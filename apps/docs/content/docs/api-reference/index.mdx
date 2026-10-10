@@ -117,6 +117,9 @@ remaining deltas are deliberate and loud:
   broadcast send it is refused with `422 reserved_sender`, in any letter case
   and with any display name. Send from a domain you
   [verified](/concepts/domains) instead.
+- Tag names starting with `millionsend_`, in any letter case, are
+  MillionSend's own: a `tags` entry with one on `POST /emails` or
+  `POST /emails/batch` is refused with `422 validation_error`.
 - Anything unsupported is rejected with `422` rather than silently dropped
   (e.g. `tls` on domain update).
 

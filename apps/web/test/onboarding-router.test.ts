@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { decryptEmailBody, EnvKeyring, hashRecipient, SUSPENSION_REASONS } from "@millionsend/core";
+import {
+  decryptEmailBody,
+  EnvKeyring,
+  hashRecipient,
+  SUSPENSION_REASONS,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -172,6 +178,23 @@ describe("onboarding.sendFirstEmail", () => {
     await expect(
       caller(teamId, "team-c").onboarding.sendFirstEmail({ locale: "en" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("refuses a paused team through the shared admission and leaves the claim free", async () => {
+    const teamId = await seedTeam("team-f");
+    // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId, day: utcDay(), sent: 200, hardBounced: 20 });
+    const c = caller(teamId, "team-f");
+    await expect(c.onboarding.sendFirstEmail({ locale: "en" })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "sending_paused",
+    });
+    expect(await teamEmails(teamId)).toEqual([]);
+
+    await db.delete(schema.usageCounters).where(eq(schema.usageCounters.teamId, teamId));
+    expect(await c.onboarding.sendFirstEmail({ locale: "en" })).toMatchObject({ sent: true });
   });
 
   it.each(SUSPENSION_REASONS)(

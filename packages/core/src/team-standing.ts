@@ -2,6 +2,12 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { recordContactActivity } from "./contact-activities.js";
+import {
+  type DeliverabilityReason,
+  fetchDeliverabilityHealth,
+  PAUSE_BOUNCE_RATE,
+  PAUSE_COMPLAINT_RATE,
+} from "./deliverability.js";
 import { unsubscribeSuspendedMembers } from "./system-contacts.js";
 
 export type SuspensionReason = (typeof schema.suspensionReasonEnum.enumValues)[number];
@@ -159,4 +165,58 @@ export function suspendedSendRefusal(reason: SuspensionReason): {
         message:
           "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
       };
+}
+
+/** Why a team may not take new mail right now. */
+export type SendRefusal =
+  | { reason: "team_suspended"; suspension: SuspensionReason }
+  | { reason: "sending_paused"; pause: DeliverabilityReason };
+
+/**
+ * The team-level admission every accept path applies (acceptEmail, and
+ * broadcast initiation beside its broadcast-only holds): an operator
+ * suspension, then the deliverability pause, a trailing rate at SES's own
+ * review line ("warning" never blocks). Null when the team may send.
+ */
+export async function sendRefusal(db: Db, teamId: string): Promise<SendRefusal | null> {
+  const suspended = (await fetchTeamStanding(db, teamId))?.suspended;
+  if (suspended) return { reason: "team_suspended", suspension: suspended.reason };
+  const health = await fetchDeliverabilityHealth(db, teamId);
+  const pause = health.reasons.find((r) => r.tier === "paused");
+  return pause ? { reason: "sending_paused", pause } : null;
+}
+
+/**
+ * The refusal as the API and the SMTP relay word it (a review hold as a
+ * neutral pause, see suspendedSendRefusal); the dashboard words it from its
+ * catalogs.
+ */
+export function sendRefusalError(refusal: SendRefusal): {
+  code: "team_suspended" | "sending_paused";
+  message: string;
+} {
+  if (refusal.reason === "team_suspended") return suspendedSendRefusal(refusal.suspension);
+  const { metric, rate, windowDays } = refusal.pause;
+  const limit = metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
+  return {
+    code: "sending_paused",
+    message: `Sending is paused: your ${metric === "bounce" ? "hard bounce" : "complaint"} rate of ${(rate * 100).toFixed(2)}% over the last ${windowDays} days is at or above the ${(limit * 100).toFixed(2)}% limit. Lower it before sending again.`,
+  };
+}
+
+/**
+ * Whether the deliverability pause holds mail a team already has waiting,
+ * at send time and in the drain: what was accepted before the team crossed
+ * the line (a schedule can sit 30 days) must not reach SES while it is past
+ * it. Account mail must go out whatever the rates: the instance's own
+ * (system) team is exempt here, and callers pass any row carrying
+ * SYSTEM_MAIL_TAG, whatever its team, without asking.
+ */
+export async function deliverabilityHold(db: Db, teamId: string): Promise<boolean> {
+  const [team] = await db
+    .select({ plan: schema.teams.plan })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, teamId));
+  if (!team || team.plan === "system") return false;
+  return (await fetchDeliverabilityHealth(db, teamId)).status === "paused";
 }

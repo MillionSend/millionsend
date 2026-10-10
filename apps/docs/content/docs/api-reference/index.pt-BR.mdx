@@ -123,6 +123,9 @@ deliberadas e explícitas:
   no envio de um broadcast ele é recusado com `422 reserved_sender`, com
   qualquer caixa de letras e qualquer nome de exibição. Envie de um domínio que
   você [verificou](/pt-BR/concepts/domains).
+- Nomes de tag que começam com `millionsend_`, com qualquer caixa de letras,
+  são do próprio MillionSend: uma entrada de `tags` com um deles em
+  `POST /emails` ou `POST /emails/batch` é recusada com `422 validation_error`.
 - Qualquer coisa não suportada é rejeitada com `422` em vez de descartada em
   silêncio (ex.: `tls` na atualização de domínio).
 

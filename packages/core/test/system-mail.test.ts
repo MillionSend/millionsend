@@ -4,6 +4,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SYSTEM_MAIL_TAG } from "../src/accept-email.js";
 import { ACCOUNT_MAIL_KINDS } from "../src/account-mail.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { hashRecipient } from "../src/suppressions.js";
@@ -11,7 +12,6 @@ import {
   findSenderDomainOwner,
   SENT_WHILE_SUSPENDED,
   type SenderDomainOwner,
-  SYSTEM_MAIL_TAG,
   type SystemMailKind,
   type SystemMailMessage,
   SystemMailRefused,

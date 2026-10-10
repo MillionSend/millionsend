@@ -550,6 +550,33 @@ describe("tools", () => {
     await client.close();
   });
 
+  it("refuses a millionsend_ tag name on send_email and send_email_batch, sending nothing", async () => {
+    const client = await connect(await mintToken());
+    const email = {
+      from: "Acme <onboarding@acme.dev>",
+      to: ["tagged@example.com"],
+      subject: "tagged",
+      text: "t",
+      tags: [{ name: "millionsend_system", value: "password_reset" }],
+    };
+    const before = enqueued.length;
+    const single = await client.callTool({ name: "send_email", arguments: email });
+    expect(single.isError).toBe(true);
+    expect(JSON.stringify(single.content)).toMatch(/millionsend_ are reserved/);
+    const batch = await client.callTool({
+      name: "send_email_batch",
+      arguments: { emails: [email] },
+    });
+    expect(batch.isError).toBe(true);
+    expect(resultJson(batch)).toMatchObject({
+      statusCode: 422,
+      name: "validation_error",
+      message: expect.stringMatching(/millionsend_ are reserved/),
+    });
+    expect(enqueued.length).toBe(before);
+    await client.close();
+  });
+
   it("contact tools: create, get by email, update, segment membership", async () => {
     const client = await connect(await mintToken());
     const created = await client.callTool({

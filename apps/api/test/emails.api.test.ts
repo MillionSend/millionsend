@@ -1,9 +1,12 @@
 import { randomBytes } from "node:crypto";
 import {
+  DAY_MS,
+  dailyCeiling,
   EnvKeyring,
   generateApiKey,
   hashRecipient,
   openAttachments,
+  teamRung,
   utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -674,6 +677,63 @@ describe("batch permissive validation", () => {
   });
 });
 
+describe("reserved tag names", () => {
+  const batch = (items: unknown[], headers: Record<string, string> = {}) =>
+    app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...headers },
+      body: JSON.stringify(items),
+    });
+
+  it("refuses a millionsend_ tag name in any letter case on POST /emails, accepting nothing", async () => {
+    const before = enqueuedSends.length;
+    for (const name of ["millionsend_system", "MillionSend_System", "MILLIONSEND_TEST"]) {
+      const res = await post({ ...validBody, tags: [{ name, value: "password_reset" }] });
+      expect(res.status, name).toBe(422);
+      expect(await res.json()).toMatchObject({
+        name: "validation_error",
+        message: expect.stringMatching(/^tags\.0\.name: .*millionsend_ are reserved/),
+      });
+    }
+    expect(enqueuedSends.length).toBe(before);
+  });
+
+  it("refuses the whole strict batch, and only that item in a permissive one", async () => {
+    const before = enqueuedSends.length;
+    const items = [
+      { ...validBody, to: ["tag-ok@example.com"] },
+      { ...validBody, tags: [{ name: "millionsend_system", value: "password_reset" }] },
+    ];
+    const strict = await batch(items);
+    expect(strict.status).toBe(422);
+    expect(await strict.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/^emails\.1: tags\.0\.name: /),
+    });
+    expect(enqueuedSends.length).toBe(before);
+
+    const permissive = await batch(items, { "x-batch-validation": "permissive" });
+    expect(permissive.status).toBe(200);
+    const body = (await permissive.json()) as {
+      data: { id: string }[];
+      errors: { index: number; message: string }[];
+    };
+    expect(body.data).toHaveLength(1);
+    expect(body.errors).toEqual([{ index: 1, message: expect.stringMatching(/reserved/) }]);
+  });
+
+  it("still stores any other tag name", async () => {
+    const res = await post({ ...validBody, tags: [{ name: "campaign", value: "launch" }] });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db
+      .select({ tags: schema.emails.tags })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, id));
+    expect(row?.tags).toEqual({ campaign: "launch" });
+  });
+});
+
 describe("attachments and custom headers", () => {
   const pdfBase64 = Buffer.from("%PDF-1.4 fake pdf bytes").toString("base64");
 
@@ -1254,5 +1314,179 @@ describe("POST /emails/batch quota", () => {
       .from(schema.usageCounters)
       .where(eq(schema.usageCounters.teamId, teamId));
     expect(counter?.accepted).toBe(150);
+  });
+});
+
+describe("quota day of a scheduled send", () => {
+  const FREE_CEILING = dailyCeiling(teamRung("free", null).included);
+
+  /** A fresh free team with a verified domain; returns a request helper on its key. */
+  async function freeTeam(slug: string) {
+    const id = await createTeam(db, slug);
+    await db.insert(schema.domains).values({
+      teamId: id,
+      name: `${slug}.dev`,
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId: id,
+      name: "t",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    const call = (method: string, path: string, payload: unknown) =>
+      app.request(path, {
+        method,
+        headers: { authorization: `Bearer ${key.token}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    const counters = async () =>
+      Object.fromEntries(
+        (
+          await db
+            .select({ day: schema.usageCounters.day, accepted: schema.usageCounters.accepted })
+            .from(schema.usageCounters)
+            .where(eq(schema.usageCounters.teamId, id))
+        ).map((r) => [r.day, r.accepted]),
+      );
+    const statusOf = async (emailId: string) =>
+      (
+        await db
+          .select({ s: schema.emails.latestStatus })
+          .from(schema.emails)
+          .where(eq(schema.emails.id, emailId))
+      )[0]?.s;
+    return { id, call, counters, statusOf, body: { ...validBody, from: `A <a@${slug}.dev>` } };
+  }
+
+  it("a free team cannot pass its daily ceiling with a backdated scheduled_at, single or batch", async () => {
+    const team = await freeTeam("backdated");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(), accepted: FREE_CEILING });
+    const yesterday = new Date(Date.now() - DAY_MS).toISOString();
+    const lastWeek = new Date(Date.now() - 7 * DAY_MS).toISOString();
+
+    const single = await team.call("POST", "/emails", { ...team.body, scheduled_at: yesterday });
+    expect(single.status).toBe(200);
+    const { id } = (await single.json()) as { id: string };
+    expect(await team.statusOf(id)).toBe("queued_quota");
+
+    const batch = await team.call("POST", "/emails/batch", [
+      { ...team.body, to: ["b1@example.com"], scheduled_at: yesterday },
+      { ...team.body, to: ["b2@example.com"], scheduled_at: lastWeek },
+    ]);
+    expect(batch.status).toBe(200);
+    const { data } = (await batch.json()) as { data: { id: string }[] };
+    for (const item of data) expect(await team.statusOf(item.id)).toBe("queued_quota");
+
+    // Nothing landed on a past day's unspent counter: today alone holds the charge.
+    expect(await team.counters()).toEqual({ [utcDay()]: FREE_CEILING });
+  });
+
+  it("rescheduling to another day charges that day too, and parks the email when that day is full", async () => {
+    const team = await freeTeam("rescheduled");
+    const at = (days: number) => new Date(Date.now() + days * DAY_MS);
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(at(3)), accepted: FREE_CEILING });
+    const res = await team.call("POST", "/emails", {
+      ...team.body,
+      scheduled_at: at(1).toISOString(),
+    });
+    const { id } = (await res.json()) as { id: string };
+    expect(await team.counters()).toEqual({
+      [utcDay(at(1))]: 1,
+      [utcDay(at(3))]: FREE_CEILING,
+    });
+
+    expect((await team.call("PATCH", `/emails/${id}`, { scheduled_at: at(2) })).status).toBe(200);
+    expect(await team.statusOf(id)).toBe("queued");
+    expect(await team.counters()).toEqual({
+      [utcDay(at(1))]: 1,
+      [utcDay(at(2))]: 1,
+      [utcDay(at(3))]: FREE_CEILING,
+    });
+
+    // The full day refuses the reservation: the email waits for the drain
+    // instead of going out past that day's ceiling.
+    expect((await team.call("PATCH", `/emails/${id}`, { scheduled_at: at(3) })).status).toBe(200);
+    expect(await team.statusOf(id)).toBe("queued_quota");
+    expect(await team.counters()).toEqual({
+      [utcDay(at(1))]: 1,
+      [utcDay(at(2))]: 1,
+      [utcDay(at(3))]: FREE_CEILING,
+    });
+  });
+
+  // While the first job is queued, the queue drops the reschedule's job: a
+  // move back earlier still sends at the first time.
+  const lateToday = () => new Date(`${utcDay()}T23:59:59Z`);
+  const dayAhead = (n: number) => new Date(`${utcDay(Date.now() + n * DAY_MS)}T12:00:00Z`);
+  const reschedule = async (team: Awaited<ReturnType<typeof freeTeam>>, id: string, at: Date) =>
+    expect((await team.call("PATCH", `/emails/${id}`, { scheduled_at: at })).status).toBe(200);
+  const sendNow = async (team: Awaited<ReturnType<typeof freeTeam>>) => {
+    const res = await team.call("POST", "/emails", { ...team.body, to: ["now@example.com"] });
+    return team.statusOf(((await res.json()) as { id: string }).id);
+  };
+
+  it("moving an email due today to a later day and back cannot free a send today", async () => {
+    const team = await freeTeam("rebound");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(), accepted: FREE_CEILING - 1 });
+    const res = await team.call("POST", "/emails", { ...team.body, scheduled_at: lateToday() });
+    const { id } = (await res.json()) as { id: string };
+    await reschedule(team, id, dayAhead(1));
+    await reschedule(team, id, lateToday());
+    // The email still goes out today, so today has no room left.
+    expect(await sendNow(team)).toBe("queued_quota");
+  });
+
+  it("a reschedule never refunds a day the email was not charged to", async () => {
+    const team = await freeTeam("refundless");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(), accepted: FREE_CEILING });
+    const res = await team.call("POST", "/emails", { ...team.body, scheduled_at: dayAhead(3) });
+    const { id } = (await res.json()) as { id: string };
+    await reschedule(team, id, lateToday());
+    await reschedule(team, id, dayAhead(1));
+    expect((await team.counters())[utcDay()]).toBe(FREE_CEILING);
+    expect(await sendNow(team)).toBe("queued_quota");
+  });
+
+  it("a monthly plan's reschedule onto a day at its operator ceiling parks without counting the period twice", async () => {
+    const team = await freeTeam("ceiling");
+    await db
+      .update(schema.teams)
+      .set({ plan: "pro", dailySendCeiling: 1 })
+      .where(eq(schema.teams.id, team.id));
+    const period = async () =>
+      (
+        await db
+          .select({ accepted: schema.usagePeriods.accepted })
+          .from(schema.usagePeriods)
+          .where(eq(schema.usagePeriods.teamId, team.id))
+      ).reduce((n, r) => n + r.accepted, 0);
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(dayAhead(2)), accepted: 1 });
+    const res = await team.call("POST", "/emails", { ...team.body, scheduled_at: dayAhead(1) });
+    const { id } = (await res.json()) as { id: string };
+    expect(await period()).toBe(1);
+
+    await reschedule(team, id, dayAhead(2));
+    expect(await team.statusOf(id)).toBe("queued_quota");
+    // The drain charges the period again when it releases the email.
+    expect(await period()).toBe(0);
+    expect(await team.counters()).toEqual({
+      [utcDay(dayAhead(1))]: 1,
+      [utcDay(dayAhead(2))]: 1,
+    });
   });
 });

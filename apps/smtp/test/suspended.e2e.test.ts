@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { EnvKeyring, generateApiKey } from "@millionsend/core";
+import { EnvKeyring, generateApiKey, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -78,6 +78,32 @@ it("refuses a suspended team's message with 550 and accepts it again once reinst
     .update(schema.teams)
     .set({ suspendedAt: null, suspensionReason: null })
     .where(eq(schema.teams.id, teamId));
+  const info = await transport().sendMail(mail);
+  expect(info.response).toContain("Queued as");
+});
+
+it("refuses a paused (not suspended) team at DATA with a temporary 451 4.7.1 until its rates clear", async () => {
+  const rows = async () =>
+    (await db.select().from(schema.emails).where(eq(schema.emails.teamId, teamId))).length;
+  const before = await rows();
+  // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: utcDay(), sent: 200, hardBounced: 20 })
+    .onConflictDoUpdate({
+      target: [schema.usageCounters.teamId, schema.usageCounters.day],
+      set: { sent: 200, hardBounced: 20 },
+    });
+  await expect(transport().sendMail(mail)).rejects.toMatchObject({
+    responseCode: 451,
+    response: expect.stringMatching(/^451 4\.7\.1 Sending is paused/),
+  });
+  expect(await rows()).toBe(before);
+
+  await db
+    .update(schema.usageCounters)
+    .set({ hardBounced: 0 })
+    .where(eq(schema.usageCounters.teamId, teamId));
   const info = await transport().sendMail(mail);
   expect(info.response).toContain("Queued as");
 });

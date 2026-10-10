@@ -375,7 +375,10 @@ Um relay SMTP pronto para software que fala SMTP em vez de HTTP — apps
 legados, plugins de CMS, qualquer coisa com um formulário de "configurações
 SMTP". As mensagens passam pelo mesmo pipeline de aceitação do
 `POST /emails`: mesma verificação de domínio, checagens de supressão, log de
-requisições e eventos de entrega.
+requisições e eventos de entrega. Enquanto os envios da equipe estão pausados
+pela taxa de bounce ou de reclamação, o relay responde `451 4.7.1` após o
+DATA, e o cliente guarda a mensagem e tenta de novo; uma equipe suspensa
+recebe `550`.
 
 Dados de conexão:
 
@@ -742,8 +745,13 @@ plano `system` ele nunca tem limite nem cobrança, o selo diz System e a aba
 Cobrança mostra um aviso no lugar dos planos. Numa instância auto-hospedada
 os planos não impõem limites, mas a marca faz mais que rotulá-lo: o monitor
 de conteúdo nunca o retém, o aquecimento de domínio novo nunca limita os
-domínios dele, e os contatos dele são a lista da qual uma suspensão
-descadastra os membros de um time.
+domínios dele, uma pausa pela taxa de bounce ou de reclamação recusa os
+envios novos dele mas nunca retém o que ele já pôs na fila, e os contatos
+dele são a lista da qual uma suspensão descadastra os membros de um time.
+Os e-mails de conta também ficam fora dessa pausa, seja qual for o plano do
+time deles: ela não recusa nem retém o que sai pelo caminho de e-mails de
+conta da própria instância, o único que pode pôr a tag `millionsend_system`
+num e-mail.
 
 O mesmo time é a audiência das novidades do produto. Em uma instância com
 `ALLOW_SIGNUP=true`, toda conta nova vira um contato ali com a propriedade

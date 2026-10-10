@@ -9,6 +9,7 @@ import {
   acceptEmail,
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
+  SYSTEM_MAIL_TAG,
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type QuotaTeamRow, teamRung } from "../src/plans.js";
@@ -237,5 +238,85 @@ describe("acceptEmail", () => {
       periodEnd,
       overage: true,
     });
+  });
+
+  it("charges a past scheduled_at to today, so a full day parks it instead of an unspent past one", async () => {
+    const backdating = await createTeam(db, "backdating");
+    const ceiling = Math.floor(teamRung("free", null).included * (1 + QUOTA_TOLERANCE));
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: backdating, day: utcDay(), accepted: ceiling });
+    const past = new Date(Date.now() - 3 * DAY_MS);
+    const result = await acceptEmail(
+      deps(),
+      { teamId: backdating, billing: FREE, apiKeyId: null },
+      payload({ domainId: null, scheduledAt: past }),
+    );
+    expect(result).toMatchObject({ ok: true, parked: true, day: utcDay() });
+    const days = await db
+      .select({ day: schema.usageCounters.day, accepted: schema.usageCounters.accepted })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, backdating));
+    expect(days).toEqual([{ day: utcDay(), accepted: ceiling }]);
+  });
+
+  it("refuses a suspended or paused team before writing anything; account mail still lands", async () => {
+    const held = await createTeam(db, "held");
+    const heldAuth = { teamId: held, billing: FREE, apiKeyId: null };
+    const rows = () =>
+      db.select({ id: schema.emails.id }).from(schema.emails).where(eq(schema.emails.teamId, held));
+
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "manual" })
+      .where(eq(schema.teams.id, held));
+    expect(await acceptEmail(deps(), heldAuth, payload({ domainId: null }))).toEqual({
+      ok: false,
+      reason: "team_suspended",
+      suspension: "manual",
+    });
+
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, held));
+    // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: held, day: utcDay(), sent: 200, hardBounced: 20 });
+    expect(await acceptEmail(deps(), heldAuth, payload({ domainId: null }))).toMatchObject({
+      ok: false,
+      reason: "sending_paused",
+      pause: { metric: "bounce", tier: "paused" },
+    });
+    expect(await rows()).toEqual([]);
+
+    const account = await acceptEmail(
+      deps(),
+      { ...heldAuth, billing: "uncapped" },
+      payload({ domainId: null }),
+    );
+    expect(account).toMatchObject({ ok: true, parked: false });
+    expect(await rows()).toHaveLength(1);
+  });
+
+  it("keeps the system-mail mark on the account-mail path alone", async () => {
+    const tagged = await createTeam(db, "tagged");
+    const tags = { [SYSTEM_MAIL_TAG]: "password_reset", campaign: "launch" };
+    const storedTags = async (billing: QuotaTeamRow | "uncapped") => {
+      const result = await acceptEmail(
+        deps(),
+        { teamId: tagged, billing, apiKeyId: null },
+        payload({ domainId: null, tags }),
+      );
+      if (!result.ok) throw new Error(result.reason);
+      const [row] = await db
+        .select({ tags: schema.emails.tags })
+        .from(schema.emails)
+        .where(eq(schema.emails.id, result.id));
+      return row?.tags;
+    };
+    expect(await storedTags(FREE)).toEqual({ campaign: "launch" });
+    expect(await storedTags("uncapped")).toEqual(tags);
   });
 });

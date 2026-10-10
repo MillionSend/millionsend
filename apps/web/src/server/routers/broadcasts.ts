@@ -6,7 +6,6 @@ import {
   DAY_MS,
   emailInsightsView,
   fetchBroadcastInsights,
-  fetchDeliverabilityHealth,
   fetchTeamStanding,
   injectPreheader,
   type MergeContact,
@@ -15,6 +14,7 @@ import {
   parseSingleSender,
   regionPause,
   reservedSenderRefusal,
+  sendRefusal,
   splitPersonName,
   substituteUnsubscribeUrl,
   verifySenderDomain,
@@ -59,12 +59,6 @@ const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
   "pt-BR": ptBRDeliverability,
 };
 
-/**
- * PRECONDITION_FAILED when the team's trailing-window rates crossed a SES
- * enforcement line (fetchDeliverabilityHealth === "paused"); null otherwise.
- * "warning" never blocks. The message names the offending metric, its rate,
- * and the limit it passed, in the caller's locale.
- */
 async function sendGuardTranslator() {
   const locale = await activeLocale();
   return {
@@ -77,21 +71,30 @@ async function sendGuardTranslator() {
   };
 }
 
-async function deliverabilityGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
-  const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId);
-  const reason =
-    health.status === "paused" ? health.reasons.find((r) => r.tier === "paused") : null;
-  if (!reason) return null;
+/**
+ * PRECONDITION_FAILED while the team may not send (core sendRefusal: an
+ * operator suspension, or trailing rates past SES's pause line) or the
+ * operator paused its broadcasts; read per call so the action bites at once.
+ * The message is in the caller's locale.
+ */
+async function sendGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
+  const refusal = await sendRefusal(ctx.db, ctx.teamId);
+  const operatorPaused =
+    !refusal && (await fetchTeamStanding(ctx.db, ctx.teamId))?.broadcastsPausedByOperatorAt;
+  if (!refusal && !operatorPaused) return null;
   const { t, pct } = await sendGuardTranslator();
-  const limit = reason.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
-  return new TRPCError({
-    code: "PRECONDITION_FAILED",
-    message: t(`sendGuard.${reason.metric}`, {
-      rate: pct.format(reason.rate),
-      limit: pct.format(limit),
-      days: reason.windowDays,
-    }),
-  });
+  const message = !refusal
+    ? t("sendGuard.operatorPaused")
+    : refusal.reason === "team_suspended"
+      ? t(refusal.suspension === "review" ? "sendGuard.pendingReview" : "sendGuard.suspended")
+      : t(`sendGuard.${refusal.pause.metric}`, {
+          rate: pct.format(refusal.pause.rate),
+          limit: pct.format(
+            refusal.pause.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE,
+          ),
+          days: refusal.pause.windowDays,
+        });
+  return new TRPCError({ code: "PRECONDITION_FAILED", message });
 }
 
 /**
@@ -104,26 +107,6 @@ async function regionGuard(db: Db, region: string): Promise<TRPCError | null> {
   if (!(await regionPause(db, region))) return null;
   const { t } = await sendGuardTranslator();
   return new TRPCError({ code: "PRECONDITION_FAILED", message: t("sendGuard.regionHeld") });
-}
-
-/**
- * PRECONDITION_FAILED while the instance operator suspended the team or
- * paused its broadcasts; read per call so the action bites at once.
- */
-async function standingGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
-  const standing = await fetchTeamStanding(ctx.db, ctx.teamId);
-  if (!standing?.suspended && !standing?.broadcastsPausedByOperatorAt) return null;
-  const { t } = await sendGuardTranslator();
-  return new TRPCError({
-    code: "PRECONDITION_FAILED",
-    message: t(
-      standing.suspended?.reason === "review"
-        ? "sendGuard.pendingReview"
-        : standing.suspended
-          ? "sendGuard.suspended"
-          : "sendGuard.operatorPaused",
-    ),
-  });
 }
 
 /**
@@ -567,10 +550,7 @@ export const broadcastsRouter = router({
       // Deliverability pause is enforced here, before anything is committed or
       // enqueued: a paused account must not schedule a new fan-out. "warning"
       // does not block.
-      const guardError =
-        (await standingGuard(ctx)) ??
-        (await deliverabilityGuard(ctx)) ??
-        (await regionGuard(ctx.db, sender.region));
+      const guardError = (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
       if (guardError) throw guardError;
       const scheduledAt = input.scheduledAt ?? new Date();
       // Same horizon as the API: a body must not sit out the retention purge.
@@ -643,10 +623,7 @@ export const broadcastsRouter = router({
               : `The ${sender.fromDomain} domain is not verified for this team.`,
         });
       }
-      const guardError =
-        (await standingGuard(ctx)) ??
-        (await deliverabilityGuard(ctx)) ??
-        (await regionGuard(ctx.db, sender.region));
+      const guardError = (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
       if (guardError) throw guardError;
       const e = schema.emails;
       const [recent] = await ctx.db

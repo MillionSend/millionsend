@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, gt, inArray, like, sql } from "drizzle-orm";
-import { SYSTEM_MAIL_TAG } from "./system-mail.js";
+import { SYSTEM_MAIL_TAG } from "./accept-email.js";
 
 /** How long an emailed console code works, and how long the mark of one that never arrived stands. */
 export const CONSOLE_CODE_MINUTES = 10;
@@ -70,9 +70,8 @@ export async function bindConsoleCodeMail(
  * operator's live code ends without reaching them (refused, failed, bounced,
  * or held back from SES), it leaves the mark a failed send leaves, so a
  * recent sign-in stands in. Only the row bound in that email's own accept
- * makes it the code's mail; the tag, which any sender can set, just spares
- * every other email the lookup. The code itself stays: a retry or a release
- * may still deliver it.
+ * makes it the code's mail; the tag just spares every other email the
+ * lookup. The code itself stays: a retry or a release may still deliver it.
  */
 export async function noteConsoleCodeUndelivered(
   db: Db,

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  acceptEmail,
   EnvKeyring,
   encryptEmailBody,
   MONITOR_SETTING_DEFAULTS,
@@ -130,4 +131,53 @@ it("never draws the fixed onboarding email, nor counts it as the team's first se
   expect(
     await db.select().from(schema.teamMonitor).where(eq(schema.teamMonitor.teamId, fresh)),
   ).toEqual([]);
+});
+
+it("draws a customer's send that carried the system-mail tag like any other", async () => {
+  const customer = await createTeam(db, "tag-borrower");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: customer,
+      name: "borrower.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const accepted = await acceptEmail(
+    { db, keyring, isCloud: true, enqueueEmailSend: async () => {} },
+    {
+      teamId: customer,
+      billing: {
+        plan: "free",
+        planQuota: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        overageEnabled: false,
+      },
+      apiKeyId: null,
+    },
+    {
+      from: "Borrower <a@borrower.dev>",
+      to: ["r@example.com"],
+      subject: "Reset your password",
+      html: "<p>hello</p>",
+      tags: { [SYSTEM_MAIL_TAG]: "password_reset" },
+      domainId: domain?.id ?? null,
+    },
+  );
+  if (!accepted.ok) throw new Error(accepted.reason);
+  const queued: string[] = [];
+  const monitor: MonitorDeps = {
+    samplingKey: Buffer.alloc(32, 7),
+    settings: async () => MONITOR_SETTING_DEFAULTS,
+    enqueueJudge: async (id) => void queued.push(id),
+  };
+  expect(await sendEmail(db, { keyring, ses, monitor }, { emailId: accepted.id })).toBe("sent");
+  const samples = await samplesFor(accepted.id);
+  expect(samples).toMatchObject([{ teamId: customer, status: "pending" }]);
+  expect(queued).toEqual([samples[0]?.id]);
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, accepted.id));
+  expect(row?.bodyCiphertext).not.toBeNull();
 });

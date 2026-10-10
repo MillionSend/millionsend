@@ -3,12 +3,11 @@ import {
   type ApiKeyAuth,
   acceptEmail,
   authenticateApiKey,
-  fetchTeamStanding,
   formatMailbox,
   monthlyQuotaMessage,
   parseMailbox,
   reservedSenderRefusal,
-  suspendedSendRefusal,
+  sendRefusalError,
   verifySenderDomain,
 } from "@millionsend/core";
 import { type AddressObject, simpleParser } from "mailparser";
@@ -75,7 +74,8 @@ const addrKey = (mailbox: string): string =>
 
 /**
  * MIME message → the shared accept pipeline. Throws errors carrying SMTP
- * response codes: 553/554 validation, 550 all-suppressed.
+ * response codes: 553/554 validation, 550 all-suppressed or suspended, 451
+ * while the team's sending is paused.
  */
 async function handleMessage(
   deps: SmtpDeps,
@@ -116,10 +116,6 @@ async function handleMessage(
     throw smtpError(554, "Either an HTML or a text body is required");
   }
 
-  // Read per message, as the HTTP API does: a suspension lands on the next
-  // message of an open session, not on its next AUTH.
-  const suspended = (await fetchTeamStanding(deps.db, auth.teamId))?.suspended;
-  if (suspended) throw smtpError(550, suspendedSendRefusal(suspended.reason).message);
   // The authenticated key's team decides which senders are allowed — the
   // MAIL FROM envelope identity is never trusted.
   const reserved = reservedSenderRefusal(from, deps.onboardingEmailFrom);
@@ -148,7 +144,18 @@ async function handleMessage(
     text,
     domainId: domain.domainId,
   });
+  // acceptEmail reads the team's admission per message, as the HTTP API
+  // does: a suspension or a pause lands on the next message of an open
+  // session, not on its next AUTH.
   if (!result.ok) {
+    // The pause lifts by itself as the trailing rates fall, so the client
+    // keeps the message and retries; a suspension waits on the operator.
+    if (result.reason === "sending_paused") {
+      throw smtpError(451, `4.7.1 ${sendRefusalError(result).message}`);
+    }
+    if (result.reason === "team_suspended") {
+      throw smtpError(550, sendRefusalError(result).message);
+    }
     if (result.reason === "quota_backlog_full") {
       throw smtpError(452, "Daily quota exceeded and the parked backlog is full");
     }

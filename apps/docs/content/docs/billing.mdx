@@ -43,7 +43,11 @@ park as `queued_quota` and the 15-minute `quota.drain` job releases them after
 midnight UTC. The API answers `429 daily_quota_exceeded` only when the parked
 backlog is full. Owners hear `quota.warning` at 80% of the cap,
 `quota.reached` at the cap and `quota.paused` when parking begins, once per
-UTC day; a plan upgrade releases parked mail within minutes.
+UTC day; a plan upgrade releases parked mail within minutes. A scheduled send
+counts against the UTC day it goes out: its own, or today for a
+`scheduled_at` already past (it sends at once). Rescheduling it to another day
+counts it against that day too, while the day it leaves keeps its count; if
+that day is full, the email parks until the drain finds room.
 
 ### Monthly volumes (Pro, Scale)
 
