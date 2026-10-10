@@ -49,6 +49,12 @@ describe("account mail catalogs", () => {
     }
   });
 
+  it("has no mail for an operator's content access, in any language", () => {
+    for (const kinds of [[...ACCOUNT_MAIL_KINDS], Object.keys(en), Object.keys(ptBR)]) {
+      expect(kinds.filter((kind) => kind.startsWith("content."))).toEqual([]);
+    }
+  });
+
   it("carries the same slots in pt-BR as in en, entry by entry", () => {
     const slots = (s: string) => [...s.matchAll(/\{\w+\}/g)].map((m) => m[0]).sort();
     for (const kind of ACCOUNT_MAIL_KINDS) {
@@ -63,6 +69,22 @@ describe("account mail catalogs", () => {
         expect(slots(b.extra?.[key] ?? ""), `${kind} extra ${key}`).toEqual(
           slots(a.extra?.[key] ?? ""),
         );
+      }
+    }
+  });
+
+  it("billing mail promises no sending: it also reaches teams whose sending is suspended", () => {
+    const promise =
+      /keeps? sending|now sends|\[team\] sends|released within minutes|continuar? enviando|agora envia|\[team\] envia|liberado em minutos/i;
+    for (const locale of MAIL_LOCALES) {
+      for (const kind of ACCOUNT_MAIL_KINDS.filter((k) => k.startsWith("billing."))) {
+        const mail = buildAccountMail({
+          kind,
+          locale,
+          url: "https://app.example/x",
+          values: VALUES,
+        });
+        expect(mail.text, `${locale} ${kind}`).not.toMatch(promise);
       }
     }
   });

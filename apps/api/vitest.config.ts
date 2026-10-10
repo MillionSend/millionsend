@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     // PGlite boot + real migrations per suite outlast the 10s default on 2-core CI runners.
     hookTimeout: 60_000,
+    // Tests that write hundreds of PGlite rows can outlast the 5s default there too.
+    testTimeout: 60_000,
     include: ["test/**/*.test.ts"],
     env: { SKIP_ENV_VALIDATION: "1" },
   },

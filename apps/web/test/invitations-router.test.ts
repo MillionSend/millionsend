@@ -1,4 +1,4 @@
-import { DAY_MS, INVITE_MAX_SENDS, INVITE_TTL_MS } from "@millionsend/core";
+import { DAY_MS, INVITE_MAX_SENDS, INVITE_TTL_MS, SUSPENSION_REASONS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SimpleEmail } from "@millionsend/ses";
@@ -662,4 +662,48 @@ describe("settings.invitations.preview", () => {
       caller.settings.invitations.preview({ token: tokenFromUrl(acceptUrl) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+});
+
+describe("settings.invitations while the team is suspended", () => {
+  it.each(SUSPENSION_REASONS)(
+    "for %s refuses new invitations, resends and accepts; the pending invite stays as it was",
+    async (reason) => {
+      const teamId = await createTeam(db, "acme");
+      await addMember(teamId, "owner1", "owner");
+      await createUser("newbie");
+      const owner = callerFor("owner1", teamId, "owner");
+      const pending = await owner.settings.invitations.create({ email: "newbie@example.com" });
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      const locked = {
+        code: "PRECONDITION_FAILED",
+        // A team suspended for phishing or held for review is never told it is suspended.
+        message: ["phishing", "review"].includes(reason)
+          ? "This isn't available for this team right now. Contact support if you need help."
+          : "This team is suspended, so no one new can join it. Contact support.",
+      };
+
+      await expect(
+        owner.settings.invitations.create({ email: "other@example.com" }),
+      ).rejects.toMatchObject(locked);
+      await expect(owner.settings.invitations.resend({ id: pending.id })).rejects.toMatchObject(
+        locked,
+      );
+      await expect(
+        callerFor("newbie", null, null).settings.invitations.accept({
+          token: tokenFromUrl(pending.acceptUrl),
+        }),
+      ).rejects.toMatchObject(locked);
+
+      const members = await db
+        .select({ userId: schema.teamMembers.userId })
+        .from(schema.teamMembers)
+        .where(eq(schema.teamMembers.teamId, teamId));
+      expect(members).toEqual([{ userId: "owner1" }]);
+      const invites = await db.select().from(schema.teamInvitations);
+      expect(invites).toMatchObject([{ id: pending.id, acceptedAt: null, sendCount: 0 }]);
+    },
+  );
 });

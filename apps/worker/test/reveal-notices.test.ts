@@ -58,22 +58,32 @@ const teamRowsFor = (grantId: string) =>
     .where(eq(schema.auditLog.target, `content_access_grant:${grantId}`))
     .orderBy(desc(schema.auditLog.createdAt));
 
+/** A mailer within reach of the run: a disclosure must still reach nobody. */
 function recorder() {
   const sent: { to: string; subject: string }[] = [];
   return {
     sent,
-    mailer: {
-      send: async (to: string, message: { subject: string }) => {
-        sent.push({ to, subject: message.subject });
+    deps: {
+      now: new Date(),
+      mailer: {
+        send: async (to: string, message: { subject: string }) => {
+          sent.push({ to, subject: message.subject });
+        },
       },
     },
   };
 }
 
-const suspend = (reason: "phishing" | "non_payment") =>
+const suspend = (reason: "phishing" | "review" | "non_payment") =>
   db
     .update(schema.teams)
     .set({ suspendedAt: new Date(), suspensionReason: reason })
+    .where(eq(schema.teams.id, teamId));
+
+const reinstate = () =>
+  db
+    .update(schema.teams)
+    .set({ suspendedAt: null, suspensionReason: null })
     .where(eq(schema.teams.id, teamId));
 
 describe("safety.reveal_notices", () => {
@@ -83,10 +93,10 @@ describe("safety.reveal_notices", () => {
     expect(await teamRowsFor(id)).toEqual([]);
   });
 
-  it("gives the team its row dated at the access, mails its owners, and says it once", async () => {
+  it("gives the team its row dated at the access, emails nobody, and says it once", async () => {
     const id = await grant(8);
-    const { sent, mailer } = recorder();
-    expect(await runRevealNotices(db, { mailer })).toEqual({ disclosed: 1, withheld: 0 });
+    const { sent, deps } = recorder();
+    expect(await runRevealNotices(db, deps)).toEqual({ disclosed: 1, withheld: 0 });
 
     const [row] = await teamRowsFor(id);
     expect(row).toMatchObject({
@@ -97,31 +107,29 @@ describe("safety.reveal_notices", () => {
     });
     // Dated at the access, not at the disclosure.
     expect(Date.now() - (row?.createdAt.getTime() ?? 0)).toBeGreaterThan(7 * 86_400_000);
-    expect(sent).toEqual([
-      { to: "bob@example.com", subject: "An operator read content in your team" },
-    ]);
+    expect(sent).toEqual([]);
 
     const [stamped] = await db.select().from(schema.contentAccessGrants);
     expect(stamped?.noticeSentAt).toBeInstanceOf(Date);
     expect(stamped?.teamVisibleAt).toBeInstanceOf(Date);
 
-    expect(await runRevealNotices(db, { mailer })).toEqual({ disclosed: 0, withheld: 0 });
-    expect(sent).toHaveLength(1);
+    expect(await runRevealNotices(db, deps)).toEqual({ disclosed: 0, withheld: 0 });
+    expect(await teamRowsFor(id)).toHaveLength(1);
   });
 
-  it("withholds row and notice from a team suspended for phishing since the grant", async () => {
+  it("withholds the row from a team suspended for phishing since the grant", async () => {
     const id = await grant(8);
     await suspend("phishing");
-    const { sent, mailer } = recorder();
-    expect(await runRevealNotices(db, { mailer })).toEqual({ disclosed: 0, withheld: 1 });
+    const { sent, deps } = recorder();
+    expect(await runRevealNotices(db, deps)).toEqual({ disclosed: 0, withheld: 1 });
     expect(sent).toEqual([]);
     expect(await teamRowsFor(id)).toEqual([]);
 
     const [stamped] = await db.select().from(schema.contentAccessGrants);
     expect(stamped?.noticeSentAt).toBeInstanceOf(Date);
     expect(stamped?.teamVisibleAt).toBeNull();
-    // Stamped, so the withheld notice is not retried every night.
-    expect(await runRevealNotices(db, { mailer })).toEqual({ disclosed: 0, withheld: 0 });
+    // Stamped, so the withheld disclosure is not retried every night.
+    expect(await runRevealNotices(db)).toEqual({ disclosed: 0, withheld: 0 });
   });
 
   it("withholds from a team already suspended for phishing before the grant", async () => {
@@ -130,6 +138,35 @@ describe("safety.reveal_notices", () => {
     await suspend("phishing");
     const id = await grant(8);
     expect(await runRevealNotices(db)).toEqual({ disclosed: 0, withheld: 1 });
+    expect(await teamRowsFor(id)).toEqual([]);
+  });
+
+  it("defers a team held for review, unstamped, and discloses once the hold is released", async () => {
+    const id = await grant(8);
+    await suspend("review");
+    const { sent, deps } = recorder();
+    expect(await runRevealNotices(db, deps)).toEqual({ disclosed: 0, withheld: 0 });
+    expect(await teamRowsFor(id)).toEqual([]);
+    const [waiting] = await db.select().from(schema.contentAccessGrants);
+    expect(waiting).toMatchObject({ noticeSentAt: null, teamVisibleAt: null });
+
+    await reinstate();
+    expect(await runRevealNotices(db, deps)).toEqual({ disclosed: 1, withheld: 0 });
+    const [row] = await teamRowsFor(id);
+    expect(row).toMatchObject({ teamId, action: "content.accessed" });
+    expect(row?.createdAt).toEqual(waiting?.createdAt);
+    expect(sent).toEqual([]);
+  });
+
+  it("withholds for good once a review hold becomes a phishing suspension", async () => {
+    const id = await grant(8);
+    await suspend("review");
+    expect(await runRevealNotices(db)).toEqual({ disclosed: 0, withheld: 0 });
+
+    await suspend("phishing");
+    expect(await runRevealNotices(db)).toEqual({ disclosed: 0, withheld: 1 });
+    await reinstate();
+    expect(await runRevealNotices(db)).toEqual({ disclosed: 0, withheld: 0 });
     expect(await teamRowsFor(id)).toEqual([]);
   });
 

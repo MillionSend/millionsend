@@ -19,6 +19,8 @@ export interface EmailRow {
   sentAt?: Date | string | null;
   scheduledAt?: Date | string | null;
   broadcastId?: string | null;
+  /** A broadcast copy waiting out a hold on its region: shown as delayed. */
+  held?: boolean;
 }
 
 /**
@@ -92,14 +94,20 @@ export function EmailsTable({
               ) : null}
             </td>
             <td>
-              <StatusBadge
-                status={row.latestStatus}
-                label={
-                  row.broadcastId && row.latestStatus === "queued_quota"
-                    ? t("list.queuedBroadcast")
-                    : undefined
-                }
-              />
+              {row.held ? (
+                <Tooltip inline text={t("held.body")}>
+                  <StatusBadge status={row.latestStatus} label={t("held.label")} />
+                </Tooltip>
+              ) : (
+                <StatusBadge
+                  status={row.latestStatus}
+                  label={
+                    row.broadcastId && row.latestStatus === "queued_quota"
+                      ? t("list.queuedBroadcast")
+                      : undefined
+                  }
+                />
+              )}
             </td>
             <td>
               <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>

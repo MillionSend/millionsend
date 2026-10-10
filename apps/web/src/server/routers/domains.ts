@@ -17,6 +17,7 @@ import {
   isOperatorTeam,
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
+  warmupCap,
 } from "@millionsend/core";
 import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
@@ -44,6 +45,8 @@ import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
+import { enqueueDomainAge } from "../queue";
+import { assertTeamNotSuspended } from "../suspension-lock";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
@@ -60,6 +63,8 @@ export interface DomainsSesDeps {
   resolveNs(name: string): Promise<string[]>;
   /** Live per-record DNS lookups; omitted falls back to node:dns/promises. */
   dns?: DnsResolver;
+  /** The domain.age job, on create and verification; omitted, the worker's sweep asks later. */
+  enqueueDomainAge?: (domainId: string) => Promise<void>;
 }
 
 const regionClients = new Map<string, SesIdentityClient>();
@@ -85,6 +90,8 @@ const defaultSesDeps: DomainsSesDeps = {
   },
   resolveNs: (name) => dnsResolveNs(name),
   dns: nodeDnsResolver,
+  // Read at call time: a test's queue mock may not define it.
+  enqueueDomainAge: (domainId) => enqueueDomainAge(domainId),
 };
 
 /**
@@ -203,8 +210,19 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         .select({ n: count() })
         .from(schema.emails)
         .where(and(eq(schema.emails.teamId, ctx.teamId), eq(schema.emails.domainId, domain.id)));
+      const warmup = await warmupCap(ctx.db, {
+        teamId: ctx.teamId,
+        domainId: domain.id,
+        at: new Date(),
+      });
       return {
         sentCount: sent?.n ?? 0,
+        // The day's cap while the domain warms up, when the calendar lifts
+        // it, and whether the team's other new domains share the day's
+        // volume; never why, nor what a tier is.
+        warmup: warmup
+          ? { perDay: warmup.cap, fullAt: warmup.fullAt, shared: warmup.poolDomains > 1 }
+          : null,
         id: domain.id,
         name: domain.name,
         region: domain.region,
@@ -367,6 +385,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           target: { type: "domain", id: created.id },
           metadata: { name: input.name, region: input.region },
         });
+        await deps.enqueueDomainAge?.(created.id);
         return { id: created.id };
       }),
 
@@ -438,6 +457,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           target: { type: "domain", id: domain.id },
           metadata: { name: domain.name },
         });
+        await deps.enqueueDomainAge?.(domain.id);
       }
       return {
         status,
@@ -521,6 +541,9 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       }),
 
     delete: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+      // While a suspended team holds a domain, cloud refuses the name to any
+      // other team, so the domain cannot move to a fresh team and keep sending.
+      await assertTeamNotSuspended(ctx.db, ctx.teamId, "deleteDomain");
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
       // The SES identity is shared by every row with the same (name, region):
       // it goes only with the last of them.

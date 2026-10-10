@@ -34,6 +34,8 @@ export interface TeamFlagDetail {
   /** The monitor reason: the internal risk and the judged samples behind it. */
   risk?: number;
   samples?: number;
+  /** Opened by a suspension, so the team's reinstatement clears it. */
+  suspension?: true;
 }
 
 /**

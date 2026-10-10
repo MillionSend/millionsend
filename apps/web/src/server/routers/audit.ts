@@ -1,10 +1,45 @@
-import { parseAuditActor } from "@millionsend/core";
+import { findInstanceOperator, parseAuditActor, SILENT_SUSPENSIONS } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
+
+/**
+ * Trust & safety flags and the content monitor's actions are the operator's
+ * record: the team's own trail never lists them, whatever team_id their rows
+ * were written with. A monitor pause reads to the team as "pending review"
+ * on its banner, never as a verdict.
+ */
+const OPERATOR_ONLY_ACTIONS = [
+  "console.flag_opened",
+  "console.flag_cleared",
+  "console.flag_reopened",
+  "monitor.broadcasts_paused",
+  "monitor.broadcasts_resumed",
+  "monitor.override_set",
+  "monitor.override_cleared",
+];
+
+/**
+ * An operator's why, kept from the team where it was never written for it:
+ * the note on a silent suspension says what was seen, and the team must not
+ * learn from it what got it caught; a broadcast pause's reason and note
+ * reach the owner only in the mail that carried them.
+ */
+function teamVisibleData(
+  action: string,
+  data: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (action === "team.suspended" && SILENT_SUSPENSIONS.includes(String(data?.reason))) {
+    return { ...data, note: null };
+  }
+  if (action === "team.broadcasts_paused" && data?.notified !== true) {
+    return { ...data, reason: null, note: null };
+  }
+  return data;
+}
 
 /**
  * Read-only, and never a member feed: the trail is a forensic record. A
@@ -34,7 +69,11 @@ export const auditRouter = router({
         })
         .from(t)
         .where(
-          and(eq(t.teamId, ctx.teamId), input.cursor ? beforeCursor(t, input.cursor) : undefined),
+          and(
+            eq(t.teamId, ctx.teamId),
+            notInArray(t.action, OPERATOR_ONLY_ACTIONS),
+            input.cursor ? beforeCursor(t, input.cursor) : undefined,
+          ),
         )
         .orderBy(desc(t.createdAt), desc(t.id))
         .limit(input.limit + 1);
@@ -51,18 +90,34 @@ export const auditRouter = router({
               .where(inArray(schema.user.id, userIds))
           : [];
       const byId = new Map(users.map((u) => [u.id, u]));
+      // The instance operator is the platform to a team, never a person it
+      // could name or write to. Only what it did there as a member, from its
+      // join on, carries its name: an invitation accepted later must not name
+      // it on the console actions and support views that came before.
+      const operator = await findInstanceOperator(ctx.db);
+      const m = schema.teamMembers;
+      const [operatorMembership] = operator
+        ? await ctx.db
+            .select({ joinedAt: m.createdAt })
+            .from(m)
+            .where(and(eq(m.teamId, ctx.teamId), eq(m.userId, operator.id)))
+        : [];
 
       return {
         nextCursor: page.nextCursor,
         items: page.items.map(({ actorId: _actorId, ...row }, i) => {
           const actor = actors[i] ?? { kind: "system" as const };
           const user = actor.kind === "user" ? byId.get(actor.id) : undefined;
+          const byOperator =
+            actor.kind === "user" &&
+            actor.id === operator?.id &&
+            !(operatorMembership && row.createdAt >= operatorMembership.joinedAt);
           return {
             ...row,
-            actor: {
-              ...actor,
-              ...(user ? { name: user.name, email: user.email } : {}),
-            },
+            data: teamVisibleData(row.action, row.data),
+            actor: byOperator
+              ? { kind: "operator" as const }
+              : { ...actor, ...(user ? { name: user.name, email: user.email } : {}) },
           };
         }),
       };

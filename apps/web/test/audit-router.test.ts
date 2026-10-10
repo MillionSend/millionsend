@@ -1,9 +1,18 @@
+import { applyJudgedSample, MONITOR_SETTING_DEFAULTS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
+
+// The monitor's Resume kicks the quota drain; no pg-boss in tests.
+vi.mock("@/server/queue", () => ({
+  getQueue: async () => ({ runCronNow: async () => {} }),
+  enqueueEmailSend: async () => {},
+  enqueueWebhookDeliveries: async () => {},
+  enqueueRecipientErase: async () => {},
+}));
 
 let db: Db;
 let close: () => Promise<void>;
@@ -13,6 +22,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await close();
 });
 
@@ -74,6 +84,204 @@ describe("audit.list", () => {
     });
     expect(second.items.map((r) => r.data?.name)).toEqual(["a"]);
     expect(second.nextCursor).toBeNull();
+  });
+
+  it("never shows the team the operator's note on a phishing suspension or a review hold", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    // The row the console's Suspend writes, under each kind of reason.
+    for (const reason of ["phishing", "review", "manual"]) {
+      await db.insert(schema.auditLog).values({
+        teamId,
+        actorId: "user:op",
+        action: "team.suspended",
+        target: `team:${teamId}`,
+        data: { name: "acme", reason, note: `kit seen (${reason})`, notified: false },
+      });
+    }
+    const { items } = await callerFor("alice", teamId, "owner").audit.list({});
+    expect(Object.fromEntries(items.map((row) => [row.data?.reason, row.data]))).toEqual({
+      phishing: { name: "acme", reason: "phishing", note: null, notified: false },
+      review: { name: "acme", reason: "review", note: null, notified: false },
+      manual: { name: "acme", reason: "manual", note: "kit seen (manual)", notified: false },
+    });
+  });
+
+  it("never lists trust & safety flags and shows the operator only as MillionSend; the console keeps both", async () => {
+    // The instance operator is the first registered user, and no member of the team.
+    await db
+      .insert(schema.user)
+      .values({ id: "op", name: "Operator", email: "op@example.com", createdAt: new Date(0) });
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    const operator = createCaller({
+      db,
+      session: {
+        user: { id: "op", email: "op@example.com", name: "Operator" },
+        session: { id: "s-op", createdAt: new Date() },
+      },
+      teamId: null,
+      role: null,
+    });
+
+    await operator.console.safety.openFlag({ teamId, note: "kit seen" });
+    const [flag] = await db.select().from(schema.teamFlags);
+    if (!flag) throw new Error("flag missing");
+    await operator.console.safety.clearFlag({ flagId: flag.id });
+    await operator.console.safety.reopenFlag({ flagId: flag.id });
+    await operator.console.teams.suspend({ id: teamId, reason: "manual", notify: false });
+    await callerFor("alice", teamId, "owner").apiKeys.create({ name: "CI" });
+
+    const { items } = await callerFor("alice", teamId, "owner").audit.list({});
+    expect(items.map((row) => [row.action, row.actor])).toEqual([
+      ["api_key.created", { kind: "user", id: "alice", name: "alice", email: "alice@example.com" }],
+      ["team.suspended", { kind: "operator" }],
+    ]);
+    expect(JSON.stringify(items)).not.toMatch(/Operator|op@example\.com|kit seen/);
+
+    const instance = await operator.console.audit.list({});
+    const flagRows = instance.items.filter((row) => row.action.startsWith("console.flag_"));
+    expect(flagRows.map((row) => row.action)).toEqual([
+      "console.flag_reopened",
+      "console.flag_cleared",
+      "console.flag_opened",
+    ]);
+    for (const row of [
+      ...flagRows,
+      ...instance.items.filter((r) => r.action === "team.suspended"),
+    ]) {
+      expect(row.actor).toEqual({
+        kind: "user",
+        id: "op",
+        name: "Operator",
+        email: "op@example.com",
+      });
+    }
+  });
+
+  it("keeps the operator MillionSend for what it did on a team before it joined", async () => {
+    vi.stubEnv("SUPPORT_VIEW", "on");
+    await db
+      .insert(schema.user)
+      .values({ id: "op", name: "Operator", email: "op@example.com", createdAt: new Date(0) });
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    const operator = createCaller({
+      db,
+      session: {
+        user: { id: "op", email: "op@example.com", name: "Operator" },
+        session: { id: "s-op", createdAt: new Date() },
+      },
+      teamId: null,
+      role: null,
+    });
+    await operator.console.teams.suspend({ id: teamId, reason: "manual", notify: false });
+    await operator.console.teams.reinstate({ id: teamId });
+    await operator.console.teams.startSupportView({
+      id: teamId,
+      reason: "support_ticket",
+      reference: "#4812",
+    });
+    await operator.support.end();
+    // The team later invites the operator in, and it acts there as a member.
+    const joinedAt = new Date(Date.now() + 60_000);
+    await db
+      .insert(schema.teamMembers)
+      .values({ teamId, userId: "op", role: "admin", createdAt: joinedAt });
+    await db.insert(schema.auditLog).values({
+      teamId,
+      actorId: "user:op",
+      action: "api_key.created",
+      target: `api_key:${crypto.randomUUID()}`,
+      data: { name: "CI" },
+      createdAt: new Date(joinedAt.getTime() + 1000),
+    });
+
+    const [asMember, ...before] = (await callerFor("alice", teamId, "owner").audit.list({})).items;
+    expect(asMember).toMatchObject({
+      action: "api_key.created",
+      actor: { kind: "user", id: "op", name: "Operator", email: "op@example.com" },
+    });
+    expect(before.map((row) => row.action).sort()).toEqual([
+      "support.view_ended",
+      "support.view_started",
+      "team.reinstated",
+      "team.suspended",
+    ]);
+    for (const row of before) expect(row.actor).toEqual({ kind: "operator" });
+    expect(JSON.stringify(before)).not.toMatch(/Operator|op@example\.com|"op"/);
+  });
+
+  it("never shows the team the content monitor's actions or a pause it was not told about, and keeps its access disclosure", async () => {
+    await db
+      .insert(schema.user)
+      .values({ id: "op", name: "Operator", email: "op@example.com", createdAt: new Date(0) });
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    const operator = createCaller({
+      db,
+      session: {
+        user: { id: "op", email: "op@example.com", name: "Operator" },
+        session: { id: "s-op", createdAt: new Date() },
+      },
+      teamId: null,
+      role: null,
+    });
+
+    // A run of certain verdicts on a new team: the monitor pauses its broadcasts.
+    const quiet = { ...MONITOR_SETTING_DEFAULTS, autoPause: false };
+    for (let i = 0; i < 12; i += 1) await applyJudgedSample(db, quiet, { teamId, score: 100 });
+    const paused = await applyJudgedSample(db, MONITOR_SETTING_DEFAULTS, { teamId, score: 95 });
+    expect(paused.paused).toBe(true);
+    await operator.console.monitor.resumeBroadcasts({ teamId });
+    await operator.console.monitor.setOverride({ teamId });
+    await operator.console.monitor.clearOverride({ teamId });
+    // Paused by hand without emailing the owner.
+    await operator.console.teams.pauseBroadcasts({
+      id: teamId,
+      reason: "report",
+      note: "lure kit seen",
+      notify: false,
+    });
+    // The seven-day disclosure of a content access, as the worker writes it.
+    await db.insert(schema.auditLog).values({
+      teamId,
+      actorId: "system",
+      action: "content.accessed",
+      target: `content_access_grant:${crypto.randomUUID()}`,
+      data: { reason: "phishing_or_malware", emails: 1, fields: "subject, rendered text" },
+      createdAt: new Date(Date.now() - 8 * 86_400_000),
+    });
+
+    const { items } = await callerFor("alice", teamId, "owner").audit.list({});
+    expect(items.map(({ action, actor, data }) => ({ action, actor, data }))).toEqual([
+      {
+        action: "team.broadcasts_paused",
+        actor: { kind: "operator" },
+        data: { name: "acme", reason: null, note: null, notified: false },
+      },
+      {
+        action: "content.accessed",
+        actor: { kind: "system" },
+        data: { reason: "phishing_or_malware", emails: 1, fields: "subject, rendered text" },
+      },
+    ]);
+    expect(JSON.stringify(items)).not.toMatch(/monitor|lure kit|report|risk|score/);
+
+    // The review page keeps all of it.
+    const { audit } = await operator.console.safety.review({ teamId });
+    expect(audit.filter((row) => row.action.startsWith("monitor.")).map((r) => r.action)).toEqual([
+      "monitor.override_cleared",
+      "monitor.override_set",
+      "monitor.broadcasts_resumed",
+      "monitor.broadcasts_paused",
+    ]);
+    expect(audit.find((row) => row.action === "team.broadcasts_paused")?.data).toEqual({
+      name: "acme",
+      reason: "report",
+      note: "lure kit seen",
+      notified: false,
+    });
   });
 
   it("is forbidden for members", async () => {

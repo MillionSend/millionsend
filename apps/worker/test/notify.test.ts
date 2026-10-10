@@ -341,6 +341,40 @@ it("a warning that escalates to a pause notifies both once", async () => {
   expect(sends).toHaveLength(2);
 });
 
+it("a suspended team hears none of its automated notices through the system mailer; others still do", async () => {
+  vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "MillionSend <notify@mail.system.test>");
+  const system = await createTeam(db, "system");
+  await db.insert(schema.domains).values({
+    teamId: system,
+    name: "mail.system.test",
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: new Date(),
+  });
+  const active = await createTeam(db, "active-team");
+  await db.insert(schema.user).values({ id: "a1", name: "A1", email: "active@example.com" });
+  await db.insert(schema.teamMembers).values({ teamId: active, userId: "a1", role: "owner" });
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+    .where(eq(schema.teams.id, teamId));
+  // Past the daily ceiling and the complaint pause line: quota.paused and deliverability.paused.
+  await counters({ accepted: 150, sent: 200, complained: 3 });
+  await counters({ accepted: 80 }, utcDay(), active);
+
+  await sweepNotifications(db, {
+    ...deps(),
+    mailer: createSystemMailer({ db, keyring, enqueueSend: async () => {} }),
+  });
+  const mailed = await db
+    .select({ to: schema.emails.to, tags: schema.emails.tags })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, system));
+  expect(mailed).toEqual([
+    { to: ["active@example.com"], tags: { millionsend_system: "quota.warning" } },
+  ]);
+});
+
 it("without a configured sender the mailer is a no-op", async () => {
   vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "");
   vi.stubEnv("AUTH_EMAIL_FROM", "");
@@ -727,7 +761,7 @@ it("a scheduled cancellation is recalled three days out, once, on the cloud only
   expect(sends.map((s) => s.subject)).toEqual([
     `Reminder: your Pro 100K plan ends on ${formatMailDate("en", endsAt)}`,
   ]);
-  expect(sends[0]?.text).toContain("to keep sending up to 100,000 emails a month");
+  expect(sends[0]?.text).toContain("to stay on Pro 100K (up to 100,000 emails a month)");
 
   // Too far out to count down yet; a fresh date is its own reminder.
   await setPlan({ cancelAt: new Date(Date.now() + 10 * DAY) });

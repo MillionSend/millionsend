@@ -34,6 +34,7 @@ export {
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
+  type HoldRule,
   loadMonitorState,
   MONITOR_ALERT_INTERVAL_MS,
   MONITOR_ANOMALY_CHECKS,
@@ -86,14 +87,12 @@ export {
   type AcceptEmailResult,
   acceptEmail,
   countDistinctRecipients,
+  enforceDomainWarmup,
   estimateAttachmentBytes,
-  isOnboardingSender,
   MAX_ATTACHMENT_BYTES,
-  type OnboardingSenderVerdict,
   QUOTA_BACKLOG_DAYS,
   type SenderDomainVerdict,
   senderDomain,
-  verifyOnboardingSender,
   verifySenderDomain,
 } from "./accept-email.js";
 export {
@@ -270,6 +269,13 @@ export {
   type WindowCounts,
 } from "./deliverability.js";
 export {
+  createDomainAgeResolver,
+  DomainAgeRetryableError,
+  domainsAwaitingAge,
+  markDomainAgeUnknown,
+  recordDomainAge,
+} from "./domain-age.js";
+export {
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
@@ -288,6 +294,15 @@ export {
   sesGateFromRecordStatus,
   strictDomainStatus,
 } from "./domain-status.js";
+export {
+  type DomainWarmupRow,
+  graduateWarmupDomains,
+  pruneWarmupUsage,
+  reserveWarmup,
+  teamWarmupOverview,
+  type WarmupCap,
+  warmupCap,
+} from "./domain-warmup.js";
 export { firstRow, resultRows } from "./driver-result.js";
 export {
   CHECKS,
@@ -367,6 +382,7 @@ export {
   type MonitorSettingSource,
   type MonitorSettings,
   type MonitorSettingsRow,
+  monitorSettingDefault,
   monitorSettingsReader,
   monitorThresholdsOrdered,
   resolveMonitorSettings,
@@ -387,6 +403,7 @@ export {
   type McpScope,
   mcpResourceUrl,
 } from "./oauth-scopes.js";
+export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.js";
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
 export { isRootDomainSend, registrableDomain } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
@@ -547,6 +564,7 @@ export {
 export {
   CREDENTIAL_MAIL_KINDS,
   findSenderDomainOwner,
+  MUTED_WHILE_SUSPENDED,
   type SenderDomainOwner,
   SYSTEM_MAIL_TAG,
   type SystemMailKind,
@@ -572,6 +590,7 @@ export {
   type TeamFlagReason,
   type TeamFlagStatus,
   type TeamStandingRow,
+  upgradesHeld,
 } from "./team-flags.js";
 export {
   INVITE_EMAILS_PER_HOUR,
@@ -591,10 +610,14 @@ export {
 } from "./team-plan.js";
 export {
   fetchTeamStanding,
+  isSilentlySuspended,
   isTeamSuspended,
+  SILENT_SUSPENSIONS,
   STANDING_COLUMNS,
   SUSPENSION_REASONS,
   type SuspensionReason,
+  suspendedSendRefusal,
+  suspendTeam,
   type TeamStanding,
   teamStandingOf,
 } from "./team-standing.js";

@@ -690,14 +690,29 @@ content insights (never email bodies), and an instance-wide audit log.
   team's standing and the automatic trust & safety flags every 15 minutes.
   History is kept 90 days.
 - **Operator actions and the team:** a suspended team's API keys still
-  authenticate but every send answers `403 team_suspended` (SMTP `550`),
-  broadcasts in flight park, webhooks keep delivering and data stays; a
+  authenticate but every send answers `403 team_suspended` (`403 sending_paused`
+  under a review hold; SMTP `550`),
+  broadcasts in flight park, webhooks keep delivering and data stays; its
+  quota, deliverability, broadcast-hold and broadcast-pause notices stop, and
+  so does its billing mail when the reason is phishing or a review hold
+  (Stripe still sends its own receipts), while mail to the operator, such as
+  the content monitor's alerts, still goes out; nobody on it can
+  delete it, remove its domains (the API answers `403 team_suspended` there
+  too) or invite anyone, and a member of a team suspended for phishing or
+  held for review cannot create new teams (under either reason each of these
+  refusals is one neutral line that never says suspended, the API's domain
+  delete answers `403 forbidden`, and the team's own audit log shows the
+  suspension without the operator's note); the team's audit log never lists
+  trust & safety flags or the content monitor's actions (its broadcast pause,
+  the resume and a sampling override), shows a broadcast pause the owner was
+  not emailed about without its reason or note, and shows every operator
+  action as MillionSend, never the operator's name or email; a
   broadcast pause parks broadcasts while transactional mail flows; a daily
   ceiling caps the team's UTC day under its plan. Owners are emailed about
-  each of these (never for a phishing suspension), and every action is
-  recorded in the audit log with its reason. With `SES_TENANTS` on, a
-  suspension also disables the team's SES tenant in every region it has a
-  domain in, and reinstating enables it again; an AWS failure never holds
+  each of these (never for a phishing suspension or a review hold), and
+  every action is recorded in the audit log with its reason. With
+  `SES_TENANTS` on, a suspension also disables the team's SES tenant in
+  every region it has a domain in, and reinstating enables it again; an AWS failure never holds
   the suspension back: the console warns, the audit log records it, and the
   worker retries.
 
@@ -709,11 +724,11 @@ content insights (never email bodies), and an instance-wide audit log.
 Off by default. With a judge configured, a sample of accepted mail is
 scored 0–100 by TypeSafe Jev after SES has taken it and folded into a
 per-team risk the operator sees on Trust & safety.
-Nothing on the send path waits for it: a verdict never delays, holds or
-refuses a message, and a judge failure of any kind (feature off, missing
-credentials, throttling, timeout, upstream error, unparseable answer, body
-already purged by retention) records the sample as unjudged and changes
-nothing else. The deterministic content checks (`email_insights`, the
+Nothing on the send path waits for it: a verdict never delays the message
+it judges, which SES has already taken, and a judge failure of any kind
+(feature off, missing credentials, throttling, timeout, upstream error,
+unparseable answer, body already purged by retention) records the sample
+as unjudged and changes nothing else. The deterministic content checks (`email_insights`, the
 guardrail, the account score) run on every send whether or not the judge is
 on. Self-hosters can leave it off; the cloud runs it.
 
@@ -724,8 +739,35 @@ day per team past the alert line, and, for a team in the New tier only
 days), pauses broadcasts when the risk passes the pause line and a sampled
 message scored 90 or more within a day (transactional mail keeps flowing;
 the team sees "paused pending review"; the operator resumes from the review
-page). It never suspends a team and never holds transactional mail: a
-person decides. The pause policy is a setting and can be switched off.
+page). The pause policy is a setting and can be switched off.
+
+**The review hold.** When one sampled message of a New-tier team is judged
+abuse at the hold score (90 by default) as credential phishing, brand
+impersonation or payment redirection, or with an impersonation,
+secret-harvesting or off-domain-lure finding, the team is suspended at once
+with the reason `review`: the API answers `403 sending_paused`, SMTP `550`,
+queued mail and broadcasts park, and with `SES_TENANTS` on its SES tenant is
+disabled. A run of lower verdicts holds the team too: by default the fifth
+such verdict from 80 within seven days of the team's first send. The operator
+is emailed at once, with the rule that held the team; the owner is not, and
+sees a neutral "Sending is paused pending review" notice. The team stays on Trust &
+safety with its flag open until the operator decides on its review page:
+**Release hold** reinstates it, the parked mail goes out, a broadcast pause
+the monitor applied before the hold is lifted as **Resume broadcasts** lifts
+it (a pause the operator set by hand stays), and the monitor flag the hold
+kept open is cleared in the operator's name (the automatic check does not
+reopen it while the same trigger holds); **Suspend for phishing** turns the
+hold into a phishing suspension. While the team is held, its later verdicts
+still move its risk and alert the operator as for any other team, but apply
+no pause, so a release leaves no monitor pause behind. A team is held once, by either
+rule: after a release its later verdicts only alert, so the released mail,
+judged again on its way out, neither holds it a second time nor pauses its
+broadcasts. A team already
+suspended keeps its suspension, and Probation, Established, Trusted and
+system teams are never held: they stay alert-only. The judge reads a message
+after SES has taken it, so the message that triggers the hold has already
+gone out; the hold stops what follows. `MONITOR_AUTO_HOLD=false` switches it
+off.
 
 **Turning it on** (in the instance's `.env`, read by the worker and the
 app; a restart applies it):
@@ -810,6 +852,10 @@ as its `MONITOR_*` environment variable until it is; the console wins.
 | `MONITOR_PAUSE_RISK` | 0.85 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |
 | `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score |
+| `MONITOR_HOLD_SCORE` | 90 | New teams only: a phishing-type verdict from this score holds the team for review |
+| `MONITOR_HOLD_REPEAT_COUNT` | 5 | New teams only: this many phishing-type verdicts from the score below, within seven days of the team's first send, also hold it for review; 0 turns this off |
+| `MONITOR_HOLD_REPEAT_SCORE` | 80 | The score from which a phishing-type verdict counts toward the count above |
+| `MONITOR_AUTO_HOLD` | true | Whether the review hold applies |
 
 The risk is a decayed mean of the verdicts (half-life 7 days) with a prior
 that starts new teams higher; the review page shows it beside the tier,
@@ -818,6 +864,45 @@ offers "Sample everything for 7 days". The Overview's Monitoring card
 charts the hourly sample count, and the operator is emailed, at most once
 every six hours, when more than 20% of an hour's samples (at least 20 of
 them) went unjudged, or as soon as TypeSafe rejects the API key.
+
+</details>
+
+<details>
+<summary><b>New-domain warm-up (optional)</b></summary>
+
+Off by default here and on by default with `IS_CLOUD`. With it on, a sending
+domain gets a daily cap by the age of its registrable domain (ICANN section of
+the Public Suffix List; under a private-section suffix, such as `shop.eu.org`
+from a free subdomain service, the name itself, dated by its certificates
+only), counted per UTC day across every team sending from it:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `WARMUP_ENABLED` | `false` (`true` with `IS_CLOUD`) | Whether the warm-up applies |
+| `WARMUP_CAP_FIRST_DAY` | 100 | Emails a day while the domain is under 24 hours old |
+| `WARMUP_CAP_FIRST_WEEK` | 300 | Day 1 to 7, and an unknown age while the team is new or on probation |
+| `WARMUP_CAP_FIRST_MONTH` | 2000 | Day 7 to 30; from day 30 only the plan applies |
+
+The console (Trust & safety → Monitoring settings) wins over the environment.
+The cap is the lower of the plan's and the warm-up's, and no plan lifts it.
+A team's warming domains also share one daily limit, the highest of their
+caps, counted per team and UTC day, so a second fresh domain never adds
+volume. Mail over either parks as `queued_quota` (`park_reason = 'warmup'`)
+and `quota.drain` releases it as both allow; `429 daily_quota_exceeded` (SMTP
+`452`) with a warm-up message only when the team's parked backlog is full.
+50 clean sends since the last step, the first a day old (hard bounces under
+2%, complaints under 0.1%, no phishing-type monitor verdict), move a domain up
+a step early, and an operator can trust a team or a domain from its review
+page (audited).
+
+The worker's `domain.age` job looks the age up off the send path, when a
+domain is added or verifies and from the `domains.reverify` sweep: RDAP via
+IANA's bootstrap (plus fixed servers for `.io`, `.me`, `.co` and `.us`), then
+the registry's WHOIS on TCP 43, then the first certificate on crt.sh, else
+unknown; a certificate's date never replaces a registry's found before. It
+needs outbound HTTPS and TCP 43 while the warm-up is on and makes no lookup
+while it is off. The full description is in the docs' self-hosting
+page.
 
 </details>
 
@@ -858,11 +943,12 @@ number of messages — never the justification's text and never any content.
 
 **What the team sees, and when.** Seven days later a daily job adds a
 `content.accessed` row to the team's own audit log — dated at the access,
-not at the disclosure — and emails the team's owners in their own language:
-when it happened, the reason, how many messages, and what was withheld. The
-one exception is a team suspended for phishing since the grant, where the
-row and the notice are withheld; the grant records that the disclosure step
-ran either way, so it is not retried nightly.
+not at the disclosure — with the reason, how many messages and which fields
+were read. Nobody is emailed about an access, then or later. A team
+suspended for phishing never gets the row; the grant records that the
+disclosure step ran, so it is not retried nightly. A team held for review
+gets it once the hold ends: after a release the next daily run writes it,
+and if the hold becomes a phishing suspension it is withheld for good.
 
 **Turning it on** in the instance's `.env`, read by the worker and the app
 (a restart applies it):
@@ -887,8 +973,9 @@ dispute, other) and the ticket reference, and opens the team's dashboard as
 its owner sees it, read-only, for 30 minutes. Every reason is a request the
 customer made; an operator checking an abuse report works from the console's
 own Trust & safety pages instead, and from the content reveal when the
-message text itself is needed. The session rides on the operator's own
-login; no session is ever minted for the owner.
+message text itself is needed. No view starts on a team suspended for
+phishing or held for review. The session rides on the operator's own login;
+no session is ever minted for the owner.
 
 - **What the operator sees:** the dashboard under a banner ("Support view
   of <team> · read-only · ends in mm:ss"): emails and their events (a
@@ -921,7 +1008,8 @@ login; no session is ever minted for the owner.
   procedure name and never anything a procedure returned.
 - **What the owner sees:** no email; the session is in the team's audit
   log at once, and the Support access card under Settings shows it while it
-  is live, with an "End session" button.
+  is live, with an "End session" button. Both name MillionSend, never the
+  operator: no name, email or user id reaches the team.
 
 ```sh
 SUPPORT_VIEW=on

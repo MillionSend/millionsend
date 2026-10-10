@@ -48,7 +48,7 @@ export function regionPausedMail(input: {
         (c) => `${inertText(c.team)}: ${c.hardBounced} hard bounces, ${c.complained} complaints`,
       ),
     ],
-    button: { label: "Open dashboard", url: input.url },
+    button: { label: "Open console", url: input.url },
     footnote: "Sent to the instance operator when a region breaker trips.",
   });
 }
@@ -59,7 +59,7 @@ export function regionResumedMail(input: { region: string; url: string }): MailC
     paragraphs: [
       `The platform's bounce and complaint rates in ${input.region} are back under the line over both the 24-hour and 7-day windows. Held broadcasts resume on their own.`,
     ],
-    button: { label: "Open dashboard", url: input.url },
+    button: { label: "Open console", url: input.url },
     footnote: "Sent to the instance operator when a region breaker clears.",
   });
 }

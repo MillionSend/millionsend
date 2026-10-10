@@ -11,6 +11,7 @@ import { useDismiss } from "@/components/popover-menu";
 import { BtnSpinner } from "@/components/spinner";
 import { TeamLogo } from "@/components/team-logo";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage } from "@/lib/trpc-error";
 
 function PlanBadge({ plan }: { plan: string }) {
   const t = useTranslations("common");
@@ -256,7 +257,7 @@ export function TeamSwitcher({
                 ? t("limit")
                 : createTeam.error.data?.code === "BAD_REQUEST"
                   ? tCommon("nameRule", { max: CUSTOMER_TEXT_MAX })
-                  : t("error")}
+                  : guardMessage(createTeam.error, t("error"))}
             </p>
           ) : null}
           <ModalFooter>

@@ -68,6 +68,8 @@ it("trips the region, mails the operator with the contributors, and stays quiet 
   expect(sends[0]).toMatchObject({ to: "op@example.com" });
   expect(sends[0]?.subject).toContain("paused in sa-east-1");
   expect(sends[0]?.text).toContain("Noisy Sender: 0 hard bounces, 5 complaints");
+  // The dashboard carries no hold banner: the details live in the console.
+  expect(sends[0]?.text).toContain("Open console: https://app.example.test/console/regions");
 
   expect(await runPlatformBreaker(db, { mailer, now: NOW })).toEqual({ tripped: [], resumed: [] });
   expect(sends).toHaveLength(1);

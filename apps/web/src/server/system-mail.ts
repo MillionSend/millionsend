@@ -198,7 +198,7 @@ export function buildInvitationEmail(input: {
  * One account mail on the shared card; the button opens `path` on this
  * instance unless `url` says elsewhere. Mail to a person about their own
  * account goes from the account sender; an owner notice passes the
- * notifications sender, as the worker's do.
+ * notifications sender, as the worker's do, and the team it is about.
  */
 export function buildAccountEmail(input: {
   to: string;
@@ -208,6 +208,7 @@ export function buildAccountEmail(input: {
   url?: string | undefined;
   from?: string | undefined;
   values?: Record<string, string>;
+  aboutTeamId?: string | undefined;
 }): SystemMailMessage {
   return {
     from: input.from ?? accountEmailFrom() ?? "",
@@ -219,6 +220,7 @@ export function buildAccountEmail(input: {
       ...(input.values ? { values: input.values } : {}),
     }),
     kind: input.kind,
+    aboutTeamId: input.aboutTeamId,
   };
 }
 

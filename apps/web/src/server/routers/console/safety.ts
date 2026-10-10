@@ -20,6 +20,7 @@ import {
   resolveMonitorSettings,
   TEAM_FLAG_REASONS,
   teamMonitorOverview,
+  teamWarmupOverview,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -43,7 +44,7 @@ import { escapeLike } from "@/lib/sql";
 import { judgeStatus } from "../../console/monitor";
 import { getKeyring } from "../../keyring";
 import { operatorProcedure, router } from "../../trpc";
-import { auditOperator, loadTeam } from "./shared";
+import { auditOperator, kickQuotaDrain, loadTeam } from "./shared";
 
 const f = schema.teamFlags;
 const t = schema.teams;
@@ -249,6 +250,7 @@ export const consoleSafetyRouter = router({
       monitor,
       samples,
       grants,
+      warmup,
     ] = await Promise.all([
       ctx.db.select().from(f).where(eq(f.teamId, team.id)).orderBy(desc(f.openedAt)).limit(10),
       fetchDeliverabilityHealth(ctx.db, team.id, { now }),
@@ -308,6 +310,7 @@ export const consoleSafetyRouter = router({
         .from(g)
         .where(and(eq(g.teamId, team.id), sql`${g.expiresAt} > ${now}`))
         .orderBy(desc(g.createdAt)),
+      teamWarmupOverview(ctx.db, team.id, now),
     ]);
     // The judge's answer for each flagged email, when it was drawn; the verdict fields only.
     const ms = schema.monitorSamples;
@@ -413,6 +416,7 @@ export const consoleSafetyRouter = router({
         flagRisk: monitorSettings.flagRisk,
         alertRisk: monitorSettings.alertRisk,
       },
+      warmup: { enabled: monitorSettings.warmupEnabled, ...warmup },
       audit: audit.map((row) => {
         const actor = parseAuditActor(row.actorId);
         return {
@@ -423,6 +427,40 @@ export const consoleSafetyRouter = router({
       }),
     };
   }),
+
+  /**
+   * The warm-up override: a trusted team, or one trusted domain of it, sends
+   * at its plan's volume from day one. The audit row is the instance's, as
+   * the owner's own log never shows trust & safety levers.
+   */
+  setWarmupTrust: operatorProcedure
+    .input(z.object({ teamId: z.uuid(), domainId: z.uuid().optional(), trusted: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      const trustedAt = input.trusted ? new Date() : null;
+      let domain: string | undefined;
+      if (input.domainId) {
+        const d = schema.domains;
+        const [row] = await ctx.db
+          .update(d)
+          .set({ warmupTrustedAt: trustedAt })
+          .where(and(eq(d.id, input.domainId), eq(d.teamId, team.id)))
+          .returning({ name: d.name });
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        domain = row.name;
+      } else {
+        await ctx.db.update(t).set({ warmupTrustedAt: trustedAt }).where(eq(t.id, team.id));
+      }
+      await auditOperator(ctx, {
+        teamId: null,
+        action: input.trusted ? "warmup.trust_granted" : "warmup.trust_revoked",
+        target: { type: "team", id: team.id },
+        metadata: { team: team.name, ...(domain ? { domain } : {}) },
+      });
+      // Mail the warm-up held goes out now rather than at the next drain.
+      if (input.trusted) await kickQuotaDrain();
+      return { trusted: input.trusted };
+    }),
 
   /**
    * Break-glass: a time-boxed grant to read the subject and rendered text of
@@ -618,12 +656,15 @@ export const consoleSafetyRouter = router({
         .from(f)
         .where(and(eq(f.teamId, flag.teamId), eq(f.status, "open")));
       if (open) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "already_open" });
+      // Reopened, a suspension's flag is the operator's own call, which no
+      // reinstatement clears.
+      const { suspension: _, ...detail } = flag.detail ?? {};
       const [reopened] = await ctx.db
         .insert(f)
         .values({
           teamId: flag.teamId,
           reason: flag.reason,
-          detail: flag.detail,
+          detail: flag.detail && detail,
           note: flag.note,
           openedBy: ctx.operator.id,
         })

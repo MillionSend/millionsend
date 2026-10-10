@@ -137,14 +137,6 @@
       "bannerAction": "Open SES settings",
       "lastEvent": "Last event received",
       "never": "never"
-    },
-    "breaker": {
-      "paused": "Broadcasts are paused in {region}: the platform's {metric} rate is {rate}%, near SES's review line for the whole account. Transactional email continues; broadcasts resume on their own once the rate recovers.",
-      "metric": {
-        "bounce": "hard-bounce",
-        "complaint": "complaint"
-      },
-      "held": "Broadcasts are paused in {region} by the instance operator. Transactional email continues; broadcasts resume when the operator releases the hold."
     }
   },
   "team": {
@@ -328,6 +320,8 @@
     "keepPlan": "Keep {plan}",
     "switchAtPeriodEnd": "Switch at period end",
     "changeHint": "Moving up applies now, with the difference prorated on your next invoice. Moving down applies when the period renews.",
+    "upgradesHeld": "Upgrades are unavailable for this team right now. Contact support if you need help.",
+    "upgradesHeldLive": "Upgrades are unavailable for this team right now. You can still cancel or move to a smaller plan. Contact support if you need help.",
     "features": {
       "domains": "{n, plural, one {# sending domain} other {# sending domains}}",
       "domainsUnlimited": "Unlimited sending domains",
@@ -407,6 +401,7 @@
       "oauth": "Connected app",
       "stripe": "Stripe",
       "system": "System",
+      "operator": "MillionSend",
       "deletedUser": "Deleted user"
     },
     "actions": {
@@ -441,6 +436,7 @@
       "team_broadcasts_resumed": "Resumed broadcasts",
       "team_suspended": "Suspended team",
       "team_reinstated": "Reinstated team",
+      "team_held_for_review": "Sending paused pending review",
       "team_ses_tenant_updated": "Updated SES tenant status",
       "team_ses_tenant_update_failed": "SES tenant status update failed",
       "console_flag_opened": "Flagged team",
@@ -455,6 +451,8 @@
       "monitor_override_cleared": "Cleared monitor sampling override",
       "monitor_broadcasts_paused": "Content monitor paused broadcasts",
       "monitor_broadcasts_resumed": "Resumed broadcasts after monitor pause",
+      "warmup_trust_granted": "Lifted new-domain warm-up",
+      "warmup_trust_revoked": "Restored new-domain warm-up",
       "content_revealed": "Read message content",
       "content_accessed": "An operator read message content",
       "support_view_started": "Support view started",
@@ -500,8 +498,8 @@
         "note": "Part of a broadcast is parked over the quota."
       },
       "broadcast_held": {
-        "label": "Broadcast on hold",
-        "note": "Sending from its region is paused across the platform."
+        "label": "Broadcast delayed",
+        "note": "A broadcast is waiting to send and resumes on its own."
       },
       "quota": {
         "label": "Sending quota",

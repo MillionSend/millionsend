@@ -5,6 +5,7 @@ import {
   SUPPORT_VIEW_MINUTES,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
+  SUSPENSION_REASONS,
   type SystemMailMessage,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -213,6 +214,43 @@ describe("console.teams.startSupportView", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(await db.select().from(schema.supportViewGrants)).toHaveLength(before);
   });
+
+  it.each(SUSPENSION_REASONS)(
+    "refuses a team suspended for %s only when the team must not learn of it",
+    async (reason) => {
+      const slug = `suspended-${reason}`;
+      const id = await createTeam(db, slug);
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, id));
+      const silent = ["phishing", "review"].includes(reason);
+      // The console disables the item with the reason before anyone clicks.
+      const [row] = (await operator().console.teams.list({ search: slug })).items;
+      expect(row).toMatchObject({ id, silentlySuspended: silent });
+      expect(await operator().console.teams.detail({ id })).toMatchObject({
+        silentlySuspended: silent,
+      });
+      const started = operator().console.teams.startSupportView({
+        id,
+        reason: "support_ticket",
+        reference: "#4812",
+      });
+      if (silent) {
+        await expect(started).rejects.toMatchObject({
+          code: "PRECONDITION_FAILED",
+          message: "silent_suspension",
+        });
+      } else {
+        await started;
+      }
+      const grants = await db
+        .select()
+        .from(schema.supportViewGrants)
+        .where(eq(schema.supportViewGrants.teamId, id));
+      expect(grants).toHaveLength(silent ? 0 : 1);
+    },
+  );
 
   it("opens a 30-minute grant, sets the cookie, audits the team and mails nobody", async () => {
     const setCookie = vi.fn();
@@ -739,16 +777,18 @@ describe("the owner's side", () => {
   it("sees the live view, ends it, and both trails carry the rows", async () => {
     const grant = await start({ reason: "billing_dispute", reference: "INV-77" });
     const current = await owner().team.supportView.current();
-    expect(current).toMatchObject({
+    // The card names MillionSend: nothing of the operator reaches the team.
+    expect(current).toStrictEqual({
       enabled: true,
       live: {
         id: grant.id,
-        operator: { name: "Operator", email: "op@example.com" },
         reason: "billing_dispute",
         reference: "INV-77",
+        startedAt: grant.createdAt,
         expiresAt: grant.expiresAt,
       },
     });
+    expect(JSON.stringify(current)).not.toMatch(/Operator|op@example\.com/);
     // The card is owner/admin only, and so is the read behind it.
     await expect(member().team.supportView.current()).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(member().team.supportView.end()).rejects.toMatchObject({ code: "FORBIDDEN" });
@@ -763,10 +803,7 @@ describe("the owner's side", () => {
     const rows = teamTrail.items.filter((r) => r.target === `support_view:${grant.id}`);
     expect(rows.map((r) => [r.action, r.actor])).toEqual([
       ["support.view_ended", { kind: "user", id: OWNER, name: "Bob", email: "bob@example.com" }],
-      [
-        "support.view_started",
-        { kind: "user", id: OPERATOR, name: "Operator", email: "op@example.com" },
-      ],
+      ["support.view_started", { kind: "operator" }],
     ]);
     expect(rows[0]?.data).toMatchObject({ by: "owner" });
 

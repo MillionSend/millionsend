@@ -40,6 +40,10 @@
       "types": "./src/domain-status.ts",
       "default": "./src/domain-status.ts"
     },
+    "./docs-links": {
+      "types": "./src/docs-links.ts",
+      "default": "./src/docs-links.ts"
+    },
     "./html": {
       "types": "./src/html.ts",
       "default": "./src/html.ts"
@@ -75,6 +79,7 @@
     "@sentry/core": "^11.1.0",
     "@sentry/node": "^11.1.0",
     "drizzle-orm": "^0.45.2",
+    "tldts": "^7.4.10",
     "zod": "^4.6.3"
   },
   "devDependencies": {

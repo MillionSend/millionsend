@@ -1,4 +1,4 @@
-import { registrableDomain } from "@millionsend/core/org-domain";
+import { normalizeHostname, registrableDomain } from "@millionsend/core/org-domain";
 
 /**
  * The record name as a DNS provider's Name field expects it: relative to the
@@ -8,7 +8,7 @@ import { registrableDomain } from "@millionsend/core/org-domain";
  */
 export function zoneRelativeName(recordName: string, domain: string): string {
   const zone = registrableDomain(domain);
-  const name = recordName.toLowerCase().replace(/\.$/, "");
+  const name = normalizeHostname(recordName);
   if (name === zone) return "@";
   return name.endsWith(`.${zone}`) ? name.slice(0, -(zone.length + 1)) : recordName;
 }

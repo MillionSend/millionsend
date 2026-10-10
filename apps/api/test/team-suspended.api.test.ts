@@ -97,6 +97,24 @@ it("refuses every send surface with 403 team_suspended while the key still authe
   expect(await db.select().from(schema.emails).where(eq(schema.emails.teamId, teamId))).toEqual([]);
 });
 
+it("answers a review hold as a neutral pause on every send surface", async () => {
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "review" })
+    .where(eq(schema.teams.id, teamId));
+  for (const res of [
+    await call("POST", "/emails", body),
+    await call("POST", "/emails/batch", [body]),
+    await call("POST", `/broadcasts/${broadcastId}/send`, {}),
+  ]) {
+    expect(res.status).toBe(403);
+    const error = (await res.json()) as { name: string; message: string };
+    expect(error).toMatchObject({ name: "sending_paused" });
+    expect(error.message).toMatch(/^Sending is paused pending review\./);
+    expect(error.message).not.toMatch(/suspend|phishing|abuse/i);
+  }
+});
+
 it("accepts again once the suspension is cleared", async () => {
   await setSuspended(false);
   const res = await call("POST", "/emails", body);
