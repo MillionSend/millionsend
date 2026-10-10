@@ -101,11 +101,11 @@ export const ptBR = {
     subject: '"{name}" está saindo ao longo de {days} dias',
     body: [
       "{first} de {count} e-mails saíram na primeira leva; o restante segue conforme a capacidade libera, o último por volta de {finishesAt}.",
-      "Envios acima da capacidade diária da plataforma são distribuídos pelos dias seguintes; o e-mail transacional de {team} não fica retido atrás deles.",
+      "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes; o e-mail transacional de {team} não fica retido atrás deles.",
     ],
     button: "Abrir broadcast",
     muted: [
-      "Você recebe isto uma vez por broadcast que leva mais de um dia. O horário de término é uma estimativa e muda conforme outras equipes enviam.",
+      "Você recebe isto uma vez por broadcast que leva mais de um dia. O horário de término é uma estimativa e pode mudar.",
     ],
   },
   "broadcast.held_quota": {
@@ -123,10 +123,10 @@ export const ptBR = {
     },
   },
   "broadcast.held": {
-    subject: '"{name}" está em espera',
+    subject: '"{name}" está atrasado',
     body: [
-      'Os envios de {region} estão pausados em toda a plataforma enquanto as taxas de bounce e reclamação se estabilizam, então "{name}" aguarda em vez de sair; e-mails transacionais continuam saindo.',
-      "Ele retoma sozinho — checamos a cada 15 minutos — e você recebe o relatório de envio de sempre ao terminar.",
+      '"{name}" aguarda para sair. O envio está pausado por enquanto e retoma automaticamente, então você não precisa fazer nada; e-mails transacionais continuam saindo.',
+      "Você recebe o relatório de envio de sempre ao terminar.",
     ],
     button: "Abrir broadcast",
   },
@@ -222,7 +222,7 @@ export const ptBR = {
   "monitor.alert": {
     subject: "Monitor de conteúdo: {team} precisa de uma olhada",
     body: [
-      "O risco do monitor de conteúdo para {team} chegou a {risk} (nível {tier}, {samples} amostras julgadas nos últimos 7 dias, {flagged} acima da linha de sinalização). O modelo lê uma amostra do e-mail aceito; nada foi pausado nem retido por conta dele.",
+      "O risco do monitor de conteúdo para {team} chegou a {risk} (nível {tier}, {samples} amostras julgadas nos últimos 7 dias, {flagged} acima da linha de sinalização). O modelo lê uma amostra do e-mail aceito; este alerta, por si só, não pausa nem retém nada.",
       "Abra a página de revisão para ver os veredictos amostrados, as verificações de conteúdo e o histórico da equipe, e decida. Este aviso se repete no máximo uma vez por dia por equipe enquanto o risco ficar acima da linha.",
     ],
     button: "Abrir revisão",
@@ -235,6 +235,19 @@ export const ptBR = {
     ],
     button: "Abrir revisão",
   },
+  "monitor.team_held": {
+    subject: "O monitor de conteúdo reteve {team} para revisão",
+    body: [
+      "{team} está no nível novo e uma mensagem amostrada pontuou {score} ({verdict}). {rule} Pela política de retenção, todo envio da equipe agora é recusado ou estacionado: a API e o SMTP recusam, o e-mail na fila e os broadcasts aguardam, e seu tenant do SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi julgada.",
+      "O dono vê o envio como pausado aguardando revisão e não recebe e-mail. Abra a página de revisão para liberar a equipe, o que envia o e-mail retido, ou para suspendê-la por phishing.",
+    ],
+    button: "Abrir revisão",
+    extra: {
+      score: "Este único veredicto reteve a equipe: a pontuação de retenção é {line}.",
+      repeat:
+        "Este veredicto reteve a equipe como o seu veredicto do tipo phishing número {n} com pontuação {line} ou mais na primeira semana de envios.",
+    },
+  },
   "monitor.degraded": {
     subject: "Monitor de conteúdo: {rate} das amostras ficaram sem julgamento na última hora",
     body: [
@@ -245,24 +258,6 @@ export const ptBR = {
     muted: [
       "Enviado ao operador da instância no máximo a cada seis horas enquanto a parcela ficar acima de 20% ou o provedor continuar recusando a chave de API.",
     ],
-  },
-  "content.access_notice": {
-    subject: "Um operador leu conteúdo em {team}",
-    body: [
-      "Em {when}, um operador autorizado desta instância leu o assunto e o texto renderizado de {emails} em {team}, por um motivo de segurança registrado: {reason}.",
-      "Endereços de destinatários, anexos, cabeçalhos e o HTML bruto não foram acessados, e o acesso se fechou depois de 30 minutos. Está registrado no log de auditoria desta equipe com a mesma data, e no log da instância desde que aconteceu.",
-      "Este aviso é exigido de nós em até sete dias após um acesso desses e é enviado tenha ou não dado em algo. Responda a este e-mail se quiser saber mais.",
-    ],
-    button: "Abrir log de auditoria",
-    extra: {
-      one: "uma mensagem",
-      many: "{n} mensagens",
-      phishing_or_malware: "suspeita de phishing ou malware",
-      complaint_spike: "um pico de reclamações de spam",
-      provider_report: "uma denúncia de abuso de um provedor de caixa postal",
-      legal_request: "uma solicitação judicial",
-      owner_support_request: "um pedido de suporte desta equipe",
-    },
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 

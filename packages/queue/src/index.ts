@@ -22,6 +22,12 @@ export interface JobPayloads {
   // The content monitor's judge call for one pending sample; the sample row
   // names the email, the job carries nothing else.
   "abuse.judge": { sampleId: string };
+  // Retry of a team's SES tenant status the console could not set; the
+  // handler applies whatever the team's standing is when it runs.
+  "tenant.status": { teamId: string };
+  // The registration date of a domain's registrable name (RDAP, WHOIS, CT),
+  // looked up when the domain is added and again when it verifies.
+  "domain.age": { domainId: string };
 }
 
 /** ParsedSesEvent with occurredAt as ISO string (JSON-safe). */
@@ -92,6 +98,8 @@ export const DEAD_LETTER_QUEUES = {
   "webhook.drain": "webhook.drain.dead",
   "recipient.erase": "recipient.erase.dead",
   "abuse.judge": "abuse.judge.dead",
+  "tenant.status": "tenant.status.dead",
+  "domain.age": "domain.age.dead",
 } as const;
 
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
@@ -103,6 +111,8 @@ const JOB_QUEUES = [
   "webhook.drain",
   "recipient.erase",
   "abuse.judge",
+  "tenant.status",
+  "domain.age",
 ] as const;
 // Compile-time check that every JobPayloads key is listed above.
 const _everyJobQueueListed: Record<Exclude<JobName, (typeof JOB_QUEUES)[number]>, never> = {};
@@ -118,6 +128,8 @@ const NOTIFY_QUEUES: ReadonlySet<string> = new Set<JobName>([
   "broadcast.send",
   "ses.event",
   "webhook.drain",
+  // A domain verified minutes ago may send now; its age should be known first.
+  "domain.age",
 ]);
 const SLOW_POLL_SECONDS = 30;
 
@@ -191,8 +203,8 @@ export const CRON_JOBS = {
   // Every 10 min: the content monitor's sample count and unjudged share as
   // probes, and the operator's notice when the judge keeps failing.
   "monitor.health": "*/10 * * * *",
-  // Daily: the seven-day disclosure of break-glass content access — the
-  // team's audit row and its owners' notice. No-op with none due.
+  // Daily: the seven-day disclosure of break-glass content access, the
+  // team's audit row. No-op with none due.
   "safety.reveal_notices": "40 4 * * *",
 } as const;
 

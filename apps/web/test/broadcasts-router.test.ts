@@ -29,6 +29,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await close();
 });
 
@@ -445,7 +446,7 @@ describe("broadcasts.send deliverability guard", () => {
 });
 
 describe("broadcasts.send platform breaker", () => {
-  it("refuses a send while the sender domain's region is held, naming the region", async () => {
+  it("refuses a send while the sender domain's region is held, without saying why", async () => {
     const teamId = await createTeam(db, "team-a");
     const { id } = await seedDraft(teamId);
     await db.insert(schema.regionBreakers).values({
@@ -467,10 +468,20 @@ describe("broadcasts.send platform breaker", () => {
         enqueued.push(broadcastId);
       },
     });
-    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject({
+    const refusal = {
       code: "PRECONDITION_FAILED",
-      message: expect.stringContaining("us-east-1"),
-    });
+      message:
+        "Broadcasts can't be sent right now. Sending resumes automatically; try again later. Transactional email is unaffected.",
+    };
+    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject(refusal);
+    // Scheduling ahead is refused alike, and an operator's hold reads the same.
+    const later = new Date(Date.now() + 86_400_000);
+    await expect(caller.broadcasts.send({ id, scheduledAt: later })).rejects.toMatchObject(refusal);
+    await db
+      .update(schema.regionBreakers)
+      .set({ reason: null, manualReason: "incident" })
+      .where(eq(schema.regionBreakers.region, "us-east-1"));
+    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject(refusal);
     expect(enqueued).toEqual([]);
     expect((await broadcastRow(id))?.status).toBe("draft");
 
@@ -668,6 +679,33 @@ describe("broadcasts.sendTest", () => {
   });
 });
 
+describe("the instance's onboarding sender", () => {
+  it("is refused by send and sendTest, even for a team holding its domain", async () => {
+    vi.stubEnv("ONBOARDING_EMAIL_FROM", "MillionSend <hello@ms.example>");
+    const teamId = await createTeam(db, "team-a");
+    await seedVerifiedDomain(teamId, "ms.example");
+    const caller = callerFor(teamId);
+    const reserved = {
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("hello@ms.example is reserved for MillionSend's own"),
+    };
+    const { id } = await caller.broadcasts.create({ ...DRAFT_INPUT, from: "Hello@MS.example" });
+    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject(reserved);
+    expect((await broadcastRow(id))?.status).toBe("draft");
+    await expect(
+      caller.broadcasts.sendTest({
+        from: "MillionSend <hello@ms.example>",
+        subject: "s",
+        html: "<p>x</p>",
+        text: null,
+      }),
+    ).rejects.toMatchObject(reserved);
+    expect(await db.select().from(schema.emails).where(eq(schema.emails.teamId, teamId))).toEqual(
+      [],
+    );
+  });
+});
+
 describe("paced sends", () => {
   type Quota = { max24h: number; sentLast24h: number; maxSendRate: number };
   function stubAccount(quota: Quota | Error) {
@@ -823,5 +861,60 @@ describe("paced sends", () => {
       finishesAt: null,
       startedAt: null,
     });
+  });
+
+  it("list and get show the due sends of a held region as delayed, with no forecast", async () => {
+    stubAccount({ max24h: 100_000, sentLast24h: 0, maxSendRate: 14 });
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id: sending } = await seedSendingBroadcast(teamId);
+    await db
+      .insert(schema.domains)
+      .values({ teamId, name: "eu.example", region: "eu-west-1", status: "verified" });
+    const scheduled = async (from: string, at: Date) => {
+      const { id } = await caller.broadcasts.create({ ...DRAFT_INPUT, from });
+      await db
+        .update(schema.broadcasts)
+        .set({ status: "scheduled", scheduledAt: at })
+        .where(eq(schema.broadcasts.id, id));
+      return id;
+    };
+    const past = new Date(Date.now() - 60_000);
+    const due = await scheduled(DRAFT_INPUT.from, past);
+    const later = await scheduled(DRAFT_INPUT.from, new Date(Date.now() + 3_600_000));
+    const elsewhere = await scheduled("Ada <ada@eu.example>", past);
+    await db.insert(schema.regionBreakers).values({
+      region: "us-east-1",
+      paused: true,
+      reason: {
+        metric: "complaint",
+        rate: 0.0009,
+        limit: 0.001,
+        windowHours: 24,
+        sent: 5000,
+        events: 5,
+      },
+      pausedAt: new Date(),
+    });
+
+    const { items } = await caller.broadcasts.list({});
+    expect(Object.fromEntries(items.map((b) => [b.id, b.held]))).toEqual({
+      [sending]: true,
+      [due]: true,
+      [later]: false,
+      [elsewhere]: false,
+    });
+    expect(await caller.broadcasts.get({ id: sending })).toMatchObject({
+      held: true,
+      finishesAt: null,
+      releases: [],
+      sentCount: 2,
+    });
+    expect((await caller.broadcasts.get({ id: due })).held).toBe(true);
+    expect((await caller.broadcasts.get({ id: elsewhere })).held).toBe(false);
+
+    await db.update(schema.regionBreakers).set({ paused: false });
+    const released = await caller.broadcasts.get({ id: sending });
+    expect(released.held).toBe(false);
+    expect(released.finishesAt).toBeInstanceOf(Date);
   });
 });

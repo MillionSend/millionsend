@@ -54,8 +54,8 @@ Resources:
               - ses:SendRawEmail
               - ses:GetAccount
             Resource: "*"
-          # Per-team SES tenants (SES_TENANTS); tenant ARNs have no documented
-          # resource-level scope.
+          # Per-team SES tenants (SES_TENANTS); suspending a team disables its
+          # tenant's sending. Tenant ARNs have no documented resource-level scope.
           - Effect: Allow
             Action:
               - ses:CreateTenant
@@ -63,6 +63,7 @@ Resources:
               - ses:DeleteTenant
               - ses:CreateTenantResourceAssociation
               - ses:DeleteTenantResourceAssociation
+              - ses:UpdateReputationEntityCustomerManagedStatus
             Resource: "*"
 
   SendUser:

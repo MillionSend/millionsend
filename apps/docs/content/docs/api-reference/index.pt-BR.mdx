@@ -63,7 +63,8 @@ deliberadas e explícitas:
 - Broadcasts suportam `canceled`, um status fora da união do Resend, e o
   envio de broadcast, `POST /emails` e `POST /emails/batch` podem retornar
   `403 sending_paused` quando sua taxa de bounce ou reclamação cruza os
-  limites de enforcement do SES. Só o envio de broadcast também pode retornar
+  limites de enforcement do SES, ou enquanto o envio da equipe está pausado
+  aguardando revisão. Só o envio de broadcast também pode retornar
   `403 broadcasts_paused` enquanto a taxa agregada da plataforma na região SES
   do remetente se recupera; é por região, não afeta e-mail transacional e
   libera sozinho.
@@ -81,7 +82,10 @@ deliberadas e explícitas:
   `429 monthly_quota_exceeded` em um plano mensal (Pro, Scale) no volume
   incluído com o excedente desligado; ative o excedente em Cobrança ou espere
   o período renovar (a mensagem informa a data). Um lote é aceito ou recusado
-  por inteiro.
+  por inteiro. Em qualquer plano, um domínio ainda no
+  [aquecimento de domínio novo](/pt-BR/concepts/domains#aquecimento-de-domínio-novo)
+  responde o mesmo `429 daily_quota_exceeded`, com uma mensagem que cita o
+  aquecimento, quando já há muito e-mail aguardando.
 - `POST /contacts`, `POST /contacts/batch` e o alias de audience retornam
   `403 plan_limit_reached` quando um contato novo levaria o time além do
   limite de contatos do plano (1.000 no Free; planos pagos são ilimitados).
@@ -113,6 +117,12 @@ deliberadas e explícitas:
   endereço precisa ser uma única caixa postal — um nome de exibição contendo
   `@` é rejeitado, e endereços aceitos voltam na forma canônica
   `Nome <usuario@host>`.
+- O remetente de onboarding da instância (`ONBOARDING_EMAIL_FROM`;
+  `hello@mail.millionsend.com` na nuvem) leva só o e-mail de onboarding do
+  próprio MillionSend: como `from` em `POST /emails`, `POST /emails/batch` ou
+  no envio de um broadcast ele é recusado com `422 reserved_sender`, com
+  qualquer caixa de letras e qualquer nome de exibição. Envie de um domínio que
+  você [verificou](/pt-BR/concepts/domains).
 - Qualquer coisa não suportada é rejeitada com `422` em vez de descartada em
   silêncio (ex.: `tls` na atualização de domínio).
 

@@ -1,5 +1,5 @@
 import { isLiveKey } from "@millionsend/billing";
-import { env, isCloudDeployment, supportViewEnabled } from "@millionsend/config";
+import { env, isCloudDeployment, sesTenantsEnabled, supportViewEnabled } from "@millionsend/config";
 import {
   accountMailPhrase,
   fetchAccountScore,
@@ -9,21 +9,34 @@ import {
   PLAN_RUNGS,
   type Plan,
   raisesQuota,
+  recordTenantStatus,
+  resumeMonitorPause,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
   startSupportView,
+  suspendTeam,
+  syncTenantSendingStatus,
+  type TenantStatusOutcome,
   teamQuota,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
+import { createSesv2Client, type SesTenantClient, setTenantSendingStatus } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ilike, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { escapeLike } from "@/lib/sql";
+import { getQueue } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
-import { auditOperator, kickQuotaDrain, loadTeam, mailTeamOwners } from "./shared";
+import {
+  auditOperator,
+  kickQuotaDrain,
+  loadTeam,
+  mailTeamOwners,
+  type OperatorCtx,
+} from "./shared";
 
 const SORT_KEYS = [
   "name",
@@ -36,6 +49,8 @@ const SORT_KEYS = [
   "created",
 ] as const;
 const PAUSE_REASONS = ["complaints", "report", "manual"] as const;
+/** Suspensions the owner never hears about, on the way in or out. */
+const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const t = schema.teams;
@@ -133,6 +148,50 @@ function reasonText(
   return note
     ? `${phrase} ${accountMailPhrase({ locale, kind, key: "note", values: { note } })}`
     : phrase;
+}
+
+/** SES access for a suspension's tenant status; tests swap it with setConsoleTeamsDeps. */
+export interface ConsoleTeamsDeps {
+  tenantClient(region: string): SesTenantClient;
+  /** Hands a failed update to the worker's tenant.status job, which retries it with backoff. */
+  retryTenantStatus(teamId: string): Promise<void>;
+}
+
+const defaultDeps: ConsoleTeamsDeps = {
+  tenantClient: (region) =>
+    createSesv2Client({
+      region,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    }),
+  retryTenantStatus: async (teamId) => {
+    await (await getQueue()).send("tenant.status", { teamId }, { dedupeKey: teamId });
+  },
+};
+
+let deps = defaultDeps;
+
+/** Tests: swap the SES client and the retry hand-off instead of stubbing the AWS SDK. */
+export function setConsoleTeamsDeps(next: ConsoleTeamsDeps | null): void {
+  deps = next ?? defaultDeps;
+}
+
+/**
+ * Brings the team's SES tenant in line with the standing just written. An
+ * AWS failure never fails the action: it is audited, handed to the worker's
+ * retry and returned for the console to show. Null without tenants.
+ */
+async function syncTenant(ctx: OperatorCtx, teamId: string): Promise<TenantStatusOutcome | null> {
+  if (!sesTenantsEnabled()) return null;
+  const outcome = await syncTenantSendingStatus(ctx.db, {
+    teamId,
+    setStatus: (region, status) =>
+      setTenantSendingStatus(deps.tenantClient(region), { tenantName: teamId, status }),
+  });
+  if (!outcome) return null;
+  if (outcome.failed.length > 0) await deps.retryTenantStatus(teamId);
+  await recordTenantStatus(ctx.db, { teamId, actor: { userId: ctx.operator.id }, outcome });
+  return outcome;
 }
 
 export const consoleTeamsRouter = router({
@@ -490,27 +549,24 @@ export const consoleTeamsRouter = router({
       await kickQuotaDrain();
     }),
 
-  /** Every send refused until reinstated; owners hear about it unless it is phishing. */
+  /**
+   * Every send refused until reinstated, the team's SES tenant disabled too;
+   * owners hear about it unless it is phishing.
+   */
   suspend: operatorProcedure
     .input(
       z.object({
         id: z.uuid(),
-        reason: z.enum(SUSPENSION_REASONS),
+        // A review hold comes only from the content monitor, which also stamps held_at.
+        reason: z.enum(SUSPENSION_REASONS).exclude(["review"]),
         note: z.string().trim().max(1000).optional(),
         notify: z.boolean().default(true),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.id);
-      await ctx.db
-        .update(t)
-        .set({
-          suspendedAt: team.suspendedAt ?? new Date(),
-          suspensionReason: input.reason,
-          suspensionNote: input.note ?? null,
-        })
-        .where(eq(t.id, team.id));
-      const notify = input.notify && input.reason !== "phishing";
+      await suspendTeam(ctx.db, { teamId: team.id, reason: input.reason, note: input.note });
+      const notify = input.notify && !SILENT_SUSPENSIONS.includes(input.reason);
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.suspended",
@@ -528,7 +584,8 @@ export const consoleTeamsRouter = router({
         }));
       }
       // The trust & safety list is the register of suspended teams, so a
-      // suspension without a flag opens a manual one.
+      // suspension without a flag opens a manual one, marked as its own so
+      // the reinstatement clears it.
       await ctx.db
         .insert(schema.teamFlags)
         .values({
@@ -536,8 +593,10 @@ export const consoleTeamsRouter = router({
           reason: "manual",
           note: input.note ?? null,
           openedBy: ctx.operator.id,
+          detail: { suspension: true },
         })
         .onConflictDoNothing();
+      return { tenant: await syncTenant(ctx, team.id) };
     }),
 
   reinstate: operatorProcedure
@@ -548,15 +607,69 @@ export const consoleTeamsRouter = router({
         .update(t)
         .set({ suspendedAt: null, suspensionReason: null, suspensionNote: null })
         .where(eq(t.id, team.id));
+      // The flag the suspension opened goes with it; any other stays open.
+      const f = schema.teamFlags;
+      const [flag] = await ctx.db
+        .update(f)
+        .set({ status: "cleared", clearedAt: new Date(), clearedBy: ctx.operator.id })
+        .where(
+          and(
+            eq(f.teamId, team.id),
+            eq(f.status, "open"),
+            sql`${f.detail} @> '{"suspension": true}'::jsonb`,
+          ),
+        )
+        .returning({ id: f.id, reason: f.reason });
+      if (flag) {
+        await auditOperator(ctx, {
+          teamId: team.id,
+          action: "console.flag_cleared",
+          target: { type: "team_flag", id: flag.id },
+          metadata: { reason: flag.reason },
+        });
+      }
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.reinstated",
         target: { type: "team", id: team.id },
         metadata: { name: team.name, reason: team.suspensionReason },
       });
-      if (team.suspendedAt && team.suspensionReason !== "phishing") {
+      if (team.suspendedAt && !SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "")) {
         await mailTeamOwners(ctx.db, team, "team.reinstated", "/emails", () => ({}));
       }
+      if (team.suspensionReason === "review") {
+        // Releasing a hold clears the monitor flag it kept open, in the
+        // operator's name, which the safety cron does not reopen while the
+        // same trigger holds; left open, it would keep a released team flagged.
+        const tf = schema.teamFlags;
+        const [holdFlag] = await ctx.db
+          .update(tf)
+          .set({ status: "cleared", clearedAt: new Date(), clearedBy: ctx.operator.id })
+          .where(
+            and(
+              eq(tf.teamId, team.id),
+              eq(tf.status, "open"),
+              eq(tf.reason, "monitor"),
+              isNull(tf.openedBy),
+            ),
+          )
+          .returning({ id: tf.id });
+        if (holdFlag) {
+          // An instance row: the team's own audit never lists its flags.
+          await auditOperator(ctx, {
+            teamId: null,
+            action: "console.flag_cleared",
+            target: { type: "team", id: team.id },
+            metadata: { team: team.name, flagId: holdFlag.id, reason: "monitor" },
+          });
+        }
+        // A broadcast pause the monitor applied before the hold goes with it,
+        // as the review page's Resume lifts it; an operator's own pause stays.
+        await resumeMonitorPause(ctx.db, { teamId: team.id, actor: { userId: ctx.operator.id } });
+      }
+      // Before the drain: SES refuses a disabled tenant's sends.
+      const tenant = await syncTenant(ctx, team.id);
       await kickQuotaDrain();
+      return { tenant };
     }),
 });

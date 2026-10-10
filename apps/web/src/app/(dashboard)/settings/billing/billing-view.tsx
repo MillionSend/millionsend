@@ -23,6 +23,7 @@ import { WarnCard } from "@/components/warn-card";
 import { formatDay, formatDayTime, formatUsd } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { UPGRADES_HELD } from "@/lib/trpc-error";
 import { QuotaRow } from "../usage/usage-view";
 
 const PLANS = ["free", "starter", "pro", "scale"] as const satisfies readonly Plan[];
@@ -165,7 +166,9 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const setOverage = useMutation(trpc.billing.setOverage.mutationOptions(refresh));
   const mutations = [startCheckout, openPortal, changePlan, setOverage];
   const busy = mutations.some((m) => m.isPending);
-  const failed = mutations.some((m) => m.isError);
+  // A hold that lands after the page loaded surfaces as this refusal.
+  const heldError = mutations.some((m) => m.error?.message === UPGRADES_HELD);
+  const failed = mutations.some((m) => m.isError) && !heldError;
 
   const fmt = new Intl.NumberFormat(locale);
   const usd = (cents: number) => formatUsd(cents, locale);
@@ -243,6 +246,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     usage,
     hasCustomer,
     hasLiveSubscription,
+    upgradesHeld,
   } = status.data;
   if (plan === "system") {
     return (
@@ -269,6 +273,10 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     );
   const selected = PLAN_RUNGS[at] ?? current;
   const over = quota.kind === "month" ? Math.max(0, usage.accepted - quota.included) : 0;
+  const held = upgradesHeld || heldError;
+  const heldNotice = held ? (
+    <WarnCard>{t(hasLiveSubscription ? "upgradesHeldLive" : "upgradesHeld")}</WarnCard>
+  ) : null;
 
   const portalButton = (label: string, className: string) => (
     <button
@@ -384,6 +392,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
           </WarnCard>
         ) : null}
 
+        {heldNotice}
+
         <p
           style={{
             margin: "14px 0 0",
@@ -416,7 +426,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             >
               <Switch
                 checked={quota.overage}
-                disabled={!canManage || !hasLiveSubscription || busy}
+                disabled={!canManage || !hasLiveSubscription || busy || (held && !quota.overage)}
                 onChange={(enabled) => setOverage.mutate({ enabled })}
                 ariaLabel={t("overage")}
               />
@@ -525,7 +535,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               // its own, else its entry rung.
               const r = active ? selected : (PLAN_RUNGS.find((x) => x.plan === p) ?? selected);
               const isCurrent = r.key === current.key;
-              const forSale = canManage && r.priceCents > 0 && !isCurrent;
+              const forSale =
+                canManage &&
+                r.priceCents > 0 &&
+                !isCurrent &&
+                !(held && r.priceCents > current.priceCents);
               return (
                 <div key={p} className="ms-plan" data-open={active || undefined}>
                   <div className="ms-plan-name">{planName(p)}</div>
@@ -599,7 +613,9 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               );
             })}
           </div>
-          {canManage && hasLiveSubscription ? (
+          {held ? (
+            heldNotice
+          ) : canManage && hasLiveSubscription ? (
             <p
               style={{
                 margin: "14px 0 0",

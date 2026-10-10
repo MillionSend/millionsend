@@ -31,8 +31,8 @@ export async function runPlatformBreaker(
   const changed = await applyRegionBreakers(db, decisions, now);
   if (changed.tripped.length === 0 && changed.resumed.length === 0) return changed;
   const operator = await findInstanceOperator(db);
-  const url = deps.appBaseUrl ?? "";
-  // The flip is already persisted (the banner shows it); a failing mail is
+  const url = `${deps.appBaseUrl ?? ""}/console/regions`;
+  // The flip is already persisted (the console shows it); a failing mail is
   // logged, never allowed to abort the handler or the other regions' mails.
   const mail = async (
     region: string,

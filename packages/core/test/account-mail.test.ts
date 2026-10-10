@@ -49,6 +49,12 @@ describe("account mail catalogs", () => {
     }
   });
 
+  it("has no mail for an operator's content access, in any language", () => {
+    for (const kinds of [[...ACCOUNT_MAIL_KINDS], Object.keys(en), Object.keys(ptBR)]) {
+      expect(kinds.filter((kind) => kind.startsWith("content."))).toEqual([]);
+    }
+  });
+
   it("carries the same slots in pt-BR as in en, entry by entry", () => {
     const slots = (s: string) => [...s.matchAll(/\{\w+\}/g)].map((m) => m[0]).sort();
     for (const kind of ACCOUNT_MAIL_KINDS) {

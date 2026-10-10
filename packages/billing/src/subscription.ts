@@ -246,7 +246,12 @@ export type RungChange =
  */
 export async function changeRung(
   deps: BillingDeps,
-  input: { teamId: string; rung: PlanRungKey },
+  input: {
+    teamId: string;
+    rung: PlanRungKey;
+    /** Runs before a move up, judged against the live subscription; throwing refuses the move. */
+    beforeMoveUp?: (() => Promise<void>) | undefined;
+  },
 ): Promise<RungChange> {
   const rung = rungByKey(input.rung);
   if (rung.priceCents <= 0) throw new Error(`rung ${input.rung} is not for sale`);
@@ -286,6 +291,7 @@ export async function changeRung(
     });
     result = { applied: "period_end", at: new Date(periodEnd * 1000) };
   } else {
+    await input.beforeMoveUp?.();
     await releaseSchedule(deps, sub);
     // Sends made under the old rung settle at its rate before the move.
     if (overage) await reportOverage(deps, { teamId: input.teamId });

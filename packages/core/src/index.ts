@@ -34,6 +34,7 @@ export {
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
+  type HoldRule,
   loadMonitorState,
   MONITOR_ALERT_INTERVAL_MS,
   MONITOR_ANOMALY_CHECKS,
@@ -86,14 +87,12 @@ export {
   type AcceptEmailResult,
   acceptEmail,
   countDistinctRecipients,
+  enforceDomainWarmup,
   estimateAttachmentBytes,
-  isOnboardingSender,
   MAX_ATTACHMENT_BYTES,
-  type OnboardingSenderVerdict,
   QUOTA_BACKLOG_DAYS,
   type SenderDomainVerdict,
   senderDomain,
-  verifyOnboardingSender,
   verifySenderDomain,
 } from "./accept-email.js";
 export {
@@ -260,6 +259,13 @@ export {
   type WindowCounts,
 } from "./deliverability.js";
 export {
+  createDomainAgeResolver,
+  DomainAgeRetryableError,
+  domainsAwaitingAge,
+  markDomainAgeUnknown,
+  recordDomainAge,
+} from "./domain-age.js";
+export {
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
@@ -278,6 +284,15 @@ export {
   sesGateFromRecordStatus,
   strictDomainStatus,
 } from "./domain-status.js";
+export {
+  type DomainWarmupRow,
+  graduateWarmupDomains,
+  pruneWarmupUsage,
+  reserveWarmup,
+  teamWarmupOverview,
+  type WarmupCap,
+  warmupCap,
+} from "./domain-warmup.js";
 export { firstRow, resultRows } from "./driver-result.js";
 export {
   CHECKS,
@@ -357,6 +372,7 @@ export {
   type MonitorSettingSource,
   type MonitorSettings,
   type MonitorSettingsRow,
+  monitorSettingDefault,
   monitorSettingsReader,
   monitorThresholdsOrdered,
   resolveMonitorSettings,
@@ -377,6 +393,7 @@ export {
   type McpScope,
   mcpResourceUrl,
 } from "./oauth-scopes.js";
+export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.js";
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
 export { isRootDomainSend, registrableDomain } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
@@ -480,7 +497,15 @@ export {
   transactionalSent24h,
   usableReserve,
 } from "./ses-capacity.js";
-export { associateDomainTenant, markDomainTenantAssociated } from "./ses-tenant.js";
+export {
+  associateDomainTenant,
+  markDomainTenantAssociated,
+  recordTenantAudit,
+  recordTenantStatus,
+  syncTenantSendingStatus,
+  type TenantSendingStatus,
+  type TenantStatusOutcome,
+} from "./ses-tenant.js";
 export {
   isBlockedIp,
   type PostFailureCode,
@@ -555,6 +580,7 @@ export {
   type TeamFlagReason,
   type TeamFlagStatus,
   type TeamStandingRow,
+  upgradesHeld,
 } from "./team-flags.js";
 export {
   INVITE_EMAILS_PER_HOUR,
@@ -580,6 +606,8 @@ export {
   STANDING_COLUMNS,
   SUSPENSION_REASONS,
   type SuspensionReason,
+  suspendedSendRefusal,
+  suspendTeam,
   type TeamStanding,
   teamStandingOf,
 } from "./team-standing.js";

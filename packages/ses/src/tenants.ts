@@ -6,7 +6,9 @@ import {
   DeleteTenantResourceAssociationCommand,
   GetTenantCommand,
   type GetTenantCommandOutput,
+  UpdateReputationEntityCustomerManagedStatusCommand,
 } from "@aws-sdk/client-sesv2";
+import type { TenantSendingStatus } from "@millionsend/core";
 
 /**
  * SES tenant management: one tenant per team so SES tracks reputation and
@@ -24,7 +26,8 @@ export type TenantCommand =
   | GetTenantCommand
   | DeleteTenantCommand
   | CreateTenantResourceAssociationCommand
-  | DeleteTenantResourceAssociationCommand;
+  | DeleteTenantResourceAssociationCommand
+  | UpdateReputationEntityCustomerManagedStatusCommand;
 
 export interface SesTenantClient {
   send(command: TenantCommand): Promise<unknown>;
@@ -139,4 +142,28 @@ export async function deleteTenant(
   } catch (error) {
     if (errorName(error) !== "NotFoundException") throw error;
   }
+}
+
+/**
+ * Sets the tenant's customer-managed sending status. The reputation entity is
+ * addressed by the ARN GetTenant returns, which carries an id SES assigns.
+ * Lifting a hold sends ENABLED, never REINSTATED: REINSTATED would also
+ * override SES's own reputation findings until they resolve.
+ */
+export async function setTenantSendingStatus(
+  client: SesTenantClient,
+  params: { tenantName: string; status: TenantSendingStatus },
+): Promise<void> {
+  const out = (await client.send(
+    new GetTenantCommand({ TenantName: params.tenantName }),
+  )) as GetTenantCommandOutput;
+  const arn = out.Tenant?.TenantArn;
+  if (!arn) throw new Error("SES tenant response carried no ARN");
+  await client.send(
+    new UpdateReputationEntityCustomerManagedStatusCommand({
+      ReputationEntityType: "RESOURCE",
+      ReputationEntityReference: arn,
+      SendingStatus: params.status,
+    }),
+  );
 }

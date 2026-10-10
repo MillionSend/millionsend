@@ -140,7 +140,7 @@ auto-hospedada não tem limites de plano.
 | `SNS_TOPIC_ARNS` | ARNs de tópicos SNS (separados por vírgula) autorizados a entregar eventos do SES. Sem definir, a ingestão de eventos fica desativada. |
 | `SQS_QUEUE_URL` | Fila SQS que o worker consome por long polling para eventos do SES. O setup sempre a cria; mantenha definida mesmo quando o SNS também faz push em `https://<seu-host>/ses/events` (o app deduplica os dois). |
 | `SES_CONFIGURATION_SET` | Configuration set do SES aplicado a envios sem configuration set por domínio. Sem definir, envia sem (e sem eventos de entrega). |
-| `SES_TENANTS` | Um tenant do SES por equipe, para o SES medir a reputação de bounces/reclamações por cliente e pausar um remetente sem pausar os demais. Padrão = `IS_CLOUD`; exige as ações IAM `ses:*Tenant*`. |
+| `SES_TENANTS` | Um tenant do SES por equipe, para o SES medir a reputação de bounces/reclamações por cliente e pausar um remetente sem pausar os demais; suspender uma equipe desativa o tenant dela. Padrão = `IS_CLOUD`; exige as ações IAM `ses:*Tenant*` e `ses:UpdateReputationEntityCustomerManagedStatus`. |
 
 ### Opcionais
 
@@ -164,7 +164,7 @@ auto-hospedada não tem limites de plano.
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha, confirmação de e-mail), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha e a confirmação no cadastro só existem com isto definido e credenciais SES configuradas — deixe vazio para pular as duas. Verifique o domínio em um time em **Domínios** e esses e-mails passam a ser registrados lá, com as novas contas como seus contatos (veja [E-mails de conta](#e-mails-de-conta-contatos-e-novidades)). |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
-| `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para membros que confirmaram o e-mail (onde a instância confirma e-mails), e sempre com este nome de exibição exato. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
+| `ONBOARDING_EMAIL_FROM` | Remetente do botão "Enviar e-mail" do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Leva um único e-mail de teste fixo por time, para o dono do time (um endereço confirmado, onde a instância confirma e-mails), e nada mais: um envio a partir dele pela API, SMTP, MCP, um broadcast ou um teste do painel é recusado (`422 reserved_sender` na API), mesmo para um time que verificou o domínio. Deixe vazio para ocultar o botão. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em um time para registrar esses e-mails lá. |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Rastreamento de erros opcional pelo SDK do Sentry; desligado enquanto `SENTRY_DSN` não estiver definido. Veja [Rastreamento de erros](#rastreamento-de-erros-opcional). |
 
@@ -346,12 +346,19 @@ do domínio e o `SES_CONFIGURATION_SET` compartilhado são associados ao tenant 
 criação do domínio, e todo envio a partir dele nomeia o tenant, então o SES
 mantém as métricas de bounce e reclamação — e a própria pausa de envio — por
 cliente, não por conta. Domínios anteriores à flag, ou cuja associação falhou,
-são tratados pelo job `tenants.sync` de hora em hora. A política IAM que o
-assistente e o template do CloudFormation instalam inclui as ações
-`ses:CreateTenant`, `ses:GetTenant`, `ses:DeleteTenant`,
-`ses:CreateTenantResourceAssociation` e `ses:DeleteTenantResourceAssociation`;
-uma implantação existente roda o assistente de novo (ou atualiza a política
-`millionsend-ses`) antes de ligar a flag.
+são tratados pelo job `tenants.sync` de hora em hora. Suspender uma equipe
+pelo console coloca o status de envio do tenant em `DISABLED` em cada região
+onde a equipe tem um domínio, e reativá-la volta para `ENABLED` (nunca
+`REINSTATED`, para que as constatações de reputação do próprio SES continuem
+valendo). Uma falha na chamada à AWS nunca segura a suspensão: o console
+avisa, o log de auditoria registra e o worker tenta de novo com espera
+crescente. A política IAM que o assistente e o template do CloudFormation
+instalam inclui as ações `ses:CreateTenant`, `ses:GetTenant`,
+`ses:DeleteTenant`, `ses:CreateTenantResourceAssociation`,
+`ses:DeleteTenantResourceAssociation` e
+`ses:UpdateReputationEntityCustomerManagedStatus`; uma implantação existente
+roda o assistente de novo (ou atualiza a política `millionsend-ses`) antes de
+ligar a flag.
 
 Para atualizar a política sem recriar nada, publique o JSON que a página de
 configurações do SES mostra como nova versão padrão:
@@ -745,7 +752,7 @@ A confirmação de e-mail fica ligada sempre que `AUTH_EMAIL_FROM` está
 definido e há credenciais SES — a mesma condição da recuperação de senha. Um
 cadastro por senha não recebe sessão até o link enviado ser aberto; contas
 anteriores confirmam no próximo login. Onde a instância confirma e-mails, o
-remetente do onboarding só alcança membros que confirmaram.
+e-mail do onboarding só vai para um dono que confirmou.
 
 Nada em uma instância auto-hospedada contata millionsend.com por conta
 própria. O assistente de configuração oferece, uma vez e só de forma
@@ -783,8 +790,8 @@ todo envio responde `403 team_suspended` (`403 sending_paused` numa retenção
 para revisão; SMTP `550`); uma pausa de
 transmissões retém as transmissões enquanto o e-mail transacional continua;
 um teto diário limita o dia da equipe abaixo do plano. Os proprietários são
-avisados por e-mail a cada ação (exceto suspensão por phishing), e cada ação
-entra no log de auditoria com o motivo.
+avisados por e-mail a cada ação (exceto suspensão por phishing ou retenção
+para revisão), e cada ação entra no log de auditoria com o motivo.
 
 Enquanto uma equipe está suspensa, os avisos de cota, entregabilidade,
 transmissões retidas e transmissões pausadas param. Os e-mails de cobrança
@@ -813,10 +820,10 @@ MillionSend, nunca o nome ou o e-mail do operador.
 Desligado por padrão. Com um juiz configurado, uma amostra do e-mail aceito é
 pontuada de 0 a 100 pelo TypeSafe Jev depois que o SES o recebeu e incorporada
 a um risco por equipe que o operador vê em Confiança e segurança. Nada no caminho de envio espera por
-isso: um veredicto nunca atrasa, retém ou recusa uma mensagem, e uma falha do
-juiz de qualquer tipo (recurso desligado, credenciais ausentes, limitação de
-taxa, timeout, erro do provedor, resposta que não parseia, corpo já removido
-pela retenção) registra a amostra como sem julgamento e não muda mais nada.
+isso: um veredicto nunca atrasa a mensagem que julga, que o SES já recebeu,
+e uma falha do juiz de qualquer tipo (recurso desligado, credenciais
+ausentes, limitação de taxa, timeout, erro do provedor, resposta que não
+parseia, corpo já removido pela retenção) registra a amostra como sem julgamento e não muda mais nada.
 As verificações determinísticas de conteúdo (os insights, o guardrail, o
 score da conta) rodam em todo envio com ou sem o juiz. Quem hospeda por
 conta própria pode deixá-lo desligado.
@@ -828,9 +835,40 @@ equipe no nível Nova (nos primeiros 1.000 envios ou 72 horas, ou abaixo de
 10.000 envios em 7 dias), pausa os broadcasts quando o risco passa da
 linha de pausa e uma mensagem amostrada pontuou 90 ou mais no último dia (o
 e-mail transacional continua saindo; a equipe vê "pausados aguardando
-revisão"; o operador retoma pela página de revisão). Nunca suspende uma
-equipe e nunca retém e-mail transacional: uma pessoa decide. A política de
-pausa é uma configuração e pode ser desligada.
+revisão"; o operador retoma pela página de revisão). A política de pausa é
+uma configuração e pode ser desligada.
+
+**A retenção para revisão.** Quando uma mensagem amostrada de uma equipe no
+nível Nova é julgada abuso na pontuação de retenção (90 por padrão) como
+phishing de credenciais, falsificação de marca ou desvio de pagamento, ou com
+uma constatação de falsificação, coleta de segredos ou isca fora do domínio, a
+equipe é suspensa na hora com o motivo `review`: a API responde
+`403 sending_paused`, o SMTP `550`, o e-mail na fila e os broadcasts ficam
+estacionados e, com `SES_TENANTS` ligado, o tenant do SES dela é desativado.
+Uma sequência de veredictos mais baixos também retém a equipe: por padrão, o
+quinto desses veredictos a partir de 80 em até sete dias do primeiro envio da
+equipe. O operador é avisado por e-mail na hora, com a regra que reteve a
+equipe; o proprietário não, e vê um aviso neutro de "envio pausado aguardando
+revisão". A equipe fica em Confiança e
+segurança com a sinalização aberta até o operador decidir na página de
+revisão: **Liberar retenção** a reativa, o e-mail estacionado sai, uma pausa
+de broadcasts que o monitor aplicou antes da retenção é levantada como
+**Retomar broadcasts** a levanta (uma pausa que o operador aplicou à mão
+continua) e a sinalização do monitor que a retenção manteve aberta é limpa em
+nome do operador (a verificação automática não a reabre enquanto o mesmo
+gatilho persistir); **Suspender por phishing** transforma a retenção numa
+suspensão por phishing.
+Enquanto a equipe está retida, os veredictos seguintes ainda movem o risco e
+avisam o operador como para qualquer outra equipe, mas não geram pausa, então
+liberar a equipe não deixa pausa do monitor para trás.
+Uma equipe é retida uma vez só, por qualquer das regras: depois de liberada,
+seus veredictos seguintes só geram alerta, então o e-mail liberado, julgado de
+novo na saída, não a retém outra vez nem pausa seus broadcasts. Uma equipe já suspensa mantém a suspensão, e equipes nos níveis Probatória,
+Estabelecida e Confiável e as de sistema nunca são retidas: ficam só no
+alerta. O
+juiz lê uma mensagem depois que o SES a recebeu, então a mensagem que dispara
+a retenção já saiu; a retenção barra o que vem depois.
+`MONITOR_AUTO_HOLD=false` a desliga.
 
 **Para ligar**, no `.env` da instância, lido pelo worker e pelo app (um
 reinício aplica):
@@ -917,6 +955,10 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_PAUSE_RISK` | 0.85 | Só equipes novas: os broadcasts pausam, com um veredicto de 90 ou mais no último dia |
 | `MONITOR_AUTO_PAUSE` | true | Se a política de pausa se aplica |
 | `MONITOR_FLAG_SCORE` | 70 | Uma amostra conta como sinalizada no console a partir desta pontuação |
+| `MONITOR_HOLD_SCORE` | 90 | Só equipes novas: um veredicto do tipo phishing a partir desta pontuação retém a equipe para revisão |
+| `MONITOR_HOLD_REPEAT_COUNT` | 5 | Só equipes novas: este número de veredictos do tipo phishing a partir da pontuação abaixo, em até sete dias do primeiro envio da equipe, também a retém para revisão; 0 desliga |
+| `MONITOR_HOLD_REPEAT_SCORE` | 80 | A pontuação a partir da qual um veredicto do tipo phishing conta para o número acima |
+| `MONITOR_AUTO_HOLD` | true | Se a retenção para revisão se aplica |
 
 O risco é uma média decaída dos veredictos (meia-vida de 7 dias) com um
 prior que começa mais alto para equipes novas. O cartão Monitoramento da
@@ -924,6 +966,75 @@ visão geral mostra a contagem de amostras por hora, e o operador é avisado
 por e-mail, no máximo a cada seis horas, quando mais de 20% das amostras de
 uma hora (pelo menos 20 delas) ficaram sem julgamento, ou assim que a
 TypeSafe recusa a chave de API.
+
+## Aquecimento de domínio novo (opcional)
+
+Desligado por padrão numa instância auto-hospedada e ligado por padrão com
+`IS_CLOUD`. Ligado, cada domínio de envio recebe um limite diário pela idade
+do seu domínio registrável (a parte ICANN da Public Suffix List: `acme.com.br`
+para `mail.acme.com.br`), contado por dia UTC entre todas as equipes que
+enviam por ele:
+
+| Configuração | Padrão | Significado |
+| --- | --- | --- |
+| `WARMUP_ENABLED` | `false` (`true` com `IS_CLOUD`) | Se o aquecimento vale |
+| `WARMUP_CAP_FIRST_DAY` | 100 | E-mails por dia enquanto o domínio tem menos de 24 horas |
+| `WARMUP_CAP_FIRST_WEEK` | 300 | Do dia 1 ao dia 7, e para um domínio de idade desconhecida enquanto a equipe é nova ou probatória |
+| `WARMUP_CAP_FIRST_MONTH` | 2000 | Do dia 7 ao dia 30; a partir do dia 30 vale só o plano |
+
+Cada valor é editado no console em Confiança e segurança → Configurações de
+monitoramento, ou definido na sua variável de ambiente até ser editado lá; o
+console prevalece. O limite efetivo é o menor entre o do plano e o do
+aquecimento, e comprar um plano nunca o libera. Os domínios em aquecimento
+de uma equipe (verificados, sob um limite e sem confiança) também
+compartilham um único limite diário, o maior entre os deles, contado por
+equipe e dia UTC: um segundo domínio novo nunca acrescenta volume, e cada
+domínio continua dentro do seu limite. O que passa de qualquer um fica
+estacionado como `queued_quota` (com `park_reason = 'warmup'`) e o
+`quota.drain` de 15 minutos libera, do mais antigo para o mais novo, conforme
+os dois permitem; a API
+responde `429 daily_quota_exceeded` com uma mensagem de aquecimento (SMTP
+`452`) só quando o acúmulo estacionado da equipe está cheio (três dias do
+volume do plano, ou do limite do domínio quando ele é maior). Um domínio sobe
+um degrau antes quando os envios desde o último degrau estão limpos: pelo
+menos 50, o primeiro enviado há um dia ou
+mais, bounces permanentes abaixo de 2%, reclamações abaixo de 0,1% e nenhum
+veredicto do tipo phishing do monitoramento de conteúdo (verificado pelo job
+`safety.flags` de 15 minutos).
+Um operador pode confiar numa equipe, ou num domínio, na página de revisão de
+Confiança e segurança, o que libera o aquecimento e fica no registro de
+auditoria.
+
+**A consulta de idade** roda no job `domain.age` do worker, nunca no caminho
+de envio: quando um domínio é adicionado, quando é verificado, e pela varredura
+`domains.reverify` de 15 minutos para qualquer domínio nunca consultado
+(inclusive os de antes da atualização). Ela tenta, nesta ordem:
+
+1. RDAP no servidor que o [bootstrap da IANA](https://data.iana.org/rdap/dns.json)
+   indica para o TLD (atualizado diariamente), ou um servidor fixo para `.io`
+   e `.me` (`rdap.identitydigital.services`), `.co` (`rdap.registry.co`) e
+   `.us` (`rdap.nic.us`), que o bootstrap não lista.
+2. WHOIS na porta TCP 43 do servidor para o qual `whois.iana.org` encaminha o
+   TLD.
+3. O primeiro certificado emitido para o nome no Certificate Transparency
+   ([crt.sh](https://crt.sh), no máximo uma requisição a cada 12 segundos).
+
+Um nome sob um sufixo da parte privada da lista, como `shop.eu.org` de um
+serviço gratuito de subdomínios, é um domínio próprio para o aquecimento: só
+o passo 3 o data, já que nenhum registro o vendeu, e ele conta separado dos
+outros nomes do serviço.
+
+Senão a idade fica desconhecida: `.de`, `.eu` e `.ch`, por exemplo, não
+publicam data de criação. As requisições levam o User-Agent
+`MillionSend-domain-age/1.0 (+https://millionsend.com)`, um `429` é respeitado
+até o seu `Retry-After`, e uma consulta que falha tenta de novo com espera
+crescente antes de o domínio ficar como desconhecido. O worker precisa, então,
+de HTTPS de saída para `data.iana.org`, os servidores RDAP dos registros e
+`crt.sh`, e de TCP 43 de saída, enquanto o aquecimento está ligado; desligado,
+nenhuma consulta é feita. A data, a sua origem (`rdap`, `whois`, `ct` ou
+`unknown`) e o horário da consulta ficam na linha do domínio; a data de um
+certificado nunca substitui a de um registro encontrada numa consulta
+anterior.
 
 ## Acesso ao conteúdo (quebra de vidro)
 
@@ -965,12 +1076,14 @@ de mensagens — nunca o texto da justificativa e nunca qualquer conteúdo.
 
 **O que a equipe vê, e quando.** Sete dias depois, uma rotina diária
 acrescenta uma linha `content.accessed` ao log de auditoria da própria
-equipe — datada no acesso, não na divulgação — e envia um e-mail aos donos
-da equipe no idioma de cada um: quando aconteceu, o motivo, quantas
-mensagens e o que não foi acessado. A única exceção é uma equipe suspensa
-por phishing depois da autorização, em que a linha e o aviso são retidos; a
-autorização registra que a etapa de divulgação rodou de qualquer forma, para
-não ser repetida toda noite.
+equipe — datada no acesso, não na divulgação — com o motivo, quantas
+mensagens e quais campos foram lidos. Ninguém recebe e-mail sobre um acesso,
+nem na hora nem depois. Uma equipe suspensa por phishing nunca recebe a
+linha; a autorização registra que a etapa de divulgação rodou, para não ser
+repetida toda noite. Uma equipe retida para revisão a recebe quando a
+retenção termina: depois de uma liberação, a próxima rotina diária a
+escreve, e se a retenção virar uma suspensão por phishing a linha nunca é
+divulgada.
 
 **Como ligar**, no `.env` da instância, lido pelo worker e pelo app (um
 restart aplica):

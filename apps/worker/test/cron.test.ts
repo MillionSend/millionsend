@@ -1257,3 +1257,185 @@ it("drain gives a throttled team one cadence of rows per run, spaced on the rows
     jobs.map((j) => j.startAfter?.getTime()),
   );
 });
+
+it("drain releases a young domain's parked mail only as its warm-up allows, whatever parked it", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "news.fresh-drain.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date("2026-10-09T09:00:00Z"),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  // The registration day's 100 already went out.
+  await db
+    .insert(schema.domainWarmupUsage)
+    .values({ registrableDomain: "fresh-drain.com", day: "2026-10-09", accepted: 100 });
+  const warmupParked: string[] = [];
+  for (let i = 0; i < 150; i++) {
+    warmupParked.push(
+      await insertParked(new Date(Date.UTC(2026, 9, 9, 10, 0, i)), "held", {
+        domainId: domain.id,
+        parkReason: "warmup",
+      }),
+    );
+  }
+  // Parked by the plan, not the warm-up: its release still passes the warm-up.
+  const planParked = await insertParked(new Date("2026-10-09T11:00:00Z"), "plan", {
+    domainId: domain.id,
+  });
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  expect(await drain("2026-10-09T15:00:00Z")).toEqual({ drained: 0, stillParked: 151 });
+  // A new UTC day, still under 24 hours old: another 100, oldest first.
+  expect(await drain("2026-10-10T00:15:00Z")).toEqual({ drained: 100, stillParked: 51 });
+  expect(enqueued).toEqual(warmupParked.slice(0, 100));
+  // Past 24 hours the same day's cap is 300: the rest goes.
+  expect(await drain("2026-10-10T09:15:00Z")).toEqual({ drained: 51, stillParked: 0 });
+  expect(enqueued.slice(100)).toEqual([...warmupParked.slice(100), planParked]);
+  const reasons = await db
+    .select({ reason: schema.emails.parkReason })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, teamId));
+  expect(reasons.every((r) => r.reason === null)).toBe(true);
+}, 60_000);
+
+it("drain leaves a young domain's mail due on a later day to that day's warm-up", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "news.stacked-drain.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date("2026-10-09T09:00:00Z"),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  // Over its delivery day's cap at accept: the earlier days' room must not
+  // carry it, or their caps would all land on that one instant.
+  const due = await insertParked(new Date("2026-10-09T10:00:00Z"), "scheduled", {
+    domainId: domain.id,
+    parkReason: "warmup",
+    scheduledAt: new Date("2026-10-11T12:00:00Z"),
+  });
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  expect(await drain("2026-10-09T15:00:00Z")).toEqual({ drained: 0, stillParked: 1 });
+  expect(await drain("2026-10-10T15:00:00Z")).toEqual({ drained: 0, stillParked: 1 });
+  expect(await drain("2026-10-11T00:15:00Z")).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([due]);
+  expect(
+    await db
+      .select({ day: schema.domainWarmupUsage.day, accepted: schema.domainWarmupUsage.accepted })
+      .from(schema.domainWarmupUsage),
+  ).toEqual([{ day: "2026-10-11", accepted: 1 }]);
+});
+
+it("drain releases a team's warm-up mail oldest first across its young domains, within their shared limit", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const domains = await db
+    .insert(schema.domains)
+    .values(
+      ["news.pool-one.com", "news.pool-two.com"].map((name) => ({
+        teamId,
+        name,
+        region: "us-east-1",
+        status: "verified" as const,
+        registeredAt: new Date("2026-10-09T09:00:00Z"),
+      })),
+    )
+    .returning({ id: schema.domains.id });
+  const parked: string[] = [];
+  for (let i = 0; i < 150; i++) {
+    parked.push(
+      await insertParked(new Date(Date.UTC(2026, 9, 9, 10, 0, i)), "held", {
+        domainId: domains[i % 2]?.id,
+        parkReason: "warmup",
+      }),
+    );
+  }
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  // A new UTC day, both still under 24 hours old: one day's 100 between them.
+  expect(await drain("2026-10-10T00:15:00Z")).toEqual({ drained: 100, stillParked: 50 });
+  expect(enqueued).toEqual(parked.slice(0, 100));
+  // Past 24 hours the shared limit is 300: the rest goes.
+  expect(await drain("2026-10-10T09:15:00Z")).toEqual({ drained: 50, stillParked: 0 });
+  expect(enqueued.slice(100)).toEqual(parked.slice(100));
+}, 60_000);
+
+it("drain holds a young domain at its own cap while the team's older warming domain goes on, within their shared limit", async () => {
+  // Small caps: 2 a day on the registration day, 5 from day 7.
+  await db.insert(schema.instanceSettings).values({
+    id: 1,
+    warmupEnabled: true,
+    warmupCapFirstDay: 2,
+    warmupCapFirstMonth: 5,
+  });
+  const domains = await db
+    .insert(schema.domains)
+    .values(
+      [
+        ["news.cap-fresh.com", "2026-10-09T23:00:00Z"],
+        ["news.cap-older.com", "2026-09-30T00:00:00Z"],
+      ].map(([name, registeredAt]) => ({
+        teamId,
+        name: name ?? "",
+        region: "us-east-1",
+        status: "verified" as const,
+        registeredAt: new Date(registeredAt ?? ""),
+      })),
+    )
+    .returning({ id: schema.domains.id });
+  const parked: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    parked.push(
+      await insertParked(new Date(Date.UTC(2026, 9, 9, 10, 0, i)), "held", {
+        domainId: domains[i % 2]?.id,
+        parkReason: "warmup",
+      }),
+    );
+  }
+  const enqueued: string[] = [];
+  expect(
+    await drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date("2026-10-10T00:15:00Z"),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    }),
+  ).toEqual({ drained: 5, stillParked: 5 });
+  // The fresh domain's own 2, then the older one's rows up to the shared 5.
+  expect(enqueued).toEqual([0, 1, 2, 3, 5].map((i) => parked[i]));
+});

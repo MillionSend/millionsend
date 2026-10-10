@@ -3,6 +3,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { JudgeVerdict } from "../src/abuse-judge/types.js";
 import {
   applyJudgedSample,
   clearMonitorOverride,
@@ -638,5 +639,301 @@ describe("verdicts and thresholds", () => {
     expect(day.unjudged).toBe(2);
     expect(day.flagged).toBeGreaterThan(0);
     expect(await pruneMonitorSamples(db, NOW)).toBe(1);
+  });
+});
+
+describe("the review hold", () => {
+  let db: Db;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, close } = await createTestDb());
+  });
+  afterAll(() => close());
+
+  const PHISHING = {
+    verdict: "abuse" as const,
+    categories: ["brand_impersonation"],
+    reasons: ["impersonation", "off_domain_lure"],
+  };
+  async function newTeam(
+    slug: string,
+    over: { plan?: "system"; sentTotal?: number; firstSendAt?: Date; createdAt?: Date } = {},
+  ) {
+    const teamId = await createTeam(db, slug);
+    const firstSendAt =
+      over.firstSendAt ?? new Date(NOW.getTime() - (over.sentTotal ? 60 * DAY_MS : 3 * 60_000));
+    await db
+      .update(schema.teams)
+      .set({
+        createdAt: over.createdAt ?? new Date(firstSendAt.getTime() - HOUR),
+        plan: over.plan ?? "free",
+      })
+      .where(eq(schema.teams.id, teamId));
+    await db
+      .insert(schema.teamMonitor)
+      .values({ teamId, sentTotal: over.sentTotal ?? 1, firstSendAt });
+    return teamId;
+  }
+  const team = async (teamId: string) =>
+    (await db.select().from(schema.teams).where(eq(schema.teams.id, teamId)))[0];
+  const flags = (teamId: string) =>
+    db.select().from(schema.teamFlags).where(eq(schema.teamFlags.teamId, teamId));
+  const audits = (teamId: string) =>
+    db.select().from(schema.auditLog).where(eq(schema.auditLog.teamId, teamId));
+
+  it("suspends a new team for review on one confident phishing verdict, once, and leaves a released team to the operator", async () => {
+    const teamId = await newTeam("held");
+    const out = await applyJudgedSample(db, S, {
+      teamId,
+      score: 96,
+      verdict: PHISHING,
+      now: NOW,
+    });
+    expect(out).toMatchObject({ tier: "new", held: { rule: "score" }, paused: false });
+    expect(await team(teamId)).toMatchObject({
+      suspendedAt: NOW,
+      suspensionReason: "review",
+      suspensionNote: null,
+    });
+    expect(await flags(teamId)).toMatchObject([
+      { reason: "monitor", status: "open", openedBy: null, openedAt: NOW },
+    ]);
+    expect(await audits(teamId)).toMatchObject([
+      { action: "team.held_for_review", actorId: "system", target: `team:${teamId}` },
+    ]);
+    const again = await applyJudgedSample(db, S, {
+      teamId,
+      score: 99,
+      verdict: PHISHING,
+      now: new Date(NOW.getTime() + HOUR),
+    });
+    expect(again.held).toBeNull();
+    expect((await team(teamId))?.suspendedAt).toEqual(NOW);
+    expect(await audits(teamId)).toHaveLength(1);
+    // Released: the drained mail is judged again, and the same verdicts only alert.
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, teamId));
+    const released = await applyJudgedSample(db, S, {
+      teamId,
+      score: 99,
+      verdict: PHISHING,
+      now: new Date(NOW.getTime() + 2 * HOUR),
+    });
+    expect(released.held).toBeNull();
+    expect((await team(teamId))?.suspendedAt).toBeNull();
+  });
+
+  it("stays alert-only under the score, on other abuse, past the new tier, for system teams and with the policy off", async () => {
+    const teamId = await newTeam("alert-only");
+    const held = async (
+      score: number,
+      verdict: typeof PHISHING,
+      s: MonitorSettings = S,
+      id = teamId,
+    ) => (await applyJudgedSample(db, s, { teamId: id, score, verdict, now: NOW })).held !== null;
+    expect(await held(89, PHISHING)).toBe(false);
+    expect(
+      await held(99, { verdict: "abuse", categories: ["scam"], reasons: ["unsolicited_bulk"] }),
+    ).toBe(false);
+    expect(await held(99, PHISHING, { ...S, autoHold: false })).toBe(false);
+    expect(await held(99, PHISHING, S, await newTeam("settled", { sentTotal: 20_000 }))).toBe(
+      false,
+    );
+    expect(await held(99, PHISHING, S, await newTeam("system", { plan: "system" }))).toBe(false);
+    expect(
+      await applyJudgedSample(db, S, { teamId, score: 99, now: NOW }).then((o) => o.held),
+    ).toBeNull();
+    expect((await team(teamId))?.suspendedAt).toBeNull();
+    // The line is a setting; a lure reason alone is enough.
+    expect(
+      await held(
+        85,
+        { verdict: "abuse", categories: ["other_abuse"], reasons: ["harvests_secrets"] },
+        { ...S, holdScore: 80 },
+      ),
+    ).toBe(true);
+  });
+
+  it("alerts as for any team but never pauses while the team is held, nor after a release", async () => {
+    const teamId = await newTeam("held-backlog");
+    expect(
+      await applyJudgedSample(db, S, { teamId, score: 96, verdict: PHISHING, now: NOW }),
+    ).toMatchObject({ held: { rule: "score" }, alert: false, paused: false });
+    // The samples taken before the hold are judged after it and carry the
+    // risk past the alert and pause lines.
+    const backlog = [];
+    for (let i = 1; i <= 20; i++) {
+      backlog.push(
+        await applyJudgedSample(db, S, {
+          teamId,
+          score: 99,
+          verdict: PHISHING,
+          now: new Date(NOW.getTime() + i * 60_000),
+        }),
+      );
+    }
+    expect(backlog.filter((o) => o.alert)).toHaveLength(1);
+    expect(backlog.filter((o) => o.paused || o.held)).toEqual([]);
+    expect(await team(teamId)).toMatchObject({
+      suspensionReason: "review",
+      broadcastsPausedByOperatorAt: null,
+    });
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, teamId));
+    // The drained mail is judged again the next day with the risk still past
+    // the pause line: it alerts, and leaves the released broadcasts flowing.
+    const released = await applyJudgedSample(db, S, {
+      teamId,
+      score: 99,
+      verdict: PHISHING,
+      now: new Date(NOW.getTime() + DAY_MS + HOUR),
+    });
+    expect(released).toMatchObject({ held: null, alert: true, paused: false });
+    expect(released.risk).toBeGreaterThan(S.pauseRisk);
+    expect((await team(teamId))?.broadcastsPausedByOperatorAt).toBeNull();
+  });
+
+  it("leaves an operator's suspension as it is", async () => {
+    const teamId = await newTeam("operator-suspended");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: NOW, suspensionReason: "non_payment", suspensionNote: "invoice" })
+      .where(eq(schema.teams.id, teamId));
+    const out = await applyJudgedSample(db, S, {
+      teamId,
+      score: 99,
+      verdict: PHISHING,
+      now: new Date(NOW.getTime() + HOUR),
+    });
+    expect(out.held).toBeNull();
+    expect(await team(teamId)).toMatchObject({
+      suspendedAt: NOW,
+      suspensionReason: "non_payment",
+      suspensionNote: "invoice",
+    });
+    expect(await flags(teamId)).toEqual([]);
+  });
+
+  /** As the judge does it: the verdict is stored, then folded in the same breath. */
+  async function judge(
+    teamId: string,
+    score: number,
+    verdict: Pick<JudgeVerdict, "verdict" | "categories" | "reasons">,
+    at: Date,
+    s: MonitorSettings = S,
+  ) {
+    await db.insert(schema.monitorSamples).values({
+      teamId,
+      kind: "first_sends",
+      status: "judged",
+      score,
+      ...verdict,
+      createdAt: at,
+      judgedAt: at,
+    });
+    return (await applyJudgedSample(db, s, { teamId, score, verdict, now: at })).held;
+  }
+  const minute = (n: number) => new Date(NOW.getTime() + n * 60_000);
+
+  it("holds a new team on its fifth phishing verdict from 80, not its fourth", async () => {
+    const teamId = await newTeam("repeat");
+    expect(await judge(teamId, 85, PHISHING, minute(1))).toBeNull();
+    // Under the score, other abuse and a clean call with a lure finding do not count.
+    expect(await judge(teamId, 79, PHISHING, minute(2))).toBeNull();
+    expect(
+      await judge(
+        teamId,
+        95,
+        { verdict: "abuse", categories: ["scam"], reasons: ["unsolicited_bulk"] },
+        minute(3),
+      ),
+    ).toBeNull();
+    expect(
+      await judge(
+        teamId,
+        88,
+        { verdict: "clean", categories: [], reasons: ["off_domain_lure"] },
+        minute(4),
+      ),
+    ).toBeNull();
+    expect(await judge(teamId, 88, PHISHING, minute(5))).toBeNull();
+    expect(
+      await judge(
+        teamId,
+        80,
+        { verdict: "abuse", categories: ["other_abuse"], reasons: ["harvests_secrets"] },
+        minute(6),
+      ),
+    ).toBeNull();
+    expect(await judge(teamId, 84, PHISHING, minute(7))).toBeNull();
+    expect(await judge(teamId, 82, PHISHING, minute(8))).toEqual({ rule: "repeat", verdicts: 5 });
+    expect(await team(teamId)).toMatchObject({
+      suspendedAt: minute(8),
+      suspensionReason: "review",
+    });
+    expect(await flags(teamId)).toMatchObject([{ reason: "monitor", status: "open" }]);
+    expect(await audits(teamId)).toMatchObject([{ action: "team.held_for_review" }]);
+  });
+
+  it("counts only the verdicts of the team's first seven days of sending, from its first send", async () => {
+    // Signed up ten days before its first send: the week starts at the send.
+    const week = async (slug: string, fifthAfter: number) => {
+      const teamId = await newTeam(slug, {
+        firstSendAt: NOW,
+        createdAt: new Date(NOW.getTime() - 10 * DAY_MS),
+      });
+      for (let i = 1; i <= 4; i++) {
+        await judge(teamId, 85, PHISHING, new Date(NOW.getTime() + DAY_MS + i * 60_000));
+      }
+      return judge(teamId, 85, PHISHING, new Date(NOW.getTime() + fifthAfter));
+    };
+    expect(await week("repeat-in-week", 7 * DAY_MS - 60_000)).toEqual({
+      rule: "repeat",
+      verdicts: 5,
+    });
+    expect(await week("repeat-past-week", 7 * DAY_MS)).toBeNull();
+    // A team that has not sent yet has no week to count.
+    const unsent = await createTeam(db, "repeat-unsent");
+    await db
+      .update(schema.teams)
+      .set({ createdAt: new Date(NOW.getTime() - HOUR) })
+      .where(eq(schema.teams.id, unsent));
+    for (let i = 1; i <= 5; i++) expect(await judge(unsent, 85, PHISHING, minute(i))).toBeNull();
+    expect((await team(unsent))?.suspendedAt).toBeNull();
+  });
+
+  it("shares the hold's scope and switch, never holds a released team again, and reads both settings", async () => {
+    const five = async (teamId: string, s: MonitorSettings = S) => {
+      let held = false;
+      for (let i = 1; i <= 5; i++) {
+        held = (await judge(teamId, 85, PHISHING, minute(i), s)) !== null || held;
+      }
+      return held;
+    };
+    const probation = await newTeam("repeat-probation", {
+      sentTotal: 20_000,
+      firstSendAt: new Date(NOW.getTime() - 4 * DAY_MS),
+    });
+    expect(await five(probation)).toBe(false);
+    expect(await five(await newTeam("repeat-system", { plan: "system" }))).toBe(false);
+    expect(await five(await newTeam("repeat-off"), { ...S, autoHold: false })).toBe(false);
+    expect(await five(await newTeam("repeat-zero"), { ...S, holdRepeatCount: 0 })).toBe(false);
+    // A release ends it: no verdict, before or after it, counts toward a second hold.
+    const released = await newTeam("repeat-released");
+    expect(await judge(released, 96, PHISHING, NOW)).toEqual({ rule: "score" });
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, released));
+    expect(await five(released)).toBe(false);
+    const two = await newTeam("repeat-two");
+    const s = { ...S, holdRepeatCount: 2, holdRepeatScore: 70 };
+    expect(await judge(two, 75, PHISHING, minute(1), s)).toBeNull();
+    expect(await judge(two, 75, PHISHING, minute(2), s)).toEqual({ rule: "repeat", verdicts: 2 });
   });
 });
