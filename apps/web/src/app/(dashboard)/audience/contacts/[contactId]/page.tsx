@@ -637,7 +637,9 @@ export default function ContactDetailPage() {
             <p className="ms-microlabel" style={{ margin: "0 0 8px", fontSize: 10.5 }}>
               {t("detail.properties")}
             </p>
-            <div style={{ display: "grid", gap: 8 }}>
+            {/* A shrinkable track: an auto one takes the two inputs' intrinsic
+                width and pushes the values and their ✕ off a phone's dialog. */}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
               {editProps.map((prop, i) => (
                 // Rows are positional and may hold blank keys mid-edit, so the
                 // array index is the only stable identity here.
