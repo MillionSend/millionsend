@@ -2,7 +2,7 @@ import { DAY_MS, SUSPENSION_REASONS, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { SES_REGIONS } from "@millionsend/ses";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, REFUSED_NAMES } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamRole } from "@/server/membership";
@@ -67,6 +67,19 @@ describe("settings.team", () => {
     await callerFor("u1", teamId, "owner").settings.team.rename({ name: "Acme Corp" });
     const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
     expect(team?.name).toBe("Acme Corp");
+  });
+
+  it("rename refuses a name that could read as a link or hide characters", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    for (const name of REFUSED_NAMES) {
+      await expect(
+        callerFor("u1", teamId, "owner").settings.team.rename({ name }),
+        name,
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+    expect(team?.name).toBe("acme");
   });
 
   it("rename is forbidden for role member", async () => {

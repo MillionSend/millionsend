@@ -1,7 +1,7 @@
 import { PLAN_TEAM_LIMIT, SUSPENSION_REASONS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTestDb } from "@millionsend/test-utils";
+import { createTestDb, REAL_NAMES, REFUSED_NAMES } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveMembership } from "@/server/membership";
@@ -59,6 +59,21 @@ describe("team.createTeam", () => {
     expect(members).toHaveLength(1);
     expect(members[0]?.userId).toBe("u1");
     expect(members[0]?.role).toBe("owner");
+  });
+
+  it("refuses a name that could read as a link or hide characters; real names in any script are fine", async () => {
+    await insertUser("u1", "u1@example.com");
+    for (const name of REFUSED_NAMES) {
+      await expect(callerFor("u1").team.createTeam({ name }), name).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+    expect(await db.select().from(schema.teams)).toEqual([]);
+    for (const name of REAL_NAMES) {
+      const { teamId } = await callerFor("u1").team.createTeam({ name });
+      const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+      expect(team?.name, name).toBe(name);
+    }
   });
 
   it("suffixes the slug when the name collides", async () => {

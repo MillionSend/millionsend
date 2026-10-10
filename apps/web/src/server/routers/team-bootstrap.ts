@@ -17,6 +17,7 @@ import { slugify } from "@/lib/slug";
 import { recordAudit } from "../audit";
 import { listMemberships } from "../membership";
 import { belongsToSilentlySuspendedTeam, suspensionLockError } from "../suspension-lock";
+import { teamNameSchema } from "../team-name";
 import {
   type AuthSession,
   adminProcedure,
@@ -142,7 +143,7 @@ export const teamBootstrapRouter = router({
     }),
 
   createTeam: protectedProcedure
-    .input(z.object({ name: z.string().trim().min(1).max(80) }))
+    .input(z.object({ name: teamNameSchema }))
     .mutation(async ({ ctx, input }) => {
       if (await belongsToSilentlySuspendedTeam(ctx.db, ctx.session.user.id)) {
         throw await suspensionLockError("unavailable");

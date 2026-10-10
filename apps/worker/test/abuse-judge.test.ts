@@ -278,9 +278,10 @@ it("emails the operator on the alert and on the pause, in that team's review lin
   expect(sends.find((s) => s.kind === "monitor.alert")?.text).toContain(
     `https://app.example.test/console/safety/${fresh}`,
   );
-  expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.subject).toContain(
-    "fresh-team",
+  expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.subject).toBe(
+    "Content monitor paused a team's broadcasts",
   );
+  expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.text).toContain("fresh-team");
   const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, fresh));
   expect(team?.broadcastsPausedByOperatorAt).toEqual(NOW);
   const [audit] = await db
