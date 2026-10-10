@@ -21,6 +21,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage } from "@/lib/trpc-error";
 import { useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, StateCard } from "../emails/list-parts";
@@ -376,7 +377,7 @@ export function DomainsView() {
                 fontSize: "var(--ms-fs-label)",
               }}
             >
-              {t("detail.deleteError")}
+              {guardMessage(deleteMutation.error, t("detail.deleteError"))}
             </p>
           ) : null}
           <ModalFooter>

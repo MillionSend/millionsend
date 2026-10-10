@@ -21,7 +21,10 @@ export type SupportViewGrant = typeof schema.supportViewGrants.$inferSelect;
 
 const g = schema.supportViewGrants;
 
-/** A live grant with the operator behind it, as the owner's card and the console dialog show it. */
+/**
+ * A live grant with the operator behind it, for the console. The operator is
+ * never passed on to the team, which sees the view as MillionSend's.
+ */
 export interface LiveSupportView extends SupportViewGrant {
   operator: { name: string; email: string };
 }

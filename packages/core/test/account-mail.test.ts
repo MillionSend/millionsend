@@ -73,6 +73,22 @@ describe("account mail catalogs", () => {
     }
   });
 
+  it("billing mail promises no sending: it also reaches teams whose sending is suspended", () => {
+    const promise =
+      /keeps? sending|now sends|\[team\] sends|released within minutes|continuar? enviando|agora envia|\[team\] envia|liberado em minutos/i;
+    for (const locale of MAIL_LOCALES) {
+      for (const kind of ACCOUNT_MAIL_KINDS.filter((k) => k.startsWith("billing."))) {
+        const mail = buildAccountMail({
+          kind,
+          locale,
+          url: "https://app.example/x",
+          values: VALUES,
+        });
+        expect(mail.text, `${locale} ${kind}`).not.toMatch(promise);
+      }
+    }
+  });
+
   it("escapes what the values carry", () => {
     const mail = buildAccountMail({
       kind: "member.joined",

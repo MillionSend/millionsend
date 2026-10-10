@@ -1,5 +1,5 @@
 import { createPublicKey } from "node:crypto";
-import { PLAN_DOMAIN_LIMIT } from "@millionsend/core";
+import { PLAN_DOMAIN_LIMIT, SUSPENSION_REASONS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
@@ -834,6 +834,33 @@ describe("domains.get", () => {
 });
 
 describe("domains.delete", () => {
+  it.each(SUSPENSION_REASONS)(
+    "refuses an admin of a team suspended for %s before SES is touched",
+    async (reason) => {
+      const teamId = await createTeam(db);
+      const { deps, calls } = fakeSes();
+      const caller = callerFor(teamId, deps, "admin");
+      const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      const before = calls.length;
+
+      await expect(caller.domains.delete({ id })).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        // A team suspended for phishing or held for review is never told it is suspended.
+        message: ["phishing", "review"].includes(reason)
+          ? "This isn't available for this team right now. Contact support if you need help."
+          : "This team is suspended, so its domains can't be deleted. Contact support.",
+      });
+      expect(calls).toHaveLength(before);
+      expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(
+        1,
+      );
+    },
+  );
+
   it("deletes the SES identity and the row", async () => {
     const teamId = await createTeam(db);
     const { deps, calls } = fakeSes();

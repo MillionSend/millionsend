@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { decryptEmailBody, EnvKeyring, hashRecipient } from "@millionsend/core";
+import { decryptEmailBody, EnvKeyring, hashRecipient, SUSPENSION_REASONS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -173,6 +173,26 @@ describe("onboarding.sendFirstEmail", () => {
       caller(teamId, "team-c").onboarding.sendFirstEmail({ locale: "en" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it.each(SUSPENSION_REASONS)(
+    "refuses a team suspended for %s, never naming a silent suspension",
+    async (reason) => {
+      const teamId = await seedTeam("team-e");
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      await expect(
+        caller(teamId, "team-e").onboarding.sendFirstEmail({ locale: "en" }),
+      ).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message: ["phishing", "review"].includes(reason)
+          ? "This isn't available for this team right now. Contact support if you need help."
+          : "team suspended",
+      });
+      expect(await teamEmails(teamId)).toEqual([]);
+    },
+  );
 
   it("is unavailable when no shared sender is configured", async () => {
     vi.stubEnv("ONBOARDING_EMAIL_FROM", "");

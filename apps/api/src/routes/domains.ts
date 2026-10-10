@@ -7,12 +7,14 @@ import {
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
+  fetchTeamStanding,
   isIdentitySharedByOtherDomains,
   isLoopbackUrl,
   isOperatorTeam,
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
   recordAudit,
+  SILENT_SUSPENSIONS,
 } from "@millionsend/core";
 import {
   combineRecordStatus,
@@ -741,11 +743,30 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: removeDomainResponseSchema } },
           description: "Domain deleted",
         },
+        403: jsonErr("Team suspended, or not available for this team"),
         404: jsonErr("Not found"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
+      // Same lock as the dashboard delete: a suspended team keeps its domains.
+      const suspended = (await fetchTeamStanding(db, auth.teamId))?.suspended;
+      if (suspended) {
+        return c.json(
+          SILENT_SUSPENSIONS.includes(suspended.reason)
+            ? errorBody(
+                403,
+                "forbidden",
+                "This isn't available for this team right now. Contact support if you need help.",
+              )
+            : errorBody(
+                403,
+                "team_suspended",
+                "This team is suspended by the instance operator. Its domains cannot be deleted until it is reinstated; contact support.",
+              ),
+          403,
+        );
+      }
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
       // The SES identity is shared by every row with the same (name, region):

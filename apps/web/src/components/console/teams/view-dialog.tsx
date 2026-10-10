@@ -22,6 +22,7 @@ const KNOWN_ERRORS = [
   "support_view_off",
   "sign_in_again",
   "own_team",
+  "silent_suspension",
   "reference_required",
   "code_required",
   "code_invalid",

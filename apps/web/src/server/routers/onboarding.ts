@@ -1,5 +1,5 @@
 import { accountMailDeliverable, env } from "@millionsend/config";
-import { acceptEmail } from "@millionsend/core";
+import { acceptEmail, SILENT_SUSPENSIONS } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
@@ -7,6 +7,7 @@ import { z } from "zod";
 import { fetchQuotaRow } from "../billing";
 import { getKeyring } from "../keyring";
 import { buildOnboardingEmail, MAIL_LOCALES } from "../onboarding-mail";
+import { suspensionLockError } from "../suspension-lock";
 import { router, teamProcedure } from "../trpc";
 import { verifyTurnstile } from "../turnstile";
 
@@ -34,12 +35,16 @@ export const onboardingRouter = router({
       const [team] = await ctx.db
         .select({
           suspendedAt: schema.teams.suspendedAt,
+          suspensionReason: schema.teams.suspensionReason,
           sentAt: schema.teams.onboardingEmailSentAt,
         })
         .from(schema.teams)
         .where(eq(schema.teams.id, ctx.teamId));
       if (team?.sentAt) return { sent: false as const };
       if (team?.suspendedAt) {
+        if (SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "")) {
+          throw await suspensionLockError("unavailable");
+        }
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "team suspended" });
       }
       // The signed-in owner, else the team's first. Verified only, where the

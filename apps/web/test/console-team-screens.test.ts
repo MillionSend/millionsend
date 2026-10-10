@@ -146,7 +146,7 @@ describe("the team's id on the console's team screens", () => {
         dialogs: null,
       },
       (key) => key,
-      { supportView: true, copyId: (id) => copied.push(id) },
+      { supportView: true, silentlySuspended: false, copyId: (id) => copied.push(id) },
     );
     expect(items.slice(0, 3).map((item) => item?.label)).toEqual(["open", "copyId", "view"]);
     items[1]?.onSelect();

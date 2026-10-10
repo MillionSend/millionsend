@@ -59,6 +59,11 @@ export function TeamDialog({
   const none = common("none");
 
   const owner = detail?.members.find((m) => m.role === "owner") ?? detail?.members[0];
+  const viewOff = !detail?.supportViewEnabled
+    ? "viewOff"
+    : detail.silentlySuspended
+      ? "viewSilent"
+      : null;
   const memberEmails = detail?.members.map((m) => m.email).join(", ") ?? "";
   // Known before the detail loads, so it never waits behind a skeleton.
   const idRow = (
@@ -193,12 +198,12 @@ export function TeamDialog({
         <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
           {common("close")} <span className="ms-keycap">Esc</span>
         </button>
-        {detail && !detail.supportViewEnabled ? (
+        {detail && viewOff ? (
           // Inline, so the trigger is a span: the default trigger is itself a
           // button, and a button inside a button is invalid nesting the
           // browser may reparent. The span is focusable, so the reason
           // reaches a keyboard user too.
-          <Tooltip inline text={t("menu.viewOff")}>
+          <Tooltip inline text={t(`menu.${viewOff}`)}>
             <button
               type="button"
               className="ms-btn ms-btn-secondary"

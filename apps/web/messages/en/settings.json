@@ -391,6 +391,7 @@
       "oauth": "Connected app",
       "stripe": "Stripe",
       "system": "System",
+      "operator": "MillionSend",
       "deletedUser": "Deleted user"
     },
     "actions": {
