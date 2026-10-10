@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { refusedAsReadOnly } from "@/lib/read-only";
 import { useScrollLock } from "@/lib/use-scroll-lock";
+import { DotParts } from "./dot-parts";
 
 function CloseGlyph({ onClose }: { onClose: () => void }) {
   const t = useTranslations("common");
@@ -132,7 +133,9 @@ export function Modal({
               gap: 12,
             }}
           >
-            <h2>{title}</h2>
+            <h2>
+              <DotParts text={title} />
+            </h2>
             <CloseGlyph onClose={onClose} />
           </div>
         ) : null}

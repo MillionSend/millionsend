@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { regionFlag } from "@/app/(dashboard)/domains/regions";
+import { DotParts } from "@/components/dot-parts";
 import type { ServedRegion } from "../region-actions";
 import { codeBlock, TemplateDialog } from "./region-dialogs";
 
@@ -116,7 +117,7 @@ export function AddRegionPanel({
       >
         <div>
           <h3 style={{ margin: "0 0 4px", fontSize: "var(--ms-fs-section)", fontWeight: 600 }}>
-            {t("title", { region: `${flag} ${region}` })}
+            <DotParts text={t("title", { region: `${flag} ${region}` })} />
           </h3>
           <p style={{ ...p, margin: 0 }}>{t("subtitle")}</p>
         </div>

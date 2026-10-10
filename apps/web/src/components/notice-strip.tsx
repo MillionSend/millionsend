@@ -20,7 +20,7 @@ export function NoticeStrip({
 }: {
   href?: string | undefined;
   tone: Tone;
-  text: string;
+  text: React.ReactNode;
   action?: string | undefined;
   onAction?: (() => void) | undefined;
 }) {

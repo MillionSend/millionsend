@@ -393,7 +393,7 @@
       "check1Production": "GetAccount answers · production"
     },
     "sold": {
-      "text": "Sold {committed}/day against a {share}/day broadcast share in {region}",
+      "text": "Sold {committed}/day against a {share}/day broadcast share in <nowrap>{region}</nowrap>",
       "backlog": " · {waiting} waiting, clears about {clears}",
       "action": "Request quota increase",
       "justification": "Broadcast backlog clears by {date}; the plans sold outrun the broadcast share of the quota."

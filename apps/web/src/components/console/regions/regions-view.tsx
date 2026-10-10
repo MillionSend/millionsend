@@ -251,19 +251,22 @@ export function RegionsView() {
             <NoticeStrip
               tone="warn"
               text={
-                t("sold.text", {
-                  committed: f.n(committed),
-                  share: f.n(oversold.share),
-                  region: oversold.region,
-                }) +
-                (oversold.bulkParked > 0
-                  ? t("sold.backlog", {
-                      waiting: f.n(oversold.bulkParked),
-                      clears: oversold.lastFinishesAt
-                        ? f.clearsAbout(oversold.lastFinishesAt)
-                        : "—",
-                    })
-                  : "")
+                <>
+                  {t.rich("sold.text", {
+                    committed: f.n(committed),
+                    share: f.n(oversold.share),
+                    region: oversold.region,
+                    nowrap: (chunks) => <span style={{ whiteSpace: "nowrap" }}>{chunks}</span>,
+                  })}
+                  {oversold.bulkParked > 0
+                    ? t("sold.backlog", {
+                        waiting: f.n(oversold.bulkParked),
+                        clears: oversold.lastFinishesAt
+                          ? f.clearsAbout(oversold.lastFinishesAt)
+                          : "—",
+                      })
+                    : null}
+                </>
               }
               action={t("sold.action")}
               onAction={() => setQuotaFor(oversold)}

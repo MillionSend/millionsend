@@ -393,7 +393,7 @@
       "check1Production": "GetAccount responde · produção"
     },
     "sold": {
-      "text": "Vendidos {committed}/dia contra uma parcela de transmissões de {share}/dia em {region}",
+      "text": "Vendidos {committed}/dia contra uma parcela de transmissões de {share}/dia em <nowrap>{region}</nowrap>",
       "backlog": " · {waiting} aguardando, libera por volta de {clears}",
       "action": "Solicitar aumento de cota",
       "justification": "A fila de transmissões libera até {date}; os planos vendidos ultrapassam a parcela de transmissões da cota."
