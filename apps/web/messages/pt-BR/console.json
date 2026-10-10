@@ -708,10 +708,10 @@
           "override": "override"
         },
         "samples": "Amostras · 7d",
-        "samplesValue": "{samples} · {flagged} sinalizadas · {unjudged} sem julgamento",
+        "samplesValue": "{samples} · {flagged, plural, =0 {# sinalizadas} one {# sinalizada} other {# sinalizadas}} · {unjudged} sem julgamento",
         "verdicts": "Veredictos",
-        "verdictsValue": "{clean} limpos · {flagged} sinalizados",
-        "verdictsReasons": "{clean} limpos · {flagged} sinalizados: <reasons></reasons>",
+        "verdictsValue": "{clean, plural, =0 {# limpos} one {# limpo} other {# limpos}} · {flagged, plural, =0 {# sinalizados} one {# sinalizado} other {# sinalizados}}",
+        "verdictsReasons": "<part>{clean, plural, =0 {# limpos} one {# limpo} other {# limpos}} ·</part> <part>{flagged, plural, =0 {# sinalizados} one {# sinalizado} other {# sinalizados}}: <reasons></reasons></part>",
         "lastSample": "Última amostra",
         "model": "Modelo",
         "override": "Override",

@@ -711,7 +711,7 @@
         "samplesValue": "{samples} · {flagged} flagged · {unjudged} unjudged",
         "verdicts": "Verdicts",
         "verdictsValue": "{clean} clean · {flagged} flagged",
-        "verdictsReasons": "{clean} clean · {flagged} flagged: <reasons></reasons>",
+        "verdictsReasons": "<part>{clean} clean ·</part> <part>{flagged} flagged: <reasons></reasons></part>",
         "lastSample": "Last sample",
         "model": "Model",
         "override": "Override",

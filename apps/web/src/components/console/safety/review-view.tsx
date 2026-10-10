@@ -3,7 +3,7 @@
 import { AUDIT_ACTIONS } from "@millionsend/core/audit-actions";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
 import { KvRow } from "@/components/kv-row";
 import { Modal } from "@/components/modal";
@@ -416,6 +416,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
                   ? monitorT.rich("verdictsReasons", {
                       clean: monitor.judged7d - monitor.flagged7d,
                       flagged: monitor.flagged7d,
+                      part: (chunks) => <span className="ms-part">{chunks}</span>,
                       reasons: () => <ReasonCodes codes={monitor.topReasons} />,
                     })
                   : monitorT("verdictsValue", {
@@ -451,7 +452,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
               </KvRow>
             </dl>
             <CardHead title={monitorT("samplesTitle")} subtitle={monitorT("samplesSubtitle")} />
-            <Table className="nowrap">
+            <Table>
               <thead>
                 <tr>
                   <th>{monitorT("cols.at")}</th>
@@ -567,7 +568,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
           title={t("emails.title", { count: flaggedEmails.length })}
           subtitle={t("emails.subtitle")}
         />
-        <Table className="nowrap">
+        <Table>
           <thead>
             <tr>
               <th>{t("emails.sent")}</th>
@@ -662,7 +663,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
 
       <div className="ms-card" style={{ padding: 0 }}>
         <CardHead inset title={t("audit.title")} subtitle={t("audit.subtitle")} />
-        <Table className="nowrap">
+        <Table>
           <thead>
             <tr>
               <th>{auditT("columns.when")}</th>
@@ -902,17 +903,22 @@ function WarmupCard({
 /** Reason codes, each explained on hover; a code this build has no text for stays plain. */
 function ReasonCodes({ codes }: { codes: string[] }) {
   const monitorT = useTranslations("console.safety.review.monitor");
+  // The comma is kept on its code's line: the tooltip trigger is an inline
+  // box, so a bare ", " after it could start the next line.
   return codes.map((code, i) => (
-    <span key={code}>
-      {i > 0 ? ", " : null}
-      {monitorT.has(`reasonCodes.${code}`) ? (
-        <Tooltip inline text={monitorT(`reasonCodes.${code}`)} triggerClassName="ms-reason-code">
-          {code}
-        </Tooltip>
-      ) : (
-        code
-      )}
-    </span>
+    <Fragment key={code}>
+      {i > 0 ? " " : null}
+      <span style={{ whiteSpace: "nowrap" }}>
+        {monitorT.has(`reasonCodes.${code}`) ? (
+          <Tooltip inline text={monitorT(`reasonCodes.${code}`)} triggerClassName="ms-reason-code">
+            {code}
+          </Tooltip>
+        ) : (
+          code
+        )}
+        {i < codes.length - 1 ? "," : null}
+      </span>
+    </Fragment>
   ));
 }
 
