@@ -564,7 +564,7 @@ export {
 export {
   CREDENTIAL_MAIL_KINDS,
   findSenderDomainOwner,
-  MUTED_WHILE_SUSPENDED,
+  SENT_WHILE_SUSPENDED,
   type SenderDomainOwner,
   SYSTEM_MAIL_TAG,
   type SystemMailKind,

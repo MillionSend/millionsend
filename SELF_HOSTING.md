@@ -395,7 +395,9 @@ revoked ones and those of deleted teams included), one pending per address.
 
 That team is the instance's own, and an operator can mark it as such: on the `system` plan
 it is never capped or billed and its badge reads System. On a self-hosted instance plans
-carry no limits, so the mark only labels the team.
+carry no limits, but the mark does more than label the team: the content monitor never
+holds it, the new-domain warm-up never caps its domains, and its contacts are the list a
+suspension unsubscribes a team's members from.
 
 On an instance with `ALLOW_SIGNUP=true`, every new account becomes a contact of that team
 (`source: signup`) once its address is verified; the sign-up screen says so, and deleting the
@@ -692,11 +694,20 @@ content insights (never email bodies), and an instance-wide audit log.
 - **Operator actions and the team:** a suspended team's API keys still
   authenticate but every send answers `403 team_suspended` (`403 sending_paused`
   under a review hold; SMTP `550`),
-  broadcasts in flight park, webhooks keep delivering and data stays; its
-  quota, deliverability, broadcast-hold and broadcast-pause notices stop, and
-  so does its billing mail when the reason is phishing or a review hold
-  (Stripe still sends its own receipts), while mail to the operator, such as
-  the content monitor's alerts, still goes out; nobody on it can
+  broadcasts in flight park, webhooks keep delivering and data stays; of the
+  mail about the team, only the suspension and reinstatement notices, billing
+  mail and the security receipts (a new API key, a rotated webhook secret, a
+  member joining) still reach its owners, and none of it under a phishing
+  suspension or a review hold (Stripe still sends its own receipts), while
+  mail about a person's own account and mail to the operator, such as the
+  content monitor's alerts, still go out; a suspension for any reason but a
+  review hold or non-payment also unsubscribes every member from the
+  instance's own contact list (the contacts of the team on the `system` plan,
+  where product announcements go), with the reason on each contact's timeline
+  and no webhook, and reinstating does not subscribe them again, only their
+  own opt-in does (upgrading to this release unsubscribes, once, the members
+  of teams already suspended for those reasons, except a contact changed
+  since its team's suspension); nobody on it can
   delete it, remove its domains (the API answers `403 team_suspended` there
   too) or invite anyone, and a member of a team suspended for phishing or
   held for review cannot create new teams (under either reason each of these

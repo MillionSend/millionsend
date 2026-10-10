@@ -27,6 +27,7 @@ const ACTIVITY_TYPES = [
   "topic_opt_in",
   "topic_opt_out",
   "unsubscribed",
+  "unsubscribed_team_suspended",
   "resubscribed",
   "segment_added",
   "segment_removed",
@@ -42,6 +43,7 @@ const ACTIVITY_DOT: Record<KnownActivityType, string> = {
   resubscribed: "var(--ms-success)",
   topic_opt_out: "var(--ms-danger)",
   unsubscribed: "var(--ms-danger)",
+  unsubscribed_team_suspended: "var(--ms-danger)",
   segment_added: "var(--ms-neutral)",
   segment_removed: "var(--ms-neutral)",
 };
