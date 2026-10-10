@@ -118,10 +118,12 @@ client's config.
   when the access token does.
 - A member removed from the team loses MCP access immediately, even before
   their token expires.
-- Your team role applies: tools that manage domains, webhooks and API keys
-  are only offered to owners and admins, matching the dashboard. A **member** with those
-  permissions granted still gets the read-only domain, webhook and API key
-  listings.
+- Your team role applies, matching the dashboard: only owners and admins
+  manage domains, webhooks and API keys, remove suppressions, delete
+  contacts in bulk or erase a contact (`delete_contact` with `erase`). The
+  tools marked **admin** below are not offered to members, and the role is
+  checked again on every call. A **member** with those permissions granted
+  still gets the read-only domain, webhook and API key listings.
   On an **All teams** grant the tools appear when you are an admin in any
   team, and calls into a team where you are a member are refused.
 - MCP calls share the API's per-minute rate limit.
@@ -170,8 +172,8 @@ and admins.
 | `create_contact_batch` | `audience:write` | Create up to 1,000 contacts in one call; `on_conflict` skip/upsert, `validation` strict/permissive. |
 | `update_contact` | `audience:write` | Update a contact's name, properties or unsubscribe flag. |
 | `update_contact_topics` | `audience:write` | Set a contact's per-topic subscriptions. |
-| `delete_contact` | `audience:write` | Delete a contact. |
-| `delete_contacts` | `audience:write` | Delete up to 1,000 contacts by ids or emails. |
+| `delete_contact` | `audience:write` | Delete a contact; `erase` (**admin** only) also scrubs it from email history. |
+| `delete_contacts` | `audience:write` | **admin** Delete up to 1,000 contacts by ids or emails. |
 | `create_contact_preferences_link` | `audience:write` | Mint a contact's preference-center URL. |
 | `add_contact_to_segment` | `audience:write` | Add a contact to a manual segment. |
 | `remove_contact_from_segment` | `audience:write` | Remove a contact from a manual segment. |
@@ -185,8 +187,8 @@ and admins.
 | `update_contact_property` | `audience:write` | Update a custom property definition. |
 | `delete_contact_property` | `audience:write` | Delete a custom property definition. |
 | `add_suppressions` | `audience:write` | Block up to 1,000 addresses, recording an `origin` (bounce, complaint, manual or unsubscribe) on new rows. |
-| `remove_suppressions` | `audience:write` | Unblock up to 1,000 addresses by emails or ids. |
-| `delete_suppression` | `audience:write` | Remove one suppression by id or email. |
+| `remove_suppressions` | `audience:write` | **admin** Unblock up to 1,000 addresses by emails or ids. |
+| `delete_suppression` | `audience:write` | **admin** Remove one suppression by id or email. |
 | `create_broadcast` | `broadcasts:write` | Create a broadcast draft (or send it immediately). |
 | `update_broadcast` | `broadcasts:write` | Update a draft broadcast. |
 | `send_broadcast` | `broadcasts:write` | Send or schedule a draft broadcast. |

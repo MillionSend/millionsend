@@ -132,7 +132,12 @@ export {
   fetchContentFactors,
   MIN_OUTCOME_SENDS,
 } from "./account-score.js";
-export { type ApiKeyAuth, authenticateApiKey } from "./api-key-auth.js";
+export {
+  type ApiKeyAuth,
+  authenticateApiKey,
+  isAdminRole,
+  type TeamRole,
+} from "./api-key-auth.js";
 export {
   extractTokenPrefix,
   type GeneratedApiKey,

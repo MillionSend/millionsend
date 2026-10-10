@@ -5,6 +5,7 @@ import {
   decryptWebhookSecret,
   encryptWebhookSecret,
   generateWebhookSecret,
+  isAdminRole,
   type Keyring,
   parseWebhookSecret,
   rotatedWebhookSecretColumns,
@@ -179,17 +180,21 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
         .where(and(eq(w.id, c.req.valid("param").id), eq(w.teamId, auth.teamId)));
       if (!row) return c.json(errorBody(404, "not_found", "Webhook not found"), 404);
       // Secrets are retrievable by design (SDK wire exposes signing_secret on
-      // get) — envelope-encrypted at rest, decrypted per request.
-      const secret = await decryptWebhookSecret(
-        {
-          ciphertext: row.secretCiphertext,
-          iv: row.secretIv,
-          wrappedDek: row.secretWrappedDek,
-          keyVersion: row.secretKeyVersion,
-        },
-        keyring,
-        { teamId: row.teamId, rowId: row.id },
-      );
+      // get) — envelope-encrypted at rest, decrypted per request. SECURITY:
+      // never for a member, whom the dashboard shows only the last 4.
+      const secret =
+        auth.role && !isAdminRole(auth.role)
+          ? undefined
+          : await decryptWebhookSecret(
+              {
+                ciphertext: row.secretCiphertext,
+                iv: row.secretIv,
+                wrappedDek: row.secretWrappedDek,
+                keyVersion: row.secretKeyVersion,
+              },
+              keyring,
+              { teamId: row.teamId, rowId: row.id },
+            );
       return c.json(
         {
           ...wire(row),

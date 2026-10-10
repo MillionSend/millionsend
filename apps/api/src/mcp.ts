@@ -5,11 +5,13 @@ import {
   ALL_TEAMS_GRANT,
   type ApiKeyAuth,
   effectivePlan,
+  isAdminRole,
   MCP_RESOURCE_PATH,
   MCP_SCOPES,
   type McpScope,
   mcpResourceUrl,
   QUOTA_COLUMNS,
+  type TeamRole,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -71,8 +73,6 @@ import {
  */
 export const INTERNAL_AUTH = new WeakMap<Request, ApiKeyAuth>();
 
-type TeamRole = (typeof schema.teamMemberRoleEnum.enumValues)[number];
-
 interface McpTeam {
   teamId: string;
   name: string;
@@ -91,9 +91,6 @@ interface McpAuthExtra {
   teams?: McpTeam[];
 }
 
-/** Mirrors the dashboard's adminProcedure: members read, owners/admins manage. */
-const isAdmin = (role: TeamRole) => role !== "member";
-
 function teamAuth(team: McpTeam, userId: string, oauthClientId: string): ApiKeyAuth {
   return {
     teamId: team.teamId,
@@ -104,6 +101,7 @@ function teamAuth(team: McpTeam, userId: string, oauthClientId: string): ApiKeyA
     oauthClientId,
     permission: "full_access",
     domainId: null,
+    role: team.role,
   };
 }
 
@@ -234,6 +232,7 @@ function createTokenVerifier(
             oauthClientId: claims.data.client_id,
             permission: "full_access",
             domainId: null,
+            role,
           },
           userId: claims.data.sub,
           role,
@@ -314,7 +313,16 @@ const omitSigningSecret = (json: Record<string, unknown>) => {
 };
 
 const idOrEmail = z.string().min(1).describe("Contact id or email address");
-const enc = encodeURIComponent;
+/**
+ * SECURITY: one path segment of a tool's REST call. The URL parser resolves
+ * "." and ".." segments, %2e spellings included, so no encoding can carry
+ * them: contact_id ".." on remove_contact_from_segment would reach
+ * DELETE /segments/{id}. No id is either, so they are refused.
+ */
+const enc = (id: string): string => {
+  if (id === "." || id === "..") throw new Error(`"${id}" is not a valid id`);
+  return encodeURIComponent(id);
+};
 /** How to read records[] on a domain response; shared by get_domain and verify_domain. */
 const RECORD_STATUS_NOTE =
   "Only the DKIM and MAIL FROM (SPF) rows gate sending. The DMARC row is recommended, and reads verified when a parent-domain policy covers the subdomain (see inherited_from and policy). Each record's live field says what public DNS answers now; detail explains a pending or failed row.";
@@ -323,7 +331,9 @@ const RECORD_STATUS_NOTE =
  * Tools are registered read-only first and only for scopes the token
  * carries. Admin tools are skipped for a plain member; on an all-teams token
  * they register when any membership is admin-level and each call re-checks
- * the selected team's role.
+ * the selected team's role. The REST routes re-check it too (auth.role), so
+ * an admin action stays refused to a member even through a tool registered
+ * without the flag.
  */
 function buildServer(
   app: OpenAPIHono<Env>,
@@ -349,7 +359,7 @@ function buildServer(
   );
   const { auth, userId, role, teams } = authInfo.extra as unknown as McpAuthExtra;
   const scopes = new Set(authInfo.scopes);
-  const canAdmin = teams ? teams.some((t) => isAdmin(t.role)) : isAdmin(role);
+  const canAdmin = teams ? teams.some((t) => isAdminRole(t.role)) : isAdminRole(role);
   // All-teams tokens act on one team per tool call (`team_id` argument,
   // default: oldest team). The selection rides async context so the
   // `api(...)` call sites need no per-call auth threading.
@@ -379,7 +389,10 @@ function buildServer(
       idempotent?: boolean;
       /** Reaches outside the team's MillionSend account: external recipients, URLs or DNS/SES. */
       openWorld?: boolean;
-      /** Owner/admin only even though read-only (e.g. a read that returns a secret). */
+      /**
+       * Owner/admin only where the scope does not make it so: a read that
+       * returns a secret, or a write the dashboard reserves (adminProcedure).
+       */
       admin?: boolean;
     },
     run: (args: z.output<S>) => Promise<CallToolResult>,
@@ -429,7 +442,7 @@ function buildServer(
             ),
           );
         }
-        if (admin && !isAdmin(team.role)) {
+        if (admin && !isAdminRole(team.role)) {
           return Promise.resolve(
             toolResult(
               errorBody(
@@ -921,6 +934,7 @@ function buildServer(
       description:
         "Delete up to 1000 contacts in one call, by ids or by email addresses (exactly one of the two). Returns the contacts actually deleted; unknown ones are skipped. Emails stay in the log; erase=true also scrubs each address from email history, like delete_contact. This cannot be undone.",
       inputSchema: batchRemoveContactsRequestSchema,
+      admin: true,
       destructive: true,
       idempotent: true,
     },
@@ -1101,6 +1115,7 @@ function buildServer(
       description:
         "Unblock up to 1000 addresses in one call, by emails or by ids (exactly one of the two). Returns only the rows actually removed.",
       inputSchema: batchRemoveSuppressionsRequestSchema,
+      admin: true,
       destructive: true,
       idempotent: true,
     },
@@ -1116,6 +1131,7 @@ function buildServer(
       inputSchema: z.object({
         id: z.string().min(1).describe("Suppression id or email address"),
       }),
+      admin: true,
       destructive: true,
       idempotent: true,
     },
