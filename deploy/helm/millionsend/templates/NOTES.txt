@@ -1,0 +1,18 @@
+MillionSend {{ .Chart.AppVersion }} deployed as {{ include "millionsend.fullname" . }}.
+
+Secret: {{ include "millionsend.secretName" . }} (mode: {{ .Values.secrets.mode }})
+{{- if eq .Values.secrets.mode "existingSecret" }}
+  Pods stay in CreateContainerConfigError until this Secret exists.
+{{- end }}
+{{- if eq .Values.secrets.mode "create" }}
+  WARNING: secrets.mode=create stores secret values in the Helm release. Use
+  existingSecret or externalSecret outside of testing.
+{{- end }}
+
+Dashboard: {{ .Values.config.APP_BASE_URL }}
+{{- if not .Values.ingress.enabled }}
+  No Ingress rendered. Try it locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "millionsend.fullname" . }}-web 3000:{{ .Values.web.service.port }}
+{{- end }}
+
+Logs: kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} --prefix -f

@@ -1,0 +1,87 @@
+# EKS: AWS Load Balancer Controller ingress, RDS for Postgres, secrets from
+# AWS Secrets Manager through the External Secrets Operator, and SES/SQS/SNS
+# access through IRSA (no static AWS keys).
+#   helm upgrade --install millionsend deploy/helm/millionsend \
+#     -n millionsend --create-namespace -f deploy/helm/millionsend/examples/values-eks.yaml
+image:
+  tag: "latest" # pin a release for production
+
+config:
+  APP_BASE_URL: "https://mail.example.com"
+  PUBLIC_API_URL: "https://api.mail.example.com"
+  AWS_REGION: "us-east-1"
+  SNS_TOPIC_ARNS: "arn:aws:sns:us-east-1:123456789012:millionsend-events"
+  SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events"
+  SES_CONFIGURATION_SET: "millionsend"
+  # Credentials come from the IRSA role; this flag also enables account
+  # mail (password resets, verification) without static keys.
+  AWS_DEFAULT_CHAIN: "true"
+  # VPC CIDR: the ALB forwards from addresses inside it.
+  TRUSTED_PROXIES: "10.0.0.0/16"
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/millionsend
+
+# One Secrets Manager secret holding a JSON object with DATABASE_URL,
+# MASTER_ENCRYPTION_KEY and BETTER_AUTH_SECRET (and S3_* if used).
+secrets:
+  mode: externalSecret
+  externalSecret:
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: aws-secrets-manager
+    dataFrom:
+      - extract:
+          key: millionsend/production
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/success-codes: "200-399"
+  hosts:
+    - host: mail.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          component: web
+    - host: api.mail.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          component: api
+
+web:
+  replicas: 2
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { memory: 1Gi }
+api:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 3001
+    annotations:
+      alb.ingress.kubernetes.io/healthcheck-path: /health
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { memory: 768Mi }
+worker:
+  replicas: 1
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { memory: 768Mi }
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: millionsend

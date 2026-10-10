@@ -1,0 +1,70 @@
+{{- if .Values.backup.enabled }}
+{{- if not .Values.config.S3_BACKUP_BUCKET }}
+{{- fail "backup.enabled needs config.S3_BACKUP_BUCKET (and S3_ENDPOINT/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY in the Secret)" }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "millionsend.fullname" . }}-backup
+  labels:
+    {{- include "millionsend.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  {{- with .Values.backup.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  concurrencyPolicy: {{ .Values.backup.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.backup.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "millionsend.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "millionsend.serviceAccountName" . }}
+          automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.backup.podSecurityContext | nindent 12 }}
+          containers:
+            - name: backup
+              image: {{ include "millionsend.imageRef" (dict "image" .Values.backup.image "appVersion" .Chart.AppVersion) }}
+              {{- with .Values.backup.image.pullPolicy }}
+              imagePullPolicy: {{ . }}
+              {{- end }}
+              # One cycle (dump, upload, verify, prune) per run: the CronJob
+              # owns the schedule instead of the image's sleep loop.
+              command: ["/usr/local/bin/backup.sh"]
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              envFrom:
+                {{- include "millionsend.envFrom" . | nindent 16 }}
+              {{- with .Values.backup.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: scratch
+                  mountPath: /tmp
+          volumes:
+            - name: scratch
+              emptyDir:
+                sizeLimit: {{ .Values.backup.scratch.sizeLimit }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

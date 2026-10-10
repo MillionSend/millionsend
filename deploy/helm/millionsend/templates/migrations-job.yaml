@@ -1,0 +1,74 @@
+{{- if .Values.migrations.job.enabled }}
+{{- if ne .Values.secrets.mode "existingSecret" }}
+{{- fail "migrations.job.enabled needs secrets.mode=existingSecret: the hook runs before this chart creates its Secret" }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "millionsend.fullname" . }}-migrate
+  labels:
+    {{- include "millionsend.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # Runs before the new pods, so a failing migration stops the upgrade
+    # while the old pods keep serving (ArgoCD maps this to PreSync).
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.job.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.job.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "millionsend.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      # The namespace's default ServiceAccount: the chart's own does not exist
+      # yet when a pre-install hook runs, and migrate needs only DATABASE_URL.
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "millionsend.image" . }}
+          {{- with .Values.image.pullPolicy }}
+          imagePullPolicy: {{ . }}
+          {{- end }}
+          # The image ENTRYPOINT is scripts/start.mjs; "migrate" runs pending
+          # migrations and exits.
+          args: ["migrate"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          envFrom:
+            # The ConfigMap is a regular resource and may not exist yet on
+            # first install; the Secret carries what migrate needs.
+            - configMapRef:
+                name: {{ include "millionsend.fullname" . }}
+                optional: true
+            - secretRef:
+                name: {{ include "millionsend.secretName" . }}
+          {{- with .Values.migrations.job.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
