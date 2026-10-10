@@ -18,6 +18,7 @@ build/
 .env
 .env.*
 
-# Turborepo cache
+# Turborepo cache, and the agent notes turbo writes at the root on every run
 .turbo/
+/AGENTS.md
 !.env.example
