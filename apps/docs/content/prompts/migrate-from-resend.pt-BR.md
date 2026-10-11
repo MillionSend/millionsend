@@ -1,10 +1,10 @@
 # Migre este projeto do Resend para o MillionSend
 
-Você está migrando uma aplicação do Resend para o MillionSend. A API REST do MillionSend é compatível no wire com a do Resend — mesmos endpoints, mesmos formatos de requisição e resposta — então isto é uma mudança de configuração mais uma migração dos dados da conta, não uma reescrita. Siga os passos na ordem. Pare e pergunte antes de qualquer ação irreversível. Nunca imprima, registre em log ou commite uma chave de API.
+Você está migrando uma aplicação do Resend para o MillionSend. A API REST do MillionSend é compatível com a do Resend — mesmos endpoints, mesmos formatos de requisição e resposta — então isto é uma mudança de configuração mais uma migração dos dados da conta, não uma reescrita. Siga os passos na ordem. Pare e pergunte antes de qualquer ação irreversível. Nunca imprima, registre em log ou commite uma chave de API.
 
 ## Fatos em que você pode confiar
 
-- URL base da API Cloud: `https://api.millionsend.com`. Auto-hospedado: a origem da API da própria instância (pergunte se não estiver no repositório).
+- URL base da API do MillionSend Cloud: `https://api.millionsend.com`. Auto-hospedado: a origem da API da própria instância (pergunte se não estiver no repositório).
 - Chaves de API começam com `ms_` e são criadas no painel em **Chaves de API**. Use uma chave de acesso total para a migração e chaves de acesso de envio para os remetentes de produção.
 - Documentação: https://docs.millionsend.com — acrescente `.md` à URL de qualquer página para obter markdown, `/llms-full.txt` é tudo em um arquivo, `/openapi.json` é a especificação OpenAPI 3.1. O guia de migração está em https://docs.millionsend.com/pt-BR/migrate-from-resend.md e a referência da CLI em https://docs.millionsend.com/pt-BR/cli.md.
 - A CLI de migração (`@millionsend/cli`) só lê do Resend (requisições `GET`), mantém as chaves em memória, não as grava em arquivo algum e não envia telemetria.
@@ -22,7 +22,7 @@ Encontre todo ponto de contato com o Resend antes de mudar qualquer coisa e most
 
 ## Passo 2 — Mova a conta
 
-Peça ao usuário uma chave do Resend com acesso total, uma chave do MillionSend com acesso total e se o destino é o Cloud ou uma URL auto-hospedada. Passe as chaves por variáveis de ambiente, nunca como argumentos de linha de comando.
+Peça ao usuário uma chave do Resend com acesso total, uma chave do MillionSend com acesso total e se o destino é o MillionSend Cloud ou uma URL auto-hospedada. Passe as chaves por variáveis de ambiente, nunca como argumentos de linha de comando.
 
 Primeiro o plano (somente leitura; código de saída 2 significa que há mudanças, 0 nada a fazer, 1 erro):
 
@@ -40,7 +40,7 @@ Mostre ao usuário o resumo do plano, incluindo avisos de limite do plano (por e
 npx @millionsend/cli migrate apply plan.json --yes
 ```
 
-Flags que valem conhecer: `--rps <n>` reduz a taxa de leitura contra o Resend (padrão 8; o Resend permite 10 por time, compartilhados com o envio em produção); `--skip enrichment` pula a segunda passagem por contato para propriedades e tópicos; `--include-sent` importa também broadcasts enviados como rascunhos; `--fresh-webhook-secrets` gera novos segredos de webhook em vez de copiá-los; `--on-conflict skip|error` muda como contatos já existentes são tratados (padrão upsert).
+Flags que valem conhecer: `--rps <n>` reduz a taxa de leitura contra o Resend (padrão 8; o Resend permite 10 por equipe, compartilhados com o envio em produção); `--skip enrichment` pula a segunda passagem por contato para propriedades e tópicos; `--include-sent` importa também broadcasts enviados como rascunhos; `--fresh-webhook-secrets` gera novos segredos de webhook em vez de copiá-los; `--on-conflict skip|error` muda como contatos já existentes são tratados (padrão upsert).
 
 Depois leia `.millionsend/migrate-report.md`: contagens por recurso, o checklist de itens manuais, os registros DNS por domínio e o mapa de ids. A ferramenta acrescenta `.millionsend/` ao `.gitignore` quando existe um; confirme que fez isso.
 

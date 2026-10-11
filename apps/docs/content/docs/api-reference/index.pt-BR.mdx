@@ -38,8 +38,8 @@ Chaves têm um nível de permissão: chaves de **acesso total** podem usar todos
 os endpoints, chaves de **somente envio** ficam confinadas a `/emails*`
 (qualquer outra coisa retorna `403 restricted_api_key`) — e mesmo ali,
 `GET /emails`, `GET /emails/{id}` e `DELETE /emails/{id}` exigem acesso
-total, já que as leituras devolvem os corpos armazenados e todo o arquivo do
-time. Uma chave também pode ficar restrita a um único domínio, limitando de
+total, já que as leituras devolvem os corpos armazenados e todo o arquivo da
+equipe. Uma chave também pode ficar restrita a um único domínio, limitando de
 quais endereços `from` ela pode enviar.
 
 Uma chave criada com `POST /api-keys` nunca é mais ampla que a chave que a
@@ -58,29 +58,29 @@ deliberadas e explícitas:
 - Anexos aceitam apenas `content` em base64 inline — uma URL em `path` é
   rejeitada com `422` (nunca é buscada), assim como `content_id` (imagens
   inline).
-- Contatos são globais ao time — os endpoints de audience são servidos como
+- Contatos são globais à equipe — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
 - `POST /domains` aceita um `region` opcional, que precisa ser uma das regiões
   do SES que a instalação atende — os valores que o schema da requisição lista,
   a primeira sendo a padrão — e é recusado com `422` caso contrário. Um domínio
   tem uma região: para mudá-la, exclua o domínio e adicione de novo.
-- Broadcasts suportam `canceled`, um status fora da união do Resend, e o
-  envio de broadcast, `POST /emails` e `POST /emails/batch` podem retornar
+- Transmissões (`/broadcasts`) suportam `canceled`, um status fora da união do Resend, e o
+  envio de transmissão, `POST /emails` e `POST /emails/batch` podem retornar
   `403 sending_paused` quando sua taxa de bounce ou reclamação cruza os
-  limites de enforcement do SES, ou enquanto o envio da equipe está pausado
-  aguardando revisão. Só o envio de broadcast também pode retornar
+  limites a partir dos quais o SES age, ou enquanto o envio da equipe está pausado
+  aguardando revisão. Só o envio de transmissão também pode retornar
   `403 broadcasts_paused` enquanto a taxa agregada da plataforma na região SES
   do remetente se recupera; é por região, não afeta e-mail transacional e
-  libera sozinho.
-- O envio de um broadcast responde com `finishes_at` (o instante estimado em
+  se resolve sozinho.
+- O envio de uma transmissão responde com `finishes_at` (o instante estimado em
   que o último e-mail sai, ou `null`), `estimated: true` e, quando a audiência
   passa da capacidade disponível agora, um `warning` (`paced` ou
-  `queued_behind`, com `days` e uma mensagem). As leituras de broadcast trazem
+  `queued_behind`, com `days` e uma mensagem). As leituras de transmissão trazem
   `sent_count` e um `finishes_at` ao vivo; um cancelamento responde com
   `canceled_remaining`. Uma audiência que precisa de mais de 24 dias de
   capacidade é recusada com `422 broadcast_too_large`. Veja
-  [Broadcasts](/pt-BR/concepts/broadcasts#ritmo-de-envio).
+  [Transmissões](/pt-BR/concepts/broadcasts#ritmo-de-envio).
 - `POST /emails` e `POST /emails/batch` retornam `429 daily_quota_exceeded`
   em um plano diário (Free, Starter) quando a cota diária de envio acabou e a
   fila de espera está cheia — tente de novo depois da virada do dia em UTC — e
@@ -92,7 +92,7 @@ deliberadas e explícitas:
   responde o mesmo `429 daily_quota_exceeded`, com uma mensagem que cita o
   aquecimento, quando já há muito e-mail aguardando.
 - `POST /contacts`, `POST /contacts/batch` e o alias de audience retornam
-  `403 plan_limit_reached` quando um contato novo levaria o time além do
+  `403 plan_limit_reached` quando um contato novo levaria a equipe além do
   limite de contatos do plano (1.000 no Free; planos pagos são ilimitados).
   Contatos existentes continuam sendo atualizados; em um lote só os novos
   falham.
@@ -102,7 +102,7 @@ deliberadas e explícitas:
   objeto `period` — `emails_sent`, `included`, `overage_enabled`,
   `overage_usd_per_1k`, `starts_at`, `ends_at`. Instâncias auto-hospedadas
   reportam `cloud: false` com plano, limites e period nulos.
-- `DELETE /emails/{id}` existe (o Resend não tem exclusão de emails).
+- `DELETE /emails/{id}` existe (o Resend não tem exclusão de e-mails).
 - `headers` personalizados seguem uma lista de permitidos: qualquer nome
   `X-*` (exceto `X-SES-*` e `X-MillionSend-*`) mais `In-Reply-To`,
   `References`, `Importance`, `Priority`, `Comments`, `Keywords`,
@@ -125,7 +125,7 @@ deliberadas e explícitas:
 - O remetente de onboarding da instância (`ONBOARDING_EMAIL_FROM`;
   `hello@mail.millionsend.com` na nuvem) leva só o e-mail de onboarding do
   próprio MillionSend: como `from` em `POST /emails`, `POST /emails/batch` ou
-  no envio de um broadcast ele é recusado com `422 reserved_sender`, com
+  no envio de uma transmissão ele é recusado com `422 reserved_sender`, com
   qualquer caixa de letras e qualquer nome de exibição. Envie de um domínio que
   você [verificou](/pt-BR/concepts/domains).
 - Nomes de tag que começam com `millionsend_`, com qualquer caixa de letras,

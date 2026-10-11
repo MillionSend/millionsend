@@ -3,7 +3,7 @@ title: Introdução
 description: O que é o MillionSend e como as peças se encaixam.
 ---
 
-MillionSend é a plataforma de email open source. Envie um. Envie um milhão.
+MillionSend é a plataforma de e-mail open source. Envie um. Envie um milhão.
 
 Use de duas formas, com o mesmo código nas duas:
 
@@ -17,12 +17,12 @@ Use de duas formas, com o mesmo código nas duas:
 As duas formas compartilham o mesmo painel, a mesma API HTTP e os mesmos
 SDKs — esta documentação cobre ambas, e as abas Nuvem / Auto-hospedado que
 você verá em algumas páginas lembram sua escolha. Em volta do núcleo de envio
-você tem um painel, uma API HTTP, SDKs, webhooks, contatos, broadcasts e um
+você tem um painel, uma API HTTP, SDKs, webhooks, contatos, transmissões e um
 relay SMTP.
 
 ## API compatível com Resend
 
-A API HTTP é compatível na comunicação com a do Resend: mesmos formatos de
+A API HTTP é compatível com a do Resend: mesmos formatos de
 requisição e resposta, mesmo formato de erro. Os SDKs oficiais do Resend
 respeitam uma URL base configurável, então migrar uma integração existente
 significa trocar duas variáveis de ambiente — a chave de API e a URL base —
@@ -30,8 +30,8 @@ sem reescrever seu código. O MillionSend também publica
 [SDKs próprios](/pt-BR/sdks) para nove linguagens, espelhando o formato dos
 SDKs do Resend.
 
-Uma diferença deliberada: **contatos são globais ao time**. Não existe o
-conceito de "audiences" — cada contato pertence diretamente ao seu time, e
+Uma diferença deliberada: **contatos são globais à equipe**. Não existe o
+conceito de "audiences" — cada contato pertence diretamente à sua equipe, e
 você segmenta com [segmentos](/pt-BR/concepts/segments) (filtros salvos) e
 [tópicos](/pt-BR/concepts/topics) (categorias de inscrição). Veja
 [Contatos](/pt-BR/concepts/contacts).
@@ -40,11 +40,11 @@ você segmenta com [segmentos](/pt-BR/concepts/segments) (filtros salvos) e
 
 | Área | Notas |
 | --- | --- |
-| API de emails | Enviar, lote, consultar, cancelar envios agendados. Idempotência via header `Idempotency-Key`. |
-| Contatos | Contatos do time inteiro, com estado de inscrição, propriedades customizadas e importação CSV. |
-| Segmentos | Filtros salvos sobre os contatos, usáveis como alvo de broadcasts. |
+| API de e-mails | Enviar, lote, consultar, cancelar envios agendados. Idempotência via header `Idempotency-Key`. |
+| Contatos | Contatos da equipe inteira, com estado de inscrição, propriedades personalizadas e importação CSV. |
+| Segmentos | Filtros salvos sobre os contatos, usáveis como alvo de transmissões. |
 | Tópicos | Categorias granulares de inscrição, integradas à página de descadastro hospedada. |
-| Broadcasts | Componha, agende e envie para todos os contatos, um segmento ou um tópico. |
+| Transmissões | Crie, agende e envie para todos os contatos, um segmento ou um tópico. |
 | Templates | Templates reutilizáveis com campos de mesclagem por contato. |
 | Domínios | Verificação de DNS guiada, BYODKIM, rastreamento e TLS por domínio. |
 | Webhooks | Assinaturas Standard Webhooks, seleção de eventos por endpoint, log de entregas. |
@@ -68,15 +68,15 @@ contêineres:
   (porta 2587). Os processos também podem ser separados um por contêiner com
   a variável de ambiente `PROCESS`.
 
-Os corpos dos emails são criptografados em repouso (criptografia de envelope
-AES-256-GCM) e expurgados após uma janela de retenção. Eventos de entrega
+Os corpos dos e-mails são criptografados em repouso (criptografia de envelope
+AES-256-GCM) e apagados após uma janela de retenção. Eventos de entrega
 (bounces, reclamações, entregas) voltam do SES — na Nuvem automaticamente;
 auto-hospedado via SNS para uma fila SQS que o worker consome por long polling,
 mais push para o seu host quando ele tem uma URL HTTPS pública.
 
 ## Próximos passos
 
-- [Início rápido](/pt-BR/quickstart) — do zero ao primeiro email em poucos
+- [Início rápido](/pt-BR/quickstart) — do zero ao primeiro e-mail em poucos
   minutos, na Nuvem ou na sua própria instância.
 - [Auto-hospedagem](/pt-BR/self-hosting) — a referência completa de
   implantação.

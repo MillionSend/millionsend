@@ -1,12 +1,12 @@
 ---
-title: Broadcasts
-description: Componha, agende e envie um email para muitos contatos.
+title: Transmissões
+description: Crie, agende e envie um e-mail para muitos contatos.
 ---
 
-Um broadcast é um email enviado a muitos contatos: todos eles, um
+Uma transmissão (`/broadcasts` na API) é um e-mail enviado a muitos contatos: todos eles, um
 [segmento](/pt-BR/concepts/segments) ou um [tópico](/pt-BR/concepts/topics).
-Componha no editor de blocos do painel (com campos de mesclagem por contato)
-ou crie broadcasts pela API.
+Escreva no editor de blocos do painel (com campos de mesclagem por contato)
+ou crie transmissões pela API.
 
 ## Ciclo de vida
 
@@ -15,23 +15,23 @@ draft → scheduled → sending → sent
               ↘ canceled
 ```
 
-- Broadcasts são criados como **rascunhos** (`draft`). Só rascunhos podem ser
+- Transmissões são criadas como **rascunhos** (`draft`). Só rascunhos podem ser
   editados ou apagados.
 - `POST /broadcasts/{id}/send` agenda o envio — imediatamente, ou em um
   timestamp `scheduled_at`.
-- Um broadcast **na fila** — agendado, ou já saindo — pode ser cancelado com
+- Uma transmissão **na fila** — agendada, ou já saindo — pode ser cancelada com
   `POST /broadcasts/{id}/cancel`. Os e-mails já enviados não voltam; o
   `canceled_remaining` da resposta diz quantos foram parados, e o
   `sent_count` de uma leitura diz quantos já tinham saído.
-- Na comunicação, `scheduled` e `sending` aparecem ambos como `queued`
+- Na API, `scheduled` e `sending` aparecem ambos como `queued`
   (correspondendo à união de status do SDK do Resend); `canceled` é uma
-  extensão do MillionSend. Um broadcast aparece como `queued` com `sent_at`
+  extensão do MillionSend. Uma transmissão aparece como `queued` com `sent_at`
   nulo até o último e-mail sair, leve o tempo que levar.
 
 ## O que o fan-out faz
 
-Cada email de destinatário passa pelo mesmo pipeline de um envio
-transacional, mais o tratamento específico de broadcast:
+Cada e-mail de destinatário passa pelo mesmo pipeline de um envio
+transacional, mais o tratamento específico de transmissão:
 
 - **Resolução de audiência** — contatos descadastrados globalmente são sempre
   excluídos; filtros de segmento e inscrições em tópicos são avaliados no
@@ -39,7 +39,7 @@ transacional, mais o tratamento específico de broadcast:
 - **Checagens de supressão** — endereços na
   [lista de supressão](/pt-BR/concepts/suppressions) são pulados.
 - **Campos de mesclagem** — valores por contato (nome, propriedades
-  customizadas) são substituídos no template.
+  personalizadas) são substituídos no template.
 - **Links de descadastro** — headers `List-Unsubscribe` de um clique
   (RFC 8058) e um link de descadastro hospedado são adicionados a cada
   mensagem. Para colocar o link no corpo, escreva `{{{UNSUBSCRIBE_URL}}}` —
@@ -49,14 +49,14 @@ transacional, mais o tratamento específico de broadcast:
   mudança).
 
 
-Os e-mails de broadcast entram na fila de envio abaixo dos transacionais: um
-e-mail transacional aceito enquanto um broadcast está saindo é enviado antes
-dos destinatários restantes. Os envios rodam em várias pistas ao mesmo tempo,
+Os e-mails de transmissão entram na fila de envio abaixo dos transacionais: um
+e-mail transacional aceito enquanto uma transmissão está saindo é enviado antes
+dos destinatários restantes. Os envios rodam em paralelo,
 no ritmo da taxa de envio do SES da instância.
 
 <Callout type="info">
 Em uma instância auto-hospedada, os links de descadastro são construídos a
-partir de `APP_BASE_URL`, então o envio de broadcasts é rejeitado até que ela
+partir de `APP_BASE_URL`, então o envio de transmissões é rejeitado até que ela
 esteja configurada — veja
 [Auto-hospedagem](/pt-BR/self-hosting#referência-de-ambiente). Na Nuvem isso
 é automático.
@@ -64,11 +64,11 @@ esteja configurada — veja
 
 ## Ritmo de envio
 
-A plataforma envia uma quantidade limitada de e-mails por dia. Um broadcast
-que cabe no que está disponível sai de uma vez, na taxa de envio. Um maior
+A plataforma envia uma quantidade limitada de e-mails por dia. Uma transmissão
+que cabe no que está disponível sai de uma vez, na taxa de envio. Uma maior
 sai em levas: a primeira agora, o restante conforme a capacidade libera nos
-dias seguintes. E-mails transacionais nunca ficam retidos atrás de um
-broadcast.
+dias seguintes. E-mails transacionais nunca ficam esperando atrás de uma
+transmissão.
 
 O envio avisa de antemão:
 
@@ -90,35 +90,35 @@ O envio avisa de antemão:
 - `warning` só aparece quando o envio leva mais de uma leva — `paced` quando a
   audiência passa da capacidade disponível agora, `queued_behind` quando
   outros envios estão na frente (a mensagem diz quando este começa).
-- Enquanto um broadcast está saindo, `GET /broadcasts/{id}` e a lista trazem
+- Enquanto uma transmissão está saindo, `GET /broadcasts/{id}` e a lista trazem
   `finishes_at` ao vivo e `sent_count`.
 - Uma audiência que precisaria de mais de 24 dias de capacidade — da
   plataforma, ou do limite do seu plano — é recusada com
   `422 broadcast_too_large` em vez de aceita e deixada esperando. Divida em
   segmentos menores ou fale com o suporte.
 
-## Salvaguardas
+## Proteções
 
-- Somente um **domínio verificado** do seu time pode aparecer em `from`.
+- Somente um **domínio verificado** da sua equipe pode aparecer em `from`.
 - Se sua taxa recente de bounce ou reclamação cruzou o limite de pausa do
-  SES, novos envios de broadcast são bloqueados com um erro
+  SES, novos envios de transmissão são bloqueados com um erro
   `403 sending_paused` — contendo o estrago antes que o SES pause o envio por
   completo.
 - Se a taxa agregada de bounce ou reclamação da plataforma na região SES do seu
-  remetente se aproxima da linha de revisão do SES, envios de broadcast nessa
+  remetente se aproxima do limite de revisão do SES, envios de transmissão nessa
   região são recusados com `403 broadcasts_paused` até a taxa se recuperar. O
-  e-mail transacional continua saindo, e a pausa libera sozinha.
+  e-mail transacional continua saindo, e a pausa termina sozinha.
 
 Veja a [referência da API](/pt-BR/api-reference) para todos os endpoints de
-broadcast.
+transmissões.
 
 ## Mudanças recentes
 
-- Um broadcast com e-mails ainda esperando — por capacidade, ou pela virada
+- Uma transmissão com e-mails ainda esperando — por capacidade, ou pela virada
   do limite do plano — aparece como `queued` com `sent_at` nulo até o último
   e-mail sair. Antes aparecia como `sent` assim que todos os e-mails eram
   gravados.
 - Uma audiência cujo limite do plano precisaria de mais de 24 dias é recusada
   com `422 broadcast_too_large` em vez de aceita e deixada esperando.
-- `POST /broadcasts/{id}/cancel` funciona em um broadcast que já está saindo;
+- `POST /broadcasts/{id}/cancel` funciona em uma transmissão que já está saindo;
   a resposta traz `canceled_remaining`.

@@ -1,29 +1,29 @@
 ---
 title: Segmentos
-description: Filtros salvos sobre seus contatos, usáveis como alvo de broadcasts.
+description: Filtros salvos sobre seus contatos, usáveis como alvo de transmissões.
 ---
 
-Um segmento é um **filtro salvo** sobre os contatos do time — ele armazena
-uma expressão de filtro, não uma lista de membros. A pertinência é avaliada
+Um segmento é um **filtro salvo** sobre os contatos da equipe — ele armazena
+uma expressão de filtro, não uma lista de membros. Quem faz parte do segmento é avaliado
 ao vivo: um contato que passa a corresponder ao filtro entra no segmento
 imediatamente, e a contagem de contatos que você vê é computada no momento da
 leitura.
 
 Um segmento criado **sem filtro** é uma **lista manual de membros**: você
-adiciona e remove contatos explicitamente (pelo dashboard, ou via
+adiciona e remove contatos explicitamente (pelo painel, ou via
 `POST /contacts/{id}/segments/{segmentId}` e o `add_contact_to_segment` do MCP). Os dois
-tipos valem igualmente como alvo de broadcast.
+tipos valem igualmente como alvo de transmissões.
 
-Os filtros atuam sobre campos do contato (email, nome, estado de inscrição,
+Os filtros atuam sobre campos do contato (e-mail, nome, estado de inscrição,
 data de criação) e sobre
-[propriedades customizadas](/pt-BR/concepts/contacts#o-que-um-contato-armazena),
+[propriedades personalizadas](/pt-BR/concepts/contacts#o-que-um-contato-armazena),
 com operadores como igual, contém, definido / não definido e comparações de
 data. As condições combinam com e/ou.
 
 ## Usando segmentos
 
-- **Broadcasts** — mire um segmento em vez de todos os contatos. O fan-out
-  resolve a pertinência no momento do envio usando o mesmo tradutor de
+- **Transmissões** — envie para um segmento em vez de todos os contatos. O fan-out
+  resolve quem faz parte do segmento no momento do envio usando o mesmo tradutor de
   filtros da contagem de contatos, então o que você prevê é o que sai.
 - **Filtro no painel** — a visão de Contatos pode ser filtrada por segmento,
   e a exportação CSV respeita o filtro de segmento ativo.

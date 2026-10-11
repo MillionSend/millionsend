@@ -34,8 +34,8 @@ millionsend --help | --version
 ```
 
 - **`migrate`** é o caminho interativo: pergunta o que falta (chaves, URL de
-  destino), deixa você escolher recursos numa lista de caixas de seleção
-  (todas marcadas por padrão, exceto broadcasts enviados), mostra o plano,
+  destino), deixa você escolher recursos em uma lista de caixas de seleção
+  (todas marcadas por padrão, exceto transmissões enviadas), mostra o plano,
   pede confirmação, aplica e imprime o resumo.
 - **`migrate plan`** lê os dois lados e imprime o que mudaria sem gravar nada
   no destino. `--out plan.json` salva. Antes de qualquer escrita, o plano
@@ -65,11 +65,11 @@ millionsend --help | --version
 | `--to-url <url>` | URL da API de uma instância auto-hospedada do MillionSend. Sem ela, o destino é o MillionSend Cloud (`https://api.millionsend.com`), como nos SDKs. |
 | `--to-key-stdin` | Lê a chave de API do MillionSend do stdin (segunda linha quando as duas flags de stdin estão presentes). |
 | `--to-key <key>` | Chave de API do MillionSend como argumento. Mesma ressalva. |
-| `--rps <n>` | Requisições por segundo contra a origem; padrão 8. O limite do time no Resend é 10, compartilhado com o seu envio em produção; a CLI mostra ao conectar o limite que detecta, se mantém abaixo dele e avisa quando o ritmo passa dele. Valores acima de 10 (até 100) são para um limite que o Resend aumentou sob pedido. |
+| `--rps <n>` | Requisições por segundo contra a origem; padrão 8. O limite da equipe no Resend é 10, compartilhado com o seu envio em produção; a CLI mostra ao conectar o limite que detecta, se mantém abaixo dele e avisa quando o ritmo passa dele. Valores acima de 10 (até 100) são para um limite que o Resend aumentou sob pedido. |
 | `--only <a,b>` | Migra apenas estes recursos. |
 | `--skip <a,b>` | Pula estes recursos. `enrichment` é a passagem por contato que roda por último: inscrições em tópicos, depois propriedades, cada uma retomável. |
 | `--on-conflict <mode>` | Contatos que já existem no destino: `upsert` (padrão), `skip`, `error`. |
-| `--include-sent` | Importa broadcasts enviados como rascunhos. Pulados por padrão. |
+| `--include-sent` | Importa transmissões enviadas como rascunhos. Puladas por padrão. |
 | `--fresh-webhook-secrets` | Gera segredos de assinatura de webhook novos em vez de copiá-los. Mostrados uma vez, no relatório. |
 | `--fresh` | Esquece o progresso de retomada em `.millionsend/migrate-state.json` e lê tudo de novo. Os ids criados por execuções anteriores são mantidos, então o `rollback` continua funcionando. |
 | `--out <file>` | `migrate plan`: grava o plano como JSON. |
@@ -78,7 +78,7 @@ millionsend --help | --version
 | `--non-interactive` | Nunca pergunta; uma entrada faltante é saída 1. Automático quando o stdin não é um terminal, e com `--json`. |
 | `--json` | JSON no stdout, progresso no stderr. |
 | `-v`, `--verbose` | Registra cada requisição: `GET /contacts?limit=100 → 200 (143 ms)`. |
-| `--color <mode>` | `auto` (padrão: cores num terminal, nenhuma quando a saída é um pipe ou `NO_COLOR` está definida), `always`, `never`. |
+| `--color <mode>` | `auto` (padrão: cores em um terminal, nenhuma quando a saída é um pipe ou `NO_COLOR` está definida), `always`, `never`. |
 | `--no-color` | O mesmo que `--color never`. |
 | `-h`, `--help` / `-V`, `--version` | Texto de ajuda / versão. |
 
@@ -94,14 +94,14 @@ Nomes de recurso para `--only` e `--skip`, na ordem de aplicação: `domains`,
 | `MILLIONSEND_API_KEY` | Chave de API do MillionSend, acesso total. |
 | `MILLIONSEND_BASE_URL` | URL da API de uma instância auto-hospedada, igual a `--to-url`. Sem ela, MillionSend Cloud. |
 | `NO_COLOR` | Desativa cores. |
-| `FORCE_COLOR` | Cores mesmo num pipe, o mesmo que `--color always`. |
-| `DO_NOT_TRACK` | Respeitada, sem efeito: a ferramenta não envia telemetria, nunca liga para casa e nunca verifica atualizações. |
+| `FORCE_COLOR` | Cores mesmo em um pipe, o mesmo que `--color always`. |
+| `DO_NOT_TRACK` | Respeitada, sem efeito: a ferramenta não envia telemetria, nunca se conecta a servidores nossos e nunca verifica atualizações. |
 
 Cada chave é resolvida nesta ordem: variável de ambiente, depois a flag
-`-stdin`, depois a flag de argumento, depois — num terminal — um prompt
+`-stdin`, depois a flag de argumento, depois — em um terminal — um prompt
 mascarado. A URL de destino vem de `MILLIONSEND_BASE_URL` ou `--to-url`; sem
 nenhuma das duas, um terminal oferece a escolha entre o MillionSend Cloud e uma
-URL auto-hospedada, e uma execução não interativa mira o MillionSend Cloud,
+URL auto-hospedada, e uma execução não interativa usa o MillionSend Cloud,
 como nos SDKs.
 
 ## Arquivos
@@ -125,7 +125,7 @@ atual; a ferramenta avisa uma vez.
   `millionsend-cli/<versão>`. Escritas vão apenas para a sua API do
   MillionSend.
 - **As chaves ficam em memória.** Nunca são gravadas em arquivo e são
-  redigidas de toda linha de log (`re_…`, `ms_…`, `whsec_…` e headers
+  mascaradas em toda linha de log (`re_…`, `ms_…`, `whsec_…` e headers
   `Authorization`).
 - **Dois hosts, nenhum terceiro.** A ferramenta contata `api.resend.com` e a
   URL da API do MillionSend que você informou. Sem telemetria, sem
@@ -133,7 +133,7 @@ atual; a ferramenta avisa uma vez.
 - **401 ou 403 de qualquer lado interrompe a execução.** Sem retentativa,
   sem contorno.
 - **Limites de taxa são respeitados.** 429 aguarda o `retry-after`; 5xx e
-  erros de rede recuam exponencialmente, 5 tentativas. Cada retentativa é
+  erros de rede esperam cada vez mais entre tentativas (backoff exponencial), até 5 tentativas. Cada retentativa é
   registrada.
 - **Descadastros são preservados.** `unsubscribed` e opt-outs de tópico vêm
   como estão; a ferramenta nunca reinscreve ninguém. Supressões mantêm a
@@ -172,7 +172,7 @@ printf '%s\n%s\n' "$RESEND_KEY" "$MS_KEY" | millionsend migrate plan --from rese
 ```
 
 O progresso é impresso uma linha por passo (`✓`, `✗`, `⟳` com contadores
-`n/N`), acrescentado quando encadeado por pipe, reescrito no lugar num
+`n/N`), acrescentado quando encadeado por pipe, reescrito no lugar em um
 terminal.
 
 ## `--json`
