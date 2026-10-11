@@ -19,8 +19,9 @@ it("boots with only its MX_* variables, filling the limits with defaults", () =>
     maxConnectionsPerIp: 10,
     connectionsPerIpPerMinute: 60,
     maxRecipients: 50,
-    socketTimeoutMs: 60_000,
+    socketTimeoutMs: 300_000,
     sessionTimeoutMs: 600_000,
+    maxBufferedBytes: 512 * 1024 * 1024,
   });
 });
 

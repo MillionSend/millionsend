@@ -1,0 +1,35 @@
+# The cloud inbound MX box (mx.millionsend-dns.com); runbook in README.md
+# next to this file. It holds no database and no app secret beyond
+# MX_INGEST_SECRET: every message goes to the API over HTTPS.
+services:
+  mx:
+    image: "ghcr.io/millionsend/millionsend:${MILLIONSEND_TAG:?set MILLIONSEND_TAG in .env}"
+    env_file: .env
+    environment:
+      PROCESS: mx
+      MX_TLS_CERT_PATH: /tls/fullchain.pem
+      MX_TLS_KEY_PATH: /tls/privkey.pem
+    ports:
+      # IPv4 only: over IPv6, Docker's proxy would replace each client's
+      # address with its own, and SPF and the per-IP limits need the real one.
+      - "0.0.0.0:25:2525"
+    volumes:
+      # The certbot deploy hook copies the keypair here; STARTTLS follows it.
+      - ./tls:/tls:ro
+    # The keypair is root:1000 0640 on the host; this group lets the image's
+    # non-root user read it.
+    group_add: ["1000"]
+    restart: unless-stopped
+    # Above the supervisor's 35 s child-exit budget (scripts/start.mjs).
+    stop_grace_period: 45s
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Rotated on disk by default, unlike json-file.
+    logging:
+      driver: local

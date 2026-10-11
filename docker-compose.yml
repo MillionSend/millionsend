@@ -75,6 +75,42 @@ services:
       - /app/apps/docs/.next/cache
       - /app/apps/docs/.source
 
+  mx:
+    build: .
+    # Its own variables only, not env_file: the MX faces the internet and has
+    # no use for the app's keys.
+    environment:
+      PROCESS: mx
+      MX_INGEST_URL: "http://millionsend:${PORT:-3001}/internal/mx"
+      MX_INGEST_SECRET: "${MX_INGEST_SECRET:-}"
+      MX_HOSTNAME: "${MX_HOSTNAME:-${RECEIVING_MX_HOST:-}}"
+      MX_TLS_CERT_PATH: /tls/fullchain.pem
+      MX_TLS_KEY_PATH: /tls/privkey.pem
+    ports:
+      # Public by design: other mail servers deliver here. IPv4 only: over
+      # IPv6, Docker's proxy would replace each client's address with its own.
+      - "0.0.0.0:25:2525"
+    volumes:
+      # A certbot deploy hook copies the keypair here; STARTTLS follows it.
+      - ./mx-tls:/tls:ro
+    # The keypair is root:1000 0640 on the host; this group lets the image's
+    # non-root user read it.
+    group_add: ["1000"]
+    # Opt-in (COMPOSE_PROFILES=mx): port 25 is public, and the app must have
+    # RECEIVING_MX_HOST set for the MX to have anything to accept.
+    profiles: ["mx"]
+    restart: unless-stopped
+    # Above the supervisor's 35 s child-exit budget (scripts/start.mjs).
+    stop_grace_period: 45s
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+
   backup:
     # Optional scheduled pg_dump to S3-compatible storage. Stays disabled (the
     # container prints one line and exits 0, and restart "no" leaves it

@@ -22,10 +22,20 @@ export interface MxEnv {
   maxConnectionsPerIp: number;
   connectionsPerIpPerMinute: number;
   maxRecipients: number;
-  /** Inactivity before a session is dropped (smtp-server socketTimeout). */
+  /**
+   * Inactivity before a session is dropped (smtp-server socketTimeout). The
+   * client sits silent while its message is checked and handed to the app,
+   * so this must outlast that handoff; RFC 5321 also asks for 5 minutes.
+   */
   socketTimeoutMs: number;
   /** Longest a single session may last, however busy. */
   sessionTimeoutMs: number;
+  /**
+   * Message bytes all sessions together may hold in memory; past it, DATA is
+   * drained and answered 452 so the sender retries. Without it, max clients
+   * each sending 40 MiB at once would exhaust a small box.
+   */
+  maxBufferedBytes: number;
 }
 
 const HOSTNAME_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -86,8 +96,9 @@ export function parseMxEnv(source: Source): MxEnv {
     maxConnectionsPerIp: int("MX_MAX_CONNECTIONS_PER_IP", 10, 1, 1000),
     connectionsPerIpPerMinute: int("MX_CONNECTIONS_PER_IP_PER_MINUTE", 60, 1, 10_000),
     maxRecipients: int("MX_MAX_RECIPIENTS", 50, 1, MAX_DELIVER_RECIPIENTS),
-    socketTimeoutMs: int("MX_SOCKET_TIMEOUT_MS", 60_000, 1000, 3_600_000),
+    socketTimeoutMs: int("MX_SOCKET_TIMEOUT_MS", 300_000, 1000, 3_600_000),
     sessionTimeoutMs: int("MX_SESSION_TIMEOUT_MS", 600_000, 10_000, 86_400_000),
+    maxBufferedBytes: int("MX_MAX_BUFFERED_MB", 512, 64, 65_536) * 1024 * 1024,
   };
   if (problems.length > 0) throw new Error(`mx: invalid configuration: ${problems.join("; ")}`);
   return env;
