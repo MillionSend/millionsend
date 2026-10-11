@@ -255,9 +255,19 @@ nothing is lost.
 
 - **Logs** are one JSON object per line: `listening`, `tls_loaded`,
   `tls_unavailable`, `rcpt_refused`, `rcpt_failed`, `delivered`,
-  `deliver_refused`, `deliver_failed`, `connection_refused`, `auth_timeout`.
-  They carry envelope facts (domains, sizes, verdicts) and outcomes, never
-  message content, and Docker's `local` driver rotates them.
+  `deliver_refused`, `deliver_failed`, `message_refused`,
+  `connection_refused`, `auth_timeout`. They carry envelope facts (domains,
+  sizes, verdicts) and outcomes, never message content, and Docker's `local`
+  driver rotates them.
+- **Refusals the MX makes itself:**
+  - `rcpt_refused` with reason `recipient_limit` is a 452 past
+    `MX_MAX_RECIPIENTS`; the sender retries the rest in another transaction.
+  - `message_refused` with reason `size` is a 552 for a message over 40 MiB.
+  - `message_refused` with reason `memory` is a 452: the messages in flight
+    together passed `MX_MAX_BUFFERED_MB`. A steady stream of these means the
+    box needs more memory or a lower `MX_MAX_CLIENTS`.
+  - A sender that declares a size over 40 MiB in `MAIL FROM` is refused
+    before it sends anything, and that leaves no log line.
 - **What the box holds:** the TLS keypair and `MX_INGEST_SECRET`. The secret
   lets its holder submit mail to the app as if received, so rotate it on both
   sides if the box is ever compromised. Nothing here reads stored mail.

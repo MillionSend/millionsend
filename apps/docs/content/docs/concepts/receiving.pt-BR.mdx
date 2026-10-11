@@ -145,8 +145,10 @@ endereço em que ela chegou.
   ela vira um email recebido com os três em `received_for`, uma entrega de
   webhook e uma mensagem contada. Uma nova tentativa do servidor de quem
   envia também é reconhecida e guardada uma vez só. Quando a mesma mensagem
-  chega de novo para outros endereços seus, eles entram em `received_for`
-  sem um segundo webhook.
+  chega de novo para outros endereços seus (o servidor de quem envia divide
+  os destinatários em várias entregas, por exemplo passando de 50), eles
+  entram em `received_for`, e chega mais um `email.received` com o mesmo
+  `email_id` só com eles.
 - Só o nome exato recebe: email para `x@eu.inbound.example.com` é recusado,
   a não ser que esse subdomínio também receba.
 - Quando uma mensagem chega aos domínios de recebimento de dois times, cada
@@ -218,8 +220,11 @@ const { data: files } = await resend.emails.receiving.attachments.list({ emailId
 
 ### Listar
 
-`GET /emails/receiving` aceita `limit` (1–100, padrão 20) e um cursor
-`after` ou `before`, como toda [listagem](/pt-BR/api-reference#paginação).
+`GET /emails/receiving` lista do mais novo para o mais antigo, como o
+Resend: `after` avança para emails mais antigos, `before` volta para os mais
+novos. Aceita `limit` (1–100, padrão 20; o Resend devolve todos quando falta
+o `limit`) e um cursor `after` ou `before`, como toda
+[listagem](/pt-BR/api-reference#paginação).
 
 ```sh
 curl "https://api.millionsend.com/emails/receiving?limit=20" \
@@ -305,14 +310,20 @@ autenticação e um link de download da mensagem original:
 - `html_format`: `data_uri`, o padrão, troca as referências `cid:` de imagem
   do HTML pelas próprias imagens inline. `?html_format=cid` mantém as
   referências; relacione-as ao `content_id` dos anexos. Qualquer outro valor
-  dá `422`.
+  dá `422`. Quando colocar as imagens no HTML passaria de 40 MB (em geral uma
+  conversa longa que repete a mesma imagem muitas vezes), as referências
+  ficam e `html_format` vem `cid`, seja qual for o pedido, como o Resend faz
+  a partir de 100 MB: confira o `html_format` em vez de contar com ele.
 - `from` é só o endereço; o nome de exibição fica em `headers.from`.
 - `headers` traz os cabeçalhos de nível superior com nomes em minúsculas, um
   valor por nome; um cabeçalho repetido, como `received`, tem os valores
-  unidos por quebras de linha.
+  unidos por quebras de linha. Quando a mensagem não traz `Return-Path`,
+  `return-path` mostra o remetente do envelope que o servidor de quem envia
+  informou, `<>` para um bounce.
 - `html` ou `text` vem `null` quando a mensagem não tem essa parte. Uma
-  mensagem cujo MIME não dá para interpretar ainda é guardada e listada, com
-  `html`, `text` e `headers` todos `null`; leia-a pelo `raw`.
+  mensagem cujo MIME não dá para interpretar ainda é guardada e listada; o
+  que não dá para ler dela vem `null` (`headers` também, quando nenhum
+  cabeçalho é reconhecido), e o `raw` traz a mensagem inteira.
 - `message_id` vem do cabeçalho `Message-ID` da mensagem. Quando ela não tem
   um, o MillionSend cria `<id@received.invalid>`.
 
@@ -321,18 +332,26 @@ autenticação e um link de download da mensagem original:
 | Valor | Significa | Resultados da checagem |
 | --- | --- | --- |
 | `pass` | A checagem passou. | `pass` |
-| `fail` | A checagem falhou. | `fail`, `softfail` |
-| `gray` | Sem resposta clara: não havia registro ou assinatura para checar, ou o resultado foi neutro. | `none`, `neutral`, `policy` |
+| `fail` | A checagem falhou. | `fail` |
+| `gray` | Sem resposta clara: não havia registro ou assinatura para checar, ou o resultado foi neutro. | `none`, `neutral`, `policy`, `softfail` |
 | `processing_failed` | A checagem não terminou, por exemplo por um erro de DNS ou um registro quebrado. | `temperror`, `permerror` |
 | `unknown` | Não foi checado. | |
 
+Como no Resend, o DKIM só passa com uma assinatura do domínio do `from` (ou
+de outro domínio da mesma organização): uma assinatura válida de qualquer
+outro domínio vem `gray`, e `policy` no painel. O DMARC vem `gray` quando o
+domínio do `from` publica `p=none` e o SPF ou o DKIM passou, `none` no
+painel.
+
 `dmarc: "pass"` quer dizer que o domínio do `from` autorizou a mensagem.
-Qualquer outro valor quer dizer que o `from` pode ser falso.
+Qualquer outro valor quer dizer que o `from` pode ser falso, mas `gray`
+também aparece em email legítimo de um domínio que pede para o DMARC não ser
+aplicado.
 
 ### Anexos
 
-`GET /emails/receiving/{email_id}/attachments` lista os anexos de um email
-(com paginação, como toda listagem), e
+`GET /emails/receiving/{email_id}/attachments` lista todos os anexos de um
+email de uma vez, como o Resend (passe `limit` para paginar), e
 `GET /emails/receiving/{email_id}/attachments/{id}` devolve um deles, cada um
 com um link de download novo:
 
@@ -389,11 +408,11 @@ inline e os anexos originais; com `passthrough: false` e o seu próprio `text`
 ou `html`, o original vai anexado como `forwarded_message.eml`, com assunto
 `Fwd:`. Um encaminhamento é um envio comum: o `from` precisa ser de um
 domínio verificado, e ele conta na sua cota de envio. `POST /emails` aceita o
-que o encaminhamento precisa: imagens inline (`content_id`) e até 30 MB de
-anexos (40 MB depois da codificação base64), o bastante para os anexos de
-qualquer mensagem que chegou. Um encaminhamento com `passthrough: false`
-anexa a mensagem inteira, então uma mensagem com mais de 30 MB só pode ser
-encaminhada no modo padrão.
+que o encaminhamento precisa: imagens inline (`content_id`) e um email de até
+40 MB do jeito que sai, com os anexos já em base64 (o limite do Resend e do
+SES). Um encaminhamento com `passthrough: false` anexa a mensagem inteira,
+então funciona para mensagens de até uns 29 MB; o modo padrão vai quase até
+40 MB. Um envio acima do limite é recusado com `422` antes de entrar na fila.
 
 Para responder na mesma conversa, envie com `In-Reply-To` e `References`
 iguais ao `message_id` recebido:
@@ -413,7 +432,10 @@ await resend.emails.send({
 `email.received` dispara uma vez para cada mensagem guardada para o seu
 time, nos endpoints inscritos nele ou em todos os eventos. Como o do Resend,
 ele só traz metadados: busque o conteúdo com
-`GET /emails/receiving/{email_id}`.
+`GET /emails/receiving/{email_id}`. Quando uma entrega posterior da mesma
+mensagem chega a mais endereços seus, chega mais um `email.received` com o
+mesmo `email_id`, e o `received_for` dele só lista os endereços novos, para
+cada endereço ser avisado uma vez só.
 
 ```json
 {

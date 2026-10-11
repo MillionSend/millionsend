@@ -416,7 +416,9 @@ Notes:
   [`deploy/mx/docker-compose.yml`](deploy/mx/docker-compose.yml) with
   `MX_INGEST_URL=https://<your API origin>/internal/mx`, `MX_HOSTNAME`, and the
   same `MX_INGEST_SECRET`; behind nginx, the API's `client_max_body_size`
-  must allow a 40 MiB delivery (the example below sets `60m`).
+  must allow a 40 MiB delivery (the example below sets `60m`), and
+  `large_client_header_buffers` a header line of about 13 KB (`16k`), since
+  the delivery's envelope travels in one header.
 - Limits, with their defaults: `MX_MAX_CLIENTS` (200),
   `MX_MAX_CONNECTIONS_PER_IP` (10), `MX_CONNECTIONS_PER_IP_PER_MINUTE` (60),
   `MX_MAX_RECIPIENTS` per message (50, at most 100), `MX_SOCKET_TIMEOUT_MS`
@@ -550,6 +552,10 @@ server {
     # POST /emails/batch of up to 100 emails. 60m covers them without
     # unbounded uploads.
     client_max_body_size 60m;
+    # The MX sends a delivery's envelope in one header of up to about 13 KB,
+    # over nginx's default 8k line; a 400 there defers that mail until the
+    # sender gives up.
+    large_client_header_buffers 4 16k;
 
     location / {
         proxy_pass http://127.0.0.1:3001;

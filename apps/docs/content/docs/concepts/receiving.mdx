@@ -138,8 +138,10 @@ Route each message in your code by the address it came to.
 - A message is stored once per team. Sent to three of your addresses, it is
   one received email with all three in `received_for`, one webhook delivery
   and one message counted. A sending server's retry is recognized and stored
-  once too. When the same message arrives again for more of your addresses,
-  they are added to `received_for` without a second webhook.
+  once too. When the same message arrives again for more of your addresses
+  (a sending server splits its recipients over several deliveries, for
+  example past 50), they are added to `received_for`, and one more
+  `email.received` for the same `email_id` names only them.
 - Only the exact name receives: mail to `x@eu.inbound.example.com` is refused
   unless that subdomain receives as well.
 - When one message reaches the receiving domains of two teams, each team gets
@@ -207,8 +209,10 @@ const { data: files } = await resend.emails.receiving.attachments.list({ emailId
 
 ### List
 
-`GET /emails/receiving` takes `limit` (1–100, default 20) and an `after` or
-`before` cursor, like every [list](/api-reference#pagination).
+`GET /emails/receiving` lists newest first, as Resend does: `after` pages
+toward older mail, `before` back toward newer. It takes `limit` (1–100,
+default 20; Resend returns every email when `limit` is left out) and an
+`after` or `before` cursor, like every [list](/api-reference#pagination).
 
 ```sh
 curl "https://api.millionsend.com/emails/receiving?limit=20" \
@@ -294,14 +298,19 @@ a download link for the original message:
 - `html_format`: `data_uri`, the default, replaces the HTML's `cid:` image
   references with the inline images themselves. `?html_format=cid` keeps the
   references; match them to the attachments' `content_id`. Any other value is
-  a `422`.
+  a `422`. When inlining would take the HTML past 40 MB (typically a long
+  thread quoting the same image over and over), the references stay and
+  `html_format` reads `cid` whatever you asked for, as Resend does past
+  100 MB: check `html_format` rather than assume it.
 - `from` is the bare address; the display name is in `headers.from`.
 - `headers` holds the top-level headers with lowercase names, one value per
   name; a repeated header such as `received` has its values joined by line
-  breaks.
+  breaks. When the message carries no `Return-Path`, `return-path` holds the
+  envelope sender the sending server gave, `<>` for a bounce.
 - `html` or `text` is `null` when the message has no such part. A message
-  whose MIME doesn't parse is still stored and listed, with `html`, `text`
-  and `headers` all `null`; read it through `raw`.
+  whose MIME doesn't parse is still stored and listed; whatever can't be read
+  from it is `null` (`headers` too, when no header parses), and `raw` has it
+  whole.
 - `message_id` comes from the message's `Message-ID` header. When it has
   none, MillionSend makes one up as `<id@received.invalid>`.
 
@@ -310,18 +319,25 @@ a download link for the original message:
 | Value | Means | Check results |
 | --- | --- | --- |
 | `pass` | The check passed. | `pass` |
-| `fail` | The check failed. | `fail`, `softfail` |
-| `gray` | No verdict: no record or signature to check, or a neutral result. | `none`, `neutral`, `policy` |
+| `fail` | The check failed. | `fail` |
+| `gray` | No verdict: no record or signature to check, or a neutral result. | `none`, `neutral`, `policy`, `softfail` |
 | `processing_failed` | The check couldn't finish, for example on a DNS error or a broken record. | `temperror`, `permerror` |
 | `unknown` | Not checked. | |
 
+As on Resend, DKIM passes only for a signature from the domain in `from` (or
+another domain of the same organization): a valid signature from any other
+domain reads `gray`, and `policy` in the dashboard. DMARC reads `gray` when
+the domain in `from` publishes `p=none` and SPF or DKIM passed, `none` in the
+dashboard.
+
 `dmarc: "pass"` means the domain in `from` authorized the message. Anything
-else means `from` may be forged.
+else means `from` may be forged, though `gray` also covers genuine mail from
+a domain that asks receivers not to enforce DMARC.
 
 ### Attachments
 
-`GET /emails/receiving/{email_id}/attachments` lists an email's attachments
-(paginated like every list), and
+`GET /emails/receiving/{email_id}/attachments` lists all of an email's
+attachments at once, as Resend does (pass `limit` to page through them), and
 `GET /emails/receiving/{email_id}/attachments/{id}` returns one, each with a
 fresh download link:
 
@@ -378,10 +394,11 @@ images and attachments; with `passthrough: false` and your own `text` or
 `html`, the original travels as an attached `forwarded_message.eml` under a
 `Fwd:` subject. A forward is an ordinary send: `from` must be on a verified
 domain, and it counts against your sending quota. `POST /emails` accepts what
-forwarding needs: inline images (`content_id`) and up to 30 MB of attachments
-(40 MB once base64-encoded), enough for the attachments of any message that
-arrived. A wrapped forward attaches the whole message, so one larger than
-30 MB can only be forwarded with the default passthrough.
+forwarding needs: inline images (`content_id`) and an email of up to 40 MB as
+it goes out, base64-encoded attachments included (Resend's limit, and SES's).
+A wrapped forward attaches the whole message, so it works for messages up to
+about 29 MB; the default passthrough works almost up to 40 MB. A send over
+the limit is refused with `422` before anything is queued.
 
 To reply in the same thread, send with `In-Reply-To` and `References` set to
 the received `message_id`:
@@ -401,6 +418,10 @@ await resend.emails.send({
 `email.received` fires once for every message stored for your team, to
 endpoints subscribed to it or to all events. Like Resend's, it carries
 metadata only: fetch the content with `GET /emails/receiving/{email_id}`.
+When a later delivery of the same message reaches more of your addresses,
+one more `email.received` arrives for the same `email_id`, and its
+`received_for` lists only the added addresses, so each address is announced
+once.
 
 ```json
 {

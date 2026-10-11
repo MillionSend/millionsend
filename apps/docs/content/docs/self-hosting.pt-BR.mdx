@@ -519,7 +519,9 @@ do repositório com `MX_INGEST_URL` (a origem da sua API mais
 `/internal/mx`), `MX_HOSTNAME` e o mesmo `MX_INGEST_SECRET`. Aí as entregas
 chegam à API pelo seu proxy reverso: uma mensagem pode ter 40 MB, então o
 limite de tamanho de requisição do proxy para a API tem que permitir isso (o
-[exemplo de nginx](#produção-nginx--tls) permite 60 MB). Os endpoints
+[exemplo de nginx](#produção-nginx--tls) permite 60 MB), e o envelope dela
+vai num único cabeçalho de até uns 13 KB, acima dos 8 KB padrão do nginx (o
+exemplo sobe para 16 KB). Os endpoints
 internos do MX respondem `404` a não ser que `RECEIVING_MX_HOST` esteja
 definida, e recusam qualquer requisição sem o segredo.
 
@@ -588,6 +590,10 @@ server {
     # POST /emails/batch de até 100 emails. 60m cobre todas sem permitir
     # uploads ilimitados.
     client_max_body_size 60m;
+    # O MX manda o envelope de cada entrega num cabeçalho de até uns 13 KB,
+    # acima da linha de 8k padrão do nginx; um 400 ali faz esse email ser
+    # adiado até o remetente desistir.
+    large_client_header_buffers 4 16k;
 
     location / {
         proxy_pass http://127.0.0.1:3001;

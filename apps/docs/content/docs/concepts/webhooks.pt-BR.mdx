@@ -55,7 +55,9 @@ extensões do MillionSend.
 `email.received` traz o payload do Resend, só com metadados: sem corpo, sem
 cabeçalhos e sem tamanho dos anexos, e `from` é só o endereço.
 `received_for` lista os endereços dos seus domínios para os quais a mensagem
-foi entregue, incluindo quem estava em Cco.
+foi entregue, incluindo quem estava em Cco. Quando uma entrega posterior da
+mesma mensagem chega a mais endereços seus, outro `email.received` com o
+mesmo `email_id` lista só esses.
 
 ```json title="email.received"
 {

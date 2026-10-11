@@ -60,15 +60,21 @@ deliberadas e explícitas:
 - Anexos aceitam apenas `content` em base64 inline — uma URL em `path` é
   rejeitada com `422` (nunca é buscada). Um anexo com `content_id` é uma
   imagem inline que o HTML referencia como `cid:<content_id>`, e pode deixar
-  `filename` de fora ou nulo. Um email leva até 30 MB de anexos, 40 MB
-  depois da codificação base64 (o limite do Resend).
+  `filename` de fora ou nulo. Um email pode ter até 40 MB do jeito que sai,
+  com os anexos já em base64 (o limite do Resend e do SES); um maior é
+  recusado com `422`.
 - O recebimento é suportado (beta): `GET /emails/receiving`,
   `GET /emails/receiving/{id}` com `html_format`, os endpoints de anexos, os
   links de download assinados de uma hora, o webhook `email.received` e
   `capabilities.receiving` com um registro `Receiving` nos domínios — então
   `resend.emails.receiving.*`, `forward()` incluído, funciona sem mudanças.
   O `capabilities.sending` de um domínio é sempre `enabled` (pedir para
-  desligá-lo dá `422`). Veja
+  desligá-lo dá `422`). O recebimento exige um domínio verificado, então
+  `POST /domains` com `capabilities.receiving: "enabled"` dá `422`: verifique
+  o domínio e depois ligue o recebimento com `PATCH /domains/{id}`.
+  `GET /emails/receiving` sem `limit` devolve 20 emails, não todos, e um HTML
+  que passaria de 40 MB com as imagens inline (no Resend, 100 MB) vem com as
+  referências `cid:` (`html_format: "cid"`). Veja
   [Recebimento](/pt-BR/concepts/receiving).
 - Contatos são globais ao time — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
@@ -164,7 +170,10 @@ vez de enviar de novo; a mesma chave com payload diferente retorna `409`.
 
 Endpoints de listagem aceitam `limit` (1–100, padrão 20) e cursores `after` /
 `before` carregando o id de um item de uma página anterior. As respostas
-incluem `has_more`.
+incluem `has_more`. As listagens vêm do mais antigo para o mais novo, menos
+`GET /emails/receiving`, que vem do mais novo para o mais antigo como no
+Resend: ali `after` avança para emails mais antigos. Os anexos de um email
+recebido vêm todos de uma vez, a não ser que você passe `limit`.
 
 ## Links de download assinados
 

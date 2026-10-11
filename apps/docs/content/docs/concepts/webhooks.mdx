@@ -54,7 +54,8 @@ changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 `email.received` carries Resend's metadata-only payload: no body, headers or
 attachment sizes, and `from` is the bare address. `received_for` lists the
 addresses at your domains the message was delivered to, Bcc recipients
-included.
+included. When a later delivery of the same message reaches more of your
+addresses, another `email.received` with the same `email_id` lists only those.
 
 ```json title="email.received"
 {

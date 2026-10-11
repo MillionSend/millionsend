@@ -57,16 +57,21 @@ remaining deltas are deliberate and loud:
 - Attachments take inline base64 `content` only — a remote `path` URL is
   rejected with `422` (never fetched). An attachment with a `content_id` is
   an inline image the HTML references as `cid:<content_id>`, and may leave
-  `filename` out or null. An email carries up to 30 MB of attachments, 40 MB
-  once base64-encoded (Resend's limit).
+  `filename` out or null. An email can be up to 40 MB as it goes out,
+  base64-encoded attachments included (Resend's limit, and SES's); a larger
+  one is refused with `422`.
 - Receiving is supported (beta): `GET /emails/receiving`,
   `GET /emails/receiving/{id}` with `html_format`, the attachment endpoints,
   signed one-hour download links, the `email.received` webhook, and
   `capabilities.receiving` with a `Receiving` record on domains — so
   `resend.emails.receiving.*`, `forward()` included, works unchanged. A
   domain's `capabilities.sending` is always `enabled` (asking to disable it
-  is a `422`). See
-  [Receiving](/concepts/receiving).
+  is a `422`). Receiving needs a verified domain, so `POST /domains` with
+  `capabilities.receiving: "enabled"` is a `422`: verify the domain, then
+  enable it with `PATCH /domains/{id}`. `GET /emails/receiving` without
+  `limit` returns 20 emails rather than all of them, and HTML whose inline
+  images would take it past 40 MB (Resend: 100 MB) is served with its `cid:`
+  references (`html_format: "cid"`). See [Receiving](/concepts/receiving).
 - Contacts are team-global — audience endpoints are served as aliases of
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
@@ -159,7 +164,10 @@ of sending again; the same key with a different payload returns `409`.
 
 List endpoints accept `limit` (1–100, default 20) plus `after` / `before`
 cursors carrying an item id from a previous page. Responses include
-`has_more`.
+`has_more`. Lists run oldest first, except `GET /emails/receiving`, which runs
+newest first as on Resend: there `after` pages toward older mail. The
+attachments of a received email come back all at once unless you pass
+`limit`.
 
 ## Signed download links
 
