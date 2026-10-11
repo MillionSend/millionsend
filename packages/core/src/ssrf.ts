@@ -375,3 +375,60 @@ export async function getImage(rawUrl: string, opts: GetImageOptions = {}): Prom
     return { bytes: answer.bytes, contentType: answer.contentType };
   }
 }
+
+export interface GetBytesOptions {
+  /** Past this many bytes the download fails rather than come back cut short. */
+  maxBytes: number;
+  timeoutMs?: number;
+}
+
+/**
+ * GET a file over https behind the same guard as postJson: blocked
+ * addresses refused before and after DNS, the resolved address pinned,
+ * redirects not followed, the whole transfer time-boxed. Anything but a
+ * complete 200 rejects.
+ */
+export async function getBytes(rawUrl: string, opts: GetBytesOptions): Promise<Buffer> {
+  const url = new URL(rawUrl);
+  if (url.protocol !== "https:") throw new Error(`download url must be https: ${url.protocol}//`);
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const allowIp = (ip: string): boolean => !isBlockedIp(ip);
+  if (isIP(hostname) !== 0 && !allowIp(hostname)) {
+    throw new Error("download url resolves to a blocked address");
+  }
+  const where = `${url.host}${url.pathname}`;
+  return new Promise<Buffer>((resolve, reject) => {
+    const req = https.request(
+      url,
+      {
+        method: "GET",
+        lookup: pinnedLookup(allowIp, "download url"),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          reject(new Error(`${where} answered ${res.statusCode}`));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let received = 0;
+        res.on("data", (chunk: Buffer) => {
+          received += chunk.length;
+          if (received > opts.maxBytes) {
+            res.destroy(new Error(`${where} is larger than ${opts.maxBytes} bytes`));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on("end", () => resolve(Buffer.concat(chunks)));
+        res.on("error", reject);
+        res.on("close", () => {
+          if (!res.complete) reject(new Error(`${where} was cut short`));
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}

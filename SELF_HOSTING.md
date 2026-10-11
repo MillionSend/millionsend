@@ -746,6 +746,17 @@ content insights (never email bodies), and an instance-wide audit log.
   every region it has a domain in, and reinstating enables it again; an AWS failure never holds
   the suspension back: the console warns, the audit log records it, and the
   worker retries.
+- **Sign-up records:** every sign-up's IP and browser are kept in a record
+  only the console reads, apart from the sessions, which expire. The hourly
+  retention sweep deletes it 90 days after the account is deleted, or 12
+  months after when the account was in a team suspended for phishing, manual
+  or reputation reasons. A team's dialog lists each member's sign-up IP, the
+  IP of their latest session and the other accounts seen on those IPs,
+  suspended ones marked. With `IP_GEOLOCATION` on (the cloud default), the
+  worker downloads DB-IP's free country and ASN databases (CC BY 4.0) from
+  `download.db-ip.com` once a month, keeps the last good copy when a download
+  fails, and the dialog adds each sign-up IP's network and country, looked up
+  locally.
 
 </details>
 

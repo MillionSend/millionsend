@@ -26,6 +26,7 @@ export {
   errorTrackingConfig,
   INVITES_PER_TEAM_PER_DAY_DEFAULT,
   invitesPerTeamPerDay,
+  ipGeolocationEnabled,
   isCloudDeployment,
   notificationsEmailFrom,
   OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT,

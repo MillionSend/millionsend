@@ -289,6 +289,12 @@ export const env = createEnv({
     WARMUP_CAP_FIRST_WEEK: z.coerce.number().int().min(0).optional(),
     WARMUP_CAP_FIRST_MONTH: z.coerce.number().int().min(0).optional(),
 
+    // Network and country of the IPs the console shows, from DB-IP's free
+    // databases: the worker downloads them monthly and every lookup stays on
+    // this instance. Unset follows IS_CLOUD; read through
+    // ipGeolocationEnabled().
+    IP_GEOLOCATION: z.enum(["true", "false", "1", "0"]).optional(),
+
     // Read-only support view: the instance operator may open a team's
     // dashboard as its owner sees it, for 30 minutes, with a reason and a
     // ticket reference, under a banner, recorded at once in both audit logs
@@ -462,6 +468,13 @@ export function servedRegions(e: Env = env): string[] {
 /** Whether teams get their own SES tenant: explicit SES_TENANTS wins, else the cloud default. */
 export function sesTenantsEnabled(e: Env = env): boolean {
   const flag = e.SES_TENANTS as unknown;
+  if (flag === undefined || flag === "") return isCloudDeployment(e);
+  return envFlag(flag);
+}
+
+/** Whether IPs are looked up in the DB-IP databases: explicit IP_GEOLOCATION wins, else the cloud default. */
+export function ipGeolocationEnabled(e: Env = env): boolean {
+  const flag = e.IP_GEOLOCATION as unknown;
   if (flag === undefined || flag === "") return isCloudDeployment(e);
   return envFlag(flag);
 }

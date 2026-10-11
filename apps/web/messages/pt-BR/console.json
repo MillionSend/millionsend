@@ -476,6 +476,41 @@
       "standingAt": "situação calculada {ago}",
       "supportView": "Modo de suporte ativo · termina em {left}"
     },
+    "members": {
+      "title": "Membros",
+      "subtitle": "De onde cada pessoa se cadastrou e onde foi vista por último. Só o console vê isso.",
+      "columns": {
+        "member": "Membro",
+        "signupIp": "IP do cadastro",
+        "network": "Rede",
+        "country": "País",
+        "lastSeen": "Último IP"
+      },
+      "memberTip": "{name} · {role}",
+      "signupTip": "Cadastro em {date} · {agent}",
+      "signupNoIp": "A solicitação de cadastro não trouxe IP",
+      "signupNone": "Cadastro feito antes de guardarmos o IP do cadastro",
+      "lastSeenTip": "Última sessão {ago}",
+      "othersTitle": "Outras contas nesses IPs",
+      "othersSubtitle": "Vistas no IP de cadastro ou no último IP de um membro, contas excluídas incluídas.",
+      "othersColumns": {
+        "account": "Conta",
+        "ip": "IP",
+        "seen": "Visto no",
+        "status": "Situação"
+      },
+      "seen": {
+        "signup": "Cadastro",
+        "session": "Sessão"
+      },
+      "status": {
+        "suspended": "Suspensa",
+        "deleted": "Excluída",
+        "active": "Ativa"
+      },
+      "deletedAbuseTip": "Excluída quando estava em uma equipe suspensa por abuso",
+      "attribution": "<link>Geolocalização de IP por DB-IP</link>"
+    },
     "limitsDialog": {
       "title": "Ajustar limites · {team}",
       "lead": "Os ajustes ficam ao lado do plano e nunca o substituem. Vazio significa que o plano decide.",

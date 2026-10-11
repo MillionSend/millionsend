@@ -6,9 +6,11 @@ import {
   enrollSystemContact,
   fillTemplate,
   findSenderDomainOwner,
+  forwardedClientIp,
   isLoopbackUrl,
   isPlainName,
   MCP_SCOPES,
+  recordSignup,
   removeSystemContact,
   stripInvisible,
 } from "@millionsend/core";
@@ -545,8 +547,22 @@ export function createAuth(
           // Runs after the row exists (after the adapter's transaction for a
           // social first sign-in). Social sign-ins arrive verified and enroll
           // here; a password sign-up enrolls from afterEmailVerification.
+          // The sign-up's IP and browser are kept apart from the sessions,
+          // which expire and go with the account.
           after: async (user, ctx) => {
-            await enrollAccount(user, ctx?.headers ?? ctx?.request?.headers);
+            const headers = ctx?.headers ?? ctx?.request?.headers;
+            await recordSignup(db, {
+              userId: user.id,
+              email: user.email,
+              ip: headers
+                ? forwardedClientIp(headers, {
+                    cloud: isCloudDeployment(),
+                    trustedProxies: trustedProxies(),
+                  })
+                : null,
+              userAgent: headers?.get("user-agent") ?? null,
+            });
+            await enrollAccount(user, headers);
           },
         },
       },

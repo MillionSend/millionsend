@@ -35,6 +35,14 @@ async function signUp(auth: Auth, email: string, headers: Record<string, string>
   return { userId: response.user.id, cookie };
 }
 
+async function signupRecord(userId: string) {
+  const [row] = await db
+    .select({ ip: schema.accountSignups.ip, userAgent: schema.accountSignups.userAgent })
+    .from(schema.accountSignups)
+    .where(eq(schema.accountSignups.userId, userId));
+  return row ?? null;
+}
+
 async function sessionIp(userId: string): Promise<string | null> {
   const [row] = await db
     .select({ ipAddress: schema.session.ipAddress })
@@ -111,8 +119,13 @@ describe("client IP resolution", () => {
     // nginx appends its view of the client after whatever the client sent.
     const { userId } = await signUp(auth, "ada@example.com", {
       "x-forwarded-for": "198.51.100.200, 203.0.113.9, 127.0.0.1",
+      "user-agent": "Mozilla/5.0 (X11; Linux x86_64) Firefox/131.0",
     });
     expect(await sessionIp(userId)).toBe("203.0.113.9");
+    expect(await signupRecord(userId)).toEqual({
+      ip: "203.0.113.9",
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64) Firefox/131.0",
+    });
   });
 
   it("cloud: reads cf-connecting-ip and ignores X-Forwarded-For", async () => {
@@ -123,6 +136,7 @@ describe("client IP resolution", () => {
       "x-forwarded-for": "198.51.100.200",
     });
     expect(await sessionIp(userId)).toBe("203.0.113.9");
+    expect(await signupRecord(userId)).toEqual({ ip: "203.0.113.9", userAgent: null });
   });
 });
 
@@ -147,5 +161,7 @@ describe("account deletion", () => {
     expect(
       await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, ada.userId)),
     ).toHaveLength(0);
+    // The sign-up record outlives the account; the retention sweep dates it.
+    expect(await signupRecord(ada.userId)).not.toBeNull();
   });
 });

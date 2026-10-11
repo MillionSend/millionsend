@@ -189,6 +189,14 @@ export function addrSpec(from: string): string {
   return (inner?.[1] ?? from).trim();
 }
 
+/** The flag of an ISO 3166 alpha-2 country code ("FR" → 🇫🇷); "" for anything else. */
+export function countryFlag(code: string): string {
+  if (!/^[A-Za-z]{2}$/.test(code)) return "";
+  return String.fromCodePoint(
+    ...[...code.toUpperCase()].map((letter) => 0x1f1e6 + letter.charCodeAt(0) - 65),
+  );
+}
+
 /** The domain part of an address, lowercased; "" when there is none. */
 export function mailDomain(address: string): string {
   const at = address.lastIndexOf("@");

@@ -476,6 +476,41 @@
       "standingAt": "standing computed {ago}",
       "supportView": "Support view live · ends in {left}"
     },
+    "members": {
+      "title": "Members",
+      "subtitle": "Where each person signed up from and where they were last seen. Only the console sees this.",
+      "columns": {
+        "member": "Member",
+        "signupIp": "Sign-up IP",
+        "network": "Network",
+        "country": "Country",
+        "lastSeen": "Last seen IP"
+      },
+      "memberTip": "{name} · {role}",
+      "signupTip": "Signed up {date} · {agent}",
+      "signupNoIp": "The sign-up request carried no IP",
+      "signupNone": "Signed up before sign-up IPs were kept",
+      "lastSeenTip": "Latest session {ago}",
+      "othersTitle": "Other accounts on these IPs",
+      "othersSubtitle": "Seen on a member's sign-up or last-seen IP, deleted accounts included.",
+      "othersColumns": {
+        "account": "Account",
+        "ip": "IP",
+        "seen": "Seen at",
+        "status": "Status"
+      },
+      "seen": {
+        "signup": "Sign-up",
+        "session": "Session"
+      },
+      "status": {
+        "suspended": "Suspended",
+        "deleted": "Deleted",
+        "active": "Active"
+      },
+      "deletedAbuseTip": "Deleted while in a team suspended for abuse",
+      "attribution": "<link>IP geolocation by DB-IP</link>"
+    },
     "limitsDialog": {
       "title": "Adjust limits · {team}",
       "lead": "Overrides sit beside the plan and never replace it. Empty means the plan decides.",

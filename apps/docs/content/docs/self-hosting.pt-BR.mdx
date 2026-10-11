@@ -167,6 +167,7 @@ auto-hospedada não tem limites de plano.
 | `ONBOARDING_EMAIL_FROM` | Remetente do botão "Enviar e-mail" do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Leva um único e-mail de teste fixo por equipe, para o proprietário da equipe (um endereço confirmado, onde a instância confirma e-mails), e nada mais: um envio a partir dele pela API, SMTP, MCP, uma transmissão ou um teste do painel é recusado (`422 reserved_sender` na API), mesmo para uma equipe que verificou o domínio. Deixe vazio para ocultar o botão. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos proprietários da equipe (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para a equipe, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em uma equipe para registrar esses e-mails lá. |
 | `INVITES_PER_TEAM_PER_DAY` | Convites que uma equipe, e um membro somando todas as suas equipes, pode criar em um dia corrido, contando os revogados e os de equipes excluídas (padrão `50`). Acima disso, novos convites são recusados até o dia virar. |
+| `IP_GEOLOCATION` | Rede e país dos IPs de cadastro que o console mostra, a partir das bases gratuitas da DB-IP ([CC BY 4.0](https://db-ip.com/db/lite.php)), que o worker baixa de `download.db-ip.com` uma vez por mês; as consultas ficam nesta instância. Padrão = `IS_CLOUD`. Veja [Console](#console). |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Rastreamento de erros opcional pelo SDK do Sentry; desligado enquanto `SENTRY_DSN` não estiver definido. Veja [Rastreamento de erros](#rastreamento-de-erros-opcional). |
 
 ### Dimensionamento do worker
@@ -898,6 +899,18 @@ segurança (abertas, encerradas ou reabertas) nem as ações do monitor de conte
 no console. Ele mostra uma pausa de transmissões sobre a qual o proprietário
 não recebeu e-mail sem o motivo nem a nota, e toda ação do operador como
 MillionSend, nunca o nome ou o e-mail do operador.
+
+O IP e o navegador de cada cadastro ficam em um registro que só o console lê,
+separado das sessões de login, que expiram. Ele sobrevive à conta: a limpeza
+de retenção, que roda de hora em hora, o apaga 90 dias depois da exclusão da
+conta, ou 12 meses depois quando a conta estava em uma equipe suspensa por
+phishing, por motivo manual ou por reputação. A janela de uma equipe lista o
+IP de cadastro de cada membro, o IP da sessão mais recente e as outras contas
+vistas nesses IPs, incluindo as excluídas, com as suspensas marcadas. Com
+`IP_GEOLOCATION` ligado (o padrão na nuvem), o worker mantém as bases
+gratuitas de país e de ASN da DB-IP, baixadas uma vez por mês de
+`download.db-ip.com` (um download que falha mantém a última cópia boa), e a
+janela mostra a rede e o país de cada IP de cadastro, consultados localmente.
 
 ## Monitoramento de conteúdo (opcional)
 

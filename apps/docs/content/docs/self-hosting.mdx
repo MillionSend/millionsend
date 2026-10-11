@@ -163,6 +163,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `NOTIFICATIONS_EMAIL_FROM` | Sender for the notices to team owners (quota, bounce/complaint rates, a domain verifying or losing its records, a new API key, a rotated webhook secret, a member joining, a broadcast that went out or is held, billing on the cloud) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
 | `INVITES_PER_TEAM_PER_DAY` | Invitations one team, and one member across all their teams, may create in a rolling day, revoked ones and those of deleted teams included (default `50`). Past it, new invitations are refused until the day rolls over. |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Optional error tracking through the Sentry SDK; off while `SENTRY_DSN` is unset. See [Error tracking](#error-tracking-optional). |
+| `IP_GEOLOCATION` | Network and country of the sign-up IPs the console shows, from DB-IP's free databases ([CC BY 4.0](https://db-ip.com/db/lite.php)), which the worker downloads from `download.db-ip.com` once a month; lookups stay on this instance. Defaults to `IS_CLOUD`. See [Console](#console). |
 
 ### Worker sizing
 
@@ -878,6 +879,18 @@ reopened) or the content monitor's actions (its broadcast pause, the resume
 and a sampling override), which stay in the console. It shows a broadcast
 pause the owner was not emailed about without its reason or note, and every
 operator action as MillionSend, never the operator's name or email.
+
+Every sign-up's IP and browser are kept in a record only the console reads,
+apart from the login sessions, which expire. It outlives the account: the
+hourly retention sweep deletes it 90 days after the account is deleted, or
+12 months after when the account was in a team suspended for phishing,
+manual or reputation reasons. A team's dialog lists each member's sign-up
+IP, the IP of their latest session and the other accounts seen on those
+IPs, deleted ones included, with the suspended ones marked. With
+`IP_GEOLOCATION` on (the default on the cloud), the worker keeps DB-IP's
+free country and ASN databases, downloaded once a month from
+`download.db-ip.com` (a failed download keeps the last good copy), and the
+dialog adds each sign-up IP's network and country, looked up locally.
 
 ## Content monitoring (optional)
 

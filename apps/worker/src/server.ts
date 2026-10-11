@@ -8,6 +8,7 @@ import {
 import {
   abuseJudgeConfig,
   env,
+  ipGeolocationEnabled,
   servedRegions,
   sesTenantsEnabled,
   trackingCnameTarget,
@@ -33,11 +34,13 @@ import {
   postJson,
   pruneMonitorSamples,
   pruneProbes,
+  purgeAccountSignups,
   purgeExpiredIdempotencyKeys,
   type QueuedWebhookDelivery,
   recordDomainAge,
   recordProbes,
   recountStaleSegments,
+  refreshIpGeoDatabases,
   regionBulkCounts,
   sesEventsHealth,
 } from "@millionsend/core";
@@ -323,6 +326,7 @@ await queue.scheduleCrons({
     const stripeEvents = await purgeStripeEvents(db);
     const probes = await pruneProbes(db);
     const monitorSamples = await pruneMonitorSamples(db);
+    const signups = await purgeAccountSignups(db);
     // The console's retention row: how many bodies the last run purged.
     await recordProbes(db, [{ probe: "retention_purged", value: purged, ok: true }]);
     const counts = {
@@ -337,6 +341,7 @@ await queue.scheduleCrons({
       oldDeliveries: metadata.deliveries,
       broadcastsFrozen: metadata.broadcasts,
       sessions,
+      signups,
       stripeEvents,
     };
     if (Object.values(counts).some((n) => n > 0)) {
@@ -508,6 +513,16 @@ await queue.scheduleCrons({
       console.log(`tenants.sync: associated=${result.associated} failed=${result.failed}`);
     }
   },
+  "reference.refresh": async () => {
+    if (ipGeolocationEnabled()) {
+      const held = await refreshIpGeoDatabases(db);
+      console.log(
+        `reference.refresh: ${Object.entries(held)
+          .map(([name, month]) => `${name}=${month ?? "none"}`)
+          .join(" ")}`,
+      );
+    }
+  },
   "domains.reap": async () => {
     // Cloud-only: squatting is a cross-tenant problem. Self-host is one
     // operator's own teams and adopts existing SES identities on create, so
@@ -526,6 +541,11 @@ if (stripe) {
     console.warn("billing.reconcile at boot failed; the daily run covers it", err);
   });
 }
+
+// A fresh instance would otherwise wait for the daily run to have any copy.
+queue.runCronNow("reference.refresh").catch((err) => {
+  console.warn("reference.refresh at boot failed; the daily run covers it", err);
+});
 
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
 // to resurrect forever.

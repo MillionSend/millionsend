@@ -1,0 +1,93 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+
+const h = vi.hoisted(() => ({ members: undefined as unknown }));
+
+// The real English catalogs, so the test reads what the operator reads.
+vi.mock("next-intl", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next-intl")>();
+  const messages = {
+    console: (await import("../messages/en/console.json")).default,
+    settings: (await import("../messages/en/settings.json")).default,
+    common: (await import("../messages/en/common.json")).default,
+  };
+  return {
+    ...actual,
+    useLocale: () => "en",
+    useTranslations: (namespace: string) =>
+      actual.createTranslator({ locale: "en", messages, namespace: namespace as "console" }),
+  };
+});
+vi.mock("@/lib/trpc", () => {
+  const at = (path: string[]): unknown =>
+    new Proxy(() => {}, {
+      get: (_, key: string) =>
+        key.endsWith("Options")
+          ? (input?: unknown) => ({ path: path.join("."), input })
+          : at([...path, key]),
+    });
+  return { useTRPC: () => at([]) };
+});
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: (options: { path: string }) =>
+    options.path === "console.accounts.members" ? { data: h.members } : { data: undefined },
+}));
+
+const { MembersSection } = await import("@/components/console/teams/members-section");
+
+const member = {
+  userId: "u1",
+  name: "Ada",
+  email: "ada@acme.dev",
+  role: "owner",
+  signup: {
+    ip: "203.0.113.9",
+    userAgent: "Firefox",
+    at: new Date("2026-10-02T10:00:00Z"),
+    geo: { country: "NL", asn: 64500, org: "Example Net" },
+  },
+  lastSeen: { ip: "198.51.100.2", at: new Date() },
+};
+
+describe("the team dialog's members", () => {
+  it("shows the sign-up IP's network and country with DB-IP's credit, and marks suspended accounts", () => {
+    h.members = {
+      geo: true,
+      members: [member],
+      others: [
+        {
+          email: "facture@gmail.com",
+          ip: "203.0.113.9",
+          seen: "signup",
+          deleted: false,
+          suspension: "phishing",
+          abuseSuspended: false,
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(createElement(MembersSection, { teamId: "t" }));
+    expect(html).toContain("203.0.113.9");
+    expect(html).toContain("AS64500 · Example Net");
+    expect(html).toContain("🇳🇱 NL");
+    expect(html).toContain("198.51.100.2");
+    expect(html).toContain("Other accounts on these IPs");
+    expect(html).toContain("facture@gmail.com");
+    expect(html).toContain("Suspended");
+    expect(html).toContain('href="https://db-ip.com"');
+    expect(html).toContain("IP geolocation by DB-IP");
+  });
+
+  it("drops the network columns and the credit with geolocation off", () => {
+    h.members = {
+      geo: false,
+      members: [{ ...member, signup: { ...member.signup, geo: null } }],
+      others: [],
+    };
+    const html = renderToStaticMarkup(createElement(MembersSection, { teamId: "t" }));
+    expect(html).toContain("Sign-up IP");
+    expect(html).not.toContain("Network");
+    expect(html).not.toContain("DB-IP");
+    expect(html).not.toContain("Other accounts on these IPs");
+  });
+});

@@ -2,6 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  getBytes,
   getImage,
   IMAGE_FETCH_MAX_BYTES,
   IMAGE_FETCH_TIMEOUT_MS,
@@ -98,6 +99,18 @@ describe("postJson guard", () => {
     // localhost resolves inside the same lookup the socket would use — the
     // rejection proves the resolved (not just literal) address is validated.
     await expect(postJson("https://localhost/hook", { body: "{}", headers: {} })).rejects.toThrow(
+      /blocked address/,
+    );
+  });
+});
+
+describe("getBytes guard", () => {
+  it("refuses http, private literals and names that resolve to them", async () => {
+    await expect(getBytes("http://example.com/list", { maxBytes: 10 })).rejects.toThrow(/https/);
+    await expect(getBytes("https://10.0.0.1/list", { maxBytes: 10 })).rejects.toThrow(
+      /blocked address/,
+    );
+    await expect(getBytes("https://localhost/list", { maxBytes: 10 })).rejects.toThrow(
       /blocked address/,
     );
   });

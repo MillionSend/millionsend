@@ -155,6 +155,7 @@ export {
   fetchContentFactors,
   MIN_OUTCOME_SENDS,
 } from "./account-score.js";
+export { purgeAccountSignups, recordSignup } from "./account-signups.js";
 export {
   type ApiKeyAuth,
   authenticateApiKey,
@@ -426,6 +427,7 @@ export {
   recordProbes,
 } from "./instance-probes.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
+export { type IpGeo, lookupIpGeo, refreshIpGeoDatabases } from "./ip-geo.js";
 export {
   ANCHOR_HREF,
   anchorHrefParts,

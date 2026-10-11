@@ -13,6 +13,7 @@ import { formatDayTime, formatMmSs, formatRelative } from "@/lib/format";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useCountdown } from "@/lib/use-countdown";
 import { GuardrailLabel, RegionLabel, usePlanName } from "./cells";
+import { MembersSection } from "./members-section";
 import type { TeamDetail } from "./types";
 
 function Figure({ label, value }: { label: string; value: React.ReactNode }) {
@@ -183,6 +184,7 @@ export function TeamDialog({
           )}
         </dl>
       )}
+      <MembersSection teamId={id} />
       <ModalFooter>
         <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
           {common("close")} <span className="ms-keycap">Esc</span>

@@ -206,6 +206,9 @@ export const CRON_JOBS = {
   // Daily: the seven-day disclosure of break-glass content access, the
   // team's audit row. No-op with none due.
   "safety.reveal_notices": "40 4 * * *",
+  // Daily: third-party reference data (the DB-IP databases, monthly files)
+  // is refreshed where it is switched on; a failed download keeps the last copy.
+  "reference.refresh": "10 5 * * *",
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;
