@@ -1076,7 +1076,9 @@ upgrade included). It tries, in order:
 1. RDAP from the server [IANA's bootstrap](https://data.iana.org/rdap/dns.json)
    names for the TLD (refreshed daily), or a fixed server for `.io` and `.me`
    (`rdap.identitydigital.services`), `.co` (`rdap.registry.co`) and `.us`
-   (`rdap.nic.us`), which the bootstrap does not list.
+   (`rdap.nic.us`), which the bootstrap does not list. The date is the latest
+   of the domain's registration, re-registration and transfer events, so a
+   name caught again after it lapsed, or bought and moved, dates from then.
 2. WHOIS on TCP port 43 at the server `whois.iana.org` refers the TLD to.
 3. The first certificate issued for the name in Certificate Transparency
    ([crt.sh](https://crt.sh), at most one request every 12 seconds).

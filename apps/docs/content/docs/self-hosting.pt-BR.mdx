@@ -1114,7 +1114,10 @@ de envio: quando um domínio é adicionado, quando é verificado, e pela varredu
 1. RDAP no servidor que o [bootstrap da IANA](https://data.iana.org/rdap/dns.json)
    indica para o TLD (atualizado diariamente), ou um servidor fixo para `.io`
    e `.me` (`rdap.identitydigital.services`), `.co` (`rdap.registry.co`) e
-   `.us` (`rdap.nic.us`), que o bootstrap não lista.
+   `.us` (`rdap.nic.us`), que o bootstrap não lista. A data é a mais recente
+   entre o registro, o novo registro e a transferência do domínio, então um
+   nome registrado de novo depois de expirar, ou comprado e transferido, conta
+   a partir daí.
 2. WHOIS na porta TCP 43 do servidor para o qual `whois.iana.org` encaminha o
    TLD.
 3. O primeiro certificado emitido para o nome no Certificate Transparency

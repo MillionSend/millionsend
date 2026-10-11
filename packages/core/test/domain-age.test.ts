@@ -61,6 +61,13 @@ const IANA = {
 };
 const NOW = Date.parse("2026-10-09T16:00:00Z");
 
+/** The recorded example.com reply with more events, as a registry lists them after a sale or a drop. */
+const exampleWith = (...events: { eventAction: string; eventDate: string }[]): Route => {
+  const reply = JSON.parse(fixture("rdap-example.com.json")) as { events: unknown[] };
+  reply.events.push(...events);
+  return { body: JSON.stringify(reply) };
+};
+
 /** `routes` stays live: a test may change what a URL answers between lookups. */
 function resolver(routes: Record<string, Route>, replies: Record<string, string> = IANA) {
   routes[RDAP_BOOTSTRAP_URL] ??= BOOTSTRAP;
@@ -113,6 +120,38 @@ describe("RDAP", () => {
       source: "rdap",
     });
     expect(web.calls.map((c) => c.url)).toContain("https://rdap.registro.br/domain/uol.com.br");
+  });
+
+  it("dates an aged domain by its latest transfer or re-registration", async () => {
+    const url = "https://rdap.verisign.com/com/v1/domain/example.com";
+    const transferred = resolver({
+      [url]: exampleWith({ eventAction: "transfer", eventDate: "2026-10-02T11:00:00Z" }),
+    });
+    expect(await transferred.r.lookup("send.example.com")).toEqual({
+      domain: "example.com",
+      registeredAt: new Date("2026-10-02T11:00:00Z"),
+      source: "rdap",
+    });
+    const caughtAgain = resolver({
+      [url]: exampleWith(
+        { eventAction: "reregistration", eventDate: "2026-09-30T08:00:00Z" },
+        { eventAction: "transfer", eventDate: "2024-05-01T00:00:00Z" },
+      ),
+    });
+    expect((await caughtAgain.r.lookup("example.com")).registeredAt).toEqual(
+      new Date("2026-09-30T08:00:00Z"),
+    );
+  });
+
+  it("never takes a future transfer or another kind of event for the latest", async () => {
+    const { r } = resolver({
+      "https://rdap.verisign.com/com/v1/domain/example.com": exampleWith(
+        { eventAction: "transfer", eventDate: "2027-01-01T00:00:00Z" },
+        { eventAction: "last changed", eventDate: "2026-10-08T00:00:00Z" },
+        { eventAction: "reinstantiation", eventDate: "2026-10-07T00:00:00Z" },
+      ),
+    });
+    expect((await r.lookup("example.com")).registeredAt).toEqual(new Date("1995-08-14T04:00:00Z"));
   });
 
   it("keeps the bootstrap for a day, then refreshes it", async () => {
@@ -361,6 +400,24 @@ describe("recordDomainAge", () => {
     });
     await markDomainAgeUnknown(db, domainId);
     expect((await row())?.ageSource).toBe("rdap");
+  });
+
+  it("moves the date forward when a re-check finds a transfer", async () => {
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: "mail.example.com", region: "us-east-1" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    const rdapUrl = "https://rdap.verisign.com/com/v1/domain/example.com";
+    const routes: Record<string, Route> = { [rdapUrl]: { body: fixture("rdap-example.com.json") } };
+    const { r } = resolver(routes);
+    await recordDomainAge(db, r, domain.id, new Date("2026-10-01T13:00:00Z"));
+    routes[rdapUrl] = exampleWith({ eventAction: "transfer", eventDate: "2026-10-05T09:30:00Z" });
+    await recordDomainAge(db, r, domain.id, new Date("2026-10-09T13:00:00Z"));
+    expect(await row(domain.id)).toMatchObject({
+      registeredAt: new Date("2026-10-05T09:30:00Z"),
+      ageSource: "rdap",
+    });
   });
 
   it("keeps a registry's date when a later check reaches only a certificate", async () => {
