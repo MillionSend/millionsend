@@ -82,6 +82,7 @@ function makeApp(opts: {
   authEmailFrom?: string;
   tenants?: { configurationSet?: string | undefined };
   regions?: string[];
+  receiving?: ApiDeps["receiving"];
 }) {
   const deps: ApiDeps = {
     db,
@@ -90,6 +91,7 @@ function makeApp(opts: {
     enqueueEmailSend: async () => {},
     appBaseUrl: opts.appBaseUrl,
     trackingSubdomains: opts.trackingSubdomains,
+    receiving: opts.receiving,
     ses: {
       clientForRegion: () => opts.client,
       dns: opts.dns ?? fakeDns(),
@@ -1034,7 +1036,7 @@ describe("PATCH /domains/{id}", () => {
     expect(disable.status).toBe(200);
   });
 
-  it("422s tls and capabilities as unsupported", async () => {
+  it("422s tls, disabling sending, and receiving on an instance that receives no mail", async () => {
     const app = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
     const { id } = await createDomain(app, "tls.example.com");
 
@@ -1042,10 +1044,30 @@ describe("PATCH /domains/{id}", () => {
     expect(tls.status).toBe(422);
     expect(await tls.json()).toMatchObject({ message: expect.stringContaining("tls") });
 
-    const capabilities = await call(app, fullKey, "PATCH", `/domains/${id}`, {
-      capabilities: { sending: "enabled" },
+    const sendingOff = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { sending: "disabled" },
     });
-    expect(capabilities.status).toBe(422);
+    expect(sendingOff.status).toBe(422);
+    expect(await sendingOff.json()).toMatchObject({
+      message: expect.stringContaining("receive-only domains are not supported"),
+    });
+
+    const receivingOn = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "enabled" },
+    });
+    expect(receivingOn.status).toBe(422);
+    expect(await receivingOn.json()).toMatchObject({
+      message: expect.stringContaining("RECEIVING_MX_HOST"),
+    });
+
+    // What is already true is not an error.
+    const unchanged = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { sending: "enabled", receiving: "disabled" },
+    });
+    expect(unchanged.status).toBe(200);
+    expect(await unchanged.json()).toMatchObject({
+      capabilities: { sending: "enabled", receiving: "disabled" },
+    });
   });
 });
 
@@ -1182,6 +1204,146 @@ describe("DELETE /domains/{id}", () => {
     expect(res.status).toBe(404);
     expect(calls.length).toBe(before);
     expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(1);
+  });
+});
+
+describe("capabilities.receiving", () => {
+  const receiving = { mxHost: "mx.millionsend.test", ingestSecret: "s".repeat(32) };
+  const verify = (id: string) =>
+    db.update(schema.domains).set({ status: "verified" }).where(eq(schema.domains.id, id));
+  const receivingRecord = (body: { records: { record: string }[] }) =>
+    body.records.find((r) => r.record === "Receiving");
+
+  it("is refused on create, before SES is touched: a new domain is not verified yet", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, receiving });
+    const res = await call(app, fullKey, "POST", "/domains", {
+      name: "inbound-create.example.com",
+      capabilities: { receiving: "enabled" },
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ message: expect.stringContaining("verified") });
+    expect(calls).toEqual([]);
+  });
+
+  it("switches on for a verified domain and adds the Receiving MX, checked live", async () => {
+    const name = "inbound.example.com";
+    let mx: { priority: number; exchange: string }[] = [];
+    const app = makeApp({
+      ...fakeSes(),
+      receiving,
+      dns: fakeDns({ resolveMx: async (host) => (host === name ? mx : []) }),
+    });
+    const { id } = await createDomain(app, name);
+
+    const unverified = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "enabled" },
+    });
+    expect(unverified.status).toBe(422);
+    expect(await unverified.json()).toMatchObject({
+      message: expect.stringContaining("only on a verified domain"),
+    });
+
+    await verify(id);
+    const enabled = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "enabled" },
+    });
+    expect(enabled.status).toBe(200);
+    const body = (await enabled.json()) as { capabilities: unknown; records: { record: string }[] };
+    expect(body.capabilities).toEqual({ sending: "enabled", receiving: "enabled" });
+    expect(receivingRecord(body)).toEqual({
+      record: "Receiving",
+      name,
+      type: "MX",
+      ttl: "Auto",
+      status: "not_started",
+      value: "mx.millionsend.test",
+      priority: 10,
+      live: "missing",
+      detail: "No MX record at this name.",
+    });
+
+    // Another MX ahead of ours means mail never reaches it.
+    mx = [
+      { priority: 5, exchange: "aspmx.l.google.com" },
+      { priority: 10, exchange: "mx.millionsend.test" },
+    ];
+    const shadowed = (await (await call(app, fullKey, "GET", `/domains/${id}`)).json()) as {
+      records: { record: string }[];
+    };
+    expect(receivingRecord(shadowed)).toMatchObject({
+      status: "failed",
+      live: "mismatch",
+      detail: expect.stringContaining("5 aspmx.l.google.com, 10 mx.millionsend.test"),
+    });
+
+    mx = [{ priority: 10, exchange: "MX.millionsend.test." }];
+    const live = (await (await call(app, fullKey, "POST", `/domains/${id}/verify`)).json()) as {
+      records: { record: string }[];
+    };
+    expect(receivingRecord(live)).toMatchObject({ status: "verified", live: "found" });
+
+    const list = (await (await call(app, fullKey, "GET", "/domains?limit=100")).json()) as {
+      data: { id: string; capabilities: unknown }[];
+    };
+    expect(list.data.find((d) => d.id === id)?.capabilities).toEqual({
+      sending: "enabled",
+      receiving: "enabled",
+    });
+
+    const disabled = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "disabled" },
+    });
+    const off = (await disabled.json()) as { capabilities: unknown; records: { record: string }[] };
+    expect(off.capabilities).toEqual({ sending: "enabled", receiving: "disabled" });
+    expect(receivingRecord(off)).toBeUndefined();
+    const [row] = await db
+      .select({ on: schema.domains.receivingEnabled, at: schema.domains.receivingEnabledAt })
+      .from(schema.domains)
+      .where(eq(schema.domains.id, id));
+    expect(row).toEqual({ on: false, at: null });
+  });
+
+  it("409s a name another team already receives, and a refusal applies nothing else", async () => {
+    const name = "shared-inbound.example.com";
+    const app = makeApp({ ...fakeSes(), receiving, appBaseUrl: "https://app.example.dev" });
+    await db.insert(schema.domains).values({
+      teamId: otherTeamId,
+      name,
+      region: "sa-east-1",
+      status: "verified",
+      receivingEnabled: true,
+    });
+    const { id } = await createDomain(app, name);
+    await verify(id);
+    const res = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      open_tracking: true,
+      capabilities: { receiving: "enabled" },
+    });
+    expect(res.status).toBe(409);
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row).toMatchObject({ receivingEnabled: false, openTracking: false });
+  });
+
+  it("reads disabled, with no Receiving record, on an instance that stopped receiving", async () => {
+    const name = "was-inbound.example.com";
+    const app = makeApp({ ...fakeSes(), receiving });
+    const { id } = await createDomain(app, name);
+    await verify(id);
+    await call(app, fullKey, "PATCH", `/domains/${id}`, { capabilities: { receiving: "enabled" } });
+
+    const off = makeApp(fakeSes());
+    const body = (await (await call(off, fullKey, "GET", `/domains/${id}`)).json()) as {
+      capabilities: unknown;
+      records: { record: string }[];
+    };
+    expect(body.capabilities).toEqual({ sending: "enabled", receiving: "disabled" });
+    expect(receivingRecord(body)).toBeUndefined();
+    // Turning it off is always allowed.
+    const disable = await call(off, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "disabled" },
+    });
+    expect(disable.status).toBe(200);
   });
 });
 

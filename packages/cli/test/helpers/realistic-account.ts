@@ -362,7 +362,13 @@ export function realisticAccount(): FakeResendData {
     {
       id: fakeId(KIND.webhook, 1),
       endpoint: WEBHOOK_ENDPOINTS[1],
-      events: ["email.opened", "email.clicked", "contact.created", "contact.updated"],
+      events: [
+        "email.opened",
+        "email.clicked",
+        "email.received",
+        "contact.created",
+        "contact.updated",
+      ],
       status: "enabled",
       created_at: "2024-06-02 00:00:00.000+00",
       signing_secret: WEBHOOK_SECRETS[1],

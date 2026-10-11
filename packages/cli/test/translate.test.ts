@@ -154,10 +154,11 @@ describe("translateWebhookEvents", () => {
         "email.sent",
         "domain.created",
         "email.clicked",
+        "email.received",
         "contact.created",
       ]),
     ).toEqual({
-      events: ["email.sent", "email.clicked", "contact.created"],
+      events: ["email.sent", "email.clicked", "email.received", "contact.created"],
       dropped: ["email.suppressed", "domain.created"],
     });
   });
@@ -171,6 +172,7 @@ describe("translateWebhookEvents", () => {
       "email.complained",
       "email.opened",
       "email.clicked",
+      "email.received",
       "contact.created",
       "contact.updated",
       "contact.deleted",

@@ -20,6 +20,8 @@ export const MCP_SCOPES = [
   // stay valid.
   "webhooks:write",
   "api-keys:write",
+  // Inbound mail is third-party content: its own scope, which no other grant implies.
+  "receiving:read",
 ] as const;
 
 export type McpScope = (typeof MCP_SCOPES)[number];

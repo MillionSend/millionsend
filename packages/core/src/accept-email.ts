@@ -122,8 +122,13 @@ export function isReservedTagName(name: string): boolean {
  */
 export const SYSTEM_MAIL_TAG = `${RESERVED_TAG_PREFIX}system`;
 
-/** Decoded attachment bytes allowed per email, summed across attachments. */
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/**
+ * Decoded attachment bytes allowed per email, summed across attachments:
+ * 40 MiB once base64-encoded. Resend caps the encoded size, so a message
+ * emails.receiving.forward() re-sends fits exactly when it fit the 40 MiB
+ * inbound limit.
+ */
+export const MAX_ATTACHMENT_BYTES = 30 * 1024 * 1024;
 
 /** Decoded size of base64 attachments: 3 bytes per 4 chars; padding makes this a ≤2-byte overestimate. */
 export function estimateAttachmentBytes(
