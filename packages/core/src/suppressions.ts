@@ -27,6 +27,26 @@ export function normalizeAddress(address: string): string {
   return address.normalize("NFKC").toLowerCase().replace(/\.$/, "");
 }
 
+const GMAIL = new Set(["gmail.com", "googlemail.com"]);
+
+/**
+ * The mailbox an address reaches, to compare people rather than strings:
+ * lowercase, "+tag" dropped, and at Gmail the dots too, since
+ * a.b+x@gmail.com is delivered to ab@gmail.com.
+ */
+export function mailboxIdentity(email: string): string {
+  const address = normalizeAddress(email.trim());
+  const at = address.lastIndexOf("@");
+  if (at < 1) return address;
+  let local = address.slice(0, at).split("+")[0] ?? "";
+  let domain = address.slice(at + 1);
+  if (GMAIL.has(domain)) {
+    local = local.replaceAll(".", "");
+    domain = "gmail.com";
+  }
+  return `${local}@${domain}`;
+}
+
 /**
  * Normalization before hashing: addr-spec + normalizeAddress. The hash — not
  * the address — is the stable identity, because erasure nulls the address

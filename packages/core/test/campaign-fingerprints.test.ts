@@ -4,12 +4,12 @@ import {
   domainsMatch,
   type Fingerprint,
   fingerprintsMatch,
-  mailboxIdentity,
   messageFingerprints,
   phoneKeys,
   subjectsMatch,
   visibleTextHash,
 } from "../src/campaign-fingerprints.js";
+import { mailboxIdentity } from "../src/suppressions.js";
 
 const sending = (value: string): Fingerprint => ({ kind: "sending_domain", value });
 const linked = (value: string): Fingerprint => ({ kind: "link_domain", value });

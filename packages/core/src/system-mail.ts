@@ -5,7 +5,7 @@ import { type AcceptEmailDeps, acceptEmail, SYSTEM_MAIL_TAG } from "./accept-ema
 import type { AccountMailKind } from "./account-mail.js";
 import { createFixedWindowLimiter } from "./domain-lifecycle.js";
 import { parseSingleSender } from "./sender-address.js";
-import { hashRecipient } from "./suppressions.js";
+import { extractAddrSpec, hashRecipient, mailboxIdentity } from "./suppressions.js";
 import { fetchTeamStanding, SILENT_SUSPENSIONS } from "./team-standing.js";
 import { DAY_MS } from "./utc-day.js";
 
@@ -202,7 +202,8 @@ export async function sendSystemMail(
     return "muted";
   }
   if (RECIPIENT_CAPPED_KINDS.has(message.kind)) {
-    const key = hashRecipient(message.to);
+    // Keyed on the mailbox: +tags and Gmail's dots reach the same inbox.
+    const key = hashRecipient(mailboxIdentity(extractAddrSpec(message.to)));
     // The hour refuses first, so a send it refuses leaves the day's budget alone.
     if (recipientHourly(key) || recipientDaily(key)) {
       throw new SystemMailRefused("recipient_capped");

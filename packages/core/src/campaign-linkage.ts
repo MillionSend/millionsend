@@ -9,12 +9,12 @@ import {
   type Fingerprint,
   type FingerprintMessage,
   fingerprintsMatch,
-  mailboxIdentity,
   messageFingerprints,
 } from "./campaign-fingerprints.js";
 import { decryptEmailBody } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 import { getMonitorSettingsRow, resolveMonitorSettings } from "./monitor-settings.js";
+import { mailboxIdentity } from "./suppressions.js";
 import { type SuspensionReason, suspendTeam } from "./team-standing.js";
 
 /** Stored emails read at a suspension, the latest of each sender and subject... */

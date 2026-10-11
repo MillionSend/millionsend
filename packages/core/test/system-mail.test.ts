@@ -314,6 +314,7 @@ describe("the per-recipient cap", () => {
     await expect(send("email_verification", "Capped <CAPPED@Example.com>")).rejects.toMatchObject(
       refused,
     );
+    await expect(send("invitation", "capped+again@example.com")).rejects.toMatchObject(refused);
     // Another address, and mail the address's own account asked for, still go.
     expect(await send("email_verification", "other@example.com")).toBe("raw");
     expect(await send("password_reset")).toBe("raw");
