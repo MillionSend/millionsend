@@ -811,7 +811,7 @@ describe("attachments and custom headers", () => {
       ],
       [
         { filename: "invoice\u202Eexe.pdf", content: pdfBase64 },
-        `"invoice<U+202E>exe.pdf" is refused: its name holds an invisible formatting character (U+202E) that can disguise the file's type`,
+        `"invoice<U+202E>exe.pdf" is refused: its name holds a text-direction control (U+202E) that can disguise the file's type`,
       ],
       [
         { filename: "a.txt", content: pdfBase64, content_type: "application/x-msdownload" },

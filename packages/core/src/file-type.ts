@@ -117,8 +117,8 @@ function sniffArchive(bytes: Uint8Array): Exclude<ArchiveType, "zip"> | null {
 }
 
 /** A ZIP's own kind: Office, OpenDocument and Wallet passes are ZIPs with known entries. */
-function zipKind(bytes: Uint8Array): "zip" | "ooxml" | "odf" | "pkpass" {
-  const names = new Set(zipEntries(bytes)?.map((entry) => entry.name.toLowerCase()));
+function zipKind(directory: ZipDirectory | null): "zip" | "ooxml" | "odf" | "pkpass" {
+  const names = new Set(directory?.entries.map((entry) => entry.name.toLowerCase()));
   if (names.has("[content_types].xml")) return "ooxml";
   if (names.has("mimetype") && (names.has("content.xml") || names.has("meta-inf/manifest.xml"))) {
     return "odf";
@@ -129,12 +129,15 @@ function zipKind(bytes: Uint8Array): "zip" | "ooxml" | "odf" | "pkpass" {
 
 /**
  * The kind of file the bytes are, whatever its name says. A PDF header may
- * sit anywhere in the first KB, as readers accept it there.
+ * sit anywhere in the first KB, as readers accept it there. Pass the ZIP
+ * directory when it is already read, so a file's directory is parsed once.
  */
-export function sniffFileType(bytes: Uint8Array): FileKind {
+export function sniffFileType(bytes: Uint8Array, directory?: ZipDirectory | null): FileKind {
   const image = sniffImageType(bytes);
   if (image) return image;
-  if (ascii(bytes, 0, "PK\x03\x04") || ascii(bytes, 0, "PK\x05\x06")) return zipKind(bytes);
+  if (ascii(bytes, 0, "PK\x03\x04") || ascii(bytes, 0, "PK\x05\x06")) {
+    return zipKind(directory === undefined ? readZipDirectory(bytes) : directory);
+  }
   if (startsWith(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) return "ole";
   const kind = sniffArchive(bytes) ?? sniffExecutable(bytes);
   if (kind) return kind;
@@ -158,75 +161,117 @@ export interface ZipEntry {
   localOffset: number;
 }
 
-const EOCD = 0x06054b50;
+export interface ZipDirectory {
+  entries: ZipEntry[];
+  /**
+   * Past a cap: more than ZIP_MAX_ENTRIES entries (the listing stops there),
+   * a name longer than ZIP_NAME_MAX_BYTES (read from its end, where its
+   * extension is), or more than ZIP_NAMES_MAX_BYTES of names in all.
+   */
+  overCaps: boolean;
+}
+
+const EOCD = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
 const ZIP64_LOCATOR = 0x07064b50;
 const ZIP64_EOCD = 0x06064b50;
 const CENTRAL = 0x02014b50;
 const LOCAL = 0x04034b50;
 const UNICODE_PATH = 0x7075;
-/** More entries than any real attachment has; past it the archive reads as unreadable. */
+/** More entries than any real attachment has. */
 const ZIP_MAX_ENTRIES = 10_000;
+const ZIP_NAME_MAX_BYTES = 1_024;
+/** Every entry can name the same 64 KB local header: without a total, names cost 10,000 times that. */
+const ZIP_NAMES_MAX_BYTES = 1_048_576;
 
-function zipName(buf: Buffer, start: number, length: number, utf8: boolean): string {
-  return buf.toString(utf8 ? "utf8" : "latin1", start, start + length);
-}
-
-function unicodePath(buf: Buffer, start: number, end: number): string | null {
-  for (let p = start; p + 4 <= end; ) {
-    const id = buf.readUInt16LE(p);
-    const size = buf.readUInt16LE(p + 2);
-    if (id === UNICODE_PATH && size > 5 && p + 4 + size <= end) {
-      return buf.toString("utf8", p + 9, p + 4 + size);
-    }
-    p += 4 + size;
-  }
-  return null;
+/** Where the end-of-central-directory record starts: within the last 64 KB, the comment's limit. */
+function findEocd(buf: Buffer): number {
+  const at = buf.lastIndexOf(EOCD, buf.length - 22);
+  return at >= 0 && at >= buf.length - 22 - 0xffff ? at : -1;
 }
 
 /**
- * Reads a ZIP's central directory with no library. Null when the bytes hold
- * no readable directory (not a ZIP, truncated, or over ZIP_MAX_ENTRIES).
+ * Reads a ZIP's central directory with no library, whatever bytes come
+ * before it: a ZIP appended to a PDF or an image is read too. Null when the
+ * bytes hold no readable directory.
  */
-export function zipEntries(bytes: Uint8Array): ZipEntry[] | null {
+export function readZipDirectory(bytes: Uint8Array): ZipDirectory | null {
   const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let eocd = -1;
-  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 0xffff); i--) {
-    if (buf.readUInt32LE(i) === EOCD) {
-      eocd = i;
-      break;
-    }
-  }
+  const eocd = findEocd(buf);
   if (eocd < 0) return null;
   let count = buf.readUInt16LE(eocd + 10);
+  let directorySize = buf.readUInt32LE(eocd + 12);
   let offset = buf.readUInt32LE(eocd + 16);
   if ((count === 0xffff || offset === 0xffffffff) && eocd >= 20) {
     if (buf.readUInt32LE(eocd - 20) !== ZIP64_LOCATOR) return null;
     const record = Number(buf.readBigUInt64LE(eocd - 12));
     if (record + 56 > buf.length || buf.readUInt32LE(record) !== ZIP64_EOCD) return null;
     count = Number(buf.readBigUInt64LE(record + 32));
+    directorySize = Number(buf.readBigUInt64LE(record + 40));
     offset = Number(buf.readBigUInt64LE(record + 48));
   }
-  if (count > ZIP_MAX_ENTRIES) return null;
+  // Offsets count from the ZIP's own start; bytes put in front of it (a PDF
+  // or an image, a self-extractor's stub) shift everything, and unzip tools
+  // find the directory from its end all the same.
+  let shift = 0;
+  const at = (position: number) => position + 4 <= buf.length && position >= 0;
+  if (!(at(offset) && buf.readUInt32LE(offset) === CENTRAL)) {
+    const start = eocd - directorySize;
+    if (!(at(start) && buf.readUInt32LE(start) === CENTRAL)) {
+      return count === 0 ? { entries: [], overCaps: false } : null;
+    }
+    shift = start - offset;
+    offset = start;
+  }
+  let overCaps = count > ZIP_MAX_ENTRIES;
+  let nameBytes = 0;
+  const name = (start: number, length: number, utf8: boolean): string => {
+    const kept = Math.min(length, ZIP_NAME_MAX_BYTES);
+    if (kept < length) overCaps = true;
+    nameBytes += kept;
+    return buf.toString(utf8 ? "utf8" : "latin1", start + length - kept, start + length);
+  };
+  const unicodePath = (start: number, end: number): string | null => {
+    for (let p = start; p + 4 <= end; ) {
+      const id = buf.readUInt16LE(p);
+      const size = buf.readUInt16LE(p + 2);
+      if (id === UNICODE_PATH && size > 5 && p + 4 + size <= end)
+        return name(p + 9, size - 5, true);
+      p += 4 + size;
+    }
+    return null;
+  };
+  // Many central entries may point at one local header: read each header's name once.
+  const localNames = new Map<number, string | null>();
   const entries: ZipEntry[] = [];
   let p = offset;
-  for (let n = 0; n < count; n++) {
+  for (let n = 0; n < Math.min(count, ZIP_MAX_ENTRIES); n++) {
+    if (nameBytes > ZIP_NAMES_MAX_BYTES) {
+      overCaps = true;
+      break;
+    }
     if (p + 46 > buf.length || buf.readUInt32LE(p) !== CENTRAL) return null;
     const flags = buf.readUInt16LE(p + 8);
     const nameLength = buf.readUInt16LE(p + 28);
     const extraLength = buf.readUInt16LE(p + 30);
     const commentLength = buf.readUInt16LE(p + 32);
-    const localOffset = buf.readUInt32LE(p + 42);
+    const localOffset = buf.readUInt32LE(p + 42) + shift;
     const utf8 = (flags & 0x800) !== 0;
-    const name = zipName(buf, p + 46, nameLength, utf8);
-    const names = new Set([name]);
+    const central = name(p + 46, nameLength, utf8);
+    const names = new Set([central]);
     const extraStart = p + 46 + nameLength;
-    const alias = unicodePath(buf, extraStart, Math.min(buf.length, extraStart + extraLength));
+    const alias = unicodePath(extraStart, Math.min(buf.length, extraStart + extraLength));
     if (alias) names.add(alias);
-    if (localOffset + 30 <= buf.length && buf.readUInt32LE(localOffset) === LOCAL) {
-      names.add(zipName(buf, localOffset + 30, buf.readUInt16LE(localOffset + 26), utf8));
+    if (!localNames.has(localOffset)) {
+      const local =
+        localOffset + 30 <= buf.length && buf.readUInt32LE(localOffset) === LOCAL
+          ? name(localOffset + 30, buf.readUInt16LE(localOffset + 26), utf8)
+          : null;
+      localNames.set(localOffset, local);
     }
+    const local = localNames.get(localOffset);
+    if (local) names.add(local);
     entries.push({
-      name,
+      name: central,
       names: [...names],
       encrypted: (flags & 1) !== 0,
       method: buf.readUInt16LE(p + 10),
@@ -236,7 +281,7 @@ export function zipEntries(bytes: Uint8Array): ZipEntry[] | null {
     });
     p = extraStart + extraLength + commentLength;
   }
-  return entries;
+  return { entries, overCaps };
 }
 
 /**

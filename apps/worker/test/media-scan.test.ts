@@ -59,6 +59,37 @@ describe("the parsing threads", () => {
   });
 });
 
+describe("the pool's limits", () => {
+  const hangScript = new URL("./fixtures/media/hang-thread.mjs", import.meta.url);
+
+  it("counts queue time against the budget, and refuses work past the queue's bound", async () => {
+    const pool = new MediaPool({ size: 1, timeoutMs: 1_500, queueMax: 1, script: hangScript });
+    try {
+      const hung = pool.run("hang");
+      const waiting = pool.run("never runs");
+      await expect(pool.run("one too many")).rejects.toMatchObject({ reason: "busy" });
+      await expect(hung).rejects.toMatchObject({ reason: "timeout" });
+      // It never reached a thread: the budget ran out while it waited for one.
+      await expect(waiting).rejects.toMatchObject({ reason: "timeout" });
+      expect(await pool.run("after")).toMatchObject({ message: "after" });
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it("replaces a thread whose WASM heap grew past the limit", async () => {
+    const pool = new MediaPool({ size: 1, timeoutMs: 3_000, script: hangScript });
+    try {
+      const first = await pool.run<{ threadId: number }>("first");
+      expect((await pool.run<{ threadId: number }>("again")).threadId).toBe(first.threadId);
+      await pool.run("grow");
+      expect((await pool.run<{ threadId: number }>("next")).threadId).not.toBe(first.threadId);
+    } finally {
+      await pool.close();
+    }
+  });
+});
+
 describe("scanAttachments (the send path)", () => {
   it("reads a PDF's text, links and Pix code, and only page 1's QR code", async () => {
     const scan = await scanAttachments([attach("Fatura.pdf", fixture("lure.pdf"))], deps());
@@ -153,6 +184,36 @@ describe("scanAttachments (the send path)", () => {
     expect(scan).toMatchObject({ unreadable: true, risky: false, refused: false });
     const old = await scanAttachments([attach("setup.exe", "MZ")], deps());
     expect(old).toMatchObject({ refused: true, files: [{ action: "reject" }] });
+  });
+
+  it("scans hostile markup in linear time, and caps how much it reads", async () => {
+    const meta = `<meta ${"http-equiv=refresh ".repeat(20_000)}`;
+    const started = performance.now();
+    const scan = await scanAttachments([attach("page.html", meta)], deps());
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(scan.files[0]?.flags).toEqual(["markup"]);
+    const refresh = '<meta http-equiv="refresh" content="0;url=https://refresh.example/go">';
+    const huge = await scanAttachments(
+      [attach("page.html", `${refresh}${"<p>x</p>".repeat(130_000)}`)],
+      deps(),
+    );
+    expect(huge.files[0]?.flags).toEqual(expect.arrayContaining(["markup", "over_caps"]));
+    expect(huge.links).toContainEqual({
+      source: "web page link",
+      url: "https://refresh.example/go",
+    });
+  });
+
+  it("says when the threads were too busy to read a file", async () => {
+    const busy = new MediaPool({ queueMax: 0 });
+    const scan = await scanAttachments([attach("Fatura.pdf", fixture("lure.pdf"))], {
+      pool: busy,
+      cache: createPromiseCache({ maxEntries: 10, ttlMs: 60_000 }),
+    });
+    expect(scan).toMatchObject({
+      unreadable: true,
+      files: [{ action: "park", flags: ["unreadable"] }],
+    });
   });
 
   it("reads each file once per process: the second scan of a blast hits the cache", async () => {

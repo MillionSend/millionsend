@@ -20,7 +20,7 @@ import {
   urlsInText,
   visibleText,
 } from "@millionsend/core";
-import { MediaPool, type ParseDepth, type ParsedFile } from "./pool.js";
+import { MediaPool, MediaPoolError, type ParseDepth, type ParsedFile } from "./pool.js";
 
 /**
  * Reads an email's attachments for screening. The parsing threads open PDF,
@@ -108,6 +108,8 @@ const THREAD_KINDS: ReadonlySet<FileKind> = new Set([
   "avif",
 ]);
 const MARKUP_EXTENSIONS = new Set(["htm", "html", "shtml", "xhtml", "xht", "svg"]);
+/** Markup read on the worker's own thread, so a huge page can't hold it; past this, over the caps. */
+const MARKUP_SCAN_MAX_CHARS = 1_000_000;
 const CALENDAR_PROPERTIES =
   /^(SUMMARY|DESCRIPTION|LOCATION|URL|ATTACH|X-ALT-DESC)(?:;[^:]*)?:(.*)$/i;
 
@@ -125,16 +127,20 @@ export function cachedParse(
   );
 }
 
+/** Why the threads gave no read: busy (queue full), timed out, crashed. */
+export interface ParseFailure {
+  failed: MediaPoolError["reason"] | "error";
+}
+
 /**
  * Reads files on the parsing threads, one task for every file not cached
- * yet, each file's read cached by its hash. Null for a file whose task timed
- * out or crashed.
+ * yet, each file's read cached by its hash. A failure is never cached.
  */
 export async function parseCached(
   files: { sha: string; bytes: Uint8Array }[],
   depth: ParseDepth,
   deps: MediaDeps,
-): Promise<(ParsedFile | null)[]> {
+): Promise<(ParsedFile | ParseFailure)[]> {
   const cache = deps.cache ?? mediaCache;
   const reads = new Map<string, Promise<ParsedFile>>();
   for (const file of files) {
@@ -160,7 +166,15 @@ export async function parseCached(
       );
     });
   }
-  return Promise.all(files.map((f) => (reads.get(f.sha) as Promise<ParsedFile>).catch(() => null)));
+  return Promise.all(
+    files.map((f) =>
+      (reads.get(f.sha) as Promise<ParsedFile>).catch(
+        (err: unknown): ParseFailure => ({
+          failed: err instanceof MediaPoolError ? err.reason : "error",
+        }),
+      ),
+    ),
+  );
 }
 
 function readCalendar(ics: string): { text: string; urls: string[] } {
@@ -178,18 +192,22 @@ function readCalendar(ics: string): { text: string; urls: string[] } {
   return { text: lines.join("\n"), urls };
 }
 
-function readMarkup(markup: string): { text: string; urls: string[]; flags: AttachmentFlag[] } {
+function readMarkup(page: string): { text: string; urls: string[]; flags: AttachmentFlag[] } {
+  const markup = page.slice(0, MARKUP_SCAN_MAX_CHARS);
   const text = decodeEntities(visibleText(stripHiddenElements(markup).html));
   const attributes = [
     ...markup.matchAll(/\b(?:xlink:href|action|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi),
   ].map((m) => m[1] ?? m[2] ?? "");
-  const refreshes = [...markup.matchAll(/<meta\b[^<>]*http-equiv\s*=\s*["']?refresh[^<>]*>/gi)];
+  // Each <meta> tag on its own, then tested: one unbounded run per match keeps this linear.
+  const refreshes = [...markup.matchAll(/<meta\b[^<>]*>/gi)]
+    .map((m) => m[0])
+    .filter((tag) => /\bhttp-equiv\s*=\s*["']?\s*refresh/i.test(tag));
   const urls = [
     ...extractAnchors(markup).map((anchor) => anchor.href),
     ...attributes,
-    ...refreshes.flatMap((m) => urlsInText(m[0])),
+    ...refreshes.flatMap((tag) => urlsInText(tag)),
   ].map((url) => decodeEntities(url).trim());
-  const flags: AttachmentFlag[] = [];
+  const flags: AttachmentFlag[] = page.length > MARKUP_SCAN_MAX_CHARS ? ["over_caps"] : [];
   if (/<script\b|<[a-z][^<>]*\son[a-z]+\s*=|=\s*["']?\s*javascript:/i.test(markup)) {
     flags.push("scripts");
   }
@@ -240,8 +258,10 @@ export async function scanFiles(
   const parsed = await parseCached(threaded, depth, deps);
   return files.map(({ attachment, bytes, sha, first }) => {
     const index = threaded.findIndex((f) => f.sha === sha);
-    const read = index === -1 ? undefined : parsed[index];
-    const found: AttachmentFlag[] = read === null ? ["unreadable"] : [...(read?.flags ?? [])];
+    const parse = index === -1 ? undefined : parsed[index];
+    const read = parse && !("failed" in parse) ? parse : undefined;
+    const found: AttachmentFlag[] =
+      parse && "failed" in parse ? ["unreadable"] : [...(read?.flags ?? [])];
     let text = read?.text ?? "";
     // Office links come out of XML attributes, entities and all.
     const urls = (read?.links ?? []).map((link) => decodeEntities(link));

@@ -289,6 +289,7 @@ describe("readMediaForJudge", () => {
     const input = { attachments: [], bodyImages: [QR_DATA_URI], readBodyImages: true };
     const refused = await readMediaForJudge(input, deps(fakeReader(() => ({ status: "refused" }))));
     expect(refused.issues).toEqual(["vision_refused"]);
+    expect((await refused.review()).previews).toEqual([]);
     const blocked = await readMediaForJudge(input, deps(fakeReader(() => ({ status: "blocked" }))));
     expect(blocked.issues).toEqual(["vision_blocked"]);
     expect((await blocked.review()).previews).toEqual([]);
@@ -302,6 +303,28 @@ describe("readMediaForJudge", () => {
     expect(Buffer.from(previews[0]?.jpeg ?? "", "base64").subarray(0, 3)).toEqual(
       Buffer.from([0xff, 0xd8, 0xff]),
     );
+  });
+
+  it("leaves a file the threads could not open alone, and says when they were busy", async () => {
+    const vision = fakeReader(() => ({ status: "ok", reports: [] }));
+    const broken = await readMediaForJudge(
+      {
+        attachments: [
+          attach("photo.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2])),
+        ],
+        bodyImages: [],
+        readBodyImages: true,
+      },
+      deps(vision),
+    );
+    expect(vision.calls).toBe(0);
+    expect(broken.issues).toEqual(["unreadable_file"]);
+    const busy = await readMediaForJudge(
+      { attachments: [], bodyImages: [QR_DATA_URI], readBodyImages: true },
+      deps(vision, { pool: new MediaPool({ queueMax: 0 }) }),
+    );
+    expect(busy.findings.images).toMatchObject({ notRead: 1, why: ["busy"] });
+    expect(busy.issues).toEqual(["images_not_read"]);
   });
 
   it("does not cache an outage, and fetches a remote image once per blast", async () => {

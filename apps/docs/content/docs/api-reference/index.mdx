@@ -169,8 +169,11 @@ message that names the file and the reason:
   application/vnd.ms-htmlhelp
   ```
 
-- A file name with an invisible formatting character (Unicode category Cf),
-  such as the right-to-left override that makes `.exe` display as `.pdf`.
+- A file name with a character that changes text direction (U+202A to
+  U+202E, U+2066 to U+2069, U+200E, U+200F, U+061C), such as the
+  right-to-left override that makes `.exe` display as `.pdf`. Other
+  invisible characters, like the joiners Persian names and emoji use, are
+  accepted.
 
 While a team is new (inside its first 1,000 sends or 72 hours, or under
 10,000 sends within 7 days of its first), an email carrying any of these is

@@ -18,13 +18,14 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull } from "drizzle-orm";
 import sharp, { type Sharp } from "sharp";
-import { MEDIA_IMAGE_MAX_PIXELS, type ParsedFile } from "./pool.js";
+import { MEDIA_IMAGE_MAX_PIXELS, MEDIA_SHARP_TIMEOUT, type ParsedFile } from "./pool.js";
 import {
   cachedParse,
   fileIssues,
   type MediaDeps,
   mediaCache,
   mediaPool,
+  type ParseFailure,
   parseCached,
   qrFindings,
   type ScannedFile,
@@ -55,6 +56,19 @@ const ANIMATION_FRAMES = 4;
 const PREVIEWS_MAX = 4;
 const PREVIEW_SIDE = 600;
 const IMAGE_KINDS: ReadonlySet<FileKind> = new Set([...IMAGE_TYPES, "svg"]);
+
+// sharp's jobs run on libuv's thread pool, which DNS lookups and file reads
+// share (4 threads unless UV_THREADPOOL_SIZE says otherwise). One sharp job
+// at a time here and one per parsing thread always leave that pool a free
+// thread; concurrency(1) keeps each job to a single libvips thread.
+sharp.concurrency(1);
+let sharpTurn: Promise<unknown> = Promise.resolve();
+
+function sharpInTurn<T>(work: () => Promise<T>): Promise<T> {
+  const turn = sharpTurn.then(work, work);
+  sharpTurn = turn.catch(() => undefined);
+  return turn;
+}
 
 export interface MediaReadInput {
   attachments: readonly EmailAttachment[];
@@ -107,32 +121,36 @@ const NOT_READ: Record<Exclude<Outcome["status"], "ok">, string> = {
  * animation as four evenly spaced frames stacked, since the model reads only
  * the first frame. "small" for an image under 48 px a side: decoration.
  */
-export async function prepareImage(bytes: Uint8Array): Promise<Buffer | "small"> {
-  const input = { limitInputPixels: MEDIA_IMAGE_MAX_PIXELS };
-  const meta = await sharp(bytes, input).metadata();
-  const height = meta.pageHeight ?? meta.height ?? 0;
-  if ((meta.width ?? 0) < VISION_MIN_SIDE || height < VISION_MIN_SIDE) return "small";
-  const fitted = (image: Sharp) =>
-    image
-      .flatten({ background: "#ffffff" })
-      .resize(VISION_SIDE, VISION_SIDE, { fit: "inside", withoutEnlargement: true });
-  const pages = meta.pages ?? 1;
-  if (pages <= 1) return fitted(sharp(bytes, input)).jpeg({ quality: 85 }).toBuffer();
-  const picks = new Set(
-    Array.from({ length: ANIMATION_FRAMES }, (_, i) =>
-      Math.round((i * (pages - 1)) / (ANIMATION_FRAMES - 1)),
-    ),
-  );
-  const frames = await Promise.all(
-    [...picks].map((page) =>
-      fitted(sharp(bytes, { ...input, page }))
-        .png()
-        .toBuffer(),
-    ),
-  );
-  return fitted(sharp(frames, { join: { across: 1 } }))
-    .jpeg({ quality: 85 })
-    .toBuffer();
+export function prepareImage(bytes: Uint8Array): Promise<Buffer | "small"> {
+  return sharpInTurn(async () => {
+    const input = { limitInputPixels: MEDIA_IMAGE_MAX_PIXELS };
+    const meta = await sharp(bytes, input).timeout(MEDIA_SHARP_TIMEOUT).metadata();
+    const height = meta.pageHeight ?? meta.height ?? 0;
+    if ((meta.width ?? 0) < VISION_MIN_SIDE || height < VISION_MIN_SIDE) return "small";
+    const fitted = (image: Sharp) =>
+      image
+        .timeout(MEDIA_SHARP_TIMEOUT)
+        .flatten({ background: "#ffffff" })
+        .resize(VISION_SIDE, VISION_SIDE, { fit: "inside", withoutEnlargement: true });
+    const pages = meta.pages ?? 1;
+    if (pages <= 1) return fitted(sharp(bytes, input)).jpeg({ quality: 85 }).toBuffer();
+    const picks = new Set(
+      Array.from({ length: ANIMATION_FRAMES }, (_, i) =>
+        Math.round((i * (pages - 1)) / (ANIMATION_FRAMES - 1)),
+      ),
+    );
+    const frames: Buffer[] = [];
+    for (const page of picks) {
+      frames.push(
+        await fitted(sharp(bytes, { ...input, page }))
+          .png()
+          .toBuffer(),
+      );
+    }
+    return fitted(sharp(frames, { join: { across: 1 } }))
+      .jpeg({ quality: 85 })
+      .toBuffer();
+  });
 }
 
 function decodeDataUri(uri: string): Uint8Array | null {
@@ -216,7 +234,7 @@ async function bodyItems(
   return resolved.filter((item): item is Item => typeof item !== "string");
 }
 
-/** QR codes in body images; an image that won't open is dropped from the items and noted. */
+/** QR codes in body images; an image that won't open, or found the threads busy, is dropped and noted. */
 async function bodyQr(
   items: Item[],
   deps: MediaDeps,
@@ -230,7 +248,7 @@ async function bodyQr(
     })),
   );
   const readable = files.filter((file): file is { sha: string; bytes: Uint8Array } => !!file.bytes);
-  const parsed = new Map<string, ParsedFile | null>();
+  const parsed = new Map<string, ParsedFile | ParseFailure>();
   (await parseCached(readable, "judge", deps)).forEach((read, i) => {
     parsed.set((readable[i] as { sha: string }).sha, read);
   });
@@ -238,8 +256,16 @@ async function bodyQr(
   const qr: string[] = [];
   for (const item of items) {
     const read = parsed.get(item.id);
-    if (!read || read.flags.some((flag) => UNREADABLE_FLAGS.has(flag))) {
-      notRead.push(parsed.has(item.id) ? "won't decode" : "fetch failed");
+    if (!read) {
+      notRead.push("fetch failed");
+      continue;
+    }
+    if ("failed" in read) {
+      notRead.push(read.failed === "busy" ? "busy" : "won't decode");
+      continue;
+    }
+    if (read.flags.some((flag) => UNREADABLE_FLAGS.has(flag))) {
+      notRead.push("won't decode");
       continue;
     }
     qr.push(...read.qr);
@@ -252,6 +278,8 @@ function attachmentItems(files: readonly ScannedFile[], deps: MediaDeps): Item[]
   const items: Item[] = [];
   for (const file of files) {
     if (file.verdict.action === "reject") continue;
+    // A file the threads could not open is not decoded again here, on the worker's own thread.
+    if (file.verdict.flags.some((flag) => UNREADABLE_FLAGS.has(flag))) continue;
     if (IMAGE_KINDS.has(file.verdict.kind)) {
       items.push({
         label: `attachment ${file.filename}`,
@@ -284,16 +312,15 @@ async function readImages(
   reader: VisionReader,
   signal: AbortSignal,
 ): Promise<Outcome> {
-  const prepared = await Promise.all(
-    items.map(async (item): Promise<Buffer | "small" | "unreadable"> => {
-      try {
-        const bytes = await item.load();
-        return bytes ? await prepareImage(bytes) : "unreadable";
-      } catch {
-        return "unreadable";
-      }
-    }),
-  );
+  const prepared: (Buffer | "small" | "unreadable")[] = [];
+  for (const item of items) {
+    try {
+      const bytes = await item.load();
+      prepared.push(bytes ? await prepareImage(bytes) : "unreadable");
+    } catch {
+      prepared.push("unreadable");
+    }
+  }
   const sent = prepared.flatMap((jpeg, index) =>
     Buffer.isBuffer(jpeg) ? [{ index, hint: (items[index] as Item).hint, jpeg }] : [],
   );
@@ -318,10 +345,13 @@ async function previews(items: Item[]): Promise<MediaReview["previews"]> {
       const bytes = await item.load();
       const jpeg = bytes && (await prepareImage(bytes));
       if (!Buffer.isBuffer(jpeg)) continue;
-      const small = await sharp(jpeg)
-        .resize(PREVIEW_SIDE, PREVIEW_SIDE, { fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 70 })
-        .toBuffer();
+      const small = await sharpInTurn(() =>
+        sharp(jpeg)
+          .timeout(MEDIA_SHARP_TIMEOUT)
+          .resize(PREVIEW_SIDE, PREVIEW_SIDE, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 70 })
+          .toBuffer(),
+      );
       out.push({ label: item.label, jpeg: small.toString("base64") });
     } catch {
       // An image that won't draw gets no preview; its facts are still listed.
@@ -434,8 +464,10 @@ export async function readMediaForJudge(
       links: findings.links.map((link) => ({ ...link, domain: linkDomain(link.url) ?? "" })),
       pix: findings.pix,
       files: findings.files,
-      // Bedrock's CSAM check answers 400: no image from such an email is ever kept.
-      previews: issues.has("vision_blocked") ? [] : await previews(items),
+      // Bedrock's CSAM check answers 400, and a refusal may hide the same:
+      // no image from such an email is ever kept.
+      previews:
+        issues.has("vision_blocked") || issues.has("vision_refused") ? [] : await previews(items),
       issues: [...issues],
     }),
   };

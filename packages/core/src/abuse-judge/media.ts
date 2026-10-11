@@ -150,7 +150,8 @@ function rows(
 function pixRow(pix: MediaPix, h: MediaLineHelpers): string {
   const source = pix.from === "qr" ? "Pix QR" : "Pix code";
   const key = pix.key ? `key: ${pix.key}` : "dynamic, no key";
-  return `  (${source}) payee "${h.redact(pix.payee)}" (${h.redact(pix.city)}), ${key}, amount ${pix.amount ?? "not set"}`;
+  const amount = pix.amount === null ? "not set" : h.redact(pix.amount);
+  return `  (${source}) payee "${h.redact(pix.payee)}" (${h.redact(pix.city)}), ${key}, amount ${amount}`;
 }
 
 function fileFacts(file: MediaFile, h: MediaLineHelpers): string {

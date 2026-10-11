@@ -3,11 +3,12 @@ import { createRequire } from "node:module";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import type { AttachmentFlag } from "@millionsend/core";
 import {
+  readZipDirectory,
   readZipEntry,
   sniffFileType,
   sniffImageType,
+  type ZipDirectory,
   type ZipEntry,
-  zipEntries,
 } from "@millionsend/core/file-type";
 
 /**
@@ -20,17 +21,20 @@ import {
  * cost each one half a second and a hundred MB.
  */
 
-// ponytail: fixed at two threads, each keeping the WASM memory its largest file needed until
-// it is replaced; size from os.availableParallelism() if parsing queues, and recycle threads
-// by job count if the worker's memory climbs.
+// ponytail: fixed at two threads; size from os.availableParallelism() if parsing queues.
 export const MEDIA_POOL_SIZE = 2;
+/** One email's budget, from the moment its job is queued: waiting for a thread counts. */
 export const MEDIA_TASK_TIMEOUT_MS = 4_000;
+/** Jobs waiting past this many are refused as busy, and their files count as not read. */
+export const MEDIA_QUEUE_MAX = 64;
+/** A thread whose mupdf heap grew past this is replaced: WASM memory only ever grows. */
+export const MEDIA_THREAD_WASM_MAX_BYTES = 512 * 1024 * 1024;
 const THREAD = "millionsend-media-thread";
 const THREAD_HEAP_MB = 512;
 
 export class MediaPoolError extends Error {
   constructor(
-    readonly reason: "timeout" | "crashed" | "closed",
+    readonly reason: "timeout" | "crashed" | "closed" | "busy",
     options?: ErrorOptions,
   ) {
     super(`media parse ${reason}`, options);
@@ -41,35 +45,71 @@ interface Job {
   message: unknown;
   resolve(value: unknown): void;
   reject(err: Error): void;
+  timer: NodeJS.Timeout;
+  thread?: Worker;
 }
+
+type Reply = ({ ok: true; result: unknown } | { ok: false; error: string }) & { wasmBytes: number };
 
 /** Runs one job per thread at a time, in order; a thread that times out or dies is replaced. */
 export class MediaPool {
   readonly #size: number;
   readonly #timeoutMs: number;
+  readonly #queueMax: number;
+  readonly #wasmMaxBytes: number;
   readonly #script: URL;
   readonly #idle: Worker[] = [];
-  readonly #busy = new Map<Worker, { job: Job; timer: NodeJS.Timeout }>();
+  readonly #busy = new Map<Worker, Job>();
   readonly #queue: Job[] = [];
   #threads = 0;
 
-  constructor(opts: { size?: number; timeoutMs?: number; script?: URL } = {}) {
+  constructor(
+    opts: {
+      size?: number;
+      timeoutMs?: number;
+      queueMax?: number;
+      wasmMaxBytes?: number;
+      script?: URL;
+    } = {},
+  ) {
     this.#size = opts.size ?? MEDIA_POOL_SIZE;
     this.#timeoutMs = opts.timeoutMs ?? MEDIA_TASK_TIMEOUT_MS;
+    this.#queueMax = opts.queueMax ?? MEDIA_QUEUE_MAX;
+    this.#wasmMaxBytes = opts.wasmMaxBytes ?? MEDIA_THREAD_WASM_MAX_BYTES;
     this.#script = opts.script ?? new URL(import.meta.url);
   }
 
   run<T>(message: unknown): Promise<T> {
+    if (this.#queue.length >= this.#queueMax) return Promise.reject(new MediaPoolError("busy"));
     return new Promise<T>((resolve, reject) => {
-      this.#queue.push({ message, resolve: resolve as (value: unknown) => void, reject });
+      const job: Job = {
+        message,
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timer: setTimeout(() => this.#expire(job), this.#timeoutMs),
+      };
+      this.#queue.push(job);
       this.#pump();
     });
   }
 
   async close(): Promise<void> {
-    for (const job of this.#queue.splice(0)) job.reject(new MediaPoolError("closed"));
+    for (const job of this.#queue.splice(0)) {
+      clearTimeout(job.timer);
+      job.reject(new MediaPoolError("closed"));
+    }
     const threads = [...this.#idle, ...this.#busy.keys()];
-    for (const thread of threads) this.#drop(thread, new MediaPoolError("closed"));
+    await Promise.all(threads.map((thread) => this.#drop(thread, new MediaPoolError("closed"))));
+  }
+
+  #expire(job: Job): void {
+    if (job.thread) {
+      void this.#drop(job.thread, new MediaPoolError("timeout"));
+      return;
+    }
+    const queued = this.#queue.indexOf(job);
+    if (queued !== -1) this.#queue.splice(queued, 1);
+    job.reject(new MediaPoolError("timeout"));
   }
 
   #pump(): void {
@@ -77,11 +117,8 @@ export class MediaPool {
       const thread = this.#idle.pop() ?? this.#spawn();
       if (!thread) return;
       const job = this.#queue.shift() as Job;
-      const timer = setTimeout(
-        () => this.#drop(thread, new MediaPoolError("timeout")),
-        this.#timeoutMs,
-      );
-      this.#busy.set(thread, { job, timer });
+      job.thread = thread;
+      this.#busy.set(thread, job);
       thread.postMessage(job.message);
     }
   }
@@ -96,35 +133,51 @@ export class MediaPool {
       resourceLimits: { maxOldGenerationSizeMb: THREAD_HEAP_MB },
     });
     thread.unref();
-    thread.on("message", (reply: { ok: true; result: unknown } | { ok: false; error: string }) => {
-      const current = this.#busy.get(thread);
-      if (!current) return;
-      clearTimeout(current.timer);
+    thread.on("message", (reply: Reply) => {
+      const job = this.#busy.get(thread);
+      if (!job) return;
+      clearTimeout(job.timer);
       this.#busy.delete(thread);
-      this.#idle.push(thread);
-      if (reply.ok) current.job.resolve(reply.result);
-      else current.job.reject(new Error(reply.error));
-      this.#pump();
+      if (reply.ok) job.resolve(reply.result);
+      else job.reject(new Error(reply.error));
+      if (reply.wasmBytes > this.#wasmMaxBytes) {
+        void this.#retire(thread);
+      } else {
+        this.#idle.push(thread);
+        this.#pump();
+      }
     });
-    thread.on("error", (err) => this.#drop(thread, new MediaPoolError("crashed", { cause: err })));
-    thread.on("exit", () => this.#drop(thread, new MediaPoolError("crashed")));
+    thread.on("error", (err) => {
+      void this.#drop(thread, new MediaPoolError("crashed", { cause: err }));
+    });
+    thread.on("exit", () => {
+      void this.#drop(thread, new MediaPoolError("crashed"));
+    });
     return thread;
   }
 
   /** Fails the thread's job, if any, and kills it; the next job starts a fresh thread. */
-  #drop(thread: Worker, err: MediaPoolError): void {
-    const current = this.#busy.get(thread);
+  #drop(thread: Worker, err: MediaPoolError): Promise<void> {
+    const job = this.#busy.get(thread);
     const idle = this.#idle.indexOf(thread);
-    if (!current && idle === -1) return;
-    if (current) {
-      clearTimeout(current.timer);
+    if (!job && idle === -1) return Promise.resolve();
+    if (job) {
+      clearTimeout(job.timer);
       this.#busy.delete(thread);
-      current.job.reject(err);
+      job.reject(err);
     }
     if (idle !== -1) this.#idle.splice(idle, 1);
+    return this.#retire(thread, err.reason !== "closed");
+  }
+
+  /**
+   * Its slot frees only once the thread has stopped, so a thread killed in
+   * the middle of native work never runs alongside its replacement.
+   */
+  async #retire(thread: Worker, refill = true): Promise<void> {
+    await thread.terminate().catch(() => undefined);
     this.#threads--;
-    void thread.terminate();
-    if (err.reason !== "closed") this.#pump();
+    if (refill) this.#pump();
   }
 }
 
@@ -161,6 +214,8 @@ const DEPTH = {
 export const MEDIA_PDF_PAGES_MAX = 50;
 /** sharp's limitInputPixels for every image screening opens. */
 export const MEDIA_IMAGE_MAX_PIXELS = 50_000_000;
+/** sharp's own timeout: libvips work runs outside the thread, where killing it can't reach. */
+export const MEDIA_SHARP_TIMEOUT = { seconds: 3 };
 const FILE_TEXT_MAX_CHARS = 8_000;
 const FILE_LINKS_MAX = 50;
 const RENDER_SCALE = 1.5;
@@ -213,8 +268,10 @@ function empty(): ParsedFile {
 
 async function imageQr(bytes: Uint8Array): Promise<Pick<ParsedFile, "flags" | "qr">> {
   const { default: sharp } = await import("sharp");
+  sharp.concurrency(1);
   try {
     const { data, info } = await sharp(bytes, { limitInputPixels: MEDIA_IMAGE_MAX_PIXELS })
+      .timeout(MEDIA_SHARP_TIMEOUT)
       .resize(QR_MAX_SIDE, QR_MAX_SIDE, { fit: "inside", withoutEnlargement: true })
       // A transparent background reads as black: a QR code drawn on one would vanish.
       .flatten({ background: "#ffffff" })
@@ -274,7 +331,18 @@ function rgba(pixmap: InstanceType<Mupdf["Pixmap"]>): Uint8Array {
   return out;
 }
 
+/**
+ * The object mupdf's WASM module is built on: set before mupdf loads, it
+ * shows how far the module's heap has grown.
+ */
+function mupdfModule(): { HEAPU8?: Uint8Array } {
+  const scope = globalThis as { $libmupdf_wasm_Module?: { HEAPU8?: Uint8Array } };
+  scope.$libmupdf_wasm_Module ??= {};
+  return scope.$libmupdf_wasm_Module;
+}
+
 async function parsePdf(bytes: Uint8Array, req: ParseRequest): Promise<ParsedFile> {
+  mupdfModule();
   const mupdf = await import("mupdf");
   const doc = mupdf.Document.openDocument(bytes, "application/pdf");
   try {
@@ -361,13 +429,14 @@ function officeLinks(xml: string, kind: "ooxml" | "odf"): string[] {
 
 async function parseOffice(
   bytes: Uint8Array,
+  directory: ZipDirectory | null,
   kind: "ooxml" | "odf",
   req: ParseRequest,
 ): Promise<ParsedFile> {
-  const entries = zipEntries(bytes);
-  if (!entries) return { ...empty(), flags: ["unreadable"] };
+  if (!directory) return { ...empty(), flags: ["unreadable"] };
+  const { entries } = directory;
   const result = empty();
-  const flags = new Set<AttachmentFlag>();
+  const flags = new Set<AttachmentFlag>(directory.overCaps ? ["over_caps"] : []);
   const read = (entry: ZipEntry): string => {
     const data = readZipEntry(bytes, entry, ZIP_PART_MAX_BYTES);
     if (!data) flags.add(entry.size > ZIP_PART_MAX_BYTES ? "over_caps" : "unreadable");
@@ -399,8 +468,8 @@ async function parseOffice(
 }
 
 /** A Wallet pass: its fields' text, and what its barcodes encode. */
-function parsePass(bytes: Uint8Array): ParsedFile {
-  const entry = zipEntries(bytes)?.find((e) => e.name === "pass.json");
+function parsePass(bytes: Uint8Array, directory: ZipDirectory | null): ParsedFile {
+  const entry = directory?.entries.find((e) => e.name === "pass.json");
   const data = entry && readZipEntry(bytes, entry, ZIP_PART_MAX_BYTES);
   if (!data) return { ...empty(), flags: ["unreadable"] };
   const strings: string[] = [];
@@ -421,11 +490,12 @@ function parsePass(bytes: Uint8Array): ParsedFile {
 }
 
 async function parseFile(bytes: Uint8Array, req: ParseRequest): Promise<ParsedFile> {
-  const kind = sniffFileType(bytes);
+  const directory = readZipDirectory(bytes);
+  const kind = sniffFileType(bytes, directory);
   try {
     if (kind === "pdf") return await parsePdf(bytes, req);
-    if (kind === "ooxml" || kind === "odf") return await parseOffice(bytes, kind, req);
-    if (kind === "pkpass") return parsePass(bytes);
+    if (kind === "ooxml" || kind === "odf") return await parseOffice(bytes, directory, kind, req);
+    if (kind === "pkpass") return parsePass(bytes, directory);
     if (kind === "svg" || sniffImageType(bytes)) return { ...empty(), ...(await imageQr(bytes)) };
     return empty();
   } catch {
@@ -441,11 +511,16 @@ export async function parseFiles(req: ParseRequest): Promise<ParsedFile[]> {
 
 if (!isMainThread && workerData === THREAD && parentPort) {
   const port = parentPort;
+  const wasmBytes = () => mupdfModule().HEAPU8?.byteLength ?? 0;
   port.on("message", (req: ParseRequest) => {
     parseFiles(req).then(
-      (result) => port.postMessage({ ok: true, result }),
+      (result) => port.postMessage({ ok: true, result, wasmBytes: wasmBytes() }),
       (err: unknown) =>
-        port.postMessage({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+        port.postMessage({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+          wasmBytes: wasmBytes(),
+        }),
     );
   });
 }

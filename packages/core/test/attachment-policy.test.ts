@@ -5,7 +5,7 @@ import {
   BLOCKED_EXTENSIONS,
   fileExtensions,
 } from "../src/attachment-policy.js";
-import { readZipEntry, sniffFileType, sniffImageType, zipEntries } from "../src/file-type.js";
+import { readZipDirectory, readZipEntry, sniffFileType, sniffImageType } from "../src/file-type.js";
 
 interface Entry {
   name: string;
@@ -103,7 +103,12 @@ describe("file types", () => {
   });
 
   it("tells programs, archives, documents and markup apart", () => {
-    expect([PE, ELF, MACH_O, LNK].map(sniffFileType)).toEqual(["pe", "elf", "macho", "lnk"]);
+    expect([PE, ELF, MACH_O, LNK].map((bytes) => sniffFileType(bytes))).toEqual([
+      "pe",
+      "elf",
+      "macho",
+      "lnk",
+    ]);
     expect(sniffFileType(text("MZ but no PE header behind it"))).toBe("unknown");
     expect(sniffFileType(OLE)).toBe("ole");
     expect(sniffFileType(DOCX)).toBe("ooxml");
@@ -128,11 +133,14 @@ describe("file types", () => {
   });
 
   it("reads every name a ZIP gives an entry, and caps what an entry inflates to", () => {
-    const entries = zipEntries(zip([{ name: "readme.txt", localName: "run.js", data: "x" }]));
-    expect(entries?.[0]?.names).toEqual(["readme.txt", "run.js"]);
-    expect(zipEntries(text("PK\x03\x04 truncated"))).toBeNull();
+    const directory = readZipDirectory(
+      zip([{ name: "readme.txt", localName: "run.js", data: "x" }]),
+    );
+    expect(directory?.entries[0]?.names).toEqual(["readme.txt", "run.js"]);
+    expect(directory?.overCaps).toBe(false);
+    expect(readZipDirectory(text("PK\x03\x04 truncated"))).toBeNull();
     const archive = zip([{ name: "a.txt", data: "hello" }]);
-    const [entry] = zipEntries(archive) ?? [];
+    const [entry] = readZipDirectory(archive)?.entries ?? [];
     if (!entry) throw new Error("entry missing");
     expect(readZipEntry(archive, entry, 100)?.toString()).toBe("hello");
     expect(readZipEntry(archive, entry, 4)).toBeNull();
@@ -183,9 +191,9 @@ describe("attachmentVerdict: refused for every team", () => {
     // Displays as "invoicefdp.exe" while the real extension is .pdf.
     expect(verdict("invoice\u202Eexe.pdf", PDF)).toMatchObject({
       action: "reject",
-      rejection: "hidden_characters",
+      rejection: "direction_controls",
       reason:
-        '"invoice<U+202E>exe.pdf" is refused: its name holds an invisible formatting character (U+202E) that can disguise the file\'s type',
+        '"invoice<U+202E>exe.pdf" is refused: its name holds a text-direction control (U+202E) that can disguise the file\'s type',
     });
   });
 
@@ -297,5 +305,83 @@ describe("attachmentVerdict: allowed", () => {
     ["notes.txt", PDF],
   ])("allows %s", (name, bytes) => {
     expect(verdict(name, bytes)).toMatchObject({ action: "allow", flags: [] });
+  });
+});
+
+describe("attachmentVerdict: hostile archives and names", () => {
+  it("reads 10,000 entries sharing one 64 KB local name once, and parks the archive", () => {
+    const longName = Buffer.alloc(0xffff, 0x61);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(longName.length, 26);
+    const central: Buffer[] = [];
+    for (let i = 0; i < 10_000; i++) {
+      const head = Buffer.alloc(46);
+      head.writeUInt32LE(0x02014b50, 0);
+      head.writeUInt16LE(5, 28);
+      central.push(head, Buffer.from("a.txt"));
+    }
+    const directory = Buffer.concat(central);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(10_000, 8);
+    end.writeUInt16LE(10_000, 10);
+    end.writeUInt32LE(directory.length, 12);
+    end.writeUInt32LE(30 + longName.length, 16);
+    const bomb = Buffer.concat([local, longName, directory, end]);
+    const started = performance.now();
+    const result = verdict("names.zip", bomb);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(result.action).toBe("park");
+    expect(result.flags).toEqual(expect.arrayContaining(["archive", "over_caps"]));
+  });
+
+  it("stops reading names past the archive's total, and keeps a long name's extension", () => {
+    const many = zip(
+      Array.from({ length: 1_100 }, (_, i) => ({ name: `${i}`.padEnd(1_000, "x") })),
+    );
+    expect(readZipDirectory(many)?.overCaps).toBe(true);
+    expect(verdict("many.zip", many).flags).toContain("over_caps");
+    expect(verdict("files.zip", zip([{ name: `${"a".repeat(2_000)}.exe` }]))).toMatchObject({
+      action: "reject",
+      rejection: "blocked_in_archive",
+    });
+  });
+
+  it("reads a ZIP behind other bytes: a PDF or image polyglot", () => {
+    const pdfZip = Buffer.concat([PDF, zip([{ name: "a/run.js", data: "x" }])]);
+    expect(verdict("fatura.pdf", pdfZip)).toMatchObject({
+      action: "reject",
+      kind: "pdf",
+      rejection: "blocked_in_archive",
+    });
+    const pngZip = Buffer.concat([PNG, zip([{ name: "readme.txt", data: "x" }])]);
+    expect(verdict("photo.png", pngZip)).toMatchObject({
+      action: "park",
+      kind: "png",
+      flags: ["archive"],
+    });
+  });
+});
+
+describe("attachmentVerdict: names", () => {
+  it("refuses only the controls that change text direction", () => {
+    for (const control of ["\u202A", "\u202E", "\u2066", "\u2069", "\u200E", "\u200F", "\u061C"]) {
+      expect(
+        verdict(`fatura${control}.pdf`, PDF),
+        control.codePointAt(0)?.toString(16),
+      ).toMatchObject({
+        action: "reject",
+        rejection: "direction_controls",
+      });
+    }
+    // Persian spelling joins with U+200C; emoji sequences with U+200D.
+    for (const name of [
+      "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645.pdf",
+      "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}.pdf",
+      "fa\u00ADtura.pdf",
+    ]) {
+      expect(verdict(name, PDF).action, name).toBe("allow");
+    }
   });
 });

@@ -13,13 +13,15 @@ export interface PixCode {
   payee: string;
   /** Merchant city (field 60). */
   city: string;
-  /** Transaction amount as written (field 54); null when the payer types it. */
+  /** Transaction amount (field 54), only in BCB's form; null when absent or written otherwise. */
   amount: string | null;
   /** Null on a dynamic code, which carries a payment URL instead of a key. */
   key: PixKeyKind | null;
 }
 
 const PIX_GUI = "br.gov.bcb.pix";
+/** Field 54 as the BCB manual writes it: digits, an optional two-place decimal, 13 characters at most. */
+const PIX_AMOUNT = /^\d{1,10}(?:\.\d{2})?$/;
 /** Longer than any valid BR Code, so a scan never walks far past a false start. */
 const MAX_PAYLOAD_CHARS = 1024;
 
@@ -73,10 +75,11 @@ export function parsePix(payload: string): PixCode | null {
   }
   if (!account) return null;
   const key = account.get("01");
+  const amount = top.get("54");
   return {
     payee: top.get("59") ?? "",
     city: top.get("60") ?? "",
-    amount: top.get("54") ?? null,
+    amount: amount !== undefined && PIX_AMOUNT.test(amount) ? amount : null,
     key: key ? keyKind(key) : null,
   };
 }

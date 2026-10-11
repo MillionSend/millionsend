@@ -1,9 +1,9 @@
 import {
   type FileKind,
   IMAGE_TYPES,
+  readZipDirectory,
   sniffFileType,
   type ZipEntry,
-  zipEntries,
 } from "./file-type.js";
 
 /**
@@ -167,7 +167,11 @@ function oleStream(name: string): Buffer {
 const OLE_VBA = oleStream("_VBA_PROJECT");
 const OLE_ENCRYPTED = oleStream("EncryptedPackage");
 
-function entryFlags(entries: readonly ZipEntry[], kind: FileKind): AttachmentFlag[] {
+function entryFlags(
+  entries: readonly ZipEntry[],
+  kind: FileKind,
+  archive: boolean,
+): AttachmentFlag[] {
   const flags: AttachmentFlag[] = [];
   for (const entry of entries) {
     if (entry.encrypted) flags.push("encrypted");
@@ -175,13 +179,20 @@ function entryFlags(entries: readonly ZipEntry[], kind: FileKind): AttachmentFla
       const lower = name.toLowerCase();
       if (lower.endsWith("vbaproject.bin")) flags.push("macros");
       if (kind === "odf" && /^(?:basic|scripts)\//.test(lower)) flags.push("macros");
-      if (kind === "zip" && fileExtensions(name).some((ext) => ARCHIVE_EXTENSIONS.has(ext))) {
+      if (archive && fileExtensions(name).some((ext) => ARCHIVE_EXTENSIONS.has(ext))) {
         flags.push("nested_archive");
       }
     }
   }
   return flags;
 }
+
+/**
+ * The controls that reverse or isolate text direction, which can show
+ * invoice<U+202E>fdp.exe as invoiceexe.pdf. Other format characters are
+ * fine in a name: Persian spelling uses U+200C, emoji sequences U+200D.
+ */
+const DIRECTION_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
 /** A filename for an API message: invisible characters spelled out, length capped. */
 function shownName(filename: string): string {
@@ -200,7 +211,7 @@ export interface AttachmentFile {
 
 /** Why a file is refused for every team; frozen names reports count by. */
 export const ATTACHMENT_REJECTIONS = [
-  "hidden_characters",
+  "direction_controls",
   "blocked_extension",
   "blocked_type",
   "executable",
@@ -233,7 +244,10 @@ export function attachmentVerdict(
   file: AttachmentFile,
   found: readonly AttachmentFlag[] = [],
 ): AttachmentVerdict {
-  const kind = sniffFileType(file.bytes);
+  // Read wherever an end-of-central-directory record is: a ZIP behind other
+  // bytes (a PDF or image polyglot) opens in unzip tools all the same.
+  const directory = readZipDirectory(file.bytes);
+  const kind = sniffFileType(file.bytes, directory);
   const reject = (rejection: AttachmentRejection, why: string): AttachmentVerdict => ({
     action: "reject",
     kind,
@@ -241,12 +255,12 @@ export function attachmentVerdict(
     rejection,
     reason: `${shownName(file.filename)} is refused: ${why}`,
   });
-  const hidden = /\p{Cf}/u.exec(file.filename)?.[0];
-  if (hidden) {
-    const code = (hidden.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
+  const control = DIRECTION_CONTROLS.exec(file.filename)?.[0];
+  if (control) {
+    const code = (control.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
     return reject(
-      "hidden_characters",
-      `its name holds an invisible formatting character (U+${code}) that can disguise the file's type`,
+      "direction_controls",
+      `its name holds a text-direction control (U+${code}) that can disguise the file's type`,
     );
   }
   const extensions = fileExtensions(file.filename);
@@ -263,8 +277,8 @@ export function attachmentVerdict(
   if (program) {
     return reject("executable", `its content is ${program}, which can't be sent under any name`);
   }
-  const entries = ZIP_FAMILY.includes(kind) ? zipEntries(file.bytes) : null;
-  for (const name of entries?.flatMap((entry) => entry.names) ?? []) {
+  const entries = directory?.entries ?? [];
+  for (const name of entries.flatMap((entry) => entry.names)) {
     const inner = fileExtensions(name).find((ext) => BLOCKED_EXTENSIONS.has(ext));
     if (inner) {
       return reject(
@@ -284,12 +298,14 @@ export function attachmentVerdict(
       PARKED_CONTENT_TYPES.get(type) ?? (type.includes("macroenabled") ? "macros" : null);
     if (flag) flags.add(flag);
   }
-  if (ARCHIVE_KINDS.has(kind)) flags.add("archive");
+  const polyglot = entries.length > 0 && !ZIP_FAMILY.includes(kind);
+  if (ARCHIVE_KINDS.has(kind) || polyglot) flags.add("archive");
   if (kind === "html" || kind === "svg") flags.add("markup");
   const expected = extensions[0] === undefined ? undefined : EXPECTED_KINDS.get(extensions[0]);
   if (expected && !expected.includes(kind)) flags.add("type_mismatch");
-  if (ZIP_FAMILY.includes(kind) && entries === null) flags.add("unreadable");
-  for (const flag of entries ? entryFlags(entries, kind) : []) flags.add(flag);
+  if (ZIP_FAMILY.includes(kind) && directory === null) flags.add("unreadable");
+  if (directory?.overCaps) flags.add("over_caps");
+  for (const flag of entryFlags(entries, kind, kind === "zip" || polyglot)) flags.add(flag);
   if (kind === "ole") {
     const bytes = Buffer.from(file.bytes.buffer, file.bytes.byteOffset, file.bytes.byteLength);
     if (bytes.includes(OLE_VBA)) flags.add("macros");

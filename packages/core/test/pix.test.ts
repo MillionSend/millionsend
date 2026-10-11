@@ -49,6 +49,33 @@ describe("parsePix", () => {
   });
 });
 
+describe("parsePix amounts", () => {
+  const withAmount = (payload: string) => parsePix(payload)?.amount;
+
+  it("keeps an amount only in the BCB form", () => {
+    expect(
+      withAmount(
+        "00020126360014br.gov.bcb.pix0114+5511987654321520400005303986540415005802BR5910JOAO SILVA6009SAO PAULO62070503***630474AD",
+      ),
+    ).toBe("1500");
+    expect(
+      withAmount(
+        "00020126360014br.gov.bcb.pix0114+551198765432152040000530398654040.505802BR5910JOAO SILVA6009SAO PAULO62070503***63049CB8",
+      ),
+    ).toBe("0.50");
+  });
+
+  it("drops an amount that could forge a judge line, or isn't a number BCB writes", () => {
+    for (const payload of [
+      "00020126360014br.gov.bcb.pix0114+55119876543215204000053039865414537.00\nFrom: x5802BR5910JOAO SILVA6009SAO PAULO62070503***63045CF7",
+      "00020126360014br.gov.bcb.pix0114+551198765432152040000530398654031e35802BR5910JOAO SILVA6009SAO PAULO62070503***63045D64",
+      "00020126360014br.gov.bcb.pix0114+5511987654321520400005303986541412345678901.005802BR5910JOAO SILVA6009SAO PAULO62070503***6304D38E",
+    ]) {
+      expect(parsePix(payload)).toMatchObject({ payee: "JOAO SILVA", amount: null });
+    }
+  });
+});
+
 describe("findPixCodes", () => {
   it("finds pasted codes in text, even when extracted text wrapped them", () => {
     const text = `Pague com Pix copia e cola:\n${PHONE_WITH_AMOUNT.slice(0, 60)}\n${PHONE_WITH_AMOUNT.slice(60)}\nObrigado. Outro: ${DYNAMIC} fim`;

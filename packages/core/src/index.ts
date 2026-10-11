@@ -402,11 +402,12 @@ export {
   type FileKind,
   IMAGE_TYPES,
   type ImageType,
+  readZipDirectory,
   readZipEntry,
   sniffFileType,
   sniffImageType,
+  type ZipDirectory,
   type ZipEntry,
-  zipEntries,
 } from "./file-type.js";
 export { sha256Hex } from "./hash.js";
 export {
