@@ -1158,7 +1158,9 @@ describe("dashboard admin parity", () => {
     "billing.setOverage": [],
     "domains.create": [{ name: "create_domain", arguments: { name: "parity.example.com" } }],
     "domains.delete": [{ name: "delete_domain", arguments: { id } }],
-    "domains.setReceiving": [],
+    "domains.setReceiving": [
+      { name: "update_domain", arguments: { id, capabilities: { receiving: "enabled" } } },
+    ],
     "domains.updateConfiguration": [
       { name: "update_domain", arguments: { id, open_tracking: false } },
     ],

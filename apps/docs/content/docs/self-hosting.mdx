@@ -194,7 +194,9 @@ connections, so separate containers and worker replicas fit without tuning.
 ### Inbound mail (receiving)
 
 See [Receiving](#receiving-beta). The app reads the first two; the MX process
-reads only the `MX_*` variables.
+reads only the `MX_*` variables. The compose `mx` service sets
+`MX_INGEST_URL`, `MX_HOSTNAME` (from `RECEIVING_MX_HOST`) and the TLS paths
+itself, so set those only for an MX on another host.
 
 | Variable | Purpose |
 | --- | --- |
@@ -206,7 +208,8 @@ reads only the `MX_*` variables.
 | `MX_TLS_CERT_PATH` / `MX_TLS_KEY_PATH` | MX process: PEM keypair for STARTTLS (paths inside the container), both or neither. STARTTLS is offered once the files exist, and a renewed certificate is picked up without a restart. |
 | `MX_MAX_CLIENTS` / `MX_MAX_CONNECTIONS_PER_IP` / `MX_CONNECTIONS_PER_IP_PER_MINUTE` | MX process: connection limits (defaults `200` at once, `10` at once per IP, `60` new per IP per minute). |
 | `MX_MAX_RECIPIENTS` | MX process: recipients accepted per SMTP transaction (default `50`, at most `100`); the sending server delivers the rest in another. |
-| `MX_SOCKET_TIMEOUT_MS` / `MX_SESSION_TIMEOUT_MS` | MX process: idle time before a connection is dropped (default `60000`) and the longest one session may last (default `600000`). |
+| `MX_SOCKET_TIMEOUT_MS` / `MX_SESSION_TIMEOUT_MS` | MX process: idle time before a connection is dropped (default `300000`) and the longest one session may last (default `600000`). |
+| `MX_MAX_BUFFERED_MB` | MX process: message megabytes all sessions together may hold in memory (default `512`, at least `64`); past it, senders get `452` and retry. |
 
 ## AWS setup
 
@@ -460,19 +463,34 @@ with port 25 open, which is how MillionSend Cloud runs it. It never relays
 mail, offers no AUTH and never sends a bounce: it refuses during the SMTP
 session instead.
 
-1. **Name it.** Point an A (and AAAA) record such as `mx.example.com` at the
-   host that will run the MX, and make sure inbound TCP port 25 reaches it;
-   some providers block port 25 until asked.
+1. **Name it.** Point an A record such as `mx.example.com` at the public IPv4
+   address of the host that will run the MX, and make sure inbound TCP port
+   25 reaches it; some providers block port 25 until asked. Add no AAAA
+   record: port 25 is published on IPv4 only, because over IPv6 Docker's
+   proxy would replace each sender's address with its own, which breaks SPF
+   and the per-address limits.
 2. **Turn receiving on in the app.** Set `RECEIVING_MX_HOST=mx.example.com`
    and `MX_INGEST_SECRET` (`openssl rand -hex 32`) in `.env`, then
    `docker compose up -d`. Domains can now turn receiving on, and their
    Receiving record points at `mx.example.com`.
-3. **Configure the MX.** It reads `MX_INGEST_URL` (your API's origin plus
-   `/internal/mx`), the same `MX_INGEST_SECRET`, and
-   `MX_HOSTNAME=mx.example.com`. For STARTTLS, mount a certificate for that
-   name and set `MX_TLS_CERT_PATH` and `MX_TLS_KEY_PATH`; sending servers
-   encrypt when it is offered, and the MX picks up a renewed certificate on
-   its own.
+3. **Give it a certificate.** The `mx` service reaches the API on the
+   compose network, greets as `RECEIVING_MX_HOST`, and offers STARTTLS with
+   the keypair in `mx-tls/` next to `docker-compose.yml`. A certbot deploy
+   hook copies it there, owned `root:1000` with mode `0640`; the compose file
+   adds the container's non-root user to group 1000 so it can read the files
+   without making them world-readable. With the
+   [nginx setup](#production-nginx--tls) on port 80 (or `--standalone`
+   instead of `--nginx` when port 80 is free):
+
+   ```sh
+   sudo install -d -m 0750 -o root -g 1000 /opt/millionsend/mx-tls
+   sudo certbot certonly --nginx -d mx.example.com --deploy-hook \
+     'install -m 0640 -o root -g 1000 "$RENEWED_LINEAGE/fullchain.pem" "$RENEWED_LINEAGE/privkey.pem" /opt/millionsend/mx-tls/'
+   ```
+
+   certbot runs the hook after every renewal, and the MX picks up the new
+   files within five minutes, without a restart. Without a certificate, mail
+   still arrives, unencrypted.
 4. **Start it.** Add `mx` to `COMPOSE_PROFILES` and run
    `docker compose up -d`: the `mx` service runs `PROCESS=mx` and publishes
    host port 25 to its port 2525.
@@ -481,10 +499,14 @@ From another machine, `nc mx.example.com 25` should answer with a `220`
 greeting naming `mx.example.com`. Then turn receiving on for a verified
 domain, publish its MX record and send it a message.
 
-Behind a reverse proxy, the API must accept the MX's deliveries: a message
-can be 40 MB, so the proxy's request size limit for the API has to allow
-that (the [nginx example](#production-nginx--tls) allows 60 MB). The internal
-MX endpoints answer `404` unless `RECEIVING_MX_HOST` is set, and refuse any
+To run the MX on another host, use
+[`deploy/mx`](https://github.com/MillionSend/millionsend/tree/main/deploy/mx)
+from the repository with `MX_INGEST_URL` (your API's origin plus
+`/internal/mx`), `MX_HOSTNAME` and the same `MX_INGEST_SECRET`. Its
+deliveries then reach the API through your reverse proxy: a message can be
+40 MB, so the proxy's request size limit for the API has to allow that (the
+[nginx example](#production-nginx--tls) allows 60 MB). The internal MX
+endpoints answer `404` unless `RECEIVING_MX_HOST` is set, and refuse any
 request without the secret.
 
 ## Documentation site

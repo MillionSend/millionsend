@@ -157,9 +157,10 @@ The app refuses to boot with only one of the two, or with a secret under 32
 characters. Until both are set, `/internal/mx` answers 404 and the MX answers
 `451` to every recipient, so senders keep retrying and nothing bounces.
 
-If a reverse proxy in front of the API limits request bodies (the nginx example
-in `SELF_HOSTING.md` sets 25m), give `location /internal/mx/` 41m: messages run
-up to 40 MiB. Cloudflare accepts 100 MB request bodies on every plan.
+If a reverse proxy in front of the API limits request bodies, it must allow
+41m on `/internal/mx/`: messages run up to 40 MiB (the nginx example in
+`SELF_HOSTING.md` sets 60m for the whole API). Cloudflare accepts 100 MB
+request bodies on every plan.
 
 ### 8. Start
 

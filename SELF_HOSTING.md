@@ -415,8 +415,8 @@ Notes:
   (`http://millionsend:<PORT>/internal/mx`). To run it on another host, use
   [`deploy/mx/docker-compose.yml`](deploy/mx/docker-compose.yml) with
   `MX_INGEST_URL=https://<your API origin>/internal/mx`, `MX_HOSTNAME`, and the
-  same `MX_INGEST_SECRET`; behind nginx, give `location /internal/mx/` a
-  `client_max_body_size` of `41m`.
+  same `MX_INGEST_SECRET`; behind nginx, the API's `client_max_body_size`
+  must allow a 40 MiB delivery (the example below sets `60m`).
 - Limits, with their defaults: `MX_MAX_CLIENTS` (200),
   `MX_MAX_CONNECTIONS_PER_IP` (10), `MX_CONNECTIONS_PER_IP_PER_MINUTE` (60),
   `MX_MAX_RECIPIENTS` per message (50, at most 100), `MX_SOCKET_TIMEOUT_MS`
@@ -545,10 +545,11 @@ server {
     listen 80;
     server_name api.example.com;
 
-    # POST /emails/batch takes up to 100 emails per request; html/text bodies
-    # carry no schema byte cap, but SES rejects messages over 10 MB anyway.
-    # 25m covers a full batch of large bodies without unbounded uploads.
-    client_max_body_size 25m;
+    # The largest requests: a send with up to 40 MB of base64 attachments, an
+    # inbound message of up to 40 MB the MX delivers to /internal/mx, and a
+    # POST /emails/batch of up to 100 emails. 60m covers them without
+    # unbounded uploads.
+    client_max_body_size 60m;
 
     location / {
         proxy_pass http://127.0.0.1:3001;
