@@ -69,8 +69,8 @@ const PG_CONTAINER = "ms-recv-e2e-pg";
 const DATABASE_URL = `postgres://millionsend:e2e@127.0.0.1:${PORTS.pg}/millionsend`;
 const KMS_KEY_ID = "arn:aws:kms:us-east-1:000000000000:key/00000000-0000-4000-8000-0000000e2e00";
 
-const A_RECV = "inbound-test.listamrr.com.br";
-const A_SEND = "listamrr.com.br";
+const A_RECV = "inbound.team-a.example";
+const A_SEND = "team-a.example";
 const B_RECV = "inbound.team-b.example";
 const F_RECV = "inbound.team-f.example";
 const F_RECV2 = "inbound2.team-f.example";
@@ -677,7 +677,7 @@ try {
       values (${teamId}, 'e2e', ${key.tokenPrefix}, ${key.keyHash}, ${key.last4}, ${domainId})`;
     return key.token;
   };
-  const teamA = await team("e2e-listamrr", "pro");
+  const teamA = await team("e2e-team-a", "pro");
   const teamB = await team("e2e-team-b", "pro");
   const teamF = await team("e2e-team-f", "free");
   const domA = await domain(teamA, A_RECV);
@@ -780,7 +780,7 @@ try {
 
   await check("plain text over cleartext SMTP, stored before the 250", async (note) => {
     const mid = msgId("plain");
-    const to = "Support@Inbound-Test.ListaMRR.com.br";
+    const to = "Support@Inbound.Team-A.Example";
     const text = `Hello from the e2e run.\r\n${CANARY_BODY}\r\n`;
     const raw = await compose({
       from: `Plain Sender <plain@${SENDER}>`,
@@ -804,8 +804,8 @@ try {
     );
     assert.equal(email.object, "email");
     assert.equal(email.from, `plain@${SENDER}`);
-    assert.deepEqual(email.to, ["Support@inbound-test.listamrr.com.br"]);
-    assert.deepEqual(email.received_for, ["Support@inbound-test.listamrr.com.br"]);
+    assert.deepEqual(email.to, ["Support@inbound.team-a.example"]);
+    assert.deepEqual(email.received_for, ["Support@inbound.team-a.example"]);
     assert.equal(email.subject, `Plain ${CANARY_SUBJECT}`);
     assert.equal(email.message_id, mid);
     assert.equal(String(email.text).replace(/\r\n/g, "\n"), text.replace(/\r\n/g, "\n"));
