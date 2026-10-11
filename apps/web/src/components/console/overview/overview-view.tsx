@@ -2,13 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { AddRegionCard, RegionCard } from "@/components/console/region-actions";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { useTRPC } from "@/lib/trpc";
 import { HealthCard, HealthPill } from "./health-card";
 import { KpiCards } from "./kpi-cards";
 import { MonitoringCard } from "./monitoring-card";
+import { RegionsTable } from "./regions-table";
 import { SentPerDay } from "./sent-per-day";
 import { StatTiles } from "./stat-tiles";
 
@@ -83,38 +83,32 @@ export function OverviewView() {
         <>
           <KpiCards />
           <StatTiles summary={s} />
-          <div className="ms-grid ms-grid-regions" style={{ marginBottom: 16 }}>
-            {regions.data ? (
-              <>
-                {regions.data.served.map((r) => (
-                  <RegionCard
-                    key={r.region}
-                    region={r}
-                    onChanged={() => {
-                      regions.refetch();
-                      summary.refetch();
-                    }}
-                  />
-                ))}
-                <AddRegionCard region={regions.data.known[0]?.region ?? "eu-west-1"} />
-              </>
-            ) : regions.isError ? (
-              <div className="ms-card ms-state" style={{ gridColumn: "1 / -1" }}>
-                <p className="ms-state-headline">{common("loadError")}</p>
-                <div className="ms-state-actions">
-                  <button
-                    type="button"
-                    className="ms-btn ms-btn-secondary"
-                    onClick={() => regions.refetch()}
-                  >
-                    {common("retry")}
-                  </button>
-                </div>
+          {regions.data ? (
+            <RegionsTable
+              list={regions.data}
+              onChanged={() => {
+                regions.refetch();
+                summary.refetch();
+              }}
+            />
+          ) : regions.isError ? (
+            <div className="ms-card ms-state" style={{ marginBottom: 16 }}>
+              <p className="ms-state-headline">{common("loadError")}</p>
+              <div className="ms-state-actions">
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  onClick={() => regions.refetch()}
+                >
+                  {common("retry")}
+                </button>
               </div>
-            ) : (
-              <Ghosts n={3} height={220} />
-            )}
-          </div>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 16 }}>
+              <Ghosts n={1} height={114} />
+            </div>
+          )}
           <div className="ms-grid ms-grid-21">
             <SentPerDay />
             <HealthCard summary={s} />

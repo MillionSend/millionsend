@@ -860,7 +860,6 @@ describe("console.regions pacing numbers", () => {
       txSent24h: 9,
       bulkParked: 2,
       waitingBroadcasts: 1,
-      txParkedAt: null,
     });
     // The one bulk send in the window takes room off the share, whatever the reserve is.
     expect(region?.room).toBe((region?.share ?? 0) - 1);

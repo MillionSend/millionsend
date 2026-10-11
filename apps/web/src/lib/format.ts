@@ -125,13 +125,14 @@ export function formatDurationShort(ms: number): string {
 }
 
 /** Cents as US dollars with a bare "$" in every locale ("$20", "$0.30", pt-BR "$0,30"
-    rather than "US$ 0,30"): whole dollars drop the decimals. */
-export function formatUsd(cents: number, locale: string): string {
+    rather than "US$ 0,30"): whole dollars drop the decimals. A price per
+    thousand passes 3 digits to keep a tenth of a cent ("$0.105"). */
+export function formatUsd(cents: number, locale: string, maxFractionDigits = 2): string {
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: maxFractionDigits,
   })
     .formatToParts(cents / 100)
     .map((part) => (part.type === "currency" ? "$" : part.type === "literal" ? "" : part.value))

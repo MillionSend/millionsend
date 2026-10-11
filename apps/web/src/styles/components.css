@@ -419,6 +419,15 @@ table.ms-table {
 .ms-table.dense td {
   padding: 4px 12px;
 }
+/* A list whose cells mix badges, mono figures, bars and words keeps them on
+   one line of text: every cell's first line sits on the row's baseline. The
+   row menu centres instead, having no text. */
+.ms-table.baseline td {
+  vertical-align: baseline;
+}
+.ms-table.baseline td.ms-cell-menu {
+  vertical-align: middle;
+}
 /* Row hover: no background wash — the row's link underlines instead (quieter,
    and the affordance sits on the thing you'd click). */
 .ms-table tbody tr.hoverable:hover td {
@@ -1397,11 +1406,6 @@ button.ms-notice-strip-action {
 .ms-grid-12 {
   align-items: start;
 }
-/* Region cards: as many 380px columns as fit, so one served region plus the
-   add-a-region card share the row; min() keeps a card inside a narrower phone. */
-.ms-grid-regions {
-  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
-}
 /* A card whose chart bleeds to its edges: the sparkline sits in the card's
    bottom band, under the card's own padding. */
 .ms-card-bleed {
@@ -1429,6 +1433,15 @@ button.ms-notice-strip-action {
   font-family: var(--ms-font-mono);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+}
+/* A card that is only a table: it clips the sticky "…" column to its
+   rounded corner, and its last row draws no rule over the card's border. */
+.ms-card-table {
+  padding: 0;
+  overflow: hidden;
+}
+.ms-card-table .ms-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 /* The health card's rows: a dot, the probe, the reading pushed right, or
    onto the line under them whole when it does not fit beside them. */
@@ -1725,6 +1738,15 @@ summary:focus-visible,
 /* A term explained on hover, such as a monitor reason code. */
 .ms-tooltip-trigger.inline.ms-reason-code {
   cursor: help;
+}
+/* A quota bar beside its figure, the split one hover away: the bar has no
+   text, so its bottom edge rides on the figure's baseline, level with the
+   digits, and the pair sits on the row's baseline. */
+.ms-tooltip-trigger.inline.ms-quota-cell {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 10px;
 }
 
 .ms-tooltip-trigger.inline.ms-truncate-host {

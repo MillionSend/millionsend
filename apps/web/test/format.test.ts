@@ -6,6 +6,7 @@ import {
   formatDurationShort,
   formatHoursMinutes,
   formatMoneyTotals,
+  formatUsd,
   formatUtcMinute,
   formatUtcTimestampMs,
   maskApiKey,
@@ -16,6 +17,16 @@ describe("formatDayUtc", () => {
     // Whatever the runner's zone, the label must be the key's own day.
     expect(formatDayUtc("2026-08-13", "en")).toBe("Aug 13");
     expect(formatDayUtc("2026-01-01", "en")).toBe("Jan 1");
+  });
+});
+
+describe("formatUsd", () => {
+  it("prints a bare $ with cents, and a tenth of a cent when asked for 3 digits", () => {
+    expect(formatUsd(3150, "pt-BR")).toBe("$31,50");
+    expect(formatUsd(2000, "en")).toBe("$20");
+    expect(formatUsd(10.5, "pt-BR", 3)).toBe("$0,105");
+    expect(formatUsd(10, "pt-BR", 3)).toBe("$0,10");
+    expect(formatUsd(10.5, "en")).toBe("$0.11");
   });
 });
 

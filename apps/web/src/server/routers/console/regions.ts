@@ -14,7 +14,6 @@ import {
   committedDailyVolume,
   getInstanceSettings,
   holdRegion,
-  latestProbes,
   pacingHorizonDays,
   pausedRegions,
   planRegionSend,
@@ -29,7 +28,6 @@ import {
   SES_TRANSACTIONAL_RESERVE_MIN,
   sendingBroadcasts,
   sesComplaintRates,
-  sesEventsHealth,
   transactionalSent24h,
   usableReserve,
 } from "@millionsend/core";
@@ -46,7 +44,7 @@ import { z } from "zod";
 import { type RegionAccountDeps, servedRegionAccounts } from "../../console/ses-regions";
 import { operatorProcedure, router } from "../../trpc";
 import { effectiveSetting } from "../system";
-import { emptyDaily, emptyHourly, regionDailySends, regionHourlySends } from "./series";
+import { emptyDaily, regionDailySends } from "./series";
 import { auditOperator } from "./shared";
 
 /** SES list prices per 1,000 emails, in cents, by pricing plan; tenants add their own line. */
@@ -109,10 +107,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         month,
         paused,
         domains,
-        hourly,
         daily,
-        events,
-        probes,
         peaks,
         bulk,
         sending,
@@ -130,10 +125,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
           .from(d)
           .where(eq(d.status, "verified"))
           .groupBy(d.region),
-        regionHourlySends(ctx.db, { now, hours: 24 }),
         regionDailySends(ctx.db, { now, days: 7 }),
-        env.SNS_TOPIC_ARNS?.length ? sesEventsHealth(ctx.db, now) : Promise.resolve(null),
-        latestProbes(ctx.db),
         Promise.all(
           served.map(
             async (region) =>
@@ -166,13 +158,6 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
       const tenants = sesTenantsEnabled();
       const domainsByRegion = new Map(domains.map((r) => [r.region, r.n]));
       const breakers = new Map(paused.map((p) => [p.region, p]));
-      // The worker's memory of a transactional row parking at the quota line,
-      // one value for the instance: the probe carries seconds since.
-      const txParkedProbe = probes.get("ses_transactional_parked");
-      const txParkedAt =
-        txParkedProbe && !txParkedProbe.ok && txParkedProbe.value !== null
-          ? new Date(txParkedProbe.takenAt.getTime() - txParkedProbe.value * 1000)
-          : null;
       // One planner run per region with a broadcast still going out: when
       // the last of them finishes, for the queue row and the notice.
       const lastFinishes = new Map(
@@ -230,7 +215,6 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
             bulkParked: inRegion.reduce((n, b) => n + b.parked, 0),
             waitingBroadcasts: inRegion.filter((b) => b.parked > 0).length,
             lastFinishesAt: lastFinishes.get(region) ?? null,
-            txParkedAt,
             txPeak7d: peaks.get(region)?.txPeak ?? 0,
             bulkPeak7d: peaks.get(region)?.bulkPeak ?? 0,
             status: !account.ok
@@ -242,11 +226,6 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
             latencyMs: account.ok ? account.latencyMs : null,
             error: account.ok ? null : account.message,
             account: account.ok ? account.overview : null,
-            // What the worker's bucket runs at: the SES rate, capped by the
-            // instance setting, shared between replicas.
-            effectiveRate: account.ok
-              ? Math.min(account.overview.quota.maxSendRate, ceiling) / env.WORKER_REPLICAS
-              : null,
             domainsVerified: domainsByRegion.get(region) ?? 0,
             sent24h: counts24?.sent ?? 0,
             // SES's own complaint rate, as the breaker last read it from CloudWatch.
@@ -266,7 +245,6 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
                   pausedAt: breaker.pausedAt,
                 }
               : null,
-            hourly: hourly.get(region) ?? emptyHourly(now, 24),
             daily: daily.get(region) ?? emptyDaily(now, 7),
             cost: {
               sentThisMonth: sentMonth,
@@ -296,9 +274,6 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
           sesPause: SES_COMPLAINT_PAUSE_RATE,
           breaker: BREAKER_SES_COMPLAINT_RATE,
         },
-        eventsHealth: events,
-        // The SQS pipeline is one queue for every region; the lag the worker measured applies to all.
-        eventsLagSeconds: probes.get("ses_events_lag_s")?.value ?? null,
         cloud: isCloudDeployment(),
         defaultRegion: served[0] ?? env.AWS_REGION,
         envRegions: env.AWS_REGIONS ?? null,

@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { DOMAIN_REGIONS, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
 import { KvRow } from "@/components/kv-row";
 import { NoticeStrip } from "@/components/notice-strip";
 import { PageHeader } from "@/components/page-header";
@@ -13,13 +13,13 @@ import { Sparkline } from "@/components/sparkline";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
-import { Tooltip } from "@/components/tooltip";
-import { formatFinishAbout, withinLastDay } from "@/lib/format";
+import { formatFinishAbout } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { QuotaBar, RegionBadge, RegionMenu, type ServedRegion } from "../region-actions";
 import { AddRegionPanel } from "./add-region-panel";
 import { useRegionFormats } from "./formatters";
+import { BroadcastsCell, mutedDash, RegionLabel } from "./region-cells";
 import { QuotaDialog } from "./region-dialogs";
 import { ReserveCard } from "./reserve-card";
 
@@ -38,29 +38,12 @@ type Column = (typeof COLUMNS)[number];
 const RIGHT: readonly Column[] = ["domains", "sent24h", "bounce7d", "complaints7d"];
 const STATUS_ORDER = { serving: 0, sandbox: 1, unreachable: 2 } as const;
 
-const mutedDash = (
-  <span className="ms-mono" style={{ color: "var(--ms-muted)" }}>
-    —
-  </span>
-);
 const cardTitle: React.CSSProperties = {
   margin: "0 0 4px",
   fontSize: "var(--ms-fs-section)",
   fontWeight: 600,
 };
 const cardSub: React.CSSProperties = { margin: 0, fontSize: 13, color: "var(--ms-muted)" };
-
-function RegionLabel({ region, tip }: { region: string; tip: string }) {
-  const domains = useTranslations("domains");
-  return (
-    <>
-      {regionFlag(region)}{" "}
-      <Tooltip inline text={tip}>
-        {domains(`regions.${region}`)}
-      </Tooltip>
-    </>
-  );
-}
 
 function SkeletonRows() {
   return (
@@ -342,41 +325,10 @@ export function RegionsView() {
                           {r.week ? f.pct3(r.week.complaintRate) : mutedDash}
                         </td>
                         <td>
-                          {sandbox ? (
-                            mutedDash
-                          ) : (
-                            <>
-                              <span
-                                className="ms-dot"
-                                style={{
-                                  background: r.breaker ? "var(--ms-danger)" : "var(--ms-success)",
-                                  marginRight: 6,
-                                }}
-                              />
-                              {r.breaker === null
-                                ? tr("breakerClosed")
-                                : r.breaker.manualReason !== null
-                                  ? tr("breakerManual")
-                                  : r.breaker.reason
-                                    ? tr("breakerOpen", {
-                                        metric: tr(`metric.${r.breaker.reason.metric}`),
-                                        rate: f.pct2(r.breaker.reason.rate),
-                                      })
-                                    : tr("breakerManual")}
-                              {withinLastDay(r.txParkedAt) ? (
-                                <span style={{ marginLeft: 10 }}>
-                                  <span
-                                    className="ms-dot"
-                                    style={{ background: "var(--ms-danger)", marginRight: 6 }}
-                                  />
-                                  {tr("txParkedChip")}
-                                </span>
-                              ) : null}
-                            </>
-                          )}
+                          <BroadcastsCell region={r} />
                         </td>
                         <td className="right" style={{ width: 40 }}>
-                          <RegionMenu region={r} onChanged={refetch} boxed={false} />
+                          <RegionMenu region={r} onChanged={refetch} />
                         </td>
                       </tr>
                     );
