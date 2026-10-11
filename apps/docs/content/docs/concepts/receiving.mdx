@@ -393,12 +393,12 @@ By default the forward carries the original subject, text, HTML, inline
 images and attachments; with `passthrough: false` and your own `text` or
 `html`, the original travels as an attached `forwarded_message.eml` under a
 `Fwd:` subject. A forward is an ordinary send: `from` must be on a verified
-domain, and it counts against your sending quota. `POST /emails` accepts what
-forwarding needs: inline images (`content_id`) and an email of up to 40 MB as
-it goes out, base64-encoded attachments included (Resend's limit, and SES's).
-A wrapped forward attaches the whole message, so it works for messages up to
-about 29 MB; the default passthrough works almost up to 40 MB. A send over
-the limit is refused with `422` before anything is queued.
+domain, and it counts against your sending quota. `POST /emails` takes inline
+images (`content_id`), so the default forward keeps them. A send carries up to
+10 MiB of attachments, though (Resend allows 40 MB): the default forward works
+when the original's attachments fit in 10 MiB, and a wrapped forward, which
+attaches the whole message, when the message itself does. A larger forward is
+refused with `422` before anything is queued.
 
 To reply in the same thread, send with `In-Reply-To` and `References` set to
 the received `message_id`:

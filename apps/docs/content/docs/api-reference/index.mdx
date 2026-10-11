@@ -57,9 +57,9 @@ remaining deltas are deliberate and loud:
 - Attachments take inline base64 `content` only — a remote `path` URL is
   rejected with `422` (never fetched). An attachment with a `content_id` is
   an inline image the HTML references as `cid:<content_id>`, and may leave
-  `filename` out or null. An email can be up to 40 MB as it goes out,
-  base64-encoded attachments included (Resend's limit, and SES's); a larger
-  one is refused with `422`.
+  `filename` out or null. Attachments can total up to 10 MiB per email
+  (Resend allows 40 MB), and the whole email must fit SES's 40 MB as it goes
+  out; a larger one is refused with `422`.
 - Receiving is supported (beta): `GET /emails/receiving`,
   `GET /emails/receiving/{id}` with `html_format`, the attachment endpoints,
   signed one-hour download links, the `email.received` webhook, and

@@ -60,9 +60,9 @@ deliberadas e explícitas:
 - Anexos aceitam apenas `content` em base64 inline — uma URL em `path` é
   rejeitada com `422` (nunca é buscada). Um anexo com `content_id` é uma
   imagem inline que o HTML referencia como `cid:<content_id>`, e pode deixar
-  `filename` de fora ou nulo. Um email pode ter até 40 MB do jeito que sai,
-  com os anexos já em base64 (o limite do Resend e do SES); um maior é
-  recusado com `422`.
+  `filename` de fora ou nulo. Os anexos podem somar até 10 MiB por email (no
+  Resend, 40 MB), e o email inteiro precisa caber nos 40 MB do SES do jeito
+  que sai; um maior é recusado com `422`.
 - O recebimento é suportado (beta): `GET /emails/receiving`,
   `GET /emails/receiving/{id}` com `html_format`, os endpoints de anexos, os
   links de download assinados de uma hora, o webhook `email.received` e

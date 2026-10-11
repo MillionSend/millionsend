@@ -585,10 +585,9 @@ server {
     listen 80;
     server_name api.example.com;
 
-    # As maiores requisições: um envio com até 40 MB de anexos em base64, uma
-    # mensagem recebida de até 40 MB que o MX entrega em /internal/mx e um
-    # POST /emails/batch de até 100 emails. 60m cobre todas sem permitir
-    # uploads ilimitados.
+    # A maior requisição é uma mensagem recebida de até 40 MiB que o MX
+    # entrega em /internal/mx; a API limita todo o resto a 25 MiB. 60m cobre
+    # isso sem permitir uploads ilimitados.
     client_max_body_size 60m;
     # O MX manda o envelope de cada entrega num cabeçalho de até uns 13 KB,
     # acima da linha de 8k padrão do nginx; um 400 ali faz esse email ser

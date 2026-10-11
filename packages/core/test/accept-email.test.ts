@@ -9,6 +9,7 @@ import {
   type AcceptEmailPayload,
   acceptEmail,
   estimateMimeBytes,
+  MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
   SES_MAX_MESSAGE_BYTES,
   SYSTEM_MAIL_TAG,
@@ -131,21 +132,23 @@ describe("acceptEmail", () => {
     }
   });
 
-  it("refuses a send SES would refuse once encoded, before accepting it", async () => {
-    // 29.5 MiB of files: 40.4 MiB as the worker builds the message.
-    const content = Buffer.alloc((59 * 1024 * 1024) / 4).toString("base64");
-    const result = await acceptEmail(deps(), auth(), {
-      ...payload(),
-      attachments: [
-        { filename: "a.bin", content },
-        { filename: "b.bin", content },
-      ],
-    });
-    expect(result).toEqual({
-      ok: false,
-      reason: "attachments_too_large",
-      maxBytes: SES_MAX_MESSAGE_BYTES,
-    });
+  it("refuses over 10 MiB of attachments, or a send SES would refuse once encoded", async () => {
+    const overCap = Buffer.alloc(MAX_ATTACHMENT_BYTES + 3).toString("base64");
+    expect(
+      await acceptEmail(deps(), auth(), {
+        ...payload(),
+        attachments: [{ filename: "a.bin", content: overCap }],
+      }),
+    ).toEqual({ ok: false, reason: "attachments_too_large", maxBytes: MAX_ATTACHMENT_BYTES });
+    // 9 MiB of files under 30 MiB of html: over 40 MiB as the worker builds the message.
+    const nine = Buffer.alloc(9 * 1024 * 1024).toString("base64");
+    expect(
+      await acceptEmail(deps(), auth(), {
+        ...payload(),
+        html: "a".repeat(30 * 1024 * 1024),
+        attachments: [{ filename: "a.bin", content: nine }],
+      }),
+    ).toEqual({ ok: false, reason: "attachments_too_large", maxBytes: SES_MAX_MESSAGE_BYTES });
   });
 
   it("measures the worker's MIME message from above, and closely", async () => {

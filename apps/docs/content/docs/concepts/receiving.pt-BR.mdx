@@ -407,12 +407,12 @@ Por padrão o encaminhamento leva o assunto, o texto, o HTML, as imagens
 inline e os anexos originais; com `passthrough: false` e o seu próprio `text`
 ou `html`, o original vai anexado como `forwarded_message.eml`, com assunto
 `Fwd:`. Um encaminhamento é um envio comum: o `from` precisa ser de um
-domínio verificado, e ele conta na sua cota de envio. `POST /emails` aceita o
-que o encaminhamento precisa: imagens inline (`content_id`) e um email de até
-40 MB do jeito que sai, com os anexos já em base64 (o limite do Resend e do
-SES). Um encaminhamento com `passthrough: false` anexa a mensagem inteira,
-então funciona para mensagens de até uns 29 MB; o modo padrão vai quase até
-40 MB. Um envio acima do limite é recusado com `422` antes de entrar na fila.
+domínio verificado, e ele conta na sua cota de envio. `POST /emails` aceita
+imagens inline (`content_id`), então o encaminhamento padrão mantém as
+imagens. Mas um envio leva no máximo 10 MiB de anexos (no Resend, 40 MB): o
+modo padrão funciona quando os anexos do original cabem em 10 MiB, e o
+`passthrough: false`, que anexa a mensagem inteira, quando a própria mensagem
+cabe. Um encaminhamento maior é recusado com `422` antes de entrar na fila.
 
 Para responder na mesma conversa, envie com `In-Reply-To` e `References`
 iguais ao `message_id` recebido:

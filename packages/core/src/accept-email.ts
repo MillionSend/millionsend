@@ -122,6 +122,9 @@ export function isReservedTagName(name: string): boolean {
  */
 export const SYSTEM_MAIL_TAG = `${RESERVED_TAG_PREFIX}system`;
 
+/** Decoded attachment bytes allowed per email, summed across attachments. */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
 /**
  * The largest message SES v2 sends, encoded as it goes out: "40 MB", which
  * SES counts in MiB. Resend caps an email the same way, base64 included.
@@ -191,6 +194,18 @@ export function estimateMimeBytes(email: {
     textPart(email.text) +
     attachments.reduce((sum, a) => sum + base64Lines(estimateAttachmentBytes([a])), 0)
   );
+}
+
+/**
+ * The size cap a send breaks, or null: the attachments' own cap first, then
+ * the encoded message SES would get, since SES refuses a larger one whatever
+ * is retried.
+ */
+export function exceededSendSize(email: Parameters<typeof estimateMimeBytes>[0]): number | null {
+  if (estimateAttachmentBytes(email.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
+    return MAX_ATTACHMENT_BYTES;
+  }
+  return estimateMimeBytes(email) > SES_MAX_MESSAGE_BYTES ? SES_MAX_MESSAGE_BYTES : null;
 }
 
 /**
@@ -327,10 +342,8 @@ export async function acceptEmail(
     const refusal = await sendRefusal(opts.tx ?? deps.db, auth.teamId);
     if (refusal) return { ok: false, ...refusal };
   }
-  // SES refuses a larger message whatever is retried, so it is refused here, before a 200.
-  if (estimateMimeBytes(payload) > SES_MAX_MESSAGE_BYTES) {
-    return { ok: false, reason: "attachments_too_large", maxBytes: SES_MAX_MESSAGE_BYTES };
-  }
+  const tooLarge = exceededSendSize(payload);
+  if (tooLarge !== null) return { ok: false, reason: "attachments_too_large", maxBytes: tooLarge };
 
   // Suppression: dedupe, check every recipient field, and strip suppressed
   // addresses; refuse only when no `to` recipient remains.

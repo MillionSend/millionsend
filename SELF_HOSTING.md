@@ -547,10 +547,9 @@ server {
     listen 80;
     server_name api.example.com;
 
-    # The largest requests: a send with up to 40 MB of base64 attachments, an
-    # inbound message of up to 40 MB the MX delivers to /internal/mx, and a
-    # POST /emails/batch of up to 100 emails. 60m covers them without
-    # unbounded uploads.
+    # The largest request is an inbound message of up to 40 MiB the MX
+    # delivers to /internal/mx; the API holds everything else to 25 MiB. 60m
+    # covers it without unbounded uploads.
     client_max_body_size 60m;
     # The MX sends a delivery's envelope in one header of up to about 13 KB,
     # over nginx's default 8k line; a 400 there defers that mail until the

@@ -28,7 +28,7 @@ import {
   emitSuppressionEvents,
   enforceDomainWarmup,
   eraseRecipient,
-  estimateMimeBytes,
+  exceededSendSize,
   extractTokenPrefix,
   fetchAccountScore,
   fetchDeliverabilityHealth,
@@ -39,6 +39,7 @@ import {
   findTopicOptOuts,
   isAdminRole,
   type Keyring,
+  MAX_ATTACHMENT_BYTES,
   MX_DELIVER_PATH,
   MX_INGEST_PATH,
   makeUnsubscribeToken,
@@ -62,7 +63,6 @@ import {
   reserveQuota,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
-  SES_MAX_MESSAGE_BYTES,
   type SendRefusal,
   scoreBand,
   segmentContactsWhere,
@@ -377,7 +377,9 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
         body: errorBody(
           422,
           "validation_error",
-          `The email exceeds ${result.maxBytes / MiB} MiB once encoded for sending; base64 makes attachments about a third larger`,
+          result.maxBytes === MAX_ATTACHMENT_BYTES
+            ? `Attachments exceed ${result.maxBytes / MiB} MiB in total`
+            : `The email exceeds ${result.maxBytes / MiB} MiB once encoded for sending; base64 makes attachments about a third larger`,
         ),
       };
     case "all_suppressed":
@@ -556,8 +558,6 @@ const AUTH_FAILURES_PER_MINUTE = 20;
 
 const MiB = 1024 * 1024;
 const DEFAULT_BODY_LIMIT_BYTES = 25 * MiB;
-/** POST /emails: a message SES can send, plus room for JSON's escaping of the html and text. */
-const SEND_BODY_LIMIT_BYTES = SES_MAX_MESSAGE_BYTES + 10 * MiB;
 const MX_DELIVER_URL_PATH = `${MX_INGEST_PATH}${MX_DELIVER_PATH}`;
 
 const bodyTooLarge = (maxBytes: number) => (c: Context) =>
@@ -3330,16 +3330,15 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       maxAge: 86400,
     }),
   );
-  // POST /emails and the MX's deliveries carry more than this: their routes
-  // apply their own limit once the caller is authenticated, so an anonymous
-  // request never gets the larger allowance buffered.
+  // The MX's deliveries carry more than this: their route applies its own
+  // limit once the caller is authenticated, so an anonymous request never gets
+  // the larger allowance buffered.
   const defaultBodyLimit = bodyLimit({
     maxSize: DEFAULT_BODY_LIMIT_BYTES,
     onError: bodyTooLarge(DEFAULT_BODY_LIMIT_BYTES),
   });
   app.use("*", (c, next) =>
-    c.req.method === "POST" &&
-    (c.req.path === "/emails" || (deps.receiving && c.req.path === MX_DELIVER_URL_PATH))
+    c.req.method === "POST" && deps.receiving && c.req.path === MX_DELIVER_URL_PATH
       ? next()
       : defaultBodyLimit(c, next),
   );
@@ -3568,9 +3567,6 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const sendRoute = createRoute({
     method: "post",
     path: "/emails",
-    middleware: [
-      bodyLimit({ maxSize: SEND_BODY_LIMIT_BYTES, onError: bodyTooLarge(SEND_BODY_LIMIT_BYTES) }),
-    ],
     request: {
       body: { content: { "application/json": { schema: sendEmailRequestSchema } } },
     },
@@ -3590,10 +3586,6 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       409: {
         content: { "application/json": { schema: errorSchema } },
         description: "Idempotency conflict",
-      },
-      413: {
-        content: { "application/json": { schema: errorSchema } },
-        description: `Request body over ${SEND_BODY_LIMIT_BYTES / MiB} MiB`,
       },
       422: {
         content: { "application/json": { schema: errorSchema } },
@@ -3775,11 +3767,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       return { status: 403, name: "restricted_api_key", message: RESTRICTED_DOMAIN_MESSAGE };
     }
     const payload = toAcceptPayload(body, domain.domainId);
-    if (estimateMimeBytes(payload) > SES_MAX_MESSAGE_BYTES) {
+    const maxBytes = exceededSendSize(payload);
+    if (maxBytes !== null) {
       const { body: rejected } = acceptRejection({
         ok: false,
         reason: "attachments_too_large",
-        maxBytes: SES_MAX_MESSAGE_BYTES,
+        maxBytes,
       });
       return { status: 422, name: "validation_error", message: rejected.message };
     }
