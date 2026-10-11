@@ -241,6 +241,15 @@ describe("system.sesAccount", () => {
     ]);
     expect(asked).toEqual([]);
   });
+
+  it("features says whether the instance takes mail at all", async () => {
+    stubAws({ AWS_REGIONS: "sa-east-1" });
+    const caller = sesCaller(() => ({ send: async () => ({}) }));
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    expect(await caller.system.features()).toMatchObject({ receiving: false });
+    vi.stubEnv("RECEIVING_MX_HOST", "mx.example.net");
+    expect(await caller.system.features()).toMatchObject({ receiving: true });
+  });
 });
 
 describe("system.instanceSettings", () => {

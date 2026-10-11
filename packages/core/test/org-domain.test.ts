@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  asciiHostname,
   isRootDomainSend,
   registrableDomain,
   vouchedRegistrableDomain,
@@ -73,5 +74,27 @@ describe("vouchedRegistrableDomain", () => {
   it("does not vouch where strangers share the ICANN name", () => {
     expect(vouchedRegistrableDomain("mail.foo.eu.org")).toBeNull();
     expect(vouchedRegistrableDomain("x.github.io")).toBeNull();
+  });
+});
+
+describe("asciiHostname", () => {
+  it("lowercases, drops the root dot and IDNA-encodes", () => {
+    expect(asciiHostname("Inbound.Example.COM.")).toBe("inbound.example.com");
+    expect(asciiHostname("bücher.example")).toBe("xn--bcher-kva.example");
+    expect(asciiHostname("xn--bcher-kva.example")).toBe("xn--bcher-kva.example");
+  });
+
+  it("refuses anything the URL parser would reinterpret", () => {
+    for (const bad of [
+      "",
+      "a@b.example",
+      "ex%61mple.com",
+      "a b.example",
+      "a/b.example",
+      "[::1]",
+      "x:25",
+    ]) {
+      expect(asciiHostname(bad)).toBeNull();
+    }
   });
 });

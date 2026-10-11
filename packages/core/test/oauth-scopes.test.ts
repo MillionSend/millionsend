@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { apiBaseUrl, MCP_SCOPES, mcpResourceUrl } from "../src/oauth-scopes.js";
+import { ADMIN_MCP_SCOPES, apiBaseUrl, MCP_SCOPES, mcpResourceUrl } from "../src/oauth-scopes.js";
 
 it("derives the API origin from the dashboard host when no public URL is set", () => {
   expect(apiBaseUrl("https://mail.example.com")).toBe("https://mail.example.com:3001");
@@ -32,4 +32,9 @@ it("advertises a read scope for broadcasts alongside the write scope", () => {
   expect(MCP_SCOPES.indexOf("broadcasts:read")).toBeLessThan(
     MCP_SCOPES.indexOf("broadcasts:write"),
   );
+});
+
+it("advertises receiving:read as its own scope, outside the admin set", () => {
+  expect(MCP_SCOPES).toContain("receiving:read");
+  expect(ADMIN_MCP_SCOPES as readonly string[]).not.toContain("receiving:read");
 });

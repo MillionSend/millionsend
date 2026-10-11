@@ -44,6 +44,7 @@ target subsets with [segments](/concepts/segments) (saved filters) and
 | Broadcasts | Compose, schedule, and send to all contacts, a segment, or a topic. |
 | Templates | Reusable templates with per-contact merge fields. |
 | Domains | Guided DNS verification, BYODKIM, per-domain tracking and TLS settings. |
+| Receiving (beta) | Mail to any address on a domain you verified: stored encrypted, read through the Resend-compatible API, announced by the `email.received` webhook. |
 | Webhooks | Standard Webhooks signatures, per-endpoint event selection, delivery log. |
 | Suppressions | Hard bounces and complaints suppressed automatically. |
 | One-click unsubscribe | RFC 8058 `List-Unsubscribe` headers plus a hosted unsubscribe page. |
@@ -61,7 +62,8 @@ deliverability and pricing. A self-hosted deployment is two containers:
   there is no Redis.
 - **App container** — runs the API (port 3001), the background worker, and the
   web dashboard (port 3000). An optional third container runs the SMTP relay
-  (port 2587). Processes can also be split one-per-container with the
+  (port 2587), and another the MX for [receiving](/concepts/receiving)
+  (port 25). Processes can also be split one-per-container with the
   `PROCESS` environment variable.
 
 Email bodies are encrypted at rest (AES-256-GCM envelope encryption) and

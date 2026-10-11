@@ -214,7 +214,7 @@ async function loadBlockInput(
   );
   const attachments = email.attachments
     ? (await openAttachments(email.attachments, keyring, owner)).map((a) => ({
-        filename: a.filename,
+        filename: a.filename ?? "(unnamed)",
         contentType: a.contentType,
       }))
     : [];

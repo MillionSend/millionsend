@@ -365,6 +365,15 @@ export const env = createEnv({
     // a configured tracking subdomain (gates on-demand certificate issuance).
     TRACKING_ASK_SECRET: z.string().optional(),
 
+    // Inbound mail. Receiving exists on this instance only when this names
+    // the MX host customers point their MX records at (the cloud's is
+    // mx.millionsend-dns.com); unset, every receiving surface is hidden and
+    // the internal MX endpoints answer 404. Read through receivingMxHost().
+    RECEIVING_MX_HOST: z.string().optional(),
+    // Bearer secret the MX (PROCESS=mx) sends to the internal MX endpoints.
+    // Required whenever RECEIVING_MX_HOST is set, at least 32 characters.
+    MX_INGEST_SECRET: z.string().optional(),
+
     // Social login for the dashboard. A provider's sign-in button appears
     // only when BOTH its client id and secret are set.
     GOOGLE_CLIENT_ID: z.string().optional(),
@@ -588,6 +597,22 @@ export function trackingCnameTarget(appBaseUrl: string, e: Env = env): string {
   return e.TRACKING_EDGE_HOST ?? new URL(appBaseUrl).host;
 }
 
+/** The host receiving domains point their MX record at; undefined when this instance does not receive mail. */
+export function receivingMxHost(e: Env = env): string | undefined {
+  return e.RECEIVING_MX_HOST || undefined;
+}
+
+/** Whether inbound mail exists on this instance at all. */
+export function receivingEnabled(e: Env = env): boolean {
+  return receivingMxHost(e) !== undefined;
+}
+
+// Mirrors MX_INGEST_SECRET_MIN_LENGTH in packages/core/src/receiving/protocol.ts
+// (this package cannot import core).
+const MX_INGEST_SECRET_MIN_LENGTH = 32;
+
+const MX_HOST_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
 const S3_CREDENTIAL_KEYS = ["S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const;
 
 const S3_BUCKET_KEYS = ["S3_STORAGE_BUCKET", "S3_BACKUP_BUCKET"] as const;
@@ -639,6 +664,19 @@ export function assertEnvConsistency(e: Env): void {
     if (e[key] && !e.S3_BACKUP_BUCKET) {
       throw new Error(`${key} requires S3_BACKUP_BUCKET`);
     }
+  }
+  // Receiving half-configured would either publish an MX record whose mail
+  // the app then refuses, or leave a secret nothing uses: both are drift.
+  if (e.RECEIVING_MX_HOST && !MX_HOST_RE.test(e.RECEIVING_MX_HOST)) {
+    throw new Error("RECEIVING_MX_HOST must be a lowercase hostname such as mx.example.com");
+  }
+  if (Boolean(e.RECEIVING_MX_HOST) !== Boolean(e.MX_INGEST_SECRET)) {
+    throw new Error("RECEIVING_MX_HOST and MX_INGEST_SECRET must be set together");
+  }
+  if (e.MX_INGEST_SECRET && e.MX_INGEST_SECRET.length < MX_INGEST_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `MX_INGEST_SECRET must be at least ${MX_INGEST_SECRET_MIN_LENGTH} characters (openssl rand -hex 32)`,
+    );
   }
   // A judge switched on without its key would fail every sample as
   // "no credentials" forever, silently; refuse the boot instead.

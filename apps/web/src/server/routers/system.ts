@@ -3,6 +3,7 @@ import {
   EMAIL_RETENTION_DAYS_DEFAULT,
   env,
   isCloudDeployment,
+  receivingEnabled,
   SES_MAX_SEND_RATE_DEFAULT,
   SES_TRANSACTIONAL_RESERVE_DEFAULT,
   servedRegions,
@@ -154,6 +155,8 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       trackingRequiresSubdomain: isCloudDeployment(),
       // The sender of the onboarding button's fixed email; null hides the button.
       onboardingSender: env.ONBOARDING_EMAIL_FROM ?? null,
+      // Inbound mail exists only with RECEIVING_MX_HOST; off, no receiving screen shows.
+      receiving: receivingEnabled(),
     })),
 
     /**

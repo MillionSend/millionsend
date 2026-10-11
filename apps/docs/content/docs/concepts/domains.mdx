@@ -151,9 +151,49 @@ receipts, password resets — consider leaving open tracking off: the pixel adds
 tracking-shaped element some filters weigh against inbox placement, for a metric
 you can't fully trust anyway.
 
+## Receiving
+
+A verified domain can also [receive mail](/concepts/receiving) (beta). Every
+domain response carries Resend's `capabilities` object: `sending` is always
+`enabled` (asking to disable it is a `422`), and `receiving` is `enabled` or
+`disabled`. Switch receiving with **Enable receiving** on the domain page, or
+send `{ "capabilities": { "receiving": "enabled" } }` (or `"disabled"`) to
+`PATCH /domains/{id}`. Only a verified domain can turn it on, which is why
+`POST /domains` refuses `"receiving": "enabled"` with a `422`: add the domain,
+verify it, then switch receiving on. A domain name receives in one team only:
+a name another team already receives on answers `409`. On an instance that
+doesn't receive mail at all, every domain reads `disabled` and turning it on
+is refused with `422`.
+
+While receiving is on, `records[]` includes a `Receiving` row: an MX record
+at the domain's own name pointing at `mx.millionsend-dns.com` (self-hosted,
+the instance's `RECEIVING_MX_HOST`), priority `10`.
+
+```json
+{
+  "record": "Receiving",
+  "name": "inbound.example.com",
+  "type": "MX",
+  "ttl": "Auto",
+  "status": "verified",
+  "value": "mx.millionsend-dns.com",
+  "priority": 10,
+  "live": "found"
+}
+```
+
+The row is checked live like the others: `verified` once that host is among
+the name's MX records with the lowest priority number, `failed` while another
+MX record on the name has a lower number (`detail` lists what is published),
+and `not_started` with no MX record at all. A lower-numbered MX record takes
+the mail instead, which is why the MX belongs on a subdomain such as
+`inbound.example.com` when the domain already receives mail elsewhere. The
+row never gates sending.
+
 ## API keys and domains
 
 An API key can be scoped to a single domain; such a key can only send from
-that domain (other domains return `403 restricted_api_key`). Keys it creates
+that domain (other domains return `403 restricted_api_key`), and reads only
+the mail [received](/concepts/receiving) at it. Keys it creates
 through the API are scoped to the same domain: an omitted `domain_id` inherits
 it, and any other domain returns `403 restricted_api_key`.

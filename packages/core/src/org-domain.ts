@@ -6,6 +6,23 @@ export function normalizeHostname(hostname: string): string {
 }
 
 /**
+ * normalizeHostname, IDNA-encoded the way DNS and the domains table store
+ * names (bücher.de → xn--bcher-kva.de); null when it is not a hostname. Only
+ * letters, digits, dots and hyphens go to the URL parser: it would otherwise
+ * read "a@b" as userinfo and percent-decode "%61".
+ */
+export function asciiHostname(hostname: string): string | null {
+  const name = normalizeHostname(hostname.trim());
+  if (!name || /[^\p{L}\p{M}\p{N}.-]/u.test(name)) return null;
+  try {
+    const ascii = new URL(`http://${name}`).hostname;
+    return /^[a-z0-9.-]+$/.test(ascii) ? ascii : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The registrable domain under the ICANN section of the Public Suffix List:
  * the name a registry sold (acme.com.br for news.acme.com.br, acme.app.br
  * for mail.acme.app.br). Feeds DMARC lookups and link-domain checks, so

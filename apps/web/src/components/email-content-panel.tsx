@@ -8,7 +8,7 @@ import { CopyButton, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import { Switch } from "@/components/switch";
-import { emulateEmailScheme } from "@/lib/email-preview";
+import { emulateEmailScheme, lockDownReceivedHtml } from "@/lib/email-preview";
 import { formatDayTime } from "@/lib/format";
 import { formatHtml } from "@/lib/html";
 import { BAND_TONE, checkGlyph, formatScoreTenths } from "@/lib/score-band";
@@ -40,7 +40,9 @@ function HtmlSource({ html, formatted }: { html: string; formatted: boolean }) {
 }
 
 const TAB_KEYS = ["preview", "text", "html", "insights"] as const;
-type Tab = (typeof TAB_KEYS)[number];
+// Received mail has no insights report; its headers take that tab.
+const RECEIVED_TAB_KEYS = ["preview", "text", "html", "headers"] as const;
+type Tab = (typeof TAB_KEYS)[number] | (typeof RECEIVED_TAB_KEYS)[number];
 
 export interface EmailInsights {
   scoreTenths: number;
@@ -284,10 +286,12 @@ function InsightsSection({
 /**
  * The message as sent, one panel for every surface that holds a message:
  * preview as a light or dark mail client, plain text, source, and the
- * insights report. Email and broadcast detail render this same panel.
+ * insights report. Email and broadcast detail render this same panel, and so
+ * does a received email, with its headers instead of insights.
  */
 export function EmailContentPanel({
   email,
+  received,
 }: {
   email: {
     id: string;
@@ -299,16 +303,25 @@ export function EmailContentPanel({
     /** The body was never decrypted: the request ran under a support view. */
     hiddenBySupportView?: boolean | undefined;
   };
+  /** A received message: written by a stranger, so its preview loads nothing from the network. */
+  received?: { headers: Record<string, string> | null };
 }) {
   const t = useTranslations("emails");
   const [tab, setTab] = useState<Tab>("preview");
   const [scheme, setScheme] = usePreviewScheme();
   const [htmlFormatted, setHtmlFormatted] = useState(true);
+  // One "name: value" line per header; a repeated header (Received) keeps every value.
+  const headersText = received?.headers
+    ? Object.entries(received.headers)
+        .flatMap(([name, value]) => value.split("\n").map((line) => `${name}: ${line}`))
+        .join("\n")
+    : null;
   const tabContent: Record<Tab, string | null> = {
     preview: email.html,
     text: email.text,
     html: email.html,
     insights: null,
+    headers: headersText,
   };
   const currentContent = tabContent[tab];
   const tabLabels: Record<Tab, string> = {
@@ -316,6 +329,7 @@ export function EmailContentPanel({
     text: t("detail.plainText"),
     html: t("detail.html"),
     insights: t("detail.insights"),
+    headers: t("detail.headers"),
   };
 
   return (
@@ -346,7 +360,7 @@ export function EmailContentPanel({
           className="ms-scroll-x"
           style={{ display: "flex", gap: 6, overflowX: "auto", flex: "0 1 auto", minWidth: 0 }}
         >
-          {TAB_KEYS.map((key) => (
+          {(received ? RECEIVED_TAB_KEYS : TAB_KEYS).map((key) => (
             <button
               key={key}
               type="button"
@@ -442,7 +456,11 @@ export function EmailContentPanel({
               <iframe
                 title={t("detail.preview")}
                 sandbox="allow-popups allow-popups-to-escape-sandbox"
-                srcDoc={emulateEmailScheme(email.html, scheme)}
+                srcDoc={
+                  received
+                    ? lockDownReceivedHtml(emulateEmailScheme(email.html, scheme))
+                    : emulateEmailScheme(email.html, scheme)
+                }
                 style={{
                   display: "block",
                   width: "100%",
@@ -503,6 +521,34 @@ export function EmailContentPanel({
                 }}
               >
                 {t("detail.noHtml")}
+              </p>
+            ))}
+          {tab === "headers" &&
+            (headersText ? (
+              <pre
+                className="ms-mono"
+                style={{
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                  margin: 0,
+                  padding: "16px 18px",
+                  fontSize: 12,
+                  lineHeight: 1.7,
+                  color: "var(--ms-bone)",
+                }}
+              >
+                {headersText}
+              </pre>
+            ) : (
+              <p
+                style={{
+                  margin: 0,
+                  padding: "16px 18px",
+                  color: "var(--ms-muted)",
+                  fontSize: "var(--ms-fs-ui)",
+                }}
+              >
+                {t("detail.noHeaders")}
               </p>
             ))}
         </>

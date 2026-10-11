@@ -1,6 +1,8 @@
 import { resolveNs as dnsResolveNs } from "node:dns/promises";
 import {
   env,
+  receivingEnabled,
+  receivingMxHost,
   servedRegions,
   sesTenantsEnabled,
   trackingCnameTarget,
@@ -17,12 +19,14 @@ import {
   isOperatorTeam,
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
+  setDomainReceiving,
   warmupCap,
 } from "@millionsend/core";
 import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
 import {
   checkDnsRecords,
+  checkReceivingMx,
   computeDomainVerification,
   createDomainIdentity,
   createSesv2Client,
@@ -36,6 +40,7 @@ import {
   lookupDmarc,
   nodeDnsResolver,
   provisionDomainTenant,
+  receivingDnsRecord,
   type SesIdentityClient,
   verificationDbPatch,
 } from "@millionsend/ses";
@@ -167,6 +172,16 @@ function trackingCname(domain: {
     : null;
 }
 
+/**
+ * The Receiving MX row while the domain receives on an instance that takes
+ * mail. Live-checked like the tracking CNAME, and like it never part of the
+ * sending status.
+ */
+function receivingRecord(domain: { name: string; receivingEnabled: boolean }) {
+  const mxHost = receivingMxHost();
+  return mxHost && domain.receivingEnabled ? receivingDnsRecord(domain.name, mxHost) : null;
+}
+
 async function requireDomain(db: Db, teamId: string, id: string) {
   const [domain] = await db
     .select()
@@ -234,6 +249,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         trackingPending:
           domain.trackingSubdomain !== null && domain.trackingSubdomainSetAt !== null,
         tlsMode: domain.tlsMode,
+        receivingEnabled: domain.receivingEnabled,
         createdAt: domain.createdAt,
         verifiedAt: domain.verifiedAt,
         lastCheckedAt: domain.lastCheckedAt,
@@ -399,24 +415,39 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       // fallback the verify pass applies, so a refresh agrees with the check.
       const resolver = deps.dns ?? nodeDnsResolver;
       const tracking = trackingCname(domain);
-      const [verification, provider, dmarc, trackingLive] = await Promise.all([
+      const receiving = receivingRecord(domain);
+      const [verification, provider, dmarc, trackingLive, receivingLive] = await Promise.all([
         getDomainVerification(deps.clientForRegion(domain.region), { domain: domain.name }),
         detectProvider(deps.resolveNs, domain.name),
         lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
         tracking ? checkDnsRecords([tracking], resolver).then(([status]) => status) : undefined,
+        receiving ? checkReceivingMx(domain.name, receiving.value, resolver) : undefined,
       ]);
       // A CNAME seen live opens the branded-host gate here too, or the row would
       // read verified while sends still ship untracked.
       if (trackingLive === "found") await clearTrackingClock(ctx.db, domain);
       return {
         provider,
-        records: dnsChecklist({
-          domain,
-          verification,
-          dmarc,
-          tracking,
-          live: tracking && trackingLive ? [{ ...tracking, status: trackingLive }] : [],
-        }),
+        records: [
+          ...dnsChecklist({
+            domain,
+            verification,
+            dmarc,
+            tracking,
+            live: tracking && trackingLive ? [{ ...tracking, status: trackingLive }] : [],
+          }),
+          ...(receiving && receivingLive
+            ? [
+                {
+                  group: "receiving" as const,
+                  ...receiving,
+                  status: null,
+                  live: receivingLive.status,
+                  ...(receivingLive.found ? { found: receivingLive.found } : {}),
+                },
+              ]
+            : []),
+        ],
       };
     }),
 
@@ -439,6 +470,14 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         const [live] = await checkDnsRecords([cname], resolver);
         liveDns.push({ ...cname, status: live ?? "missing" });
         trackingResolved = live === "found";
+      }
+      // The Receiving MX never gates status either; its row badge reads the same check.
+      const receiving = receivingRecord(domain);
+      if (receiving) {
+        liveDns.push({
+          ...receiving,
+          ...(await checkReceivingMx(domain.name, receiving.value, resolver)),
+        });
       }
       const now = new Date();
       await ctx.db
@@ -538,6 +577,42 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           trackingSubdomain: next.trackingSubdomain,
           tlsMode: next.tlsMode,
         };
+      }),
+
+    /** Resend's capabilities.receiving: a catch-all for every address at the domain. */
+    setReceiving: adminProcedure
+      .input(z.object({ id: z.uuid(), enabled: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        if (!receivingEnabled()) {
+          throw new TRPCError({
+            code: "UNPROCESSABLE_CONTENT",
+            message: "This instance does not receive mail",
+          });
+        }
+        const result = await setDomainReceiving(ctx.db, {
+          teamId: ctx.teamId,
+          domainId: input.id,
+          enabled: input.enabled,
+        });
+        if (result.ok) {
+          if (result.changed) {
+            await recordAudit(ctx, {
+              action: result.receivingEnabled
+                ? "domain.receiving_enabled"
+                : "domain.receiving_disabled",
+              target: { type: "domain", id: input.id },
+              metadata: { name: result.name },
+            });
+          }
+          return { receivingEnabled: result.receivingEnabled };
+        }
+        if (result.reason === "not_found") throw new TRPCError({ code: "NOT_FOUND" });
+        throw result.reason === "not_verified"
+          ? new TRPCError({ code: "PRECONDITION_FAILED", message: "Verify the domain first" })
+          : new TRPCError({
+              code: "CONFLICT",
+              message: "Another team receives mail for this domain",
+            });
       }),
 
     delete: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {

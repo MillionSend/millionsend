@@ -8,6 +8,7 @@
     "broadcasts",
     "templates",
     "domains",
+    "receiving",
     "webhooks",
     "suppressions",
     "deliverability-insights"

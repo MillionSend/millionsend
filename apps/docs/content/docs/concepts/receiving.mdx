@@ -1,0 +1,480 @@
+---
+title: Receiving
+description: Receive email at any address on your own domain, read it through the Resend-compatible API, and get an email.received webhook for every message. Beta.
+---
+
+Receiving turns a domain you verified into an inbox for every address on it.
+Mail sent to any address there reaches MillionSend's mail server, is stored
+encrypted, and comes back to you through the API, the `email.received`
+webhook, the dashboard (**Emails → Receiving**) and the [MCP server](/mcp).
+The API is Resend's receiving API, so the official Resend SDKs work against
+MillionSend unchanged, `forward()` included.
+
+<Callout type="info">
+Receiving is in public beta and marked **Beta** in the dashboard. It has no
+spam or virus filtering yet: MillionSend stores whatever reaches your
+receiving domain and reports its SPF, DKIM and DMARC results for your code to
+act on.
+</Callout>
+
+## How it works
+
+Mail reaches you the way it reaches any mailbox: the sending server looks up
+the MX record of the recipient's domain and delivers to the host it names.
+
+1. The sender's server reads your domain's MX record and connects to
+   MillionSend's MX.
+2. For each recipient (`RCPT TO`), the MX checks that the domain receives
+   here. An address at any other domain is refused, so the MX never relays
+   mail anywhere.
+3. The message streams in (40 MB at most). The MX checks SPF, DKIM, DMARC and
+   ARC, and hands the message to MillionSend, which stores it before the MX
+   answers `250`. From that moment the message is yours, and the sending
+   server's job is done.
+4. `email.received` fires, and the message shows in the API and the
+   dashboard.
+
+Every refusal happens during that SMTP conversation, so the sending server
+still holds the message and decides what to do with it. MillionSend never
+sends a bounce of its own.
+
+| Reply | When | The sending server |
+| --- | --- | --- |
+| `550 5.1.1` | The domain doesn't receive here: unknown, or receiving is off. | Returns the message to its sender. |
+| `550 5.7.1` | The team that owns the domain is suspended. | Returns the message to its sender. |
+| `552 5.3.4` | The message is larger than 40 MB. | Returns the message to its sender. |
+| `452 4.2.2` | The team's receiving allowance is used up (see [pricing](#pricing)). | Keeps the message and tries again later. |
+| Other `4xx`, such as `451 4.3.0` | A temporary problem on MillionSend's side, or more recipients than one delivery takes (50). | Keeps the message and tries again, for days if needed. |
+
+## Set up
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+Receiving domains point their MX record at `mx.millionsend-dns.com`.
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+Receiving exists on an instance once its operator runs the MX process and
+sets `RECEIVING_MX_HOST` (see
+[Self-hosting → Receiving](/self-hosting#receiving-beta)); receiving domains
+point their MX record at that host. Until then the dashboard shows no
+receiving at all, every domain reports `capabilities.receiving: "disabled"`,
+and turning it on is refused with `422`.
+
+</DeploymentTab>
+</DeploymentTabs>
+
+### 1. Pick a subdomain
+
+Senders deliver to the MX record with the lowest priority number on the
+recipient's domain, so the receiving MX record takes over every address on
+the name it is published on. Publish it on a name that receives no mail yet,
+such as `inbound.example.com`: your mailboxes at `example.com` stay with your
+current provider. Receive on a root domain only when nothing else receives
+mail there.
+
+### 2. Add and verify it
+
+Receiving belongs to one exact domain name, and only to a domain your team
+verified. To receive at `inbound.example.com`, add `inbound.example.com`
+itself under **Domains** (or with `POST /domains`) and verify it with its own
+DKIM and MAIL FROM records, as for [sending](/concepts/domains#verification).
+Verifying `example.com` does not cover its subdomains. Once verified, the
+subdomain can send too, so replies can go out from the same addresses.
+
+### 3. Turn receiving on
+
+Open the domain and switch on **Enable receiving**, or use the API:
+
+```sh
+curl -X PATCH "https://api.millionsend.com/domains/{id}" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "capabilities": { "receiving": "enabled" } }'
+```
+
+Every domain response reports it, for example `{ "sending": "enabled",
+"receiving": "enabled" }`. A domain name receives in one team only: a name
+another team already receives on is refused with `409`.
+
+### 4. Publish the MX record
+
+The domain's records gain a Receiving row, under **Enable receiving** on the
+domain page (`record: "Receiving"` in the API). Add it at your DNS provider:
+
+| Type | Name | Value | Priority |
+| --- | --- | --- | --- |
+| MX | `inbound.example.com` | `mx.millionsend-dns.com` | `10` |
+
+The row turns verified once public DNS lists `mx.millionsend-dns.com` among
+the name's MX records with the lowest priority number. The number itself is
+only a suggestion; what matters is that no other MX record on that name has a
+lower one. The check runs live and never affects the domain's sending status.
+Self-hosted, the value is your instance's `RECEIVING_MX_HOST`.
+
+### 5. Send a test
+
+From any mailbox, send a message to an address at the domain, such as
+`hello@inbound.example.com`. It shows under **Emails → Receiving** within
+seconds, and every webhook endpoint subscribed to `email.received` gets a
+delivery.
+
+To stop receiving, switch it off (`"receiving": "disabled"`). New mail is
+refused within a minute; what already arrived stays until
+[retention](#limits) removes it. Remove the MX record as well.
+
+## Addresses
+
+A receiving domain accepts every address on it. `support@`, `invoices@`,
+`reply+ticket-4821@`: any local part works, with nothing to create first.
+Route each message in your code by the address it came to.
+
+- `received_for` lists the addresses at your domains that the sending server
+  actually delivered to (the SMTP envelope recipients), Bcc recipients
+  included. `to` and `cc` are what the message's headers claim and can name
+  anyone, so route on `received_for`.
+- A message is stored once per team. Sent to three of your addresses, it is
+  one received email with all three in `received_for`, one webhook delivery
+  and one message counted. A sending server's retry is recognized and stored
+  once too. When the same message arrives again for more of your addresses
+  (a sending server splits its recipients over several deliveries, for
+  example past 50), they are added to `received_for`, and one more
+  `email.received` for the same `email_id` names only them.
+- Only the exact name receives: mail to `x@eu.inbound.example.com` is refused
+  unless that subdomain receives as well.
+- When one message reaches the receiving domains of two teams, each team gets
+  its own copy, listing only its own recipients.
+
+## Limits
+
+| Limit | Value |
+| --- | --- |
+| Message size | 40 MB (41,943,040 bytes) for the whole message as sent: headers, text, HTML and attachments encoded for email. Base64 encoding makes attachments about a third larger, so roughly 30 MB of files fit. A larger message is refused with `552 5.3.4` while it streams in. |
+| Retention | 30 days on Cloud. Self-hosted, the content follows the instance's email retention (**Settings → Instance**, 30 days by default), and the sender, recipients and subject follow `EMAIL_METADATA_RETENTION_DAYS` (30 by default). |
+| Filtering | No spam or virus filtering during the beta; check `authentication` before trusting a sender. |
+
+When the content's retention ends, `html`, `text`, `headers` and `raw` read
+`null`, `attachments` is empty and the download links stop working; the
+sender, recipients and subject stay until the row itself is deleted.
+
+## Pricing
+
+Received mail counts once per message per team, however many of your
+addresses it was sent to, in its own usage counter next to your sends. What
+it costs depends on the plan:
+
+| Plan | Free receiving | Past it |
+| --- | --- | --- |
+| Free | Shares the daily sending cap of 100 | Deferred with `452 4.2.2` until midnight UTC |
+| Starter | 3,000 per UTC day (twice the 1,500 daily cap), counted apart from sends | Deferred with `452 4.2.2` until midnight UTC |
+| Pro, Scale | Twice the plan's monthly volume per billing period (200,000 on Pro 100K) | Each received email counts as a tenth of an email toward the volume and overage |
+
+- **Free**: received mail and sends fill the same daily count, with the same
+  50% tolerance sends get, so new mail is deferred once the two together
+  reach 150 in a UTC day. Inbound mail can therefore use up the day: sends
+  past the cap wait until midnight UTC like any others, and received mail
+  moves the [quota notices](/concepts/webhooks#event-types) too.
+- **Pro and Scale**: past the free allowance, every tenth received email adds
+  one email to the billing period's count, so 1,000 more received emails
+  count as 100 emails: inside your included volume they use it up, past it
+  they bill at your plan's overage rate. Past the allowance, received mail is
+  deferred with `452 4.2.2` once the period's count reaches 5 times the
+  included volume with overage on, or the included volume with overage off.
+- A deferral is temporary: the sending server keeps the message and retries,
+  usually for several days, so it arrives once there is room again.
+
+**Settings → Usage** shows received mail and the free allowance. A
+self-hosted instance counts received mail and never caps it.
+
+## Reading received mail
+
+Use the official Resend SDK pointed at MillionSend (`RESEND_BASE_URL`), or
+plain HTTP. The MillionSend SDKs don't have receiving methods yet. Every
+endpoint below needs a **full access** key; a sending-only key gets
+`403 restricted_api_key`, and a key scoped to a domain reads only mail
+received at that domain.
+
+```ts
+import { Resend } from "resend";
+
+// RESEND_API_KEY=ms_...  RESEND_BASE_URL=https://api.millionsend.com
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+const { data: page } = await resend.emails.receiving.list({ limit: 20 });
+const { data: email } = await resend.emails.receiving.get(page.data[0].id);
+const { data: files } = await resend.emails.receiving.attachments.list({ emailId: email.id });
+```
+
+### List
+
+`GET /emails/receiving` lists newest first, as Resend does: `after` pages
+toward older mail, `before` back toward newer. It takes `limit` (1–100,
+default 20; Resend returns every email when `limit` is left out) and an
+`after` or `before` cursor, like every [list](/api-reference#pagination).
+
+```sh
+curl "https://api.millionsend.com/emails/receiving?limit=20" \
+  -H "Authorization: Bearer ms_..."
+```
+
+```json
+{
+  "object": "list",
+  "has_more": false,
+  "data": [
+    {
+      "id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+      "to": ["support@inbound.example.com"],
+      "from": "ada@example.org",
+      "created_at": "2026-10-11T14:37:40.951Z",
+      "subject": "Order #1042",
+      "bcc": [],
+      "cc": [],
+      "reply_to": [],
+      "received_for": ["support@inbound.example.com"],
+      "message_id": "<CAF1x7Qm9@mail.example.org>",
+      "attachments": [
+        {
+          "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+          "filename": "invoice.pdf",
+          "content_type": "application/pdf",
+          "content_id": null,
+          "content_disposition": "attachment",
+          "size": 48213
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Get one
+
+`GET /emails/receiving/{id}` adds the content, the authentication results and
+a download link for the original message:
+
+```json
+{
+  "object": "email",
+  "id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+  "to": ["support@inbound.example.com"],
+  "from": "ada@example.org",
+  "created_at": "2026-10-11T14:37:40.951Z",
+  "subject": "Order #1042",
+  "html": "<p>Hi! The invoice is attached.</p>",
+  "html_format": "data_uri",
+  "text": "Hi! The invoice is attached.",
+  "headers": {
+    "from": "Ada Lovelace <ada@example.org>",
+    "to": "support@inbound.example.com",
+    "subject": "Order #1042",
+    "mime-version": "1.0"
+  },
+  "bcc": [],
+  "cc": [],
+  "reply_to": [],
+  "received_for": ["support@inbound.example.com"],
+  "authentication": { "spf": "pass", "dkim": "pass", "dmarc": "pass" },
+  "message_id": "<CAF1x7Qm9@mail.example.org>",
+  "raw": {
+    "download_url": "https://api.millionsend.com/receiving/raw/4ef9a417-02e9-4d39-ad75-9611e0fcc33c?expires=1791733061&signature=…",
+    "expires_at": "2026-10-11T15:37:41.000Z"
+  },
+  "attachments": [
+    {
+      "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+      "filename": "invoice.pdf",
+      "content_type": "application/pdf",
+      "content_id": null,
+      "content_disposition": "attachment",
+      "size": 48213
+    }
+  ]
+}
+```
+
+- `html_format`: `data_uri`, the default, replaces the HTML's `cid:` image
+  references with the inline images themselves. `?html_format=cid` keeps the
+  references; match them to the attachments' `content_id`. Any other value is
+  a `422`. When inlining would take the HTML past 40 MB (typically a long
+  thread quoting the same image over and over), the references stay and
+  `html_format` reads `cid` whatever you asked for, as Resend does past
+  100 MB: check `html_format` rather than assume it.
+- `from` is the bare address; the display name is in `headers.from`.
+- `headers` holds the top-level headers with lowercase names, one value per
+  name; a repeated header such as `received` has its values joined by line
+  breaks. When the message carries no `Return-Path`, `return-path` holds the
+  envelope sender the sending server gave, `<>` for a bounce.
+- `html` or `text` is `null` when the message has no such part. A message
+  whose MIME doesn't parse is still stored and listed; whatever can't be read
+  from it is `null` (`headers` too, when no header parses), and `raw` has it
+  whole.
+- `message_id` comes from the message's `Message-ID` header. When it has
+  none, MillionSend makes one up as `<id@received.invalid>`.
+
+`authentication` reports SPF, DKIM and DMARC in Resend's words:
+
+| Value | Means | Check results |
+| --- | --- | --- |
+| `pass` | The check passed. | `pass` |
+| `fail` | The check failed. | `fail` |
+| `gray` | No verdict: no record or signature to check, or a neutral result. | `none`, `neutral`, `policy`, `softfail` |
+| `processing_failed` | The check couldn't finish, for example on a DNS error or a broken record. | `temperror`, `permerror` |
+| `unknown` | Not checked. | |
+
+As on Resend, DKIM passes only for a signature from the domain in `from` (or
+another domain of the same organization): a valid signature from any other
+domain reads `gray`, and `policy` in the dashboard. DMARC reads `gray` when
+the domain in `from` publishes `p=none` and SPF or DKIM passed, `none` in the
+dashboard.
+
+`dmarc: "pass"` means the domain in `from` authorized the message. Anything
+else means `from` may be forged, though `gray` also covers genuine mail from
+a domain that asks receivers not to enforce DMARC.
+
+### Attachments
+
+`GET /emails/receiving/{email_id}/attachments` lists all of an email's
+attachments at once, as Resend does (pass `limit` to page through them), and
+`GET /emails/receiving/{email_id}/attachments/{id}` returns one, each with a
+fresh download link:
+
+```json
+{
+  "object": "attachment",
+  "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+  "filename": "invoice.pdf",
+  "size": 48213,
+  "content_type": "application/pdf",
+  "content_disposition": "attachment",
+  "download_url": "https://api.millionsend.com/receiving/attachments/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/b344102e-962e-8943-aef6-271c7743e1dd?expires=1791733061&signature=…",
+  "expires_at": "2026-10-11T15:37:41.000Z"
+}
+```
+
+`filename` and `content_id` are left out when the part has none. Attachment
+ids never change for the life of the email. Filenames are cleaned before they
+reach you: control characters are removed, and `/` and `\` become `_`.
+
+### Downloads
+
+`raw.download_url` and each attachment's `download_url` work without an API
+key: the link itself is the credential.
+
+- A link is signed for one email and one attachment (or the raw message) of
+  one team, and stops working at its `expires_at`, one hour after the API
+  answered; after that, or once altered, it answers `403`. Anyone holding it
+  can download until then, so don't log it or pass it around. Each call to
+  the endpoints above signs fresh links.
+- The raw download is the message exactly as the sending server transmitted
+  it (`message/rfc822`), byte for byte. An attachment download is the
+  attachment's decoded bytes, always as `application/octet-stream`; the
+  type the sender declared is in `content_type`.
+- Downloads are always served as files (`Content-Disposition: attachment`),
+  never rendered in a browser tab.
+
+## Forwarding and replying
+
+`resend.emails.receiving.forward()` works as it does on Resend: it reads the
+email, downloads `raw.download_url` and sends the message again through
+`POST /emails`.
+
+```ts
+await resend.emails.receiving.forward({
+  emailId: "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+  from: "Support <support@inbound.example.com>",
+  to: "team@example.com",
+});
+```
+
+By default the forward carries the original subject, text, HTML, inline
+images and attachments; with `passthrough: false` and your own `text` or
+`html`, the original travels as an attached `forwarded_message.eml` under a
+`Fwd:` subject. A forward is an ordinary send: `from` must be on a verified
+domain, and it counts against your sending quota. `POST /emails` takes inline
+images (`content_id`), so the default forward keeps them. A send carries up to
+10 MiB of attachments, though (Resend allows 40 MB): the default forward works
+when the original's attachments fit in 10 MiB, and a wrapped forward, which
+attaches the whole message, when the message itself does. A larger forward is
+refused with `422` before anything is queued.
+
+To reply in the same thread, send with `In-Reply-To` and `References` set to
+the received `message_id`:
+
+```ts
+await resend.emails.send({
+  from: "Support <support@inbound.example.com>",
+  to: email.from,
+  subject: `Re: ${email.subject}`,
+  text: "Thanks, we're on it.",
+  headers: { "In-Reply-To": email.message_id, References: email.message_id },
+});
+```
+
+## Webhook
+
+`email.received` fires once for every message stored for your team, to
+endpoints subscribed to it or to all events. Like Resend's, it carries
+metadata only: fetch the content with `GET /emails/receiving/{email_id}`.
+When a later delivery of the same message reaches more of your addresses,
+one more `email.received` arrives for the same `email_id`, and its
+`received_for` lists only the added addresses, so each address is announced
+once.
+
+```json
+{
+  "type": "email.received",
+  "created_at": "2026-10-11T14:37:40.951Z",
+  "data": {
+    "email_id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+    "created_at": "2026-10-11T14:37:40.951Z",
+    "from": "ada@example.org",
+    "to": ["support@inbound.example.com"],
+    "bcc": [],
+    "cc": [],
+    "received_for": ["support@inbound.example.com"],
+    "message_id": "<CAF1x7Qm9@mail.example.org>",
+    "subject": "Order #1042",
+    "attachments": [
+      {
+        "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+        "filename": "invoice.pdf",
+        "content_type": "application/pdf",
+        "content_disposition": "attachment",
+        "content_id": null
+      }
+    ]
+  }
+}
+```
+
+Signatures, retries and the delivery log work as for every other event; see
+[Webhooks](/concepts/webhooks).
+
+## Dashboard
+
+**Emails → Receiving** lists received mail with its sender, recipients,
+subject, time, SPF, DKIM and DMARC results and attachment count. Opening a
+message shows its HTML in a sandbox, with scripts and remote images blocked
+and inline images shown, plus the text version, the headers, the
+authentication results, attachment downloads and the raw message.
+
+## MCP
+
+The [MCP server](/mcp#tools) reads received mail with four tools under the
+`receiving:read` permission: `list_received_emails`, `get_received_email`,
+`list_received_email_attachments` and `get_received_email_attachment`.
+`get_received_email` leaves inline images as `cid:` references unless asked
+otherwise, and `update_domain` switches receiving on or off. Grants made
+before receiving existed don't include `receiving:read`: sign in again from
+the client to grant it.
+
+## Treat received mail as untrusted
+
+Anyone can send mail to a receiving domain. HTML can carry scripts and
+tracking images, links can lead to phishing pages, attachments can carry
+malware, and `from` can be forged; `authentication` tells you how far to
+trust it. An AI agent reading received mail should treat it as data, never as
+instructions: the MCP tools mark it that way.

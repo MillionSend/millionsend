@@ -28,7 +28,7 @@ import {
   emitSuppressionEvents,
   enforceDomainWarmup,
   eraseRecipient,
-  estimateAttachmentBytes,
+  exceededSendSize,
   extractTokenPrefix,
   fetchAccountScore,
   fetchDeliverabilityHealth,
@@ -40,6 +40,8 @@ import {
   isAdminRole,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
+  MX_DELIVER_PATH,
+  MX_INGEST_PATH,
   makeUnsubscribeToken,
   markSegmentsStale,
   monthlyQuotaMessage,
@@ -112,6 +114,7 @@ import { loggedBody, maskEmailPathSegments } from "./request-log.js";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
 import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
+import { registerMxIngestRoutes, registerReceivingRoutes } from "./routes/receiving.js";
 import { registerSuppressionRoutes } from "./routes/suppressions.js";
 import { registerTemplateRoutes } from "./routes/templates.js";
 import { registerUsageRoutes } from "./routes/usage.js";
@@ -234,6 +237,19 @@ export interface ApiDeps {
    * POST /contacts/{id}/preferences-link mint links; omitted → that route 422s.
    */
   unsubscribeSecretKey?: Buffer | undefined;
+  /**
+   * Inbound mail on this instance (RECEIVING_MX_HOST set): the host receiving
+   * domains point their MX at, and the bearer secret the MX presents
+   * (MX_INGEST_SECRET). Omitted → the internal MX endpoints do not exist
+   * (404), domains report receiving disabled and enabling it is a 422.
+   */
+  receiving?: { mxHost: string; ingestSecret: string } | undefined;
+  /**
+   * Signs received mail's download links (core deriveReceivedDownloadKey over
+   * MASTER_ENCRYPTION_KEY). Kept apart from `receiving`: mail stored before
+   * an instance stopped receiving stays readable until retention removes it.
+   */
+  receivedDownloadKey?: Buffer | undefined;
   /** SES event ingestion; omitted → the endpoint does not exist (404). */
   sns?: SnsIngestDeps | undefined;
   /** SES identity management; omitted → the /domains routes do not exist (404). */
@@ -361,7 +377,9 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
         body: errorBody(
           422,
           "validation_error",
-          `Attachments exceed ${Math.floor(result.maxBytes / (1024 * 1024))} MiB in total`,
+          result.maxBytes === MAX_ATTACHMENT_BYTES
+            ? `Attachments exceed ${result.maxBytes / MiB} MiB in total`
+            : `The email exceeds ${result.maxBytes / MiB} MiB once encoded for sending; base64 makes attachments about a third larger`,
         ),
       };
     case "all_suppressed":
@@ -421,9 +439,10 @@ function toAcceptPayload(body: SendEmailRequest, domainId: string | null): Accep
   // `content` is guaranteed by the schema's superRefine; the `?? ""` only
   // satisfies the optional wire type.
   const attachments = body.attachments?.map((a) => ({
-    filename: a.filename,
+    ...(a.filename ? { filename: a.filename } : {}),
     content: a.content ?? "",
     ...(a.content_type ? { contentType: a.content_type } : {}),
+    ...(a.content_id ? { contentId: a.content_id } : {}),
   }));
   return {
     from: body.from,
@@ -537,6 +556,13 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_COUNTER_SWEEP_SIZE = 10_000;
 const AUTH_FAILURES_PER_MINUTE = 20;
 
+const MiB = 1024 * 1024;
+const DEFAULT_BODY_LIMIT_BYTES = 25 * MiB;
+const MX_DELIVER_URL_PATH = `${MX_INGEST_PATH}${MX_DELIVER_PATH}`;
+
+const bodyTooLarge = (maxBytes: number) => (c: Context) =>
+  c.json(errorBody(413, "payload_too_large", `Request body exceeds ${maxBytes / MiB} MiB`), 413);
+
 /**
  * Fixed-window hit counter. Returns the count for `key` in the current
  * window after this hit, plus the seconds until the window rolls over.
@@ -577,12 +603,15 @@ function clientIp(c: Context, isCloud: boolean): string | null {
 
 /**
  * Keyset pagination for the Resend list endpoints: limit 1-100 (default 20),
- * `after`/`before` cursors are item ids, rows ordered by (created_at, id).
+ * `after`/`before` cursors are item ids, rows ordered by (created_at, id),
+ * oldest first unless `newestFirst` (Resend's order, `after` paging toward
+ * older items).
  */
 export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
+  newestFirst?: boolean;
   /** Resolves a cursor id to its sort key, scoped to the caller's team. */
   loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
   loadRows: (cond: SQL | undefined, descending: boolean, take: number) => Promise<R[]>;
@@ -590,19 +619,42 @@ export async function keysetPage<R>(opts: {
   const { query } = opts;
   const limit = query.limit ?? 20;
   const cursorId = query.before ?? query.after;
+  const towardNewer = opts.newestFirst ? Boolean(query.before) : !query.before;
   let cond: SQL | undefined;
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
     if (!cur) return "bad_cursor";
-    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, query.before ? "before" : "after");
+    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
   }
   // One extra row decides has_more without a count query.
-  const fetched = await opts.loadRows(cond, Boolean(query.before), limit + 1);
+  const fetched = await opts.loadRows(cond, !towardNewer, limit + 1);
   const hasMore = fetched.length > limit;
   const rows = fetched.slice(0, limit);
-  // `before` pages are fetched newest-first; responses stay oldest-first.
+  // `before` pages are fetched outward from the cursor; responses keep the list's order.
   if (query.before) rows.reverse();
   return { rows, hasMore };
+}
+
+/** keysetPage's contract over a list already in memory, kept in its own order. */
+export function arrayPage<T extends { id: string }>(
+  items: readonly T[],
+  query: ListQuery,
+): { rows: T[]; hasMore: boolean } | "bad_cursor" {
+  const limit = query.limit ?? 20;
+  const cursorId = query.before ?? query.after;
+  let start = 0;
+  let end = items.length;
+  if (cursorId) {
+    const at = items.findIndex((item) => item.id === cursorId);
+    if (at < 0) return "bad_cursor";
+    if (query.before) end = at;
+    else start = at + 1;
+  }
+  if (query.before) {
+    const from = Math.max(start, end - limit);
+    return { rows: items.slice(from, end), hasMore: from > start };
+  }
+  return { rows: items.slice(start, start + limit), hasMore: start + limit < end };
 }
 
 /**
@@ -3278,13 +3330,17 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       maxAge: 86400,
     }),
   );
-  app.use(
-    "*",
-    bodyLimit({
-      maxSize: 25 * 1024 * 1024,
-      onError: (c) =>
-        c.json(errorBody(413, "payload_too_large", "Request body exceeds 25 MiB"), 413),
-    }),
+  // The MX's deliveries carry more than this: their route applies its own
+  // limit once the caller is authenticated, so an anonymous request never gets
+  // the larger allowance buffered.
+  const defaultBodyLimit = bodyLimit({
+    maxSize: DEFAULT_BODY_LIMIT_BYTES,
+    onError: bodyTooLarge(DEFAULT_BODY_LIMIT_BYTES),
+  });
+  app.use("*", (c, next) =>
+    c.req.method === "POST" && deps.receiving && c.req.path === MX_DELIVER_URL_PATH
+      ? next()
+      : defaultBodyLimit(c, next),
   );
   app.use("*", secureHeaders());
 
@@ -3338,9 +3394,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         requestBytes: requestLength == null ? null : Number(requestLength),
         responseBytes: responseLength == null ? null : Number(responseLength),
         requestBody: await loggedBody(path, c.req.header("content-type"), requestLength, () =>
-          c.req.json(),
+          c.req.text(),
         ),
-        responseBody: await loggedBody(path, responseType, responseLength, () => resClone.json()),
+        responseBody: await loggedBody(path, responseType, responseLength, () => resClone.text()),
       });
     })().catch((err) => console.error("api request log failed", err));
   });
@@ -3349,7 +3405,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // prefix-indexed key lookup, and nothing else throttles a caller that has
   // no key to bucket on.
   const countAuthFailure = fixedWindowCounter();
-  const authFailure = (c: Context, name: string, message: string) => {
+  const authFailure = (c: Context, name: string, message: string, status: 401 | 403 = 401) => {
     const ip = clientIp(c, deps.isCloud);
     if (ip) {
       const failures = countAuthFailure(`ip:${ip}`);
@@ -3361,7 +3417,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         );
       }
     }
-    return c.json(errorBody(401, name, message), 401);
+    return c.json(errorBody(status, name, message), status);
   };
 
   const requireApiKey = createMiddleware<Env>(async (c, next) => {
@@ -3710,11 +3766,13 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return { status: 403, name: "restricted_api_key", message: RESTRICTED_DOMAIN_MESSAGE };
     }
-    if (estimateAttachmentBytes(body.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
+    const payload = toAcceptPayload(body, domain.domainId);
+    const maxBytes = exceededSendSize(payload);
+    if (maxBytes !== null) {
       const { body: rejected } = acceptRejection({
         ok: false,
         reason: "attachments_too_large",
-        maxBytes: MAX_ATTACHMENT_BYTES,
+        maxBytes,
       });
       return { status: 422, name: "validation_error", message: rejected.message };
     }
@@ -3736,7 +3794,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         message: "All recipients are suppressed",
       };
     }
-    return { payload: toAcceptPayload(body, domain.domainId) };
+    return { payload };
   };
 
   app.openapi(batchRoute, async (c) => {
@@ -4215,6 +4273,15 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
     return c.json({ object: "email" as const, id: row.id }, 200);
   });
+
+  // Before GET /emails/{id}: Hono tries routes in registration order, and
+  // that route would claim /emails/receiving as an id.
+  registerReceivingRoutes(app, deps, {
+    requireFullAccess,
+    refuseDownload: (c) =>
+      authFailure(c, "invalid_download_link", "This download link is invalid or has expired", 403),
+  });
+  if (deps.receiving) registerMxIngestRoutes(app, deps, deps.receiving);
 
   // SECURITY: reads return decrypted bodies and the whole team archive, so
   // they are management surface — a sending_access key gets a 403 here even

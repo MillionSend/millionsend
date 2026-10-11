@@ -138,13 +138,20 @@ Questions or problems connecting a client: [support@millionsend.com](mailto:supp
 Each tool requires a permission (OAuth scope). Clients only see the tools
 their granted permissions cover. `broadcasts:write` also covers the two
 `broadcasts:read` tools. Tools marked **admin** are offered only to owners
-and admins.
+and admins. `receiving:read`, for [received mail](/concepts/receiving), came
+later than most grants: a client authorized before it existed doesn't have
+it until you sign in again from the client and grant it. Its tools exist
+only on an instance that receives mail.
 
 | Tool | Permission | Description |
 | --- | --- | --- |
 | `list_emails` | `emails:read` | List sent, queued and scheduled emails. |
 | `get_email` | `emails:read` | Get one email with its delivery status. |
 | `get_usage` | `emails:read` | Plan, send limit (daily on Free and Starter, monthly on Pro and Scale), domain limit, today's accepted count and, on monthly plans, the billing period's usage — check before bulk work. |
+| `list_received_emails` | `receiving:read` | List the emails received at your [receiving domains](/concepts/receiving). |
+| `get_received_email` | `receiving:read` | Get one received email with its text, HTML, headers, authentication results and a download link for the raw message. `html_format` defaults to `cid` here, keeping inline images out of the result. |
+| `list_received_email_attachments` | `receiving:read` | List a received email's attachments with their download links. |
+| `get_received_email_attachment` | `receiving:read` | Get one attachment of a received email with its download link. |
 | `list_contacts` | `audience:read` | List contacts, optionally one segment's members. |
 | `get_contact` | `audience:read` | Get a contact by id or email address. |
 | `get_contact_topics` | `audience:read` | Every topic with the contact's effective subscription and whether it was explicit. |
@@ -202,7 +209,7 @@ and admins.
 | `delete_webhook` | `webhooks:write` | **admin** Delete a webhook endpoint. |
 | `revoke_api_key` | `api-keys:write` | **admin** Revoke an API key. |
 | `create_domain` | `domains:write` | **admin** Add a sending domain and get its DNS records; optional tracking settings apply at creation. |
-| `update_domain` | `domains:write` | **admin** Change a domain's tracking settings; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |
+| `update_domain` | `domains:write` | **admin** Change a domain's tracking settings, or switch [receiving](/concepts/receiving) with `capabilities.receiving`; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |
 | `verify_domain` | `domains:write` | **admin** Re-check a domain's DNS and SES verification. |
 | `delete_domain` | `domains:write` | **admin** Remove a domain and its SES identity. |
 
@@ -221,8 +228,10 @@ envelope that marks it as untrusted data:
 ```
 
 Contact names and properties, email subjects and bodies, template names and
-bodies, suppressed addresses, and the names of segments, topics, webhooks,
-domains and API keys are all authored by your end users or third parties. The envelope lets an agent keep them apart from tool output,
+bodies, suppressed addresses, the names of segments, topics, webhooks,
+domains and API keys, and every field of a received email (sender, subject,
+headers, bodies, attachment names) are all authored by your end users or
+third parties. The envelope lets an agent keep them apart from tool output,
 so a contact whose name reads like an instruction is not followed as one.
 Read `untrusted_data` for the payload; an `isError` result carries the REST
 error body in the same place.

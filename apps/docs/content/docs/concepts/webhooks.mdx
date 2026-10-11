@@ -20,6 +20,7 @@ delivery log.
 | `email.opened` | A person loaded the tracking pixel (requires open tracking on the [domain](/concepts/domains)). `data.open` carries the fetch's `ipAddress`, `userAgent` and `timestamp`. A click on a message with no open yet also records one, with `data.open.reason: "click"`: a person cannot click what they never rendered, and for Apple Mail readers it is the only open that can ever be seen. |
 | `email.clicked` | A person clicked a rewritten link (requires click tracking). `data.click` carries `link`, `ipAddress`, `userAgent` and `timestamp`, as Resend's does. A link a machine followed — a security gateway, a link preview, a fetch seconds after delivery — is recorded as `email.prefetched` instead. |
 | `email.prefetched` | The pixel was fetched, or a link followed, by a machine — Apple Mail Privacy Protection, Gmail's prefetch, a security scanner, a browser identity no real browser sends, a fetch within seconds of delivery, or every link of the message within a second; `data.open.reason` or `data.click.reason` says which (see [open-rate accuracy](/concepts/domains#open-rate-accuracy)). A click recorded before the rest of its burst arrived is re-recorded here with the same `data.click.timestamp` its `email.clicked` carried: treat that as the retraction of the click and of any `email.opened` with `data.open.reason: "click"` stamped one millisecond before it. Opt-in: delivered only to endpoints that name it, never to "all events". |
+| `email.received` | A message reached one of your [receiving domains](/concepts/receiving) and was stored, once per message. `data.email_id` is a received email: read it with `GET /emails/receiving/{id}`. See [the payload](#received-mail) below. |
 
 Team-level events carry no email; `data` describes the team's standing instead:
 
@@ -47,6 +48,41 @@ changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 | `contact.resubscribed` | An explicit re-subscribe (`unsubscribed: false`). | |
 | `contact.topic_opt_in` / `contact.topic_opt_out` | The contact's effective subscription to a topic flipped. | `topic_id`, `topic_name` |
 | `suppression.added` / `suppression.removed` | An address joined or left the [suppression list](/concepts/suppressions). Bounce and complaint rows come from SES, with `source: null`. | `data` is `{ id, email, origin, source, created_at }` |
+
+### Received mail
+
+`email.received` carries Resend's metadata-only payload: no body, headers or
+attachment sizes, and `from` is the bare address. `received_for` lists the
+addresses at your domains the message was delivered to, Bcc recipients
+included. When a later delivery of the same message reaches more of your
+addresses, another `email.received` with the same `email_id` lists only those.
+
+```json title="email.received"
+{
+  "type": "email.received",
+  "created_at": "2026-10-11T14:37:40.951Z",
+  "data": {
+    "email_id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+    "created_at": "2026-10-11T14:37:40.951Z",
+    "from": "ada@example.org",
+    "to": ["support@inbound.example.com"],
+    "bcc": [],
+    "cc": [],
+    "received_for": ["support@inbound.example.com"],
+    "message_id": "<CAF1x7Qm9@mail.example.org>",
+    "subject": "Order #1042",
+    "attachments": [
+      {
+        "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+        "filename": "invoice.pdf",
+        "content_type": "application/pdf",
+        "content_disposition": "attachment",
+        "content_id": null
+      }
+    ]
+  }
+}
+```
 
 ## Signatures (Standard Webhooks)
 

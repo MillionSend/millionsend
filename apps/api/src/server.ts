@@ -1,12 +1,14 @@
 import { serve } from "@hono/node-server";
 import {
   env,
+  receivingMxHost,
   servedRegions,
   sesTenantsEnabled,
   trackingSubdomainsSupported,
   unsubscribeBaseUrl,
 } from "@millionsend/config";
 import {
+  deriveReceivedDownloadKey,
   deriveUnsubscribeKey,
   getInstanceSettings,
   hashRecipient,
@@ -70,6 +72,9 @@ const accountCache = createRegionAccountCache({
     }),
 });
 const settings = () => getInstanceSettings(db);
+const masterKey = Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64");
+// Boot validation requires the secret whenever the host is set.
+const mxHost = receivingMxHost();
 
 const app = createApi({
   db,
@@ -93,7 +98,11 @@ const app = createApi({
   appBaseUrl: env.APP_BASE_URL,
   unsubscribeBaseUrl: unsubscribeBaseUrl(),
   publicApiUrl: env.PUBLIC_API_URL,
-  unsubscribeSecretKey: deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64")),
+  unsubscribeSecretKey: deriveUnsubscribeKey(masterKey),
+  receivedDownloadKey: deriveReceivedDownloadKey(masterKey),
+  ...(mxHost && env.MX_INGEST_SECRET
+    ? { receiving: { mxHost, ingestSecret: env.MX_INGEST_SECRET } }
+    : {}),
   enqueueWebhookDeliveries: async (deliveries) => {
     await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
   },

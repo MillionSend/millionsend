@@ -1,9 +1,12 @@
 "use client";
 
+import { registrableDomain } from "@millionsend/core/org-domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
+import { BetaPill } from "@/components/beta-pill";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import {
   type DnsRecord,
@@ -21,12 +24,13 @@ import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
+import { toast } from "@/components/toast";
 import { WarnCard } from "@/components/warn-card";
 import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
 import { formatDay, formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
-import { guardMessage } from "@/lib/trpc-error";
+import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
 import { zoneRelativeName } from "@/lib/zone";
 import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
@@ -478,6 +482,27 @@ export function DomainDetail({ id }: { id: string }) {
       },
     }),
   );
+  const receivingOn = features.data?.receiving === true;
+  const setReceiving = useMutation(
+    trpc.domains.setReceiving.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
+      },
+      onError: (error) => {
+        const code = trpcErrorCode(error);
+        const name = domain.data?.name ?? "";
+        toast(
+          code === "PRECONDITION_FAILED"
+            ? t("detail.receiving.errorNotVerified")
+            : code === "CONFLICT"
+              ? t("detail.receiving.errorTaken", { domain: name })
+              : t("detail.receiving.error"),
+          "danger",
+        );
+      },
+    }),
+  );
 
   // A verify round-trip can return in well under a human blink; holding the
   // pending state for a floor keeps the Check DNS button's spinner visible so
@@ -635,7 +660,11 @@ export function DomainDetail({ id }: { id: string }) {
   // everything is green there is nothing to re-read, so the header button
   // hides and the action moves into the ⋯ menu for the rare manual re-check.
   const trackingRow = rows.find((r) => r.group === "tracking");
-  const needsDnsCheck = status !== "verified" || (!!trackingRow && trackingRow.live !== "found");
+  const receivingRow = rows.find((r) => r.group === "receiving");
+  const needsDnsCheck =
+    status !== "verified" ||
+    (!!trackingRow && trackingRow.live !== "found") ||
+    (!!receivingRow && receivingRow.live !== "found");
   // The header badge reads the live row: a verified identity whose tracking
   // CNAME is not resolving is partial until a check sees it.
   const shownStatus = displayDomainStatus(
@@ -652,6 +681,25 @@ export function DomainDetail({ id }: { id: string }) {
   }
   function aiPrompt(): string {
     return t("detail.aiPrompt", { domain: data.name, records: recordsText() });
+  }
+
+  // Receiving at a registrable domain (acme.com, not inbound.acme.com) takes
+  // over the mail its existing mailboxes get.
+  const receivingApex = data.name === registrableDomain(data.name);
+  async function toggleReceiving(enabled: boolean) {
+    const state = enabled ? "Enable" : "Disable";
+    const ok = await confirmDialog({
+      title: t(`detail.receiving.confirm${state}Title`),
+      message: t(
+        enabled && receivingApex
+          ? "detail.receiving.confirmEnableApex"
+          : `detail.receiving.confirm${state}`,
+        { domain: data.name },
+      ),
+      confirmLabel: t(`detail.receiving.confirm${state}Cta`),
+      danger: !enabled,
+    });
+    if (ok) setReceiving.mutate({ id, enabled });
   }
 
   async function copyToClipboard(text: string, key: "instructions" | "prompt") {
@@ -919,7 +967,7 @@ export function DomainDetail({ id }: { id: string }) {
                   domain={data.name}
                   showStatus
                   highlightGroup={highlightTracking ? "tracking" : null}
-                  forceGroups={["tracking"]}
+                  forceGroups={receivingOn ? ["tracking", "receiving"] : ["tracking"]}
                   groupExtras={{
                     // Same enable gesture as the Configuration tab, right on the
                     // group header.
@@ -931,12 +979,27 @@ export function DomainDetail({ id }: { id: string }) {
                         ariaLabel={t("detail.tracking.enable")}
                       />
                     ),
+                    receiving: (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                        <BetaPill />
+                        <Switch
+                          checked={data.receivingEnabled}
+                          // Turning it off stays possible whatever the status.
+                          disabled={
+                            setReceiving.isPending ||
+                            (!data.receivingEnabled && status !== "verified")
+                          }
+                          onChange={(enabled) => void toggleReceiving(enabled)}
+                          ariaLabel={t("detail.receiving.enable")}
+                        />
+                      </span>
+                    ),
                   }}
-                  emptyNotes={
+                  emptyNotes={{
                     // Cloud has no shared host, so an unconfigured group needs no
                     // note — the switch is the affordance. Self-host keeps the
                     // default-host explainer.
-                    trackingRequiresSubdomain
+                    ...(trackingRequiresSubdomain
                       ? {}
                       : {
                           tracking: t(
@@ -944,8 +1007,15 @@ export function DomainDetail({ id }: { id: string }) {
                               ? "detail.groups.trackingNote"
                               : "detail.groups.trackingNoteDefaultOnly",
                           ),
-                        }
-                  }
+                        }),
+                    receiving:
+                      status !== "verified"
+                        ? t("detail.receiving.notVerified")
+                        : t(receivingApex ? "detail.receiving.noteApex" : "detail.receiving.note", {
+                            domain: data.name,
+                            example: `inbound.${data.name}`,
+                          }),
+                  }}
                 />
               ) : (
                 <DnsRecordsTableSkeleton showStatus />

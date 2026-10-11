@@ -11,6 +11,7 @@
 # Optional services sit behind compose profiles — COMPOSE_PROFILES in .env:
 #   docs    the documentation site on DOCS_PORT
 #   smtp    the SMTP relay; mount a STARTTLS keypair first (SELF_HOSTING.md)
+#   mx      inbound mail on port 25; needs RECEIVING_MX_HOST (SELF_HOSTING.md)
 #   backup  scheduled pg_dump to S3-compatible storage; needs S3_BACKUP_BUCKET
 services:
   postgres:
@@ -104,6 +105,40 @@ services:
       - /app/apps/web/.next/cache
       - /app/apps/docs/.next/cache
       - /app/apps/docs/.source
+
+  mx:
+    image: "${MILLIONSEND_IMAGE:-ghcr.io/millionsend/millionsend:latest}"
+    # Its own variables only, not env_file: the MX faces the internet and has
+    # no use for the app's keys.
+    environment:
+      PROCESS: mx
+      MX_INGEST_URL: "http://millionsend:${PORT:-3001}/internal/mx"
+      MX_INGEST_SECRET: "${MX_INGEST_SECRET:-}"
+      MX_HOSTNAME: "${MX_HOSTNAME:-${RECEIVING_MX_HOST:-}}"
+      MX_TLS_CERT_PATH: /tls/fullchain.pem
+      MX_TLS_KEY_PATH: /tls/privkey.pem
+    ports:
+      # Public by design: other mail servers deliver here. IPv4 only: over
+      # IPv6, Docker's proxy would replace each client's address with its own.
+      - "0.0.0.0:25:2525"
+    volumes:
+      # A certbot deploy hook copies the keypair here; STARTTLS follows it.
+      - ./mx-tls:/tls:ro
+    # The keypair is root:1000 0640 on the host; this group lets the image's
+    # non-root user read it.
+    group_add: ["1000"]
+    profiles: ["mx"]
+    restart: unless-stopped
+    # Above the supervisor's 35 s child-exit budget (scripts/start.mjs).
+    stop_grace_period: 45s
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
 
   backup:
     # Published from scripts/backup on the same tags as the app.

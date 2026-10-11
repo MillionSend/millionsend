@@ -140,6 +140,23 @@ describe("redactLoggedBody", () => {
       url: "[redacted]",
     });
   });
+
+  it("treats a received email's headers as content and every signed download link as a secret", () => {
+    const received = {
+      headers: { subject: "hi" },
+      raw: { download_url: "https://api/receiving/raw/x?signature=s", expires_at: "t" },
+      attachments: [{ filename: "a.pdf", download_url: "https://api/receiving/attachments/x/y" }],
+    };
+    expect(redactLoggedBody("/emails/receiving/x", received)).toEqual({
+      headers: "[headers, 16 B]",
+      raw: { download_url: "[redacted]", expires_at: "t" },
+      attachments: [{ filename: "a.pdf", download_url: "[redacted]" }],
+    });
+    // A send's custom headers are settings, not content.
+    expect(redactLoggedBody("/emails", { headers: { "X-Ref": "1" } })).toEqual({
+      headers: { "X-Ref": "1" },
+    });
+  });
 });
 
 describe("api request logging", () => {
@@ -371,6 +388,23 @@ describe("api request logging", () => {
     const [row] = await waitForRows(1);
     expect(row?.requestBody).toEqual({ truncated: true, bytes: declared });
     expect(row?.requestBytes).toBe(declared);
+  });
+
+  it("never parses a response over 1 MiB that declares no length: the marker carries its size", async () => {
+    await db.delete(schema.apiRequests);
+    const html = `<p>${"x".repeat(1024 * 1024)}</p>`;
+    const res = await post({ ...validBody, to: ["big@example.com"], html });
+    const { id } = (await res.json()) as { id: string };
+    const read = await call("GET", `/emails/${id}`);
+    expect(read.headers.get("content-length")).toBeNull();
+    expect(((await read.json()) as { html: string }).html).toBe(html);
+
+    const rows = await waitForRows(2);
+    const logged = rows.find((r) => r.method === "GET");
+    expect(logged?.responseBody).toEqual({
+      truncated: true,
+      bytes: expect.toSatisfy((bytes: number) => bytes > 1024 * 1024),
+    });
   });
 
   it("stores null for a non-JSON response", async () => {

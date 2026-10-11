@@ -21,6 +21,10 @@ paths = [
 ]
 
 [[allowlists]]
+description = "Fixed MX_INGEST_SECRET value for the receiving boot-validation tests"
+paths = ['''packages/config/test/receiving\.test\.ts''']
+
+[[allowlists]]
 description = "Static private key paired with the local SNS signature fixture"
 paths = ['''packages/ses/test/fixtures/sns-test-key\.pem''']
 

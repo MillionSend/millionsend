@@ -61,7 +61,7 @@ Then fix what the report lists:
 
 - Update topic and segment ids in code and config using the report's id map.
 - Templates: MillionSend templates do not store `from` or `reply_to`; pass them on each send.
-- Webhooks: endpoint, events and signing secret were copied, so the existing receiver keeps verifying the `svix-*` headers. Event types outside MillionSend's seven `email.*` types were dropped per webhook and are listed; remove or replace handlers for them.
+- Webhooks: endpoint, events and signing secret were copied, so the existing receiver keeps verifying the `svix-*` headers. Event types outside MillionSend's eight `email.*` types (`email.received` included) were dropped per webhook and are listed; remove or replace handlers for them.
 - API keys cannot be migrated (Resend exposes their names only). Create one per name the report lists, in the dashboard, and place them in the matching environments.
 
 ## Step 4 — DNS, done by the user

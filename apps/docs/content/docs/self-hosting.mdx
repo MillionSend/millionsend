@@ -145,7 +145,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `ALLOW_SIGNUP` | The first user can always register; after that signup stays closed unless this is `true`. Keep `false` when the dashboard is reachable from the internet. |
 | `TRUSTED_PROXIES` | Reverse proxies whose forwarded-client-IP headers (`X-Forwarded-For`, `CF-Connecting-IP`) are believed, comma-separated IPs or CIDRs. Default `127.0.0.1,::1` covers a proxy on the same host; add your proxy's address when it runs elsewhere. See the [nginx section](#production-nginx--tls). |
 | `WEBHOOK_ALLOW_LOCALHOST` | Local development only: lets webhook endpoints (test fires included) target `http://` and loopback/private addresses on any port. Keep `false` on any internet-reachable instance. |
-| `COMPOSE_PROFILES` | Optional compose services, comma-separated: `smtp` (the relay; mount a STARTTLS keypair first), and in the standalone file also `docs` (this documentation site) and `backup` (scheduled dumps). |
+| `COMPOSE_PROFILES` | Optional compose services, comma-separated: `smtp` (the relay; mount a STARTTLS keypair first), and in the standalone file also `docs` (this documentation site), `backup` (scheduled dumps) and `mx` (the inbound MX; see [Receiving](#receiving-beta)). |
 | `PORT` | API port (default `3001`). Under compose this moves both the container's listen port and the published host port together. |
 | `UNSUBSCRIBE_BASE_URL` | Optional own host for the hosted unsubscribe pages (e.g. `https://unsubscribe.example.com`), pointed at the same web process. Unsubscribe links in mail and the page's redirects use it, and that host serves the unsubscribe flow only, so recipients and link scanners never reach the dashboard's origin, cookies or reputation. Unset: `APP_BASE_URL`. |
 | `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
@@ -190,6 +190,26 @@ connections, so separate containers and worker replicas fit without tuning.
 | `S3_BACKUP_BUCKET` | PRIVATE bucket for scheduled database dumps — never the public uploads bucket. Unset disables the `backup` service. |
 | `S3_BACKUP_PREFIX` / `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | Backup tuning: object key prefix (default `backups`), daily dump schedule (`<minute> <hour> * * *`, UTC, default `0 3 * * *`; any other shape makes the service exit 1), days of dumps kept (default 14). |
 | `BACKUP_AGE_RECIPIENT` | age public key (`age1…`); set to encrypt dumps before upload. Restore with `age --decrypt -i <key file>` first. |
+
+### Inbound mail (receiving)
+
+See [Receiving](#receiving-beta). The app reads the first two; the MX process
+reads only the `MX_*` variables. The compose `mx` service sets
+`MX_INGEST_URL`, `MX_HOSTNAME` (from `RECEIVING_MX_HOST`) and the TLS paths
+itself, so set those only for an MX on another host.
+
+| Variable | Purpose |
+| --- | --- |
+| `RECEIVING_MX_HOST` | Hostname the MX process answers at (e.g. `mx.example.com`); receiving domains point their MX record at it. Unset, receiving doesn't exist on the instance: no dashboard tab or switch, every domain reports `capabilities.receiving: "disabled"`, and the internal MX endpoints answer `404`. |
+| `MX_INGEST_SECRET` | Bearer secret the MX presents to the API, at least 32 characters (`openssl rand -hex 32`). Set it together with `RECEIVING_MX_HOST`: the app refuses to boot with only one of the two. The MX process needs the same value. |
+| `MX_INGEST_URL` | MX process: your API's origin plus `/internal/mx` (e.g. `https://api.example.com/internal/mx`). |
+| `MX_HOSTNAME` | MX process: the name in its greeting and EHLO, normally the same as `RECEIVING_MX_HOST`. |
+| `MX_PORT` | MX process: listen port (default `2525`). Publish host port 25 to it. |
+| `MX_TLS_CERT_PATH` / `MX_TLS_KEY_PATH` | MX process: PEM keypair for STARTTLS (paths inside the container), both or neither. STARTTLS is offered once the files exist, and a renewed certificate is picked up without a restart. |
+| `MX_MAX_CLIENTS` / `MX_MAX_CONNECTIONS_PER_IP` / `MX_CONNECTIONS_PER_IP_PER_MINUTE` | MX process: connection limits (defaults `200` at once, `10` at once per IP, `60` new per IP per minute). |
+| `MX_MAX_RECIPIENTS` | MX process: recipients accepted per SMTP transaction (default `50`, at most `100`); the sending server delivers the rest in another. |
+| `MX_SOCKET_TIMEOUT_MS` / `MX_SESSION_TIMEOUT_MS` | MX process: idle time before a connection is dropped (default `300000`) and the longest one session may last (default `600000`). |
+| `MX_MAX_BUFFERED_MB` | MX process: message megabytes all sessions together may hold in memory (default `512`, at least `64`); past it, senders get `452` and retry. |
 
 ## AWS setup
 
@@ -433,6 +453,64 @@ profile, so it stays off until asked for: once the keypair is mounted, add
 `smtp` to `COMPOSE_PROFILES` in `.env` (comma-separated with any others) and
 `docker compose up -d`.
 
+## Receiving (beta)
+
+[Receiving](/concepts/receiving) needs one more process: the MX, which
+answers SMTP on port 25 for your teams' receiving domains and hands every
+message to the API over HTTP. It holds no database and no keys, only its
+`MX_*` variables, so it can run beside the app or on a small separate box
+with port 25 open, which is how MillionSend Cloud runs it. It never relays
+mail, offers no AUTH and never sends a bounce: it refuses during the SMTP
+session instead.
+
+1. **Name it.** Point an A record such as `mx.example.com` at the public IPv4
+   address of the host that will run the MX, and make sure inbound TCP port
+   25 reaches it; some providers block port 25 until asked. Add no AAAA
+   record: port 25 is published on IPv4 only, because over IPv6 Docker's
+   proxy would replace each sender's address with its own, which breaks SPF
+   and the per-address limits.
+2. **Turn receiving on in the app.** Set `RECEIVING_MX_HOST=mx.example.com`
+   and `MX_INGEST_SECRET` (`openssl rand -hex 32`) in `.env`, then
+   `docker compose up -d`. Domains can now turn receiving on, and their
+   Receiving record points at `mx.example.com`.
+3. **Give it a certificate.** The `mx` service reaches the API on the
+   compose network, greets as `RECEIVING_MX_HOST`, and offers STARTTLS with
+   the keypair in `mx-tls/` next to `docker-compose.yml`. A certbot deploy
+   hook copies it there, owned `root:1000` with mode `0640`; the compose file
+   adds the container's non-root user to group 1000 so it can read the files
+   without making them world-readable. With the
+   [nginx setup](#production-nginx--tls) on port 80 (or `--standalone`
+   instead of `--nginx` when port 80 is free):
+
+   ```sh
+   sudo install -d -m 0750 -o root -g 1000 /opt/millionsend/mx-tls
+   sudo certbot certonly --nginx -d mx.example.com --deploy-hook \
+     'install -m 0640 -o root -g 1000 "$RENEWED_LINEAGE/fullchain.pem" "$RENEWED_LINEAGE/privkey.pem" /opt/millionsend/mx-tls/'
+   ```
+
+   certbot runs the hook after every renewal, and the MX picks up the new
+   files within five minutes, without a restart. Without a certificate, mail
+   still arrives, unencrypted.
+4. **Start it.** Add `mx` to `COMPOSE_PROFILES` and run
+   `docker compose up -d`: the `mx` service runs `PROCESS=mx` and publishes
+   host port 25 to its port 2525.
+
+From another machine, `nc mx.example.com 25` should answer with a `220`
+greeting naming `mx.example.com`. Then turn receiving on for a verified
+domain, publish its MX record and send it a message.
+
+To run the MX on another host, use
+[`deploy/mx`](https://github.com/MillionSend/millionsend/tree/main/deploy/mx)
+from the repository with `MX_INGEST_URL` (your API's origin plus
+`/internal/mx`), `MX_HOSTNAME` and the same `MX_INGEST_SECRET`. Its
+deliveries then reach the API through your reverse proxy: a message can be
+40 MB, so the proxy's request size limit for the API has to allow that (the
+[nginx example](#production-nginx--tls) allows 60 MB), and its envelope
+travels in one request header of up to about 13 KB, past nginx's default
+8 KB (the example raises it to 16 KB). The internal MX
+endpoints answer `404` unless `RECEIVING_MX_HOST` is set, and refuse any
+request without the secret.
+
 ## Documentation site
 
 The image can also serve this documentation site: a `docs` compose service
@@ -491,10 +569,14 @@ server {
     listen 80;
     server_name api.example.com;
 
-    # POST /emails/batch takes up to 100 emails per request; html/text bodies
-    # carry no schema byte cap, but SES rejects messages over 10 MB anyway.
-    # 25m covers a full batch of large bodies without unbounded uploads.
-    client_max_body_size 25m;
+    # The largest request is an inbound message of up to 40 MiB the MX
+    # delivers to /internal/mx; the API holds everything else to 25 MiB. 60m
+    # covers it without unbounded uploads.
+    client_max_body_size 60m;
+    # The MX sends a delivery's envelope in one header of up to about 13 KB,
+    # over nginx's default 8k line; a 400 there defers that mail until the
+    # sender gives up.
+    large_client_header_buffers 4 16k;
 
     location / {
         proxy_pass http://127.0.0.1:3001;
@@ -1259,7 +1341,7 @@ docker build --secret id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
   purge run.
 - Worker sizing: `SEND_CONCURRENCY` lanes (default 16, about 1.2 per message/second of SES rate) and `WORKER_REPLICAS` (default 1). The SES rate limiter lives in each worker process, so every worker divides the account's rate by `WORKER_REPLICAS`; set it to the number of worker containers you run.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`,
-  `web`, `smtp`, or `docs` per container (default `all` = api + worker + web).
+  `web`, `smtp`, `mx`, or `docs` per container (default `all` = api + worker + web).
   Upgrade them in the same `up -d`: the Metrics chart counts only what
   upgraded processes write, so a writer left on an older image during the
   swap is missing from that day's chart (the daily usage figures are

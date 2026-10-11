@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DARK_CLIENT_SIM, emulateEmailScheme } from "./email-preview";
+import { DARK_CLIENT_SIM, emulateEmailScheme, lockDownReceivedHtml } from "./email-preview";
 
 describe("emulateEmailScheme", () => {
   const html =
@@ -30,5 +30,26 @@ describe("emulateEmailScheme", () => {
         "dark",
       ),
     ).not.toContain(DARK_CLIENT_SIM);
+  });
+});
+
+describe("lockDownReceivedHtml", () => {
+  const POLICY = '<meta http-equiv="Content-Security-Policy"';
+
+  it("puts a no-network policy ahead of everything a stranger wrote", () => {
+    const doc = lockDownReceivedHtml(
+      '<html><head><link rel="stylesheet" href="https://x.example/a.css"></head></html>',
+    );
+    expect(doc.startsWith(POLICY)).toBe(true);
+    expect(doc).toContain("default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+    expect(doc).toContain('<meta name="referrer" content="no-referrer">');
+  });
+
+  it("keeps the message's doctype first, so its rendering mode stays as sent", () => {
+    expect(
+      lockDownReceivedHtml("<!DOCTYPE html>\n<html><body>hi</body></html>").startsWith(
+        `<!DOCTYPE html>${POLICY}`,
+      ),
+    ).toBe(true);
   });
 });

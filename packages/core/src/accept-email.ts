@@ -125,11 +125,87 @@ export const SYSTEM_MAIL_TAG = `${RESERVED_TAG_PREFIX}system`;
 /** Decoded attachment bytes allowed per email, summed across attachments. */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
+/**
+ * The largest message SES v2 sends, encoded as it goes out: "40 MB", which
+ * SES counts in MiB. Resend caps an email the same way, base64 included.
+ */
+export const SES_MAX_MESSAGE_BYTES = 40 * 1024 * 1024;
+
 /** Decoded size of base64 attachments: 3 bytes per 4 chars; padding makes this a ≤2-byte overestimate. */
 export function estimateAttachmentBytes(
   attachments: readonly { content?: string | undefined }[],
 ): number {
   return attachments.reduce((sum, a) => sum + Math.floor(((a.content?.length ?? 0) * 3) / 4), 0);
+}
+
+/** Headers and boundaries a MIME part adds around its body, a long non-ASCII filename included. */
+const MIME_PART_OVERHEAD_BYTES = 4096;
+
+/** `bytes` base64-encoded in 76-character lines, as nodemailer writes a part. */
+const base64Lines = (bytes: number): number => Math.ceil(bytes / 57) * 78;
+
+/**
+ * `text` quoted-printable in lines, as nodemailer writes a text part, from
+ * above: "=" and each non-ASCII UTF-8 byte take three bytes, a line break
+ * two, and every 73 a soft break.
+ */
+function quotedPrintableLines(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 0x0a) bytes += 2;
+    else if (c === 0x09 || c === 0x0d || (c >= 0x20 && c <= 0x7e && c !== 0x3d)) bytes += 1;
+    else if (c < 0x80) bytes += 3;
+    // Two UTF-8 bytes, or half of a surrogate pair's four.
+    else if (c < 0x800 || (c >= 0xd800 && c <= 0xdfff)) bytes += 6;
+    else bytes += 9;
+  }
+  return Math.ceil(bytes / 73) * 78;
+}
+
+/**
+ * The MIME message the worker builds for a send, measured from above: text
+ * in whichever of nodemailer's two encodings runs longer, attachments in
+ * base64, header text four times over for encoded words, and room around
+ * every part.
+ */
+// ponytail: link tracking lengthens every URL in the html after this is
+// measured; a link-heavy send at the very limit can still fail at SES.
+export function estimateMimeBytes(email: {
+  subject?: string | undefined;
+  html?: string | undefined;
+  text?: string | undefined;
+  headers?: Record<string, string> | undefined;
+  attachments?: readonly { content?: string | undefined }[] | undefined;
+}): number {
+  const textPart = (value: string | undefined) =>
+    value
+      ? Math.max(quotedPrintableLines(value), base64Lines(Buffer.byteLength(value, "utf8")))
+      : 0;
+  const attachments = email.attachments ?? [];
+  const headerText = Object.entries(email.headers ?? {}).reduce(
+    (sum, [name, value]) => sum + Buffer.byteLength(name + value, "utf8"),
+    Buffer.byteLength(email.subject ?? "", "utf8"),
+  );
+  return (
+    MIME_PART_OVERHEAD_BYTES * (attachments.length + 4) +
+    4 * headerText +
+    textPart(email.html) +
+    textPart(email.text) +
+    attachments.reduce((sum, a) => sum + base64Lines(estimateAttachmentBytes([a])), 0)
+  );
+}
+
+/**
+ * The size cap a send breaks, or null: the attachments' own cap first, then
+ * the encoded message SES would get, since SES refuses a larger one whatever
+ * is retried.
+ */
+export function exceededSendSize(email: Parameters<typeof estimateMimeBytes>[0]): number | null {
+  if (estimateAttachmentBytes(email.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
+    return MAX_ATTACHMENT_BYTES;
+  }
+  return estimateMimeBytes(email) > SES_MAX_MESSAGE_BYTES ? SES_MAX_MESSAGE_BYTES : null;
 }
 
 /**
@@ -266,9 +342,8 @@ export async function acceptEmail(
     const refusal = await sendRefusal(opts.tx ?? deps.db, auth.teamId);
     if (refusal) return { ok: false, ...refusal };
   }
-  if (estimateAttachmentBytes(payload.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
-    return { ok: false, reason: "attachments_too_large", maxBytes: MAX_ATTACHMENT_BYTES };
-  }
+  const tooLarge = exceededSendSize(payload);
+  if (tooLarge !== null) return { ok: false, reason: "attachments_too_large", maxBytes: tooLarge };
 
   // Suppression: dedupe, check every recipient field, and strip suppressed
   // addresses; refuse only when no `to` recipient remains.
