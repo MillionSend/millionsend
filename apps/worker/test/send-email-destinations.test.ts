@@ -354,3 +354,43 @@ it("holds a team past new's broadcast for a new destination in its HTML, and par
     ["queued_quota", "destination"],
   ]);
 });
+
+it("lists a new destination first in the judge's link table, past thirty links to the team's own site", async () => {
+  const t = await team("novel-first", "established");
+  const id = randomUUID();
+  const own = Array.from(
+    { length: 30 },
+    (_, i) => `<a href="https://novel-first.dev/p${i}">page ${i}</a>`,
+  ).join("");
+  const body = await encryptEmailBody(
+    { html: `<p>${own}<a href="https://lure-at-the-end.com/x">claim</a></p>`, text: null },
+    keyring,
+    { teamId: t.teamId, rowId: id },
+  );
+  await db.insert(schema.emails).values({
+    id,
+    teamId: t.teamId,
+    domainId: t.domainId,
+    from: "Team <hi@novel-first.dev>",
+    to: ["r@example.org"],
+    subject: "Hello",
+    bodyCiphertext: body.ciphertext,
+    bodyIv: body.iv,
+    bodyWrappedDek: body.wrappedDek,
+    bodyKeyVersion: body.keyVersion,
+  });
+  expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("deferred");
+  const blocks: string[] = [];
+  const seeing: AbuseJudge = {
+    ...verdict(10, false),
+    judge: async (block, opts) => {
+      blocks.push(block);
+      return verdict(10, false).judge(block, opts);
+    },
+  };
+  await judge((await sampleOf(id))?.id ?? "", seeing);
+  const rows = (blocks[0] ?? "")
+    .split("\n")
+    .filter((line) => line.startsWith("  ") && line.includes(" -> "));
+  expect(rows[0]).toContain("-> lure-at-the-end.com");
+});

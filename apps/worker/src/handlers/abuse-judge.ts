@@ -109,7 +109,8 @@ async function judgePending(
 
   const loaded = await loadBlockInput(db, deps.keyring, sample, now, deps.platformDomains);
   if (!loaded) return unjudged("body_purged");
-  const block = buildJudgeBlock(loaded.input);
+  // Links to destinations the team never cleared lead the judge's link table.
+  const block = buildJudgeBlock({ ...loaded.input, novelDomains: new Set(loaded.destinations) });
   const timeoutMs = sample.screening
     ? SCREEN_JUDGE_TIMEOUT_MS
     : (deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);

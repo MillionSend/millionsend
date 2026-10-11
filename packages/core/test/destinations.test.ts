@@ -61,6 +61,47 @@ describe("a message's destinations", () => {
   });
 });
 
+describe("a message's destinations, read as the judge reads its links", () => {
+  it("follow a known redirect wrapper to where it leads", () => {
+    expect(
+      messageDestinations({
+        html: [
+          '<a href="https://www.google.com/url?q=https://evil-pay.com/login&amp;sa=D">a</a>',
+          '<a href="https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fsecure-update.net%2Fx&data=1">b</a>',
+          '<a href="https://www.google.com/maps">a plain Google link</a>',
+        ].join(""),
+        text: "Also https://l.facebook.com/l.php?u=https%3A%2F%2Fpix-promo.com%2Fy",
+        replyTo: null,
+        verifiedDomains: ["acme.dev"],
+      }),
+    ).toEqual(["evil-pay.com", "google.com", "pix-promo.com", "secure-update.net"]);
+  });
+
+  it("are none for a team on tx.acme.com.br linking and replying to acme.com.br", () => {
+    expect(
+      messageDestinations({
+        html: [
+          '<a href="https://acme.com.br/pagar">pay</a>',
+          '<a href="https://www.acme.com.br/conta">account</a>',
+          '<a href="https://app.acme.com.br/">app</a>',
+        ].join(""),
+        text: "https://acme.com.br/ajuda",
+        replyTo: ["Acme <contato@acme.com.br>", "suporte@tx.acme.com.br"],
+        verifiedDomains: ["tx.acme.com.br"],
+      }),
+    ).toEqual([]);
+    // One owner holds a free host's name only: its neighbours stay new.
+    expect(
+      messageDestinations({
+        html: '<a href="https://foo.github.io/a">own</a><a href="https://bar.github.io/b">other</a>',
+        text: null,
+        replyTo: null,
+        verifiedDomains: ["foo.github.io"],
+      }),
+    ).toEqual(["bar.github.io"]);
+  });
+});
+
 describe("the destination registry", () => {
   it("clears a destination for good, never a shortener", async () => {
     const teamId = await createTeam(db, "registry");
