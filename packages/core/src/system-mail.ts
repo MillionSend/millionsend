@@ -71,14 +71,16 @@ export const SENT_WHILE_SUSPENDED: ReadonlySet<SystemMailKind> = new Set<SystemM
 
 /**
  * Kinds that reach an address on a stranger's say-so: anyone can sign up as
- * any address, and any team can invite one. However many accounts and teams
- * ask, one address gets at most RECIPIENT_MAIL_PER_HOUR of these a clock
- * hour and RECIPIENT_MAIL_PER_DAY a UTC day. A person retrying a sign-up
- * needs three or four, and a few invitations a day still fit.
+ * any address, any team can invite one, and anyone can ask for product
+ * updates at one. However many accounts and teams ask, one address gets at
+ * most RECIPIENT_MAIL_PER_HOUR of these a clock hour and
+ * RECIPIENT_MAIL_PER_DAY a UTC day. A person retrying a sign-up needs three
+ * or four, and a few invitations a day still fit.
  */
 export const RECIPIENT_CAPPED_KINDS: ReadonlySet<SystemMailKind> = new Set<SystemMailKind>([
   "email_verification",
   "invitation",
+  "updates.confirm",
 ]);
 export const RECIPIENT_MAIL_PER_HOUR = 5;
 export const RECIPIENT_MAIL_PER_DAY = 10;

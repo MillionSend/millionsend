@@ -298,15 +298,16 @@ describe("the per-recipient cap", () => {
     vi.useRealTimers();
   });
 
-  it("caps verification and invitation mail to one address across kinds, by the hour and the day", async () => {
+  it("caps verification, invitation and product-update mail to one address across kinds, by the hour and the day", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-11T08:00:00Z"));
     const d = deps();
     const send = (kind: SystemMailKind, to = "capped@example.com") =>
       sendSystemMail(d.deps, message({ kind, to, from: "no-reply@unowned.example.com" }));
     const refused = { reason: "recipient_capped" };
+    const capped = ["email_verification", "invitation", "updates.confirm"] as const;
     for (let i = 0; i < RECIPIENT_MAIL_PER_HOUR; i += 1) {
-      expect(await send(i % 2 === 0 ? "email_verification" : "invitation")).toBe("raw");
+      expect(await send(capped[i % capped.length] ?? "invitation")).toBe("raw");
     }
     await expect(send("invitation")).rejects.toMatchObject(refused);
     // The same mailbox however it is written.
