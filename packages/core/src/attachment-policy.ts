@@ -198,13 +198,29 @@ export interface AttachmentFile {
   bytes: Uint8Array;
 }
 
+/** Why a file is refused for every team; frozen names reports count by. */
+export const ATTACHMENT_REJECTIONS = [
+  "hidden_characters",
+  "blocked_extension",
+  "blocked_type",
+  "executable",
+  "blocked_in_archive",
+] as const;
+export type AttachmentRejection = (typeof ATTACHMENT_REJECTIONS)[number];
+
 /**
  * reject: refused for every team, with a sentence naming the file and why,
  * fit for an API error. park: waits for a person while the team is new.
  * allow: sent. `kind` is what the bytes are, whatever the name says.
  */
 export type AttachmentVerdict =
-  | { action: "reject"; kind: FileKind; flags: AttachmentFlag[]; reason: string }
+  | {
+      action: "reject";
+      kind: FileKind;
+      flags: AttachmentFlag[];
+      rejection: AttachmentRejection;
+      reason: string;
+    }
   | { action: "park" | "allow"; kind: FileKind; flags: AttachmentFlag[] };
 
 /**
@@ -218,32 +234,44 @@ export function attachmentVerdict(
   found: readonly AttachmentFlag[] = [],
 ): AttachmentVerdict {
   const kind = sniffFileType(file.bytes);
-  const reject = (why: string): AttachmentVerdict => ({
+  const reject = (rejection: AttachmentRejection, why: string): AttachmentVerdict => ({
     action: "reject",
     kind,
     flags: [],
+    rejection,
     reason: `${shownName(file.filename)} is refused: ${why}`,
   });
   const hidden = /\p{Cf}/u.exec(file.filename)?.[0];
   if (hidden) {
     const code = (hidden.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
     return reject(
+      "hidden_characters",
       `its name holds an invisible formatting character (U+${code}) that can disguise the file's type`,
     );
   }
   const extensions = fileExtensions(file.filename);
   const blocked = extensions.find((ext) => BLOCKED_EXTENSIONS.has(ext));
-  if (blocked) return reject(`.${blocked} files can't be sent`);
+  if (blocked) return reject("blocked_extension", `.${blocked} files can't be sent`);
   const type = mediaType(file.contentType);
   if (type && BLOCKED_CONTENT_TYPES.has(type)) {
-    return reject(`its content_type ${type} is a program type, which can't be sent`);
+    return reject(
+      "blocked_type",
+      `its content_type ${type} is a program type, which can't be sent`,
+    );
   }
   const program = EXECUTABLE_KINDS[kind];
-  if (program) return reject(`its content is ${program}, which can't be sent under any name`);
+  if (program) {
+    return reject("executable", `its content is ${program}, which can't be sent under any name`);
+  }
   const entries = ZIP_FAMILY.includes(kind) ? zipEntries(file.bytes) : null;
   for (const name of entries?.flatMap((entry) => entry.names) ?? []) {
     const inner = fileExtensions(name).find((ext) => BLOCKED_EXTENSIONS.has(ext));
-    if (inner) return reject(`it holds ${shownName(name)}, and .${inner} files can't be sent`);
+    if (inner) {
+      return reject(
+        "blocked_in_archive",
+        `it holds ${shownName(name)}, and .${inner} files can't be sent`,
+      );
+    }
   }
 
   const flags = new Set<AttachmentFlag>(found);

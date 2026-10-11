@@ -168,6 +168,7 @@ describe("attachmentVerdict: refused for every team", () => {
   it.each([...BLOCKED_EXTENSIONS])("refuses .%s", (ext) => {
     expect(verdict(`file.${ext}`, text("hello"))).toMatchObject({
       action: "reject",
+      rejection: "blocked_extension",
       reason: expect.stringContaining(`.${ext} files can't be sent`),
     });
   });
@@ -182,13 +183,17 @@ describe("attachmentVerdict: refused for every team", () => {
     // Displays as "invoicefdp.exe" while the real extension is .pdf.
     expect(verdict("invoice\u202Eexe.pdf", PDF)).toMatchObject({
       action: "reject",
+      rejection: "hidden_characters",
       reason:
         '"invoice<U+202E>exe.pdf" is refused: its name holds an invisible formatting character (U+202E) that can disguise the file\'s type',
     });
   });
 
   it.each([...BLOCKED_CONTENT_TYPES])("refuses the declared type %s", (type) => {
-    expect(verdict("data.bin", text("hello"), type).action).toBe("reject");
+    expect(verdict("data.bin", text("hello"), type)).toMatchObject({
+      action: "reject",
+      rejection: "blocked_type",
+    });
   });
 
   it("reads the declared type without case or parameters", () => {
@@ -205,6 +210,7 @@ describe("attachmentVerdict: refused for every team", () => {
   ])("refuses %s bytes named .pdf", (kind, bytes) => {
     expect(verdict("fatura.pdf", bytes)).toMatchObject({
       action: "reject",
+      rejection: "executable",
       kind,
       reason: expect.stringMatching(
         /^"fatura\.pdf" is refused: its content is a .+, which can't be sent under any name$/,
@@ -215,6 +221,7 @@ describe("attachmentVerdict: refused for every team", () => {
   it("refuses a ZIP holding a blocked file, under any of the entry's names", () => {
     expect(verdict("files.zip", zip([{ name: "a/run.js", data: "alert(1)" }]))).toMatchObject({
       action: "reject",
+      rejection: "blocked_in_archive",
       reason: '"files.zip" is refused: it holds "a/run.js", and .js files can\'t be sent',
     });
     const disguised = zip([{ name: "a/readme.txt", localName: "a/run.js", data: "x" }]);

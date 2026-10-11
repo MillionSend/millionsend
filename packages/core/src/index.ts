@@ -172,8 +172,10 @@ export {
 } from "./api-keys.js";
 export {
   ATTACHMENT_FLAGS,
+  ATTACHMENT_REJECTIONS,
   type AttachmentFile,
   type AttachmentFlag,
+  type AttachmentRejection,
   type AttachmentVerdict,
   attachmentVerdict,
   BLOCKED_CONTENT_TYPES,

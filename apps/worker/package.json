@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "replay:media": "tsx src/replay-media.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
