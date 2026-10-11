@@ -57,10 +57,29 @@ describe("rewriteForTracking — click", () => {
     expect(out).toMatch(/<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">b<\/a>/);
   });
 
+  it("tracks an unquoted or spaced href and writes the tracked one back quoted", () => {
+    const src =
+      "<a href=https://acme.example/a?x=1&amp;y=2>a</a>" +
+      '<a class=btn href = "https://acme.example/b">b</a>' +
+      "<a href=https://acme.example/c/>c</a>";
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://acme.example/a?x=1&y=2",
+      "https://acme.example/b",
+      "https://acme.example/c/",
+    ]);
+    expect(out).toMatch(/^<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">a<\/a>/);
+    expect(out).toMatch(/<a class=btn href = "https:\/\/track\.example\.com\/t\/c\/[^"]+">b<\/a>/);
+    expect(out).toMatch(/<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">c<\/a>$/);
+  });
+
   it("walks a crafted body of repeated unclosed hrefs in linear time", () => {
     // The vitest timeout is the guard: a backtracking regex takes seconds here.
     const src = `<a${' href="='.repeat(20_000)}`;
     expect(rewriteForTracking(src, opts({ click: true }))).toBe(src);
+    const spaced = `<a${" href = ".repeat(20_000)}`;
+    expect(rewriteForTracking(spaced, opts({ click: true }))).toBe(spaced);
   });
 
   it("leaves mailto:, tel:, relative, and unexpanded {{{...}}} hrefs intact", () => {

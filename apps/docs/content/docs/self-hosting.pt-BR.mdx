@@ -997,19 +997,34 @@ armazenado pelo MillionSend: o nome da equipe, os domínios verificados (mais o 
 registrável de cada um, a forma em que os links aparecem, quando o sufixo é
 inequívoco), os
 dias desde o primeiro envio e o plano; os cabeçalhos `From` e `Reply-To` como
-enviados; o `Subject`; o texto visível renderizado, sem os elementos ocultos
-por estilo inline ou pelo atributo `hidden` (até 6.000 caracteres); uma tabela com os textos dos links e seus
-domínios registráveis (até 30 linhas); a contagem de imagens, os nomes e
-tipos de conteúdo dos anexos e a contagem de caracteres ocultos. O assunto, o
-texto visível, os textos dos links e os nomes dos anexos passam antes pela
-mesmo mascaramento que o acesso ao conteúdo abaixo usa (links cortados ao
-domínio e a um trecho curto do caminho; sequências com cara de credencial e
-códigos de 4 a 8 dígitos nos 40 caracteres depois de palavras como *code*,
-*OTP*, *senha* ou *token* mascarados); além disso, endereços de e-mail neles
-ficam só com o domínio. Os espaços em branco de cada campo, quebras de linha
-incluídas, viram um único espaço. Outros dados pessoais escritos nesses
-campos (nomes, telefones, documentos como o CPF, endereços postais) não são
-removidos: nada os detecta de forma confiável.
+enviados; o `Subject`; a mensagem como o leitor a vê, lida da parte HTML (ou
+da parte em texto puro, quando o HTML falta ou está em branco): o texto
+visível renderizado (os primeiros 4.000 e os últimos 2.000 caracteres, quando
+ele é mais longo), sem o que um estilo inline, uma regra de `<style>` ou o
+atributo `hidden` escondem e sem texto em 1px ou menos, transparente ou da
+cor do fundo; o texto escondido desse jeito, numa seção própria (até 1.000
+caracteres), separado da linha de prévia que aparece na caixa de entrada e
+abre a mensagem (até 200); a parte em texto puro, quando menos de 80% das
+palavras dela aparecem no texto visível (até 1.500 caracteres); uma tabela
+com os textos dos links e seus domínios registráveis, com redirecionadores
+conhecidos, como o `/url?q=` do Google, decodificados antes, e os links para
+domínios que a equipe nunca usou e para fora dos domínios verificados dela
+listados primeiro (até 30 linhas); uma linha que avisa quando a mensagem
+mostra menos de 100 caracteres de texto ao lado de uma imagem, de um anexo
+ou de um QR code desenhado com caracteres ou células de tabela; o número de
+imagens que ela mostra (`<img>`, fundos em CSS, VML do Outlook, SVG); os
+nomes e tipos de conteúdo dos anexos; e a contagem de caracteres ocultos
+(entre eles os de largura zero, os bidirecionais e os caracteres de tag do
+Unicode). Todas as partes da mensagem (o assunto, cada seção do corpo, os
+textos dos links e os nomes dos anexos) passam antes pelo mesmo mascaramento
+que o acesso ao conteúdo abaixo usa (links cortados ao domínio e a um trecho
+curto do caminho; sequências com cara de credencial, códigos de 4 a 8 dígitos
+nos 40 caracteres depois de palavras como *code*, *OTP*, *senha* ou *token*,
+e números de CPF e CNPJ com dígitos verificadores válidos mascarados); além
+disso, endereços de e-mail neles ficam só com o domínio. Os espaços em branco
+de cada campo, quebras de linha incluídas, viram um único espaço. Outros
+dados pessoais escritos nesses campos (nomes, telefones, endereços postais)
+não são removidos: nada os detecta de forma confiável.
 Nunca um endereço ou cabeçalho de destinatário, nunca o HTML bruto, nunca o
 conteúdo de um anexo. Uma amostra avaliada guarda a pontuação, a avaliação, as
 categorias, os códigos de motivo, o idioma, a versão do modelo, a latência e
@@ -1142,7 +1157,8 @@ coisa com forma de credencial (um JWT, 32 ou mais caracteres hexadecimais,
 40 ou mais de base64, uma das chaves de API `ms_` da própria instância) é
 mascarada, assim como uma sequência de 4 a 8 dígitos
 nos 40 caracteres depois de uma palavra como *código*, *code*, *OTP*, *PIN*,
-*token*, *senha*, *password* ou *verification*. Nunca o HTML bruto, os
+*token*, *senha*, *password* ou *verification*, e qualquer número de CPF ou
+CNPJ com dígitos verificadores válidos. Nunca o HTML bruto, os
 endereços dos destinatários, os cabeçalhos, os anexos ou os destinos de
 rastreamento de cliques, e a tela não oferece copiar nem baixar. Um corpo
 que a retenção já apagou não pode ser revelado por ninguém.

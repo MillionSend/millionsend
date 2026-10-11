@@ -110,6 +110,28 @@ describe("redactRevealedText", () => {
     ]);
   });
 
+  it("masks a CPF or CNPJ only when its check digits hold", () => {
+    expect(
+      plain(
+        redactRevealedText(
+          "CPF 529.982.247-25, 52998224725; CNPJ 11.222.333/0001-81, 11222333000181, 12.ABC.345/01DE-35.",
+        ),
+      ),
+    ).toBe("CPF ••••••, ••••••; CNPJ ••••••, ••••••, ••••••.");
+    const lookalikes =
+      "Order 529.982.247-26, 111.111.111-11, 11.222.333/0001-82, 12.ABC.345/01DE-36, 12345678901, ref 052998224725.";
+    expect(redactRevealedText(lookalikes)).toEqual({
+      spans: [{ text: lookalikes }],
+      redactions: 0,
+    });
+  });
+
+  it("masks a CPF a link path carries", () => {
+    expect(plain(redactRevealedText("Boleto: https://pay.example/b/52998224725"))).toBe(
+      "Boleto: https://pay.example/b/••••••",
+    );
+  });
+
   it("keeps a bare address as the host: there is no domain to reduce it to", () => {
     expect(plain(redactRevealedText("go http://10.0.0.7/login/now"))).toBe(
       "go http://10.0.0.7/login/now",

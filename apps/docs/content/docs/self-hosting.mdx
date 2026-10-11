@@ -969,19 +969,32 @@ notice (see also its [customer agreement](https://typesafe.ai/legal/mca) and
 MillionSend: the team's name, verified domains (plus each one's registrable
 domain, the form links are shown in, where the suffix is unambiguous), days since its first send
 and plan; the `From` and `Reply-To` headers as sent; the `Subject`; the
-rendered visible text, without elements hidden by an inline style or the
-`hidden` attribute (up to 6,000
-characters); a table of link anchor texts and their registrable domains (up
-to 30 rows); the image count, the attachment names and content types, and
-the count of hidden characters. The subject, the visible text, the anchor
-texts and the attachment names are redacted first by the same pass the
+message as a reader sees it, read from the HTML part (or the plain-text part
+when the HTML is missing or blank): the rendered visible text (its first
+4,000 and last 2,000 characters when it is longer), without what an inline
+style, a `<style>` rule or the `hidden` attribute hides and without text set
+at 1px or less, transparent, or in its background's colour; the text hidden
+that way, in a section of its own (up to 1,000 characters), apart from the
+inbox preview line it opens with (up to 200); the plain-text part when fewer
+than 80% of its words appear in the visible text (up to 1,500 characters); a
+table of link anchor texts and their registrable domains, well-known redirect
+wrappers such as Google's `/url?q=` decoded first, and links to domains the
+team has never sent to and other links off its verified domains listed first
+(up to 30 rows); a line flagging a message that shows under 100 characters of
+text beside an image, an attachment or a QR code drawn with characters or
+table cells; the number of images it shows (`<img>`, CSS backgrounds,
+Outlook's VML, SVG); the attachment names and content types; and the count of
+hidden characters (zero-width, bidirectional and Unicode tag characters among
+them). Every part of the message (the subject, each body section, the anchor
+texts and the attachment names) is redacted first by the same pass the
 content access below uses (links cut to their domain and a short path stub;
-credential-shaped strings and 4-to-8-digit codes in the 40 characters after
-words like *code*, *OTP*, *senha* or *token* masked); on top of that, email
-addresses in them keep only their domain. Whitespace in every field, line
-breaks included, collapses to one space. Other personal data written in these
-fields (names, phone numbers, tax ids such as CPF, postal addresses) is not
-removed: nothing detects it reliably. Never a recipient address or
+credential-shaped strings, 4-to-8-digit codes in the 40 characters after
+words like *code*, *OTP*, *senha* or *token*, and CPF and CNPJ numbers whose
+check digits are valid, masked); on top of that, email addresses in them keep
+only their domain. Whitespace in every field, line breaks included, collapses
+to one space. Other personal data written in these fields (names, phone
+numbers, postal addresses) is not removed: nothing detects it reliably. Never
+a recipient address or
 header, never the raw HTML, never an attachment's content. A judged sample
 keeps its score, verdict, categories, reason codes, language, model version,
 latency and error class; the review page shows those and never a subject or
@@ -1102,7 +1115,8 @@ link cannot be followed; anything shaped like a
 credential (a JWT, 32 or more hex characters, 40 or more of base64, one of
 this instance's own `ms_` API keys) is masked, as is a 4-to-8-digit run
 in the 40 characters after a word like *code*, *código*, *OTP*, *PIN*, *token*,
-*senha*, *password* or *verification*.
+*senha*, *password* or *verification*, and any CPF or CNPJ number whose check
+digits are valid.
 Never the raw HTML, the recipient addresses, the headers, the attachments or
 the click-tracking targets, and the view offers no copy or download. A body
 retention has already purged cannot be revealed by anyone.

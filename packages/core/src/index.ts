@@ -1,12 +1,20 @@
 export type { ContactActivityType, SegmentCondition, SegmentFilter } from "@millionsend/db/schema";
 export {
   buildJudgeBlock,
-  decodeEntities,
   JUDGE_LINK_ROWS_MAX,
   JUDGE_TEXT_MAX_CHARS,
   type JudgeBlockInput,
-  stripHiddenElements,
 } from "./abuse-judge/block.js";
+export {
+  decodeEntities,
+  extractImageRefs,
+  hasQrArt,
+  type ImageRef,
+  type OpaqueFacts,
+  opaqueFacts,
+  stripHiddenElements,
+  type VisibleHtml,
+} from "./abuse-judge/body.js";
 export {
   ABUSE_JUDGE_POLICY,
   ABUSE_JUDGE_QUESTIONS,
@@ -328,6 +336,7 @@ export {
   type EmailCheckResult,
   type EmailInsightsInput,
   evaluateEmailInsights,
+  MIN_BODY_TEXT_CHARS,
   SCORE_VERSION,
   type ScoreBand,
   SHORTENER_HOSTS,
@@ -678,7 +687,7 @@ export {
   type UpdatesSource,
   verifyUpdatesToken,
 } from "./updates-token.js";
-export { isLoopbackUrl } from "./url.js";
+export { isLoopbackUrl, unwrapRedirect } from "./url.js";
 export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./usage-hourly.js";
 export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 export {

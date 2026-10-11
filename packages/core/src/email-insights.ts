@@ -120,6 +120,12 @@ export interface EmailInsightsInput {
   now: Date;
 }
 
+/**
+ * Under this many visible characters a body has no text of its own: the
+ * line for image_text_ratio, and for the content judge's opaque email.
+ */
+export const MIN_BODY_TEXT_CHARS = 100;
+
 /** Gmail clips messages whose HTML exceeds ~100KB (community-measured). */
 const GMAIL_CLIP_BYTES = 102400;
 const DMARC_STALE_MS = 24 * 60 * 60 * 1000;
@@ -369,7 +375,7 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
         return { status: input.hasAttachments ? "fail" : "pass" };
       case "image_text_ratio": {
         if (images.length === 0) return { status: "not_applicable" };
-        if (bodyText.length < 100) {
+        if (bodyText.length < MIN_BODY_TEXT_CHARS) {
           return {
             status: "fail",
             detail: { visibleTextChars: bodyText.length, imageCount: images.length },

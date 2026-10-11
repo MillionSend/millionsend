@@ -1,4 +1,4 @@
-import { decodeEntities, stripHiddenElements } from "./abuse-judge/block.js";
+import { decodeEntities, stripHiddenElements } from "./abuse-judge/body.js";
 import {
   CONTENT_REVEAL_TEXT_MAX_CHARS,
   type RevealedContent,
@@ -46,6 +46,42 @@ const CODE_WORD = /\b(?:c[óo]digos?|codes?|otp|pins?|tokens?|senhas?|passwords?
 const CODE_WINDOW = 40;
 const CODE_DIGITS = /(?<!\d)\d{4,8}(?!\d)/g;
 
+/**
+ * A CPF (11 digits) or a CNPJ (14, the first 12 alphanumeric since the
+ * 2026 format), with or without its dots, slash and dash. Masked only when
+ * its check digits hold, so an order number of the same length goes through.
+ */
+const TAX_ID =
+  /(?<![\p{L}\p{N}])(?:\d{3}\.?\d{3}\.?\d{3}-?\d{2}|[0-9A-Z]{2}\.?[0-9A-Z]{3}\.?[0-9A-Z]{3}\/?[0-9A-Z]{4}-?\d{2})(?![\p{L}\p{N}])/gu;
+
+/** The mod-11 check digit of `body`, each character worth its code point minus 48 ("A" is 17), as the alphanumeric CNPJ defines. */
+function checkDigit(body: string, weights: readonly number[]): number {
+  let sum = 0;
+  for (let i = 0; i < body.length; i++) sum += (body.charCodeAt(i) - 48) * (weights[i] as number);
+  const r = sum % 11;
+  return r < 2 ? 0 : 11 - r;
+}
+
+const CPF_WEIGHTS = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
+const CNPJ_WEIGHTS = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+
+function validTaxId(raw: string): boolean {
+  const id = raw.replace(/[./-]/g, "");
+  // All-same strings pass the arithmetic and are never issued.
+  if (/^(.)\1*$/.test(id)) return false;
+  const weights = id.length === 11 ? CPF_WEIGHTS : id.length === 14 ? CNPJ_WEIGHTS : null;
+  if (!weights || (id.length === 11 && !/^\d+$/.test(id))) return false;
+  const n = id.length - 2;
+  return (
+    checkDigit(id.slice(0, n), weights.slice(1)) === Number(id[n]) &&
+    checkDigit(id.slice(0, n + 1), weights) === Number(id[n + 1])
+  );
+}
+
+function maskTaxIds(text: string): string {
+  return text.replace(TAX_ID, (m) => (validTaxId(m) ? MASK : m));
+}
+
 interface Hit {
   start: number;
   end: number;
@@ -82,7 +118,7 @@ function urlHits(text: string): Hit[] {
   for (const m of text.matchAll(URL_RE)) {
     const raw = m[0].replace(URL_TAIL, "");
     if (raw.length === 0) continue;
-    hits.push({ start: m.index, end: m.index + raw.length, text: reduceUrl(raw) });
+    hits.push({ start: m.index, end: m.index + raw.length, text: maskTaxIds(reduceUrl(raw)) });
   }
   return hits;
 }
@@ -95,6 +131,12 @@ function secretHits(text: string): Hit[] {
       text: MASK,
     })),
   );
+}
+
+function taxIdHits(text: string): Hit[] {
+  return [...text.matchAll(TAX_ID)]
+    .filter((m) => validTaxId(m[0]))
+    .map((m) => ({ start: m.index, end: m.index + m[0].length, text: MASK }));
 }
 
 function codeHits(text: string): Hit[] {
@@ -114,12 +156,13 @@ function codeHits(text: string): Hit[] {
 }
 
 /**
- * Reduce every link to where it points and mask what reads as a credential.
+ * Reduce every link to where it points and mask what reads as a credential
+ * or a CPF or CNPJ.
  * Earlier hits win an overlap, and the passes are ordered so a token inside a
  * link is cut by the link's own path stub rather than masked twice.
  */
 export function redactRevealedText(text: string): RevealedContent {
-  const hits = [...urlHits(text), ...secretHits(text), ...codeHits(text)].sort(
+  const hits = [...urlHits(text), ...secretHits(text), ...codeHits(text), ...taxIdHits(text)].sort(
     (a, b) => a.start - b.start || b.end - a.end,
   );
   const spans: RevealSpan[] = [];

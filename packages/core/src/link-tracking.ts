@@ -37,9 +37,10 @@ export interface RewriteOptions {
 // than lazily up to a backreference, and the tag prefix is `[^<>]` rather
 // than `[^>]`: the html is the customer's, and either lazy form backtracks
 // polynomially on a crafted body (an unclosed `<a` now stops at the next `<`).
-export const ANCHOR_HREF = /(<a\b[^<>]*?\shref=)(?:(")([^"]*)"|(')([^']*)')/gi;
+// An unquoted value runs to whitespace or `>`, as a browser reads it.
+export const ANCHOR_HREF = /(<a\b[^<>]*?\shref\s*=\s*)(?:(")([^"]*)"|(')([^']*)'|([^\s>]+))/gi;
 
-/** An ANCHOR_HREF match taken apart: the tag up to the quote, the quote, the raw value. */
+/** An ANCHOR_HREF match taken apart: the tag up to the value, its quote ("" when unquoted), the raw value. */
 export function anchorHrefParts(m: readonly (string | undefined)[]): {
   prefix: string;
   quote: string;
@@ -47,8 +48,8 @@ export function anchorHrefParts(m: readonly (string | undefined)[]): {
 } {
   return {
     prefix: m[1] as string,
-    quote: (m[2] ?? m[4]) as string,
-    value: (m[3] ?? m[5]) as string,
+    quote: m[2] ?? m[4] ?? "",
+    value: (m[3] ?? m[5] ?? m[6]) as string,
   };
 }
 
@@ -82,7 +83,8 @@ export function rewriteForTracking(html: string, opts: RewriteOptions): string {
         url,
         secretKey: opts.secretKey,
       });
-      return `${prefix}${quote}${base}/t/c/${token}${quote}`;
+      const q = quote || '"';
+      return `${prefix}${q}${base}/t/c/${token}${q}`;
     });
   }
 
