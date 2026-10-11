@@ -274,7 +274,14 @@
     "bounced": "Devolvidos",
     "complained": "Reclamações",
     "sentThisPeriod": "E-mails enviados neste período",
-    "renewsOn": "Renova em {date}"
+    "renewsOn": "Renova em {date}",
+    "receivedToday": "E-mails recebidos hoje",
+    "receivedThisPeriod": "E-mails recebidos neste período",
+    "sentAndReceivedToday": "E-mails enviados e recebidos hoje",
+    "receivedShared": "Conta no mesmo limite diário dos envios. Reinicia à meia-noite UTC.",
+    "receivedDay": "Grátis até {allowance} por dia; acima disso, quem envia tenta de novo mais tarde. Reinicia à meia-noite UTC.",
+    "receivedMonth": "Grátis até {allowance} neste período; acima disso, {per} recebidos contam como 1 e-mail.",
+    "received": "Recebidos"
   },
   "billing": {
     "plan": "Plano",

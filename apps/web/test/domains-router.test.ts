@@ -1104,3 +1104,139 @@ describe("domains.updateConfiguration", () => {
     expect(ok?.trackingSubdomain).toBe("links");
   });
 });
+
+describe("domains receiving", () => {
+  const MX = "mx.receiving.test";
+
+  beforeEach(() => {
+    vi.stubEnv("RECEIVING_MX_HOST", MX);
+  });
+
+  /** example.com as create leaves it, then verified the way a passing check marks it. */
+  async function verifiedDomain(teamId: string): Promise<{ id: string; dkimPublicKey: string }> {
+    const dkimPublicKey = await seedAndPublicKey(teamId);
+    const [row] = await db
+      .update(schema.domains)
+      .set({ status: "verified" })
+      .where(eq(schema.domains.teamId, teamId))
+      .returning({ id: schema.domains.id });
+    if (!row) throw new Error("no domain");
+    return { id: row.id, dkimPublicKey };
+  }
+
+  it("is refused with 422 on an instance that takes no mail", async () => {
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    const teamId = await createTeam(db);
+    const { id } = await verifiedDomain(teamId);
+    await expect(
+      callerFor(teamId, fakeSes().deps).domains.setReceiving({ id, enabled: true }),
+    ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
+  });
+
+  it("turns on only for a verified domain, and only for owners and admins", async () => {
+    const teamId = await createTeam(db);
+    await seedAndPublicKey(teamId);
+    const [seed] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
+    const id = seed?.id ?? "";
+    const owner = callerFor(teamId, fakeSes().deps);
+    await expect(owner.domains.setReceiving({ id, enabled: true })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    });
+
+    await db.update(schema.domains).set({ status: "verified" }).where(eq(schema.domains.id, id));
+    await expect(
+      callerFor(teamId, fakeSes().deps, "member").domains.setReceiving({ id, enabled: true }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await owner.domains.setReceiving({ id, enabled: true })).toEqual({
+      receivingEnabled: true,
+    });
+    expect((await owner.domains.get({ id })).receivingEnabled).toBe(true);
+    expect(await owner.domains.setReceiving({ id, enabled: false })).toEqual({
+      receivingEnabled: false,
+    });
+  });
+
+  it("refuses a name another team already receives, and another team's domain", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const [a, b] = await db
+      .insert(schema.domains)
+      .values(
+        [teamA, teamB].map((teamId) => ({
+          teamId,
+          name: "shared.example.com",
+          region: "us-east-1",
+          status: "verified" as const,
+        })),
+      )
+      .returning({ id: schema.domains.id });
+    if (!a || !b) throw new Error("no domains");
+    await callerFor(teamA, fakeSes().deps).domains.setReceiving({ id: a.id, enabled: true });
+    await expect(
+      callerFor(teamB, fakeSes().deps).domains.setReceiving({ id: b.id, enabled: true }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      callerFor(teamB, fakeSes().deps).domains.setReceiving({ id: a.id, enabled: false }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("lists the live-checked Receiving MX while receiving is on, never gating the sending status", async () => {
+    const teamId = await createTeam(db);
+    const { id, dkimPublicKey } = await verifiedDomain(teamId);
+    const published = publishedDns(dkimPublicKey);
+    const withApexMx = (rows: { priority: number; exchange: string }[]) =>
+      fakeSes({
+        dkimStatus: "SUCCESS",
+        verifiedForSending: true,
+        dns: {
+          ...published,
+          resolveMx: async (name: string) =>
+            name === "example.com" ? rows : published.resolveMx(name),
+        },
+      }).deps;
+    const receivingRows = async (deps: DomainsSesDeps) =>
+      (await callerFor(teamId, deps).domains.records({ id })).records.filter(
+        (r) => r.group === "receiving",
+      );
+
+    // Off: no row, whatever the zone says.
+    expect(await receivingRows(withApexMx([{ priority: 10, exchange: MX }]))).toEqual([]);
+
+    await callerFor(teamId, fakeSes().deps).domains.setReceiving({ id, enabled: true });
+    expect(await receivingRows(withApexMx([{ priority: 10, exchange: `${MX}.` }]))).toEqual([
+      {
+        group: "receiving",
+        type: "MX",
+        name: "example.com",
+        value: MX,
+        priority: 10,
+        status: null,
+        live: "found",
+      },
+    ]);
+    // A lower-numbered MX elsewhere takes the mail first.
+    expect(
+      await receivingRows(
+        withApexMx([
+          { priority: 10, exchange: MX },
+          { priority: 1, exchange: "aspmx.l.google.com" },
+        ]),
+      ),
+    ).toMatchObject([{ live: "mismatch", found: `1 aspmx.l.google.com\n10 ${MX}` }]);
+
+    // The check DNS pass reads it too, and a missing MX leaves the domain verified.
+    const result = await callerFor(teamId, withApexMx([])).domains.verify({ id });
+    expect(result.status).toBe("verified");
+    expect(result.liveDns).toContainEqual({
+      type: "MX",
+      name: "example.com",
+      value: MX,
+      priority: 10,
+      status: "missing",
+    });
+
+    // An instance that stops taking mail stops listing the record.
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    expect(await receivingRows(withApexMx([{ priority: 10, exchange: MX }]))).toEqual([]);
+  });
+});

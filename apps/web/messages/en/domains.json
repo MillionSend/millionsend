@@ -97,7 +97,8 @@
       "dmarc": "DMARC (recommended)",
       "tracking": "Open & click tracking",
       "trackingNote": "Tracking links use the default host — no DNS records needed. Set a custom subdomain in Configuration to serve them from your own domain.",
-      "trackingNoteDefaultOnly": "Tracking links use the default host — no DNS records needed."
+      "trackingNoteDefaultOnly": "Tracking links use the default host — no DNS records needed.",
+      "receiving": "Enable receiving"
     },
     "tracking": {
       "open": "Enable open tracking",
@@ -195,7 +196,23 @@
       "change": "Change subdomain",
       "add": "Add a custom subdomain"
     },
-    "notFound": "Domain not found."
+    "notFound": "Domain not found.",
+    "receiving": {
+      "enable": "Enable receiving",
+      "note": "Accepts mail sent to any address at {domain}. Read it under Emails → Receiving, through the API or with the email.received webhook.",
+      "noteApex": "Accepts mail sent to any address at {domain}, and its MX record brings all of the domain's mail here. If people already get email at {domain}, use a subdomain such as {example} so their mailboxes stay as they are.",
+      "notVerified": "Available once the domain is verified.",
+      "confirmEnableTitle": "Enable receiving?",
+      "confirmEnable": "Once the MX record points here, mail sent to any address at {domain} is accepted and stored here.",
+      "confirmEnableApex": "Once the MX record points here, mail sent to any address at {domain} is accepted and stored here, and stops reaching the mailboxes that get it today.",
+      "confirmEnableCta": "Enable receiving",
+      "confirmDisableTitle": "Disable receiving?",
+      "confirmDisable": "Mail sent to {domain} is refused from now on. Emails already received stay until the retention window removes them.",
+      "confirmDisableCta": "Disable receiving",
+      "errorNotVerified": "Verify the domain before turning on receiving.",
+      "errorTaken": "Another team already receives mail for {domain}.",
+      "error": "Couldn't change receiving. Try again."
+    }
   },
   "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Open SES setup",

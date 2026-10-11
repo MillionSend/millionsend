@@ -58,3 +58,25 @@ function openLinksOutside(html: string): string {
     ? `${html.slice(0, head.index + head[0].length)}${LINKS_OUTSIDE}${html.slice(head.index + head[0].length)}`
     : LINKS_OUTSIDE + html;
 }
+
+/*
+ * Mail from a stranger loads nothing from the network: a remote image is a
+ * read receipt, and remote CSS, fonts and DNS prefetches leak the same way.
+ * Inline styles and data: images stay, which is how cid: parts arrive. The
+ * frame's sandbox already stops scripts, forms and meta refresh.
+ */
+const RECEIVED_LOCKDOWN =
+  `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">` +
+  '<meta http-equiv="x-dns-prefetch-control" content="off">' +
+  '<meta name="referrer" content="no-referrer">';
+
+/**
+ * A received message's preview document. The policy goes first, after the
+ * doctype if there is one, so it governs every element that follows: ahead
+ * of <html> the parser puts it in an implied head, and the doctype it kept
+ * leaves the message's rendering mode as sent.
+ */
+export function lockDownReceivedHtml(html: string): string {
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? "";
+  return doctype + RECEIVED_LOCKDOWN + html.slice(doctype.length);
+}
