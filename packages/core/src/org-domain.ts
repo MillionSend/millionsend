@@ -17,6 +17,17 @@ export function registrableDomain(hostname: string): string {
   return getDomain(name) ?? name;
 }
 
+/** The registrable domain an http(s) link points to; null for any other link or a malformed one. */
+export function linkDomain(href: string): string | null {
+  const url = href.trim();
+  if (!/^https?:\/\//i.test(url)) return null;
+  try {
+    return registrableDomain(new URL(url).hostname);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The registrable domain one owner holds, with the private section of the
  * list too: shop.eu.org, where registrableDomain says eu.org. What the

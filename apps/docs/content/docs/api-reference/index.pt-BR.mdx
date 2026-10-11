@@ -57,7 +57,8 @@ deliberadas e explícitas:
 
 - Anexos aceitam apenas `content` em base64 inline — uma URL em `path` é
   rejeitada com `422` (nunca é buscada), assim como `content_id` (imagens
-  inline).
+  inline). Arquivos de programa também são recusados; veja
+  [Anexos](#anexos).
 - Contatos são globais à equipe — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
@@ -133,6 +134,74 @@ deliberadas e explícitas:
   `POST /emails` ou `POST /emails/batch` é recusada com `422 validation_error`.
 - Qualquer coisa não suportada é rejeitada com `422` em vez de descartada em
   silêncio (ex.: `tls` na atualização de domínio).
+
+## Anexos
+
+Alguns arquivos são recusados para todas as equipes, com
+`422 validation_error` e uma mensagem com o nome do arquivo e o motivo:
+
+- Um tipo que o SES ou o Gmail recusam. Vale a última extensão, em
+  maiúsculas ou minúsculas e sem pontos ou espaços no fim, e também a de
+  dentro de um arquivo compactado (`fatura.exe.gz` conta como `.exe`):
+
+  ```
+  ade adp apk app appx appxbundle asp bas bat cab cer chm cmd com cpl crt
+  csh der diagcab diagcfg diagpkg dll dmg ex ex_ exe fxp gadget hlp hta img
+  inf ins iso isp its jar jnlp js jse ksh lib lnk mad maf mag mam maq mar
+  mas mat mau mav maw mda mdb mde mdt mdw mdz mjs msc msh msh1 msh1xml msh2
+  msh2xml mshxml msi msix msixbundle msp mst nsh ops pcd pif plg prf prg ps1
+  ps1xml ps2 ps2xml psc1 psc2 reg scf scr sct shb shs sys tmp url vb vbe vbs
+  vhd vps vsmacros vss vst vsw vxd ws wsc wsf wsh xll xnk
+  ```
+
+- Um programa com qualquer nome: um executável de Windows, Linux ou macOS,
+  ou um atalho do Windows.
+- Um ZIP, inclusive arquivos do Office, que contenha um arquivo com uma
+  dessas extensões.
+- Um `content_type` de programa:
+
+  ```
+  application/x-msdownload application/x-msdos-program application/x-dosexec
+  application/x-ms-dos-executable
+  application/vnd.microsoft.portable-executable application/x-executable
+  application/x-elf application/x-mach-binary application/x-msi
+  application/x-ms-installer application/x-ms-shortcut
+  application/x-mswinurl application/hta application/x-bat application/x-csh
+  application/javascript application/x-javascript text/javascript
+  application/ecmascript text/ecmascript text/vbscript
+  application/java-archive application/x-java-archive
+  application/x-java-jnlp-file application/vnd.android.package-archive
+  application/x-apple-diskimage application/x-iso9660-image
+  application/vnd.ms-cab-compressed application/x-msaccess
+  application/vnd.ms-htmlhelp
+  ```
+
+- Um nome de arquivo com um caractere de formatação invisível (categoria
+  Unicode Cf), como o que inverte o texto e faz um `.exe` aparecer como
+  `.pdf`.
+
+Enquanto a equipe é nova (nos primeiros 1.000 envios ou 72 horas, ou abaixo
+de 10.000 envios nos 7 dias seguintes ao primeiro), um e-mail com qualquer
+um destes é aceito, mas fica em espera até ser revisado antes do envio:
+
+- Páginas web e imagens SVG (`htm html shtml xhtml xht mht mhtml svg svgz`),
+  pelo nome, pelo `content_type` ou pelo conteúdo.
+- Arquivos compactados (`zip zipx rar 7z gz tgz bz2 tbz tbz2 xz txz tar zst
+  lz lzh lha arj ace z cpio`), e conteúdo compactado com qualquer nome.
+- Imagens de disco `vhdx`; arquivos do Office com macros (`docm dotm xlsm
+  xltm xlam xlsb pptm potm ppam ppsm sldm`) e qualquer arquivo do Office com
+  um projeto VBA; OneNote (`one onepkg`), `rtf` e e-mails anexados (`eml
+  msg`).
+- Um arquivo cujo nome não bate com o conteúdo, como um `.pdf` que na
+  verdade é um ZIP ou uma página web.
+- Um PDF que pede senha para abrir, ou que traz scripts, ações que abrem
+  programas, arquivos embutidos ou formulários XFA; itens criptografados
+  dentro de um arquivo compactado, e compactados dentro de compactados.
+- Um arquivo que não dá para ler: danificado, com mais de 50 páginas ou com
+  mais de 50 megapixels.
+
+Equipes mais antigas enviam os mesmos arquivos sem espera; os e-mails delas
+são avaliados com mais frequência.
 
 ## Erros
 

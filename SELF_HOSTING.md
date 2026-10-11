@@ -854,11 +854,56 @@ email addresses in them keep only their domain. Whitespace in every field,
 line breaks included, collapses to one space. Other personal data written in
 these fields (names, phone numbers, tax ids such as CPF, postal addresses) is
 not removed: nothing detects it reliably. Never a recipient
-address or header, never the raw HTML, never an attachment's content. The
+address or header, never the raw HTML, never the images or files themselves. The
 stored record of a judged sample is the score, verdict, categories, reason
 codes, language, model version, latency and error class; the review page
 shows those and never a subject or a body. Sample rows are metadata and are
 pruned after 90 days.
+
+**Images and attachments.** Screening opens what an email carries, inside
+the worker: the text and links of PDF (up to 50 pages), Word, Excel,
+PowerPoint, OpenDocument, calendar, HTML and SVG attachments, and the QR
+codes in images, in a PDF's first pages and in images inside Office files.
+A Pix code, in a QR code or pasted as text, shows as its payee, city,
+amount and kind of key, never the key. Jev then also sees up to 4,000
+characters of text from attachments, up to 20 more link rows (QR codes,
+links inside files, Pix codes), and each attachment's real type, size, page
+count and flags. Program files are refused at the API for every team, and
+a new team's email carrying a risky file waits for review (see
+the API reference's "Attachments"). None of this leaves the
+instance: parsing runs on two worker threads, with 4 seconds per email.
+
+**Image reading (optional).** Off by default. With it on, Claude Haiku 5.5
+on Amazon Bedrock writes down the text and the brands shown in an email's
+images and in attachment pages that are images, and Jev receives that text
+(up to 3,000 characters) with the rest. The images go to Bedrock in
+`ABUSE_VISION_REGION` (default `us-east-1`), on that region's own endpoint,
+with the worker's AWS credentials; Bedrock keeps no copy, except that AWS
+may keep an image its automated checks flag as child sexual abuse material.
+Off, an email is judged without its image text and the judge is told so.
+Refusing program files, holding risky files and reading PDFs, Office files
+and QR codes all work without Bedrock. To turn it on:
+
+1. Accept Claude Haiku 5.5 in Amazon Bedrock in that region: on the
+   console's model access page, or with
+   `aws bedrock list-foundation-model-agreement-offers --model-id anthropic.claude-haiku-5-5`
+   and then
+   `aws bedrock create-foundation-model-agreement --model-id anthropic.claude-haiku-5-5 --offer-token <token>`.
+2. Give the worker's AWS credentials this statement, with your region and
+   account id:
+
+   ```json
+   {
+     "Effect": "Allow",
+     "Action": "bedrock-mantle:CreateInference",
+     "Resource": "arn:aws:bedrock-mantle:<region>:<account-id>:project/*",
+     "Condition": { "StringEquals": { "bedrock-mantle:Model": "anthropic.claude-haiku-5-5" } }
+   }
+   ```
+
+3. Set `ABUSE_VISION=bedrock` (and `ABUSE_VISION_REGION` for another
+   region) and restart. Add Amazon Bedrock to the instance's privacy notice
+   first.
 
 **Sampling.** After each accepted message, a keyed draw
 (HMAC of the team and message ids under a key derived from

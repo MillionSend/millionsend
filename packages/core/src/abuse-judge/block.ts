@@ -5,6 +5,7 @@ import { maskEmailLocalParts } from "../mask.js";
 import { ownerDomain, registrableDomain, vouchedRegistrableDomain } from "../org-domain.js";
 import { unwrapRedirect } from "../url.js";
 import { decodeEntities, INVISIBLE, opaqueFactsOf, readBody } from "./body.js";
+import { type MediaFindings, renderMediaLines } from "./media.js";
 
 /**
  * The text block the judge sees: the sender's context, the headers, the body
@@ -21,9 +22,11 @@ import { decodeEntities, INVISIBLE, opaqueFactsOf, readBody } from "./body.js";
  * (team, From, Reply-To) goes as-is. Every field's whitespace is collapsed,
  * each section is indented like the link rows, so nothing the sender writes
  * can open a line posing as a header, and each has its own cap, so padding
- * one cannot push another out. No recipient address, raw HTML or attachment
- * content is ever part of it, and the block itself is never stored anywhere:
- * it exists in the judge call only. Section 5 of the landing page's privacy
+ * one cannot push another out. What screening read from the images and
+ * attachments (their text, brands, links and Pix payees) follows in sections
+ * of its own; no recipient address, raw HTML, image or file is ever part of
+ * it, and the block itself is never stored anywhere: it exists in the judge
+ * call only. Section 5 of the landing page's privacy
  * policy (millionsend-lp src/app/privacy/page.tsx) lists these fields;
  * change them together.
  */
@@ -55,6 +58,8 @@ export interface JudgeBlockInput {
   attachments: { filename: string; contentType?: string | undefined }[];
   /** Domains the team has never sent to before (registrable or owner form): their links lead the table. */
   novelDomains?: ReadonlySet<string> | undefined;
+  /** What screening read from the email's images and attachments. */
+  media?: MediaFindings | undefined;
 }
 
 // \s leaves out NEL and the C0 separators, which some readers take for line breaks.
@@ -224,6 +229,12 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     `Image count: ${facts.imageRefs.length}`,
     `Attachments: ${attachments || "(none)"}`,
     `Hidden characters count: ${(stripped?.hiddenChars ?? 0) + body.invisible + plainInvisible}`,
+  );
+  lines.push(
+    ...renderMediaLines(input.media, {
+      redact: redacted,
+      target: (href) => linkTarget(href).shown,
+    }),
   );
   return lines.join("\n");
 }

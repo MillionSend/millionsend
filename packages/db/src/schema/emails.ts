@@ -111,6 +111,10 @@ export const emails = pgTable(
     // Content, not metadata: holds ciphertext (same envelope scheme as the
     // body columns), so it belongs on the content retention clock.
     attachments: text("attachments"),
+    // What screening read from a held email (text, links, file facts, small
+    // re-encoded previews), sealed like attachments; written only for mail
+    // parked for review and purged with the body.
+    media: text("media"),
     latestStatus: emailStatusEnum("latest_status").notNull().default("queued"),
     parkReason: emailParkReasonEnum("park_reason"),
     bodyCiphertext: bytea("body_ciphertext"),

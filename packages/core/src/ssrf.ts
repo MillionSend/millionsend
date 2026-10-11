@@ -2,17 +2,21 @@ import { lookup as dnsLookup } from "node:dns";
 import http from "node:http";
 import https from "node:https";
 import { isIP } from "node:net";
+import { sniffFileType, sniffImageType } from "./file-type.js";
 
 /**
- * SSRF-guarded HTTP client for webhook delivery. Defenses, in order:
- * - https only (http allowed solely for loopback targets when the caller
- *   opts in, i.e. local development);
+ * SSRF-guarded HTTP clients: webhook delivery (postJson) and the screening
+ * fetch of an email's remote images (getImage). Defenses, in order:
+ * - postJson: https only (http allowed solely for loopback targets when the
+ *   caller opts in, i.e. local development); getImage: http or https, on
+ *   ports 80 and 443 only;
  * - IP-literal hosts validated before any connection;
  * - hostnames resolved through a custom `lookup` that validates the resolved
  *   address and hands THAT address to the socket — validation and connection
  *   use the same single resolution, so DNS rebinding between "check" and
  *   "connect" is impossible by construction;
- * - redirects never followed (bare http(s).request has no redirect logic);
+ * - redirects never followed by the socket: postJson stops at the first
+ *   answer, getImage follows a few by hand and validates every hop again;
  * - response reads capped, requests time-boxed.
  */
 
@@ -91,6 +95,38 @@ function isLoopbackIp(ip: string): boolean {
   return LOOPBACK_V4.test(ip) || isIpv6Loopback(ip);
 }
 
+/**
+ * A DNS lookup that validates what it resolves and hands THAT address to the
+ * socket: validation and connection use the same single resolution, the pin
+ * that makes rebinding impossible. The socket calls this with `all: true`
+ * when autoSelectFamily is on (the Node ≥20 default) and expects an address
+ * ARRAY back then; answering with a single address there makes net throw
+ * "Invalid IP address: undefined", killing every request to a hostname.
+ */
+function pinnedLookup(allowIp: (ip: string) => boolean, label: string): typeof dnsLookup {
+  return ((
+    host: string,
+    options: { all?: boolean },
+    cb: (
+      err: NodeJS.ErrnoException | null,
+      address: string | { address: string; family: number }[],
+      family?: number,
+    ) => void,
+  ): void => {
+    dnsLookup(host, { all: true, verbatim: true }, (err, addresses) => {
+      if (err) return cb(err, "", 0);
+      const blocked = addresses.find((a) => !allowIp(a.address));
+      if (blocked) return cb(new Error(`${label} resolves to a blocked address`), "", 0);
+      const first = addresses[0];
+      if (!first) return cb(new Error(`${label} did not resolve`), "", 0);
+      // Every returned address was validated above, so whichever one the
+      // socket picks stays inside the guard.
+      if (options?.all === true) return cb(null, addresses);
+      cb(null, first.address, first.family);
+    });
+  }) as typeof dnsLookup;
+}
+
 export interface PostJsonOptions {
   body: string;
   headers: Record<string, string>;
@@ -163,35 +199,7 @@ export async function postJson(rawUrl: string, opts: PostJsonOptions): Promise<P
     throw new Error(`webhook url resolves to a blocked address`);
   }
 
-  // Validation happens inside the lookup and the validated addresses are the
-  // ones the socket connects to — the pin that makes rebinding impossible.
-  // The socket calls this with `all: true` when autoSelectFamily is on (the
-  // Node ≥20 default) and expects an address ARRAY back then; answering with
-  // a single address there makes net throw "Invalid IP address: undefined",
-  // killing every delivery to a hostname.
-  const pinnedLookup: typeof dnsLookup = ((
-    host: string,
-    options: { all?: boolean },
-    cb: (
-      err: NodeJS.ErrnoException | null,
-      address: string | { address: string; family: number }[],
-      family?: number,
-    ) => void,
-  ): void => {
-    dnsLookup(host, { all: true, verbatim: true }, (err, addresses) => {
-      if (err) return cb(err, "", 0);
-      const blocked = addresses.find((a) => !allowIp(a.address));
-      if (blocked) {
-        return cb(new Error(`webhook url resolves to a blocked address`), "", 0);
-      }
-      const first = addresses[0];
-      if (!first) return cb(new Error("webhook url did not resolve"), "", 0);
-      // Every returned address was validated above, so whichever one the
-      // socket picks stays inside the guard.
-      if (options?.all === true) return cb(null, addresses);
-      cb(null, first.address, first.family);
-    });
-  }) as typeof dnsLookup;
+  const lookup = pinnedLookup(allowIp, "webhook url");
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = opts.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
@@ -203,7 +211,7 @@ export async function postJson(rawUrl: string, opts: PostJsonOptions): Promise<P
       {
         method: "POST",
         headers: { "content-type": "application/json", ...opts.headers },
-        lookup: pinnedLookup,
+        lookup,
         signal: AbortSignal.timeout(timeoutMs),
       },
       (res) => {
@@ -234,4 +242,136 @@ export async function postJson(rawUrl: string, opts: PostJsonOptions): Promise<P
     req.on("error", reject);
     req.end(opts.body);
   });
+}
+
+/** Bedrock's per-image limit; a bigger image is refused, never cut. */
+export const IMAGE_FETCH_MAX_BYTES = 5 * 1024 * 1024;
+export const IMAGE_FETCH_TIMEOUT_MS = 3_000;
+const IMAGE_FETCH_MAX_REDIRECTS = 3;
+const IMAGE_FETCH_PORTS = new Set([80, 443]);
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+// A desktop browser's: some hosts show an honest client a decoy image.
+const IMAGE_FETCH_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+
+export interface GetImageOptions {
+  timeoutMs?: number;
+  maxBytes?: number;
+  /** Aborts with the caller, e.g. an email's whole fetch budget. */
+  signal?: AbortSignal;
+  /** Tests and local development: permit loopback targets, on any port. */
+  allowLocalhost?: boolean;
+}
+
+export interface FetchedImage {
+  bytes: Buffer;
+  /** The declared type, lowercased and without parameters; the bytes agree with it. */
+  contentType: string;
+}
+
+type Hop = { redirect: string } | { status: number; contentType: string; bytes: Buffer };
+
+function requestHop(
+  url: URL,
+  allowIp: (ip: string) => boolean,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<Hop> {
+  const transport = url.protocol === "https:" ? https : http;
+  return new Promise<Hop>((resolve, reject) => {
+    // No cookie and no Referer: the request carries nothing about who asks.
+    const req = transport.request(
+      url,
+      {
+        method: "GET",
+        headers: {
+          "user-agent": IMAGE_FETCH_USER_AGENT,
+          accept: "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8",
+          "accept-encoding": "identity",
+        },
+        lookup: pinnedLookup(allowIp, "image url"),
+        signal,
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        const location = res.headers.location;
+        if (REDIRECTS.has(status) && location) {
+          res.resume();
+          resolve({ redirect: location });
+          return;
+        }
+        if (Number(res.headers["content-length"]) > maxBytes) {
+          res.destroy();
+          reject(new Error(`image url is over ${maxBytes} bytes`));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let received = 0;
+        res.on("data", (chunk: Buffer) => {
+          received += chunk.length;
+          if (received > maxBytes) {
+            res.destroy();
+            reject(new Error(`image url is over ${maxBytes} bytes`));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on("end", () =>
+          resolve({
+            status,
+            contentType:
+              (res.headers["content-type"] ?? "").split(";")[0]?.trim().toLowerCase() ?? "",
+            bytes: Buffer.concat(chunks),
+          }),
+        );
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
+ * GET one image an email shows, for screening. Rejects (and never connects
+ * for) a blocked address or port; follows up to three redirects, validating
+ * each hop the same way; refuses, rather than truncates, anything over the
+ * cap; and accepts the answer only when its image/* type and its leading
+ * bytes both say image.
+ */
+export async function getImage(rawUrl: string, opts: GetImageOptions = {}): Promise<FetchedImage> {
+  const maxBytes = opts.maxBytes ?? IMAGE_FETCH_MAX_BYTES;
+  const timeout = AbortSignal.timeout(opts.timeoutMs ?? IMAGE_FETCH_TIMEOUT_MS);
+  const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout;
+  const allowIp = (ip: string): boolean =>
+    opts.allowLocalhost && isLoopbackIp(ip) ? true : !isBlockedIp(ip);
+  let url = new URL(rawUrl);
+  for (let hop = 0; ; hop++) {
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      throw new Error(`image url must be http or https: ${url.protocol}//`);
+    }
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+    const loopback = opts.allowLocalhost === true && isIP(hostname) !== 0 && isLoopbackIp(hostname);
+    if (!IMAGE_FETCH_PORTS.has(port) && !loopback) {
+      throw new Error(`image url port must be 80 or 443: ${port}`);
+    }
+    if (isIP(hostname) !== 0 && !allowIp(hostname)) {
+      throw new Error("image url resolves to a blocked address");
+    }
+    const answer = await requestHop(url, allowIp, maxBytes, signal);
+    if ("redirect" in answer) {
+      if (hop >= IMAGE_FETCH_MAX_REDIRECTS) throw new Error("image url redirects too many times");
+      url = new URL(answer.redirect, url);
+      continue;
+    }
+    if (answer.status !== 200) throw new Error(`image url answered ${answer.status}`);
+    const svg = answer.contentType === "image/svg+xml";
+    const agrees = svg
+      ? sniffFileType(answer.bytes) === "svg"
+      : answer.contentType.startsWith("image/") && sniffImageType(answer.bytes) !== null;
+    if (!agrees)
+      throw new Error(`image url served something other than ${answer.contentType || "an image"}`);
+    return { bytes: answer.bytes, contentType: answer.contentType };
+  }
 }

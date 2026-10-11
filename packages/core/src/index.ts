@@ -16,6 +16,21 @@ export {
   type VisibleHtml,
 } from "./abuse-judge/body.js";
 export {
+  MEDIA_FILE_TEXT_MAX_CHARS,
+  MEDIA_IMAGE_TEXT_MAX_CHARS,
+  MEDIA_ISSUES,
+  MEDIA_LINK_ROWS_MAX,
+  type MediaFile,
+  type MediaFindings,
+  type MediaIssue,
+  type MediaLink,
+  type MediaLinkSource,
+  type MediaPix,
+  type MediaReview,
+  VISION_REPORT_JSON_SCHEMA,
+  visionReportSchema,
+} from "./abuse-judge/media.js";
+export {
   ABUSE_JUDGE_POLICY,
   ABUSE_JUDGE_QUESTIONS,
   ABUSE_JUDGE_QUESTIONS_VERSION,
@@ -250,7 +265,7 @@ export {
   type RevealedContent,
   type RevealSpan,
 } from "./content-reveal.js";
-export { redactRevealedText, renderRevealedBody } from "./content-reveal-render.js";
+export { redactRevealedText, renderRevealedBody, urlsInText } from "./content-reveal-render.js";
 export {
   BOUND_ENVELOPE_VERSION_OFFSET,
   decryptEmailBody,
@@ -264,7 +279,9 @@ export {
   encryptEmailBody,
   encryptPayload,
   openAttachments,
+  openMediaReview,
   sealAttachments,
+  sealMediaReview,
 } from "./crypto/envelope.js";
 export { type DekContext, EnvKeyring, type Keyring } from "./crypto/keyring.js";
 export {
@@ -346,11 +363,13 @@ export {
   type EmailCheckResult,
   type EmailInsightsInput,
   evaluateEmailInsights,
+  extractAnchors,
   MIN_BODY_TEXT_CHARS,
   SCORE_VERSION,
   type ScoreBand,
   SHORTENER_HOSTS,
   scoreBand,
+  visibleText,
 } from "./email-insights.js";
 export {
   type EmailInsightsRow,
@@ -373,6 +392,7 @@ export {
   type ZipEntry,
   zipEntries,
 } from "./file-type.js";
+export { sha256Hex } from "./hash.js";
 export {
   accountMailCard,
   EMAIL_WHITE_TILE_URL,
@@ -453,7 +473,7 @@ export {
 } from "./oauth-scopes.js";
 export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.js";
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
-export { isRootDomainSend, registrableDomain } from "./org-domain.js";
+export { isRootDomainSend, linkDomain, registrableDomain } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
 export { findPixCodes, type PixCode, type PixKeyKind, parsePix } from "./pix.js";
 export {
@@ -512,6 +532,7 @@ export {
   type SesComplaintReading,
   sesComplaintReadings,
 } from "./platform-breaker.js";
+export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
 export {
   dailyCeiling,
   type QuotaResult,
@@ -576,6 +597,11 @@ export {
   type TenantStatusOutcome,
 } from "./ses-tenant.js";
 export {
+  type FetchedImage,
+  type GetImageOptions,
+  getImage,
+  IMAGE_FETCH_MAX_BYTES,
+  IMAGE_FETCH_TIMEOUT_MS,
   isBlockedIp,
   type PostFailureCode,
   type PostJsonOptions,

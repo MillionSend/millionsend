@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "0.34.4",
     "@aws-sdk/client-sesv2": "^3.1130.0",
     "@aws-sdk/client-sqs": "^3.1130.0",
     "@millionsend/billing": "workspace:*",
@@ -18,8 +19,11 @@
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "mupdf": "1.28.1",
     "nodemailer": "^10.0.9",
-    "tsx": "^4.23.13"
+    "sharp": "0.35.5",
+    "tsx": "^4.23.13",
+    "zxing-wasm": "3.1.5"
   },
   "devDependencies": {
     "@hono/node-server": "^2.1.1",

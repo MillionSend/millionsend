@@ -1,0 +1,4 @@
+# The bytes are the test: no line-ending conversion, even where a PDF reads as text.
+*.pdf binary
+*.docx binary
+*.png binary

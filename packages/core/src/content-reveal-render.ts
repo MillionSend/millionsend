@@ -27,6 +27,14 @@ const URL_RE = /(?:https?:\/\/|\bwww\.)[^\s<>"'`)\]]+/gi;
 /** Trailing sentence punctuation is not part of the link. */
 const URL_TAIL = /[.,;:!?]+$/;
 
+/** The links written in plain text, as a reader takes them; a bare www host gains https://. */
+export function urlsInText(text: string): string[] {
+  return [...text.matchAll(URL_RE)].map((m) => {
+    const url = m[0].replace(URL_TAIL, "");
+    return /^www\./i.test(url) ? `https://${url}` : url;
+  });
+}
+
 /**
  * Each run is bounded by its own alphabet rather than by \b: an underscore is
  * a word character, so a boundary would refuse to match after the prefix every

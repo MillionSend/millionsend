@@ -54,6 +54,7 @@ remaining deltas are deliberate and loud:
 
 - Attachments take inline base64 `content` only — a remote `path` URL is
   rejected with `422` (never fetched), as is `content_id` (inline images).
+  Program files are refused too; see [Attachments](#attachments).
 - Contacts are team-global — audience endpoints are served as aliases of
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
@@ -127,6 +128,71 @@ remaining deltas are deliberate and loud:
   `POST /emails/batch` is refused with `422 validation_error`.
 - Anything unsupported is rejected with `422` rather than silently dropped
   (e.g. `tls` on domain update).
+
+## Attachments
+
+Some files are refused for every team, with `422 validation_error` and a
+message that names the file and the reason:
+
+- A type SES or Gmail refuses. The last extension counts, in any letter case
+  and without trailing dots or spaces, and so does the one inside a
+  compressed file (`invoice.exe.gz` counts as `.exe`):
+
+  ```
+  ade adp apk app appx appxbundle asp bas bat cab cer chm cmd com cpl crt
+  csh der diagcab diagcfg diagpkg dll dmg ex ex_ exe fxp gadget hlp hta img
+  inf ins iso isp its jar jnlp js jse ksh lib lnk mad maf mag mam maq mar
+  mas mat mau mav maw mda mdb mde mdt mdw mdz mjs msc msh msh1 msh1xml msh2
+  msh2xml mshxml msi msix msixbundle msp mst nsh ops pcd pif plg prf prg ps1
+  ps1xml ps2 ps2xml psc1 psc2 reg scf scr sct shb shs sys tmp url vb vbe vbs
+  vhd vps vsmacros vss vst vsw vxd ws wsc wsf wsh xll xnk
+  ```
+
+- A program under any name: a Windows, Linux or macOS executable, or a
+  Windows shortcut.
+- A ZIP, Office files included, holding a file with one of those extensions.
+- A `content_type` that names a program:
+
+  ```
+  application/x-msdownload application/x-msdos-program application/x-dosexec
+  application/x-ms-dos-executable
+  application/vnd.microsoft.portable-executable application/x-executable
+  application/x-elf application/x-mach-binary application/x-msi
+  application/x-ms-installer application/x-ms-shortcut
+  application/x-mswinurl application/hta application/x-bat application/x-csh
+  application/javascript application/x-javascript text/javascript
+  application/ecmascript text/ecmascript text/vbscript
+  application/java-archive application/x-java-archive
+  application/x-java-jnlp-file application/vnd.android.package-archive
+  application/x-apple-diskimage application/x-iso9660-image
+  application/vnd.ms-cab-compressed application/x-msaccess
+  application/vnd.ms-htmlhelp
+  ```
+
+- A file name with an invisible formatting character (Unicode category Cf),
+  such as the right-to-left override that makes `.exe` display as `.pdf`.
+
+While a team is new (inside its first 1,000 sends or 72 hours, or under
+10,000 sends within 7 days of its first), an email carrying any of these is
+accepted but waits for review before it is sent:
+
+- Web pages and SVG images (`htm html shtml xhtml xht mht mhtml svg svgz`),
+  by name, `content_type` or content.
+- Archives (`zip zipx rar 7z gz tgz bz2 tbz tbz2 xz txz tar zst lz lzh lha
+  arj ace z cpio`), and archive content under any name.
+- `vhdx` disk images; macro-enabled Office files (`docm dotm xlsm xltm xlam
+  xlsb pptm potm ppam ppsm sldm`) and any Office file with a VBA project;
+  OneNote (`one onepkg`), `rtf`, and attached emails (`eml msg`).
+- A file whose name and content disagree, such as a `.pdf` that is really a
+  ZIP or a web page.
+- A PDF that needs a password to open, or that carries scripts, launch
+  actions, embedded files or XFA forms; encrypted archive entries, and
+  archives inside archives.
+- A file that can't be read: damaged, longer than 50 pages, or larger than
+  50 megapixels.
+
+Older teams send the same files without waiting; their emails are screened
+more often.
 
 ## Errors
 

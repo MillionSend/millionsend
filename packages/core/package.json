@@ -36,6 +36,10 @@
       "types": "./src/error-tracking-node.ts",
       "default": "./src/error-tracking-node.ts"
     },
+    "./file-type": {
+      "types": "./src/file-type.ts",
+      "default": "./src/file-type.ts"
+    },
     "./domain-status": {
       "types": "./src/domain-status.ts",
       "default": "./src/domain-status.ts"

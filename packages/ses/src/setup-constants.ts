@@ -207,6 +207,14 @@ ABUSE_JUDGE=off
 ABUSE_JUDGE_API_KEY=
 ABUSE_JUDGE_MODEL=jev-1.13.0
 
+# Image reading for the judge (see "Image reading" in SELF_HOSTING.md):
+# Claude Haiku 5.5 on Amazon Bedrock writes down the text in an email's
+# images, with the worker's AWS credentials, on ABUSE_VISION_REGION's own
+# endpoint. Off unless ABUSE_VISION=bedrock; refusing program files, holding
+# risky files and reading PDFs, Office files and QR codes work without it.
+ABUSE_VISION=off
+ABUSE_VISION_REGION=us-east-1
+
 # New-domain warm-up (see "New-domain warm-up" in SELF_HOSTING.md): a daily
 # cap per sending domain by its registration age. Unset follows IS_CLOUD. The
 # caps (WARMUP_CAP_FIRST_DAY/_WEEK/_MONTH) are edited in the console (Trust &

@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
+import type { MediaReview } from "../abuse-judge/media.js";
 import { GCM_IV_LENGTH, GCM_TAG_LENGTH } from "./constants.js";
 import type { DekContext, Keyring } from "./keyring.js";
 
@@ -15,7 +16,7 @@ export interface EncryptedBody {
   keyVersion: number;
 }
 
-export type EnvelopeKind = "email_body" | "email_attachments" | "webhook_secret";
+export type EnvelopeKind = "email_body" | "email_attachments" | "email_media" | "webhook_secret";
 
 /** The row an envelope belongs to; the helpers below fix the kind. */
 export interface EnvelopeOwner {
@@ -155,17 +156,18 @@ export interface EmailAttachment {
 /**
  * Attachments seal through the same envelope primitive as email bodies, but
  * the emails table gives them a single text column instead of four dedicated
- * ones — so the envelope parts travel inside the blob as base64 JSON.
+ * ones — so the envelope parts travel inside the blob as base64 JSON. What
+ * screening read from a held email seals the same way.
  */
-export async function sealAttachments(
-  attachments: EmailAttachment[],
+async function sealJson(
+  value: unknown,
   keyring: Keyring,
-  owner?: EnvelopeOwner,
+  binding: EnvelopeBinding | undefined,
 ): Promise<string> {
   const encrypted = await encryptPayload(
-    Buffer.from(JSON.stringify(attachments), "utf8"),
+    Buffer.from(JSON.stringify(value), "utf8"),
     keyring,
-    owner && { ...owner, kind: "email_attachments" },
+    binding,
   );
   return JSON.stringify({
     keyVersion: encrypted.keyVersion,
@@ -175,11 +177,11 @@ export async function sealAttachments(
   });
 }
 
-export async function openAttachments(
+async function openJson(
   sealed: string,
   keyring: Keyring,
-  owner?: EnvelopeOwner,
-): Promise<EmailAttachment[]> {
+  binding: EnvelopeBinding | undefined,
+): Promise<unknown> {
   const parts = JSON.parse(sealed) as {
     keyVersion: number;
     iv: string;
@@ -194,9 +196,45 @@ export async function openAttachments(
       keyVersion: parts.keyVersion,
     },
     keyring,
-    owner && { ...owner, kind: "email_attachments" },
+    binding,
   );
-  return JSON.parse(plaintext.toString("utf8")) as EmailAttachment[];
+  return JSON.parse(plaintext.toString("utf8"));
+}
+
+export function sealAttachments(
+  attachments: EmailAttachment[],
+  keyring: Keyring,
+  owner?: EnvelopeOwner,
+): Promise<string> {
+  return sealJson(attachments, keyring, owner && { ...owner, kind: "email_attachments" });
+}
+
+export async function openAttachments(
+  sealed: string,
+  keyring: Keyring,
+  owner?: EnvelopeOwner,
+): Promise<EmailAttachment[]> {
+  return (await openJson(
+    sealed,
+    keyring,
+    owner && { ...owner, kind: "email_attachments" },
+  )) as EmailAttachment[];
+}
+
+export function sealMediaReview(
+  review: MediaReview,
+  keyring: Keyring,
+  owner: EnvelopeOwner,
+): Promise<string> {
+  return sealJson(review, keyring, { ...owner, kind: "email_media" });
+}
+
+export async function openMediaReview(
+  sealed: string,
+  keyring: Keyring,
+  owner: EnvelopeOwner,
+): Promise<MediaReview> {
+  return (await openJson(sealed, keyring, { ...owner, kind: "email_media" })) as MediaReview;
 }
 
 export async function decryptEmailBody(

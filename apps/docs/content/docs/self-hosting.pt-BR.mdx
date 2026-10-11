@@ -1025,11 +1025,59 @@ disso, endereços de e-mail neles ficam só com o domínio. Os espaços em branc
 de cada campo, quebras de linha incluídas, viram um único espaço. Outros
 dados pessoais escritos nesses campos (nomes, telefones, endereços postais)
 não são removidos: nada os detecta de forma confiável.
-Nunca um endereço ou cabeçalho de destinatário, nunca o HTML bruto, nunca o
-conteúdo de um anexo. Uma amostra avaliada guarda a pontuação, a avaliação, as
+Nunca um endereço ou cabeçalho de destinatário, nunca o HTML bruto, nunca as
+imagens ou os arquivos em si. Uma amostra avaliada guarda a pontuação, a avaliação, as
 categorias, os códigos de motivo, o idioma, a versão do modelo, a latência e
 a classe de erro; a página de revisão mostra isso e nunca um assunto ou um
 corpo. As linhas de amostra são removidas após 90 dias.
+
+**Imagens e anexos.** A triagem abre o que o e-mail traz, dentro do
+worker: o texto e os links de anexos PDF (até 50 páginas), Word, Excel,
+PowerPoint, OpenDocument, de calendário, HTML e SVG, e os QR codes em
+imagens, nas primeiras páginas de um PDF e em imagens dentro de arquivos do
+Office. Um código Pix, num QR code ou colado como texto, aparece como
+recebedor, cidade, valor e tipo de chave, nunca a chave. O Jev passa a ver
+também até 4.000 caracteres de texto dos anexos, até 20 linhas de link a
+mais (QR codes, links dentro de arquivos, códigos Pix) e o tipo real, o
+tamanho, o número de páginas e os alertas de cada anexo. Arquivos de
+programa são recusados na API para todas as equipes, e o e-mail de uma
+equipe nova com um arquivo arriscado fica em espera até a revisão (veja
+[Anexos](/pt-BR/api-reference#anexos)). Nada disso sai da instância: a
+leitura roda em duas threads do worker, com 4 segundos por e-mail.
+
+**Leitura de imagens (opcional).** Desligada por padrão. Ligada, o Claude
+Haiku 5.5 no Amazon Bedrock lê o texto e as marcas que aparecem nas
+imagens do e-mail e nas páginas de anexos que são imagens, e o Jev recebe
+esse texto (até 3.000 caracteres) junto com o resto. As imagens vão para o
+Bedrock em `ABUSE_VISION_REGION` (padrão `us-east-1`), pelo endpoint da
+própria região, com as credenciais AWS do worker; o Bedrock não guarda
+cópia, exceto que a AWS pode guardar uma imagem que as verificações
+automáticas dela marquem como material de abuso sexual infantil. Desligada,
+o e-mail é avaliado sem o texto das imagens e o avaliador fica sabendo.
+Recusar arquivos de programa, deixar em espera os e-mails com arquivos
+arriscados e ler PDFs, arquivos do Office e QR codes: tudo isso funciona sem
+o Bedrock. Para ligar:
+
+1. Aceite o Claude Haiku 5.5 no Amazon Bedrock nessa região: na página de
+   acesso a modelos do console, ou com
+   `aws bedrock list-foundation-model-agreement-offers --model-id anthropic.claude-haiku-5-5`
+   e depois
+   `aws bedrock create-foundation-model-agreement --model-id anthropic.claude-haiku-5-5 --offer-token <token>`.
+2. Dê às credenciais AWS do worker esta permissão, com a sua região e o id
+   da sua conta:
+
+   ```json
+   {
+     "Effect": "Allow",
+     "Action": "bedrock-mantle:CreateInference",
+     "Resource": "arn:aws:bedrock-mantle:<region>:<account-id>:project/*",
+     "Condition": { "StringEquals": { "bedrock-mantle:Model": "anthropic.claude-haiku-5-5" } }
+   }
+   ```
+
+3. Defina `ABUSE_VISION=bedrock` (e `ABUSE_VISION_REGION` para outra
+   região) e reinicie. Antes, inclua o Amazon Bedrock no aviso de
+   privacidade da instância.
 
 **Amostragem.** Depois de cada mensagem aceita, um sorteio com chave decide
 se ela é avaliada. Cada valor abaixo é editado no console em Confiança e
