@@ -8,7 +8,7 @@
   },
   "held": {
     "label": "Atrasada",
-    "body": "O envio está pausado por enquanto e retoma automaticamente. Você não precisa fazer nada."
+    "body": "O envio está pausado por enquanto e será retomado automaticamente. Você não precisa fazer nada."
   },
   "list": {
     "title": "Transmissões",
@@ -46,7 +46,7 @@
     "optional": "opcional",
     "topicLabel": "Tópico",
     "topicNone": "Todos os contatos",
-    "topicHint": "Restringe o envio e o cancelamento de cada destinatário a este tópico.",
+    "topicHint": "Restringe o envio e o descadastro de cada destinatário a este tópico.",
     "htmlLabel": "Corpo",
     "editTab": "Editar",
     "previewTab": "Pré-visualizar",
@@ -97,16 +97,16 @@
     "stepAllSent": "todos os {count} enviados · por volta de {time}",
     "stepLimitDay": "limite diário do {plan}",
     "stepLimitMonth": "limite mensal do {plan}",
-    "stepMoreReset": "mais {count} quando o limite reinicia às {reset}",
-    "stepLastReset": "últimos {count} quando o limite reinicia às {reset} · termina por volta de {time}",
-    "reason": "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes. Seu e-mail transacional não fica retido atrás deles.",
+    "stepMoreReset": "mais {count} quando o limite renovar às {reset}",
+    "stepLastReset": "últimos {count} quando o limite renovar às {reset} · termina por volta de {time}",
+    "reason": "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes. Seu e-mail transacional não fica esperando atrás deles.",
     "planFits": "{plan} envia todos até {time}",
     "planFitsOverage": "{plan} com excedente envia todos até {time}",
     "todayAt": "hoje, {time}",
     "seePlans": "Ver planos",
     "tooLarge": "Esta audiência precisa de mais de {days} dias de capacidade de envio. Divida em segmentos menores ou fale com o suporte.",
     "tooLargeSelfHost": "Esta audiência precisa de mais de {days} dias de capacidade de envio. Divida em segmentos menores ou peça mais capacidade ao operador da instância.",
-    "stepFirstReset": "{count} saem quando o limite reinicia às {reset}"
+    "stepFirstReset": "{count} saem quando o limite renovar às {reset}"
   },
   "detail": {
     "eyebrow": "Transmissão",
@@ -138,7 +138,7 @@
     "error": "Não foi possível carregar a transmissão.",
     "emails": "E-mails",
     "finishesAbout": "Termina por volta de",
-    "started": "começou {time}",
+    "started": "começou em {time}",
     "progress": "{sent} enviados · {waiting} aguardando",
     "planHold": "Aguardando o plano · retoma {date}",
     "sentSoFar": "Enviados até agora",

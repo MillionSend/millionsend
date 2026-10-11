@@ -1,12 +1,12 @@
 {
   "team": {
-    "title": "Dê um nome ao seu time",
-    "teamName": "Nome do time",
-    "logoLabel": "Logo do time (opcional)",
+    "title": "Dê um nome à sua equipe",
+    "teamName": "Nome da equipe",
+    "logoLabel": "Logo da equipe (opcional)",
     "logoAdd": "Adicionar uma logo",
     "logoChange": "Trocar a logo",
-    "submit": "Criar time",
-    "error": "Falha ao criar o time. Tente de novo."
+    "submit": "Criar equipe",
+    "error": "Falha ao criar a equipe. Tente de novo."
   },
   "title": "Envie seu primeiro e-mail",
   "subtitle": "Siga os passos para enviar um e-mail pela API do MillionSend.",
@@ -32,16 +32,16 @@
     "keyCommentReplace": "substitua pela sua chave de API",
     "keyCommentLocked": "sua chave, após a criação",
     "sendCta": "Enviar e-mail",
-    "sendHint": "Ainda sem domínio? Receba um e-mail de teste do MillionSend — um por time, enviado ao dono do time.",
+    "sendHint": "Ainda sem domínio? Receba um e-mail de teste do MillionSend — um por equipe, enviado ao proprietário da equipe.",
     "sending": "Enviando…",
     "sentTo": "Enviado para {to}. Aparece abaixo assim que chegar.",
-    "alreadySent": "O e-mail de teste deste time já foi enviado. Verifique um domínio para enviar os seus.",
+    "alreadySent": "O e-mail de teste desta equipe já foi enviado. Verifique um domínio para enviar os seus.",
     "sendError": "Não foi possível enviar. Tente de novo.",
-    "selfHostBase": "Self-host: aponte os SDKs para esta instância com MILLIONSEND_BASE_URL={url}.",
+    "selfHostBase": "Auto-hospedado: aponte os SDKs para esta instância com MILLIONSEND_BASE_URL={url}.",
     "captchaFailed": "A verificação falhou. Tente de novo."
   },
   "step3": {
-    "title": "Veja chegar",
+    "title": "Veja o e-mail chegar",
     "waiting": "aguardando seu primeiro e-mail · verificando a cada 5 s"
   },
   "success": {
@@ -70,13 +70,13 @@
       "cta": "Adicionar webhook"
     },
     "team": {
-      "title": "Convide seu time",
+      "title": "Convide sua equipe",
       "body": "Membros gerenciam e-mails, domínios e webhooks.",
       "cta": "Convidar membros"
     },
     "migrate": {
       "title": "Migre do Resend",
-      "body": "Um comando move contatos, segmentos, templates, webhooks e domínios.",
+      "body": "Um comando move contatos, segmentos, modelos, webhooks e domínios.",
       "cta": "Ler o guia"
     },
     "instance": "Taxa de envio e retenção de e-mails são configurações da instância — defina em <link>Configurações</link>."

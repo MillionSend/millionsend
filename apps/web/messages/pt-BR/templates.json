@@ -14,7 +14,7 @@
     "loadError": "Não foi possível carregar os modelos.",
     "retry": "Tentar novamente",
     "deleteTitle": "Excluir modelo",
-    "deleteBody": "\"{name}\" será excluído. Transmissões que partiram dele mantêm sua cópia.",
+    "deleteBody": "\"{name}\" será excluído. Transmissões criadas a partir dele mantêm a própria cópia.",
     "deleteConfirm": "Excluir",
     "htmlChipHint": "Criado como HTML; abre no modo código"
   },
@@ -26,7 +26,7 @@
     "textStored": "Texto simples: enviado como está armazenado.",
     "textNone": "Texto simples: nenhum — só HTML.",
     "convertTitle": "Converter em blocos?",
-    "convertBody": "O layout será achatado para o modelo do editor de blocos: tabelas, CSS inline e tudo que os blocos não expressam se perdem. O HTML armazenado só muda quando você salvar.",
+    "convertBody": "O layout será simplificado para o formato do editor de blocos: tabelas, CSS inline e tudo que os blocos não expressam se perdem. O HTML armazenado só muda quando você salvar.",
     "convertCopy": "Duplicar e converter",
     "convertInPlace": "Converter este modelo",
     "copyError": "Não foi possível criar a cópia.",
@@ -57,7 +57,7 @@
     "saved": "Salvo",
     "saveError": "Não foi possível salvar o modelo.",
     "error": "Não foi possível carregar o modelo.",
-    "hiddenBySupportView": "O conteúdo do template fica oculto no modo de suporte."
+    "hiddenBySupportView": "O conteúdo do modelo fica oculto no modo de suporte."
   },
   "picker": {
     "label": "Começar de um modelo",

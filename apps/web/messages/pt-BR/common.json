@@ -2,7 +2,7 @@
   "appName": "MillionSend",
   "meta": {
     "title": "MillionSend · A plataforma de e-mail open-source",
-    "description": "API de e-mail open-source compatível com a Resend, sobre AWS SES. Self-host grátis ou nuvem: 100 e-mails por dia grátis, sem cartão. Migre da Resend com duas variáveis de ambiente."
+    "description": "API de e-mail open-source compatível com o Resend, sobre AWS SES. Self-host grátis ou nuvem: 100 e-mails por dia grátis, sem cartão. Migre do Resend com duas variáveis de ambiente."
   },
   "copy": "Copiar",
   "copied": "Copiado",
@@ -24,13 +24,13 @@
     "languageSaveFailed": "Não foi possível salvar o idioma. Tente novamente."
   },
   "teamSwitcher": {
-    "teams": "Times",
-    "switch": "Trocar de time",
-    "create": "Criar time",
-    "nameLabel": "Nome do time",
+    "teams": "Equipes",
+    "switch": "Trocar de equipe",
+    "create": "Criar equipe",
+    "nameLabel": "Nome da equipe",
     "submit": "Criar",
-    "error": "Falha ao criar o time. Tente de novo.",
-    "limit": "Você já é proprietário do número máximo de times para o seu plano."
+    "error": "Falha ao criar a equipe. Tente de novo.",
+    "limit": "Você já é proprietário do número máximo de equipes para o seu plano."
   },
   "select": {
     "searchPlaceholder": "Buscar…",
@@ -98,9 +98,9 @@
   },
   "trackedLink": {
     "disabledTitle": "Este link foi desativado.",
-    "disabledBody": "Ele veio em um e-mail enviado pela MillionSend e não leva mais a lugar nenhum.",
+    "disabledBody": "Ele veio em um e-mail enviado pelo MillionSend e não leva mais a lugar nenhum.",
     "confirmTitle": "Confira para onde este link vai.",
-    "confirmBody": "Ele veio em um e-mail enviado pela MillionSend e leva para {host}. Não é mais possível confirmar quem o enviou, então continue só se você confia nesse site.",
+    "confirmBody": "Ele veio em um e-mail enviado pelo MillionSend e leva para {host}. Não é mais possível confirmar quem o enviou, então continue só se você confia nesse site.",
     "confirmCta": "Continuar para {host}"
   },
   "confirmWord": "EXCLUIR",

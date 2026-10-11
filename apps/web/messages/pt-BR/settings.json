@@ -6,7 +6,7 @@
     "ses": "SES",
     "smtp": "SMTP",
     "mcp": "MCP",
-    "unsubscribe": "Página de cancelamento",
+    "unsubscribe": "Página de descadastro",
     "connectedApps": "Aplicativos conectados",
     "notifications": "Notificações",
     "audit": "Registro de auditoria"
@@ -29,18 +29,18 @@
     "docs": "Documentação do SMTP"
   },
   "unsubscribe": {
-    "title": "Página de cancelamento",
-    "subtitle": "Personalize a página hospedada que os destinatários veem ao cancelar a inscrição.",
+    "title": "Página de descadastro",
+    "subtitle": "Personalize a página hospedada que os destinatários veem ao se descadastrar.",
     "brandName": "Nome da marca",
     "brandNamePlaceholder": "Sua organização",
     "message": "Mensagem personalizada",
-    "messagePlaceholder": "Exibida acima da confirmação de cancelamento.",
+    "messagePlaceholder": "Exibida acima da confirmação de descadastro.",
     "successMessage": "Mensagem de sucesso",
-    "successMessagePlaceholder": "Exibida após o cancelamento ou ao salvar as preferências.",
-    "showLogo": "Exibir seu logotipo",
-    "showLogoNote": "O logotipo do seu time substitui a marca MillionSend no topo da página.",
-    "showLogoMissing": "Envie um logotipo do time na aba Configurações para habilitar.",
-    "logoRadius": "Cantos do logotipo",
+    "successMessagePlaceholder": "Exibida após o descadastro ou ao salvar as preferências.",
+    "showLogo": "Exibir sua logo",
+    "showLogoNote": "A logo da sua equipe substitui a marca MillionSend no topo da página.",
+    "showLogoMissing": "Envie uma logo da equipe na aba Configurações para habilitar.",
+    "logoRadius": "Cantos da logo",
     "logoRadiusOptions": {
       "square": "Retos",
       "gentle": "Suaves",
@@ -58,10 +58,10 @@
     "previewSuccess": "Sucesso",
     "previewLanguage": "Idioma da pré-visualização",
     "poweredBy": "Powered by MillionSend",
-    "poweredByNote": "Uma linha discreta sob a página, com link para o MillionSend.",
+    "poweredByNote": "Uma linha discreta no rodapé da página, com link para o MillionSend.",
     "poweredByLocked": "Sempre exibido no plano Free; planos pagos podem desligar.",
     "redirectUrl": "URL de redirecionamento",
-    "redirectUrlNote": "Para onde enviar os destinatários após o cancelamento. Deixe em branco para mantê-los na página de confirmação.",
+    "redirectUrlNote": "Para onde enviar os destinatários após o descadastro. Deixe em branco para mantê-los na página de confirmação.",
     "redirectUrlInvalid": "Informe uma URL http(s).",
     "save": "Salvar",
     "saved": "Salvo",
@@ -76,12 +76,12 @@
       "viewInstructions": "Ver instruções",
       "recommended": "Recomendado",
       "cliTitle": "Execute o CLI de configuração",
-      "cliNote": "Execute em qualquer lugar com Node 18+ e as SUAS credenciais AWS de administrador — seu laptop ou o servidor. Ele cria tudo e imprime as linhas do <code>.env</code> para colar se o MillionSend rodar em outro lugar.",
+      "cliNote": "Execute em qualquer lugar com Node 18+ e as SUAS credenciais AWS de administrador — seu notebook ou o servidor. Ele cria tudo e imprime as linhas do <code>.env</code> para colar se o MillionSend rodar em outro lugar.",
       "cfnButton": "Criar a stack no CloudFormation",
       "scriptTitle": "Alternativa: cole este script",
       "scriptNote": "Cole em um terminal onde o AWS CLI tenha credenciais de administrador. Ele cria o usuário IAM, a política, o tópico SNS, a fila SQS de eventos e o conjunto de configuração, e então imprime as linhas do seu <code>.env</code>.",
       "eventsSkipped": "<code>APP_BASE_URL</code> não é uma URL https pública, então o script pula o push por https; os eventos continuam chegando pela fila SQS. Defina-a e recarregue para adicionar o push.",
-      "cfnNote": "Um clique: abre a página de revisão do CloudFormation com o template hospedado — a mesma stack de <code>infra/millionsend-ses.cfn.yaml</code>. Prefere o terminal:",
+      "cfnNote": "Um clique: abre a página de revisão do CloudFormation com o template hospedado — a mesma stack de <code>infra/millionsend-ses.cfn.yaml</code>. Se preferir o terminal:",
       "manualTitle": "Manual: passos no console",
       "step1": "Crie uma política: console IAM → Policies → Create policy → JSON — cole este documento.",
       "step1Link": "Abrir o editor de políticas",
@@ -116,14 +116,14 @@
       "sandboxBody": "Os destinatários precisam ser verificados até a AWS conceder acesso de produção.",
       "sandboxLink": "Solicitar acesso de produção",
       "requestTemplate": "Use case: transactional email (account notifications, receipts, password resets) sent through MillionSend, a self-hosted sending platform we operate on our own infrastructure.\n\nRecipients: our own users. List subscriptions follow double-opt-in guidance before any sending.\n\nBounce and complaint handling: SES delivery events are ingested via SNS; hard bounces and complaints are suppressed automatically and are never mailed again.\n\nExpected volume: [VOLUME] emails/day, ramping up gradually.",
-      "requestTemplateNote": "Substitua <code>[VOLUME]</code> e cole no formulário de acesso de produção da AWS — o formulário espera inglês.",
+      "requestTemplateNote": "Substitua <code>[VOLUME]</code> e cole no formulário de acesso de produção da AWS — o formulário deve ser preenchido em inglês.",
       "rateHint": "SES_MAX_SEND_RATE={envRate} no .env · máximo da conta nesta região {accountRate}/s — o worker envia no menor dos dois.",
       "errors": {
         "credentials": "A AWS rejeitou as credenciais — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>.",
         "unreachable": "O SES não respondeu — verifique <code>AWS_REGION</code> / <code>AWS_REGIONS</code> e o caminho de rede."
       },
       "disabledHint": "Defina suas credenciais AWS primeiro.",
-      "committedPerDay": "Comprometido por dia"
+      "committedPerDay": "Contratado por dia"
     },
     "next": {
       "title": "Próximos passos",
@@ -133,7 +133,7 @@
     "events": {
       "title": "Eventos",
       "connected": "Eventos conectados.",
-      "unhealthy": "Os eventos de entrega não estão chegando: {sent, plural, one {# e-mail foi enviado} other {# e-mails foram enviados}} nas últimas 2 horas e o SES não reportou nada de volta. Verifique a assinatura SNS (ausente ou aguardando confirmação) ou a configuração da fila SQS.",
+      "unhealthy": "Os eventos de entrega não estão chegando: {sent, plural, one {# e-mail foi enviado} other {# e-mails foram enviados}} nas últimas 2 horas e o SES não deu nenhum retorno. Verifique a assinatura SNS (ausente ou aguardando confirmação) ou a configuração da fila SQS.",
       "bannerAction": "Abrir configurações do SES",
       "lastEvent": "Último evento recebido",
       "never": "nunca"
@@ -155,7 +155,7 @@
       "hint": "PNG, JPEG ou WebP, de até 2 MB. Aparece onde sua equipe é exibida.",
       "error": "Não foi possível atualizar a logo.",
       "removeTitle": "Remover logo",
-      "removeBody": "A equipe volta à inicial. Você pode enviar uma logo de novo quando quiser."
+      "removeBody": "A equipe volta a aparecer com a inicial do nome. Você pode enviar uma logo de novo quando quiser."
     }
   },
   "plans": {
@@ -198,7 +198,7 @@
     "refused": {
       "daily": "Esta equipe atingiu o limite de {limit} convites por dia. Tente de novo amanhã.",
       "dailyMember": "Você atingiu o seu limite de {limit} convites por dia. Tente de novo amanhã.",
-      "hourly": "Convites demais nesta hora. Tente de novo mais tarde.",
+      "hourly": "Limite de convites por hora atingido. Tente de novo mais tarde.",
       "duplicate": "Este endereço já tem um convite pendente. Reenvie ou revogue o convite pela lista.",
       "cooldown": "Este convite acabou de ser enviado. Espere alguns minutos antes de reenviar.",
       "maxSends": "Este convite já foi enviado {max} vezes. Revogue e convide de novo.",
@@ -228,7 +228,7 @@
       "revokeBody": "O link enviado para {email} deixa de funcionar. Você pode convidar de novo quando quiser."
     },
     "accept": {
-      "title": "Entrar no time",
+      "title": "Entrar na equipe",
       "loading": "Verificando sua sessão…",
       "signInPrompt": "Entre ou crie uma conta para aceitar este convite.",
       "signIn": "Entrar",
@@ -246,7 +246,7 @@
   },
   "instance": {
     "title": "Instância",
-    "subtitle": "Vale para toda esta instalação, todos os times.",
+    "subtitle": "Vale para toda esta instalação, todas as equipes.",
     "rateLabel": "Taxa de envio SES (mensagens/segundo)",
     "retentionLabel": "Retenção de corpos de e-mail (dias)",
     "reserveLabel": "Reserva transacional (% da cota de envio)",
@@ -264,7 +264,7 @@
   },
   "usage": {
     "sentToday": "E-mails enviados hoje",
-    "resetsMidnightUtc": "Reinicia à meia-noite UTC",
+    "resetsMidnightUtc": "Zera à meia-noite UTC",
     "unlimited": "Ilimitado",
     "history": "Histórico diário",
     "empty": "0 dias registrados.",
@@ -281,7 +281,7 @@
     "status": {
       "none": "Sem assinatura",
       "active": "Ativo",
-      "trialing": "Teste",
+      "trialing": "Período de teste",
       "past_due": "Pagamento atrasado",
       "unpaid": "Não pago",
       "canceled": "Cancelado",
@@ -292,9 +292,9 @@
     "capPerMonth": "{n} e-mails / mês",
     "renewsOn": "Renova em",
     "manage": "Gerenciar cobrança",
-    "manageHint": "Os planos mudam aqui. Faturas, forma de pagamento, CNPJ/CPF e cancelamento ficam no portal de cobrança.",
+    "manageHint": "Você troca de plano aqui. Faturas, forma de pagamento, CNPJ/CPF e cancelamento ficam no portal de cobrança.",
     "readOnly": "Apenas proprietários e administradores podem alterar a cobrança.",
-    "systemNotice": "Este é o time da própria instância: envia os e-mails de conta e as novidades, nunca é cobrado e não tem limite de envio. O plano é definido pelo operador.",
+    "systemNotice": "Esta é a equipe da própria instância: envia os e-mails de conta e as novidades, nunca é cobrada e não tem limite de envio. O plano é definido pelo operador.",
     "pastDue": "O pagamento falhou — atualize seu cartão para manter o plano.",
     "updateCard": "Atualizar forma de pagamento",
     "usageTitle": "Uso",
@@ -305,7 +305,7 @@
     "comparePlans": "Comparar planos",
     "fromPrice": "a partir de {price}",
     "volume": "E-mails por mês",
-    "sliderHint": "Mova o slider para comparar planos",
+    "sliderHint": "Arraste a barra para comparar planos",
     "emailsADay": "e-mails por dia",
     "emailsAMonth": "e-mails por mês",
     "current": "Atual",
@@ -327,7 +327,7 @@
       "domainsUnlimited": "Domínios de envio ilimitados",
       "contacts": "Contatos, segmentos e tópicos ilimitados",
       "contactsLimit": "Até {n, number} contatos",
-      "broadcasts": "Broadcasts: newsletters e campanhas, personalizados por contato",
+      "broadcasts": "Transmissões: newsletters e campanhas, personalizadas por contato",
       "integrations": "Webhooks e chaves de API",
       "agents": "Servidor MCP, CLI e nove SDKs"
     },
@@ -338,7 +338,7 @@
   "mcp": {
     "title": "Servidor MCP",
     "intro": "Deixe agentes de IA enviarem e-mails e gerenciarem sua audiência pelo Model Context Protocol.",
-    "subtitle": "Toda chamada de ferramenta passa pelas mesmas regras da API REST: domínios verificados, supressões, cotas e escopo de time.",
+    "subtitle": "Toda chamada de ferramenta passa pelas mesmas regras da API REST: domínios verificados, supressões, cotas e escopo de equipe.",
     "serverUrl": "URL do servidor",
     "serverUrlNote": "Endpoint HTTP (Streamable). Os clientes entram com sua conta MillionSend via OAuth — sem chaves de API e nada secreto para colar.",
     "connectTitle": "Conectar um cliente",
@@ -346,9 +346,9 @@
       "claudeCode": "Depois rode <code>/mcp</code> dentro do Claude Code e escolha millionsend para entrar.",
       "claudeDesktop": "Adicione ao <code>claude_desktop_config.json</code> — ou pule o arquivo: Settings → Connectors → Add custom connector, e cole a URL do servidor.",
       "cursor": "Salve como <code>.cursor/mcp.json</code> no projeto, ou <code>~/.cursor/mcp.json</code> para todos os projetos.",
-      "vscode": "Salve como <code>.vscode/mcp.json</code> no workspace e inicie o servidor pela visão de MCP do editor."
+      "vscode": "Salve como <code>.vscode/mcp.json</code> no workspace e inicie o servidor pelo painel de MCP do editor."
     },
-    "authNote": "Na primeira conexão o navegador abre uma tela de consentimento onde você escolhe o time e as permissões do cliente. A permissão aparece em <link>Aplicativos conectados</link>, onde qualquer membro pode revogá-la.",
+    "authNote": "Na primeira conexão o navegador abre uma tela de consentimento onde você escolhe a equipe e as permissões do cliente. A autorização aparece em <link>Aplicativos conectados</link>, onde qualquer membro pode revogá-la.",
     "toolsTitle": "Ferramentas",
     "toolsIntro": "Um cliente só vê as ferramentas cobertas pelas permissões concedidas.",
     "table": {
@@ -360,30 +360,30 @@
   },
   "connectedApps": {
     "title": "Aplicativos conectados",
-    "intro": "Aplicativos e clientes MCP autorizados via OAuth a agir neste time.",
-    "empty": "Nenhum aplicativo conectado ainda. Autorize um cliente MCP e a permissão aparece aqui.",
+    "intro": "Aplicativos e clientes MCP autorizados via OAuth a agir nesta equipe.",
+    "empty": "Nenhum aplicativo conectado ainda. Autorize um cliente MCP e ele aparece aqui.",
     "table": {
       "app": "Aplicativo",
       "user": "Autorizado por",
       "scopes": "Permissões",
       "granted": "Concedido",
-      "menu": "Ações da permissão"
+      "menu": "Ações da autorização"
     },
     "you": "você",
-    "allTeams": "Todos os times",
+    "allTeams": "Todas as equipes",
     "scopesCount": "{count, plural, one {# permissão} other {# permissões}}",
     "revoke": "Revogar acesso",
-    "revokeAllTeamsForbidden": "Esta autorização também cobre times que você não administra. Só quem a concedeu pode revogá-la.",
+    "revokeAllTeamsForbidden": "Esta autorização também cobre equipes que você não administra. Só quem a concedeu pode revogá-la.",
     "revokeConfirm": {
       "title": "Revogar acesso",
-      "body": "{name} perde o acesso a este time na próxima renovação de token, em até 15 minutos.",
+      "body": "{name} perde o acesso a esta equipe na próxima renovação de token, em até 15 minutos.",
       "confirm": "Revogar acesso"
     }
   },
   "danger": {
     "title": "Zona de perigo",
     "deleteTeam": "Excluir equipe",
-    "deleteTeamBody": "Exclui permanentemente {name} com todos os contatos, e-mails, domínios, chaves de API, templates, campanhas e membros. Isso não pode ser desfeito.",
+    "deleteTeamBody": "Exclui permanentemente {name} com todos os contatos, e-mails, domínios, chaves de API, modelos, transmissões e membros. Isso não pode ser desfeito.",
     "deleteAccount": "Excluir minha conta",
     "deleteAccountBody": "Exclui permanentemente sua conta e encerra todas as suas sessões. Equipes das quais você é o único proprietário precisam ser excluídas ou transferidas antes. Isso não pode ser desfeito.",
     "deleteAccountError": "Não foi possível excluir a conta. Exclua ou transfira as equipes que você possui, entre de novo e tente outra vez.",
@@ -395,7 +395,7 @@
     "when": "Quando",
     "who": "Quem",
     "action": "Ação",
-    "target": "Alvo",
+    "target": "Item",
     "actors": {
       "api_key": "Chave de API",
       "oauth": "App conectado",
@@ -440,19 +440,19 @@
       "team_ses_tenant_updated": "Atualizou o status do tenant do SES",
       "team_ses_tenant_update_failed": "Falha ao atualizar o status do tenant do SES",
       "console_flag_opened": "Sinalizou a equipe",
-      "console_flag_cleared": "Limpou a sinalização",
+      "console_flag_cleared": "Encerrou a sinalização",
       "console_flag_reopened": "Reabriu a sinalização",
       "region_breaker_opened": "Pausou transmissões na região",
       "region_breaker_closed": "Retomou transmissões na região",
       "region_quota_requested": "Solicitou aumento de cota do SES",
       "instance_monitor_settings_updated": "Atualizou configurações de monitoramento",
       "instance_reserve_updated": "Alterou a reserva transacional",
-      "monitor_override_set": "Definiu override de amostragem do monitor",
-      "monitor_override_cleared": "Removeu override de amostragem do monitor",
+      "monitor_override_set": "Ativou a amostragem total do monitor",
+      "monitor_override_cleared": "Desativou a amostragem total do monitor",
       "monitor_broadcasts_paused": "O monitor de conteúdo pausou transmissões",
       "monitor_broadcasts_resumed": "Retomou transmissões após pausa do monitor",
-      "warmup_trust_granted": "Liberou o aquecimento de domínio novo",
-      "warmup_trust_revoked": "Restabeleceu o aquecimento de domínio novo",
+      "warmup_trust_granted": "Dispensou o aquecimento de domínio novo",
+      "warmup_trust_revoked": "Reativou o aquecimento de domínio novo",
       "content_revealed": "Leu o conteúdo de mensagens",
       "content_accessed": "Um operador leu o conteúdo de mensagens",
       "support_view_started": "Modo de suporte iniciado",
@@ -467,11 +467,11 @@
   "notifications": {
     "title": "Notificações por e-mail",
     "intro": "O que o MillionSend envia a você como proprietário das suas equipes. Cada opção vale para todas as equipes que você possui.",
-    "always": "Sempre enviados: e-mails sobre a sua própria conta (redefinição de senha, verificação, boas-vindas, senha alterada, app autorizado) e os recibos de segurança de chaves de API e segredos de webhook.",
+    "always": "Sempre enviados: e-mails sobre a sua própria conta (redefinição de senha, verificação, boas-vindas, senha alterada, app autorizado) e os avisos de segurança sobre chaves de API e segredos de webhook.",
     "groups": {
       "domains": "Domínios",
       "team": "Equipe",
-      "broadcasts": "Broadcasts",
+      "broadcasts": "Transmissões",
       "sending": "Saúde do envio",
       "webhooks": "Webhooks",
       "billing": "Cobrança"
@@ -490,16 +490,16 @@
         "note": "Alguém aceitou um convite para uma equipe sua."
       },
       "broadcast_sent": {
-        "label": "Broadcast enviado",
-        "note": "O número de destinatários quando um broadcast sai."
+        "label": "Transmissão enviada",
+        "note": "O número de destinatários quando uma transmissão sai."
       },
       "broadcast_held_quota": {
-        "label": "Broadcast aguardando a cota",
-        "note": "Parte de um broadcast ficou retida acima da cota."
+        "label": "Transmissão aguardando a cota",
+        "note": "Parte de uma transmissão passou da cota e ficou em espera."
       },
       "broadcast_held": {
-        "label": "Broadcast atrasado",
-        "note": "Um broadcast aguarda para sair e retoma sozinho."
+        "label": "Transmissão atrasada",
+        "note": "Uma transmissão aguarda para sair e é retomada automaticamente."
       },
       "quota": {
         "label": "Cota de envio",
@@ -549,7 +549,7 @@
   },
   "supportAccess": {
     "title": "Acesso de suporte",
-    "intro": "A seu pedido, um operador da instância pode abrir este painel em modo somente leitura por até 30 minutos. O conteúdo dos e-mails enviados, exportações e segredos ficam ocultos, e a sessão é registrada no log de auditoria.",
+    "intro": "A seu pedido, um operador da instância pode abrir este painel em modo somente leitura por até 30 minutos. O conteúdo dos e-mails enviados, exportações e segredos ficam ocultos, e a sessão aparece no registro de auditoria.",
     "none": "Nenhuma sessão de suporte ativa em {team}.",
     "operator": "Operador",
     "started": "Início",
@@ -558,7 +558,7 @@
     "reference": "Referência",
     "reasons": {
       "support_ticket": "Chamado de suporte",
-      "billing_dispute": "Disputa de cobrança",
+      "billing_dispute": "Contestação de cobrança",
       "other": "Outro"
     },
     "end": "Encerrar sessão",
