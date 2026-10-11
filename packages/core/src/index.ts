@@ -456,8 +456,8 @@ export {
 export {
   applyRegionBreakers,
   BREAKER_BOUNCE_RATE,
-  BREAKER_COMPLAINT_RATE,
   BREAKER_MIN_SENT,
+  BREAKER_SES_COMPLAINT_RATE,
   BREAKER_WINDOWS_HOURS,
   evaluateRegionBreakers,
   holdRegion,
@@ -466,10 +466,16 @@ export {
   type RegionContributor,
   type RegionDecision,
   type RegionWindowCounts,
+  recordSesComplaintRates,
   regionCounterTotals,
   regionPause,
   regionWindowCounts,
   releaseRegion,
+  SES_COMPLAINT_ALERT_RATE,
+  SES_COMPLAINT_PAUSE_RATE,
+  SES_COMPLAINT_REVIEW_RATE,
+  type SesComplaintAlert,
+  sesComplaintRates,
 } from "./platform-breaker.js";
 export {
   dailyCeiling,

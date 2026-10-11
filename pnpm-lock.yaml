@@ -556,6 +556,9 @@ importers:
 
   packages/ses:
     dependencies:
+      '@aws-sdk/client-cloudwatch':
+        specifier: 3.1130.0
+        version: 3.1130.0
       '@aws-sdk/client-iam':
         specifier: ^3.1130.0
         version: 3.1130.0
@@ -677,6 +680,10 @@ packages:
 
   '@aws-sdk/checksums@3.1001.0':
     resolution: {integrity: sha512-6uTniZc87q+B5eXouGTl+7Tmc482rEeCcvxpsvREP8EfF0gvloRZ41UOA9sbSJlyy8TbqIBXb3kKfKarEArUQA==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-cloudwatch@3.1130.0':
+    resolution: {integrity: sha512-XtBeFWchp4+mxl6aLbL+X072sTIFMgWx2rhrsMjmVOczXCFM443FbYOtRef3hMNAK5Uh9wzjWTdvj7CbIQpsMw==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-iam@3.1130.0':
@@ -2897,6 +2904,10 @@ packages:
     resolution: {integrity: sha512-ycSJu3tFAQ4v04CBB0agqFMVsSQ1iG3yw+SpgxRqKfaURpQD4CZ8Wn0zPMmSnOuTpTh65Vz+EA0rMrw089wvkA==}
     engines: {node: '>=18.0.0'}
 
+  '@smithy/middleware-compression@4.6.2':
+    resolution: {integrity: sha512-Q9d+luiRjyHT6kCL/9NyGpdZJgodh4vtvfHC6H8SqoVKrV2k9RoyI9/IloVfdCYks3/2DIi7BsYYLcda5KZS0A==}
+    engines: {node: '>=18.0.0'}
+
   '@smithy/node-http-handler@4.12.1':
     resolution: {integrity: sha512-ThMkboGeONWXAelq9FvGsuJC4rOi+qyC4/zhUF58xYpxUg5sQKx2VXZYJmtNjr4dSuBJ1HeJXETQILCz3wOHvw==}
     engines: {node: '>=18.0.0'}
@@ -4157,6 +4168,9 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
   framer-motion@13.2.0:
     resolution: {integrity: sha512-9E33ebgMaO33w1nN/jEdW8z3/GO483fMi4rqbMG9rt83XgW9QLKRe4NcmJ8s+fQ3O34++UHrIQwlIWGIWTITjA==}
@@ -5791,6 +5805,18 @@ snapshots:
       '@aws-sdk/core': 3.978.0
       '@aws-sdk/types': 3.974.5
       '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
+      tslib: 2.8.1
+
+  '@aws-sdk/client-cloudwatch@3.1130.0':
+    dependencies:
+      '@aws-sdk/core': 3.978.0
+      '@aws-sdk/credential-provider-node': 3.972.83
+      '@aws-sdk/types': 3.974.5
+      '@smithy/core': 3.33.3
+      '@smithy/fetch-http-handler': 5.8.0
+      '@smithy/middleware-compression': 4.6.2
+      '@smithy/node-http-handler': 4.12.1
       '@smithy/types': 4.18.0
       tslib: 2.8.1
 
@@ -7711,6 +7737,13 @@ snapshots:
       '@smithy/types': 4.18.0
       tslib: 2.8.1
 
+  '@smithy/middleware-compression@4.6.2':
+    dependencies:
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
+      fflate: 0.8.3
+      tslib: 2.8.1
+
   '@smithy/node-http-handler@4.12.1':
     dependencies:
       '@smithy/core': 3.33.3
@@ -8720,6 +8753,8 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
+
+  fflate@0.8.3: {}
 
   framer-motion@13.2.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
     dependencies:

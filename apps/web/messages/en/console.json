@@ -117,7 +117,7 @@
       "complained": "Complaints",
       "deliveredOf": "{delivered} of {sent} delivered",
       "hardOf": "hard {rate} · SES line 5%",
-      "complaintLines": "breaker 0.08% · SES 0.1%",
+      "complaintLines": "our own count · SES's rate is per region",
       "period": "Period",
       "noSends": "no sends in the window"
     },

@@ -8,6 +8,7 @@ import {
   sesTenantsEnabled,
 } from "@millionsend/config";
 import {
+  BREAKER_SES_COMPLAINT_RATE,
   bulkShare,
   clampReserve,
   committedDailyVolume,
@@ -22,9 +23,12 @@ import {
   regionDailyPeaks,
   regionWindowCounts,
   releaseRegion,
+  SES_COMPLAINT_PAUSE_RATE,
+  SES_COMPLAINT_REVIEW_RATE,
   SES_TRANSACTIONAL_RESERVE_MAX,
   SES_TRANSACTIONAL_RESERVE_MIN,
   sendingBroadcasts,
+  sesComplaintRates,
   sesEventsHealth,
   transactionalSent24h,
   usableReserve,
@@ -113,6 +117,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         bulk,
         sending,
         committedPerDay,
+        sesRates,
       ] = await Promise.all([
         accounts(),
         getInstanceSettings(ctx.db),
@@ -138,6 +143,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         regionBulkCounts(ctx.db, now),
         sendingBroadcasts(ctx.db),
         isCloudDeployment() ? committedDailyVolume(ctx.db, now) : Promise.resolve(null),
+        sesComplaintRates(ctx.db),
       ]);
       // Env values are raw strings when validation is skipped (tests), hence Number().
       const horizonDays = pacingHorizonDays(
@@ -243,6 +249,8 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
               : null,
             domainsVerified: domainsByRegion.get(region) ?? 0,
             sent24h: counts24?.sent ?? 0,
+            // SES's own complaint rate, as the breaker last read it from CloudWatch.
+            sesComplaintRate: sesRates.get(region) ?? null,
             week: counts7
               ? {
                   sent: counts7.sent,
@@ -282,6 +290,11 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
               defaultQuota === null ? null : usableReserve(defaultQuota, reserve.value),
             suggested: suggestedReserve(defaultQuota, defaultPeak),
           },
+        },
+        complaintLines: {
+          sesReview: SES_COMPLAINT_REVIEW_RATE,
+          sesPause: SES_COMPLAINT_PAUSE_RATE,
+          breaker: BREAKER_SES_COMPLAINT_RATE,
         },
         eventsHealth: events,
         // The SQS pipeline is one queue for every region; the lag the worker measured applies to all.

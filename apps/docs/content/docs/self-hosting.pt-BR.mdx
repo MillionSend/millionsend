@@ -821,8 +821,10 @@ todos os outros recebem 404, e nada no app leva até ele. Em uma instância
 auto-hospedada, **Configurações → SES** mostra ao operador um cartão "Console da
 instância" com o botão "Abrir console"; a URL direta
 `https://<seu-host>/console` também funciona. Todo número vem do Postgres ou
-de uma leitura gratuita de `GetAccount` do SESv2 por região; nenhuma API paga
-da AWS é chamada, e o custo por região é uma estimativa local.
+de uma leitura gratuita de `GetAccount` do SESv2 por região, exceto a taxa de
+reclamações que o próprio SES mede: o worker a lê no CloudWatch
+(`cloudwatch:GetMetricData`, uma métrica por região a cada 15 minutos, alguns
+centavos de dólar por mês). O custo por região é uma estimativa local.
 
 Uma equipe suspensa mantém os dados e as chaves continuam autenticando, mas
 todo envio responde `403 team_suspended` (`403 sending_paused` em uma pausa

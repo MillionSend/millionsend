@@ -63,6 +63,11 @@ export {
   SES_DAILY_QUOTA_CODE,
 } from "./quotas.js";
 export {
+  createSesReputationClient,
+  getSesComplaintRate,
+  type SesReputationClient,
+} from "./reputation.js";
+export {
   createSesSendClient,
   type SesSendClient,
   type SimpleEmail,

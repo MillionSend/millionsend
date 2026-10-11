@@ -3,12 +3,14 @@ import {
   evaluateRegionBreakers,
   findInstanceOperator,
   type RegionDecision,
+  recordSesComplaintRates,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import {
   type MailContent,
   regionPausedMail,
   regionResumedMail,
+  sesComplaintsMail,
 } from "../notifications/templates.js";
 import type { SystemMailer } from "../system-mail.js";
 
@@ -16,27 +18,53 @@ export interface PlatformBreakerDeps {
   mailer: SystemMailer;
   appBaseUrl?: string | undefined;
   now?: Date;
+  /** SES's own complaint rate in each served region, read from CloudWatch. */
+  ses?: { regions: readonly string[]; complaintRate: (region: string) => Promise<number | null> };
+}
+
+/** Every region's reading; a failed read is logged and left out, so the stored one stands. */
+async function readSesComplaintRates(
+  ses: NonNullable<PlatformBreakerDeps["ses"]>,
+): Promise<Map<string, number | null>> {
+  const rates = new Map<string, number | null>();
+  for (const region of ses.regions) {
+    try {
+      rates.set(region, await ses.complaintRate(region));
+    } catch (err) {
+      console.warn(`platform.breaker: SES complaint rate unreadable in ${region}`, err);
+    }
+  }
+  return rates;
 }
 
 /**
- * Evaluate the per-region breakers, persist the flips, and tell the operator
- * about each one with the teams behind it. Returns the regions that changed.
+ * Store SES's complaint rates, evaluate the per-region breakers, persist the
+ * flips, and tell the operator about each flip and each region whose SES rate
+ * reached the alert line, with the teams behind it. Returns the regions that
+ * changed.
  */
 export async function runPlatformBreaker(
   db: Db,
   deps: PlatformBreakerDeps,
 ): Promise<{ tripped: string[]; resumed: string[] }> {
   const now = deps.now ?? new Date();
+  const alerts = deps.ses
+    ? await recordSesComplaintRates(db, await readSesComplaintRates(deps.ses), now)
+    : [];
   const decisions = await evaluateRegionBreakers(db, { now });
   const changed = await applyRegionBreakers(db, decisions, now);
-  if (changed.tripped.length === 0 && changed.resumed.length === 0) return changed;
+  // A region that tripped in this run gets the pause notice alone.
+  const warned = alerts.filter((a) => !changed.tripped.includes(a.region));
+  if (changed.tripped.length === 0 && changed.resumed.length === 0 && warned.length === 0) {
+    return changed;
+  }
   const operator = await findInstanceOperator(db);
   const url = `${deps.appBaseUrl ?? ""}/console/regions`;
   // The flip is already persisted (the console shows it); a failing mail is
   // logged, never allowed to abort the handler or the other regions' mails.
   const mail = async (
     region: string,
-    kind: "region.paused" | "region.resumed",
+    kind: "region.paused" | "region.resumed" | "region.ses_complaints",
     content: MailContent,
   ) => {
     if (!operator) return;
@@ -46,6 +74,12 @@ export async function runPlatformBreaker(
       console.error(`platform.breaker: operator mail for ${region} failed`, err);
     }
   };
+  const teams = (contributors: RegionDecision["contributors"]) =>
+    contributors.map((c) => ({
+      team: c.teamName,
+      hardBounced: c.hardBounced,
+      complained: c.complained,
+    }));
   const byRegion = new Map(decisions.map((d) => [d.region, d]));
   for (const region of changed.tripped) {
     const d = byRegion.get(region) as RegionDecision & {
@@ -54,27 +88,37 @@ export async function runPlatformBreaker(
     const top = d.contributors
       .map((c) => `${c.teamName} (${c.hardBounced} hard bounces, ${c.complained} complaints)`)
       .join(", ");
+    const measured =
+      "windowHours" in d.reason
+        ? `over ${d.reason.windowHours}h (${d.reason.events}/${d.reason.sent})`
+        : "measured by SES";
     console.warn(
-      `platform.breaker: broadcasts paused in ${region} — ${d.reason.metric} rate ${(d.reason.rate * 100).toFixed(2)}% over ${d.reason.windowHours}h (${d.reason.events}/${d.reason.sent}); top contributors: ${top || "none"}`,
+      `platform.breaker: broadcasts paused in ${region} — ${d.reason.metric} rate ${(d.reason.rate * 100).toFixed(2)}% ${measured}; top contributors: ${top || "none"}`,
     );
     await mail(
       region,
       "region.paused",
-      regionPausedMail({
-        region,
-        ...d.reason,
-        contributors: d.contributors.map((c) => ({
-          team: c.teamName,
-          hardBounced: c.hardBounced,
-          complained: c.complained,
-        })),
-        url,
-      }),
+      regionPausedMail({ region, reason: d.reason, contributors: teams(d.contributors), url }),
     );
   }
   for (const region of changed.resumed) {
     console.log(`platform.breaker: broadcasts resumed in ${region}`);
     await mail(region, "region.resumed", regionResumedMail({ region, url }));
+  }
+  for (const alert of warned) {
+    console.warn(
+      `platform.breaker: SES complaint rate in ${alert.region} at ${(alert.rate * 100).toFixed(2)}%`,
+    );
+    await mail(
+      alert.region,
+      "region.ses_complaints",
+      sesComplaintsMail({
+        region: alert.region,
+        rate: alert.rate,
+        contributors: teams(alert.contributors),
+        url,
+      }),
+    );
   }
   return changed;
 }

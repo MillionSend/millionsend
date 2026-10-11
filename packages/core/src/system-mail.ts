@@ -36,6 +36,7 @@ export type SystemMailKind =
   | "deliverability.paused"
   | "region.paused"
   | "region.resumed"
+  | "region.ses_complaints"
   | "webhook.failing"
   | "webhook.auto_disabled"
   | "webhook.backlog"

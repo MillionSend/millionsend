@@ -933,6 +933,24 @@ describe("console.regions during a region hold", () => {
   });
 });
 
+describe("console.regions and SES's own complaint rate", () => {
+  it("carries the rate the breaker last read, and the lines it is judged against", async () => {
+    await db.delete(schema.regionBreakers);
+    let list = await operator().console.regions.list();
+    expect(list.served.find((r) => r.region === REGION)?.sesComplaintRate).toBeNull();
+    expect(list.complaintLines).toEqual({ sesReview: 0.001, sesPause: 0.005, breaker: 0.004 });
+
+    await db.insert(schema.regionBreakers).values({ region: REGION, sesComplaintRate: 0.0025 });
+    list = await operator().console.regions.list();
+    expect(list.served.find((r) => r.region === REGION)).toMatchObject({
+      sesComplaintRate: 0.0025,
+      // A stored reading is no pause.
+      breaker: null,
+    });
+    await db.delete(schema.regionBreakers);
+  });
+});
+
 describe("suspend / reinstate and the team's SES tenant", () => {
   let tenantTeam: string;
   const arn = (region: string) => `arn:aws:ses:${region}:123456789012:tenant/${tenantTeam}/tn-1`;

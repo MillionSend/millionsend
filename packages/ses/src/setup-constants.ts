@@ -30,11 +30,12 @@ export const SES_EVENT_TYPES = [
 ] as const;
 
 /**
- * Every SES action the instance issues — infra/millionsend-ses.cfn.yaml
- * mirrors the same set. Identity actions support resource-level permissions
- * and are confined to identities; sending stays account-wide because a send
- * that names a configuration set is authorized against that resource too,
- * and GetAccount accepts no resource at all.
+ * Every SES action the instance issues, plus the CloudWatch read of SES's
+ * reputation — infra/millionsend-ses.cfn.yaml mirrors the same set. Identity
+ * actions support resource-level permissions and are confined to identities;
+ * sending stays account-wide because a send that names a configuration set is
+ * authorized against that resource too, and GetAccount and GetMetricData
+ * accept no resource at all.
  */
 export const SES_IAM_POLICY = {
   Version: "2012-10-17",
@@ -68,6 +69,13 @@ export const SES_IAM_POLICY = {
         "ses:DeleteTenantResourceAssociation",
         "ses:UpdateReputationEntityCustomerManagedStatus",
       ],
+      Resource: "*",
+    },
+    // SES's own complaint rate (Reputation.ComplaintRate), which the region
+    // breaker judges, is published as a CloudWatch metric.
+    {
+      Effect: "Allow",
+      Action: ["cloudwatch:GetMetricData"],
       Resource: "*",
     },
   ],

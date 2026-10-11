@@ -3,22 +3,31 @@ import { schema } from "@millionsend/db";
 import type { RegionBreakerReason } from "@millionsend/db/schema";
 import { and, asc, desc, eq, gte, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { MIN_PAUSE_COMPLAINTS, MIN_PAUSE_HARD_BOUNCES } from "./deliverability.js";
+import { MIN_PAUSE_HARD_BOUNCES } from "./deliverability.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
  * SES enforces bounce/complaint rates on the whole account per region: one
  * team's bad week pauses every customer in that region. The breaker watches
- * the aggregate and holds broadcasts (never transactional mail) at a fraction
- * of SES's own review lines, so the platform stops itself before AWS does.
+ * the aggregate and holds broadcasts (never transactional mail) short of
+ * SES's own lines, so the platform stops itself before AWS does.
  */
-// 80% of SES's review lines (5% / 0.1%), written as literals: 0.8 * 0.05 is
+// 80% of SES's bounce review line (5%), written as a literal: 0.8 * 0.05 is
 // 0.04000000000000001 in floating point, and 40 bounces in 1000 must trip.
 export const BREAKER_BOUNCE_RATE = 0.04;
-export const BREAKER_COMPLAINT_RATE = 0.0008;
 /** Sends a region needs in a window before its aggregate rate means anything. */
 export const BREAKER_MIN_SENT = 1000;
 export const BREAKER_WINDOWS_HOURS = [24, 24 * 7] as const;
+/**
+ * Complaints are judged on SES's own rate (Reputation.ComplaintRate), the one
+ * its review and pause lines apply to. It counts only the mailbox providers
+ * that report complaints, so it runs well above our own count over all mail.
+ */
+export const SES_COMPLAINT_REVIEW_RATE = 0.001;
+export const SES_COMPLAINT_PAUSE_RATE = 0.005;
+/** The operator hears at this rate, a day apart while it stays there. */
+export const SES_COMPLAINT_ALERT_RATE = 0.003;
+export const BREAKER_SES_COMPLAINT_RATE = 0.004;
 
 export interface RegionWindowCounts {
   sent: number;
@@ -203,43 +212,31 @@ async function contributors(
     .limit(5);
 }
 
-function tripReason(counts: RegionWindowCounts, windowHours: number): RegionBreakerReason | null {
-  if (counts.sent < BREAKER_MIN_SENT) return null;
-  const checks = [
-    {
-      metric: "bounce" as const,
-      events: counts.hardBounced,
-      limit: BREAKER_BOUNCE_RATE,
-      min: MIN_PAUSE_HARD_BOUNCES,
-    },
-    {
-      metric: "complaint" as const,
-      events: counts.complained,
-      limit: BREAKER_COMPLAINT_RATE,
-      min: MIN_PAUSE_COMPLAINTS,
-    },
-  ];
-  for (const c of checks) {
-    const rate = c.events / counts.sent;
-    if (rate >= c.limit && c.events >= c.min) {
-      return {
-        metric: c.metric,
-        rate,
-        limit: c.limit,
-        windowHours,
-        sent: counts.sent,
-        events: c.events,
-      };
-    }
-  }
-  return null;
+function bounceTrip(counts: RegionWindowCounts, windowHours: number): RegionBreakerReason | null {
+  if (counts.sent < BREAKER_MIN_SENT || counts.hardBounced < MIN_PAUSE_HARD_BOUNCES) return null;
+  const rate = counts.hardBounced / counts.sent;
+  if (rate < BREAKER_BOUNCE_RATE) return null;
+  return {
+    metric: "bounce",
+    rate,
+    limit: BREAKER_BOUNCE_RATE,
+    windowHours,
+    sent: counts.sent,
+    events: counts.hardBounced,
+  };
+}
+
+/** The window whose teams a reason names: SES's rate spans far more than a day. */
+function contributorHours(reason: RegionBreakerReason): number {
+  return "windowHours" in reason ? reason.windowHours : BREAKER_WINDOWS_HOURS[1];
 }
 
 /**
- * One decision per region with traffic: trip when either window is over a
- * breaker line with enough sends and events behind it;
- * clear only when both windows are under. Contributors are listed for
- * tripped regions so the operator knows who to talk to.
+ * One decision per region with traffic or a stored SES rate: trip when
+ * either window's hard bounces are over the line with enough sends and
+ * bounces behind them, or when SES's own complaint rate is; clear only when
+ * all of them are under. Contributors are listed for tripped regions so the
+ * operator knows who to talk to.
  */
 export async function evaluateRegionBreakers(
   db: Db,
@@ -256,32 +253,88 @@ export async function evaluateRegionBreakers(
     { hours: dayHours, counts: await regionWindowCounts(db, { now, hours: dayHours }) },
     { hours: weekHours, counts: await regionCounterTotals(db, { now, days: weekHours / 24 }) },
   ];
+  const rows = await db
+    .select({
+      region: schema.regionBreakers.region,
+      paused: schema.regionBreakers.paused,
+      sesComplaintRate: schema.regionBreakers.sesComplaintRate,
+    })
+    .from(schema.regionBreakers);
+  const sesRates = new Map(rows.map((r) => [r.region, r.sesComplaintRate]));
   // Paused regions stay in the set even with no traffic in either window:
   // a decision with nothing tripping is what lets them resume.
-  const paused = await db
-    .select({ region: schema.regionBreakers.region })
-    .from(schema.regionBreakers)
-    .where(eq(schema.regionBreakers.paused, true));
   const regions = new Set([
     ...windows.flatMap((w) => [...w.counts.keys()]),
-    ...paused.map((r) => r.region),
+    ...rows.filter((r) => r.paused || r.sesComplaintRate !== null).map((r) => r.region),
   ]);
   const decisions: RegionDecision[] = [];
   for (const region of regions) {
     let reason: RegionBreakerReason | null = null;
     for (const w of windows) {
       const counts = w.counts.get(region);
-      reason = counts ? tripReason(counts, w.hours) : null;
+      reason = counts ? bounceTrip(counts, w.hours) : null;
       if (reason) break;
+    }
+    const ses = sesRates.get(region) ?? null;
+    if (!reason && ses !== null && ses >= BREAKER_SES_COMPLAINT_RATE) {
+      reason = { metric: "complaint", source: "ses", rate: ses, limit: BREAKER_SES_COMPLAINT_RATE };
     }
     decisions.push({
       region,
       trip: reason !== null,
       ...(reason ? { reason } : {}),
-      contributors: reason ? await contributors(db, region, now, reason.windowHours) : [],
+      contributors: reason ? await contributors(db, region, now, contributorHours(reason)) : [],
     });
   }
   return decisions;
+}
+
+export interface SesComplaintAlert {
+  region: string;
+  rate: number;
+  contributors: RegionContributor[];
+}
+
+/**
+ * Stores SES's own complaint rate per region (a region left out of `rates`,
+ * its read having failed, keeps its last one) and returns the regions the
+ * operator should hear about: at or over the alert line, not paused (the
+ * pause has its own notice), and not told in the last day. Those are marked
+ * told.
+ */
+export async function recordSesComplaintRates(
+  db: Db,
+  rates: ReadonlyMap<string, number | null>,
+  now: Date = new Date(),
+): Promise<SesComplaintAlert[]> {
+  const b = schema.regionBreakers;
+  const alerts: SesComplaintAlert[] = [];
+  for (const [region, rate] of rates) {
+    const [row] = await db
+      .insert(b)
+      .values({ region, sesComplaintRate: rate })
+      .onConflictDoUpdate({ target: b.region, set: { sesComplaintRate: rate } })
+      .returning({ paused: b.paused, alertedAt: b.sesComplaintAlertedAt });
+    if (rate === null || rate < SES_COMPLAINT_ALERT_RATE || row?.paused) continue;
+    if (row?.alertedAt && now.getTime() - row.alertedAt.getTime() < DAY_MS) continue;
+    await db.update(b).set({ sesComplaintAlertedAt: now }).where(eq(b.region, region));
+    alerts.push({
+      region,
+      rate,
+      contributors: await contributors(db, region, now, BREAKER_WINDOWS_HOURS[1]),
+    });
+  }
+  return alerts;
+}
+
+/** SES's own complaint rate per region, as the breaker last read it. */
+export async function sesComplaintRates(db: Db): Promise<Map<string, number>> {
+  const b = schema.regionBreakers;
+  const rows = await db
+    .select({ region: b.region, rate: b.sesComplaintRate })
+    .from(b)
+    .where(isNotNull(b.sesComplaintRate));
+  return new Map(rows.flatMap((r) => (r.rate === null ? [] : [[r.region, r.rate] as const])));
 }
 
 /** Persist decisions; reports only the regions whose state actually flipped. */

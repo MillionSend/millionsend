@@ -52,8 +52,10 @@ import {
 import {
   createKeyringFromEnv,
   createSesAccountClient,
+  createSesReputationClient,
   createSesv2Client,
   getAccountOverview,
+  getSesComplaintRate,
   nodeDnsResolver,
   type SesIdentityClient,
 } from "@millionsend/ses";
@@ -159,6 +161,18 @@ const accountClientFor = (region: string) => {
   }
   return client;
 };
+// SES publishes each region's reputation (its own complaint rate) to
+// CloudWatch in that region.
+const reputationClients = new Map(
+  regions.map((region) => [
+    region,
+    createSesReputationClient({
+      region,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    }),
+  ]),
+);
 // The buckets are the messages/second control; worker concurrency is not a
 // rate limit and must never be treated as one. In-memory ⇒ single worker
 // process only (see SES_MAX_SEND_RATE in @millionsend/config); each process
@@ -389,9 +403,19 @@ await queue.scheduleCrons({
     if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);
   },
   "platform.breaker": async () => {
-    // Without SES events there are no bounce/complaint counts to judge.
-    if (!env.SNS_TOPIC_ARNS?.length) return;
-    await runPlatformBreaker(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    // Runs without SES events too: with no bounce counts, SES's own complaint
+    // rate is still judged.
+    await runPlatformBreaker(db, {
+      mailer,
+      appBaseUrl: env.APP_BASE_URL,
+      ses: {
+        regions,
+        complaintRate: async (region) => {
+          const client = reputationClients.get(region);
+          return client ? getSesComplaintRate(client) : null;
+        },
+      },
+    });
   },
   "instance.probe": async () => {
     await runInstanceProbes(db, {

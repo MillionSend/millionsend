@@ -117,7 +117,7 @@
       "complained": "Reclamações",
       "deliveredOf": "{delivered} de {sent} entregues",
       "hardOf": "hard {rate} · limite do SES 5%",
-      "complaintLines": "pausa regional 0,08% · SES 0,1%",
+      "complaintLines": "nossa contagem · a taxa do SES é por região",
       "period": "Período",
       "noSends": "nenhum envio no período"
     },
