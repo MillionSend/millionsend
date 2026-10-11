@@ -165,3 +165,41 @@ it("lets the review page open a held email that never went out", async () => {
     .where(and(eq(schema.monitorSamples.emailId, unsent)));
   expect(rows).toHaveLength(1);
 });
+
+it("lists mail parked for a new destination with it, and a release clears the destination", async () => {
+  const teamId = await createTeam(db, "destination");
+  const [parked] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "Shop <a@shop.dev>",
+      to: ["r@example.org"],
+      subject: "s",
+      latestStatus: "queued_quota",
+      parkReason: "destination",
+    })
+    .returning({ id: schema.emails.id });
+  await db.insert(schema.monitorSamples).values({
+    teamId,
+    emailId: parked?.id,
+    kind: "destination",
+    status: "judged",
+    screening: true,
+    score: 93,
+    verdict: "abuse",
+    categories: ["phishing_credentials"],
+    reasons: [],
+    destinations: ["evil-pay.com"],
+    judgedAt: new Date(),
+  });
+  const { groups } = await operator().console.safety.waiting({ teamId });
+  expect(groups[0]?.emails).toMatchObject([
+    { id: parked?.id, why: "destination", score: 93, destinations: ["evil-pay.com"] },
+  ]);
+  expect(await operator().console.safety.releaseWaiting({ teamId })).toEqual({ released: 1 });
+  const cleared = await db
+    .select({ domain: schema.teamDestinations.domain })
+    .from(schema.teamDestinations)
+    .where(eq(schema.teamDestinations.teamId, teamId));
+  expect(cleared).toEqual([{ domain: "evil-pay.com" }]);
+});

@@ -18,6 +18,7 @@ import {
   unsubscribeBaseUrl,
 } from "@millionsend/config";
 import {
+  anyYoungLinkDomain,
   committedDailyVolume,
   createDomainAgeResolver,
   DomainAgeRetryableError,
@@ -31,6 +32,7 @@ import {
   type MonitorDeps,
   markDomainAgeUnknown,
   monitorSettingsReader,
+  ownerDomain,
   pacingHorizonDays,
   pausedRegions,
   postJson,
@@ -135,6 +137,13 @@ const unsubscribeHost = unsubscribeBaseUrl();
 const unsubscribe = unsubscribeHost
   ? { secretKey: unsubscribeSecretKey, baseUrl: unsubscribeHost }
   : undefined;
+// The links this instance writes into customer mail (unsubscribe, the
+// dashboard) lead nowhere new: screening never counts them as destinations.
+const platformDomains = new Set(
+  [unsubscribeHost, env.APP_BASE_URL].flatMap((url) =>
+    url && URL.canParse(url) ? [ownerDomain(new URL(url).hostname)] : [],
+  ),
+);
 // Platform mail (no domain row) goes out in the default region, the first served.
 const regions = servedRegions();
 const ses = createSesSender(regions[0] ?? env.AWS_REGION);
@@ -304,6 +313,9 @@ const domainAgeWanted = async (): Promise<boolean> => {
 // One resolver for the process: it holds the RDAP bootstrap, the WHOIS
 // referrals, the hosts in Retry-After backoff and the crt.sh clock.
 const domainAge = createDomainAgeResolver();
+// How long a verdict waits on a new link domain's age; a lookup still
+// running then fills the shared cache for the next one.
+const LINK_AGE_BUDGET_MS = 10_000;
 
 const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
   await queue.send(
@@ -635,6 +647,7 @@ await queue.work(
         enqueueWebhookDelivery: enqueueWebhook,
         tracking,
         monitor,
+        platformDomains,
         ...(unsubscribe ? { unsubscribe } : {}),
       },
       payload,
@@ -661,6 +674,7 @@ await queue.work(
         sesQuota: sendControls,
         horizonDays,
         monitor,
+        platformDomains,
       },
       payload,
     );
@@ -691,6 +705,9 @@ await queue.work(
         },
         enqueueSend: (emailId, priority) => enqueueSend(emailId, undefined, priority),
         enqueueBroadcast: (broadcastId) => enqueueBroadcast(broadcastId),
+        platformDomains,
+        linkDomainYoung: (domains, at) =>
+          anyYoungLinkDomain(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
       },
       { sampleId },
     );

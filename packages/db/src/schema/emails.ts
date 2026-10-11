@@ -77,13 +77,15 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
  * team the content monitor holds (the drain sends it once the hold is
  * released). The rest wait for an operator on the review list, which the
  * drain never releases: "screening" when the judge could not answer for a
- * young sending domain, "media" for content the judge could not read.
- * Never shown to the team.
+ * young sending domain, "destination" for mail to a destination new to the
+ * team that the judge read as phishing, "media" for content the judge could
+ * not read. Never shown to the team.
  */
 export const emailParkReasonEnum = pgEnum("email_park_reason", [
   "warmup",
   "review",
   "screening",
+  "destination",
   "media",
 ]);
 

@@ -173,7 +173,7 @@ async function flaggedEmails(db: Db, teamId: string, since: Date, holdLine: numb
 const WAITING_SHOWN_PER_TEAM = 20;
 
 /** Why an email waits, as the review list words it. */
-type WaitingWhy = "held" | "verdict" | "outage" | "media";
+type WaitingWhy = "held" | "verdict" | "outage" | "destination" | "media";
 
 /**
  * The review list: every unsent email screening stopped before SES, newest
@@ -196,6 +196,7 @@ async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
     verdict: ms.verdict,
     categories: ms.categories,
     reasons: ms.reasons,
+    destinations: ms.destinations,
   };
   const parked = and(
     teamId ? eq(e.teamId, teamId) : undefined,
@@ -265,9 +266,11 @@ async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
       ? "held"
       : row.parkReason === "screening"
         ? "outage"
-        : row.parkReason === "media"
-          ? "media"
-          : "verdict";
+        : row.parkReason === "destination"
+          ? "destination"
+          : row.parkReason === "media"
+            ? "media"
+            : "verdict";
   return teams
     .map((team) => {
       const emails = shown.filter((row) => row.teamId === team.id);
@@ -284,6 +287,7 @@ async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
           why: why(row),
           score: row.verdict === null ? null : row.score,
           reasons: row.reasons ?? [],
+          destinations: row.destinations ?? [],
         })),
       };
     })

@@ -1029,10 +1029,32 @@ não pausa nada espera 2 minutos antes de sair: uma rajada chega à contagem de
 repetição dentro deles. `MONITOR_AUTO_HOLD=false` desliga a pausa para
 revisão, e a avaliação antes do SES junto com ela.
 
+**Destinos novos, em qualquer nível.** Uma mensagem também é avaliada antes
+do SES, seja qual for o nível da equipe (Confiável incluído), quando leva um
+destino que a equipe ainda não conhece: o domínio dono de um link (um nome
+como `x.pages.dev`, de um serviço gratuito, conta sozinho) ou do seu
+Reply-To, menos os domínios verificados da equipe. Uma avaliação abaixo de 80
+torna os destinos da mensagem conhecidos da equipe para sempre, assim como
+uma liberação do operador; um encurtador de links nunca se torna conhecido.
+Uma transmissão é avaliada antes de gravar as cópias quando o próprio HTML
+leva um destino novo, e uma cópia renderizada quando um campo do contato
+colocou um nela; e-mail com links só para os domínios da própria equipe nunca
+espera por isso. Quando um destino novo recebe uma avaliação do tipo phishing
+a partir de 80, a data de registro do domínio do link é consultada, num cache
+comum a todas as equipes (nomes de serviços gratuitos e encurtadores não são
+datados, e uma data desconhecida não conta como recente). Para uma equipe no
+nível Nova, essa avaliação com um domínio de link registrado há menos de 7
+dias pausa a equipe para revisão. Depois do nível Nova, o e-mail fica em
+espera na lista de revisão com uma avaliação do tipo phishing a partir de 90,
+ou a partir de 80 com um domínio de link com menos de 7 dias, e o operador
+recebe e-mail no máximo uma vez por dia por equipe; uma equipe depois do
+nível Nova nunca é pausada para revisão automaticamente. Essas amostras não
+contam para nenhum limite diário.
+
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
 não enviado que a avaliação antes do envio segurou: em espera atrás de uma
-pausa para revisão, cumprindo os seus 2 minutos, ou em espera depois de o
-avaliador falhar repetidas vezes. **Liberar** envia o e-mail sem avaliá-lo de
+pausa para revisão, cumprindo os seus 2 minutos, em espera por um destino
+novo, ou em espera depois de o avaliador falhar repetidas vezes. **Liberar** envia o e-mail sem avaliá-lo de
 novo (o `quota.drain` o cobra como qualquer e-mail em espera); **Cancelar**
 faz com que ele nunca saia. O e-mail de uma equipe pausada para revisão é
 liberado junto com a equipe. A página de revisão da equipe também lista, entre

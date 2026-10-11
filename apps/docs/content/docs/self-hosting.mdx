@@ -1000,9 +1000,29 @@ from 80 that holds nothing waits 2 minutes before it is sent: a burst
 reaches the repeat count within them. `MONITOR_AUTO_HOLD=false` switches the
 hold off, and the screening before SES with it.
 
+**New destinations, at every tier.** A message is also judged before SES,
+whatever the team's tier (Trusted included), when it carries a destination
+the team has not cleared: the owner domain of a link (a free host's
+`x.pages.dev` counts on its own) or of its Reply-To, less the team's
+verified domains. A verdict under 80 clears the message's destinations for
+the team for good, and so does an operator's release; a link shortener is
+never cleared. A broadcast is judged before its fan-out when its own HTML
+carries a new destination, and a rendered copy when a contact field put one
+there; mail that links only to the team's own domains never waits for this.
+When a new destination draws a phishing-type verdict from 80, its link
+domain's registration date is looked up, in a cache every team shares (a
+free host's names and shorteners are not dated, and an unknown date is not
+young). For a New-tier team, such a verdict on a link domain registered
+under 7 days ago holds the team. Past New, the mail is parked for the review
+list on a phishing-type verdict from 90, or from 80 with a link domain under
+7 days old, and the operator is mailed at most once a day per team; a team
+past New is never held automatically. These samples count against no daily
+cap.
+
 **The review list.** Trust & safety lists every unsent email screening
 stopped, grouped by team: parked behind a review hold, waiting out its 2
-minutes, or parked after the judge kept failing. **Release** sends an email
+minutes, parked for a new destination, or parked after the judge kept
+failing. **Release** sends an email
 without screening it again (`quota.drain` charges it as any parked mail);
 **Cancel** means it never goes out. A held team's mail is released with its
 hold. The team's review page also lists its held unsent emails among the

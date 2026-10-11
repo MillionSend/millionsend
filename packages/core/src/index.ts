@@ -497,7 +497,7 @@ export {
 } from "./oauth-scopes.js";
 export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.js";
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
-export { isRootDomainSend, linkDomain, registrableDomain } from "./org-domain.js";
+export { isRootDomainSend, linkDomain, ownerDomain, registrableDomain } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
 export { findPixCodes, type PixCode, type PixKeyKind, parsePix } from "./pix.js";
 export {
@@ -573,9 +573,14 @@ export {
 } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
+  anyYoungLinkDomain,
   broadcastScreen,
   cancelWaitingEmails,
+  clearDestinations,
+  destinationVerdictParks,
+  isShortener,
   judgeAfterSend,
+  messageDestinations,
   OPERATOR_PARK_REASONS,
   releaseWaitingEmails,
   SCREEN_HOLD_WAIT_MS,
@@ -587,6 +592,8 @@ export {
   screenBeforeSend,
   screeningReasons,
   sendingDomainYoung,
+  teamNovelDestinations,
+  unclearedDestinations,
 } from "./screening.js";
 export {
   countSegment,

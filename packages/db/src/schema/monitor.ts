@@ -7,12 +7,14 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
 import { broadcasts } from "./broadcasts.js";
+import { domainAgeSourceEnum } from "./domains.js";
 import { emails } from "./emails.js";
 import { teams } from "./teams.js";
 
@@ -25,6 +27,7 @@ export const monitorSampleKindEnum = pgEnum("monitor_sample_kind", [
   "override",
   "broadcast_skeleton",
   "broadcast_copy",
+  "destination",
 ]);
 
 /** `unjudged` is every judge failure: the sample is kept with its error class and touches nothing else. */
@@ -100,6 +103,12 @@ export const monitorSamples = pgTable(
     // before SES; screenRetries counts the judge's re-runs after failures.
     screening: boolean("screening").notNull().default(false),
     screenRetries: smallint("screen_retries").notNull().default(0),
+    // The judged message's destinations the team had not cleared (link owner
+    // domains and the Reply-To's domain), and whether one of them was a link
+    // domain under 7 days old (null: not looked up). Domains only, as the
+    // insights keep them.
+    destinations: jsonb("destinations").$type<string[]>(),
+    linkYoung: boolean("link_young"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     judgedAt: timestamp("judged_at", { withTimezone: true }),
   },
@@ -114,6 +123,35 @@ export const monitorSamples = pgTable(
       .where(sql`${t.broadcastId} is not null`),
   ],
 );
+
+/**
+ * The destinations a team has cleared: a link owner domain or a Reply-To
+ * domain one of its messages carried with a verdict under 80, or that an
+ * operator released mail to. Once cleared it stays cleared; mail to any
+ * other destination is judged before SES at every tier.
+ */
+export const teamDestinations = pgTable(
+  "team_destinations",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    domain: text("domain").notNull(),
+    clearedAt: timestamp("cleared_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.domain] })],
+);
+
+/**
+ * Registration dates of link domains that drew a phishing-type verdict,
+ * shared by every team: looked up once, read by every later verdict.
+ */
+export const linkDomainAges = pgTable("link_domain_ages", {
+  domain: text("domain").primaryKey(),
+  registeredAt: timestamp("registered_at", { withTimezone: true }),
+  source: domainAgeSourceEnum("source").notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+});
 
 /** The judge's own switch is env; these sampling and threshold overrides sit beside it, with the warm-up's. */
 export const monitorSettingColumns = {

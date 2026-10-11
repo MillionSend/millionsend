@@ -22,6 +22,7 @@ const COLUMNS = 6;
 const WHY_DOT: Record<string, string> = {
   held: "var(--ms-warn)",
   verdict: "var(--ms-warn)",
+  destination: "var(--ms-warn)",
   outage: "var(--ms-danger)",
   media: "var(--ms-danger)",
 };
@@ -191,6 +192,11 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
                             style={{ background: WHY_DOT[email.why] ?? "var(--ms-muted)" }}
                           />
                           {t(`why.${email.why}`)}
+                          {email.destinations.length > 0 ? (
+                            <span className="ms-mono" style={{ color: "var(--ms-muted)" }}>
+                              {email.destinations.join(", ")}
+                            </span>
+                          ) : null}
                         </span>
                       </td>
                       <td className="right num">{email.score ?? common("none")}</td>

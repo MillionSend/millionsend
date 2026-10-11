@@ -375,6 +375,8 @@ export const ptBR = {
       score: "Esta avaliação, sozinha, pausou a equipe: a pontuação de revisão é {line}.",
       young_domain:
         "Esta avaliação, sozinha, pausou a equipe: chegou a {line} quando o domínio de envio da equipe tinha menos de 7 dias ou idade desconhecida.",
+      young_link:
+        "Esta avaliação, sozinha, pausou a equipe: chegou a {line} em um e-mail com link para um destino novo registrado há menos de 7 dias.",
       repeat:
         "Esta avaliação pausou a equipe por ser a {n}ª do tipo phishing com pontuação {line} ou mais em 7 dias.",
     },
@@ -410,6 +412,15 @@ export const ptBR = {
     muted: [
       "Enviado ao operador da instância no máximo a cada seis horas enquanto o percentual ficar acima de 20%, o provedor continuar recusando a chave de API ou a avaliação antes do envio desistir de algum e-mail.",
     ],
+  },
+  "monitor.destination_parked": {
+    subject: "O monitor de conteúdo deixou em espera e-mails para um destino novo",
+    body: [
+      "{team} enviou e-mails para um destino que nunca tinha usado ({domain}), e o avaliador deu pontuação {score} ({verdict}). Esses e-mails estão em espera em Confiança e segurança, onde você os libera, o que os envia e torna o destino conhecido da equipe, ou os cancela.",
+      "A equipe não fica pausada para revisão: o resto do e-mail dela continua saindo, e ela não fica sabendo. E-mails para o mesmo destino são avaliados antes do envio até que um seja liberado.",
+    ],
+    button: "Abrir lista de revisão",
+    muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 

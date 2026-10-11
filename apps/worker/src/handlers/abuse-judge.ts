@@ -3,7 +3,11 @@ import {
   accountMailPhrase,
   applyJudgedSample,
   buildJudgeBlock,
+  claimNotification,
+  clearDestinations,
   decryptEmailBody,
+  destinationVerdictParks,
+  isHoldVerdict,
   type JudgeBlockInput,
   type JudgeVerdict,
   judgeErrorClass,
@@ -15,6 +19,8 @@ import {
   sendingDomainYoung,
   teamMonitorOverview,
   teamMonitorRow,
+  teamNovelDestinations,
+  utcDay,
   type VerdictOutcome,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -37,6 +43,13 @@ export interface JudgeDeps {
   /** Queues again what waited on a screening verdict: an unsent email, or a new team's fan-out. */
   enqueueSend?: ((emailId: string, priority: EmailSendPriority) => Promise<void>) | undefined;
   enqueueBroadcast?: ((broadcastId: string) => Promise<void>) | undefined;
+  /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
+  platformDomains?: ReadonlySet<string> | undefined;
+  /**
+   * Whether any of these new destinations is a link domain registered under
+   * 7 days ago, by the shared cache and a bounded lookup; absent, none is.
+   */
+  linkDomainYoung?: ((domains: readonly string[], at: Date) => Promise<boolean>) | undefined;
 }
 
 /** A throttled call is retried this many times through the queue's backoff before the sample gives up. */
@@ -94,7 +107,7 @@ async function judgePending(
   };
   if (!deps.judge) return unjudged("off");
 
-  const loaded = await loadBlockInput(db, deps.keyring, sample, now);
+  const loaded = await loadBlockInput(db, deps.keyring, sample, now, deps.platformDomains);
   if (!loaded) return unjudged("body_purged");
   const block = buildJudgeBlock(loaded.input);
   const timeoutMs = sample.screening
@@ -127,6 +140,12 @@ async function judgePending(
   const youngSendingDomain =
     (await sendingDomainYoung(db, { teamId: sample.teamId, ...loaded.sendingDomain }, now)) ===
     true;
+  // Only a destination that drew a phishing-type verdict is dated.
+  const { destinations } = loaded;
+  const linkYoung =
+    destinations.length > 0 && isHoldVerdict(verdict, settings.holdRepeatScore)
+      ? ((await deps.linkDomainYoung?.(destinations, now)) ?? false)
+      : null;
   // The verdict and its fold commit together: a crash between them would
   // leave a judged row the retry skips and a risk that never saw it.
   const outcome = await db.transaction(async (tx) => {
@@ -143,6 +162,8 @@ async function judgePending(
         language: verdict.language,
         model,
         latencyMs,
+        destinations,
+        linkYoung,
         judgedAt: now,
       })
       .where(and(eq(ms.id, sample.id), eq(ms.status, "pending")))
@@ -155,10 +176,24 @@ async function judgePending(
       verdict,
       kind: sample.kind,
       youngSendingDomain,
+      youngLinkDomain: linkYoung === true,
       now,
     });
   });
   if (!outcome) return "skipped";
+  // A verdict under the repeat line vouches for where the message leads.
+  if (verdict.score < settings.holdRepeatScore) {
+    await clearDestinations(db, sample.teamId, destinations, now);
+  }
+  if (
+    sample.screening &&
+    destinations.length > 0 &&
+    outcome.tier !== "new" &&
+    outcome.tier !== "exempt" &&
+    destinationVerdictParks({ ...verdict, linkYoung }, settings)
+  ) {
+    await notifyDestinationParked(db, deps, sample.teamId, verdict, destinations, now);
+  }
   if ((outcome.alert || outcome.paused || outcome.held) && deps.mailer) {
     await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings, now);
   }
@@ -202,18 +237,62 @@ async function resumeScreened(
 }
 
 /**
+ * The operator hears once a day per team that mail to a new destination was
+ * parked; the review list holds every parked email.
+ */
+async function notifyDestinationParked(
+  db: Db,
+  deps: JudgeDeps,
+  teamId: string,
+  verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons">,
+  destinations: readonly string[],
+  now: Date,
+): Promise<void> {
+  if (!deps.mailer) return;
+  try {
+    const claimed = await claimNotification(db, {
+      teamId,
+      kind: "monitor.destination_parked",
+      periodKey: utcDay(now),
+    });
+    if (!claimed) return;
+    const [team] = await db
+      .select({ name: schema.teams.name })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, teamId));
+    await mailOperator(
+      db,
+      deps.mailer,
+      "monitor.destination_parked",
+      "/console/safety",
+      {
+        team: team?.name ?? teamId,
+        score: String(verdict.score),
+        verdict: [...verdict.categories, ...verdict.reasons].join(", "),
+        domain: destinations.slice(0, 5).join(", "),
+      },
+      deps.appBaseUrl,
+    );
+  } catch (err) {
+    console.error(`abuse.judge: destination mail for team ${teamId} failed`, err);
+  }
+}
+
+/**
  * The judge's input for a sample: the email's decrypted body, or the
  * broadcast's own HTML for a skeleton; with the sending domain, whose age
- * the hold reads.
+ * the hold reads, and the destinations the team has not cleared.
  */
 async function loadBlockInput(
   db: Db,
   keyring: Keyring,
   sample: typeof schema.monitorSamples.$inferSelect,
   now: Date,
+  platformDomains: ReadonlySet<string> | undefined,
 ): Promise<{
   input: JudgeBlockInput;
   sendingDomain: { domainId?: string | null; name?: string | null };
+  destinations: string[];
 } | null> {
   const [team] = await db
     .select({ name: schema.teams.name, plan: schema.teams.plan })
@@ -248,17 +327,25 @@ async function loadBlockInput(
       .from(schema.broadcasts)
       .where(eq(schema.broadcasts.id, sample.broadcastId));
     if (!broadcast) return null;
+    const replyTo = broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null;
     return {
       input: {
         team: context,
         from: broadcast.from,
-        replyTo: broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null,
+        replyTo,
         subject: broadcast.subject,
         html: broadcast.html,
         text: broadcast.text,
         attachments: [],
       },
       sendingDomain: { name: parseSingleSender(broadcast.from)?.domain ?? null },
+      destinations: await teamNovelDestinations(db, {
+        teamId: sample.teamId,
+        html: broadcast.html,
+        text: broadcast.text,
+        replyTo,
+        ignore: platformDomains,
+      }),
     };
   }
   if (!sample.emailId) return null;
@@ -301,6 +388,13 @@ async function loadBlockInput(
       attachments,
     },
     sendingDomain: { domainId: email.domainId },
+    destinations: await teamNovelDestinations(db, {
+      teamId: email.teamId,
+      html: body.html,
+      text: body.text,
+      replyTo: email.replyTo,
+      ignore: platformDomains,
+    }),
   };
 }
 
@@ -341,9 +435,9 @@ async function notifyOperator(
             values:
               held.rule === "score"
                 ? { line: String(settings.holdScore) }
-                : held.rule === "young_domain"
-                  ? { line: String(settings.holdRepeatScore) }
-                  : { line: String(settings.holdRepeatScore), n: String(held.verdicts) },
+                : held.rule === "repeat"
+                  ? { line: String(settings.holdRepeatScore), n: String(held.verdicts) }
+                  : { line: String(settings.holdRepeatScore) },
           }),
         }),
         deps.appBaseUrl,

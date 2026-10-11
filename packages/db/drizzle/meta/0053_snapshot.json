@@ -1,5 +1,5 @@
 {
-  "id": "5d64a747-675a-4759-b3d6-f07253762682",
+  "id": "c8cd9579-2dfe-4e21-a0cb-120b45e42022",
   "prevId": "0dccf77b-d98e-4735-840e-7a4c78b61cf3",
   "version": "7",
   "dialect": "postgresql",
@@ -4494,6 +4494,44 @@
       },
       "isRLSEnabled": false
     },
+    "public.link_domain_ages": {
+      "name": "link_domain_ages",
+      "schema": "",
+      "columns": {
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "registered_at": {
+          "name": "registered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "domain_age_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.monitor_samples": {
       "name": "monitor_samples",
       "schema": "",
@@ -4612,6 +4650,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "destinations": {
+          "name": "destinations",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "link_young": {
+          "name": "link_young",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -4739,6 +4789,60 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.team_destinations": {
+      "name": "team_destinations",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cleared_at": {
+          "name": "cleared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "team_destinations_team_id_teams_id_fk": {
+          "name": "team_destinations_team_id_teams_id_fk",
+          "tableFrom": "team_destinations",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "team_destinations_team_id_domain_pk": {
+          "name": "team_destinations_team_id_domain_pk",
+          "columns": [
+            "team_id",
+            "domain"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -7321,6 +7425,7 @@
         "warmup",
         "review",
         "screening",
+        "destination",
         "media"
       ]
     },
@@ -7352,7 +7457,8 @@
         "anomaly",
         "override",
         "broadcast_skeleton",
-        "broadcast_copy"
+        "broadcast_copy",
+        "destination"
       ]
     },
     "public.monitor_sample_status": {

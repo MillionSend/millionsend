@@ -40,6 +40,7 @@ import {
   roundUpToSlot,
   segmentContactsWhere,
   substituteUnsubscribeUrl,
+  teamNovelDestinations,
   utcDay,
   warmupCap,
 } from "@millionsend/core";
@@ -93,6 +94,8 @@ export interface BroadcastDeps {
   appBaseUrl?: string | undefined;
   /** The content monitor: the skeleton sample at fan-out start and the copies drawn per recipient. */
   monitor?: MonitorDeps | undefined;
+  /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
+  platformDomains?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -334,18 +337,27 @@ export async function sendBroadcast(
 
   // The monitor judges the broadcast's own HTML once and a few rendered
   // copies: the expected count is `copies`, so the draw needs the audience
-  // size. Every step is best-effort. For a new team, with the hold on, the
-  // walk writes no row until the HTML has its verdict, and the first copy it
-  // renders waits for its own: a contact field can carry a whole link.
+  // size. Every step is best-effort. For a new team, or HTML that sends
+  // readers somewhere the team has not cleared, with the hold on, the walk
+  // writes no row until the HTML has its verdict; a new team's first copy
+  // waits for its own too: a contact field can carry a whole link.
   let monitorCopies = 0;
   let monitorAudience = 0;
   let screenFirstCopy = false;
-  let screenParked = false;
+  let screenParked: "screening" | "destination" | null = null;
   if (deps.monitor) {
     try {
+      const novel = await teamNovelDestinations(db, {
+        teamId: broadcast.teamId,
+        html: broadcast.html,
+        text: broadcast.text,
+        replyTo: broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null,
+        ignore: deps.platformDomains,
+      });
       const plan = await planBroadcastSamples(db, deps.monitor, {
         teamId: broadcast.teamId,
         broadcastId: broadcast.id,
+        novel: novel.length > 0,
       });
       if (plan.copies > 0) {
         monitorAudience = audienceCount;
@@ -358,9 +370,12 @@ export async function sendBroadcast(
           now: new Date(),
         });
         // The judge queues the fan-out again once the HTML has its verdict.
-        if (gate === "wait") return "deferred";
-        screenParked = gate === "park";
-        screenFirstCopy = !screenParked && !(await firstCopyScreened(db, broadcast.id));
+        if (gate.action === "wait") return "deferred";
+        if (gate.action === "park") screenParked = gate.reason;
+        screenFirstCopy =
+          screenParked === null &&
+          plan.tier === "new" &&
+          !(await firstCopyScreened(db, broadcast.id));
       }
     } catch (err) {
       console.error(`broadcast ${broadcast.id}: monitor skeleton skipped`, err);
@@ -525,8 +540,8 @@ export async function sendBroadcast(
         // job, the drain reserves on release (the existing parking contract).
         // While the judge cannot answer for a young domain's broadcast, every
         // row waits for an operator instead.
-        const paced = emitted >= admitted && !screenParked;
-        const held = !paced && !screenParked && warmupFull;
+        const paced = emitted >= admitted && screenParked === null;
+        const held = !paced && screenParked === null && warmupFull;
         // Quota reservation and email insert commit atomically (the quota
         // contract), same as the API accept path — a broadcast must not
         // bypass the plan's cap.
@@ -547,7 +562,7 @@ export async function sendBroadcast(
               replyTo,
               subject: applyMergeFields(broadcast.subject, contact, { html: false }),
               latestStatus: paced || held || screenParked ? "queued_quota" : "queued",
-              parkReason: screenParked ? "screening" : held ? "warmup" : null,
+              parkReason: screenParked ?? (held ? "warmup" : null),
               // The drip lives on the row: the send handler defers to it and
               // the reconcile sweep leaves a not-yet-due row alone instead of
               // re-enqueueing every throttled send each pass.

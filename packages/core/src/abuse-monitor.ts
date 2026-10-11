@@ -10,9 +10,9 @@ import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
  * The content monitor's sampling and risk model. A new team's mail in its
- * first window, and a new team's broadcasts, are judged before SES takes
- * them (screening.ts holds that gate); the rest is drawn by a keyed draw
- * after SES accepts it. Verdicts decay into a per-team risk that opens the
+ * first window and its broadcasts, and any team's mail to a destination it
+ * has not cleared, are judged before SES takes them (screening.ts holds that
+ * gate); the rest is drawn by a keyed draw after SES accepts it. Verdicts decay into a per-team risk that opens the
  * monitor flag, alerts the operator and, for a new team, pauses broadcasts;
  * a confident phishing verdict on a new team, a slightly less confident one
  * while its sending domain is young, or a run of those within a week, holds
@@ -412,8 +412,9 @@ const dayStart = (now: Date) => new Date(`${utcDay(now)}T00:00:00Z`);
 
 /**
  * Write the pending sample and hand it to the judge queue, unless a daily
- * cap says no. The team cap stops every kind; the instance cap spares the
- * first-sends and anomaly kinds, which are the ones worth the most.
+ * cap says no. The team cap stops every kind but mail to a destination new
+ * to the team, which a cap must never let through unjudged; the instance cap
+ * also spares the first-sends and anomaly kinds, the ones worth the most.
  */
 export async function recordMonitorSample(
   db: Db,
@@ -427,15 +428,19 @@ export async function recordMonitorSample(
     now: Date;
     /** Mail waits on this verdict before SES. */
     screening?: boolean | undefined;
+    /** Mail to a destination new to the team: no cap applies. */
+    novelty?: boolean | undefined;
   },
 ): Promise<string | null> {
   const since = dayStart(input.now);
-  const [team] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(ms)
-    .where(and(eq(ms.teamId, input.teamId), gte(ms.createdAt, since)));
+  const [team] = input.novelty
+    ? []
+    : await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(ms)
+        .where(and(eq(ms.teamId, input.teamId), gte(ms.createdAt, since)));
   if ((team?.n ?? 0) >= s.teamDailyCap) return null;
-  if (input.kind !== "first_sends" && input.kind !== "anomaly") {
+  if (!input.novelty && input.kind !== "first_sends" && input.kind !== "anomaly") {
     const [all] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(ms)
@@ -500,20 +505,32 @@ export async function sampleAcceptedEmail(
 
 /**
  * At fan-out start: the broadcast's own HTML as the skeleton, and how many
- * rendered copies to draw. For a new team, with the hold on, the fan-out
- * waits on the skeleton's verdict and its first copy on its own (`screen`).
+ * rendered copies to draw. With the hold on, the fan-out waits on the
+ * skeleton's verdict (`screen`) for a new team, whose first copy waits on its
+ * own too, and at any tier for HTML new destinations (`novel`).
  */
 export async function planBroadcastSamples(
   db: Db,
   deps: MonitorDeps,
-  input: { teamId: string; broadcastId: string; now?: Date },
-): Promise<{ skeletonSampleId: string | null; copies: number; screen: boolean }> {
+  input: {
+    teamId: string;
+    broadcastId: string;
+    /** The HTML sends readers to a destination the team has not cleared: screened at any tier. */
+    novel?: boolean | undefined;
+    now?: Date;
+  },
+): Promise<{
+  skeletonSampleId: string | null;
+  copies: number;
+  screen: boolean;
+  tier: MonitorTier;
+}> {
   const now = input.now ?? new Date();
   const s = await deps.settings();
   const state = await loadMonitorState(db, await monitorRowWithHistory(db, input.teamId, now), now);
   const tier = monitorTier(state, s, now);
-  if (tier === "exempt") return { skeletonSampleId: null, copies: 0, screen: false };
-  const screen = tier === "new" && s.autoHold;
+  if (tier === "exempt") return { skeletonSampleId: null, copies: 0, screen: false, tier };
+  const screen = s.autoHold && (tier === "new" || input.novel === true);
   // A resumed fan-out plans again; the skeleton was judged the first time.
   const [existing] = await db
     .select({ id: ms.id })
@@ -529,11 +546,13 @@ export async function planBroadcastSamples(
       kind: "broadcast_skeleton",
       now,
       screening: screen,
+      novelty: screen && input.novel === true,
     }));
   return {
     skeletonSampleId,
     copies: tier === "new" || tier === "probation" ? s.broadcastCopiesNew : s.broadcastCopies,
     screen,
+    tier,
   };
 }
 
@@ -550,12 +569,14 @@ export interface VerdictOutcome {
 
 /**
  * One verdict from `holdScore`; one from `holdRepeatScore` while the
- * sending domain is young (YOUNG_DOMAIN_DAYS, or of unknown age); or the
+ * sending domain is young (YOUNG_DOMAIN_DAYS, or of unknown age), or while
+ * a new destination it links to is (by its registration date alone); or the
  * `verdicts`th from `holdRepeatScore` within MONITOR_HOLD_REPEAT_DAYS.
  */
 export type HoldRule =
   | { rule: "score" }
   | { rule: "young_domain" }
+  | { rule: "young_link" }
   | { rule: "repeat"; verdicts: number };
 
 /**
@@ -640,6 +661,8 @@ export async function applyJudgedSample(
     kind?: MonitorSampleKind | undefined;
     /** The sending domain was under YOUNG_DOMAIN_DAYS old, or of unknown age. */
     youngSendingDomain?: boolean | undefined;
+    /** A new destination's link domain was registered under YOUNG_DOMAIN_DAYS ago. */
+    youngLinkDomain?: boolean | undefined;
     now?: Date;
   },
 ): Promise<VerdictOutcome> {
@@ -668,7 +691,9 @@ export async function applyJudgedSample(
           ? ({ rule: "score" } as const)
           : input.youngSendingDomain && isHoldVerdict(verdict, s.holdRepeatScore)
             ? ({ rule: "young_domain" } as const)
-            : await repeatHold(t, s, row, verdict, now)
+            : input.youngLinkDomain && isHoldVerdict(verdict, s.holdRepeatScore)
+              ? ({ rule: "young_link" } as const)
+              : await repeatHold(t, s, row, verdict, now)
         : null;
     if (rule) {
       // A standing suspension is the operator's call and stays as it is.

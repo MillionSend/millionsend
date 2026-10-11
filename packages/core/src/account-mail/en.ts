@@ -365,6 +365,8 @@ export const en = {
       score: "This one verdict held the team: the hold score is {line}.",
       young_domain:
         "This one verdict held the team: it reached {line} while the team's sending domain was under 7 days old, or of unknown age.",
+      young_link:
+        "This one verdict held the team: it reached {line} on mail linking to a new destination registered under 7 days ago.",
       repeat:
         "This verdict held the team as its phishing-type verdict number {n} at or above {line} within 7 days.",
     },
@@ -400,6 +402,15 @@ export const en = {
     muted: [
       "Sent to the instance operator at most once every six hours while the share stays over 20%, the provider keeps rejecting the API key, or screening before sending gives up on mail.",
     ],
+  },
+  "monitor.destination_parked": {
+    subject: "Content monitor parked mail to a new destination",
+    body: [
+      "{team} sent mail to a destination it had not used before ({domain}), and the judge scored it {score} ({verdict}). That mail waits on Trust & safety, where you release it, which sends it and makes the destination known to the team, or cancel it.",
+      "The team is not held: the rest of its mail flows, and it is not told. Mail to the same destination is judged before sending until one is cleared.",
+    ],
+    button: "Open review list",
+    muted: ["Sent to the instance operator at most once a day per team."],
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 

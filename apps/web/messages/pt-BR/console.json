@@ -835,7 +835,8 @@
           "anomaly": "anomalia",
           "override": "amostragem total",
           "broadcast_skeleton": "esqueleto da transmissão",
-          "broadcast_copy": "cópia da transmissão"
+          "broadcast_copy": "cópia da transmissão",
+          "destination": "destino novo"
         },
         "pending": "pendente",
         "unjudged": "sem avaliação · {error}",
@@ -913,6 +914,7 @@
         "held": "Equipe pausada para revisão",
         "verdict": "Espera curta após avaliação de phishing",
         "outage": "Avaliador indisponível",
+        "destination": "Destino novo",
         "media": "Conteúdo ilegível"
       },
       "count": "{count, plural, one {# e-mail} other {# e-mails}}",
@@ -951,7 +953,7 @@
       "saved": "Configurações de monitoramento salvas",
       "error": "Não foi possível salvar: {message}",
       "order": "Os limites de sinalização, alerta e pausa precisam estar em ordem crescente.",
-      "footnote": "A amostragem só muda a rapidez com que o risco fica confiável. O e-mail de uma equipe nova na sua janela inicial, e as transmissões de uma equipe nova, são avaliados antes de o SES recebê-los e esperam a avaliação; todo o resto é avaliado depois que o SES aceita. As perguntas do avaliador, os níveis e os limites são públicos; só a chave de amostragem é secreta.",
+      "footnote": "A amostragem só muda a rapidez com que o risco fica confiável. O e-mail de uma equipe nova na sua janela inicial e as transmissões dela, e o e-mail de qualquer equipe para um destino que ela ainda não conhece, são avaliados antes de o SES recebê-los e esperam a avaliação; todo o resto é avaliado depois que o SES aceita. As perguntas do avaliador, os níveis e os limites são públicos; só a chave de amostragem é secreta.",
       "on": "ligada",
       "off": "desligada",
       "reset": "Restaurar padrão",

@@ -112,6 +112,8 @@ export interface SendDeps {
    * reach it): no rows, no jobs, no state, no wait.
    */
   monitor?: MonitorDeps | undefined;
+  /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
+  platformDomains?: ReadonlySet<string> | undefined;
   tracking?:
     | {
         secretKey: Buffer;
@@ -609,13 +611,18 @@ async function sendQueued(
   // never customer content, so they never wait.
   let screened: { id: string; unjudged: boolean } | null = null;
   if (deps.monitor && !systemMail && !platformSend) {
-    const gate = await screenBeforeSend(db, deps.monitor, { email, now: new Date() });
+    const gate = await screenBeforeSend(db, deps.monitor, {
+      email,
+      body: { html: body.html, text: body.text },
+      ignore: deps.platformDomains,
+      now: new Date(),
+    });
     if (gate.action === "wait") {
       if (gate.until) await deps.reschedule?.(email.id, gate.until, emailSendPriority(email));
       return "deferred";
     }
     if (gate.action === "park") {
-      await parkQueued(db, email, "judge kept failing on a young domain", "screening");
+      await parkQueued(db, email, `screening parked it (${gate.reason})`, gate.reason);
       return "parked";
     }
     screened = gate.sample;

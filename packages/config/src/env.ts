@@ -228,9 +228,10 @@ export const env = createEnv({
       .min(0)
       .default(OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT),
 
-    // Optional content monitor: TypeSafe Jev judges a new team's mail before
-    // SES takes it, and a sample of the rest after. Off by default; with it
-    // off nothing waits on it.
+    // Optional content monitor: TypeSafe Jev judges a new team's mail, and
+    // any team's mail to a destination it has never used, before SES takes
+    // it, and a sample of the rest after. Off by default; with it off nothing
+    // waits on it.
     // ABUSE_JUDGE=typesafe needs ABUSE_JUDGE_API_KEY. Sampling rates and
     // thresholds are instance settings (console → Trust & safety →
     // Monitoring settings); the MONITOR_* values below are their bootstrap

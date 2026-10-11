@@ -136,7 +136,8 @@ async function team(slug: string, registeredDaysAgo: number | null) {
 async function email(t: { teamId: string; domainId: string; slug: string }): Promise<string> {
   const id = randomUUID();
   const body = await encryptEmailBody(
-    { html: '<p>Your account <a href="https://login.example">verify</a></p>', text: null },
+    // Links to its own domain only: no destination new to the team.
+    { html: `<p>Your account <a href="https://${t.slug}.dev/login">verify</a></p>`, text: null },
     keyring,
     { teamId: t.teamId, rowId: id },
   );

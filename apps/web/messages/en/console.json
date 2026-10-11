@@ -835,7 +835,8 @@
           "anomaly": "anomaly",
           "override": "override",
           "broadcast_skeleton": "broadcast skeleton",
-          "broadcast_copy": "broadcast copy"
+          "broadcast_copy": "broadcast copy",
+          "destination": "new destination"
         },
         "pending": "pending",
         "unjudged": "unjudged · {error}",
@@ -913,6 +914,7 @@
         "held": "Team held for review",
         "verdict": "Short wait after a phishing-type verdict",
         "outage": "Judge unavailable",
+        "destination": "New destination",
         "media": "Content not readable"
       },
       "count": "{count, plural, one {# email} other {# emails}}",
@@ -951,7 +953,7 @@
       "saved": "Monitoring settings saved",
       "error": "Could not save: {message}",
       "order": "The flag, alert and pause lines must climb in that order.",
-      "footnote": "Sampling only changes how fast the risk becomes confident. A new team's mail in its first window, and a new team's broadcasts, are judged before SES takes them and wait for the verdict; everything else is judged after SES accepts it. The judge's questions, tiers and thresholds ship in the open; only the sampling key is secret.",
+      "footnote": "Sampling only changes how fast the risk becomes confident. A new team's mail in its first window and its broadcasts, and any team's mail to a destination it has not cleared, are judged before SES takes them and wait for the verdict; everything else is judged after SES accepts it. The judge's questions, tiers and thresholds ship in the open; only the sampling key is secret.",
       "on": "on",
       "off": "off",
       "reset": "Reset to default",
