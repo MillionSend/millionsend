@@ -32,6 +32,13 @@ export function MembersSection({ teamId }: { teamId: string }) {
   if (!query.data) return null;
   const { members, others, geo } = query.data;
   const none = common("none");
+  const temporary = (
+    <Tooltip inline text={t("temporaryTip")}>
+      <span className="ms-badge ms-badge-warn" style={{ marginLeft: 8 }}>
+        {t("temporary")}
+      </span>
+    </Tooltip>
+  );
   const located = members.some((m) => m.signup?.geo?.asn || m.signup?.geo?.country);
 
   return (
@@ -63,6 +70,7 @@ export function MembersSection({ teamId }: { teamId: string }) {
                   >
                     {member.email}
                   </Tooltip>
+                  {member.disposable ? temporary : null}
                 </td>
                 <td className="ms-mono">
                   {member.signup?.ip ? (
@@ -175,7 +183,10 @@ export function MembersSection({ teamId }: { teamId: string }) {
                 );
                 return (
                   <tr key={`${other.email}:${other.ip}`}>
-                    <td>{other.email}</td>
+                    <td>
+                      {other.email}
+                      {other.disposable ? temporary : null}
+                    </td>
                     <td className="ms-mono">{other.ip}</td>
                     <td>{t(`seen.${other.seen}`)}</td>
                     <td>

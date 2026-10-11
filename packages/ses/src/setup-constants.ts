@@ -230,6 +230,13 @@ WARMUP_ENABLED=
 # it on.
 CONTENT_REVEAL=off
 
+# Refuse addresses on the disposable-email-domains list (public domain) at
+# sign-up, on invitations and on email changes; a subdomain counts as its
+# parent. Existing accounts keep working and the console tags them. The app
+# ships the list; while this is on, the worker refreshes it daily from
+# raw.githubusercontent.com. Unset follows IS_CLOUD.
+BLOCK_DISPOSABLE_EMAILS=
+
 # Network and country of the sign-up IPs in the console's team dialog, from
 # DB-IP's free databases (CC BY 4.0), which the worker downloads from
 # download.db-ip.com once a month; lookups never leave this instance. Unset

@@ -203,7 +203,8 @@
       "cooldown": "Este convite acabou de ser enviado. Espere alguns minutos antes de reenviar.",
       "maxSends": "Este convite já foi enviado {max} vezes. Revogue e convide de novo.",
       "noSender": "Nenhum remetente de e-mail está configurado; compartilhe o link do convite.",
-      "sendFailed": "Não foi possível enviar o e-mail do convite. Tente de novo em instantes."
+      "sendFailed": "Não foi possível enviar o e-mail do convite. Tente de novo em instantes.",
+      "disposable": "Convide um e-mail permanente. Endereços temporários não podem entrar em uma equipe."
     },
     "created": {
       "title": "Link do convite",

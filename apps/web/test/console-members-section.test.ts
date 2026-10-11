@@ -40,6 +40,7 @@ const member = {
   userId: "u1",
   name: "Ada",
   email: "ada@acme.dev",
+  disposable: false,
   role: "owner",
   signup: {
     ip: "203.0.113.9",
@@ -57,7 +58,8 @@ describe("the team dialog's members", () => {
       members: [member],
       others: [
         {
-          email: "facture@gmail.com",
+          email: "facture@sub.mailinator.com",
+          disposable: true,
           ip: "203.0.113.9",
           seen: "signup",
           deleted: false,
@@ -72,7 +74,8 @@ describe("the team dialog's members", () => {
     expect(html).toContain("🇳🇱 NL");
     expect(html).toContain("198.51.100.2");
     expect(html).toContain("Other accounts on these IPs");
-    expect(html).toContain("facture@gmail.com");
+    expect(html).toContain("facture@sub.mailinator.com");
+    expect(html).toContain("Temporary address");
     expect(html).toContain("Suspended");
     expect(html).toContain('href="https://db-ip.com"');
     expect(html).toContain("IP geolocation by DB-IP");
@@ -89,5 +92,6 @@ describe("the team dialog's members", () => {
     expect(html).not.toContain("Network");
     expect(html).not.toContain("DB-IP");
     expect(html).not.toContain("Other accounts on these IPs");
+    expect(html).not.toContain("Temporary address");
   });
 });

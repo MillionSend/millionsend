@@ -1,6 +1,7 @@
 import { cancelTeamSubscription } from "@millionsend/billing";
 import {
   accountEmailFrom,
+  disposableEmailsBlocked,
   env,
   invitesPerTeamPerDay,
   isCloudDeployment,
@@ -67,6 +68,7 @@ import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { requireAuthSecret } from "../auth-secret";
 import { getStripe } from "../billing";
+import { disposableAddressTest } from "../disposable-email";
 import { activeLocale } from "../locale";
 import { poweredByLocked } from "../powered-by";
 import { smtpRelayOffered } from "../smtp";
@@ -558,6 +560,9 @@ export function createSettingsRouter(
         .mutation(async ({ ctx, input }) => {
           assertCanManageMembers(ctx.role);
           await assertTeamNotSuspended(ctx.db, ctx.teamId, "invite");
+          if (disposableEmailsBlocked() && (await disposableAddressTest(ctx.db))(input.email)) {
+            throw await inviteRefusal("BAD_REQUEST", "disposable");
+          }
           if (inviteEmailsLimited(ctx.teamId)) {
             throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly");
           }

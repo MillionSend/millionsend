@@ -361,6 +361,14 @@ send through your SES account, so signup stays off unless you opt in with
 `ALLOW_SIGNUP=true`. Keep port 3000 off the public internet unless you have opened
 signup deliberately.
 
+With `BLOCK_DISPOSABLE_EMAILS=true` (the cloud default), addresses on the
+[disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains)
+list (public domain) are refused at sign-up, on invitations and on email changes; a
+subdomain counts as its parent. Accounts that already use one keep working, and the
+console tags them. The app ships the list; while the block is on, the worker refreshes
+it daily from `raw.githubusercontent.com` and keeps the last good copy when a download
+fails.
+
 </details>
 
 <details>

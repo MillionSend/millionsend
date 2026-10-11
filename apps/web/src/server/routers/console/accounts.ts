@@ -3,6 +3,7 @@ import { type IpGeo, lookupIpGeo, type SuspensionReason } from "@millionsend/cor
 import { schema } from "@millionsend/db";
 import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
 import { z } from "zod";
+import { disposableAddressTest } from "../../disposable-email";
 import { operatorProcedure, router } from "../../trpc";
 
 /** Other accounts listed per team at most, the ones in suspended teams first. */
@@ -138,6 +139,8 @@ export const consoleAccountsRouter = router({
           members.flatMap((row) => (row.signupIp ? [row.signupIp] : [])),
         )
       : new Map();
+    // Tagged, never locked out: the block applies to new addresses only.
+    const disposable = await disposableAddressTest(ctx.db);
     const rank = (other: { userId: string; deleted: boolean; abuseSuspended: boolean }) => {
       const reason = suspensions.get(other.userId);
       if (reason) return SUSPENSION_ORDER.indexOf(reason);
@@ -149,6 +152,7 @@ export const consoleAccountsRouter = router({
         userId: row.userId,
         name: row.name,
         email: row.email,
+        disposable: disposable(row.email),
         role: row.role,
         signup:
           row.signedUpAt === null
@@ -166,6 +170,7 @@ export const consoleAccountsRouter = router({
         .slice(0, OTHERS_MAX)
         .map((other) => ({
           email: other.email,
+          disposable: disposable(other.email),
           ip: other.ip,
           seen: other.seen,
           deleted: other.deleted,

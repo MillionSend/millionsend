@@ -19,6 +19,7 @@ export {
   CONTENT_REVEAL_MODES,
   type ContentRevealMode,
   contentRevealOn,
+  disposableEmailsBlocked,
   EMAIL_RETENTION_DAYS_DEFAULT,
   type Env,
   type ErrorTrackingConfig,

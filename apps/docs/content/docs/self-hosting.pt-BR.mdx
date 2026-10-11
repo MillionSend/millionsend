@@ -167,6 +167,7 @@ auto-hospedada não tem limites de plano.
 | `ONBOARDING_EMAIL_FROM` | Remetente do botão "Enviar e-mail" do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Leva um único e-mail de teste fixo por equipe, para o proprietário da equipe (um endereço confirmado, onde a instância confirma e-mails), e nada mais: um envio a partir dele pela API, SMTP, MCP, uma transmissão ou um teste do painel é recusado (`422 reserved_sender` na API), mesmo para uma equipe que verificou o domínio. Deixe vazio para ocultar o botão. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos proprietários da equipe (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para a equipe, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em uma equipe para registrar esses e-mails lá. |
 | `INVITES_PER_TEAM_PER_DAY` | Convites que uma equipe, e um membro somando todas as suas equipes, pode criar em um dia corrido, contando os revogados e os de equipes excluídas (padrão `50`). Acima disso, novos convites são recusados até o dia virar. |
+| `BLOCK_DISPOSABLE_EMAILS` | Recusa endereços da lista [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) (domínio público) no cadastro, nos convites e na troca de e-mail; um subdomínio conta como o domínio acima dele. Contas que já existem continuam funcionando, e o console as marca. Padrão = `IS_CLOUD`. Veja [Política de cadastro](#política-de-cadastro). |
 | `IP_GEOLOCATION` | Rede e país dos IPs de cadastro que o console mostra, a partir das bases gratuitas da DB-IP ([CC BY 4.0](https://db-ip.com/db/lite.php)), que o worker baixa de `download.db-ip.com` uma vez por mês; as consultas ficam nesta instância. Padrão = `IS_CLOUD`. Veja [Console](#console). |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Rastreamento de erros opcional pelo SDK do Sentry; desligado enquanto `SENTRY_DSN` não estiver definido. Veja [Rastreamento de erros](#rastreamento-de-erros-opcional). |
 
@@ -717,6 +718,15 @@ criar chaves de API que enviam pela sua conta SES, então o cadastro fica
 desligado a menos que você opte por abri-lo com `ALLOW_SIGNUP=true`. Mantenha
 a porta 3000 fora da internet pública a menos que tenha aberto o cadastro
 deliberadamente.
+
+Com `BLOCK_DISPOSABLE_EMAILS=true` (o padrão na nuvem), endereços da lista
+[disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains)
+são recusados no cadastro, nos convites e na troca de e-mail, e um subdomínio
+conta como o domínio acima dele (`sub.mailinator.com` é `mailinator.com`). Contas que
+já usam um desses endereços continuam funcionando; a janela da equipe no
+console as marca. O app já vem com uma cópia da lista e, enquanto o bloqueio
+está ligado, o worker baixa uma nova de `raw.githubusercontent.com` todo dia,
+mantendo a última cópia boa quando um download falha.
 
 ## E-mails de conta, contatos e novidades
 

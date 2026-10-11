@@ -203,7 +203,8 @@
       "cooldown": "This invitation was just sent. Wait a couple of minutes before resending.",
       "maxSends": "This invitation was already sent {max} times. Revoke it and invite again.",
       "noSender": "No email sender is configured; share the invitation link instead.",
-      "sendFailed": "The invitation email could not be sent. Try again in a moment."
+      "sendFailed": "The invitation email could not be sent. Try again in a moment.",
+      "disposable": "Invite a permanent email address. Temporary inboxes can't join a team."
     },
     "created": {
       "title": "Invitation link",

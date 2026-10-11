@@ -137,6 +137,30 @@ describe("settings.invitations.create", () => {
       caller.settings.invitations.create({ email: "DUP@example.com" }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
+
+  it("refuses a temporary inbox, subdomains included, where disposable addresses are blocked", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "owner1", "owner");
+    const caller = callerFor("owner1", teamId, "owner");
+    vi.stubEnv("BLOCK_DISPOSABLE_EMAILS", "true");
+    for (const email of ["new@mailinator.com", "new@sub.mailinator.com"]) {
+      await expect(caller.settings.invitations.create({ email }), email).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Invite a permanent email address. Temporary inboxes can't join a team.",
+      });
+    }
+    dashboard.locale = "pt-BR";
+    await expect(
+      caller.settings.invitations.create({ email: "new@mailinator.com" }),
+    ).rejects.toMatchObject({
+      message:
+        "Convide um e-mail permanente. Endereços temporários não podem entrar em uma equipe.",
+    });
+    expect(await db.select().from(schema.teamInvitations)).toEqual([]);
+
+    vi.stubEnv("BLOCK_DISPOSABLE_EMAILS", "false");
+    await caller.settings.invitations.create({ email: "new@mailinator.com" });
+  });
 });
 
 describe("settings.invitations.accept", () => {

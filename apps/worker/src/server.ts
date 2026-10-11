@@ -7,6 +7,7 @@ import {
 } from "@millionsend/billing";
 import {
   abuseJudgeConfig,
+  disposableEmailsBlocked,
   env,
   ipGeolocationEnabled,
   servedRegions,
@@ -40,6 +41,7 @@ import {
   recordDomainAge,
   recordProbes,
   recountStaleSegments,
+  refreshDisposableDomains,
   refreshIpGeoDatabases,
   regionBulkCounts,
   sesEventsHealth,
@@ -514,6 +516,9 @@ await queue.scheduleCrons({
     }
   },
   "reference.refresh": async () => {
+    if (disposableEmailsBlocked()) {
+      console.log(`reference.refresh: disposable_domains=${await refreshDisposableDomains(db)}`);
+    }
     if (ipGeolocationEnabled()) {
       const held = await refreshIpGeoDatabases(db);
       console.log(

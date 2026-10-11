@@ -321,6 +321,11 @@ export {
   type WindowCounts,
 } from "./deliverability.js";
 export {
+  disposableDomains,
+  isListedDomain,
+  refreshDisposableDomains,
+} from "./disposable-domains.js";
+export {
   createDomainAgeResolver,
   DomainAgeRetryableError,
   domainsAwaitingAge,

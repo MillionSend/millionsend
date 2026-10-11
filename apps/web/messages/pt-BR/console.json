@@ -487,6 +487,8 @@
         "lastSeen": "Último IP"
       },
       "memberTip": "{name} · {role}",
+      "temporary": "Endereço temporário",
+      "temporaryTip": "O domínio está na lista de domínios de e-mail temporário.",
       "signupTip": "Cadastro em {date} · {agent}",
       "signupNoIp": "A solicitação de cadastro não trouxe IP",
       "signupNone": "Cadastro feito antes de guardarmos o IP do cadastro",

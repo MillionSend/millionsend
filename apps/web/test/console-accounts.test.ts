@@ -86,6 +86,7 @@ describe("console.accounts.members", () => {
     expect(view.others).toEqual([
       {
         email: "facture@gmail.com",
+        disposable: false,
         ip: "203.0.113.9",
         seen: "signup",
         deleted: false,
@@ -94,6 +95,7 @@ describe("console.accounts.members", () => {
       },
       {
         email: "bob@example.com",
+        disposable: false,
         ip: "203.0.113.9",
         seen: "session",
         deleted: false,
@@ -102,6 +104,7 @@ describe("console.accounts.members", () => {
       },
       {
         email: "gone@mailinator.com",
+        disposable: true,
         ip: "198.51.100.2",
         seen: "signup",
         deleted: true,

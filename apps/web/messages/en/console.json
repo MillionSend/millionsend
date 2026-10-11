@@ -487,6 +487,8 @@
         "lastSeen": "Last seen IP"
       },
       "memberTip": "{name} · {role}",
+      "temporary": "Temporary address",
+      "temporaryTip": "Its domain is on the list of disposable email domains.",
       "signupTip": "Signed up {date} · {agent}",
       "signupNoIp": "The sign-up request carried no IP",
       "signupNone": "Signed up before sign-up IPs were kept",

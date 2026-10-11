@@ -289,6 +289,13 @@ export const env = createEnv({
     WARMUP_CAP_FIRST_WEEK: z.coerce.number().int().min(0).optional(),
     WARMUP_CAP_FIRST_MONTH: z.coerce.number().int().min(0).optional(),
 
+    // Sign-up, invitations and email changes refuse addresses on the
+    // disposable-email-domains list (sub.mailinator.com counts as mailinator.com);
+    // existing accounts keep working. The app ships the list and the worker
+    // refreshes it daily while this is on. Unset follows IS_CLOUD; read
+    // through disposableEmailsBlocked().
+    BLOCK_DISPOSABLE_EMAILS: z.enum(["true", "false", "1", "0"]).optional(),
+
     // Network and country of the IPs the console shows, from DB-IP's free
     // databases: the worker downloads them monthly and every lookup stays on
     // this instance. Unset follows IS_CLOUD; read through
@@ -468,6 +475,13 @@ export function servedRegions(e: Env = env): string[] {
 /** Whether teams get their own SES tenant: explicit SES_TENANTS wins, else the cloud default. */
 export function sesTenantsEnabled(e: Env = env): boolean {
   const flag = e.SES_TENANTS as unknown;
+  if (flag === undefined || flag === "") return isCloudDeployment(e);
+  return envFlag(flag);
+}
+
+/** Whether disposable addresses are refused: explicit BLOCK_DISPOSABLE_EMAILS wins, else the cloud default. */
+export function disposableEmailsBlocked(e: Env = env): boolean {
+  const flag = e.BLOCK_DISPOSABLE_EMAILS as unknown;
   if (flag === undefined || flag === "") return isCloudDeployment(e);
   return envFlag(flag);
 }
