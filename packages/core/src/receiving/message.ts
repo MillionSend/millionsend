@@ -3,6 +3,7 @@ import { schema } from "@millionsend/db";
 import { getTableColumns } from "drizzle-orm";
 import {
   type AddressObject,
+  type Attachment,
   type AttachmentStream,
   type EmailAddress,
   type HeaderLines,
@@ -23,6 +24,7 @@ import type { Keyring } from "../crypto/keyring.js";
 import { visibleLine } from "../customer-text.js";
 import { routableAddress } from "../sender-address.js";
 import { type DownloadSigning, signReceivedDownload } from "./downloads.js";
+import { MAX_RECEIVED_MESSAGE_BYTES } from "./protocol.js";
 
 export type ReceivedEmailRow = typeof schema.receivedEmails.$inferSelect;
 
@@ -90,6 +92,18 @@ const parseSlot = createSemaphore(PARSE_CONCURRENCY);
 const PARSE_TIMEOUT_MS = 30_000;
 
 const TEXT_ONLY = { skipHtmlToText: true, skipTextToHtml: true, skipTextLinks: true } as const;
+
+/**
+ * Longest HTML a data_uri read builds: the largest message accepted. Each
+ * image's data URL repeats at every `cid:` naming it, so a small message
+ * quoting one image hundreds of times would otherwise inflate to gigabytes
+ * in memory. Past it the cid form is served, as Resend does past 100 MB.
+ */
+const MAX_INLINED_HTML_CHARS = MAX_RECEIVED_MESSAGE_BYTES;
+
+/** mailparser's `cid:` reference syntax and the image types it inlines. */
+const CID_REFERENCE = /\bcid:([^'"\s]{1,256})/g;
+const INLINE_IMAGE_TYPE = /^image\/[\w]+$/i;
 
 const CONTENT_TYPE_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/i;
 
@@ -288,7 +302,7 @@ export async function openReceivedAttachment(
 const RESEND_VERDICT: Record<string, string> = {
   pass: "pass",
   fail: "fail",
-  softfail: "fail",
+  softfail: "gray",
   neutral: "gray",
   none: "gray",
   policy: "gray",
@@ -411,10 +425,62 @@ function headerRecord(lines: HeaderLines): Record<string, string> {
 }
 
 /**
+ * The envelope sender as Return-Path when the message carries none, as the
+ * receiving server adds it: the MX prepends nothing, so retries keep
+ * deduplicating on the exact bytes. `<>` marks a bounce.
+ */
+function withReturnPath(headers: Record<string, string>, row: ReceivedEmailMeta) {
+  headers["return-path"] ??= `<${row.envelope.mailFrom}>`;
+  return headers;
+}
+
+/**
+ * The HTML with every `cid:` image reference replaced by the image as a data
+ * URL, as mailparser inlines them, or null when the result would pass
+ * `maxChars`; measured before any data URL is built.
+ */
+function inlineCidImages(
+  html: string,
+  attachments: readonly Attachment[],
+  maxChars: number,
+): string | null {
+  const images = new Map<string, Attachment | undefined>();
+  const imageFor = (cid: string) => {
+    if (!images.has(cid)) {
+      images.set(
+        cid,
+        attachments.find((a) => a.cid === cid && INLINE_IMAGE_TYPE.test(a.contentType)),
+      );
+    }
+    return images.get(cid);
+  };
+  let chars = html.length;
+  for (const [reference, cid = ""] of html.matchAll(CID_REFERENCE)) {
+    const image = imageFor(cid);
+    if (!image) continue;
+    chars += `data:${image.contentType};base64,`.length + Math.ceil(image.content.length / 3) * 4;
+    chars -= reference.length;
+    if (chars > maxChars) return null;
+  }
+  const urls = new Map<string, string>();
+  return html.replace(CID_REFERENCE, (reference, cid: string) => {
+    const image = imageFor(cid);
+    if (!image) return reference;
+    let url = urls.get(cid);
+    if (url === undefined) {
+      url = `data:${image.contentType};base64,${image.content.toString("base64")}`;
+      urls.set(cid, url);
+    }
+    return url;
+  });
+}
+
+/**
  * GET /emails/receiving/{id}. HTML, text and headers come from parsing the
  * raw message; `data_uri` (Resend's default) inlines `cid:` images, `cid`
- * leaves the references. A message that does not parse still answers, with
- * null content and its raw download.
+ * leaves the references, and so does a message whose inlined HTML would pass
+ * MAX_INLINED_HTML_CHARS (`html_format` then reads `cid`). A message that does
+ * not parse still answers, with null content and its raw download.
  */
 export async function receivedEmailDetail(
   row: ReceivedEmailRow,
@@ -425,21 +491,31 @@ export async function receivedEmailDetail(
     openReceivedAttachments(row, keyring),
     openReceivedRaw(row, keyring),
   ]);
-  let content: Pick<ReceivedEmailDetail, "html" | "text" | "headers"> = {
+  let content: Pick<ReceivedEmailDetail, "html" | "html_format" | "text" | "headers"> = {
     html: null,
+    html_format: options.htmlFormat,
     text: null,
     headers: null,
   };
   if (raw) {
     try {
-      const parsed = await parseSlot(() =>
-        simpleParser(raw, { ...TEXT_ONLY, keepCidLinks: options.htmlFormat === "cid" }),
-      );
-      content = {
-        html: parsed.html || null,
-        text: parsed.text || null,
-        headers: headerRecord(parsed.headerLines ?? []),
-      };
+      content = await parseSlot(async () => {
+        const parsed = await simpleParser(raw, { ...TEXT_ONLY, keepCidLinks: true });
+        let html = parsed.html || null;
+        let htmlFormat = options.htmlFormat;
+        if (html && htmlFormat === "data_uri") {
+          const inlined = inlineCidImages(html, parsed.attachments, MAX_INLINED_HTML_CHARS);
+          if (inlined === null) htmlFormat = "cid";
+          else html = inlined;
+        }
+        const headers = headerRecord(parsed.headerLines ?? []);
+        return {
+          html,
+          html_format: htmlFormat,
+          text: parsed.text || null,
+          headers: Object.keys(headers).length > 0 ? withReturnPath(headers, row) : null,
+        };
+      });
     } catch {
       // Malformed MIME: the raw download below is the way to its bytes.
     }
@@ -456,7 +532,7 @@ export async function receivedEmailDetail(
     created_at: item.created_at,
     subject: item.subject,
     html: content.html,
-    html_format: options.htmlFormat,
+    html_format: content.html_format,
     text: content.text,
     headers: content.headers,
     bcc: item.bcc,

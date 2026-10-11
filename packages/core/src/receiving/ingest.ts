@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Keyring } from "../crypto/keyring.js";
 import { visibleLine } from "../customer-text.js";
 import { sha256Hex } from "../hash.js";
@@ -13,6 +13,9 @@ import {
 } from "../webhooks.js";
 import {
   parseReceivedMetadata,
+  RECEIVED_EMAIL_META_COLUMNS,
+  type ReceivedAttachment,
+  type ReceivedEmailMeta,
   type ReceivedMetadata,
   receivedAttachmentId,
   receivedEmailEventData,
@@ -93,9 +96,11 @@ interface TeamDelivery {
  * cached), routed by domain to team, and each team's row holds only that
  * team's envelope recipients. Idempotent per (team, sha256 of the raw
  * bytes): a retry stores nothing twice, counts nothing twice and emits no
- * second webhook, and recipients a retry adds are merged into the row. When a
- * team's allowance is spent the whole delivery answers 452 so the sender
- * retries; teams already stored dedupe on that retry.
+ * second webhook. Recipients a later delivery adds (a sender splitting its
+ * recipients over transactions) are merged into the row and announced in an
+ * email.received of their own that names only them. When a team's allowance
+ * is spent the whole delivery answers 452 so the sender retries; teams
+ * already stored dedupe on that retry.
  *
  * The sha256 covers the exact bytes the MX sent: the MX must not prepend
  * anything per attempt (a Received line with a timestamp), or retries stop
@@ -174,6 +179,16 @@ async function storeForTeam(
   ]);
   const r = schema.receivedEmails;
   const deliveries: QueuedWebhookDelivery[] = [];
+  const announce = (db: Db, row: ReceivedEmailMeta, files: ReceivedAttachment[], at: Date) =>
+    enqueueTeamWebhookEvents(db, {
+      teamId,
+      events: [
+        { type: "email.received", occurredAt: at, data: receivedEmailEventData(row, files) },
+      ],
+      enqueue: async (rows) => {
+        deliveries.push(...rows);
+      },
+    });
   let outcome: StoredReceivedEmail;
   try {
     outcome = await deps.db.transaction(async (tx) => {
@@ -208,34 +223,41 @@ async function storeForTeam(
           rawKeyVersion: raw.keyVersion,
           attachments: sealedAttachments,
         })
-        .onConflictDoUpdate({
-          target: [r.teamId, r.rawSha256],
-          // A retry, or the same message in another SMTP transaction to more
-          // of this team's addresses: keep one row and widen its recipients.
-          set: {
-            receivedFor: sql`(select jsonb_agg(distinct x) from jsonb_array_elements_text(${r.receivedFor} || excluded.received_for) as x)`,
-            domainIds: sql`(select array_agg(distinct x) from unnest(${r.domainIds} || excluded.domain_ids) as x)`,
-          },
+        .onConflictDoNothing({ target: [r.teamId, r.rawSha256] })
+        .returning(RECEIVED_EMAIL_META_COLUMNS);
+      if (row) {
+        const rule = receivingRule(delivery.domain, deps.isCloud, input.now);
+        if (!(await chargeReceived(db, { teamId, rule, now: input.now }))) throw new QuotaSpent();
+        await announce(db, row, attachments, row.createdAt);
+        return { teamId, id, duplicate: false };
+      }
+      // A retry, or the same message in another SMTP transaction: one row,
+      // nothing counted again. Locked, so concurrent deliveries widening it
+      // each announce only the recipients they added.
+      const [stored] = await db
+        .select(RECEIVED_EMAIL_META_COLUMNS)
+        .from(r)
+        .where(and(eq(r.teamId, teamId), eq(r.rawSha256, input.rawSha256)))
+        .for("update");
+      if (!stored) throw new Error("received_emails conflict row not found");
+      const added = delivery.recipients.filter((a) => !stored.receivedFor.includes(a));
+      if (added.length === 0) return { teamId, id: stored.id, duplicate: true };
+      const [widened] = await db
+        .update(r)
+        .set({
+          receivedFor: [...stored.receivedFor, ...added],
+          domainIds: [...new Set([...stored.domainIds, ...delivery.domainIds])],
         })
-        .returning();
-      if (!row) throw new Error("received_emails insert returned no row");
-      if (row.id !== id) return { teamId, id: row.id, duplicate: true };
-      const rule = receivingRule(delivery.domain, deps.isCloud, input.now);
-      if (!(await chargeReceived(db, { teamId, rule, now: input.now }))) throw new QuotaSpent();
-      await enqueueTeamWebhookEvents(db, {
-        teamId,
-        events: [
-          {
-            type: "email.received",
-            occurredAt: row.createdAt,
-            data: receivedEmailEventData(row, attachments),
-          },
-        ],
-        enqueue: async (rows) => {
-          deliveries.push(...rows);
-        },
-      });
-      return { teamId, id, duplicate: false };
+        .where(eq(r.id, stored.id))
+        .returning(RECEIVED_EMAIL_META_COLUMNS);
+      if (!widened) throw new Error("received_emails update returned no row");
+      // Same bytes, same parse: the stored row's attachment ids, without opening its seal.
+      const files = metadata.attachments.map((a) => ({
+        ...a,
+        id: receivedAttachmentId(stored.id, a.index),
+      }));
+      await announce(db, { ...widened, receivedFor: added }, files, input.now);
+      return { teamId, id: stored.id, duplicate: true };
     });
   } catch (err) {
     if (err instanceof QuotaSpent) return null;

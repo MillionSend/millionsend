@@ -7,6 +7,7 @@ import {
   monthlyQuotaMessage,
   parseMailbox,
   reservedSenderRefusal,
+  SES_MAX_MESSAGE_BYTES,
   sendRefusalError,
   verifySenderDomain,
 } from "@millionsend/core";
@@ -16,8 +17,8 @@ import { SMTPServer, type SMTPServerDataStream, type SMTPServerSession } from "s
 /** Mirrors Resend's SMTP contract: fixed username, an API key as password. */
 export const SMTP_USERNAME = "millionsend";
 
-// SESv2 rejects raw messages over 40 MB, and nothing larger can ever send.
-export const MAX_MESSAGE_BYTES = 40 * 1024 * 1024;
+// Nothing larger than SES takes can ever send.
+export const MAX_MESSAGE_BYTES = SES_MAX_MESSAGE_BYTES;
 
 /** Same per-field cap as POST /emails, applied to the envelope. */
 export const MAX_RCPT_TO = 50;

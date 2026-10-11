@@ -636,6 +636,21 @@ it("an attachment with a content id ships inline beside the html that references
   expect(lower).toContain("content-disposition: inline");
 });
 
+it("a forwarded message without a content id ships as an attachment, not inline", async () => {
+  const { ses, sends } = fakeSes("mid-eml");
+  const content = Buffer.from("From: a@b.test\r\nSubject: original\r\n\r\nbody").toString("base64");
+  const emailId = await insertEmail({
+    attachments: await sealAttachments(
+      [{ filename: "forwarded_message.eml", content, contentType: "message/rfc822" }],
+      keyring,
+    ),
+  });
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  const mime = sends[0]?.raw.toString("utf8") ?? "";
+  expect(mime).toMatch(/Content-Type: message\/rfc822[\s\S]*?Content-Disposition: attachment/);
+  expect(mime).not.toMatch(/Content-Disposition: inline/);
+});
+
 it("clickTracking on routes <a href> through /t/c and the token verifies to the original url", async () => {
   const { ses, sends } = fakeSes("mid-click-track");
   const url = "https://dest.test/landing?x=1";

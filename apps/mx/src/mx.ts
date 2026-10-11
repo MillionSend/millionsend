@@ -213,6 +213,13 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
       0,
     );
     if (listed.length >= env.maxRecipients || bytes > MAX_ENVELOPE_RECIPIENT_BYTES) {
+      log("rcpt_refused", {
+        session: session.id,
+        ip: session.remoteAddress,
+        domain: domainOf(recipient),
+        code: 452,
+        reason: "recipient_limit",
+      });
       throw smtpError({ code: 452, enhanced: "4.5.3", message: "Too many recipients" });
     }
     let answer: RcptResponse;
@@ -259,13 +266,28 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
         log("auth_timeout", { session: sessionId });
         return all("temperror");
       }
-      const dkim = result.dkim.results;
-      return {
-        spf: known(result.spf ? result.spf.status.result : undefined),
-        dkim: known((dkim.find((r) => r.status.result === "pass") ?? dkim[0])?.status.result),
-        dmarc: known(result.dmarc ? result.dmarc.status.result : undefined),
-        arc: known(result.arc ? result.arc.status.result : undefined),
-      };
+      const signatures = result.dkim.results;
+      const passing = signatures.filter((r) => r.status.result === "pass");
+      const spf = known(result.spf ? result.spf.status.result : undefined);
+      let dmarc = known(result.dmarc ? result.dmarc.status.result : undefined);
+      // Resend's reading, which agents check before trusting a sender. A
+      // valid signature from a domain other than From's says nothing about
+      // who wrote the message: RFC 8601's DKIM "policy", reported gray.
+      const dkim = passing.some((r) => r.status.aligned)
+        ? "pass"
+        : passing.length > 0
+          ? "policy"
+          : known(signatures[0]?.status.result);
+      // p=none asks for no enforcement: no verdict once SPF or DKIM passed.
+      if (
+        result.dmarc &&
+        result.dmarc.policy === "none" &&
+        (dmarc === "pass" || dmarc === "fail") &&
+        (spf === "pass" || passing.length > 0)
+      ) {
+        dmarc = "none";
+      }
+      return { spf, dkim, dmarc, arc: known(result.arc ? result.arc.status.result : undefined) };
     } catch (err) {
       // The name only: a parser's message could quote the message itself.
       log("auth_failed", { session: sessionId, error: err instanceof Error ? err.name : "error" });
@@ -386,6 +408,7 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
       const state = sessions.get(session.id);
       const chunks: Buffer[] = [];
       let held = 0;
+      let streamed = 0;
       let starved = false;
       const release = () => {
         buffered -= held;
@@ -396,6 +419,7 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
       // smtp-server flags an oversized message but keeps streaming it in; past
       // the cap, or the budget all sessions share, the rest is drained unkept.
       stream.on("data", (chunk: Buffer) => {
+        streamed += chunk.length;
         if (starved || stream.sizeExceeded) return release();
         if (buffered + chunk.length > env.maxBufferedBytes) {
           starved = true;
@@ -410,6 +434,14 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
         if (state) delete state.release;
         const receivedAt = new Date();
         let handoff: Promise<string>;
+        if (stream.sizeExceeded || starved) {
+          log("message_refused", {
+            session: session.id,
+            ip: session.remoteAddress,
+            reason: stream.sizeExceeded ? "size" : "memory",
+            bytes: streamed,
+          });
+        }
         if (stream.sizeExceeded) {
           handoff = Promise.reject(
             smtpError({

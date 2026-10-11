@@ -3,12 +3,14 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
+import { createTransport } from "nodemailer";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   type AcceptEmailPayload,
   acceptEmail,
-  MAX_ATTACHMENT_BYTES,
+  estimateMimeBytes,
   QUOTA_BACKLOG_DAYS,
+  SES_MAX_MESSAGE_BYTES,
   SYSTEM_MAIL_TAG,
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
@@ -129,8 +131,9 @@ describe("acceptEmail", () => {
     }
   });
 
-  it("rejects attachments whose decoded bytes exceed the cap", async () => {
-    const content = Buffer.alloc(MAX_ATTACHMENT_BYTES / 2 + 1).toString("base64");
+  it("refuses a send SES would refuse once encoded, before accepting it", async () => {
+    // 29.5 MiB of files: 40.4 MiB as the worker builds the message.
+    const content = Buffer.alloc((59 * 1024 * 1024) / 4).toString("base64");
     const result = await acceptEmail(deps(), auth(), {
       ...payload(),
       attachments: [
@@ -141,8 +144,33 @@ describe("acceptEmail", () => {
     expect(result).toEqual({
       ok: false,
       reason: "attachments_too_large",
-      maxBytes: MAX_ATTACHMENT_BYTES,
+      maxBytes: SES_MAX_MESSAGE_BYTES,
     });
+  });
+
+  it("measures the worker's MIME message from above, and closely", async () => {
+    const transport = createTransport({ streamTransport: true, buffer: true });
+    for (const [mib, html] of [
+      [1, "<p>hi</p>"],
+      [29, `<p>Olá, ${"número ".repeat(5000)}</p>`],
+    ] as const) {
+      const content = Buffer.alloc(mib * 1024 * 1024, 7).toString("base64");
+      const email = {
+        subject: "Pedido nº 42",
+        html,
+        text: "hi",
+        headers: { "X-Entity-Ref-ID": "r1" },
+      };
+      const built = await transport.sendMail({
+        from: "a@acme.dev",
+        to: "b@example.com",
+        ...email,
+        attachments: [{ filename: "a.bin", content, encoding: "base64" }],
+      });
+      const estimate = estimateMimeBytes({ ...email, attachments: [{ content }] });
+      expect(estimate).toBeGreaterThanOrEqual((built.message as Buffer).length);
+      expect(estimate - (built.message as Buffer).length).toBeLessThan(64 * 1024);
+    }
   });
 
   it("parks over-quota mail until the backlog cap, then refuses", async () => {

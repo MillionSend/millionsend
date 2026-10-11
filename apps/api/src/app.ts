@@ -28,7 +28,7 @@ import {
   emitSuppressionEvents,
   enforceDomainWarmup,
   eraseRecipient,
-  estimateAttachmentBytes,
+  estimateMimeBytes,
   extractTokenPrefix,
   fetchAccountScore,
   fetchDeliverabilityHealth,
@@ -39,7 +39,6 @@ import {
   findTopicOptOuts,
   isAdminRole,
   type Keyring,
-  MAX_ATTACHMENT_BYTES,
   MX_DELIVER_PATH,
   MX_INGEST_PATH,
   makeUnsubscribeToken,
@@ -63,6 +62,7 @@ import {
   reserveQuota,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
+  SES_MAX_MESSAGE_BYTES,
   type SendRefusal,
   scoreBand,
   segmentContactsWhere,
@@ -377,7 +377,7 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
         body: errorBody(
           422,
           "validation_error",
-          `Attachments exceed ${Math.floor((result.maxBytes * 4) / 3 / MiB)} MiB in total once base64-encoded`,
+          `The email exceeds ${result.maxBytes / MiB} MiB once encoded for sending; base64 makes attachments about a third larger`,
         ),
       };
     case "all_suppressed":
@@ -556,8 +556,8 @@ const AUTH_FAILURES_PER_MINUTE = 20;
 
 const MiB = 1024 * 1024;
 const DEFAULT_BODY_LIMIT_BYTES = 25 * MiB;
-/** POST /emails: MAX_ATTACHMENT_BYTES once base64-encoded, plus room for the html and text. */
-const SEND_BODY_LIMIT_BYTES = Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 10 * MiB;
+/** POST /emails: a message SES can send, plus room for JSON's escaping of the html and text. */
+const SEND_BODY_LIMIT_BYTES = SES_MAX_MESSAGE_BYTES + 10 * MiB;
 const MX_DELIVER_URL_PATH = `${MX_INGEST_PATH}${MX_DELIVER_PATH}`;
 
 const bodyTooLarge = (maxBytes: number) => (c: Context) =>
@@ -603,12 +603,15 @@ function clientIp(c: Context, isCloud: boolean): string | null {
 
 /**
  * Keyset pagination for the Resend list endpoints: limit 1-100 (default 20),
- * `after`/`before` cursors are item ids, rows ordered by (created_at, id).
+ * `after`/`before` cursors are item ids, rows ordered by (created_at, id),
+ * oldest first unless `newestFirst` (Resend's order, `after` paging toward
+ * older items).
  */
 export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
+  newestFirst?: boolean;
   /** Resolves a cursor id to its sort key, scoped to the caller's team. */
   loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
   loadRows: (cond: SQL | undefined, descending: boolean, take: number) => Promise<R[]>;
@@ -616,17 +619,18 @@ export async function keysetPage<R>(opts: {
   const { query } = opts;
   const limit = query.limit ?? 20;
   const cursorId = query.before ?? query.after;
+  const towardNewer = opts.newestFirst ? Boolean(query.before) : !query.before;
   let cond: SQL | undefined;
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
     if (!cur) return "bad_cursor";
-    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, query.before ? "before" : "after");
+    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
   }
   // One extra row decides has_more without a count query.
-  const fetched = await opts.loadRows(cond, Boolean(query.before), limit + 1);
+  const fetched = await opts.loadRows(cond, !towardNewer, limit + 1);
   const hasMore = fetched.length > limit;
   const rows = fetched.slice(0, limit);
-  // `before` pages are fetched newest-first; responses stay oldest-first.
+  // `before` pages are fetched outward from the cursor; responses keep the list's order.
   if (query.before) rows.reverse();
   return { rows, hasMore };
 }
@@ -3391,9 +3395,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         requestBytes: requestLength == null ? null : Number(requestLength),
         responseBytes: responseLength == null ? null : Number(responseLength),
         requestBody: await loggedBody(path, c.req.header("content-type"), requestLength, () =>
-          c.req.json(),
+          c.req.text(),
         ),
-        responseBody: await loggedBody(path, responseType, responseLength, () => resClone.json()),
+        responseBody: await loggedBody(path, responseType, responseLength, () => resClone.text()),
       });
     })().catch((err) => console.error("api request log failed", err));
   });
@@ -3770,11 +3774,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return { status: 403, name: "restricted_api_key", message: RESTRICTED_DOMAIN_MESSAGE };
     }
-    if (estimateAttachmentBytes(body.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
+    const payload = toAcceptPayload(body, domain.domainId);
+    if (estimateMimeBytes(payload) > SES_MAX_MESSAGE_BYTES) {
       const { body: rejected } = acceptRejection({
         ok: false,
         reason: "attachments_too_large",
-        maxBytes: MAX_ATTACHMENT_BYTES,
+        maxBytes: SES_MAX_MESSAGE_BYTES,
       });
       return { status: 422, name: "validation_error", message: rejected.message };
     }
@@ -3796,7 +3801,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         message: "All recipients are suppressed",
       };
     }
-    return { payload: toAcceptPayload(body, domain.domainId) };
+    return { payload };
   };
 
   app.openapi(batchRoute, async (c) => {

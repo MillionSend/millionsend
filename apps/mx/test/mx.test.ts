@@ -418,6 +418,36 @@ describe("mx session", () => {
     expect((await transaction(port, { message: sized(1500) })).done).toMatch(/^250 /);
   });
 
+  it("logs the refusals it makes itself, envelope facts only", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line: string) => lines.push(line));
+    const capped = await startMx({ maxRecipients: 1 });
+    expect((await transaction(capped.port, { to: ["a@acme.test", "b@acme.test"] })).rcpts[1]).toBe(
+      "452 4.5.3 Too many recipients",
+    );
+    const small = await startMx({}, { maxMessageBytes: 2048 });
+    expect((await transaction(small.port, { message: sized(3000) })).done).toMatch(/^552 /);
+    const tight = await startMx({ maxBufferedBytes: 4096 });
+    expect((await transaction(tight.port, { message: sized(8192) })).done).toMatch(/^452 /);
+
+    const events = lines.map((line) => JSON.parse(line));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: "rcpt_refused",
+        domain: "acme.test",
+        code: 452,
+        reason: "recipient_limit",
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: "message_refused", reason: "size", ip: "127.0.0.1" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: "message_refused", reason: "memory" }),
+    );
+    expect(lines.join("\n")).not.toContain("secret plans");
+  });
+
   it.each<[string, Answer, string]>([
     [
       "a 5xx",
@@ -522,39 +552,60 @@ describe("mx session", () => {
     expect(await slow.reply()).toBe("421 4.4.2 Session time limit reached, closing connection");
   });
 
-  it("hands SPF, DKIM and DMARC verdicts to the app", async () => {
-    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const signed = await dkimSign(MESSAGE, {
-      signatureData: [
-        {
-          signingDomain: "sender.test",
-          selector: "s1",
-          privateKey: privateKey.export({ type: "pkcs8", format: "pem" }),
-        },
-      ],
-    });
-    const dkimKey = publicKey.export({ type: "spki", format: "der" }).toString("base64");
-    const records: Record<string, string> = {
-      "sender.test": "v=spf1 ip4:127.0.0.1 -all",
-      "s1._domainkey.sender.test": `v=DKIM1; k=rsa; p=${dkimKey}`,
-      "_dmarc.sender.test": "v=DMARC1; p=reject",
-    };
-    const resolver: DNSResolver = async (name, type) => {
-      const record = type === "TXT" ? records[name] : undefined;
-      if (record) return [[record]];
-      throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });
-    };
-    const { port } = await startMx({}, { resolver });
-    expect((await transaction(port, { message: signed.signatures + MESSAGE })).done).toMatch(
-      /^250 /,
-    );
-    expect(envelopeOf(deliveries()[0] as Hit)?.auth).toEqual({
-      spf: "pass",
-      dkim: "pass",
-      dmarc: "pass",
-      arc: "none",
-    });
-  });
+  it.each([
+    {
+      label: "an aligned signature under p=reject",
+      signer: "sender.test",
+      spf: "v=spf1 ip4:127.0.0.1 -all",
+      policy: "reject",
+      auth: { spf: "pass", dkim: "pass", dmarc: "pass", arc: "none" },
+    },
+    {
+      // A forged From signed by the forger's own domain: DKIM is valid, but not for From.
+      label: "a valid signature from another domain than From's",
+      signer: "forger.test",
+      spf: "v=spf1 ip4:192.0.2.1 -all",
+      policy: "reject",
+      auth: { spf: "fail", dkim: "policy", dmarc: "fail", arc: "none" },
+    },
+    {
+      label: "a passing message from a p=none domain",
+      signer: "sender.test",
+      spf: "v=spf1 ip4:127.0.0.1 -all",
+      policy: "none",
+      auth: { spf: "pass", dkim: "pass", dmarc: "none", arc: "none" },
+    },
+  ])(
+    "hands SPF, DKIM and DMARC verdicts to the app: $label",
+    async ({ signer, spf, policy, auth }) => {
+      const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      const signed = await dkimSign(MESSAGE, {
+        signatureData: [
+          {
+            signingDomain: signer,
+            selector: "s1",
+            privateKey: privateKey.export({ type: "pkcs8", format: "pem" }),
+          },
+        ],
+      });
+      const dkimKey = publicKey.export({ type: "spki", format: "der" }).toString("base64");
+      const records: Record<string, string> = {
+        "sender.test": spf,
+        [`s1._domainkey.${signer}`]: `v=DKIM1; k=rsa; p=${dkimKey}`,
+        "_dmarc.sender.test": `v=DMARC1; p=${policy}`,
+      };
+      const resolver: DNSResolver = async (name, type) => {
+        const record = type === "TXT" ? records[name] : undefined;
+        if (record) return [[record]];
+        throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });
+      };
+      const { port } = await startMx({}, { resolver });
+      expect((await transaction(port, { message: signed.signatures + MESSAGE })).done).toMatch(
+        /^250 /,
+      );
+      expect(envelopeOf(deliveries()[0] as Hit)?.auth).toEqual(auth);
+    },
+  );
 
   it("skips authentication for a message carrying more DKIM signatures than it would check", async () => {
     const resolver = vi.fn(nxdomain);

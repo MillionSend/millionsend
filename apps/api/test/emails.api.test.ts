@@ -800,7 +800,7 @@ describe("attachments and custom headers", () => {
     }
   });
 
-  it("takes attachments up to 40 MiB once base64-encoded, and refuses more", async () => {
+  it("takes attachments up to a 40 MiB message as sent, and refuses more", async () => {
     // Over the old 10 MiB cap.
     const twelve = Buffer.alloc(12 * 1024 * 1024, 7).toString("base64");
     const big = await post({
@@ -820,8 +820,16 @@ describe("attachments and custom headers", () => {
     });
     expect(over.status).toBe(422);
     expect(await over.json()).toMatchObject({
-      message: "Attachments exceed 40 MiB in total once base64-encoded",
+      message:
+        "The email exceeds 40 MiB once encoded for sending; base64 makes attachments about a third larger",
     });
+    // 29.5 MiB of files: under 40 MiB as base64 alone, over it as SES would get the message.
+    const near = Buffer.alloc((59 * 1024 * 1024) / 2, 7).toString("base64");
+    const nearCap = await post({
+      ...validBody,
+      attachments: [{ filename: "near.bin", content: near }],
+    });
+    expect(nearCap.status).toBe(422);
   });
 
   it("rejects path attachments with a clear message, never fetching the URL", async () => {

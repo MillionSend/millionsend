@@ -26,6 +26,7 @@ import {
   receivedEmailDetail,
   receivedEmailListItem,
   receivedEmailScope,
+  releasingStream,
   secretsEqual,
   verifyReceivedDownload,
 } from "@millionsend/core";
@@ -48,11 +49,50 @@ import {
 
 /**
  * Reads that load a whole received message (up to 40 MiB, then decrypted and
- * parsed) in flight per process: GET of one email and both downloads.
+ * parsed) in flight per process: GET of one email and both downloads. A slot
+ * stays taken until its response body has been read (inContentSlot).
  */
-// ponytail: per process, and a slot frees when the handler returns, before a
-// slow client has read the body; hold it through the stream if downloads pile up.
+// ponytail: per process; a client that stops reading holds its slot until its
+// connection closes or CONTENT_HOLD_MAX_MS, which proxy buffering (Cloudflare,
+// nginx) keeps rare. Per-team slots if one team's slow readers starve others.
 const contentSlot = createSemaphore(4);
+
+/** Longest a response may hold a content slot: 40 MiB at about 50 KB/s. */
+const CONTENT_HOLD_MAX_MS = 15 * 60_000;
+
+/** A response body served from a content slot, which it keeps until read. */
+interface HeldBody {
+  bytes: Uint8Array;
+  headers: Record<string, string>;
+}
+
+/**
+ * Runs `load` in a content slot. A Response it returns is served as is; a
+ * HeldBody streams out of the slot, which frees once the body has been read
+ * or the client left, so decrypted messages in memory never outnumber the
+ * slots. Its Content-Length keeps the request log from reading a large body
+ * back, which would drain the stream ahead of the client.
+ */
+function inContentSlot(
+  c: Context<Env>,
+  load: () => Promise<Response | HeldBody>,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    contentSlot(async () => {
+      const out = await load();
+      if (out instanceof Response) return resolve(out);
+      await new Promise<void>((release) => {
+        const body = releasingStream(out.bytes, release, {
+          signal: c.req.raw.signal,
+          maxHoldMs: CONTENT_HOLD_MAX_MS,
+        });
+        resolve(
+          c.body(body, 200, { ...out.headers, "content-length": String(out.bytes.byteLength) }),
+        );
+      });
+    }).catch(reject);
+  });
+}
 
 /** Deliveries stored at once per process: each holds the message plus a sealed copy per team. */
 const deliverSlot = createSemaphore(4);
@@ -113,7 +153,7 @@ export function registerReceivingRoutes(
       method: "get",
       path: "/emails/receiving",
       summary: "List received emails",
-      description: `Mail received at the team's receiving domains, oldest first, with cursor pagination. Needs a full access key; a domain-scoped key lists mail addressed to its domain only. ${untrusted}`,
+      description: `Mail received at the team's receiving domains, newest first like Resend (\`after\` pages toward older mail), with cursor pagination. Needs a full access key; a domain-scoped key lists mail addressed to its domain only. ${untrusted}`,
       middleware,
       request: { query: listQuerySchema },
       responses: {
@@ -130,6 +170,7 @@ export function registerReceivingRoutes(
         query: c.req.valid("query"),
         createdAt: t.createdAt,
         id: t.id,
+        newestFirst: true,
         loadCursor: async (id) =>
           (
             await db
@@ -176,7 +217,8 @@ export function registerReceivingRoutes(
     async (c) => {
       const { id } = c.req.valid("param");
       const htmlFormat = c.req.valid("query").html_format ?? "data_uri";
-      return contentSlot(async () => {
+      // Streamed from its content slot: typed route responses cover only c.json's.
+      return inContentSlot(c, async () => {
         const [row] = await db
           .select()
           .from(t)
@@ -186,8 +228,11 @@ export function registerReceivingRoutes(
           htmlFormat,
           downloads: downloads(),
         });
-        return c.json(email, 200);
-      });
+        return {
+          bytes: Buffer.from(JSON.stringify(email)),
+          headers: { "content-type": "application/json" },
+        };
+      }) as never;
     },
   );
 
@@ -205,7 +250,7 @@ export function registerReceivingRoutes(
       path: "/emails/receiving/{email_id}/attachments",
       summary: "List a received email's attachments",
       description:
-        "The attachments and inline parts of one received email, each with a signed download link valid for one hour. Needs a full access key.",
+        "The attachments and inline parts of one received email, each with a signed download link valid for one hour; all of them unless `limit` is given. Needs a full access key.",
       middleware,
       request: { params: z.object({ email_id: z.uuid() }), query: listQuerySchema },
       responses: {
@@ -221,10 +266,10 @@ export function registerReceivingRoutes(
     async (c) => {
       const row = await findMeta(c, c.req.valid("param").email_id);
       if (!row) return c.json(errorBody(404, "not_found", "Email not found"), 404);
-      const page = arrayPage(
-        await receivedEmailAttachments(row, keyring, downloads()),
-        c.req.valid("query"),
-      );
+      const query = c.req.valid("query");
+      const attachments = await receivedEmailAttachments(row, keyring, downloads());
+      // Resend returns every attachment when no limit is given.
+      const page = arrayPage(attachments, { ...query, limit: query.limit ?? attachments.length });
       if (page === "bad_cursor") {
         return c.json(errorBody(422, "validation_error", BAD_CURSOR_MESSAGE), 422);
       }
@@ -288,24 +333,24 @@ export function registerReceivingRoutes(
         signature: c.req.query("signature"),
       });
     if (!verified) return opts.refuseDownload(c);
-    return contentSlot(async () => {
+    return inContentSlot(c, async () => {
       const [row] = await db.select().from(t).where(eq(t.id, emailId));
       if (attachmentId === undefined) {
         const raw = row ? await openReceivedRaw(row, keyring) : null;
         if (!raw) return c.json(errorBody(404, "not_found", "This email is no longer stored"), 404);
-        // Decrypted bytes live in a plain ArrayBuffer, never shared memory.
-        const body = raw as Uint8Array<ArrayBuffer>;
-        return c.body(body, 200, downloadHeaders("message/rfc822", `${emailId}.eml`));
+        return { bytes: raw, headers: downloadHeaders("message/rfc822", `${emailId}.eml`) };
       }
       const file = row ? await openReceivedAttachment(row, keyring, attachmentId) : null;
       if (!file)
         return c.json(errorBody(404, "not_found", "This attachment is no longer stored"), 404);
       // Always a download: the declared type is the sender's word, so it never reaches the browser.
-      return c.body(
-        file.content as Uint8Array<ArrayBuffer>,
-        200,
-        downloadHeaders("application/octet-stream", file.attachment.filename ?? attachmentId),
-      );
+      return {
+        bytes: file.content,
+        headers: downloadHeaders(
+          "application/octet-stream",
+          file.attachment.filename ?? attachmentId,
+        ),
+      };
     });
   };
 

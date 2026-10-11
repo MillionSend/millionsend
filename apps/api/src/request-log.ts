@@ -90,15 +90,16 @@ export function capLoggedJson(value: unknown): unknown {
 
 /**
  * One side's loggable body: null unless it is JSON, a size-only marker when
- * the declared length is over the read guard (`read` is never called, so a
- * multi-megabyte upload is not re-serialized), otherwise redacted and capped.
+ * its length is over the read guard (declared: `read` is never called, so a
+ * multi-megabyte upload is not re-serialized; undeclared, as on c.json
+ * responses: measured before it is parsed), otherwise redacted and capped.
  * A failing read logs null rather than failing the caller.
  */
 export async function loggedBody(
   path: string,
   contentType: string | null | undefined,
   contentLength: string | null | undefined,
-  read: () => Promise<unknown>,
+  read: () => Promise<string>,
 ): Promise<unknown> {
   if (!contentType || !JSON_CONTENT_TYPE.test(contentType)) return null;
   const declared = contentLength == null ? null : Number(contentLength);
@@ -107,7 +108,10 @@ export async function loggedBody(
   }
   let body: unknown;
   try {
-    body = await read();
+    const text = await read();
+    const bytes = Buffer.byteLength(text, "utf8");
+    if (bytes > LOGGED_BODY_READ_MAX_BYTES) return { truncated: true, bytes };
+    body = JSON.parse(text);
   } catch {
     return null;
   }

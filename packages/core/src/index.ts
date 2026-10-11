@@ -88,11 +88,11 @@ export {
   acceptEmail,
   countDistinctRecipients,
   enforceDomainWarmup,
-  estimateAttachmentBytes,
+  estimateMimeBytes,
   isReservedTagName,
-  MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
   RESERVED_TAG_PREFIX,
+  SES_MAX_MESSAGE_BYTES,
   type SenderDomainVerdict,
   SYSTEM_MAIL_TAG,
   senderDomain,
@@ -720,7 +720,7 @@ export {
 // either touch different lines. Blank lines around this comment end Biome's
 // run of exports, which would otherwise merge the two.
 
-export { createSemaphore } from "./concurrency.js";
+export { createSemaphore, releasingStream } from "./concurrency.js";
 export { secretsEqual, sha256Hex } from "./hash.js";
 export { attachmentDisposition } from "./http-headers.js";
 export {

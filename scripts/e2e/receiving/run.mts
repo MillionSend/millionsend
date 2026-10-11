@@ -638,7 +638,7 @@ async function ok<T>(call: Promise<SdkResult<T>>, what: string): Promise<T> {
 const RESEND_VERDICT: Record<string, string> = {
   pass: "pass",
   fail: "fail",
-  softfail: "fail",
+  softfail: "gray",
   neutral: "gray",
   none: "gray",
   policy: "gray",
@@ -1703,7 +1703,7 @@ try {
   );
 
   await check(
-    "email.received webhook: Resend's exact payload, signed, once per email",
+    "email.received webhook: Resend's exact payload, signed, each recipient announced once",
     async (note) => {
       const hook = await waitFor(() => hooksFor(ids.multi as string)[0], 30_000, "webhook");
       const verified = apiA.webhooks.verify({
@@ -1770,8 +1770,8 @@ try {
         })),
       );
       note(`payload: ${hook.body.slice(0, 400)}${hook.body.length > 400 ? "…" : ""}`);
-      const stored: { id: string }[] =
-        await sql`select id from received_emails where team_id = ${teamA}`;
+      const stored: { id: string; received_for: string[] }[] =
+        await sql`select id, received_for from received_emails where team_id = ${teamA}`;
       await waitFor(
         () => stored.every((r) => hooksFor(r.id).length >= 1),
         30_000,
@@ -1780,10 +1780,16 @@ try {
       await sleep(2000);
       const counts = stored.map((r) => hooksFor(r.id).length);
       note(`team A: ${stored.length} rows, webhook deliveries per row: ${JSON.stringify(counts)}`);
-      assert.ok(
-        counts.every((n) => n === 1),
-        "exactly one per row",
-      );
+      // One delivery per row, plus one for each later delivery that added
+      // recipients to it: across a row's deliveries every recipient is named once.
+      for (const row of stored) {
+        const told = hooksFor(row.id).flatMap((h) => hookData(h).received_for as string[]);
+        assert.deepEqual(
+          [...told].sort(),
+          [...row.received_for].sort(),
+          `row ${row.id}: each recipient in exactly one email.received`,
+        );
+      }
     },
   );
 

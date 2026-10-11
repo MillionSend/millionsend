@@ -247,11 +247,14 @@ describe("Resend shapes", () => {
     expect(detail.headers?.received).toBe(
       "from a by b; Sat, 10 Oct 2026 10:00:00 +0000\nfrom c by d",
     );
+    // Resend reads an SPF softfail as no verdict.
     expect(detail.authentication).toEqual({
-      spf: "fail",
+      spf: "gray",
       dkim: "pass",
       dmarc: "processing_failed",
     });
+    // The envelope sender stands in for the Return-Path the message lacks.
+    expect(detail.headers?.["return-path"]).toBe("<bounce@sender.example>");
     expect(detail.raw?.expires_at).toBe("2026-10-11T13:30:00.000Z");
     const url = new URL(detail.raw?.download_url ?? "");
     expect(`${url.origin}${url.pathname}`).toBe(`https://api.example.com/receiving/raw/${row.id}`);
@@ -269,6 +272,28 @@ describe("Resend shapes", () => {
     const cid = await receivedEmailDetail(row, keyring, { htmlFormat: "cid", downloads });
     expect(cid.html_format).toBe("cid");
     expect(cid.html).toContain('src="cid:logo@sender"');
+  });
+
+  it("keeps the cid references when inlining would repeat an image past the largest message", async () => {
+    // One 1 MiB image quoted 50 times: a 1.4 MB message whose inlined HTML
+    // would run to 67 MiB, each data URL repeated at every reference.
+    const image = randomBytes(1024 * 1024);
+    const { row } = await storedRow(
+      await mime({
+        from: "quoter@sender.example",
+        to: "agent@inbound.acme.test",
+        subject: "Long thread",
+        html: '<p><img src="cid:sig@sender"></p>'.repeat(50),
+        attachments: [
+          { filename: "sig.png", content: image, contentType: "image/png", cid: "sig@sender" },
+        ],
+      }),
+    );
+    const detail = await receivedEmailDetail(row, keyring, { htmlFormat: "data_uri", downloads });
+    expect(detail.html_format).toBe("cid");
+    expect(detail.html?.match(/src="cid:sig@sender"/g)).toHaveLength(50);
+    expect(detail.html?.length).toBeLessThan(4096);
+    expect(detail.attachments).toMatchObject([{ content_id: "sig@sender", size: image.length }]);
   });
 
   it("serves attachment records with signed links, and the bytes of exactly one", async () => {
@@ -337,7 +362,7 @@ describe("Resend shapes", () => {
   it("answers an unparseable message with its metadata and the raw download", async () => {
     const { row } = await storedRow(Buffer.from([0, 159, 146, 150, 13, 10, 13, 10, 0]));
     const detail = await receivedEmailDetail(row, keyring, { htmlFormat: "data_uri", downloads });
-    expect(detail.html).toBeNull();
+    expect(detail).toMatchObject({ html: null, headers: null });
     expect(detail.raw?.download_url).toContain(`/receiving/raw/${row.id}`);
   });
 

@@ -408,6 +408,23 @@ describe("api request logging", () => {
     expect(row?.requestBytes).toBe(declared);
   });
 
+  it("never parses a response over 1 MiB that declares no length: the marker carries its size", async () => {
+    await db.delete(schema.apiRequests);
+    const html = `<p>${"x".repeat(1024 * 1024)}</p>`;
+    const res = await post({ ...validBody, to: ["big@example.com"], html });
+    const { id } = (await res.json()) as { id: string };
+    const read = await call("GET", `/emails/${id}`);
+    expect(read.headers.get("content-length")).toBeNull();
+    expect(((await read.json()) as { html: string }).html).toBe(html);
+
+    const rows = await waitForRows(2);
+    const logged = rows.find((r) => r.method === "GET");
+    expect(logged?.responseBody).toEqual({
+      truncated: true,
+      bytes: expect.toSatisfy((bytes: number) => bytes > 1024 * 1024),
+    });
+  });
+
   it("stores null for a non-JSON response", async () => {
     await db.delete(schema.apiRequests);
     // Authenticated but unrouted: Hono answers with a text/plain 404.

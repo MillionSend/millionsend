@@ -213,19 +213,33 @@ describe("ingestReceivedEmail", () => {
     expect(enqueued.length).toBe(before);
   });
 
-  it("merges recipients the same message reaches in another transaction", async () => {
+  it("merges recipients the same message reaches in another transaction and announces only them", async () => {
+    const before = enqueued.length;
     const result = await ingestReceivedEmail(deps(), {
       raw,
-      envelope: envelope(["other@second.acme.test"]),
+      envelope: envelope(["agent@inbound.acme.test", "other@second.acme.test"]),
     });
     expect(result.ok && result.stored[0]?.duplicate).toBe(true);
     const [row] = await rowsOf(acme);
-    expect([...(row?.receivedFor ?? [])].sort()).toEqual([
-      "agent@inbound.acme.test",
-      "other@second.acme.test",
-    ]);
+    expect(row?.receivedFor).toEqual(["agent@inbound.acme.test", "other@second.acme.test"]);
     expect(row?.domainIds).toHaveLength(2);
     expect(await receivedToday(acme)).toEqual({ received: 1, accepted: 0 });
+    // Webhook consumers hear of the new address once, under the same email id.
+    const hooks = await deliveriesFor(acmeHook);
+    expect(hooks).toHaveLength(2);
+    const second = hooks.find((h) => JSON.stringify(h.payload).includes("other@second"));
+    expect(second?.payload).toMatchObject({
+      type: "email.received",
+      data: {
+        email_id: row?.id,
+        received_for: ["other@second.acme.test"],
+        attachments: [{ filename: "a.txt" }],
+      },
+    });
+    expect(enqueued.length).toBe(before + 1);
+    // Retrying that delivery announces nothing more.
+    await ingestReceivedEmail(deps(), { raw, envelope: envelope(["other@second.acme.test"]) });
+    expect(await deliveriesFor(acmeHook)).toHaveLength(2);
   });
 
   it("stores malformed MIME with minimal metadata", async () => {

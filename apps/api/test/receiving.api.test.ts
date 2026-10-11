@@ -294,14 +294,14 @@ describe("received mail reads", () => {
     scopedId = rows.find((r) => r.subject === "Scoped")?.id ?? "";
   });
 
-  it("lists the team's mail oldest first, Resend's shape, paged by cursor", async () => {
+  it("lists the team's mail newest first, Resend's shape, paged by cursor", async () => {
     const res = await get(acmeKey, "/emails/receiving");
     expect(res.status).toBe(200);
     const body = await json<{ object: string; has_more: boolean; data: Record<string, unknown>[] }>(
       res,
     );
     expect(body.object).toBe("list");
-    expect(body.data.map((e) => e.subject)).toEqual(["First", "Second", "Scoped"]);
+    expect(body.data.map((e) => e.subject)).toEqual(["Scoped", "Second", "First"]);
     expect(body.data[1]).toMatchObject({
       id,
       from: "sender@sender.example",
@@ -331,10 +331,23 @@ describe("received mail reads", () => {
       await get(acmeKey, "/emails/receiving?limit=1"),
     );
     expect(page.has_more).toBe(true);
-    const next = await json<{ data: { subject: string }[] }>(
+    // `after` pages toward older mail, `before` back toward newer, as on Resend.
+    const next = await json<{ has_more: boolean; data: { id: string; subject: string }[] }>(
       await get(acmeKey, `/emails/receiving?limit=1&after=${page.data[0]?.id}`),
     );
-    expect(next.data.map((e) => e.subject)).toEqual(["Second"]);
+    expect(next).toMatchObject({ has_more: true, data: [{ subject: "Second" }] });
+    const oldest = body.data[2]?.id;
+    const back = await json<{ has_more: boolean; data: { subject: string }[] }>(
+      await get(acmeKey, `/emails/receiving?limit=1&before=${oldest}`),
+    );
+    expect(back).toMatchObject({ has_more: true, data: [{ subject: "Second" }] });
+    const newer = await json<{ has_more: boolean; data: { subject: string }[] }>(
+      await get(acmeKey, `/emails/receiving?before=${oldest}`),
+    );
+    expect(newer).toMatchObject({
+      has_more: false,
+      data: [{ subject: "Scoped" }, { subject: "Second" }],
+    });
     const foreignCursor = (await rowsOf(beta))[0]?.id;
     expect((await get(acmeKey, `/emails/receiving?after=${foreignCursor}`)).status).toBe(422);
   });
@@ -429,6 +442,31 @@ describe("received mail reads", () => {
     expect(unknown.status).toBe(404);
   });
 
+  it("lists every attachment when no limit is given, as Resend does", async () => {
+    const info = await transport.sendMail({
+      from: "sender@sender.example",
+      to: "agent@inbound.acme.test",
+      subject: "Many files",
+      text: "25 files",
+      attachments: Array.from({ length: 25 }, (_, i) => ({
+        filename: `f${i}.txt`,
+        content: `${i}`,
+      })),
+    });
+    await deliver(info.message as Buffer, ["agent@inbound.acme.test"]);
+    const many = (await rowsOf(acme)).find((r) => r.subject === "Many files")?.id;
+    const all = await json<{ has_more: boolean; data: unknown[] }>(
+      await get(acmeKey, `/emails/receiving/${many}/attachments`),
+    );
+    expect(all).toMatchObject({ has_more: false });
+    expect(all.data).toHaveLength(25);
+    const paged = await json<{ has_more: boolean; data: unknown[] }>(
+      await get(acmeKey, `/emails/receiving/${many}/attachments?limit=20`),
+    );
+    expect(paged.has_more).toBe(true);
+    expect(paged.data).toHaveLength(20);
+  });
+
   it("serves downloads to the signed link alone, as attachments a browser will not render", async () => {
     const email = await json<{ raw: { download_url: string } }>(
       await get(acmeKey, `/emails/receiving/${id}`),
@@ -457,6 +495,26 @@ describe("received mail reads", () => {
     expect(file.headers.get("content-type")).toBe("application/octet-stream");
     expect(file.headers.get("content-disposition")).toContain('filename="report.pdf"');
     expect(Buffer.from(await file.arrayBuffer()).equals(PDF)).toBe(true);
+  });
+
+  it("holds a content slot until its download has been read, not just answered", async () => {
+    const email = await json<{ raw: { download_url: string } }>(
+      await get(acmeKey, `/emails/receiving/${id}`),
+    );
+    const url = local(email.raw.download_url);
+    // Four answered downloads nobody has read yet take every slot.
+    const unread = await Promise.all([1, 2, 3, 4].map(() => app.request(url)));
+    let answered = false;
+    const fifth = Promise.resolve(app.request(url)).then((res) => {
+      answered = true;
+      return res;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(answered).toBe(false);
+    await unread[0]?.body?.cancel();
+    const res = await fifth;
+    expect(res.status).toBe(200);
+    await Promise.all([...unread.slice(1), res].map((r) => r.arrayBuffer()));
   });
 
   it("refuses tampered, expired, misdirected and malformed links alike", async () => {

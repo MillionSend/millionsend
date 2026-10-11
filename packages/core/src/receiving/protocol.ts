@@ -108,8 +108,10 @@ export type AuthResult = (typeof AUTH_RESULTS)[number];
 const authResult = z.enum(AUTH_RESULTS);
 
 /**
- * One verdict per check. DKIM folds every signature into one: pass when any
- * signature passed, otherwise the first signature's result, none without one.
+ * One verdict per check, as Resend reads them. DKIM folds every signature
+ * into one: pass when a signature aligned with From passed, policy when only
+ * others did, otherwise the first signature's result, none without one.
+ * DMARC reads none under a p=none policy once SPF or DKIM passed.
  */
 export const authVerdictsSchema = z.object({
   spf: authResult,

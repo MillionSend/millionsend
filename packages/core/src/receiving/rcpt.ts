@@ -166,12 +166,18 @@ export async function findReceivingDomains(
     .where(and(inArray(d.name, [...names]), eq(d.receivingEnabled, true)));
 }
 
+/**
+ * Permanent refusals are cached only briefly: the sender bounces on a 550, so
+ * one must not outlive the state behind it (a domain switching receiving on).
+ */
+const REFUSAL_TTL_SECONDS = 10;
+
 const UNKNOWN_RECIPIENT = {
   accept: false,
   code: 550,
   enhanced: "5.1.1",
   message: "Recipient domain does not receive mail here",
-  ttlSeconds: 60,
+  ttlSeconds: REFUSAL_TTL_SECONDS,
 } as const satisfies RcptResponse;
 
 const SUSPENDED_RECIPIENT = {
@@ -179,7 +185,7 @@ const SUSPENDED_RECIPIENT = {
   code: 550,
   enhanced: "5.7.1",
   message: "Recipient account is not accepting mail",
-  ttlSeconds: 60,
+  ttlSeconds: REFUSAL_TTL_SECONDS,
 } as const satisfies RcptResponse;
 
 const OVER_QUOTA = {

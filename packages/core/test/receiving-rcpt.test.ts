@@ -227,6 +227,8 @@ describe("decideRecipient", () => {
         accept: false,
         code: 550,
         enhanced: "5.1.1",
+        // The sender bounces on it: never cached past a domain switching receiving on.
+        ttlSeconds: 10,
       });
     }
   });
