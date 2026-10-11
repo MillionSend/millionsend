@@ -357,6 +357,7 @@ export {
   purgeExpiredIdempotencyKeys,
   releaseIdempotent,
 } from "./idempotency.js";
+export { IMITATED_BRAND_WORDS, IMITATED_BRANDS, imitatedBrandIn } from "./imitated-brands.js";
 export { findInstanceOperator, isInstanceOperator } from "./instance-operator.js";
 export {
   isProbeKey,
@@ -605,6 +606,7 @@ export {
   FLAG_WINDOW_DAYS,
   type FlagTrigger,
   type FlagTriggerOptions,
+  flagImitatedBrand,
   flagTrigger,
   pruneTeamStandings,
   STANDING_WINDOW_DAYS,

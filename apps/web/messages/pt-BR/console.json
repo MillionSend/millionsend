@@ -598,7 +598,8 @@
       "guardrail": "Proteção de envio",
       "score": "Nota",
       "report": "Denúncia",
-      "manual": "Manual"
+      "manual": "Manual",
+      "brand": "Nome de marca"
     },
     "reasonTip": {
       "monitor": "O monitor de conteúdo: conteúdo amostrado avaliado pelo modelo levou o risco interno acima do limite de sinalização.",
@@ -606,7 +607,8 @@
       "guardrail": "A proteção de envio ficou em alerta ou pausou a equipe pelas taxas de bounce ou reclamação.",
       "score": "A nota da conta caiu abaixo de 5 (de 0 a 10).",
       "report": "Um provedor de e-mail ou um destinatário denunciou abuso.",
-      "manual": "Um operador sinalizou a equipe manualmente."
+      "manual": "Um operador sinalizou a equipe manualmente.",
+      "brand": "O nome da equipe bate com uma marca que golpistas costumam imitar. A checagem acontece quando a equipe é criada ou renomeada; o nome em si é permitido."
     },
     "reasonLabel": {
       "complaint": "Reclamações {rate} · 7d",
@@ -616,7 +618,8 @@
       "score": "Nota {score} / 10",
       "manual": "Sinalizada pelo operador",
       "report": "Denúncia de abuso",
-      "monitor": "Risco {risk} · {samples, plural, one {# amostra} other {# amostras}}"
+      "monitor": "Risco {risk} · {samples, plural, one {# amostra} other {# amostras}}",
+      "brand": "Nome parecido com {brand}"
     },
     "columns": {
       "team": "Equipe",
@@ -647,7 +650,8 @@
       "reveal": "Pedir acesso ao conteúdo",
       "clearTip": "Marca a sinalização como revisada e a fecha, com registro na auditoria. Risco, amostragem e qualquer pausa continuam como estão. Enquanto o mesmo gatilho se mantiver, a checagem automática não a reabre; se o gatilho sumir e voltar, uma nova sinalização é aberta. Sem isso, uma sinalização automática se fecha sozinha quando o gatilho some. Uma sinalização aberta nos últimos 90 dias mantém a equipe fora do nível Confiável de qualquer forma.",
       "reopenTip": "Abre de novo como sinalização manual, que a checagem automática nunca fecha.",
-      "clearManualTip": "Marca a sinalização como revisada e a fecha, com registro na auditoria. Risco, amostragem e qualquer pausa continuam como estão. Uma sinalização manual não tem gatilho próprio: se um gatilho automático estiver ativo quando ela for encerrada, a próxima checagem abre uma sinalização automática."
+      "clearManualTip": "Marca a sinalização como revisada e a fecha, com registro na auditoria. Risco, amostragem e qualquer pausa continuam como estão. Uma sinalização manual não tem gatilho próprio: se um gatilho automático estiver ativo quando ela for encerrada, a próxima checagem abre uma sinalização automática.",
+      "clearBrandTip": "Marca a sinalização como revisada e a fecha, com registro na auditoria. Nada mais muda. Só um operador fecha uma sinalização de marca; renomear a equipe para outro nome parecido com uma marca abre uma nova."
     },
     "toast": {
       "cleared": "{team} · encerrada",

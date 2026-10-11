@@ -5,6 +5,7 @@ import {
   endSupportView,
   fetchBestOwnedPlan,
   fetchTeamStanding,
+  flagImitatedBrand,
   liveSupportViewForTeam,
   PLAN_TEAM_LIMIT,
 } from "@millionsend/core";
@@ -186,6 +187,7 @@ export const teamBootstrapRouter = router({
               metadata: { name: input.name.trim() },
             },
           );
+          await flagImitatedBrand(ctx.db, created.teamId, input.name.trim());
           return created;
         } catch (error) {
           if (!isUniqueViolation(error)) throw error;

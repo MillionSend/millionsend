@@ -598,7 +598,8 @@
       "guardrail": "Guardrail",
       "score": "Score",
       "report": "Report",
-      "manual": "Manual"
+      "manual": "Manual",
+      "brand": "Brand name"
     },
     "reasonTip": {
       "monitor": "The content monitor: sampled content judged by the model pushed the internal risk over the flag line.",
@@ -606,7 +607,8 @@
       "guardrail": "The deliverability guardrail turned warning or paused the team on its bounce or complaint rates.",
       "score": "The account score dropped under 5 out of 10.",
       "report": "A mailbox provider or a recipient reported abuse.",
-      "manual": "An operator flagged the team by hand."
+      "manual": "An operator flagged the team by hand.",
+      "brand": "The team's name matches a brand phishers often imitate. Checked when the team is created or renamed; the name itself is allowed."
     },
     "reasonLabel": {
       "complaint": "Complaints {rate} · 7d",
@@ -616,7 +618,8 @@
       "score": "Score {score} / 10",
       "manual": "Flagged by operator",
       "report": "Abuse report",
-      "monitor": "Risk {risk} · {samples, plural, one {# sample} other {# samples}}"
+      "monitor": "Risk {risk} · {samples, plural, one {# sample} other {# samples}}",
+      "brand": "Named like {brand}"
     },
     "columns": {
       "team": "Team",
@@ -647,7 +650,8 @@
       "reveal": "Request content access",
       "clearTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. While the same trigger holds, the automatic check will not reopen it; if the trigger lapses and comes back, a new flag opens. Left alone, an automatic flag closes itself once its trigger is gone. A flag opened in the last 90 days keeps the team out of the Trusted tier either way.",
       "reopenTip": "Opens it again as a manual flag, which the automatic check never closes.",
-      "clearManualTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. A manual flag has no trigger of its own: if an automatic trigger holds when it is cleared, the next check opens an automatic flag."
+      "clearManualTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. A manual flag has no trigger of its own: if an automatic trigger holds when it is cleared, the next check opens an automatic flag.",
+      "clearBrandTip": "Marks the flag reviewed and closes it, with an audit entry. Nothing else changes. Only an operator closes a brand flag; a rename to another name that matches a brand opens a new one."
     },
     "toast": {
       "cleared": "{team} · cleared",

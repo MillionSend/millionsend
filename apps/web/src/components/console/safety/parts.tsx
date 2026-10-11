@@ -9,7 +9,14 @@ import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
 
 export type Guardrail = "ok" | "warning" | "paused";
-export type FlagReason = "monitor" | "complaints" | "guardrail" | "score" | "report" | "manual";
+export type FlagReason =
+  | "monitor"
+  | "complaints"
+  | "guardrail"
+  | "score"
+  | "report"
+  | "manual"
+  | "brand";
 
 const PAID = ["starter", "pro", "scale"];
 const PLAN_KEYS = ["free", "starter", "pro", "scale", "system"];
@@ -121,6 +128,9 @@ export function ReasonLabel({
         risk: formatRisk(detail?.risk ?? 0),
         samples: detail?.samples ?? 0,
       });
+      break;
+    case "brand":
+      label = t("reasonLabel.brand", { brand: detail?.brand ?? "" });
       break;
     default:
       label = t(`reasonLabel.${reason}`);

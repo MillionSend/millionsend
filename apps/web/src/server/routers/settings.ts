@@ -11,6 +11,7 @@ import {
   createFixedWindowLimiter,
   DAY_MS,
   fillTemplate,
+  flagImitatedBrand,
   getMonitorSettingsRow,
   INVITE_EMAILS_PER_HOUR,
   INVITE_MAX_SENDS,
@@ -378,10 +379,14 @@ export function createSettingsRouter(
         .input(z.object({ name: teamNameSchema }))
         .mutation(async ({ ctx, input }) => {
           if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
-          await ctx.db
+          // Saving the name it already has is no rename: an operator's clear of
+          // its brand flag stands.
+          const [renamed] = await ctx.db
             .update(schema.teams)
             .set({ name: input.name })
-            .where(eq(schema.teams.id, ctx.teamId));
+            .where(and(eq(schema.teams.id, ctx.teamId), ne(schema.teams.name, input.name)))
+            .returning({ id: schema.teams.id });
+          if (renamed) await flagImitatedBrand(ctx.db, ctx.teamId, input.name);
           return { name: input.name };
         }),
 

@@ -245,7 +245,9 @@ export function ReviewView({ teamId }: { teamId: string }) {
                     ? "menu.reopenTip"
                     : flag.reason === "manual"
                       ? "menu.clearManualTip"
-                      : "menu.clearTip",
+                      : flag.reason === "brand"
+                        ? "menu.clearBrandTip"
+                        : "menu.clearTip",
                 )}
               >
                 <button

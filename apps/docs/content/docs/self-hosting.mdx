@@ -724,10 +724,13 @@ hair space follows each `.`, `@`, `:` and `\`, so `acme.dev` still reads as
 acme.dev without becoming one. A run of seven or more digits keeps its first
 four, so no mail app offers to call it, unless the run is exactly one date
 (`09/10/2026`, `2026-10-09`) or one span of up to ten years (`2025-2026`),
-which prints as typed. Team and display names with a link
-scheme, an `@`, a line break or any other invisible character, a run of eight
-or more digits (such a date or span of years aside), or longer than 64
-characters, are refused when set; a name stored earlier stays as it is.
+which prints as typed. Team and display names with a link scheme, an `@`, a
+line break or any other invisible character, a run of eight or more digits
+(such a date or span of years aside), or longer than 64 characters, are refused
+when set; a name stored earlier stays as it is. A team name that matches a
+brand phishers often imitate (`PayPal`, `Itaú`, `Correios` and others,
+look-alike spellings such as `PayPa1` included) is allowed, and opens a `brand`
+flag on Trust & safety when the team is created or renamed.
 
 Verification, password-reset and invitation emails can reach whatever address
 someone typed, so they greet nobody by name. An invitation names the inviter by

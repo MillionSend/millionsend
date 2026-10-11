@@ -36,7 +36,15 @@ import { useContentReveal } from "./reveal";
 
 const STATUSES = ["open", "cleared", "suspended", "all"] as const;
 // The team_flag_reason enum; tsc checks it against the router's input.
-const REASONS = ["monitor", "complaints", "guardrail", "score", "report", "manual"] as const;
+const REASONS = [
+  "monitor",
+  "complaints",
+  "guardrail",
+  "score",
+  "report",
+  "manual",
+  "brand",
+] as const;
 const SORTS = ["name", "type", "risk", "score", "guardrail", "reason", "status", "since"] as const;
 const DIRS = ["asc", "desc"] as const;
 const COLUMNS = 12;

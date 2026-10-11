@@ -21,6 +21,7 @@ export const teamFlagReasonEnum = pgEnum("team_flag_reason", [
   "score",
   "report",
   "manual",
+  "brand",
 ]);
 
 export const teamFlagStatusEnum = pgEnum("team_flag_status", ["open", "cleared"]);
@@ -36,13 +37,16 @@ export interface TeamFlagDetail {
   samples?: number;
   /** Opened by a suspension, so the team's reinstatement clears it. */
   suspension?: true;
+  /** The imitated brand the team's name matched, as the brand list spells it. */
+  brand?: string;
 }
 
 /**
  * Trust & safety flags. A team holds at most one open flag; the worker's
  * safety cron opens and clears the automatic ones (opened_by null) so a
  * flag's `opened_at` stays put across runs, and an operator's manual flag or
- * clear is never touched by the cron.
+ * clear is never touched by the cron. A brand flag is automatic too, opened
+ * when a team's name matches an imitated brand, and only an operator clears it.
  */
 export const teamFlags = pgTable(
   "team_flags",
