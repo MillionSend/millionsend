@@ -47,6 +47,7 @@ você segmenta com [segmentos](/pt-BR/concepts/segments) (filtros salvos) e
 | Broadcasts | Componha, agende e envie para todos os contatos, um segmento ou um tópico. |
 | Templates | Templates reutilizáveis com campos de mesclagem por contato. |
 | Domínios | Verificação de DNS guiada, BYODKIM, rastreamento e TLS por domínio. |
+| Recebimento (beta) | Email para qualquer endereço de um domínio verificado: guardado com criptografia, lido pela API compatível com o Resend e avisado pelo webhook `email.received`. |
 | Webhooks | Assinaturas Standard Webhooks, seleção de eventos por endpoint, log de entregas. |
 | Supressões | Hard bounces e reclamações suprimidos automaticamente. |
 | Descadastro em um clique | Headers `List-Unsubscribe` (RFC 8058) e página de descadastro hospedada. |
@@ -65,7 +66,8 @@ contêineres:
   nele; não há Redis.
 - **Contêiner do app** — roda a API (porta 3001), o worker em segundo plano e
   o painel web (porta 3000). Um terceiro contêiner opcional roda o relay SMTP
-  (porta 2587). Os processos também podem ser separados um por contêiner com
+  (porta 2587), e outro o MX do [recebimento](/pt-BR/concepts/receiving)
+  (porta 25). Os processos também podem ser separados um por contêiner com
   a variável de ambiente `PROCESS`.
 
 Os corpos dos emails são criptografados em repouso (criptografia de envelope
