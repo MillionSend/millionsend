@@ -5,7 +5,7 @@ export const ptBR = {
     subject: "Bem-vindo ao MillionSend",
     body: [
       "Olá, {name}, sua conta está pronta.",
-      "Primeiro adicione um domínio de envio e publique os registros DNS; os envios saem assim que ele verificar.",
+      "Primeiro adicione um domínio de envio e publique os registros DNS; os envios saem assim que ele for verificado.",
       "Depois crie uma chave de API em Chaves de API — ela aparece uma única vez e é o que os SDKs, o SMTP e o servidor MCP usam para enviar.",
     ],
     button: "Adicionar domínio",
@@ -23,7 +23,7 @@ export const ptBR = {
     subject: "Um app foi conectado à sua conta do MillionSend",
     body: [
       "Você permitiu que {app} atue em {team} pelo servidor MCP do MillionSend com estas permissões: {scopes}.",
-      "Ele pode fazer ali o que você pode, em seu nome, até você revogar.",
+      "Ele pode fazer o mesmo que você, em seu nome, até você revogar o acesso.",
     ],
     button: "Revisar apps conectados",
     muted: ["Não autorizou isso? Revogue agora."],
@@ -60,7 +60,7 @@ export const ptBR = {
     subject: "Um novo membro entrou na sua equipe",
     body: [
       "{name} ({email}) aceitou o convite e agora é {role} de {team}.",
-      "Membros enviam e leem os logs; administradores também gerenciam domínios, chaves e webhooks. Remova em Configurações → Equipe se estiver errado.",
+      "Membros enviam e leem os logs; administradores também gerenciam domínios, chaves e webhooks. Se foi engano, remova o membro em Configurações → Equipe.",
     ],
     button: "Abrir configurações da equipe",
     extra: { member: "membro", admin: "administrador", owner: "proprietário" },
@@ -68,7 +68,7 @@ export const ptBR = {
   "domain.verified": {
     subject: "Seu domínio está verificado",
     body: [
-      "Os registros DNS de {domain} estão corretos e ele pode enviar de qualquer endereço — API, SMTP e broadcasts.",
+      "Os registros DNS de {domain} estão corretos e ele pode enviar de qualquer endereço — API, SMTP e transmissões.",
       "Continuamos verificando os registros e avisamos se algum sumir.",
     ],
     button: "Abrir domínio",
@@ -76,7 +76,7 @@ export const ptBR = {
   "domain.lost": {
     subject: "Um domínio perdeu a verificação",
     body: [
-      "Um registro DNS obrigatório de {domain} (DKIM ou MAIL FROM) deixou de responder, então os envios são recusados até ele voltar — chamadas à API falham e broadcasts agendados param na hora do envio.",
+      "Um registro DNS obrigatório de {domain} (DKIM ou MAIL FROM) deixou de responder, então os envios são recusados até ele voltar — chamadas à API falham e transmissões agendadas param na hora do envio.",
       "Restaure o registro no seu DNS; a verificação volta sozinha na próxima checagem ou quando você clicar em Verificar.",
     ],
     button: "Abrir domínio",
@@ -84,51 +84,51 @@ export const ptBR = {
   "domain.lost.identity": {
     subject: "Um domínio perdeu a verificação",
     body: [
-      "O SES desistiu de {domain}: a identidade sumiu ou os registros DKIM ficaram ausentes além da janela de 72 horas. Os envios são recusados; adicione o domínio de novo para voltar a enviar.",
+      "O SES desistiu de {domain}: a identidade sumiu ou os registros DKIM ficaram ausentes por mais de 72 horas. Os envios são recusados; adicione o domínio de novo para voltar a enviar.",
     ],
     button: "Abrir domínios",
   },
   "broadcast.sent": {
-    subject: "Seu broadcast foi enviado para {count} destinatários",
+    subject: "Sua transmissão foi enviada para {count} destinatários",
     body: [
-      '"{subject}" foi entregue a {count} contatos de {team}; endereços suprimidos e descadastrados foram ignorados.{failed}',
-      "Aberturas, cliques e bounces aparecem na página do broadcast conforme chegam.",
+      '"{subject}" foi enviado para {count} contatos de {team}; endereços suprimidos e descadastrados foram ignorados.{failed}',
+      "Aberturas, cliques e bounces aparecem na página da transmissão conforme chegam.",
     ],
-    button: "Abrir broadcast",
+    button: "Abrir transmissão",
     extra: { failed: " {n} não puderam ser enviados." },
   },
   "broadcast.sending": {
-    subject: "Seu broadcast está saindo ao longo de {days} dias",
+    subject: "Sua transmissão está saindo ao longo de {days} dias",
     body: [
       "{first} de {count} e-mails saíram na primeira leva; o restante segue conforme a capacidade libera, o último por volta de {finishesAt}.",
-      "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes; o e-mail transacional de {team} não fica retido atrás deles.",
+      "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes; o e-mail transacional de {team} não fica esperando atrás deles.",
     ],
-    button: "Abrir broadcast",
+    button: "Abrir transmissão",
     muted: [
-      "Você recebe isto uma vez por broadcast que leva mais de um dia. O horário de término é uma estimativa e pode mudar.",
+      "Você recebe isto uma vez por transmissão que leva mais de um dia. O horário de término é uma estimativa e pode mudar.",
     ],
   },
   "broadcast.held_quota": {
-    subject: "{parked} de {count} destinatários do broadcast aguardam a cota",
+    subject: "{parked} de {count} destinatários da transmissão aguardam a cota",
     body: [
-      "{sent} e-mails saíram; {parked} estão retidos porque {team} atingiu a cota de {limit}.",
+      "{sent} e-mails saíram; {parked} estão em espera porque {team} atingiu a cota de {limit}.",
       "{release}",
     ],
     button: "Revisar plano",
     extra: {
       releaseDaily:
-        "Eles saem após a virada às {resetsAt} UTC, ou minutos depois de um plano maior.",
+        "Eles saem depois que a cota renovar às {resetsAt} UTC, ou minutos depois de você mudar para um plano maior.",
       releaseMonthly:
-        "Eles saem quando o período renovar em {date}, assim que o excedente for ativado em Cobrança, ou minutos depois de um plano maior.",
+        "Eles saem quando o período renovar em {date}, assim que o excedente for ativado em Cobrança, ou minutos depois de você mudar para um plano maior.",
     },
   },
   "broadcast.held": {
-    subject: "Seu broadcast aguarda para sair",
+    subject: "Sua transmissão aguarda para sair",
     body: [
       '"{name}" aguarda para sair. O envio está pausado por enquanto e retoma automaticamente, então você não precisa fazer nada; e-mails transacionais continuam saindo.',
       "Você recebe o relatório de envio de sempre ao terminar.",
     ],
-    button: "Abrir broadcast",
+    button: "Abrir transmissão",
   },
   "quota.warning": {
     subject: "80% da cota de envio de hoje foi usada",
@@ -171,7 +171,7 @@ export const ptBR = {
       overage:
         "Os envios acima da cota são cobrados pela tarifa de excedente do seu plano e aparecem na próxima fatura. Um plano maior inclui mais e-mails a uma tarifa menor.",
       noOverage:
-        "Na cota, novos envios pela API são recusados e os broadcasts ficam retidos até o período renovar. Ative o excedente em Cobrança para continuar enviando além dela, ou mude para um plano maior.",
+        "Ao atingir a cota, novos envios pela API são recusados e as transmissões ficam em espera até o período renovar. Ative o excedente em Cobrança para continuar enviando além dela, ou mude para um plano maior.",
     },
   },
   "quota.monthly_reached": {
@@ -188,24 +188,24 @@ export const ptBR = {
       overage:
         "Os envios acima da cota agora são cobrados pela tarifa de excedente do seu plano e aparecem na próxima fatura. Eles param em {hardCap} vezes o volume incluído ({stopAt}) até o período renovar em {renewsAt}; um plano maior inclui mais e-mails a uma tarifa menor.",
       noOverage:
-        "Novos envios pela API são recusados até o período renovar em {renewsAt} ou o excedente ser ativado em Cobrança; os broadcasts ficam retidos até lá. Um plano maior aumenta a cota na hora e libera o que estava retido em minutos.",
+        "Novos envios pela API são recusados até o período renovar em {renewsAt} ou o excedente ser ativado em Cobrança; as transmissões ficam em espera até lá. Um plano maior aumenta a cota na hora e libera o que estava em espera em minutos.",
     },
   },
   "deliverability.warning": {
     subject: "Sua {metric} está em risco",
     body: [
-      "A {metric} de {team} nos últimos {days} dias está em {rate}, acima da linha de risco de {limit}. Os envios continuam, mas os broadcasts ficam mais lentos enquanto ela estiver aí.",
+      "A {metric} de {team} nos últimos {days} dias está em {rate}, acima do limite de risco de {limit}. Os envios continuam, mas as transmissões ficam mais lentas enquanto ela estiver acima do limite.",
       "{advice}",
     ],
     button: "Abrir métricas",
     muted: [
-      "Você recebe isto uma vez por episódio; ele se encerra quando a taxa volta para baixo da linha.",
+      "Você recebe isto uma vez por episódio; ele se encerra quando a taxa volta a ficar abaixo do limite.",
     ],
     extra: {
-      bounce: "taxa de hard bounce",
+      bounce: "taxa de bounce permanente",
       complaint: "taxa de reclamação",
       bounceAdvice:
-        "Hard bounces vêm de endereços que não existem. Remova endereços antigos ou não verificados das suas listas; todo endereço com bounce já está na sua lista de supressão.",
+        "Bounces permanentes vêm de endereços que não existem. Remova endereços antigos ou não verificados das suas listas; todo endereço com bounce já está na sua lista de supressão.",
       complaintAdvice:
         "Reclamações vêm de destinatários que não esperavam o e-mail. Envie só para quem se inscreveu, mantenha o link de descadastro visível e pause listas que não recebem nada seu há meses.",
     },
@@ -213,12 +213,12 @@ export const ptBR = {
   "deliverability.paused": {
     subject: "Envios pausados ({metric})",
     body: [
-      "A {metric} de {team} nos últimos {days} dias chegou a {rate}, na linha de pausa de {limit} ou acima dela. Novos envios são recusados até ela se recuperar.",
-      "A pausa termina sozinha quando a taxa na janela volta para baixo da linha. Limpe a lista de destinatários antes, ou os próximos envios vão acioná-la de novo.",
+      "A {metric} de {team} nos últimos {days} dias chegou a {rate}, no limite de pausa de {limit} ou acima dele. Novos envios são recusados até ela baixar.",
+      "A pausa termina sozinha quando a taxa na janela volta a ficar abaixo do limite. Limpe a lista de destinatários antes, ou os próximos envios vão acioná-la de novo.",
     ],
     button: "Abrir métricas",
     muted: ["Você recebe isto uma vez por episódio."],
-    extra: { bounce: "taxa de hard bounce", complaint: "taxa de reclamação" },
+    extra: { bounce: "taxa de bounce permanente", complaint: "taxa de reclamação" },
   },
   "webhook.failing": {
     subject: "As entregas de webhook estão falhando",
@@ -256,28 +256,28 @@ export const ptBR = {
     subject: "Pagamento recusado no seu plano {plan}",
     body: [
       "Não conseguimos cobrar o cartão cadastrado do plano {plan} de {team}.",
-      "{retry} Por enquanto {team} mantém o plano {plan} ({cap}). Se a fatura continuar em aberto, a Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
+      "{retry} Por enquanto {team} mantém o plano {plan} ({cap}). Se a fatura continuar em aberto, o Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
     ],
     button: "Pagar fatura",
     muted: ["Ou atualize o cartão em Cobrança: {billingUrl}"],
     extra: {
-      retryOn: "A Stripe tenta de novo em {date}.",
-      noRetry: "A Stripe não vai tentar de novo sozinha.",
+      retryOn: "O Stripe tenta de novo em {date}.",
+      noRetry: "O Stripe não vai tentar de novo sozinho.",
     },
   },
   "billing.plan_activated": {
     subject: "Sua equipe está no plano {plan}",
     body: [
-      "Sua assinatura está ativa: o {plan} permite {cap}, e o que ficou retido acima do limite antigo deixa de esperar por ele.",
-      "Recibos e faturas vêm da Stripe; a assinatura é gerenciada em Cobrança.",
+      "Sua assinatura está ativa: o {plan} permite {cap}, e o que estava em espera por causa do limite antigo não depende mais dele.",
+      "Recibos e faturas vêm do Stripe; a assinatura é gerenciada em Cobrança.",
     ],
     button: "Abrir cobrança",
   },
   "billing.plan_changed": {
     subject: "Sua equipe mudou de {old} para {new}",
     body: [
-      "{team} agora está no {new}, que permite {cap}. Num limite menor, os envios já aceitos não mudam; o que passar do novo limite, em planos diários espera o próximo dia UTC e, em planos mensais, cobra excedente (quando ativado) ou é recusado pela API até o período renovar.",
-      "O rateio aparece na próxima fatura da Stripe.",
+      "{team} agora está no {new}, que permite {cap}. Com um limite menor, os envios já aceitos não mudam; o que passar do novo limite espera o próximo dia UTC nos planos diários e, nos planos mensais, é cobrado como excedente (quando ativado) ou recusado pela API até o período renovar.",
+      "O rateio aparece na próxima fatura do Stripe.",
     ],
     button: "Abrir cobrança",
   },
@@ -300,18 +300,18 @@ export const ptBR = {
   "billing.downgraded": {
     subject: "Sua equipe agora está no Free",
     body: [
-      "O plano {plan} terminou em {date}. A partir de hoje {team} está no Free: até {freeCap} e-mails por dia, o que passar espera o próximo dia UTC, e broadcasts acima do limite saem em partes.",
+      "O plano {plan} terminou em {date}. A partir de hoje {team} está no Free: até {freeCap} e-mails por dia, o que passar espera o próximo dia UTC, e transmissões acima do limite saem em partes.",
       "Domínios verificados, contatos e chaves de API continuam iguais. Escolha um plano de novo em Cobrança quando precisar de mais.",
     ],
     button: "Abrir cobrança",
   },
   "team.broadcasts_paused": {
-    subject: "Broadcasts pausados para sua equipe",
+    subject: "Transmissões pausadas para sua equipe",
     body: [
-      "O operador da instância pausou os broadcasts de {team}: {reason}",
-      "E-mails transacionais continuam saindo pela API e pelo SMTP. Broadcasts agendados aguardam, e novos não podem ser enviados, até o operador retomá-los. Responda a este e-mail se tiver dúvidas.",
+      "O operador da instância pausou as transmissões de {team}: {reason}",
+      "E-mails transacionais continuam saindo pela API e pelo SMTP. Transmissões agendadas aguardam, e novas não podem ser enviadas, até o operador retomá-las. Responda a este e-mail se tiver dúvidas.",
     ],
-    button: "Abrir broadcasts",
+    button: "Abrir transmissões",
     extra: {
       complaints: "a taxa de reclamações passou de 0,1% nos últimos 7 dias.",
       report: "uma denúncia de abuso foi recebida.",
@@ -323,7 +323,7 @@ export const ptBR = {
     subject: "Sua equipe foi suspensa",
     body: [
       "O operador da instância suspendeu {team}: {reason}",
-      "Todo envio é recusado e os broadcasts ficam em espera. Chaves de API, domínios, contatos e histórico permanecem como estão, e uma equipe reativada volta a enviar em um minuto. Responda a este e-mail para resolver.",
+      "Todo envio é recusado e as transmissões ficam em espera. Chaves de API, domínios, contatos e histórico permanecem como estão, e uma equipe reativada volta a enviar em um minuto. Responda a este e-mail para resolver.",
     ],
     button: "Abrir painel",
     extra: {
@@ -337,48 +337,48 @@ export const ptBR = {
   "team.reinstated": {
     subject: "Sua equipe foi reativada",
     body: [
-      "O operador da instância reativou {team}. Os envios voltam a sair, e os broadcasts em espera retomam sozinhos em até 15 minutos.",
+      "O operador da instância reativou {team}. Os envios voltam a sair, e as transmissões em espera são retomadas automaticamente em até 15 minutos.",
     ],
     button: "Abrir painel",
   },
   "monitor.alert": {
     subject: "Monitor de conteúdo: uma equipe precisa de uma olhada",
     body: [
-      "O risco do monitor de conteúdo para {team} chegou a {risk} (nível {tier}, {samples} amostras julgadas nos últimos 7 dias, {flagged} acima da linha de sinalização). O modelo lê uma amostra do e-mail aceito; este alerta, por si só, não pausa nem retém nada.",
-      "Abra a página de revisão para ver os veredictos amostrados, as verificações de conteúdo e o histórico da equipe, e decida. Este aviso se repete no máximo uma vez por dia por equipe enquanto o risco ficar acima da linha.",
+      "O risco do monitor de conteúdo para {team} chegou a {risk} (nível {tier}, {samples} amostras avaliadas nos últimos 7 dias, {flagged} acima do limite de sinalização). O modelo lê uma amostra dos e-mails aceitos; este alerta, por si só, não pausa nem segura nada.",
+      "Abra a página de revisão para ver as avaliações das amostras, as verificações de conteúdo e o histórico da equipe, e decida. Este aviso se repete no máximo uma vez por dia por equipe enquanto o risco ficar acima do limite.",
     ],
     button: "Abrir revisão",
   },
   "monitor.broadcasts_paused": {
-    subject: "O monitor de conteúdo pausou os broadcasts de uma equipe",
+    subject: "O monitor de conteúdo pausou as transmissões de uma equipe",
     body: [
-      "{team} está no nível novo, seu risco no monitor chegou a {risk} e uma mensagem amostrada pontuou {score}. Pela política de pausa, seus broadcasts estão em espera; o e-mail transacional continua saindo.",
-      "A equipe vê os broadcasts como pausados aguardando revisão. Abra a página de revisão para ler os veredictos e retomar, suspender ou limpar.",
+      "{team} é uma equipe nova, o risco dela no monitor chegou a {risk} e uma mensagem amostrada teve pontuação {score}. Pela política de pausa, as transmissões dela estão em espera; o e-mail transacional continua saindo.",
+      "A equipe vê as transmissões como pausadas aguardando revisão. Abra a página de revisão para ler as avaliações e retomar, suspender ou encerrar a sinalização.",
     ],
     button: "Abrir revisão",
   },
   "monitor.team_held": {
-    subject: "O monitor de conteúdo reteve uma equipe para revisão",
+    subject: "O monitor de conteúdo pausou uma equipe para revisão",
     body: [
-      "{team} está no nível novo e uma mensagem amostrada pontuou {score} ({verdict}). {rule} Pela política de retenção, todo envio da equipe agora é recusado ou estacionado: a API e o SMTP recusam, o e-mail na fila e os broadcasts aguardam, e seu tenant do SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi julgada.",
-      "O dono vê o envio como pausado aguardando revisão e não recebe e-mail. Abra a página de revisão para liberar a equipe, o que envia o e-mail retido, ou para suspendê-la por phishing.",
+      "{team} é uma equipe nova e uma mensagem amostrada teve pontuação {score} ({verdict}). {rule} Pela política de pausa para revisão, todo envio da equipe agora é recusado ou fica em espera: a API e o SMTP recusam, os e-mails na fila e as transmissões aguardam, e o tenant da equipe no SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi avaliada.",
+      "O proprietário vê o envio como pausado aguardando revisão e não recebe e-mail. Abra a página de revisão para liberar a equipe, o que envia os e-mails em espera, ou para suspendê-la por phishing.",
     ],
     button: "Abrir revisão",
     extra: {
-      score: "Este único veredicto reteve a equipe: a pontuação de retenção é {line}.",
+      score: "Esta avaliação, sozinha, pausou a equipe: a pontuação de revisão é {line}.",
       repeat:
-        "Este veredicto reteve a equipe como o seu veredicto do tipo phishing número {n} com pontuação {line} ou mais na primeira semana de envios.",
+        "Esta avaliação pausou a equipe por ser a {n}ª do tipo phishing com pontuação {line} ou mais na primeira semana de envios.",
     },
   },
   "monitor.degraded": {
-    subject: "Monitor de conteúdo: {rate} das amostras ficaram sem julgamento na última hora",
+    subject: "Monitor de conteúdo: {rate} das amostras ficaram sem avaliação na última hora",
     body: [
-      "{unjudged} de {samples} amostras sorteadas na última hora voltaram sem julgamento ({provider} · {model}). O envio não é afetado: uma amostra sem julgamento não muda risco, não abre sinalização e não retém e-mail.",
-      "As causas comuns são um provedor limitado ou inacessível, uma chave de API inválida ou revogada, ou respostas que o monitor não conseguiu ler. O cartão Saúde do console mostra a parcela sem julgamento.",
+      "{unjudged} de {samples} amostras sorteadas na última hora voltaram sem avaliação ({provider} · {model}). O envio não é afetado: uma amostra sem avaliação não muda o risco, não abre sinalização e não segura nenhum e-mail.",
+      "As causas comuns são um provedor limitando requisições ou fora do ar, uma chave de API inválida ou revogada, ou respostas que o monitor não conseguiu ler. O cartão Saúde do console mostra o percentual sem avaliação.",
     ],
     button: "Abrir console",
     muted: [
-      "Enviado ao operador da instância no máximo a cada seis horas enquanto a parcela ficar acima de 20% ou o provedor continuar recusando a chave de API.",
+      "Enviado ao operador da instância no máximo a cada seis horas enquanto o percentual ficar acima de 20% ou o provedor continuar recusando a chave de API.",
     ],
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;

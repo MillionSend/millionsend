@@ -109,7 +109,7 @@ describe("account mail catalogs", () => {
         key: "retryOn",
         values: { date: "1 de outubro" },
       }),
-    ).toBe("A Stripe tenta de novo em 1 de outubro.");
+    ).toBe("O Stripe tenta de novo em 1 de outubro.");
   });
 });
 
