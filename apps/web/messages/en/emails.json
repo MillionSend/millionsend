@@ -50,7 +50,8 @@
       "label": "Source",
       "transactional": "Transactional",
       "broadcast": "Broadcasts",
-      "all": "All"
+      "all": "All",
+      "receiving": "Receiving"
     },
     "hiddenBroadcasts": "{count} broadcast emails are not shown in this list.",
     "showBroadcasts": "Show broadcasts →",
@@ -127,7 +128,9 @@
       "waitingBody": "Goes out as soon as sending capacity frees up.",
       "warmup": "Warming up the domain",
       "warmupBody": "New domains ramp up gradually to protect deliverability. Goes out as the daily volume allows."
-    }
+    },
+    "headers": "Headers",
+    "noHeaders": "No headers."
   },
   "insights": {
     "outOfTen": "/ 10",
@@ -367,5 +370,34 @@
     "when": "When",
     "recipient": "Recipient",
     "note": "The recipient opted out using this email's unsubscribe link. Account messages still arrive; broadcasts to this scope stop."
+  },
+  "receiving": {
+    "auth": "Authentication",
+    "attachments": "Attachments",
+    "received": "Received",
+    "noSubject": "(no subject)",
+    "empty": "No received emails yet.",
+    "emptyHint": "Turn on receiving for a domain in <link>Domains</link>, then point its MX record here.",
+    "pageOf": "Page 1 – {pages} of {total} received emails",
+    "loadError": "Couldn't load received emails.",
+    "detail": {
+      "breadcrumb": "Received email",
+      "error": "Couldn't load this email.",
+      "notFound": "Email not found.",
+      "downloadRaw": "Download .eml",
+      "receivedFor": "Received for",
+      "messageId": "Message-ID",
+      "envelopeFrom": "Envelope from",
+      "server": "Sending server",
+      "noTls": "no TLS",
+      "attachments": "Attachments",
+      "download": "Download",
+      "unnamed": "Unnamed attachment",
+      "inline": "inline",
+      "attachmentCount": "{count, plural, one {# attachment} other {# attachments}}",
+      "file": "File",
+      "type": "Type",
+      "size": "Size"
+    }
   }
 }

@@ -95,7 +95,7 @@ export function QuotaRow({
 
 const HISTORY_COLS = ["sent", "delivered", "bounced", "complained"] as const;
 
-function HistoryHead() {
+function HistoryHead({ received = false }: { received?: boolean }) {
   const t = useTranslations("settings.usage");
   return (
     <thead>
@@ -109,6 +109,14 @@ function HistoryHead() {
             </span>
           </th>
         ))}
+        {received ? (
+          <th className="right">
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <StatusDot color="var(--ms-dot-opened)" />
+              {t("received")}
+            </span>
+          </th>
+        ) : null}
       </tr>
     </thead>
   );
@@ -170,6 +178,10 @@ export function UsageView() {
   if (!data) return <UsageSkeleton />;
 
   const { accepted, limit } = data.today;
+  const { receiving } = data;
+  // On Free, received mail spends the same daily counter sends do.
+  const shared = receiving?.kind === "shared_day";
+  const fmt = new Intl.NumberFormat(locale);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
@@ -186,13 +198,35 @@ export function UsageView() {
           />
         ) : (
           <QuotaRow
-            label={t("sentToday")}
+            label={t(shared ? "sentAndReceivedToday" : "sentToday")}
             hint={t("resetsMidnightUtc")}
             used={accepted}
             limit={limit}
           />
         )}
       </section>
+
+      {receiving ? (
+        <section className="ms-card" style={{ padding: "20px 24px" }}>
+          <QuotaRow
+            label={t(receiving.kind === "month" ? "receivedThisPeriod" : "receivedToday")}
+            hint={
+              receiving.kind === "shared_day"
+                ? t("receivedShared")
+                : receiving.kind === "day"
+                  ? t("receivedDay", { allowance: fmt.format(receiving.allowance ?? 0) })
+                  : receiving.kind === "month"
+                    ? t("receivedMonth", {
+                        allowance: fmt.format(receiving.allowance ?? 0),
+                        per: fmt.format(receiving.perBilledEmail),
+                      })
+                    : t("resetsMidnightUtc")
+            }
+            used={receiving.received}
+            limit={receiving.allowance}
+          />
+        </section>
+      ) : null}
 
       <section>
         <div className="ms-microlabel" style={{ marginBottom: 12 }}>
@@ -204,17 +238,23 @@ export function UsageView() {
           </p>
         ) : (
           <Table>
-            <HistoryHead />
+            <HistoryHead received={receiving !== null} />
             <tbody>
               {data.rows.map((row) => (
                 <tr key={row.day}>
                   {/* formatDayUtc pins the label to the UTC day key — plain
                       locale formatting would shift it in negative offsets. */}
                   <td title={row.day}>{formatDayUtc(row.day, locale)}</td>
-                  <td className="right ms-mono">{row.accepted}</td>
+                  {/* ponytail: Free's sends are its shared counter minus received,
+                      judged by today's plan; a day from before a plan change can
+                      be off by that day's received count. */}
+                  <td className="right ms-mono">
+                    {shared ? Math.max(0, row.accepted - row.received) : row.accepted}
+                  </td>
                   <td className="right ms-mono">{row.delivered}</td>
                   <td className="right ms-mono">{row.bounced}</td>
                   <td className="right ms-mono">{row.complained}</td>
+                  {receiving ? <td className="right ms-mono">{row.received}</td> : null}
                 </tr>
               ))}
             </tbody>

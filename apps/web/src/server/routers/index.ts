@@ -12,6 +12,7 @@ import { emailsRouter } from "./emails";
 import { logsRouter } from "./logs";
 import { metricsRouter } from "./metrics";
 import { onboardingRouter } from "./onboarding";
+import { receivingRouter } from "./receiving";
 import { segmentsRouter } from "./segments";
 import { settingsRouter } from "./settings";
 import { supportRouter } from "./support";
@@ -35,6 +36,7 @@ export const appRouter = router({
   logs: logsRouter,
   metrics: metricsRouter,
   onboarding: onboardingRouter,
+  receiving: receivingRouter,
   segments: segmentsRouter,
   settings: settingsRouter,
   support: supportRouter,

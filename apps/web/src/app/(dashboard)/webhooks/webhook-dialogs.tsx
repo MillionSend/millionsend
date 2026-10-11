@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
@@ -22,9 +22,15 @@ import {
 /** Shared dot + human-label option list for the event picker, derived from meta. */
 function useWebhookEventOptions() {
   const t = useTranslations("webhooks");
+  const trpc = useTRPC();
+  // email.received is offered only where the instance takes mail at all.
+  const receiving = useQuery(trpc.system.features.queryOptions()).data?.receiving === true;
+  const types = receiving
+    ? WEBHOOK_EVENT_TYPES
+    : WEBHOOK_EVENT_TYPES.filter((value) => value !== "email.received");
   return {
     groups: WEBHOOK_EVENT_GROUPS.map((key) => ({ key, label: t(`eventGroup.${key}`) })),
-    options: WEBHOOK_EVENT_TYPES.map((value) => ({
+    options: types.map((value) => ({
       value,
       label: t(`eventLabel.${value}`),
       group: WEBHOOK_EVENT_META[value].group,

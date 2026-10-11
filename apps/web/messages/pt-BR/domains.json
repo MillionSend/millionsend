@@ -97,7 +97,8 @@
       "dmarc": "DMARC (recomendado)",
       "tracking": "Rastreamento de aberturas e cliques",
       "trackingNote": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário. Defina um subdomínio em Configuração para servi-los do seu próprio domínio.",
-      "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário."
+      "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário.",
+      "receiving": "Habilitar recebimento"
     },
     "tracking": {
       "open": "Ativar rastreamento de aberturas",
@@ -195,7 +196,23 @@
       "change": "Alterar subdomínio",
       "add": "Adicionar um subdomínio personalizado"
     },
-    "notFound": "Domínio não encontrado."
+    "notFound": "Domínio não encontrado.",
+    "receiving": {
+      "enable": "Ativar recebimento",
+      "note": "Aceita e-mails enviados para qualquer endereço em {domain}. Veja em E-mails → Recebidos, pela API ou pelo webhook email.received.",
+      "noteApex": "Aceita e-mails enviados para qualquer endereço em {domain}, e o registro MX dele traz todos os e-mails do domínio para cá. Se alguém já recebe e-mail em {domain}, use um subdomínio como {example} para as caixas de entrada atuais continuarem como estão.",
+      "notVerified": "Disponível assim que o domínio for verificado.",
+      "confirmEnableTitle": "Ativar recebimento?",
+      "confirmEnable": "Quando o registro MX apontar para cá, os e-mails enviados para qualquer endereço em {domain} passam a ser aceitos e guardados aqui.",
+      "confirmEnableApex": "Quando o registro MX apontar para cá, os e-mails enviados para qualquer endereço em {domain} passam a ser aceitos e guardados aqui, e deixam de chegar às caixas de entrada que os recebem hoje.",
+      "confirmEnableCta": "Ativar recebimento",
+      "confirmDisableTitle": "Desativar recebimento?",
+      "confirmDisable": "Os e-mails enviados para {domain} passam a ser recusados. Os que já chegaram continuam aqui até o fim da janela de retenção.",
+      "confirmDisableCta": "Desativar recebimento",
+      "errorNotVerified": "Verifique o domínio antes de ativar o recebimento.",
+      "errorTaken": "Outra equipe já recebe os e-mails de {domain}.",
+      "error": "Não foi possível alterar o recebimento. Tente novamente."
+    }
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Abrir configuração do SES",

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
+import { BetaPill } from "@/components/beta-pill";
 import { EmailsTable } from "@/components/emails-table";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
@@ -22,6 +23,7 @@ import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
+import { ReceivedEmailsList } from "./received-list";
 
 // Keep in enum order (packages/db schema.emailStatusEnum) — the router input
 // rejects anything outside it at typecheck time.
@@ -43,6 +45,8 @@ const RANGE_KEYS: RangeKey[] = ["h24", "d7", "d15", "d30", "all"];
 
 // The log opens on what a team checks every day; broadcast copies are a tab away.
 const SOURCES = ["transactional", "broadcast", "all"] as const;
+// Received mail is its own list behind the last tab, on instances that take mail.
+const TABS = [...SOURCES, "receiving"] as const;
 
 /** ms until the daily quota resets (midnight UTC). */
 function msToUtcMidnight(now = new Date()): number {
@@ -64,7 +68,12 @@ export default function EmailsPage() {
   const [apiKeyId, setApiKeyId] = useUrlState("key", "all");
   const [domainId, setDomainId] = useUrlState("domain", "all");
   const [sourceParam, setSource] = useUrlState("source", "transactional");
-  const source = oneOf(SOURCES, sourceParam, "transactional");
+  const features = useQuery(trpc.system.features.queryOptions());
+  const receivingOn = features.data?.receiving === true;
+  const picked = oneOf(TABS, sourceParam, "transactional");
+  // A receiving link on an instance that takes no mail falls back to the sent list.
+  const source =
+    picked === "receiving" && features.data?.receiving === false ? "transactional" : picked;
   const [limit, setLimit] = useState(40);
   // Any subset of statuses, "all" (the default) meaning no status filter.
   const statuses = useMemo(() => manyOf(STATUSES, statusParam), [statusParam]);
@@ -85,8 +94,12 @@ export default function EmailsPage() {
   };
   const query = useInfiniteQuery(
     trpc.emails.list.infiniteQueryOptions(
-      { limit, ...filterInput, ...(source !== "all" ? { source } : {}) },
-      { getNextPageParam: (page) => page.nextCursor },
+      {
+        limit,
+        ...filterInput,
+        ...(source === "transactional" || source === "broadcast" ? { source } : {}),
+      },
+      { getNextPageParam: (page) => page.nextCursor, enabled: source !== "receiving" },
     ),
   );
   // The tab counts hold their last value while a filter change refetches
@@ -104,8 +117,14 @@ export default function EmailsPage() {
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
   const sourceTotals = counts.data ?? null;
-  // A team that never sent a broadcast gets no tabs at all.
-  const showSources = source !== "transactional" || stats.data?.hasBroadcasts === true;
+  // A team that never sent a broadcast gets no broadcast tabs, and no tab row
+  // at all unless the Receiving tab needs one.
+  const showSources =
+    source === "broadcast" || source === "all" || stats.data?.hasBroadcasts === true;
+  const tabs = [
+    ...(showSources ? SOURCES : (["transactional"] as const)),
+    ...(receivingOn ? (["receiving"] as const) : []),
+  ];
   const hiddenBroadcasts = source === "transactional" ? (sourceTotals?.broadcast ?? 0) : 0;
 
   // The cap that can stop sends: the billing period's included volume on a
@@ -163,13 +182,13 @@ export default function EmailsPage() {
     ...(range !== "all" ? [t(`list.range.${range}`)] : []),
   ].join(" · ");
 
-  return (
+  const top = (
     <>
       <PageHeader
         title={t("list.title")}
         actions={
           <>
-            {canExport ? (
+            {canExport && source !== "receiving" ? (
               <ExportCsvLink
                 href={exportQuery ? `/export/emails?${exportQuery}` : "/export/emails"}
               />
@@ -231,14 +250,14 @@ export default function EmailsPage() {
         </div>
       ) : null}
 
-      {showSources ? (
+      {tabs.length > 1 ? (
         <div
           className="ms-tabs bleed"
           role="tablist"
           aria-label={t("list.source.label")}
           style={{ marginBottom: 14 }}
         >
-          {SOURCES.map((key) => (
+          {tabs.map((key) => (
             <button
               key={key}
               type="button"
@@ -248,7 +267,8 @@ export default function EmailsPage() {
               onClick={() => setSource(key)}
             >
               {t(`list.source.${key}`)}
-              {sourceTotals && key !== "all" ? (
+              {key === "receiving" ? <BetaPill /> : null}
+              {sourceTotals && (key === "transactional" || key === "broadcast") ? (
                 <span
                   className="ms-digits"
                   style={{ marginLeft: 7, fontWeight: 500, color: "var(--ms-faint)" }}
@@ -260,7 +280,21 @@ export default function EmailsPage() {
           ))}
         </div>
       ) : null}
+    </>
+  );
 
+  if (source === "receiving") {
+    return (
+      <>
+        {top}
+        <ReceivedEmailsList />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {top}
       <div
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}

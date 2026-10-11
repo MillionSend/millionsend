@@ -638,3 +638,88 @@ describe("settings.usage", () => {
     expect(usage.today.accepted).toBe(0);
   });
 });
+
+describe("settings.usage receiving", () => {
+  beforeEach(() => {
+    vi.stubEnv("RECEIVING_MX_HOST", "mx.receiving.test");
+  });
+
+  async function insertCounter(teamId: string, day: string, accepted: number, received: number) {
+    await db.insert(schema.usageCounters).values({ teamId, day, accepted, received });
+  }
+
+  it("has no receiving figures on an instance that takes no mail", async () => {
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    const teamId = await createTeam(db, "acme");
+    expect((await callerFor("u1", teamId, "owner").settings.usage.recent()).receiving).toBeNull();
+  });
+
+  it("on Free, counts received mail inside the daily limit sending uses", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme");
+    await insertCounter(teamId, dayAgo(0), 30, 12);
+    await insertCounter(teamId, dayAgo(1), 3, 3);
+    const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
+    expect(usage.receiving).toEqual({
+      kind: "shared_day",
+      received: 12,
+      allowance: 100,
+      perBilledEmail: 10,
+    });
+    expect(usage.rows.map((r) => [r.day, r.accepted, r.received])).toEqual([
+      [dayAgo(0), 30, 12],
+      [dayAgo(1), 3, 3],
+    ]);
+  });
+
+  it("on Starter, allows twice the daily cap apart from sending", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme");
+    await db
+      .update(schema.teams)
+      .set({ plan: "starter", currentPeriodEnd: new Date(Date.now() + 20 * DAY_MS) })
+      .where(eq(schema.teams.id, teamId));
+    await insertCounter(teamId, dayAgo(0), 0, 7);
+    expect((await callerFor("u1", teamId, "owner").settings.usage.recent()).receiving).toEqual({
+      kind: "day",
+      received: 7,
+      allowance: 3_000,
+      perBilledEmail: 10,
+    });
+  });
+
+  it("on a monthly plan, counts the billing period against twice its volume", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme");
+    const start = new Date(Date.now() - 10 * DAY_MS);
+    await db
+      .update(schema.teams)
+      .set({
+        plan: "scale",
+        planQuota: 500_000,
+        currentPeriodStart: start,
+        currentPeriodEnd: new Date(Date.now() + 20 * DAY_MS),
+      })
+      .where(eq(schema.teams.id, teamId));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: start, accepted: 10, received: 1_234 });
+    expect((await callerFor("u1", teamId, "owner").settings.usage.recent()).receiving).toEqual({
+      kind: "month",
+      received: 1_234,
+      allowance: 1_000_000,
+      perBilledEmail: 10,
+    });
+  });
+
+  it("never caps it on self-host", async () => {
+    const teamId = await createTeam(db, "acme");
+    await insertCounter(teamId, dayAgo(0), 0, 5);
+    expect((await callerFor("u1", teamId, "owner").settings.usage.recent()).receiving).toEqual({
+      kind: "none",
+      received: 5,
+      allowance: null,
+      perBilledEmail: 10,
+    });
+  });
+});
