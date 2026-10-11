@@ -84,6 +84,31 @@ próprio limite diário (veja [Domínios](/pt-BR/concepts/domains#aquecimento-de
 Uma mudança de plano nunca o libera, e o que ele retém fica estacionado como
 `queued_quota` sem contar no plano até o dreno liberá-lo.
 
+### Emails recebidos
+
+Times que [recebem email](/pt-BR/concepts/receiving) são contados uma vez por
+mensagem, não por destinatário, em `usage_counters.received` e
+`usage_counters_hourly.received` e, em plano mensal, em
+`usage_periods.received`. O custo vem de
+`receivingRule` em `packages/core/src/receiving/rcpt.ts`:
+
+- **Free**: o email recebido gasta o contador de envios do dia
+  (`usage_counters.accepted`), então envios e emails recebidos dividem a
+  cota e a tolerância de 50%, e os avisos de cota contam os dois. No teto, o
+  MX adia emails novos com `452 4.2.2` até a meia-noite UTC.
+- **Starter**: grátis até o dobro da cota diária (3.000) por dia UTC, contado
+  à parte dos envios; além disso, `452`.
+- **Pro, Scale**: grátis até o dobro do volume incluído por período. Além
+  disso, cada décimo email recebido soma um email a `usage_periods.accepted`,
+  que o [cron de excedente](#o-cron-de-excedente) cobra como um envio. Depois
+  da franquia, o email recebido é adiado quando `accepted` chega ao teto do
+  período: 5× o volume com o excedente ligado, o próprio volume com ele
+  desligado.
+
+O MX pergunta a cada `RCPT TO`, então um time sem espaço é adiado antes de a
+mensagem ser enviada; o remetente tenta de novo. Instâncias auto-hospedadas
+contam os emails recebidos e nunca os limitam.
+
 ## O modelo no Stripe
 
 - Um **produto** por plano pago (Starter, Pro, Scale), localizado por

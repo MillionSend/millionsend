@@ -150,7 +150,7 @@ auto-hospedada não tem limites de plano.
 | `ALLOW_SIGNUP` | O primeiro usuário sempre pode se registrar; depois disso o cadastro fica fechado a menos que isto seja `true`. Mantenha `false` quando o painel é acessível pela internet. |
 | `TRUSTED_PROXIES` | Reverse proxies cujos headers de IP do cliente (`X-Forwarded-For`, `CF-Connecting-IP`) são confiáveis, IPs ou CIDRs separados por vírgula. O padrão `127.0.0.1,::1` cobre um proxy no mesmo host; adicione o endereço do seu proxy quando ele roda em outro lugar. Veja a [seção de nginx](#produção-nginx--tls). |
 | `WEBHOOK_ALLOW_LOCALHOST` | Só para desenvolvimento local: permite que endpoints de webhook (disparos de teste incluídos) apontem para `http://` e endereços de loopback/privados em qualquer porta. Mantenha `false` em qualquer instância acessível pela internet. |
-| `COMPOSE_PROFILES` | Serviços opcionais do compose, separados por vírgula: `smtp` (o relay; monte um par de chaves STARTTLS antes) e, no arquivo standalone, também `docs` (este site de documentação) e `backup` (dumps agendados). |
+| `COMPOSE_PROFILES` | Serviços opcionais do compose, separados por vírgula: `smtp` (o relay; monte um par de chaves STARTTLS antes) e, no arquivo standalone, também `docs` (este site de documentação), `backup` (dumps agendados) e `mx` (o MX de entrada; veja [Recebimento](#recebimento-beta)). |
 | `PORT` | Porta da API (padrão `3001`). No compose, move junto a porta interna do contêiner e a porta publicada no host. |
 | `UNSUBSCRIBE_BASE_URL` | Host próprio, opcional, para as páginas hospedadas de descadastro (ex.: `https://unsubscribe.example.com`), apontado para o mesmo processo web. Os links de descadastro nos e-mails e os redirecionamentos da página usam esse host, e ele serve só o fluxo de descadastro, então destinatários e scanners de links nunca alcançam a origem, os cookies nem a reputação do painel. Sem definir: `APP_BASE_URL`. |
 | `WEB_PORT` | Porta do host em que o compose publica o painel (o processo web é sempre 3000 dentro do contêiner). Mantenha `APP_BASE_URL` em sincronia. |
@@ -196,6 +196,23 @@ worker cabem sem ajuste.
 | `S3_BACKUP_BUCKET` | Bucket PRIVADO para os dumps agendados do banco — nunca o bucket público de uploads. Sem ele o serviço `backup` fica desligado. |
 | `S3_BACKUP_PREFIX` / `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | Ajustes do backup: prefixo das chaves (padrão `backups`), agenda diária dos dumps (`<minuto> <hora> * * *`, UTC, padrão `0 3 * * *`; qualquer outro formato faz o serviço sair com código 1) e dias de dumps mantidos (padrão 14). |
 | `BACKUP_AGE_RECIPIENT` | Chave pública age (`age1…`); defina para criptografar os dumps antes do upload. Para restaurar, rode `age --decrypt -i <arquivo da chave>` primeiro. |
+
+### Email de entrada (recebimento)
+
+Veja [Recebimento](#recebimento-beta). O app lê as duas primeiras; o processo
+MX lê só as variáveis `MX_*`.
+
+| Variável | Propósito |
+| --- | --- |
+| `RECEIVING_MX_HOST` | Hostname em que o processo MX atende (ex.: `mx.example.com`); os domínios de recebimento apontam o registro MX para ele. Sem ela, o recebimento não existe na instância: nem aba nem opção de ativar no painel, todo domínio informa `capabilities.receiving: "disabled"` e os endpoints internos do MX respondem `404`. |
+| `MX_INGEST_SECRET` | Segredo bearer que o MX apresenta à API, com pelo menos 32 caracteres (`openssl rand -hex 32`). Defina junto com `RECEIVING_MX_HOST`: o app se recusa a subir com só uma das duas. O processo MX precisa do mesmo valor. |
+| `MX_INGEST_URL` | Processo MX: a origem da sua API mais `/internal/mx` (ex.: `https://api.example.com/internal/mx`). |
+| `MX_HOSTNAME` | Processo MX: o nome na saudação e no EHLO, normalmente igual ao `RECEIVING_MX_HOST`. |
+| `MX_PORT` | Processo MX: porta de escuta (padrão `2525`). Publique a porta 25 do host nela. |
+| `MX_TLS_CERT_PATH` / `MX_TLS_KEY_PATH` | Processo MX: par de chaves PEM para STARTTLS (caminhos dentro do contêiner), as duas ou nenhuma. O STARTTLS é oferecido quando os arquivos existem, e um certificado renovado é carregado sem reiniciar. |
+| `MX_MAX_CLIENTS` / `MX_MAX_CONNECTIONS_PER_IP` / `MX_CONNECTIONS_PER_IP_PER_MINUTE` | Processo MX: limites de conexão (padrões `200` ao mesmo tempo, `10` ao mesmo tempo por IP, `60` novas por IP por minuto). |
+| `MX_MAX_RECIPIENTS` | Processo MX: destinatários aceitos por transação SMTP (padrão `50`, no máximo `100`); o servidor de quem envia entrega o resto em outra. |
+| `MX_SOCKET_TIMEOUT_MS` / `MX_SESSION_TIMEOUT_MS` | Processo MX: tempo parado antes de derrubar a conexão (padrão `60000`) e a duração máxima de uma sessão (padrão `600000`). |
 
 ## Configuração da AWS
 
@@ -447,6 +464,44 @@ O serviço `smtp` está definido nos dois arquivos compose atrás do profile
 adicione `smtp` a `COMPOSE_PROFILES` no `.env` (separado por vírgula de
 outros) e rode `docker compose up -d`.
 
+## Recebimento (beta)
+
+O [recebimento](/pt-BR/concepts/receiving) precisa de mais um processo: o MX,
+que atende SMTP na porta 25 para os domínios de recebimento dos seus times e
+entrega cada mensagem à API por HTTP. Ele não tem banco de dados nem chaves,
+só as variáveis `MX_*`, então pode rodar ao lado do app ou numa máquina
+pequena separada com a porta 25 aberta, que é como o MillionSend Cloud o
+roda. Ele nunca repassa email, não oferece AUTH e nunca envia bounce: recusa
+durante a sessão SMTP.
+
+1. **Dê um nome a ele.** Aponte um registro A (e AAAA) como `mx.example.com`
+   para o host que vai rodar o MX e garanta que a porta TCP 25 de entrada
+   chegue até ele; alguns provedores bloqueiam a porta 25 até você pedir.
+2. **Ligue o recebimento no app.** Defina `RECEIVING_MX_HOST=mx.example.com`
+   e `MX_INGEST_SECRET` (`openssl rand -hex 32`) no `.env` e rode
+   `docker compose up -d`. Os domínios já podem ativar o recebimento, e o
+   registro de recebimento deles aponta para `mx.example.com`.
+3. **Configure o MX.** Ele lê `MX_INGEST_URL` (a origem da sua API mais
+   `/internal/mx`), o mesmo `MX_INGEST_SECRET` e
+   `MX_HOSTNAME=mx.example.com`. Para STARTTLS, monte um certificado para
+   esse nome e defina `MX_TLS_CERT_PATH` e `MX_TLS_KEY_PATH`; os servidores
+   que enviam criptografam quando ele é oferecido, e o MX carrega sozinho um
+   certificado renovado.
+4. **Suba o MX.** Adicione `mx` ao `COMPOSE_PROFILES` e rode
+   `docker compose up -d`: o serviço `mx` roda `PROCESS=mx` e publica a porta
+   25 do host na porta 2525 dele.
+
+De outra máquina, `nc mx.example.com 25` deve responder com uma saudação
+`220` com o nome `mx.example.com`. Depois ative o recebimento num domínio
+verificado, publique o registro MX dele e mande uma mensagem para ele.
+
+Atrás de um proxy reverso, a API precisa aceitar as entregas do MX: uma
+mensagem pode ter 40 MB, então o limite de tamanho de requisição do proxy
+para a API tem que permitir isso (o [exemplo de nginx](#produção-nginx--tls)
+permite 60 MB). Os endpoints internos do MX respondem `404` a não ser que
+`RECEIVING_MX_HOST` esteja definida, e recusam qualquer requisição sem o
+segredo.
+
 ## Site de documentação
 
 A imagem também pode servir este site de documentação: um serviço `docs` do
@@ -507,11 +562,11 @@ server {
     listen 80;
     server_name api.example.com;
 
-    # POST /emails/batch aceita até 100 emails por requisição; os corpos
-    # html/text não têm teto de bytes no schema, mas o SES rejeita mensagens
-    # acima de 10 MB de qualquer forma. 25m cobre um lote cheio de corpos
-    # grandes sem permitir uploads ilimitados.
-    client_max_body_size 25m;
+    # As maiores requisições: um envio com até 40 MB de anexos em base64, uma
+    # mensagem recebida de até 40 MB que o MX entrega em /internal/mx e um
+    # POST /emails/batch de até 100 emails. 60m cobre todas sem permitir
+    # uploads ilimitados.
+    client_max_body_size 60m;
 
     location / {
         proxy_pass http://127.0.0.1:3001;
@@ -1305,7 +1360,7 @@ docker build --secret id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
   a retenção na próxima execução do expurgo.
 - Dimensionamento do worker: `SEND_CONCURRENCY` pistas (padrão 16, cerca de 1,2 por mensagem/segundo da taxa do SES) e `WORKER_REPLICAS` (padrão 1). O limitador de taxa do SES vive em cada processo do worker, então cada worker divide a taxa da conta por `WORKER_REPLICAS`; defina-o como o número de contêineres de worker em execução.
 - Para rodar processos em contêineres separados, defina `PROCESS` como
-  `api`, `worker`, `web`, `smtp` ou `docs` por contêiner (padrão `all` =
+  `api`, `worker`, `web`, `smtp`, `mx` ou `docs` por contêiner (padrão `all` =
   api + worker + web). Atualize todos no mesmo `up -d`: o gráfico de Métricas
   só conta o que processos atualizados escrevem, então um processo deixado em
   uma imagem antiga durante a troca some do gráfico daquele dia (os números de

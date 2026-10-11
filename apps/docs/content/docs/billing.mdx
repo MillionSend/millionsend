@@ -81,6 +81,30 @@ On every plan, a sending domain under 30 days old also has its own daily cap
 lifts it, and mail it holds parks as `queued_quota` without counting against
 the plan until the drain releases it.
 
+### Received mail
+
+Teams that [receive mail](/concepts/receiving) are counted once per message,
+not per recipient, in `usage_counters.received` and
+`usage_counters_hourly.received` and, on a monthly plan,
+`usage_periods.received`. What it costs comes from
+`receivingRule` in `packages/core/src/receiving/rcpt.ts`:
+
+- **Free**: received mail spends the day's sending counter
+  (`usage_counters.accepted`), so sends and received mail share the cap and
+  its 50% tolerance, and the quota notices count both. At the ceiling the MX
+  defers new mail with `452 4.2.2` until midnight UTC.
+- **Starter**: free up to twice the daily cap (3,000) per UTC day, counted
+  apart from sends; past it, `452`.
+- **Pro, Scale**: free up to twice the included volume per period. Past that,
+  every tenth received message adds one email to `usage_periods.accepted`,
+  which the [overage cron](#the-overage-cron) bills like a send. Past the
+  allowance, received mail is deferred once `accepted` reaches the period's
+  ceiling: 5× the volume with overage on, the volume itself with it off.
+
+The MX asks at every `RCPT TO`, so a team out of room is deferred before the
+message is sent; the sender retries. Self-hosted instances count received
+mail and never cap it.
+
 ## The Stripe model
 
 - One **product** per paid plan (Starter, Pro, Scale), found again by
