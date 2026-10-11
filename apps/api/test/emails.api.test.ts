@@ -788,6 +788,63 @@ describe("attachments and custom headers", () => {
     });
   });
 
+  it("refuses program files for every team, naming the file and why", async () => {
+    const program = Buffer.alloc(0x80);
+    program.write("MZ", 0);
+    program.writeUInt32LE(0x40, 0x3c);
+    program.write("PE\0\0", 0x40);
+    // A stored ZIP holding a/run.js.
+    const zipWithScript =
+      "UEsDBBQAAAAAAHSDS12DFtyMAQAAAAEAAAAIAAAAYS9ydW4uanN4UEsBAhQDFAAAAAAAdINLXYMW3IwBAAAAAQAAAAgAAAAAAAAAAAAAAIABAAAAAGEvcnVuLmpzUEsFBgAAAAABAAEANgAAACcAAAAAAA==";
+    const cases: [Record<string, string>, string][] = [
+      [
+        { filename: "invoice.exe", content: pdfBase64 },
+        `"invoice.exe" is refused: .exe files can't be sent`,
+      ],
+      [
+        { filename: "fatura.pdf", content: program.toString("base64") },
+        `"fatura.pdf" is refused: its content is a Windows program, which can't be sent under any name`,
+      ],
+      [
+        { filename: "files.zip", content: zipWithScript },
+        `"files.zip" is refused: it holds "a/run.js", and .js files can't be sent`,
+      ],
+      [
+        { filename: "invoice\u202Eexe.pdf", content: pdfBase64 },
+        `"invoice<U+202E>exe.pdf" is refused: its name holds an invisible formatting character (U+202E) that can disguise the file's type`,
+      ],
+      [
+        { filename: "a.txt", content: pdfBase64, content_type: "application/x-msdownload" },
+        `"a.txt" is refused: its content_type application/x-msdownload is a program type, which can't be sent`,
+      ],
+    ];
+    for (const [attachment, message] of cases) {
+      const res = await post({ ...validBody, attachments: [attachment] });
+      expect(res.status, attachment.filename).toBe(422);
+      expect(await res.json()).toMatchObject({
+        name: "validation_error",
+        message: `attachments.0.filename: ${message}`,
+      });
+    }
+    const batch = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([
+        { ...validBody, attachments: [{ filename: "setup.msi", content: pdfBase64 }] },
+      ]),
+    });
+    expect(batch.status).toBe(422);
+    // Risky but not refusable files wait for the worker's checks instead.
+    const html = await post({
+      ...validBody,
+      to: ["risky-attach@example.com"],
+      attachments: [
+        { filename: "invoice.html", content: Buffer.from("<html>").toString("base64") },
+      ],
+    });
+    expect(html.status).toBe(200);
+  });
+
   it("rejects attachments missing content", async () => {
     const res = await post({ ...validBody, attachments: [{ filename: "x.txt" }] });
     expect(res.status).toBe(422);

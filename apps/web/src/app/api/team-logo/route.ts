@@ -1,8 +1,9 @@
+import { sniffImageType } from "@millionsend/core";
 import { getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
 import { appOrigin } from "@/lib/api-base-url";
 import { isCrossOriginMutation } from "@/lib/http-url";
-import { sniffImageType, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
+import { isLogoImageType, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
 import { getAuth } from "@/server/auth";
 import { listMemberships } from "@/server/membership";
 import {
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
   if (file.size > TEAM_LOGO_MAX_BYTES) return new Response(null, { status: 413 });
   const bytes = new Uint8Array(await file.arrayBuffer());
   const type = sniffImageType(bytes);
-  if (!type) return new Response(null, { status: 415 });
+  if (!isLogoImageType(type)) return new Response(null, { status: 415 });
 
   const [team] = await auth.db
     .select({ logoUrl: schema.teams.logoUrl })

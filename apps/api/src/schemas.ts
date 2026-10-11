@@ -1,5 +1,6 @@
 import { z } from "@hono/zod-openapi";
 import {
+  attachmentVerdict,
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
@@ -73,10 +74,12 @@ const MEDIA_TYPE_RE = new RegExp(
  * Wire shape from resend's parseEmailToApiOptions. Only inline base64
  * `content` is supported: a `path` URL would have the server fetch an
  * attacker-chosen location (SSRF), so it is rejected and never fetched.
+ * Program files are refused here for every team (attachmentVerdict), so the
+ * sender hears it now instead of from a send that fails at SES later.
  */
 const attachmentSchema = z
   .object({
-    filename: z.string().min(1),
+    filename: z.string().min(1).max(1000),
     content: z.string().optional(),
     content_type: z.string().optional(),
     content_id: z.string().optional(),
@@ -123,6 +126,15 @@ const attachmentSchema = z
     }
     if (!BASE64_RE.test(a.content)) {
       ctx.addIssue({ code: "custom", path: ["content"], message: "content must be valid base64" });
+      return;
+    }
+    const verdict = attachmentVerdict({
+      filename: a.filename,
+      contentType: a.content_type,
+      bytes: Buffer.from(a.content, "base64"),
+    });
+    if (verdict.action === "reject") {
+      ctx.addIssue({ code: "custom", path: ["filename"], message: verdict.reason });
     }
   });
 

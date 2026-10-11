@@ -155,6 +155,16 @@ export {
   verifyApiKey,
 } from "./api-keys.js";
 export {
+  ATTACHMENT_FLAGS,
+  type AttachmentFile,
+  type AttachmentFlag,
+  type AttachmentVerdict,
+  attachmentVerdict,
+  BLOCKED_CONTENT_TYPES,
+  BLOCKED_EXTENSIONS,
+  fileExtensions,
+} from "./attachment-policy.js";
+export {
   AUDIT_ACTIONS,
   type AuditAction,
   type AuditActor,
@@ -352,6 +362,18 @@ export { purgedEmailBodyColumns } from "./email-retention.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
 export { type SesEventsHealth, sesEventsHealth } from "./events-health.js";
 export {
+  type ArchiveType,
+  type ExecutableType,
+  type FileKind,
+  IMAGE_TYPES,
+  type ImageType,
+  readZipEntry,
+  sniffFileType,
+  sniffImageType,
+  type ZipEntry,
+  zipEntries,
+} from "./file-type.js";
+export {
   accountMailCard,
   EMAIL_WHITE_TILE_URL,
   EMAIL_WORDMARK_BONE_URL,
@@ -433,6 +455,7 @@ export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.j
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
 export { isRootDomainSend, registrableDomain } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
+export { findPixCodes, type PixCode, type PixKeyKind, parsePix } from "./pix.js";
 export {
   effectivePlan,
   formatVolume,
