@@ -1,6 +1,8 @@
 {
   "subject": "Você recebeu um convite para uma equipe no MillionSend",
   "body": "{inviter} convidou você para entrar em {team} no MillionSend como {role}.",
+  "bodyNewTeam": "{inviter} convidou você para entrar em uma equipe no MillionSend como {role}.",
+  "bodyNoInviter": "Você recebeu um convite para entrar em uma equipe no MillionSend como {role}.",
   "roles": {
     "member": "membro",
     "admin": "administrador"

@@ -338,6 +338,13 @@ export const en = {
       "Open the review page to see the sampled verdicts, the content checks and the team's history, and decide. This notice repeats at most once a day per team while the risk stays over the line.",
     ],
     button: "Open review",
+    extra: {
+      new: "new",
+      probation: "probation",
+      established: "established",
+      trusted: "trusted",
+      exempt: "exempt",
+    },
   },
   "monitor.broadcasts_paused": {
     subject: "Content monitor paused a team's broadcasts",

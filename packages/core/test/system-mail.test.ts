@@ -3,13 +3,15 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { SYSTEM_MAIL_TAG } from "../src/accept-email.js";
 import { ACCOUNT_MAIL_KINDS } from "../src/account-mail.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { hashRecipient } from "../src/suppressions.js";
 import {
   findSenderDomainOwner,
+  RECIPIENT_MAIL_PER_DAY,
+  RECIPIENT_MAIL_PER_HOUR,
   SENT_WHILE_SUSPENDED,
   type SenderDomainOwner,
   type SystemMailKind,
@@ -288,5 +290,44 @@ describe("suspended teams", () => {
     expect(
       await sendSystemMail(d.deps, message({ kind: "domain.verified", aboutTeamId: team })),
     ).toBe("pipeline");
+  });
+});
+
+describe("the per-recipient cap", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("caps verification and invitation mail to one address across kinds, by the hour and the day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-11T08:00:00Z"));
+    const d = deps();
+    const send = (kind: SystemMailKind, to = "capped@example.com") =>
+      sendSystemMail(d.deps, message({ kind, to, from: "no-reply@unowned.example.com" }));
+    const refused = { reason: "recipient_capped" };
+    for (let i = 0; i < RECIPIENT_MAIL_PER_HOUR; i += 1) {
+      expect(await send(i % 2 === 0 ? "email_verification" : "invitation")).toBe("raw");
+    }
+    await expect(send("invitation")).rejects.toMatchObject(refused);
+    // The same mailbox however it is written.
+    await expect(send("email_verification", "Capped <CAPPED@Example.com>")).rejects.toMatchObject(
+      refused,
+    );
+    // Another address, and mail the address's own account asked for, still go.
+    expect(await send("email_verification", "other@example.com")).toBe("raw");
+    expect(await send("password_reset")).toBe("raw");
+
+    vi.setSystemTime(new Date("2026-10-11T09:00:00Z"));
+    for (let i = RECIPIENT_MAIL_PER_HOUR; i < RECIPIENT_MAIL_PER_DAY; i += 1) {
+      expect(await send("email_verification")).toBe("raw");
+    }
+    vi.setSystemTime(new Date("2026-10-11T10:00:00Z"));
+    await expect(send("email_verification")).rejects.toMatchObject(refused);
+
+    vi.setSystemTime(new Date("2026-10-12T00:00:00Z"));
+    expect(await send("invitation")).toBe("raw");
+    expect(d.raw.filter((m) => m.to === "capped@example.com")).toHaveLength(
+      RECIPIENT_MAIL_PER_DAY + 2,
+    );
   });
 });

@@ -1,4 +1,5 @@
 import { DAY_MS, INVITE_MAX_SENDS, INVITE_TTL_MS, SUSPENSION_REASONS } from "@millionsend/core";
+import { unescapeHtml } from "@millionsend/core/html";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SimpleEmail } from "@millionsend/ses";
@@ -76,6 +77,17 @@ function mailCaller(
     role,
   };
   return { caller: factory(ctx), sent };
+}
+
+async function verifyEmail(userId: string): Promise<void> {
+  await db.update(schema.user).set({ emailVerified: true }).where(eq(schema.user.id, userId));
+}
+
+/** Past the monitor's "new" tier: its first window and ramp behind it, on probation. */
+async function settleTeam(teamId: string): Promise<void> {
+  await db
+    .insert(schema.teamMonitor)
+    .values({ teamId, sentTotal: 2_000, firstSendAt: new Date(Date.now() - 10 * DAY_MS) });
 }
 
 function stubSender(): void {
@@ -264,13 +276,17 @@ describe("settings.invitations email + resend", () => {
       "Você recebeu um convite para uma equipe no MillionSend",
       "You've been invited to a team on MillionSend",
     ]);
-    expect(sent[0]?.text).toContain("owner1 convidou você para entrar em acme no MillionSend");
+    expect(sent[0]?.text).toContain(
+      "Você recebeu um convite para entrar em uma equipe no MillionSend como membro.",
+    );
   });
 
   it("emails the invitee at create, naming the team and carrying the accept link", async () => {
     stubSender();
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "owner1", "owner");
+    await verifyEmail("owner1");
+    await settleTeam(teamId);
     const { caller, sent } = mailCaller("owner1", teamId, "owner");
     const created = await caller.settings.invitations.create({ email: "new@example.com" });
     expect(created.emailed).toBe(true);
@@ -279,7 +295,7 @@ describe("settings.invitations email + resend", () => {
     expect(sent[0]?.from).toContain("no-reply@mail.example.com");
     expect(sent[0]?.subject).toBe("You've been invited to a team on MillionSend");
     expect(readable(sent[0]?.text)).toContain(
-      "owner1 invited you to join acme on MillionSend as a member.",
+      "owner1@example.com invited you to join acme on MillionSend as a member.",
     );
     expect(sent[0]?.html).toContain(created.acceptUrl);
     expect(sent[0]?.text).toContain(created.acceptUrl);
@@ -368,6 +384,51 @@ describe("settings.invitations email + resend", () => {
   });
 });
 
+describe("settings.invitations email content", () => {
+  /** The one invitation the owner of a team named Zebra Labs sends, as a reader sees it. */
+  async function invitation(opts: { verified: boolean; settled: boolean }): Promise<string> {
+    stubSender();
+    const teamId = await createTeam(db, "zebra");
+    await db.update(schema.teams).set({ name: "Zebra Labs" }).where(eq(schema.teams.id, teamId));
+    await addMember(teamId, "owner1", "owner");
+    // A display name stored before names refused phone numbers.
+    await db
+      .update(schema.user)
+      .set({ name: "Ana, call 0800 555 0199" })
+      .where(eq(schema.user.id, "owner1"));
+    if (opts.verified) await verifyEmail("owner1");
+    if (opts.settled) await settleTeam(teamId);
+    const { caller, sent } = mailCaller("owner1", teamId, "owner");
+    await caller.settings.invitations.create({ email: "new@example.com" });
+    expect(sent).toHaveLength(1);
+    const mail = sent[0];
+    const read = readable(`${mail?.subject}\n${mail?.text}\n${unescapeHtml(mail?.html ?? "")}`);
+    expect(read).not.toMatch(/Ana|0800/);
+    return read;
+  }
+
+  it("names a new team's inviter by verified address, and the team by no name", async () => {
+    const read = await invitation({ verified: true, settled: false });
+    expect(read).toContain(
+      "owner1@example.com invited you to join a team on MillionSend as a member.",
+    );
+    expect(read).not.toContain("Zebra");
+  });
+
+  it("names the team once it is past the new tier", async () => {
+    const read = await invitation({ verified: true, settled: true });
+    expect(read).toContain(
+      "owner1@example.com invited you to join Zebra Labs on MillionSend as a member.",
+    );
+  });
+
+  it("names neither when the inviter's address is unverified", async () => {
+    const read = await invitation({ verified: false, settled: true });
+    expect(read).toContain("You've been invited to join a team on MillionSend as a member.");
+    expect(read).not.toMatch(/owner1|Zebra/);
+  });
+});
+
 describe("settings.invitations send accounting", () => {
   it("two concurrent resends email exactly once: the cooldown is enforced by the update itself", async () => {
     stubSender();
@@ -437,14 +498,14 @@ describe("settings.invitations send accounting", () => {
   it("names with $ sequences render verbatim and every placeholder is filled", () => {
     const mail = buildInvitationEmail({
       to: "new@example.com",
-      inviterName: "Bob $'",
+      inviterEmail: "bob+$'@example.com",
       teamName: "Acme $$ Co",
       role: "member",
       url: "https://app.example.com/invite/tok",
       expiresInDays: 3,
       locale: "en",
     });
-    expect(mail.text).toContain("Bob $'");
+    expect(mail.text).toContain("bob+$'@");
     expect(mail.text).toContain("Acme $$ Co");
     expect(mail.text).not.toMatch(/\{(inviter|team|role|days|email)\}/);
     expect(mail.subject).toBe("You've been invited to a team on MillionSend");

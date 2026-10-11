@@ -741,13 +741,26 @@ finíssimo (hair space) segue cada `.`, `@`, `:` e `\`, então `acme.dev`
 continua legível como acme.dev sem virar link. Uma sequência de sete ou mais
 dígitos mantém só os quatro primeiros, para nenhum app de e-mail oferecer a
 ligação, a menos que seja exatamente uma data (`09/10/2026`, `2026-10-09`) ou
-um intervalo de até dez anos (`2025-2026`), que sai como foi digitado. Nomes
-de equipe e de pessoa com um esquema de link, um `@`, uma quebra
-de linha ou qualquer outro caractere invisível, ou com mais de 64 caracteres,
-são recusados ao serem definidos. Uma equipe tem no máximo um convite pendente
-por endereço, um reenvio espera dois minutos, e a equipe, e cada membro somando
-todas as suas equipes, cria no máximo `INVITES_PER_TEAM_PER_DAY` convites por
-dia (padrão 50, contando os revogados e os de equipes excluídas).
+um intervalo de até dez anos (`2025-2026`), que sai como foi digitado. Nomes de
+equipe e de pessoa com um esquema de link, um `@`, uma quebra de linha ou
+qualquer outro caractere invisível, uma sequência de oito ou mais dígitos (fora
+uma data ou um intervalo de anos como esses), ou com mais de 64 caracteres, são
+recusados ao serem definidos; um nome salvo antes continua como está.
+
+A confirmação de e-mail, a redefinição de senha e o convite podem chegar a
+qualquer endereço que alguém digitou, por isso não cumprimentam ninguém pelo
+nome. Um convite identifica quem convidou pelo endereço confirmado dessa
+pessoa, ou não identifica ninguém quando o endereço não foi confirmado, e só
+diz o nome da equipe depois que ela sai do nível novo do monitor de conteúdo;
+até lá, diz "uma equipe" (sem `ABUSE_JUDGE`, toda equipe continua nova). Uma
+equipe tem no máximo um convite pendente por endereço, um reenvio espera dois
+minutos, e a equipe, e cada membro somando todas as suas equipes, cria no
+máximo `INVITES_PER_TEAM_PER_DAY` convites por dia (padrão 50, contando os
+revogados e os de equipes excluídas). Não importa quantas contas e equipes
+peçam: um endereço recebe no máximo 5 e-mails de confirmação e de convite por
+hora cheia e 10 por dia UTC; passando disso, nada mais vai para ele até a hora
+ou o dia virar, e a janela do convite avisa que o e-mail não pôde ser enviado e
+mostra o link.
 
 Essa equipe é a da própria instância, e o operador pode marcá-la como tal: no
 plano `system` ela nunca tem limite nem cobrança, o selo diz System e a aba

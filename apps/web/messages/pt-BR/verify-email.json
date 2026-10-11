@@ -1,6 +1,6 @@
 {
   "subject": "Confirme seu e-mail do MillionSend",
-  "greeting": "Olá, {name},",
+  "greeting": "Olá,",
   "body": "Confirme este endereço para concluir a configuração da sua conta. Clique no botão abaixo.",
   "button": "Confirmar e-mail",
   "linkFallback": "Ou copie e cole este link no seu navegador:",

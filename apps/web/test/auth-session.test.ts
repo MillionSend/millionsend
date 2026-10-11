@@ -66,7 +66,7 @@ describe("display names", () => {
       expect(await res.json(), name).toMatchObject({
         code: "INVALID_NAME",
         message:
-          "Names can't contain links, email addresses, line breaks or hidden characters, and can be up to 64 characters long.",
+          "Names can't contain links, email addresses, phone numbers, line breaks or hidden characters, and can be up to 64 characters long.",
       });
     }
     const portuguese = await post(
@@ -77,7 +77,7 @@ describe("display names", () => {
     );
     expect(await portuguese.json()).toMatchObject({
       message:
-        "Nomes não podem ter links, endereços de e-mail, quebras de linha nem caracteres invisíveis, e podem ter até 64 caracteres.",
+        "Nomes não podem ter links, endereços de e-mail, números de telefone, quebras de linha nem caracteres invisíveis, e podem ter até 64 caracteres.",
     });
     expect(await db.select().from(schema.user)).toEqual([]);
 

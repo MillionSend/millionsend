@@ -348,6 +348,13 @@ export const ptBR = {
       "Abra a página de revisão para ver as avaliações das amostras, as verificações de conteúdo e o histórico da equipe, e decida. Este aviso se repete no máximo uma vez por dia por equipe enquanto o risco ficar acima do limite.",
     ],
     button: "Abrir revisão",
+    extra: {
+      new: "novo",
+      probation: "em observação",
+      established: "estabelecido",
+      trusted: "confiável",
+      exempt: "isento",
+    },
   },
   "monitor.broadcasts_paused": {
     subject: "O monitor de conteúdo pausou as transmissões de uma equipe",

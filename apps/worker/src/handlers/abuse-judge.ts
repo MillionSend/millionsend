@@ -289,13 +289,13 @@ async function notifyOperator(
         deps.mailer,
         "monitor.alert",
         path,
-        {
+        (locale) => ({
           team: name,
           risk,
-          tier: outcome.tier,
+          tier: accountMailPhrase({ locale, kind: "monitor.alert", key: outcome.tier }),
           samples: String(overview.judged7d),
           flagged: String(overview.flagged7d),
-        },
+        }),
         deps.appBaseUrl,
       );
     }

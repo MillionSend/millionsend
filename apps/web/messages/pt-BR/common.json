@@ -12,7 +12,7 @@
   "cancel": "Cancelar",
   "openNav": "Abrir navegação",
   "signOut": "Sair",
-  "nameRule": "Nomes não podem ter links, endereços de e-mail, quebras de linha nem caracteres invisíveis, e podem ter até {max} caracteres.",
+  "nameRule": "Nomes não podem ter links, endereços de e-mail, números de telefone, quebras de linha nem caracteres invisíveis, e podem ter até {max} caracteres.",
   "accountMenu": {
     "onboarding": "Onboarding",
     "appearance": "Aparência",

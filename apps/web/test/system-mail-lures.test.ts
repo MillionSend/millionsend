@@ -9,8 +9,6 @@ import {
   buildInvitationEmail,
   buildMcpConnectedEmail,
   buildPasswordChangedEmail,
-  buildResetEmail,
-  buildVerificationEmail,
   buildWelcomeEmail,
 } from "@/server/system-mail";
 
@@ -39,15 +37,13 @@ describe("system mail around customer text shaped like a lure", () => {
         const mails = [
           buildInvitationEmail({
             to: "billing@acme-support.com",
-            inviterName: lure,
+            inviterEmail: "ana@acme.dev",
             teamName: lure,
             role: "admin",
             url: LINK,
             expiresInDays: 3,
             locale,
           }),
-          buildResetEmail({ to: "a@example.com", name: lure, url: LINK, locale }),
-          buildVerificationEmail({ to: "a@example.com", name: lure, url: LINK, locale }),
           buildWelcomeEmail({ to: "a@example.com", name: lure, locale }),
           buildPasswordChangedEmail({ to: "billing@acme-support.com", locale }),
           buildMcpConnectedEmail({
@@ -80,10 +76,10 @@ describe("system mail around customer text shaped like a lure", () => {
     }
   });
 
-  it("still reads a team named like a domain as written", () => {
+  it("still reads a team named like a domain, and the inviter's address, as written", () => {
     const mail = buildInvitationEmail({
       to: "new@example.com",
-      inviterName: "Ana",
+      inviterEmail: "ana@acme.dev",
       teamName: "acme.dev",
       role: "member",
       url: LINK,
@@ -93,7 +89,7 @@ describe("system mail around customer text shaped like a lure", () => {
     expect(mail.subject).toBe("You've been invited to a team on MillionSend");
     for (const part of [mail.text, mail.html]) {
       expect(readable(part)).toContain(
-        "Ana invited you to join acme.dev on MillionSend as a member.",
+        "ana@acme.dev invited you to join acme.dev on MillionSend as a member.",
       );
       expect(readable(part)).toContain("(new@example.com)");
     }
@@ -110,15 +106,13 @@ describe("system mail around customer text shaped like a lure", () => {
         const mails = [
           buildInvitationEmail({
             to: "new@example.com",
-            inviterName: name,
+            inviterEmail: "ana@example.com",
             teamName: name,
             role: "member",
             url: LINK,
             expiresInDays: 3,
             locale,
           }),
-          buildVerificationEmail({ to: "a@example.com", name, url: LINK, locale }),
-          buildResetEmail({ to: "a@example.com", name, url: LINK, locale }),
         ];
         for (const mail of mails) {
           const where = `${locale} ${mail.kind} ${name}`;

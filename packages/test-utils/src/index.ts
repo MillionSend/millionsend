@@ -112,7 +112,8 @@ export const LURE_NAMES = [
 
 /**
  * Names every team and display name input refuses: a URL scheme, an
- * address, a zero-width or bidi character, a line break, too long.
+ * address, a zero-width or bidi character, a line break, a phone number,
+ * too long.
  */
 export const REFUSED_NAMES = [
   "https://acme-support.com/login",
@@ -122,6 +123,8 @@ export const REFUSED_NAMES = [
   "acme-sup\u200bport",
   "\u202emoc.troppus-emca\u202c",
   "Security notice\nVisit acme-support.com",
+  "Ligue 0800 555 0199 para desbloquear",
+  "Suporte +55 (11) 98765-4321",
   "x".repeat(65),
 ] as const;
 

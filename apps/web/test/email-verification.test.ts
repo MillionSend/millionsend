@@ -115,27 +115,36 @@ describe("email verification", () => {
     expect(sent[0]?.kind).toBe("email_verification");
   });
 
-  it("the template escapes the name and carries the link in html and text", () => {
+  it("the template carries the link in html and text", () => {
     stubSender();
     const mail = buildVerificationEmail({
       to: "a@b.com",
-      name: '<img src="x">',
       url: "https://x.com/v?token=t",
       locale: "en",
     });
     expect(mail.subject).toBe("Verify your MillionSend email");
-    expect(mail.html).not.toContain('<img src="x">');
-    expect(mail.html).toContain("&lt;img");
     expect(mail.html).toContain("https://x.com/v?token=t");
     expect(mail.text).toContain("https://x.com/v?token=t");
     expect(mail.text).toContain("60");
-    expect(
-      buildVerificationEmail({
-        to: "a@b.com",
-        name: "Ada",
-        url: "https://x.com/v",
-        locale: "pt-BR",
-      }).subject,
-    ).toBe("Confirme seu e-mail do MillionSend");
+    expect(mail.text).toMatch(/^Hi,$/m);
+    const pt = buildVerificationEmail({ to: "a@b.com", url: "https://x.com/v", locale: "pt-BR" });
+    expect(pt.subject).toBe("Confirme seu e-mail do MillionSend");
+    expect(pt.text).toMatch(/^Olá,$/m);
+  });
+
+  it("prints no part of the name sign-up typed, on sign-up and on the re-send", async () => {
+    stubSender();
+    const a = auth();
+    await a.api.signUpEmail({
+      body: { name: "Zoë Lovelace", email: "ada@example.com", password: "correct horse battery" },
+    });
+    await expect(signIn(a)).rejects.toMatchObject({ status: "FORBIDDEN" });
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    for (const mail of sent) {
+      expect(mail.kind).toBe("email_verification");
+      for (const part of [mail.subject, mail.text, mail.html]) {
+        expect(part).not.toMatch(/Zoë|Lovelace/);
+      }
+    }
   });
 });

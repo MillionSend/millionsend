@@ -83,22 +83,24 @@ export function emailVerificationEnabled(): boolean {
   return passwordRecoveryEnabled();
 }
 
-/** Exported for tests; interpolates and escapes, so strings stay in JSON. */
+/**
+ * Exported for tests; interpolates and escapes, so strings stay in JSON. Like
+ * the verification, it greets nobody by name: whoever registers an address
+ * types the account's name, and this mail reaches that address.
+ */
 export function buildResetEmail(input: {
   to: string;
-  name: string;
   url: string;
   locale: MailLocale;
 }): SystemMailMessage {
   const m = MESSAGES[input.locale];
-  const greeting = fill(m.greeting, { name: input.name });
   const expiry = fill(m.expiry, { minutes: String(RESET_TOKEN_TTL_MINUTES) });
   return {
     from: env.AUTH_EMAIL_FROM ?? "",
     to: input.to,
     subject: m.subject,
     ...accountMailCard({
-      paragraphs: [greeting, m.body],
+      paragraphs: [m.greeting, m.body],
       button: m.button,
       url: input.url,
       linkFallback: m.linkFallback,
@@ -111,19 +113,17 @@ export function buildResetEmail(input: {
 /** Exported for tests. Same card as the reset, from the same sender. */
 export function buildVerificationEmail(input: {
   to: string;
-  name: string;
   url: string;
   locale: MailLocale;
 }): SystemMailMessage {
   const m = VERIFY_MESSAGES[input.locale];
-  const greeting = fill(m.greeting, { name: input.name });
   const expiry = fill(m.expiry, { minutes: String(VERIFY_TOKEN_TTL_MINUTES) });
   return {
     from: env.AUTH_EMAIL_FROM ?? "",
     to: input.to,
     subject: m.subject,
     ...accountMailCard({
-      paragraphs: [greeting, m.body],
+      paragraphs: [m.greeting, m.body],
       button: m.button,
       url: input.url,
       linkFallback: m.linkFallback,
@@ -183,11 +183,16 @@ export function buildUpdatesConfirmEmail(input: {
  * Exported for tests. The invitee's stored language picks it when they
  * already have an account; otherwise the inviter's dashboard locale does,
  * since teammates usually share one.
+ *
+ * Any team can invite any address, so the mail prints no name anyone typed:
+ * the inviter is their verified address, and the team's name waits until
+ * the team is past the monitor's "new" tier. Null for either prints a line
+ * without it; without an inviter the line names no team either.
  */
 export function buildInvitationEmail(input: {
   to: string;
-  inviterName: string;
-  teamName: string;
+  inviterEmail: string | null;
+  teamName: string | null;
   role: "member" | "admin";
   url: string;
   expiresInDays: number;
@@ -195,13 +200,20 @@ export function buildInvitationEmail(input: {
 }): SystemMailMessage {
   const m = INVITE_MESSAGES[input.locale];
   const values = {
-    inviter: input.inviterName,
-    team: input.teamName,
+    inviter: input.inviterEmail ?? "",
+    team: input.teamName ?? "",
     role: m.roles[input.role],
     days: String(input.expiresInDays),
     email: input.to,
   };
-  const body = fill(m.body, values);
+  const body = fill(
+    input.inviterEmail === null
+      ? m.bodyNoInviter
+      : input.teamName === null
+        ? m.bodyNewTeam
+        : m.body,
+    values,
+  );
   const expiry = fill(m.expiry, values);
   const noAccount = fill(m.noAccount, values);
   return {
@@ -384,11 +396,7 @@ export async function sendPasswordResetEmail(
     if (recent) return;
     // The language lookup is detached with the send, for the same timing reason.
     void accountMailLocale(db, data.user.email, request?.headers)
-      .then((locale) =>
-        deps.send(
-          buildResetEmail({ to: data.user.email, name: data.user.name, url: data.url, locale }),
-        ),
-      )
+      .then((locale) => deps.send(buildResetEmail({ to: data.user.email, url: data.url, locale })))
       .catch((error) => {
         console.error("Password reset email failed to send", error);
       });
@@ -413,14 +421,7 @@ export function sendVerificationEmail(
   try {
     void accountMailLocale(db, data.user.email, request?.headers)
       .then((locale) =>
-        deps.send(
-          buildVerificationEmail({
-            to: data.user.email,
-            name: data.user.name,
-            url: data.url,
-            locale,
-          }),
-        ),
+        deps.send(buildVerificationEmail({ to: data.user.email, url: data.url, locale })),
       )
       .catch((error) => {
         console.error("Verification email failed to send", error);
