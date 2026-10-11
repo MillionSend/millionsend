@@ -3,6 +3,7 @@ import {
   type AccountMailKind,
   accountMailPhrase,
   applyMergeFields,
+  broadcastScreen,
   broadcastSendSpacingMs,
   buildAccountMail,
   buildUnsubscribeHeaders,
@@ -330,17 +331,16 @@ export async function sendBroadcast(
     .update(schema.broadcasts)
     .set({ audienceCount })
     .where(eq(schema.broadcasts.id, broadcast.id));
-  // Admission: the first `admitted` rows this walk writes get a job now; the
-  // rest park for the drain. A resumed walk takes again against the count,
-  // which already holds the rows it wrote before.
-  const admitted =
-    deps.sesQuota?.take(domain.region, broadcast.id, audienceCount) ?? Number.POSITIVE_INFINITY;
 
   // The monitor judges the broadcast's own HTML once and a few rendered
   // copies: the expected count is `copies`, so the draw needs the audience
-  // size. Every step is best-effort.
+  // size. Every step is best-effort. For a new team, with the hold on, the
+  // walk writes no row until the HTML has its verdict, and the first copy it
+  // renders waits for its own: a contact field can carry a whole link.
   let monitorCopies = 0;
   let monitorAudience = 0;
+  let screenFirstCopy = false;
+  let screenParked = false;
   if (deps.monitor) {
     try {
       const plan = await planBroadcastSamples(db, deps.monitor, {
@@ -351,10 +351,26 @@ export async function sendBroadcast(
         monitorAudience = audienceCount;
         monitorCopies = plan.copies;
       }
+      if (plan.screen && plan.skeletonSampleId) {
+        const gate = await broadcastScreen(db, deps.monitor, {
+          skeletonSampleId: plan.skeletonSampleId,
+          domainId: domain.id,
+          now: new Date(),
+        });
+        // The judge queues the fan-out again once the HTML has its verdict.
+        if (gate === "wait") return "deferred";
+        screenParked = gate === "park";
+        screenFirstCopy = !screenParked && !(await firstCopyScreened(db, broadcast.id));
+      }
     } catch (err) {
       console.error(`broadcast ${broadcast.id}: monitor skeleton skipped`, err);
     }
   }
+  // Admission: the first `admitted` rows this walk writes get a job now; the
+  // rest park for the drain. A resumed walk takes again against the count,
+  // which already holds the rows it wrote before.
+  const admitted =
+    deps.sesQuota?.take(domain.region, broadcast.id, audienceCount) ?? Number.POSITIVE_INFINITY;
   const replyTo = broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null;
   // The preheader is per-broadcast, so it is injected once here; merge tokens
   // inside it still personalize per contact below.
@@ -507,8 +523,10 @@ export async function sendBroadcast(
         const startAfter = spacingMs > 0 ? new Date(nextSendMs) : undefined;
         // Past the share's room the row parks at once: no reservation and no
         // job, the drain reserves on release (the existing parking contract).
-        const paced = emitted >= admitted;
-        const held = !paced && warmupFull;
+        // While the judge cannot answer for a young domain's broadcast, every
+        // row waits for an operator instead.
+        const paced = emitted >= admitted && !screenParked;
+        const held = !paced && !screenParked && warmupFull;
         // Quota reservation and email insert commit atomically (the quota
         // contract), same as the API accept path — a broadcast must not
         // bypass the plan's cap.
@@ -528,12 +546,12 @@ export async function sendBroadcast(
               to: [contact.email],
               replyTo,
               subject: applyMergeFields(broadcast.subject, contact, { html: false }),
-              latestStatus: paced || held ? "queued_quota" : "queued",
-              parkReason: held ? "warmup" : null,
+              latestStatus: paced || held || screenParked ? "queued_quota" : "queued",
+              parkReason: screenParked ? "screening" : held ? "warmup" : null,
               // The drip lives on the row: the send handler defers to it and
               // the reconcile sweep leaves a not-yet-due row alone instead of
               // re-enqueueing every throttled send each pass.
-              scheduledAt: paced ? null : (startAfter ?? null),
+              scheduledAt: paced || screenParked ? null : (startAfter ?? null),
               bodyCiphertext: encrypted.ciphertext,
               bodyIv: encrypted.iv,
               bodyWrappedDek: encrypted.wrappedDek,
@@ -545,7 +563,7 @@ export async function sendBroadcast(
             })
             .returning({ id: schema.emails.id });
           if (!row) return null;
-          if (paced || held) return { id: row.id, parked: true };
+          if (paced || held || screenParked) return { id: row.id, parked: true };
           const txDb = tx as unknown as Db;
           const reservation = await reserveQuota(txDb, {
             teamId: broadcast.teamId,
@@ -585,15 +603,18 @@ export async function sendBroadcast(
         if (
           accepted &&
           deps.monitor &&
-          monitorCopies > 0 &&
-          drawBroadcastCopy(
-            deps.monitor.samplingKey,
-            broadcast.id,
-            accepted.id,
-            monitorCopies,
-            monitorAudience,
-          )
+          (screenFirstCopy ||
+            (monitorCopies > 0 &&
+              drawBroadcastCopy(
+                deps.monitor.samplingKey,
+                broadcast.id,
+                accepted.id,
+                monitorCopies,
+                monitorAudience,
+              )))
         ) {
+          const screening = screenFirstCopy;
+          screenFirstCopy = false;
           try {
             await recordMonitorSample(db, deps.monitor, await deps.monitor.settings(), {
               teamId: broadcast.teamId,
@@ -601,6 +622,7 @@ export async function sendBroadcast(
               broadcastId: broadcast.id,
               kind: "broadcast_copy",
               now: new Date(),
+              screening,
             });
           } catch (err) {
             console.error(`broadcast ${broadcast.id}: monitor copy skipped`, err);
@@ -645,6 +667,19 @@ export async function sendBroadcast(
     await reportWalkEnd(db, deps, broadcast, domain.region, walked.recipientCount ?? 0, quota);
   }
   return "sent";
+}
+
+/** Whether a fan-out already rendered the copy that waits for its own verdict. */
+async function firstCopyScreened(db: Db, broadcastId: string): Promise<boolean> {
+  const ms = schema.monitorSamples;
+  const [row] = await db
+    .select({ id: ms.id })
+    .from(ms)
+    .where(
+      and(eq(ms.broadcastId, broadcastId), eq(ms.kind, "broadcast_copy"), eq(ms.screening, true)),
+    )
+    .limit(1);
+  return row !== undefined;
 }
 
 /**

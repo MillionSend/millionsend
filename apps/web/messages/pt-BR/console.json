@@ -765,7 +765,7 @@
       },
       "emails": {
         "title": "E-mails sinalizados · {count}",
-        "subtitle": "Enviados nos últimos 7 dias com uma checagem crítica ou importante falhando. Assunto e corpo são conteúdo e ficam criptografados; passe o mouse ou toque na etiqueta para ver o motivo.",
+        "subtitle": "Enviados nos últimos 7 dias com uma checagem crítica ou importante falhando, e os não enviados que uma avaliação de phishing segurou antes do SES. Assunto e corpo são conteúdo e ficam criptografados; passe o mouse ou toque na etiqueta para ver o motivo.",
         "sent": "Enviado",
         "from": "De",
         "recipients": "Destinatários",
@@ -899,6 +899,43 @@
     "settingsButton": "Configurações de monitoramento",
     "exempt": "isenta",
     "riskTip": "Risco interno do monitor, de 0 a 1. Avaliações do modelo sobre o conteúdo amostrado, com menos peso conforme envelhecem, ajustadas pela idade da equipe. Nunca mostrado à equipe.",
+    "waiting": {
+      "title": "Aguardando revisão · {count}",
+      "subtitle": "E-mails não enviados que a avaliação antes do envio segurou antes do SES. Liberar envia sem avaliar de novo; cancelar faz com que nunca saiam.",
+      "cols": {
+        "since": "Esperando desde",
+        "from": "De",
+        "why": "Motivo",
+        "score": "Pontuação",
+        "recipients": "Destinatários"
+      },
+      "why": {
+        "held": "Equipe pausada para revisão",
+        "verdict": "Espera curta após avaliação de phishing",
+        "outage": "Avaliador indisponível",
+        "media": "Conteúdo ilegível"
+      },
+      "count": "{count, plural, one {# e-mail} other {# e-mails}}",
+      "heldTeam": "pausada para revisão",
+      "suspendedTeam": "suspensa",
+      "more": "{count, plural, one {mais # e-mail não exibido} other {mais # e-mails não exibidos}}",
+      "release": "Liberar",
+      "cancel": "Cancelar",
+      "releaseAll": "Liberar todos",
+      "cancelAll": "Cancelar todos",
+      "releaseHold": "Liberar equipe",
+      "heldTip": "Sai quando a pausa para revisão da equipe for liberada.",
+      "suspendedTip": "Fica em espera enquanto a equipe estiver suspensa.",
+      "cancelTitle": "{count, plural, one {Cancelar este e-mail de {team}?} other {Cancelar # e-mails de {team}?}}",
+      "cancelLead": "E-mail cancelado nunca sai. A equipe o vê como cancelado; nada mais conta o motivo.",
+      "cancelConfirm": "Cancelar",
+      "keep": "Manter em espera",
+      "toast": {
+        "released": "{team} · {count, plural, one {# e-mail liberado} other {# e-mails liberados}}",
+        "canceled": "{team} · {count, plural, one {# e-mail cancelado} other {# e-mails cancelados}}",
+        "error": "Não foi possível: {message}"
+      }
+    },
     "tiers": {
       "new": "Nova",
       "probation": "Em observação",
@@ -914,7 +951,7 @@
       "saved": "Configurações de monitoramento salvas",
       "error": "Não foi possível salvar: {message}",
       "order": "Os limites de sinalização, alerta e pausa precisam estar em ordem crescente.",
-      "footnote": "A amostragem só muda a rapidez com que o risco fica confiável: a avaliação acontece depois que o SES aceita a mensagem e nunca a atrasa nem a segura. As perguntas do avaliador, os níveis e os limites são públicos; só a chave de amostragem é secreta.",
+      "footnote": "A amostragem só muda a rapidez com que o risco fica confiável. O e-mail de uma equipe nova na sua janela inicial, e as transmissões de uma equipe nova, são avaliados antes de o SES recebê-los e esperam a avaliação; todo o resto é avaliado depois que o SES aceita. As perguntas do avaliador, os níveis e os limites são públicos; só a chave de amostragem é secreta.",
       "on": "ligada",
       "off": "desligada",
       "reset": "Restaurar padrão",

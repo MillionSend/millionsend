@@ -1,5 +1,5 @@
 {
-  "id": "c5f5ec2d-631a-4a86-ac11-f278ebd75691",
+  "id": "5d64a747-675a-4759-b3d6-f07253762682",
   "prevId": "0dccf77b-d98e-4735-840e-7a4c78b61cf3",
   "version": "7",
   "dialect": "postgresql",
@@ -3776,6 +3776,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "screen_released_at": {
+          "name": "screen_released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3987,6 +3993,22 @@
           ],
           "isUnique": false,
           "where": "\"emails\".\"broadcast_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "emails_review_list_idx": {
+          "name": "emails_review_list_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"emails\".\"latest_status\" = 'queued_quota' and \"emails\".\"park_reason\" <> 'warmup'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4572,6 +4594,20 @@
         },
         "attempts": {
           "name": "attempts",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "screening": {
+          "name": "screening",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "screen_retries": {
+          "name": "screen_retries",
           "type": "smallint",
           "primaryKey": false,
           "notNull": true,
@@ -7283,7 +7319,9 @@
       "schema": "public",
       "values": [
         "warmup",
-        "review"
+        "review",
+        "screening",
+        "media"
       ]
     },
     "public.email_status": {

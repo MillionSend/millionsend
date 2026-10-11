@@ -765,7 +765,7 @@
       },
       "emails": {
         "title": "Flagged emails · {count}",
-        "subtitle": "Sent in the last 7 days with a failing critical or major check. Subject and body are content and stay encrypted; the pill explains itself on hover or tap.",
+        "subtitle": "Sent in the last 7 days with a failing critical or major check, and unsent ones a phishing-type verdict stopped before SES. Subject and body are content and stay encrypted; the pill explains itself on hover or tap.",
         "sent": "Sent",
         "from": "From",
         "recipients": "Recipients",
@@ -899,6 +899,43 @@
     "settingsButton": "Monitoring settings",
     "exempt": "exempt",
     "riskTip": "Internal monitor risk, 0 to 1. Sampled content judged by the model, decayed over time, weighted by team age. Never shown to the team.",
+    "waiting": {
+      "title": "Waiting for review · {count}",
+      "subtitle": "Unsent emails screening stopped before SES. Release sends one without screening it again; cancel means it never goes out.",
+      "cols": {
+        "since": "Waiting since",
+        "from": "From",
+        "why": "Why",
+        "score": "Score",
+        "recipients": "Recipients"
+      },
+      "why": {
+        "held": "Team held for review",
+        "verdict": "Short wait after a phishing-type verdict",
+        "outage": "Judge unavailable",
+        "media": "Content not readable"
+      },
+      "count": "{count, plural, one {# email} other {# emails}}",
+      "heldTeam": "held for review",
+      "suspendedTeam": "suspended",
+      "more": "{count, plural, one {# more email not shown} other {# more emails not shown}}",
+      "release": "Release",
+      "cancel": "Cancel",
+      "releaseAll": "Release all",
+      "cancelAll": "Cancel all",
+      "releaseHold": "Release hold",
+      "heldTip": "Goes out when the team's hold is released.",
+      "suspendedTip": "Waits while the team is suspended.",
+      "cancelTitle": "{count, plural, one {Cancel this email of {team}?} other {Cancel # emails of {team}?}}",
+      "cancelLead": "Canceled mail never goes out. The team sees it as canceled; nothing else tells it why.",
+      "cancelConfirm": "Cancel",
+      "keep": "Keep waiting",
+      "toast": {
+        "released": "{team} · {count, plural, one {# email released} other {# emails released}}",
+        "canceled": "{team} · {count, plural, one {# email canceled} other {# emails canceled}}",
+        "error": "Could not do it: {message}"
+      }
+    },
     "tiers": {
       "new": "New",
       "probation": "Probation",
@@ -914,7 +951,7 @@
       "saved": "Monitoring settings saved",
       "error": "Could not save: {message}",
       "order": "The flag, alert and pause lines must climb in that order.",
-      "footnote": "Sampling only changes how fast the risk becomes confident: judging happens after SES accepts a message and never delays or holds it. The judge's questions, tiers and thresholds ship in the open; only the sampling key is secret.",
+      "footnote": "Sampling only changes how fast the risk becomes confident. A new team's mail in its first window, and a new team's broadcasts, are judged before SES takes them and wait for the verdict; everything else is judged after SES accepts it. The judge's questions, tiers and thresholds ship in the open; only the sampling key is secret.",
       "on": "on",
       "off": "off",
       "reset": "Reset to default",

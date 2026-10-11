@@ -10,12 +10,16 @@ import {
   type Keyring,
   type MonitorSettings,
   openAttachments,
+  parseSingleSender,
+  SCREEN_JUDGE_TIMEOUT_MS,
+  sendingDomainYoung,
   teamMonitorOverview,
   teamMonitorRow,
   type VerdictOutcome,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq } from "drizzle-orm";
 import { mailOperator, type SystemMailer } from "../system-mail.js";
 
@@ -30,6 +34,9 @@ export interface JudgeDeps {
   now?: (() => Date) | undefined;
   /** Hands a team the hold just suspended to the tenant.status job, which disables its SES tenant. */
   syncTenant?: ((teamId: string) => Promise<void>) | undefined;
+  /** Queues again what waited on a screening verdict: an unsent email, or a new team's fan-out. */
+  enqueueSend?: ((emailId: string, priority: EmailSendPriority) => Promise<void>) | undefined;
+  enqueueBroadcast?: ((broadcastId: string) => Promise<void>) | undefined;
 }
 
 /** A throttled call is retried this many times through the queue's backoff before the sample gives up. */
@@ -41,12 +48,16 @@ export type JudgeOutcome = "judged" | "unjudged" | "skipped";
 
 const ms = schema.monitorSamples;
 
+/** Failures a second screening call may not meet: a slow or stumbling provider. */
+const SCREEN_RETRYABLE = new Set(["timeout", "upstream"]);
+
 /**
  * Judge one pending sample. The block is built in memory from the stored
  * body and discarded with the call; the row keeps the verdict fields only.
  * A judge failure of any class records the sample unjudged and changes
  * nothing else; only a throttle is retried, and only a few times. Database
- * and decrypt errors throw so pg-boss retries the job.
+ * and decrypt errors throw so pg-boss retries the job. Mail waiting on a
+ * screening sample is queued again once it has its answer, either way.
  */
 export async function judgeSample(
   db: Db,
@@ -56,6 +67,17 @@ export async function judgeSample(
   const now = deps.now?.() ?? new Date();
   const [sample] = await db.select().from(ms).where(eq(ms.id, payload.sampleId));
   if (sample?.status !== "pending") return "skipped";
+  const outcome = await judgePending(db, deps, sample, now);
+  if (sample.screening && outcome !== "skipped") await resumeScreened(db, deps, sample);
+  return outcome;
+}
+
+async function judgePending(
+  db: Db,
+  deps: JudgeDeps,
+  sample: typeof schema.monitorSamples.$inferSelect,
+  now: Date,
+): Promise<JudgeOutcome> {
   const unjudged = async (errorClass: string, latencyMs?: number) => {
     await db
       .update(ms)
@@ -72,14 +94,20 @@ export async function judgeSample(
   };
   if (!deps.judge) return unjudged("off");
 
-  const input = await loadBlockInput(db, deps.keyring, sample, now);
-  if (!input) return unjudged("body_purged");
-  const block = buildJudgeBlock(input);
+  const loaded = await loadBlockInput(db, deps.keyring, sample, now);
+  if (!loaded) return unjudged("body_purged");
+  const block = buildJudgeBlock(loaded.input);
+  const timeoutMs = sample.screening
+    ? SCREEN_JUDGE_TIMEOUT_MS
+    : (deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const judge = deps.judge;
+  const call = () => judge.judge(block, { signal: AbortSignal.timeout(timeoutMs) });
   const started = Date.now();
   let verdict: Awaited<ReturnType<AbuseJudge["judge"]>>;
   try {
-    verdict = await deps.judge.judge(block, {
-      signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    verdict = await call().catch((err: unknown) => {
+      if (!sample.screening || !SCREEN_RETRYABLE.has(judgeErrorClass(err))) throw err;
+      return call();
     });
   } catch (err) {
     const errorClass = judgeErrorClass(err);
@@ -95,7 +123,10 @@ export async function judgeSample(
   }
   const latencyMs = Date.now() - started;
   const settings = await deps.settings();
-  const model = verdict.model ?? deps.judge.model;
+  const model = verdict.model ?? judge.model;
+  const youngSendingDomain =
+    (await sendingDomainYoung(db, { teamId: sample.teamId, ...loaded.sendingDomain }, now)) ===
+    true;
   // The verdict and its fold commit together: a crash between them would
   // leave a judged row the retry skips and a risk that never saw it.
   const outcome = await db.transaction(async (tx) => {
@@ -122,6 +153,8 @@ export async function judgeSample(
       teamId: sample.teamId,
       score: verdict.score,
       verdict,
+      kind: sample.kind,
+      youngSendingDomain,
       now,
     });
   });
@@ -141,13 +174,47 @@ export async function judgeSample(
   return "judged";
 }
 
-/** The judge's input for a sample: the email's decrypted body, or the broadcast's own HTML for a skeleton. */
+/**
+ * What waited on a screening verdict goes back to its queue: the email's
+ * send, which now reads the verdict and the hold or pause it brought, or the
+ * new team's fan-out. A sent or settled email is left alone.
+ */
+async function resumeScreened(
+  db: Db,
+  deps: JudgeDeps,
+  sample: typeof schema.monitorSamples.$inferSelect,
+): Promise<void> {
+  if (sample.kind === "broadcast_skeleton") {
+    if (sample.broadcastId) await deps.enqueueBroadcast?.(sample.broadcastId);
+    return;
+  }
+  if (!sample.emailId) return;
+  const [email] = await db
+    .select({
+      latestStatus: schema.emails.latestStatus,
+      sentAt: schema.emails.sentAt,
+      broadcastId: schema.emails.broadcastId,
+    })
+    .from(schema.emails)
+    .where(eq(schema.emails.id, sample.emailId));
+  if (email?.latestStatus !== "queued" || email.sentAt) return;
+  await deps.enqueueSend?.(sample.emailId, emailSendPriority(email));
+}
+
+/**
+ * The judge's input for a sample: the email's decrypted body, or the
+ * broadcast's own HTML for a skeleton; with the sending domain, whose age
+ * the hold reads.
+ */
 async function loadBlockInput(
   db: Db,
   keyring: Keyring,
   sample: typeof schema.monitorSamples.$inferSelect,
   now: Date,
-): Promise<JudgeBlockInput | null> {
+): Promise<{
+  input: JudgeBlockInput;
+  sendingDomain: { domainId?: string | null; name?: string | null };
+} | null> {
   const [team] = await db
     .select({ name: schema.teams.name, plan: schema.teams.plan })
     .from(schema.teams)
@@ -158,12 +225,14 @@ async function loadBlockInput(
     .from(schema.domains)
     .where(and(eq(schema.domains.teamId, sample.teamId), eq(schema.domains.status, "verified")));
   const monitor = await teamMonitorRow(db, sample.teamId);
+  // Screened ahead of its first send, a team is a day-0 team, not one of
+  // unknown age: the thresholds were set on verdicts read that way.
   const context: JudgeBlockInput["team"] = {
     name: team.name,
     verifiedDomains: domains.map((d) => d.name),
     ageDays: monitor.firstSendAt
       ? Math.floor((now.getTime() - monitor.firstSendAt.getTime()) / DAY_MS)
-      : null,
+      : 0,
     plan: team.plan as string,
   };
   if (sample.kind === "broadcast_skeleton") {
@@ -180,13 +249,16 @@ async function loadBlockInput(
       .where(eq(schema.broadcasts.id, sample.broadcastId));
     if (!broadcast) return null;
     return {
-      team: context,
-      from: broadcast.from,
-      replyTo: broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null,
-      subject: broadcast.subject,
-      html: broadcast.html,
-      text: broadcast.text,
-      attachments: [],
+      input: {
+        team: context,
+        from: broadcast.from,
+        replyTo: broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null,
+        subject: broadcast.subject,
+        html: broadcast.html,
+        text: broadcast.text,
+        attachments: [],
+      },
+      sendingDomain: { name: parseSingleSender(broadcast.from)?.domain ?? null },
     };
   }
   if (!sample.emailId) return null;
@@ -219,13 +291,16 @@ async function loadBlockInput(
       }))
     : [];
   return {
-    team: context,
-    from: email.from,
-    replyTo: email.replyTo,
-    subject: email.subject,
-    html: body.html,
-    text: body.text,
-    attachments,
+    input: {
+      team: context,
+      from: email.from,
+      replyTo: email.replyTo,
+      subject: email.subject,
+      html: body.html,
+      text: body.text,
+      attachments,
+    },
+    sendingDomain: { domainId: email.domainId },
   };
 }
 
@@ -266,7 +341,9 @@ async function notifyOperator(
             values:
               held.rule === "score"
                 ? { line: String(settings.holdScore) }
-                : { line: String(settings.holdRepeatScore), n: String(held.verdicts) },
+                : held.rule === "young_domain"
+                  ? { line: String(settings.holdRepeatScore) }
+                  : { line: String(settings.holdRepeatScore), n: String(held.verdicts) },
           }),
         }),
         deps.appBaseUrl,

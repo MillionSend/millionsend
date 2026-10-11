@@ -946,23 +946,42 @@ com quatro letras ou mais e fora as que todo hostname usa ("mail",
 
 ## Monitoramento de conteúdo (opcional)
 
-Desligado por padrão. Com um avaliador configurado, uma amostra do e-mail aceito é
-pontuada de 0 a 100 pelo TypeSafe Jev depois que o SES o recebeu e incorporada
-a um risco por equipe que o operador vê em Confiança e segurança. Nada no caminho de envio espera por
-isso: uma avaliação nunca atrasa a mensagem avaliada, que o SES já recebeu,
-e uma falha do avaliador de qualquer tipo (recurso desligado, credenciais
+Desligado por padrão. Com um avaliador configurado, o TypeSafe Jev dá ao
+e-mail uma pontuação de 0 a 100, e cada avaliação é incorporada a um risco
+por equipe que o operador vê em Confiança e segurança.
+
+**Avaliado antes do SES.** O e-mail de uma equipe na sua janela inicial (os
+primeiros 1.000 envios e 72 horas, contados do primeiro envio) é avaliado
+antes de o SES recebê-lo: o e-mail espera na fila, o envio segue com os
+outros e a avaliação, primeira na fila do avaliador, o libera em cerca de
+meio segundo. Uma transmissão de uma equipe no nível Nova não grava nenhuma
+cópia até o próprio HTML ter uma avaliação, e a primeira cópia renderizada
+espera a sua. Uma equipe usa no máximo duas das quatro vias do avaliador, e
+um e-mail avaliado antes do envio tem timeout de 5 s e uma nova tentativa.
+Se o avaliador ainda assim não responder, o e-mail de um domínio de envio
+com menos de 7 dias, ou de idade desconhecida, espera: o avaliador é chamado
+de novo a cada 2 minutos, 3 vezes, e depois o e-mail fica em espera para o
+operador, que fica sabendo pelo aviso de saúde do avaliador; qualquer outro
+e-mail é enviado e avaliado depois. Passado o limite diário de amostras da
+equipe, o e-mail sai sem avaliação. O resto do e-mail aceito é sorteado
+depois que o SES o recebe, na taxa do seu nível. E-mails da conta e o e-mail
+do onboarding nunca são avaliados.
+
+Uma falha do avaliador de qualquer tipo (recurso desligado, credenciais
 ausentes, limitação de taxa, timeout, erro do provedor, resposta que não
-parseia, corpo já removido pela retenção) registra a amostra como sem avaliação e não muda mais nada.
-As verificações determinísticas de conteúdo (os insights, a proteção de envio, a
-nota da conta) rodam em todo envio com ou sem o avaliador. Quem hospeda por
-conta própria pode deixá-lo desligado.
+parseia, corpo já removido pela retenção) registra a amostra como sem
+avaliação e não muda mais nada. As verificações determinísticas de conteúdo
+(os insights, a proteção de envio, a nota da conta) rodam em todo envio com
+ou sem o avaliador. Quem hospeda por conta própria pode deixá-lo desligado.
 
 **O que ele faz.** Abre a sinalização `monitor` em Confiança e segurança
 quando o risco de uma equipe cruza o limite de sinalização, avisa o operador
 por e-mail uma vez por dia por equipe acima do limite de alerta e, só para uma
 equipe no nível Nova (nos primeiros 1.000 envios ou 72 horas, ou abaixo de
 10.000 envios em 7 dias), pausa as transmissões quando o risco passa do
-limite de pausa e uma mensagem amostrada teve pontuação 90 ou mais no último dia (o
+limite de pausa e uma mensagem amostrada teve pontuação 90 ou mais no último dia,
+ou na hora quando o próprio HTML de uma transmissão ou uma cópia renderizada
+recebe uma avaliação do tipo phishing a partir de 80 (o
 e-mail transacional continua saindo; a equipe vê as transmissões "pausadas aguardando
 revisão"; o operador retoma pela página de revisão). A política de pausa é
 uma configuração e pode ser desligada.
@@ -970,7 +989,9 @@ uma configuração e pode ser desligada.
 **A pausa para revisão.** Quando uma mensagem amostrada de uma equipe no
 nível Nova é avaliada como abuso na pontuação de revisão (90 por padrão), seja como
 phishing de credenciais, imitação de marca ou desvio de pagamento, seja com
-uma constatação de falsificação ou coleta de segredos, a equipe é suspensa na
+uma constatação de falsificação ou coleta de segredos, ou na pontuação de
+repetição (80) quando o domínio de envio da equipe foi registrado menos de 7
+dias antes, ou tem idade desconhecida, a equipe é suspensa na
 hora com o motivo `review`: o e-mail que ela envia pela API (`POST /emails` e
 `/emails/batch`, que o MCP também usa) ou pelo SMTP é aceito como qualquer
 envio e fica em espera (`park_reason = 'review'`), o e-mail na fila e as
@@ -1000,10 +1021,23 @@ Uma equipe é pausada para revisão uma vez só, por qualquer das regras: depois
 suas avaliações seguintes só geram alerta, então o e-mail liberado, avaliado de
 novo na saída, não dispara uma nova pausa para revisão nem pausa suas transmissões. Uma equipe já suspensa mantém a suspensão, e equipes nos níveis Em observação,
 Estabelecida e Confiável nunca são pausadas para revisão: ficam só no alerta. A equipe de
-sistema fica isenta: o monitor nunca a amostra. O
-avaliador lê uma mensagem depois que o SES a recebeu, então a mensagem que dispara
-a pausa já saiu; a pausa barra o que vem depois.
-`MONITOR_AUTO_HOLD=false` a desliga.
+sistema fica isenta: o monitor nunca a amostra. Uma mensagem avaliada antes
+do SES que pausa a equipe fica em espera com o resto do e-mail dela; uma
+avaliada depois do envio já tinha saído, e a pausa barra o que vem depois. Na
+janela inicial, uma mensagem avaliada como do tipo phishing a partir de 80 que
+não pausa nada espera 2 minutos antes de sair: uma rajada chega à contagem de
+repetição dentro deles. `MONITOR_AUTO_HOLD=false` desliga a pausa para
+revisão, e a avaliação antes do SES junto com ela.
+
+**A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
+não enviado que a avaliação antes do envio segurou: em espera atrás de uma
+pausa para revisão, cumprindo os seus 2 minutos, ou em espera depois de o
+avaliador falhar repetidas vezes. **Liberar** envia o e-mail sem avaliá-lo de
+novo (o `quota.drain` o cobra como qualquer e-mail em espera); **Cancelar**
+faz com que ele nunca saia. O e-mail de uma equipe pausada para revisão é
+liberado junto com a equipe. A página de revisão da equipe também lista, entre
+os sinalizados, os e-mails não enviados que foram segurados, para que um
+acesso ao conteúdo possa citá-los.
 
 **Para ligar**, no `.env` da instância, lido pelo worker e pelo app (um
 reinício aplica):

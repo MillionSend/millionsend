@@ -36,11 +36,15 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
+// The draw alone, with the hold (and the screening it turns on for a new
+// team) off; send-broadcast-screening.test.ts covers the screening.
+const DRAW_ONLY = { ...MONITOR_SETTING_DEFAULTS, autoHold: false };
+
 it("samples the skeleton once and the rendered copies by the keyed draw", async () => {
   const queued: string[] = [];
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
-    settings: async () => MONITOR_SETTING_DEFAULTS,
+    settings: async () => DRAW_ONLY,
     enqueueJudge: async (id) => void queued.push(id),
   };
   const deps: BroadcastDeps = {
@@ -134,7 +138,7 @@ it("counts the audience with the topic rule so an opt-in topic still gets its co
   const queued: string[] = [];
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
-    settings: async () => ({ ...MONITOR_SETTING_DEFAULTS, broadcastCopiesNew: 1 }),
+    settings: async () => ({ ...DRAW_ONLY, broadcastCopiesNew: 1 }),
     enqueueJudge: async (id) => void queued.push(id),
   };
   const [topic] = await db

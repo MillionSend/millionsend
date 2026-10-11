@@ -456,6 +456,8 @@
       "monitor_broadcasts_resumed": "Resumed broadcasts after monitor pause",
       "warmup_trust_granted": "Lifted new-domain warm-up",
       "warmup_trust_revoked": "Restored new-domain warm-up",
+      "screening_released": "Released emails waiting for review",
+      "screening_canceled": "Canceled emails waiting for review",
       "content_revealed": "Read message content",
       "content_accessed": "An operator read message content",
       "support_view_started": "Support view started",

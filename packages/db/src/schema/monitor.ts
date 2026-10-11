@@ -96,6 +96,10 @@ export const monitorSamples = pgTable(
     latencyMs: integer("latency_ms"),
     // Throttled judge calls retry a few times before the sample gives up.
     attempts: smallint("attempts").notNull().default(0),
+    // An unsent email (or a new team's broadcast) waits on this verdict
+    // before SES; screenRetries counts the judge's re-runs after failures.
+    screening: boolean("screening").notNull().default(false),
+    screenRetries: smallint("screen_retries").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     judgedAt: timestamp("judged_at", { withTimezone: true }),
   },

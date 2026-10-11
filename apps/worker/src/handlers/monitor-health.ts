@@ -1,4 +1,4 @@
-import { markLostSamples, monitorHealth, recordProbes } from "@millionsend/core";
+import { markLostSamples, monitorHealth, recordProbes, SCREEN_RETRIES } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, gte, or, sql } from "drizzle-orm";
@@ -25,8 +25,9 @@ export const MONITOR_DEGRADED_MAIL_INTERVAL_MS = 6 * 3600_000;
 /**
  * The last hour's sample count and unjudged share as probes for the console,
  * pending samples whose job never came back marked, and one notice to the
- * operator when the judge keeps failing. ponytail: the notice's clock lives
- * in the worker's memory, so a restart may repeat it once early.
+ * operator when the judge keeps failing, or gave up on mail screening held
+ * before SES, which then waits for the operator. ponytail: the notice's
+ * clock lives in the worker's memory, so a restart may repeat it once early.
  */
 export async function runMonitorHealth(
   db: Db,
@@ -50,7 +51,21 @@ export async function runMonitorHealth(
     )
     .orderBy(sql`${ms.judgedAt} desc nulls last`)
     .limit(1);
+  // A screening sample the judge failed on, re-runs and all: what waited on
+  // it is parked for the review list, so one is enough to tell.
+  const [gaveUp] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(ms)
+    .where(
+      and(
+        eq(ms.screening, true),
+        eq(ms.status, "unjudged"),
+        gte(ms.screenRetries, SCREEN_RETRIES),
+        gte(ms.judgedAt, new Date(now.getTime() - 3600_000)),
+      ),
+    );
   const degraded =
+    (gaveUp?.n ?? 0) > 0 ||
     latest?.errorClass === "no_credentials" ||
     (health.samples >= MONITOR_DEGRADED_MIN_SAMPLES &&
       (health.unjudgedRate ?? 0) > MONITOR_DEGRADED_RATE);
@@ -70,6 +85,15 @@ export async function runMonitorHealth(
   ) {
     deps.state.degradedMailedAt = now;
     try {
+      const [waiting] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.emails)
+        .where(
+          and(
+            eq(schema.emails.latestStatus, "queued_quota"),
+            eq(schema.emails.parkReason, "screening"),
+          ),
+        );
       await mailOperator(
         db,
         deps.mailer,
@@ -79,6 +103,7 @@ export async function runMonitorHealth(
           rate: `${Math.round((health.unjudgedRate ?? 0) * 100)}%`,
           unjudged: String(health.unjudged),
           samples: String(health.samples),
+          parked: String(waiting?.n ?? 0),
           provider: deps.judge.provider,
           model: deps.judge.model,
         },

@@ -33,6 +33,7 @@ import {
   usePlanLabel,
 } from "./parts";
 import { RevealCell, useContentReveal } from "./reveal";
+import { WaitingList } from "./waiting-list";
 
 const TILE: React.CSSProperties = { padding: "16px 20px" };
 // The monitoring rows are sentences, not figures: sans, left, the body size.
@@ -578,6 +579,8 @@ export function ReviewView({ teamId }: { teamId: string }) {
           )}
         </div>
       </div>
+
+      <WaitingList teamId={team.id} onChanged={refetch} />
 
       <div className="ms-card" style={{ padding: 0, marginBottom: 16 }}>
         <CardHead

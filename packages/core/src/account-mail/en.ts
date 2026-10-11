@@ -349,7 +349,7 @@ export const en = {
   "monitor.broadcasts_paused": {
     subject: "Content monitor paused a team's broadcasts",
     body: [
-      "{team} is in the new tier, its monitor risk reached {risk} and a sampled message scored {score}. Under the pause policy its broadcasts are now on hold; transactional mail still flows.",
+      "{team} is in the new tier: a sampled message scored {score} and its monitor risk is {risk}. Under the pause policy its broadcasts are now on hold; transactional mail still flows.",
       "The team sees broadcasts as paused pending review. Open the review page to read the verdicts and resume, suspend or clear.",
     ],
     button: "Open review",
@@ -357,12 +357,14 @@ export const en = {
   "monitor.team_held": {
     subject: "Content monitor held a team for review",
     body: [
-      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy nothing of the team goes out: mail it sends through the API and SMTP is accepted and parked, queued mail and broadcasts wait, new broadcasts are refused, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
+      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy nothing of the team goes out: mail it sends through the API and SMTP is accepted and parked, queued mail and broadcasts wait, new broadcasts are refused, and its SES tenant is disabled where tenants are on. A message judged before it was sent waits with the rest; one judged after sending had already gone out.",
       "The owner is not emailed: the dashboard shows sending as paused pending review, and the API and SMTP answer as for any accepted send. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
     ],
     button: "Open review",
     extra: {
       score: "This one verdict held the team: the hold score is {line}.",
+      young_domain:
+        "This one verdict held the team: it reached {line} while the team's sending domain was under 7 days old, or of unknown age.",
       repeat:
         "This verdict held the team as its phishing-type verdict number {n} at or above {line} within 7 days.",
     },
@@ -391,12 +393,12 @@ export const en = {
   "monitor.degraded": {
     subject: "Content monitor: {rate} of samples went unjudged in the last hour",
     body: [
-      "{unjudged} of {samples} samples drawn in the last hour came back unjudged ({provider} · {model}). Sending is unaffected: an unjudged sample changes no risk, opens no flag and holds no mail.",
+      "{unjudged} of {samples} samples drawn in the last hour came back unjudged ({provider} · {model}). An unjudged sample changes no risk and opens no flag. While the judge fails, a new team's mail from a sending domain under 7 days old, or of unknown age, waits: the judge is tried again for a few minutes, then the email waits for you on Trust & safety, where {parked} do now. Everything else is sent and judged afterwards.",
       "Common causes are a throttled or unreachable provider, an invalid or revoked API key, or answers the monitor could not read. The console's Health card charts the unjudged share.",
     ],
     button: "Open console",
     muted: [
-      "Sent to the instance operator at most once every six hours while the share stays over 20% or the provider keeps rejecting the API key.",
+      "Sent to the instance operator at most once every six hours while the share stays over 20%, the provider keeps rejecting the API key, or screening before sending gives up on mail.",
     ],
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;

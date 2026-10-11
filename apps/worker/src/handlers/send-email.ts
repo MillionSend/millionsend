@@ -17,10 +17,12 @@ import {
   hashRecipient,
   isOnboardingSender,
   isSubscribedToTopic,
+  judgeAfterSend,
   type Keyring,
   MONITOR_ANOMALY_CHECKS,
   type MonitorDeps,
   makeUnsubscribeToken,
+  noteAcceptedSend,
   noteConsoleCodeUndelivered,
   openAttachments,
   parseSingleSender,
@@ -30,6 +32,7 @@ import {
   SCORE_VERSION,
   SYSTEM_MAIL_TAG,
   sampleAcceptedEmail,
+  screenBeforeSend,
   substituteUnsubscribeUrl,
   transitionQueueState,
   utcDay,
@@ -104,8 +107,9 @@ export interface SendDeps {
    * it — the worker always provides it, since the master key is always present.
    */
   /**
-   * The content monitor's draw on an accepted send. Absent when the judge is
-   * off (and in tests that never reach it): no rows, no jobs, no state.
+   * The content monitor: the screening before SES and the draw on an
+   * accepted send. Absent when the judge is off (and in tests that never
+   * reach it): no rows, no jobs, no state, no wait.
    */
   monitor?: MonitorDeps | undefined;
   tracking?:
@@ -291,7 +295,7 @@ async function parkQueued(
   db: Db,
   email: { id: string; teamId: string },
   why: string,
-  reason: "review" | null = null,
+  reason: (typeof schema.emailParkReasonEnum.enumValues)[number] | null = null,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
@@ -596,6 +600,25 @@ async function sendQueued(
     if (isTransientError(err)) throw err;
     await failQueuedEmail(db, email.id, "body_unreadable");
     return "failed";
+  }
+
+  // Screening before SES: mail with a reason to be judged first waits for
+  // the verdict queued, and the send lane moves on; the judge queues the send
+  // again once it answers. The team's hold or pause the verdict brings was
+  // read above, on this pass. Account mail and the fixed onboarding email are
+  // never customer content, so they never wait.
+  let screened: { id: string; unjudged: boolean } | null = null;
+  if (deps.monitor && !systemMail && !platformSend) {
+    const gate = await screenBeforeSend(db, deps.monitor, { email, now: new Date() });
+    if (gate.action === "wait") {
+      if (gate.until) await deps.reschedule?.(email.id, gate.until, emailSendPriority(email));
+      return "deferred";
+    }
+    if (gate.action === "park") {
+      await parkQueued(db, email, "judge kept failing on a young domain", "screening");
+      return "parked";
+    }
+    screened = gate.sample;
   }
 
   // App-layer engagement tracking: when the domain has click or open tracking
@@ -945,16 +968,25 @@ async function sendQueued(
   // are never drawn.
   if (deps.monitor && !systemMail && !platformSend) {
     try {
-      await sampleAcceptedEmail(db, deps.monitor, {
-        teamId: email.teamId,
-        emailId: email.id,
-        broadcast: email.broadcastId !== null,
-        anomalies:
-          insights?.checks.filter(
-            (c) =>
-              c.status === "fail" && (MONITOR_ANOMALY_CHECKS as readonly string[]).includes(c.id),
-          ).length ?? 0,
-      });
+      if (screened) {
+        // Judged before it went out: counted, never drawn again, which would
+        // count its verdict twice toward the repeat hold.
+        await noteAcceptedSend(db, email.teamId, new Date());
+        if (screened.unjudged) {
+          await judgeAfterSend(db, deps.monitor, { id: screened.id, teamId: email.teamId });
+        }
+      } else {
+        await sampleAcceptedEmail(db, deps.monitor, {
+          teamId: email.teamId,
+          emailId: email.id,
+          broadcast: email.broadcastId !== null,
+          anomalies:
+            insights?.checks.filter(
+              (c) =>
+                c.status === "fail" && (MONITOR_ANOMALY_CHECKS as readonly string[]).includes(c.id),
+            ).length ?? 0,
+        });
+      }
     } catch (err) {
       console.error(`email.send: monitor draw failed for ${email.id}`, err);
     }

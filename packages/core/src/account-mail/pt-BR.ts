@@ -359,7 +359,7 @@ export const ptBR = {
   "monitor.broadcasts_paused": {
     subject: "O monitor de conteúdo pausou as transmissões de uma equipe",
     body: [
-      "{team} é uma equipe nova, o risco dela no monitor chegou a {risk} e uma mensagem amostrada teve pontuação {score}. Pela política de pausa, as transmissões dela estão em espera; o e-mail transacional continua saindo.",
+      "{team} é uma equipe nova: uma mensagem amostrada teve pontuação {score} e o risco dela no monitor está em {risk}. Pela política de pausa, as transmissões dela estão em espera; o e-mail transacional continua saindo.",
       "A equipe vê as transmissões como pausadas aguardando revisão. Abra a página de revisão para ler as avaliações e retomar, suspender ou encerrar a sinalização.",
     ],
     button: "Abrir revisão",
@@ -367,12 +367,14 @@ export const ptBR = {
   "monitor.team_held": {
     subject: "O monitor de conteúdo pausou uma equipe para revisão",
     body: [
-      "{team} é uma equipe nova e uma mensagem amostrada teve pontuação {score} ({verdict}). {rule} Pela política de pausa para revisão, nada da equipe sai: os e-mails que ela envia pela API e pelo SMTP são aceitos e ficam em espera, os e-mails na fila e as transmissões aguardam, novas transmissões são recusadas e o tenant da equipe no SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi avaliada.",
+      "{team} é uma equipe nova e uma mensagem amostrada teve pontuação {score} ({verdict}). {rule} Pela política de pausa para revisão, nada da equipe sai: os e-mails que ela envia pela API e pelo SMTP são aceitos e ficam em espera, os e-mails na fila e as transmissões aguardam, novas transmissões são recusadas e o tenant da equipe no SES fica desativado onde os tenants estão ligados. Uma mensagem avaliada antes do envio fica em espera com as outras; uma avaliada depois do envio já tinha saído.",
       "O proprietário não recebe e-mail: o painel mostra o envio pausado aguardando revisão, e a API e o SMTP respondem como para qualquer envio aceito. Abra a página de revisão para liberar a equipe, o que envia os e-mails em espera, ou para suspendê-la por phishing.",
     ],
     button: "Abrir revisão",
     extra: {
       score: "Esta avaliação, sozinha, pausou a equipe: a pontuação de revisão é {line}.",
+      young_domain:
+        "Esta avaliação, sozinha, pausou a equipe: chegou a {line} quando o domínio de envio da equipe tinha menos de 7 dias ou idade desconhecida.",
       repeat:
         "Esta avaliação pausou a equipe por ser a {n}ª do tipo phishing com pontuação {line} ou mais em 7 dias.",
     },
@@ -401,12 +403,12 @@ export const ptBR = {
   "monitor.degraded": {
     subject: "Monitor de conteúdo: {rate} das amostras ficaram sem avaliação na última hora",
     body: [
-      "{unjudged} de {samples} amostras sorteadas na última hora voltaram sem avaliação ({provider} · {model}). O envio não é afetado: uma amostra sem avaliação não muda o risco, não abre sinalização e não segura nenhum e-mail.",
+      "{unjudged} de {samples} amostras sorteadas na última hora voltaram sem avaliação ({provider} · {model}). Uma amostra sem avaliação não muda o risco nem abre sinalização. Enquanto o avaliador falha, o e-mail de uma equipe nova enviado de um domínio com menos de 7 dias, ou de idade desconhecida, espera: o avaliador é chamado de novo por alguns minutos e depois o e-mail fica em espera para você em Confiança e segurança, onde {parked} estão agora. Todo o resto é enviado e avaliado depois.",
       "As causas comuns são um provedor limitando requisições ou fora do ar, uma chave de API inválida ou revogada, ou respostas que o monitor não conseguiu ler. O cartão Saúde do console mostra o percentual sem avaliação.",
     ],
     button: "Abrir console",
     muted: [
-      "Enviado ao operador da instância no máximo a cada seis horas enquanto o percentual ficar acima de 20% ou o provedor continuar recusando a chave de API.",
+      "Enviado ao operador da instância no máximo a cada seis horas enquanto o percentual ficar acima de 20%, o provedor continuar recusando a chave de API ou a avaliação antes do envio desistir de algum e-mail.",
     ],
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;

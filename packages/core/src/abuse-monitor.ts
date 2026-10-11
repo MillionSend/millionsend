@@ -9,13 +9,15 @@ import { fetchTeamStanding, suspendTeam } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
- * The content monitor's sampling and risk model. After SES accepts a
- * message a keyed draw decides whether the judge sees it; verdicts decay
- * into a per-team risk that opens the monitor flag, alerts the operator and,
- * for a new team, pauses broadcasts; a confident phishing verdict on a new
- * team, or a run of slightly less confident ones within a week, holds
- * all of its sending for review. Every function here is safe to skip:
- * nothing on the send path waits for a verdict.
+ * The content monitor's sampling and risk model. A new team's mail in its
+ * first window, and a new team's broadcasts, are judged before SES takes
+ * them (screening.ts holds that gate); the rest is drawn by a keyed draw
+ * after SES accepts it. Verdicts decay into a per-team risk that opens the
+ * monitor flag, alerts the operator and, for a new team, pauses broadcasts;
+ * a confident phishing verdict on a new team, a slightly less confident one
+ * while its sending domain is young, or a run of those within a week, holds
+ * all of its sending for review. The draw after a send is safe to skip: a
+ * failure in it changes nothing about the send.
  */
 
 export type MonitorSampleKind = (typeof schema.monitorSampleKindEnum.enumValues)[number];
@@ -103,7 +105,7 @@ export interface MonitorTeamState {
 const daysSince = (at: Date | null, now: Date) =>
   at ? (now.getTime() - at.getTime()) / DAY_MS : 0;
 
-function inFirstWindow(state: MonitorTeamState, s: MonitorSettings, now: Date): boolean {
+export function inFirstWindow(state: MonitorTeamState, s: MonitorSettings, now: Date): boolean {
   const hours = state.firstSendAt ? (now.getTime() - state.firstSendAt.getTime()) / 3600_000 : 0;
   return state.sentTotal <= s.firstSends || hours < s.firstHours;
 }
@@ -250,7 +252,15 @@ export function riskAt(state: RiskState, now: Date): number | null {
 export interface MonitorDeps {
   samplingKey: Buffer;
   settings: () => Promise<MonitorSettings>;
-  enqueueJudge: (sampleId: string) => Promise<void>;
+  /**
+   * Queues the judge for a sample. The team is the fairness group, so one
+   * team never takes every judge lane; a screening sample, which mail waits
+   * on, goes ahead of the after-the-fact ones; `startAfter` delays a re-run.
+   */
+  enqueueJudge: (
+    sampleId: string,
+    opts?: { teamId: string; screening: boolean; startAfter?: Date | undefined },
+  ) => Promise<void>;
 }
 
 type TeamMonitorRow = typeof schema.teamMonitor.$inferSelect;
@@ -278,15 +288,8 @@ export async function noteAcceptedSend(db: Db, teamId: string, now: Date): Promi
     .returning();
   if (!row) throw new Error("team_monitor upsert returned nothing");
   if (row.sentTotal !== 1) return row;
-  const c = schema.usageCounters;
-  const [history] = await db
-    .select({
-      sent: sql<number>`coalesce(sum(${c.sent}), 0)::int`,
-      first: sql<string | null>`min(${c.day}) filter (where ${c.sent} > 0)`,
-    })
-    .from(c)
-    .where(eq(c.teamId, teamId));
-  if (!history || history.sent <= 1) return row;
+  const history = await usageHistory(db, teamId);
+  if (history.sent <= 1) return row;
   // A first day in the past is history the monitor missed; today's counter
   // is the batch this row was created in, and its first send was just now.
   const firstSendAt =
@@ -297,6 +300,50 @@ export async function noteAcceptedSend(db: Db, teamId: string, now: Date): Promi
     .where(eq(tm.teamId, teamId))
     .returning();
   return backfilled ?? row;
+}
+
+/** What the usage counters remember of a team's sends: how many, and the first UTC day of one. */
+async function usageHistory(
+  db: Db,
+  teamId: string,
+): Promise<{ sent: number; first: string | null }> {
+  const c = schema.usageCounters;
+  const [history] = await db
+    .select({
+      sent: sql<number>`coalesce(sum(${c.sent}), 0)::int`,
+      first: sql<string | null>`min(${c.day}) filter (where ${c.sent} > 0)`,
+    })
+    .from(c)
+    .where(eq(c.teamId, teamId));
+  return history ?? { sent: 0, first: null };
+}
+
+/**
+ * The monitor row as the tier reads it ahead of a send. A team the monitor
+ * has not counted yet, but whose usage counters show sends, takes them as
+ * its history, written once: an old team that went quiet is neither
+ * screened nor held as brand new.
+ */
+export async function monitorRowWithHistory(
+  db: Db,
+  teamId: string,
+  now: Date,
+): Promise<TeamMonitorRow> {
+  const row = await teamMonitorRow(db, teamId);
+  if (row.sentTotal > 0) return row;
+  const history = await usageHistory(db, teamId);
+  if (history.sent === 0 || !history.first) return row;
+  const firstSendAt = new Date(`${history.first}T00:00:00Z`);
+  const [written] = await db
+    .insert(tm)
+    .values({ teamId, sentTotal: history.sent, firstSendAt, updatedAt: now })
+    .onConflictDoUpdate({
+      target: tm.teamId,
+      set: { sentTotal: history.sent, firstSendAt, updatedAt: now },
+      setWhere: eq(tm.sentTotal, 0),
+    })
+    .returning();
+  return written ?? (await teamMonitorRow(db, teamId));
 }
 
 const EMPTY_ROW = (teamId: string): TeamMonitorRow => ({
@@ -378,6 +425,8 @@ export async function recordMonitorSample(
     broadcastId: string | null;
     kind: MonitorSampleKind;
     now: Date;
+    /** Mail waits on this verdict before SES. */
+    screening?: boolean | undefined;
   },
 ): Promise<string | null> {
   const since = dayStart(input.now);
@@ -400,6 +449,7 @@ export async function recordMonitorSample(
       emailId: input.emailId,
       broadcastId: input.broadcastId,
       kind: input.kind,
+      screening: input.screening ?? false,
       createdAt: input.now,
     })
     .returning({ id: ms.id });
@@ -408,7 +458,10 @@ export async function recordMonitorSample(
     .insert(tm)
     .values({ teamId: input.teamId, lastSampleAt: input.now, updatedAt: input.now })
     .onConflictDoUpdate({ target: tm.teamId, set: { lastSampleAt: input.now } });
-  await deps.enqueueJudge(sample.id);
+  await deps.enqueueJudge(sample.id, {
+    teamId: input.teamId,
+    screening: input.screening ?? false,
+  });
   return sample.id;
 }
 
@@ -445,17 +498,22 @@ export async function sampleAcceptedEmail(
   return { sampleId, decision };
 }
 
-/** At fan-out start: the broadcast's own HTML as the skeleton, and how many rendered copies to draw. */
+/**
+ * At fan-out start: the broadcast's own HTML as the skeleton, and how many
+ * rendered copies to draw. For a new team, with the hold on, the fan-out
+ * waits on the skeleton's verdict and its first copy on its own (`screen`).
+ */
 export async function planBroadcastSamples(
   db: Db,
   deps: MonitorDeps,
   input: { teamId: string; broadcastId: string; now?: Date },
-): Promise<{ skeletonSampleId: string | null; copies: number }> {
+): Promise<{ skeletonSampleId: string | null; copies: number; screen: boolean }> {
   const now = input.now ?? new Date();
   const s = await deps.settings();
-  const state = await loadMonitorState(db, await teamMonitorRow(db, input.teamId), now);
+  const state = await loadMonitorState(db, await monitorRowWithHistory(db, input.teamId, now), now);
   const tier = monitorTier(state, s, now);
-  if (tier === "exempt") return { skeletonSampleId: null, copies: 0 };
+  if (tier === "exempt") return { skeletonSampleId: null, copies: 0, screen: false };
+  const screen = tier === "new" && s.autoHold;
   // A resumed fan-out plans again; the skeleton was judged the first time.
   const [existing] = await db
     .select({ id: ms.id })
@@ -470,10 +528,12 @@ export async function planBroadcastSamples(
       broadcastId: input.broadcastId,
       kind: "broadcast_skeleton",
       now,
+      screening: screen,
     }));
   return {
     skeletonSampleId,
     copies: tier === "new" || tier === "probation" ? s.broadcastCopiesNew : s.broadcastCopies,
+    screen,
   };
 }
 
@@ -488,8 +548,23 @@ export interface VerdictOutcome {
   held: HoldRule | null;
 }
 
-/** One verdict from `holdScore`, or the `verdicts`th from `holdRepeatScore` within MONITOR_HOLD_REPEAT_DAYS. */
-export type HoldRule = { rule: "score" } | { rule: "repeat"; verdicts: number };
+/**
+ * One verdict from `holdScore`; one from `holdRepeatScore` while the
+ * sending domain is young (YOUNG_DOMAIN_DAYS, or of unknown age); or the
+ * `verdicts`th from `holdRepeatScore` within MONITOR_HOLD_REPEAT_DAYS.
+ */
+export type HoldRule =
+  | { rule: "score" }
+  | { rule: "young_domain" }
+  | { rule: "repeat"; verdicts: number };
+
+/**
+ * Under this many days old, or of unknown age, a sending domain makes one
+ * phishing-type verdict from `holdRepeatScore` enough to hold a new team: a
+ * real business's new domain outgrows it within a week, a phisher must buy
+ * an aged one.
+ */
+export const YOUNG_DOMAIN_DAYS = 7;
 
 /** A verdict as the judge returns it or as its sample stores it. */
 interface HoldVerdictFields {
@@ -550,9 +625,9 @@ async function repeatHold(
  * The flag itself is the safety cron's (it reads the risk off the
  * standings); this writes the alert stamp and, for a new team, the policies:
  * the broadcast pause (the monitor's own column and the operator hold every
- * send surface already honours) and, on a confident phishing verdict or the
- * repeat hold's count of them, the review hold (a suspension, with the flag
- * that keeps it on the list).
+ * send surface already honours), on a high risk or one phishing-type verdict
+ * on a broadcast's own HTML or a rendered copy, and the review hold (a
+ * suspension, with the flag that keeps it on the list) under a HoldRule.
  */
 export async function applyJudgedSample(
   db: Db,
@@ -561,6 +636,10 @@ export async function applyJudgedSample(
     teamId: string;
     score: number;
     verdict?: Pick<JudgeVerdict, "verdict" | "categories" | "reasons"> | undefined;
+    /** The sample's kind: a broadcast's skeleton or copy can pause its broadcasts on its own. */
+    kind?: MonitorSampleKind | undefined;
+    /** The sending domain was under YOUNG_DOMAIN_DAYS old, or of unknown age. */
+    youngSendingDomain?: boolean | undefined;
     now?: Date;
   },
 ): Promise<VerdictOutcome> {
@@ -587,7 +666,9 @@ export async function applyJudgedSample(
       s.autoHold && tier === "new" && row.heldAt === null && verdict
         ? isHoldVerdict(verdict, s.holdScore)
           ? ({ rule: "score" } as const)
-          : await repeatHold(t, s, row, verdict, now)
+          : input.youngSendingDomain && isHoldVerdict(verdict, s.holdRepeatScore)
+            ? ({ rule: "young_domain" } as const)
+            : await repeatHold(t, s, row, verdict, now)
         : null;
     if (rule) {
       // A standing suspension is the operator's call and stays as it is.
@@ -633,6 +714,12 @@ export async function applyJudgedSample(
       alert = stamped.length > 0;
     }
     let paused = false;
+    // A lure on a broadcast's own HTML, or on a copy rendered for a contact,
+    // is about every copy: one verdict pauses the rest.
+    const broadcastLure =
+      (input.kind === "broadcast_skeleton" || input.kind === "broadcast_copy") &&
+      verdict !== undefined &&
+      isHoldVerdict(verdict, s.holdRepeatScore);
     // A team held for review is never paused by the policy, during the hold
     // or after its release: the backlog sampled before the hold is judged
     // after it and keeps the risk past the line, so a pause would outlive the
@@ -640,7 +727,7 @@ export async function applyJudgedSample(
     if (
       s.autoPause &&
       tier === "new" &&
-      next.risk >= s.pauseRisk &&
+      (broadcastLure || next.risk >= s.pauseRisk) &&
       row.broadcastsPausedAt === null &&
       held === null &&
       row.heldAt === null &&
@@ -654,18 +741,21 @@ export async function applyJudgedSample(
           row.broadcastsResumedAt?.getTime() ?? 0,
         ),
       );
-      const [hot] = await t
-        .select({ n: sql<number>`count(*)::int` })
-        .from(ms)
-        .where(
-          and(
-            eq(ms.teamId, input.teamId),
-            eq(ms.status, "judged"),
-            gte(ms.score, MONITOR_PAUSE_VERDICT_SCORE),
-            gte(ms.judgedAt, since),
-          ),
-        );
-      if ((hot?.n ?? 0) > 0 || input.score >= MONITOR_PAUSE_VERDICT_SCORE) {
+      const hot = async () => {
+        const [count] = await t
+          .select({ n: sql<number>`count(*)::int` })
+          .from(ms)
+          .where(
+            and(
+              eq(ms.teamId, input.teamId),
+              eq(ms.status, "judged"),
+              gte(ms.score, MONITOR_PAUSE_VERDICT_SCORE),
+              gte(ms.judgedAt, since),
+            ),
+          );
+        return (count?.n ?? 0) > 0;
+      };
+      if (broadcastLure || input.score >= MONITOR_PAUSE_VERDICT_SCORE || (await hot())) {
         // A team the operator already holds is theirs; the policy only
         // stamps a team nothing else holds, so its Resume lifts its own hold.
         const stamped = await t

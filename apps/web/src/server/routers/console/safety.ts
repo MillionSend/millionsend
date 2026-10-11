@@ -7,15 +7,19 @@ import {
   CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
   CONTENT_REVEAL_SCOPES,
+  cancelWaitingEmails,
   contentRevealExpiry,
   decryptEmailBody,
   fetchAccountScore,
   fetchContentFactors,
   fetchDeliverabilityHealth,
   getMonitorSettingsRow,
+  isHoldVerdict,
+  OPERATOR_PARK_REASONS,
   parseAuditActor,
   recentMonitorSamples,
   redactRevealedText,
+  releaseWaitingEmails,
   renderRevealedBody,
   resolveMonitorSettings,
   TEAM_FLAG_REASONS,
@@ -41,8 +45,9 @@ import {
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
-import { judgeStatus } from "../../console/monitor";
+import { judgeStatus, monitorSettingsNow } from "../../console/monitor";
 import { getKeyring } from "../../keyring";
+import { enqueueEmailSend } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
 import { auditOperator, kickQuotaDrain, loadTeam } from "./shared";
 
@@ -89,19 +94,23 @@ function flaggedSince(now: Date): Date {
 }
 
 /**
- * The flagged emails of a team's window: one row per email, a broadcast's
- * recipients sharing its insights row. The review page lists these and a
- * grant may only ever name ids from here.
+ * The flagged emails of a team's window: one row per sent email with a
+ * failing check, a broadcast's recipients sharing its insights row, then the
+ * unsent ones a phishing-type verdict stopped before SES, which have no
+ * insights yet. The review page lists these and a grant may only ever name
+ * ids from here.
  */
-function flaggedEmails(db: Db, teamId: string, since: Date) {
+async function flaggedEmails(db: Db, teamId: string, since: Date, holdLine: number) {
   const e = schema.emails;
   const i = schema.emailInsights;
-  return db
+  const ms = schema.monitorSamples;
+  const recipients = sql<number>`jsonb_array_length(${e.to})`;
+  const sent = await db
     .select({
       id: e.id,
       sentAt: e.sentAt,
       from: e.from,
-      recipients: sql<number>`jsonb_array_length(${e.to})`,
+      recipients,
       broadcastId: e.broadcastId,
       checks: i.checks,
     })
@@ -119,6 +128,166 @@ function flaggedEmails(db: Db, teamId: string, since: Date) {
     )
     .orderBy(desc(e.sentAt))
     .limit(50);
+  const held = await db
+    .select({
+      id: e.id,
+      sentAt: e.sentAt,
+      from: e.from,
+      recipients,
+      broadcastId: e.broadcastId,
+      score: ms.score,
+      verdict: ms.verdict,
+      categories: ms.categories,
+      reasons: ms.reasons,
+    })
+    .from(e)
+    .innerJoin(ms, eq(ms.emailId, e.id))
+    .where(
+      and(
+        eq(e.teamId, teamId),
+        isNull(e.sentAt),
+        inArray(e.latestStatus, ["queued", "queued_quota"]),
+        eq(ms.status, "judged"),
+        sql`${ms.judgedAt} >= ${since}`,
+        sql`${ms.score} >= ${holdLine}`,
+      ),
+    )
+    .orderBy(desc(e.createdAt))
+    .limit(50);
+  return [
+    ...held
+      .filter((row) => isHoldVerdict(row, holdLine))
+      .map((row) => ({
+        id: row.id,
+        sentAt: row.sentAt,
+        from: row.from,
+        recipients: row.recipients,
+        broadcastId: row.broadcastId,
+        checks: [] as schema.EmailInsightCheck[],
+      })),
+    ...sent,
+  ];
+}
+
+/** Waiting emails the review list shows per team; a group's actions reach every one of them. */
+const WAITING_SHOWN_PER_TEAM = 20;
+
+/** Why an email waits, as the review list words it. */
+type WaitingWhy = "held" | "verdict" | "outage" | "media";
+
+/**
+ * The review list: every unsent email screening stopped before SES, newest
+ * first, grouped by team. Parked for an operator (a judge that kept failing
+ * on a young domain, content it could not read), parked behind a review
+ * hold still pending, or waiting out a phishing-type verdict's short wait.
+ */
+async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
+  const e = schema.emails;
+  const ms = schema.monitorSamples;
+  const fields = {
+    id: e.id,
+    teamId: e.teamId,
+    createdAt: e.createdAt,
+    from: e.from,
+    recipients: sql<number>`jsonb_array_length(${e.to}) + coalesce(jsonb_array_length(${e.cc}), 0) + coalesce(jsonb_array_length(${e.bcc}), 0)`,
+    broadcastId: e.broadcastId,
+    parkReason: e.parkReason,
+    score: ms.score,
+    verdict: ms.verdict,
+    categories: ms.categories,
+    reasons: ms.reasons,
+  };
+  const parked = and(
+    teamId ? eq(e.teamId, teamId) : undefined,
+    eq(e.latestStatus, "queued_quota"),
+    isNull(e.sentAt),
+    or(
+      inArray(e.parkReason, [...OPERATOR_PARK_REASONS]),
+      and(eq(e.parkReason, "review"), eq(t.suspensionReason, "review")),
+    ),
+  );
+  const parkedRows = await db
+    .select(fields)
+    .from(e)
+    .innerJoin(t, eq(t.id, e.teamId))
+    .leftJoin(ms, and(eq(ms.emailId, e.id), eq(ms.screening, true)))
+    .where(parked)
+    .orderBy(desc(e.createdAt))
+    .limit(500);
+  const parkedTotals = await db
+    .select({ teamId: e.teamId, n: sql<number>`count(*)::int` })
+    .from(e)
+    .innerJoin(t, eq(t.id, e.teamId))
+    .where(parked)
+    .groupBy(e.teamId);
+  // A verdict's short wait lasts minutes: few rows, read whole.
+  const waitingRows = (
+    await db
+      .select(fields)
+      .from(e)
+      .innerJoin(ms, and(eq(ms.emailId, e.id), eq(ms.screening, true)))
+      .where(
+        and(
+          teamId ? eq(e.teamId, teamId) : undefined,
+          eq(e.latestStatus, "queued"),
+          isNull(e.sentAt),
+          isNull(e.screenReleasedAt),
+          eq(ms.status, "judged"),
+          sql`${ms.score} >= ${holdLine}`,
+        ),
+      )
+  ).filter((row) => isHoldVerdict(row, holdLine));
+  const shown = [...parkedRows, ...waitingRows].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+  );
+  const totalOf = (id: string) =>
+    (parkedTotals.find((row) => row.teamId === id)?.n ?? 0) +
+    waitingRows.filter((row) => row.teamId === id).length;
+  const teamIds = [...new Set(shown.map((row) => row.teamId))];
+  const teams =
+    teamIds.length === 0
+      ? []
+      : await db
+          .select({
+            id: t.id,
+            name: t.name,
+            logoUrl: t.logoUrl,
+            plan: sql<string>`${t.plan}::text`,
+            planQuota: t.planQuota,
+            suspendedAt: t.suspendedAt,
+            suspensionReason: t.suspensionReason,
+            broadcastsPausedByOperatorAt: t.broadcastsPausedByOperatorAt,
+          })
+          .from(t)
+          .where(inArray(t.id, teamIds));
+  const why = (row: (typeof shown)[number]): WaitingWhy =>
+    row.parkReason === "review"
+      ? "held"
+      : row.parkReason === "screening"
+        ? "outage"
+        : row.parkReason === "media"
+          ? "media"
+          : "verdict";
+  return teams
+    .map((team) => {
+      const emails = shown.filter((row) => row.teamId === team.id);
+      return {
+        team,
+        total: totalOf(team.id),
+        newestAt: emails[0]?.createdAt ?? new Date(0),
+        emails: emails.slice(0, WAITING_SHOWN_PER_TEAM).map((row) => ({
+          id: row.id,
+          createdAt: row.createdAt,
+          from: row.from,
+          recipients: row.recipients,
+          broadcastId: row.broadcastId,
+          why: why(row),
+          score: row.verdict === null ? null : row.score,
+          reasons: row.reasons ?? [],
+        })),
+      };
+    })
+    .sort((a, b) => b.newestAt.getTime() - a.newestAt.getTime());
 }
 
 /** Every content procedure refuses the same way while the feature is off. */
@@ -275,7 +444,7 @@ export const consoleSafetyRouter = router({
         .from(schema.contacts)
         .where(eq(schema.contacts.teamId, team.id))
         .then((r) => r[0]?.n ?? 0),
-      flaggedEmails(ctx.db, team.id, since),
+      flaggedEmails(ctx.db, team.id, since, monitorSettings.holdRepeatScore),
       ctx.db
         .select({
           id: schema.auditLog.id,
@@ -496,7 +665,12 @@ export const consoleSafetyRouter = router({
       assertContentRevealOn();
       const team = await loadTeam(ctx.db, input.teamId);
       const now = new Date();
-      const flagged = await flaggedEmails(ctx.db, team.id, flaggedSince(now));
+      const flagged = await flaggedEmails(
+        ctx.db,
+        team.id,
+        flaggedSince(now),
+        (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+      );
       const wanted =
         input.scope === "email" ? flagged.filter((row) => row.id === input.emailId) : flagged;
       if (wanted.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "not_flagged" });
@@ -621,6 +795,65 @@ export const consoleSafetyRouter = router({
         expiresAt: grant.expiresAt,
         viewCount: counted?.viewCount ?? grant.viewCount + 1,
       };
+    }),
+
+  /** The review list, across teams or for one: what screening stopped before SES. */
+  waiting: operatorProcedure
+    .input(z.object({ teamId: z.uuid().optional() }))
+    .query(async ({ ctx, input }) => ({
+      groups: await waitingEmails(
+        ctx.db,
+        (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+        input.teamId,
+      ),
+    })),
+
+  /**
+   * Release: the emails go out without being screened again, every waiting
+   * one of the team when no ids are named. A team held for review is
+   * released with its hold, from its review page.
+   */
+  releaseWaiting: operatorProcedure
+    .input(z.object({ teamId: z.uuid(), emailIds: z.array(z.uuid()).min(1).max(500).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      if (team.suspendedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "held" });
+      const released = await releaseWaitingEmails(ctx.db, {
+        ...input,
+        holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+      });
+      for (const emailId of released.queued) await enqueueEmailSend(emailId);
+      if (released.parked > 0) await kickQuotaDrain();
+      const count = released.parked + released.queued.length;
+      if (count > 0) {
+        await auditOperator(ctx, {
+          teamId: null,
+          action: "screening.released",
+          target: { type: "team", id: team.id },
+          metadata: { team: team.name, emails: count },
+        });
+      }
+      return { released: count };
+    }),
+
+  /** Cancel: the emails never go out, every waiting one of the team when no ids are named. */
+  cancelWaiting: operatorProcedure
+    .input(z.object({ teamId: z.uuid(), emailIds: z.array(z.uuid()).min(1).max(500).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      const canceled = await cancelWaitingEmails(ctx.db, {
+        ...input,
+        holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+      });
+      if (canceled > 0) {
+        await auditOperator(ctx, {
+          teamId: null,
+          action: "screening.canceled",
+          target: { type: "team", id: team.id },
+          metadata: { team: team.name, emails: canceled },
+        });
+      }
+      return { canceled };
     }),
 
   clearFlag: operatorProcedure

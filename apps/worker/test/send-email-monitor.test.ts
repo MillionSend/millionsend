@@ -62,11 +62,15 @@ async function insertEmail(over: Partial<typeof schema.emails.$inferInsert> = {}
 const samplesFor = (emailId: string) =>
   db.select().from(schema.monitorSamples).where(eq(schema.monitorSamples.emailId, emailId));
 
+// The draw after the send, with the hold (and the screening before SES it
+// turns on) off; send-email-screening.test.ts covers the screening.
+const DRAW_ONLY = { ...MONITOR_SETTING_DEFAULTS, autoHold: false };
+
 it("draws an accepted send into a pending sample and queues the judge", async () => {
   const queued: string[] = [];
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
-    settings: async () => MONITOR_SETTING_DEFAULTS,
+    settings: async () => DRAW_ONLY,
     enqueueJudge: async (id) => void queued.push(id),
   };
   const emailId = await insertEmail();
@@ -171,7 +175,7 @@ it("draws a customer's send that carried the system-mail tag like any other", as
   const queued: string[] = [];
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
-    settings: async () => MONITOR_SETTING_DEFAULTS,
+    settings: async () => DRAW_ONLY,
     enqueueJudge: async (id) => void queued.push(id),
   };
   expect(await sendEmail(db, { keyring, ses, monitor }, { emailId: accepted.id })).toBe("sent");

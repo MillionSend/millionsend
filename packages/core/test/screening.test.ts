@@ -1,0 +1,193 @@
+import type { Db } from "@millionsend/db";
+import { schema } from "@millionsend/db";
+import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { applyJudgedSample, monitorRowWithHistory } from "../src/abuse-monitor.js";
+import { MONITOR_SETTING_DEFAULTS } from "../src/monitor-settings.js";
+import { releaseWaitingEmails, sendingDomainYoung } from "../src/screening.js";
+import { DAY_MS, utcDay } from "../src/utc-day.js";
+
+const S = MONITOR_SETTING_DEFAULTS;
+const NOW = new Date("2026-10-11T12:00:00Z");
+const PHISHING = {
+  verdict: "abuse" as const,
+  categories: ["payment_redirect"],
+  reasons: ["harvests_secrets"],
+};
+
+let db: Db;
+let close: () => Promise<void>;
+
+beforeAll(async () => {
+  ({ db, close } = await createTestDb());
+});
+afterAll(() => close());
+
+async function newTeam(slug: string) {
+  const teamId = await createTeam(db, slug);
+  await db.insert(schema.teamMonitor).values({ teamId, sentTotal: 1, firstSendAt: NOW });
+  return teamId;
+}
+const team = async (teamId: string) =>
+  (await db.select().from(schema.teams).where(eq(schema.teams.id, teamId)))[0];
+
+describe("the young sending domain", () => {
+  it("reads a domain under 7 days old, or of unknown age, as young", async () => {
+    const teamId = await createTeam(db, "ages");
+    const add = async (name: string, registeredAt: Date | null) =>
+      (
+        await db
+          .insert(schema.domains)
+          .values({ teamId, name, region: "us-east-1", status: "verified", registeredAt })
+          .returning({ id: schema.domains.id })
+      )[0]?.id ?? "";
+    const young = await add("young.dev", new Date(NOW.getTime() - 6 * DAY_MS));
+    const week = await add("week.dev", new Date(NOW.getTime() - 7 * DAY_MS));
+    const unknown = await add("unknown.dev", null);
+    expect(await sendingDomainYoung(db, { teamId, domainId: young }, NOW)).toBe(true);
+    expect(await sendingDomainYoung(db, { teamId, domainId: week }, NOW)).toBe(false);
+    expect(await sendingDomainYoung(db, { teamId, domainId: unknown }, NOW)).toBe(true);
+    expect(await sendingDomainYoung(db, { teamId, name: "Young.dev" }, NOW)).toBe(true);
+    // Another team's domain, or none, says nothing.
+    const other = await createTeam(db, "ages-other");
+    expect(await sendingDomainYoung(db, { teamId: other, domainId: young }, NOW)).toBeNull();
+    expect(await sendingDomainYoung(db, { teamId, domainId: null }, NOW)).toBeNull();
+  });
+
+  it("holds a new team on one phishing verdict from 80 while its sending domain is young", async () => {
+    const held = await newTeam("young-held");
+    expect(
+      await applyJudgedSample(db, S, {
+        teamId: held,
+        score: 81,
+        verdict: PHISHING,
+        youngSendingDomain: true,
+        now: NOW,
+      }),
+    ).toMatchObject({ held: { rule: "young_domain" } });
+    expect(await team(held)).toMatchObject({ suspensionReason: "review" });
+
+    // An aged domain, a verdict under the repeat line, or other abuse: no hold.
+    const aged = await newTeam("young-aged");
+    const call = (teamId: string, score: number, verdict = PHISHING, young = true) =>
+      applyJudgedSample(db, S, {
+        teamId,
+        score,
+        verdict,
+        youngSendingDomain: young,
+        now: NOW,
+      }).then((o) => o.held);
+    expect(await call(aged, 89, PHISHING, false)).toBeNull();
+    expect(await call(aged, 79)).toBeNull();
+    expect(
+      await call(aged, 85, {
+        verdict: "abuse",
+        categories: ["scam"],
+        reasons: ["unsolicited_bulk"],
+      }),
+    ).toBeNull();
+    expect((await team(aged))?.suspendedAt).toBeNull();
+  });
+});
+
+describe("the broadcast lure", () => {
+  it("pauses a new team's broadcasts on one phishing verdict from 80 on its HTML or a copy", async () => {
+    for (const kind of ["broadcast_skeleton", "broadcast_copy"] as const) {
+      const teamId = await newTeam(`lure-${kind}`);
+      const out = await applyJudgedSample(db, S, {
+        teamId,
+        score: 82,
+        verdict: PHISHING,
+        kind,
+        now: NOW,
+      });
+      expect(out).toMatchObject({ paused: true, held: null });
+      expect((await team(teamId))?.broadcastsPausedByOperatorAt).toEqual(NOW);
+    }
+    // The same verdict on a transactional email pauses nothing on its own.
+    const single = await newTeam("lure-single");
+    expect(
+      await applyJudgedSample(db, S, {
+        teamId: single,
+        score: 82,
+        verdict: PHISHING,
+        kind: "first_sends",
+        now: NOW,
+      }),
+    ).toMatchObject({ paused: false });
+    // Nor past the new tier, nor with the policy off.
+    const settled = await createTeam(db, "lure-settled");
+    await db.insert(schema.teamMonitor).values({
+      teamId: settled,
+      sentTotal: 20_000,
+      firstSendAt: new Date(NOW.getTime() - 60 * DAY_MS),
+    });
+    const off = await newTeam("lure-off");
+    for (const [teamId, s] of [
+      [settled, S],
+      [off, { ...S, autoPause: false }],
+    ] as const) {
+      expect(
+        await applyJudgedSample(db, s, {
+          teamId,
+          score: 95,
+          verdict: PHISHING,
+          kind: "broadcast_copy",
+          now: NOW,
+        }),
+      ).toMatchObject({ paused: false });
+    }
+  });
+});
+
+describe("the tier read ahead of a send", () => {
+  it("takes a quiet old team's history from the usage counters, and leaves a new one empty", async () => {
+    const quiet = await createTeam(db, "history-quiet");
+    await db.insert(schema.usageCounters).values([
+      { teamId: quiet, day: utcDay(new Date(NOW.getTime() - 300 * DAY_MS)), sent: 4000 },
+      { teamId: quiet, day: utcDay(new Date(NOW.getTime() - 200 * DAY_MS)), sent: 2000 },
+    ]);
+    const row = await monitorRowWithHistory(db, quiet, NOW);
+    expect(row).toMatchObject({
+      sentTotal: 6000,
+      firstSendAt: new Date(`${utcDay(new Date(NOW.getTime() - 300 * DAY_MS))}T00:00:00Z`),
+    });
+    const fresh = await createTeam(db, "history-fresh");
+    expect(await monitorRowWithHistory(db, fresh, NOW)).toMatchObject({
+      sentTotal: 0,
+      firstSendAt: null,
+    });
+  });
+});
+
+describe("the review list", () => {
+  it("releases what screening parked, never what a review hold parked", async () => {
+    const teamId = await createTeam(db, "release-scope");
+    const insert = (parkReason: "screening" | "review") =>
+      db
+        .insert(schema.emails)
+        .values({
+          teamId,
+          from: "A <a@x.dev>",
+          to: ["r@example.org"],
+          subject: "s",
+          latestStatus: "queued_quota",
+          parkReason,
+        })
+        .returning({ id: schema.emails.id })
+        .then((r) => r[0]?.id ?? "");
+    const screened = await insert("screening");
+    const held = await insert("review");
+    expect(await releaseWaitingEmails(db, { teamId, holdLine: 80, now: NOW })).toEqual({
+      parked: 1,
+      queued: [],
+    });
+    const rows = await db.select().from(schema.emails).where(eq(schema.emails.teamId, teamId));
+    expect(rows.find((r) => r.id === screened)).toMatchObject({
+      parkReason: null,
+      screenReleasedAt: NOW,
+    });
+    expect(rows.find((r) => r.id === held)).toMatchObject({ parkReason: "review" });
+  });
+});

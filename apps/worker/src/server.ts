@@ -54,6 +54,7 @@ import {
   EMAIL_SEND_PRIORITY,
   type EmailSendPriority,
   type EnqueueEmailSends,
+  JUDGE_PRIORITY,
   Queue,
 } from "@millionsend/queue";
 import {
@@ -238,9 +239,10 @@ const enqueueSend = (emailId: string, startAfter?: Date, priority?: EmailSendPri
 // Account mail rides the pipeline, so the mailer needs the queue it enqueues into.
 const mailer = createSystemMailer({ db, keyring, enqueueSend });
 
-// The content monitor: off unless ABUSE_JUDGE names a provider. When on, an
-// accepted send may be drawn and judged after the fact; the sampling key is
-// derived like the token keys, the settings row is re-read once a minute.
+// The content monitor: off unless ABUSE_JUDGE names a provider. When on, a
+// new team's mail is judged before SES and an accepted send may be drawn and
+// judged after the fact; the sampling key is derived like the token keys,
+// the settings row is re-read once a minute.
 const judgeConfig = abuseJudgeConfig();
 const judge = createAbuseJudge(judgeConfig);
 const monitorSettings = monitorSettingsReader(db, env as unknown as Record<string, unknown>);
@@ -248,8 +250,17 @@ const monitor: MonitorDeps | undefined = judge
   ? {
       samplingKey: deriveSamplingKey(masterKeyBytes),
       settings: monitorSettings,
-      enqueueJudge: async (sampleId) => {
-        await queue.send("abuse.judge", { sampleId }, { dedupeKey: sampleId });
+      enqueueJudge: async (sampleId, opts) => {
+        await queue.send(
+          "abuse.judge",
+          { sampleId },
+          {
+            dedupeKey: sampleId,
+            group: opts?.teamId,
+            priority: opts?.screening ? JUDGE_PRIORITY.screening : JUDGE_PRIORITY.sample,
+            startAfter: opts?.startAfter,
+          },
+        );
       },
     }
   : undefined;
@@ -660,8 +671,9 @@ await queue.work(
 );
 
 // Judge calls: a few lanes, each pulling two jobs a fetch so a burst is
-// worked continuously. A throttle is retried through the queue's backoff,
-// not in-process.
+// worked continuously, and one team (the job's group) on at most two of them
+// so its burst never starves another team's screening. A throttle is retried
+// through the queue's backoff, not in-process.
 await queue.work(
   "abuse.judge",
   async ({ sampleId }) => {
@@ -677,11 +689,13 @@ await queue.work(
         syncTenant: async (teamId) => {
           await queue.send("tenant.status", { teamId }, { dedupeKey: teamId });
         },
+        enqueueSend: (emailId, priority) => enqueueSend(emailId, undefined, priority),
+        enqueueBroadcast: (broadcastId) => enqueueBroadcast(broadcastId),
       },
       { sampleId },
     );
   },
-  { concurrency: 4, batchSize: 2 },
+  { concurrency: 4, batchSize: 2, groupConcurrency: 2 },
 );
 
 await queue.work(

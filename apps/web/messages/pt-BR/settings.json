@@ -456,6 +456,8 @@
       "monitor_broadcasts_resumed": "Retomou transmissões após pausa do monitor",
       "warmup_trust_granted": "Dispensou o aquecimento de domínio novo",
       "warmup_trust_revoked": "Reativou o aquecimento de domínio novo",
+      "screening_released": "Liberou e-mails em espera para revisão",
+      "screening_canceled": "Cancelou e-mails em espera para revisão",
       "content_revealed": "Leu o conteúdo de mensagens",
       "content_accessed": "Um operador leu o conteúdo de mensagens",
       "support_view_started": "Modo de suporte iniciado",

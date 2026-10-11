@@ -58,6 +58,8 @@ export {
   drawBroadcastCopy,
   foldRisk,
   type HoldRule,
+  inFirstWindow,
+  isHoldVerdict,
   loadMonitorState,
   MONITOR_ALERT_INTERVAL_MS,
   MONITOR_ANOMALY_CHECKS,
@@ -85,6 +87,7 @@ export {
   monitorDayCounts,
   monitorHealth,
   monitorRate,
+  monitorRowWithHistory,
   monitorSamplesByTeam,
   monitorTier,
   noteAcceptedSend,
@@ -102,6 +105,7 @@ export {
   teamMonitorOverview,
   teamMonitorRow,
   type VerdictOutcome,
+  YOUNG_DOMAIN_DAYS,
 } from "./abuse-monitor.js";
 export {
   type AcceptEmailAuth,
@@ -568,6 +572,22 @@ export {
   reserveQuota,
 } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
+export {
+  broadcastScreen,
+  cancelWaitingEmails,
+  judgeAfterSend,
+  OPERATOR_PARK_REASONS,
+  releaseWaitingEmails,
+  SCREEN_HOLD_WAIT_MS,
+  SCREEN_JUDGE_TIMEOUT_MS,
+  SCREEN_RETRIES,
+  SCREEN_RETRY_MS,
+  type ScreenDecision,
+  type ScreenReason,
+  screenBeforeSend,
+  screeningReasons,
+  sendingDomainYoung,
+} from "./screening.js";
 export {
   countSegment,
   markSegmentsStale,

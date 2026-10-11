@@ -75,9 +75,17 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
  * Why a queued_quota row waits: null for the team's plan or SES's own
  * capacity, "warmup" for the sending domain's warm-up cap, "review" for a
  * team the content monitor holds (the drain sends it once the hold is
- * released). Never shown to the team.
+ * released). The rest wait for an operator on the review list, which the
+ * drain never releases: "screening" when the judge could not answer for a
+ * young sending domain, "media" for content the judge could not read.
+ * Never shown to the team.
  */
-export const emailParkReasonEnum = pgEnum("email_park_reason", ["warmup", "review"]);
+export const emailParkReasonEnum = pgEnum("email_park_reason", [
+  "warmup",
+  "review",
+  "screening",
+  "media",
+]);
 
 /**
  * Lifecycle split (compliance by schema): the plaintext columns here are
@@ -125,6 +133,9 @@ export const emails = pgTable(
     bodyKeyVersion: integer("body_key_version"),
     bodyPurgedAt: timestamp("body_purged_at", { withTimezone: true }),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    // An operator released it from the review list: no screening reason
+    // stops it again.
+    screenReleasedAt: timestamp("screen_released_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp("sent_at", { withTimezone: true }),
   },
@@ -162,6 +173,10 @@ export const emails = pgTable(
     index("emails_team_bulk_created_idx")
       .on(t.teamId, t.createdAt, t.id)
       .where(isNotNull(t.broadcastId)),
+    // The review list: rows waiting on a hold or an operator, across teams.
+    index("emails_review_list_idx")
+      .on(t.createdAt)
+      .where(sql`${t.latestStatus} = 'queued_quota' and ${t.parkReason} <> 'warmup'`),
     // The cap banner counts a team's parked transactional rows only.
     index("emails_team_tx_held_idx")
       .on(t.teamId)

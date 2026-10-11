@@ -783,14 +783,28 @@ content insights (never email bodies), and an instance-wide audit log.
 <details>
 <summary><b>Content monitoring (optional)</b></summary>
 
-Off by default. With a judge configured, a sample of accepted mail is
-scored 0–100 by TypeSafe Jev after SES has taken it and folded into a
-per-team risk the operator sees on Trust & safety.
-Nothing on the send path waits for it: a verdict never delays the message
-it judges, which SES has already taken, and a judge failure of any kind
-(feature off, missing credentials, throttling, timeout, upstream error,
-unparseable answer, body already purged by retention) records the sample
-as unjudged and changes nothing else. The deterministic content checks (`email_insights`, the
+Off by default. With a judge configured, TypeSafe Jev scores mail 0–100
+and every verdict is folded into a per-team risk the operator sees on Trust
+& safety.
+
+**Judged before SES.** A team's mail in its first window (its first 1,000
+sends and 72 hours, counted from its first send) is judged before SES takes
+it: the email waits in the queue, the send lane moves on, and the verdict,
+first in the judge's queue, sends it on in about half a second. A New-tier
+team's broadcast writes no copy until its own HTML has a verdict, and its
+first rendered copy waits for its own. One team uses at most two of the
+judge's four lanes, and a screened email gets a 5 s timeout and one retry.
+When the judge still cannot answer, mail from a sending domain under 7 days
+old, or of unknown age, waits: the judge is tried again every 2 minutes, 3
+times, then the email is parked for the operator, who hears of it through
+the judge-health notice; any other mail is sent and judged afterwards. Past
+the team's daily sample cap, mail goes out unscreened. The rest of accepted
+mail is drawn after SES has taken it, at its tier's rate. Account mail and
+the onboarding email are never judged.
+
+A judge failure of any kind (feature off, missing credentials, throttling,
+timeout, upstream error, unparseable answer, body already purged by
+retention) records the sample as unjudged and changes nothing else. The deterministic content checks (`email_insights`, the
 guardrail, the account score) run on every send whether or not the judge is
 on. Self-hosters can leave it off; the cloud runs it.
 
@@ -799,14 +813,18 @@ safety when a team's risk crosses the flag line, emails the operator once a
 day per team past the alert line, and, for a team in the New tier only
 (inside its first 1,000 sends or 72 hours, or under 10,000 sends within 7
 days), pauses broadcasts when the risk passes the pause line and a sampled
-message scored 90 or more within a day (transactional mail keeps flowing;
-the team sees "paused pending review"; the operator resumes from the review
-page). The pause policy is a setting and can be switched off.
+message scored 90 or more within a day, or at once when a broadcast's own
+HTML or a rendered copy draws a phishing-type verdict from 80 (transactional
+mail keeps flowing; the team sees "paused pending review"; the operator
+resumes from the review page). The pause policy is a setting and can be
+switched off.
 
 **The review hold.** When one sampled message of a New-tier team is judged
 abuse at the hold score (90 by default) as credential phishing, brand
 impersonation or payment redirection, or with an impersonation or
-secret-harvesting finding, the team is suspended at once
+secret-harvesting finding, or at the repeat score (80) while the team's
+sending domain was registered under 7 days before, or is of unknown age, the
+team is suspended at once
 with the reason `review`: mail it sends through the API (`POST /emails` and
 `/emails/batch`, which MCP uses too) or SMTP is accepted as any send is and
 parked (`park_reason = 'review'`), queued mail and broadcasts park, a new
@@ -834,10 +852,20 @@ judged again on its way out, neither holds it a second time nor pauses its
 broadcasts. A team already
 suspended keeps its suspension, and Probation, Established and Trusted teams
 are never held: they stay alert-only. The system team is exempt: the monitor
-never samples it. The judge reads a message
-after SES has taken it, so the message that triggers the hold has already
-gone out; the hold stops what follows. `MONITOR_AUTO_HOLD=false` switches it
-off.
+never samples it. A message judged before SES that holds the team waits with
+the rest of its mail; one judged after sending had already gone out, and the
+hold stops what follows. In the first window, a message judged phishing-type
+from 80 that holds nothing waits 2 minutes before it is sent: a burst
+reaches the repeat count within them. `MONITOR_AUTO_HOLD=false` switches the
+hold off, and the screening before SES with it.
+
+**The review list.** Trust & safety lists every unsent email screening
+stopped, grouped by team: parked behind a review hold, waiting out its 2
+minutes, or parked after the judge kept failing. **Release** sends an email
+without screening it again (`quota.drain` charges it as any parked mail);
+**Cancel** means it never goes out. A held team's mail is released with its
+hold. The team's review page also lists its held unsent emails among the
+flagged ones, so a content access can name them.
 
 **Turning it on** (in the instance's `.env`, read by the worker and the
 app; a restart applies it):

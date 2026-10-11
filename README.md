@@ -33,7 +33,7 @@ means changing two environment variables, not rewriting your integration.
 | Migrate from Resend | ✅ | `npx @millionsend/cli migrate --from resend` moves contacts, segments, topics, templates, webhooks, domains and suppressions; read-only against Resend, safe to re-run before cutover. |
 | Content monitoring | ✅ | Optional outbound judge via [TypeSafe Jev](https://typesafe.ai). Off by default on self-host. |
 
-The hosted monitor uses [TypeSafe](https://typesafe.ai)'s Jev, a System One model built for typed decisions in software. After SES accepts a message, a sample is scored in the background; sending never waits on it. Self-hosters leave it off unless they set `ABUSE_JUDGE=typesafe`.
+The hosted monitor uses [TypeSafe](https://typesafe.ai)'s Jev, a System One model built for typed decisions in software. A new team's mail in its first window, and its broadcasts, are scored before SES takes them and wait for the verdict, about half a second; after that, a sample of accepted mail is scored in the background and sending never waits on it. Self-hosters leave it off unless they set `ABUSE_JUDGE=typesafe`.
 
 ## Run it locally
 

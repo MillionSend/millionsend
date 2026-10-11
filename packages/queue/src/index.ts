@@ -63,6 +63,12 @@ export type EmailSendPriority = (typeof EMAIL_SEND_PRIORITY)[keyof typeof EMAIL_
 export const emailSendPriority = (email: { broadcastId: string | null }): EmailSendPriority =>
   email.broadcastId ? EMAIL_SEND_PRIORITY.bulk : EMAIL_SEND_PRIORITY.transactional;
 
+/**
+ * Fetch order inside the abuse.judge queue: a sample that mail waits on
+ * before SES goes ahead of the samples judged after sending.
+ */
+export const JUDGE_PRIORITY = { screening: 1, sample: 0 } as const;
+
 /** One email.send in a batch enqueue; the wiring supplies the default priority. */
 export interface EmailSendRequest {
   emailId: string;

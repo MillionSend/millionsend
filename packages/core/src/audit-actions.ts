@@ -52,6 +52,10 @@ export const AUDIT_ACTIONS = [
   "monitor.broadcasts_resumed",
   "warmup.trust_granted",
   "warmup.trust_revoked",
+  // The review list's verdict on mail screening stopped before SES; the
+  // instance's rows, as every trust & safety lever.
+  "screening.released",
+  "screening.canceled",
   "support.view_started",
   "support.view_ended",
   "billing.checkout_started",
