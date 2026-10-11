@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
 import { schema } from "@millionsend/db";
 import { getTableColumns } from "drizzle-orm";
@@ -418,7 +419,10 @@ function headerRecord(lines: HeaderLines): Record<string, string> {
   for (const { key, line } of lines) {
     const name = visibleLine(key, 128).toLowerCase();
     if (!name) continue;
-    const value = visibleLine(line.slice(line.indexOf(":") + 1), 16_384);
+    // mailsplit hands lines over as latin1: raw UTF-8 (SMTPUTF8 senders) reads
+    // back as UTF-8, and bytes that are not UTF-8 stay latin1, as it decodes them.
+    const bytes = Buffer.from(line.slice(line.indexOf(":") + 1), "latin1");
+    const value = visibleLine(bytes.toString(isUtf8(bytes) ? "utf8" : "latin1"), 16_384);
     out[name] = name in out ? `${out[name]}\n${value}` : value;
   }
   return out;

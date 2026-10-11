@@ -594,7 +594,18 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           domainId: input.id,
           enabled: input.enabled,
         });
-        if (result.ok) return { receivingEnabled: result.receivingEnabled };
+        if (result.ok) {
+          if (result.changed) {
+            await recordAudit(ctx, {
+              action: result.receivingEnabled
+                ? "domain.receiving_enabled"
+                : "domain.receiving_disabled",
+              target: { type: "domain", id: input.id },
+              metadata: { name: result.name },
+            });
+          }
+          return { receivingEnabled: result.receivingEnabled };
+        }
         if (result.reason === "not_found") throw new TRPCError({ code: "NOT_FOUND" });
         throw result.reason === "not_verified"
           ? new TRPCError({ code: "PRECONDITION_FAILED", message: "Verify the domain first" })

@@ -1302,6 +1302,20 @@ describe("capabilities.receiving", () => {
       .from(schema.domains)
       .where(eq(schema.domains.id, id));
     expect(row).toEqual({ on: false, at: null });
+
+    // A repeat of the current state changes nothing, so it audits nothing.
+    await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "disabled" },
+    });
+    const audit = await db
+      .select({ action: schema.auditLog.action, data: schema.auditLog.data })
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.target, `domain:${id}`))
+      .orderBy(schema.auditLog.createdAt);
+    expect(audit.filter((a) => a.action.startsWith("domain.receiving_"))).toEqual([
+      { action: "domain.receiving_enabled", data: { name } },
+      { action: "domain.receiving_disabled", data: { name } },
+    ]);
   });
 
   it("409s a name another team already receives, and a refusal applies nothing else", async () => {

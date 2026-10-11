@@ -418,6 +418,8 @@
       "domain_created": "Adicionou domínio",
       "domain_verified": "Verificou domínio",
       "domain_deleted": "Excluiu domínio",
+      "domain_receiving_enabled": "Ativou recebimento",
+      "domain_receiving_disabled": "Desativou recebimento",
       "webhook_created": "Criou webhook",
       "webhook_updated": "Atualizou webhook",
       "webhook_secret_rotated": "Rotacionou o segredo de assinatura do webhook",

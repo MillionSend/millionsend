@@ -359,6 +359,19 @@ describe("Resend shapes", () => {
     expect(await openReceivedAttachment(purged, keyring, attachments[0]?.id ?? "")).toBeNull();
   });
 
+  it("reads raw 8-bit header values as UTF-8, or latin1 when they are not UTF-8", async () => {
+    const raw = Buffer.concat([
+      Buffer.from("From: ana@sender.example\r\nX-Nota: confirmação\r\nX-Legado: ", "utf8"),
+      Buffer.from([0x61, 0xe7, 0xe3, 0x6f]),
+      Buffer.from("\r\nSubject: =?UTF-8?Q?ol=C3=A1?=\r\n\r\nbody", "utf8"),
+    ]);
+    const { row } = await storedRow(raw);
+    const detail = await receivedEmailDetail(row, keyring, { htmlFormat: "data_uri", downloads });
+    expect(detail.headers?.["x-nota"]).toBe("confirmação");
+    expect(detail.headers?.["x-legado"]).toBe("ação");
+    expect(detail.headers?.subject).toBe("=?UTF-8?Q?ol=C3=A1?=");
+  });
+
   it("answers an unparseable message with its metadata and the raw download", async () => {
     const { row } = await storedRow(Buffer.from([0, 159, 146, 150, 13, 10, 13, 10, 0]));
     const detail = await receivedEmailDetail(row, keyring, { htmlFormat: "data_uri", downloads });

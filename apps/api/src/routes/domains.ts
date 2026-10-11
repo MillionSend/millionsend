@@ -801,6 +801,17 @@ export function registerDomainRoutes(
                 422,
               );
         }
+        if (result.changed) {
+          await recordAudit(db, {
+            teamId: auth.teamId,
+            actor: apiRequestActor(auth),
+            action: result.receivingEnabled
+              ? "domain.receiving_enabled"
+              : "domain.receiving_disabled",
+            target: { type: "domain", id: domain.id },
+            metadata: { name: domain.name },
+          });
+        }
         receiving = {
           receivingEnabled: result.receivingEnabled,
           receivingEnabledAt: result.receivingEnabledAt,

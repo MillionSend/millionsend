@@ -218,7 +218,14 @@ export async function decideRecipient(
 }
 
 export type DomainReceivingResult =
-  | { ok: true; receivingEnabled: boolean; receivingEnabledAt: Date | null }
+  | {
+      ok: true;
+      /** False when the domain was already in the asked state. */
+      changed: boolean;
+      name: string;
+      receivingEnabled: boolean;
+      receivingEnabledAt: Date | null;
+    }
   | {
       ok: false;
       /** not_found: no such domain in the team; not_verified: receiving needs a verified domain; taken: another team receives this name. */
@@ -239,6 +246,7 @@ export async function setDomainReceiving(
   const scope = and(eq(d.id, params.domainId), eq(d.teamId, params.teamId));
   const [domain] = await db
     .select({
+      name: d.name,
       status: d.status,
       receivingEnabled: d.receivingEnabled,
       receivingEnabledAt: d.receivingEnabledAt,
@@ -249,6 +257,8 @@ export async function setDomainReceiving(
   if (domain.receivingEnabled === params.enabled) {
     return {
       ok: true,
+      changed: false,
+      name: domain.name,
       receivingEnabled: domain.receivingEnabled,
       receivingEnabledAt: domain.receivingEnabledAt,
     };
@@ -267,7 +277,7 @@ export async function setDomainReceiving(
         receivingEnabledAt: d.receivingEnabledAt,
       });
     if (!row) return { ok: false, reason: "not_found" };
-    return { ok: true, ...row };
+    return { ok: true, changed: true, name: domain.name, ...row };
   } catch (err) {
     if (isUniqueViolation(err)) return { ok: false, reason: "taken" };
     throw err;

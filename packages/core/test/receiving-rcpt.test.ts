@@ -271,10 +271,18 @@ describe("setDomainReceiving", () => {
     });
     expect(
       await setDomainReceiving(db, { teamId: a, domainId: aDomain, enabled: true, now: NOW }),
-    ).toEqual({ ok: true, receivingEnabled: true, receivingEnabledAt: NOW });
+    ).toEqual({
+      ok: true,
+      changed: true,
+      name: "shared.toggle.test",
+      receivingEnabled: true,
+      receivingEnabledAt: NOW,
+    });
     // Idempotent, and the original timestamp stays.
     expect(await setDomainReceiving(db, { teamId: a, domainId: aDomain, enabled: true })).toEqual({
       ok: true,
+      changed: false,
+      name: "shared.toggle.test",
       receivingEnabled: true,
       receivingEnabledAt: NOW,
     });
@@ -285,6 +293,8 @@ describe("setDomainReceiving", () => {
     });
     expect(await setDomainReceiving(db, { teamId: a, domainId: aDomain, enabled: false })).toEqual({
       ok: true,
+      changed: true,
+      name: "shared.toggle.test",
       receivingEnabled: false,
       receivingEnabledAt: null,
     });
