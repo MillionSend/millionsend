@@ -439,6 +439,8 @@
       "team_held_for_review": "Sending paused pending review",
       "team_ses_tenant_updated": "Updated SES tenant status",
       "team_ses_tenant_update_failed": "SES tenant status update failed",
+      "team_fraud_refunded": "Canceled subscription and refunded as fraud",
+      "team_fraud_refund_failed": "Stripe cancel and refund failed",
       "console_flag_opened": "Flagged team",
       "console_flag_cleared": "Cleared flag",
       "console_flag_reopened": "Reopened flag",

@@ -439,6 +439,8 @@
       "team_held_for_review": "Envio pausado aguardando revisão",
       "team_ses_tenant_updated": "Atualizou o status do tenant do SES",
       "team_ses_tenant_update_failed": "Falha ao atualizar o status do tenant do SES",
+      "team_fraud_refunded": "Cancelou a assinatura e reembolsou como fraude",
+      "team_fraud_refund_failed": "Falha ao cancelar e reembolsar no Stripe",
       "console_flag_opened": "Sinalizou a equipe",
       "console_flag_cleared": "Encerrou a sinalização",
       "console_flag_reopened": "Reabriu a sinalização",

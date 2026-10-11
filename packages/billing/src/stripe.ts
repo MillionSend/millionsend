@@ -37,6 +37,14 @@ export interface BillingStripe {
       create(params: Stripe.Billing.MeterEventCreateParams): Promise<Stripe.Billing.MeterEvent>;
     };
   };
+  /** Iterating the list auto-paginates, as the real client's list does. */
+  charges: { list(params: Stripe.ChargeListParams): AsyncIterable<Stripe.Charge> };
+  refunds: {
+    create(
+      params: Stripe.RefundCreateParams,
+      options?: Stripe.RequestOptions,
+    ): Promise<Stripe.Refund>;
+  };
   checkout: {
     sessions: {
       create(

@@ -529,6 +529,12 @@
       "notePlaceholder": "What you saw. Goes to the audit log and, unless phishing, to the owner.",
       "confirm": "Suspend team"
     },
+    "refund": {
+      "offer": "Cancel {plan} in Stripe and refund the last 120 days as fraud",
+      "suspended": "{team} suspended",
+      "done": "subscription canceled · {count, plural, =0 {no payments to refund} one {# payment refunded ({amount})} other {# payments refunded ({amount})}}",
+      "failed": "Stripe stopped partway: finish canceling and refunding in the Stripe dashboard"
+    },
     "reinstateDialog": {
       "title": "Reinstate {team}",
       "lead": "Sends go out again at once; held broadcasts resume within 15 minutes. The owner is emailed unless the suspension was for phishing or a review hold.",

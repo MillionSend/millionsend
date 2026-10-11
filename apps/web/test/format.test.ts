@@ -5,6 +5,7 @@ import {
   formatDayUtc,
   formatDurationShort,
   formatHoursMinutes,
+  formatMoneyTotals,
   formatUtcMinute,
   formatUtcTimestampMs,
   maskApiKey,
@@ -77,5 +78,17 @@ describe("abbreviateDkim", () => {
     expect(abbreviateDkim('"v=spf1 include:amazonses.com ~all"')).toBe(
       '"v=spf1 include:amazonses.com ~all"',
     );
+  });
+});
+
+describe("formatMoneyTotals", () => {
+  it("sums per currency: US dollars as formatUsd writes them, any other as the locale does", () => {
+    const usd = (amount: number) => ({ amount, currency: "usd" });
+    expect(formatMoneyTotals([usd(2000), usd(2000)], "en")).toBe("$40");
+    expect(formatMoneyTotals([usd(2050), { amount: 9800, currency: "brl" }], "pt-BR")).toBe(
+      "$20,50 + R$\u00a098,00",
+    );
+    expect(formatMoneyTotals([{ amount: 500, currency: "jpy" }], "en")).toBe("¥500");
+    expect(formatMoneyTotals([], "en")).toBe("");
   });
 });

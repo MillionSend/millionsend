@@ -5,8 +5,14 @@ import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BillingStripe } from "../src/stripe.js";
-import { applySubscription, changeRung, setOverage } from "../src/subscription.js";
 import {
+  applySubscription,
+  cancelAndRefundFraud,
+  changeRung,
+  setOverage,
+} from "../src/subscription.js";
+import {
+  charge,
   fakeStripe,
   legacyProduct,
   PERIOD_END,
@@ -274,5 +280,108 @@ describe("setOverage", () => {
     );
     expect(state.itemCreates).toEqual([]);
     expect((await team(teamId))?.overageEnabled).toBe(true);
+  });
+});
+
+describe("cancelAndRefundFraud", () => {
+  const NOW = new Date("2026-10-11T12:00:00Z");
+  const ago = (days: number) => Math.floor(NOW.getTime() / 1000) - days * 86_400;
+  const refunded = () => state.refunds.map(([params]) => params.charge);
+
+  it("cancels at once, then refunds each payment of the last 120 days in full as fraud under its own key", async () => {
+    const teamId = await subscribedTeam(withOverage());
+    state.charges = [
+      charge("ch_old", "cus_1", ago(119), { amount: 900 }),
+      charge("ch_new", "cus_1", ago(2)),
+      charge("ch_stale", "cus_1", ago(121)),
+      charge("ch_elsewhere", "cus_2", ago(1)),
+    ];
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: "sub_1",
+      refunds: [
+        { charge: "ch_new", amount: 2000, currency: "usd" },
+        { charge: "ch_old", amount: 900, currency: "usd" },
+      ],
+      failed: null,
+    });
+    expect(state.cancels).toEqual(["sub_1"]);
+    expect(state.cancelParams).toEqual({ invoice_now: false, prorate: false });
+    callOrder("subscriptions.cancel", "charges.list");
+    expect(state.chargeListParams).toEqual({
+      customer: "cus_1",
+      created: { gte: ago(120) },
+      limit: 100,
+    });
+    expect(state.refunds).toEqual([
+      [{ charge: "ch_new", reason: "fraudulent" }, { idempotencyKey: "fraud-refund:ch_new" }],
+      [{ charge: "ch_old", reason: "fraudulent" }, { idempotencyKey: "fraud-refund:ch_old" }],
+    ]);
+    expect(await team(teamId)).toMatchObject({
+      plan: "free",
+      planQuota: null,
+      planStatus: "canceled",
+      stripeCustomerId: "cus_1",
+      stripeSubscriptionId: null,
+    });
+  });
+
+  it("leaves disputed, refunded and failed payments alone, and returns the rest of a partly refunded one", async () => {
+    const teamId = await subscribedTeam(withOverage());
+    state.charges = [
+      charge("ch_disputed", "cus_1", ago(10), { disputed: true }),
+      charge("ch_refunded", "cus_1", ago(20), { amount_refunded: 2000, refunded: true }),
+      charge("ch_failed", "cus_1", ago(30), { status: "failed" }),
+      charge("ch_partly", "cus_1", ago(40), { amount_refunded: 500 }),
+    ];
+    const { refunds, failed } = await cancelAndRefundFraud(deps(), teamId, NOW);
+    expect(refunds).toEqual([{ charge: "ch_partly", amount: 1500, currency: "usd" }]);
+    expect(refunded()).toEqual(["ch_partly"]);
+    expect(failed).toBeNull();
+  });
+
+  it("returns a Stripe failure with what was done before it, and a retry never refunds twice", async () => {
+    const teamId = await subscribedTeam(withOverage());
+    state.charges = [charge("ch_a", "cus_1", ago(1)), charge("ch_b", "cus_1", ago(2))];
+    state.refundErrors.ch_b = new Error("Stripe is down");
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: "sub_1",
+      refunds: [{ charge: "ch_a", amount: 2000, currency: "usd" }],
+      failed: "Error: Stripe is down",
+    });
+
+    delete state.refundErrors.ch_b;
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: null,
+      refunds: [{ charge: "ch_b", amount: 2000, currency: "usd" }],
+      failed: null,
+    });
+    expect(refunded()).toEqual(["ch_a", "ch_b"]);
+    expect(state.cancels).toEqual(["sub_1"]);
+  });
+
+  it("refunds nothing when the cancel fails", async () => {
+    const teamId = await createTeam(db);
+    await db
+      .update(schema.teams)
+      .set({ stripeCustomerId: "cus_1", stripeSubscriptionId: "sub_gone", plan: "pro" })
+      .where(eq(schema.teams.id, teamId));
+    state.charges = [charge("ch_a", "cus_1", ago(1))];
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: null,
+      refunds: [],
+      failed: "Error: No such subscription: sub_gone",
+    });
+    expect(state.calls).not.toContain("charges.list");
+    expect((await team(teamId))?.plan).toBe("pro");
+  });
+
+  it("touches nothing in Stripe for a team that never had a customer", async () => {
+    const teamId = await createTeam(db);
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: null,
+      refunds: [],
+      failed: null,
+    });
+    expect(state.calls).toEqual([]);
   });
 });

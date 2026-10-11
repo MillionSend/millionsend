@@ -138,6 +138,28 @@ export function formatUsd(cents: number, locale: string): string {
     .join("");
 }
 
+/**
+ * Amounts in minor units (Stripe's), summed per currency: US dollars as
+ * formatUsd writes them, any other currency as the locale does ("$40",
+ * "$40 + R$ 98,00").
+ */
+export function formatMoneyTotals(
+  items: readonly { amount: number; currency: string }[],
+  locale: string,
+): string {
+  const totals = new Map<string, number>();
+  for (const { amount, currency } of items) {
+    totals.set(currency, (totals.get(currency) ?? 0) + amount);
+  }
+  return [...totals]
+    .map(([currency, minor]) => {
+      if (currency.toLowerCase() === "usd") return formatUsd(minor, locale);
+      const format = new Intl.NumberFormat(locale, { style: "currency", currency });
+      return format.format(minor / 10 ** (format.resolvedOptions().maximumFractionDigits ?? 2));
+    })
+    .join(" + ");
+}
+
 /** Payload size label ("512 B", "12.4 KB", "1.2 MB"): 1024-based, trailing zeros trimmed. */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
