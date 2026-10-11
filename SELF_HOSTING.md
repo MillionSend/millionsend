@@ -55,8 +55,8 @@ In `.env` (everything else defaults to a working local setup):
   hostname (the nginx section below); otherwise the API is assumed at port 3001
   of the dashboard host.
 - `COMPOSE_PROFILES` — optional services, comma-separated: `docs` (the
-  documentation site), `smtp` (the relay; mount a keypair first), `backup`
-  (scheduled dumps).
+  documentation site), `smtp` (the relay; mount a keypair first), `mx`
+  (inbound mail; see "Receiving mail" below), `backup` (scheduled dumps).
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — from the AWS setup below, or rely
   on the default AWS credential chain. The worker paces each region at the lower
   of its own SES send rate and `SES_MAX_SEND_RATE` (or the Settings → Instance
@@ -353,6 +353,83 @@ so it stays off until asked for: once the keypair is mounted, add `smtp` to
 </details>
 
 <details>
+<summary><b>Receiving mail (built-in MX, beta)</b></summary>
+
+Point a domain's MX record at this instance and every message to any address
+on it is stored for the team, listed under Emails → Receiving, and sent to
+`email.received` webhooks (Resend's receiving API and payloads). The mail
+server is the `mx` compose service (`PROCESS=mx`):
+
+- It accepts mail only for domains a team turned receiving on for, so it is
+  never an open relay. Anything else gets `550 5.1.1` during the session.
+- It asks the app about each recipient, checks SPF, DKIM, DMARC and ARC, and
+  hands every message (up to 40 MiB) to the API before it answers `250`. When
+  the app cannot take it, the answer is `451` and the sender retries for days.
+- It holds no database and none of the app's keys, offers no AUTH, and never
+  sends mail: refusals happen in the SMTP session, so it causes no backscatter.
+
+You need a hostname for it (`mx.example.com`) with an A record pointing at this
+host's public IPv4 address, and inbound TCP 25 open (many providers block
+outbound 25; inbound is usually open, but check yours).
+
+1. In `.env`, set the hostname and a shared secret. The app needs both to
+   enable receiving; the MX greets as that hostname and presents the secret.
+
+   ```sh
+   RECEIVING_MX_HOST=mx.example.com
+   MX_INGEST_SECRET=          # openssl rand -hex 32
+   COMPOSE_PROFILES=mx        # comma-separated with any others
+   ```
+
+2. Give the MX a certificate, so senders can use STARTTLS (without one, mail
+   still arrives, unencrypted). A certbot deploy hook copies the keypair into
+   `mx-tls/` next to `docker-compose.yml`, owned `root:1000` with mode 0640;
+   the compose file adds the container's non-root user to group 1000 so it can
+   read them without making them world-readable. With nginx from the section
+   below on port
+   80 (or `--standalone` instead of `--nginx` when port 80 is free):
+
+   ```sh
+   sudo install -d -m 0750 -o root -g 1000 /opt/millionsend/mx-tls
+   sudo certbot certonly --nginx -d mx.example.com --deploy-hook \
+     'install -m 0640 -o root -g 1000 "$RENEWED_LINEAGE/fullchain.pem" "$RENEWED_LINEAGE/privkey.pem" /opt/millionsend/mx-tls/'
+   ```
+
+   certbot saves the hook and runs it after every renewal, and the MX picks up
+   the new files within five minutes, without a restart.
+
+3. `docker compose up -d`, then `docker compose logs mx` should show
+   `tls_loaded` and `listening`.
+
+4. In the dashboard, open a verified domain, turn on **Receiving**, and add
+   the MX record it shows (priority 10, pointing at `RECEIVING_MX_HOST`). Use
+   a subdomain such as `inbound.example.com`: an MX record on the domain
+   itself would route all of its mail here, mailboxes included.
+
+Notes:
+
+- Port 25 is published on IPv4 only. Over IPv6, Docker's userland proxy hands
+  every connection over with its own address, which breaks SPF and the
+  per-address limits.
+- The MX reaches the API on the compose network
+  (`http://millionsend:<PORT>/internal/mx`). To run it on another host, use
+  [`deploy/mx/docker-compose.yml`](deploy/mx/docker-compose.yml) with
+  `MX_INGEST_URL=https://<your API origin>/internal/mx`, `MX_HOSTNAME`, and the
+  same `MX_INGEST_SECRET`; behind nginx, give `location /internal/mx/` a
+  `client_max_body_size` of `41m`.
+- Limits, with their defaults: `MX_MAX_CLIENTS` (200),
+  `MX_MAX_CONNECTIONS_PER_IP` (10), `MX_CONNECTIONS_PER_IP_PER_MINUTE` (60),
+  `MX_MAX_RECIPIENTS` per message (50, at most 100), `MX_SOCKET_TIMEOUT_MS`
+  (300000, idle), `MX_SESSION_TIMEOUT_MS` (600000) and `MX_MAX_BUFFERED_MB`
+  (512, message bytes all sessions may hold at once; past it senders get
+  `452` and retry). Under compose, set them in the `mx` service's
+  `environment` in `docker-compose.override.yml`.
+- Logs are one JSON object per line: envelope facts (domains, sizes,
+  verdicts) and outcomes, never message content.
+
+</details>
+
+<details>
 <summary><b>Signup policy</b></summary>
 
 The first user to register becomes the initial account — no configuration needed.
@@ -560,12 +637,13 @@ stream {
 ```
 
 Firewall: allow 80 and 443, plus 2587 only if the SMTP relay is used from
-outside; everything else closed:
+outside and 25 when the MX receives mail; everything else closed:
 
 ```sh
 sudo ufw default deny incoming
 sudo ufw allow 80,443/tcp
 sudo ufw allow 2587/tcp   # only if the SMTP relay is exposed
+sudo ufw allow 25/tcp     # only with the mx profile
 sudo ufw enable
 ```
 
