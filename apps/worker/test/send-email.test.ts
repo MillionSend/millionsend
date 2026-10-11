@@ -617,6 +617,25 @@ it("attachments and custom headers ride the raw MIME; tracking still rewrites th
   expect(mime).not.toContain("dest.test");
 });
 
+it("an attachment with a content id ships inline beside the html that references it", async () => {
+  const { ses, sends } = fakeSes("mid-inline");
+  const content = Buffer.from("fake png bytes").toString("base64");
+  const emailId = await insertEmail(
+    {
+      attachments: await sealAttachments(
+        [{ content, contentType: "image/png", contentId: "logo-1" }],
+        keyring,
+      ),
+    },
+    `<img src="cid:logo-1">`,
+  );
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  const lower = (sends[0]?.raw.toString("utf8") ?? "").toLowerCase();
+  expect(lower).toContain("content-type: multipart/related");
+  expect(lower).toContain("content-id: <logo-1>");
+  expect(lower).toContain("content-disposition: inline");
+});
+
 it("clickTracking on routes <a href> through /t/c and the token verifies to the original url", async () => {
   const { ses, sends } = fakeSes("mid-click-track");
   const url = "https://dest.test/landing?x=1";

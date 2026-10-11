@@ -722,6 +722,7 @@ export {
 
 export { createSemaphore } from "./concurrency.js";
 export { secretsEqual, sha256Hex } from "./hash.js";
+export { attachmentDisposition } from "./http-headers.js";
 export {
   type DownloadSigning,
   deriveReceivedDownloadKey,
@@ -736,6 +737,7 @@ export {
   type IngestDeps,
   type IngestResult,
   ingestReceivedEmail,
+  MESSAGE_TOO_LARGE,
   type StoredReceivedEmail,
 } from "./receiving/ingest.js";
 export {

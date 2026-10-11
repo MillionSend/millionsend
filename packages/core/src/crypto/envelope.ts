@@ -157,10 +157,13 @@ export async function encryptEmailBody(
 }
 
 export interface EmailAttachment {
-  filename: string;
+  /** Absent for an unnamed part, such as an inline image a forwarded message carried. */
+  filename?: string | undefined;
   /** File bytes, base64-encoded (validated at the accept surface). */
   content: string;
   contentType?: string | undefined;
+  /** Content-ID without angle brackets: an inline part the HTML references as cid:<contentId>. */
+  contentId?: string | undefined;
 }
 
 /**

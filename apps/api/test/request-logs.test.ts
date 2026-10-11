@@ -140,6 +140,23 @@ describe("redactLoggedBody", () => {
       url: "[redacted]",
     });
   });
+
+  it("treats a received email's headers as content and every signed download link as a secret", () => {
+    const received = {
+      headers: { subject: "hi" },
+      raw: { download_url: "https://api/receiving/raw/x?signature=s", expires_at: "t" },
+      attachments: [{ filename: "a.pdf", download_url: "https://api/receiving/attachments/x/y" }],
+    };
+    expect(redactLoggedBody("/emails/receiving/x", received)).toEqual({
+      headers: "[headers, 16 B]",
+      raw: { download_url: "[redacted]", expires_at: "t" },
+      attachments: [{ filename: "a.pdf", download_url: "[redacted]" }],
+    });
+    // A send's custom headers are settings, not content.
+    expect(redactLoggedBody("/emails", { headers: { "X-Ref": "1" } })).toEqual({
+      headers: { "X-Ref": "1" },
+    });
+  });
 });
 
 describe("api request logging", () => {
@@ -322,14 +339,14 @@ describe("api request logging", () => {
 
   it("rejects oversized bodies before authentication or parsing", async () => {
     await db.delete(schema.apiRequests);
-    const res = await app.request("/emails", {
+    const res = await app.request("/emails/batch", {
       method: "POST",
       headers: {
-        authorization: `Bearer ${token}`,
+        authorization: "Bearer not-a-key",
         "content-type": "application/json",
         "content-length": String(25 * 1024 * 1024 + 1),
       },
-      body: "{}",
+      body: "[]",
     });
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({
@@ -338,6 +355,24 @@ describe("api request logging", () => {
       message: "Request body exceeds 25 MiB",
     });
     expect(await loggedRows()).toHaveLength(0);
+  });
+
+  it("gives POST /emails room for 40 MiB of encoded attachments, once the key checks out", async () => {
+    const declared = (length: number, authorization = `Bearer ${token}`) =>
+      app.request("/emails", {
+        method: "POST",
+        headers: {
+          authorization,
+          "content-type": "application/json",
+          "content-length": String(length),
+        },
+        body: "{}",
+      });
+    // Past the general limit, the key is checked before any size allowance.
+    expect((await declared(30 * 1024 * 1024, "Bearer not-a-key")).status).toBe(401);
+    const over = await declared(50 * 1024 * 1024 + 1);
+    expect(over.status).toBe(413);
+    expect(await over.json()).toMatchObject({ message: "Request body exceeds 50 MiB" });
   });
 
   it("stores a truncation marker with the size instead of a body over the cap", async () => {

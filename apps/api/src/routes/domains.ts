@@ -15,6 +15,7 @@ import {
   PLAN_DOMAIN_LIMIT,
   recordAudit,
   SILENT_SUSPENSIONS,
+  setDomainReceiving,
 } from "@millionsend/core";
 import {
   combineRecordStatus,
@@ -25,6 +26,7 @@ import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
 import {
   checkDnsRecordsDetailed,
+  checkReceivingMx,
   computeDomainVerification,
   createDomainIdentity,
   DKIM_SELECTOR,
@@ -35,8 +37,10 @@ import {
   disassociateIdentity,
   dnsChecklist,
   generateDkimKeyPair,
+  type LiveDnsCheck,
   nodeDnsResolver,
   provisionDomainTenant,
+  receivingDnsRecord,
   SES_REGIONS,
   type SesIdentityClient,
   verificationDbPatch,
@@ -187,7 +191,40 @@ function wireRecords(rows: DnsChecklistRow[], domainName: string, checked: boole
   });
 }
 
-const toWire = (row: DomainRow) => ({
+/**
+ * The Receiving record (Resend's ReceivingRecord) as its live MX check reads.
+ * It never gates sending; `found` means senders try this MX first.
+ */
+function receivingWireRecord(domainName: string, mxHost: string, live: LiveDnsCheck) {
+  const record = receivingDnsRecord(domainName, mxHost);
+  const detail =
+    live.status === "mismatch" && live.found
+      ? `Senders try a lower-numbered MX first, so mail does not reach this one. Published: ${live.found.split("\n").join(", ")}`
+      : live.status === "missing"
+        ? "No MX record at this name."
+        : undefined;
+  return {
+    record: "Receiving",
+    name: record.name,
+    type: record.type,
+    ttl: "Auto",
+    status:
+      live.status === "found"
+        ? "verified"
+        : live.status === "mismatch"
+          ? "failed"
+          : live.status === "missing"
+            ? "not_started"
+            : "pending",
+    value: record.value,
+    priority: record.priority,
+    live: live.status,
+    ...(detail ? { detail } : {}),
+  };
+}
+
+/** `receives`: this instance receives mail at all (RECEIVING_MX_HOST); otherwise no domain does. */
+const toWire = (row: DomainRow, receives: boolean) => ({
   id: row.id,
   name: row.name,
   status: wireDomainStatus(row.status),
@@ -196,9 +233,28 @@ const toWire = (row: DomainRow) => ({
   open_tracking: row.openTracking,
   click_tracking: row.clickTracking,
   tracking_subdomain: row.trackingSubdomain,
-  // Sending-only platform; present for SDK-shape parity.
-  capabilities: { sending: "enabled", receiving: "disabled" },
+  capabilities: {
+    sending: "enabled",
+    receiving: receives && row.receivingEnabled ? "enabled" : "disabled",
+  },
 });
+
+/**
+ * The 422 message for a capabilities value this deployment refuses, or null.
+ * Sending is always on, and receiving needs an instance that receives mail.
+ */
+function capabilitiesError(
+  deps: Pick<ApiDeps, "receiving">,
+  capabilities: { sending?: string | undefined; receiving?: string | undefined } | undefined,
+): string | null {
+  if (capabilities?.sending === "disabled") {
+    return "capabilities.sending cannot be disabled: receive-only domains are not supported";
+  }
+  if (capabilities?.receiving === "enabled" && !deps.receiving) {
+    return "Receiving is not available on this instance (RECEIVING_MX_HOST is not set)";
+  }
+  return null;
+}
 
 /**
  * The guardrails on tracking settings, shared by create (no stored row: every
@@ -275,6 +331,7 @@ export function registerDomainRoutes(
   ses: DomainsSesDeps,
 ): void {
   const db = deps.db;
+  const receives = deps.receiving !== undefined;
   const jsonErr = (description: string) => ({
     content: { "application/json": { schema: errorSchema } },
     description,
@@ -332,9 +389,11 @@ export function registerDomainRoutes(
   async function liveChecklist(domain: DomainRow) {
     const resolver = ses.dns ?? nodeDnsResolver;
     const tracking = trackingCname(domain);
-    const [result, trackingCheck] = await Promise.all([
+    const mxHost = domain.receivingEnabled ? deps.receiving?.mxHost : undefined;
+    const [result, trackingCheck, receivingCheck] = await Promise.all([
       computeDomainVerification(ses.clientForRegion(domain.region), resolver, domain),
       tracking ? checkDnsRecordsDetailed([tracking], resolver).then(([check]) => check) : undefined,
+      mxHost ? checkReceivingMx(domain.name, mxHost, resolver) : undefined,
     ]);
     const rows = dnsChecklist({
       domain,
@@ -347,7 +406,12 @@ export function registerDomainRoutes(
     });
     return {
       result,
-      records: wireRecords(rows, domain.name, true),
+      records: [
+        ...wireRecords(rows, domain.name, true),
+        ...(mxHost && receivingCheck
+          ? [receivingWireRecord(domain.name, mxHost, receivingCheck)]
+          : []),
+      ],
       trackingFound: trackingCheck?.status === "found",
     };
   }
@@ -386,6 +450,19 @@ export function registerDomainRoutes(
       ) {
         return c.json(
           errorBody(422, "validation_error", "This domain cannot be added as a sender"),
+          422,
+        );
+      }
+      // Checked before the SES identity exists, like tracking below.
+      const capabilityError = capabilitiesError(deps, body.capabilities);
+      if (capabilityError) return c.json(errorBody(422, "validation_error", capabilityError), 422);
+      if (body.capabilities?.receiving === "enabled") {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "Receiving needs a verified domain, and a new domain is not verified yet: add it, verify it, then set capabilities.receiving to enabled with PATCH /domains/{id}",
+          ),
           422,
         );
       }
@@ -504,7 +581,7 @@ export function registerDomainRoutes(
       await queueDomainAge(row.id);
       return c.json(
         {
-          ...toWire(row),
+          ...toWire(row, receives),
           records: wireRecords(
             dnsChecklist({ domain: row, verification: null, tracking: trackingCname(row) }),
             row.name,
@@ -563,7 +640,11 @@ export function registerDomainRoutes(
         );
       }
       return c.json(
-        { object: "list" as const, data: page.rows.map(toWire), has_more: page.hasMore },
+        {
+          object: "list" as const,
+          data: page.rows.map((row) => toWire(row, receives)),
+          has_more: page.hasMore,
+        },
         200,
       );
     },
@@ -592,7 +673,7 @@ export function registerDomainRoutes(
       // row reads verified while sends still ship untracked.
       const { records, trackingFound } = await liveChecklist(domain);
       if (trackingFound) await clearTrackingClock(db, domain);
-      return c.json({ object: "domain" as const, ...toWire(domain), records }, 200);
+      return c.json({ object: "domain" as const, ...toWire(domain, receives), records }, 200);
     },
   );
 
@@ -638,7 +719,10 @@ export function registerDomainRoutes(
       }
       // Full object with per-record status — the promised "fresh status"
       // without a get_domain round-trip. Additive over the SDK's { id }.
-      return c.json({ object: "domain" as const, ...toWire({ ...domain, status }), records }, 200);
+      return c.json(
+        { object: "domain" as const, ...toWire({ ...domain, status }, receives), records },
+        200,
+      );
     },
   );
 
@@ -656,6 +740,7 @@ export function registerDomainRoutes(
           description: "Domain updated; full object with records",
         },
         404: jsonErr("Not found"),
+        409: jsonErr("Another team receives mail for this domain"),
         422: jsonErr("Validation error"),
       },
     }),
@@ -665,9 +750,8 @@ export function registerDomainRoutes(
       if (body.tls !== undefined) {
         return c.json(errorBody(422, "validation_error", "tls is not supported"), 422);
       }
-      if (body.capabilities !== undefined) {
-        return c.json(errorBody(422, "validation_error", "capabilities is not supported"), 422);
-      }
+      const capabilityError = capabilitiesError(deps, body.capabilities);
+      if (capabilityError) return c.json(errorBody(422, "validation_error", capabilityError), 422);
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
 
@@ -687,6 +771,40 @@ export function registerDomainRoutes(
       );
       if (trackingError) {
         return c.json(errorBody(422, "validation_error", trackingError), 422);
+      }
+
+      // Before the tracking write: the receiving switch is the one change here
+      // that can still be refused, and a refusal must leave nothing applied.
+      let receiving: Pick<DomainRow, "receivingEnabled" | "receivingEnabledAt"> | undefined;
+      const wantReceiving = body.capabilities?.receiving;
+      if (wantReceiving !== undefined) {
+        const result = await setDomainReceiving(db, {
+          teamId: auth.teamId,
+          domainId: domain.id,
+          enabled: wantReceiving === "enabled",
+        });
+        if (!result.ok) {
+          if (result.reason === "not_found") {
+            return c.json(errorBody(404, "not_found", "Domain not found"), 404);
+          }
+          return result.reason === "taken"
+            ? c.json(
+                errorBody(409, "conflict", "Another team already receives mail for this domain"),
+                409,
+              )
+            : c.json(
+                errorBody(
+                  422,
+                  "validation_error",
+                  "Receiving can be enabled only on a verified domain; verify the domain first",
+                ),
+                422,
+              );
+        }
+        receiving = {
+          receivingEnabled: result.receivingEnabled,
+          receivingEnabledAt: result.receivingEnabledAt,
+        };
       }
 
       const set: Partial<
@@ -719,6 +837,7 @@ export function registerDomainRoutes(
       // reads them, for the subdomain that was just set.
       const updated = {
         ...domain,
+        ...receiving,
         openTracking: set.openTracking ?? domain.openTracking,
         clickTracking: set.clickTracking ?? domain.clickTracking,
         trackingSubdomain:
@@ -729,7 +848,7 @@ export function registerDomainRoutes(
             : domain.trackingSubdomainSetAt,
       };
       const { records } = await liveChecklist(updated);
-      return c.json({ object: "domain" as const, ...toWire(updated), records }, 200);
+      return c.json({ object: "domain" as const, ...toWire(updated, receives), records }, 200);
     },
   );
 

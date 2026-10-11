@@ -46,10 +46,12 @@ function contentMarker(kind: string, value: unknown): string {
  * Deep copy of a JSON body with content fields replaced by "[kind, size]"
  * markers and secrets by "[redacted]". `path` is the request path: a
  * preferences-link response's `url` is a capability URL, so it is a secret
- * there and a plain value everywhere else.
+ * there and a plain value everywhere else. A received email's headers are
+ * its content (a send's custom headers are settings, and stay).
  */
 export function redactLoggedBody(path: string, value: unknown): unknown {
   const urlIsSecret = path.endsWith("/preferences-link");
+  const headersAreContent = path.startsWith("/emails/receiving");
   const walk = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(walk);
     if (node === null || typeof node !== "object") return node;
@@ -57,9 +59,16 @@ export function redactLoggedBody(path: string, value: unknown): unknown {
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(node)) {
       if (v == null) out[key] = v;
-      else if (CONTENT_KEYS.has(key)) out[key] = contentMarker(key, v);
+      else if (CONTENT_KEYS.has(key) || (headersAreContent && key === "headers"))
+        out[key] = contentMarker(key, v);
       else if (isAttachment && key === "content") out[key] = contentMarker("attachment content", v);
-      else if (SECRET_KEYS.has(key) || key.endsWith("_secret") || (urlIsSecret && key === "url"))
+      else if (
+        SECRET_KEYS.has(key) ||
+        key.endsWith("_secret") ||
+        // Signed received-mail links: anyone holding one downloads the file.
+        key === "download_url" ||
+        (urlIsSecret && key === "url")
+      )
         out[key] = "[redacted]";
       else out[key] = walk(v);
     }

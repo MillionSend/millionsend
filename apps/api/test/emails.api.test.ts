@@ -765,6 +765,65 @@ describe("attachments and custom headers", () => {
     ).toEqual([{ filename: "x.pdf", content: pdfBase64, contentType: "application/pdf" }]);
   });
 
+  it("accepts inline parts: a content_id, and a filename that is null, false or absent", async () => {
+    // The shape emails.receiving.forward() posts: postal-mime reads an unnamed part's filename as null.
+    const res = await post({
+      ...validBody,
+      to: ["inline@example.com"],
+      html: '<img src="cid:logo-1">',
+      attachments: [
+        { filename: null, content: pdfBase64, content_type: "image/png", content_id: "logo-1" },
+        { filename: false, content: pdfBase64 },
+        { content: pdfBase64 },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db
+      .select({ teamId: schema.emails.teamId, attachments: schema.emails.attachments })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, id));
+    expect(await openAttachments(row?.attachments ?? "", keyring, { teamId, rowId: id })).toEqual([
+      { content: pdfBase64, contentType: "image/png", contentId: "logo-1" },
+      { content: pdfBase64 },
+      { content: pdfBase64 },
+    ]);
+  });
+
+  it("rejects a content_id that could break out of its header", async () => {
+    for (const contentId of ["a\r\nBcc: x@evil.test", ""]) {
+      const res = await post({
+        ...validBody,
+        attachments: [{ content: pdfBase64, content_id: contentId }],
+      });
+      expect(res.status, JSON.stringify(contentId)).toBe(422);
+    }
+  });
+
+  it("takes attachments up to 40 MiB once base64-encoded, and refuses more", async () => {
+    // Over the old 10 MiB cap.
+    const twelve = Buffer.alloc(12 * 1024 * 1024, 7).toString("base64");
+    const big = await post({
+      ...validBody,
+      to: ["big@example.com"],
+      attachments: [{ filename: "big.bin", content: twelve }],
+    });
+    expect(big.status).toBe(200);
+
+    const half = "A".repeat(20 * 1024 * 1024 + 4);
+    const over = await post({
+      ...validBody,
+      attachments: [
+        { filename: "a.bin", content: half },
+        { filename: "b.bin", content: half },
+      ],
+    });
+    expect(over.status).toBe(422);
+    expect(await over.json()).toMatchObject({
+      message: "Attachments exceed 40 MiB in total once base64-encoded",
+    });
+  });
+
   it("rejects path attachments with a clear message, never fetching the URL", async () => {
     const res = await post({
       ...validBody,

@@ -56,7 +56,8 @@ export type IngestResult =
   | { ok: true; stored: StoredReceivedEmail[] }
   | ({ ok: false } & SmtpReply);
 
-const TOO_LARGE: SmtpReply = {
+/** The refusal for a message over MAX_RECEIVED_MESSAGE_BYTES, wherever it is caught. */
+export const MESSAGE_TOO_LARGE: SmtpReply = {
   code: 552,
   enhanced: "5.3.4",
   message: "Message exceeds the maximum size",
@@ -105,7 +106,7 @@ export async function ingestReceivedEmail(
   input: { raw: Buffer; envelope: DeliverEnvelope },
 ): Promise<IngestResult> {
   const now = deps.now?.() ?? new Date();
-  if (input.raw.length > MAX_RECEIVED_MESSAGE_BYTES) return { ok: false, ...TOO_LARGE };
+  if (input.raw.length > MAX_RECEIVED_MESSAGE_BYTES) return { ok: false, ...MESSAGE_TOO_LARGE };
 
   const recipients = new Map<string, string>();
   for (const recipient of input.envelope.recipients) {

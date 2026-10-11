@@ -20,6 +20,7 @@ export const TARGET_WEBHOOK_EVENTS = [
   "email.complained",
   "email.opened",
   "email.clicked",
+  "email.received",
   "contact.created",
   "contact.updated",
   "contact.deleted",
