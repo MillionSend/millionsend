@@ -291,6 +291,7 @@ async function parkQueued(
   db: Db,
   email: { id: string; teamId: string },
   why: string,
+  reason: "review" | null = null,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
@@ -299,6 +300,12 @@ async function parkQueued(
       to: "queued_quota",
     });
     if (!moved) return;
+    if (reason) {
+      await txDb
+        .update(schema.emails)
+        .set({ parkReason: reason })
+        .where(eq(schema.emails.id, email.id));
+    }
     // Against the same counter accept charged: on a monthly plan that is the
     // billing period, which the drain will charge again on release. The cap
     // itself is irrelevant here, so the row is read as Cloud reads it.
@@ -452,7 +459,12 @@ async function sendQueued(
   // next row, not the next fan-out.
   const standing = await fetchTeamStanding(db, email.teamId);
   if (standing?.suspended || (email.broadcastId && standing?.broadcastsPausedByOperatorAt)) {
-    await parkQueued(db, email, standing.suspended ? "team suspended" : "broadcasts paused");
+    await parkQueued(
+      db,
+      email,
+      standing.suspended ? "team suspended" : "broadcasts paused",
+      standing.suspended?.reason === "review" ? "review" : null,
+    );
     return "parked";
   }
   // Account mail (core sendSystemMail); acceptEmail keeps this mark on no

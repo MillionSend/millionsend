@@ -1,7 +1,7 @@
 import { createHmac, hkdfSync } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
@@ -13,7 +13,7 @@ import { DAY_MS, utcDay } from "./utc-day.js";
  * message a keyed draw decides whether the judge sees it; verdicts decay
  * into a per-team risk that opens the monitor flag, alerts the operator and,
  * for a new team, pauses broadcasts; a confident phishing verdict on a new
- * team, or a run of slightly less confident ones in its first week, holds
+ * team, or a run of slightly less confident ones within a week, holds
  * all of its sending for review. Every function here is safe to skip:
  * nothing on the send path waits for a verdict.
  */
@@ -53,9 +53,9 @@ export const MONITOR_HOLD_CATEGORIES = [
 ] as const;
 export const MONITOR_HOLD_REASONS = ["impersonation", "harvests_secrets"] as const;
 /**
- * The repeat hold counts the verdicts of a team's first week of sending,
- * from its first send: a phisher who signs up and waits a week before
- * sending is still covered. A team that has not sent has nothing to count.
+ * The repeat hold counts the verdicts of the last 7 days, whenever they fall
+ * while the team is new: one early send followed by a week's wait disarms
+ * nothing, and a team stays new until its first window and ramp are behind it.
  */
 export const MONITOR_HOLD_REPEAT_DAYS = 7;
 /** Samples are metadata on the probes' clock. */
@@ -488,7 +488,7 @@ export interface VerdictOutcome {
   held: HoldRule | null;
 }
 
-/** One verdict from `holdScore`, or the `verdicts`th from `holdRepeatScore` in the first week of sending. */
+/** One verdict from `holdScore`, or the `verdicts`th from `holdRepeatScore` within MONITOR_HOLD_REPEAT_DAYS. */
 export type HoldRule = { rule: "score" } | { rule: "repeat"; verdicts: number };
 
 /** A verdict as the judge returns it or as its sample stores it. */
@@ -512,22 +512,18 @@ export function isHoldVerdict(v: HoldVerdictFields, holdScore: number): boolean 
 
 /**
  * The repeat hold: this verdict is at least the `holdRepeatCount`th
- * phishing-type one from `holdRepeatScore` judged in the team's first week
- * of sending. The stored verdicts include this one: the judge writes it in
- * the transaction that folds it.
+ * phishing-type one from `holdRepeatScore` judged in the last
+ * MONITOR_HOLD_REPEAT_DAYS. The stored verdicts include this one: the judge
+ * writes it in the transaction that folds it.
  */
 async function repeatHold(
   db: Db,
   s: MonitorSettings,
-  row: Pick<TeamMonitorRow, "teamId" | "firstSendAt">,
+  row: Pick<TeamMonitorRow, "teamId">,
   verdict: HoldVerdictFields,
   now: Date,
 ): Promise<HoldRule | null> {
-  if (s.holdRepeatCount === 0 || !row.firstSendAt || !isHoldVerdict(verdict, s.holdRepeatScore)) {
-    return null;
-  }
-  const until = new Date(row.firstSendAt.getTime() + MONITOR_HOLD_REPEAT_DAYS * DAY_MS);
-  if (now >= until) return null;
+  if (s.holdRepeatCount === 0 || !isHoldVerdict(verdict, s.holdRepeatScore)) return null;
   const judged = await db
     .select({
       score: ms.score,
@@ -541,7 +537,8 @@ async function repeatHold(
         eq(ms.teamId, row.teamId),
         eq(ms.status, "judged"),
         gte(ms.score, s.holdRepeatScore),
-        lt(ms.judgedAt, until),
+        gte(ms.judgedAt, new Date(now.getTime() - MONITOR_HOLD_REPEAT_DAYS * DAY_MS)),
+        lte(ms.judgedAt, now),
       ),
     );
   const verdicts = judged.filter((v) => isHoldVerdict(v, s.holdRepeatScore)).length;

@@ -720,8 +720,9 @@ content insights (never email bodies), and an instance-wide audit log.
   team's standing and the automatic trust & safety flags every 15 minutes.
   History is kept 90 days.
 - **Operator actions and the team:** a suspended team's API keys still
-  authenticate but every send answers `403 team_suspended` (`403 sending_paused`
-  under a review hold; SMTP `550`),
+  authenticate but every send answers `403 team_suspended` (SMTP `550`;
+  under a review hold, mail through the API or SMTP is accepted and parked,
+  and only broadcast sends answer, `403 sending_paused`),
   broadcasts in flight park, webhooks keep delivering and data stays; of the
   mail about the team, only the suspension and reinstatement notices, billing
   mail and the security receipts (a new API key, a rotated webhook secret, a
@@ -806,21 +807,26 @@ page). The pause policy is a setting and can be switched off.
 abuse at the hold score (90 by default) as credential phishing, brand
 impersonation or payment redirection, or with an impersonation or
 secret-harvesting finding, the team is suspended at once
-with the reason `review`: the API answers `403 sending_paused`, SMTP `550`,
-queued mail and broadcasts park, and with `SES_TENANTS` on its SES tenant is
-disabled. A run of lower verdicts holds the team too: by default the fifth
-such verdict from 80 within seven days of the team's first send. A link to
+with the reason `review`: mail it sends through the API (`POST /emails` and
+`/emails/batch`, which MCP uses too) or SMTP is accepted as any send is and
+parked (`park_reason = 'review'`), queued mail and broadcasts park, a new
+broadcast is refused with `403 sending_paused`, and with `SES_TENANTS` on its
+SES tenant is disabled. A run of lower verdicts holds the team too: by
+default the fifth such verdict from 80 within any seven days while the team
+is New. A link to
 another domain counts toward neither rule on its own: legitimate mail often
 links elsewhere. The operator is emailed at once, with the rule that held the
-team; the owner is not, and
-sees a neutral "Sending is paused pending review" notice. The team stays on Trust &
+team; the owner is not. The dashboard shows a neutral "Sending is paused
+pending review" notice, while the API and SMTP answer as for any accepted
+send, so a sender is never told it was caught. The team stays on Trust &
 safety with its flag open until the operator decides on its review page:
 **Release hold** reinstates it, the parked mail goes out, a broadcast pause
 the monitor applied before the hold is lifted as **Resume broadcasts** lifts
 it (a pause the operator set by hand stays), and the monitor flag the hold
 kept open is cleared in the operator's name (the automatic check does not
 reopen it while the same trigger holds); **Suspend for phishing** turns the
-hold into a phishing suspension. While the team is held, its later verdicts
+hold into a phishing suspension, and what the hold parked stays parked:
+`quota.drain` never releases a suspended team's mail. While the team is held, its later verdicts
 still move its risk and alert the operator as for any other team, but apply
 no pause, so a release leaves no monitor pause behind. A team is held once, by either
 rule: after a release its later verdicts only alert, so the released mail,
@@ -1009,8 +1015,9 @@ domain is added or verifies and from the `domains.reverify` sweep: RDAP via
 IANA's bootstrap (plus fixed servers for `.io`, `.me`, `.co` and `.us`), then
 the registry's WHOIS on TCP 43, then the first certificate on crt.sh, else
 unknown; a certificate's date never replaces a registry's found before. It
-needs outbound HTTPS and TCP 43 while the warm-up is on and makes no lookup
-while it is off. The full description is in the docs' self-hosting
+needs outbound HTTPS and TCP 43 while the warm-up or the content monitor's
+review hold (a judge set and `MONITOR_AUTO_HOLD` on) is on, and makes no
+lookup otherwise. The full description is in the docs' self-hosting
 page.
 
 </details>

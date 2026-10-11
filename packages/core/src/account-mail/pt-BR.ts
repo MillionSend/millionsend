@@ -367,14 +367,14 @@ export const ptBR = {
   "monitor.team_held": {
     subject: "O monitor de conteúdo pausou uma equipe para revisão",
     body: [
-      "{team} é uma equipe nova e uma mensagem amostrada teve pontuação {score} ({verdict}). {rule} Pela política de pausa para revisão, todo envio da equipe agora é recusado ou fica em espera: a API e o SMTP recusam, os e-mails na fila e as transmissões aguardam, e o tenant da equipe no SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi avaliada.",
-      "O proprietário vê o envio como pausado aguardando revisão e não recebe e-mail. Abra a página de revisão para liberar a equipe, o que envia os e-mails em espera, ou para suspendê-la por phishing.",
+      "{team} é uma equipe nova e uma mensagem amostrada teve pontuação {score} ({verdict}). {rule} Pela política de pausa para revisão, nada da equipe sai: os e-mails que ela envia pela API e pelo SMTP são aceitos e ficam em espera, os e-mails na fila e as transmissões aguardam, novas transmissões são recusadas e o tenant da equipe no SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi avaliada.",
+      "O proprietário não recebe e-mail: o painel mostra o envio pausado aguardando revisão, e a API e o SMTP respondem como para qualquer envio aceito. Abra a página de revisão para liberar a equipe, o que envia os e-mails em espera, ou para suspendê-la por phishing.",
     ],
     button: "Abrir revisão",
     extra: {
       score: "Esta avaliação, sozinha, pausou a equipe: a pontuação de revisão é {line}.",
       repeat:
-        "Esta avaliação pausou a equipe por ser a {n}ª do tipo phishing com pontuação {line} ou mais na primeira semana de envios.",
+        "Esta avaliação pausou a equipe por ser a {n}ª do tipo phishing com pontuação {line} ou mais em 7 dias.",
     },
   },
   "monitor.team_linked": {

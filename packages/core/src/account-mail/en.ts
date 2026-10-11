@@ -357,14 +357,14 @@ export const en = {
   "monitor.team_held": {
     subject: "Content monitor held a team for review",
     body: [
-      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy every send of the team is now refused or parked: the API and SMTP refuse, queued mail and broadcasts wait, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
-      "The owner sees sending as paused pending review and is not emailed. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
+      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy nothing of the team goes out: mail it sends through the API and SMTP is accepted and parked, queued mail and broadcasts wait, new broadcasts are refused, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
+      "The owner is not emailed: the dashboard shows sending as paused pending review, and the API and SMTP answer as for any accepted send. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
     ],
     button: "Open review",
     extra: {
       score: "This one verdict held the team: the hold score is {line}.",
       repeat:
-        "This verdict held the team as its phishing-type verdict number {n} at or above {line} in its first week of sending.",
+        "This verdict held the team as its phishing-type verdict number {n} at or above {line} within 7 days.",
     },
   },
   "monitor.team_linked": {

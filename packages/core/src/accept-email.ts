@@ -150,7 +150,16 @@ function warmupBacklogLimit(quota: TeamQuota, cap: number): number {
   return Math.ceil(QUOTA_BACKLOG_DAYS * Math.max(cap, planDay));
 }
 
-async function countParked(db: Db, teamId: string): Promise<number> {
+/**
+ * Mail a team may park while held for review: QUOTA_BACKLOG_DAYS of what its
+ * plan sends in a day, so a held sender cannot grow the table without bound.
+ * An uncapped deployment bounds nothing, as its plans do.
+ */
+export function reviewBacklogLimit(quota: TeamQuota): number {
+  return Math.ceil((QUOTA_BACKLOG_DAYS * monthlyCapacity(quota)) / 30);
+}
+
+export async function countParked(db: Db, teamId: string): Promise<number> {
   const [parked] = await db
     .select({ n: count() })
     .from(schema.emails)
@@ -215,6 +224,11 @@ export type AcceptEmailResult =
       at: Date;
       /** The cap the reservation ran against, for callers that reserve in bulk. */
       quota: TeamQuota;
+      /**
+       * Accepted while the team is held for review (parkUnderReview): parked
+       * with reason "review", or, in a deferred batch, for the caller to park.
+       */
+      underReview: boolean;
     }
   | { ok: false; reason: "all_suppressed" }
   | { ok: false; reason: "attachments_too_large"; maxBytes: number }
@@ -260,11 +274,22 @@ export async function acceptEmail(
      * as queued; the caller parks them if its reservation fails.
      */
     quota?: "deferred" | undefined;
+    /**
+     * A review hold accepts and parks the mail instead of refusing it: the
+     * sender sees it queued, as for any send, and nothing tells it the team
+     * was caught. Releasing the hold sends it. Every other check still runs.
+     */
+    parkUnderReview?: boolean | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
+  let underReview = false;
   if (auth.billing !== "uncapped") {
     const refusal = await sendRefusal(opts.tx ?? deps.db, auth.teamId);
-    if (refusal) return { ok: false, ...refusal };
+    underReview =
+      opts.parkUnderReview === true &&
+      refusal?.reason === "team_suspended" &&
+      refusal.suspension === "review";
+    if (refusal && !underReview) return { ok: false, ...refusal };
   }
   if (estimateAttachmentBytes(payload.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
     return { ok: false, reason: "attachments_too_large", maxBytes: MAX_ATTACHMENT_BYTES };
@@ -362,8 +387,25 @@ export async function acceptEmail(
     }
     // The plan said yes; the sending domain's warm-up has the last word. A
     // deferred batch runs the same gate after its own reservation.
-    let parkReason: "warmup" | null = null;
-    if (reservation.reserved && opts.quota !== "deferred" && auth.billing !== "uncapped") {
+    let parkReason: "warmup" | "review" | null = null;
+    if (underReview && opts.quota !== "deferred") {
+      // Charged above so a cap refuses it as any send; a parked row holds no
+      // reservation, so the units go back and the drain charges them on
+      // release, the warm-up included.
+      if (reservation.reserved) {
+        await releaseQuota(txDb, {
+          teamId: auth.teamId,
+          count: recipientCount,
+          quota,
+          day,
+          at: deliveryAt,
+        });
+      }
+      if ((await countParked(txDb, auth.teamId)) >= reviewBacklogLimit(quota)) {
+        return "quota_backlog_full" as const;
+      }
+      parkReason = "review";
+    } else if (reservation.reserved && opts.quota !== "deferred" && auth.billing !== "uncapped") {
       const warmup = await enforceDomainWarmup(txDb, {
         teamId: auth.teamId,
         domainId: payload.domainId,
@@ -444,5 +486,6 @@ export async function acceptEmail(
     day,
     at: deliveryAt,
     quota,
+    underReview,
   };
 }

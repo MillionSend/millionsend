@@ -130,6 +130,11 @@ const NOTIFY_QUEUES: ReadonlySet<string> = new Set<JobName>([
   "webhook.drain",
   // A domain verified minutes ago may send now; its age should be known first.
   "domain.age",
+  // Polling, not the model, made a verdict's latency: a burst's later
+  // messages went out while earlier ones waited for the next fetch.
+  "abuse.judge",
+  // A held team's SES tenant is disabled within seconds, not a poll later.
+  "tenant.status",
 ]);
 const SLOW_POLL_SECONDS = 30;
 

@@ -69,8 +69,9 @@ deliberadas e explícitas:
 - Transmissões (`/broadcasts`) suportam `canceled`, um status fora da união do Resend, e o
   envio de transmissão, `POST /emails` e `POST /emails/batch` podem retornar
   `403 sending_paused` quando sua taxa de bounce ou reclamação cruza os
-  limites a partir dos quais o SES age, ou enquanto o envio da equipe está pausado
-  aguardando revisão. Só o envio de transmissão também pode retornar
+  limites a partir dos quais o SES age, e o envio de transmissão também enquanto
+  o envio da equipe está pausado aguardando revisão. Só o envio de transmissão
+  também pode retornar
   `403 broadcasts_paused` enquanto a taxa agregada da plataforma na região SES
   do remetente se recupera; é por região, não afeta e-mail transacional e
   se resolve sozinho.

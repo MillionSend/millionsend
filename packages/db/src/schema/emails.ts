@@ -73,9 +73,11 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
 
 /**
  * Why a queued_quota row waits: null for the team's plan or SES's own
- * capacity, "warmup" for the sending domain's warm-up cap.
+ * capacity, "warmup" for the sending domain's warm-up cap, "review" for a
+ * team the content monitor holds (the drain sends it once the hold is
+ * released). Never shown to the team.
  */
-export const emailParkReasonEnum = pgEnum("email_park_reason", ["warmup"]);
+export const emailParkReasonEnum = pgEnum("email_park_reason", ["warmup", "review"]);
 
 /**
  * Lifecycle split (compliance by schema): the plaintext columns here are

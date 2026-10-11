@@ -860,8 +860,9 @@ com limite de 0,08% de todos os e-mails. O custo por região é uma estimativa
 local.
 
 Uma equipe suspensa mantém os dados e as chaves continuam autenticando, mas
-todo envio responde `403 team_suspended` (`403 sending_paused` em uma pausa
-para revisão; SMTP `550`); uma pausa de
+todo envio responde `403 team_suspended` (SMTP `550`; em uma pausa para
+revisão, o e-mail pela API ou pelo SMTP é aceito e fica em espera, e só o envio
+de transmissão responde, com `403 sending_paused`); uma pausa de
 transmissões segura as transmissões enquanto o e-mail transacional continua;
 um teto diário limita o dia da equipe abaixo do plano. Os proprietários são
 avisados por e-mail a cada ação (exceto suspensão por phishing ou pausa
@@ -970,16 +971,19 @@ uma configuração e pode ser desligada.
 nível Nova é avaliada como abuso na pontuação de revisão (90 por padrão), seja como
 phishing de credenciais, imitação de marca ou desvio de pagamento, seja com
 uma constatação de falsificação ou coleta de segredos, a equipe é suspensa na
-hora com o motivo `review`: a API responde
-`403 sending_paused`, o SMTP `550`, o e-mail na fila e as transmissões ficam
-em espera e, com `SES_TENANTS` ligado, o tenant do SES dela é desativado.
+hora com o motivo `review`: o e-mail que ela envia pela API (`POST /emails` e
+`/emails/batch`, que o MCP também usa) ou pelo SMTP é aceito como qualquer
+envio e fica em espera (`park_reason = 'review'`), o e-mail na fila e as
+transmissões ficam em espera, uma nova transmissão é recusada com
+`403 sending_paused` e, com `SES_TENANTS` ligado, o tenant do SES dela é desativado.
 Uma sequência de avaliações com pontuação menor também pausa a equipe: por padrão, a
-quinta dessas avaliações a partir de 80 em até sete dias do primeiro envio da
-equipe. Um link para outro domínio, sozinho, não conta para nenhuma das duas
+quinta dessas avaliações a partir de 80 em quaisquer sete dias enquanto a
+equipe está no nível Nova. Um link para outro domínio, sozinho, não conta para nenhuma das duas
 regras: e-mail legítimo costuma ter links para outros lugares. O operador é
 avisado por e-mail na hora, com a regra que pausou a
-equipe; o proprietário não, e vê um aviso neutro de "envio pausado aguardando
-revisão". A equipe fica em Confiança e
+equipe; o proprietário não. O painel mostra um aviso neutro de "envio pausado
+aguardando revisão", enquanto a API e o SMTP respondem como para qualquer
+envio aceito, então quem envia nunca fica sabendo que foi pego. A equipe fica em Confiança e
 segurança com a sinalização aberta até o operador decidir na página de
 revisão: **Liberar equipe** a reativa, o e-mail em espera sai, uma pausa
 de transmissões que o monitor aplicou antes da pausa para revisão é levantada como
@@ -987,7 +991,8 @@ de transmissões que o monitor aplicou antes da pausa para revisão é levantada
 continua) e a sinalização do monitor que a pausa para revisão manteve aberta é encerrada em
 nome do operador (a verificação automática não a reabre enquanto o mesmo
 gatilho persistir); **Suspender por phishing** transforma a pausa para revisão em uma
-suspensão por phishing.
+suspensão por phishing, e o que a pausa deixou em espera continua em espera: o
+`quota.drain` nunca libera o e-mail de uma equipe suspensa.
 Enquanto a equipe está aguardando revisão, as avaliações seguintes ainda movem o risco e
 avisam o operador como para qualquer outra equipe, mas não pausam as transmissões, então
 liberar a equipe não deixa pausa do monitor para trás.
@@ -1226,8 +1231,10 @@ publicam data de criação. As requisições levam o User-Agent
 até o seu `Retry-After`, e uma consulta que falha tenta de novo com espera
 crescente antes de o domínio ficar como desconhecido. O worker precisa, então,
 de HTTPS de saída para `data.iana.org`, os servidores RDAP dos registros e
-`crt.sh`, e de TCP 43 de saída, enquanto o aquecimento está ligado; desligado,
-nenhuma consulta é feita. A data, a sua origem (`rdap`, `whois`, `ct` ou
+`crt.sh`, e de TCP 43 de saída, enquanto o aquecimento ou a pausa para
+revisão do monitoramento de conteúdo (um avaliador configurado e
+`MONITOR_AUTO_HOLD` ligado) está ligado; com os dois desligados, nenhuma
+consulta é feita. A data, a sua origem (`rdap`, `whois`, `ct` ou
 `unknown`) e o horário da consulta ficam na linha do domínio; a data de um
 certificado nunca substitui a de um registro encontrada em uma consulta
 anterior.

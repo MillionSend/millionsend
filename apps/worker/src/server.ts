@@ -284,6 +284,12 @@ const enqueueWebhook = async (deliveries: readonly QueuedWebhookDelivery[]): Pro
 const enqueueDomainAge = async (domainId: string): Promise<void> => {
   await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
 };
+// The warm-up caps by a sending domain's age and the review hold reads it,
+// so registries are asked while either can act.
+const domainAgeWanted = async (): Promise<boolean> => {
+  const s = await monitorSettings();
+  return s.warmupEnabled || (judge !== null && s.autoHold);
+};
 // One resolver for the process: it holds the RDAP bootstrap, the WHOIS
 // referrals, the hosts in Retry-After backoff and the crt.sh clock.
 const domainAge = createDomainAgeResolver();
@@ -495,8 +501,8 @@ await queue.scheduleCrons({
       console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
     }
     // Domains no age lookup has answered for: rows from before the job, a
-    // lost enqueue, or added while the warm-up was off.
-    if ((await monitorSettings()).warmupEnabled) {
+    // lost enqueue, or added while neither the warm-up nor the hold was on.
+    if (await domainAgeWanted()) {
       const awaiting = await domainsAwaitingAge(db);
       for (const domainId of awaiting) await enqueueDomainAge(domainId);
       if (awaiting.length > 0) console.log(`domains.age: queued=${awaiting.length}`);
@@ -653,8 +659,9 @@ await queue.work(
   { concurrency: 2 },
 );
 
-// Judge calls: a plain queue, a few lanes. A throttle is retried through
-// the queue's backoff, not in-process.
+// Judge calls: a few lanes, each pulling two jobs a fetch so a burst is
+// worked continuously. A throttle is retried through the queue's backoff,
+// not in-process.
 await queue.work(
   "abuse.judge",
   async ({ sampleId }) => {
@@ -674,7 +681,7 @@ await queue.work(
       { sampleId },
     );
   },
-  { concurrency: 4 },
+  { concurrency: 4, batchSize: 2 },
 );
 
 await queue.work(
@@ -751,8 +758,8 @@ await queue.work(
 // One lane: crt.sh is spaced per process, and a lookup is a few slow GETs.
 // A retryable failure throws into pg-boss's backoff.
 await queue.work("domain.age", async ({ domainId }) => {
-  // No registry is asked while the warm-up is off; the sweep asks once it is on.
-  if (!(await monitorSettings()).warmupEnabled) return;
+  // No registry is asked while nothing reads the age; the sweep asks once something does.
+  if (!(await domainAgeWanted())) return;
   try {
     const age = await recordDomainAge(db, domainAge, domainId);
     if (age) {

@@ -218,8 +218,9 @@ ABUSE_VISION_REGION=us-east-1
 # New-domain warm-up (see "New-domain warm-up" in SELF_HOSTING.md): a daily
 # cap per sending domain by its registration age. Unset follows IS_CLOUD. The
 # caps (WARMUP_CAP_FIRST_DAY/_WEEK/_MONTH) are edited in the console (Trust &
-# safety → Monitoring settings) or seeded here. While on, the worker looks
-# domain ages up over RDAP, WHOIS (TCP 43) and crt.sh.
+# safety → Monitoring settings) or seeded here. While on, or while the
+# content monitor's review hold is (a judge set and MONITOR_AUTO_HOLD on), the
+# worker looks domain ages up over RDAP, WHOIS (TCP 43) and crt.sh.
 WARMUP_ENABLED=
 
 # Break-glass content access (see "Content access (break-glass)" in
