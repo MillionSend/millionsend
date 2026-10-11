@@ -205,6 +205,10 @@
       "queue_oldest_s": "Oldest queued job",
       "region_sent": "Sent per hour · {region}",
       "noPoints": "Nothing recorded in this window yet.",
+      "point": {
+        "max": "Each point: the highest reading in {window}",
+        "avg": "Each point: the average over {window}"
+      },
       "monitor_samples_1h": "Monitor samples per hour",
       "monitor_unjudged_rate": "Monitor unjudged share"
     },

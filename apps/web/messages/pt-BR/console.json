@@ -205,6 +205,10 @@
       "queue_oldest_s": "Job mais antigo na fila",
       "region_sent": "Enviados por hora · {region}",
       "noPoints": "Nada registrado neste período ainda.",
+      "point": {
+        "max": "Cada ponto: o maior valor em {window}",
+        "avg": "Cada ponto: a média em {window}"
+      },
       "monitor_samples_1h": "Amostras do monitor por hora",
       "monitor_unjudged_rate": "Percentual sem avaliação do monitor"
     },

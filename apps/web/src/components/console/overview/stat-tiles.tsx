@@ -65,7 +65,7 @@ export function StatTiles({ summary }: { summary: Summary }) {
   const common = useTranslations("console.common");
   const locale = useLocale();
   const fmt = new Intl.NumberFormat(locale);
-  const count = (v: number) => fmt.format(v);
+  const count = (v: number) => fmt.format(Math.round(v));
   const { teams, contacts, domains, queue } = summary;
   const oldest =
     queue.oldestSeconds === null

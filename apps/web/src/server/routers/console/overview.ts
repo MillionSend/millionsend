@@ -71,7 +71,7 @@ export const consoleOverviewRouter = router({
         const sample = probes.get(key);
         return {
           key,
-          severity: PROBES[key],
+          severity: PROBES[key].severity,
           value: sample?.value ?? null,
           ok: sample?.ok ?? null,
           takenAt: sample?.takenAt ?? null,
@@ -130,7 +130,11 @@ export const consoleOverviewRouter = router({
         to: period.to,
         bucketSeconds: period.bucketSeconds,
       });
-      return { bucketSeconds: period.bucketSeconds, points };
+      return {
+        bucketSeconds: period.bucketSeconds,
+        aggregate: PROBES[input.probe].aggregate,
+        points,
+      };
     }),
 
   /** Teams created per day, for the Teams tile's history. */
