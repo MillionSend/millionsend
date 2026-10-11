@@ -842,7 +842,11 @@ instância" com o botão "Abrir console"; a URL direta
 de uma leitura gratuita de `GetAccount` do SESv2 por região, exceto a taxa de
 reclamações que o próprio SES mede: o worker a lê no CloudWatch
 (`cloudwatch:GetMetricData`, uma métrica por região a cada 15 minutos, alguns
-centavos de dólar por mês). O custo por região é uma estimativa local.
+centavos de dólar por mês). Uma política IAM anterior a essa permissão (rode a
+configuração de novo para adicioná-la) deixa a taxa sem leitura, e a pausa
+regional passa a avaliar as reclamações pela contagem da própria instância,
+com limite de 0,08% de todos os e-mails. O custo por região é uma estimativa
+local.
 
 Uma equipe suspensa mantém os dados e as chaves continuam autenticando, mas
 todo envio responde `403 team_suspended` (`403 sending_paused` em uma pausa

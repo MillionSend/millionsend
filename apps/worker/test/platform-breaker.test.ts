@@ -10,7 +10,9 @@ let close: () => Promise<void>;
 let sends: { to: string; subject: string; text: string; kind: string }[];
 
 const NOW = new Date("2026-09-03T12:00:00Z");
+const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
+const at = (ms: number) => new Date(NOW.getTime() + ms);
 const mailer = {
   send: async (to: string, m: { subject: string; text: string; kind: string }) => {
     sends.push({ to, subject: m.subject, text: m.text, kind: m.kind });
@@ -24,7 +26,10 @@ const ses = {
     if (sesRate instanceof Error) throw sesRate;
     return sesRate;
   },
+  loggedAt: new Map<string, Date>(),
 };
+const UNREADABLE =
+  "platform.breaker: SES complaint rate unreadable in sa-east-1; without a reading from the last day, our own complaint count is judged";
 const run = (now = NOW) =>
   runPlatformBreaker(db, { mailer, appBaseUrl: "https://app.example.test", now, ses });
 
@@ -69,14 +74,47 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
-it("judges complaints on SES's own rate: our count alone trips nothing", async () => {
-  expect(await run()).toEqual({ tripped: [], resumed: [] });
-  expect(sends).toEqual([]);
+it("trips on our own complaint count while SES's rate can't be read, logging the failed read once an hour", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const unreadable = () => warn.mock.calls.filter(([line]) => line === UNREADABLE).length;
+  // An IAM policy from before the CloudWatch read: every read fails.
+  sesRate = new Error("AccessDenied");
+  // 5 complaints in 1000 sends over the last 24 hours, past our own 0.08% line.
+  expect(await run()).toEqual({ tripped: ["sa-east-1"], resumed: [] });
+  expect(sends).toHaveLength(1);
+  expect(sends[0]?.subject).toBe(
+    "Broadcasts paused in sa-east-1: platform complaint rate at 0.50%",
+  );
+  expect(sends[0]?.text).toContain("SES's own complaint rate couldn't be read");
+  expect(sends[0]?.text).toContain("Noisy Sender: 0 hard bounces, 5 complaints");
+  expect((await db.select().from(schema.regionBreakers))[0]?.reason).toEqual({
+    metric: "complaint",
+    source: "events",
+    rate: 0.005,
+    limit: 0.0008,
+    windowHours: 24,
+    sent: 1000,
+    events: 5,
+  });
+  expect(unreadable()).toBe(1);
+  await run(at(15 * 60_000));
+  await run(at(45 * 60_000));
+  expect(unreadable()).toBe(1);
+  await run(at(HOUR_MS));
+  expect(unreadable()).toBe(2);
+  warn.mockRestore();
+
+  // Once SES's rate reads, it alone judges complaints: ours no longer counts.
+  sesRate = 0.0005;
+  expect(await run(at(2 * HOUR_MS))).toEqual({ tripped: [], resumed: ["sa-east-1"] });
+  expect(sends[1]?.subject).toBe("Broadcasts resumed in sa-east-1");
+  sends = [];
 });
 
 it("alerts the operator at 0.3%, at most once a day, and never for a failed read", async () => {
+  const t = at(3 * HOUR_MS);
   sesRate = 0.0033;
-  expect(await run()).toEqual({ tripped: [], resumed: [] });
+  expect(await run(t)).toEqual({ tripped: [], resumed: [] });
   expect(sends).toHaveLength(1);
   expect(sends[0]).toMatchObject({ to: "op@example.com", kind: "region.ses_complaints" });
   expect(sends[0]?.subject).toBe("SES complaint rate in sa-east-1 at 0.33%");
@@ -87,23 +125,21 @@ it("alerts the operator at 0.3%, at most once a day, and never for a failed read
     paused: false,
   });
 
-  await run(new Date(NOW.getTime() + 3_600_000));
+  await run(new Date(t.getTime() + HOUR_MS));
   expect(sends).toHaveLength(1);
 
-  // CloudWatch down: the stored reading stands, and nobody is told twice.
+  // CloudWatch down for a while: the stored reading stands, so our own count
+  // (still past its line) trips nothing, and nobody is told twice.
   sesRate = new Error("Throttling");
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  await run(new Date(NOW.getTime() + 2 * 3_600_000));
-  expect(warn).toHaveBeenCalledWith(
-    "platform.breaker: SES complaint rate unreadable in sa-east-1",
-    sesRate,
-  );
+  expect(await run(new Date(t.getTime() + 2 * HOUR_MS))).toEqual({ tripped: [], resumed: [] });
+  expect(warn).toHaveBeenCalledWith(UNREADABLE, sesRate);
   warn.mockRestore();
   expect(sends).toHaveLength(1);
   expect((await db.select().from(schema.regionBreakers))[0]?.sesComplaintRate).toBe(0.0033);
 
   sesRate = 0.0032;
-  await run(new Date(NOW.getTime() + DAY_MS));
+  await run(new Date(t.getTime() + DAY_MS));
   expect(sends).toHaveLength(2);
   expect(sends[1]?.subject).toBe("SES complaint rate in sa-east-1 at 0.32%");
   sends = [];

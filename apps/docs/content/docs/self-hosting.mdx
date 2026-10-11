@@ -829,7 +829,10 @@ with an "Open console" button; the direct URL `https://<your-host>/console`
 works too. Every number comes from Postgres or a free SESv2 `GetAccount`
 read per region, except SES's own complaint rate: the worker reads it from
 CloudWatch (`cloudwatch:GetMetricData`, one metric per region every 15
-minutes, a few cents a month). The per-region cost is a local estimate.
+minutes, a few cents a month). An IAM policy from before that permission
+(run the setup again to add it) leaves the rate unread, and the regional
+pause then judges complaints on the instance's own count, at 0.08% of all
+mail. The per-region cost is a local estimate.
 
 A suspended team keeps its data and its keys authenticate, but every send
 answers `403 team_suspended` (`403 sending_paused` under a review hold; SMTP

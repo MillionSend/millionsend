@@ -62,7 +62,7 @@ vi.mock("@tanstack/react-query", () => ({
 const { RegionsTable } = await import("@/components/console/overview/regions-table");
 const { BroadcastsCell } = await import("@/components/console/regions/region-cells");
 
-const LINES = { sesReview: 0.001, sesPause: 0.005, breaker: 0.004 };
+const LINES = { sesReview: 0.001, sesPause: 0.005, breaker: 0.004, ours: 0.0008 };
 
 function served(over: Partial<ServedRegion> & { region: string }): ServedRegion {
   return {
@@ -91,6 +91,7 @@ function served(over: Partial<ServedRegion> & { region: string }): ServedRegion 
     domainsVerified: 3,
     sent24h: 75_000,
     sesComplaintRate: 0.0002,
+    sesComplaintRead: true,
     week: { sent: 500_000, hardBounceRate: 0.001, complaintRate: 0.0003 },
     breaker: null,
     daily: [],
@@ -279,6 +280,24 @@ describe("the Overview's regions table", () => {
     expect(shutdown[4]).toContain("background:var(--ms-danger)");
     expect(text(shutdown[4] ?? "")).toBe("suspensa");
   });
+
+  it("says when SES's rate can't be read, and that our own count is what the pause watches", () => {
+    h.locale = "pt-BR";
+    const [unreadable, none] = cells(
+      render([
+        served({ region: "sa-east-1", sesComplaintRate: null, sesComplaintRead: false }),
+        served({ region: "eu-west-1", sesComplaintRate: null, sesComplaintRead: true }),
+      ]),
+    );
+    if (!unreadable || !none) throw new Error("rows missing");
+    expect(text(unreadable[7] ?? "")).toBe("—");
+    expect(tipOf(unreadable[7] ?? "")).toBe(
+      "Não foi possível ler a taxa do SES\nA pausa regional segue nossa medição: 0,030% em 7 dias, limite de 0,08%",
+    );
+    expect(tipOf(none[7] ?? "")).toBe(
+      "O SES ainda não publicou uma taxa para esta região\nA pausa regional segue nossa medição: 0,030% em 7 dias, limite de 0,08%",
+    );
+  });
 });
 
 describe("the Broadcasts cell the Regions page shares", () => {
@@ -308,5 +327,28 @@ describe("the Broadcasts cell the Regions page shares", () => {
       }),
     );
     expect(tipOf(held)).toBe("Paused by the operator: incident\nTransactional mail keeps flowing.");
+    // Our own complaint count, judged while SES's rate can't be read.
+    const ours = cell(
+      served({
+        region: "sa-east-1",
+        breaker: {
+          paused: true,
+          manualReason: null,
+          pausedAt: new Date(),
+          reason: {
+            metric: "complaint",
+            source: "events",
+            rate: 0.0009,
+            limit: 0.0008,
+            windowHours: 168,
+            sent: 10_000,
+            events: 9,
+          },
+        },
+      }),
+    );
+    expect(tipOf(ours)).toBe(
+      "Automatic pause: complaint at 0.09% over 7 days, above the 0.08% limit.\nTransactional mail keeps flowing.",
+    );
   });
 });

@@ -69,6 +69,11 @@ export function regionPausedMail(input: {
       windowed
         ? `Across every team sending from ${input.region}, the ${metricLabel(reason.metric)} rate over the last ${reason.windowHours} hours is ${percent(reason.rate)} (${reason.events} of ${reason.sent} sends), at or over the breaker's ${percent(reason.limit)} line, set short of SES's own review line for the whole account.`
         : `SES measures the account's complaint rate in ${input.region} at ${percent(reason.rate)}, at or over the breaker's ${percent(reason.limit)} line. ${sesLines}.`,
+      ...(windowed && reason.metric === "complaint"
+        ? [
+            "SES's own complaint rate couldn't be read (the instance's IAM policy needs cloudwatch:GetMetricData), so the breaker judged our own count of complaints.",
+          ]
+        : []),
       "Broadcasts in this region are held until the rate drops back under the line; transactional email keeps flowing.",
       ...teamLines(
         windowed ? "Teams behind the events in that window:" : weekTeams,

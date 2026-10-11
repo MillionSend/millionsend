@@ -139,7 +139,18 @@ function Row({
       <td className="right num">{r.week ? f.pct2(r.week.hardBounceRate) : mutedDash}</td>
       <td className="right num">
         {ses === null ? (
-          mutedDash
+          <Tooltip
+            inline
+            text={[
+              t(r.sesComplaintRead ? "sesNone" : "sesUnreadable"),
+              t("oursWatched", {
+                ours: r.week ? f.pct3(r.week.complaintRate) : "—",
+                limit: f.pctLimit(lines.ours),
+              }),
+            ].join("\n")}
+          >
+            {mutedDash}
+          </Tooltip>
         ) : (
           <Tooltip
             inline

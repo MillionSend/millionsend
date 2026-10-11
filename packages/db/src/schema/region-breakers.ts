@@ -2,13 +2,14 @@ import { boolean, doublePrecision, jsonb, pgTable, text, timestamp } from "drizz
 
 /**
  * Why a region's broadcasts were paused: the window and metric of our own
- * counts that tripped, or SES's own complaint rate. Complaints are judged on
- * SES's rate alone; a complaint reason with a window is what older releases
- * stored, left on a region they paused.
+ * counts that tripped, or SES's own complaint rate. Our own complaint count
+ * only trips while SES's rate can't be read.
  */
 export type RegionBreakerReason =
   | {
       metric: "bounce" | "complaint";
+      /** Our own events; reasons older releases stored carry no source. */
+      source?: "events";
       rate: number;
       limit: number;
       windowHours: number;
@@ -40,6 +41,9 @@ export const regionBreakers = pgTable("region_breakers", {
   // SES's own complaint rate as of the breaker's last successful read; null
   // while SES publishes none. A failed read leaves the last one in place.
   sesComplaintRate: doublePrecision("ses_complaint_rate"),
+  // When that read happened: a rate read over a day ago no longer counts, and
+  // the breaker judges our own complaint count instead.
+  sesComplaintReadAt: timestamp("ses_complaint_read_at", { withTimezone: true }),
   // When the operator was last told the rate sat over the alert line.
   sesComplaintAlertedAt: timestamp("ses_complaint_alerted_at", { withTimezone: true }),
 });

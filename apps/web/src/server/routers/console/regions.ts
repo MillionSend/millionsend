@@ -8,6 +8,7 @@ import {
   sesTenantsEnabled,
 } from "@millionsend/config";
 import {
+  BREAKER_COMPLAINT_RATE,
   BREAKER_SES_COMPLAINT_RATE,
   bulkShare,
   clampReserve,
@@ -27,7 +28,7 @@ import {
   SES_TRANSACTIONAL_RESERVE_MAX,
   SES_TRANSACTIONAL_RESERVE_MIN,
   sendingBroadcasts,
-  sesComplaintRates,
+  sesComplaintReadings,
   transactionalSent24h,
   usableReserve,
 } from "@millionsend/core";
@@ -112,7 +113,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         bulk,
         sending,
         committedPerDay,
-        sesRates,
+        sesReadings,
       ] = await Promise.all([
         accounts(),
         getInstanceSettings(ctx.db),
@@ -135,7 +136,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         regionBulkCounts(ctx.db, now),
         sendingBroadcasts(ctx.db),
         isCloudDeployment() ? committedDailyVolume(ctx.db, now) : Promise.resolve(null),
-        sesComplaintRates(ctx.db),
+        sesComplaintReadings(ctx.db, now),
       ]);
       // Env values are raw strings when validation is skipped (tests), hence Number().
       const horizonDays = pacingHorizonDays(
@@ -228,8 +229,11 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
             account: account.ok ? account.overview : null,
             domainsVerified: domainsByRegion.get(region) ?? 0,
             sent24h: counts24?.sent ?? 0,
-            // SES's own complaint rate, as the breaker last read it from CloudWatch.
-            sesComplaintRate: sesRates.get(region) ?? null,
+            // SES's own complaint rate as the breaker judges it; null while it
+            // judges our own count instead, `read` telling a failed read from
+            // SES publishing no rate.
+            sesComplaintRate: sesReadings.get(region)?.rate ?? null,
+            sesComplaintRead: sesReadings.get(region)?.read ?? false,
             week: counts7
               ? {
                   sent: counts7.sent,
@@ -273,6 +277,8 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
           sesReview: SES_COMPLAINT_REVIEW_RATE,
           sesPause: SES_COMPLAINT_PAUSE_RATE,
           breaker: BREAKER_SES_COMPLAINT_RATE,
+          // Our own count's line, judged while SES's rate can't be read.
+          ours: BREAKER_COMPLAINT_RATE,
         },
         cloud: isCloudDeployment(),
         defaultRegion: served[0] ?? env.AWS_REGION,

@@ -104,9 +104,9 @@ O envio avisa de antemão:
   SES, novos envios de transmissão são bloqueados com um erro
   `403 sending_paused` — contendo o estrago antes que o SES pause o envio por
   completo.
-- Se a taxa agregada de bounce da plataforma na região SES do seu remetente, ou
-  a taxa de reclamações que o próprio SES mede ali, se aproxima do limite em que
-  o SES age sobre a conta, envios de transmissão nessa região são recusados com
+- Se a taxa agregada de bounce ou de reclamações da plataforma na região SES do
+  seu remetente se aproxima do limite em que o SES age sobre a conta, envios de
+  transmissão nessa região são recusados com
   `403 broadcasts_paused` até a taxa se recuperar. O
   e-mail transacional continua saindo, e a pausa termina sozinha.
 

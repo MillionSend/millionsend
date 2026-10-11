@@ -150,7 +150,7 @@
       "quotaShort": "{quota} · max rate {rate}/s",
       "broadcastsFlowing": "flowing",
       "broadcastsPaused": "paused",
-      "pauseWindow": "Automatic pause: {metric} at {rate} over {hours}h, above the {limit} limit.",
+      "pauseWindow": "Automatic pause: {metric} at {rate} over {hours, select, 168 {7 days} other {{hours}h}}, above the {limit} limit.",
       "pauseSes": "Automatic pause: complaints at {rate} as SES measures them, above the {limit} limit.",
       "pauseManual": "Paused by the operator: {reason}",
       "pauseTransactional": "Transactional mail keeps flowing.",
@@ -164,6 +164,9 @@
       "sesRate": "The rate SES itself measures",
       "sesLines": "SES reviews from {review} and pauses at {pause}",
       "ourLines": "Our regional pause: {limit} · our own 7-day count: {ours}",
+      "sesUnreadable": "SES's rate couldn't be read",
+      "sesNone": "SES hasn't published a rate for this region",
+      "oursWatched": "The regional pause watches our own count: {ours} over 7 days, {limit} limit",
       "costTip": "{sent} sent × {rate}/1k"
     },
     "sent": {

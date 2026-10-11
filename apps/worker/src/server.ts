@@ -163,6 +163,7 @@ const accountClientFor = (region: string) => {
 };
 // SES publishes each region's reputation (its own complaint rate) to
 // CloudWatch in that region.
+const sesUnreadableLoggedAt = new Map<string, Date>();
 const reputationClients = new Map(
   regions.map((region) => [
     region,
@@ -403,8 +404,7 @@ await queue.scheduleCrons({
     if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);
   },
   "platform.breaker": async () => {
-    // Runs without SES events too: with no bounce counts, SES's own complaint
-    // rate is still judged.
+    // Runs without SES events too: SES's own complaint rate needs none.
     await runPlatformBreaker(db, {
       mailer,
       appBaseUrl: env.APP_BASE_URL,
@@ -414,6 +414,7 @@ await queue.scheduleCrons({
           const client = reputationClients.get(region);
           return client ? getSesComplaintRate(client) : null;
         },
+        loggedAt: sesUnreadableLoggedAt,
       },
     });
   },

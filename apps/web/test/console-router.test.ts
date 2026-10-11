@@ -933,19 +933,33 @@ describe("console.regions during a region hold", () => {
 });
 
 describe("console.regions and SES's own complaint rate", () => {
-  it("carries the rate the breaker last read, and the lines it is judged against", async () => {
+  it("carries the rate the breaker judges, whether SES answered, and the lines", async () => {
     await db.delete(schema.regionBreakers);
-    let list = await operator().console.regions.list();
-    expect(list.served.find((r) => r.region === REGION)?.sesComplaintRate).toBeNull();
-    expect(list.complaintLines).toEqual({ sesReview: 0.001, sesPause: 0.005, breaker: 0.004 });
+    const region = async () =>
+      (await operator().console.regions.list()).served.find((r) => r.region === REGION);
+    // Never read: our own count is judged.
+    expect(await region()).toMatchObject({ sesComplaintRate: null, sesComplaintRead: false });
+    expect((await operator().console.regions.list()).complaintLines).toEqual({
+      sesReview: 0.001,
+      sesPause: 0.005,
+      breaker: 0.004,
+      ours: 0.0008,
+    });
 
-    await db.insert(schema.regionBreakers).values({ region: REGION, sesComplaintRate: 0.0025 });
-    list = await operator().console.regions.list();
-    expect(list.served.find((r) => r.region === REGION)).toMatchObject({
+    await db
+      .insert(schema.regionBreakers)
+      .values({ region: REGION, sesComplaintRate: 0.0025, sesComplaintReadAt: new Date() });
+    expect(await region()).toMatchObject({
       sesComplaintRate: 0.0025,
+      sesComplaintRead: true,
       // A stored reading is no pause.
       breaker: null,
     });
+    // Reads failing for over a day: the stale rate no longer counts.
+    await db
+      .update(schema.regionBreakers)
+      .set({ sesComplaintReadAt: new Date(Date.now() - 25 * 3_600_000) });
+    expect(await region()).toMatchObject({ sesComplaintRate: null, sesComplaintRead: false });
     await db.delete(schema.regionBreakers);
   });
 });

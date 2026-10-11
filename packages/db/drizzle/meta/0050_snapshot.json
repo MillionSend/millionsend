@@ -1,6 +1,6 @@
 {
-  "id": "c29ed9d6-bf9a-4053-ac19-165f60741f5e",
-  "prevId": "f2f43126-59c5-4d06-9d5a-e545347b7dd3",
+  "id": "fb6c2d6a-34b4-4522-96d6-7ca1f14af6dd",
+  "prevId": "6ca57b8a-e037-4963-9462-1f72396f7a35",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4614,6 +4614,12 @@
         "ses_complaint_rate": {
           "name": "ses_complaint_rate",
           "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ses_complaint_read_at": {
+          "name": "ses_complaint_read_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

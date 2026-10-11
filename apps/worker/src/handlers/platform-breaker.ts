@@ -19,19 +19,37 @@ export interface PlatformBreakerDeps {
   appBaseUrl?: string | undefined;
   now?: Date;
   /** SES's own complaint rate in each served region, read from CloudWatch. */
-  ses?: { regions: readonly string[]; complaintRate: (region: string) => Promise<number | null> };
+  ses?: {
+    regions: readonly string[];
+    complaintRate: (region: string) => Promise<number | null>;
+    /** When each region's failed read was last logged; kept across runs. */
+    loggedAt: Map<string, Date>;
+  };
 }
 
-/** Every region's reading; a failed read is logged and left out, so the stored one stands. */
+const HOUR_MS = 3_600_000;
+
+/**
+ * Every region's reading; a failed read is left out, so the stored one
+ * stands, and logged at most hourly per region: a policy without the
+ * CloudWatch read fails every run until the setup runs again.
+ */
 async function readSesComplaintRates(
   ses: NonNullable<PlatformBreakerDeps["ses"]>,
+  now: Date,
 ): Promise<Map<string, number | null>> {
   const rates = new Map<string, number | null>();
   for (const region of ses.regions) {
     try {
       rates.set(region, await ses.complaintRate(region));
     } catch (err) {
-      console.warn(`platform.breaker: SES complaint rate unreadable in ${region}`, err);
+      const last = ses.loggedAt.get(region);
+      if (last && now.getTime() - last.getTime() < HOUR_MS) continue;
+      ses.loggedAt.set(region, now);
+      console.warn(
+        `platform.breaker: SES complaint rate unreadable in ${region}; without a reading from the last day, our own complaint count is judged`,
+        err,
+      );
     }
   }
   return rates;
@@ -49,7 +67,7 @@ export async function runPlatformBreaker(
 ): Promise<{ tripped: string[]; resumed: string[] }> {
   const now = deps.now ?? new Date();
   const alerts = deps.ses
-    ? await recordSesComplaintRates(db, await readSesComplaintRates(deps.ses), now)
+    ? await recordSesComplaintRates(db, await readSesComplaintRates(deps.ses, now), now)
     : [];
   const decisions = await evaluateRegionBreakers(db, { now });
   const changed = await applyRegionBreakers(db, decisions, now);

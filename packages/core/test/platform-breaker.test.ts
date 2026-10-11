@@ -12,7 +12,7 @@ import {
   regionCounterTotals,
   regionPause,
   releaseRegion,
-  sesComplaintRates,
+  sesComplaintReadings,
 } from "../src/platform-breaker.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
@@ -339,72 +339,125 @@ it("a region held by hand stays paused through the cron's resume decisions until
   expect(await regionPause(db, "us-east-1")).toBeNull();
 });
 
-it("judges complaints on SES's own rate: 0.4% trips, our own count never does", async () => {
+it("judges complaints on SES's own rate while it can be read: 0.4% trips, our own count does not", async () => {
   await clearTraffic();
   await db.delete(schema.regionBreakers);
   const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
   if (!dom) throw new Error("no domain");
-  // 1% of our own count: the old line was 0.08%.
+  // 1% of our own count, past its 0.08% line.
   await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 10 }], hoursAgo(72));
-  expect(
-    (await evaluateRegionBreakers(db, { now: NOW })).find((d) => d.region === "sa-east-1")?.trip,
-  ).toBe(false);
-
   await recordSesComplaintRates(
     db,
     new Map([
-      ["sa-east-1", 0.004],
-      ["us-east-1", 0.0039],
+      ["sa-east-1", 0.0039],
+      ["us-east-1", 0.004],
       // No traffic of ours there: SES's rate alone puts it in the run.
       ["eu-west-1", 0.0051],
     ]),
     NOW,
   );
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
-  expect(decisions.find((d) => d.region === "sa-east-1")).toMatchObject({
+  let decisions = await evaluateRegionBreakers(db, { now: NOW });
+  expect(decisions.find((d) => d.region === "sa-east-1")).toMatchObject({ trip: false });
+  expect(decisions.find((d) => d.region === "us-east-1")).toMatchObject({
     trip: true,
     reason: { metric: "complaint", source: "ses", rate: 0.004, limit: 0.004 },
   });
+  expect(decisions.find((d) => d.region === "eu-west-1")).toMatchObject({
+    trip: true,
+    contributors: [],
+  });
+
+  await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0042]]), NOW);
+  decisions = await evaluateRegionBreakers(db, { now: NOW });
   // SES's rate spans far more than a day: the week's teams are named.
+  expect(decisions.find((d) => d.region === "sa-east-1")).toMatchObject({
+    trip: true,
+    reason: { source: "ses", rate: 0.0042 },
+  });
   expect(
     decisions
       .find((d) => d.region === "sa-east-1")
       ?.contributors.map((c) => [c.teamId, c.complained]),
   ).toEqual([[teamA, 10]]);
-  expect(decisions.find((d) => d.region === "us-east-1")).toMatchObject({ trip: false });
-  expect(decisions.find((d) => d.region === "eu-west-1")).toMatchObject({
-    trip: true,
-    contributors: [],
-  });
-  expect(await sesComplaintRates(db)).toEqual(
-    new Map([
-      ["sa-east-1", 0.004],
-      ["us-east-1", 0.0039],
-      ["eu-west-1", 0.0051],
-    ]),
-  );
 });
 
-it("stores SES's rate, keeps the last one when a read is missing, and alerts at 0.3% once a day unless paused", async () => {
+it("falls back to our own complaint count, at 0.08% over either window, while SES's rate can't be read", async () => {
+  await clearTraffic();
+  await db.delete(schema.regionBreakers);
+  const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
+  if (!dom) throw new Error("no domain");
+  await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 10 }], hoursAgo(72));
+  const sa = async (now: Date) =>
+    (await evaluateRegionBreakers(db, { now })).find((d) => d.region === "sa-east-1");
+  const own = {
+    trip: true,
+    reason: {
+      metric: "complaint",
+      source: "events",
+      rate: 0.01,
+      limit: 0.0008,
+      windowHours: 168,
+      sent: 1000,
+      events: 10,
+    },
+  };
+  // Never read: the instance's IAM policy has no CloudWatch read.
+  expect(await sa(NOW)).toMatchObject(own);
+  expect((await sa(NOW))?.contributors.map((c) => [c.teamId, c.complained])).toEqual([[teamA, 10]]);
+  // Read under a day ago, the reads since then failing: SES's rate still counts.
+  await recordSesComplaintRates(db, new Map([["sa-east-1", 0.001]]), NOW);
+  const later = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
+  expect(await sa(later(23))).toMatchObject({ trip: false });
+  // Over a day of failed reads: our own count again.
+  expect(await sa(later(25))).toMatchObject(own);
+  // SES answering with no rate at all leaves our own count in charge too.
+  await recordSesComplaintRates(db, new Map([["sa-east-1", null]]), later(25));
+  expect(await sa(later(25))).toMatchObject(own);
+
+  // The 24-hour window counts as it always did, behind its 3-complaint floor.
+  await clearTraffic();
+  await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 2 }]);
+  expect(await sa(NOW)).toMatchObject({ trip: false });
+  await seedTraffic(teamA, dom.id, 1, [{ type: "complained", n: 1 }]);
+  expect(await sa(NOW)).toMatchObject({
+    trip: true,
+    reason: { metric: "complaint", source: "events", windowHours: 24, events: 3 },
+  });
+});
+
+it("stores SES's rate with its read time, keeps the last one when a read fails, and alerts at 0.3% once a day unless paused", async () => {
   await db.delete(schema.regionBreakers);
   const at = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
   expect(await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0025]]), at(0))).toEqual([]);
   const first = await recordSesComplaintRates(db, new Map([["sa-east-1", 0.003]]), at(1));
   expect(first).toMatchObject([{ region: "sa-east-1", rate: 0.003 }]);
   expect(await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0035]]), at(2))).toEqual([]);
-  // A failed read leaves the region out: the stored rate stands.
+  // A failed read leaves the region out: the stored rate stands for a day.
   await recordSesComplaintRates(db, new Map(), at(3));
-  expect(await sesComplaintRates(db)).toEqual(new Map([["sa-east-1", 0.0035]]));
+  expect((await sesComplaintReadings(db, at(3))).get("sa-east-1")).toEqual({
+    rate: 0.0035,
+    read: true,
+  });
+  expect((await sesComplaintReadings(db, at(27))).get("sa-east-1")).toEqual({
+    rate: null,
+    read: false,
+  });
   expect(await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0033]]), at(25))).toMatchObject(
     [{ region: "sa-east-1", rate: 0.0033 }],
   );
-  // SES publishing no rate clears it.
+  // SES answering with no rate: read, but nothing to judge.
   await recordSesComplaintRates(db, new Map([["sa-east-1", null]]), at(26));
-  expect(await sesComplaintRates(db)).toEqual(new Map());
+  expect((await sesComplaintReadings(db, at(26))).get("sa-east-1")).toEqual({
+    rate: null,
+    read: true,
+  });
   // A paused region has its pause notice; no daily alert on top.
   await holdRegion(db, "sa-east-1", "incident");
   expect(await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0045]]), at(60))).toEqual([]);
   await releaseRegion(db, "sa-east-1");
   // The hold and its release leave the reading alone.
-  expect(await sesComplaintRates(db)).toEqual(new Map([["sa-east-1", 0.0045]]));
+  expect((await sesComplaintReadings(db, at(60))).get("sa-east-1")).toEqual({
+    rate: 0.0045,
+    read: true,
+  });
 });
