@@ -94,6 +94,10 @@ export async function createCheckoutSession(
       // Automatic tax on an existing customer requires Checkout to persist the
       // collected address (and the business name for tax ids) onto it.
       customer_update: { address: "auto", name: "auto" },
+      // The bank challenges wherever it can, not only where Stripe's risk
+      // engine asks: a stolen card fails without the cardholder's banking app,
+      // and an authenticated payment's fraud liability moves to the bank.
+      payment_method_options: { card: { request_three_d_secure: "any" } },
     },
     // A double-click or two tabs within the same minute replay one session
     // instead of minting several.

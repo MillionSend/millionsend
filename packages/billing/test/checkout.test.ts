@@ -39,6 +39,7 @@ describe("createCheckoutSession", () => {
         { price: priceId("millionsend_pro_100k_monthly"), quantity: 1 },
         { price: priceId("millionsend_pro_100k_overage") },
       ],
+      payment_method_options: { card: { request_three_d_secure: "any" } },
     });
     expect((await teamRow(db, teamId))?.stripeCustomerId).toBe("cus_1");
 
