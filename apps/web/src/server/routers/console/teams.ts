@@ -14,6 +14,7 @@ import {
   PLAN_RUNGS,
   type Plan,
   raisesQuota,
+  recordPhishingFingerprints,
   recordTenantStatus,
   resumeMonitorPause,
   SILENT_SUSPENSIONS,
@@ -41,6 +42,7 @@ import {
   sendConsoleCode,
   signedInRecently,
 } from "../../console-code";
+import { FINGERPRINT_SOURCES } from "../../linkage";
 import { getQueue } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
 import {
@@ -634,6 +636,11 @@ export const consoleTeamsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.id);
       await suspendTeam(ctx.db, { teamId: team.id, reason: input.reason, note: input.note });
+      await recordPhishingFingerprints(
+        ctx.db,
+        { teamId: team.id, reason: input.reason },
+        FINGERPRINT_SOURCES,
+      );
       const notify = input.notify && !SILENT_SUSPENSIONS.includes(input.reason);
       await auditOperator(ctx, {
         teamId: team.id,

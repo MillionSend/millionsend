@@ -7,6 +7,9 @@ import Stripe from "stripe";
 export interface BillingStripe {
   prices: { list(params: Stripe.PriceListParams): Promise<Stripe.ApiList<Stripe.Price>> };
   customers: { create(params: Stripe.CustomerCreateParams): Promise<Stripe.Customer> };
+  paymentMethods: {
+    list(params: Stripe.PaymentMethodListParams): Promise<Stripe.ApiList<Stripe.PaymentMethod>>;
+  };
   subscriptions: {
     retrieve(id: string, params?: Stripe.SubscriptionRetrieveParams): Promise<Stripe.Subscription>;
     list(params: Stripe.SubscriptionListParams): Promise<Stripe.ApiList<Stripe.Subscription>>;

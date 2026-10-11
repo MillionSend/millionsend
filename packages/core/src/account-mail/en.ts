@@ -367,6 +367,27 @@ export const en = {
         "This verdict held the team as its phishing-type verdict number {n} at or above {line} in its first week of sending.",
     },
   },
+  "monitor.team_linked": {
+    subject: "A new team matches a team suspended for phishing",
+    body: [
+      "{team} matches {linked}, a team you suspended for phishing, on its {matches}. {held}",
+      "Open the review page to see what matched, then release the team or suspend it for phishing.",
+    ],
+    button: "Open review",
+    extra: {
+      held: "It is held for review before it sends anything: its mail waits until you decide, and its owner sees sending as paused pending review, with no email about it.",
+      notHeld: "The automatic hold is off, so the team is not held.",
+      display_name: "sender name",
+      subject: "subject",
+      sending_domain: "domain name",
+      link_domain: "link domain",
+      phone: "phone number",
+      text_hash: "email text",
+      card: "card",
+      ip: "IP address",
+      address: "email address",
+    },
+  },
   "monitor.degraded": {
     subject: "Content monitor: {rate} of samples went unjudged in the last hour",
     body: [

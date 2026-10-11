@@ -210,8 +210,8 @@ const STANDING_REASONS: TeamFlagReason[] = ["monitor", "complaints", "guardrail"
  * previous run's standings, so `previous` must be the rows saved before this
  * run's); an open automatic flag whose trigger is gone is cleared, unless
  * the team is held for review, which waits on an operator; an operator's
- * manual flag, and a brand flag, which no standing triggers, are never
- * touched. `opened_at` of an open flag is left alone so the list's "since"
+ * manual flag, and brand and linkage flags, which no standing triggers, are
+ * never touched. `opened_at` of an open flag is left alone so the list's "since"
  * holds still.
  */
 export async function syncTeamFlags(

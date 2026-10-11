@@ -16,6 +16,7 @@ import {
   isIdentitySharedByOtherDomains,
   isOperatorTeam,
   isReservedSenderDomain,
+  linkTeam,
   PLAN_DOMAIN_LIMIT,
   warmupCap,
 } from "@millionsend/core";
@@ -386,6 +387,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           metadata: { name: input.name, region: input.region },
         });
         await deps.enqueueDomainAge?.(created.id);
+        await linkTeam(ctx.db, { teamId: ctx.teamId, trigger: "domain" });
         return { id: created.id };
       }),
 

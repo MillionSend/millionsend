@@ -13,7 +13,10 @@ import {
 } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
-/** What put a team on the trust & safety list. */
+/**
+ * What put a team on the trust & safety list. `linked`: the team matches a
+ * team suspended for phishing (campaign linkage).
+ */
 export const teamFlagReasonEnum = pgEnum("team_flag_reason", [
   "monitor",
   "complaints",
@@ -22,6 +25,7 @@ export const teamFlagReasonEnum = pgEnum("team_flag_reason", [
   "report",
   "manual",
   "brand",
+  "linked",
 ]);
 
 export const teamFlagStatusEnum = pgEnum("team_flag_status", ["open", "cleared"]);

@@ -765,6 +765,17 @@ content insights (never email bodies), and an instance-wide audit log.
   `download.db-ip.com` once a month, keeps the last good copy when a download
   fails, and the dialog adds each sign-up IP's network and country, looked up
   locally.
+- **Campaign linkage:** a team suspended for phishing leaves fingerprints that
+  outlive it (its people's addresses, Gmail dots and `+tags` ignored, and IPs,
+  its domains and card, and from its latest stored mail the sender names,
+  subjects, link domains, phone numbers and a visible-text hash). A new team is
+  compared with them when it is created, adds a domain, first pays and sends; a
+  match holds it for review before it sends anything (unless the automatic hold
+  is off), opens a `linked` flag and mails the operator the kinds of evidence;
+  the team's dialog and review page show the values. Only teams still suspended
+  for phishing count, and the fuzzy rules are strict: sender names need two
+  shared distinctive words, subjects four words overlapping by 75%, domain names
+  two words of four letters or more filling 80% of the other name.
 
 </details>
 

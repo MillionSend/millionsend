@@ -1214,3 +1214,30 @@ describe("permission confinement", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("POST /domains and teams suspended for phishing", () => {
+  it("holds a new team for review when the domain it adds is a return's", async () => {
+    const phisher = await createTeam(db, "facture-vexto");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, phisher));
+    await db.insert(schema.campaignFingerprints).values({
+      teamId: phisher,
+      teamName: "facture-vexto",
+      kind: "sending_domain",
+      value: "vexto-cadeaux.example",
+    });
+    const team = await createTeam(db, "newcomer-api");
+    const token = await insertKey(team);
+    const res = await call(makeApp({ client: fakeSes().client }), token, "POST", "/domains", {
+      name: "cadeaux-vexto.example",
+    });
+    expect(res.status).toBe(200);
+    const [row] = await db
+      .select({ reason: schema.teams.suspensionReason })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, team));
+    expect(row).toEqual({ reason: "review" });
+  });
+});

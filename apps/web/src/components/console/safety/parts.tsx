@@ -16,7 +16,8 @@ export type FlagReason =
   | "score"
   | "report"
   | "manual"
-  | "brand";
+  | "brand"
+  | "linked";
 
 const PAID = ["starter", "pro", "scale"];
 const PLAN_KEYS = ["free", "starter", "pro", "scale", "system"];

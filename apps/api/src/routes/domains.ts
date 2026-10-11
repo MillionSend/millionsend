@@ -12,6 +12,7 @@ import {
   isLoopbackUrl,
   isOperatorTeam,
   isReservedSenderDomain,
+  linkTeam,
   PLAN_DOMAIN_LIMIT,
   recordAudit,
   SILENT_SUSPENSIONS,
@@ -502,6 +503,7 @@ export function registerDomainRoutes(
         metadata: { name: row.name, region },
       });
       await queueDomainAge(row.id);
+      await linkTeam(db, { teamId: auth.teamId, trigger: "domain" });
       return c.json(
         {
           ...toWire(row),

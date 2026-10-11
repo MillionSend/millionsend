@@ -476,6 +476,37 @@
       "standingAt": "standing computed {ago}",
       "supportView": "Support view live · ends in {left}"
     },
+    "linked": {
+      "title": "Matches a team suspended for phishing",
+      "subtitle": "What this team shares with a team you suspended for phishing. Sender names, subjects and domains match when nearly the same; everything else must be identical.",
+      "columns": {
+        "signal": "Signal",
+        "thisTeam": "This team",
+        "matched": "Suspended team's",
+        "team": "Suspended team"
+      },
+      "kinds": {
+        "display_name": "Sender name",
+        "subject": "Subject",
+        "sending_domain": "Sending domain",
+        "link_domain": "Link domain",
+        "phone": "Phone number",
+        "text_hash": "Email text",
+        "card": "Card",
+        "ip": "IP address",
+        "address": "Email address"
+      },
+      "sameText": "Same text",
+      "found": "Matched {team} {ago}, {trigger}.",
+      "triggers": {
+        "team": "when the team was created",
+        "domain": "when a domain was added",
+        "payment": "at its first payment",
+        "send": "on a send"
+      },
+      "held": "Held for review before sending.",
+      "notHeld": "This match held nothing: the automatic hold is off, or the team was already suspended."
+    },
     "members": {
       "title": "Members",
       "subtitle": "Where each person signed up from and where they were last seen. Only the console sees this.",
@@ -639,7 +670,8 @@
       "score": "Score",
       "report": "Report",
       "manual": "Manual",
-      "brand": "Brand name"
+      "brand": "Brand name",
+      "linked": "Linked"
     },
     "reasonTip": {
       "monitor": "The content monitor: sampled content judged by the model pushed the internal risk over the flag line.",
@@ -659,7 +691,8 @@
       "manual": "Flagged by operator",
       "report": "Abuse report",
       "monitor": "Risk {risk} · {samples, plural, one {# sample} other {# samples}}",
-      "brand": "Named like {brand}"
+      "brand": "Named like {brand}",
+      "linked": "Matches a team suspended for phishing"
     },
     "columns": {
       "team": "Team",

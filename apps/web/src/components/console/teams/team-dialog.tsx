@@ -13,6 +13,7 @@ import { formatDayTime, formatMmSs, formatRelative } from "@/lib/format";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useCountdown } from "@/lib/use-countdown";
 import { GuardrailLabel, RegionLabel, usePlanName } from "./cells";
+import { LinkedTeams } from "./linked-teams";
 import { MembersSection } from "./members-section";
 import type { TeamDetail } from "./types";
 
@@ -184,6 +185,7 @@ export function TeamDialog({
           )}
         </dl>
       )}
+      <LinkedTeams teamId={id} />
       <MembersSection teamId={id} />
       <ModalFooter>
         <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>

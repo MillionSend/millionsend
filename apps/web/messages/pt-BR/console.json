@@ -476,6 +476,37 @@
       "standingAt": "situação calculada {ago}",
       "supportView": "Modo de suporte ativo · termina em {left}"
     },
+    "linked": {
+      "title": "Coincide com uma equipe suspensa por phishing",
+      "subtitle": "O que esta equipe tem em comum com uma equipe que você suspendeu por phishing. Nomes de remetente, assuntos e domínios coincidem quando são quase iguais; o resto precisa ser idêntico.",
+      "columns": {
+        "signal": "Sinal",
+        "thisTeam": "Esta equipe",
+        "matched": "Da equipe suspensa",
+        "team": "Equipe suspensa"
+      },
+      "kinds": {
+        "display_name": "Nome do remetente",
+        "subject": "Assunto",
+        "sending_domain": "Domínio de envio",
+        "link_domain": "Domínio dos links",
+        "phone": "Telefone",
+        "text_hash": "Texto do e-mail",
+        "card": "Cartão",
+        "ip": "Endereço IP",
+        "address": "Endereço de e-mail"
+      },
+      "sameText": "Mesmo texto",
+      "found": "Coincidiu com {team} {ago}, {trigger}.",
+      "triggers": {
+        "team": "quando a equipe foi criada",
+        "domain": "quando um domínio foi adicionado",
+        "payment": "no primeiro pagamento",
+        "send": "em um envio"
+      },
+      "held": "Pausada para revisão antes de enviar.",
+      "notHeld": "Esta coincidência não pausou nada: a pausa automática está desligada ou a equipe já estava suspensa."
+    },
     "members": {
       "title": "Membros",
       "subtitle": "De onde cada pessoa se cadastrou e onde foi vista por último. Só o console vê isso.",
@@ -639,7 +670,8 @@
       "score": "Nota",
       "report": "Denúncia",
       "manual": "Manual",
-      "brand": "Nome de marca"
+      "brand": "Nome de marca",
+      "linked": "Vínculo"
     },
     "reasonTip": {
       "monitor": "O monitor de conteúdo: conteúdo amostrado avaliado pelo modelo levou o risco interno acima do limite de sinalização.",
@@ -659,7 +691,8 @@
       "manual": "Sinalizada pelo operador",
       "report": "Denúncia de abuso",
       "monitor": "Risco {risk} · {samples, plural, one {# amostra} other {# amostras}}",
-      "brand": "Nome parecido com {brand}"
+      "brand": "Nome parecido com {brand}",
+      "linked": "Coincide com uma equipe suspensa por phishing"
     },
     "columns": {
       "team": "Equipe",

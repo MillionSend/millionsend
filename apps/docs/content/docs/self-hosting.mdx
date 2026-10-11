@@ -902,6 +902,25 @@ free country and ASN databases, downloaded once a month from
 `download.db-ip.com` (a failed download keeps the last good copy), and the
 dialog adds each sign-up IP's network and country, looked up locally.
 
+A team suspended for phishing leaves its fingerprints behind, kept after
+the team: its people's email addresses (Gmail's dots and any `+tag`
+ignored) and their sign-up and session IPs, its domains, its card on the
+cloud, and from its latest stored mail the sender names, subjects, link
+domains, phone numbers and a hash of the visible text. A new team is
+compared with them when it is created, adds a domain, first pays and
+sends. A match holds it for review before it sends anything (unless the
+automatic hold is off), opens a `linked` flag on the trust & safety list,
+and mails the operator which kinds of evidence matched; the team's dialog
+and review page show the values. Only teams still suspended for phishing
+count. IPs, addresses, phone numbers (their last nine digits), cards and
+text hashes must be equal. Sender names match when one's distinctive words,
+at least two, are all in the other, which has at most one more; subjects
+when their word sets, four words or more with numbers left out, overlap by
+75%; domain names when one's words, at least two of four letters or more
+and not the words every hostname uses ("mail", "secure"…), are all in the
+other and fill 80% of it, so `vexto-cadeaux.example` meets
+`cadeaux-vexto.example`.
+
 ## Content monitoring (optional)
 
 Off by default. With a judge configured, a sample of accepted mail is

@@ -1,3 +1,4 @@
+export { cardFingerprints } from "./cards.js";
 export {
   type BillingDeps,
   type BillingTeam,

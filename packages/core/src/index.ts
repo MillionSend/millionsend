@@ -219,6 +219,14 @@ export {
   type SendingBroadcast,
   sendingBroadcasts,
 } from "./broadcast-pacing.js";
+export type { FingerprintMessage } from "./campaign-fingerprints.js";
+export {
+  type FingerprintSources,
+  linkTeam,
+  recordMissingFingerprints,
+  recordPhishingFingerprints,
+  type TeamLinkResult,
+} from "./campaign-linkage.js";
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export { forwardedClientIp } from "./client-ip.js";
 export {

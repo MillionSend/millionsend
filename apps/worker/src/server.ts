@@ -1,5 +1,6 @@
 import { SQSClient } from "@aws-sdk/client-sqs";
 import {
+  cardFingerprints,
   createStripe,
   purgeStripeEvents,
   reconcileTeamPlan,
@@ -39,6 +40,7 @@ import {
   purgeExpiredIdempotencyKeys,
   type QueuedWebhookDelivery,
   recordDomainAge,
+  recordMissingFingerprints,
   recordProbes,
   recountStaleSegments,
   refreshDisposableDomains,
@@ -85,6 +87,7 @@ import {
 } from "./handlers/cron.js";
 import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
 import { runInstanceProbes } from "./handlers/instance-probes.js";
+import { alertLinkedTeams } from "./handlers/linkage-alerts.js";
 import { runMonitorHealth } from "./handlers/monitor-health.js";
 import { reportPlanMove, sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
@@ -409,6 +412,8 @@ await queue.scheduleCrons({
       appBaseUrl: env.APP_BASE_URL,
     });
     if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);
+    const linked = await alertLinkedTeams(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    if (linked > 0) console.log(`notifications.sweep: linkedTeamAlerts=${linked}`);
   },
   "platform.breaker": async () => {
     // Runs without SES events too: SES's own complaint rate needs none.
@@ -444,6 +449,11 @@ await queue.scheduleCrons({
         `safety.flags: teams=${result.teams} opened=${result.opened} cleared=${result.cleared} warmupGraduated=${result.graduated}`,
       );
     }
+    // Phishing teams suspended before linkage existed, or whose capture failed.
+    await recordMissingFingerprints(db, {
+      keyring: () => keyring,
+      cards: stripe ? (customerId) => cardFingerprints(stripe, customerId) : undefined,
+    });
   },
   "safety.reveal_notices": async () => {
     const result = await runRevealNotices(db);

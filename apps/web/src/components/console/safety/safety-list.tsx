@@ -44,6 +44,7 @@ const REASONS = [
   "report",
   "manual",
   "brand",
+  "linked",
 ] as const;
 const SORTS = ["name", "type", "risk", "score", "guardrail", "reason", "status", "since"] as const;
 const DIRS = ["asc", "desc"] as const;

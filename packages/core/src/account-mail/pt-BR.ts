@@ -377,6 +377,27 @@ export const ptBR = {
         "Esta avaliação pausou a equipe por ser a {n}ª do tipo phishing com pontuação {line} ou mais na primeira semana de envios.",
     },
   },
+  "monitor.team_linked": {
+    subject: "Uma equipe nova coincide com uma equipe suspensa por phishing",
+    body: [
+      "{team} coincide com {linked}, uma equipe que você suspendeu por phishing, em: {matches}. {held}",
+      "Abra a página de revisão para ver o que coincidiu e depois liberar a equipe ou suspendê-la por phishing.",
+    ],
+    button: "Abrir revisão",
+    extra: {
+      held: "Ela fica pausada para revisão antes de enviar qualquer coisa: os e-mails ficam em espera até você decidir, e o proprietário vê o envio como pausado aguardando revisão, sem receber e-mail sobre isso.",
+      notHeld: "A pausa automática para revisão está desligada, então a equipe não foi pausada.",
+      display_name: "nome do remetente",
+      subject: "assunto",
+      sending_domain: "nome do domínio",
+      link_domain: "domínio dos links",
+      phone: "telefone",
+      text_hash: "texto do e-mail",
+      card: "cartão",
+      ip: "endereço IP",
+      address: "endereço de e-mail",
+    },
+  },
   "monitor.degraded": {
     subject: "Monitor de conteúdo: {rate} das amostras ficaram sem avaliação na última hora",
     body: [

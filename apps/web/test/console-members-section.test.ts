@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ members: undefined as unknown }));
+const h = vi.hoisted(() => ({ members: undefined as unknown, links: undefined as unknown }));
 
 // The real English catalogs, so the test reads what the operator reads.
 vi.mock("next-intl", async (importOriginal) => {
@@ -30,11 +30,18 @@ vi.mock("@/lib/trpc", () => {
   return { useTRPC: () => at([]) };
 });
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { path: string }) =>
-    options.path === "console.accounts.members" ? { data: h.members } : { data: undefined },
+  useQuery: (options: { path: string }) => ({
+    data:
+      options.path === "console.accounts.members"
+        ? h.members
+        : options.path === "console.accounts.links"
+          ? h.links
+          : undefined,
+  }),
 }));
 
 const { MembersSection } = await import("@/components/console/teams/members-section");
+const { LinkedTeams } = await import("@/components/console/teams/linked-teams");
 
 const member = {
   userId: "u1",
@@ -93,5 +100,39 @@ describe("the team dialog's members", () => {
     expect(html).not.toContain("DB-IP");
     expect(html).not.toContain("Other accounts on these IPs");
     expect(html).not.toContain("Temporary address");
+  });
+});
+
+describe("the match with a team suspended for phishing", () => {
+  it("lists each shared signal beside the suspended team's, and nothing for an unlinked team", () => {
+    h.links = [];
+    expect(renderToStaticMarkup(createElement(LinkedTeams, { teamId: "t" }))).toBe("");
+    h.links = [
+      {
+        linkedTeamId: "p",
+        linkedTeamName: "facture-vexto",
+        matches: [
+          {
+            kind: "sending_domain",
+            value: "cadeaux-vexto.example",
+            matched: "vexto-cadeaux.example",
+          },
+          { kind: "text_hash", value: "ab12", matched: "ab12" },
+        ],
+        trigger: "domain",
+        held: true,
+        createdAt: new Date(),
+      },
+    ];
+    const html = renderToStaticMarkup(createElement(LinkedTeams, { teamId: "t" }));
+    expect(html).toContain("Matches a team suspended for phishing");
+    expect(html).toContain("Sending domain");
+    expect(html).toContain("cadeaux-vexto.example");
+    expect(html).toContain("vexto-cadeaux.example");
+    expect(html).toContain("Same text");
+    expect(html).not.toContain("ab12");
+    expect(html).toContain('href="/console/safety/p"');
+    expect(html).toContain("when a domain was added");
+    expect(html).toContain("Held for review before sending.");
   });
 });

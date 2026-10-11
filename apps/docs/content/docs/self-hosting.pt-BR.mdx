@@ -922,6 +922,27 @@ gratuitas de país e de ASN da DB-IP, baixadas uma vez por mês de
 `download.db-ip.com` (um download que falha mantém a última cópia boa), e a
 janela mostra a rede e o país de cada IP de cadastro, consultados localmente.
 
+Uma equipe suspensa por phishing deixa suas impressões digitais, que ficam
+guardadas depois da equipe: os endereços de e-mail das pessoas (ignorando os
+pontos do Gmail e qualquer `+tag`) e os IPs de cadastro e de sessão delas, os
+domínios, o cartão na nuvem e, dos e-mails mais recentes guardados, os nomes
+de remetente, assuntos, domínios dos links, telefones e um hash do texto
+visível. Uma equipe nova é comparada com elas quando é criada, adiciona um
+domínio, faz o primeiro pagamento e envia. Uma coincidência a pausa para
+revisão antes de enviar qualquer coisa (a menos que a pausa automática esteja
+desligada), abre uma sinalização `linked` na lista de confiança e segurança e
+avisa o operador por e-mail sobre os tipos de evidência que coincidiram; a
+janela da equipe e a página de revisão mostram os valores. Só contam equipes
+que continuam suspensas por phishing. IPs, endereços, telefones (os nove
+últimos dígitos), cartões e hashes de texto precisam ser iguais. Nomes de
+remetente coincidem quando as palavras marcantes de um, pelo menos duas,
+estão todas no outro, que tem no máximo uma a mais; assuntos, quando os
+conjuntos de palavras, com quatro palavras ou mais e sem os números, se
+sobrepõem em 75%; nomes de domínio, quando as palavras de um, pelo menos duas
+com quatro letras ou mais e fora as que todo hostname usa ("mail",
+"secure"…), estão todas no outro e ocupam 80% dele, então
+`vexto-cadeaux.example` coincide com `cadeaux-vexto.example`.
+
 ## Monitoramento de conteúdo (opcional)
 
 Desligado por padrão. Com um avaliador configurado, uma amostra do e-mail aceito é

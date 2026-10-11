@@ -179,4 +179,21 @@ export const consoleAccountsRouter = router({
         })),
     };
   }),
+
+  /** The teams suspended for phishing this team matched, and on what (campaign linkage). */
+  links: operatorProcedure.input(z.object({ teamId: z.uuid() })).query(({ ctx, input }) => {
+    const l = schema.teamLinks;
+    return ctx.db
+      .select({
+        linkedTeamId: l.linkedTeamId,
+        linkedTeamName: l.linkedTeamName,
+        matches: l.matches,
+        trigger: l.trigger,
+        held: l.held,
+        createdAt: l.createdAt,
+      })
+      .from(l)
+      .where(eq(l.teamId, input.teamId))
+      .orderBy(asc(l.createdAt));
+  }),
 });

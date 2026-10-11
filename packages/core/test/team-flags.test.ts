@@ -143,6 +143,19 @@ describe("syncTeamFlags", () => {
     ]);
   });
 
+  it("leaves a linkage flag alone, which no standing triggers", async () => {
+    const teamId = await createTeam(db, "linked");
+    await db.insert(schema.teamFlags).values({ teamId, reason: "linked", detail: {} });
+    expect(await syncTeamFlags(db, [standing({ teamId })])).toEqual({ opened: 0, cleared: 0 });
+    expect(await syncTeamFlags(db, [standing({ teamId, scoreTenths: 10 })])).toEqual({
+      opened: 0,
+      cleared: 0,
+    });
+    expect(await flagsOf(teamId)).toMatchObject([
+      { reason: "linked", status: "open", openedBy: null },
+    ]);
+  });
+
   it("keeps a held team's automatic flag open until the hold is lifted", async () => {
     const teamId = await createTeam(db, "held-for-review");
     await db
