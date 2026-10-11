@@ -30,6 +30,9 @@ export const WEBHOOK_EVENT_TYPES = [
   // open-classifier). Never delivered to an endpoint subscribed to "all
   // events" — naming it is the consent; see endpointSubscribes.
   "email.prefetched",
+  // Inbound mail stored for the team: Resend's email.received payload, whose
+  // email_id is a received email (GET /emails/receiving/{id}).
+  "email.received",
   // Team-level standing events: no email in the payload.
   "deliverability.warning",
   "deliverability.paused",

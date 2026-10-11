@@ -258,6 +258,26 @@ ALLOW_TRACKING_SUBDOMAINS=false
 # Generate: openssl rand -hex 32
 # TRACKING_ASK_SECRET=
 
+# Inbound mail (receiving, beta). RECEIVING_MX_HOST is the hostname the MX
+# process (PROCESS=mx, the optional mx compose service) is reachable at;
+# receiving domains point their MX record there. Unset hides receiving
+# entirely. MX_INGEST_SECRET is the bearer secret the MX presents to this app,
+# at least 32 characters; the two are set together.
+# Generate: openssl rand -hex 32
+# RECEIVING_MX_HOST=mx.example.com
+# MX_INGEST_SECRET=
+
+# The mx process reads only its MX_* variables (it holds no database) and the
+# MX_INGEST_SECRET above. MX_INGEST_URL is this API's public origin plus
+# /internal/mx; MX_HOSTNAME is its greeting name. It listens on MX_PORT
+# (default 2525): publish host port 25 to it. STARTTLS is offered once the
+# certificate and key exist at the two paths.
+# MX_INGEST_URL=https://api.example.com/internal/mx
+# MX_HOSTNAME=mx.example.com
+# MX_PORT=2525
+# MX_TLS_CERT_PATH=
+# MX_TLS_KEY_PATH=
+
 # API port. Under docker compose this moves both the container's listen port
 # and the published host port together.
 PORT=3001

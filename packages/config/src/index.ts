@@ -26,6 +26,8 @@ export {
   parseCommaList,
   parseEmailFrom,
   parseSnsTopicArns,
+  receivingEnabled,
+  receivingMxHost,
   SES_MAX_SEND_RATE_DEFAULT,
   SES_TRANSACTIONAL_RESERVE_DEFAULT,
   SES_TRANSACTIONAL_RESERVE_MAX,

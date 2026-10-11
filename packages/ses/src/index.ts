@@ -62,6 +62,7 @@ export {
   requestSesDailyQuota,
   SES_DAILY_QUOTA_CODE,
 } from "./quotas.js";
+export { checkReceivingMx, RECEIVING_MX_PRIORITY, receivingDnsRecord } from "./receiving-dns.js";
 export {
   createSesSendClient,
   type SesSendClient,

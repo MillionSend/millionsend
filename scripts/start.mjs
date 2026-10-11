@@ -1,8 +1,8 @@
 // Self-host process supervisor. PROCESS selects what runs in this container:
-// api | worker | web | smtp | docs | all (default all). Migrations run first
-// so a fresh database is usable on first boot — except for docs-only
-// containers, which have no database at all. "all" excludes smtp and docs —
-// both are opt-in via their own compose services.
+// api | worker | web | smtp | docs | mx | all (default all). Migrations run
+// first so a fresh database is usable on first boot — except for docs and mx
+// containers, which have no database at all. "all" excludes smtp, docs and
+// mx — each is opt-in via its own compose service.
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -48,7 +48,19 @@ const PROCESSES = {
     // DOCS_PORT remaps only the host side; the docs process is fixed at 3002.
     env: { PORT: "3002" },
   },
+  // The inbound MX: hands every message to the app over HTTPS, so it holds
+  // no database and boots with only its MX_* variables.
+  mx: {
+    command: join(root, "apps/mx/node_modules/.bin/tsx"),
+    args: [join(root, "apps/mx/src/server.ts")],
+    cwd: root,
+    env: {},
+  },
 };
+
+// Processes that never touch the database: a container running only these
+// boots without DATABASE_URL and skips migrations.
+const DATABASE_FREE = new Set(["docs", "mx"]);
 
 const ALL_PROCESSES = ["api", "worker", "web"];
 
@@ -90,15 +102,13 @@ const names = selection === "all" ? ALL_PROCESSES : [selection];
 for (const name of names) {
   if (!PROCESSES[name]) {
     console.error(
-      `start: unknown PROCESS "${selection}" (expected api | worker | web | smtp | docs | all)`,
+      `start: unknown PROCESS "${selection}" (expected api | worker | web | smtp | docs | mx | all)`,
     );
     process.exit(1);
   }
 }
 
-// The docs site is static content with no database; a docs-only container
-// must boot without DATABASE_URL (its compose service has no postgres).
-if (names.some((name) => name !== "docs")) {
+if (names.some((name) => !DATABASE_FREE.has(name))) {
   const migrate = runMigrations();
   if (migrate.status !== 0) {
     console.error("start: migrations failed, not starting processes");

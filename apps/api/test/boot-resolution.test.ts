@@ -25,6 +25,7 @@ const ENTRYPOINTS = [
   { pkg: "apps/worker", entry: "apps/worker/src/server.ts" },
   { pkg: "apps/smtp", entry: "apps/smtp/src/server.ts" },
   { pkg: "packages/db", entry: "packages/db/src/migrate.ts" },
+  { pkg: "apps/mx", entry: "apps/mx/src/server.ts" },
 ];
 
 function boot(pkg: string, entry: string, extraEnv: Record<string, string> = {}): string {

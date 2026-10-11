@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   jsonb,
@@ -85,9 +86,21 @@ export const domains = pgTable(
     warmupTierAt: timestamp("warmup_tier_at", { withTimezone: true }),
     // Operator override: no warm-up for this domain row.
     warmupTrustedAt: timestamp("warmup_trusted_at", { withTimezone: true }),
+    // Inbound mail (Resend's capabilities.receiving): a catch-all for every
+    // local part at this name, enabled only once the domain is verified.
+    receivingEnabled: boolean("receiving_enabled").notNull().default(false),
+    // When receiving was last switched on; null while it is off.
+    receivingEnabledAt: timestamp("receiving_enabled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("domains_team_name_idx").on(t.teamId, t.name)],
+  (t) => [
+    uniqueIndex("domains_team_name_idx").on(t.teamId, t.name),
+    // Mail for a name can belong to one team only: the MX routes on the
+    // recipient's domain, so a second team receiving the same name would read
+    // the first team's mail. Names are stored lowercase, so the column itself
+    // is the key, and the MX's lookup by name rides this index.
+    uniqueIndex("domains_receiving_name_idx").on(t.name).where(sql`${t.receivingEnabled}`),
+  ],
 );

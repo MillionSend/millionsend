@@ -15,7 +15,18 @@ export interface EncryptedBody {
   keyVersion: number;
 }
 
-export type EnvelopeKind = "email_body" | "email_attachments" | "webhook_secret";
+/**
+ * What a sealed column holds; bound into the AAD and the KMS encryption
+ * context, so a value never opens as another kind. Inbound mail has its own
+ * kinds: a received message is third-party content and must never open
+ * through a path written for outbound mail, nor the reverse.
+ */
+export type EnvelopeKind =
+  | "email_body"
+  | "email_attachments"
+  | "webhook_secret"
+  | "received_raw"
+  | "received_attachments";
 
 /** The row an envelope belongs to; the helpers below fix the kind. */
 export interface EnvelopeOwner {
@@ -153,10 +164,35 @@ export interface EmailAttachment {
 }
 
 /**
- * Attachments seal through the same envelope primitive as email bodies, but
- * the emails table gives them a single text column instead of four dedicated
- * ones — so the envelope parts travel inside the blob as base64 JSON.
+ * An envelope as one text value, for tables that give a sealed payload a
+ * single text column instead of four dedicated ones: the parts travel inside
+ * the blob as base64 JSON.
  */
+export function packEnvelope(encrypted: EncryptedBody): string {
+  return JSON.stringify({
+    keyVersion: encrypted.keyVersion,
+    iv: encrypted.iv.toString("base64"),
+    wrappedDek: encrypted.wrappedDek.toString("base64"),
+    ciphertext: encrypted.ciphertext.toString("base64"),
+  });
+}
+
+export function unpackEnvelope(sealed: string): EncryptedBody {
+  const parts = JSON.parse(sealed) as {
+    keyVersion: number;
+    iv: string;
+    wrappedDek: string;
+    ciphertext: string;
+  };
+  return {
+    ciphertext: Buffer.from(parts.ciphertext, "base64"),
+    iv: Buffer.from(parts.iv, "base64"),
+    wrappedDek: Buffer.from(parts.wrappedDek, "base64"),
+    keyVersion: parts.keyVersion,
+  };
+}
+
+/** Attachments seal through the same envelope primitive as email bodies, packed into emails.attachments. */
 export async function sealAttachments(
   attachments: EmailAttachment[],
   keyring: Keyring,
@@ -167,12 +203,7 @@ export async function sealAttachments(
     keyring,
     owner && { ...owner, kind: "email_attachments" },
   );
-  return JSON.stringify({
-    keyVersion: encrypted.keyVersion,
-    iv: encrypted.iv.toString("base64"),
-    wrappedDek: encrypted.wrappedDek.toString("base64"),
-    ciphertext: encrypted.ciphertext.toString("base64"),
-  });
+  return packEnvelope(encrypted);
 }
 
 export async function openAttachments(
@@ -180,19 +211,8 @@ export async function openAttachments(
   keyring: Keyring,
   owner?: EnvelopeOwner,
 ): Promise<EmailAttachment[]> {
-  const parts = JSON.parse(sealed) as {
-    keyVersion: number;
-    iv: string;
-    wrappedDek: string;
-    ciphertext: string;
-  };
   const plaintext = await decryptPayload(
-    {
-      ciphertext: Buffer.from(parts.ciphertext, "base64"),
-      iv: Buffer.from(parts.iv, "base64"),
-      wrappedDek: Buffer.from(parts.wrappedDek, "base64"),
-      keyVersion: parts.keyVersion,
-    },
+    unpackEnvelope(sealed),
     keyring,
     owner && { ...owner, kind: "email_attachments" },
   );

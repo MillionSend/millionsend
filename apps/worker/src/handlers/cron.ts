@@ -764,6 +764,84 @@ export async function purgeExpiredEmailBodies(
 }
 
 /**
+ * Received mail on the content clock (the email bodies' window: instance
+ * setting > env default): the sealed raw message and attachment list go,
+ * contentPurgedAt is stamped, and the metadata row stays for its own window.
+ * After this a received email reads `raw: null`, which is what makes Resend's
+ * forward() report the raw content as unavailable.
+ */
+export async function purgeExpiredReceivedContent(
+  db: Db,
+  params: { defaultRetentionDays: number; now?: Date },
+): Promise<number> {
+  const { emailRetentionDays } = await getInstanceSettings(db);
+  const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
+  const now = params.now ?? new Date();
+  const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
+  const r = schema.receivedEmails;
+  let purged = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db
+        .update(r)
+        .set({
+          rawCiphertext: null,
+          rawIv: null,
+          rawWrappedDek: null,
+          rawKeyVersion: null,
+          attachments: null,
+          contentPurgedAt: now,
+        })
+        .where(
+          inArray(
+            r.id,
+            db
+              .select({ id: r.id })
+              .from(r)
+              .where(and(lt(r.createdAt, cutoff), isNull(r.contentPurgedAt)))
+              .orderBy(asc(r.createdAt))
+              .limit(PURGE_BATCH),
+          ),
+        ),
+    );
+    purged += batch;
+    if (batch < PURGE_BATCH) break;
+  }
+  return purged;
+}
+
+/** Received mail on the metadata clock: whole rows past EMAIL_METADATA_RETENTION_DAYS, in batches. */
+export async function purgeExpiredReceivedMetadata(
+  db: Db,
+  params: { retentionDays: number; now?: Date },
+): Promise<number> {
+  const now = params.now ?? new Date();
+  const cutoff = new Date(now.getTime() - params.retentionDays * DAY_MS);
+  const r = schema.receivedEmails;
+  let deleted = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db
+        .delete(r)
+        .where(
+          inArray(
+            r.id,
+            db
+              .select({ id: r.id })
+              .from(r)
+              .where(lt(r.createdAt, cutoff))
+              .orderBy(asc(r.createdAt))
+              .limit(PURGE_BATCH),
+          ),
+        ),
+    );
+    deleted += batch;
+    if (batch < PURGE_BATCH) break;
+  }
+  return deleted;
+}
+
+/**
  * Deletes api_requests rows past the SAME effective retention window as
  * email bodies (instance setting > env default): request logs carry
  * request/response payload fragments, so they age out with content.
