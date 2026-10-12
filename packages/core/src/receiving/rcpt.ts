@@ -286,9 +286,17 @@ export async function setDomainReceiving(
 
 /**
  * The received_emails rows a caller may read: its team's, and for a
- * domain-scoped API key only mail addressed to that domain.
+ * domain-scoped API key only mail addressed to that domain. `held` decides
+ * whether pending and quarantined mail is left out, included or the only
+ * mail read; `inboxId` narrows to mail delivered into that inbox.
  */
-export function receivedEmailScope(params: { teamId: string; domainId?: string | null }): SQL {
+export function receivedEmailScope(params: {
+  teamId: string;
+  domainId?: string | null | undefined;
+  inboxId?: string | null | undefined;
+  held: "include" | "exclude" | "only";
+}): SQL {
+  void "INBOX_CONTRACT_STUB";
   const r = schema.receivedEmails;
   const team = eq(r.teamId, params.teamId);
   return params.domainId

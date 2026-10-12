@@ -421,6 +421,14 @@
       "domain_deleted": "Deleted domain",
       "domain_receiving_enabled": "Enabled receiving",
       "domain_receiving_disabled": "Disabled receiving",
+      "domain_catch_all_enabled": "Catch-all turned on",
+      "domain_catch_all_disabled": "Catch-all turned off",
+      "inbox_created": "Inbox created",
+      "inbox_deleted": "Inbox deleted",
+      "inbox_safety_updated": "Inbox safety rules changed",
+      "inbox_email_released": "Email released from quarantine",
+      "inbox_draft_approved": "Draft approved and sent",
+      "received_email_deleted": "Received email deleted",
       "webhook_created": "Created webhook",
       "webhook_updated": "Updated webhook",
       "webhook_secret_rotated": "Rotated webhook signing secret",
@@ -488,6 +496,7 @@
       "broadcasts": "Broadcasts",
       "sending": "Sending health",
       "webhooks": "Webhooks",
+      "inboxes": "Inboxes",
       "billing": "Billing"
     },
     "items": {
@@ -534,6 +543,10 @@
       "webhook_backlog": {
         "label": "Webhook backlog",
         "note": "Deliveries to an endpoint are queuing up."
+      },
+      "inbox_attention": {
+        "label": "Inbox alerts",
+        "note": "Quarantine, drafts to approve and held sends, at most once a day."
       },
       "billing_payment_failed": {
         "label": "Payment failed",

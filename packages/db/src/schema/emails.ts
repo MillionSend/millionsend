@@ -1,5 +1,7 @@
 import { isNotNull, isNull, sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
+  boolean,
   index,
   integer,
   jsonb,
@@ -13,6 +15,7 @@ import {
 import { broadcasts } from "./broadcasts.js";
 import { bytea } from "./custom-types.js";
 import { domains } from "./domains.js";
+import { inboxes, inboxThreads } from "./inboxes.js";
 import { teams } from "./teams.js";
 import { topics } from "./topics.js";
 
@@ -142,6 +145,13 @@ export const emails = pgTable(
     // release of "everything shown" takes only mail parked before the
     // operator looked.
     parkedAt: timestamp("parked_at", { withTimezone: true }),
+    // Sent from an inbox, in one of its threads.
+    inboxId: uuid("inbox_id").references((): AnyPgColumn => inboxes.id, { onDelete: "set null" }),
+    threadId: uuid("thread_id").references((): AnyPgColumn => inboxThreads.id, {
+      onDelete: "set null",
+    }),
+    // An agent inbox's first mail to some recipient: the worker samples it for the content monitor.
+    firstContact: boolean("first_contact").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp("sent_at", { withTimezone: true }),
   },
@@ -194,6 +204,12 @@ export const emails = pgTable(
     uniqueIndex("emails_broadcast_contact_idx")
       .on(t.broadcastId, t.contactId)
       .where(sql`${t.broadcastId} is not null`),
+    // The set-null foreign key fires on every inbox delete.
+    index("emails_inbox_idx").on(t.inboxId).where(sql`${t.inboxId} is not null`),
+    // A thread's outbound messages, oldest first.
+    index("emails_thread_created_idx")
+      .on(t.threadId, t.createdAt)
+      .where(sql`${t.threadId} is not null`),
   ],
 );
 

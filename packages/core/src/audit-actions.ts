@@ -8,6 +8,17 @@ export const AUDIT_ACTIONS = [
   "domain.deleted",
   "domain.receiving_enabled",
   "domain.receiving_disabled",
+  "domain.catch_all_enabled",
+  "domain.catch_all_disabled",
+  // Inboxes: dashboard creates and deletes only (an API key creates inboxes
+  // by the thousand; its trail is inbox_activity), safety changes, and a
+  // person's release or approval. Never per-message rows: this table is never purged.
+  "inbox.created",
+  "inbox.deleted",
+  "inbox.safety_updated",
+  "inbox.email_released",
+  "inbox.draft_approved",
+  "received_email.deleted",
   "webhook.created",
   "webhook.updated",
   "webhook.secret_rotated",

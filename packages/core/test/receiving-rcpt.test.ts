@@ -334,7 +334,7 @@ describe("receivedEmailScope", () => {
         await db
           .select({ id: schema.receivedEmails.id })
           .from(schema.receivedEmails)
-          .where(receivedEmailScope({ teamId, domainId }))
+          .where(receivedEmailScope({ teamId, domainId, held: "include" }))
       )
         .map((r) => r.id)
         .sort();

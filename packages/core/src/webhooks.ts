@@ -51,6 +51,22 @@ export const WEBHOOK_EVENT_TYPES = [
   "contact.topic_opt_out",
   "suppression.added",
   "suppression.removed",
+  // Inbox events, every one opt-in (OPT_IN_EVENT_TYPES). Resend's names and
+  // payloads; inbox.expired and inbox.email.quarantined are MillionSend's.
+  "inbox.created",
+  "inbox.updated",
+  "inbox.deleted",
+  "inbox.expired",
+  "inbox.thread.created",
+  "inbox.thread.folder.updated",
+  "inbox.thread.labels.updated",
+  "inbox.email.received",
+  "inbox.email.sent",
+  "inbox.email.quarantined",
+  "inbox.draft.created",
+  "inbox.draft.updated",
+  "inbox.draft.sent",
+  "inbox.draft.deleted",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -59,8 +75,15 @@ export function isWebhookEventType(value: string): value is WebhookEventType {
   return (WEBHOOK_EVENT_TYPES as readonly string[]).includes(value);
 }
 
-/** Event types an endpoint receives only by naming them; "all events" (null) skips them. */
-const OPT_IN_EVENT_TYPES: ReadonlySet<string> = new Set<WebhookEventType>(["email.prefetched"]);
+/**
+ * Event types an endpoint receives only by naming them; "all events" (null)
+ * skips them. Inbox events are among them: SDKs with closed event enums (the
+ * .NET webhook parser among them) throw on a category they do not know.
+ */
+const OPT_IN_EVENT_TYPES: ReadonlySet<string> = new Set<WebhookEventType>([
+  "email.prefetched",
+  ...WEBHOOK_EVENT_TYPES.filter((type) => type.startsWith("inbox.")),
+]);
 
 export function endpointSubscribes(
   events: readonly string[] | null,
@@ -478,6 +501,21 @@ export interface TeamWebhookEvent {
   type: WebhookEventType;
   occurredAt: Date;
   data: Record<string, unknown>;
+  /**
+   * The inboxes the event is about, for endpoints filtered to some inboxes
+   * (webhook_endpoints.inbox_ids); an empty list reaches unfiltered endpoints
+   * only, and an absent one every endpoint. A routing hint: never serialized.
+   */
+  inboxIds?: readonly string[] | undefined;
+}
+
+/** Whether an endpoint filtered to `endpointInboxIds` (null = every inbox) takes an event about `eventInboxIds`. */
+function endpointCoversInboxes(
+  endpointInboxIds: readonly string[] | null,
+  eventInboxIds: readonly string[] | undefined,
+): boolean {
+  if (endpointInboxIds === null || eventInboxIds === undefined) return true;
+  return eventInboxIds.some((id) => endpointInboxIds.includes(id));
 }
 
 /**
@@ -497,7 +535,11 @@ export async function enqueueTeamWebhookEvents(
   const endpoints = await enabledEndpoints(db, params.teamId);
   const values = params.events.flatMap((event) =>
     endpoints
-      .filter((e) => endpointSubscribes(e.events, event.type))
+      .filter(
+        (e) =>
+          endpointSubscribes(e.events, event.type) &&
+          endpointCoversInboxes(e.inboxIds, event.inboxIds),
+      )
       .map((endpoint) => ({
         endpointId: endpoint.id,
         emailId: null,
@@ -540,7 +582,11 @@ async function insertDeliveryRows(
 
 function enabledEndpoints(db: Db, teamId: string) {
   return db
-    .select({ id: schema.webhookEndpoints.id, events: schema.webhookEndpoints.events })
+    .select({
+      id: schema.webhookEndpoints.id,
+      events: schema.webhookEndpoints.events,
+      inboxIds: schema.webhookEndpoints.inboxIds,
+    })
     .from(schema.webhookEndpoints)
     .where(
       and(

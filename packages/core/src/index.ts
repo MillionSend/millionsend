@@ -119,6 +119,7 @@ export {
   enforceDomainWarmup,
   estimateMimeBytes,
   exceededSendSize,
+  type InboxAccept,
   isReservedTagName,
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
@@ -885,8 +886,27 @@ export {
 // run of exports, which would otherwise merge the two.
 
 export { createSemaphore, releasingStream } from "./concurrency.js";
+export * from "./custom-headers.js";
 export { secretsEqual, sha256Hex } from "./hash.js";
 export { attachmentDisposition } from "./http-headers.js";
+export * from "./inboxes/activity.js";
+export * from "./inboxes/api-key-scope.js";
+export * from "./inboxes/drafts.js";
+export * from "./inboxes/events.js";
+export * from "./inboxes/inboxes.js";
+export * from "./inboxes/keys.js";
+export * from "./inboxes/labels.js";
+export * from "./inboxes/limits.js";
+export * from "./inboxes/quarantine.js";
+export * from "./inboxes/safety.js";
+export * from "./inboxes/send.js";
+export * from "./inboxes/send-policy.js";
+export * from "./inboxes/shared-domain.js";
+export * from "./inboxes/threads.js";
+export * from "./inboxes/types.js";
+export * from "./inboxes/wire.js";
+export * from "./receiving/clamd.js";
+export * from "./receiving/delivery.js";
 export {
   type DownloadSigning,
   deriveReceivedDownloadKey,
@@ -897,6 +917,7 @@ export {
   signReceivedDownload,
   verifyReceivedDownload,
 } from "./receiving/downloads.js";
+export * from "./receiving/erase.js";
 export {
   type IngestDeps,
   type IngestResult,
@@ -909,6 +930,7 @@ export {
   type InboundAttachmentWire,
   openReceivedAttachment,
   openReceivedAttachments,
+  openReceivedExtracted,
   openReceivedRaw,
   parseReceivedMetadata,
   RECEIVED_EMAIL_META_COLUMNS,
@@ -917,6 +939,7 @@ export {
   type ReceivedEmailListItem,
   type ReceivedEmailMeta,
   type ReceivedEmailRow,
+  type ReceivedExtracted,
   type ReceivedMetadata,
   receivedAttachmentId,
   receivedEmailAttachment,
@@ -942,4 +965,7 @@ export {
   receivingRule,
   setDomainReceiving,
 } from "./receiving/rcpt.js";
+export * from "./receiving/verification.js";
+export * from "./receiving/wait.js";
+export * from "./slug.js";
 export { linksDisabled } from "./team-standing.js";

@@ -24,8 +24,29 @@ export const TARGET_WEBHOOK_EVENTS = [
   "contact.created",
   "contact.updated",
   "contact.deleted",
+  "inbox.created",
+  "inbox.updated",
+  "inbox.deleted",
+  "inbox.thread.created",
+  "inbox.thread.folder.updated",
+  "inbox.thread.labels.updated",
+  "inbox.email.received",
+  "inbox.email.sent",
+  "inbox.draft.created",
+  "inbox.draft.updated",
+  "inbox.draft.sent",
+  "inbox.draft.deleted",
 ] as const;
 export type TargetWebhookEvent = (typeof TARGET_WEBHOOK_EVENTS)[number];
+
+/**
+ * What a target endpoint subscribed to every event (events null) receives:
+ * inbox events are opt-in on MillionSend, delivered only to endpoints that
+ * name them (OPT_IN_EVENT_TYPES in packages/core/src/webhooks.ts).
+ */
+export const TARGET_ALL_EVENTS: readonly TargetWebhookEvent[] = TARGET_WEBHOOK_EVENTS.filter(
+  (event) => !event.startsWith("inbox."),
+);
 
 /** Mirror of apps/web/src/lib/merge-fields.ts MERGE_NAME_RE — the token grammar the send worker resolves. */
 const MERGE_NAME_RE = /^[A-Za-z0-9_]+$/;

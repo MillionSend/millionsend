@@ -313,6 +313,16 @@ ALLOW_TRACKING_SUBDOMAINS=false
 # MX_TLS_CERT_PATH=
 # MX_TLS_KEY_PATH=
 
+# Agent inboxes on a shared domain (beta). Customers get addresses on per-team
+# subdomains of this domain without DNS. It must be its own registrable domain,
+# its wildcard MX must point at RECEIVING_MX_HOST, and an SES identity for it
+# must exist in AWS_REGION. Unset hides the shared domain.
+# SHARED_INBOX_DOMAIN=agents.example.com
+
+# Optional virus scanning of received mail by clamd over TCP (host[:port],
+# port 3310 by default). Unset: no scanning.
+# CLAMAV_HOST=clamav:3310
+
 # API port. Under docker compose this moves both the container's listen port
 # and the published host port together.
 PORT=3001

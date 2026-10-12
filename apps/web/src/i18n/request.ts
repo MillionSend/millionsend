@@ -17,6 +17,7 @@ const NAMESPACES = [
   "bounce-guidance",
   "domains",
   "api-keys",
+  "inboxes",
   "logs",
   "merge-fields",
   "metrics",

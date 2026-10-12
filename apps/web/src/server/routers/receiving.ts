@@ -32,7 +32,7 @@ export const receivingRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const r = schema.receivedEmails;
-      const scope = receivedEmailScope({ teamId: ctx.teamId });
+      const scope = receivedEmailScope({ teamId: ctx.teamId, held: "include" });
       // Counted on the first page only; later pages keep reading pages[0].total.
       const [count] = input.cursor
         ? []
@@ -58,7 +58,10 @@ export const receivingRouter = router({
 
   get: receivingProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     const r = schema.receivedEmails;
-    const where = and(eq(r.id, input.id), receivedEmailScope({ teamId: ctx.teamId }));
+    const where = and(
+      eq(r.id, input.id),
+      receivedEmailScope({ teamId: ctx.teamId, held: "include" }),
+    );
     const [row] = await ctx.db.select(RECEIVED_EMAIL_META_COLUMNS).from(r).where(where).limit(1);
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
 
@@ -81,6 +84,7 @@ export const receivingRouter = router({
             rawCiphertext: r.rawCiphertext,
             rawIv: r.rawIv,
             rawWrappedDek: r.rawWrappedDek,
+            extracted: r.extracted,
           })
           .from(r)
           .where(where);

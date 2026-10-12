@@ -1,18 +1,24 @@
 import { serve } from "@hono/node-server";
 import {
+  clamavHost,
   env,
   receivingMxHost,
   servedRegions,
   sesTenantsEnabled,
+  sharedInboxDomain,
   trackingSubdomainsSupported,
   unsubscribeBaseUrl,
 } from "@millionsend/config";
 import {
+  CLAMAV_MAX_BYTES,
+  CLAMAV_TIMEOUT_MS,
+  deriveInboxKeys,
   deriveReceivedDownloadKey,
   deriveUnsubscribeKey,
   getInstanceSettings,
   hashRecipient,
   pacingHorizonDays,
+  scanWithClamd,
 } from "@millionsend/core";
 import { initErrorTracking } from "@millionsend/core/error-tracking-node";
 import { getDb } from "@millionsend/db";
@@ -75,6 +81,7 @@ const settings = () => getInstanceSettings(db);
 const masterKey = Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64");
 // Boot validation requires the secret whenever the host is set.
 const mxHost = receivingMxHost();
+const clamav = clamavHost();
 
 const app = createApi({
   db,
@@ -103,6 +110,20 @@ const app = createApi({
   ...(mxHost && env.MX_INGEST_SECRET
     ? { receiving: { mxHost, ingestSecret: env.MX_INGEST_SECRET } }
     : {}),
+  inboxKeys: deriveInboxKeys(masterKey),
+  sharedInboxDomain: sharedInboxDomain(),
+  ...(clamav
+    ? {
+        scanVirus: (raw: Buffer) =>
+          scanWithClamd(raw, {
+            host: clamav,
+            timeoutMs: CLAMAV_TIMEOUT_MS,
+            maxBytes: CLAMAV_MAX_BYTES,
+          }),
+      }
+    : {}),
+  enqueueScreening: (p) => queue.enqueueScreening(p),
+  enqueueInboxForward: (p) => queue.enqueueInboxForward(p),
   enqueueWebhookDeliveries: async (deliveries) => {
     await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
   },

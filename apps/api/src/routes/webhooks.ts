@@ -51,6 +51,7 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
     status: wireStatus(row.status),
     // null = subscribed to all events (dashboard-created endpoints).
     events: row.events,
+    inbox_ids: row.inboxIds,
   });
 
   app.openapi(

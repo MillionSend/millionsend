@@ -44,6 +44,8 @@ export const usageCounters = pgTable(
     // recipient count. On the Free plan they also count in `accepted`, the
     // daily cap sending and receiving share.
     received: integer("received").notNull().default(0),
+    // Received mail the inbound judge read, against the team's daily cap.
+    inboundJudged: integer("inbound_judged").notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.day] }),

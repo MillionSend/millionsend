@@ -24,6 +24,12 @@ export interface ApiKeyAuth {
   permission: (typeof schema.apiKeys.permission.enumValues)[number];
   domainId: string | null;
   /**
+   * SECURITY: a non-null inboxId confines the key to that inbox's routes
+   * (an allow-list in the API) and to sending from its address. Null for
+   * every OAuth (MCP) call.
+   */
+  inboxId: string | null;
+  /**
    * SECURITY: the OAuth token holder's live team role, set on MCP calls only.
    * Owner/admin-only routes refuse any other role. An API key carries none:
    * only owners and admins can create a full-access key.
@@ -59,6 +65,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       lastUsedAt: schema.apiKeys.lastUsedAt,
       permission: schema.apiKeys.permission,
       domainId: schema.apiKeys.domainId,
+      inboxId: schema.apiKeys.inboxId,
       plan: schema.teams.plan,
       planQuota: schema.teams.planQuota,
       currentPeriodStart: schema.teams.currentPeriodStart,
@@ -95,5 +102,6 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
     apiKeyId: match.id,
     permission: match.permission,
     domainId: match.domainId,
+    inboxId: match.inboxId,
   };
 }

@@ -28,6 +28,7 @@ export const monitorSampleKindEnum = pgEnum("monitor_sample_kind", [
   "broadcast_skeleton",
   "broadcast_copy",
   "destination",
+  "agent_first_contact",
 ]);
 
 /** `unjudged` is every judge failure: the sample is kept with its error class and touches nothing else. */

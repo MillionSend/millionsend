@@ -252,6 +252,14 @@ export const ptBR = {
     muted: ["Você recebe isto no máximo uma vez por dia por endpoint."],
     extra: { moreThan: "Mais de {n}" },
   },
+  "inbox.attention": {
+    subject: "Suas caixas de entrada precisam de atenção",
+    body: [
+      "Até agora hoje: {quarantined} e-mails em quarentena, {drafts} rascunhos aguardando aprovação e {refused} envios barrados pelas regras das suas caixas.",
+      "Revise no painel.",
+    ],
+    button: "Revisar caixas",
+  },
   "billing.payment_failed": {
     subject: "Pagamento recusado no seu plano {plan}",
     body: [

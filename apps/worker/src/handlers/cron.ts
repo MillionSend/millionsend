@@ -1427,3 +1427,11 @@ export async function reconcileBillingPlans(
   }
   return { reconciled: teams.length - failed, failed };
 }
+
+/** The inbox data steps of retention.purge; counts by step name. */
+export async function purgeInboxData(
+  _db: Db,
+  _p: { contentDays: number; metadataDays: number; now?: Date | undefined },
+): Promise<Record<string, number>> {
+  throw new Error("INBOX_CONTRACT_STUB");
+}

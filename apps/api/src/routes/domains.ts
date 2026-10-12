@@ -238,6 +238,7 @@ const toWire = (row: DomainRow, receives: boolean) => ({
     sending: "enabled",
     receiving: receives && row.receivingEnabled ? "enabled" : "disabled",
   },
+  receiving_catch_all: row.receivingCatchAll,
 });
 
 /**

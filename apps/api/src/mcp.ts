@@ -101,6 +101,7 @@ function teamAuth(team: McpTeam, userId: string, oauthClientId: string): ApiKeyA
     oauthClientId,
     permission: "full_access",
     domainId: null,
+    inboxId: null,
     role: team.role,
   };
 }
@@ -232,6 +233,7 @@ function createTokenVerifier(
             oauthClientId: claims.data.client_id,
             permission: "full_access",
             domainId: null,
+            inboxId: null,
             role,
           },
           userId: claims.data.sub,

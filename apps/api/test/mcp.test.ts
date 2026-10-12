@@ -1271,6 +1271,7 @@ describe("dashboard admin parity", () => {
       oauthClientId: "client-abc",
       permission: "full_access",
       domainId: null,
+      inboxId: null,
       role,
     });
     return app.fetch(req);

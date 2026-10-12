@@ -38,6 +38,8 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
+  type InboxKeys,
+  inboxKeyAllows,
   isAdminRole,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
@@ -73,11 +75,14 @@ import {
   sendingBroadcasts,
   sendRefusal,
   sendRefusalError,
+  sesMessageIdHeader,
   teamQuota,
   transitionQueueState,
   utcDay,
+  type VirusResult,
   verifySenderDomain,
   type WebhookEnqueue,
+  wireLastEvent,
 } from "@millionsend/core";
 import { captureError } from "@millionsend/core/error-tracking-node";
 import type { Db } from "@millionsend/db";
@@ -117,6 +122,8 @@ import { loggedBody, maskEmailPathSegments } from "./request-log.js";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
 import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
+import { registerInboxSendRoutes } from "./routes/inbox-send.js";
+import { registerInboxRoutes } from "./routes/inboxes.js";
 import { registerMxIngestRoutes, registerReceivingRoutes } from "./routes/receiving.js";
 import { registerSuppressionRoutes } from "./routes/suppressions.js";
 import { registerTemplateRoutes } from "./routes/templates.js";
@@ -253,6 +260,23 @@ export interface ApiDeps {
    * an instance stopped receiving stays readable until retention removes it.
    */
   receivedDownloadKey?: Buffer | undefined;
+  /** Thread-token and received-secret keys (core deriveInboxKeys over MASTER_ENCRYPTION_KEY). */
+  inboxKeys?: InboxKeys | undefined;
+  /** SHARED_INBOX_DOMAIN; omitted → no inbox gets an address on the shared domain. */
+  sharedInboxDomain?: string | undefined;
+  /** clamd's scan of received mail (CLAMAV_HOST); omitted → nothing is scanned. */
+  scanVirus?: ((raw: Buffer) => Promise<VirusResult>) | undefined;
+  /**
+   * Hands a membership waiting for the inbound judge to the worker. Optional:
+   * the sends.reconcile sweep re-enqueues memberships left pending.
+   */
+  enqueueScreening?:
+    | ((p: { receivedEmailId: string; inboxId: string }) => Promise<void>)
+    | undefined;
+  /** Hands a delivered message to its inbox's forward_to job. */
+  enqueueInboxForward?:
+    | ((p: { receivedEmailId: string; inboxId: string }) => Promise<void>)
+    | undefined;
   /** SES event ingestion; omitted → the endpoint does not exist (404). */
   sns?: SnsIngestDeps | undefined;
   /** SES identity management; omitted → the /domains routes do not exist (404). */
@@ -348,8 +372,12 @@ function emailScopeConditions(auth: ApiKeyAuth): SQL[] {
   return conditions;
 }
 
-/** Wire status + body for an accept the pipeline refused. */
-function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
+/** Wire status + body for an accept the pipeline refused; retryAfterSec goes out as retry-after. */
+function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
+  status: 403 | 422 | 429;
+  body: ReturnType<typeof errorBody>;
+  retryAfterSec?: number;
+} {
   switch (result.reason) {
     case "quota_backlog_full":
       return {
@@ -393,6 +421,34 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
     case "team_suspended":
     case "sending_paused":
       return { status: 403 as const, body: refusalBody(result) };
+    case "inbox_send_policy":
+      return {
+        status: 403,
+        body: errorBody(
+          403,
+          "inbox_send_policy",
+          `The sending inbox's rules hold this email${result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : ""}; create it as a draft with POST /inboxes/{inbox_id}/drafts for a person to approve`,
+        ),
+      };
+    case "inbox_send_cap_reached":
+      return {
+        status: 429,
+        body: errorBody(
+          429,
+          "inbox_send_cap_reached",
+          "The sending inbox reached its daily send limit; retry after the UTC day rolls over",
+        ),
+        retryAfterSec: result.retryAfterSec,
+      };
+    case "inbox_scope":
+      return {
+        status: 403,
+        body: errorBody(
+          403,
+          "restricted_api_key",
+          "This API key can only send from its inbox address",
+        ),
+      };
   }
 }
 
@@ -3437,6 +3493,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       return authFailure(c, "invalid_api_key", "API key is invalid");
     }
     c.set("auth", auth);
+    // SECURITY: an inbox-scoped key reaches only the allow-listed routes of its
+    // own inbox; every other route, and any route added later, is refused.
+    if (auth.inboxId && !inboxKeyAllows(c.req.method, c.req.path, auth.inboxId)) {
+      return c.json(
+        errorBody(403, "restricted_api_key", "This API key is restricted to one inbox"),
+        403,
+      );
+    }
     await next();
   });
 
@@ -3472,6 +3536,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     requireAdmin,
   );
   app.on("POST", ["/suppressions/batch/remove", "/contacts/batch/remove"], requireAdmin);
+  // Inbox exposure: deleting an inbox, its safety rules, erasing received mail.
+  app.on("DELETE", ["/inboxes/:id", "/emails/receiving/:id"], requireAdmin);
+  app.on("PATCH", "/inboxes/:id/safety", requireAdmin);
   app.on("DELETE", "/suppressions/:id", requireAdmin);
   app.on("DELETE", ["/contacts/:id", "/audiences/:audienceId/contacts/:id"], (c, next) =>
     c.req.query("erase") === "true" ? requireAdmin(c, next) : next(),
@@ -3566,6 +3633,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
   app.use("/usage", requireApiKey, enforceRateLimit, requireFullAccess);
   registerUsageRoutes(app, deps);
+
+  app.use("/inboxes", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/inboxes/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  registerInboxRoutes(app, deps, { requireFullAccess });
+  registerInboxSendRoutes(app, deps, { requireFullAccess });
 
   const sendRoute = createRoute({
     method: "post",
@@ -3688,6 +3760,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       if (!result.ok) {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         const rejection = acceptRejection(result);
+        if (rejection.retryAfterSec) c.header("retry-after", String(rejection.retryAfterSec));
         return c.json(rejection.body, rejection.status);
       }
       return c.json({ id: result.id }, 200);
@@ -4090,6 +4163,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       }
       if (err instanceof AcceptRejectedError) {
         const rejection = acceptRejection(err.result);
+        if (rejection.retryAfterSec) c.header("retry-after", String(rejection.retryAfterSec));
         // The team's admission refuses the whole batch, not the item it met first.
         const teamRefusal =
           err.result.reason === "team_suspended" || err.result.reason === "sending_paused";
@@ -4391,17 +4465,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         text,
         created_at: email.createdAt.toISOString(),
         scheduled_at: email.scheduledAt?.toISOString() ?? null,
-        // SES returns a bare message id; the RFC 5322 Message-ID header SES
-        // writes is '<id@<region>.amazonses.com>'. Unsent emails get a
-        // placeholder so the field (required by the SDK) is always present.
+        // Unsent emails get a placeholder so the field (required by the SDK)
+        // is always present.
         message_id: email.sesMessageId
-          ? email.sesMessageId.startsWith("<")
-            ? email.sesMessageId
-            : `<${email.sesMessageId}@email.amazonses.com>`
+          ? sesMessageIdHeader(email.sesMessageId)
           : `<${email.id}@unsent.millionsend>`,
-        // Internal quota-parking is invisible on the wire: the SDK's
-        // last_event union has no 'queued_quota'.
-        last_event: email.latestStatus === "queued_quota" ? "queued" : email.latestStatus,
+        last_event: wireLastEvent(email.latestStatus),
         score: insights ? insights.scoreTenths / 10 : null,
       },
       200,
@@ -4561,8 +4630,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           subject: email.subject,
           created_at: email.createdAt.toISOString(),
           scheduled_at: email.scheduledAt?.toISOString() ?? null,
-          // Internal quota-parking is invisible on the wire (same as GET /emails/{id}).
-          last_event: email.latestStatus === "queued_quota" ? "queued" : email.latestStatus,
+          last_event: wireLastEvent(email.latestStatus),
         })),
         has_more: page.hasMore,
       },

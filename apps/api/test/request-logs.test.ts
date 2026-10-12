@@ -201,6 +201,7 @@ describe("api request logging", () => {
       oauthClientId: "client-abc",
       permission: "full_access",
       domainId: null,
+      inboxId: null,
     });
     const res = await app.fetch(req);
     expect(res.status).toBe(200);

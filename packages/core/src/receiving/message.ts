@@ -29,18 +29,21 @@ import { MAX_RECEIVED_MESSAGE_BYTES } from "./protocol.js";
 
 export type ReceivedEmailRow = typeof schema.receivedEmails.$inferSelect;
 
-const { rawCiphertext, rawIv, rawWrappedDek, ...metaColumns } = getTableColumns(
+const { rawCiphertext, rawIv, rawWrappedDek, extracted, ...metaColumns } = getTableColumns(
   schema.receivedEmails,
 );
 
 /**
  * Every received_emails column but the sealed raw message (up to 40 MiB a
- * row): what lists, webhooks and attachment records select. Only a GET of one
- * email and the downloads need the full row.
+ * row) and the sealed extracted read: what lists, webhooks and attachment
+ * records select. Only a GET of one email and the downloads need the full row.
  */
 export const RECEIVED_EMAIL_META_COLUMNS = metaColumns;
 
-export type ReceivedEmailMeta = Omit<ReceivedEmailRow, "rawCiphertext" | "rawIv" | "rawWrappedDek">;
+export type ReceivedEmailMeta = Omit<
+  ReceivedEmailRow,
+  "rawCiphertext" | "rawIv" | "rawWrappedDek" | "extracted"
+>;
 
 /** One attachment as the sealed list records it. */
 export interface ReceivedAttachment {
@@ -265,6 +268,24 @@ export async function openReceivedRaw(
     keyring,
     { ...ownerOf(row), kind: "received_raw" },
   );
+}
+
+/** The read pipeline's output, sealed as received_emails.extracted. */
+export interface ReceivedExtracted {
+  text: string;
+  quoted: string;
+  signature: string;
+  code: { kind: "otp"; value: string } | { ambiguous: true } | null;
+  link: { url: string; linkDomainMatchesSender: boolean } | { ambiguous: true } | null;
+  flags: string[];
+}
+
+/** The sealed extracted read, or null when there is none or the content purge emptied it. */
+export async function openReceivedExtracted(
+  _row: { teamId: string; id: string; extracted: string | null },
+  _keyring: Keyring,
+): Promise<ReceivedExtracted | null> {
+  throw new Error("INBOX_CONTRACT_STUB");
 }
 
 /** The sealed attachment list; empty once purged. */

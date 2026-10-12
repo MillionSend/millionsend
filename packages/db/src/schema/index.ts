@@ -14,6 +14,7 @@ export * from "./domains.js";
 export * from "./email-insights.js";
 export * from "./emails.js";
 export * from "./idempotency.js";
+export * from "./inboxes.js";
 export * from "./instance-probes.js";
 export * from "./instance-settings.js";
 export * from "./monitor.js";

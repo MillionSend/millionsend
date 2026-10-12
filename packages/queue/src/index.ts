@@ -28,6 +28,10 @@ export interface JobPayloads {
   // The registration date of a domain's registrable name (RDAP, WHOIS, CT),
   // looked up when the domain is added and again when it verifies.
   "domain.age": { domainId: string };
+  // The inbound judge for one pending inbox membership.
+  "received.screen": { receivedEmailId: string; inboxId: string };
+  // A delivered message passed on to its inbox's forward_to owners.
+  "inbox.forward": { receivedEmailId: string; inboxId: string };
 }
 
 /** ParsedSesEvent with occurredAt as ISO string (JSON-safe). */
@@ -106,6 +110,8 @@ export const DEAD_LETTER_QUEUES = {
   "abuse.judge": "abuse.judge.dead",
   "tenant.status": "tenant.status.dead",
   "domain.age": "domain.age.dead",
+  "received.screen": "received.screen.dead",
+  "inbox.forward": "inbox.forward.dead",
 } as const;
 
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
@@ -119,6 +125,8 @@ const JOB_QUEUES = [
   "abuse.judge",
   "tenant.status",
   "domain.age",
+  "received.screen",
+  "inbox.forward",
 ] as const;
 // Compile-time check that every JobPayloads key is listed above.
 const _everyJobQueueListed: Record<Exclude<JobName, (typeof JOB_QUEUES)[number]>, never> = {};
@@ -141,6 +149,10 @@ const NOTIFY_QUEUES: ReadonlySet<string> = new Set<JobName>([
   "abuse.judge",
   // A held team's SES tenant is disabled within seconds, not a poll later.
   "tenant.status",
+  // An agent waiting on a sign-in code waits on its screening, and owners
+  // on their forwards.
+  "received.screen",
+  "inbox.forward",
 ]);
 const SLOW_POLL_SECONDS = 30;
 
@@ -406,6 +418,21 @@ export class Queue {
         startAfter,
       })),
     );
+  }
+
+  /** The inbound judge for one membership held pending. */
+  async enqueueScreening(p: JobPayloads["received.screen"]): Promise<void> {
+    // ponytail: fairness per inbox, the payload names no team; carry the team
+    // id if one team's many inboxes ever starve the lanes.
+    await this.send("received.screen", p, {
+      dedupeKey: `${p.receivedEmailId}:${p.inboxId}`,
+      group: p.inboxId,
+    });
+  }
+
+  /** A delivered message's pass to its inbox's forward_to owners. */
+  async enqueueInboxForward(p: JobPayloads["inbox.forward"]): Promise<void> {
+    await this.send("inbox.forward", p, { dedupeKey: `${p.receivedEmailId}:${p.inboxId}` });
   }
 
   /**

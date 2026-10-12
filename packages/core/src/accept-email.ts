@@ -5,6 +5,7 @@ import { and, count, eq } from "drizzle-orm";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 import { admitWarmup } from "./domain-warmup.js";
+import type { InboxKeys } from "./inboxes/keys.js";
 import { monthlyCapacity, type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
 import { quotaChargeAt, releaseQuota, reserveQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
@@ -65,6 +66,10 @@ export interface AcceptEmailDeps {
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
   enqueueEmailSend: (emailId: string, opts?: { startAfter?: Date }) => Promise<void>;
+  /** Thread-token keys: a send from an inbox address resolves its thread through them. */
+  inboxKeys?: InboxKeys | undefined;
+  /** SHARED_INBOX_DOMAIN: its addresses send only through the inbox endpoints. */
+  sharedInboxDomain?: string | null | undefined;
 }
 
 /** SECURITY: must come from verified authentication, never from the payload. */
@@ -78,6 +83,8 @@ export interface AcceptEmailAuth {
   billing: QuotaTeamRow | "uncapped";
   /** Null when the caller authenticated with something other than an API key (OAuth/MCP). */
   apiKeyId: string | null;
+  /** An inbox-scoped key's inbox: it sends from that inbox's address only. */
+  inboxId?: string | null | undefined;
 }
 
 export interface AcceptEmailPayload {
@@ -99,6 +106,21 @@ export interface AcceptEmailPayload {
   domainId: string | null;
   /** Topic-scoped send; callers validate team ownership before accepting. */
   topicId?: string | undefined;
+  /**
+   * Set by inbox-aware callers after their own send decision; the accept
+   * transaction then records the inbox, thread and cap usage with the row.
+   */
+  inbox?: InboxAccept | undefined;
+}
+
+export interface InboxAccept {
+  inboxId: string;
+  /** Null: a new thread is created (folder sent). */
+  threadId: string | null;
+  firstContact: boolean;
+  newRecipients: string[];
+  /** False for approved sends: counted, never refused by the cap. */
+  countTowardCap: boolean;
 }
 
 /**
@@ -317,7 +339,12 @@ export type AcceptEmailResult =
    */
   | { ok: false; reason: "monthly_quota_exceeded"; periodEnd: Date; overage: boolean }
   /** The team may not send at all right now (sendRefusal); nothing was accepted. */
-  | ({ ok: false } & SendRefusal);
+  | ({ ok: false } & SendRefusal)
+  /** An inbox's send rules hold it; `reasons` are rule codes, never content. */
+  | { ok: false; reason: "inbox_send_policy"; reasons: string[] }
+  | { ok: false; reason: "inbox_send_cap_reached"; retryAfterSec: number }
+  /** An inbox-scoped key sending from another address. */
+  | { ok: false; reason: "inbox_scope" };
 
 /**
  * The single accept pipeline behind every send surface: the team's send

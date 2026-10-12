@@ -3,6 +3,7 @@ import type { SourceBroadcast, SourceDomain, SourceTemplate } from "../src/model
 import {
   broadcastCreateInput,
   domainCreateInput,
+  TARGET_ALL_EVENTS,
   templateCreateInput,
   translateMergeTags,
   translateSegmentFilter,
@@ -178,6 +179,20 @@ describe("translateWebhookEvents", () => {
       "contact.deleted",
     ];
     expect(translateWebhookEvents(all)).toEqual({ events: all, dropped: [] });
+  });
+
+  it("carries Resend's inbox events over, but not the assignment ones MillionSend never emits", () => {
+    expect(
+      translateWebhookEvents(["inbox.email.received", "inbox.thread.assigned", "inbox.draft.sent"]),
+    ).toEqual({
+      events: ["inbox.email.received", "inbox.draft.sent"],
+      dropped: ["inbox.thread.assigned"],
+    });
+  });
+
+  it("reads an endpoint on every event as every event but the opt-in inbox ones", () => {
+    expect(TARGET_ALL_EVENTS).toContain("email.received");
+    expect(TARGET_ALL_EVENTS.some((event) => event.startsWith("inbox."))).toBe(false);
   });
 });
 

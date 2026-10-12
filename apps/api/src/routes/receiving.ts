@@ -142,7 +142,7 @@ export function registerReceivingRoutes(
   // SECURITY: the caller's team, narrowed to its domain for a domain-scoped key.
   const scope = (c: Context<Env>) => {
     const auth = c.get("auth");
-    return receivedEmailScope({ teamId: auth.teamId, domainId: auth.domainId });
+    return receivedEmailScope({ teamId: auth.teamId, domainId: auth.domainId, held: "include" });
   };
   const middleware = [opts.requireFullAccess];
   const untrusted =

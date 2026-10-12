@@ -4,8 +4,10 @@ import {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
+  customHeaderIssues,
   DAY_MS,
   formatMailbox,
+  hasHeaderControlChar,
   isReservedTagName,
   MEDIA_TYPE_TOKEN,
   parseMailbox,
@@ -150,122 +152,9 @@ const attachmentSchema = z
     }
   });
 
-/**
- * Custom headers are allowlisted, not denylisted: mail leaves through a
- * shared SES identity, so a tenant must not be able to forge authentication
- * verdicts (Authentication-Results, ARC-*, Received-SPF), alternate senders
- * (Resent-*, Sender, Return-Path), read-receipt targets
- * (Disposition-Notification-To, Return-Receipt-To, Errors-To) or list
- * headers the transport owns. Allowed: any X-* header except the X-SES-* and
- * X-MillionSend-* families, plus this vetted set of threading/priority
- * headers. Matched case-insensitively; the worker still reassigns its own
- * headers last (defense in depth).
- */
-const ALLOWED_HEADERS = new Set([
-  "in-reply-to",
-  "references",
-  "importance",
-  "priority",
-  "comments",
-  "keywords",
-  "organization",
-  // RFC 2369/8058 one-click unsubscribe pair: a sender running its own opt-out
-  // endpoint may point recipients at it. Values are checked below so only
-  // https/mailto targets go out; on a topic send they replace the generated pair.
-  "list-unsubscribe",
-  "list-unsubscribe-post",
-]);
-
-// RFC 2369: one or more <https://…> or <mailto:…> targets, comma-separated.
-const LIST_UNSUBSCRIBE_RE =
-  /^\s*<(?:https:\/\/|mailto:)[^<>\s]+>(?:\s*,\s*<(?:https:\/\/|mailto:)[^<>\s]+>)*\s*$/i;
-const LIST_UNSUBSCRIBE_POST_VALUE = "List-Unsubscribe=One-Click";
-
-/** Value rule for the two unsubscribe headers; null when the value is acceptable. */
-function unsubscribeHeaderIssue(name: string, value: string): string | null {
-  const lower = name.toLowerCase();
-  if (lower === "list-unsubscribe" && !LIST_UNSUBSCRIBE_RE.test(value)) {
-    return "List-Unsubscribe must be one or more <https://…> or <mailto:…> targets";
-  }
-  if (
-    lower === "list-unsubscribe-post" &&
-    value.trim().toLowerCase() !== LIST_UNSUBSCRIBE_POST_VALUE.toLowerCase()
-  ) {
-    return `List-Unsubscribe-Post must be "${LIST_UNSUBSCRIBE_POST_VALUE}"`;
-  }
-  return null;
-}
-
-const ALLOWED_HEADERS_HINT = `X-* (except X-SES-*) or ${[...ALLOWED_HEADERS].join(", ")}`;
-
-function isAllowedHeaderName(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (lower.startsWith("x-")) {
-    return !lower.startsWith("x-ses-") && !lower.startsWith("x-millionsend-");
-  }
-  return ALLOWED_HEADERS.has(lower);
-}
-
-// RFC 5322 field name: printable US-ASCII except colon.
-const HEADER_NAME_RE = /^[!-9;-~]+$/;
-
-/** True when the value carries a control char that could smuggle a header. */
-function hasHeaderControlChar(value: string): boolean {
-  for (const ch of value) {
-    const code = ch.charCodeAt(0);
-    if ((code < 0x20 && code !== 0x09) || code === 0x7f) return true;
-  }
-  return false;
-}
-
 const customHeadersSchema = z.record(z.string(), z.string()).superRefine((headers, ctx) => {
-  for (const [name, value] of Object.entries(headers)) {
-    if (!HEADER_NAME_RE.test(name)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" is not a valid header name`,
-      });
-    } else if (!isAllowedHeaderName(name)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" is not an allowed header; use ${ALLOWED_HEADERS_HINT}`,
-      });
-    }
-    if (hasHeaderControlChar(value)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" value must not contain control characters`,
-      });
-    }
-    const unsubscribeIssue = unsubscribeHeaderIssue(name, value);
-    if (unsubscribeIssue) ctx.addIssue({ code: "custom", path: [name], message: unsubscribeIssue });
-  }
-  // RFC 8058: one-click needs both headers and an https target. Half a pair
-  // would either ship without one-click or, on a topic send, collide with the
-  // generated pair — so the two come together or not at all.
-  const names = Object.keys(headers).map((n) => n.toLowerCase());
-  const hasList = names.includes("list-unsubscribe");
-  const hasPost = names.includes("list-unsubscribe-post");
-  if (hasList !== hasPost) {
-    ctx.addIssue({
-      code: "custom",
-      path: [hasList ? "List-Unsubscribe" : "List-Unsubscribe-Post"],
-      message: "List-Unsubscribe and List-Unsubscribe-Post must be sent together",
-    });
-  }
-  const listValue = Object.entries(headers).find(
-    ([n]) => n.toLowerCase() === "list-unsubscribe",
-  )?.[1];
-  if (listValue !== undefined && !/<https:\/\//i.test(listValue)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["List-Unsubscribe"],
-      message:
-        "List-Unsubscribe must include an <https://…> target (RFC 8058); mailto may only accompany it",
-    });
+  for (const issue of customHeaderIssues(headers)) {
+    ctx.addIssue({ code: "custom", path: [issue.header], message: issue.message });
   }
 });
 
@@ -1428,6 +1317,12 @@ export const updateDomainRequestSchema = z
     // instead of silently ignoring a security-relevant setting.
     tls: z.unknown().optional(),
     capabilities: domainCapabilitiesRequestSchema.optional(),
+    receiving_catch_all: z
+      .boolean()
+      .optional()
+      .describe(
+        "MillionSend extension: store mail to addresses without an inbox (true) or refuse it at RCPT (false). Turning it on needs receiving enabled and, on MillionSend Cloud, a paid plan.",
+      ),
   })
   .openapi("UpdateDomainRequest");
 
@@ -1488,6 +1383,11 @@ const domainSchema = z.object({
         "enabled while the domain receives mail; always disabled on an instance that does not",
       ),
   }),
+  receiving_catch_all: z
+    .boolean()
+    .describe(
+      "MillionSend extension: whether mail to an address without an inbox is stored (true) or refused at RCPT (false)",
+    ),
 });
 
 export const createDomainResponseSchema = domainSchema
@@ -1533,10 +1433,15 @@ const webhookEndpointUrl = z
     message: "endpoint must be an https:// URL",
   });
 
+const INBOX_IDS_DESC =
+  "MillionSend extension: inbox events and email.received reach this endpoint only for these inboxes of the team (at most 100). null means every inbox.";
+const webhookInboxIds = z.array(z.uuid()).max(100).nullable();
+
 export const createWebhookRequestSchema = z
   .object({
     endpoint: webhookEndpointUrl,
     events: z.array(webhookEventSchema).min(1),
+    inbox_ids: webhookInboxIds.optional().describe(`${INBOX_IDS_DESC} Omitted: every inbox.`),
     signing_secret: z
       .string()
       .optional()
@@ -1551,6 +1456,7 @@ export const updateWebhookRequestSchema = z
     endpoint: webhookEndpointUrl.optional(),
     events: z.array(webhookEventSchema).min(1).optional(),
     status: webhookWireStatusSchema.optional(),
+    inbox_ids: webhookInboxIds.optional().describe(`${INBOX_IDS_DESC} Omitted: unchanged.`),
   })
   .openapi("UpdateWebhookRequest");
 
@@ -1562,6 +1468,7 @@ const webhookListItemSchema = z.object({
   created_at: z.string(),
   status: webhookWireStatusSchema,
   events: z.array(z.string()).nullable(),
+  inbox_ids: z.array(z.string()).nullable().describe(INBOX_IDS_DESC),
 });
 
 export const createWebhookResponseSchema = z
