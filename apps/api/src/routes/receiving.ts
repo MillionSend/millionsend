@@ -10,8 +10,10 @@ import {
   decideRecipient,
   decodeEnvelopeHeader,
   deleteReceivedEmail,
+  EMAIL_QUARANTINED_MESSAGE,
   escapeLike,
   heldFrom,
+  INBOX_KEY_SCOPE_MESSAGE,
   inboxActorFromAuth,
   ingestReceivedEmail,
   isAgentActor,
@@ -122,8 +124,6 @@ const uuid = z.uuid();
 /** With wait and no cursor, mail this recent still counts: it may have landed just before the call. */
 const WAIT_LOOKBACK_MS = 60_000;
 
-const QUARANTINED_MESSAGE = "This email is quarantined; a person can release it in the dashboard";
-
 /**
  * Who reads: an agent view (an inbox-scoped key, any MCP call) never sees
  * held mail; anything else is an owner view.
@@ -229,10 +229,7 @@ export function registerReceivingRoutes(
       const q = c.req.valid("query");
       const { agent } = readerOf(auth);
       if (auth.inboxId && q.inbox_id && q.inbox_id !== auth.inboxId) {
-        return c.json(
-          errorBody(403, "restricted_api_key", "This API key is restricted to one inbox"),
-          403,
-        );
+        return c.json(errorBody(403, "restricted_api_key", INBOX_KEY_SCOPE_MESSAGE), 403);
       }
       const wantsHeld = q.include_quarantined === "true" || q.quarantined === "true";
       if (wantsHeld && agent) {
@@ -441,7 +438,7 @@ export function registerReceivingRoutes(
         if (agent) {
           const held = heldFrom(row, memberships, auth.inboxId);
           if (held === "quarantined") {
-            return c.json(errorBody(403, "email_quarantined", QUARANTINED_MESSAGE), 403);
+            return c.json(errorBody(403, "email_quarantined", EMAIL_QUARANTINED_MESSAGE), 403);
           }
           if (held === "pending")
             return c.json(errorBody(404, "not_found", "Email not found"), 404);

@@ -32,17 +32,18 @@ import {
 } from "./inbox-common.js";
 import type { InboxDeps } from "./inboxes.js";
 import { TRASH_RETENTION } from "./limits.js";
-import type {
-  InboxError,
-  ListQuery,
-  MoveFolder,
-  ThreadEmailWire,
-  ThreadFolder,
-  ThreadLabelWire,
-  ThreadListItemWire,
-  ThreadSearchHighlightKey,
-  ThreadSearchResultWire,
-  ThreadSummaryWire,
+import {
+  EMAIL_QUARANTINED_MESSAGE,
+  type InboxError,
+  type ListQuery,
+  type MoveFolder,
+  type ThreadEmailWire,
+  type ThreadFolder,
+  type ThreadLabelWire,
+  type ThreadListItemWire,
+  type ThreadSearchHighlightKey,
+  type ThreadSearchResultWire,
+  type ThreadSummaryWire,
 } from "./types.js";
 import {
   inboundThreadEmailWire,
@@ -89,7 +90,7 @@ const EMAIL_NOT_FOUND = notFound("Email not found.");
 const EMAIL_QUARANTINED: InboxError = {
   status: 403,
   name: "email_quarantined",
-  message: "This email is quarantined; a person can release it in the dashboard",
+  message: EMAIL_QUARANTINED_MESSAGE,
 };
 
 const QUERY_MAX_CHARS = 256;

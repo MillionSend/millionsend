@@ -1,6 +1,13 @@
 import { schema } from "@millionsend/db";
 import type { InboxSafety } from "./safety.js";
 
+export const INBOX_NOT_FOUND_MESSAGE = "Inbox not found.";
+export const CURSOR_NOT_FOUND_MESSAGE =
+  "The pagination cursor references an object that does not exist. See https://resend.com/docs/api-reference/pagination for more information.";
+export const EMAIL_QUARANTINED_MESSAGE =
+  "This email is quarantined; a person can release it in the dashboard";
+export const INBOX_KEY_SCOPE_MESSAGE = "This API key is restricted to one inbox";
+
 export const INBOX_KINDS = schema.inboxKindEnum.enumValues;
 export type InboxKind = (typeof INBOX_KINDS)[number];
 

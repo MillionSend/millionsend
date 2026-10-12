@@ -3,6 +3,7 @@ import {
   apiRequestActor,
   generateApiKey,
   getInboxSafety,
+  INBOX_KEY_SCOPE_MESSAGE,
   INBOX_KEYS_MAX,
   inboxActorFromAuth,
   MAX_ACTIVE_API_KEYS,
@@ -53,10 +54,7 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const body = c.req.valid("json");
       // SECURITY: an inbox-scoped key never mints, whatever the route allow-list says.
       if (auth.inboxId) {
-        return c.json(
-          errorBody(403, "restricted_api_key", "This API key is restricted to one inbox"),
-          403,
-        );
+        return c.json(errorBody(403, "restricted_api_key", INBOX_KEY_SCOPE_MESSAGE), 403);
       }
       // SECURITY: a minted key is never broader than the key minting it. Under
       // a domain-scoped minter, an omitted or null domain_id inherits the

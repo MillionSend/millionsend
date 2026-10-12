@@ -1,14 +1,12 @@
-import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, count, eq, inArray, lte, max, notInArray, sql } from "drizzle-orm";
 import { recordAudit } from "../audit.js";
 import { isPlainName } from "../customer-text.js";
 import { imitatedBrandIn } from "../imitated-brands.js";
-import { getMonitorSettingsRow, resolveMonitorSettings } from "../monitor-settings.js";
 import { asciiHostname } from "../org-domain.js";
 import type { Plan } from "../plans.js";
-import { screeningTier } from "../screening.js";
+import { teamMemberEmails } from "../receiving/inbox-routing.js";
 import { slugify } from "../slug.js";
 import { DAY_MS } from "../utc-day.js";
 import type { WebhookEnqueue } from "../webhooks.js";
@@ -35,6 +33,7 @@ import {
   SHARED_INBOX_MAX_TTL,
 } from "./limits.js";
 import { defaultSafety, type InboxSafety, inboxSafetySchema, safetyProblem } from "./safety.js";
+import { teamInNewTier } from "./send.js";
 import { ensureSharedSubdomain } from "./shared-domain.js";
 import {
   INBOX_KINDS,
@@ -128,25 +127,6 @@ function expiryOf(
   return { expiresAt: new Date(now.getTime() + ms) };
 }
 
-/** Whether the team is in the content monitor's new tier, which may not send to anyone. */
-async function teamIsNew(db: Db, teamId: string, now: Date): Promise<boolean> {
-  const settings = resolveMonitorSettings(
-    await getMonitorSettingsRow(db),
-    env as unknown as Record<string, unknown>,
-  ).settings;
-  return (await screeningTier(db, settings, teamId, now)) === "new";
-}
-
-/** The team members' login addresses, lowercased. */
-async function memberEmails(db: Db, teamId: string): Promise<string[]> {
-  const rows = await db
-    .select({ email: schema.user.email })
-    .from(schema.teamMembers)
-    .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
-    .where(eq(schema.teamMembers.teamId, teamId));
-  return rows.map((r) => r.email.toLowerCase());
-}
-
 /** A complete safety object for this inbox, or the 422 that refuses it. */
 async function checkedSafety(
   db: Db,
@@ -162,8 +142,8 @@ async function checkedSafety(
   const problem = safetyProblem(safety, {
     kind: p.kind,
     shared: p.shared,
-    teamTierNew: safety.send_policy === "open" && (await teamIsNew(db, p.teamId, p.now)),
-    memberEmails: safety.forward_to.length > 0 ? await memberEmails(db, p.teamId) : [],
+    teamTierNew: safety.send_policy === "open" && (await teamInNewTier(db, p.teamId, p.now)),
+    memberEmails: safety.forward_to.length > 0 ? await teamMemberEmails(db, p.teamId) : [],
   });
   return problem === null ? safety : invalid(problem);
 }
@@ -382,7 +362,7 @@ export async function createInbox(
   if (
     defaults.send_policy === "open" &&
     requested.send_policy === undefined &&
-    (await teamIsNew(db, p.teamId, now))
+    (await teamInNewTier(db, p.teamId, now))
   ) {
     defaults.send_policy = "allowlist";
   }

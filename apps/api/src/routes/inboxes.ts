@@ -1,6 +1,7 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   acquireWaitSlot,
+  CURSOR_NOT_FOUND_MESSAGE,
   createInbox,
   createLabel,
   deleteInboxes,
@@ -9,6 +10,7 @@ import {
   getInboxSafety,
   getThread,
   getThreadEmail,
+  INBOX_NOT_FOUND_MESSAGE,
   type InboxActor,
   type InboxDeps,
   type InboxError,
@@ -77,8 +79,6 @@ import {
 } from "../schemas/inboxes.js";
 import { errorSchema } from "../schemas.js";
 
-const INBOX_NOT_FOUND = "Inbox not found.";
-
 const jsonErr = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
   description,
@@ -116,11 +116,7 @@ export function registerInboxRoutes(
     failure(c, { status: 422, name: "validation_error", message });
   const notFound = (c: Context<Env>, message: string) =>
     failure(c, { status: 404, name: "not_found", message });
-  const cursorNotFound = (c: Context<Env>) =>
-    notFound(
-      c,
-      "The pagination cursor references an object that does not exist. See https://resend.com/docs/api-reference/pagination for more information.",
-    );
+  const cursorNotFound = (c: Context<Env>) => notFound(c, CURSOR_NOT_FOUND_MESSAGE);
 
   /**
    * SECURITY: the inbox must be the team's, live, and the key's own when the
@@ -254,7 +250,7 @@ export function registerInboxRoutes(
         idOrEmail: ref.value,
         onlyInboxId: auth.inboxId,
       });
-      return inbox ? c.json(inbox, 200) : notFound(c, INBOX_NOT_FOUND);
+      return inbox ? c.json(inbox, 200) : notFound(c, INBOX_NOT_FOUND_MESSAGE);
     },
   );
 
@@ -320,7 +316,7 @@ export function registerInboxRoutes(
         reason: "deleted",
       });
       return deleted === 0
-        ? notFound(c, INBOX_NOT_FOUND)
+        ? notFound(c, INBOX_NOT_FOUND_MESSAGE)
         : c.json(
             { object: "inbox" as const, id: inbox_id.toLowerCase(), deleted: true as const },
             200,
@@ -343,7 +339,7 @@ export function registerInboxRoutes(
     }),
     async (c) => {
       if (!(await inboxFound(c, c.req.valid("param").inbox_id))) {
-        return notFound(c, INBOX_NOT_FOUND);
+        return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       }
       return c.json(
         { object: "inbox_agent" as const, instructions: null, tone: null, enabled_actions: [] },
@@ -366,7 +362,7 @@ export function registerInboxRoutes(
     }),
     async (c) => {
       if (!(await inboxFound(c, c.req.valid("param").inbox_id))) {
-        return notFound(c, INBOX_NOT_FOUND);
+        return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       }
       return invalid(
         c,
@@ -391,7 +387,7 @@ export function registerInboxRoutes(
     async (c) => {
       const { inbox_id } = c.req.valid("param");
       const safety = await ownInboxSafety(c, inbox_id);
-      if (!safety) return notFound(c, INBOX_NOT_FOUND);
+      if (!safety) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       return c.json(
         { object: "inbox_safety" as const, inbox_id: inbox_id.toLowerCase(), ...safety },
         200,
@@ -449,7 +445,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id } = c.req.valid("param");
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       return c.json(
         {
           object: "list" as const,
@@ -480,7 +476,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id } = c.req.valid("param");
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const body = c.req.valid("json");
       const result = await createLabel(db, inboxDeps(), {
         teamId: auth.teamId,
@@ -514,7 +510,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id, label_id } = c.req.valid("param");
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const body = c.req.valid("json");
       const result = await updateLabel(db, inboxDeps(), {
         teamId: auth.teamId,
@@ -544,7 +540,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id, label_id } = c.req.valid("param");
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const deleted = await deleteLabel(db, inboxDeps(), {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -598,7 +594,7 @@ export function registerInboxRoutes(
       }
       const hasAttachment = booleanOf(q.has_attachment, "has_attachment");
       if (!hasAttachment.ok) return invalid(c, hasAttachment.message);
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const result = await searchThreads(db, {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -643,7 +639,7 @@ export function registerInboxRoutes(
       if (!paging.ok) return invalid(c, paging.message);
       const filters = threadFiltersOf(q);
       if (!filters.ok) return invalid(c, filters.message);
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const result = await listThreads(db, {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -661,7 +657,7 @@ export function registerInboxRoutes(
   const threadMissing = async (c: Context<Env>, inboxId: string) =>
     (await inboxFound(c, inboxId))
       ? notFound(c, "Thread not found.")
-      : notFound(c, INBOX_NOT_FOUND);
+      : notFound(c, INBOX_NOT_FOUND_MESSAGE);
 
   app.openapi(
     createRoute({
@@ -679,7 +675,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id, thread_id } = c.req.valid("param");
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const thread = await getThread(db, {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -714,7 +710,7 @@ export function registerInboxRoutes(
       if (body.read === undefined && body.folder === undefined && body.label_id === undefined) {
         return invalid(c, "Provide at least one of read, folder or label_id");
       }
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const result = await updateThread(db, inboxDeps(), {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -744,7 +740,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id, thread_id } = c.req.valid("param");
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const result = await trashThread(db, inboxDeps(), {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -781,7 +777,7 @@ export function registerInboxRoutes(
       if ("refusal" in view) return failure(c, view.refusal);
       const paging = pagingOf(q, "email");
       if (!paging.ok) return invalid(c, paging.message);
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const result = await listThreadEmails(db, keyring, {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -815,7 +811,7 @@ export function registerInboxRoutes(
       const { inbox_id, thread_id, email_id } = c.req.valid("param");
       const view = viewOf(c, c.req.valid("query").include_quarantined);
       if ("refusal" in view) return failure(c, view.refusal);
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const email = await getThreadEmail(db, keyring, {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -847,7 +843,7 @@ export function registerInboxRoutes(
       const { inbox_id } = c.req.valid("param");
       const paging = pagingOf(c.req.valid("query"), "email");
       if (!paging.ok) return invalid(c, paging.message);
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const page = await listQuarantined(db, {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -882,7 +878,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id, email_id } = c.req.valid("param");
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const body = (c.req.valid("json") as { trust_sender?: boolean } | undefined) ?? {};
       const result = await releaseQuarantined(
         db,
@@ -939,7 +935,7 @@ export function registerInboxRoutes(
       if (!wait.ok) return invalid(c, wait.message);
       const maxAge = boundedInt(q.max_age, "max_age", 60, 86_400, 600);
       if (!maxAge.ok) return invalid(c, maxAge.message);
-      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND);
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const read = () =>
         latestVerificationCode(db, keyring, {
           teamId: auth.teamId,

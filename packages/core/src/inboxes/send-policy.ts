@@ -154,15 +154,3 @@ export function isSharedInboxSender(
   const domain = parseSingleSender(from)?.domain;
   return domain !== undefined && (domain === sharedDomain || domain.endsWith(`.${sharedDomain}`));
 }
-
-/** An allowlist entry `local@domain` matches exactly; `*@domain` the domain and its subdomains. */
-export function allowlistIncludes(allowlist: readonly string[], address: string): boolean {
-  const a = address.toLowerCase();
-  const domain = a.slice(a.lastIndexOf("@") + 1);
-  return allowlist.some((entry) => {
-    const e = entry.toLowerCase();
-    if (!e.startsWith("*@")) return e === a;
-    const d = e.slice(2);
-    return domain === d || domain.endsWith(`.${d}`);
-  });
-}

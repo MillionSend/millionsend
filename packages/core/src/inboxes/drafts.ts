@@ -44,13 +44,15 @@ import {
   withIdempotency,
 } from "./send.js";
 import { getThread } from "./threads.js";
-import type {
-  DraftListItemWire,
-  DraftStatus,
-  DraftWire,
-  InboxError,
-  ListQuery,
-  ThreadSummaryWire,
+import {
+  type DraftListItemWire,
+  type DraftStatus,
+  type DraftWire,
+  EMAIL_QUARANTINED_MESSAGE,
+  INBOX_NOT_FOUND_MESSAGE,
+  type InboxError,
+  type ListQuery,
+  type ThreadSummaryWire,
 } from "./types.js";
 import { draftListItemWire, draftWire } from "./wire.js";
 
@@ -266,7 +268,7 @@ export async function createDraft(
   }
   const now = new Date();
   const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId, now });
-  if (!inbox) return fail(404, "not_found", "Inbox not found.");
+  if (!inbox) return fail(404, "not_found", INBOX_NOT_FOUND_MESSAGE);
   if (threadId && targetId) {
     const target = await loadThreadTarget(db, {
       teamId: p.teamId,
@@ -278,11 +280,7 @@ export async function createDraft(
     if (target.direction === "inbound" && target.deliveredAt === null && isAgentActor(p.actor)) {
       return target.verdict === "pending"
         ? fail(404, "not_found", "Email not found.")
-        : fail(
-            403,
-            "email_quarantined",
-            "This email is quarantined; a person can release it in the dashboard",
-          );
+        : fail(403, "email_quarantined", EMAIL_QUARANTINED_MESSAGE);
     }
     const existing = await unsentReplyDraft(db, inbox.id, targetId);
     if (existing) {
@@ -615,7 +613,7 @@ export async function sendDraft(
         );
       }
       const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId, now });
-      if (!inbox) return refused(404, "not_found", "Inbox not found.");
+      if (!inbox) return refused(404, "not_found", INBOX_NOT_FOUND_MESSAGE);
       const body = await openBody(deps.keyring, row);
       if (!body)
         return refused(422, "validation_error", "This draft's content is no longer stored");

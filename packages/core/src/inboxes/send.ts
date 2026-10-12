@@ -3,7 +3,6 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { simpleParser } from "mailparser";
-import { loadMonitorState, monitorTier, teamMonitorRow } from "../abuse-monitor.js";
 import {
   type AcceptEmailAuth,
   type AcceptEmailDeps,
@@ -25,11 +24,14 @@ import { getMonitorSettingsRow, resolveMonitorSettings } from "../monitor-settin
 import { registrableDomain } from "../org-domain.js";
 import { monthlyQuotaMessage, type QuotaTeamRow } from "../plans.js";
 import { outgoingSecretValues } from "../receiving/codes.js";
+import { resolveThread, teamMemberEmails } from "../receiving/inbox-routing.js";
 import {
   openReceivedRaw,
   RECEIVED_EMAIL_META_COLUMNS,
   type ReceivedEmailMeta,
 } from "../receiving/message.js";
+import { allowlisted } from "../receiving/trust.js";
+import { screeningTier } from "../screening.js";
 import { formatMailbox, parseMailbox, parseSingleSender } from "../sender-address.js";
 import { QUOTA_COLUMNS } from "../team-plan.js";
 import { sendRefusalError } from "../team-standing.js";
@@ -54,25 +56,25 @@ import {
 } from "./compose.js";
 import { draftForHeldSend, loadDraftWire } from "./drafts.js";
 import { threadEmailEvent } from "./events.js";
-import { type InboxKeys, secretMac, threadTokenId, verifyThreadTokenRef } from "./keys.js";
+import { type InboxKeys, secretMac, threadTokenId } from "./keys.js";
 import { RECEIVED_SECRET_WINDOW, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
 import {
   type AgentSendDecision,
-  allowlistIncludes,
   decideAgentSend,
   INBOX_KEY_FROM_MESSAGE,
   isSharedInboxSender,
   type RecipientClass,
 } from "./send-policy.js";
 import { getThread } from "./threads.js";
-import type {
-  DraftWire,
-  InboxError,
-  ScreeningVerdict,
-  SenderTrust,
-  SentEmailWire,
-  ThreadEmailAttachmentWire,
-  ThreadSummaryWire,
+import {
+  type DraftWire,
+  EMAIL_QUARANTINED_MESSAGE,
+  type InboxError,
+  type ScreeningVerdict,
+  type SenderTrust,
+  type SentEmailWire,
+  type ThreadEmailAttachmentWire,
+  type ThreadSummaryWire,
 } from "./types.js";
 import {
   outboundThreadEmailWire,
@@ -141,8 +143,6 @@ export const refused = (
 const notFound = (what: "Inbox" | "Thread" | "Email" | "Draft") =>
   refused(404, "not_found", `${what} not found.`);
 
-export const QUARANTINED_MESSAGE =
-  "This email is quarantined; a person can release it in the dashboard";
 const invalid = (message: string) => refused(422, "validation_error", message);
 
 export const isOutcome = (v: unknown): v is SendOutcome =>
@@ -168,14 +168,17 @@ export async function findLiveInbox(
   return row ?? null;
 }
 
-/** Whether the team sits in the content monitor's new tier, where send_policy "open" is unavailable. */
+/**
+ * Whether the team sits in the content monitor's new tier, where send_policy
+ * "open" is unavailable: the tier as screening reads it ahead of a send, so
+ * the safety check and the send rails never disagree.
+ */
 export async function teamInNewTier(db: Db, teamId: string, now = new Date()): Promise<boolean> {
   const { settings } = resolveMonitorSettings(
     await getMonitorSettingsRow(db),
     env as unknown as Record<string, unknown>,
   );
-  const state = await loadMonitorState(db, await teamMonitorRow(db, teamId), now);
-  return monitorTier(state, settings, now) === "new";
+  return (await screeningTier(db, settings, teamId, now)) === "new";
 }
 
 const TRUSTED_TIERS: ReadonlySet<string> = new Set(["owner", "allowlisted", "known_thread"]);
@@ -196,15 +199,6 @@ export function untrustedReplyTos(target: SendTarget): string[] {
   return target.row.replyTo.filter(
     (rt) => !replyToTrusted(rt, target.row.from, target.senderTrust),
   );
-}
-
-async function memberLogins(db: Db, teamId: string): Promise<string[]> {
-  const rows = await db
-    .select({ email: schema.user.email })
-    .from(schema.teamMembers)
-    .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
-    .where(eq(schema.teamMembers.teamId, teamId));
-  return rows.map((r) => addressKey(r.email));
 }
 
 /** The From and trusted Reply-To of every delivered inbound message of a thread. */
@@ -246,7 +240,7 @@ async function classifyRecipients(
 }> {
   const c = schema.inboxCorrespondents;
   const [logins, senders, known] = await Promise.all([
-    memberLogins(db, p.teamId),
+    teamMemberEmails(db, p.teamId),
     p.threadId ? threadSenders(db, p.inbox.id, p.threadId) : new Set<string>(),
     p.recipients.length > 0
       ? db
@@ -266,7 +260,7 @@ async function classifyRecipients(
   const recipients = p.recipients.map((address) => {
     const cls: RecipientClass = owners.has(address)
       ? "owner"
-      : allowlistIncludes(p.inbox.safety.allowlist, address)
+      : allowlisted(address, p.inbox.safety.allowlist)
         ? "allowlisted"
         : senders.has(address)
           ? "thread"
@@ -385,59 +379,6 @@ export async function decideInboxSend(
   });
 }
 
-const SES_MESSAGE_ID = /^<([^<>@\s]+)@[^<>\s]*amazonses\.com>$/i;
-
-/**
- * The thread of this inbox a message's In-Reply-To and References name: a
- * thread token first, then one of our sends by its SES id (local part only:
- * the domain varies by region), then a message the inbox received. Never by
- * subject.
- */
-export async function threadFromReferences(
-  db: Db,
-  keys: InboxKeys,
-  p: { teamId: string; inboxId: string; refs: readonly string[] },
-): Promise<string | null> {
-  const t = schema.inboxThreads;
-  for (const ref of p.refs) {
-    const threadId = verifyThreadTokenRef(keys, { teamId: p.teamId, inboxId: p.inboxId, ref });
-    if (!threadId) continue;
-    const [thread] = await db
-      .select({ id: t.id })
-      .from(t)
-      .where(and(eq(t.id, threadId), eq(t.inboxId, p.inboxId), eq(t.teamId, p.teamId)));
-    if (thread) return thread.id;
-  }
-  const sesIds = p.refs.flatMap((ref) => SES_MESSAGE_ID.exec(ref)?.[1] ?? []);
-  if (sesIds.length > 0) {
-    const e = schema.emails;
-    const [sent] = await db
-      .select({ threadId: e.threadId })
-      .from(e)
-      .where(
-        and(
-          inArray(e.sesMessageId, sesIds),
-          eq(e.teamId, p.teamId),
-          eq(e.inboxId, p.inboxId),
-          isNotNull(e.threadId),
-        ),
-      )
-      .limit(1);
-    if (sent?.threadId) return sent.threadId;
-  }
-  if (p.refs.length === 0) return null;
-  const m = schema.receivedEmailInboxes;
-  const r = schema.receivedEmails;
-  const [received] = await db
-    .select({ threadId: m.threadId })
-    .from(r)
-    .innerJoin(m, and(eq(m.receivedEmailId, r.id), eq(m.inboxId, p.inboxId)))
-    .where(and(eq(r.teamId, p.teamId), inArray(r.messageId, [...p.refs])))
-    .orderBy(asc(m.createdAt))
-    .limit(1);
-  return received?.threadId ?? null;
-}
-
 /** The accept pipeline's refusal as an inbox send answers it. */
 export function acceptFailure(result: Exclude<AcceptEmailResult, { ok: true }>): InboxError {
   switch (result.reason) {
@@ -536,11 +477,12 @@ export async function gateGenericSend(
     ...(inReplyTo ? [inReplyTo] : []),
     ...msgIds(headerValue(payload.headers, "References")),
   ]).slice(0, 50);
-  const threadId = await threadFromReferences(db, deps.inboxKeys, {
+  const thread = await resolveThread(db, deps.inboxKeys, {
     teamId: auth.teamId,
     inboxId: inbox.id,
     refs,
   });
+  const threadId = thread?.threadId ?? null;
   const automated =
     threadId && inReplyTo
       ? await receivedAutomated(db, {
@@ -1277,7 +1219,7 @@ function heldFromAgent(
   if (!held || held.deliveredAt !== null || !isAgentActor(actor)) return null;
   return held.verdict === "pending"
     ? notFound("Email")
-    : refused(403, "email_quarantined", QUARANTINED_MESSAGE);
+    : refused(403, "email_quarantined", EMAIL_QUARANTINED_MESSAGE);
 }
 
 /** In-Reply-To and References answering `target`. */
@@ -1680,7 +1622,7 @@ async function receivedContext(
   if (held) return held;
   const virusHeld = row.catchAll && row.virusVerdict === "fail" && row.releasedAt === null;
   if (!membership && virusHeld && isAgentActor(p.actor)) {
-    return refused(403, "email_quarantined", QUARANTINED_MESSAGE);
+    return refused(403, "email_quarantined", EMAIL_QUARANTINED_MESSAGE);
   }
   if (membership && (!fromAddress || fromAddress === membership.emailAddress)) {
     const inbox = await findLiveInbox(db, {
@@ -1895,7 +1837,7 @@ export async function forwardToForwardTargets(
   if (!inbox || inbox.safety.forward_to.length === 0) return null;
   // Safety was valid when saved; a member may have left the team since.
   const owners = new Set([
-    ...(await memberLogins(db, teamId)),
+    ...(await teamMemberEmails(db, teamId)),
     ...inbox.safety.owner_addresses.map(addressKey),
   ]);
   const targets = inbox.safety.forward_to.filter((a) => owners.has(addressKey(a)));

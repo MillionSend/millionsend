@@ -9,6 +9,8 @@ export const REFERENCES_MAX = 20;
 /** The `<…>` msg-ids in header values, in order, each once. */
 export function msgIds(values: string | readonly string[] | null | undefined): string[] {
   const text = typeof values === "string" ? values : (values ?? []).join(" ");
+  // Loose on purpose: callers validate what it finds, so a malformed id is
+  // refused (the SMTP relay answers 554), never silently dropped.
   const ids = text.match(/<[^<>\s]+>/g) ?? [];
   return [...new Set(ids.filter((id) => id.length <= MSG_ID_MAX))];
 }

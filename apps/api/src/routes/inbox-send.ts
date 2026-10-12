@@ -1,11 +1,13 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  CURSOR_NOT_FOUND_MESSAGE,
   createDraft,
   deleteDraft,
   findLiveInbox,
   forwardInThread,
   forwardReceivedEmail,
   getDraft,
+  INBOX_NOT_FOUND_MESSAGE,
   type InboxError,
   type InboxSendDeps,
   inboxActorFromAuth,
@@ -24,7 +26,7 @@ import {
 import { schema } from "@millionsend/db";
 import { and, eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
-import { type ApiDeps, type Env, errorBody } from "../app.js";
+import { type ApiDeps, type Env, errorBody, RESTRICTED_DOMAIN_MESSAGE } from "../app.js";
 import {
   createDraftRequestSchema,
   deleteDraftResponseSchema,
@@ -65,10 +67,6 @@ const threadEmailParams = z.object({
   email_id: z.uuid(),
 });
 const draftParams = z.object({ inbox_id: z.uuid(), draft_id: z.uuid() });
-
-const RESTRICTED_DOMAIN_MESSAGE = "This API key can only send from its assigned domain";
-const CURSOR_NOT_FOUND =
-  "The pagination cursor references an object that does not exist. See https://resend.com/docs/api-reference/pagination for more information.";
 
 /**
  * Replies, forwards and drafts of an inbox (Resend's Inboxes beta), the
@@ -235,14 +233,15 @@ export function registerInboxSendRoutes(
       const { inbox_id } = c.req.valid("param");
       const auth = c.get("auth");
       const inbox = await findLiveInbox(db, { teamId: auth.teamId, inboxId: inbox_id });
-      if (!inbox) return c.json(errorBody(404, "not_found", "Inbox not found."), 404);
+      if (!inbox) return c.json(errorBody(404, "not_found", INBOX_NOT_FOUND_MESSAGE), 404);
       if (auth.domainId !== null && inbox.domainId !== auth.domainId) return restrictedDomain(c);
       const page = await listDrafts(db, {
         teamId: auth.teamId,
         inboxId: inbox_id,
         query: c.req.valid("query"),
       });
-      if (page === "bad_cursor") return c.json(errorBody(404, "not_found", CURSOR_NOT_FOUND), 404);
+      if (page === "bad_cursor")
+        return c.json(errorBody(404, "not_found", CURSOR_NOT_FOUND_MESSAGE), 404);
       return c.json({ object: "list" as const, has_more: page.hasMore, data: page.data }, 200);
     },
   );

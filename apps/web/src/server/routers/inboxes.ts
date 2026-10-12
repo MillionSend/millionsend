@@ -34,6 +34,7 @@ import {
   sendDraft,
   sendNewFromInbox,
   THREAD_FOLDERS,
+  teamMemberEmails,
   updateDraft,
   updateInbox,
   updateInboxSafety,
@@ -377,17 +378,12 @@ export const inboxesRouter = router({
   safety: receivingProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     const safety = await getInboxSafety(ctx.db, { teamId: ctx.teamId, inboxId: input.id });
     if (!safety) throw new TRPCError({ code: "NOT_FOUND" });
-    const members = await ctx.db
-      .select({ email: schema.user.email })
-      .from(schema.teamMembers)
-      .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
-      .where(eq(schema.teamMembers.teamId, ctx.teamId))
-      .orderBy(sql`lower(${schema.user.email})`);
+    const members = await teamMemberEmails(ctx.db, ctx.teamId);
     const stored = await getInstanceSettings(ctx.db);
     return {
       safety,
       // forward_to may name these, besides the owner addresses.
-      memberEmails: members.map((m) => m.email.toLowerCase()),
+      memberEmails: members.sort(),
       retentionDays: effectiveSetting(
         stored.emailRetentionDays,
         process.env.EMAIL_RETENTION_DAYS,

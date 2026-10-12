@@ -3,13 +3,13 @@ import type { InboxActor } from "../src/inboxes/activity.js";
 import { defaultSafety, type InboxSafety } from "../src/inboxes/safety.js";
 import {
   type AgentSendInput,
-  allowlistIncludes,
   decideAgentSend,
   isSharedInboxSender,
   type RecipientClass,
   rampLimit,
   secondsToNextUtcDay,
 } from "../src/inboxes/send-policy.js";
+import { allowlisted } from "../src/receiving/trust.js";
 
 const NOW = new Date("2026-10-12T10:00:00Z");
 const DAY = 86_400_000;
@@ -291,14 +291,14 @@ describe("decideAgentSend", () => {
   });
 });
 
-describe("allowlistIncludes", () => {
+describe("allowlisted", () => {
   it("matches exact addresses as written and a *@domain with its subdomains", () => {
     const list = ["ana@acme.com", "*@stripe.com"];
-    expect(allowlistIncludes(list, "ANA@acme.com")).toBe(true);
-    expect(allowlistIncludes(list, "ana+x@acme.com")).toBe(false);
-    expect(allowlistIncludes(list, "billing@stripe.com")).toBe(true);
-    expect(allowlistIncludes(list, "x@mail.stripe.com")).toBe(true);
-    expect(allowlistIncludes(list, "x@notstripe.com")).toBe(false);
+    expect(allowlisted("ANA@acme.com", list)).toBe(true);
+    expect(allowlisted("ana+x@acme.com", list)).toBe(false);
+    expect(allowlisted("billing@stripe.com", list)).toBe(true);
+    expect(allowlisted("x@mail.stripe.com", list)).toBe(true);
+    expect(allowlisted("x@notstripe.com", list)).toBe(false);
   });
 });
 

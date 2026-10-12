@@ -39,6 +39,7 @@ import {
   findSuppressed,
   findTopicOptOuts,
   INBOX_KEY_FROM_MESSAGE,
+  INBOX_KEY_SCOPE_MESSAGE,
   type InboxKeys,
   inboxKeyAllows,
   isAdminRole,
@@ -358,7 +359,7 @@ function keyForbidsSendingDomain(auth: ApiKeyAuth, domainId: string): boolean {
   return auth.domainId !== null && auth.domainId !== domainId;
 }
 
-const RESTRICTED_DOMAIN_MESSAGE = "This API key can only send from its assigned domain";
+export const RESTRICTED_DOMAIN_MESSAGE = "This API key can only send from its assigned domain";
 
 /**
  * SECURITY: which of the team's emails a key may cancel, reschedule or
@@ -3505,10 +3506,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // SECURITY: an inbox-scoped key reaches only the allow-listed routes of its
     // own inbox; every other route, and any route added later, is refused.
     if (auth.inboxId && !inboxKeyAllows(c.req.method, c.req.path, auth.inboxId)) {
-      return c.json(
-        errorBody(403, "restricted_api_key", "This API key is restricted to one inbox"),
-        403,
-      );
+      return c.json(errorBody(403, "restricted_api_key", INBOX_KEY_SCOPE_MESSAGE), 403);
     }
     await next();
   });

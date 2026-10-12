@@ -11,22 +11,26 @@ import {
   type WebhookEnqueue,
 } from "../webhooks.js";
 import type { InboxActor } from "./activity.js";
-import type { InboxError, ListQuery } from "./types.js";
+import {
+  CURSOR_NOT_FOUND_MESSAGE,
+  INBOX_NOT_FOUND_MESSAGE,
+  type InboxError,
+  type ListQuery,
+} from "./types.js";
 
 // Helpers the inbox modules share. Not re-exported from the package index.
 
 export const INBOX_NOT_FOUND: InboxError = {
   status: 404,
   name: "not_found",
-  message: "Inbox not found.",
+  message: INBOX_NOT_FOUND_MESSAGE,
 };
 
 /** Resend's answer when `after` or `before` names no item of the list. */
 export const CURSOR_NOT_FOUND: InboxError = {
   status: 404,
   name: "not_found",
-  message:
-    "The pagination cursor references an object that does not exist. See https://resend.com/docs/api-reference/pagination for more information.",
+  message: CURSOR_NOT_FOUND_MESSAGE,
 };
 
 export const invalid = (message: string): InboxError => ({
