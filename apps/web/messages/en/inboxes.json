@@ -90,7 +90,7 @@
     "namePlaceholder": "Orders agent",
     "kind": "Who reads it",
     "agent": "An agent",
-    "agentHint": "Threads, reply API, code and link extraction, injection guard, drafts that wait for approval.",
+    "agentHint": "Threads, reply API, code and link extraction, injection guard, drafts that wait for approval. Mail sent from its address follows its rules, through the API too: pick an address your app doesn't already send from.",
     "human": "People",
     "humanHint": "Read and reply in the dashboard, forward to a mailbox, route to a webhook.",
     "errors": {

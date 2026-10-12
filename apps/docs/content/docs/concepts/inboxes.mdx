@@ -152,6 +152,11 @@ Catch-all starts off, and is on for domains that already received mail
 before inboxes existed. On MillionSend Cloud it needs a paid plan. See
 [Which addresses receive](/concepts/receiving#which-addresses-receive).
 
+Mail sent from an inbox's address follows the inbox's rules on every
+surface, `POST /emails`, the batch endpoint, the SMTP relay and MCP
+included, and an agent inbox starts as `reply_only`. Give an inbox an
+address your app doesn't already send from.
+
 ### Shared domain
 
 An instance can offer a shared domain for inboxes that need no DNS at all

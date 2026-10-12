@@ -90,7 +90,7 @@
     "namePlaceholder": "Agente de pedidos",
     "kind": "Quem lê",
     "agent": "Um agente",
-    "agentHint": "Conversas, API de resposta, extração de códigos e links, proteção contra injeção de prompt e rascunhos que esperam aprovação.",
+    "agentHint": "Conversas, API de resposta, extração de códigos e links, proteção contra injeção de prompt e rascunhos que esperam aprovação. E-mails enviados desse endereço seguem as regras da caixa, inclusive pela API: escolha um endereço que seu app ainda não usa para enviar.",
     "human": "Pessoas",
     "humanHint": "Leia e responda pelo painel, encaminhe para outro e-mail e envie para um webhook.",
     "errors": {

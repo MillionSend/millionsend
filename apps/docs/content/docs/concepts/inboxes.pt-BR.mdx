@@ -159,6 +159,11 @@ e-mail antes de as caixas existirem. No MillionSend Cloud ele exige um plano
 pago. Veja
 [Quais endereços recebem](/pt-BR/concepts/receiving#quais-endereços-recebem).
 
+E-mails enviados do endereço de uma caixa seguem as regras dela em todos os
+canais, inclusive `POST /emails`, o envio em lote, o relay SMTP e o MCP, e
+uma caixa de agente começa como `reply_only`. Use na caixa um endereço que
+seu app ainda não usa para enviar.
+
 ### Domínio compartilhado
 
 Uma instância pode oferecer um domínio compartilhado para caixas que não
