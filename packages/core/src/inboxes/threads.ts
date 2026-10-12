@@ -5,7 +5,7 @@ import { simpleParser } from "mailparser";
 import { createSemaphore } from "../concurrency.js";
 import { decryptEmailBody, openAttachments } from "../crypto/envelope.js";
 import type { Keyring } from "../crypto/keyring.js";
-import { stripInvisible } from "../customer-text.js";
+import { dropInvisible } from "../customer-text.js";
 import { resultRows } from "../driver-result.js";
 import { escapeRegex } from "../erase-recipient.js";
 import {
@@ -167,6 +167,12 @@ async function summaryOf(db: Db, row: ThreadRow, agentView: boolean): Promise<Th
     read: (unread?.n ?? 0) === 0,
     quarantined: held?.n ?? 0,
   });
+}
+
+/** A thread as its owners read it, or null once it is gone. */
+export async function threadSummaryOf(db: Db, threadId: string): Promise<ThreadSummaryWire | null> {
+  const [row] = await db.select().from(th).where(eq(th.id, threadId));
+  return row ? summaryOf(db, row, false) : null;
 }
 
 /** Lowercased label ids, or the 404 of the first one the inbox lacks. */
@@ -676,9 +682,7 @@ async function changeThread(
       threadId: thread.id,
     });
     const summary = await summaryOf(t, row, agentView);
-    // Webhook snapshots never carry held counts, whoever reads the endpoint.
-    const snapshot = { ...summary, quarantined: 0 };
-    const common = { source, inboxId: p.inboxId, thread: snapshot, occurredAt: now };
+    const common = { source, inboxId: p.inboxId, thread: summary, occurredAt: now };
     await hooks.emit(t, p.teamId, [
       ...(moved ? [threadFolderEvent({ ...common, from: thread.folder, to: row.folder })] : []),
       ...(added && add ? [threadLabelsEvent({ ...common, added: threadLabelWire(add) })] : []),
@@ -789,9 +793,7 @@ async function inboundContent(
     return {
       // Mail carrying malware shows its text only, released or not.
       html: row.virusVerdict === "fail" ? null : html,
-      // ponytail: stripInvisible per line also folds runs of spaces and trims each
-      // line; customer-text's newline-preserving dropInvisible would keep spacing.
-      text: text === null ? null : text.split("\n").map(stripInvisible).join("\n"),
+      text: text === null ? null : dropInvisible(text),
       attachments: files.map((a) => ({ id: a.id, filename: a.filename, size: a.size })),
       extractedText: extracted?.text ?? null,
     };

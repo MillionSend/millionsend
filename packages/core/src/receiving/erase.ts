@@ -1,8 +1,9 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { type AuditActor, recordAudit } from "../audit.js";
+import { recordAudit } from "../audit.js";
 import { type InboxActor, recordInboxActivity } from "../inboxes/activity.js";
+import { auditActorOf } from "../inboxes/inbox-common.js";
 
 /**
  * Threads left with nothing in them: no received or sent message and no
@@ -26,18 +27,6 @@ export async function deleteEmptyThreads(db: Db, threadIds?: readonly string[]):
     )
     .returning({ id: t.id });
   return deleted.length;
-}
-
-function auditActor(actor: InboxActor): AuditActor {
-  switch (actor.kind) {
-    case "user":
-    case "oauth":
-      return { userId: actor.userId };
-    case "api_key":
-      return { apiKeyId: actor.apiKeyId };
-    case "system":
-      return "system";
-  }
 }
 
 /**
@@ -79,12 +68,13 @@ export async function deleteReceivedEmail(
     return true;
   });
   if (deleted) {
+    const { actor, metadata } = auditActorOf(p.actor);
     await recordAudit(db, {
       teamId: p.teamId,
-      actor: auditActor(p.actor),
+      actor,
       action: "received_email.deleted",
       target: { type: "received_email", id: p.id },
-      ...(p.actor.kind === "oauth" ? { metadata: { oauth_client_id: p.actor.clientId } } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     });
   }
   return deleted;

@@ -522,43 +522,6 @@ export const deleteReceivedEmailResponseSchema = z
   .object({ object: z.literal("email"), id: z.uuid(), deleted: z.literal(true) })
   .openapi("DeleteReceivedEmailResponse");
 
-export const latestCodeQuerySchema = z.object({
-  from: z
-    .string()
-    .max(320)
-    .optional()
-    .describe("A sender address, or a domain matching itself and its subdomains"),
-  wait: z.coerce
-    .number()
-    .int()
-    .min(0)
-    .max(LONG_POLL_MAX_SECONDS)
-    .optional()
-    .describe(`Seconds to wait for one to arrive, 0-${LONG_POLL_MAX_SECONDS} (default 0)`),
-  max_age: z.coerce
-    .number()
-    .int()
-    .min(60)
-    .max(86_400)
-    .optional()
-    .describe("Only mail received this many seconds ago or later, 60-86400 (default 600)"),
-});
-
-export const verificationCodeResponseSchema = z
-  .object({
-    object: z.literal("verification_code"),
-    status: z.enum(["found", "none", "ambiguous", "timeout"]),
-    kind: z.enum(["otp", "link"]).nullable(),
-    code: z.string().nullable(),
-    url: z.string().nullable(),
-    link_domain_matches_sender: z.boolean().nullable(),
-    email_id: z.uuid().nullable(),
-    from: z.string().nullable(),
-    received_at: z.string().nullable(),
-    sender_trust: senderTrustSchema.nullable(),
-  })
-  .openapi("VerificationCode");
-
 const receivedAttachmentDataSchema = z.object({
   id: z.uuid(),
   filename: z.string().optional(),

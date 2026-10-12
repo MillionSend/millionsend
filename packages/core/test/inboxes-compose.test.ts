@@ -4,13 +4,13 @@ import {
   forwardedMessage,
   forwardSubject,
   msgIds,
-  outgoingSecretValues,
   REFERENCES_MAX,
   replyHeaders,
   replyRecipients,
   replySubject,
   withThreadToken,
 } from "../src/inboxes/compose.js";
+import { outgoingSecretValues } from "../src/receiving/codes.js";
 
 const TOKEN = "<ms1.AAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB@inbound.acme.test>";
 
@@ -139,21 +139,21 @@ describe("replyRecipients", () => {
 
 describe("outgoingSecretValues", () => {
   it("normalizes codes as ingest stores them: uppercase, no separators, prefix dropped", () => {
-    const values = outgoingSecretValues({
-      subject: "Your code",
-      text: "Use 482 913 or G-123456 or xk7-92f, or XK7-92F.",
-      html: null,
-    });
+    const values = outgoingSecretValues(
+      "Your code",
+      "Use 482 913 or G-123456 or xk7-92f, or XK7-92F.",
+      null,
+    );
     expect(values).toEqual(expect.arrayContaining(["482913", "123456", "XK792F"]));
   });
 
   it("takes links without their fragment and the tokens inside them", () => {
     const token = "a1B2c3D4e5F6g7H8i9J0k1L2";
-    const values = outgoingSecretValues({
-      subject: "Sign in",
-      text: null,
-      html: `<p><a href="https://app.example.com/magic/${token}?u=1#frag">Sign in</a></p>`,
-    });
+    const values = outgoingSecretValues(
+      "Sign in",
+      null,
+      `<p><a href="https://app.example.com/magic/${token}?u=1#frag">Sign in</a></p>`,
+    );
     expect(values).toEqual(
       expect.arrayContaining([`https://app.example.com/magic/${token}?u=1`, token]),
     );
@@ -161,11 +161,9 @@ describe("outgoingSecretValues", () => {
   });
 
   it("takes token-like runs from plain text and nothing from plain prose", () => {
-    expect(
-      outgoingSecretValues({ subject: "Hi", text: `key=${"Zx9".repeat(8)} done`, html: null }),
-    ).toContain("Zx9".repeat(8));
-    expect(
-      outgoingSecretValues({ subject: "Hello there", text: "See you soon.", html: null }),
-    ).toEqual([]);
+    expect(outgoingSecretValues("Hi", `key=${"Zx9".repeat(8)} done`, null)).toContain(
+      "Zx9".repeat(8),
+    );
+    expect(outgoingSecretValues("Hello there", "See you soon.", null)).toEqual([]);
   });
 });

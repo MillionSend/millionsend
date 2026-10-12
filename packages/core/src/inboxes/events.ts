@@ -35,6 +35,11 @@ export function eventEmail(email: ThreadEmailWire): EventEmailWire {
   return metadata;
 }
 
+/** Held counts are for owners reading the API; an endpoint may feed an agent. */
+function eventThread(thread: ThreadSummaryWire): ThreadSummaryWire {
+  return { ...thread, quarantined: 0 };
+}
+
 export function eventDraft(draft: DraftWire): EventDraftWire {
   const { html, text, ...metadata } = draft;
   return metadata;
@@ -89,7 +94,12 @@ export function threadEmailEvent(
     type,
     "system",
     p.inboxId,
-    { thread_id: p.thread.id, email_id: p.email.id, thread: p.thread, email: eventEmail(p.email) },
+    {
+      thread_id: p.thread.id,
+      email_id: p.email.id,
+      thread: eventThread(p.thread),
+      email: eventEmail(p.email),
+    },
     p.occurredAt,
   );
 }
@@ -106,7 +116,7 @@ export function threadFolderEvent(p: {
     "inbox.thread.folder.updated",
     p.source,
     p.inboxId,
-    { from: p.from, to: p.to, thread_id: p.thread.id, thread: p.thread },
+    { from: p.from, to: p.to, thread_id: p.thread.id, thread: eventThread(p.thread) },
     p.occurredAt,
   );
 }
@@ -128,7 +138,7 @@ export function threadLabelsEvent(
       added: "added" in p ? [p.added] : [],
       removed: "removed" in p ? [p.removed] : [],
       thread_id: p.thread.id,
-      thread: p.thread,
+      thread: eventThread(p.thread),
     },
     p.occurredAt,
   );
@@ -181,7 +191,7 @@ export function draftEvent(
     {
       draft_id: p.draft.id,
       draft: eventDraft(p.draft),
-      ...(p.thread ? { thread_id: p.thread.id, thread: p.thread } : {}),
+      ...(p.thread ? { thread_id: p.thread.id, thread: eventThread(p.thread) } : {}),
     },
     p.occurredAt,
   );
@@ -204,7 +214,7 @@ export function draftSentEvent(p: {
       thread_id: p.thread.id,
       email_id: p.emailId,
       draft_id: p.draft.id,
-      thread: p.thread,
+      thread: eventThread(p.thread),
       draft: eventDraft(p.draft),
     },
     p.occurredAt,
@@ -223,7 +233,10 @@ export function draftDeletedEvent(p: {
     "inbox.draft.deleted",
     p.source,
     p.inboxId,
-    { draft_id: p.draftId, ...(p.thread ? { thread_id: p.thread.id, thread: p.thread } : {}) },
+    {
+      draft_id: p.draftId,
+      ...(p.thread ? { thread_id: p.thread.id, thread: eventThread(p.thread) } : {}),
+    },
     p.occurredAt,
   );
 }

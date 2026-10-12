@@ -1,5 +1,4 @@
 import { escapeHtml, visibleText } from "../html.js";
-import { extractLinks } from "../links.js";
 import { extractAddrSpec, normalizeAddress } from "../suppressions.js";
 
 /** RFC 5322's line limit, which also bounds one msg-id. */
@@ -172,53 +171,4 @@ export function replyRecipients(p: {
     cc: keep([...copied.filter((m) => !own.has(addressKey(m))), ...p.cc]),
     bcc: keep(p.bcc),
   };
-}
-
-// The values a sent message could carry that the team received as a code,
-// sign-in link or token, normalized the way received_secrets stores them:
-// codes uppercase without separators, links without their fragment, tokens
-// as the path segments and query values they are.
-const CODE_CANDIDATE =
-  /(?<![\p{L}\p{N}_@./:%$#-])([A-Z]-)?(\d{3}[ -]\d{3}|\d{4}[ -]\d{4}|\d{4,8}|[A-Z0-9]{4,8}|[A-Z0-9]{3,4}-[A-Z0-9]{3,4})(?![\p{L}\p{N}_@%]|[.,:/-]\p{N})/gu;
-const TOKEN_RUN = /[A-Za-z0-9_.~%-]{20,}/g;
-/** Bounds the MAC lookups one send costs; a body past it is checked on its first values. */
-const SECRET_VALUES_MAX = 2000;
-
-const tokenLike = (v: string) =>
-  v.length >= 20 && /^[A-Za-z0-9_.~%-]+$/.test(v) && /\d/.test(v) && /[A-Za-z]/.test(v);
-
-function codeValue(raw: string): string | null {
-  const v = raw.replace(/[ -]/g, "").toUpperCase();
-  if (v.length < 4 || v.length > 8) return null;
-  return /^\d+$/.test(v) || (/\d/.test(v) && /[A-Z]/.test(v)) ? v : null;
-}
-
-export function outgoingSecretValues(p: {
-  subject: string;
-  text: string | null;
-  html: string | null;
-}): string[] {
-  const out = new Set<string>();
-  const add = (v: string | null) => {
-    if (v && out.size < SECRET_VALUES_MAX) out.add(v);
-  };
-  const prose = [p.subject, p.text ?? "", p.html ? visibleText(p.html) : ""].join("\n");
-  for (const m of prose.matchAll(CODE_CANDIDATE)) add(codeValue(m[2] ?? ""));
-  for (const m of prose.matchAll(TOKEN_RUN)) if (tokenLike(m[0])) add(m[0]);
-  for (const link of extractLinks(p.html, [p.subject, p.text ?? ""].join("\n"))) {
-    for (const value of [link.raw, link.href]) {
-      if (!value || !/^https?:\/\//i.test(value)) continue;
-      add(value.split("#")[0] ?? null);
-      let url: URL;
-      try {
-        url = new URL(value);
-      } catch {
-        continue;
-      }
-      for (const part of [...url.pathname.split("/"), ...url.searchParams.values()]) {
-        if (tokenLike(part)) add(part);
-      }
-    }
-  }
-  return [...out];
 }

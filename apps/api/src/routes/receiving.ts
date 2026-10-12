@@ -15,7 +15,6 @@ import {
   inboxActorFromAuth,
   ingestReceivedEmail,
   isAgentActor,
-  latestVerificationCode,
   MAX_RECEIVED_MESSAGE_BYTES,
   MESSAGE_TOO_LARGE,
   MX_DELIVER_PATH,
@@ -43,7 +42,6 @@ import {
   recordInboxActivity,
   releasingStream,
   secretsEqual,
-  type VerificationCodeWire,
   verifyReceivedDownload,
   waitForReceived,
 } from "@millionsend/core";
@@ -60,12 +58,10 @@ import {
   getReceivedAttachmentResponseSchema,
   getReceivedEmailQuerySchema,
   getReceivedEmailResponseSchema,
-  latestCodeQuerySchema,
   listQuerySchema,
   listReceivedAttachmentsResponseSchema,
   listReceivedEmailsQuerySchema,
   listReceivedEmailsResponseSchema,
-  verificationCodeResponseSchema,
 } from "../schemas.js";
 
 /**
@@ -125,7 +121,6 @@ const uuid = z.uuid();
 
 /** With wait and no cursor, mail this recent still counts: it may have landed just before the call. */
 const WAIT_LOOKBACK_MS = 60_000;
-const DEFAULT_CODE_MAX_AGE_S = 600;
 
 const QUARANTINED_MESSAGE = "This email is quarantined; a person can release it in the dashboard";
 
@@ -584,92 +579,6 @@ export function registerReceivingRoutes(
       const attachment = await receivedEmailAttachment(row, keyring, id, downloads());
       if (!attachment) return c.json(errorBody(404, "not_found", "Attachment not found"), 404);
       return c.json({ object: "attachment" as const, ...attachment }, 200);
-    },
-  );
-
-  app.openapi(
-    createRoute({
-      method: "get",
-      path: "/inboxes/{id}/codes/latest",
-      summary: "Get an inbox's latest verification code",
-      description:
-        "MillionSend extension: the newest verification code or sign-in link delivered to the inbox within max_age, never from held mail, from a sender that failed authentication, or from an inbox with extract_codes off. With wait, the request is held until one arrives; status timeout then means none did. A served code is recorded in the inbox's activity. Links are only read, never fetched.",
-      request: { params: z.object({ id: z.uuid() }), query: latestCodeQuerySchema },
-      responses: {
-        200: {
-          content: { "application/json": { schema: verificationCodeResponseSchema } },
-          description: "The latest code or link, or why there is none",
-        },
-        403: jsonErr("Restricted API key"),
-        404: jsonErr("Inbox not found"),
-        422: jsonErr("Validation error"),
-        429: jsonErr("Too many concurrent waits"),
-      },
-    }),
-    async (c) => {
-      const auth = c.get("auth");
-      const { id } = c.req.valid("param");
-      const q = c.req.valid("query");
-      const i = schema.inboxes;
-      const [inbox] = await db
-        .select({ id: i.id })
-        .from(i)
-        .where(
-          and(
-            eq(i.id, id),
-            eq(i.teamId, auth.teamId),
-            or(isNull(i.expiresAt), gt(i.expiresAt, new Date())),
-          ),
-        );
-      if (!inbox) return c.json(errorBody(404, "not_found", "Inbox not found."), 404);
-      const latest = () =>
-        latestVerificationCode(db, keyring, {
-          teamId: auth.teamId,
-          inboxId: id,
-          from: q.from ?? null,
-          maxAgeMs: (q.max_age ?? DEFAULT_CODE_MAX_AGE_S) * 1000,
-          actor: inboxActorFromAuth(auth),
-        });
-      if (!q.wait) return c.json(await latest(), 200);
-      const release = acquireWaitSlot(auth.teamId);
-      if (!release) {
-        c.header("retry-after", "1");
-        return c.json(
-          errorBody(
-            429,
-            "too_many_waits",
-            "Too many requests waiting for mail at once; retry shortly",
-          ),
-          429,
-        );
-      }
-      try {
-        const [found] = await waitForReceived<VerificationCodeWire>({
-          deadlineMs: Date.now() + q.wait * 1000,
-          signal: c.req.raw.signal,
-          poll: async () => {
-            const answer = await latest();
-            return answer.status === "none" ? [] : [answer];
-          },
-        });
-        return c.json(
-          found ?? {
-            object: "verification_code" as const,
-            status: "timeout" as const,
-            kind: null,
-            code: null,
-            url: null,
-            link_domain_matches_sender: null,
-            email_id: null,
-            from: null,
-            received_at: null,
-            sender_trust: null,
-          },
-          200,
-        );
-      } finally {
-        release();
-      }
     },
   );
 

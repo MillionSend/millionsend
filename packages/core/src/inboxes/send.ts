@@ -24,6 +24,7 @@ import { beginIdempotent, completeIdempotent, releaseIdempotent } from "../idemp
 import { getMonitorSettingsRow, resolveMonitorSettings } from "../monitor-settings.js";
 import { registrableDomain } from "../org-domain.js";
 import { monthlyQuotaMessage, type QuotaTeamRow } from "../plans.js";
+import { outgoingSecretValues } from "../receiving/codes.js";
 import {
   openReceivedRaw,
   RECEIVED_EMAIL_META_COLUMNS,
@@ -45,7 +46,6 @@ import {
   forwardSubject,
   headerValue,
   msgIds,
-  outgoingSecretValues,
   replyHeaders,
   replyRecipients,
   replySubject,
@@ -279,6 +279,9 @@ async function classifyRecipients(
   return { recipients, burstExceeded };
 }
 
+/** Bounds the MAC lookups one send costs; a body past it is checked on its first values. */
+const SECRET_VALUES_MAX = 2000;
+
 /** Whether outgoing content repeats a code, sign-in link or token the team received within the window. */
 async function receivedSecretHit(
   db: Db,
@@ -289,7 +292,8 @@ async function receivedSecretHit(
     now: Date;
   },
 ): Promise<boolean> {
-  const values = outgoingSecretValues(p.content);
+  const { subject, text, html } = p.content;
+  const values = outgoingSecretValues(subject, text, html).slice(0, SECRET_VALUES_MAX);
   if (values.length === 0) return false;
   const s = schema.receivedSecrets;
   const [hit] = await db

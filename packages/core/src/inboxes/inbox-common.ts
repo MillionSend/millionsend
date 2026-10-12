@@ -98,7 +98,10 @@ export function webhookBatch(enqueue: WebhookEnqueue | undefined) {
   };
 }
 
-/** The audit_log actor for an inbox actor; an OAuth (MCP) client rides in metadata. */
+/**
+ * The audit_log actor for an inbox actor, as apiRequestActor names it; an
+ * OAuth (MCP) client rides in metadata.
+ */
 export function auditActorOf(actor: InboxActor): {
   actor: AuditActor;
   metadata: Record<string, unknown>;
@@ -109,7 +112,7 @@ export function auditActorOf(actor: InboxActor): {
     case "api_key":
       return { actor: { apiKeyId: actor.apiKeyId }, metadata: {} };
     case "oauth":
-      return { actor: "oauth", metadata: { oauth_client_id: actor.clientId } };
+      return { actor: { userId: actor.userId }, metadata: { oauth_client_id: actor.clientId } };
     case "system":
       return { actor: "system", metadata: {} };
   }

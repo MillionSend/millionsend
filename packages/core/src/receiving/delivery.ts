@@ -6,8 +6,9 @@ import type { Keyring } from "../crypto/keyring.js";
 import { encodeInboxActor, type InboxActor, recordInboxActivity } from "../inboxes/activity.js";
 import { emailQuarantinedEvent, threadEmailEvent, threadFolderEvent } from "../inboxes/events.js";
 import { INBOX_ALLOWLIST_MAX } from "../inboxes/limits.js";
-import type { QuarantineReason, ThreadSummaryWire } from "../inboxes/types.js";
-import { inboundThreadEmailWire, threadSummaryWire } from "../inboxes/wire.js";
+import { threadSummaryOf } from "../inboxes/threads.js";
+import type { QuarantineReason } from "../inboxes/types.js";
+import { inboundThreadEmailWire } from "../inboxes/wire.js";
 import { utcDay } from "../utc-day.js";
 import {
   enqueueTeamWebhookEvents,
@@ -87,40 +88,6 @@ const emit = (tx: Db, teamId: string, events: TeamWebhookEvent[], after: AfterCo
       after.deliveries.push(...rows);
     },
   });
-
-/**
- * A thread as the API and webhooks show it: labels in the order they were
- * made, read when no delivered message waits unread, and the held messages
- * in it counted.
- */
-export async function threadSummaryOf(db: Db, threadId: string): Promise<ThreadSummaryWire | null> {
-  const t = schema.inboxThreads;
-  const m = schema.receivedEmailInboxes;
-  const [thread] = await db
-    .select({
-      id: t.id,
-      subject: t.subject,
-      folder: t.folder,
-      unread: sql<boolean>`exists (select 1 from ${m} where ${m.threadId} = ${t.id} and ${m.deliveredAt} is not null and ${m.readAt} is null)`,
-      held: sql<number>`(select count(*)::int from ${m} where ${m.threadId} = ${t.id} and ${m.quarantinedAt} is not null and ${m.releasedAt} is null)`,
-    })
-    .from(t)
-    .where(eq(t.id, threadId));
-  if (!thread) return null;
-  const l = schema.inboxLabels;
-  const tl = schema.inboxThreadLabels;
-  const labels = await db
-    .select({ id: l.id, name: l.name, color: l.color })
-    .from(tl)
-    .innerJoin(l, eq(l.id, tl.labelId))
-    .where(eq(tl.threadId, threadId))
-    .orderBy(asc(l.createdAt), asc(l.id));
-  return threadSummaryWire(thread, {
-    labels,
-    read: !thread.unread,
-    quarantined: Number(thread.held),
-  });
-}
 
 /** The inbox ids a row was delivered into, for webhook endpoints filtered by inbox. */
 async function deliveredInboxIds(db: Db, receivedEmailId: string): Promise<string[]> {
