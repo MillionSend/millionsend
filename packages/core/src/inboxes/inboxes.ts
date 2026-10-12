@@ -1,9 +1,50 @@
+import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
+import { schema } from "@millionsend/db";
+import { and, asc, count, eq, inArray, lte, max, notInArray, sql } from "drizzle-orm";
+import { recordAudit } from "../audit.js";
+import { isPlainName } from "../customer-text.js";
+import { imitatedBrandIn } from "../imitated-brands.js";
+import { getMonitorSettingsRow, resolveMonitorSettings } from "../monitor-settings.js";
+import { asciiHostname } from "../org-domain.js";
 import type { Plan } from "../plans.js";
+import { screeningTier } from "../screening.js";
+import { slugify } from "../slug.js";
+import { DAY_MS } from "../utc-day.js";
 import type { WebhookEnqueue } from "../webhooks.js";
-import type { InboxActor } from "./activity.js";
-import type { InboxSafety } from "./safety.js";
-import type { InboxError, InboxKind, InboxListItemWire, InboxWire, ListQuery } from "./types.js";
+import { type InboxActor, recordInboxActivity, webhookSource } from "./activity.js";
+import { inboxDeletedEvent, inboxEvent } from "./events.js";
+import {
+  auditActorOf,
+  findLiveInbox,
+  INBOX_NOT_FOUND,
+  invalid,
+  isInboxError,
+  keysetRows,
+  liveInbox,
+  oneLineName,
+  randomAlnum,
+  webhookBatch,
+} from "./inbox-common.js";
+import {
+  expiresInMs,
+  INBOX_MAX_TTL,
+  inboxCreatesLeft,
+  inboxRoom,
+  SHARED_INBOX_DEFAULT_TTL,
+  SHARED_INBOX_MAX_TTL,
+} from "./limits.js";
+import { defaultSafety, type InboxSafety, inboxSafetySchema, safetyProblem } from "./safety.js";
+import { ensureSharedSubdomain } from "./shared-domain.js";
+import {
+  INBOX_KINDS,
+  type InboxError,
+  type InboxKind,
+  type InboxListItemWire,
+  type InboxWire,
+  type ListQuery,
+} from "./types.js";
+import { type InboxCounts, inboxListItemWire, inboxWire } from "./wire.js";
 
 export interface InboxDeps {
   sharedInboxDomain: string | null;
@@ -21,10 +62,286 @@ export interface CreateInboxInput {
   safety?: Partial<InboxSafety> | undefined;
 }
 
+type InboxRow = typeof schema.inboxes.$inferSelect;
+type Failure = { ok: false; error: InboxError };
+
+const fail = (error: InboxError): Failure => ({ ok: false, error });
+
+/** Resend's text for the plan cap, with its 403 validation_error. */
+const PLAN_LIMIT: InboxError = {
+  status: 403,
+  name: "validation_error",
+  message: "You have reached the inbox limit of your plan. Upgrade to add more.",
+};
+
+const ADDRESS_TAKEN: InboxError = {
+  status: 409,
+  name: "validation_error",
+  message: "This address is already used by an inbox",
+};
+
+const SHARED_LOCAL_SLUG_MAX = 20;
+/** Generated addresses retried on collision before giving up. */
+const ADDRESS_ATTEMPTS = 5;
+const EXPIRE_BATCH = 1000;
+const LOCAL_PART = /^[a-z0-9._%+-]{1,64}$/;
+
+/**
+ * The display name recipients see: a plain name as team and display names
+ * are everywhere (no "@", links or phone numbers), and nothing that would
+ * read as From header structure. "" removes it.
+ */
+function fromNameOf(value: string): string | null | InboxError {
+  const name = value.trim();
+  if (name === "") return null;
+  return isPlainName(name) && !/[:<>]/.test(name)
+    ? name
+    : invalid(
+        "from_name must be a plain name of at most 64 characters, without @ : < >, line breaks, links or phone numbers",
+      );
+}
+
+/** When an inbox created or renewed now expires: null never. Shared addresses always expire. */
+function expiryOf(
+  value: string | null | undefined,
+  shared: boolean,
+  now: Date,
+): { expiresAt: Date | null } | InboxError {
+  if (value === undefined) {
+    return { expiresAt: shared ? new Date(now.getTime() + SHARED_INBOX_DEFAULT_TTL) : null };
+  }
+  if (value === null) {
+    return shared
+      ? invalid(
+          `Inboxes on the shared domain always expire: expires_in can be at most ${SHARED_INBOX_MAX_TTL / DAY_MS}d`,
+        )
+      : { expiresAt: null };
+  }
+  const ms = expiresInMs(value);
+  if (ms === null) return invalid('expires_in must be hours or days, like "24h" or "7d"');
+  const maxMs = shared ? SHARED_INBOX_MAX_TTL : INBOX_MAX_TTL;
+  if (ms > maxMs) {
+    return invalid(
+      `expires_in can be at most ${maxMs / DAY_MS}d${shared ? " on the shared domain" : ""}`,
+    );
+  }
+  return { expiresAt: new Date(now.getTime() + ms) };
+}
+
+/** Whether the team is in the content monitor's new tier, which may not send to anyone. */
+async function teamIsNew(db: Db, teamId: string, now: Date): Promise<boolean> {
+  const settings = resolveMonitorSettings(
+    await getMonitorSettingsRow(db),
+    env as unknown as Record<string, unknown>,
+  ).settings;
+  return (await screeningTier(db, settings, teamId, now)) === "new";
+}
+
+/** The team members' login addresses, lowercased. */
+async function memberEmails(db: Db, teamId: string): Promise<string[]> {
+  const rows = await db
+    .select({ email: schema.user.email })
+    .from(schema.teamMembers)
+    .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
+    .where(eq(schema.teamMembers.teamId, teamId));
+  return rows.map((r) => r.email.toLowerCase());
+}
+
+/** A complete safety object for this inbox, or the 422 that refuses it. */
+async function checkedSafety(
+  db: Db,
+  p: { teamId: string; kind: InboxKind; shared: boolean; safety: InboxSafety; now: Date },
+): Promise<InboxSafety | InboxError> {
+  const parsed = inboxSafetySchema.safeParse(p.safety);
+  if (!parsed.success) {
+    return invalid(
+      parsed.error.issues.map((i) => `safety.${i.path.join(".")}: ${i.message}`).join("; "),
+    );
+  }
+  const safety = parsed.data;
+  const problem = safetyProblem(safety, {
+    kind: p.kind,
+    shared: p.shared,
+    teamTierNew: safety.send_policy === "open" && (await teamIsNew(db, p.teamId, p.now)),
+    memberEmails: safety.forward_to.length > 0 ? await memberEmails(db, p.teamId) : [],
+  });
+  return problem === null ? safety : invalid(problem);
+}
+
+/** Only the keys a partial safety object sets, so an absent key never overwrites one. */
+const setKeys = (patch: Partial<InboxSafety>): Partial<InboxSafety> =>
+  Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+
+const ZERO_COUNTS: InboxCounts = {
+  unread: 0,
+  drafts: 0,
+  quarantined: 0,
+  pendingApproval: 0,
+  lastReceived: null,
+};
+
+/** The read and attention counts of several inboxes at once. */
+async function countsFor(db: Db, inboxIds: string[]): Promise<Map<string, InboxCounts>> {
+  const out = new Map(inboxIds.map((id) => [id, { ...ZERO_COUNTS }]));
+  if (inboxIds.length === 0) return out;
+  const m = schema.receivedEmailInboxes;
+  const t = schema.inboxThreads;
+  const d = schema.inboxDrafts;
+  const [unread, drafts, held, last] = await Promise.all([
+    // Unread threads, spam and trash aside: what needs reading.
+    db
+      .select({ inboxId: m.inboxId, n: sql<number>`count(distinct ${m.threadId})::int` })
+      .from(m)
+      .innerJoin(t, eq(t.id, m.threadId))
+      .where(
+        and(
+          inArray(m.inboxId, inboxIds),
+          sql`${m.readAt} is null and ${m.deliveredAt} is not null`,
+          notInArray(t.folder, ["spam", "trash"]),
+        ),
+      )
+      .groupBy(m.inboxId),
+    db
+      .select({
+        inboxId: d.inboxId,
+        unsent: count(),
+        pending: sql<number>`count(*) filter (where ${d.status} = 'pending_approval')::int`,
+      })
+      .from(d)
+      .where(and(inArray(d.inboxId, inboxIds), inArray(d.status, ["draft", "pending_approval"])))
+      .groupBy(d.inboxId),
+    db
+      .select({ inboxId: m.inboxId, n: count() })
+      .from(m)
+      .where(
+        and(
+          inArray(m.inboxId, inboxIds),
+          sql`${m.quarantinedAt} is not null and ${m.releasedAt} is null`,
+        ),
+      )
+      .groupBy(m.inboxId),
+    db
+      .select({ inboxId: t.inboxId, at: max(t.lastMessageAt) })
+      .from(t)
+      .where(inArray(t.inboxId, inboxIds))
+      .groupBy(t.inboxId),
+  ]);
+  const of = (id: string) => out.get(id) as InboxCounts;
+  for (const r of unread) of(r.inboxId).unread = r.n;
+  for (const r of drafts) {
+    of(r.inboxId).drafts = r.unsent;
+    of(r.inboxId).pendingApproval = r.pending;
+  }
+  for (const r of held) of(r.inboxId).quarantined = r.n;
+  for (const r of last) of(r.inboxId).lastReceived = r.at ? new Date(r.at) : null;
+  return out;
+}
+
+async function wireOf(db: Db, row: InboxRow): Promise<InboxWire> {
+  return inboxWire(row, (await countsFor(db, [row.id])).get(row.id) ?? ZERO_COUNTS);
+}
+
+/** Where a new inbox's address lives, resolved from the request. */
+type AddressPlan =
+  | { shared: true; sub: { id: string; name: string }; name: string | undefined }
+  | {
+      shared: false;
+      emailAddress: string;
+      localPart: string;
+      domainId: string;
+      /** The shared subdomain a forwarding inbox's receiving_address sits on. */
+      forwardingSub: { id: string; name: string } | null;
+    };
+
+async function addressPlan(
+  db: Db,
+  deps: InboxDeps,
+  p: { teamId: string; teamName: string; input: CreateInboxInput; name: string | undefined },
+): Promise<AddressPlan | InboxError> {
+  const { input } = p;
+  const shared = deps.sharedInboxDomain;
+  if (input.email_address === undefined) {
+    if (input.forwarding) {
+      return invalid("forwarding needs email_address: an address on one of your domains");
+    }
+    if (!shared) {
+      return invalid("email_address is required: this instance has no shared inbox domain");
+    }
+    const sub = await ensureSharedSubdomain(db, {
+      teamId: p.teamId,
+      teamName: p.teamName,
+      sharedInboxDomain: shared,
+    });
+    return { shared: true, sub, name: p.name };
+  }
+  const address = input.email_address.trim().toLowerCase();
+  const at = address.lastIndexOf("@");
+  const localPart = address.slice(0, at);
+  const domain = at > 0 ? asciiHostname(address.slice(at + 1)) : null;
+  if (
+    domain === null ||
+    !LOCAL_PART.test(localPart) ||
+    localPart.startsWith(".") ||
+    localPart.endsWith(".") ||
+    localPart.includes("..")
+  ) {
+    return invalid(
+      "email_address must be an address like support@example.com: a local part of at most 64 letters, digits and . _ % + - with no leading, trailing or double dot",
+    );
+  }
+  if (shared && (domain === shared || domain.endsWith(`.${shared}`))) {
+    return invalid(
+      "Addresses on the shared domain are made up for you: leave email_address out to get one",
+    );
+  }
+  const d = schema.domains;
+  const [row] = await db
+    .select({ id: d.id, receivingEnabled: d.receivingEnabled })
+    .from(d)
+    .where(and(eq(d.teamId, p.teamId), eq(d.name, domain), eq(d.status, "verified")));
+  if (!row) return invalid("email_address must be on a verified domain of this team");
+  if (!input.forwarding && !row.receivingEnabled) {
+    return invalid(
+      `Turn on receiving for ${domain} first, or create the inbox with forwarding: true`,
+    );
+  }
+  let forwardingSub: { id: string; name: string } | null = null;
+  if (input.forwarding) {
+    if (!shared) {
+      return invalid("forwarding needs a shared inbox domain, which this instance does not have");
+    }
+    forwardingSub = await ensureSharedSubdomain(db, {
+      teamId: p.teamId,
+      teamName: p.teamName,
+      sharedInboxDomain: shared,
+    });
+  }
+  return {
+    shared: false,
+    emailAddress: `${localPart}@${domain}`,
+    localPart,
+    domainId: row.id,
+    forwardingSub,
+  };
+}
+
+/**
+ * A shared address's local part: the inbox name as a slug and a random
+ * suffix, or a random one when there is no usable name or the name imitates
+ * a brand. Never the `fwd-` shape forwarding addresses take.
+ */
+function sharedLocalPart(name: string | undefined): string {
+  const slug =
+    name && !imitatedBrandIn(name)
+      ? slugify(name).slice(0, SHARED_LOCAL_SLUG_MAX).replace(/-+$/, "")
+      : "";
+  return slug ? `${slug}-${randomAlnum(4)}` : `inbox-${randomAlnum(8)}`;
+}
+
 export async function createInbox(
-  _db: Db,
-  _deps: InboxDeps,
-  _p: {
+  db: Db,
+  deps: InboxDeps,
+  p: {
     teamId: string;
     teamName: string;
     plan: Plan;
@@ -34,24 +351,155 @@ export async function createInbox(
     now?: Date | undefined;
   },
 ): Promise<{ ok: true; inbox: InboxWire } | { ok: false; error: InboxError }> {
-  throw new Error("INBOX_CONTRACT_STUB");
+  const now = p.now ?? new Date();
+  const { input } = p;
+  if (!deps.receivingEnabled) return fail(invalid("This instance does not receive mail"));
+  const kind = input.kind ?? "agent";
+  if (!INBOX_KINDS.includes(kind)) return fail(invalid("kind must be agent or human"));
+  const name = input.name === undefined ? undefined : oneLineName(input.name);
+  if (isInboxError(name)) return fail(name);
+  const fromName = input.from_name === undefined ? null : fromNameOf(input.from_name);
+  if (isInboxError(fromName)) return fail(fromName);
+
+  if ((await inboxRoom(db, p.teamId, p.plan, p.isCloud, now)) === 0) return fail(PLAN_LIMIT);
+  const creates = await inboxCreatesLeft(db, p.teamId, p.plan, p.isCloud, now);
+  if (creates?.left === 0) {
+    return fail({
+      status: 429,
+      name: "rate_limit_exceeded",
+      message: "Too many inboxes created in the last hour. Try again later.",
+      retryAfterSec: creates.retryAfterSec,
+    });
+  }
+
+  const plan = await addressPlan(db, deps, { ...p, name });
+  if (isInboxError(plan)) return fail(plan);
+  const expiry = expiryOf(input.expires_in, plan.shared, now);
+  if (isInboxError(expiry)) return fail(expiry);
+  const defaults = defaultSafety(kind, plan.shared);
+  const requested = setKeys(input.safety ?? {});
+  // A new team may not send openly yet, so its default steps down to what it may use.
+  if (
+    defaults.send_policy === "open" &&
+    requested.send_policy === undefined &&
+    (await teamIsNew(db, p.teamId, now))
+  ) {
+    defaults.send_policy = "allowlist";
+  }
+  const safety = await checkedSafety(db, {
+    teamId: p.teamId,
+    kind,
+    shared: plan.shared,
+    safety: { ...defaults, ...requested },
+    now,
+  });
+  if (isInboxError(safety)) return fail(safety);
+
+  const i = schema.inboxes;
+  const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
+  const row = await db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    for (let attempt = 0; attempt < ADDRESS_ATTEMPTS; attempt += 1) {
+      const localPart = plan.shared ? sharedLocalPart(plan.name) : plan.localPart;
+      const emailAddress = plan.shared ? `${localPart}@${plan.sub.name}` : plan.emailAddress;
+      const [inserted] = await t
+        .insert(i)
+        .values({
+          teamId: p.teamId,
+          kind,
+          emailAddress,
+          localPart,
+          domainId: plan.shared ? null : plan.domainId,
+          sharedDomainId: plan.shared ? plan.sub.id : (plan.forwardingSub?.id ?? null),
+          receivingAddress:
+            !plan.shared && plan.forwardingSub
+              ? `fwd-${randomAlnum(16)}@${plan.forwardingSub.name}`
+              : null,
+          name: name ?? emailAddress,
+          fromName,
+          safety,
+          expiresAt: expiry.expiresAt,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (inserted) {
+        await recordInboxActivity(t, {
+          teamId: p.teamId,
+          inboxId: inserted.id,
+          actor: p.actor,
+          action: "inbox.created",
+        });
+        await hooks.emit(t, p.teamId, [
+          inboxEvent("inbox.created", {
+            source: webhookSource(p.actor),
+            inbox: inboxWire(inserted, ZERO_COUNTS),
+            occurredAt: now,
+          }),
+        ]);
+        return inserted;
+      }
+      // A chosen address collides only with its own; a generated one is drawn again.
+      if (!plan.shared) {
+        const [taken] = await t
+          .select({ id: i.id })
+          .from(i)
+          .where(eq(i.emailAddress, plan.emailAddress));
+        if (taken) return null;
+      }
+    }
+    throw new Error("no free inbox address after several draws");
+  });
+  if (!row) return fail(ADDRESS_TAKEN);
+  await hooks.flush();
+  if (p.actor.kind === "user") {
+    await recordAudit(db, {
+      teamId: p.teamId,
+      actor: { userId: p.actor.userId },
+      action: "inbox.created",
+      target: { type: "inbox", id: row.id },
+      metadata: { email_address: row.emailAddress, kind: row.kind },
+    });
+  }
+  return { ok: true, inbox: inboxWire(row, ZERO_COUNTS) };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** By id or, when the value holds an "@", by address (case-insensitive). */
 export async function getInbox(
-  _db: Db,
-  _p: {
+  db: Db,
+  p: {
     teamId: string;
     idOrEmail: string;
     onlyInboxId?: string | null | undefined;
     now?: Date | undefined;
   },
 ): Promise<InboxWire | null> {
-  throw new Error("INBOX_CONTRACT_STUB");
+  const i = schema.inboxes;
+  const byAddress = p.idOrEmail.includes("@");
+  if (!byAddress && !UUID.test(p.idOrEmail)) return null;
+  const [row] = await db
+    .select()
+    .from(i)
+    .where(
+      and(
+        byAddress
+          ? eq(i.emailAddress, p.idOrEmail.trim().toLowerCase())
+          : eq(i.id, p.idOrEmail.toLowerCase()),
+        eq(i.teamId, p.teamId),
+        p.onlyInboxId ? eq(i.id, p.onlyInboxId) : undefined,
+        liveInbox(p.now ?? new Date()),
+      ),
+    );
+  return row ? wireOf(db, row) : null;
 }
 
+/** Newest first, as Resend lists inboxes; `after` pages toward older ones. */
 export async function listInboxes(
-  _db: Db,
-  _p: {
+  db: Db,
+  p: {
     teamId: string;
     query: ListQuery;
     kind?: InboxKind | undefined;
@@ -59,13 +507,49 @@ export async function listInboxes(
     now?: Date | undefined;
   },
 ): Promise<{ data: InboxListItemWire[]; hasMore: boolean } | "bad_cursor"> {
-  throw new Error("INBOX_CONTRACT_STUB");
+  const i = schema.inboxes;
+  const scope = and(
+    eq(i.teamId, p.teamId),
+    liveInbox(p.now ?? new Date()),
+    p.kind ? eq(i.kind, p.kind) : undefined,
+    p.onlyInboxId ? eq(i.id, p.onlyInboxId) : undefined,
+  );
+  const page = await keysetRows({
+    query: p.query,
+    key: i.createdAt,
+    id: i.id,
+    newestFirst: true,
+    cursorExists: async (id) =>
+      (
+        await db
+          .select({ id: i.id })
+          .from(i)
+          .where(and(eq(i.id, id), scope))
+      ).length > 0,
+    cursorKey: (id) => sql`(select ${i.createdAt} from ${i} where ${i.id} = ${id}::uuid)`,
+    load: (where, orderBy, take) =>
+      db
+        .select()
+        .from(i)
+        .where(and(scope, where))
+        .orderBy(...orderBy)
+        .limit(take),
+  });
+  if (page === "bad_cursor") return page;
+  const counts = await countsFor(
+    db,
+    page.rows.map((r) => r.id),
+  );
+  return {
+    data: page.rows.map((r) => inboxListItemWire(r, counts.get(r.id) ?? ZERO_COUNTS)),
+    hasMore: page.hasMore,
+  };
 }
 
 export async function updateInbox(
-  _db: Db,
-  _deps: InboxDeps,
-  _p: {
+  db: Db,
+  deps: InboxDeps,
+  p: {
     teamId: string;
     inboxId: string;
     actor: InboxActor;
@@ -76,37 +560,231 @@ export async function updateInbox(
     };
   },
 ): Promise<{ ok: true; inbox: InboxWire } | { ok: false; error: InboxError }> {
-  throw new Error("INBOX_CONTRACT_STUB");
+  const now = new Date();
+  const inbox = await findLiveInbox(db, p.teamId, p.inboxId, now);
+  if (!inbox) return fail(INBOX_NOT_FOUND);
+  const set: Partial<typeof schema.inboxes.$inferInsert> = { updatedAt: now };
+  if (p.patch.name !== undefined) {
+    const name = oneLineName(p.patch.name);
+    if (isInboxError(name)) return fail(name);
+    set.name = name;
+  }
+  if (p.patch.from_name !== undefined) {
+    const fromName = fromNameOf(p.patch.from_name);
+    if (isInboxError(fromName)) return fail(fromName);
+    set.fromName = fromName;
+  }
+  if (p.patch.expires_in !== undefined) {
+    const expiry = expiryOf(p.patch.expires_in, inbox.domainId === null, now);
+    if (isInboxError(expiry)) return fail(expiry);
+    set.expiresAt = expiry.expiresAt;
+  }
+  const i = schema.inboxes;
+  const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
+  const wire = await db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    const [row] = await t.update(i).set(set).where(eq(i.id, inbox.id)).returning();
+    if (!row) throw new Error("inbox update returned no row");
+    await recordInboxActivity(t, {
+      teamId: p.teamId,
+      inboxId: row.id,
+      actor: p.actor,
+      action: "inbox.updated",
+    });
+    const updated = await wireOf(t, row);
+    await hooks.emit(t, p.teamId, [
+      inboxEvent("inbox.updated", { source: webhookSource(p.actor), inbox: updated }),
+    ]);
+    return updated;
+  });
+  await hooks.flush();
+  return { ok: true, inbox: wire };
 }
 
+/**
+ * Deletes inboxes with their threads, drafts, labels and memberships, and
+ * the received messages only they held (catch-all mail stays in All
+ * received). Their scoped keys are revoked first, never widened.
+ */
 export async function deleteInboxes(
-  _db: Db,
-  _deps: InboxDeps,
-  _p: {
+  db: Db,
+  deps: InboxDeps,
+  p: {
     teamId: string;
     inboxIds: string[];
     actor: InboxActor;
     reason: "deleted" | "expired" | "domain_deleted";
   },
 ): Promise<number> {
-  throw new Error("INBOX_CONTRACT_STUB");
+  if (p.inboxIds.length === 0) return 0;
+  const i = schema.inboxes;
+  const k = schema.apiKeys;
+  const m = schema.receivedEmailInboxes;
+  const r = schema.receivedEmails;
+  const w = schema.webhookEndpoints;
+  const source = webhookSource(p.actor);
+  const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
+  const deleted = await db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    const rows = await t
+      .select()
+      .from(i)
+      .where(and(eq(i.teamId, p.teamId), inArray(i.id, p.inboxIds)))
+      .for("update");
+    if (rows.length === 0) return [];
+    const ids = rows.map((row) => row.id);
+    const counts = p.reason === "expired" ? await countsFor(t, ids) : null;
+    // SECURITY: inbox_id is never set null on a live key: that would widen it to the team.
+    await t
+      .update(k)
+      .set({ revokedAt: sql`coalesce(${k.revokedAt}, now())`, inboxId: null })
+      .where(inArray(k.inboxId, ids));
+    await t
+      .delete(r)
+      .where(
+        and(
+          eq(r.teamId, p.teamId),
+          eq(r.catchAll, false),
+          inArray(r.id, t.select({ id: m.receivedEmailId }).from(m).where(inArray(m.inboxId, ids))),
+          sql`not exists (select 1 from ${m} where ${m.receivedEmailId} = ${r.id} and ${notInArray(m.inboxId, ids)})`,
+        ),
+      );
+    // Emitted while endpoints still name these inboxes, so filtered ones hear of it.
+    await hooks.emit(
+      t,
+      p.teamId,
+      rows.flatMap((row) => [
+        ...(counts
+          ? [
+              inboxEvent("inbox.expired", {
+                source,
+                inbox: inboxWire(row, counts.get(row.id) ?? ZERO_COUNTS),
+              }),
+            ]
+          : []),
+        inboxDeletedEvent({ source, inboxId: row.id }),
+      ]),
+    );
+    await t.delete(i).where(inArray(i.id, ids));
+    // An endpoint left filtered to no inbox hears of none, rather than of every one.
+    const gone = sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    await t
+      .update(w)
+      .set({
+        inboxIds: sql`coalesce((select jsonb_agg(x) from jsonb_array_elements_text(${w.inboxIds}) x where x not in (${gone})), '[]'::jsonb)`,
+      })
+      .where(
+        and(
+          eq(w.teamId, p.teamId),
+          sql`exists (select 1 from jsonb_array_elements_text(${w.inboxIds}) x where x in (${gone}))`,
+        ),
+      );
+    for (const row of rows) {
+      await recordInboxActivity(t, {
+        teamId: p.teamId,
+        inboxId: row.id,
+        actor: p.actor,
+        action: p.reason === "expired" ? "inbox.expired" : "inbox.deleted",
+      });
+    }
+    return rows;
+  });
+  await hooks.flush();
+  // Bulk and API deletions stay out of audit_log, which is never purged.
+  if (p.reason === "deleted" && p.actor.kind === "user") {
+    for (const row of deleted) {
+      await recordAudit(db, {
+        teamId: p.teamId,
+        actor: { userId: p.actor.userId },
+        action: "inbox.deleted",
+        target: { type: "inbox", id: row.id },
+        metadata: { email_address: row.emailAddress },
+      });
+    }
+  }
+  return deleted.length;
 }
 
-export async function expireInboxes(_db: Db, _deps: InboxDeps, _now: Date): Promise<number> {
-  throw new Error("INBOX_CONTRACT_STUB");
+/** The hourly sweep: inboxes past expires_at go, each announced as expired then deleted. */
+export async function expireInboxes(db: Db, deps: InboxDeps, now: Date): Promise<number> {
+  const i = schema.inboxes;
+  // ponytail: one batch per run; a larger backlog clears over the next hourly runs,
+  // and expired inboxes already read as gone everywhere.
+  const due = await db
+    .select({ id: i.id, teamId: i.teamId })
+    .from(i)
+    .where(lte(i.expiresAt, now))
+    .orderBy(asc(i.expiresAt))
+    .limit(EXPIRE_BATCH);
+  const byTeam = new Map<string, string[]>();
+  for (const row of due) byTeam.set(row.teamId, [...(byTeam.get(row.teamId) ?? []), row.id]);
+  let n = 0;
+  for (const [teamId, inboxIds] of byTeam) {
+    n += await deleteInboxes(db, deps, {
+      teamId,
+      inboxIds,
+      actor: { kind: "system" },
+      reason: "expired",
+    });
+  }
+  return n;
 }
 
 export async function getInboxSafety(
-  _db: Db,
-  _p: { teamId: string; inboxId: string },
+  db: Db,
+  p: { teamId: string; inboxId: string },
 ): Promise<InboxSafety | null> {
-  throw new Error("INBOX_CONTRACT_STUB");
+  return (await findLiveInbox(db, p.teamId, p.inboxId))?.safety ?? null;
 }
 
 export async function updateInboxSafety(
-  _db: Db,
-  _deps: InboxDeps,
-  _p: { teamId: string; inboxId: string; actor: InboxActor; patch: Partial<InboxSafety> },
+  db: Db,
+  deps: InboxDeps,
+  p: { teamId: string; inboxId: string; actor: InboxActor; patch: Partial<InboxSafety> },
 ): Promise<{ ok: true; safety: InboxSafety } | { ok: false; error: InboxError }> {
-  throw new Error("INBOX_CONTRACT_STUB");
+  const now = new Date();
+  const inbox = await findLiveInbox(db, p.teamId, p.inboxId, now);
+  if (!inbox) return fail(INBOX_NOT_FOUND);
+  const patch = setKeys(p.patch);
+  const safety = await checkedSafety(db, {
+    teamId: p.teamId,
+    kind: inbox.kind,
+    shared: inbox.domainId === null,
+    safety: { ...inbox.safety, ...patch },
+    now,
+  });
+  if (isInboxError(safety)) return fail(safety);
+  const i = schema.inboxes;
+  const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
+  await db.transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    const [row] = await t
+      .update(i)
+      .set({ safety, updatedAt: now })
+      .where(eq(i.id, inbox.id))
+      .returning();
+    if (!row) throw new Error("inbox safety update returned no row");
+    await recordInboxActivity(t, {
+      teamId: p.teamId,
+      inboxId: row.id,
+      actor: p.actor,
+      action: "inbox.safety_updated",
+    });
+    await hooks.emit(t, p.teamId, [
+      inboxEvent("inbox.updated", { source: webhookSource(p.actor), inbox: await wireOf(t, row) }),
+    ]);
+  });
+  await hooks.flush();
+  const audit = auditActorOf(p.actor);
+  await recordAudit(db, {
+    teamId: p.teamId,
+    actor: audit.actor,
+    action: "inbox.safety_updated",
+    target: { type: "inbox", id: inbox.id },
+    metadata: { ...audit.metadata, fields: Object.keys(patch) },
+  });
+  return { ok: true, safety };
 }
