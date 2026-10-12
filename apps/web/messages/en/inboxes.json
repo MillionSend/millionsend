@@ -148,7 +148,13 @@
     "private_code": "it contains a code or sign-in link this inbox received",
     "loop_guard": "a reply to an automatic message",
     "loop_burst": "too many automatic replies to this address",
-    "reply_to_redirect": "the Reply-To points somewhere else"
+    "reply_to_redirect": "the Reply-To points somewhere else",
+    "inbox_send_policy": "the inbox's rules refused it",
+    "inbox_send_cap_reached": "the inbox's daily send limit was reached",
+    "restricted_api_key": "a key restricted to another inbox",
+    "shared_domain": "shared-domain addresses only reply in their threads",
+    "approved": "sent by a person or a full-access key",
+    "trust_sender": "the sender went on the allowlist"
   },
   "review": {
     "drafts": "Drafts to approve",

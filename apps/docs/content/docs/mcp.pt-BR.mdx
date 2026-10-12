@@ -161,8 +161,8 @@ retém na quarentena ou ainda está analisando, e o texto das mensagens vem
 marcado como não confiável (veja
 [Resultados das ferramentas](#resultados-das-ferramentas)). Ele não aprova
 rascunhos nem muda as configurações de segurança de uma caixa; o
-`create_inbox` aceita o `accept_from` e nenhuma outra configuração de
-segurança.
+`create_inbox` só cria caixas de agente e aceita o `accept_from` e nenhuma
+outra configuração de segurança.
 
 | Ferramenta | Permissão | Descrição |
 | --- | --- | --- |
@@ -173,7 +173,7 @@ segurança.
 | `get_received_email` | `receiving:read` | Busca um e-mail recebido. O `format` escolhe o conteúdo: `extracted` (o padrão: remetente, confiança, análise e o texto limpo da resposta), `text`, `html` ou `raw` (só um link de download). Com `html`, o `html_format` é `cid` por padrão, para as imagens inline não incharem o resultado. |
 | `list_received_email_attachments` | `receiving:read` | Lista os anexos de um e-mail recebido com os links de download. |
 | `get_received_email_attachment` | `receiving:read` | Busca um anexo de um e-mail recebido com o link de download. |
-| `wait_for_received_email` | `receiving:read` | Espera até 50 segundos (45 por padrão) por um e-mail novo para uma caixa ou um endereço, opcionalmente de um remetente ou com um assunto. Responde `received` com o e-mail, `timeout`, ou `quarantined` com o id e o motivo quando um e-mail que bateu ficou retido. |
+| `wait_for_received_email` | `receiving:read` | Espera até 50 segundos (45 por padrão) por um e-mail novo para uma caixa ou um endereço, opcionalmente de um remetente ou com um assunto. Responde `received` com o e-mail, `timeout`, ou `quarantined` com o id e o motivo da quarentena quando um e-mail que bateu ficou retido. |
 | `get_verification_code` | `receiving:read` | O código de verificação ou o link de acesso de um e-mail, ou o mais recente que uma caixa recebeu, opcionalmente de um remetente e esperando até 50 segundos. |
 | `list_inboxes` | `receiving:read` | Lista as [caixas de entrada](/pt-BR/concepts/inboxes), opcionalmente de um tipo. |
 | `get_inbox` | `receiving:read` | Busca uma caixa pelo id ou pelo endereço. |
@@ -245,8 +245,8 @@ segurança.
 | `reply_to_received_email` | `receiving:reply` | Responde a um e-mail recebido pela caixa dele. Devolve `sent` com o e-mail e a conversa, ou `draft` com os motivos quando as regras da caixa seguram a resposta para uma pessoa. |
 | `forward_received_email` | `receiving:reply` | Encaminha um e-mail recebido, citado no corpo ou anexado como `.eml`; com os mesmos resultados de `reply_to_received_email`. |
 | `update_thread` | `receiving:reply` | Marca uma conversa como lida ou não lida, muda de pasta ou coloca uma etiqueta. |
-| `create_inbox` | `receiving:manage` | Cria uma caixa, de agente a não ser que o `kind` diga outra coisa; o `accept_from` é a única configuração de segurança que ela aceita. |
-| `update_inbox` | `receiving:manage` | Muda o nome, o nome de remetente ou a validade de uma caixa. |
+| `create_inbox` | `receiving:manage` | Cria uma caixa de agente (as caixas de pessoas são criadas no painel); o `accept_from` é a única configuração de segurança que ela aceita. |
+| `update_inbox` | `receiving:manage` | Muda o nome, o nome de remetente ou a validade de uma caixa; fazer ela vencer antes exige o papel de responsável ou de admin. |
 | `delete_inbox` | `receiving:manage` | **admin** Exclui uma caixa com as conversas e os rascunhos dela; as chaves de API dela são revogadas. |
 | `release_email` | `receiving:manage` | Libera um e-mail da quarentena para a caixa; `trust_sender` também coloca o remetente na lista de permitidos. |
 
@@ -287,6 +287,8 @@ Hi! Your order shipped today.
 Uma linha de marcação escrita dentro da mensagem é alterada antes,
 então uma mensagem não consegue encerrar a própria marcação. Antes disso, o texto
 perde tudo o que uma pessoa não veria (veja
-[Segurança de agentes](/pt-BR/concepts/agent-safety#texto-oculto-e-extracted_text)).
+[Segurança de agentes](/pt-BR/concepts/agent-safety#texto-oculto-e-extracted_text)),
+menos o que o `get_received_email` devolve com `format: "html"` ou
+`format: "text"`: essas são as partes da própria mensagem, como foram enviadas.
 Uma espera que termina sem e-mail responde `timeout`, e uma busca de código
 sem nada para achar, `none`: resultados normais, não erros.

@@ -154,8 +154,8 @@ receives mail.
 An MCP client reads mail the way an agent does: it never sees mail an inbox
 holds in quarantine or is still screening, and message text comes fenced as
 untrusted (see [Tool results](#tool-results)). It can't approve drafts or
-change an inbox's safety settings; `create_inbox` takes `accept_from` and no
-other safety setting.
+change an inbox's safety settings; `create_inbox` makes agent inboxes only and
+takes `accept_from` and no other safety setting.
 
 | Tool | Permission | Description |
 | --- | --- | --- |
@@ -166,7 +166,7 @@ other safety setting.
 | `get_received_email` | `receiving:read` | Get one received email. `format` picks the content: `extracted` (the default: sender, trust, screening and the cleaned reply text), `text`, `html` or `raw` (a download link only). With `html`, `html_format` defaults to `cid`, keeping inline images out of the result. |
 | `list_received_email_attachments` | `receiving:read` | List a received email's attachments with their download links. |
 | `get_received_email_attachment` | `receiving:read` | Get one attachment of a received email with its download link. |
-| `wait_for_received_email` | `receiving:read` | Wait up to 50 seconds (45 by default) for a new email to an inbox or address, optionally from a sender or with a subject. Answers `received` with the email, `timeout`, or `quarantined` with the id and reason when a match was held. |
+| `wait_for_received_email` | `receiving:read` | Wait up to 50 seconds (45 by default) for a new email to an inbox or address, optionally from a sender or with a subject. Answers `received` with the email, `timeout`, or `quarantined` with the id and the quarantine reason when a match was held. |
 | `get_verification_code` | `receiving:read` | The verification code or sign-in link of one email, or the newest one an inbox received, optionally from a sender and waiting up to 50 seconds. |
 | `list_inboxes` | `receiving:read` | List [inboxes](/concepts/inboxes), optionally one kind. |
 | `get_inbox` | `receiving:read` | Get an inbox by id or address. |
@@ -238,8 +238,8 @@ other safety setting.
 | `reply_to_received_email` | `receiving:reply` | Reply to a received email from its inbox. Answers `sent` with the email and thread, or `draft` with the reasons when the inbox's rules hold the reply for a person. |
 | `forward_received_email` | `receiving:reply` | Forward a received email, quoted inline or attached as `.eml`; same answers as the reply. |
 | `update_thread` | `receiving:reply` | Mark a thread read or unread, move it to a folder, or add a label. |
-| `create_inbox` | `receiving:manage` | Create an inbox, an agent's unless `kind` says otherwise; `accept_from` is the only safety setting it takes. |
-| `update_inbox` | `receiving:manage` | Change an inbox's name, from name or expiry. |
+| `create_inbox` | `receiving:manage` | Create an agent inbox (people's inboxes are made in the dashboard); `accept_from` is the only safety setting it takes. |
+| `update_inbox` | `receiving:manage` | Change an inbox's name, from name or expiry; making it expire sooner takes the owner or admin role. |
 | `delete_inbox` | `receiving:manage` | **admin** Delete an inbox with its threads and drafts; its API keys are revoked. |
 | `release_email` | `receiving:manage` | Release a quarantined email into its inbox; `trust_sender` also adds the sender to the allowlist. |
 
@@ -280,6 +280,8 @@ Hi! Your order shipped today.
 A marker line written inside the message is altered before fencing, so a
 message can't close its own fence. The text is cleaned of anything a person
 couldn't see first (see
-[Agent safety](/concepts/agent-safety#hidden-text-and-extracted_text)). A
+[Agent safety](/concepts/agent-safety#hidden-text-and-extracted_text)),
+except what `get_received_email` returns with `format: "html"` or
+`format: "text"`: those are the message's own parts, as sent. A
 wait that ends without mail answers `timeout`, and a code lookup with
 nothing to find `none`: normal results, not errors.

@@ -212,10 +212,12 @@ aparecem. Antes de qualquer texto chegar a um agente ou a um modelo, o
 MillionSend remove:
 
 - elementos ocultos: `display:none`, `visibility:hidden`, opacidade quase
-  zero, fontes menores que 3 px, caixas espremidas até sumir, conteúdo
-  empurrado para fora da tela ou recortado, texto da cor do fundo, o atributo
-  `hidden`, comentários (inclusive os condicionais do Outlook), `<template>` e
-  `<noscript>`;
+  zero, fontes menores que 3 px, caixas espremidas, reduzidas ou com zoom até
+  sumir, conteúdo empurrado para fora da tela ou recortado, texto da cor do
+  fundo (inclusive com `-webkit-text-fill-color`), o atributo `hidden`,
+  comentários (inclusive os condicionais do Outlook), `<template>`,
+  `<noscript>`, o conteúdo alternativo dentro de `<object>` e o corpo de um
+  `<details>` fechado;
 - caracteres invisíveis: espaços e junções de largura zero, controles de
   direção do texto, caracteres de tag Unicode e seletores de variação soltos.
   Os emojis mantêm as junções e os seletores de que precisam.
@@ -282,10 +284,15 @@ atividade da caixa.
 
 **Códigos privados.** Com o `private_codes` ligado (o padrão dos agentes),
 um código, link ou token que a equipe recebeu nas últimas 24 horas não sai
-num envio para ninguém além dos responsáveis e da lista de permitidos: esse
-envio vira um rascunho com o motivo `private_code`. Isso vale mesmo quando o
-agente foi convencido a enviar. A checagem compara hashes com chave, então
-nenhuma cópia do código fica guardada fora da mensagem criptografada.
+do endereço da caixa num envio para ninguém além dos responsáveis e da lista
+de permitidos: esse envio vira um rascunho com o motivo `private_code`. Isso
+vale mesmo quando o agente foi convencido a enviar, e pega um código
+espalhado para escapar da checagem (espaços entre os dígitos, tags,
+caracteres invisíveis ou de largura total). A checagem cobre os envios do
+endereço da caixa: um agente que também tem `emails:send` (MCP) consegue
+enviar dos seus outros endereços, então dê aos agentes chaves restritas à
+caixa, ou deixe esse escopo de fora. A checagem compara hashes com chave,
+então nenhuma cópia do código fica guardada fora da mensagem criptografada.
 
 ## O que o agente pode enviar
 
@@ -299,9 +306,11 @@ ferramenta MCP `send_email`. Na ordem:
    caixa (`403 restricted_api_key`; `550 5.7.1` pelo SMTP).
 2. **Domínio compartilhado.** Um
    [endereço compartilhado](/pt-BR/concepts/inboxes#domínio-compartilhado) só
-   responde dentro das próprias conversas, para quem está nelas, para os
-   responsáveis e para a lista de permitidos. Qualquer outra coisa é recusada
-   com `403 inbox_send_policy`, mesmo aprovada.
+   responde dentro das próprias conversas, para quem está nelas e teve o
+   endereço confirmado pelo próprio domínio e para os endereços de login da
+   equipe (os `owner_addresses`, a lista de permitidos e um `Reply-To` de
+   outra organização não contam lá). Qualquer outra coisa é recusada com
+   `403 inbox_send_policy`, mesmo aprovada.
 3. **Limite diário.** `send_cap` destinatários por dia UTC. Acima disso,
    `429 inbox_send_cap_reached`, com o `retry-after` contando até a
    meia-noite UTC. Envios aprovados contam, mas nunca são barrados.
@@ -342,9 +351,11 @@ retém como rascunho, com um motivo:
 
 Um destinatário é **responsável**, está na **lista de permitidos**, está na
 **conversa** (escreveu uma mensagem entregue nela, ou é o `Reply-To`
-confiável de uma), é **conhecido** (a caixa já escreveu para ele ou recebeu
-dele) ou é **novo**. Os destinatários em Cco contam como os outros, e
-endereços `nome+tag@` contam como foram escritos.
+confiável de uma), é **conhecido** (a caixa já escreveu para ele, ou recebeu
+dele um e-mail que o domínio dele confirmou) ou é **novo**. Os destinatários
+em Cco contam como os outros, e endereços `nome+tag@` contam como foram
+escritos. Um envio da forma `nome+tag@` do endereço de uma caixa passa
+pelas regras dessa caixa, assim como os e-mails para ela caem nessa caixa.
 
 Uma caixa `human` só passa pelos três primeiros passos: pessoas respondendo
 pelo painel não ficam retidas. No `POST /emails`, no envio em lote, no relay

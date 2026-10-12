@@ -341,11 +341,13 @@ curl "https://api.millionsend.com/emails/receiving?inbox_id=7eeb9517-aed7-40d7-a
   or newer than `since`. With neither, the last 60 seconds count, so a
   message that landed just before the call isn't missed.
 - The answer adds `held`: matching messages held since then, as
-  `{ id, inbox_id, reason, created_at }` and nothing more, so an agent knows
-  to stop waiting and tell a person.
+  `{ id, inbox_id, reason, quarantine_reason, created_at }` and nothing more,
+  so an agent knows to stop waiting and tell a person. For an inbox-scoped key
+  or an MCP client, `subject_contains` doesn't filter `held`: held mail is
+  never matched on what it says.
 - A timeout answers `200` with `{ "object": "list", "has_more": false, "data": [], "held": [] }`.
-- One team holds 20 waits at once on each API process; one more answers
-  `429 too_many_waits` with `retry-after: 1`.
+- One team holds 20 waits at once on each API process, and all teams 200;
+  one more answers `429 too_many_waits` with `retry-after: 1`.
 
 50 seconds stays under the 60-second limits of MCP clients and of common
 proxies, such as nginx's default `proxy_read_timeout`.
@@ -648,7 +650,8 @@ copy until the delivery log's own retention.
 endpoints subscribed to it or to all events, as soon as the message is
 visible: at once for a catch-all address, and on delivery for an inbox. Mail
 an inbox holds, in quarantine or while it is screened, and infected mail
-fire it only once delivered or released. Like Resend's, it carries metadata
+fire it only once delivered or released, even when a copy also went to a
+catch-all address. Like Resend's, it carries metadata
 only: fetch the content with `GET /emails/receiving/{email_id}`. When a
 later delivery of the same message reaches more of your addresses, one more
 `email.received` arrives for the same `email_id`, and its `received_for`

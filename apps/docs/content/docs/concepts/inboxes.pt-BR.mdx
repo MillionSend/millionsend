@@ -98,7 +98,7 @@ são do MillionSend.
 | --- | --- |
 | `email_address` | Um endereço de um domínio verificado da sua equipe que recebe aqui (veja [Endereços](#endereços)). Ele é guardado sem espaços nas pontas e em minúsculas; a parte antes do `@` aceita até 64 letras, dígitos e `. _ % + -`, sem ponto nas pontas e sem `..`. Não muda depois. Deixe de fora para ganhar um endereço aleatório no [domínio compartilhado](#domínio-compartilhado). |
 | `name` | De 1 a 64 caracteres; o próprio endereço quando fica de fora. |
-| `from_name` | O nome de exibição dos e-mails que a caixa envia, com até 78 caracteres, sem `:`, `<`, `>` nem quebras de linha. |
+| `from_name` | O nome de exibição dos e-mails que a caixa envia, com até 78 caracteres: um nome simples, sem `@`, `:`, `<`, `>`, quebras de linha, links nem números de telefone. |
 | `kind` | `agent` (o padrão) ou `human`. |
 | `expires_in` | Quando a caixa [expira](#validade), como `1h`, `24h` ou `7d`. |
 | `safety` | Qualquer uma das [configurações de segurança](#configurações-de-segurança); as outras ficam com os padrões do tipo. |
@@ -176,11 +176,14 @@ cadastrar num serviço e ler o código de confirmação:
 
 - Eles expiram: depois de 24 horas, a não ser que o `expires_in` diga outra
   coisa, e em no máximo 30 dias; "nunca" não existe aqui.
-- Eles só respondem dentro das próprias conversas, para quem escreveu para
-  eles, para os endereços de responsáveis e para a lista de permitidos.
-  Começar uma conversa responde `403 inbox_send_policy`, com ou sem
-  aprovação: use o seu domínio para isso. O `send_policy` fica em
-  `reply_only`.
+- Eles só respondem dentro das próprias conversas, para remetentes cujo
+  domínio confirmou o endereço e para os endereços de login das pessoas da
+  equipe. Os endereços de responsáveis, a lista de permitidos e um `Reply-To`
+  de outra organização não contam aqui, e o `forward_to` só aceita endereços
+  de login da equipe: o domínio compartilhado é de todas as equipes, então ele
+  nunca escreve para um endereço que ninguém comprovou. Começar uma conversa responde
+  `403 inbox_send_policy`, com ou sem aprovação: use o seu domínio para isso.
+  O `send_policy` fica em `reply_only`.
 - Eles enviam para no máximo 50 destinatários por dia (`send_cap` de 1 a
   50).
 - Eles só enviam pelos endpoints das caixas: `POST /emails` a partir de um
@@ -208,9 +211,13 @@ partir daquele momento, e `null` tira a validade de uma caixa no seu domínio.
 O `expires_at` mostra quando ela termina.
 
 No `expires_at`, a caixa para: e-mails para ela são recusados (`550 5.1.1`)
-e as leituras respondem `404 Inbox not found.`. Em até uma hora ela é
-excluída como num `DELETE`, com um webhook `inbox.expired` seguido de
-`inbox.deleted`, e as chaves de API dela são revogadas.
+ou, num domínio com pega-tudo ligado, ficam em Todos os recebidos como os de
+qualquer outro endereço; as leituras respondem `404 Inbox not found.` e as
+chaves de API dela param de funcionar. Em até uma hora ela é excluída como
+num `DELETE`, com um webhook `inbox.expired` seguido de `inbox.deleted`, e as
+chaves de API dela são revogadas. Fazer uma caixa vencer antes do previsto
+exige o papel de responsável ou de admin, como excluí-la; qualquer membro
+pode estender a validade.
 
 ## Conversas
 
@@ -510,7 +517,12 @@ curl -X POST "https://api.millionsend.com/api-keys" \
 - Todo o resto responde `403 restricted_api_key`: ela não muda as
   configurações de segurança, não lista nem libera a quarentena, não aprova
   rascunhos, não cria chaves e não alcança nenhuma outra caixa.
-- Excluir a caixa revoga as chaves dela.
+- Ela para de funcionar quando a caixa vence, e excluir a caixa a revoga.
+
+Uma chave restrita a um domínio (`domain_id`) só alcança as caixas desse
+domínio, como só lê os e-mails recebidos nele: as outras, inclusive as do
+domínio compartilhado, aparecem como não encontradas, e ela só cria caixas no
+próprio domínio.
 
 No painel, donos e admins escolhem a caixa em **Restringir a uma caixa de
 entrada** ao criar uma chave.
@@ -623,6 +635,8 @@ Onde o Resend deixa espaço, ou o MillionSend é diferente:
   `api`, `dashboard` ou `system`, nunca `agent`.
 - As cores das etiquetas são só hexadecimais, como no pré-lançamento mais
   recente do Resend.
+- O `from_name` mantém os 78 caracteres do Resend, mas só aceita um nome
+  simples: sem `@`, links nem números de telefone, que respondem `422`.
 - Os eventos de webhook `inbox.*` são opcionais (só vão para quem os
   escolhe); `inbox.expired` e `inbox.email.quarantined` são do MillionSend, e
   `inbox.thread.assigned` e `inbox.thread.unassigned` não são enviados.

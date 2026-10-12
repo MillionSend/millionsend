@@ -278,7 +278,9 @@ const { data: code } = await ms.inboxes.codes.latest("7eeb9517-aed7-40d7-ad65-50
 ```
 
 - Responder, encaminhar e enviar rascunhos aceitam uma chave de
-  idempotência, e o SDK manda uma por você.
+  idempotência (no Node `{ idempotencyKey }`, no Go `WithIdempotencyKey`, e o
+  equivalente de cada linguagem). Passe uma para poder repetir a chamada sem
+  risco: o SDK não manda nenhuma por conta própria.
 - Uma resposta ou um encaminhamento que as regras da caixa retêm devolve um
   rascunho em vez do e-mail enviado, e os SDKs dizem qual dos dois veio: no
   Node o resultado traz `kind: "sent"` ou `kind: "draft"`, e cada linguagem

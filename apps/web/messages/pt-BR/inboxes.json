@@ -148,7 +148,13 @@
     "private_code": "contém um código ou link de acesso que esta caixa recebeu",
     "loop_guard": "resposta a uma mensagem automática",
     "loop_burst": "respostas automáticas demais para este endereço",
-    "reply_to_redirect": "o Reply-To aponta para outro lugar"
+    "reply_to_redirect": "o Reply-To aponta para outro lugar",
+    "inbox_send_policy": "as regras da caixa recusaram",
+    "inbox_send_cap_reached": "a caixa atingiu o limite diário de envios",
+    "restricted_api_key": "chave restrita a outra caixa",
+    "shared_domain": "endereços do domínio compartilhado só respondem nas próprias conversas",
+    "approved": "enviado por uma pessoa ou por uma chave de acesso total",
+    "trust_sender": "o remetente entrou na lista de permitidos"
   },
   "review": {
     "drafts": "Rascunhos para aprovar",

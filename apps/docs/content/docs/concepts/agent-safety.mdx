@@ -198,10 +198,11 @@ white on white, a `display:none` block, characters that render as nothing.
 Before any text reaches an agent or a model, MillionSend removes:
 
 - hidden elements: `display:none`, `visibility:hidden`, near-zero opacity,
-  fonts under 3 px, boxes squeezed to nothing, content pushed off screen or
-  clipped away, text the color of its background, the `hidden` attribute,
-  comments (Outlook's conditional ones included), `<template>` and
-  `<noscript>`;
+  fonts under 3 px, boxes squeezed, scaled or zoomed to nothing, content
+  pushed off screen or clipped away, text the color of its background
+  (`-webkit-text-fill-color` included), the `hidden` attribute, comments
+  (Outlook's conditional ones included), `<template>`, `<noscript>`, the
+  fallback inside `<object>` and the body of a closed `<details>`;
 - invisible characters: zero-width spaces and joiners, text-direction
   controls, Unicode tag characters and stray variation selectors. Emoji keep
   the joiners and selectors they need.
@@ -262,11 +263,15 @@ mail, from a `failed` sender, or when the inbox's `extract_codes` is off, and
 every read is recorded in the inbox's activity.
 
 **Private codes.** With `private_codes` on (the agent default), a code, link
-or token the team received in the last 24 hours can't leave in a send to
-anyone but owners and the allowlist: such a send becomes a draft with reason
-`private_code`. This holds even when the agent was talked into it. The check
-compares keyed hashes, so no copy of the code is kept outside the encrypted
-message.
+or token the team received in the last 24 hours can't leave the inbox's
+address in a send to anyone but owners and the allowlist: such a send becomes
+a draft with reason `private_code`. This holds even when the agent was talked
+into it, and catches a code spread out to slip past it (spaces between its
+digits, tags, invisible or full-width characters). It covers sends from the
+inbox's address: an agent that also holds `emails:send` (MCP) can send from
+your other addresses, so give agents inbox-scoped keys, or leave that scope
+out. The check compares keyed hashes, so no copy of the code is kept outside
+the encrypted message.
 
 ## What an agent may send
 
@@ -278,9 +283,11 @@ the SMTP relay and the MCP tool `send_email`. In order:
 1. **Identity.** An inbox-scoped key sends only from its inbox's address
    (`403 restricted_api_key`; `550 5.7.1` over SMTP).
 2. **Shared domain.** A [shared address](/concepts/inboxes#shared-domain)
-   only replies inside its threads, to the people in them, owners and the
-   allowlist. Anything else is refused with `403 inbox_send_policy`, even
-   approved.
+   only replies inside its threads, to the people in them whose domain
+   vouched for them and to your team members' sign-in addresses
+   (`owner_addresses`, the allowlist and a `Reply-To` at another organization
+   don't count there). Anything else is refused with
+   `403 inbox_send_policy`, even approved.
 3. **Daily cap.** `send_cap` recipients per UTC day. Past it,
    `429 inbox_send_cap_reached`, with `retry-after` counting to midnight UTC.
    Approved sends count but are never refused.
@@ -320,8 +327,10 @@ a draft instead, with a reason:
 
 A recipient is an **owner**, **allowlisted**, in the **thread** (it wrote a
 delivered message there, or is a trusted `Reply-To` of one), **known** (the
-inbox wrote to it or heard from it before) or **new**. Bcc recipients count
-like the rest, and `name+tag@` addresses count as written.
+inbox wrote to it, or heard from it in mail whose domain vouched for it) or
+**new**. Bcc recipients count like the rest, and `name+tag@` addresses count
+as written. A send from the `name+tag@` form of an inbox's address runs
+that inbox's rules, as mail to it lands in that inbox.
 
 A `human` inbox runs only the first three steps: people replying in the
 dashboard aren't held. On `POST /emails`, the batch endpoint, the SMTP relay

@@ -191,6 +191,12 @@ describe("inbox screens", () => {
     expect(approvalReasonWords(t, ["loop_guard:auto_submitted", "ramp", "unknown_reason"])).toBe(
       "a reply to an automatic message · too many new recipients today · unknown_reason",
     );
+    // What activity rows record: refusals, sends and quarantines.
+    expect(
+      approvalReasonWords(t, ["inbox_send_cap_reached", "restricted_api_key", "not_allowlisted"]),
+    ).toBe(
+      "the inbox's daily send limit was reached · a key restricted to another inbox · not on the allowlist",
+    );
   });
 
   it("offers a shared address only replies, within its 50 sends a day", () => {

@@ -55,7 +55,9 @@ export function approvalReasonWords(
   return reasons
     .map((reason) => {
       const key = reason.split(":")[0] ?? reason;
-      return t.has(`reason.${key}`) ? t(`reason.${key}`) : reason;
+      if (t.has(`reason.${key}`)) return t(`reason.${key}`);
+      // Quarantine reasons, which activity rows name too.
+      return t.has(`qr.${key}`) ? t(`qr.${key}`) : reason;
     })
     .join(" · ");
 }

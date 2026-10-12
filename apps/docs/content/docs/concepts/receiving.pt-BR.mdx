@@ -360,12 +360,16 @@ curl "https://api.millionsend.com/emails/receiving?inbox_id=7eeb9517-aed7-40d7-a
   contam os últimos 60 segundos, então uma mensagem que chegou logo antes da
   chamada não se perde.
 - A resposta traz também `held`: as mensagens que bateram e ficaram retidas
-  desde então, como `{ id, inbox_id, reason, created_at }` e nada mais, para
-  o agente saber que deve parar de esperar e avisar uma pessoa.
+  desde então, como `{ id, inbox_id, reason, quarantine_reason, created_at }`
+  e nada mais, para o agente saber que deve parar de esperar e avisar uma
+  pessoa. Para uma chave restrita a uma caixa ou um cliente MCP, o
+  `subject_contains` não filtra o `held`: um e-mail retido nunca é comparado
+  pelo que ele diz.
 - Quando o prazo acaba, a resposta é `200` com
   `{ "object": "list", "has_more": false, "data": [], "held": [] }`.
-- Uma equipe segura 20 esperas ao mesmo tempo em cada processo da API; mais
-  uma responde `429 too_many_waits` com `retry-after: 1`.
+- Uma equipe segura 20 esperas ao mesmo tempo em cada processo da API, e
+  todas as equipes juntas, 200; mais uma responde `429 too_many_waits` com
+  `retry-after: 1`.
 
 50 segundos fica abaixo dos limites de 60 segundos dos clientes MCP e de
 proxies comuns, como o `proxy_read_timeout` padrão do nginx.
@@ -678,7 +682,8 @@ com metadados até a retenção do próprio log de entregas.
 equipe, nos endpoints inscritos nele ou em todos os eventos, assim que a
 mensagem fica visível: na hora para um endereço do pega-tudo, e na entrega
 para uma caixa. O e-mail que uma caixa retém, na quarentena ou durante a
-análise, e o e-mail infectado só disparam depois de entregues ou liberados.
+análise, e o e-mail infectado só disparam depois de entregues ou liberados,
+mesmo quando uma cópia também foi para um endereço do pega-tudo.
 Como o do Resend, ele só traz metadados: busque o conteúdo com
 `GET /emails/receiving/{email_id}`. Quando uma entrega posterior da mesma
 mensagem chega a mais endereços seus, chega mais um `email.received` com o

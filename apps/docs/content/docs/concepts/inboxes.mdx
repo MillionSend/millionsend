@@ -92,7 +92,7 @@ person. The last five fields are MillionSend's.
 | --- | --- |
 | `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for a random address on the [shared domain](#shared-domain). |
 | `name` | 1–64 characters; the address when left out. |
-| `from_name` | The display name of the mail the inbox sends, up to 78 characters, without `:`, `<`, `>` or line breaks. |
+| `from_name` | The display name of the mail the inbox sends, up to 78 characters: a plain name, without `@`, `:`, `<`, `>`, line breaks, links or phone numbers. |
 | `kind` | `agent` (the default) or `human`. |
 | `expires_in` | When the inbox [expires](#expiry), such as `1h`, `24h` or `7d`. |
 | `safety` | Any of the [safety settings](#safety-settings); the rest take the kind's defaults. |
@@ -168,8 +168,11 @@ service and reading the confirmation code:
 
 - They expire: after 24 hours unless `expires_in` says otherwise, 30 days at
   most, never "never".
-- They only reply, inside their own threads, to whoever wrote to them, to
-  owner addresses and to the allowlist. Starting a conversation answers
+- They only reply, inside their own threads, to senders whose domain vouched
+  for them and to your team members' sign-in addresses. Owner addresses, the
+  allowlist and a `Reply-To` at another organization don't count here, and
+  `forward_to` takes members' sign-in addresses only: the shared domain is
+  every team's, so it never writes to an address nobody proved. Starting a conversation answers
   `403 inbox_send_policy`, approved or not: use your own domain for that.
   `send_policy` stays `reply_only`.
 - They send to 50 recipients a day at most (`send_cap` from 1 to 50).
@@ -197,10 +200,13 @@ to `30d` on the shared domain. A `PATCH` with a new `expires_in` counts from
 that moment, and `null` removes the expiry of an inbox on your own domain.
 `expires_at` shows when it ends.
 
-At `expires_at` the inbox stops: mail to it is refused (`550 5.1.1`), and
-reads answer `404 Inbox not found.`. Within the hour it is deleted as a
-`DELETE` would, with an `inbox.expired` webhook followed by `inbox.deleted`,
-and its API keys are revoked.
+At `expires_at` the inbox stops: mail to it is refused (`550 5.1.1`), or, on
+a domain with catch-all on, kept in All received like mail to any other
+address; reads answer `404 Inbox not found.` and its API keys stop working.
+Within the hour it is deleted as a `DELETE` would, with an `inbox.expired`
+webhook followed by `inbox.deleted`, and its API keys are revoked. Making an
+inbox expire sooner than it would takes the owner or admin role, as deleting
+it does; any member can extend it.
 
 ## Threads
 
@@ -490,7 +496,12 @@ curl -X POST "https://api.millionsend.com/api-keys" \
 - Everything else answers `403 restricted_api_key`: it can't change safety
   settings, list or release quarantine, approve drafts, create keys or reach
   any other inbox.
-- Deleting the inbox revokes its keys.
+- It stops working when its inbox expires, and deleting the inbox revokes
+  it.
+
+A key scoped to a domain (`domain_id`) reaches only the inboxes on that
+domain, as it reads only mail received there: others, shared-domain inboxes
+included, read as not found, and it creates inboxes on its own domain only.
 
 In the dashboard, owners and admins pick the inbox under **Restrict to an
 inbox** when creating a key.
@@ -596,6 +607,8 @@ leaves room, or MillionSend differs:
   in a new folder, and a webhook's `source` is `api`, `dashboard` or
   `system`, never `agent`.
 - Label colors are hex only, as in Resend's latest preview.
+- `from_name` keeps Resend's 78 characters but takes a plain name only: no
+  `@`, links or phone numbers, which answer `422`.
 - `inbox.*` webhook events are opt-in; `inbox.expired` and
   `inbox.email.quarantined` are MillionSend's own, and
   `inbox.thread.assigned` and `inbox.thread.unassigned` aren't sent.
