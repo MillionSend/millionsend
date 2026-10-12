@@ -2,6 +2,7 @@
 
 import { registrableDomain } from "@millionsend/core/org-domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
@@ -504,6 +505,21 @@ export function DomainDetail({ id }: { id: string }) {
     }),
   );
 
+  const setCatchAll = useMutation(
+    trpc.domains.setCatchAll.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
+      },
+      onError: (error) =>
+        toast(
+          trpcErrorCode(error) === "PRECONDITION_FAILED"
+            ? t("detail.receiving.catchAllPaid")
+            : t("detail.receiving.catchAllError"),
+          "danger",
+        ),
+    }),
+  );
+
   // A verify round-trip can return in well under a human blink; holding the
   // pending state for a floor keeps the Check DNS button's spinner visible so
   // the click registers as an action that ran.
@@ -702,6 +718,19 @@ export function DomainDetail({ id }: { id: string }) {
     if (ok) setReceiving.mutate({ id, enabled });
   }
 
+  async function toggleCatchAll(enabled: boolean) {
+    // Off refuses mail to every address without an inbox, so it asks first.
+    const ok =
+      enabled ||
+      (await confirmDialog({
+        title: t("detail.receiving.catchAllOffTitle"),
+        message: t("detail.receiving.catchAllOffConfirm", { domain: data.name }),
+        confirmLabel: t("detail.receiving.catchAllOffCta"),
+        danger: true,
+      }));
+    if (ok) setCatchAll.mutate({ id, enabled });
+  }
+
   async function copyToClipboard(text: string, key: "instructions" | "prompt") {
     await navigator.clipboard.writeText(text);
     setCopiedKey(key);
@@ -828,6 +857,18 @@ export function DomainDetail({ id }: { id: string }) {
         <MetaItem label={t("detail.region")}>
           <RegionLabel region={data.region} variant="meta" />
         </MetaItem>
+        {receivingOn && data.receivingEnabled ? (
+          <MetaItem label={t("detail.receiving.summaryLabel")}>
+            <Link href="/inboxes" className="ms-link">
+              {t(
+                data.receivingCatchAll
+                  ? "detail.receiving.summaryCatchAll"
+                  : "detail.receiving.summary",
+                { count: data.inboxCount },
+              )}
+            </Link>
+          </MetaItem>
+        ) : null}
       </div>
 
       {checking ? (
@@ -994,6 +1035,41 @@ export function DomainDetail({ id }: { id: string }) {
                         />
                       </span>
                     ),
+                  }}
+                  groupFooters={{
+                    receiving:
+                      receivingOn && data.receivingEnabled ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: 16,
+                            marginTop: 12,
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <span style={{ display: "block", fontSize: "var(--ms-fs-label)" }}>
+                              {t("detail.receiving.catchAll")}
+                            </span>
+                            <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
+                              {data.catchAllAllowed || data.receivingCatchAll
+                                ? t("detail.receiving.catchAllHint")
+                                : t("detail.receiving.catchAllPaid")}
+                            </span>
+                          </div>
+                          <Switch
+                            checked={data.receivingCatchAll}
+                            // A stored on survives a downgrade and can always be turned off.
+                            disabled={
+                              setCatchAll.isPending ||
+                              (!data.receivingCatchAll && !data.catchAllAllowed)
+                            }
+                            onChange={(enabled) => void toggleCatchAll(enabled)}
+                            ariaLabel={t("detail.receiving.catchAll")}
+                          />
+                        </div>
+                      ) : null,
                   }}
                   emptyNotes={{
                     // Cloud has no shared host, so an unconfigured group needs no

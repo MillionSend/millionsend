@@ -63,6 +63,21 @@ function EmailsGlyph({ on, size }: GlyphProps) {
   );
 }
 
+function InboxesGlyph({ on, size }: GlyphProps) {
+  return (
+    <Svg size={size}>
+      {/* The tray dips as if a message just landed in it. */}
+      <motion.polyline
+        points="22 12 16 12 14 15 10 15 8 12 2 12"
+        initial={false}
+        animate={on ? { y: [0, 1.5, 0] } : { y: 0 }}
+        transition={TR}
+      />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </Svg>
+  );
+}
+
 const RADIO_WAVES = [
   { d: "M7.753 16.239a6 6 0 0 1 0-8.478", delay: 0 },
   { d: "M16.247 7.761a6 6 0 0 1 0 8.478", delay: 0 },
@@ -318,6 +333,7 @@ export function PlusGlyph({ size = 14 }: { size?: number }) {
 
 const GLYPHS = {
   emails: EmailsGlyph,
+  inboxes: InboxesGlyph,
   broadcasts: BroadcastsGlyph,
   templates: TemplatesGlyph,
   audience: AudienceGlyph,

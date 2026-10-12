@@ -836,7 +836,8 @@
           "override": "override",
           "broadcast_skeleton": "broadcast skeleton",
           "broadcast_copy": "broadcast copy",
-          "destination": "new destination"
+          "destination": "new destination",
+          "agent_first_contact": "agent first contact"
         },
         "pending": "pending",
         "unjudged": "unjudged · {error}",

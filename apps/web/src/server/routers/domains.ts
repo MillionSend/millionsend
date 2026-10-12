@@ -13,6 +13,7 @@ import {
   clearTrackingClock,
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
+  deleteInboxes,
   failQueuedEmailsForDomain,
   fetchEffectivePlan,
   isIdentitySharedByOtherDomains,
@@ -51,6 +52,7 @@ import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
+import { catchAllAllowed, inboxDeps, liveInbox, userActor } from "../inboxes";
 import { enqueueDomainAge } from "../queue";
 import { assertTeamNotSuspended } from "../suspension-lock";
 import { adminProcedure, router, teamProcedure } from "../trpc";
@@ -231,6 +233,10 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         domainId: domain.id,
         at: new Date(),
       });
+      const [inboxes] = await ctx.db
+        .select({ n: count() })
+        .from(schema.inboxes)
+        .where(and(eq(schema.inboxes.domainId, domain.id), liveInbox(new Date())));
       return {
         sentCount: sent?.n ?? 0,
         // The day's cap while the domain warms up, when the calendar lifts
@@ -251,6 +257,10 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           domain.trackingSubdomain !== null && domain.trackingSubdomainSetAt !== null,
         tlsMode: domain.tlsMode,
         receivingEnabled: domain.receivingEnabled,
+        receivingCatchAll: domain.receivingCatchAll,
+        // A stored true survives a downgrade; only turning it on needs the plan.
+        catchAllAllowed: await catchAllAllowed(ctx.db, ctx.teamId),
+        inboxCount: inboxes?.n ?? 0,
         createdAt: domain.createdAt,
         verifiedAt: domain.verifiedAt,
         lastCheckedAt: domain.lastCheckedAt,
@@ -617,6 +627,46 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
             });
       }),
 
+    /** Mail to addresses without an inbox: stored in All received, or refused at RCPT. */
+    setCatchAll: adminProcedure
+      .input(z.object({ id: z.uuid(), enabled: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        if (!receivingEnabled()) {
+          throw new TRPCError({
+            code: "UNPROCESSABLE_CONTENT",
+            message: "This instance does not receive mail",
+          });
+        }
+        const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
+        if (input.enabled && !domain.receivingCatchAll) {
+          if (!domain.receivingEnabled) {
+            throw new TRPCError({
+              code: "UNPROCESSABLE_CONTENT",
+              message: "Turn on receiving for this domain first",
+            });
+          }
+          // The plan cap's code, as domains.create answers it: FORBIDDEN is the tier's.
+          if (!(await catchAllAllowed(ctx.db, ctx.teamId))) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "Catch-all receiving needs a paid plan",
+            });
+          }
+        }
+        if (domain.receivingCatchAll !== input.enabled) {
+          await ctx.db
+            .update(schema.domains)
+            .set({ receivingCatchAll: input.enabled })
+            .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
+          await recordAudit(ctx, {
+            action: input.enabled ? "domain.catch_all_enabled" : "domain.catch_all_disabled",
+            target: { type: "domain", id: domain.id },
+            metadata: { name: domain.name },
+          });
+        }
+        return { receivingCatchAll: input.enabled };
+      }),
+
     delete: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       // While a suspended team holds a domain, cloud refuses the name to any
       // other team, so the domain cannot move to a fresh team and keep sending.
@@ -643,6 +693,21 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           // An identity already gone from SES must not block removing the row.
           if ((error as { name?: string }).name !== "NotFoundException") throw error;
         }
+      }
+      // The domain's inboxes go first, through the same path as deleting one:
+      // their keys are revoked (api_keys.inbox_id is ON DELETE restrict),
+      // webhook filters drop them and their events fire.
+      const domainInboxes = await ctx.db
+        .select({ id: schema.inboxes.id })
+        .from(schema.inboxes)
+        .where(and(eq(schema.inboxes.teamId, ctx.teamId), eq(schema.inboxes.domainId, domain.id)));
+      if (domainInboxes.length > 0) {
+        await deleteInboxes(ctx.db, inboxDeps(ctx), {
+          teamId: ctx.teamId,
+          inboxIds: domainInboxes.map((inbox) => inbox.id),
+          actor: userActor(ctx),
+          reason: "domain_deleted",
+        });
       }
       await ctx.db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;

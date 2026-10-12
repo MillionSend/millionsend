@@ -1,1 +1,425 @@
-{}
+{
+  "title": "Caixas de entrada",
+  "inbox": "Caixa de entrada",
+  "more": "Mais ações",
+  "retry": "Tentar de novo",
+  "loadMore": "Carregar mais",
+  "pageSize": "{count} itens",
+  "total": "{count, plural, one {# caixa} other {# caixas}}",
+  "loadError": "Não foi possível carregar suas caixas de entrada.",
+  "notFound": "Caixa de entrada não encontrada.",
+  "noSubject": "(sem assunto)",
+  "noSender": "(sem remetente)",
+  "summary": "{kind} · {count} recebidos em 30 dias",
+  "sendEmail": "Enviar e-mail",
+  "search": "Buscar conversas…",
+  "emptyFolder": "Nada nesta pasta.",
+  "threadsError": "Não foi possível carregar as conversas.",
+  "threadError": "Não foi possível carregar esta conversa.",
+  "close": "Fechar",
+  "moveTo": "Mover para…",
+  "addLabel": "Adicionar etiqueta…",
+  "removeLabel": "Remover {label}",
+  "newLabel": "Nova etiqueta…",
+  "newLabelPlaceholder": "Nome da etiqueta",
+  "addLabelSubmit": "Adicionar etiqueta",
+  "messageCount": "{count, plural, one {# mensagem} other {# mensagens}}",
+  "newerMessages": "Mensagens mais novas",
+  "openEmail": "Abrir e-mail",
+  "expired": "Esta caixa expirou. Ela fica aqui, só para leitura, até ser removida, dentro de uma hora.",
+  "delete": "Excluir caixa",
+  "deleteConfirm": "Excluir {address}? As conversas, rascunhos e etiquetas dela vão junto, e as chaves de API dela param de funcionar.",
+  "deleteError": "Não foi possível excluir esta caixa.",
+  "edit": {
+    "title": "Editar caixa",
+    "fromName": "Nome do remetente",
+    "fromNameHint": "O nome que aparece no De dos e-mails que esta caixa envia. Vazio: só o endereço.",
+    "expiresKeep": "Manter como está",
+    "save": "Salvar",
+    "saved": "Caixa salva."
+  },
+  "expiresIn": "expira em {time}",
+  "forwardsTo": "encaminha para {address}",
+  "planUsage": "Plano: {used} de {limit} caixas",
+  "tabs": {
+    "all": "Todas",
+    "agent": "Agente",
+    "human": "Pessoas",
+    "threads": "Conversas",
+    "review": "Precisa de revisão",
+    "safety": "Segurança e regras",
+    "activity": "Atividade"
+  },
+  "type": {
+    "catchAll": "Pega-tudo"
+  },
+  "col": {
+    "inbox": "Caixa",
+    "type": "Tipo",
+    "attention": "Precisa de atenção",
+    "received30d": "Recebidos em 30 dias",
+    "last": "Última mensagem"
+  },
+  "attention": {
+    "drafts": "{count, plural, one {# rascunho para aprovar} other {# rascunhos para aprovar}}",
+    "unread": "{count, plural, one {# não lido} other {# não lidos}}",
+    "quarantined": "{count} em quarentena"
+  },
+  "channel": {
+    "webhook": "webhook",
+    "key": "chave da caixa"
+  },
+  "empty": {
+    "title": "Nenhuma caixa de entrada ainda",
+    "body": "Crie um endereço que recebe e-mails. Agentes leem pela API, por webhooks ou pelo MCP; pessoas leem aqui.",
+    "noReceiving": "Ative o recebimento em um domínio primeiro, ou use o domínio compartilhado."
+  },
+  "limit": {
+    "reached": "Você já usa as {limit} caixas do seu plano. <link>Faça upgrade</link> para criar mais.",
+    "full": "Você chegou ao limite de caixas do seu plano. Faça upgrade para criar mais."
+  },
+  "catchAll": {
+    "row": "Pega-tudo · endereços sem caixa de entrada"
+  },
+  "create": {
+    "title": "Criar caixa de entrada",
+    "address": "Endereço",
+    "addressHint": "Seus domínios com recebimento ativo, ou o domínio compartilhado {domain}, pronto sem DNS.",
+    "random": "Endereço aleatório",
+    "name": "Nome",
+    "namePlaceholder": "Agente de pedidos",
+    "kind": "Quem lê",
+    "agent": "Um agente",
+    "agentHint": "Conversas, API de resposta, extração de códigos e links, proteção contra injeção de prompt e rascunhos que esperam aprovação.",
+    "human": "Pessoas",
+    "humanHint": "Leia e responda pelo painel, encaminhe para outro e-mail e envie para um webhook.",
+    "errors": {
+      "taken": "Esse endereço já está em uso.",
+      "notReceiving": "Ative o recebimento em {domain} primeiro.",
+      "rate": "Muitas caixas criadas na última hora. Tente de novo mais tarde.",
+      "localPart": "Use letras minúsculas, números e . _ % + - (até 64), sem ponto no começo nem no fim."
+    }
+  },
+  "acceptFrom": {
+    "label": "Aceitar e-mails de",
+    "anyone": "Qualquer pessoa",
+    "verified": "Remetentes verificados",
+    "allowlist": "Só a lista de permitidos"
+  },
+  "expires": {
+    "label": "Expira",
+    "never": "Nunca",
+    "1h": "1 hora",
+    "24h": "24 horas",
+    "7d": "7 dias",
+    "30d": "30 dias"
+  },
+  "folder": {
+    "inbox": "Entrada",
+    "archive": "Arquivo",
+    "spam": "Spam",
+    "sent": "Enviados",
+    "trash": "Lixeira"
+  },
+  "badge": {
+    "draft": "Rascunho para aprovar",
+    "replied": "Respondido",
+    "quarantined": "Em quarentena · {reason}",
+    "injection": "injeção {score}"
+  },
+  "message": {
+    "screening": "Em análise…",
+    "quarantined": "Retido em quarentena: o agente só vê depois que alguém liberar.",
+    "hiddenText": "Texto oculto removido"
+  },
+  "draft": {
+    "title": "Rascunho · aguardando aprovação",
+    "created": "criado {time}",
+    "discard": "Descartar",
+    "edit": "Editar",
+    "save": "Salvar rascunho",
+    "approve": "Aprovar e enviar"
+  },
+  "reason": {
+    "approval_required": "o agente pediu revisão de uma pessoa",
+    "require_approval": "toda resposta desta caixa precisa de aprovação",
+    "send_policy": "destinatário novo para as regras de envio desta caixa",
+    "ramp": "muitos destinatários novos hoje",
+    "private_code": "contém um código ou link de acesso que esta caixa recebeu",
+    "loop_guard": "resposta a uma mensagem automática",
+    "loop_burst": "respostas automáticas demais para este endereço",
+    "reply_to_redirect": "o Reply-To aponta para outro lugar"
+  },
+  "review": {
+    "drafts": "Rascunhos para aprovar",
+    "quarantine": "Quarentena",
+    "empty": "Nada para revisar.",
+    "to": "Para",
+    "subject": "Assunto",
+    "reasons": "Por que está esperando",
+    "reason": "Motivo",
+    "scores": "Notas"
+  },
+  "release": "Liberar",
+  "releaseTrust": "Liberar e confiar no remetente",
+  "qr": {
+    "failed_auth": "falhou na autenticação",
+    "unauthenticated_sender": "remetente não verificado",
+    "not_allowlisted": "fora da lista de permitidos",
+    "injection": "injeção de prompt",
+    "phishing": "phishing",
+    "virus": "vírus",
+    "unscreened": "não deu para analisar",
+    "screening_cap": "limite diário de análise atingido"
+  },
+  "trust": {
+    "owner": "Responsável",
+    "allowlisted": "Na lista de permitidos",
+    "known_thread": "Conversa conhecida",
+    "external": "Externo, verificado",
+    "unauthenticated": "Não verificado",
+    "failed": "Falhou na autenticação"
+  },
+  "spam": {
+    "pass": "Não é spam",
+    "gray": "Talvez spam",
+    "fail": "Spam"
+  },
+  "virus": {
+    "pass": "Sem vírus",
+    "fail": "Vírus: {signature}",
+    "processing_failed": "Não verificado (antivírus indisponível)",
+    "none": "Não verificado"
+  },
+  "downloadsBlocked": "Downloads bloqueados: este e-mail tem malware.",
+  "chip": {
+    "code": "código",
+    "link": "link"
+  },
+  "gray": {
+    "dmarcPassNone": "DMARC cinza: a mensagem passou no DMARC, mas o domínio do remetente usa p=none, então os servidores não são orientados a bloquear e-mails que falham.",
+    "dmarcFailNone": "DMARC cinza: a mensagem falhou no DMARC, e o domínio do remetente usa p=none, que não pede para bloquear.",
+    "dmarcNoRecord": "DMARC cinza: o domínio do remetente não tem política DMARC.",
+    "dmarcGeneric": "DMARC cinza: o domínio do remetente não pede para bloquear e-mails que falham (p=none ou sem política).",
+    "dkimPolicy": "DKIM cinza: assinatura válida de {domains}, não do domínio do remetente, então não prova quem escreveu.",
+    "spfSoftfail": "SPF cinza: o servidor de envio não está na lista do domínio do remetente, que só pede uma falha leve.",
+    "spfNeutral": "SPF cinza: o domínio do remetente não diz quais servidores podem enviar por ele.",
+    "checkError": "Não foi possível verificar (o DNS demorou ou o registro está malformado).",
+    "anotherDomain": "outro domínio"
+  },
+  "received": {
+    "title": "Todos os recebidos",
+    "hint": "Todos os e-mails que seus domínios receberam, inclusive em endereços sem caixa de entrada.",
+    "search": "Buscar remetente, caixa ou assunto…",
+    "loadError": "Não foi possível carregar os e-mails recebidos.",
+    "empty": "Nenhum e-mail recebido ainda.",
+    "emptyHint": "Ative o recebimento de um domínio em <link>Domínios</link> e aponte o registro MX dele para cá.",
+    "noMatch": "Nenhum e-mail recebido com esses filtros.",
+    "clearFilters": "Limpar filtros",
+    "pageOf": "Página 1 – {pages} de {total} e-mails recebidos",
+    "col": {
+      "from": "De",
+      "subject": "Assunto",
+      "received": "Recebido"
+    },
+    "badge": {
+      "quarantined": "Em quarentena",
+      "spam": "Spam",
+      "virus": "Vírus"
+    },
+    "filter": {
+      "allInboxes": "Todas as caixas",
+      "catchAllOnly": "Só pega-tudo",
+      "allVerdicts": "Todos os resultados"
+    },
+    "verdict": {
+      "clean": "Limpo",
+      "suspicious": "Suspeito",
+      "quarantined": "Em quarentena",
+      "spam": "Spam",
+      "virus": "Vírus"
+    },
+    "range": {
+      "h24": "Últimas 24 horas",
+      "d7": "Últimos 7 dias",
+      "d15": "Últimos 15 dias",
+      "d30": "Últimos 30 dias",
+      "all": "Todo o período"
+    }
+  },
+  "detail": {
+    "breadcrumb": "E-mail recebido",
+    "error": "Não foi possível carregar este e-mail.",
+    "notFound": "E-mail não encontrado.",
+    "more": "Mais ações",
+    "reply": "Responder",
+    "forward": "Encaminhar",
+    "deleteNow": "Excluir agora",
+    "deleteConfirm": "Excluir este e-mail agora? Não dá para desfazer.",
+    "deleteError": "Não foi possível excluir este e-mail.",
+    "downloadRaw": "Baixar .eml",
+    "auth": "Autenticação",
+    "inboxes": "Caixas",
+    "catchAllOnly": "Pega-tudo · sem caixa",
+    "trust": "Remetente",
+    "spam": "Spam",
+    "virus": "Vírus",
+    "hiddenText": "Texto oculto",
+    "code": "Código",
+    "link": "Link de acesso",
+    "linkElsewhere": "O link aponta para um domínio diferente do remetente.",
+    "scores": "injeção {injection} · phishing {phishing}",
+    "receivedFor": "Recebido por",
+    "messageId": "Message-ID",
+    "envelopeFrom": "Remetente do envelope",
+    "server": "Servidor de envio",
+    "noTls": "sem TLS",
+    "attachments": "Anexos",
+    "download": "Baixar",
+    "unnamed": "Anexo sem nome",
+    "inline": "no corpo",
+    "attachmentCount": "{count, plural, one {# anexo} other {# anexos}}",
+    "file": "Arquivo",
+    "type": "Tipo",
+    "size": "Tamanho"
+  },
+  "timeline": {
+    "received": "Recebido",
+    "scanned": "Verificado",
+    "screened": "Analisado",
+    "delivered": "Entregue em {inbox}",
+    "quarantined": "Em quarentena",
+    "released": "Liberado por {who}",
+    "replied": "Respondido",
+    "forwarded": "Encaminhado",
+    "webhook": "Webhook"
+  },
+  "compose": {
+    "from": "De {address}",
+    "to": "Para",
+    "subject": "Assunto",
+    "message": "Mensagem",
+    "note": "Nota",
+    "mode": "Encaminhar como",
+    "inline": "No corpo, abaixo da nota",
+    "attachment": "Um arquivo .eml anexado",
+    "replyAll": "Responder a todos",
+    "replyPlaceholder": "Escreva uma resposta…",
+    "send": "Enviar",
+    "sent": "Enviado.",
+    "drafted": "Aguardando aprovação. Está em Precisa de revisão."
+  },
+  "safety": {
+    "whoCanWrite": "Quem pode escrever",
+    "whoCanWriteHint": "E-mails que não passam nessas regras vão para a quarentena: ficam guardados e listados, mas o agente só recebe depois que uma pessoa liberar.",
+    "anyoneHint": "Todas as mensagens chegam ao agente.",
+    "verifiedHint": "Remetentes alinhados com DMARC, respostas em conversas conhecidas e a lista de permitidos.",
+    "allowlistHint": "Só os endereços e domínios abaixo.",
+    "allowlist": "Lista de permitidos",
+    "addSender": "Adicionar remetente",
+    "addOwner": "Adicionar endereço",
+    "remove": "Remover {value}",
+    "beforeRead": "Antes de o agente ler",
+    "screening": "Procurar injeção de prompt",
+    "screeningHint": "Dá uma nota de 0 a 100 para e-mails de remetentes externos e não autenticados; a partir de 80 vai para a quarentena. É um sinal a mais além das regras, não uma garantia. Leia em screening.injection_score.",
+    "hiddenText": "Remover texto oculto",
+    "hiddenTextHint": "Remove o texto que uma pessoa não vê (elementos ocultos, texto branco no branco, caracteres de largura zero e tags Unicode) do texto e do markdown. O HTML original continua na mensagem bruta. Sempre ativo.",
+    "extractCodes": "Extrair códigos e links",
+    "extractCodesHint": "Inclui extracted.code e extracted.link em e-mails de verificação, para o agente não precisar ler HTML.",
+    "maySend": "O que o agente pode enviar",
+    "sendPolicy": "Regra de envio",
+    "requireApproval": "Toda resposta precisa de aprovação",
+    "requireApprovalHint": "Desligado: rascunhos só esperam quando uma regra pede (a API envia requires_approval).",
+    "privateCodes": "Códigos e links mágicos ficam privados",
+    "privateCodesHint": "Um código ou link de acesso extraído não pode ser enviado nem encaminhado para ninguém além de você e da lista de permitidos.",
+    "sendCap": "Envios por dia",
+    "sendCapNone": "Sem limite diário",
+    "retention": "Guardado por",
+    "retentionValue": "{days} dias (configuração da instância)",
+    "forwardTo": "Encaminhar toda mensagem para",
+    "forwardToHint": "Endereços de pessoas do time e os endereços de responsáveis abaixo.",
+    "owners": "Endereços de responsáveis",
+    "alwaysOn": "Sempre ativo: as respostas levam Auto-Submitted e nunca respondem outra resposta automática, e o primeiro contato passa pela mesma análise de abuso de qualquer envio.",
+    "save": "Salvar alterações",
+    "saved": "Regras salvas.",
+    "adminOnly": "Só donos e admins podem mudar essas regras."
+  },
+  "policy": {
+    "reply_only": "Responder só em conversas existentes",
+    "reply_onlyHint": "Conversas novas com destinatários novos viram rascunhos que esperam uma pessoa.",
+    "allowlist": "Respostas e conversas novas com a lista de permitidos",
+    "open": "Qualquer pessoa (precisa do seu domínio verificado)",
+    "sharedOnly": "Endereços do domínio compartilhado só respondem dentro das próprias conversas."
+  },
+  "activity": {
+    "empty": "Nenhuma atividade ainda.",
+    "loadError": "Não foi possível carregar a atividade.",
+    "when": "Quando",
+    "who": "Quem",
+    "what": "O quê",
+    "why": "Por quê",
+    "actor": {
+      "user": "Uma pessoa",
+      "api_key": "Uma chave de API",
+      "oauth": "Um app conectado",
+      "system": "MillionSend"
+    },
+    "actions": {
+      "inbox": {
+        "created": "Criou a caixa",
+        "updated": "Alterou a caixa",
+        "deleted": "Excluiu a caixa",
+        "expired": "A caixa expirou",
+        "safety_updated": "Alterou as regras de segurança"
+      },
+      "email": {
+        "quarantined": "Pôs um e-mail em quarentena",
+        "released": "Liberou um e-mail",
+        "sent": "Enviou um e-mail",
+        "drafted": "Segurou um envio como rascunho",
+        "refused": "Recusou um envio",
+        "forwarded": "Encaminhou um e-mail",
+        "deleted": "Excluiu um e-mail"
+      },
+      "code": {
+        "read": "Leu um código ou link de acesso"
+      },
+      "thread": {
+        "updated": "Alterou uma conversa"
+      },
+      "label": {
+        "created": "Criou uma etiqueta",
+        "updated": "Alterou uma etiqueta",
+        "deleted": "Excluiu uma etiqueta"
+      },
+      "draft": {
+        "created": "Criou um rascunho",
+        "updated": "Alterou um rascunho",
+        "sent": "Enviou um rascunho",
+        "approved": "Aprovou um rascunho",
+        "rejected": "Descartou um rascunho",
+        "deleted": "Excluiu um rascunho",
+        "expired": "Um rascunho expirou sem aprovação"
+      },
+      "key": {
+        "created": "Criou uma chave de API da caixa",
+        "revoked": "Revogou uma chave de API da caixa"
+      }
+    }
+  },
+  "settingsReceiving": {
+    "title": "Recebimento",
+    "mxHost": "Host MX",
+    "lastMessage": "Última mensagem",
+    "receivedToday": "Recebidos hoje",
+    "virus": "Antivírus",
+    "sharedDomain": "Domínio compartilhado das caixas",
+    "maxSize": "Tamanho máximo da mensagem",
+    "off": "Desligado"
+  },
+  "billing": {
+    "limit": "{n, plural, one {# caixa de entrada} other {# caixas de entrada}}",
+    "unlimited": "Caixas de entrada ilimitadas",
+    "used": "{used} de {limit} caixas de entrada"
+  }
+}

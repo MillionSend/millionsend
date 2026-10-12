@@ -6,8 +6,9 @@ import {
   hasLiveSubscription,
   setOverage as setSubscriptionOverage,
 } from "@millionsend/billing";
-import { env } from "@millionsend/config";
+import { env, receivingEnabled } from "@millionsend/config";
 import {
+  PLAN_INBOX_LIMIT,
   PLAN_RUNG_KEYS,
   type Plan,
   QUOTA_COLUMNS,
@@ -29,6 +30,7 @@ import { UPGRADES_HELD } from "@/lib/trpc-error";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe, mailPlanMove } from "../billing";
+import { planUsage } from "../inboxes";
 import { getQueue } from "../queue";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
@@ -127,6 +129,10 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         hasCustomer: team.stripeCustomerId !== null,
         hasLiveSubscription: live,
         upgradesHeld: await upgradesHeld(ctx.db, ctx.teamId),
+        // Each plan's inbox cap, and how many the team holds; null where no mail is received.
+        inboxes: receivingEnabled()
+          ? { limits: PLAN_INBOX_LIMIT, used: (await planUsage(ctx.db, ctx.teamId)).used }
+          : null,
       };
     }),
 
