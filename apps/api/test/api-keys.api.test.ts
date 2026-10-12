@@ -200,8 +200,14 @@ describe("GET /api-keys", () => {
     expect(body.object).toBe("list");
     expect(body.data.length).toBeGreaterThan(0);
     for (const item of body.data) {
-      // Exactly the oracle's masked item shape — no token, prefix, or hash.
-      expect(Object.keys(item).sort()).toEqual(["created_at", "id", "last_used_at", "name"]);
+      // Exactly the oracle's masked item shape plus the inbox_id extension — no token, prefix, or hash.
+      expect(Object.keys(item).sort()).toEqual([
+        "created_at",
+        "id",
+        "inbox_id",
+        "last_used_at",
+        "name",
+      ]);
     }
     expect(JSON.stringify(body)).not.toContain(fullKey);
 

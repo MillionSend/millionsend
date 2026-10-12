@@ -1,0 +1,754 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { Db } from "@millionsend/db";
+import { schema } from "@millionsend/db";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { generateApiKey } from "../src/api-keys.js";
+import type { InboxActor } from "../src/inboxes/activity.js";
+import {
+  createInbox,
+  deleteInboxes,
+  expireInboxes,
+  getInbox,
+  getInboxSafety,
+  type InboxDeps,
+  listInboxes,
+  updateInbox,
+  updateInboxSafety,
+} from "../src/inboxes/inboxes.js";
+import { defaultSafety } from "../src/inboxes/safety.js";
+import { ensureSharedSubdomain } from "../src/inboxes/shared-domain.js";
+
+const SHARED = "agents.example.test";
+const api: InboxActor = { kind: "api_key", apiKeyId: randomUUID(), inboxId: null };
+const person: InboxActor = { kind: "user", userId: "user-1" };
+const deps: InboxDeps = { sharedInboxDomain: SHARED, receivingEnabled: true };
+const HOUR = 3_600_000;
+
+let db: Db;
+let close: () => Promise<void>;
+
+beforeAll(async () => {
+  ({ db, close } = await createTestDb());
+});
+afterAll(() => close());
+
+/** A team with a verified receiving domain and a verified sending-only one. */
+async function team(slug: string) {
+  const teamId = await createTeam(db, slug);
+  teamNames.set(teamId, slug);
+  const [receiving] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: `in.${slug}.test`,
+      region: "us-east-1",
+      status: "verified",
+      receivingEnabled: true,
+    })
+    .returning({ id: schema.domains.id });
+  await db
+    .insert(schema.domains)
+    .values({ teamId, name: `${slug}.test`, region: "us-east-1", status: "verified" });
+  return { teamId, domainId: receiving?.id as string, receiving: `in.${slug}.test` };
+}
+
+/** Each team's name, which its shared subdomain is named after. */
+const teamNames = new Map<string, string>();
+
+const create = (
+  teamId: string,
+  input: Parameters<typeof createInbox>[2]["input"],
+  extra: Partial<Parameters<typeof createInbox>[2]> = {},
+) =>
+  createInbox(db, deps, {
+    teamId,
+    teamName: teamNames.get(teamId) ?? "Acme Robots",
+    plan: "pro",
+    isCloud: true,
+    actor: api,
+    input,
+    ...extra,
+  });
+
+async function created(teamId: string, input: Parameters<typeof createInbox>[2]["input"]) {
+  const result = await create(teamId, input);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.inbox;
+}
+
+const deliveries = (endpointId: string) =>
+  db
+    .select({ type: schema.webhookDeliveries.eventType, payload: schema.webhookDeliveries.payload })
+    .from(schema.webhookDeliveries)
+    .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+
+describe("ensureSharedSubdomain", () => {
+  it("names the team's subdomain after it, once, with a suffix when the label is taken", async () => {
+    const a = await createTeam(db, "sub-a");
+    const b = await createTeam(db, "sub-b");
+    const first = await ensureSharedSubdomain(db, {
+      teamId: a,
+      teamName: "Ação Robots, Inc.",
+      sharedInboxDomain: SHARED,
+    });
+    expect(first.name).toBe(`acao-robots-inc.${SHARED}`);
+    expect(
+      await ensureSharedSubdomain(db, {
+        teamId: a,
+        teamName: "Renamed",
+        sharedInboxDomain: SHARED,
+      }),
+    ).toEqual(first);
+    const clash = await ensureSharedSubdomain(db, {
+      teamId: b,
+      teamName: "Acao Robots Inc",
+      sharedInboxDomain: SHARED,
+    });
+    expect(clash.name).toMatch(
+      new RegExp(`^acao-robots-inc-[a-z0-9]{4}\\.${SHARED.replaceAll(".", "\\.")}$`),
+    );
+  });
+
+  it("never lends a brand look-alike label, and falls back for names without a slug", async () => {
+    const brand = await ensureSharedSubdomain(db, {
+      teamId: await createTeam(db, "sub-brand"),
+      teamName: "PayPal Support",
+      sharedInboxDomain: SHARED,
+    });
+    expect(brand.name).toMatch(/^team-[a-z0-9]{6}\./);
+    const cjk = await ensureSharedSubdomain(db, {
+      teamId: await createTeam(db, "sub-cjk"),
+      teamName: "株式会社",
+      sharedInboxDomain: SHARED,
+    });
+    expect(cjk.name).toBe(`team.${SHARED}`);
+    const long = await ensureSharedSubdomain(db, {
+      teamId: await createTeam(db, "sub-long"),
+      teamName: "abcdefghijklmnopqrstuvwxyzabc def",
+      sharedInboxDomain: SHARED,
+    });
+    expect(long.name).toBe(`abcdefghijklmnopqrstuvwxyzabc.${SHARED}`);
+  });
+});
+
+describe("createInbox", () => {
+  it("creates an agent inbox on a receiving domain: full object, activity, opt-in event", async () => {
+    const t = await team("create-custom");
+    const optedIn = await createWebhookEndpoint(db, t.teamId, ["inbox.created"]);
+    const everything = await createWebhookEndpoint(db, t.teamId, null);
+    const result = await create(t.teamId, {
+      email_address: ` Support@${t.receiving.toUpperCase()} `,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.inbox).toMatchObject({
+      object: "inbox",
+      name: `support@${t.receiving}`,
+      email_address: `support@${t.receiving}`,
+      domain_id: t.domainId,
+      receiving_address: null,
+      from_name: null,
+      unread: 0,
+      drafts: 0,
+      last_received: null,
+      kind: "agent",
+      shared: false,
+      expires_at: null,
+      quarantined: 0,
+      pending_approval: 0,
+    });
+    expect(await getInboxSafety(db, { teamId: t.teamId, inboxId: result.inbox.id })).toEqual(
+      defaultSafety("agent", false),
+    );
+    const activity = await db
+      .select()
+      .from(schema.inboxActivity)
+      .where(eq(schema.inboxActivity.inboxId, result.inbox.id));
+    expect(activity.map((a) => [a.action, a.actor])).toEqual([
+      ["inbox.created", `api_key:${(api as { apiKeyId: string }).apiKeyId}`],
+    ]);
+    const [hook] = await deliveries(optedIn);
+    expect(hook?.type).toBe("inbox.created");
+    expect(hook?.payload).toMatchObject({
+      type: "inbox.created",
+      data: { source: "api", inbox_id: result.inbox.id, inbox: { id: result.inbox.id } },
+    });
+    expect(await deliveries(everything)).toEqual([]);
+    // API creations stay out of audit_log; a dashboard one is recorded.
+    const audits = () =>
+      db
+        .select({ action: schema.auditLog.action })
+        .from(schema.auditLog)
+        .where(eq(schema.auditLog.teamId, t.teamId));
+    expect(await audits()).toEqual([]);
+    await create(
+      t.teamId,
+      { email_address: `people@${t.receiving}`, kind: "human" },
+      { actor: person },
+    );
+    expect(await audits()).toEqual([{ action: "inbox.created" }]);
+  });
+
+  it("refuses an address in use, a bad local part, a foreign domain and a domain not receiving", async () => {
+    const t = await team("create-refusals");
+    await created(t.teamId, { email_address: `taken@${t.receiving}` });
+    const again = await create(t.teamId, { email_address: `TAKEN@${t.receiving}` });
+    expect(again).toEqual({
+      ok: false,
+      error: {
+        status: 409,
+        name: "validation_error",
+        message: "This address is already used by an inbox",
+      },
+    });
+    for (const local of ["a..b", ".lead", "trail.", "bad!char", "x".repeat(65)]) {
+      const bad = await create(t.teamId, { email_address: `${local}@${t.receiving}` });
+      expect(bad.ok ? null : bad.error.status, local).toBe(422);
+    }
+    const foreign = await create(t.teamId, { email_address: "bot@someone-else.test" });
+    expect(foreign.ok ? null : foreign.error.message).toBe(
+      "email_address must be on a verified domain of this team",
+    );
+    const sendOnly = await create(t.teamId, { email_address: "bot@create-refusals.test" });
+    expect(sendOnly.ok ? null : sendOnly.error.message).toMatch(
+      /^Turn on receiving for create-refusals\.test first/,
+    );
+    const onShared = await create(t.teamId, { email_address: `bot@x.${SHARED}` });
+    expect(onShared.ok ? null : onShared.error.message).toMatch(/shared domain/);
+    const off = await createInbox(
+      db,
+      { ...deps, receivingEnabled: false },
+      {
+        teamId: t.teamId,
+        teamName: "x",
+        plan: "pro",
+        isCloud: true,
+        actor: api,
+        input: { email_address: `x@${t.receiving}` },
+      },
+    );
+    expect(off.ok ? null : off.error.message).toBe("This instance does not receive mail");
+  });
+
+  it("gives a forwarding inbox a receiving address on the team's shared subdomain", async () => {
+    const t = await team("create-forwarding");
+    const inbox = await created(t.teamId, {
+      email_address: "help@create-forwarding.test",
+      forwarding: true,
+    });
+    expect(inbox.shared).toBe(false);
+    expect(inbox.receiving_address).toMatch(
+      new RegExp(`^fwd-[a-z0-9]{16}@create-forwarding\\.${SHARED.replaceAll(".", "\\.")}$`),
+    );
+    const noShared = await createInbox(
+      db,
+      { ...deps, sharedInboxDomain: null },
+      {
+        teamId: t.teamId,
+        teamName: "x",
+        plan: "pro",
+        isCloud: true,
+        actor: api,
+        input: { email_address: "other@create-forwarding.test", forwarding: true },
+      },
+    );
+    expect(noShared.ok ? null : noShared.error.status).toBe(422);
+  });
+
+  it("makes up a shared address that expires in a day, at most 30 days, never never", async () => {
+    const t = await team("create-shared");
+    const now = new Date();
+    const inbox = await created(t.teamId, { name: "Signup Bot" });
+    expect(inbox.email_address).toMatch(
+      new RegExp(`^signup-bot-[a-z0-9]{4}@create-shared\\.${SHARED.replaceAll(".", "\\.")}$`),
+    );
+    expect(inbox).toMatchObject({ shared: true, kind: "agent", name: "Signup Bot" });
+    const ttl = new Date(inbox.expires_at as string).getTime() - now.getTime();
+    expect(Math.abs(ttl - 24 * HOUR)).toBeLessThan(60_000);
+    const safety = await getInboxSafety(db, { teamId: t.teamId, inboxId: inbox.id });
+    expect(safety).toMatchObject({ send_policy: "reply_only", send_cap: 50 });
+    const unnamed = await created(t.teamId, {});
+    expect(unnamed.email_address).toMatch(/^inbox-[a-z0-9]{8}@/);
+    const brand = await created(t.teamId, { name: "PayPal security" });
+    expect(brand.email_address).toMatch(/^inbox-[a-z0-9]{8}@/);
+    for (const [expires, ok] of [
+      [null, false],
+      ["31d", false],
+      ["721h", false],
+      ["30d", true],
+      ["1h", true],
+    ] as const) {
+      const result = await create(t.teamId, { expires_in: expires });
+      expect(result.ok, String(expires)).toBe(ok);
+    }
+    const noShared = await createInbox(
+      db,
+      { ...deps, sharedInboxDomain: null },
+      { teamId: t.teamId, teamName: "x", plan: "pro", isCloud: true, actor: api, input: {} },
+    );
+    expect(noShared.ok ? null : noShared.error.message).toMatch(/email_address is required/);
+  });
+
+  it("checks names, from_name and a custom inbox's lifetime", async () => {
+    const t = await team("create-fields");
+    for (const from of ["a@b.test", "Acme <x>", "Support: now", "Call +1 (888) 555-0199"]) {
+      const result = await create(t.teamId, { email_address: `f@${t.receiving}`, from_name: from });
+      expect(result.ok ? null : result.error.status, from).toBe(422);
+    }
+    const blank = await created(t.teamId, { email_address: `blank@${t.receiving}`, from_name: "" });
+    expect(blank.from_name).toBeNull();
+    const named = await created(t.teamId, {
+      email_address: `named@${t.receiving}`,
+      from_name: "  Acme Support  ",
+      name: "  Support desk ",
+    });
+    expect(named).toMatchObject({ from_name: "Acme Support", name: "Support desk" });
+    const longName = await create(t.teamId, {
+      email_address: `n@${t.receiving}`,
+      name: "x".repeat(65),
+    });
+    expect(longName.ok).toBe(false);
+    const tooLong = await create(t.teamId, {
+      email_address: `l@${t.receiving}`,
+      expires_in: "366d",
+    });
+    expect(tooLong.ok ? null : tooLong.error.message).toBe("expires_in can be at most 365d");
+    const badForm = await create(t.teamId, { email_address: `w@${t.receiving}`, expires_in: "1w" });
+    expect(badForm.ok ? null : badForm.error.status).toBe(422);
+  });
+
+  it("holds the plan's inbox cap and the hourly creation rate, deleted inboxes counted", async () => {
+    const t = await team("create-caps");
+    const free = (input: Parameters<typeof createInbox>[2]["input"]) =>
+      create(t.teamId, input, { plan: "free" });
+    for (const local of ["a", "b", "c"]) {
+      expect((await free({ email_address: `${local}@${t.receiving}` })).ok).toBe(true);
+    }
+    expect(await free({ email_address: `d@${t.receiving}` })).toEqual({
+      ok: false,
+      error: {
+        status: 403,
+        name: "validation_error",
+        message: "You have reached the inbox limit of your plan. Upgrade to add more.",
+      },
+    });
+    // Self-host never caps.
+    expect(
+      (
+        await create(
+          t.teamId,
+          { email_address: `e@${t.receiving}` },
+          { plan: "free", isCloud: false },
+        )
+      ).ok,
+    ).toBe(true);
+    const rated = await team("create-rate");
+    for (let n = 0; n < 10; n += 1) {
+      await db.insert(schema.inboxActivity).values({
+        teamId: rated.teamId,
+        inboxId: randomUUID(),
+        actor: "system",
+        action: "inbox.created",
+      });
+    }
+    const limited = await create(
+      rated.teamId,
+      { email_address: `x@${rated.receiving}` },
+      { plan: "free" },
+    );
+    expect(limited.ok ? null : limited.error).toMatchObject({
+      status: 429,
+      name: "rate_limit_exceeded",
+    });
+    expect(limited.ok ? 0 : (limited.error.retryAfterSec ?? 0)).toBeGreaterThan(3500);
+  });
+
+  it("merges safety over the kind's defaults and refuses what safetyProblem refuses", async () => {
+    const t = await team("create-safety");
+    const human = await created(t.teamId, {
+      email_address: `team@${t.receiving}`,
+      kind: "human",
+      safety: { accept_from: "verified", allowlist: ["Boss@Partner.TEST", "*@vendor.test"] },
+    });
+    // A new team (no sends yet) steps the human default down from open.
+    expect(await getInboxSafety(db, { teamId: t.teamId, inboxId: human.id })).toEqual({
+      ...defaultSafety("human", false),
+      accept_from: "verified",
+      allowlist: ["boss@partner.test", "*@vendor.test"],
+      send_policy: "allowlist",
+    });
+    const openNew = await create(t.teamId, {
+      email_address: `open@${t.receiving}`,
+      kind: "human",
+      safety: { send_policy: "open" },
+    });
+    expect(openNew.ok ? null : openNew.error.message).toBe(
+      'send_policy "open" is not available to a new team yet; use "allowlist" for now',
+    );
+    const screenedHuman = await create(t.teamId, {
+      email_address: `h2@${t.receiving}`,
+      kind: "human",
+      safety: { screening: true },
+    });
+    expect(screenedHuman.ok ? null : screenedHuman.error.message).toBe(
+      "screening is available on agent inboxes only",
+    );
+    const openShared = await create(t.teamId, { safety: { send_policy: "open" } });
+    expect(openShared.ok ? null : openShared.error.message).toBe(
+      "Addresses on the shared domain only reply inside their threads",
+    );
+    const stranger = await create(t.teamId, {
+      email_address: `fw@${t.receiving}`,
+      safety: { forward_to: ["someone@else.test"] },
+    });
+    expect(stranger.ok ? null : stranger.error.message).toMatch(/^forward_to accepts/);
+    await db.insert(schema.user).values({ id: "member-1", name: "Ana", email: "Ana@Acme.TEST" });
+    await db.insert(schema.teamMembers).values({ teamId: t.teamId, userId: "member-1" });
+    const member = await create(t.teamId, {
+      email_address: `fw2@${t.receiving}`,
+      safety: { forward_to: ["ana@acme.test"] },
+    });
+    expect(member.ok).toBe(true);
+    const unknownKey = await create(t.teamId, {
+      email_address: `k@${t.receiving}`,
+      safety: { allowlist: ["not an address"] },
+    });
+    expect(unknownKey.ok ? null : unknownKey.error.message).toMatch(/^safety\.allowlist\.0: /);
+  });
+});
+
+describe("getInbox and listInboxes", () => {
+  it("finds by id or address, hides expired inboxes and other teams' and keys' inboxes", async () => {
+    const t = await team("get-inbox");
+    const other = await team("get-other");
+    const inbox = await created(t.teamId, { email_address: `bot@${t.receiving}` });
+    expect((await getInbox(db, { teamId: t.teamId, idOrEmail: inbox.id }))?.id).toBe(inbox.id);
+    expect(
+      (await getInbox(db, { teamId: t.teamId, idOrEmail: `BOT@${t.receiving.toUpperCase()}` }))?.id,
+    ).toBe(inbox.id);
+    expect(await getInbox(db, { teamId: other.teamId, idOrEmail: inbox.id })).toBeNull();
+    expect(
+      await getInbox(db, { teamId: t.teamId, idOrEmail: inbox.id, onlyInboxId: randomUUID() }),
+    ).toBeNull();
+    expect(await getInbox(db, { teamId: t.teamId, idOrEmail: "not-a-uuid" })).toBeNull();
+    await db
+      .update(schema.inboxes)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.inboxes.id, inbox.id));
+    expect(await getInbox(db, { teamId: t.teamId, idOrEmail: inbox.id })).toBeNull();
+  });
+
+  it("lists newest first with keyset paging, a kind filter and one inbox for a scoped key", async () => {
+    const t = await team("list-inbox");
+    const ids: string[] = [];
+    for (const [n, kind] of [
+      [1, "agent"],
+      [2, "human"],
+      [3, "agent"],
+      [4, "agent"],
+    ] as const) {
+      const inbox = await created(t.teamId, { email_address: `l${n}@${t.receiving}`, kind });
+      ids.push(inbox.id);
+      await db
+        .update(schema.inboxes)
+        .set({ createdAt: new Date(Date.UTC(2026, 0, n)) })
+        .where(eq(schema.inboxes.id, inbox.id));
+    }
+    const [i1, i2, i3, i4] = ids as [string, string, string, string];
+    const page = await listInboxes(db, { teamId: t.teamId, query: { limit: 2 } });
+    if (page === "bad_cursor") throw new Error("bad cursor");
+    expect(page.data.map((i) => i.id)).toEqual([i4, i3]);
+    expect(page.hasMore).toBe(true);
+    expect(page.data[0]).toEqual({
+      id: i4,
+      name: `l4@${t.receiving}`,
+      email_address: `l4@${t.receiving}`,
+      from_name: null,
+      unread: 0,
+      last_received: null,
+      kind: "agent",
+      shared: false,
+      expires_at: null,
+    });
+    const next = await listInboxes(db, { teamId: t.teamId, query: { limit: 2, after: i3 } });
+    expect(next !== "bad_cursor" && next.data.map((i) => i.id)).toEqual([i2, i1]);
+    const back = await listInboxes(db, { teamId: t.teamId, query: { limit: 2, before: i2 } });
+    expect(back !== "bad_cursor" && back.data.map((i) => i.id)).toEqual([i4, i3]);
+    const humans = await listInboxes(db, { teamId: t.teamId, query: {}, kind: "human" });
+    expect(humans !== "bad_cursor" && humans.data.map((i) => i.id)).toEqual([i2]);
+    const scoped = await listInboxes(db, { teamId: t.teamId, query: {}, onlyInboxId: i1 });
+    expect(scoped !== "bad_cursor" && scoped.data.map((i) => i.id)).toEqual([i1]);
+    expect(await listInboxes(db, { teamId: t.teamId, query: { after: randomUUID() } })).toBe(
+      "bad_cursor",
+    );
+  });
+});
+
+describe("updateInbox and updateInboxSafety", () => {
+  it("renames, renews and announces; refuses expired inboxes", async () => {
+    const t = await team("update-inbox");
+    const hook = await createWebhookEndpoint(db, t.teamId, ["inbox.updated"]);
+    const inbox = await created(t.teamId, { email_address: `u@${t.receiving}` });
+    const result = await updateInbox(db, deps, {
+      teamId: t.teamId,
+      inboxId: inbox.id,
+      actor: person,
+      patch: { name: "Desk", from_name: "Acme Desk", expires_in: "7d" },
+    });
+    expect(result.ok && result.inbox).toMatchObject({ name: "Desk", from_name: "Acme Desk" });
+    expect(result.ok && result.inbox.expires_at).toBeTruthy();
+    const cleared = await updateInbox(db, deps, {
+      teamId: t.teamId,
+      inboxId: inbox.id,
+      actor: person,
+      patch: { from_name: "", expires_in: null },
+    });
+    expect(cleared.ok && cleared.inbox).toMatchObject({ from_name: null, expires_at: null });
+    const [first] = await deliveries(hook);
+    expect(first?.payload).toMatchObject({
+      data: { source: "dashboard", inbox: { name: "Desk" } },
+    });
+    await db
+      .update(schema.inboxes)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.inboxes.id, inbox.id));
+    const gone = await updateInbox(db, deps, {
+      teamId: t.teamId,
+      inboxId: inbox.id,
+      actor: person,
+      patch: { name: "x" },
+    });
+    expect(gone.ok ? null : gone.error).toEqual({
+      status: 404,
+      name: "not_found",
+      message: "Inbox not found.",
+    });
+  });
+
+  it("merges a safety patch, refuses a bad one and records activity and audit", async () => {
+    const t = await team("update-safety");
+    const hook = await createWebhookEndpoint(db, t.teamId, ["inbox.updated"]);
+    const inbox = await created(t.teamId, { email_address: `s@${t.receiving}` });
+    const result = await updateInboxSafety(db, deps, {
+      teamId: t.teamId,
+      inboxId: inbox.id,
+      actor: api,
+      patch: { accept_from: "allowlist", allowlist: ["A@B.test"], send_cap: 10 },
+    });
+    expect(result).toEqual({
+      ok: true,
+      safety: {
+        ...defaultSafety("agent", false),
+        accept_from: "allowlist",
+        allowlist: ["a@b.test"],
+        send_cap: 10,
+      },
+    });
+    const bad = await updateInboxSafety(db, deps, {
+      teamId: t.teamId,
+      inboxId: inbox.id,
+      actor: api,
+      patch: { send_cap: 0 },
+    });
+    expect(bad.ok ? null : bad.error.status).toBe(422);
+    expect((await getInboxSafety(db, { teamId: t.teamId, inboxId: inbox.id }))?.send_cap).toBe(10);
+    const actions = await db
+      .select({ action: schema.inboxActivity.action })
+      .from(schema.inboxActivity)
+      .where(eq(schema.inboxActivity.inboxId, inbox.id));
+    expect(actions.map((a) => a.action)).toEqual(["inbox.created", "inbox.safety_updated"]);
+    const [audit] = await db
+      .select()
+      .from(schema.auditLog)
+      .where(
+        and(
+          eq(schema.auditLog.teamId, t.teamId),
+          eq(schema.auditLog.action, "inbox.safety_updated"),
+        ),
+      );
+    expect(audit?.data).toEqual({ fields: ["accept_from", "allowlist", "send_cap"] });
+    expect((await deliveries(hook)).map((d) => d.type)).toEqual(["inbox.updated"]);
+  });
+});
+
+describe("deleteInboxes and expireInboxes", () => {
+  async function received(teamId: string, catchAll: boolean) {
+    const [row] = await db
+      .insert(schema.receivedEmails)
+      .values({
+        teamId,
+        domainIds: [],
+        rawSha256: createHash("sha256").update(randomBytes(16)).digest("hex"),
+        messageId: `<${randomUUID()}@sender.test>`,
+        from: "sender@sender.test",
+        receivedFor: ["x@y.test"],
+        envelope: { mailFrom: "", clientIp: "192.0.2.1", helo: "h", tls: null },
+        authentication: { spf: "pass", dkim: "pass", dmarc: "pass", arc: "none" },
+        sizeBytes: 10,
+        catchAll,
+      })
+      .returning({ id: schema.receivedEmails.id });
+    return row?.id as string;
+  }
+
+  async function member(teamId: string, inboxId: string, receivedEmailId: string) {
+    const [thread] = await db
+      .insert(schema.inboxThreads)
+      .values({ teamId, inboxId })
+      .returning({ id: schema.inboxThreads.id });
+    await db.insert(schema.receivedEmailInboxes).values({
+      receivedEmailId,
+      inboxId,
+      teamId,
+      threadId: thread?.id as string,
+      address: "x@y.test",
+      senderTrust: "external",
+      verdict: "clean",
+      deliveredAt: new Date(),
+    });
+  }
+
+  it("revokes keys, removes mail only it held, prunes endpoint filters and announces", async () => {
+    const t = await team("delete-inbox");
+    const gone = await created(t.teamId, { email_address: `gone@${t.receiving}` });
+    const kept = await created(t.teamId, { email_address: `kept@${t.receiving}` });
+    const key = generateApiKey();
+    const [scopedKey] = await db
+      .insert(schema.apiKeys)
+      .values({
+        teamId: t.teamId,
+        name: "agent",
+        tokenPrefix: key.tokenPrefix,
+        keyHash: key.keyHash,
+        last4: key.last4,
+        inboxId: gone.id,
+      })
+      .returning({ id: schema.apiKeys.id });
+    const only = await received(t.teamId, false);
+    const catchAll = await received(t.teamId, true);
+    const shared = await received(t.teamId, false);
+    await member(t.teamId, gone.id, only);
+    await member(t.teamId, gone.id, catchAll);
+    await member(t.teamId, gone.id, shared);
+    await member(t.teamId, kept.id, shared);
+    const filtered = await createWebhookEndpoint(db, t.teamId, ["inbox.deleted"]);
+    await db
+      .update(schema.webhookEndpoints)
+      .set({ inboxIds: [gone.id] })
+      .where(eq(schema.webhookEndpoints.id, filtered));
+    const both = await createWebhookEndpoint(db, t.teamId, ["inbox.deleted"]);
+    await db
+      .update(schema.webhookEndpoints)
+      .set({ inboxIds: [gone.id, kept.id] })
+      .where(eq(schema.webhookEndpoints.id, both));
+
+    expect(
+      await deleteInboxes(db, deps, {
+        teamId: t.teamId,
+        inboxIds: [gone.id],
+        actor: person,
+        reason: "deleted",
+      }),
+    ).toBe(1);
+    const [revoked] = await db
+      .select()
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, scopedKey?.id as string));
+    expect(revoked?.revokedAt).not.toBeNull();
+    expect(revoked?.inboxId).toBeNull();
+    const remaining = await db
+      .select({ id: schema.receivedEmails.id })
+      .from(schema.receivedEmails)
+      .where(eq(schema.receivedEmails.teamId, t.teamId));
+    expect(remaining.map((r) => r.id).sort()).toEqual([catchAll, shared].sort());
+    const endpoints = await db
+      .select({ id: schema.webhookEndpoints.id, inboxIds: schema.webhookEndpoints.inboxIds })
+      .from(schema.webhookEndpoints)
+      .where(eq(schema.webhookEndpoints.teamId, t.teamId));
+    expect(Object.fromEntries(endpoints.map((e) => [e.id, e.inboxIds]))).toEqual({
+      [filtered]: [],
+      [both]: [kept.id],
+    });
+    const [event] = await deliveries(filtered);
+    expect(event?.payload).toEqual({
+      type: "inbox.deleted",
+      created_at: expect.any(String),
+      data: { source: "dashboard", inbox_id: gone.id },
+    });
+    expect(await getInbox(db, { teamId: t.teamId, idOrEmail: gone.id })).toBeNull();
+    const [audit] = await db
+      .select({ action: schema.auditLog.action })
+      .from(schema.auditLog)
+      .where(
+        and(eq(schema.auditLog.teamId, t.teamId), eq(schema.auditLog.action, "inbox.deleted")),
+      );
+    expect(audit).toBeDefined();
+    // Another team's ids delete nothing.
+    const stranger = await team("delete-stranger");
+    expect(
+      await deleteInboxes(db, deps, {
+        teamId: stranger.teamId,
+        inboxIds: [kept.id],
+        actor: api,
+        reason: "deleted",
+      }),
+    ).toBe(0);
+  });
+
+  it("expires inboxes past expires_at with inbox.expired, then inbox.deleted", async () => {
+    const t = await team("expire-inbox");
+    const hook = await createWebhookEndpoint(db, t.teamId, ["inbox.expired", "inbox.deleted"]);
+    const old = await created(t.teamId, { email_address: `old@${t.receiving}`, expires_in: "1h" });
+    const fresh = await created(t.teamId, {
+      email_address: `new@${t.receiving}`,
+      expires_in: "1h",
+    });
+    const key = generateApiKey();
+    const [agentKey] = await db
+      .insert(schema.apiKeys)
+      .values({
+        teamId: t.teamId,
+        name: "agent",
+        tokenPrefix: key.tokenPrefix,
+        keyHash: key.keyHash,
+        last4: key.last4,
+        inboxId: old.id,
+      })
+      .returning({ id: schema.apiKeys.id });
+    await db
+      .update(schema.inboxes)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.inboxes.id, old.id));
+    // The sweep spans every team; other suites leave expired inboxes behind too.
+    expect(await expireInboxes(db, deps, new Date())).toBeGreaterThanOrEqual(1);
+    expect(await expireInboxes(db, deps, new Date())).toBe(0);
+    expect((await deliveries(hook)).map((d) => d.type)).toEqual(["inbox.expired", "inbox.deleted"]);
+    const [expired] = await deliveries(hook);
+    expect(expired?.payload).toMatchObject({
+      data: {
+        source: "system",
+        inbox_id: old.id,
+        inbox: { id: old.id, email_address: old.email_address },
+      },
+    });
+    expect(await getInbox(db, { teamId: t.teamId, idOrEmail: fresh.id })).not.toBeNull();
+    const [revoked] = await db
+      .select({ revokedAt: schema.apiKeys.revokedAt, inboxId: schema.apiKeys.inboxId })
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, agentKey?.id as string));
+    expect(revoked?.revokedAt).not.toBeNull();
+    expect(revoked?.inboxId).toBeNull();
+    const [activity] = await db
+      .select({ action: schema.inboxActivity.action, actor: schema.inboxActivity.actor })
+      .from(schema.inboxActivity)
+      .where(
+        and(
+          eq(schema.inboxActivity.inboxId, old.id),
+          eq(schema.inboxActivity.action, "inbox.expired"),
+        ),
+      );
+    expect(activity).toEqual({ action: "inbox.expired", actor: "system" });
+  });
+});

@@ -6,8 +6,8 @@ import { extractAddrSpec, hashRecipient, normalizeAddress } from "./suppressions
 /** Replaces every erased copy of an address so readers see a deliberate gap, not a blank. */
 export const ERASED_TOMBSTONE = "[erased]";
 
-/** Escapes a literal for use inside a PostgreSQL (ARE) regular expression. */
-function escapeRegex(value: string): string {
+/** Escapes a literal for use inside a regular expression, PostgreSQL (ARE) or JavaScript. */
+export function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 

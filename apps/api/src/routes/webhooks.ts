@@ -14,7 +14,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { type Env, errorBody, keysetPage } from "../app.js";
 import {
   createWebhookRequestSchema,
@@ -43,6 +43,31 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
   // status: "enabled" re-enables it either way.
   const wireStatus = (status: (typeof w.$inferSelect)["status"]): "enabled" | "disabled" =>
     status === "enabled" ? "enabled" : "disabled";
+
+  /**
+   * SECURITY: an endpoint filters on the team's own inboxes only. Lowercased
+   * and deduplicated; the first id that is not one of them, if any.
+   */
+  const inboxFilter = async (
+    teamId: string,
+    ids: readonly string[],
+  ): Promise<{ ids: string[] } | { unknown: string }> => {
+    const wanted = [...new Set(ids.map((id) => id.toLowerCase()))];
+    if (wanted.length === 0) return { ids: [] };
+    const i = schema.inboxes;
+    const found = new Set(
+      (
+        await db
+          .select({ id: i.id })
+          .from(i)
+          .where(and(eq(i.teamId, teamId), inArray(i.id, wanted)))
+      ).map((row) => row.id),
+    );
+    const unknown = wanted.find((id) => !found.has(id));
+    return unknown === undefined ? { ids: wanted } : { unknown };
+  };
+  const unknownInbox = (id: string) =>
+    errorBody(422, "validation_error", `inbox_ids: "${id}" is not an inbox of this team`);
 
   const wire = (row: typeof w.$inferSelect) => ({
     id: row.id,
@@ -82,6 +107,8 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
           422,
         );
       }
+      const filter = body.inbox_ids ? await inboxFilter(auth.teamId, body.inbox_ids) : null;
+      if (filter && "unknown" in filter) return c.json(unknownInbox(filter.unknown), 422);
       const secret = body.signing_secret ?? generateWebhookSecret();
       const id = randomUUID();
       const encrypted = await encryptWebhookSecret(secret, keyring, {
@@ -100,6 +127,7 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
           secretKeyVersion: encrypted.keyVersion,
           secretLast4: secret.slice(-4),
           events: [...new Set(body.events)],
+          inboxIds: filter?.ids ?? null,
         })
         .returning({ id: w.id });
       if (!row) throw new Error("webhook insert returned no row");
@@ -299,6 +327,11 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
       if (body.endpoint !== undefined) set.url = body.endpoint;
       if (body.events !== undefined) set.events = [...new Set(body.events)];
       if (body.status !== undefined) set.status = body.status;
+      if (body.inbox_ids !== undefined) {
+        const filter = body.inbox_ids ? await inboxFilter(auth.teamId, body.inbox_ids) : null;
+        if (filter && "unknown" in filter) return c.json(unknownInbox(filter.unknown), 422);
+        set.inboxIds = filter?.ids ?? null;
+      }
       const scope = and(eq(w.id, id), eq(w.teamId, auth.teamId));
       // An empty PATCH body is a valid no-op, like the other resources.
       const [row] =

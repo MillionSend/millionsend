@@ -517,6 +517,11 @@ export const usageResponseSchema = z
         .int()
         .nullable()
         .describe("Contacts the team may hold; null = unlimited or self-hosted"),
+      inboxes: z
+        .number()
+        .int()
+        .nullable()
+        .describe("Inboxes the team may hold at once; null = unlimited or self-hosted"),
     }),
     today: z.object({
       emails_sent: z.number().int().describe("Emails accepted so far this UTC day"),
@@ -1553,6 +1558,15 @@ export const createApiKeyRequestSchema = z
           "domain-scoped. A domain-scoped calling key cannot name any other domain " +
           "(403 restricted_api_key).",
       ),
+    inbox_id: z
+      .uuid()
+      .nullish()
+      .describe(
+        "MillionSend extension: restricts the key to one inbox of the team. It reads that inbox's " +
+          "threads, drafts and received mail and sends only from its address; every other route " +
+          "answers 403 restricted_api_key. Needs full_access, can't be combined with domain_id, " +
+          "and an inbox holds at most 5 active keys (outside the team's 25).",
+      ),
   })
   .openapi("CreateApiKeyRequest");
 
@@ -1569,6 +1583,10 @@ export const listApiKeysResponseSchema = z
         name: z.string(),
         created_at: z.string(),
         last_used_at: z.string().nullable(),
+        inbox_id: z
+          .uuid()
+          .nullable()
+          .describe("MillionSend extension: the one inbox the key is restricted to, or null"),
       }),
     ),
     has_more: z.boolean(),
