@@ -53,12 +53,40 @@ export const ABUSE_JUDGE_TIMEOUT_MS_DEFAULT = 20_000;
 /** Who reads the text in an email's images for the judge; "off" is the default everywhere. */
 export const ABUSE_VISION_PROVIDERS = ["off", "bedrock"] as const;
 export type AbuseVisionProvider = (typeof ABUSE_VISION_PROVIDERS)[number];
-/**
- * Claude Haiku 5.5, called by its bare id on the region's own Bedrock Mantle
- * host: the in-region route, so images are read in that region.
- */
+/** Claude Haiku 5.5's foundation model id on Amazon Bedrock. */
 export const ABUSE_VISION_MODEL = "anthropic.claude-haiku-5-5";
 export const ABUSE_VISION_REGION_DEFAULT = "us-east-1";
+/**
+ * The regions Haiku 5.5 is called from, by the prefix of the geographic
+ * inference profile that serves each: Bedrock offers the model there only
+ * through cross-region profiles, and a geographic one reads images only in
+ * its geography's regions. The global profile, which may read them
+ * anywhere, is never used.
+ */
+const ABUSE_VISION_GEOGRAPHIES: Record<"us" | "eu" | "au" | "jp", string[]> = {
+  us: ["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ca-central-1", "ca-west-1"],
+  eu: [
+    "eu-central-1",
+    "eu-central-2",
+    "eu-north-1",
+    "eu-south-1",
+    "eu-south-2",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-west-3",
+  ],
+  au: ["ap-southeast-2", "ap-southeast-4"],
+  jp: ["ap-northeast-1", "ap-northeast-3"],
+};
+
+/** The profile a region calls Haiku 5.5 through (us.anthropic.claude-haiku-5-5), or null. */
+export function abuseVisionProfile(region: string): string | null {
+  const geo = Object.entries(ABUSE_VISION_GEOGRAPHIES).find(([, regions]) =>
+    regions.includes(region),
+  );
+  return geo ? `${geo[0]}.${ABUSE_VISION_MODEL}` : null;
+}
+
 const SENTRY_ENVIRONMENT_DEFAULT = "production";
 /** MILLIONSEND_REVISION outside an image built with a GIT_SHA. */
 const REVISION_UNKNOWN = "unknown";
@@ -248,9 +276,10 @@ export const env = createEnv({
     // Optional image reading for the judge: Claude Haiku 5.5 on Amazon
     // Bedrock writes down the text and brands in an email's images and in
     // attachment pages that are images, with the worker's AWS credentials,
-    // on ABUSE_VISION_REGION's own endpoint. Off by default; refusing
-    // program files, holding risky files and reading PDFs, Office files and
-    // QR codes all work without it.
+    // called from ABUSE_VISION_REGION through its geography's inference
+    // profile (abuseVisionProfile), so images are read within that
+    // geography. Off by default; refusing program files, holding risky files
+    // and reading PDFs, Office files and QR codes all work without it.
     ABUSE_VISION: z.enum(ABUSE_VISION_PROVIDERS).default("off"),
     ABUSE_VISION_REGION: z
       .string()
@@ -582,15 +611,29 @@ export function abuseJudgeConfig(e: Env = env): AbuseJudgeConfig | null {
 
 export interface AbuseVisionConfig {
   region: string;
+  /** The region's geographic inference profile id, what the reader calls. */
+  model: string;
   accessKeyId: string | undefined;
   secretAccessKey: string | undefined;
 }
 
-/** The image reader the worker builds, or null when it is off; raw-string safe as abuseJudgeConfig is. */
+/**
+ * The image reader the worker builds, or null when it is off; raw-string safe
+ * as abuseJudgeConfig is. Throws for a region with no geographic profile.
+ */
 export function abuseVisionConfig(e: Env = env): AbuseVisionConfig | null {
   if (((e.ABUSE_VISION as unknown as string | undefined) || "off") === "off") return null;
+  const region = e.ABUSE_VISION_REGION || ABUSE_VISION_REGION_DEFAULT;
+  const model = abuseVisionProfile(region);
+  if (!model) {
+    const regions = Object.values(ABUSE_VISION_GEOGRAPHIES).flat().join(", ");
+    throw new Error(
+      `ABUSE_VISION_REGION=${region} has no geographic inference profile for Claude Haiku 5.5 that image reading can use; use one of ${regions}`,
+    );
+  }
   return {
-    region: e.ABUSE_VISION_REGION || ABUSE_VISION_REGION_DEFAULT,
+    region,
+    model,
     accessKeyId: e.AWS_ACCESS_KEY_ID,
     secretAccessKey: e.AWS_SECRET_ACCESS_KEY,
   };
@@ -792,6 +835,9 @@ export function assertEnvConsistency(e: Env): void {
   if (e.ABUSE_JUDGE && e.ABUSE_JUDGE !== "off" && !e.ABUSE_JUDGE_API_KEY) {
     throw new Error(`ABUSE_JUDGE=${e.ABUSE_JUDGE} requires ABUSE_JUDGE_API_KEY`);
   }
+  // Image reading from a region with no geographic profile would fail every
+  // read: abuseVisionConfig throws for it, which refuses the boot here.
+  abuseVisionConfig(e);
   if (e.IS_CLOUD) {
     for (const key of [
       "KMS_KEY_ID",

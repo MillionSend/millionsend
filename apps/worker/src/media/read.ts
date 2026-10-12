@@ -473,8 +473,8 @@ export async function readMediaForJudge(
       links: findings.links.map((link) => ({ ...link, domain: linkDomain(link.url) ?? "" })),
       pix: findings.pix,
       files: findings.files,
-      // Bedrock's CSAM check answers 400, and a refusal may hide the same:
-      // no image from such an email is ever kept.
+      // A block is how Bedrock's CSAM check answers, and a refusal may hide
+      // the same: no image from such an email is ever kept.
       previews:
         issues.has("vision_blocked") || issues.has("vision_refused") ? [] : await previews(items),
       issues: [...issues],
