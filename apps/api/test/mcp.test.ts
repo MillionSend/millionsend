@@ -770,8 +770,8 @@ describe('"." and ".." ids', () => {
       dispatched.mockRestore();
     }
     await client.close();
-    // About 200 sequential tool calls overrun the default 5s on loaded CI runners.
-  }, 30_000);
+    // Several hundred sequential tool calls: over 30s on a loaded CI runner.
+  }, 120_000);
 });
 
 describe("rate limiting", () => {

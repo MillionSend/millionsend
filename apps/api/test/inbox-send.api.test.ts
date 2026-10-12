@@ -152,12 +152,15 @@ describe("thread email reply and forward", () => {
     expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
-  it("holds a domain-scoped key to the inboxes of its domain", async () => {
+  it("shows a domain-scoped key only the inboxes of its domain", async () => {
     const t = await thread();
     const res = await call(otherDomainKey, "POST", threadPath(t, "reply"), { text: "x" });
-    expect(res.status).toBe(403);
-    expect((await json(res)).name).toBe("restricted_api_key");
-    expect((await call(otherDomainKey, "GET", `/inboxes/${inbox.id}/drafts`)).status).toBe(403);
+    expect(res.status).toBe(404);
+    expect((await json(res)).name).toBe("not_found");
+    expect((await call(otherDomainKey, "GET", `/inboxes/${inbox.id}/drafts`)).status).toBe(404);
+    expect(
+      (await call(otherDomainKey, "POST", `/inboxes/${inbox.id}/drafts`, { text: "x" })).status,
+    ).toBe(404);
     expect(
       (await call(otherDomainKey, "POST", `/emails/receiving/${t.id}/reply`, { text: "x" })).status,
     ).toBe(404);

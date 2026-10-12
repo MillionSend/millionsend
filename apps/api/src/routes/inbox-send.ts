@@ -96,13 +96,19 @@ export function registerInboxSendRoutes(
     return c.json(errorBody(e.status, e.name, e.message), e.status);
   };
 
-  /** SECURITY: a domain-scoped key sends only from the inboxes of its domain. */
+  /**
+   * SECURITY: a domain-scoped key reaches only the inboxes of its domain; any
+   * other inbox reads as missing, as on the /inboxes routes, so the key can't
+   * tell it exists.
+   */
   const outsideKeyDomain = async (c: Context<Env>, inboxId: string) => {
     const auth = c.get("auth");
     if (auth.domainId === null) return false;
     const inbox = await findLiveInbox(db, { teamId: auth.teamId, inboxId });
     return inbox !== null && inbox.domainId !== auth.domainId;
   };
+  const inboxNotFound = (c: Context<Env>) =>
+    c.json(errorBody(404, "not_found", INBOX_NOT_FOUND_MESSAGE), 404);
   const restrictedDomain = (c: Context<Env>) =>
     c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
 
@@ -136,7 +142,7 @@ export function registerInboxSendRoutes(
     }),
     async (c) => {
       const { inbox_id, thread_id, email_id } = c.req.valid("param");
-      if (await outsideKeyDomain(c, inbox_id)) return restrictedDomain(c);
+      if (await outsideKeyDomain(c, inbox_id)) return inboxNotFound(c);
       const auth = c.get("auth");
       const outcome = await replyInThread(db, sendDeps(), {
         teamId: auth.teamId,
@@ -171,7 +177,7 @@ export function registerInboxSendRoutes(
     }),
     async (c) => {
       const { inbox_id, thread_id, email_id } = c.req.valid("param");
-      if (await outsideKeyDomain(c, inbox_id)) return restrictedDomain(c);
+      if (await outsideKeyDomain(c, inbox_id)) return inboxNotFound(c);
       const auth = c.get("auth");
       const outcome = await forwardInThread(db, sendDeps(), {
         teamId: auth.teamId,
@@ -206,7 +212,7 @@ export function registerInboxSendRoutes(
     }),
     async (c) => {
       const { inbox_id } = c.req.valid("param");
-      if (await outsideKeyDomain(c, inbox_id)) return restrictedDomain(c);
+      if (await outsideKeyDomain(c, inbox_id)) return inboxNotFound(c);
       const auth = c.get("auth");
       const result = await createDraft(db, sendDeps(), {
         teamId: auth.teamId,
@@ -233,8 +239,8 @@ export function registerInboxSendRoutes(
       const { inbox_id } = c.req.valid("param");
       const auth = c.get("auth");
       const inbox = await findLiveInbox(db, { teamId: auth.teamId, inboxId: inbox_id });
-      if (!inbox) return c.json(errorBody(404, "not_found", INBOX_NOT_FOUND_MESSAGE), 404);
-      if (auth.domainId !== null && inbox.domainId !== auth.domainId) return restrictedDomain(c);
+      if (!inbox) return inboxNotFound(c);
+      if (auth.domainId !== null && inbox.domainId !== auth.domainId) return inboxNotFound(c);
       const page = await listDrafts(db, {
         teamId: auth.teamId,
         inboxId: inbox_id,
@@ -257,7 +263,7 @@ export function registerInboxSendRoutes(
     }),
     async (c) => {
       const { inbox_id, draft_id } = c.req.valid("param");
-      if (await outsideKeyDomain(c, inbox_id)) return restrictedDomain(c);
+      if (await outsideKeyDomain(c, inbox_id)) return inboxNotFound(c);
       const auth = c.get("auth");
       const draft = await getDraft(db, deps.keyring, {
         teamId: auth.teamId,
@@ -284,7 +290,7 @@ export function registerInboxSendRoutes(
     }),
     async (c) => {
       const { inbox_id, draft_id } = c.req.valid("param");
-      if (await outsideKeyDomain(c, inbox_id)) return restrictedDomain(c);
+      if (await outsideKeyDomain(c, inbox_id)) return inboxNotFound(c);
       const auth = c.get("auth");
       const result = await updateDraft(db, sendDeps(), {
         teamId: auth.teamId,
@@ -309,7 +315,7 @@ export function registerInboxSendRoutes(
     }),
     async (c) => {
       const { inbox_id, draft_id } = c.req.valid("param");
-      if (await outsideKeyDomain(c, inbox_id)) return restrictedDomain(c);
+      if (await outsideKeyDomain(c, inbox_id)) return inboxNotFound(c);
       const auth = c.get("auth");
       const result = await deleteDraft(db, sendDeps(), {
         teamId: auth.teamId,
@@ -338,7 +344,7 @@ export function registerInboxSendRoutes(
     }),
     async (c) => {
       const { inbox_id, draft_id } = c.req.valid("param");
-      if (await outsideKeyDomain(c, inbox_id)) return restrictedDomain(c);
+      if (await outsideKeyDomain(c, inbox_id)) return inboxNotFound(c);
       const auth = c.get("auth");
       const outcome = await sendDraft(db, sendDeps(), {
         teamId: auth.teamId,
@@ -369,7 +375,7 @@ export function registerInboxSendRoutes(
     }),
     async (c) => {
       const { inbox_id, draft_id } = c.req.valid("param");
-      if (await outsideKeyDomain(c, inbox_id)) return restrictedDomain(c);
+      if (await outsideKeyDomain(c, inbox_id)) return inboxNotFound(c);
       const auth = c.get("auth");
       const result = await rejectDraft(db, sendDeps(), {
         teamId: auth.teamId,
