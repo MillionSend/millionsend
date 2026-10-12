@@ -50,17 +50,17 @@ beforeAll(async () => {
   const rows = await db
     .insert(schema.emails)
     .values(
-      Array.from({ length: 1000 }, (_, i) => ({
+      Array.from({ length: 2000 }, (_, i) => ({
         teamId,
         domainId: domain.id,
         from: "f@noisy.dev",
-        to: [`r${i}@b.com`],
+        // Half to Gmail, which never reports a complaint to SES.
+        to: [i < 1000 ? `r${i}@b.com` : `r${i}@gmail.com`],
         subject: "s",
         sentAt,
       })),
     )
     .returning({ id: schema.emails.id });
-  // 5 complaints in 1000 sends: 0.5% of our own count no longer trips anything.
   for (const email of rows.slice(0, 5)) {
     await db.insert(schema.emailEvents).values({
       emailId: email.id,
@@ -79,19 +79,25 @@ it("trips on our own complaint count while SES's rate can't be read, logging the
   const unreadable = () => warn.mock.calls.filter(([line]) => line === UNREADABLE).length;
   // An IAM policy from before the CloudWatch read: every read fails.
   sesRate = new Error("AccessDenied");
-  // 5 complaints in 1000 sends over the last 24 hours, past our own 0.08% line.
+  // 5 complaints in the 1000 sends that can draw one over the last 24 hours,
+  // past the 0.4% line.
   expect(await run()).toEqual({ tripped: ["sa-east-1"], resumed: [] });
   expect(sends).toHaveLength(1);
   expect(sends[0]?.subject).toBe(
     "Broadcasts paused in sa-east-1: platform complaint rate at 0.50%",
   );
-  expect(sends[0]?.text).toContain("SES's own complaint rate couldn't be read");
+  expect(sends[0]?.text).toContain(
+    "the complaint rate over the last 24 hours is 0.50% (5 of 1000 sends to providers that report complaints), at or over the breaker's 0.40% line. SES reviews an account from 0.10% and pauses its sending at 0.50%.",
+  );
+  expect(sends[0]?.text).toContain(
+    "SES's own complaint rate wasn't available (reading it takes cloudwatch:GetMetricData in the instance's IAM policy), so the breaker estimated it from our own count of complaints, leaving out mail to providers that never report them, such as Gmail.",
+  );
   expect(sends[0]?.text).toContain("Noisy Sender: 0 hard bounces, 5 complaints");
   expect((await db.select().from(schema.regionBreakers))[0]?.reason).toEqual({
     metric: "complaint",
     source: "events",
     rate: 0.005,
-    limit: 0.0008,
+    limit: 0.004,
     windowHours: 24,
     sent: 1000,
     events: 5,
@@ -108,6 +114,9 @@ it("trips on our own complaint count while SES's rate can't be read, logging the
   sesRate = 0.0005;
   expect(await run(at(2 * HOUR_MS))).toEqual({ tripped: [], resumed: ["sa-east-1"] });
   expect(sends[1]?.subject).toBe("Broadcasts resumed in sa-east-1");
+  expect(sends[1]?.text).toContain(
+    "and so is the complaint rate the breaker judges: SES's own, or our estimate of it while that isn't available.",
+  );
   sends = [];
 });
 
@@ -186,4 +195,24 @@ it("names contributing teams called like lures with no link but the console's", 
   expect(
     mailLinks(mail).filter((link) => link !== url && link !== "https://millionsend.com"),
   ).toEqual([]);
+});
+
+it("counts a bounce trip over every send", () => {
+  const mail = regionPausedMail({
+    region: "sa-east-1",
+    reason: {
+      metric: "bounce",
+      rate: 0.045,
+      limit: 0.04,
+      windowHours: 168,
+      sent: 1000,
+      events: 45,
+    },
+    contributors: [],
+    url: "https://app.example.test/console",
+  });
+  expect(mail.text).toContain(
+    "the hard-bounce rate over the last 168 hours is 4.50% (45 of 1000 sends), at or over the breaker's 4.00% line, set short of SES's own review line for the whole account.",
+  );
+  expect(mail.text).not.toContain("cloudwatch");
 });

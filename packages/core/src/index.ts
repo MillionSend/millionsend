@@ -491,6 +491,7 @@ export {
   type MailPreferenceKey,
   mailPreferenceOf,
 } from "./mail-preferences.js";
+export { sentWithoutComplaintFeedback } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,
   isValidMonitorSetting,
@@ -567,7 +568,6 @@ export {
 export {
   applyRegionBreakers,
   BREAKER_BOUNCE_RATE,
-  BREAKER_COMPLAINT_RATE,
   BREAKER_MIN_SENT,
   BREAKER_SES_COMPLAINT_RATE,
   BREAKER_WINDOWS_HOURS,

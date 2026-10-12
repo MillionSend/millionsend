@@ -39,6 +39,7 @@ import {
   screenBeforeSend,
   screeningTeam,
   sentContentType,
+  sentWithoutComplaintFeedback,
   substituteUnsubscribeUrl,
   transitionQueueState,
   utcDay,
@@ -938,12 +939,17 @@ async function sendQueued(
   });
   const counter = schema.usageCounters;
   const sentAt = new Date();
+  const recipients = [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])];
+  const noFeedback = sentWithoutComplaintFeedback(recipients) ? 1 : 0;
   await db
     .insert(counter)
-    .values({ teamId: email.teamId, day: utcDay(sentAt), sent: 1 })
+    .values({ teamId: email.teamId, day: utcDay(sentAt), sent: 1, sentNoFeedback: noFeedback })
     .onConflictDoUpdate({
       target: [counter.teamId, counter.day],
-      set: { sent: sql`${counter.sent} + 1` },
+      set: {
+        sent: sql`${counter.sent} + 1`,
+        sentNoFeedback: sql`${counter.sentNoFeedback} + ${noFeedback}`,
+      },
     });
   await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
   if (bulk) deps.sesQuota?.noteBulkSent?.(region);

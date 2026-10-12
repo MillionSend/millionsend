@@ -939,10 +939,11 @@ de uma leitura gratuita de `GetAccount` do SESv2 por região, exceto a taxa de
 reclamações que o próprio SES mede: o worker a lê no CloudWatch
 (`cloudwatch:GetMetricData`, uma métrica por região a cada 15 minutos, alguns
 centavos de dólar por mês). Uma política `millionsend-ses` anterior a essa
-permissão deixa a taxa sem leitura, e a pausa regional passa a avaliar as
-reclamações pela contagem da própria instância, com limite de 0,08% de todos
-os e-mails. Para adicioná-la, rode a configuração de novo (o que também cria
-uma nova chave de acesso) ou
+permissão deixa a taxa sem leitura, e a pausa regional passa a estimá-la pela
+contagem da própria instância, sem contar os e-mails para provedores que
+nunca repassam reclamações ao SES, como o Gmail, com o mesmo limite de 0,4%
+usado para a taxa do SES. Para adicioná-la, rode a configuração de novo (o
+que também cria uma nova chave de acesso) ou
 [atualize a política sem recriar nada](#tenants-do-ses-reputação-por-equipe).
 O custo por região é uma estimativa local.
 

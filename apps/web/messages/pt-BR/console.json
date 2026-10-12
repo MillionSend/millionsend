@@ -117,7 +117,7 @@
       "complained": "Reclamações",
       "deliveredOf": "{delivered} de {sent} entregues",
       "hardOf": "hard {rate} · limite do SES 5%",
-      "complaintLines": "nossa contagem · a taxa do SES é por região",
+      "complaintLines": "nossa contagem em todos os e-mails · a taxa do SES é por região",
       "period": "Período",
       "noSends": "nenhum envio no período"
     },
@@ -151,6 +151,7 @@
       "broadcastsFlowing": "liberadas",
       "broadcastsPaused": "pausadas",
       "pauseWindow": "Pausa automática: {metric} de {rate} em {hours, select, 168 {7 dias} other {{hours}h}}, acima do limite de {limit}.",
+      "pauseComplaints": "Pausa automática: reclamações de {rate} em {hours, select, 168 {7 dias} other {{hours}h}} nos e-mails para provedores que repassam reclamações, acima do limite de {limit}.",
       "pauseSes": "Pausa automática: reclamações de {rate} medidas pelo SES, acima do limite de {limit}.",
       "pauseManual": "Pausada pelo operador: {reason}",
       "pauseTransactional": "O transacional segue saindo.",
@@ -163,10 +164,10 @@
       "queueHeld": "{count, plural, one {# transmissão} other {# transmissões}} · em espera durante a pausa",
       "sesRate": "Taxa medida pelo próprio SES",
       "sesLines": "O SES revisa a partir de {review} e pausa em {pause}",
-      "ourLines": "Nossa pausa regional: {limit} · nossa medição em 7 dias: {ours}",
+      "ourLines": "Nossa pausa regional: {limit} · nossa estimativa em 7 dias: {ours}",
       "sesUnreadable": "Não foi possível ler a taxa do SES",
       "sesNone": "O SES ainda não publicou uma taxa para esta região",
-      "oursWatched": "A pausa regional segue nossa medição: {ours} em 7 dias, limite de {limit}",
+      "oursWatched": "A pausa regional segue nossa estimativa dessa taxa: {ours} em 7 dias, limite de {limit}",
       "costTip": "{sent} enviados × {rate}/mil"
     },
     "sent": {
@@ -240,6 +241,7 @@
     "quotaOf": "{used} / {max}",
     "costTenants": " · inclui tenants",
     "error": "GetAccount falhou: {message}",
+    "complaintEstimate": "Nossa estimativa da taxa do SES deixa de fora os e-mails para provedores que nunca repassam reclamações, como o Gmail",
     "metric": {
       "bounce": "bounce",
       "complaint": "reclamação"

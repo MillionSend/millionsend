@@ -13,6 +13,7 @@ import { Sparkline } from "@/components/sparkline";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
 import { formatFinishAbout } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -322,10 +323,19 @@ export function RegionsView() {
                           {r.week ? f.pct2(r.week.hardBounceRate) : mutedDash}
                         </td>
                         <td className="right num">
-                          {r.week ? f.pct3(r.week.complaintRate) : mutedDash}
+                          {r.week ? (
+                            <Tooltip inline text={tr("complaintEstimate")}>
+                              {f.pct3(r.week.complaintRate)}
+                            </Tooltip>
+                          ) : (
+                            mutedDash
+                          )}
                         </td>
                         <td>
-                          <BroadcastsCell region={r} />
+                          <BroadcastsCell
+                            region={r}
+                            complaintLine={list.data.complaintLines.breaker}
+                          />
                         </td>
                         <td className="right" style={{ width: 40 }}>
                           <RegionMenu region={r} onChanged={refetch} />

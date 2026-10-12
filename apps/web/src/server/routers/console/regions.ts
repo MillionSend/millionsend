@@ -8,7 +8,6 @@ import {
   sesTenantsEnabled,
 } from "@millionsend/config";
 import {
-  BREAKER_COMPLAINT_RATE,
   BREAKER_SES_COMPLAINT_RATE,
   bulkShare,
   clampReserve,
@@ -238,7 +237,10 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
               ? {
                   sent: counts7.sent,
                   hardBounceRate: counts7.sent > 0 ? counts7.hardBounced / counts7.sent : 0,
-                  complaintRate: counts7.sent > 0 ? counts7.complained / counts7.sent : 0,
+                  // Our estimate of SES's rate, the one the breaker judges while
+                  // SES's own can't be read.
+                  complaintRate:
+                    counts7.complaintSent > 0 ? counts7.complained / counts7.complaintSent : 0,
                 }
               : null,
             breaker: breaker
@@ -277,8 +279,6 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
           sesReview: SES_COMPLAINT_REVIEW_RATE,
           sesPause: SES_COMPLAINT_PAUSE_RATE,
           breaker: BREAKER_SES_COMPLAINT_RATE,
-          // Our own count's line, judged while SES's rate can't be read.
-          ours: BREAKER_COMPLAINT_RATE,
         },
         cloud: isCloudDeployment(),
         defaultRegion: served[0] ?? env.AWS_REGION,
@@ -331,7 +331,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         sent24h: day.get(input.region)?.sent ?? 0,
         peak30d: Math.max(0, ...(daily.get(input.region) ?? []).map((p) => p.sent)),
         hardBounceRate7d: w && w.sent > 0 ? w.hardBounced / w.sent : 0,
-        complaintRate7d: w && w.sent > 0 ? w.complained / w.sent : 0,
+        complaintRate7d: w && w.complaintSent > 0 ? w.complained / w.complaintSent : 0,
         domainsVerified: aligned.total,
         domainsWithDmarc: aligned.dmarc,
       };
