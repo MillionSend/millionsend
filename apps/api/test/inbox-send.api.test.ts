@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { generateApiKey, utcDay } from "@millionsend/core";
+import { generateApiKey, SHARED_REPLY_ONLY_MESSAGE, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   addInbox,
   addThread,
@@ -15,27 +15,6 @@ import {
   type World,
 } from "../../../packages/core/test/inbox-send-fixtures.js";
 import { createApi } from "../src/app.js";
-
-// Fixed stand-ins for the thread summary and the inbox-key allow-list keep
-// these tests on the send routes.
-vi.mock("../../../packages/core/src/inboxes/threads.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../packages/core/src/inboxes/threads.js")>()),
-  getThread: vi.fn(async (_db: unknown, p: { threadId: string }) => ({
-    object: "inbox_thread",
-    id: p.threadId,
-    subject: "Question",
-    folder: "inbox",
-    labels: [],
-    read: true,
-    quarantined: 0,
-  })),
-}));
-vi.mock("../../../packages/core/src/inboxes/api-key-scope.js", () => ({
-  inboxKeyAllows: (method: string, path: string, inboxId: string) =>
-    (path.startsWith(`/inboxes/${inboxId}/`) && !path.endsWith("/reject")) ||
-    path.startsWith("/emails/receiving/") ||
-    (method === "POST" && (path === "/emails" || path === "/emails/batch")),
-}));
 
 let db: Db;
 let close: () => Promise<void>;
@@ -383,7 +362,11 @@ describe("the inbox rails on POST /emails and the batch", () => {
       subject: "Hi",
       text: "Hello",
     });
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(403);
+    expect(await json(res)).toMatchObject({
+      name: "inbox_send_policy",
+      message: SHARED_REPLY_ONLY_MESSAGE,
+    });
     expect(
       await db.select().from(schema.emails).where(eq(schema.emails.inboxId, shared.id)),
     ).toEqual([]);

@@ -38,9 +38,11 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
+  INBOX_KEY_FROM_MESSAGE,
   type InboxKeys,
   inboxKeyAllows,
   isAdminRole,
+  isSharedInboxSender,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
   MX_DELIVER_PATH,
@@ -69,6 +71,7 @@ import {
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
   type SendRefusal,
+  SHARED_REPLY_ONLY_MESSAGE,
   scoreBand,
   segmentContactsWhere,
   segmentFilterSchema,
@@ -427,7 +430,9 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
         body: errorBody(
           403,
           "inbox_send_policy",
-          `The sending inbox's rules hold this email${result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : ""}; create it as a draft with POST /inboxes/{inbox_id}/drafts for a person to approve`,
+          result.reasons.includes("shared_domain")
+            ? SHARED_REPLY_ONLY_MESSAGE
+            : `The sending inbox's rules hold this email${result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : ""}; create it as a draft with POST /inboxes/{inbox_id}/drafts for a person to approve`,
         ),
       };
     case "inbox_send_cap_reached":
@@ -443,14 +448,18 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
     case "inbox_scope":
       return {
         status: 403,
-        body: errorBody(
-          403,
-          "restricted_api_key",
-          "This API key can only send from its inbox address",
-        ),
+        body: errorBody(403, "restricted_api_key", INBOX_KEY_FROM_MESSAGE),
       };
   }
 }
+
+// Shared-domain addresses have no domains row, so they would otherwise fail
+// sender verification with a 422 before the inbox rails could refuse them.
+const sharedSenderRefusal = acceptRejection({
+  ok: false,
+  reason: "inbox_send_policy",
+  reasons: ["shared_domain"],
+});
 
 /**
  * Wire body for a team sendRefusal holds; keys still authenticate so the
@@ -3685,6 +3694,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
     const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
     if (reserved) return c.json(errorBody(422, reserved.name, reserved.message), 422);
+    if (isSharedInboxSender(body.from, deps.sharedInboxDomain)) {
+      return c.json(sharedSenderRefusal.body, sharedSenderRefusal.status);
+    }
     const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
       return c.json(
@@ -3829,6 +3841,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
     const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
     if (reserved) return { status: 422, ...reserved };
+    if (isSharedInboxSender(body.from, deps.sharedInboxDomain)) {
+      const { name, message } = sharedSenderRefusal.body;
+      return { status: 403, name, message };
+    }
     const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
       return {

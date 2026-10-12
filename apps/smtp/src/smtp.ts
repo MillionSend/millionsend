@@ -7,12 +7,14 @@ import {
   findLiveInbox,
   formatMailbox,
   INBOX_KEY_FROM_MESSAGE,
+  isSharedInboxSender,
   monthlyQuotaMessage,
   msgIds,
   parseMailbox,
   parseSingleSender,
   reservedSenderRefusal,
   SES_MAX_MESSAGE_BYTES,
+  SHARED_REPLY_ONLY_MESSAGE,
   sendRefusalError,
   verifySenderDomain,
 } from "@millionsend/core";
@@ -151,6 +153,9 @@ async function handleMessage(
   // MAIL FROM envelope identity is never trusted.
   const reserved = reservedSenderRefusal(from, deps.onboardingEmailFrom);
   if (reserved) throw smtpError(550, reserved.message);
+  if (isSharedInboxSender(from, deps.sharedInboxDomain)) {
+    throw smtpError(550, `5.7.1 ${SHARED_REPLY_ONLY_MESSAGE}`);
+  }
   const domain = await verifySenderDomain(deps.db, auth.teamId, from);
   if (!domain.ok) {
     throw smtpError(
