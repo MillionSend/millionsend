@@ -1097,7 +1097,8 @@ page.
 <summary><b>Content access (break-glass)</b></summary>
 
 Off by default. With it on, an authorised operator can read the subject and
-the rendered visible text of specific messages of a flagged team, for a
+the rendered visible text of specific messages of a flagged team, and what
+screening read from the images and attachments of mail it held, for a
 security reason they name and justify before anything is decrypted, for at
 most 30 minutes. It is the break-glass path for the cases the stored
 metadata cannot settle: the insights know a link points at a shortener, not
@@ -1113,9 +1114,25 @@ credential (a JWT, 32 or more hex characters, 40 or more of base64, one of
 this instance's own `ms_` API keys) is masked, as is a 4-to-8-digit run
 in the 40 characters after a word like *code*, *código*, *OTP*, *PIN*, *token*,
 *senha*, *password* or *verification*.
-Never the raw HTML, the recipient addresses, the headers, the attachments or
-the click-tracking targets, and the view offers no copy or download. A body
-retention has already purged cannot be revealed by anyone.
+Never the raw HTML, the recipient addresses, the headers, the attachment
+files or the click-tracking targets, and the view offers no copy or download.
+A body retention has already purged cannot be revealed by anyone.
+
+**The media panel.** An email screening held over its images or files, and
+any other held email it kept a read of, gets a **Media** action on the
+review list. Under the same grant it shows why the email waits; the text
+read from its images (transcribed) and attachments (extracted); the links
+found in them, each with its registrable domain and that domain's age when
+screening has already dated it; each file's name, type, size, pages and
+flags; and up to four previews. Every one of those strings, file names
+included, goes through the redaction above. The previews are small JPEGs
+the worker redrew from what it read, at most 600 px a side: they reach the
+page only as JPEG `data:` images, anything else is dropped, and an original
+file, an SVG or HTML is never shown or served. What the panel shows is
+sealed with the email and purged with its body. **Release all N with the
+same media** sends every held email of the team whose images and files
+screening read exactly as this one's (a blast's copies), as **Release**
+does, with the same audit row.
 
 **For how long.** A grant lasts 30 minutes from the moment it is made and is
 never extended; a later look is a new grant, with a new reason and a new
@@ -1127,12 +1144,17 @@ ids, the view count and the times. Nothing prunes those rows: they are the
 inventory of who read what. An instance audit row (`content.revealed`) is
 written before anything decrypts, with the grant id, the reason and the
 number of messages — never the justification's text and never any content.
+A grant's first look at a media panel writes a second `content.revealed`
+row, whose fields name what screening read from the images and attachments,
+and stamps the grant (`media_viewed_at`).
 
 **What the team sees, and when.** Seven days later a daily job adds a
 `content.accessed` row to the team's own audit log — dated at the access,
 not at the disclosure — with the reason, how many messages and which fields
-were read. Nobody is emailed about an access, then or later. A team
-suspended for phishing never gets the row; the grant records that the
+were read: `subject, rendered text`, followed by
+`what screening read from its images and attachments` only when the grant
+opened a media panel. Nobody is emailed about an access, then or later. A
+team suspended for phishing never gets the row; the grant records that the
 disclosure step ran, so it is not retried nightly. A team held for review
 gets it once the hold ends: after a release the next daily run writes it,
 and if the hold becomes a phishing suspension it is withheld for good.
@@ -1145,9 +1167,9 @@ CONTENT_REVEAL=on
 ```
 
 Off, the console's buttons render disabled with a tooltip naming the
-variable and both procedures refuse. Reading other people's messages is
-lawful only as a narrow, recorded, disclosed security measure: say so in the
-instance's terms and privacy notice before turning it on.
+variable and every content procedure refuses. Reading other people's messages
+is lawful only as a narrow, recorded, disclosed security measure: say so in
+the instance's terms and privacy notice before turning it on.
 
 </details>
 

@@ -32,7 +32,7 @@ afterEach(async () => {
 });
 
 /** A grant made `daysAgo` days back, as the console would have written it. */
-async function grant(daysAgo: number): Promise<string> {
+async function grant(daysAgo: number, opts: { openedMedia?: boolean } = {}): Promise<string> {
   const createdAt = new Date(Date.now() - daysAgo * 86_400_000);
   const [row] = await db
     .insert(schema.contentAccessGrants)
@@ -45,6 +45,7 @@ async function grant(daysAgo: number): Promise<string> {
       emailIds: ["6f1e5b8c-8f3e-4f47-9a1f-2b0f0d3c5a71"],
       createdAt,
       expiresAt: new Date(createdAt.getTime() + CONTENT_REVEAL_WINDOW_MS),
+      mediaViewedAt: opts.openedMedia ? createdAt : null,
     })
     .returning({ id: schema.contentAccessGrants.id });
   if (!row) throw new Error("grant missing");
@@ -115,6 +116,24 @@ describe("safety.reveal_notices", () => {
 
     expect(await runRevealNotices(db, deps)).toEqual({ disclosed: 0, withheld: 0 });
     expect(await teamRowsFor(id)).toHaveLength(1);
+  });
+
+  it("names what screening read from the media only for a grant that opened it", async () => {
+    const text = await grant(8);
+    const media = await grant(8, { openedMedia: true });
+    expect(await runRevealNotices(db)).toEqual({ disclosed: 2, withheld: 0 });
+    const [textRow] = await teamRowsFor(text);
+    const [mediaRow] = await teamRowsFor(media);
+    expect(textRow?.data).toEqual({
+      reason: "phishing_or_malware",
+      emails: 1,
+      fields: "subject, rendered text",
+    });
+    expect(mediaRow?.data).toEqual({
+      reason: "phishing_or_malware",
+      emails: 1,
+      fields: "subject, rendered text, what screening read from its images and attachments",
+    });
   });
 
   it("withholds the row from a team suspended for phishing since the grant", async () => {

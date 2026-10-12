@@ -1070,12 +1070,14 @@ contam para nenhum limite diário.
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
 não enviado que a avaliação antes do envio segurou: em espera atrás de uma
 pausa para revisão, cumprindo os seus 2 minutos, em espera por um destino
-novo, ou em espera depois de o avaliador falhar repetidas vezes. **Liberar** envia o e-mail sem avaliá-lo de
+novo ou pelas imagens ou arquivos, ou em espera depois de o avaliador falhar repetidas vezes. **Liberar** envia o e-mail sem avaliá-lo de
 novo (o `quota.drain` o cobra como qualquer e-mail em espera); **Cancelar**
 faz com que ele nunca saia. O e-mail de uma equipe pausada para revisão é
 liberado junto com a equipe. A página de revisão da equipe também lista, entre
 os sinalizados, os e-mails não enviados que foram segurados, para que um
-acesso ao conteúdo possa citá-los.
+acesso ao conteúdo possa citá-los. O que a avaliação leu de um e-mail em
+espera abre num painel de **Mídia**, com um acesso ao conteúdo (veja Acesso
+ao conteúdo abaixo).
 
 **Para ligar**, no `.env` da instância, lido pelo worker e pelo app (um
 reinício aplica):
@@ -1333,7 +1335,8 @@ anterior.
 
 Desligado por padrão. Com ele ligado, um operador autorizado pode ler o
 assunto e o texto visível renderizado de mensagens específicas de uma equipe
-sinalizada, por um motivo de segurança que ele nomeia e justifica antes de
+sinalizada, e o que a avaliação leu nas imagens e anexos dos e-mails em
+espera, por um motivo de segurança que ele nomeia e justifica antes de
 qualquer coisa ser descriptografada, por no máximo 30 minutos. É o caminho
 de emergência para os casos que os metadados armazenados não resolvem: as
 métricas sabem que um link aponta para um encurtador, não se o texto ao
@@ -1351,9 +1354,27 @@ mascarada, assim como uma sequência de 4 a 8 dígitos
 nos 40 caracteres depois de uma palavra como *código*, *code*, *OTP*, *PIN*,
 *token*, *senha*, *password* ou *verification*, e qualquer número de CPF ou
 CNPJ com dígitos verificadores válidos. Nunca o HTML bruto, os
-endereços dos destinatários, os cabeçalhos, os anexos ou os destinos de
-rastreamento de cliques, e a tela não oferece copiar nem baixar. Um corpo
-que a retenção já apagou não pode ser revelado por ninguém.
+endereços dos destinatários, os cabeçalhos, os próprios arquivos anexados ou
+os destinos de rastreamento de cliques, e a tela não oferece copiar nem
+baixar. Um corpo que a retenção já apagou não pode ser revelado por ninguém.
+
+**O painel de mídia.** Um e-mail que a avaliação deixou em espera pelas
+imagens ou arquivos, e qualquer outro e-mail em espera de que ela guardou
+uma leitura, ganha a ação **Mídia** na lista de revisão. Com a mesma
+autorização, ele mostra por que o e-mail está em espera; o texto lido nas
+imagens (transcrito) e nos anexos (extraído); os links encontrados neles,
+cada um com o seu domínio registrável e a idade desse domínio quando a
+avaliação já o datou; o nome, o tipo, o tamanho, as páginas e os alertas de
+cada arquivo; e até quatro prévias. Todos esses textos, nomes de arquivo
+incluídos, passam pelo mesmo ocultamento descrito acima. As prévias são
+JPEGs pequenos que o worker redesenhou a partir do que leu, com no máximo
+600 px de lado: elas chegam à tela só como imagens JPEG `data:`, qualquer
+outra coisa é descartada, e um arquivo original, um SVG ou um HTML nunca é
+mostrado nem servido. O que o painel mostra fica criptografado junto com o
+e-mail e é apagado com o corpo dele. **Liberar os N com as mesmas imagens e
+anexos** envia todo e-mail em espera da equipe cujas imagens e arquivos a
+avaliação leu exatamente como os deste (as cópias de um disparo), como o
+**Liberar** faz, com a mesma linha de auditoria.
 
 **Por quanto tempo.** Uma autorização dura 30 minutos a partir do momento em
 que é criada e nunca é estendida; uma nova olhada é uma nova autorização,
@@ -1367,11 +1388,16 @@ essas linhas: elas são o inventário de quem leu o quê. Uma linha na
 auditoria da instância (`content.revealed`) é escrita antes de qualquer
 coisa ser descriptografada, com o id da autorização, o motivo e a quantidade
 de mensagens — nunca o texto da justificativa e nunca qualquer conteúdo.
+A primeira olhada de uma autorização num painel de mídia escreve uma
+segunda linha `content.revealed`, com campos que nomeiam o que a avaliação
+leu nas imagens e anexos, e marca a autorização (`media_viewed_at`).
 
 **O que a equipe vê, e quando.** Sete dias depois, uma rotina diária
 acrescenta uma linha `content.accessed` ao registro de auditoria da própria
 equipe — datada no acesso, não na divulgação — com o motivo, quantas
-mensagens e quais campos foram lidos. Ninguém recebe e-mail sobre um acesso,
+mensagens e quais campos foram lidos: `subject, rendered text`, seguido de
+`what screening read from its images and attachments` só quando a
+autorização abriu um painel de mídia. Ninguém recebe e-mail sobre um acesso,
 nem na hora nem depois. Uma equipe suspensa por phishing nunca recebe a
 linha; a autorização registra que a etapa de divulgação rodou, para não ser
 repetida toda noite. Uma equipe aguardando revisão a recebe quando a
@@ -1387,7 +1413,7 @@ CONTENT_REVEAL=on
 ```
 
 Desligado, os botões do console aparecem desabilitados com uma dica nomeando
-a variável e os dois procedimentos recusam. Ler as mensagens de outras
+a variável e todo procedimento de conteúdo recusa. Ler as mensagens de outras
 pessoas só é lícito como uma medida de segurança estreita, registrada e
 informada: diga isso nos termos e no aviso de privacidade da instância antes
 de ligar.

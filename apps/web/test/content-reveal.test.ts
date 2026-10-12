@@ -297,6 +297,8 @@ describe("console.safety.revealed", () => {
     const [grant] = await db.select().from(schema.contentAccessGrants);
     expect(grant?.viewCount).toBe(2);
     expect(grant?.lastViewedAt).toBeInstanceOf(Date);
+    // Text alone: the disclosure names the subject and rendered text, never the media.
+    expect(grant?.mediaViewedAt).toBeNull();
   });
 
   it("refuses after the window closes, off the grant, and for anyone else", async () => {

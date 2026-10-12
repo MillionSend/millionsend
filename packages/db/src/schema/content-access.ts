@@ -46,6 +46,9 @@ export const contentAccessGrants = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     viewCount: integer("view_count").notNull().default(0),
     lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    // The first time the grant opened what screening read from an email's
+    // images and attachments; its disclosure then names that read too.
+    mediaViewedAt: timestamp("media_viewed_at", { withTimezone: true }),
     // When the seven-day disclosure ran — including when it was withheld
     // because the team had been suspended for phishing by then, which is why
     // this is stamped even with team_visible_at left null. A team held for

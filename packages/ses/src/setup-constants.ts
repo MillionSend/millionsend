@@ -226,8 +226,9 @@ WARMUP_ENABLED=
 
 # Break-glass content access (see "Content access (break-glass)" in
 # SELF_HOSTING.md): with this on, the console can unwrap the subject and
-# rendered text of a flagged team's messages for a recorded security reason,
-# for 30 minutes, disclosed to the team after 7 days. Off unless
+# rendered text of a flagged team's messages, and what screening read from the
+# images and attachments of mail it held, for a recorded security reason, for
+# 30 minutes, disclosed to the team after 7 days. Off unless
 # CONTENT_REVEAL=on. Say so in your terms and privacy notice before turning
 # it on.
 CONTENT_REVEAL=off

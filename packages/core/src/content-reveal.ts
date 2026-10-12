@@ -40,6 +40,18 @@ export const CONTENT_REVEAL_NOTICE_DAYS = 7;
 
 /** What the audit rows say was read, on both sides. */
 export const CONTENT_REVEAL_FIELDS = "subject, rendered text";
+/** What the media panel reads under a grant: its first view's own audit row names this. */
+export const CONTENT_REVEAL_MEDIA_FIELDS = "what screening read from its images and attachments";
+
+/**
+ * What a grant's disclosure to the team says was read: the media too, once
+ * the grant opened the media panel, and never for a grant that did not.
+ */
+export function grantDisclosureFields(mediaViewed: boolean): string {
+  return mediaViewed
+    ? `${CONTENT_REVEAL_FIELDS}, ${CONTENT_REVEAL_MEDIA_FIELDS}`
+    : CONTENT_REVEAL_FIELDS;
+}
 
 export function contentRevealExpiry(createdAt: Date): Date {
   return new Date(createdAt.getTime() + CONTENT_REVEAL_WINDOW_MS);

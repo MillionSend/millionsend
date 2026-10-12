@@ -6,6 +6,7 @@ import {
   IMAGE_TYPES,
   type Keyring,
   linkDomain,
+  MEDIA_PREVIEWS_MAX,
   type MediaFindings,
   type MediaIssue,
   type MediaReview,
@@ -53,7 +54,6 @@ const URL_HASH_TTL_MS = 10 * 60_000;
 const VISION_SIDE = 1_120;
 const VISION_MIN_SIDE = 48;
 const ANIMATION_FRAMES = 4;
-const PREVIEWS_MAX = 4;
 const PREVIEW_SIDE = 600;
 const IMAGE_KINDS: ReadonlySet<FileKind> = new Set([...IMAGE_TYPES, "svg"]);
 
@@ -340,7 +340,7 @@ async function readImages(
 async function previews(items: Item[]): Promise<MediaReview["previews"]> {
   const out: MediaReview["previews"] = [];
   for (const item of items) {
-    if (out.length >= PREVIEWS_MAX) break;
+    if (out.length >= MEDIA_PREVIEWS_MAX) break;
     try {
       const bytes = await item.load();
       const jpeg = bytes && (await prepareImage(bytes));

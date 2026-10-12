@@ -4,6 +4,7 @@ import {
   CONTENT_REVEAL_FIELDS,
   CONTENT_REVEAL_JUSTIFICATION_MAX,
   CONTENT_REVEAL_JUSTIFICATION_MIN,
+  CONTENT_REVEAL_MEDIA_FIELDS,
   CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
   CONTENT_REVEAL_SCOPES,
@@ -916,6 +917,28 @@ export const consoleSafetyRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "purged" });
       }
       if (!email.media) throw new TRPCError({ code: "NOT_FOUND", message: "no_media" });
+      const team = await loadTeam(ctx.db, email.teamId);
+      // A grant's first look at the media is its own instance audit row, written
+      // before anything decrypts; the stamp makes the team's disclosure name it.
+      const [first] = await ctx.db
+        .update(g)
+        .set({ mediaViewedAt: now })
+        .where(and(eq(g.id, grant.id), isNull(g.mediaViewedAt)))
+        .returning({ id: g.id });
+      if (first) {
+        await auditOperator(ctx, {
+          teamId: null,
+          action: "content.revealed",
+          target: { type: "team", id: team.id },
+          metadata: {
+            grantId: grant.id,
+            team: team.name,
+            reason: grant.reason,
+            emails: 1,
+            fields: CONTENT_REVEAL_MEDIA_FIELDS,
+          },
+        });
+      }
       const view = renderRevealedMedia(
         await openMediaReview(email.media, getKeyring(), { teamId: email.teamId, rowId: email.id }),
       );
@@ -931,7 +954,6 @@ export const consoleSafetyRouter = router({
                 .where(inArray(la.domain, domains))
             ).map((row) => [row.domain, row.registeredAt]),
       );
-      const team = await loadTeam(ctx.db, email.teamId);
       const sameMedia = await sameMediaParked(ctx.db, team.id, email.id);
       return {
         ...view,

@@ -266,8 +266,28 @@ describe("console.safety.media", () => {
     for (const leak of ["448122", "8sJ2k", "529.982", SVG, "victim@example.org"]) {
       expect(payload).not.toContain(leak);
     }
+
+    // The first look at the media is recorded with its own fields, once per grant,
+    // and stamped on the grant so the team's disclosure names it.
+    await operator().console.safety.media({ grantId, emailId });
     const [grant] = await db.select().from(schema.contentAccessGrants);
-    expect(grant?.viewCount).toBe(1);
+    expect(grant?.viewCount).toBe(2);
+    expect(grant?.mediaViewedAt).toBeInstanceOf(Date);
+    const reads = await db
+      .select()
+      .from(schema.auditLog)
+      .where(
+        and(
+          eq(schema.auditLog.action, "content.revealed"),
+          eq(schema.auditLog.target, `team:${teamId}`),
+        ),
+      );
+    expect(
+      reads
+        .filter((row) => row.data?.grantId === grantId)
+        .map((row) => row.data?.fields)
+        .sort(),
+    ).toEqual(["subject, rendered text", "what screening read from its images and attachments"]);
   });
 
   it("refuses an email off the grant, a closed window and one without a review", async () => {

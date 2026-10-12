@@ -386,6 +386,13 @@
       "when": 1791764889740,
       "tag": "0054_campaign_capture_failures",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1791765770578,
+      "tag": "0055_content_access_media_views",
+      "breakpoints": true
     }
   ]
 }
