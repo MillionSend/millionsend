@@ -120,6 +120,7 @@ import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
+import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { INTERNAL_AUTH, registerMcp } from "./mcp.js";
@@ -3382,6 +3383,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // Uncaught throws must still speak Resend's error format — SDK clients
   // parse the body as JSON.
   app.onError((err, c) => {
+    // The request validators refuse a malformed JSON body (400) or one that
+    // isn't JSON (415) by throwing: the caller's mistake, not ours to report.
+    if (err instanceof HTTPException && err.status < 500) {
+      return c.json(errorBody(err.status, "invalid_parameter", err.message), err.status);
+    }
     console.error("unhandled api error", err);
     void captureError(err, { teamId: c.get("auth")?.teamId, tags: { route: routePath(c, -1) } });
     return c.json(errorBody(500, "internal_server_error", "An unexpected error occurred"), 500);

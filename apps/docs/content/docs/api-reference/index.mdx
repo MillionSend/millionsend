@@ -248,6 +248,9 @@ Errors use Resend's format:
 { "statusCode": 422, "name": "validation_error", "message": "..." }
 ```
 
+A body that isn't valid JSON answers `400 invalid_parameter`, and a body sent
+with a `Content-Type` other than `application/json` answers `415`.
+
 Besides Resend's names, [received mail](/concepts/receiving) and
 [inboxes](/concepts/inboxes) answer these:
 
