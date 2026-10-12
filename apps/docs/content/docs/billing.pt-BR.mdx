@@ -84,30 +84,30 @@ próprio limite diário (veja [Domínios](/pt-BR/concepts/domains#aquecimento-de
 Uma mudança de plano nunca o libera, e o que ele segura fica em espera como
 `queued_quota` sem contar no plano até o dreno liberá-lo.
 
-### Emails recebidos
+### E-mails recebidos
 
-Times que [recebem email](/pt-BR/concepts/receiving) são contados uma vez por
+Equipes que [recebem e-mail](/pt-BR/concepts/receiving) são contadas uma vez por
 mensagem, não por destinatário, em `usage_counters.received` e
 `usage_counters_hourly.received` e, em plano mensal, em
 `usage_periods.received`. O custo vem de
 `receivingRule` em `packages/core/src/receiving/rcpt.ts`:
 
-- **Free**: o email recebido gasta o contador de envios do dia
-  (`usage_counters.accepted`), então envios e emails recebidos dividem a
+- **Free**: o e-mail recebido gasta o contador de envios do dia
+  (`usage_counters.accepted`), então envios e e-mails recebidos dividem a
   cota e a tolerância de 50%, e os avisos de cota contam os dois. No teto, o
-  MX adia emails novos com `452 4.2.2` até a meia-noite UTC.
+  MX adia e-mails novos com `452 4.2.2` até a meia-noite UTC.
 - **Starter**: grátis até o dobro da cota diária (3.000) por dia UTC, contado
   à parte dos envios; além disso, `452`.
 - **Pro, Scale**: grátis até o dobro do volume incluído por período. Além
-  disso, cada décimo email recebido soma um email a `usage_periods.accepted`,
+  disso, cada décimo e-mail recebido soma um e-mail a `usage_periods.accepted`,
   que o [cron de excedente](#o-cron-de-excedente) cobra como um envio. Depois
-  da franquia, o email recebido é adiado quando `accepted` chega ao teto do
+  da franquia, o e-mail recebido é adiado quando `accepted` chega ao teto do
   período: 5× o volume com o excedente ligado, o próprio volume com ele
   desligado.
 
-O MX pergunta a cada `RCPT TO`, então um time sem espaço é adiado antes de a
-mensagem ser enviada; o remetente tenta de novo. Instâncias auto-hospedadas
-contam os emails recebidos e nunca os limitam.
+O MX pergunta a cada `RCPT TO`, então, se a equipe estiver sem espaço, a
+mensagem é adiada antes de ser enviada; o remetente tenta de novo. Instâncias
+auto-hospedadas contam os e-mails recebidos e nunca os limitam.
 
 ## O modelo no Stripe
 

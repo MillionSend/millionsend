@@ -199,7 +199,7 @@ worker cabem sem ajuste.
 | `S3_BACKUP_PREFIX` / `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | Ajustes do backup: prefixo das chaves (padrão `backups`), agenda diária dos dumps (`<minuto> <hora> * * *`, UTC, padrão `0 3 * * *`; qualquer outro formato faz o serviço sair com código 1) e dias de dumps mantidos (padrão 14). |
 | `BACKUP_AGE_RECIPIENT` | Chave pública age (`age1…`); defina para criptografar os dumps antes do upload. Para restaurar, rode `age --decrypt -i <arquivo da chave>` primeiro. |
 
-### Email de entrada (recebimento)
+### E-mail de entrada (recebimento)
 
 Veja [Recebimento](#recebimento-beta). O app lê as duas primeiras; o processo
 MX lê só as variáveis `MX_*`. O serviço `mx` do compose já define
@@ -472,11 +472,11 @@ outros) e rode `docker compose up -d`.
 ## Recebimento (beta)
 
 O [recebimento](/pt-BR/concepts/receiving) precisa de mais um processo: o MX,
-que atende SMTP na porta 25 para os domínios de recebimento dos seus times e
+que atende SMTP na porta 25 para os domínios de recebimento das suas equipes e
 entrega cada mensagem à API por HTTP. Ele não tem banco de dados nem chaves,
 só as variáveis `MX_*`, então pode rodar ao lado do app ou numa máquina
 pequena separada com a porta 25 aberta, que é como o MillionSend Cloud o
-roda. Ele nunca repassa email, não oferece AUTH e nunca envia bounce: recusa
+roda. Ele nunca repassa e-mail, não oferece AUTH e nunca envia bounce: recusa
 durante a sessão SMTP.
 
 1. **Dê um nome a ele.** Aponte um registro A como `mx.example.com` para o
@@ -505,7 +505,7 @@ durante a sessão SMTP.
    ```
 
    O certbot roda o hook a cada renovação, e o MX carrega os arquivos novos
-   em até cinco minutos, sem reiniciar. Sem certificado, o email chega do
+   em até cinco minutos, sem reiniciar. Sem certificado, o e-mail chega do
    mesmo jeito, só que sem criptografia.
 4. **Suba o MX.** Adicione `mx` ao `COMPOSE_PROFILES` e rode
    `docker compose up -d`: o serviço `mx` roda `PROCESS=mx` e publica a porta
@@ -592,7 +592,7 @@ server {
     # isso sem permitir uploads ilimitados.
     client_max_body_size 60m;
     # O MX manda o envelope de cada entrega num cabeçalho de até uns 13 KB,
-    # acima da linha de 8k padrão do nginx; um 400 ali faz esse email ser
+    # acima dos 8 KB padrão do nginx; um 400 ali faz esse e-mail ser
     # adiado até o remetente desistir.
     large_client_header_buffers 4 16k;
 

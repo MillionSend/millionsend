@@ -163,7 +163,7 @@ em que você não pode confiar totalmente de todo modo.
 
 ## Recebimento
 
-Um domínio verificado também pode [receber emails](/pt-BR/concepts/receiving)
+Um domínio verificado também pode [receber e-mails](/pt-BR/concepts/receiving)
 (beta). Toda resposta de domínio traz o objeto `capabilities` do Resend:
 `sending` é sempre `enabled` (pedir para desligá-lo dá `422`), e `receiving` é
 `enabled` ou `disabled`. Ligue ou desligue o recebimento em **Ativar
@@ -172,8 +172,8 @@ recebimento**, na página do domínio, ou mande
 `PATCH /domains/{id}`. Só um domínio verificado pode ativá-lo, e é por isso
 que `POST /domains` recusa `"receiving": "enabled"` com `422`: adicione o
 domínio, verifique e depois ligue o recebimento. Um nome de domínio recebe em
-um time só: um nome em que outro time já recebe responde `409`. Numa
-instância que não recebe email nenhum, todo domínio informa `disabled` e
+uma equipe só: um nome em que outra equipe já recebe responde `409`. Numa
+instância que não recebe e-mail nenhum, todo domínio informa `disabled` e
 ativar o recebimento é recusado com `422`.
 
 Com o recebimento ligado, `records[]` inclui uma linha `Receiving`: um
@@ -198,15 +198,15 @@ A linha é checada ao vivo como as outras: `verified` quando esse host está
 entre os registros MX do nome com o menor número de prioridade, `failed`
 enquanto outro registro MX do nome tiver um número menor (`detail` lista o
 que está publicado) e `not_started` sem nenhum registro MX. Um registro MX
-com número menor leva os emails no lugar dele, e é por isso que o MX deve
+com número menor leva os e-mails no lugar dele, e é por isso que o MX deve
 ficar num subdomínio como `inbound.example.com` quando o domínio já recebe
-email em outro lugar. A linha nunca condiciona o envio.
+e-mail em outro lugar. A linha nunca condiciona o envio.
 
 ## Chaves de API e domínios
 
 Uma chave de API pode ficar restrita a um único domínio; essa chave só envia
 a partir daquele domínio (outros domínios retornam `403 restricted_api_key`)
-e só lê os emails [recebidos](/pt-BR/concepts/receiving) nele. As chaves que
+e só lê os e-mails [recebidos](/pt-BR/concepts/receiving) nele. As chaves que
 ela cria pela API ficam restritas ao mesmo domínio: um
 `domain_id` omitido herda esse domínio, e qualquer outro domínio retorna
 `403 restricted_api_key`.

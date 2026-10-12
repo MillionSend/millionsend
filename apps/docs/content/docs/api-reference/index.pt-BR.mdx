@@ -29,7 +29,7 @@ local, ou onde você expôs a porta 3001 (ex.: `https://api.acme.dev`). Veja
 
 Todo endpoint exige uma chave de API criada no painel, exceto o webhook de
 ingestão de eventos do SES e os links de download assinados dos
-[emails recebidos](/pt-BR/concepts/receiving#downloads):
+[e-mails recebidos](/pt-BR/concepts/receiving#downloads):
 
 ```
 Authorization: Bearer ms_...
@@ -243,17 +243,17 @@ Endpoints de listagem aceitam `limit` (1–100, padrão 20) e cursores `after` /
 `before` carregando o id de um item de uma página anterior. As respostas
 incluem `has_more`. As listagens vêm do mais antigo para o mais novo, menos
 `GET /emails/receiving`, que vem do mais novo para o mais antigo como no
-Resend: ali `after` avança para emails mais antigos. Os anexos de um email
+Resend: ali `after` avança para e-mails mais antigos. Os anexos de um e-mail
 recebido vêm todos de uma vez, a não ser que você passe `limit`.
 
 ## Links de download assinados
 
-Emails recebidos trazem links de download em vez dos bytes:
+E-mails recebidos trazem links de download em vez dos bytes:
 `raw.download_url` em `GET /emails/receiving/{id}` e `download_url` em cada
 anexo que os endpoints de anexos devolvem. São URLs `GET` comuns na origem
 da API, `/receiving/raw/{email_id}` e
 `/receiving/attachments/{email_id}/{attachment_id}`, com `expires` (segundos
 Unix) e `signature` na query. Não precisam de chave de API, valem por uma
-hora (`expires_at`) para um email e um anexo de um time, e respondem `403`
+hora (`expires_at`) para um e-mail e um anexo de uma equipe, e respondem `403`
 depois de expirar ou se forem alterados; peça links novos à API. Veja
 [Recebimento → Downloads](/pt-BR/concepts/receiving#downloads).

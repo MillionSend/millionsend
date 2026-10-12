@@ -1,11 +1,11 @@
 ---
 title: Recebimento
-description: Receba emails em qualquer endereço do seu próprio domínio, leia-os pela API compatível com o Resend e seja avisado pelo webhook email.received a cada mensagem. Beta.
+description: Receba e-mails em qualquer endereço do seu próprio domínio, leia-os pela API compatível com o Resend e seja avisado pelo webhook email.received a cada mensagem. Beta.
 ---
 
 O recebimento transforma um domínio que você verificou numa caixa de entrada
-para todos os endereços dele. Um email enviado para qualquer endereço ali
-chega ao servidor de email do MillionSend, fica guardado com criptografia e
+para todos os endereços dele. Um e-mail enviado para qualquer endereço ali
+chega ao servidor de e-mail do MillionSend, fica guardado com criptografia e
 volta para você pela API, pelo webhook `email.received`, pelo painel
 (**E-mails → Recebidos**) e pelo [servidor MCP](/pt-BR/mcp). A API é a de
 recebimento do Resend, então os SDKs oficiais do Resend funcionam com o
@@ -20,7 +20,7 @@ DMARC para o seu código decidir o que fazer.
 
 ## Como funciona
 
-O email chega até você do mesmo jeito que chega a qualquer caixa de entrada:
+O e-mail chega até você do mesmo jeito que chega a qualquer caixa de entrada:
 o servidor de quem envia consulta o registro MX do domínio do destinatário e
 entrega no host que ele indica.
 
@@ -28,7 +28,7 @@ entrega no host que ele indica.
    MX do MillionSend.
 2. Para cada destinatário (`RCPT TO`), o MX confere se o domínio recebe aqui.
    Um endereço de qualquer outro domínio é recusado, então o MX nunca repassa
-   email para lugar nenhum.
+   e-mail para lugar nenhum.
 3. A mensagem vai chegando (no máximo 40 MB). O MX verifica SPF, DKIM, DMARC
    e ARC e entrega a mensagem ao MillionSend, que a guarda antes de o MX
    responder `250`. A partir daí a mensagem é sua, e o servidor de quem
@@ -42,9 +42,9 @@ nunca envia um bounce por conta própria.
 | Resposta | Quando | O servidor de quem envia |
 | --- | --- | --- |
 | `550 5.1.1` | O domínio não recebe aqui: é desconhecido ou está com o recebimento desligado. | Devolve a mensagem ao remetente. |
-| `550 5.7.1` | O time dono do domínio está suspenso. | Devolve a mensagem ao remetente. |
+| `550 5.7.1` | A equipe dona do domínio está suspensa. | Devolve a mensagem ao remetente. |
 | `552 5.3.4` | A mensagem passa de 40 MB. | Devolve a mensagem ao remetente. |
-| `452 4.2.2` | A franquia de recebimento do time acabou (veja [preços](#preços)). | Guarda a mensagem e tenta de novo mais tarde. |
+| `452 4.2.2` | A franquia de recebimento da equipe acabou (veja [preços](#preços)). | Guarda a mensagem e tenta de novo mais tarde. |
 | Outros `4xx`, como `451 4.3.0` | Um problema temporário do lado do MillionSend, ou mais destinatários do que uma entrega aceita (50). | Guarda a mensagem e tenta de novo, por dias se precisar. |
 
 ## Configuração
@@ -72,14 +72,14 @@ painel não mostra nada de recebimento, todo domínio informa
 
 Quem envia entrega no registro MX com o menor número de prioridade do domínio
 do destinatário, então o MX de recebimento assume todos os endereços do nome
-em que for publicado. Publique-o num nome que ainda não recebe email, como
+em que for publicado. Publique-o num nome que ainda não recebe e-mail, como
 `inbound.example.com`: suas caixas em `example.com` continuam no seu provedor
-atual. Só receba num domínio raiz quando nada mais recebe email lá.
+atual. Só receba num domínio raiz quando nada mais recebe e-mail lá.
 
 ### 2. Adicione e verifique
 
-O recebimento pertence a um nome de domínio exato, e só a um domínio que o
-seu time verificou. Para receber em `inbound.example.com`, adicione o próprio
+O recebimento pertence a um nome de domínio exato, e só a um domínio que a
+sua equipe verificou. Para receber em `inbound.example.com`, adicione o próprio
 `inbound.example.com` em **Domínios** (ou com `POST /domains`) e verifique-o
 com os registros DKIM e MAIL FROM dele, como no
 [envio](/pt-BR/concepts/domains#verificação). Verificar `example.com` não
@@ -98,8 +98,8 @@ curl -X PATCH "https://api.millionsend.com/domains/{id}" \
 ```
 
 Toda resposta de domínio informa o estado, por exemplo `{ "sending":
-"enabled", "receiving": "enabled" }`. Um nome de domínio recebe em um time
-só: um nome em que outro time já recebe é recusado com `409`.
+"enabled", "receiving": "enabled" }`. Um nome de domínio recebe em uma equipe
+só: um nome em que outra equipe já recebe é recusado com `409`.
 
 ### 4. Publique o registro MX
 
@@ -120,13 +120,13 @@ instância.
 
 ### 5. Faça um teste
 
-De qualquer caixa de email, mande uma mensagem para um endereço do domínio,
+De qualquer caixa de e-mail, mande uma mensagem para um endereço do domínio,
 como `hello@inbound.example.com`. Ela aparece em **E-mails → Recebidos** em
 segundos, e todo endpoint de webhook inscrito em `email.received` recebe uma
 entrega.
 
 Para parar de receber, desligue o recebimento (`"receiving": "disabled"`).
-Emails novos passam a ser recusados em até um minuto; o que já chegou fica
+E-mails novos passam a ser recusados em até um minuto; o que já chegou fica
 até a [retenção](#limites) apagar. Remova também o registro MX.
 
 ## Endereços
@@ -141,25 +141,25 @@ endereço em que ela chegou.
   SMTP), incluindo quem estava em Cco. `to` e `cc` são o que os cabeçalhos da
   mensagem dizem e podem citar qualquer pessoa, então use `received_for` para
   decidir o destino.
-- Uma mensagem é guardada uma vez por time. Enviada para três endereços seus,
-  ela vira um email recebido com os três em `received_for`, uma entrega de
+- Uma mensagem é guardada uma vez por equipe. Enviada para três endereços seus,
+  ela vira um e-mail recebido com os três em `received_for`, uma entrega de
   webhook e uma mensagem contada. Uma nova tentativa do servidor de quem
   envia também é reconhecida e guardada uma vez só. Quando a mesma mensagem
   chega de novo para outros endereços seus (o servidor de quem envia divide
   os destinatários em várias entregas, por exemplo passando de 50), eles
   entram em `received_for`, e chega mais um `email.received` com o mesmo
   `email_id` só com eles.
-- Só o nome exato recebe: email para `x@eu.inbound.example.com` é recusado,
+- Só o nome exato recebe: e-mail para `x@eu.inbound.example.com` é recusado,
   a não ser que esse subdomínio também receba.
-- Quando uma mensagem chega aos domínios de recebimento de dois times, cada
-  time ganha a própria cópia, só com os próprios destinatários.
+- Quando uma mensagem chega aos domínios de recebimento de duas equipes, cada
+  equipe ganha a própria cópia, só com os próprios destinatários.
 
 ## Limites
 
 | Limite | Valor |
 | --- | --- |
-| Tamanho da mensagem | 40 MB (41.943.040 bytes) para a mensagem inteira como foi enviada: cabeçalhos, texto, HTML e anexos codificados para email. A codificação base64 deixa os anexos cerca de um terço maiores, então cabem uns 30 MB de arquivos. Uma mensagem maior é recusada com `552 5.3.4` enquanto ainda está chegando. |
-| Retenção | 30 dias na nuvem. Na auto-hospedagem, o conteúdo segue a retenção de emails da instância (**Configurações → Instância**, 30 dias por padrão), e remetente, destinatários e assunto seguem `EMAIL_METADATA_RETENTION_DAYS` (30 por padrão). |
+| Tamanho da mensagem | 40 MB (41.943.040 bytes) para a mensagem inteira como foi enviada: cabeçalhos, texto, HTML e anexos codificados para e-mail. A codificação base64 deixa os anexos cerca de um terço maiores, então cabem uns 30 MB de arquivos. Uma mensagem maior é recusada com `552 5.3.4` enquanto ainda está chegando. |
+| Retenção | 30 dias na nuvem. Na auto-hospedagem, o conteúdo segue a retenção de e-mails da instância (**Configurações → Instância**, 30 dias por padrão), e remetente, destinatários e assunto seguem `EMAIL_METADATA_RETENTION_DAYS` (30 por padrão). |
 | Filtro | Sem filtro de spam ou vírus durante o beta; confira `authentication` antes de confiar num remetente. |
 
 Quando a retenção do conteúdo termina, `html`, `text`, `headers` e `raw`
@@ -169,7 +169,7 @@ apagada.
 
 ## Preços
 
-O email recebido conta uma vez por mensagem por time, não importa para
+O e-mail recebido conta uma vez por mensagem por equipe, não importa para
 quantos endereços seus ela foi enviada, num contador de uso próprio, ao lado
 dos seus envios. Quanto custa depende do plano:
 
@@ -177,35 +177,35 @@ dos seus envios. Quanto custa depende do plano:
 | --- | --- | --- |
 | Free | Divide a cota diária de envio de 100 | Adiado com `452 4.2.2` até a meia-noite UTC |
 | Starter | 3.000 por dia UTC (o dobro da cota diária de 1.500), contados à parte dos envios | Adiado com `452 4.2.2` até a meia-noite UTC |
-| Pro, Scale | O dobro do volume mensal do plano por período de cobrança (200.000 no Pro 100K) | Cada email recebido conta como um décimo de email no volume e no excedente |
+| Pro, Scale | O dobro do volume mensal do plano por período de cobrança (200.000 no Pro 100K) | Cada e-mail recebido conta como um décimo de e-mail no volume e no excedente |
 
-- **Free**: emails recebidos e envios enchem a mesma contagem diária, com a
-  mesma tolerância de 50% dos envios, então emails novos são adiados quando
+- **Free**: e-mails recebidos e envios enchem a mesma contagem diária, com a
+  mesma tolerância de 50% dos envios, então e-mails novos são adiados quando
   os dois juntos chegam a 150 num dia UTC. Ou seja, o recebimento pode gastar
   o dia: envios além da cota esperam até a meia-noite UTC como quaisquer
   outros, e o recebimento também conta para os
   [avisos de cota](/pt-BR/concepts/webhooks#tipos-de-evento).
-- **Pro e Scale**: depois da franquia grátis, cada décimo email recebido soma
-  um email à contagem do período de cobrança, então mais 1.000 emails
-  recebidos contam como 100 emails: dentro do volume incluído eles o
+- **Pro e Scale**: depois da franquia grátis, cada décimo e-mail recebido soma
+  um e-mail à contagem do período de cobrança, então mais 1.000 e-mails
+  recebidos contam como 100 e-mails: dentro do volume incluído eles o
   consomem, além dele são cobrados pela taxa de excedente do seu plano.
-  Depois da franquia, o email recebido é adiado com `452 4.2.2` quando a
+  Depois da franquia, o e-mail recebido é adiado com `452 4.2.2` quando a
   contagem do período chega a 5 vezes o volume incluído com o excedente
   ligado, ou ao volume incluído com o excedente desligado.
 - Um adiamento é temporário: o servidor de quem envia guarda a mensagem e
   tenta de novo, normalmente por vários dias, então ela chega assim que
   houver espaço.
 
-**Configurações → Uso** mostra os emails recebidos e a franquia grátis. Uma
-instância auto-hospedada conta os emails recebidos e nunca os limita.
+**Configurações → Uso** mostra os e-mails recebidos e a franquia grátis. Uma
+instância auto-hospedada conta os e-mails recebidos e nunca os limita.
 
-## Lendo emails recebidos
+## Lendo e-mails recebidos
 
 Use o SDK oficial do Resend apontado para o MillionSend (`RESEND_BASE_URL`)
 ou HTTP direto. Os SDKs do MillionSend ainda não têm métodos de recebimento.
 Todo endpoint abaixo exige uma chave de **acesso total**; uma chave de
 somente envio recebe `403 restricted_api_key`, e uma chave restrita a um
-domínio só lê os emails recebidos nesse domínio.
+domínio só lê os e-mails recebidos nesse domínio.
 
 ```ts
 import { Resend } from "resend";
@@ -221,7 +221,7 @@ const { data: files } = await resend.emails.receiving.attachments.list({ emailId
 ### Listar
 
 `GET /emails/receiving` lista do mais novo para o mais antigo, como o
-Resend: `after` avança para emails mais antigos, `before` volta para os mais
+Resend: `after` avança para e-mails mais antigos, `before` volta para os mais
 novos. Aceita `limit` (1–100, padrão 20; o Resend devolve todos quando falta
 o `limit`) e um cursor `after` ou `before`, como toda
 [listagem](/pt-BR/api-reference#paginação).
@@ -345,13 +345,13 @@ painel.
 
 `dmarc: "pass"` quer dizer que o domínio do `from` autorizou a mensagem.
 Qualquer outro valor quer dizer que o `from` pode ser falso, mas `gray`
-também aparece em email legítimo de um domínio que pede para o DMARC não ser
+também aparece em e-mail legítimo de um domínio que pede para o DMARC não ser
 aplicado.
 
 ### Anexos
 
 `GET /emails/receiving/{email_id}/attachments` lista todos os anexos de um
-email de uma vez, como o Resend (passe `limit` para paginar), e
+e-mail de uma vez, como o Resend (passe `limit` para paginar), e
 `GET /emails/receiving/{email_id}/attachments/{id}` devolve um deles, cada um
 com um link de download novo:
 
@@ -369,7 +369,7 @@ com um link de download novo:
 ```
 
 `filename` e `content_id` ficam de fora quando a parte não tem. Os ids de
-anexo nunca mudam enquanto o email existir. Os nomes de arquivo são limpos
+anexo nunca mudam enquanto o e-mail existir. Os nomes de arquivo são limpos
 antes de chegar a você: caracteres de controle são removidos, e `/` e `\`
 viram `_`.
 
@@ -378,8 +378,8 @@ viram `_`.
 `raw.download_url` e o `download_url` de cada anexo funcionam sem chave de
 API: o próprio link é a credencial.
 
-- Um link é assinado para um email e um anexo (ou a mensagem original) de um
-  time, e para de funcionar no seu `expires_at`, uma hora depois da resposta
+- Um link é assinado para um e-mail e um anexo (ou a mensagem original) de uma
+  equipe, e para de funcionar no seu `expires_at`, uma hora depois da resposta
   da API; depois disso, ou se for alterado, responde `403`. Quem tiver o link
   consegue baixar até lá, então não o registre em log nem o repasse. Cada
   chamada aos endpoints acima assina links novos.
@@ -392,7 +392,7 @@ API: o próprio link é a credencial.
 
 ## Encaminhar e responder
 
-`resend.emails.receiving.forward()` funciona como no Resend: lê o email,
+`resend.emails.receiving.forward()` funciona como no Resend: lê o e-mail,
 baixa o `raw.download_url` e envia a mensagem de novo por `POST /emails`.
 
 ```ts
@@ -429,8 +429,8 @@ await resend.emails.send({
 
 ## Webhook
 
-`email.received` dispara uma vez para cada mensagem guardada para o seu
-time, nos endpoints inscritos nele ou em todos os eventos. Como o do Resend,
+`email.received` dispara uma vez para cada mensagem guardada para a sua
+equipe, nos endpoints inscritos nele ou em todos os eventos. Como o do Resend,
 ele só traz metadados: busque o conteúdo com
 `GET /emails/receiving/{email_id}`. Quando uma entrega posterior da mesma
 mensagem chega a mais endereços seus, chega mais um `email.received` com o
@@ -469,7 +469,7 @@ outro evento; veja [Webhooks](/pt-BR/concepts/webhooks).
 
 ## Painel
 
-**E-mails → Recebidos** lista os emails recebidos com remetente,
+**E-mails → Recebidos** lista os e-mails recebidos com remetente,
 destinatários, assunto, horário, resultados de SPF, DKIM e DMARC e número de
 anexos. Ao abrir uma mensagem, o HTML aparece isolado, com scripts e imagens
 remotas bloqueados e imagens inline exibidas, junto com a versão em texto, os
@@ -478,7 +478,7 @@ mensagem original.
 
 ## MCP
 
-O [servidor MCP](/pt-BR/mcp#ferramentas) lê emails recebidos com quatro
+O [servidor MCP](/pt-BR/mcp#ferramentas) lê e-mails recebidos com quatro
 ferramentas sob a permissão `receiving:read`: `list_received_emails`,
 `get_received_email`, `list_received_email_attachments` e
 `get_received_email_attachment`. O `get_received_email` deixa as imagens
@@ -487,11 +487,11 @@ inline como referências `cid:`, a não ser que você peça outra coisa, e o
 recebimento existir não incluem `receiving:read`: entre de novo pelo cliente
 para concedê-la.
 
-## Trate emails recebidos como não confiáveis
+## Trate e-mails recebidos como não confiáveis
 
-Qualquer pessoa pode mandar email para um domínio de recebimento. O HTML pode
+Qualquer pessoa pode mandar e-mail para um domínio de recebimento. O HTML pode
 trazer scripts e imagens de rastreamento, links podem levar a páginas de
 phishing, anexos podem trazer malware e o `from` pode ser falso;
-`authentication` diz até onde confiar. Um agente de IA que lê emails
+`authentication` diz até onde confiar. Um agente de IA que lê e-mails
 recebidos deve tratá-los como dados, nunca como instruções: as ferramentas
 MCP os marcam assim.
