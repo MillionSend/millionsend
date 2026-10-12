@@ -63,6 +63,12 @@ export type EmailSendPriority = (typeof EMAIL_SEND_PRIORITY)[keyof typeof EMAIL_
 export const emailSendPriority = (email: { broadcastId: string | null }): EmailSendPriority =>
   email.broadcastId ? EMAIL_SEND_PRIORITY.bulk : EMAIL_SEND_PRIORITY.transactional;
 
+/**
+ * Fetch order inside the abuse.judge queue: a sample that mail waits on
+ * before SES goes ahead of the samples judged after sending.
+ */
+export const JUDGE_PRIORITY = { screening: 1, sample: 0 } as const;
+
 /** One email.send in a batch enqueue; the wiring supplies the default priority. */
 export interface EmailSendRequest {
   emailId: string;
@@ -130,6 +136,11 @@ const NOTIFY_QUEUES: ReadonlySet<string> = new Set<JobName>([
   "webhook.drain",
   // A domain verified minutes ago may send now; its age should be known first.
   "domain.age",
+  // Polling, not the model, made a verdict's latency: a burst's later
+  // messages went out while earlier ones waited for the next fetch.
+  "abuse.judge",
+  // A held team's SES tenant is disabled within seconds, not a poll later.
+  "tenant.status",
 ]);
 const SLOW_POLL_SECONDS = 30;
 
@@ -206,6 +217,10 @@ export const CRON_JOBS = {
   // Daily: the seven-day disclosure of break-glass content access, the
   // team's audit row. No-op with none due.
   "safety.reveal_notices": "40 4 * * *",
+  // Daily: third-party reference data (the disposable-domain list, and the
+  // DB-IP databases, monthly files) is refreshed where it is switched on; a
+  // failed download keeps the last copy.
+  "reference.refresh": "10 5 * * *",
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;

@@ -117,7 +117,7 @@
       "complained": "Complaints",
       "deliveredOf": "{delivered} of {sent} delivered",
       "hardOf": "hard {rate} · SES line 5%",
-      "complaintLines": "breaker 0.08% · SES 0.1%",
+      "complaintLines": "our own count over all mail · SES's rate is per region",
       "period": "Period",
       "noSends": "no sends in the window"
     },
@@ -134,6 +134,42 @@
       "queueSub": "{waiting} queued · {held} held (plan + pacing) · oldest {oldest}",
       "queuePending": "counted by the next probe"
     },
+    "regions": {
+      "columns": {
+        "region": "Region",
+        "status": "Status",
+        "quota": "24h quota",
+        "broadcasts": "Broadcasts",
+        "sesAccount": "SES account",
+        "queue": "Queue",
+        "bounce7d": "Bounce 7d",
+        "sesComplaints": "SES complaints",
+        "cost": "Cost this month"
+      },
+      "maxRate": "Max rate {rate}/s",
+      "quotaShort": "{quota} · max rate {rate}/s",
+      "broadcastsFlowing": "flowing",
+      "broadcastsPaused": "paused",
+      "pauseWindow": "Automatic pause: {metric} at {rate} over {hours, select, 168 {7 days} other {{hours}h}}, above the {limit} limit.",
+      "pauseComplaints": "Automatic pause: complaints at {rate} over {hours, select, 168 {7 days} other {{hours}h}} on mail to providers that report them, above the {limit} limit.",
+      "pauseSes": "Automatic pause: complaints at {rate} as SES measures them, above the {limit} limit.",
+      "pauseManual": "Paused by the operator: {reason}",
+      "pauseTransactional": "Transactional mail keeps flowing.",
+      "accountHealthy": "healthy",
+      "accountProbation": "under review",
+      "accountProbationTip": "AWS put the account under review (probation) in this region.",
+      "accountShutdown": "suspended",
+      "accountShutdownTip": "AWS paused the account's sending in this region (shutdown).",
+      "queueClears": "{count, plural, one {# broadcast} other {# broadcasts}} · clears about {clears}",
+      "queueHeld": "{count, plural, one {# broadcast} other {# broadcasts}} · held during the pause",
+      "sesRate": "The rate SES itself measures",
+      "sesLines": "SES reviews from {review} and pauses at {pause}",
+      "ourLines": "Our regional pause: {limit} · our 7-day estimate: {ours}",
+      "sesUnreadable": "SES's rate couldn't be read",
+      "sesNone": "SES hasn't published a rate for this region",
+      "oursWatched": "The regional pause watches our estimate of it: {ours} over 7 days, {limit} limit",
+      "costTip": "{sent} sent × {rate}/1k"
+    },
     "sent": {
       "title": "Sent per day",
       "titleHourly": "Sent per hour",
@@ -146,12 +182,6 @@
       "legendQuotaTip": "The SES 24-hour sending quota of the region, from GetAccount.",
       "committedLabel": "committed {value}",
       "quotaLabel": "SES quota {value}"
-    },
-    "addRegion": {
-      "title": "Add a region",
-      "body": "Run the setup tool for the new region, add the lines it prints to .env, restart.",
-      "cta": "Provision {region}",
-      "open": "Open regions"
     },
     "charts": {
       "sent": "Emails sent",
@@ -179,6 +209,10 @@
       "queue_oldest_s": "Oldest queued job",
       "region_sent": "Sent per hour · {region}",
       "noPoints": "Nothing recorded in this window yet.",
+      "point": {
+        "max": "Each point: the highest reading in {window}",
+        "avg": "Each point: the average over {window}"
+      },
       "monitor_samples_1h": "Monitor samples per hour",
       "monitor_unjudged_rate": "Monitor unjudged share"
     },
@@ -204,35 +238,10 @@
     "notProvisioned": "Not provisioned",
     "production": "production",
     "sandboxLower": "sandbox",
-    "quota": "24h quota",
     "quotaOf": "{used} / {max}",
-    "maxRate": "Max rate",
-    "rateValue": "{rate} /s · bucket {bucket}",
-    "plan": "Pricing plan",
-    "planNone": "à la carte · $0.10 /1k",
-    "planEssentials": "Essentials · $0.16 /1k",
-    "planOther": "{plan}",
-    "planUnknown": "unknown",
-    "enforcement": "Enforcement",
-    "domains": "Domains",
-    "domainsValue": "{count, plural, other {# verified}}",
-    "breaker": "Breaker",
-    "breakerClosed": "closed",
-    "breakerOpen": "open · {metric} {rate}",
-    "breakerManual": "held by operator",
-    "breakerRates": "{closed} · {bounce} / {complaint}",
-    "productionRow": "Production",
-    "productionPending": "sandbox · request access",
-    "events": "Events",
-    "eventsLag": "SQS lag {lag}",
-    "eventsIdle": "idle",
-    "eventsUnhealthy": "no events back",
-    "eventsOff": "not configured",
-    "cost": "Cost this month",
-    "costValue": "{amount} · {sent} sent × {rate}/1k",
     "costTenants": " · incl. tenants",
-    "sparkLabel": "Sent per hour · 24h",
     "error": "GetAccount failed: {message}",
+    "complaintEstimate": "Our estimate of SES's rate leaves out mail to providers that never report complaints, such as Gmail",
     "metric": {
       "bounce": "bounce",
       "complaint": "complaint"
@@ -294,14 +303,7 @@
     },
     "legendBroadcasts": "Broadcasts {sent} of {share}",
     "legendTransactional": "Transactional {sent}",
-    "legendUsable": "(usable reserve {usable})",
-    "queue": "Queue",
-    "queueValue": "{waiting} waiting · {count, plural, one {# broadcast} other {# broadcasts}} · clears about {clears}",
-    "queueEmpty": "empty",
-    "txParked": "Transactional parked",
-    "txParkedAt": "parked {ago}",
-    "txParkedNone": "none in 24h",
-    "txParkedChip": "transactional parked"
+    "legendUsable": "(usable reserve {usable})"
   },
   "regions": {
     "title": "Regions",
@@ -476,6 +478,74 @@
       "standingAt": "standing computed {ago}",
       "supportView": "Support view live · ends in {left}"
     },
+    "linked": {
+      "title": "Matches a team suspended for phishing",
+      "subtitle": "What this team shares with a team you suspended for phishing. Sender names, subjects and domains match when nearly the same; everything else must be identical.",
+      "columns": {
+        "signal": "Signal",
+        "thisTeam": "This team",
+        "matched": "Suspended team's",
+        "team": "Suspended team"
+      },
+      "kinds": {
+        "display_name": "Sender name",
+        "subject": "Subject",
+        "sending_domain": "Sending domain",
+        "link_domain": "Link domain",
+        "phone": "Phone number",
+        "text_hash": "Email text",
+        "card": "Card",
+        "ip": "IP address",
+        "address": "Email address"
+      },
+      "sameText": "Same text",
+      "found": "Matched {team} {ago}, {trigger}.",
+      "triggers": {
+        "team": "when the team was created",
+        "domain": "when a domain was added",
+        "payment": "at its first payment",
+        "send": "on a send"
+      },
+      "held": "Held for review at a send: its mail waits until you decide.",
+      "notHeld": "This match held nothing: a match holds a team only when it sends, if it includes an email address, a card or two kinds of evidence and the automatic hold is on."
+    },
+    "members": {
+      "title": "Members",
+      "subtitle": "Where each person signed up from and where they were last seen. Only the console sees this.",
+      "columns": {
+        "member": "Member",
+        "signupIp": "Sign-up IP",
+        "network": "Network",
+        "country": "Country",
+        "lastSeen": "Last seen IP"
+      },
+      "memberTip": "{name} · {role}",
+      "temporary": "Temporary address",
+      "temporaryTip": "Its domain is on the list of disposable email domains.",
+      "signupTip": "Signed up {date} · {agent}",
+      "signupNoIp": "The sign-up request carried no IP",
+      "signupNone": "Signed up before sign-up IPs were kept",
+      "lastSeenTip": "Latest session {ago}",
+      "othersTitle": "Other accounts on these IPs",
+      "othersSubtitle": "Seen on a member's sign-up or last-seen IP, deleted accounts included.",
+      "othersColumns": {
+        "account": "Account",
+        "ip": "IP",
+        "seen": "Seen at",
+        "status": "Status"
+      },
+      "seen": {
+        "signup": "Sign-up",
+        "session": "Session"
+      },
+      "status": {
+        "suspended": "Suspended",
+        "deleted": "Deleted",
+        "active": "Active"
+      },
+      "deletedAbuseTip": "Deleted while in a team suspended for abuse",
+      "attribution": "<link>IP geolocation by DB-IP</link>"
+    },
     "limitsDialog": {
       "title": "Adjust limits · {team}",
       "lead": "Overrides sit beside the plan and never replace it. Empty means the plan decides.",
@@ -528,6 +598,12 @@
       },
       "notePlaceholder": "What you saw. Goes to the audit log and, unless phishing, to the owner.",
       "confirm": "Suspend team"
+    },
+    "refund": {
+      "offer": "Cancel {plan} in Stripe and refund the last 120 days as fraud",
+      "suspended": "{team} suspended",
+      "done": "subscription canceled · {count, plural, =0 {no payments to refund} one {# payment refunded ({amount})} other {# payments refunded ({amount})}}",
+      "failed": "Stripe stopped partway: finish canceling and refunding in the Stripe dashboard"
     },
     "reinstateDialog": {
       "title": "Reinstate {team}",
@@ -595,7 +671,9 @@
       "guardrail": "Guardrail",
       "score": "Score",
       "report": "Report",
-      "manual": "Manual"
+      "manual": "Manual",
+      "brand": "Brand name",
+      "linked": "Linked"
     },
     "reasonTip": {
       "monitor": "The content monitor: sampled content judged by the model pushed the internal risk over the flag line.",
@@ -603,7 +681,8 @@
       "guardrail": "The deliverability guardrail turned warning or paused the team on its bounce or complaint rates.",
       "score": "The account score dropped under 5 out of 10.",
       "report": "A mailbox provider or a recipient reported abuse.",
-      "manual": "An operator flagged the team by hand."
+      "manual": "An operator flagged the team by hand.",
+      "brand": "The team's name matches a brand phishers often imitate. Checked when the team is created or renamed; the name itself is allowed."
     },
     "reasonLabel": {
       "complaint": "Complaints {rate} · 7d",
@@ -613,7 +692,9 @@
       "score": "Score {score} / 10",
       "manual": "Flagged by operator",
       "report": "Abuse report",
-      "monitor": "Risk {risk} · {samples, plural, one {# sample} other {# samples}}"
+      "monitor": "Risk {risk} · {samples, plural, one {# sample} other {# samples}}",
+      "brand": "Named like {brand}",
+      "linked": "Matches a team suspended for phishing"
     },
     "columns": {
       "team": "Team",
@@ -644,7 +725,8 @@
       "reveal": "Request content access",
       "clearTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. While the same trigger holds, the automatic check will not reopen it; if the trigger lapses and comes back, a new flag opens. Left alone, an automatic flag closes itself once its trigger is gone. A flag opened in the last 90 days keeps the team out of the Trusted tier either way.",
       "reopenTip": "Opens it again as a manual flag, which the automatic check never closes.",
-      "clearManualTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. A manual flag has no trigger of its own: if an automatic trigger holds when it is cleared, the next check opens an automatic flag."
+      "clearManualTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. A manual flag has no trigger of its own: if an automatic trigger holds when it is cleared, the next check opens an automatic flag.",
+      "clearBrandTip": "Marks the flag reviewed and closes it, with an audit entry. Nothing else changes. Only an operator closes a brand flag; a rename to another name that matches a brand opens a new one."
     },
     "toast": {
       "cleared": "{team} · cleared",
@@ -685,7 +767,7 @@
       },
       "emails": {
         "title": "Flagged emails · {count}",
-        "subtitle": "Sent in the last 7 days with a failing critical or major check. Subject and body are content and stay encrypted; the pill explains itself on hover or tap.",
+        "subtitle": "Sent in the last 7 days with a failing critical or major check, and unsent ones a phishing-type verdict stopped before SES. Subject and body are content and stay encrypted; the pill explains itself on hover or tap.",
         "sent": "Sent",
         "from": "From",
         "recipients": "Recipients",
@@ -755,7 +837,8 @@
           "anomaly": "anomaly",
           "override": "override",
           "broadcast_skeleton": "broadcast skeleton",
-          "broadcast_copy": "broadcast copy"
+          "broadcast_copy": "broadcast copy",
+          "destination": "new destination"
         },
         "pending": "pending",
         "unjudged": "unjudged · {error}",
@@ -819,6 +902,47 @@
     "settingsButton": "Monitoring settings",
     "exempt": "exempt",
     "riskTip": "Internal monitor risk, 0 to 1. Sampled content judged by the model, decayed over time, weighted by team age. Never shown to the team.",
+    "waiting": {
+      "title": "Waiting for review · {count}",
+      "subtitle": "Unsent emails screening stopped before SES. Release sends one without screening it again; cancel means it never goes out.",
+      "cols": {
+        "since": "Waiting since",
+        "from": "From",
+        "why": "Why",
+        "score": "Score",
+        "recipients": "Recipients"
+      },
+      "why": {
+        "held": "Team held for review",
+        "verdict": "Short wait after a phishing-type verdict",
+        "outage": "Judge unavailable",
+        "destination": "New destination",
+        "media": "Images or files"
+      },
+      "count": "{count, plural, one {# email} other {# emails}}",
+      "heldTeam": "held for review",
+      "suspendedTeam": "suspended",
+      "more": "{count, plural, one {# more email not shown} other {# more emails not shown}}",
+      "release": "Release",
+      "cancel": "Cancel",
+      "releaseAll": "Release all",
+      "cancelAll": "Cancel all",
+      "releaseHold": "Release hold",
+      "heldTip": "Goes out when the team's hold is released.",
+      "suspendedTip": "Waits while the team is suspended.",
+      "cancelTitle": "{count, plural, one {Cancel this email of {team}?} other {Cancel # emails of {team}?}}",
+      "cancelLead": "Canceled mail never goes out. The team sees it as canceled; nothing else tells it why.",
+      "cancelConfirm": "Cancel",
+      "releaseTitle": "{count, plural, one {Release the email of {team} waiting here?} other {Release the # emails of {team} waiting here?}}",
+      "releaseLead": "They go out without being screened again. Mail held after this list was loaded stays held.",
+      "releaseConfirm": "Release",
+      "keep": "Keep waiting",
+      "toast": {
+        "released": "{team} · {count, plural, one {# email released} other {# emails released}}",
+        "canceled": "{team} · {count, plural, one {# email canceled} other {# emails canceled}}",
+        "error": "Could not do it: {message}"
+      }
+    },
     "tiers": {
       "new": "New",
       "probation": "Probation",
@@ -834,7 +958,7 @@
       "saved": "Monitoring settings saved",
       "error": "Could not save: {message}",
       "order": "The flag, alert and pause lines must climb in that order.",
-      "footnote": "Sampling only changes how fast the risk becomes confident: judging happens after SES accepts a message and never delays or holds it. The judge's questions, tiers and thresholds ship in the open; only the sampling key is secret.",
+      "footnote": "Sampling only changes how fast the risk becomes confident. A new team's mail in its first window and its broadcasts, and any team's mail to a destination it has not cleared, are judged before SES takes them and wait for the verdict; everything else is judged after SES accepts it. The judge's questions, tiers and thresholds ship in the open; only the sampling key is secret.",
       "on": "on",
       "off": "off",
       "reset": "Reset to default",
@@ -904,9 +1028,9 @@
         "trustedRate": "120 days, 50,000 sends, no flag in 90 days",
         "broadcastCopies": "established and trusted teams; the skeleton is judged besides",
         "broadcastCopiesNew": "new, ramp and probation teams",
-        "anomalyMultiplier": "one failing critical or major check; two or more force the sample",
-        "teamDailyCap": "past it, sampling stops for the team, first sends included",
-        "instanceDailyCap": "past it, tier sampling stops; first sends and anomalies continue",
+        "anomalyMultiplier": "one failing critical or major check, a message carried by images or files, or an attachment; two or more force the sample",
+        "teamDailyCap": "past it, draws after sending stop for the team; mail judged before SES is never capped",
+        "instanceDailyCap": "past it, tier sampling after sending stops; first sends and anomalies continue",
         "flagRisk": "opens the monitor flag and quadruples the team's rate",
         "alertRisk": "emails the operator, once per team per day",
         "pauseRisk": "new tier only, with a verdict of 90 or more in the last day",
@@ -999,6 +1123,67 @@
         "failedPurged": "Every message in scope had its body purged by retention.",
         "failedNotFlagged": "That email is no longer in the team's flagged window."
       }
+    },
+    "media": {
+      "row": "Media",
+      "title": "Images and attachments · {team}",
+      "lead": "What screening read from this email's images and attachments. Read it, decide, close.",
+      "scopeSub": "What screening read from its images and attachments: text, links, file details and small redrawn previews. The files themselves, headers and the recipient list stay hidden.",
+      "redrawn": "previews redrawn as JPEG",
+      "why": "Why it waits",
+      "issues": {
+        "risky_file": "risky file",
+        "refused_file": "refused file type",
+        "unreadable_file": "a file would not open",
+        "qr_undecoded": "a QR code could not be decoded",
+        "images_not_read": "images not read",
+        "vision_off": "image reading is off",
+        "vision_refused": "the image reader declined",
+        "vision_blocked": "blocked by Bedrock",
+        "vision_unavailable": "image reader unavailable"
+      },
+      "text": "Text read · credentials and one-time links redacted",
+      "noText": "Nothing was read as text.",
+      "links": "Links",
+      "noLinks": "No links found.",
+      "files": "Attachments",
+      "noFiles": "No attachments.",
+      "previews": "Previews",
+      "noPreviews": "No previews kept.",
+      "cols": {
+        "source": "Found in",
+        "link": "Link",
+        "registered": "Domain registered",
+        "name": "Name",
+        "kind": "Type",
+        "flags": "Flags",
+        "size": "Size",
+        "pages": "Pages"
+      },
+      "sources": {
+        "qr": "QR code",
+        "pdf": "PDF",
+        "office": "Office file",
+        "pass": "Wallet pass",
+        "calendar": "Calendar invite",
+        "page": "Attached web page"
+      },
+      "flags": {
+        "markup": "web page or SVG",
+        "archive": "archive",
+        "disk_image": "disk image",
+        "macros": "macros",
+        "risky_type": "risky type",
+        "type_mismatch": "name doesn't match content",
+        "encrypted": "password-protected",
+        "pdf_actions": "PDF actions",
+        "nested_archive": "archive inside an archive",
+        "scripts": "scripts",
+        "forms": "forms",
+        "over_caps": "over the reading limits",
+        "unreadable": "won't open"
+      },
+      "releaseSame": "{count, plural, one {Release this email} other {Release all # with the same media}}"
     }
   },
   "audit": {

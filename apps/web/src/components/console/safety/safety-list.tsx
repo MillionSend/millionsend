@@ -33,10 +33,20 @@ import {
   usePercent,
 } from "./parts";
 import { useContentReveal } from "./reveal";
+import { WaitingList } from "./waiting-list";
 
 const STATUSES = ["open", "cleared", "suspended", "all"] as const;
 // The team_flag_reason enum; tsc checks it against the router's input.
-const REASONS = ["monitor", "complaints", "guardrail", "score", "report", "manual"] as const;
+const REASONS = [
+  "monitor",
+  "complaints",
+  "guardrail",
+  "score",
+  "report",
+  "manual",
+  "brand",
+  "linked",
+] as const;
 const SORTS = ["name", "type", "risk", "score", "guardrail", "reason", "status", "since"] as const;
 const DIRS = ["asc", "desc"] as const;
 const COLUMNS = 12;
@@ -132,6 +142,7 @@ export function SafetyList() {
           </Link>
         }
       />
+      <WaitingList onChanged={refetch} />
       <div
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}

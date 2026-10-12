@@ -163,6 +163,8 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `NOTIFICATIONS_EMAIL_FROM` | Sender for the notices to team owners (quota, bounce/complaint rates, a domain verifying or losing its records, a new API key, a rotated webhook secret, a member joining, a broadcast that went out or is held, billing on the cloud) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
 | `INVITES_PER_TEAM_PER_DAY` | Invitations one team, and one member across all their teams, may create in a rolling day, revoked ones and those of deleted teams included (default `50`). Past it, new invitations are refused until the day rolls over. |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Optional error tracking through the Sentry SDK; off while `SENTRY_DSN` is unset. See [Error tracking](#error-tracking-optional). |
+| `BLOCK_DISPOSABLE_EMAILS` | Refuse addresses on the [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) list (public domain) at sign-up, on invitations and on email changes; a subdomain counts as its parent. Existing accounts keep working, and the console tags them. Defaults to `IS_CLOUD`. See [Signup policy](#signup-policy). |
+| `IP_GEOLOCATION` | Network and country of the sign-up IPs the console shows, from DB-IP's free databases ([CC BY 4.0](https://db-ip.com/db/lite.php)), which the worker downloads from `download.db-ip.com` once a month; lookups stay on this instance. Defaults to `IS_CLOUD`. See [Console](#console). |
 
 ### Worker sizing
 
@@ -772,6 +774,19 @@ API keys that send through your SES account, so signup stays off unless you
 opt in with `ALLOW_SIGNUP=true`. Keep port 3000 off the public internet unless
 you have opened signup deliberately.
 
+With `BLOCK_DISPOSABLE_EMAILS=true` (the default on the cloud), addresses on
+the [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains)
+list are refused at sign-up, on invitations and on email changes, and a
+subdomain counts as its parent (`sub.mailinator.com` is `mailinator.com`). Accounts
+that already use one keep working; the console's team dialog tags them. The
+app ships a copy of the list, and while the block is on the worker downloads
+a fresh one from `raw.githubusercontent.com` each day, keeping the last good
+copy when a download fails. A day's list that grows or shrinks by more than a
+fifth is not applied either: the worker logs it and keeps its copy. Whatever
+the list says, a consumer mailbox provider (Gmail, Outlook, Yahoo, iCloud,
+Proton, UOL, BOL, Terra and the like) and a public suffix (`com.br`,
+`github.io`) are never refused.
+
 ## Account mail, contacts and product updates
 
 MillionSend's own emails go out from `AUTH_EMAIL_FROM` and
@@ -806,12 +821,26 @@ hair space follows each `.`, `@`, `:` and `\`, so `acme.dev` still reads as
 acme.dev without becoming one. A run of seven or more digits keeps its first
 four, so no mail app offers to call it, unless the run is exactly one date
 (`09/10/2026`, `2026-10-09`) or one span of up to ten years (`2025-2026`),
-which prints as typed. Team and display names with a link
-scheme, an `@`, a line break or any other invisible character, or longer than
-64 characters, are refused when set. A team may hold one pending invitation per
-address, a resend waits two minutes, and the team, and each member across all
-their teams, creates at most `INVITES_PER_TEAM_PER_DAY` invitations a day
-(default 50, revoked ones and those of deleted teams included).
+which prints as typed. Team and display names with a link scheme, an `@`, a
+line break or any other invisible character, a run of eight or more digits
+(such a date or span of years aside), or longer than 64 characters, are refused
+when set; a name stored earlier stays as it is. A team name that matches a
+brand phishers often imitate (`PayPal`, `Itaú`, `Correios` and others,
+look-alike spellings such as `PayPa1` included) is allowed, and opens a `brand`
+flag on Trust & safety when the team is created or renamed.
+
+Verification, password-reset and invitation emails can reach whatever address
+someone typed, so they greet nobody by name. An invitation names the inviter by
+their verified address, or no inviter when the address is unverified, and names
+the team only once the content monitor has it past the new tier; until then it
+says "a team" (without `ABUSE_JUDGE`, every team stays new). A team may hold
+one pending invitation per address, a resend waits two minutes, and the team,
+and each member across all their teams, creates at most
+`INVITES_PER_TEAM_PER_DAY` invitations a day (default 50, revoked ones and
+those of deleted teams included). However many accounts and teams ask, one
+address gets at most 5 verification and invitation emails a clock hour and 10 a
+UTC day; past that nothing more is sent to it until the hour or the day turns,
+and the invitation dialog says the email could not be sent and shows the link.
 
 Verify the sender's
 domain under **Domains** in a team, and from then on those emails are logged
@@ -881,9 +910,9 @@ either way.
 ## Console
 
 `/console` is the operator's view of the whole deployment: an overview
-(sends, deliverability, teams, contacts, domains, queue, one card per SES
-region with quota, pricing plan and enforcement status, and the health probes
-with their history), a Regions page, a Teams page with operator actions
+(sends, deliverability, teams, contacts, domains, queue, a table of the SES
+regions with each one's quota, broadcasts, account status, queue, bounce and
+complaint rates and cost, and the health probes with their history), a Regions page, a Teams page with operator actions
 (change plan or type, daily send ceiling, pause broadcasts, suspend and
 reinstate), a Trust & safety page built on the guardrail, the account score,
 the stored content insights (never email bodies) and, when the optional
@@ -895,12 +924,21 @@ else gets a 404, and nothing in the app links to it. On a self-hosted
 instance, **Settings → SES** shows the operator an "Instance console" card
 with an "Open console" button; the direct URL `https://<your-host>/console`
 works too. Every number comes from Postgres or a free SESv2 `GetAccount`
-read per region; no paid AWS API is called, and the per-region cost is a
-local estimate.
+read per region, except SES's own complaint rate: the worker reads it from
+CloudWatch (`cloudwatch:GetMetricData`, one metric per region every 15
+minutes, a few cents a month). A `millionsend-ses` policy from before that
+permission leaves the rate unread, and the regional pause then estimates it
+from the instance's own count, leaving out mail to providers that never
+report complaints to SES, such as Gmail, and judges the estimate on the same
+0.4% line as SES's own rate. To add it, re-run the setup (which also mints a
+new access key) or
+[update the policy in place](#ses-tenants-per-team-reputation). The
+per-region cost is a local estimate.
 
 A suspended team keeps its data and its keys authenticate, but every send
-answers `403 team_suspended` (`403 sending_paused` under a review hold; SMTP
-`550`); a broadcast pause holds
+answers `403 team_suspended` (SMTP `550`; under a review hold, mail through
+the API or SMTP is accepted and parked, and only broadcast sends answer,
+`403 sending_paused`); a broadcast pause holds
 broadcasts while transactional mail flows; a daily ceiling caps the team's
 day under its plan. Owners are emailed about each action (except a phishing
 suspension or a review hold), and every action lands in the audit log with
@@ -943,47 +981,113 @@ and a sampling override), which stay in the console. It shows a broadcast
 pause the owner was not emailed about without its reason or note, and every
 operator action as MillionSend, never the operator's name or email.
 
+Every sign-up's IP and browser are kept in a record only the console reads,
+apart from the login sessions, which expire. It outlives the account: the
+hourly retention sweep deletes it 90 days after the account is deleted, or
+12 months after when the account was in a team suspended for phishing,
+manual or reputation reasons and not reinstated. A team's dialog lists each member's sign-up
+IP, the IP of their latest session and the other accounts seen on those
+IPs, deleted ones included, with the suspended ones marked. With
+`IP_GEOLOCATION` on (the default on the cloud), the worker keeps DB-IP's
+free country and ASN databases, downloaded once a month from
+`download.db-ip.com` (a failed download keeps the last good copy), and the
+dialog adds each sign-up IP's network and country, looked up locally.
+
+A team suspended for phishing leaves its fingerprints behind, kept after
+the team: its people's email addresses (Gmail's dots and any `+tag`
+ignored) and the IPs they signed up from, its verified domains, its card on
+the cloud, and from its latest stored mail the sender names, subjects (cut
+to 256 characters), link domains, phone numbers and a hash of the visible
+text. An IP of a shared egress network, where one address stands for
+crowds (Cloudflare WARP, iCloud Private Relay, Vivo, Claro and TIM), is
+left out, by the ASN database `IP_GEOLOCATION` keeps. A new team is
+compared with them when it is created, adds a domain, first pays and
+sends. A match opens a `linked` flag on the trust & safety list and mails
+the operator which kinds of evidence matched; the team's dialog and review
+page show the values. Nothing the team can see changes until it sends: then,
+with the automatic hold on, the match holds it for review and its mail is
+parked without a word, when the evidence from one suspended team includes an
+email address or a card, or two kinds. An IP, a domain or one kind of
+content alone never holds a team, and a team held once, or released from any
+review hold, is not held again. Only teams still suspended for phishing
+count: a reinstatement deletes a team's fingerprints, and the retention
+sweep deletes them 12 months after the suspension, IPs after 90 days. IPs,
+addresses, phone numbers (their last nine digits, read only beside a `+`, a
+0800 or 0300 number, a Brazilian `(11) 9xxxx-xxxx` or a word such as "tel"
+or "WhatsApp"), cards and text hashes must be equal. Sender names match when one's distinctive words,
+at least two, are all in the other, which has at most one more; subjects
+when their word sets, four words or more with numbers left out, overlap by
+75%; domain names when one's words, at least two of four letters or more
+and not the words every hostname uses ("mail", "secure"…), are all in the
+other and fill 80% of it, so `vexto-cadeaux.example` meets
+`cadeaux-vexto.example`.
+
 ## Content monitoring (optional)
 
-Off by default. With a judge configured, a sample of accepted mail is
-scored 0–100 by TypeSafe Jev after SES has taken it and folded into a
-per-team risk the operator sees on Trust & safety.
-Nothing on the send path waits for it: a verdict never delays the message
-it judges, which SES has already taken, and a judge failure of any kind
-(feature off, missing credentials, throttling, timeout, upstream error,
-unparseable answer, body already purged by retention) records the sample as
-unjudged and changes nothing else. The deterministic content checks (the insights, the guardrail,
-the account score) run on every send whether or not the judge is on.
-Self-hosters can leave it off.
+Off by default. With a judge configured, TypeSafe Jev scores mail 0–100
+and every verdict is folded into a per-team risk the operator sees on Trust
+& safety.
+
+**Judged before SES.** A team's mail in its first window (its first 1,000
+sends and 72 hours, counted from its first send) is judged before SES takes
+it: the email waits in the queue, the send lane moves on, and the verdict,
+first in the judge's queue, sends it on in about half a second. A New-tier
+team's broadcast writes no copy until its own HTML has a verdict, and its
+first rendered copy waits for its own. One team uses at most two of the
+judge's four lanes, and a screened email gets a 5 s timeout and one retry.
+When the judge still cannot answer, mail from a sending domain under 7 days
+old, or of unknown age, waits: the judge is tried again every 2 minutes, 3
+times, then the email is parked for the operator, who hears of it through
+the judge-health notice; any other mail is sent and judged afterwards. No
+daily cap lets mail that waits on a verdict through unjudged: the caps count
+and stop only draws made after sending. A team with 20 screenings waiting on
+the judge has its next mail wait its turn. The rest of accepted mail is
+drawn after SES has taken it, at its tier's rate. Account mail and the
+onboarding email are never judged.
+
+A judge failure of any kind (feature off, missing credentials, throttling,
+timeout, upstream error, unparseable answer, body already purged by
+retention) records the sample as unjudged and changes nothing else. The
+deterministic content checks (the insights, the guardrail, the account
+score) run on every send whether or not the judge is on. Self-hosters can
+leave it off.
 
 **What it does.** It opens the `monitor` flag on Trust & safety when a team's
 risk crosses the flag line, emails the operator once a day per team past the
 alert line, and, for a team in the New tier only (inside its first 1,000
 sends or 72 hours, or under 10,000 sends within 7 days), pauses broadcasts
 when the risk passes the pause line and a sampled message scored 90 or more
-within a day (transactional mail keeps flowing; the team sees "paused
-pending review"; the operator resumes from the review page). The pause
-policy is a setting and can be switched off.
+within a day, or at once when a broadcast's own HTML or a rendered copy
+draws a phishing-type verdict from 80 (transactional mail keeps flowing; the
+team sees "paused pending review"; the operator resumes from the review
+page). The pause policy is a setting and can be switched off.
 
 **The review hold.** When one sampled message of a New-tier team is judged
 abuse at the hold score (90 by default) as credential phishing, brand
 impersonation or payment redirection, or with an impersonation or
-secret-harvesting finding, the team is suspended at once
-with the reason `review`: the API answers `403 sending_paused`, SMTP `550`,
-queued mail and broadcasts park, and with `SES_TENANTS` on its SES tenant is
-disabled. A run of lower verdicts holds the team too: by default the fifth
-such verdict from 80 within seven days of the team's first send. A link to
+secret-harvesting finding, or at the repeat score (80) while the team's
+sending domain was registered under 7 days before, or is of unknown age, the
+team is suspended at once
+with the reason `review`: mail it sends through the API (`POST /emails` and
+`/emails/batch`, which MCP uses too) or SMTP is accepted as any send is and
+parked (`park_reason = 'review'`), queued mail and broadcasts park, a new
+broadcast is refused with `403 sending_paused`, and with `SES_TENANTS` on its
+SES tenant is disabled. A run of lower verdicts holds the team too: by
+default the fifth such verdict from 80 within any seven days while the team
+is New. A link to
 another domain counts toward neither rule on its own: legitimate mail often
 links elsewhere. The operator is emailed at once, with the rule that held the
-team; the owner is not, and
-sees a neutral "Sending is paused pending review" notice. The team stays on Trust &
+team; the owner is not. The dashboard shows a neutral "Sending is paused
+pending review" notice, while the API and SMTP answer as for any accepted
+send, so a sender is never told it was caught. The team stays on Trust &
 safety with its flag open until the operator decides on its review page:
 **Release hold** reinstates it, the parked mail goes out, a broadcast pause
 the monitor applied before the hold is lifted as **Resume broadcasts** lifts
 it (a pause the operator set by hand stays), and the monitor flag the hold
 kept open is cleared in the operator's name (the automatic check does not
 reopen it while the same trigger holds); **Suspend for phishing** turns the
-hold into a phishing suspension. While the team is held, its later verdicts
+hold into a phishing suspension, and what the hold parked stays parked:
+`quota.drain` never releases a suspended team's mail. While the team is held, its later verdicts
 still move its risk and alert the operator as for any other team, but apply
 no pause, so a release leaves no monitor pause behind. A team is held once, by either
 rule: after a release its later verdicts only alert, so the released mail,
@@ -991,10 +1095,60 @@ judged again on its way out, neither holds it a second time nor pauses its
 broadcasts. A team already
 suspended keeps its suspension, and Probation, Established and Trusted teams
 are never held: they stay alert-only. The system team is exempt: the monitor
-never samples it. The judge reads a message
-after SES has taken it, so the message that triggers the hold has already
-gone out; the hold stops what follows. `MONITOR_AUTO_HOLD=false` switches it
-off.
+never samples it. A message judged before SES that holds the team waits with
+the rest of its mail; one judged after sending had already gone out, and the
+hold stops what follows. In the first window, a message judged phishing-type
+from 80 that holds nothing waits 2 minutes before it is sent: a burst
+reaches the repeat count within them. `MONITOR_AUTO_HOLD=false` switches the
+hold off, and the screening before SES with it.
+
+**New destinations, at every tier.** A message is also judged before SES,
+whatever the team's tier (Trusted included), when it carries a destination
+the team has not cleared: the owner domain of a link a mail client would
+follow (an anchor, an image-map area, a form action, an SVG link or a URL in
+the text, read as a browser reads it and through up to three redirect
+wrappers; a free host's `x.pages.dev` counts on its own) or of its Reply-To,
+less the team's verified domains. A link that cannot be read counts as a
+destination too. A verdict under 70 that names nothing phishing-type clears
+the message's destinations for the team, when it carried 5 new ones at most;
+so does releasing mail parked for a new destination, or waiting after a
+verdict, while releasing mail parked for its media or a failing judge clears
+none. A link shortener, or a link that cannot be read, is never cleared. For 7
+days after a destination clears, every email to it is judged after it is sent,
+and a phishing-type verdict from 80 on one takes the clearance back: mail to
+it is judged before SES again, no verdict clears it again (an operator's
+release does), and the operator is mailed at most once a day per team. A
+message with more than 20 new destinations is not judged: it waits for the
+operator. A broadcast is judged before its fan-out when its own HTML carries a
+new destination, and a rendered copy when a contact field put one there; mail
+that links only to the team's own domains never waits for this. When a new
+destination draws a phishing-type verdict from 80, its link domains'
+registration dates are looked up, in a cache every team shares: 3 per verdict,
+the rest in the background, and a failed lookup is not repeated for an hour (a
+free host's names and shorteners are not dated, and a date no registry has is
+not young). An age not known yet, because its lookup failed, ran past 10
+seconds or waits its turn, counts as young. For a New-tier team, such a
+verdict on a link domain registered under 7 days ago holds the team, and one
+of an age not known makes its mail wait 2 minutes. Past New, the mail is
+parked for the review list on a phishing-type verdict from 90, or from 80 with
+a link domain under 7 days old or of an age not known, and the operator is
+mailed at most once a day per team; a team past New is never held
+automatically. These samples count against no daily cap; a team has 200 of
+them a day, past which its mail with a new destination waits for the next UTC
+day.
+
+**The review list.** Trust & safety lists every unsent email screening
+stopped, grouped by team: parked behind a review hold, waiting out its 2
+minutes, parked for a new destination or for its images or files, or parked
+after the judge kept failing. **Release** sends an email
+without screening it again (`quota.drain` charges it as any parked mail);
+**Cancel** means it never goes out. **Release all** and **Cancel all** ask
+first, with the count, and take only mail held before the list was loaded.
+A held team's mail is released with its hold, and a suspension for anything
+else cancels it, so no later reinstatement sends it. The team's review page also lists its held unsent emails among the
+flagged ones, so a content access can name them. What screening read from a
+held email opens in a **Media** panel, under a content access (see Content
+access below).
 
 **Turning it on** in the instance's `.env`, read by the worker and the app
 (a restart applies it):
@@ -1033,23 +1187,98 @@ notice (see also its [customer agreement](https://typesafe.ai/legal/mca) and
 MillionSend: the team's name, verified domains (plus each one's registrable
 domain, the form links are shown in, where the suffix is unambiguous), days since its first send
 and plan; the `From` and `Reply-To` headers as sent; the `Subject`; the
-rendered visible text, without elements hidden by an inline style or the
-`hidden` attribute (up to 6,000
-characters); a table of link anchor texts and their registrable domains (up
-to 30 rows); the image count, the attachment names and content types, and
-the count of hidden characters. The subject, the visible text, the anchor
-texts and the attachment names are redacted first by the same pass the
+message as a reader sees it, read from the HTML part (or the plain-text part
+when the HTML is missing or blank): the rendered visible text (its first
+4,000 and last 2,000 characters when it is longer), without what an inline
+style, a `<style>` rule or the `hidden` attribute hides and without text set
+at 1px or less, transparent, or in its background's colour; the text hidden
+that way, in a section of its own (up to 1,000 characters), apart from the
+inbox preview line it opens with (up to 200); the plain-text part when fewer
+than 80% of its words appear in the visible text (up to 1,500 characters); a
+table of every link a mail client would follow (anchors, image-map areas,
+form actions, SVG links and the URLs in the text), each with its anchor text
+and the registrable domain it lands on, read as a browser reads it and
+through up to three redirect wrappers such as Google's `/url?q=`, and links
+to domains the team has never sent to, links that cannot be read and other
+links off its verified domains listed first (up to 30 rows); a line flagging a message that shows under 100 characters of
+text beside an image, an attachment or a QR code drawn with characters or
+table cells; the number of images it shows (`<img>`, CSS backgrounds,
+Outlook's VML, SVG); the attachment names and content types; and the count of
+hidden characters (zero-width, bidirectional and Unicode tag characters among
+them). Every part of the message (the subject, each body section, the anchor
+texts and the attachment names) is redacted first by the same pass the
 content access below uses (links cut to their domain and a short path stub;
-credential-shaped strings and 4-to-8-digit codes in the 40 characters after
-words like *code*, *OTP*, *senha* or *token* masked); on top of that, email
-addresses in them keep only their domain. Whitespace in every field, line
-breaks included, collapses to one space. Other personal data written in these
-fields (names, phone numbers, tax ids such as CPF, postal addresses) is not
-removed: nothing detects it reliably. Never a recipient address or
-header, never the raw HTML, never an attachment's content. A judged sample
+credential-shaped strings, 4-to-8-digit codes in the 40 characters after
+words like *code*, *OTP*, *senha* or *token*, and CPF and CNPJ numbers whose
+check digits are valid, masked); on top of that, email addresses in them keep
+only their domain. Whitespace in every field, line breaks included, collapses
+to one space. Other personal data written in these fields (names, phone
+numbers, postal addresses) is not removed: nothing detects it reliably. Never
+a recipient address or
+header, never the raw HTML, never the images or files themselves. A judged sample
 keeps its score, verdict, categories, reason codes, language, model version,
 latency and error class; the review page shows those and never a subject or
 a body. Sample rows are pruned after 90 days.
+
+**Images and attachments.** Screening opens what an email carries, inside
+the worker: the text and links of PDF (up to 50 pages), Word, Excel,
+PowerPoint, OpenDocument, calendar, HTML and SVG attachments, and the QR
+codes in images, in a PDF's first pages and in images inside Office files.
+A Pix code, in a QR code or pasted as text, shows as its payee, city,
+amount and kind of key, never the key. Jev then also sees up to 4,000
+characters of text from attachments, up to 20 more link rows (QR codes,
+links inside files, Pix codes), and each attachment's real type, size, page
+count and flags. Program files are refused at the API for every team, and
+a new team's email carrying a risky file waits for review (see
+[Attachments](/api-reference#attachments)). None of this leaves the
+instance: parsing runs on two worker threads, with 4 seconds per email.
+
+For a New-tier team, an email that carries a file, or whose message rides in
+images, files or a QR code drawn with characters (under 100 characters of
+readable text), is judged before SES, and its body images are read too. A
+file the policy flags, refuses or cannot open parks it at once; after the
+verdict, so does a QR code the image reader saw that no decoder read, or
+images the reader declined. Images Bedrock refuses (HTTP 400) park any
+team's unsent email, keep no preview, and the operator is mailed at most
+once a day per team. When a body image cannot be fetched or Bedrock does not
+answer, a New-tier team's mail from a sending domain under 7 days old waits
+as for a judge outage; other mail is judged without those images, and Jev is
+told what was not read. Links in files and QR codes count as destinations at
+every tier. Past New, a sampled email has its body images read when its
+readable text is under 100 characters, and such an email, like one with
+files, counts as an anomaly in the draw.
+
+**Image reading (optional).** Off by default. With it on, Claude Haiku 5.5
+on Amazon Bedrock writes down the text and the brands shown in an email's
+images and in attachment pages that are images, and Jev receives that text
+(up to 3,000 characters) with the rest. The images go to Bedrock in
+`ABUSE_VISION_REGION` (default `us-east-1`), on that region's own endpoint,
+with the worker's AWS credentials; Bedrock keeps no copy, except that AWS
+may keep an image its automated checks flag as child sexual abuse material.
+Off, an email is judged without its image text and the judge is told so.
+Refusing program files, holding risky files and reading PDFs, Office files
+and QR codes all work without Bedrock. To turn it on:
+
+1. Accept Claude Haiku 5.5 in Amazon Bedrock in that region: on the
+   console's model access page, or with
+   `aws bedrock list-foundation-model-agreement-offers --model-id anthropic.claude-haiku-5-5`
+   and then
+   `aws bedrock create-foundation-model-agreement --model-id anthropic.claude-haiku-5-5 --offer-token <token>`.
+2. Give the worker's AWS credentials this statement, with your region and
+   account id:
+
+   ```json
+   {
+     "Effect": "Allow",
+     "Action": "bedrock-mantle:CreateInference",
+     "Resource": "arn:aws:bedrock-mantle:<region>:<account-id>:project/*",
+     "Condition": { "StringEquals": { "bedrock-mantle:Model": "anthropic.claude-haiku-5-5" } }
+   }
+   ```
+
+3. Set `ABUSE_VISION=bedrock` (and `ABUSE_VISION_REGION` for another
+   region) and restart. Add Amazon Bedrock to the instance's privacy notice
+   first.
 
 **Sampling.** After each accepted message a keyed draw decides whether it is
 judged. Every value below is edited in the console under Trust & safety →
@@ -1068,9 +1297,9 @@ is; the console wins.
 | `MONITOR_TRUSTED_RATE` | 0.005 | 120 days, 50,000 sends and no flag in 90 days |
 | `MONITOR_BROADCAST_COPIES` | 3 | Rendered copies judged per broadcast (plus the broadcast's own HTML), established and trusted teams |
 | `MONITOR_BROADCAST_COPIES_NEW` | 10 | The same for new, ramp and probation teams |
-| `MONITOR_ANOMALY_MULTIPLIER` | 20 | One failing link-domain, shortener or phishing-pattern check multiplies the rate; two force the sample |
-| `MONITOR_TEAM_DAILY_CAP` | 600 | Judged messages per team per UTC day; past it sampling stops silently |
-| `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide; past it tier sampling stops, first sends and anomalies continue |
+| `MONITOR_ANOMALY_MULTIPLIER` | 20 | One anomaly (a failing link-domain, shortener or phishing-pattern check, under 100 characters of text carried by images or files, an attachment) multiplies the rate; two force the sample |
+| `MONITOR_TEAM_DAILY_CAP` | 600 | Draws after sending per team per UTC day; past it they stop silently. Mail judged before SES neither counts nor is capped |
+| `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide draws after sending; past it tier sampling stops, first sends and anomalies continue |
 | `MONITOR_FLAG_RISK` | 0.5 | The team gets the `monitor` flag and samples four times as much |
 | `MONITOR_ALERT_RISK` | 0.7 | The operator is emailed, once per team per day |
 | `MONITOR_PAUSE_RISK` | 0.85 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
@@ -1127,7 +1356,9 @@ upgrade included). It tries, in order:
 1. RDAP from the server [IANA's bootstrap](https://data.iana.org/rdap/dns.json)
    names for the TLD (refreshed daily), or a fixed server for `.io` and `.me`
    (`rdap.identitydigital.services`), `.co` (`rdap.registry.co`) and `.us`
-   (`rdap.nic.us`), which the bootstrap does not list.
+   (`rdap.nic.us`), which the bootstrap does not list. The date is the latest
+   of the domain's registration, re-registration and transfer events, so a
+   name caught again after it lapsed, or bought and moved, dates from then.
 2. WHOIS on TCP port 43 at the server `whois.iana.org` refers the TLD to.
 3. The first certificate issued for the name in Certificate Transparency
    ([crt.sh](https://crt.sh), at most one request every 12 seconds).
@@ -1143,7 +1374,8 @@ no creation date. Requests carry the User-Agent
 until its `Retry-After`, and a failed lookup retries with backoff before the
 domain is recorded as unknown. The worker therefore needs outbound HTTPS to
 `data.iana.org`, the registries' RDAP servers and `crt.sh`, and outbound TCP
-43, while the warm-up is on; with it off no lookup is made. The date, its
+43, while the warm-up or the content monitor's review hold (a judge set and
+`MONITOR_AUTO_HOLD` on) is on; with both off no lookup is made. The date, its
 source (`rdap`, `whois`, `ct` or `unknown`) and the time of the check are
 stored on the domain row; a certificate's date never replaces a registry's
 found on an earlier check.
@@ -1151,7 +1383,8 @@ found on an earlier check.
 ## Content access (break-glass)
 
 Off by default. With it on, an authorised operator can read the subject and
-the rendered visible text of specific messages of a flagged team, for a
+the rendered visible text of specific messages of a flagged team, and what
+screening read from the images and attachments of mail it held, for a
 security reason they name and justify before anything is decrypted, for at
 most 30 minutes. It is the break-glass path for the cases the stored
 metadata cannot settle: the insights know a link points at a shortener, not
@@ -1166,10 +1399,27 @@ link cannot be followed; anything shaped like a
 credential (a JWT, 32 or more hex characters, 40 or more of base64, one of
 this instance's own `ms_` API keys) is masked, as is a 4-to-8-digit run
 in the 40 characters after a word like *code*, *código*, *OTP*, *PIN*, *token*,
-*senha*, *password* or *verification*.
-Never the raw HTML, the recipient addresses, the headers, the attachments or
-the click-tracking targets, and the view offers no copy or download. A body
-retention has already purged cannot be revealed by anyone.
+*senha*, *password* or *verification*, and any CPF or CNPJ number whose check
+digits are valid.
+Never the raw HTML, the recipient addresses, the headers, the attachment
+files or the click-tracking targets, and the view offers no copy or download.
+A body retention has already purged cannot be revealed by anyone.
+
+**The media panel.** An email screening held over its images or files, and
+any other held email it kept a read of, gets a **Media** action on the
+review list. Under the same grant it shows why the email waits; the text
+read from its images (transcribed) and attachments (extracted); the links
+found in them, each with its registrable domain and that domain's age when
+screening has already dated it; each file's name, type, size, pages and
+flags; and up to four previews. Every one of those strings, file names
+included, goes through the redaction above. The previews are small JPEGs
+the worker redrew from what it read, at most 600 px a side: they reach the
+page only as JPEG `data:` images, anything else is dropped, and an original
+file, an SVG or HTML is never shown or served. What the panel shows is
+sealed with the email and purged with its body. **Release all N with the
+same media** sends every held email of the team whose images and files screening
+read exactly as this one's (a blast's copies), as **Release** does, with the
+same audit row.
 
 **For how long.** A grant lasts 30 minutes from the moment it is made and is
 never extended; a later look is a new grant, with a new reason and a new
@@ -1181,12 +1431,17 @@ ids, the view count and the times. Nothing prunes those rows: they are the
 inventory of who read what. An instance audit row (`content.revealed`) is
 written before anything decrypts, with the grant id, the reason and the
 number of messages — never the justification's text and never any content.
+A grant's first look at a media panel writes a second `content.revealed`
+row, whose fields name what screening read from the images and attachments,
+and stamps the grant (`media_viewed_at`).
 
 **What the team sees, and when.** Seven days later a daily job adds a
 `content.accessed` row to the team's own audit log — dated at the access,
 not at the disclosure — with the reason, how many messages and which fields
-were read. Nobody is emailed about an access, then or later. A team
-suspended for phishing never gets the row; the grant records that the
+were read: `subject, rendered text`, followed by
+`what screening read from its images and attachments` only when the grant
+opened a media panel. Nobody is emailed about an access, then or later. A
+team suspended for phishing never gets the row; the grant records that the
 disclosure step ran, so it is not retried nightly. A team held for review
 gets it once the hold ends: after a release the next daily run writes it,
 and if the hold becomes a phishing suspension it is withheld for good.
@@ -1199,9 +1454,9 @@ CONTENT_REVEAL=on
 ```
 
 Off, the console's buttons render disabled with a tooltip naming the
-variable and both procedures refuse. Reading other people's messages is
-lawful only as a narrow, recorded, disclosed security measure: say so in the
-instance's terms and privacy notice before turning it on.
+variable and every content procedure refuses. Reading other people's messages
+is lawful only as a narrow, recorded, disclosed security measure: say so in
+the instance's terms and privacy notice before turning it on.
 
 ## Support view (optional)
 

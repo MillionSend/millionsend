@@ -97,22 +97,41 @@ it("refuses every send surface with 403 team_suspended while the key still authe
   expect(await db.select().from(schema.emails).where(eq(schema.emails.teamId, teamId))).toEqual([]);
 });
 
-it("answers a review hold as a neutral pause on every send surface", async () => {
+it("accepts and parks a held team's mail as any send, and refuses only its broadcasts, neutrally", async () => {
   await db
     .update(schema.teams)
     .set({ suspendedAt: new Date(), suspensionReason: "review" })
     .where(eq(schema.teams.id, teamId));
-  for (const res of [
-    await call("POST", "/emails", body),
-    await call("POST", "/emails/batch", [body]),
-    await call("POST", `/broadcasts/${broadcastId}/send`, {}),
-  ]) {
-    expect(res.status).toBe(403);
-    const error = (await res.json()) as { name: string; message: string };
-    expect(error).toMatchObject({ name: "sending_paused" });
-    expect(error.message).toMatch(/^Sending is paused pending review\./);
-    expect(error.message).not.toMatch(/suspend|phishing|abuse/i);
+  const single = await call("POST", "/emails", body);
+  expect(single.status).toBe(200);
+  const { id } = (await single.json()) as { id: string };
+  const batch = await call("POST", "/emails/batch", [body, { ...body, to: ["b@example.com"] }]);
+  expect(batch.status).toBe(200);
+  const { data } = (await batch.json()) as { data: { id: string }[] };
+  expect(data).toHaveLength(2);
+  const rows = await db
+    .select({
+      id: schema.emails.id,
+      latestStatus: schema.emails.latestStatus,
+      parkReason: schema.emails.parkReason,
+    })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, teamId));
+  expect(rows.map((r) => r.id).sort()).toEqual([id, ...data.map((d) => d.id)].sort());
+  for (const row of rows) {
+    expect(row).toMatchObject({ latestStatus: "queued_quota", parkReason: "review" });
   }
+  // The sender sees it queued, like any accepted email.
+  const got = await call("GET", `/emails/${id}`);
+  expect(await got.json()).toMatchObject({ id, last_event: "queued" });
+
+  const send = await call("POST", `/broadcasts/${broadcastId}/send`, {});
+  expect(send.status).toBe(403);
+  const error = (await send.json()) as { name: string; message: string };
+  expect(error).toMatchObject({ name: "sending_paused" });
+  expect(error.message).toMatch(/^Sending is paused pending review\./);
+  expect(error.message).not.toMatch(/suspend|phishing|abuse/i);
+  await db.delete(schema.emails).where(eq(schema.emails.teamId, teamId));
 });
 
 it("accepts again once the suspension is cleared", async () => {

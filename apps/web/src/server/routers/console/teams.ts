@@ -1,14 +1,21 @@
-import { isLiveKey } from "@millionsend/billing";
+import {
+  type BillingStripe,
+  cancelAndRefundFraud,
+  hasLiveSubscription,
+  isLiveKey,
+} from "@millionsend/billing";
 import { env, isCloudDeployment, sesTenantsEnabled, supportViewEnabled } from "@millionsend/config";
 import {
   accountMailPhrase,
   fetchAccountScore,
   fetchDeliverabilityHealth,
+  forgetAbuseRecords,
   isSilentlySuspended,
   liveSupportViewForTeam,
   PLAN_RUNGS,
   type Plan,
   raisesQuota,
+  recordPhishingFingerprints,
   recordTenantStatus,
   resumeMonitorPause,
   SILENT_SUSPENSIONS,
@@ -27,13 +34,16 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ilike, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
+import { formatMoneyTotals } from "@/lib/format";
 import { escapeLike } from "@/lib/sql";
+import { getStripe } from "../../billing";
 import {
   consoleCodeVerifiedUntil,
   consoleStepUp,
   sendConsoleCode,
   signedInRecently,
 } from "../../console-code";
+import { FINGERPRINT_SOURCES } from "../../linkage";
 import { getQueue } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
 import {
@@ -154,11 +164,12 @@ function reasonText(
     : phrase;
 }
 
-/** SES access for a suspension's tenant status; tests swap it with setConsoleTeamsDeps. */
+/** SES and Stripe access for a suspension; tests swap them with setConsoleTeamsDeps. */
 export interface ConsoleTeamsDeps {
   tenantClient(region: string): SesTenantClient;
   /** Hands a failed update to the worker's tenant.status job, which retries it with backoff. */
   retryTenantStatus(teamId: string): Promise<void>;
+  stripe(): BillingStripe;
 }
 
 const defaultDeps: ConsoleTeamsDeps = {
@@ -171,13 +182,14 @@ const defaultDeps: ConsoleTeamsDeps = {
   retryTenantStatus: async (teamId) => {
     await (await getQueue()).send("tenant.status", { teamId }, { dedupeKey: teamId });
   },
+  stripe: getStripe,
 };
 
 let deps = defaultDeps;
 
-/** Tests: swap the SES client and the retry hand-off instead of stubbing the AWS SDK. */
-export function setConsoleTeamsDeps(next: ConsoleTeamsDeps | null): void {
-  deps = next ?? defaultDeps;
+/** Tests: swap the SES client, the retry hand-off or Stripe instead of stubbing their SDKs. */
+export function setConsoleTeamsDeps(next: Partial<ConsoleTeamsDeps> | null): void {
+  deps = { ...defaultDeps, ...next };
 }
 
 /**
@@ -195,6 +207,31 @@ async function syncTenant(ctx: OperatorCtx, teamId: string): Promise<TenantStatu
   if (!outcome) return null;
   if (outcome.failed.length > 0) await deps.retryTenantStatus(teamId);
   await recordTenantStatus(ctx.db, { teamId, actor: { userId: ctx.operator.id }, outcome });
+  return outcome;
+}
+
+/**
+ * Cancels the team's subscription and refunds its last 120 days as fraud,
+ * once the suspension is saved. A Stripe failure never fails the action: it
+ * is audited and returned for the console to show, and the operator finishes
+ * in the Stripe dashboard. The audit row is the operator's alone, as the
+ * tenant's is: a phishing suspension is silent.
+ */
+async function refundFraud(ctx: OperatorCtx, team: { id: string; name: string }) {
+  const outcome = await cancelAndRefundFraud({ db: ctx.db, stripe: deps.stripe() }, team.id);
+  await auditOperator(ctx, {
+    teamId: null,
+    action: outcome.failed ? "team.fraud_refund_failed" : "team.fraud_refunded",
+    target: { type: "team", id: team.id },
+    metadata: {
+      team: team.name,
+      subscription: outcome.canceled,
+      refunded: outcome.refunds.length,
+      amount: formatMoneyTotals(outcome.refunds, "en") || null,
+      charges: outcome.refunds.map((r) => r.charge).join(", ") || null,
+      failed: outcome.failed,
+    },
+  });
   return outcome;
 }
 
@@ -293,6 +330,19 @@ export const consoleTeamsRouter = router({
       supportView: view ? { operatorEmail: view.operator.email, expiresAt: view.expiresAt } : null,
     };
   }),
+
+  /**
+   * The plan a live Stripe subscription bills the team for, which Suspend
+   * offers to cancel and refund; null without one.
+   */
+  subscription: operatorProcedure
+    .input(z.object({ id: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.id);
+      return team.stripeSubscriptionId && hasLiveSubscription(team.planStatus)
+        ? { plan: team.plan, planQuota: team.planQuota }
+        : null;
+    }),
 
   /**
    * The first step of View as owner: a one-time code to the operator's own
@@ -565,21 +615,33 @@ export const consoleTeamsRouter = router({
 
   /**
    * Every send refused until reinstated, the team's SES tenant disabled too;
-   * owners hear about it unless it is phishing.
+   * owners hear about it unless it is phishing. `refund` also cancels the
+   * subscription and refunds its last 120 days as fraud.
    */
   suspend: operatorProcedure
     .input(
-      z.object({
-        id: z.uuid(),
-        // A review hold comes only from the content monitor, which also stamps held_at.
-        reason: z.enum(SUSPENSION_REASONS).exclude(["review"]),
-        note: z.string().trim().max(1000).optional(),
-        notify: z.boolean().default(true),
-      }),
+      z
+        .object({
+          id: z.uuid(),
+          // A review hold comes only from the content monitor, which also stamps held_at.
+          reason: z.enum(SUSPENSION_REASONS).exclude(["review"]),
+          note: z.string().trim().max(1000).optional(),
+          notify: z.boolean().default(true),
+          refund: z.boolean().default(false),
+        })
+        // Nothing was paid on non-payment, so nothing goes back.
+        .refine((input) => !(input.refund && input.reason === "non_payment"), {
+          message: "refund_non_payment",
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.id);
       await suspendTeam(ctx.db, { teamId: team.id, reason: input.reason, note: input.note });
+      await recordPhishingFingerprints(
+        ctx.db,
+        { teamId: team.id, reason: input.reason },
+        FINGERPRINT_SOURCES,
+      );
       const notify = input.notify && !SILENT_SUSPENSIONS.includes(input.reason);
       await auditOperator(ctx, {
         teamId: team.id,
@@ -610,7 +672,11 @@ export const consoleTeamsRouter = router({
           detail: { suspension: true },
         })
         .onConflictDoNothing();
-      return { tenant: await syncTenant(ctx, team.id) };
+      const tenant = await syncTenant(ctx, team.id);
+      return {
+        tenant,
+        refund: input.refund && team.stripeCustomerId ? await refundFraud(ctx, team) : null,
+      };
     }),
 
   reinstate: operatorProcedure
@@ -621,6 +687,7 @@ export const consoleTeamsRouter = router({
         .update(t)
         .set({ suspendedAt: null, suspensionReason: null, suspensionNote: null })
         .where(eq(t.id, team.id));
+      await forgetAbuseRecords(ctx.db, team.id);
       // The flag the suspension opened goes with it; any other stays open.
       const f = schema.teamFlags;
       const [flag] = await ctx.db

@@ -30,11 +30,12 @@ export const SES_EVENT_TYPES = [
 ] as const;
 
 /**
- * Every SES action the instance issues — infra/millionsend-ses.cfn.yaml
- * mirrors the same set. Identity actions support resource-level permissions
- * and are confined to identities; sending stays account-wide because a send
- * that names a configuration set is authorized against that resource too,
- * and GetAccount accepts no resource at all.
+ * Every SES action the instance issues, plus the CloudWatch read of SES's
+ * reputation — infra/millionsend-ses.cfn.yaml mirrors the same set. Identity
+ * actions support resource-level permissions and are confined to identities;
+ * sending stays account-wide because a send that names a configuration set is
+ * authorized against that resource too, and GetAccount and GetMetricData
+ * accept no resource at all.
  */
 export const SES_IAM_POLICY = {
   Version: "2012-10-17",
@@ -68,6 +69,13 @@ export const SES_IAM_POLICY = {
         "ses:DeleteTenantResourceAssociation",
         "ses:UpdateReputationEntityCustomerManagedStatus",
       ],
+      Resource: "*",
+    },
+    // SES's own complaint rate (Reputation.ComplaintRate), which the region
+    // breaker judges, is published as a CloudWatch metric.
+    {
+      Effect: "Allow",
+      Action: ["cloudwatch:GetMetricData"],
       Resource: "*",
     },
   ],
@@ -189,10 +197,11 @@ SES_TENANTS=
 
 # --- Optional ---
 
-# Content monitoring: TypeSafe Jev judges a sample of accepted mail after
-# SES took it (see "Content monitoring" in SELF_HOSTING.md). Off unless
-# ABUSE_JUDGE=typesafe; then ABUSE_JUDGE_API_KEY is required. Sending never
-# waits on it. Sampling rates and thresholds are edited in the console
+# Content monitoring: TypeSafe Jev judges a new team's mail, and any team's
+# mail to a destination it has never used, before SES takes it, and a sample
+# of the rest after (see "Content monitoring" in SELF_HOSTING.md). Off unless
+# ABUSE_JUDGE=typesafe; then ABUSE_JUDGE_API_KEY is required. While off,
+# nothing waits on it. Sampling rates and thresholds are edited in the console
 # (Trust & safety → Monitoring settings) or seeded as MONITOR_*. The model
 # is pinned because the thresholds are tuned against one version; jev-latest
 # moves whenever TypeSafe ships a new one.
@@ -200,20 +209,43 @@ ABUSE_JUDGE=off
 ABUSE_JUDGE_API_KEY=
 ABUSE_JUDGE_MODEL=jev-1.13.0
 
+# Image reading for the judge (see "Image reading" in SELF_HOSTING.md):
+# Claude Haiku 5.5 on Amazon Bedrock writes down the text in an email's
+# images, with the worker's AWS credentials, on ABUSE_VISION_REGION's own
+# endpoint. Off unless ABUSE_VISION=bedrock; refusing program files, holding
+# risky files and reading PDFs, Office files and QR codes work without it.
+ABUSE_VISION=off
+ABUSE_VISION_REGION=us-east-1
+
 # New-domain warm-up (see "New-domain warm-up" in SELF_HOSTING.md): a daily
 # cap per sending domain by its registration age. Unset follows IS_CLOUD. The
 # caps (WARMUP_CAP_FIRST_DAY/_WEEK/_MONTH) are edited in the console (Trust &
-# safety → Monitoring settings) or seeded here. While on, the worker looks
-# domain ages up over RDAP, WHOIS (TCP 43) and crt.sh.
+# safety → Monitoring settings) or seeded here. While on, or while the
+# content monitor's review hold is (a judge set and MONITOR_AUTO_HOLD on), the
+# worker looks domain ages up over RDAP, WHOIS (TCP 43) and crt.sh.
 WARMUP_ENABLED=
 
 # Break-glass content access (see "Content access (break-glass)" in
 # SELF_HOSTING.md): with this on, the console can unwrap the subject and
-# rendered text of a flagged team's messages for a recorded security reason,
-# for 30 minutes, disclosed to the team after 7 days. Off unless
+# rendered text of a flagged team's messages, and what screening read from the
+# images and attachments of mail it held, for a recorded security reason, for
+# 30 minutes, disclosed to the team after 7 days. Off unless
 # CONTENT_REVEAL=on. Say so in your terms and privacy notice before turning
 # it on.
 CONTENT_REVEAL=off
+
+# Refuse addresses on the disposable-email-domains list (public domain) at
+# sign-up, on invitations and on email changes; a subdomain counts as its
+# parent. Existing accounts keep working and the console tags them. The app
+# ships the list; while this is on, the worker refreshes it daily from
+# raw.githubusercontent.com. Unset follows IS_CLOUD.
+BLOCK_DISPOSABLE_EMAILS=
+
+# Network and country of the sign-up IPs in the console's team dialog, from
+# DB-IP's free databases (CC BY 4.0), which the worker downloads from
+# download.db-ip.com once a month; lookups never leave this instance. Unset
+# follows IS_CLOUD.
+IP_GEOLOCATION=
 
 # Read-only support view (see "Support view (optional)" in SELF_HOSTING.md):
 # with this on, the console can open a team's dashboard read-only for 30

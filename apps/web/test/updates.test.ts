@@ -75,7 +75,7 @@ describe("product-updates opt-in", () => {
     expect(sent[0]).toMatchObject({
       kind: "updates.confirm",
       to: "op@example.com",
-      subject: "Confirme as novidades do MillionSend",
+      subject: "Confirme sua inscrição nas novidades do MillionSend",
     });
     expect(await db.select().from(schema.contacts)).toHaveLength(0);
 

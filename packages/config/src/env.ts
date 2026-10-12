@@ -49,6 +49,16 @@ export type AbuseJudgeProvider = (typeof ABUSE_JUDGE_PROVIDERS)[number];
 export const ABUSE_JUDGE_BASE_URL_DEFAULT = "https://api.typesafe.ai";
 export const ABUSE_JUDGE_MODEL_DEFAULT = "jev-1.13.0";
 export const ABUSE_JUDGE_TIMEOUT_MS_DEFAULT = 20_000;
+
+/** Who reads the text in an email's images for the judge; "off" is the default everywhere. */
+export const ABUSE_VISION_PROVIDERS = ["off", "bedrock"] as const;
+export type AbuseVisionProvider = (typeof ABUSE_VISION_PROVIDERS)[number];
+/**
+ * Claude Haiku 5.5, called by its bare id on the region's own Bedrock Mantle
+ * host: the in-region route, so images are read in that region.
+ */
+export const ABUSE_VISION_MODEL = "anthropic.claude-haiku-5-5";
+export const ABUSE_VISION_REGION_DEFAULT = "us-east-1";
 const SENTRY_ENVIRONMENT_DEFAULT = "production";
 /** MILLIONSEND_REVISION outside an image built with a GIT_SHA. */
 const REVISION_UNKNOWN = "unknown";
@@ -218,8 +228,10 @@ export const env = createEnv({
       .min(0)
       .default(OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT),
 
-    // Optional content monitor: TypeSafe Jev judges a sample of accepted
-    // mail after SES took it. Off by default; sending never waits on it.
+    // Optional content monitor: TypeSafe Jev judges a new team's mail, and
+    // any team's mail to a destination it has never used, before SES takes
+    // it, and a sample of the rest after. Off by default; with it off nothing
+    // waits on it.
     // ABUSE_JUDGE=typesafe needs ABUSE_JUDGE_API_KEY. Sampling rates and
     // thresholds are instance settings (console → Trust & safety →
     // Monitoring settings); the MONITOR_* values below are their bootstrap
@@ -233,6 +245,17 @@ export const env = createEnv({
       .int()
       .min(1000)
       .default(ABUSE_JUDGE_TIMEOUT_MS_DEFAULT),
+    // Optional image reading for the judge: Claude Haiku 5.5 on Amazon
+    // Bedrock writes down the text and brands in an email's images and in
+    // attachment pages that are images, with the worker's AWS credentials,
+    // on ABUSE_VISION_REGION's own endpoint. Off by default; refusing
+    // program files, holding risky files and reading PDFs, Office files and
+    // QR codes all work without it.
+    ABUSE_VISION: z.enum(ABUSE_VISION_PROVIDERS).default("off"),
+    ABUSE_VISION_REGION: z
+      .string()
+      .regex(/^[a-z]{2}(?:-[a-z]+)+-\d+$/, "must be an AWS region like us-east-1")
+      .default(ABUSE_VISION_REGION_DEFAULT),
     // Break-glass: with this on, an operator can read the subject and
     // rendered text of a flagged team's messages for a recorded security
     // reason, for 30 minutes, disclosed to the team after 7 days. The cloud
@@ -267,6 +290,19 @@ export const env = createEnv({
     WARMUP_CAP_FIRST_DAY: z.coerce.number().int().min(0).optional(),
     WARMUP_CAP_FIRST_WEEK: z.coerce.number().int().min(0).optional(),
     WARMUP_CAP_FIRST_MONTH: z.coerce.number().int().min(0).optional(),
+
+    // Sign-up, invitations and email changes refuse addresses on the
+    // disposable-email-domains list (sub.mailinator.com counts as mailinator.com);
+    // existing accounts keep working. The app ships the list and the worker
+    // refreshes it daily while this is on. Unset follows IS_CLOUD; read
+    // through disposableEmailsBlocked().
+    BLOCK_DISPOSABLE_EMAILS: z.enum(["true", "false", "1", "0"]).optional(),
+
+    // Network and country of the IPs the console shows, from DB-IP's free
+    // databases: the worker downloads them monthly and every lookup stays on
+    // this instance. Unset follows IS_CLOUD; read through
+    // ipGeolocationEnabled().
+    IP_GEOLOCATION: z.enum(["true", "false", "1", "0"]).optional(),
 
     // Read-only support view: the instance operator may open a team's
     // dashboard as its owner sees it, for 30 minutes, with a reason and a
@@ -454,6 +490,20 @@ export function sesTenantsEnabled(e: Env = env): boolean {
   return envFlag(flag);
 }
 
+/** Whether disposable addresses are refused: explicit BLOCK_DISPOSABLE_EMAILS wins, else the cloud default. */
+export function disposableEmailsBlocked(e: Env = env): boolean {
+  const flag = e.BLOCK_DISPOSABLE_EMAILS as unknown;
+  if (flag === undefined || flag === "") return isCloudDeployment(e);
+  return envFlag(flag);
+}
+
+/** Whether IPs are looked up in the DB-IP databases: explicit IP_GEOLOCATION wins, else the cloud default. */
+export function ipGeolocationEnabled(e: Env = env): boolean {
+  const flag = e.IP_GEOLOCATION as unknown;
+  if (flag === undefined || flag === "") return isCloudDeployment(e);
+  return envFlag(flag);
+}
+
 /** The sender for account notifications; undefined when no system sender is configured. */
 export function notificationsEmailFrom(e: Env = env): string | undefined {
   return e.NOTIFICATIONS_EMAIL_FROM ?? e.AUTH_EMAIL_FROM;
@@ -520,6 +570,22 @@ export function abuseJudgeConfig(e: Env = env): AbuseJudgeConfig | null {
     baseUrl: e.ABUSE_JUDGE_BASE_URL || ABUSE_JUDGE_BASE_URL_DEFAULT,
     apiKey: e.ABUSE_JUDGE_API_KEY,
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : ABUSE_JUDGE_TIMEOUT_MS_DEFAULT,
+  };
+}
+
+export interface AbuseVisionConfig {
+  region: string;
+  accessKeyId: string | undefined;
+  secretAccessKey: string | undefined;
+}
+
+/** The image reader the worker builds, or null when it is off; raw-string safe as abuseJudgeConfig is. */
+export function abuseVisionConfig(e: Env = env): AbuseVisionConfig | null {
+  if (((e.ABUSE_VISION as unknown as string | undefined) || "off") === "off") return null;
+  return {
+    region: e.ABUSE_VISION_REGION || ABUSE_VISION_REGION_DEFAULT,
+    accessKeyId: e.AWS_ACCESS_KEY_ID,
+    secretAccessKey: e.AWS_SECRET_ACCESS_KEY,
   };
 }
 

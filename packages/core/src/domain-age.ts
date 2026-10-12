@@ -11,7 +11,9 @@ import { DAY_MS } from "./utc-day.js";
  * domain.age job) on the registrable name: RDAP through the IANA bootstrap,
  * then the registry's own WHOIS, then the first certificate in Certificate
  * Transparency, else unknown. A name a free subdomain service hands out
- * (ownerDomain) is no registry's: only its certificates can date it.
+ * (ownerDomain) is no registry's: only its certificates can date it. RDAP
+ * dates the current holder: a dropped name caught again, or an aged name
+ * bought and moved to another registrar, is only as old as that event.
  */
 
 /** Names MillionSend to every registry and log it asks. */
@@ -139,12 +141,24 @@ function parseIanaReferral(reply: string): string | null {
   return /^(?:refer|whois):[ \t]*(\S+)[ \t]*$/im.exec(reply)?.[1]?.toLowerCase() ?? null;
 }
 
-/** The registration event of an RDAP domain object. */
-function rdapRegisteredAt(body: unknown): Date | null {
-  const events = (body as { events?: { eventAction?: unknown; eventDate?: unknown }[] } | null)
-    ?.events;
-  const event = events?.find((e) => e.eventAction === "registration");
-  return typeof event?.eventDate === "string" ? parseRegistryDate(event.eventDate) : null;
+const RDAP_HOLDER_EVENTS = new Set(["registration", "reregistration", "transfer"]);
+
+/**
+ * The latest registration, re-registration or transfer event of an RDAP
+ * domain object. A date past `notAfter` is a registry's error, not the
+ * latest event.
+ */
+function rdapRegisteredAt(body: unknown, notAfter: number): Date | null {
+  const events = (body as { events?: unknown } | null)?.events;
+  if (!Array.isArray(events)) return null;
+  let latest: Date | null = null;
+  for (const event of events as ({ eventAction?: unknown; eventDate?: unknown } | null)[]) {
+    const action = event?.eventAction;
+    if (typeof action !== "string" || !RDAP_HOLDER_EVENTS.has(action.toLowerCase())) continue;
+    const at = typeof event?.eventDate === "string" ? parseRegistryDate(event.eventDate) : null;
+    if (at && at.getTime() <= notAfter && (!latest || at > latest)) latest = at;
+  }
+  return latest;
 }
 
 /** The earliest not_before among crt.sh's certificates for a name; null when it has none. */
@@ -263,7 +277,7 @@ export function createDomainAgeResolver(deps: DomainAgeDeps = {}): DomainAgeReso
     if (res.status === 404) return null;
     if (!res.ok) return "retry";
     const body = await json(res);
-    return body === undefined ? "retry" : rdapRegisteredAt(body);
+    return body === undefined ? "retry" : rdapRegisteredAt(body, now() + DAY_MS);
   }
 
   async function referral(tld: string): Promise<string | null | "retry"> {

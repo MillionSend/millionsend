@@ -108,9 +108,14 @@ function isDateOrYears(run: string): boolean {
   return span >= 1 && span <= 10;
 }
 
+/** A digit run (DIGIT_RUN) of at least `digits` digits that is no date or span of years. */
+function isNumberRun(run: string, digits: number): boolean {
+  return (run.match(/\p{N}/gu)?.length ?? 0) >= digits && !isDateOrYears(run);
+}
+
 function maskNumbers(text: string): string {
   return text.replace(DIGIT_RUN, (run) => {
-    if ((run.match(/\p{N}/gu)?.length ?? 0) < 7 || isDateOrYears(run)) return run;
+    if (!isNumberRun(run, 7)) return run;
     let kept = 0;
     return run.replace(/\p{N}/gu, (digit) => (++kept > 4 ? "•" : digit));
   });
@@ -190,13 +195,20 @@ export function fillMailTemplate(template: string, values: Record<string, string
 const URL_SCHEME =
   /[a-z][a-z\d+.-]*:\/\/|\b(?:mailto|tel|sms|callto|javascript|data|file|ftp|https?):(?!\s)/i;
 const NOT_PLAIN = /[@\p{Cc}\p{Zl}\p{Zp}]/u;
+/**
+ * The digits of the shortest number a name may not carry: a local number
+ * with its area code. Years, dates, "Studio 54" and short order numbers stay
+ * under it.
+ */
+const NAME_NUMBER_DIGITS = 8;
 
 /**
  * Whether a team or display name may be stored: one line of visible text, at
- * most CUSTOMER_TEXT_MAX characters, no "@" and no URL scheme, judged on the
- * NFKC form so fullwidth look-alikes count. A name that only looks like a
- * domain ("acme.dev") is a company's name and passes; system mail prints
- * every name through inertText anyway.
+ * most CUSTOMER_TEXT_MAX characters, no "@", no URL scheme and no run of
+ * digits a phone number fits in, judged on the NFKC form so fullwidth
+ * look-alikes count. A name that only looks like a domain ("acme.dev") is a
+ * company's name and passes; system mail prints every name through
+ * inertText anyway.
  */
 export function isPlainName(value: string): boolean {
   const folded = value.normalize("NFKC");
@@ -204,6 +216,7 @@ export function isPlainName(value: string): boolean {
     value.length <= CUSTOMER_TEXT_MAX &&
     !NOT_PLAIN.test(folded) &&
     dropInvisible(folded) === folded &&
-    !URL_SCHEME.test(folded)
+    !URL_SCHEME.test(folded) &&
+    !(folded.match(DIGIT_RUN) ?? []).some((run) => isNumberRun(run, NAME_NUMBER_DIGITS))
   );
 }

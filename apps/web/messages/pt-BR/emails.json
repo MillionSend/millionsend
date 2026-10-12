@@ -1,7 +1,7 @@
 {
   "held": {
     "label": "Atrasado",
-    "body": "O envio está pausado por enquanto e retoma automaticamente. Você não precisa fazer nada."
+    "body": "O envio está pausado por enquanto e será retomado automaticamente. Você não precisa fazer nada."
   },
   "list": {
     "title": "E-mails",
@@ -79,7 +79,7 @@
       "prefetched": "Pré-carregado",
       "unsubscribed": "Descadastrado"
     },
-    "prefetchedHint": "A imagem de rastreamento ou um link foi buscado por um cliente de email ou scanner de segurança antes de alguém abrir a mensagem. Não conta como abertura nem como clique.",
+    "prefetchedHint": "A imagem de rastreamento ou um link foi buscado por um cliente de e-mail ou scanner de segurança antes de alguém abrir a mensagem. Não conta como abertura nem como clique.",
     "openFromClick": "pelo clique",
     "prefetchReason": {
       "apple_mpp": "privacidade do Apple Mail",
@@ -114,11 +114,11 @@
       "scheduled": "Agendado",
       "queued": "Na fila",
       "queuedBody": "Sai em instantes.",
-      "plan": "Retido pelo limite do plano",
+      "plan": "Limite do plano atingido",
       "planBody": "Sai quando o limite renovar, {date}.",
       "raiseLimit": "Aumentar limite",
       "waitingCapacity": "Aguardando capacidade",
-      "pacedBody": "A transmissão é enviada em ondas pela capacidade diária. Seu e-mail transacional não fica retido atrás dela.",
+      "pacedBody": "A transmissão é enviada em ondas, dentro da capacidade diária. Seu e-mail transacional não fica esperando atrás dela.",
       "expected": "Envio previsto",
       "window": "entre {from} e {to}",
       "until": "por volta de {to}",
@@ -145,7 +145,7 @@
     },
     "notCheckedWhy": "Estado do DNS indisponível no momento do envio.",
     "notApplicableToggle": "{count, plural, one {# verificação não aplicável} other {# verificações não aplicáveis}}",
-    "byDesign": "por construção",
+    "byDesign": "garantido",
     "byDesignNote": "O MillionSend garante isso estruturalmente — não há como falhar aqui.",
     "adviceLabel": "O que fazer",
     "detailLabel": "Detalhe",
@@ -154,7 +154,7 @@
       "dmarc_record": {
         "title": "Registro DMARC",
         "description": "Seu domínio de envio publica uma política DMARC. Google, Yahoo e Microsoft exigem uma para remetentes em massa, e p=none já os satisfaz.",
-        "advice": "Adicione um registro TXT _dmarc ao seu domínio. Comece com p=none, acompanhe os relatórios e depois restrinja."
+        "advice": "Adicione um registro TXT _dmarc ao seu domínio. Comece com p=none, acompanhe os relatórios e depois deixe a política mais rígida."
       },
       "auth_alignment": {
         "title": "Alinhamento SPF e DKIM",
@@ -173,27 +173,27 @@
       },
       "no_shorteners": {
         "title": "Sem encurtadores de link",
-        "description": "Links encurtados (bit.ly, tinyurl e similares) escondem o destino e são muito usados em abusos. Com rastreamento de cliques ativo, um encurtador vira um redirecionamento duplo embrulhado pelo rastreador — padrão de phishing documentado no Gmail. youtu.be é o domínio de compartilhamento do próprio YouTube e só conta enquanto o rastreamento de cliques o embrulharia.",
+        "description": "Links encurtados (bit.ly, tinyurl e similares) escondem o destino e são muito usados em abusos. Com rastreamento de cliques ativo, o link encurtado é reescrito pelo rastreador e vira um redirecionamento duplo — padrão de phishing documentado no Gmail. youtu.be é o domínio de compartilhamento do próprio YouTube e só conta quando o rastreamento de cliques reescreveria o link.",
         "advice": "Use URLs completas — youtube.com/watch em vez de youtu.be. O rastreamento de cliques já informa o que foi clicado."
       },
       "body_size": {
         "title": "Tamanho do HTML",
-        "description": "O Gmail corta mensagens cujo HTML passa de 102KB — tudo após o corte, rodapé de descadastro incluído, fica atrás de \"Exibir mensagem inteira\".",
+        "description": "O Gmail corta mensagens cujo HTML passa de 102KB — tudo depois do corte, incluindo o rodapé de descadastro, só aparece ao clicar em \"Exibir toda a mensagem\".",
         "advice": "Mantenha o HTML abaixo de 102KB: menos estilos inline, conteúdo mais curto, nada embutido."
       },
       "plain_text": {
         "title": "Versão em texto simples",
         "description": "A mensagem inclui uma parte text/plain junto do HTML. E-mails só em HTML pontuam pior nos filtros de spam e quebram em clientes de texto.",
-        "advice": "Envie um corpo em texto junto de todo HTML."
+        "advice": "Envie sempre uma versão em texto junto com o HTML."
       },
       "visible_unsubscribe": {
         "title": "Link de descadastro visível",
-        "description": "O corpo contém um link de descadastro antes do ponto de corte do Gmail. Quem não encontra o link aperta \"Marcar como spam\".",
+        "description": "O corpo contém um link de descadastro antes do ponto de corte do Gmail. Quem não encontra o link aperta \"Denunciar spam\".",
         "advice": "Coloque um link de descadastro no rodapé e mantenha-o dentro dos primeiros 102KB de HTML."
       },
       "phishing_links": {
         "title": "Sem padrões de phishing nos links",
-        "description": "Nenhum texto de link nomeando um domínio diferente do destino, nenhum link para endereço IP, nenhum link http se dizendo https — os padrões que filtros de phishing procuram.",
+        "description": "Nenhum texto de link que mostre um domínio diferente do destino, nenhum link para endereço IP, nenhum link http se passando por https — os padrões que filtros de phishing procuram.",
         "advice": "Faça o texto do link corresponder ao destino e nunca aponte para IPs."
       },
       "no_reply_from": {
@@ -213,7 +213,7 @@
       },
       "image_text_ratio": {
         "title": "Texto junto das imagens",
-        "description": "A mensagem tem texto visível de verdade junto das imagens. E-mail só de imagem, quase sem texto, é assinatura clássica de spam e fica ilegível com imagens bloqueadas.",
+        "description": "A mensagem tem texto visível de verdade junto das imagens. E-mail só de imagem, quase sem texto, é um padrão clássico de spam e fica ilegível com imagens bloqueadas.",
         "advice": "Escreva a mensagem como texto; use imagens para apoiar, não substituir."
       },
       "tracking_unbranded": {
@@ -229,7 +229,7 @@
       "insecure_links": {
         "title": "Links em HTTPS",
         "description": "Todos os links usam https. Links em http puro são sinalizados por scanners de segurança e podem ser adulterados no caminho.",
-        "advice": "Sirva os destinos por https e atualize as URLs."
+        "advice": "Use https nos destinos dos links e atualize as URLs."
       },
       "subject_lint": {
         "title": "Linha de assunto",
@@ -252,7 +252,7 @@
         "advice": "Mantenha um Reply-To em todo envio de endereço no-reply."
       }
     },
-    "handoffLabel": "Entregue ao seu agente",
+    "handoffLabel": "Passe para o seu agente",
     "handoffHint": "Uma instrução pronta com a verificação, o motivo e a correção.",
     "copyForAgent": "Copiar instruções",
     "agentPrompt": "Na nossa integração com o MillionSend, o e-mail \"{subject}\" (id {id}) falha na verificação de entregabilidade \"{title}\".\n\n{description}\n\nO que fazer: {advice}{detail}\n\nEncontre o código ou template que envia este e-mail e aplique a correção. Mantenha a mudança mínima e explique o que mudou."
@@ -276,10 +276,10 @@
       },
       "domains": "Domínios e subdomínios",
       "addresses": "Endereços de e-mail",
-      "hint": "Registre todo domínio e subdomínio de envio, e todo endereço De, exatamente como usados. Endereços do relay só aceitam remetentes registrados.",
+      "hint": "Registre todo domínio e subdomínio de envio e todo endereço de remetente, exatamente como você os usa. Endereços do relay só aceitam remetentes registrados.",
       "article": "Como parar os bounces para destinatários @privaterelay.appleid.com"
     },
-    "acceptedThenBounced": "O servidor do destinatário aceitou esta mensagem primeiro (veja o evento entregue) e a devolveu depois de dentro do próprio sistema — um encaminhamento, uma caixa cheia ou uma resposta automática lida como bounce. Nada tenta de novo."
+    "acceptedThenBounced": "O servidor do destinatário aceitou esta mensagem primeiro (veja o evento Entregue) e depois a devolveu de dentro do próprio sistema — um encaminhamento, uma caixa cheia ou uma resposta automática interpretada como bounce. Não há novas tentativas."
   },
   "occurrencesDrawer": {
     "title": "{label} — {count, plural, one {# evento} other {# eventos}}",
@@ -343,18 +343,18 @@
       "recipient": "Destinatário",
       "added": "Adicionado",
       "details": "Detalhes",
-      "removeNote": "Remover um endereço que devolveu permanentemente provavelmente devolverá de novo — remova apenas depois que a caixa postal for corrigida."
+      "removeNote": "Se você remover um endereço que deu bounce permanente, ele provavelmente vai dar bounce de novo — remova apenas depois que a caixa postal for corrigida."
     },
     "removeDialog": {
       "title": "Remover endereço de e-mail",
-      "body": "{email} volta a poder receber e-mails. Um endereço que devolveu permanentemente costuma devolver de novo."
+      "body": "{email} volta a poder receber e-mails. Um endereço que deu bounce permanente costuma dar bounce de novo."
     }
   },
   "apiSheet": {
-    "title": "API de Emails",
-    "send": "Enviar email",
-    "batch": "Enviar emails em lote",
-    "retrieve": "Consultar email",
+    "title": "API de E-mails",
+    "send": "Enviar e-mail",
+    "batch": "Enviar e-mails em lote",
+    "retrieve": "Consultar e-mail",
     "keyHint": "Substitua ms_xxxxxxxxx por uma chave da página de Chaves de API. Todos os SDKs também aceitam as variáveis de ambiente MILLIONSEND_API_KEY e MILLIONSEND_BASE_URL."
   },
   "unsubscribedDrawer": {
@@ -364,12 +364,12 @@
     "topic": "Tópico",
     "via": "Via",
     "source": {
-      "one_click": "Cabeçalho one-click (List-Unsubscribe)",
+      "one_click": "Cabeçalho de descadastro em um clique (List-Unsubscribe)",
       "hosted_page": "Página de descadastro"
     },
     "when": "Quando",
     "recipient": "Destinatário",
-    "note": "O destinatário se descadastrou pelo link deste e-mail. Mensagens de conta continuam chegando; broadcasts para este escopo param."
+    "note": "O destinatário se descadastrou pelo link deste e-mail. Mensagens de conta continuam chegando; transmissões para este escopo param."
   },
   "receiving": {
     "auth": "Autenticação",

@@ -73,9 +73,21 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
 
 /**
  * Why a queued_quota row waits: null for the team's plan or SES's own
- * capacity, "warmup" for the sending domain's warm-up cap.
+ * capacity, "warmup" for the sending domain's warm-up cap, "review" for a
+ * team the content monitor holds (the drain sends it once the hold is
+ * released). The rest wait for an operator on the review list, which the
+ * drain never releases: "screening" when the judge could not answer for a
+ * young sending domain, "destination" for mail to a destination new to the
+ * team that the judge read as phishing, "media" for content the judge could
+ * not read. Never shown to the team.
  */
-export const emailParkReasonEnum = pgEnum("email_park_reason", ["warmup"]);
+export const emailParkReasonEnum = pgEnum("email_park_reason", [
+  "warmup",
+  "review",
+  "screening",
+  "destination",
+  "media",
+]);
 
 /**
  * Lifecycle split (compliance by schema): the plaintext columns here are
@@ -111,6 +123,10 @@ export const emails = pgTable(
     // Content, not metadata: holds ciphertext (same envelope scheme as the
     // body columns), so it belongs on the content retention clock.
     attachments: text("attachments"),
+    // What screening read from a held email (text, links, file facts, small
+    // re-encoded previews), sealed like attachments; written only for mail
+    // parked for review and purged with the body.
+    media: text("media"),
     latestStatus: emailStatusEnum("latest_status").notNull().default("queued"),
     parkReason: emailParkReasonEnum("park_reason"),
     bodyCiphertext: bytea("body_ciphertext"),
@@ -119,6 +135,13 @@ export const emails = pgTable(
     bodyKeyVersion: integer("body_key_version"),
     bodyPurgedAt: timestamp("body_purged_at", { withTimezone: true }),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    // An operator released it from the review list: no screening reason
+    // stops it again.
+    screenReleasedAt: timestamp("screen_released_at", { withTimezone: true }),
+    // When it was last parked (null for mail parked before this was kept): a
+    // release of "everything shown" takes only mail parked before the
+    // operator looked.
+    parkedAt: timestamp("parked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp("sent_at", { withTimezone: true }),
   },
@@ -156,6 +179,10 @@ export const emails = pgTable(
     index("emails_team_bulk_created_idx")
       .on(t.teamId, t.createdAt, t.id)
       .where(isNotNull(t.broadcastId)),
+    // The review list: rows waiting on a hold or an operator, across teams.
+    index("emails_review_list_idx")
+      .on(t.createdAt)
+      .where(sql`${t.latestStatus} = 'queued_quota' and ${t.parkReason} <> 'warmup'`),
     // The cap banner counts a team's parked transactional rows only.
     index("emails_team_tx_held_idx")
       .on(t.teamId)

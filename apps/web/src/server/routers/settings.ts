@@ -1,6 +1,7 @@
 import { cancelTeamSubscription } from "@millionsend/billing";
 import {
   accountEmailFrom,
+  disposableEmailsBlocked,
   env,
   invitesPerTeamPerDay,
   isCloudDeployment,
@@ -12,21 +13,27 @@ import {
   createFixedWindowLimiter,
   DAY_MS,
   fillTemplate,
+  flagImitatedBrand,
+  getMonitorSettingsRow,
   INVITE_EMAILS_PER_HOUR,
   INVITE_MAX_SENDS,
   INVITE_RESEND_COOLDOWN_MS,
   INVITE_TTL_MS,
   isMailPreferenceKey,
+  loadMonitorState,
   MAIL_LOCALES,
   MAIL_PREFERENCE_KEYS,
   type MailPreferenceKey,
+  monitorTier,
   QUOTA_COLUMNS,
   type QuotaTeamRow,
   RECEIVED_PER_BILLED_EMAIL,
   readPeriodUsage,
   receivingRule,
+  resolveMonitorSettings,
   SystemMailRefused,
   signInviteToken,
+  teamMonitorRow,
   teamQuota,
   utcDay,
   verifyInviteToken,
@@ -65,6 +72,7 @@ import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { requireAuthSecret } from "../auth-secret";
 import { getStripe } from "../billing";
+import { disposableAddressTest } from "../disposable-email";
 import { activeLocale } from "../locale";
 import { poweredByLocked } from "../powered-by";
 import { smtpRelayOffered } from "../smtp";
@@ -305,17 +313,31 @@ export function createSettingsRouter(
    * shows the link, and nothing is charged against the invite.
    */
   async function emailInvite(
-    ctx: { db: Db; teamId: string; session: { user: { name: string } } },
+    ctx: { db: Db; teamId: string; session: { user: { id: string } } },
     invite: { id: string; email: string; role: "member" | "admin" },
   ): Promise<boolean> {
     const [team] = await ctx.db
       .select({ name: schema.teams.name })
       .from(schema.teams)
       .where(eq(schema.teams.id, ctx.teamId));
+    const [inviter] = await ctx.db
+      .select({ email: schema.user.email, verified: schema.user.emailVerified })
+      .from(schema.user)
+      .where(eq(schema.user.id, ctx.session.user.id));
+    const now = new Date();
+    const { settings } = resolveMonitorSettings(
+      await getMonitorSettingsRow(ctx.db),
+      env as unknown as Record<string, unknown>,
+    );
+    const tier = monitorTier(
+      await loadMonitorState(ctx.db, await teamMonitorRow(ctx.db, ctx.teamId), now),
+      settings,
+      now,
+    );
     const message = buildInvitationEmail({
       to: invite.email,
-      inviterName: ctx.session.user.name,
-      teamName: team?.name ?? "",
+      inviterEmail: inviter?.verified ? inviter.email : null,
+      teamName: tier === "new" ? null : (team?.name ?? null),
       role: invite.role,
       url: inviteAcceptUrl(invite.id),
       expiresInDays: Math.round(INVITE_TTL_MS / DAY_MS),
@@ -363,10 +385,14 @@ export function createSettingsRouter(
         .input(z.object({ name: teamNameSchema }))
         .mutation(async ({ ctx, input }) => {
           if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
-          await ctx.db
+          // Saving the name it already has is no rename: an operator's clear of
+          // its brand flag stands.
+          const [renamed] = await ctx.db
             .update(schema.teams)
             .set({ name: input.name })
-            .where(eq(schema.teams.id, ctx.teamId));
+            .where(and(eq(schema.teams.id, ctx.teamId), ne(schema.teams.name, input.name)))
+            .returning({ id: schema.teams.id });
+          if (renamed) await flagImitatedBrand(ctx.db, ctx.teamId, input.name);
           return { name: input.name };
         }),
 
@@ -538,6 +564,9 @@ export function createSettingsRouter(
         .mutation(async ({ ctx, input }) => {
           assertCanManageMembers(ctx.role);
           await assertTeamNotSuspended(ctx.db, ctx.teamId, "invite");
+          if (disposableEmailsBlocked() && (await disposableAddressTest(ctx.db))(input.email)) {
+            throw await inviteRefusal("BAD_REQUEST", "disposable");
+          }
           if (inviteEmailsLimited(ctx.teamId)) {
             throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly");
           }

@@ -91,6 +91,32 @@ describe("settings.team", () => {
     const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
     expect(team?.name).toBe("acme");
   });
+
+  it("rename to a brand's name keeps the name and flags the team, once per new name", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const rename = (name: string) =>
+      callerFor("u1", teamId, "owner").settings.team.rename({ name });
+    const flags = () =>
+      db.select().from(schema.teamFlags).where(eq(schema.teamFlags.teamId, teamId));
+    await rename("Acme Corp");
+    expect(await flags()).toEqual([]);
+    await expect(rename("Centra1 Mercado Pago")).resolves.toEqual({ name: "Centra1 Mercado Pago" });
+    expect(await flags()).toMatchObject([
+      { reason: "brand", status: "open", detail: { brand: "Mercado Pago" } },
+    ]);
+    // An operator clears it; saving the same name again is no rename and opens nothing.
+    await db
+      .update(schema.teamFlags)
+      .set({ status: "cleared", clearedAt: new Date(), clearedBy: "op" })
+      .where(eq(schema.teamFlags.teamId, teamId));
+    await rename("Centra1 Mercado Pago");
+    expect((await flags()).filter((f) => f.status === "open")).toEqual([]);
+    await rename("Mercado Pago Help");
+    expect((await flags()).filter((f) => f.status === "open")).toMatchObject([
+      { reason: "brand", detail: { brand: "Mercado Pago" } },
+    ]);
+  });
 });
 
 describe("settings.members", () => {

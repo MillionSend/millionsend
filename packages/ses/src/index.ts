@@ -64,6 +64,11 @@ export {
 } from "./quotas.js";
 export { checkReceivingMx, RECEIVING_MX_PRIORITY, receivingDnsRecord } from "./receiving-dns.js";
 export {
+  createSesReputationClient,
+  getSesComplaintRate,
+  type SesReputationClient,
+} from "./reputation.js";
+export {
   createSesSendClient,
   type SesSendClient,
   type SimpleEmail,

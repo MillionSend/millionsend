@@ -100,8 +100,9 @@ The send tells you up front:
   threshold, new broadcast sends are blocked with a `403 sending_paused`
   error — stopping the damage before SES pauses sending entirely.
 - If the platform's aggregate bounce or complaint rate in your sender's SES
-  region approaches the SES review line, broadcast sends in that region are
-  refused with `403 broadcasts_paused` until the rate recovers. Transactional
+  region nears the line where SES acts on the account, broadcast sends in
+  that region are refused with
+  `403 broadcasts_paused` until the rate recovers. Transactional
   email keeps flowing, and the pause clears on its own.
 
 See the [API reference](/api-reference) for all broadcast endpoints.

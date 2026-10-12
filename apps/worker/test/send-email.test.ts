@@ -617,6 +617,37 @@ it("attachments and custom headers ride the raw MIME; tracking still rewrites th
   expect(mime).not.toContain("dest.test");
 });
 
+it("sends an attachment's bare media type and charset: a declared name never reaches the MIME", async () => {
+  const { ses, sends } = fakeSes("mid-attach-type");
+  const content = Buffer.from("hello attachment").toString("base64");
+  const emailId = await insertEmail(
+    {
+      attachments: await sealAttachments(
+        [
+          {
+            filename: "notes.txt",
+            content,
+            contentType: "application/octet-stream; name=notes.txt; name=report.pdf",
+          },
+          {
+            filename: "data.csv",
+            content,
+            contentType: 'text/csv; charset=utf-8; name="invoice.pdf"',
+          },
+        ],
+        keyring,
+      ),
+    },
+    "<p>Hi</p>",
+  );
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  const lower = (sends[0]?.raw.toString("utf8") ?? "").toLowerCase();
+  expect(lower).toContain("content-type: application/octet-stream; name=notes.txt");
+  expect(lower).toContain("content-type: text/csv; charset=utf-8; name=data.csv");
+  expect(lower).not.toContain("report.pdf");
+  expect(lower).not.toContain("invoice.pdf");
+});
+
 it("an attachment with a content id ships inline beside the html that references it", async () => {
   const { ses, sends } = fakeSes("mid-inline");
   const content = Buffer.from("fake png bytes").toString("base64");
@@ -1429,6 +1460,33 @@ it("parks the email as queued_quota when SES refuses for its daily quota", async
   expect(counter?.accepted).toBe(4);
 });
 
+it("hands back one reservation per recipient when it parks, as the drain charges them", async () => {
+  const emailId = await insertEmail({
+    to: ["a@example.org", "b@example.org"],
+    cc: ["c@example.org", "A@example.org"],
+  });
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: utcDay(Date.now()), accepted: 5 })
+    .onConflictDoUpdate({
+      target: [schema.usageCounters.teamId, schema.usageCounters.day],
+      set: { accepted: 5 },
+    });
+  const ses: SesSender = {
+    async sendRaw() {
+      throw Object.assign(new Error("Daily message quota exceeded"), {
+        name: "TooManyRequestsException",
+      });
+    },
+  };
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("parked");
+  const [counter] = await db
+    .select({ accepted: schema.usageCounters.accepted })
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.accepted).toBe(2);
+});
+
 it("a rate refusal with quota headroom stays a retry; the same refusal at the ceiling parks", async () => {
   const rate = () =>
     Object.assign(new Error("Maximum sending rate exceeded"), {
@@ -1730,4 +1788,37 @@ it("a row of a canceled broadcast is canceled, not sent", async () => {
     .from(schema.emailEvents)
     .where(eq(schema.emailEvents.emailId, emailId));
   expect(events).toHaveLength(0);
+});
+
+it("counts a send no recipient can report as a complaint only when every recipient is at such a provider", async () => {
+  const team = await createTeam(db, "feedback-team");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: team,
+      name: "feedback.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const own = { teamId: team, domainId: domain?.id, from: "F <f@feedback.example>" };
+  const send = async (over: Partial<typeof schema.emails.$inferInsert>) => {
+    const { ses } = fakeSes(randomUUID());
+    const emailId = await insertEmail({ ...own, ...over });
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  };
+  await send({ to: ["Ana <ana@GMAIL.com>"], cc: ["b@icloud.com"], bcc: ["c@t-online.de"] });
+  await send({ to: ["d@gmail.com"], cc: ["e@example.com"] });
+  await send({ to: ["f@gmail.com"], bcc: ["g@example.com"] });
+  // The day's row exists by now: this one counts through the upsert's update.
+  await send({ to: ["h@me.com"] });
+  const counters = await db
+    .select({
+      sent: schema.usageCounters.sent,
+      sentNoFeedback: schema.usageCounters.sentNoFeedback,
+    })
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, team));
+  expect(counters).toEqual([{ sent: 4, sentNoFeedback: 2 }]);
 });

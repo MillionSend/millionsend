@@ -49,7 +49,11 @@ export const ACCOUNT_MAIL_KINDS = [
   "monitor.alert",
   "monitor.broadcasts_paused",
   "monitor.team_held",
+  "monitor.team_linked",
   "monitor.degraded",
+  "monitor.destination_parked",
+  "monitor.media_blocked",
+  "monitor.destination_revoked",
 ] as const;
 export type AccountMailKind = (typeof ACCOUNT_MAIL_KINDS)[number];
 

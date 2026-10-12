@@ -2,7 +2,7 @@
   "addWebhook": "Adicionar webhook",
   "empty": {
     "headline": "Nenhum webhook ainda.",
-    "body": "Adicione um endpoint para receber eventos de email."
+    "body": "Adicione um endpoint para receber eventos de e-mail."
   },
   "table": {
     "url": "URL",
@@ -27,14 +27,14 @@
   },
   "eventLabel": {
     "email": {
-      "sent": "Email enviado",
-      "delivered": "Email entregue",
+      "sent": "E-mail enviado",
+      "delivered": "E-mail entregue",
       "delivery_delayed": "Entrega atrasada",
-      "opened": "Email aberto",
+      "opened": "E-mail aberto",
       "clicked": "Link clicado",
-      "prefetched": "Email pré-carregado",
-      "received": "Email recebido",
-      "bounced": "Email rejeitado",
+      "prefetched": "E-mail pré-carregado",
+      "received": "E-mail recebido",
+      "bounced": "E-mail devolvido",
       "complained": "Marcado como spam"
     },
     "deliverability": {
@@ -69,7 +69,7 @@
     "queued": "{count} na fila",
     "oldest": "mais antiga",
     "next": "próxima tentativa",
-    "stale": "{count} entregas aguardando; a mais antiga está vencida há {age}. O receptor está lento ou falhando.",
+    "stale": "{count} entregas aguardando; a mais antiga está atrasada há {age}. O receptor está lento ou falhando.",
     "autoDisabled": "Desativado automaticamente após falhas repetidas. Corrija o receptor e ative-o de novo; os eventos do intervalo não são reenviados."
   },
   "enable": "Ativar",
@@ -160,7 +160,7 @@
     "pending": "Pendente",
     "success": "Sucesso",
     "failed": "Falhou",
-    "exhausted": "Esgotado"
+    "exhausted": "Tentativas esgotadas"
   },
   "apiSheet": {
     "title": "API de Webhooks",

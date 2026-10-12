@@ -108,17 +108,14 @@ it("refuses a paused (not suspended) team at DATA with a temporary 451 4.7.1 unt
   expect(info.response).toContain("Queued as");
 });
 
-it("refuses a team held for review with a neutral 550", async () => {
+it("accepts a team held for review as any message, and parks it for the release", async () => {
   await db
     .update(schema.teams)
     .set({ suspendedAt: new Date(), suspensionReason: "review" })
     .where(eq(schema.teams.id, teamId));
-  const refused = transport().sendMail(mail);
-  await expect(refused).rejects.toMatchObject({
-    responseCode: 550,
-    response: expect.stringContaining("Sending is paused pending review"),
-  });
-  await expect(refused).rejects.not.toMatchObject({
-    response: expect.stringMatching(/suspend/i),
-  });
+  const info = await transport().sendMail(mail);
+  expect(info.response).toContain("Queued as");
+  const id = info.response?.split("Queued as ")[1]?.trim() ?? "";
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, id));
+  expect(row).toMatchObject({ teamId, latestStatus: "queued_quota", parkReason: "review" });
 });

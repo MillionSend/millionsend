@@ -36,6 +36,10 @@
       "types": "./src/error-tracking-node.ts",
       "default": "./src/error-tracking-node.ts"
     },
+    "./file-type": {
+      "types": "./src/file-type.ts",
+      "default": "./src/file-type.ts"
+    },
     "./domain-status": {
       "types": "./src/domain-status.ts",
       "default": "./src/domain-status.ts"
@@ -84,6 +88,7 @@
     "@sentry/node": "^11.1.0",
     "drizzle-orm": "^0.45.2",
     "mailparser": "^3.9.26",
+    "mmdb-lib": "3.0.3",
     "tldts": "^7.4.10",
     "zod": "^4.6.3"
   },

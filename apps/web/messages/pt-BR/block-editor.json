@@ -24,7 +24,7 @@
   "picker": {
     "search": "Buscar campos…",
     "fallback": "Valor padrão (opcional)",
-    "empty": "Nenhum campo corresponde."
+    "empty": "Nenhum campo encontrado."
   },
   "slash": {
     "group": "Blocos",
@@ -82,7 +82,7 @@
     }
   },
   "ph": {
-    "body": "Escreva algo, ou / para blocos",
+    "body": "Escreva algo ou digite / para inserir um bloco",
     "heading": "Título {level}"
   },
   "varpop": {
@@ -93,6 +93,6 @@
   "suggest": {
     "header": "Variáveis",
     "navigate": "Navegar",
-    "empty": "Nenhum campo corresponde."
+    "empty": "Nenhum campo encontrado."
   }
 }

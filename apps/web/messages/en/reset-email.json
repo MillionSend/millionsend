@@ -1,6 +1,6 @@
 {
   "subject": "Reset your MillionSend password",
-  "greeting": "Hi {name},",
+  "greeting": "Hi,",
   "body": "We received a request to reset the password for your account. Click the button below to choose a new one.",
   "button": "Reset password",
   "linkFallback": "Or copy this link into your browser:",

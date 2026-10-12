@@ -224,6 +224,6 @@ it("replays the first phishing campaign: held on its 5th message, or its 10th by
   // A hold score out of the campaign's reach leaves the repeat hold to act.
   expect(await heldOn("incident-repeat", { ...MONITOR_SETTING_DEFAULTS, holdScore: 100 })).toBe(10);
   expect(holdMails.pop()).toContain(
-    "This verdict held the team as its phishing-type verdict number 5 at or above 80 in its first week of sending.",
+    "This verdict held the team as its phishing-type verdict number 5 at or above 80 within 7 days.",
   );
 });

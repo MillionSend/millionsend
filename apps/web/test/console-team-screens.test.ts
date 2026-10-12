@@ -70,6 +70,7 @@ vi.mock("@/server/queue", () => ({
 const { ReviewView } = await import("@/components/console/safety/review-view");
 const { TeamDialog } = await import("@/components/console/teams/team-dialog");
 const { ViewDialog } = await import("@/components/console/teams/view-dialog");
+const { SuspendDialog } = await import("@/components/console/teams/hold-dialogs");
 const { teamMenuItems } = await import("@/components/console/team-actions");
 
 let db: Db;
@@ -237,5 +238,48 @@ describe("the View as owner dialog", () => {
     const lapsed = render(null, "code_required", until);
     expect(lapsed).toContain("Email me a code");
     expect(lapsed).not.toContain("still covers");
+  });
+});
+
+describe("the Suspend dialog's cancel and refund", () => {
+  const render = (
+    initialReason: "phishing" | "reputation" | "manual" | "non_payment",
+    refundPlan: string | null | undefined,
+  ) =>
+    renderToStaticMarkup(
+      createElement(SuspendDialog, {
+        name: "acme",
+        initialReason,
+        refundPlan,
+        pending: false,
+        onClose: () => {},
+        onSubmit: () => {},
+      }),
+    );
+  /** The checkbox's input tag, or null when the dialog does not offer it. */
+  const box = (html: string) => html.match(/<input id="[^"]*-refund"[^>]*>/)?.[0] ?? null;
+  const submit = (html: string) => html.match(/<button type="submit"[^>]*>/)?.[0];
+
+  it("is ticked by default for phishing and unticked for reputation and other reasons", () => {
+    const phishing = render("phishing", "Pro 100K");
+    expect(phishing).toContain("Cancel Pro 100K in Stripe and refund the last 120 days as fraud");
+    expect(box(phishing)).toContain('checked=""');
+    for (const reason of ["reputation", "manual"] as const) {
+      const unticked = box(render(reason, "Pro 100K"));
+      expect(unticked).toContain('type="checkbox"');
+      expect(unticked).not.toContain("checked");
+    }
+  });
+
+  it("is never offered on non-payment or without a live subscription", () => {
+    expect(box(render("non_payment", "Pro 100K"))).toBeNull();
+    expect(box(render("phishing", null))).toBeNull();
+    expect(submit(render("phishing", null))).not.toContain("disabled");
+  });
+
+  it("holds the submit until the subscription is known", () => {
+    const loading = render("phishing", undefined);
+    expect(box(loading)).toBeNull();
+    expect(submit(loading)).toContain('disabled=""');
   });
 });

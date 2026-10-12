@@ -203,7 +203,8 @@
       "cooldown": "This invitation was just sent. Wait a couple of minutes before resending.",
       "maxSends": "This invitation was already sent {max} times. Revoke it and invite again.",
       "noSender": "No email sender is configured; share the invitation link instead.",
-      "sendFailed": "The invitation email could not be sent. Try again in a moment."
+      "sendFailed": "The invitation email could not be sent. Try again in a moment.",
+      "disposable": "Invite a permanent email address. Temporary inboxes can't join a team."
     },
     "created": {
       "title": "Invitation link",
@@ -448,6 +449,8 @@
       "team_held_for_review": "Sending paused pending review",
       "team_ses_tenant_updated": "Updated SES tenant status",
       "team_ses_tenant_update_failed": "SES tenant status update failed",
+      "team_fraud_refunded": "Canceled subscription and refunded as fraud",
+      "team_fraud_refund_failed": "Stripe cancel and refund failed",
       "console_flag_opened": "Flagged team",
       "console_flag_cleared": "Cleared flag",
       "console_flag_reopened": "Reopened flag",
@@ -462,6 +465,8 @@
       "monitor_broadcasts_resumed": "Resumed broadcasts after monitor pause",
       "warmup_trust_granted": "Lifted new-domain warm-up",
       "warmup_trust_revoked": "Restored new-domain warm-up",
+      "screening_released": "Released emails waiting for review",
+      "screening_canceled": "Canceled emails waiting for review",
       "content_revealed": "Read message content",
       "content_accessed": "An operator read message content",
       "support_view_started": "Support view started",

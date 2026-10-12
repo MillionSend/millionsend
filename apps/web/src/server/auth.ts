@@ -1,14 +1,22 @@
 import { oauthProvider } from "@better-auth/oauth-provider";
-import { accountEmailFrom, env, isCloudDeployment, signupOpen } from "@millionsend/config";
+import {
+  accountEmailFrom,
+  disposableEmailsBlocked,
+  env,
+  isCloudDeployment,
+  signupOpen,
+} from "@millionsend/config";
 import {
   ALL_TEAMS_GRANT,
   CUSTOMER_TEXT_MAX,
   enrollSystemContact,
   fillTemplate,
   findSenderDomainOwner,
+  forwardedClientIp,
   isLoopbackUrl,
   isPlainName,
   MCP_SCOPES,
+  recordSignup,
   removeSystemContact,
   stripInvisible,
 } from "@millionsend/core";
@@ -23,8 +31,11 @@ import { headers } from "next/headers";
 import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
 import { httpOrigin } from "@/lib/http-url";
 import { isAppLocale, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE } from "@/lib/locale-cookie";
+import enAuth from "../../messages/en/auth.json";
 import enCommon from "../../messages/en/common.json";
+import ptBRAuth from "../../messages/pt-BR/auth.json";
 import ptBRCommon from "../../messages/pt-BR/common.json";
+import { disposableAddressTest } from "./disposable-email";
 import { accountMailLocale, localeFromHeaders } from "./locale";
 import { getActiveMembership, listMemberships } from "./membership";
 import { enqueueRecipientErase } from "./queue";
@@ -81,6 +92,41 @@ function assertPlainName(body: unknown, headers: Headers | undefined): void {
     message: fillTemplate(NAME_RULE[localeFromHeaders(headers)], {
       max: String(CUSTOMER_TEXT_MAX),
     }),
+  });
+}
+
+const DISPOSABLE_REFUSAL = {
+  signup: { en: enAuth.signup.disposable, "pt-BR": ptBRAuth.signup.disposable },
+  change: { en: enAuth.changeEmail.disposable, "pt-BR": ptBRAuth.changeEmail.disposable },
+} as const;
+
+/**
+ * An address on the disposable list is refused where the instance blocks
+ * them, in the requester's language. On a change, an address some account
+ * already holds is not new (the write is that account's own row), so an
+ * account registered with one before the block keeps working. Sign-up
+ * never asks: refusing a held address differently would tell anyone which
+ * disposable addresses have accounts.
+ */
+async function assertPermanentAddress(
+  db: Db,
+  email: unknown,
+  when: keyof typeof DISPOSABLE_REFUSAL,
+  headers: Headers | undefined,
+): Promise<void> {
+  if (typeof email !== "string" || !disposableEmailsBlocked()) return;
+  if (!(await disposableAddressTest(db))(email)) return;
+  if (when === "change") {
+    const [held] = await db
+      .select({ id: schema.user.id })
+      .from(schema.user)
+      .where(eq(schema.user.email, email.toLowerCase()))
+      .limit(1);
+    if (held) return;
+  }
+  throw new APIError("BAD_REQUEST", {
+    code: "DISPOSABLE_EMAIL",
+    message: DISPOSABLE_REFUSAL[when][localeFromHeaders(headers)],
   });
 }
 
@@ -540,13 +586,39 @@ export function createAuth(
           before: async (user, ctx) => {
             await assertSignupAllowed(db, signupOpen());
             const headers = ctx?.headers ?? ctx?.request?.headers;
+            await assertPermanentAddress(db, user.email, "signup", headers);
             return { data: headers ? { ...user, locale: localeFromHeaders(headers) } : user };
           },
           // Runs after the row exists (after the adapter's transaction for a
           // social first sign-in). Social sign-ins arrive verified and enroll
           // here; a password sign-up enrolls from afterEmailVerification.
+          // The sign-up's IP and browser are kept apart from the sessions,
+          // which expire and go with the account.
           after: async (user, ctx) => {
-            await enrollAccount(user, ctx?.headers ?? ctx?.request?.headers);
+            const headers = ctx?.headers ?? ctx?.request?.headers;
+            await recordSignup(db, {
+              userId: user.id,
+              email: user.email,
+              ip: headers
+                ? forwardedClientIp(headers, {
+                    cloud: isCloudDeployment(),
+                    trustedProxies: trustedProxies(),
+                  })
+                : null,
+              userAgent: headers?.get("user-agent") ?? null,
+            });
+            await enrollAccount(user, headers);
+          },
+        },
+        update: {
+          // Every path that changes an address writes it here.
+          before: async (user, ctx) => {
+            await assertPermanentAddress(
+              db,
+              user.email,
+              "change",
+              ctx?.headers ?? ctx?.request?.headers,
+            );
           },
         },
       },
@@ -565,6 +637,12 @@ export function createAuth(
         if (ctx.path === "/sign-up/email") {
           await assertSignupAllowed(db, signupOpen());
           assertPlainName(ctx.body, ctx.headers);
+          await assertPermanentAddress(
+            db,
+            (ctx.body as { email?: unknown } | undefined)?.email,
+            "signup",
+            ctx.headers,
+          );
           return;
         }
         if (ctx.path === "/update-user") {

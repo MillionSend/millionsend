@@ -2,6 +2,7 @@ import {
   DAY_MS,
   latestProbes,
   PROBE_HISTORY_DAYS,
+  PROBES,
   probeHistory,
   pruneProbes,
   recordProbes,
@@ -92,18 +93,58 @@ it("pruneProbes drops samples past the history window and keeps the rest", async
   ).toEqual([]);
 });
 
-it("probeHistory buckets samples with the average and bool_and(ok)", async () => {
+it("probeHistory draws a count's, a size's or a time's highest reading per bucket, with bool_and(ok)", async () => {
   const t0 = new Date("2026-01-01T10:00:00Z");
-  const t1 = new Date("2026-01-01T10:01:00Z");
+  const minute = (n: number) => new Date(t0.getTime() + n * 60_000);
   await recordProbes(db, [{ probe: "pg_latency_ms", value: 10, ok: true }], t0);
-  await recordProbes(db, [{ probe: "pg_latency_ms", value: 30, ok: false }], t1);
-  const points = await probeHistory(db, {
-    probe: "pg_latency_ms",
-    from: t0,
-    to: new Date(t0.getTime() + 3_600_000),
-    bucketSeconds: 3_600,
-  });
-  expect(points).toEqual([{ t: t0, value: 20, ok: false }]);
+  await recordProbes(db, [{ probe: "pg_latency_ms", value: 30, ok: false }], minute(1));
+  const hour = { from: t0, to: new Date(t0.getTime() + 3_600_000), bucketSeconds: 3_600 };
+  expect(await probeHistory(db, { probe: "pg_latency_ms", ...hour })).toEqual([
+    { t: t0, value: 30, ok: false, readings: 2 },
+  ]);
+  // Ten minutes at 8000 in a quiet six-hour bucket: the point is the spike,
+  // a reading the worker took, not a third of a message.
+  const q0 = new Date("2026-01-01T12:00:00Z");
+  for (let i = 0; i < 360; i++) {
+    const value = i >= 100 && i < 110 ? 8000 : i % 3 === 0 ? 0 : 1;
+    await recordProbes(
+      db,
+      [{ probe: "queue_waiting", value, ok: true }],
+      new Date(q0.getTime() + i * 60_000),
+    );
+  }
+  expect(
+    await probeHistory(db, {
+      probe: "queue_waiting",
+      from: q0,
+      to: new Date(q0.getTime() + 6 * 3_600_000 - 1),
+      bucketSeconds: 6 * 3_600,
+    }),
+  ).toEqual([{ t: q0, value: 8000, ok: true, readings: 360 }]);
+});
+
+it("probeHistory averages a rate per bucket", async () => {
+  const t0 = new Date("2026-01-02T10:00:00Z");
+  await recordProbes(db, [{ probe: "webhook_success_rate", value: 0.9, ok: true }], t0);
+  await recordProbes(
+    db,
+    [{ probe: "webhook_success_rate", value: 1, ok: true }],
+    new Date(t0.getTime() + 60_000),
+  );
+  expect(
+    await probeHistory(db, {
+      probe: "webhook_success_rate",
+      from: t0,
+      to: new Date(t0.getTime() + 3_600_000),
+      bucketSeconds: 3_600,
+    }),
+  ).toEqual([{ t: t0, value: 0.95, ok: true, readings: 2 }]);
+  // The rates are the only probes a bucket averages.
+  expect(
+    Object.entries(PROBES)
+      .filter(([, p]) => p.aggregate === "avg")
+      .map(([key]) => key),
+  ).toEqual(["webhook_success_rate", "monitor_unjudged_rate"]);
 });
 
 it("ses_transactional_parked reads the worker's memory of the last park", async () => {

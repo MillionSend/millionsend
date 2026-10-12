@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { recordAudit, upgradesHeld } from "@millionsend/core";
+import type { BillingStripe } from "@millionsend/billing";
+import { recordAudit, upgradesHeld, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -859,7 +860,6 @@ describe("console.regions pacing numbers", () => {
       txSent24h: 9,
       bulkParked: 2,
       waitingBroadcasts: 1,
-      txParkedAt: null,
     });
     // The one bulk send in the window takes room off the share, whatever the reserve is.
     expect(region?.room).toBe((region?.share ?? 0) - 1);
@@ -928,6 +928,73 @@ describe("console.regions during a region hold", () => {
 
     await db.delete(schema.regionBreakers);
     await db.delete(schema.broadcasts).where(eq(schema.broadcasts.id, broadcast.id));
+    await db.delete(schema.domains).where(eq(schema.domains.id, domain.id));
+  });
+});
+
+describe("console.regions and SES's own complaint rate", () => {
+  it("carries the rate the breaker judges, whether SES answered, and the lines", async () => {
+    await db.delete(schema.regionBreakers);
+    const region = async () =>
+      (await operator().console.regions.list()).served.find((r) => r.region === REGION);
+    // Never read: our own estimate is judged, on the same line.
+    expect(await region()).toMatchObject({ sesComplaintRate: null, sesComplaintRead: false });
+    expect((await operator().console.regions.list()).complaintLines).toEqual({
+      sesReview: 0.001,
+      sesPause: 0.005,
+      breaker: 0.004,
+    });
+
+    await db
+      .insert(schema.regionBreakers)
+      .values({ region: REGION, sesComplaintRate: 0.0025, sesComplaintReadAt: new Date() });
+    expect(await region()).toMatchObject({
+      sesComplaintRate: 0.0025,
+      sesComplaintRead: true,
+      // A stored reading is no pause.
+      breaker: null,
+    });
+    // Reads failing for over a day: the stale rate no longer counts.
+    await db
+      .update(schema.regionBreakers)
+      .set({ sesComplaintReadAt: new Date(Date.now() - 25 * 3_600_000) });
+    expect(await region()).toMatchObject({ sesComplaintRate: null, sesComplaintRead: false });
+    await db.delete(schema.regionBreakers);
+  });
+});
+
+describe("console.regions complaint estimate", () => {
+  it("divides complaints by the sends a provider can report, on the table and the access request alike", async () => {
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId,
+        name: "estimate.example",
+        region: REGION,
+        status: "verified",
+        verifiedAt: new Date(),
+      })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    // 2 complaints over 2000 sends, 1500 of them to Gmail: 0.4% of the 500 left.
+    const week = { sent: 2000, sentNoFeedback: 1500, complained: 2 };
+    const c = schema.usageCounters;
+    await db
+      .insert(c)
+      .values({ teamId, day: utcDay(), ...week })
+      .onConflictDoUpdate({ target: [c.teamId, c.day], set: week });
+    const region = (await operator().console.regions.list()).served.find(
+      (r) => r.region === REGION,
+    );
+    expect(region?.week).toEqual({ sent: 2000, hardBounceRate: 0, complaintRate: 0.004 });
+    expect(await operator().console.regions.accessRequestFacts({ region: REGION })).toMatchObject({
+      hardBounceRate7d: 0,
+      complaintRate7d: 0.004,
+    });
+    await db
+      .update(c)
+      .set({ sent: 0, sentNoFeedback: 0, complained: 0 })
+      .where(eq(c.teamId, teamId));
     await db.delete(schema.domains).where(eq(schema.domains.id, domain.id));
   });
 });
@@ -1275,5 +1342,187 @@ describe("suspension and the system team's contacts", () => {
     expect(await unsubscribed()).toBe(true);
     await operator().console.teams.reinstate({ id: held });
     expect(await unsubscribed()).toBe(true);
+  });
+});
+
+describe("suspend's cancel and refund in Stripe", () => {
+  afterEach(() => setConsoleTeamsDeps(null));
+
+  /** A team Stripe bills for Pro 100K: a live subscription and its customer. */
+  async function payingTeam(): Promise<string> {
+    const id = await createTeam(db, randomUUID());
+    await db
+      .update(schema.teams)
+      .set({
+        plan: "pro",
+        planQuota: 100_000,
+        planStatus: "active",
+        stripeCustomerId: `cus_${id}`,
+        stripeSubscriptionId: `sub_${id}`,
+      })
+      .where(eq(schema.teams.id, id));
+    return id;
+  }
+
+  /** Stripe holding the team's subscription and two $20 payments from the last 120 days. */
+  function fakeStripe(teamId: string, fail?: Error) {
+    const calls = { stripe: 0, cancels: [] as unknown[], refunds: [] as unknown[] };
+    const day = 86_400;
+    const now = Math.floor(Date.now() / 1000);
+    const charges = [now - 3600, now - 40 * day].map((created, i) => ({
+      id: `ch_${i + 1}`,
+      customer: `cus_${teamId}`,
+      created,
+      amount: 2000,
+      amount_refunded: 0,
+      currency: "usd",
+      status: "succeeded",
+      disputed: false,
+      refunded: false,
+    }));
+    setConsoleTeamsDeps({
+      stripe: () => {
+        calls.stripe += 1;
+        return {
+          subscriptions: {
+            retrieve: async (id: string) => ({ id, status: "active" }),
+            cancel: async (id: string, params: unknown) => {
+              calls.cancels.push([id, params]);
+              return { id, status: "canceled" };
+            },
+          },
+          charges: {
+            async *list() {
+              yield* charges;
+            },
+          },
+          refunds: {
+            create: async (params: unknown, options: unknown) => {
+              if (fail) throw fail;
+              calls.refunds.push([params, options]);
+              return { id: `re_${calls.refunds.length}` };
+            },
+          },
+        } as unknown as BillingStripe;
+      },
+    });
+    return calls;
+  }
+
+  const instanceRow = async (action: string, id: string) =>
+    (await auditRows(action)).find((row) => row.target === `team:${id}`);
+
+  it("is offered on a live subscription only", async () => {
+    const paying = await payingTeam();
+    expect(await operator().console.teams.subscription({ id: paying })).toEqual({
+      plan: "pro",
+      planQuota: 100_000,
+    });
+    await db
+      .update(schema.teams)
+      .set({ planStatus: "canceled" })
+      .where(eq(schema.teams.id, paying));
+    expect(await operator().console.teams.subscription({ id: paying })).toBeNull();
+    const free = await createTeam(db, randomUUID());
+    expect(await operator().console.teams.subscription({ id: free })).toBeNull();
+  });
+
+  it("cancels and refunds as fraud once the team is suspended, in the operator's audit alone", async () => {
+    const id = await payingTeam();
+    const stripe = fakeStripe(id);
+    const { refund } = await operator().console.teams.suspend({
+      id,
+      reason: "phishing",
+      refund: true,
+    });
+    expect(refund).toEqual({
+      canceled: `sub_${id}`,
+      refunds: [
+        { charge: "ch_1", amount: 2000, currency: "usd" },
+        { charge: "ch_2", amount: 2000, currency: "usd" },
+      ],
+      failed: null,
+    });
+    expect(stripe.cancels).toEqual([[`sub_${id}`, { invoice_now: false, prorate: false }]]);
+    expect(stripe.refunds).toEqual([
+      [{ charge: "ch_1", reason: "fraudulent" }, { idempotencyKey: "fraud-refund:ch_1" }],
+      [{ charge: "ch_2", reason: "fraudulent" }, { idempotencyKey: "fraud-refund:ch_2" }],
+    ]);
+    const row = await team(id);
+    expect(row).toMatchObject({
+      suspensionReason: "phishing",
+      plan: "free",
+      planQuota: null,
+      planStatus: "canceled",
+      stripeSubscriptionId: null,
+    });
+    expect(row.suspendedAt).toBeInstanceOf(Date);
+    expect(await instanceRow("team.fraud_refunded", id)).toMatchObject({
+      teamId: null,
+      actorId: `user:${OPERATOR}`,
+      data: {
+        team: row.name,
+        subscription: `sub_${id}`,
+        refunded: 2,
+        amount: "$40",
+        charges: "ch_1, ch_2",
+        failed: null,
+      },
+    });
+    const owner = await callerFor(MEMBER, id, "owner").audit.list({ limit: 50 });
+    expect(owner.items.map((r) => r.action)).toEqual(["team.suspended"]);
+
+    // Reinstating gives nothing back: the team stays on Free and may buy again.
+    await operator().console.teams.reinstate({ id });
+    expect(await team(id)).toMatchObject({
+      suspendedAt: null,
+      plan: "free",
+      planStatus: "canceled",
+      stripeSubscriptionId: null,
+    });
+    expect(await upgradesHeld(db, id)).toBe(false);
+    expect(stripe.cancels).toHaveLength(1);
+    expect(stripe.refunds).toHaveLength(2);
+  });
+
+  it("a Stripe failure keeps the suspension, comes back for the console and is audited", async () => {
+    const id = await payingTeam();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    fakeStripe(id, new Error("Stripe is down"));
+    const { refund } = await operator().console.teams.suspend({
+      id,
+      reason: "manual",
+      notify: false,
+      refund: true,
+    });
+    warn.mockRestore();
+    expect(refund).toEqual({ canceled: `sub_${id}`, refunds: [], failed: "Error: Stripe is down" });
+    expect(await team(id)).toMatchObject({ suspensionReason: "manual", plan: "free" });
+    expect((await team(id)).suspendedAt).toBeInstanceOf(Date);
+    expect(await instanceRow("team.fraud_refund_failed", id)).toMatchObject({
+      teamId: null,
+      data: { subscription: `sub_${id}`, refunded: 0, failed: "Error: Stripe is down" },
+    });
+    expect(await instanceRow("team.fraud_refunded", id)).toBeUndefined();
+  });
+
+  it("is refused on non-payment, and left alone unticked or without a Stripe customer", async () => {
+    const id = await payingTeam();
+    const stripe = fakeStripe(id);
+    await expect(
+      operator().console.teams.suspend({ id, reason: "non_payment", refund: true }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect((await team(id)).suspendedAt).toBeNull();
+
+    expect(
+      (await operator().console.teams.suspend({ id, reason: "phishing", notify: false })).refund,
+    ).toBeNull();
+    const free = await createTeam(db, randomUUID());
+    expect(
+      (await operator().console.teams.suspend({ id: free, reason: "phishing", refund: true }))
+        .refund,
+    ).toBeNull();
+    expect(stripe.stripe).toBe(0);
+    expect(await team(id)).toMatchObject({ plan: "pro", planStatus: "active" });
   });
 });

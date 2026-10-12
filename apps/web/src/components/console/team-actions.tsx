@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import type { PopoverMenuItem } from "@/components/popover-menu";
 import { toast } from "@/components/toast";
 import { planLabel } from "@/lib/console-format";
+import { formatMoneyTotals } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { usePlanName } from "./teams/cells";
 import { PauseDialog, ReinstateDialog, SuspendDialog } from "./teams/hold-dialogs";
@@ -52,6 +53,7 @@ type DialogKind = "team" | "limits" | "plan" | "pause" | "suspend" | "reinstate"
  */
 export function useTeamActions(onChanged: () => void): TeamActions {
   const t = useTranslations("console.teams");
+  const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const planName = usePlanName();
@@ -64,6 +66,14 @@ export function useTeamActions(onChanged: () => void): TeamActions {
     dialog?.kind === "team" || dialog?.kind === "limits" || dialog?.kind === "plan";
   const detail = useQuery(
     trpc.console.teams.detail.queryOptions({ id: dialog?.team.id ?? "" }, { enabled: needsDetail }),
+  );
+  // Suspend's cancel and refund rides on this alone, a row read, not on the
+  // heavier detail: a slow or failing detail must never hold up a suspension.
+  const subscription = useQuery(
+    trpc.console.teams.subscription.queryOptions(
+      { id: dialog?.team.id ?? "" },
+      { enabled: dialog?.kind === "suspend", staleTime: 0 },
+    ),
   );
 
   const done = (message: string, teamId: string, tone?: "warn") => {
@@ -213,23 +223,41 @@ export function useTeamActions(onChanged: () => void): TeamActions {
         <SuspendDialog
           name={team.name}
           initialReason={team.suspensionReason === "review" ? "phishing" : undefined}
+          refundPlan={
+            subscription.isPending
+              ? undefined
+              : subscription.data
+                ? planLabel(planName(subscription.data.plan), subscription.data.planQuota)
+                : null
+          }
           pending={suspend.isPending}
           onClose={close}
           onSubmit={(input) =>
             suspend.mutate(
               { id: team.id, ...input },
               {
-                onSuccess: ({ tenant }) => {
+                onSuccess: ({ tenant, refund }) => {
                   const regions = tenant?.failed.map((f) => f.region).join(", ");
-                  done(
-                    regions
-                      ? t("toast.suspendedTenantFailed", { team: team.name, regions })
+                  const head = regions
+                    ? t("toast.suspendedTenantFailed", { team: team.name, regions })
+                    : refund
+                      ? t("refund.suspended", { team: team.name })
                       : t("toast.suspended", {
                           team: team.name,
                           reason: t(`suspendDialog.reasons.${input.reason}`),
-                        }),
+                        });
+                  const tail = !refund
+                    ? null
+                    : refund.failed
+                      ? t("refund.failed")
+                      : t("refund.done", {
+                          count: refund.refunds.length,
+                          amount: formatMoneyTotals(refund.refunds, locale),
+                        });
+                  done(
+                    tail ? `${head} · ${tail}` : head,
                     team.id,
-                    regions ? "warn" : undefined,
+                    regions || refund?.failed ? "warn" : undefined,
                   );
                 },
               },

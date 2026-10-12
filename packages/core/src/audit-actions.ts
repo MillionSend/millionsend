@@ -31,6 +31,9 @@ export const AUDIT_ACTIONS = [
   "team.held_for_review",
   "team.ses_tenant_updated",
   "team.ses_tenant_update_failed",
+  // A suspension's cancel and refund in Stripe, an instance row like the tenant's.
+  "team.fraud_refunded",
+  "team.fraud_refund_failed",
   // The instance side of a break-glass content access (team_id null, so the
   // team's own audit can never show it); "content.accessed" is the row the
   // team gains seven days later, dated at the access.
@@ -51,6 +54,10 @@ export const AUDIT_ACTIONS = [
   "monitor.broadcasts_resumed",
   "warmup.trust_granted",
   "warmup.trust_revoked",
+  // The review list's verdict on mail screening stopped before SES; the
+  // instance's rows, as every trust & safety lever.
+  "screening.released",
+  "screening.canceled",
   "support.view_started",
   "support.view_ended",
   "billing.checkout_started",

@@ -1,4 +1,4 @@
-import { type PlanRung, type PlanRungKey, rungByKey } from "@millionsend/core";
+import { DAY_MS, type PlanRung, type PlanRungKey, rungByKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
@@ -386,4 +386,64 @@ export async function cancelTeamSubscription(deps: BillingDeps, teamId: string):
       cancelAt: null,
     })
     .where(eq(schema.teams.id, teamId));
+}
+
+/** Card networks take disputes for about 120 days after a payment; an older one cannot return. */
+const FRAUD_REFUND_WINDOW_MS = 120 * DAY_MS;
+
+export interface FraudRefund {
+  /** The subscription canceled; null when the team had none. */
+  canceled: string | null;
+  /** The payments refunded, each in full, in minor units of its currency. */
+  refunds: { charge: string; amount: number; currency: string }[];
+  /** Why Stripe stopped partway; what is listed above was done before it. */
+  failed: string | null;
+}
+
+/**
+ * Ends the billing of a team suspended for fraud: its subscription is
+ * canceled at once (cancelTeamSubscription: no final invoice, no proration),
+ * then every payment of the last 120 days is refunded in full as fraudulent,
+ * which also puts the card and email on Radar's block lists. A disputed
+ * payment is left to its dispute and a refunded one is skipped; the rest of a
+ * partly refunded one goes back, since a partial refund can still be disputed
+ * in full. Each refund is keyed by its charge, so a retry never refunds twice.
+ * A Stripe failure is returned, never thrown: the suspension before it stands.
+ */
+export async function cancelAndRefundFraud(
+  deps: BillingDeps,
+  teamId: string,
+  now = new Date(),
+): Promise<FraudRefund> {
+  const team = await loadBillingColumns(deps.db, teamId);
+  const outcome: FraudRefund = { canceled: null, refunds: [], failed: null };
+  if (!team?.stripeCustomerId) return outcome;
+  try {
+    if (team.stripeSubscriptionId) {
+      await cancelTeamSubscription(deps, teamId);
+      outcome.canceled = team.stripeSubscriptionId;
+    }
+    const charges = deps.stripe.charges.list({
+      customer: team.stripeCustomerId,
+      created: { gte: Math.floor((now.getTime() - FRAUD_REFUND_WINDOW_MS) / 1000) },
+      limit: 100,
+    });
+    for await (const charge of charges) {
+      if (charge.status !== "succeeded" || charge.disputed || charge.refunded) continue;
+      const refund = {
+        charge: charge.id,
+        amount: charge.amount - charge.amount_refunded,
+        currency: charge.currency,
+      };
+      await deps.stripe.refunds.create(
+        { charge: charge.id, reason: "fraudulent" },
+        { idempotencyKey: `fraud-refund:${charge.id}` },
+      );
+      outcome.refunds.push(refund);
+    }
+  } catch (err) {
+    outcome.failed = String(err);
+    (deps.log ?? console.warn)(`fraud refund for team ${teamId} stopped: ${outcome.failed}`);
+  }
+  return outcome;
 }

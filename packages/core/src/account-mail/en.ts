@@ -338,11 +338,18 @@ export const en = {
       "Open the review page to see the sampled verdicts, the content checks and the team's history, and decide. This notice repeats at most once a day per team while the risk stays over the line.",
     ],
     button: "Open review",
+    extra: {
+      new: "new",
+      probation: "probation",
+      established: "established",
+      trusted: "trusted",
+      exempt: "exempt",
+    },
   },
   "monitor.broadcasts_paused": {
     subject: "Content monitor paused a team's broadcasts",
     body: [
-      "{team} is in the new tier, its monitor risk reached {risk} and a sampled message scored {score}. Under the pause policy its broadcasts are now on hold; transactional mail still flows.",
+      "{team} is in the new tier: a sampled message scored {score} and its monitor risk is {risk}. Under the pause policy its broadcasts are now on hold; transactional mail still flows.",
       "The team sees broadcasts as paused pending review. Open the review page to read the verdicts and resume, suspend or clear.",
     ],
     button: "Open review",
@@ -350,26 +357,79 @@ export const en = {
   "monitor.team_held": {
     subject: "Content monitor held a team for review",
     body: [
-      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy every send of the team is now refused or parked: the API and SMTP refuse, queued mail and broadcasts wait, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
-      "The owner sees sending as paused pending review and is not emailed. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
+      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy nothing of the team goes out: mail it sends through the API and SMTP is accepted and parked, queued mail and broadcasts wait, new broadcasts are refused, and its SES tenant is disabled where tenants are on. A message judged before it was sent waits with the rest; one judged after sending had already gone out.",
+      "The owner is not emailed: the dashboard shows sending as paused pending review, and the API and SMTP answer as for any accepted send. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
     ],
     button: "Open review",
     extra: {
       score: "This one verdict held the team: the hold score is {line}.",
+      young_domain:
+        "This one verdict held the team: it reached {line} while the team's sending domain was under 7 days old, or of unknown age.",
+      young_link:
+        "This one verdict held the team: it reached {line} on mail linking to a new destination registered under 7 days ago.",
       repeat:
-        "This verdict held the team as its phishing-type verdict number {n} at or above {line} in its first week of sending.",
+        "This verdict held the team as its phishing-type verdict number {n} at or above {line} within 7 days.",
+    },
+  },
+  "monitor.team_linked": {
+    subject: "A new team matches a team suspended for phishing",
+    body: [
+      "{team} matches {linked}, a team you suspended for phishing, on its {matches}. {held}",
+      "Open the review page to see what matched, then release the team or suspend it for phishing.",
+    ],
+    button: "Open review",
+    extra: {
+      held: "It is held for review: its mail waits until you decide, and its owner sees sending as paused pending review, with no email about it.",
+      notHeld:
+        "It is not held: a match holds a new team when it sends, and only when it includes an email address, a card or two kinds of evidence and the automatic hold is on.",
+      display_name: "sender name",
+      subject: "subject",
+      sending_domain: "domain name",
+      link_domain: "link domain",
+      phone: "phone number",
+      text_hash: "email text",
+      card: "card",
+      ip: "IP address",
+      address: "email address",
     },
   },
   "monitor.degraded": {
     subject: "Content monitor: {rate} of samples went unjudged in the last hour",
     body: [
-      "{unjudged} of {samples} samples drawn in the last hour came back unjudged ({provider} · {model}). Sending is unaffected: an unjudged sample changes no risk, opens no flag and holds no mail.",
+      "{unjudged} of {samples} samples drawn in the last hour came back unjudged ({provider} · {model}). An unjudged sample changes no risk and opens no flag. While the judge fails, a new team's mail from a sending domain under 7 days old, or of unknown age, waits: the judge is tried again for a few minutes, then the email waits for you on Trust & safety, where {parked} do now. Everything else is sent and judged afterwards.",
       "Common causes are a throttled or unreachable provider, an invalid or revoked API key, or answers the monitor could not read. The console's Health card charts the unjudged share.",
     ],
     button: "Open console",
     muted: [
-      "Sent to the instance operator at most once every six hours while the share stays over 20% or the provider keeps rejecting the API key.",
+      "Sent to the instance operator at most once every six hours while the share stays over 20%, the provider keeps rejecting the API key, or screening before sending gives up on mail.",
     ],
+  },
+  "monitor.destination_parked": {
+    subject: "Content monitor parked mail to a new destination",
+    body: [
+      "{team} sent mail to a destination it had not used before ({domain}), and the judge scored it {score} ({verdict}). That mail waits on Trust & safety, where you release it, which sends it and makes the destination known to the team, or cancel it.",
+      "The team is not held: the rest of its mail flows, and it is not told. Mail to the same destination is judged before sending until one is cleared.",
+    ],
+    button: "Open review list",
+    muted: ["Sent to the instance operator at most once a day per team."],
+  },
+  "monitor.media_blocked": {
+    subject: "Content monitor: the image reader refused an email's images",
+    body: [
+      "Amazon Bedrock refused to read the images in an email from {team} (HTTP 400). Bedrock answers this way when its abuse detection blocks an image, which includes child sexual abuse material. No preview of these images is kept.",
+      "An email that had not been sent yet waits on Trust & safety until you release or cancel it; one judged after sending was already delivered. This alone does not hold the team, and the team is not told.",
+    ],
+    button: "Open review list",
+    muted: ["Sent to the instance operator at most once a day per team."],
+  },
+  "monitor.destination_revoked": {
+    subject: "Content monitor: mail to a cleared destination was judged as phishing",
+    body: [
+      "{team} sent mail to {domain}, a destination its earlier mail had cleared in the last week, and the judge scored it {score} ({verdict}) after it went out. The destination is no longer cleared: mail to it is judged before sending again and waits on Trust & safety on a phishing-type verdict, and no verdict clears it again. Releasing mail to it from the review list does.",
+      "This alone does not hold the team: the rest of its mail flows, and it is not told.",
+    ],
+    button: "Open review list",
+    muted: ["Sent to the instance operator at most once a day per team."],
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 

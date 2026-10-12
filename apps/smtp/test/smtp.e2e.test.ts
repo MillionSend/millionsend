@@ -400,16 +400,23 @@ describe("smtp relay", () => {
     }
   });
 
-  it("rejects attachments with 554", async () => {
-    await expect(
-      transport({ user: SMTP_USERNAME, pass: token }).sendMail({
-        from: "a@acme.dev",
-        to: "r@example.com",
-        subject: "s",
-        text: "t",
-        attachments: [{ filename: "x.txt", content: "attached" }],
-      }),
-    ).rejects.toMatchObject({ responseCode: 554 });
+  it("rejects attachments with 554, program files and PDFs alike", async () => {
+    for (const attachment of [
+      { filename: "x.txt", content: "attached" },
+      { filename: "invoice.exe", content: Buffer.from("MZ") },
+      { filename: "fatura.pdf", content: Buffer.from("%PDF-1.7 statement") },
+    ]) {
+      await expect(
+        transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+          from: "a@acme.dev",
+          to: "r@example.com",
+          subject: "s",
+          text: "t",
+          attachments: [attachment],
+        }),
+        attachment.filename,
+      ).rejects.toMatchObject({ responseCode: 554 });
+    }
   });
 
   it("refuses a monthly plan at its included volume with 452 until overage is on", async () => {

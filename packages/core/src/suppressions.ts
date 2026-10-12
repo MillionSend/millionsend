@@ -2,6 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { sha256Hex } from "./hash.js";
+import { GMAIL_DOMAINS } from "./mailbox-providers.js";
 import { parseMailbox } from "./sender-address.js";
 
 /**
@@ -25,6 +26,24 @@ export function extractAddrSpec(recipient: string): string {
  */
 export function normalizeAddress(address: string): string {
   return address.normalize("NFKC").toLowerCase().replace(/\.$/, "");
+}
+
+/**
+ * The mailbox an address reaches, to compare people rather than strings:
+ * lowercase, "+tag" dropped, and at Gmail the dots too, since
+ * a.b+x@gmail.com is delivered to ab@gmail.com.
+ */
+export function mailboxIdentity(email: string): string {
+  const address = normalizeAddress(email.trim());
+  const at = address.lastIndexOf("@");
+  if (at < 1) return address;
+  let local = address.slice(0, at).split("+")[0] ?? "";
+  let domain = address.slice(at + 1);
+  if (GMAIL_DOMAINS.has(domain)) {
+    local = local.replaceAll(".", "");
+    domain = "gmail.com";
+  }
+  return `${local}@${domain}`;
 }
 
 /**

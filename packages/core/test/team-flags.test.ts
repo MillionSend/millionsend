@@ -5,11 +5,13 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   computeTeamStandings,
+  flagImitatedBrand,
   flagTrigger,
   pruneTeamStandings,
   saveTeamStandings,
   syncTeamFlags,
   type TeamStandingRow,
+  upgradesHeld,
 } from "../src/team-flags.js";
 import { utcDay } from "../src/utc-day.js";
 
@@ -141,6 +143,19 @@ describe("syncTeamFlags", () => {
     ]);
   });
 
+  it("leaves a linkage flag alone, which no standing triggers", async () => {
+    const teamId = await createTeam(db, "linked");
+    await db.insert(schema.teamFlags).values({ teamId, reason: "linked", detail: {} });
+    expect(await syncTeamFlags(db, [standing({ teamId })])).toEqual({ opened: 0, cleared: 0 });
+    expect(await syncTeamFlags(db, [standing({ teamId, scoreTenths: 10 })])).toEqual({
+      opened: 0,
+      cleared: 0,
+    });
+    expect(await flagsOf(teamId)).toMatchObject([
+      { reason: "linked", status: "open", openedBy: null },
+    ]);
+  });
+
   it("keeps a held team's automatic flag open until the hold is lifted", async () => {
     const teamId = await createTeam(db, "held-for-review");
     await db
@@ -240,6 +255,35 @@ describe("syncTeamFlags", () => {
     await saveTeamStandings(db, [noisy]);
     expect(await syncTeamFlags(db, [noisy])).toMatchObject({ opened: 0 });
     expect((await flagsOf(teamId)).filter((f) => f.status === "open")).toEqual([]);
+  });
+});
+
+describe("brand flags", () => {
+  it("opens one for a name that borrows a brand, keeps the first, and none for a plain name", async () => {
+    const teamId = await createTeam(db, "brand-named");
+    expect(await flagImitatedBrand(db, teamId, "Suporte Itaú")).toBe("Itaú");
+    expect(await flagImitatedBrand(db, teamId, "PayPa1 Help")).toBe("PayPal");
+    expect(await flagsOf(teamId)).toMatchObject([
+      { reason: "brand", status: "open", openedBy: null, detail: { brand: "Itaú" } },
+    ]);
+    const plain = await createTeam(db, "plain-named");
+    expect(await flagImitatedBrand(db, plain, "Acme Studio")).toBeNull();
+    expect(await flagsOf(plain)).toEqual([]);
+  });
+
+  it("blocks nothing, and the safety cron neither clears nor rewrites it", async () => {
+    const teamId = await createTeam(db, "brand-cron");
+    await flagImitatedBrand(db, teamId, "Nubank Ofertas");
+    expect(await upgradesHeld(db, teamId)).toBe(false);
+    // No trigger, then a trigger of the cron's own: the brand flag stays as it is.
+    expect(await syncTeamFlags(db, [standing({ teamId })])).toEqual({ opened: 0, cleared: 0 });
+    expect(await syncTeamFlags(db, [standing({ teamId, scoreTenths: 10 })])).toEqual({
+      opened: 0,
+      cleared: 0,
+    });
+    expect(await flagsOf(teamId)).toMatchObject([
+      { reason: "brand", status: "open", detail: { brand: "Nubank" } },
+    ]);
   });
 });
 

@@ -3,8 +3,11 @@ import { schema } from "@millionsend/db";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { type AcceptEmailDeps, acceptEmail, SYSTEM_MAIL_TAG } from "./accept-email.js";
 import type { AccountMailKind } from "./account-mail.js";
+import { createFixedWindowLimiter } from "./domain-lifecycle.js";
 import { parseSingleSender } from "./sender-address.js";
+import { extractAddrSpec, hashRecipient, mailboxIdentity } from "./suppressions.js";
 import { fetchTeamStanding, SILENT_SUSPENSIONS } from "./team-standing.js";
+import { DAY_MS } from "./utc-day.js";
 
 /**
  * Kinds whose body holds a live credential (a signed link that resets a
@@ -36,6 +39,7 @@ export type SystemMailKind =
   | "deliverability.paused"
   | "region.paused"
   | "region.resumed"
+  | "region.ses_complaints"
   | "webhook.failing"
   | "webhook.auto_disabled"
   | "webhook.backlog"
@@ -64,6 +68,28 @@ export const SENT_WHILE_SUSPENDED: ReadonlySet<SystemMailKind> = new Set<SystemM
   "billing.cancel_reminder",
   "billing.downgraded",
 ]);
+
+/**
+ * Kinds that reach an address on a stranger's say-so: anyone can sign up as
+ * any address, any team can invite one, and anyone can ask for product
+ * updates at one. However many accounts and teams ask, one address gets at
+ * most RECIPIENT_MAIL_PER_HOUR of these a clock hour and
+ * RECIPIENT_MAIL_PER_DAY a UTC day. A person retrying a sign-up needs three
+ * or four, and a few invitations a day still fit.
+ */
+export const RECIPIENT_CAPPED_KINDS: ReadonlySet<SystemMailKind> = new Set<SystemMailKind>([
+  "email_verification",
+  "invitation",
+  "updates.confirm",
+]);
+export const RECIPIENT_MAIL_PER_HOUR = 5;
+export const RECIPIENT_MAIL_PER_DAY = 10;
+
+// ponytail: per-process windows that a restart resets; the web, the one
+// process that sends these kinds, runs as one. Move to a table if it ever
+// runs as several.
+const recipientHourly = createFixedWindowLimiter(RECIPIENT_MAIL_PER_HOUR, 3_600_000);
+const recipientDaily = createFixedWindowLimiter(RECIPIENT_MAIL_PER_DAY, DAY_MS);
 
 export interface SystemMailMessage {
   /** `Name <user@domain>` or a bare address; one of the instance's sender env vars. */
@@ -155,10 +181,11 @@ const warnedSenders = new Set<string>();
  * that) while hard bounces, complaints and manual suppressions still apply.
  *
  * No owner: the raw SES path, byte for byte what every instance did before
- * a team verified the domain. A refusal (all suppressed) throws and never
- * falls back — the suppression list is the point. A failure inside accept
- * (keyring, database, queue) falls back to raw so account mail outlives an
- * outage of the pipeline it normally rides.
+ * a team verified the domain. A refusal (all suppressed, or a recipient over
+ * its cap) throws and never falls back — the suppression list and the cap
+ * are the point. A failure inside accept (keyring, database, queue) falls
+ * back to raw so account mail outlives an outage of the pipeline it
+ * normally rides.
  */
 export async function sendSystemMail(
   deps: SystemSendDeps,
@@ -173,6 +200,14 @@ export async function sendSystemMail(
     (SILENT_SUSPENSIONS.includes(suspended.reason) || !SENT_WHILE_SUSPENDED.has(message.kind))
   ) {
     return "muted";
+  }
+  if (RECIPIENT_CAPPED_KINDS.has(message.kind)) {
+    // Keyed on the mailbox: +tags and Gmail's dots reach the same inbox.
+    const key = hashRecipient(mailboxIdentity(extractAddrSpec(message.to)));
+    // The hour refuses first, so a send it refuses leaves the day's budget alone.
+    if (recipientHourly(key) || recipientDaily(key)) {
+      throw new SystemMailRefused("recipient_capped");
+    }
   }
   const owner = await findSenderDomainOwner(deps.db, message.from);
   if (!owner) {

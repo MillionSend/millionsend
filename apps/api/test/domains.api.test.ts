@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import {
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   EnvKeyring,
+  forgetPhishingPrints,
   generateApiKey,
   hashApiKey,
   PLAN_DOMAIN_LIMIT,
@@ -1388,5 +1389,38 @@ describe("permission confinement", () => {
     });
     const res = await call(bare, fullKey, "GET", "/domains");
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /domains and teams suspended for phishing", () => {
+  it("records, without holding, a new team whose added domain is a return's", async () => {
+    const phisher = await createTeam(db, "facture-vexto");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, phisher));
+    await db.insert(schema.campaignFingerprints).values({
+      teamId: phisher,
+      teamName: "facture-vexto",
+      kind: "sending_domain",
+      value: "vexto-cadeaux.example",
+    });
+    forgetPhishingPrints(db);
+    const team = await createTeam(db, "newcomer-api");
+    const token = await insertKey(team);
+    const res = await call(makeApp({ client: fakeSes().client }), token, "POST", "/domains", {
+      name: "cadeaux-vexto.example",
+    });
+    expect(res.status).toBe(200);
+    const [row] = await db
+      .select({ reason: schema.teams.suspensionReason })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, team));
+    expect(row).toEqual({ reason: null });
+    const links = await db
+      .select({ held: schema.teamLinks.held, trigger: schema.teamLinks.trigger })
+      .from(schema.teamLinks)
+      .where(eq(schema.teamLinks.teamId, team));
+    expect(links).toEqual([{ held: false, trigger: "domain" }]);
   });
 });

@@ -4,6 +4,7 @@ import {
   buildUnsubscribeUrl,
   bumpHourlyUsage,
   CREDENTIAL_MAIL_KINDS,
+  countDistinctRecipients,
   decryptEmailBody,
   deliverabilityHold,
   type EmailAttachment,
@@ -17,19 +18,28 @@ import {
   hashRecipient,
   isOnboardingSender,
   isSubscribedToTopic,
+  judgeAfterSend,
   type Keyring,
+  linkTeam,
   MONITOR_ANOMALY_CHECKS,
   type MonitorDeps,
   makeUnsubscribeToken,
+  noteAcceptedSend,
   noteConsoleCodeUndelivered,
+  opaqueFacts,
   openAttachments,
   parseSingleSender,
   purgedEmailBodyColumns,
   releaseQuota,
   rewriteForTracking,
   SCORE_VERSION,
+  type SendMedia,
   SYSTEM_MAIL_TAG,
   sampleAcceptedEmail,
+  screenBeforeSend,
+  screeningTeam,
+  sentContentType,
+  sentWithoutComplaintFeedback,
   substituteUnsubscribeUrl,
   transitionQueueState,
   utcDay,
@@ -40,6 +50,9 @@ import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
+import { MediaPoolError } from "../media/pool.js";
+import { saveMediaReview } from "../media/read.js";
+import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
 import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-quota.js";
 
 /**
@@ -104,10 +117,15 @@ export interface SendDeps {
    * it — the worker always provides it, since the master key is always present.
    */
   /**
-   * The content monitor's draw on an accepted send. Absent when the judge is
-   * off (and in tests that never reach it): no rows, no jobs, no state.
+   * The content monitor: the screening before SES and the draw on an
+   * accepted send. Absent when the judge is off (and in tests that never
+   * reach it): no rows, no jobs, no state, no wait.
    */
   monitor?: MonitorDeps | undefined;
+  /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
+  platformDomains?: ReadonlySet<string> | undefined;
+  /** The parsing threads and cache the file scan uses; the process's own when absent. */
+  media?: MediaDeps | undefined;
   tracking?:
     | {
         secretKey: Buffer;
@@ -291,6 +309,7 @@ async function parkQueued(
   db: Db,
   email: { id: string; teamId: string },
   why: string,
+  reason: (typeof schema.emailParkReasonEnum.enumValues)[number] | null = null,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
@@ -299,11 +318,23 @@ async function parkQueued(
       to: "queued_quota",
     });
     if (!moved) return;
-    // Against the same counter accept charged: on a monthly plan that is the
-    // billing period, which the drain will charge again on release. The cap
-    // itself is irrelevant here, so the row is read as Cloud reads it.
+    const [row] = await txDb
+      .update(schema.emails)
+      .set({ parkReason: reason, parkedAt: new Date() })
+      .where(eq(schema.emails.id, email.id))
+      .returning({ to: schema.emails.to, cc: schema.emails.cc, bcc: schema.emails.bcc });
+    // Against the same counter accept charged, one unit per recipient as the
+    // drain charges again on release: on a monthly plan that is the billing
+    // period. The cap itself is irrelevant here, so the row is read as Cloud
+    // reads it.
     const quota = await fetchTeamQuota(txDb, email.teamId, true);
-    if (quota) await releaseQuota(txDb, { teamId: email.teamId, count: 1, quota });
+    if (quota && row) {
+      await releaseQuota(txDb, {
+        teamId: email.teamId,
+        count: countDistinctRecipients(row.to, row.cc, row.bcc),
+        quota,
+      });
+    }
   });
   console.warn(`email.send: ${why}, parked ${email.id}`);
 }
@@ -452,7 +483,12 @@ async function sendQueued(
   // next row, not the next fan-out.
   const standing = await fetchTeamStanding(db, email.teamId);
   if (standing?.suspended || (email.broadcastId && standing?.broadcastsPausedByOperatorAt)) {
-    await parkQueued(db, email, standing.suspended ? "team suspended" : "broadcasts paused");
+    await parkQueued(
+      db,
+      email,
+      standing.suspended ? "team suspended" : "broadcasts paused",
+      standing.suspended?.reason === "review" ? "review" : null,
+    );
     return "parked";
   }
   // Account mail (core sendSystemMail); acceptEmail keeps this mark on no
@@ -584,6 +620,70 @@ async function sendQueued(
     if (isTransientError(err)) throw err;
     await failQueuedEmail(db, email.id, "body_unreadable");
     return "failed";
+  }
+
+  // Screening before SES: mail with a reason to be judged first waits for
+  // the verdict queued, and the send lane moves on; the judge queues the send
+  // again once it answers. The team's hold or pause the verdict brings was
+  // read above, on this pass. Account mail and the fixed onboarding email are
+  // never customer content, so they never wait.
+  let screened: { id: string; unjudged: boolean } | null = null;
+  let probation = false;
+  let media: SendMedia | null = null;
+  if (deps.monitor && !systemMail && !platformSend) {
+    // Read once for the linkage check and the gate.
+    const settings = await deps.monitor.settings().catch(() => null);
+    const team = settings ? await screeningTeam(db, settings, email.teamId, new Date()) : undefined;
+    // A team in its first window that shares people, domains or this message
+    // with a team suspended for phishing is held before it sends anything.
+    if (team?.firstWindow && !email.broadcastId) {
+      const linked = await linkTeam(db, {
+        teamId: email.teamId,
+        trigger: "send",
+        message: { from: email.from, subject: email.subject, html: body.html, text: body.text },
+        tier: team.tier,
+      });
+      if (linked?.held) {
+        await parkQueued(db, email, "team linked to a team suspended for phishing", "review");
+        return "parked";
+      }
+    }
+    const files = attachments ?? [];
+    const scan = files.length > 0 ? await scanAttachments(files, deps.media) : null;
+    // Threads too busy to read a file say nothing about it: the job tries
+    // again through the queue's backoff instead of parking or sending blind.
+    if (scan?.busy) throw new MediaPoolError("busy");
+    media = {
+      attachments: files.length,
+      opaque: opaqueFacts({ html: body.html, text: body.text, attachments: files.length }).opaque,
+      links: scan?.links.map((link) => link.url) ?? [],
+      unsafe: scan !== null && (scan.risky || scan.unreadable || scan.refused),
+    };
+    const gate = await screenBeforeSend(db, deps.monitor, {
+      email,
+      body: { html: body.html, text: body.text },
+      media,
+      ignore: deps.platformDomains,
+      team,
+      now: new Date(),
+    });
+    if (gate.action === "wait") {
+      if (gate.until) await deps.reschedule?.(email.id, gate.until, emailSendPriority(email));
+      return "deferred";
+    }
+    if (gate.action === "park") {
+      await parkQueued(db, email, `screening parked it (${gate.reason})`, gate.reason);
+      if (gate.reason === "media" && scan) {
+        try {
+          await saveMediaReview(db, deps.keyring, email, scanReview(scan), { keep: true });
+        } catch (err) {
+          console.error(`email.send: media review for ${email.id} not saved`, err);
+        }
+      }
+      return "parked";
+    }
+    screened = gate.sample;
+    probation = gate.probation === true;
   }
 
   // App-layer engagement tracking: when the domain has click or open tracking
@@ -839,12 +939,17 @@ async function sendQueued(
   });
   const counter = schema.usageCounters;
   const sentAt = new Date();
+  const recipients = [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])];
+  const noFeedback = sentWithoutComplaintFeedback(recipients) ? 1 : 0;
   await db
     .insert(counter)
-    .values({ teamId: email.teamId, day: utcDay(sentAt), sent: 1 })
+    .values({ teamId: email.teamId, day: utcDay(sentAt), sent: 1, sentNoFeedback: noFeedback })
     .onConflictDoUpdate({
       target: [counter.teamId, counter.day],
-      set: { sent: sql`${counter.sent} + 1` },
+      set: {
+        sent: sql`${counter.sent} + 1`,
+        sentNoFeedback: sql`${counter.sentNoFeedback} + ${noFeedback}`,
+      },
     });
   await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
   if (bulk) deps.sesQuota?.noteBulkSent?.(region);
@@ -933,16 +1038,30 @@ async function sendQueued(
   // are never drawn.
   if (deps.monitor && !systemMail && !platformSend) {
     try {
-      await sampleAcceptedEmail(db, deps.monitor, {
-        teamId: email.teamId,
-        emailId: email.id,
-        broadcast: email.broadcastId !== null,
-        anomalies:
-          insights?.checks.filter(
-            (c) =>
-              c.status === "fail" && (MONITOR_ANOMALY_CHECKS as readonly string[]).includes(c.id),
-          ).length ?? 0,
-      });
+      if (screened) {
+        // Judged before it went out: counted, never drawn again, which would
+        // count its verdict twice toward the repeat hold.
+        await noteAcceptedSend(db, email.teamId, new Date());
+        if (screened.unjudged) {
+          await judgeAfterSend(db, deps.monitor, { id: screened.id, teamId: email.teamId });
+        }
+      } else {
+        // An opaque email and one with files each add an anomaly: both
+        // together draw it at every tier.
+        await sampleAcceptedEmail(db, deps.monitor, {
+          teamId: email.teamId,
+          emailId: email.id,
+          broadcast: email.broadcastId !== null,
+          probation,
+          anomalies:
+            (insights?.checks.filter(
+              (c) =>
+                c.status === "fail" && (MONITOR_ANOMALY_CHECKS as readonly string[]).includes(c.id),
+            ).length ?? 0) +
+            (media?.opaque ? 1 : 0) +
+            (media && media.attachments > 0 ? 1 : 0),
+        });
+      }
     } catch (err) {
       console.error(`email.send: monitor draw failed for ${email.id}`, err);
     }
@@ -987,15 +1106,20 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
     ...(input.text ? { text: input.text } : {}),
     ...(input.attachments
       ? {
-          attachments: input.attachments.map((a) => ({
-            filename: a.filename,
-            content: a.content,
-            encoding: "base64" as const,
-            ...(a.contentType ? { contentType: a.contentType } : {}),
-            // nodemailer would send a message/* part (a forwarded .eml) inline;
-            // only a part the html references by content id is.
-            ...(a.contentId ? { cid: a.contentId } : { contentDisposition: "attachment" as const }),
-          })),
+          attachments: input.attachments.map((a) => {
+            const contentType = sentContentType(a.contentType);
+            return {
+              filename: a.filename,
+              content: a.content,
+              encoding: "base64" as const,
+              ...(contentType ? { contentType } : {}),
+              // nodemailer would send a message/* part (a forwarded .eml) inline;
+              // only a part the html references by content id is.
+              ...(a.contentId
+                ? { cid: a.contentId }
+                : { contentDisposition: "attachment" as const }),
+            };
+          }),
         }
       : {}),
     headers: input.headers,

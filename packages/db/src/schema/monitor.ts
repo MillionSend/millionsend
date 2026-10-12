@@ -7,12 +7,14 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
 import { broadcasts } from "./broadcasts.js";
+import { domainAgeSourceEnum } from "./domains.js";
 import { emails } from "./emails.js";
 import { teams } from "./teams.js";
 
@@ -25,6 +27,7 @@ export const monitorSampleKindEnum = pgEnum("monitor_sample_kind", [
   "override",
   "broadcast_skeleton",
   "broadcast_copy",
+  "destination",
 ]);
 
 /** `unjudged` is every judge failure: the sample is kept with its error class and touches nothing else. */
@@ -96,6 +99,20 @@ export const monitorSamples = pgTable(
     latencyMs: integer("latency_ms"),
     // Throttled judge calls retry a few times before the sample gives up.
     attempts: smallint("attempts").notNull().default(0),
+    // An unsent email (or a new team's broadcast) waits on this verdict
+    // before SES; screenRetries counts the judge's re-runs after failures.
+    screening: boolean("screening").notNull().default(false),
+    screenRetries: smallint("screen_retries").notNull().default(0),
+    // The judged message's destinations the team had not cleared (link owner
+    // domains and the Reply-To's domain), and whether one of them was a link
+    // domain under 7 days old. A phishing-type verdict from 80 is always
+    // looked up, so null on one means an age not known yet; on any other,
+    // not looked up. Domains only, as the insights keep them.
+    destinations: jsonb("destinations").$type<string[]>(),
+    linkYoung: boolean("link_young"),
+    // What screening could not clear in the message's images and files
+    // (core MEDIA_ISSUES), which can park the mail waiting on this verdict.
+    mediaIssues: jsonb("media_issues").$type<string[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     judgedAt: timestamp("judged_at", { withTimezone: true }),
   },
@@ -110,6 +127,39 @@ export const monitorSamples = pgTable(
       .where(sql`${t.broadcastId} is not null`),
   ],
 );
+
+/**
+ * The destinations a team has cleared: a link owner domain or a Reply-To
+ * domain one of its messages carried with a verdict under 70 naming nothing
+ * phishing-type, among at most 5 new ones, or that an operator released mail
+ * to. Mail to any other destination, or to a revoked one, is judged before
+ * SES at every tier.
+ */
+export const teamDestinations = pgTable(
+  "team_destinations",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    domain: text("domain").notNull(),
+    clearedAt: timestamp("cleared_at", { withTimezone: true }).notNull().defaultNow(),
+    // Mail to it drew a phishing-type verdict after it cleared: new again
+    // until an operator releases mail to it; no verdict clears it again.
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.domain] })],
+);
+
+/**
+ * Registration dates of link domains that drew a phishing-type verdict,
+ * shared by every team: looked up once, read by every later verdict.
+ */
+export const linkDomainAges = pgTable("link_domain_ages", {
+  domain: text("domain").primaryKey(),
+  registeredAt: timestamp("registered_at", { withTimezone: true }),
+  source: domainAgeSourceEnum("source").notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+});
 
 /** The judge's own switch is env; these sampling and threshold overrides sit beside it, with the warm-up's. */
 export const monitorSettingColumns = {

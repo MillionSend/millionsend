@@ -4,27 +4,47 @@ import type { RegionBreakerReason } from "@millionsend/db/schema";
 import { and, asc, desc, eq, gte, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { MIN_PAUSE_COMPLAINTS, MIN_PAUSE_HARD_BOUNCES } from "./deliverability.js";
+import { NO_COMPLAINT_FEEDBACK_DOMAINS } from "./mailbox-providers.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
  * SES enforces bounce/complaint rates on the whole account per region: one
  * team's bad week pauses every customer in that region. The breaker watches
- * the aggregate and holds broadcasts (never transactional mail) at a fraction
- * of SES's own review lines, so the platform stops itself before AWS does.
+ * the aggregate and holds broadcasts (never transactional mail) short of
+ * SES's own lines, so the platform stops itself before AWS does.
  */
-// 80% of SES's review lines (5% / 0.1%), written as literals: 0.8 * 0.05 is
+// 80% of SES's 5% bounce review line, written as a literal: 0.8 * 0.05 is
 // 0.04000000000000001 in floating point, and 40 bounces in 1000 must trip.
 export const BREAKER_BOUNCE_RATE = 0.04;
-export const BREAKER_COMPLAINT_RATE = 0.0008;
 /** Sends a region needs in a window before its aggregate rate means anything. */
 export const BREAKER_MIN_SENT = 1000;
 export const BREAKER_WINDOWS_HOURS = [24, 24 * 7] as const;
+/**
+ * Complaints are judged on SES's own rate (Reputation.ComplaintRate) when it
+ * can be read, the one its review and pause lines apply to. It counts only
+ * mail to the providers that report complaints. While it can't be read (an
+ * instance whose IAM policy predates the CloudWatch read), our own count
+ * estimates it the same way, leaving out sends no recipient can report.
+ * BREAKER_SES_COMPLAINT_RATE judges both.
+ */
+export const SES_COMPLAINT_REVIEW_RATE = 0.001;
+export const SES_COMPLAINT_PAUSE_RATE = 0.005;
+/** The operator hears at this rate, a day apart while it stays there. */
+export const SES_COMPLAINT_ALERT_RATE = 0.003;
+export const BREAKER_SES_COMPLAINT_RATE = 0.004;
 
 export interface RegionWindowCounts {
   sent: number;
+  /**
+   * The complaint rate's denominator: sends with a recipient at a provider
+   * that reports complaints.
+   */
+  complaintSent: number;
   hardBounced: number;
   complained: number;
 }
+
+const NO_COUNTS: RegionWindowCounts = { sent: 0, complaintSent: 0, hardBounced: 0, complained: 0 };
 
 export interface RegionContributor {
   teamId: string;
@@ -47,6 +67,12 @@ const HOUR_MS = 60 * 60 * 1000;
 // existed (until retention strips their payload).
 const hardBounceFilter = sql`${schema.emailEvents.type} = 'bounced' and coalesce(${schema.emailEvents.bounceType}, ${schema.emailEvents.data}->'bounce'->>'bounceType') = 'Permanent'`;
 const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
+// sentWithoutComplaintFeedback over the stored recipients, each domain read
+// the same way: what follows the last '@', less a closing '>'.
+const noComplaintFeedback = sql`coalesce((
+  select bool_and(lower(rtrim(split_part(r, '@', -1), '>')) in ${[...NO_COMPLAINT_FEEDBACK_DOMAINS]})
+  from jsonb_array_elements_text(${schema.emails.to} || coalesce(${schema.emails.cc}, '[]') || coalesce(${schema.emails.bcc}, '[]')) as r
+), false)`;
 
 /**
  * Sends and SES-reported hard bounces/complaints per region over the trailing
@@ -60,12 +86,18 @@ export async function regionWindowCounts(
   const teamFilter = opts.teamIds ? inArray(schema.emails.teamId, opts.teamIds) : undefined;
   const out = new Map<string, RegionWindowCounts>();
   const sent = await db
-    .select({ region: schema.domains.region, n: sql<number>`count(*)::int` })
+    .select({
+      region: schema.domains.region,
+      n: sql<number>`count(*)::int`,
+      complaintSent: sql<number>`count(*) filter (where not ${noComplaintFeedback})::int`,
+    })
     .from(schema.emails)
     .innerJoin(schema.domains, eq(schema.domains.id, schema.emails.domainId))
     .where(and(gte(schema.emails.sentAt, since), teamFilter))
     .groupBy(schema.domains.region);
-  for (const row of sent) out.set(row.region, { sent: row.n, hardBounced: 0, complained: 0 });
+  for (const row of sent) {
+    out.set(row.region, { ...NO_COUNTS, sent: row.n, complaintSent: row.complaintSent });
+  }
   const events = await db
     .select({
       region: schema.domains.region,
@@ -84,7 +116,7 @@ export async function regionWindowCounts(
     )
     .groupBy(schema.domains.region);
   for (const row of events) {
-    const counts = out.get(row.region) ?? { sent: 0, hardBounced: 0, complained: 0 };
+    const counts = out.get(row.region) ?? NO_COUNTS;
     out.set(row.region, { ...counts, hardBounced: row.hardBounced, complained: row.complained });
   }
   return out;
@@ -93,8 +125,9 @@ export async function regionWindowCounts(
 /**
  * The same totals over the trailing `days` UTC days (today included) from
  * usage_counters, which the send and SES-event paths bump alongside the
- * rows the raw scan reads: `sent` per accepted send, `hard_bounced` per
- * Permanent bounce, `complained` per complaint. Counters carry no domain,
+ * rows the raw scan reads: `sent` per accepted send, `sent_no_feedback` per
+ * send no recipient can report as a complaint, `hard_bounced` per Permanent
+ * bounce, `complained` per complaint. Counters carry no domain,
  * so a team's traffic goes to the region of its most recently verified
  * domain. A team whose verified domains span more than one region cannot
  * be attributed that way: it is left out of the counters and its window is
@@ -127,6 +160,7 @@ export async function regionCounterTotals(
     .select({
       region: teamRegion.region,
       sent: total(c.sent),
+      sentNoFeedback: total(c.sentNoFeedback),
       hardBounced: total(c.hardBounced),
       complained: total(c.complained),
     })
@@ -143,6 +177,7 @@ export async function regionCounterTotals(
   for (const row of rows) {
     const counts = {
       sent: Number(row.sent),
+      complaintSent: Number(row.sent) - Number(row.sentNoFeedback),
       hardBounced: Number(row.hardBounced),
       complained: Number(row.complained),
     };
@@ -159,9 +194,10 @@ export async function regionCounterTotals(
       teamIds: multiRegion,
     });
     for (const [region, counts] of raw) {
-      const base = out.get(region) ?? { sent: 0, hardBounced: 0, complained: 0 };
+      const base = out.get(region) ?? NO_COUNTS;
       out.set(region, {
         sent: base.sent + counts.sent,
+        complaintSent: base.complaintSent + counts.complaintSent,
         hardBounced: base.hardBounced + counts.hardBounced,
         complained: base.complained + counts.complained,
       });
@@ -203,31 +239,46 @@ async function contributors(
     .limit(5);
 }
 
-function tripReason(counts: RegionWindowCounts, windowHours: number): RegionBreakerReason | null {
-  if (counts.sent < BREAKER_MIN_SENT) return null;
+/**
+ * Our own counts over a window, each line over its own sends; `complaints`
+ * adds the complaint line, over the sends that can draw one, to the bounce one.
+ */
+function windowTrip(
+  counts: RegionWindowCounts,
+  windowHours: number,
+  complaints: boolean,
+): RegionBreakerReason | null {
   const checks = [
     {
       metric: "bounce" as const,
+      sent: counts.sent,
       events: counts.hardBounced,
       limit: BREAKER_BOUNCE_RATE,
       min: MIN_PAUSE_HARD_BOUNCES,
     },
-    {
-      metric: "complaint" as const,
-      events: counts.complained,
-      limit: BREAKER_COMPLAINT_RATE,
-      min: MIN_PAUSE_COMPLAINTS,
-    },
+    ...(complaints
+      ? [
+          {
+            metric: "complaint" as const,
+            sent: counts.complaintSent,
+            events: counts.complained,
+            limit: BREAKER_SES_COMPLAINT_RATE,
+            min: MIN_PAUSE_COMPLAINTS,
+          },
+        ]
+      : []),
   ];
   for (const c of checks) {
-    const rate = c.events / counts.sent;
+    if (c.sent < BREAKER_MIN_SENT) continue;
+    const rate = c.events / c.sent;
     if (rate >= c.limit && c.events >= c.min) {
       return {
         metric: c.metric,
+        source: "events",
         rate,
         limit: c.limit,
         windowHours,
-        sent: counts.sent,
+        sent: c.sent,
         events: c.events,
       };
     }
@@ -235,11 +286,40 @@ function tripReason(counts: RegionWindowCounts, windowHours: number): RegionBrea
   return null;
 }
 
+export interface SesComplaintReading {
+  /** SES's rate while it counts; null while the breaker judges our own complaint count. */
+  rate: number | null;
+  /** SES answered within the day: a null rate then means it published none. */
+  read: boolean;
+}
+
 /**
- * One decision per region with traffic: trip when either window is over a
- * breaker line with enough sends and events behind it;
- * clear only when both windows are under. Contributors are listed for
- * tripped regions so the operator knows who to talk to.
+ * A stored SES reading as the breaker judges it: a read counts for a day, so
+ * a failed read keeps the last one that long. Never read, a day of failed
+ * reads, or SES publishing no rate all leave no rate, and the breaker judges
+ * our own complaint count instead.
+ */
+function sesReading(
+  row: { sesComplaintRate: number | null; sesComplaintReadAt: Date | null },
+  now: Date,
+): SesComplaintReading {
+  const read =
+    row.sesComplaintReadAt !== null && now.getTime() - row.sesComplaintReadAt.getTime() <= DAY_MS;
+  return { rate: read ? row.sesComplaintRate : null, read };
+}
+
+/** The window whose teams a reason names: SES's rate spans far more than a day. */
+function contributorHours(reason: RegionBreakerReason): number {
+  return "windowHours" in reason ? reason.windowHours : BREAKER_WINDOWS_HOURS[1];
+}
+
+/**
+ * One decision per region with traffic or a current SES rate: trip when
+ * either window is over a breaker line with enough sends and events behind
+ * it, or SES's own complaint rate is over its line; clear only when all of
+ * them are under. Complaints count through SES's rate while it can be read,
+ * through our own windows otherwise. Contributors are listed for tripped
+ * regions so the operator knows who to talk to.
  */
 export async function evaluateRegionBreakers(
   db: Db,
@@ -256,32 +336,97 @@ export async function evaluateRegionBreakers(
     { hours: dayHours, counts: await regionWindowCounts(db, { now, hours: dayHours }) },
     { hours: weekHours, counts: await regionCounterTotals(db, { now, days: weekHours / 24 }) },
   ];
+  const b = schema.regionBreakers;
+  const rows = await db
+    .select({
+      region: b.region,
+      paused: b.paused,
+      sesComplaintRate: b.sesComplaintRate,
+      sesComplaintReadAt: b.sesComplaintReadAt,
+    })
+    .from(b);
+  const sesRates = new Map(rows.map((r) => [r.region, sesReading(r, now).rate]));
   // Paused regions stay in the set even with no traffic in either window:
   // a decision with nothing tripping is what lets them resume.
-  const paused = await db
-    .select({ region: schema.regionBreakers.region })
-    .from(schema.regionBreakers)
-    .where(eq(schema.regionBreakers.paused, true));
   const regions = new Set([
     ...windows.flatMap((w) => [...w.counts.keys()]),
-    ...paused.map((r) => r.region),
+    ...rows.filter((r) => r.paused || sesRates.get(r.region) !== null).map((r) => r.region),
   ]);
   const decisions: RegionDecision[] = [];
   for (const region of regions) {
+    const ses = sesRates.get(region) ?? null;
     let reason: RegionBreakerReason | null = null;
     for (const w of windows) {
       const counts = w.counts.get(region);
-      reason = counts ? tripReason(counts, w.hours) : null;
+      reason = counts ? windowTrip(counts, w.hours, ses === null) : null;
       if (reason) break;
+    }
+    if (!reason && ses !== null && ses >= BREAKER_SES_COMPLAINT_RATE) {
+      reason = { metric: "complaint", source: "ses", rate: ses, limit: BREAKER_SES_COMPLAINT_RATE };
     }
     decisions.push({
       region,
       trip: reason !== null,
       ...(reason ? { reason } : {}),
-      contributors: reason ? await contributors(db, region, now, reason.windowHours) : [],
+      contributors: reason ? await contributors(db, region, now, contributorHours(reason)) : [],
     });
   }
   return decisions;
+}
+
+export interface SesComplaintAlert {
+  region: string;
+  rate: number;
+  contributors: RegionContributor[];
+}
+
+/**
+ * Stores SES's own complaint rate per region with the time of the read (a
+ * region left out of `rates`, its read having failed, keeps its last one)
+ * and returns the regions the operator should hear about: at or over the
+ * alert line, not paused (the pause has its own notice), and not told in the
+ * last day. Those are marked told.
+ */
+export async function recordSesComplaintRates(
+  db: Db,
+  rates: ReadonlyMap<string, number | null>,
+  now: Date = new Date(),
+): Promise<SesComplaintAlert[]> {
+  const b = schema.regionBreakers;
+  const alerts: SesComplaintAlert[] = [];
+  for (const [region, rate] of rates) {
+    const reading = { sesComplaintRate: rate, sesComplaintReadAt: now };
+    const [row] = await db
+      .insert(b)
+      .values({ region, ...reading })
+      .onConflictDoUpdate({ target: b.region, set: reading })
+      .returning({ paused: b.paused, alertedAt: b.sesComplaintAlertedAt });
+    if (rate === null || rate < SES_COMPLAINT_ALERT_RATE || row?.paused) continue;
+    if (row?.alertedAt && now.getTime() - row.alertedAt.getTime() < DAY_MS) continue;
+    await db.update(b).set({ sesComplaintAlertedAt: now }).where(eq(b.region, region));
+    alerts.push({
+      region,
+      rate,
+      contributors: await contributors(db, region, now, BREAKER_WINDOWS_HOURS[1]),
+    });
+  }
+  return alerts;
+}
+
+/** Each region's SES complaint reading, as the breaker judges it. */
+export async function sesComplaintReadings(
+  db: Db,
+  now: Date = new Date(),
+): Promise<Map<string, SesComplaintReading>> {
+  const b = schema.regionBreakers;
+  const rows = await db
+    .select({
+      region: b.region,
+      sesComplaintRate: b.sesComplaintRate,
+      sesComplaintReadAt: b.sesComplaintReadAt,
+    })
+    .from(b);
+  return new Map(rows.map((r) => [r.region, sesReading(r, now)]));
 }
 
 /** Persist decisions; reports only the regions whose state actually flipped. */

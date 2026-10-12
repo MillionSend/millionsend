@@ -1,11 +1,13 @@
 import { z } from "@hono/zod-openapi";
 import {
+  attachmentVerdict,
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   DAY_MS,
   formatMailbox,
   isReservedTagName,
+  MEDIA_TYPE_TOKEN,
   parseMailbox,
   parseScheduledAt,
   parseSingleSender,
@@ -66,7 +68,6 @@ export const MAX_RECIPIENTS_PER_EMAIL = 50;
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 // RFC 7231 media type: type "/" subtype, optional ; token=token|"quoted" parameters.
-const MEDIA_TYPE_TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
 const MEDIA_TYPE_RE = new RegExp(
   `^${MEDIA_TYPE_TOKEN}/${MEDIA_TYPE_TOKEN}(?:\\s*;\\s*${MEDIA_TYPE_TOKEN}=(?:${MEDIA_TYPE_TOKEN}|"[^"\\r\\n]*"))*$`,
 );
@@ -77,12 +78,14 @@ const MEDIA_TYPE_RE = new RegExp(
  * attacker-chosen location (SSRF), so it is rejected and never fetched.
  * `filename` may be null, false or absent and `content_id` names an inline
  * part: emails.receiving.forward() re-sends a received message's parts that
- * way, and postal-mime reads an unnamed part's filename as null.
+ * way, and postal-mime reads an unnamed part's filename as null. Program
+ * files are refused here for every team (attachmentVerdict), so the sender
+ * hears it now instead of from a send that fails at SES later.
  */
 const attachmentSchema = z
   .object({
     filename: z
-      .union([z.string().min(1), z.literal(false)])
+      .union([z.string().min(1).max(1000), z.literal(false)])
       .nullable()
       .optional(),
     content: z.string().optional(),
@@ -135,6 +138,15 @@ const attachmentSchema = z
     }
     if (a.content.length % 4 !== 0 || !BASE64_RE.test(a.content)) {
       ctx.addIssue({ code: "custom", path: ["content"], message: "content must be valid base64" });
+      return;
+    }
+    const verdict = attachmentVerdict({
+      filename: typeof a.filename === "string" ? a.filename : undefined,
+      contentType: a.content_type,
+      bytes: Buffer.from(a.content, "base64"),
+    });
+    if (verdict.action === "reject") {
+      ctx.addIssue({ code: "custom", path: ["filename"], message: verdict.reason });
     }
   });
 

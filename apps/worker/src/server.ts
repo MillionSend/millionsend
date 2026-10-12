@@ -1,5 +1,6 @@
 import { SQSClient } from "@aws-sdk/client-sqs";
 import {
+  cardFingerprints,
   createStripe,
   purgeStripeEvents,
   reconcileTeamPlan,
@@ -7,7 +8,10 @@ import {
 } from "@millionsend/billing";
 import {
   abuseJudgeConfig,
+  abuseVisionConfig,
+  disposableEmailsBlocked,
   env,
+  ipGeolocationEnabled,
   servedRegions,
   sesTenantsEnabled,
   trackingCnameTarget,
@@ -15,6 +19,7 @@ import {
   unsubscribeBaseUrl,
 } from "@millionsend/config";
 import {
+  anyYoungLinkDomain,
   committedDailyVolume,
   createDomainAgeResolver,
   DomainAgeRetryableError,
@@ -28,16 +33,22 @@ import {
   type MonitorDeps,
   markDomainAgeUnknown,
   monitorSettingsReader,
+  ownerDomain,
   pacingHorizonDays,
   pausedRegions,
   postJson,
   pruneMonitorSamples,
   pruneProbes,
+  purgeAccountSignups,
+  purgeCampaignFingerprints,
   purgeExpiredIdempotencyKeys,
   type QueuedWebhookDelivery,
   recordDomainAge,
+  recordMissingFingerprints,
   recordProbes,
   recountStaleSegments,
+  refreshDisposableDomains,
+  refreshIpGeoDatabases,
   regionBulkCounts,
   sesEventsHealth,
 } from "@millionsend/core";
@@ -47,13 +58,16 @@ import {
   EMAIL_SEND_PRIORITY,
   type EmailSendPriority,
   type EnqueueEmailSends,
+  JUDGE_PRIORITY,
   Queue,
 } from "@millionsend/queue";
 import {
   createKeyringFromEnv,
   createSesAccountClient,
+  createSesReputationClient,
   createSesv2Client,
   getAccountOverview,
+  getSesComplaintRate,
   nodeDnsResolver,
   type SesIdentityClient,
 } from "@millionsend/ses";
@@ -80,6 +94,7 @@ import {
 } from "./handlers/cron.js";
 import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
 import { runInstanceProbes } from "./handlers/instance-probes.js";
+import { alertLinkedTeams } from "./handlers/linkage-alerts.js";
 import { runMonitorHealth } from "./handlers/monitor-health.js";
 import { reportPlanMove, sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
@@ -90,6 +105,8 @@ import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
 import { abandonTenantStatus, retryTenantStatus, syncTenants } from "./handlers/tenants.js";
+import { mediaPool } from "./media/scan.js";
+import { createAbuseVision } from "./media/vision.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
 import { createSystemMailer } from "./system-mail.js";
@@ -126,6 +143,13 @@ const unsubscribeHost = unsubscribeBaseUrl();
 const unsubscribe = unsubscribeHost
   ? { secretKey: unsubscribeSecretKey, baseUrl: unsubscribeHost }
   : undefined;
+// The links this instance writes into customer mail (unsubscribe, the
+// dashboard) lead nowhere new: screening never counts them as destinations.
+const platformDomains = new Set(
+  [unsubscribeHost, env.APP_BASE_URL].flatMap((url) =>
+    url && URL.canParse(url) ? [ownerDomain(new URL(url).hostname)] : [],
+  ),
+);
 // Platform mail (no domain row) goes out in the default region, the first served.
 const regions = servedRegions();
 const ses = createSesSender(regions[0] ?? env.AWS_REGION);
@@ -161,6 +185,19 @@ const accountClientFor = (region: string) => {
   }
   return client;
 };
+// SES publishes each region's reputation (its own complaint rate) to
+// CloudWatch in that region.
+const sesUnreadableLoggedAt = new Map<string, Date>();
+const reputationClients = new Map(
+  regions.map((region) => [
+    region,
+    createSesReputationClient({
+      region,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    }),
+  ]),
+);
 // The buckets are the messages/second control; worker concurrency is not a
 // rate limit and must never be treated as one. In-memory ⇒ single worker
 // process only (see SES_MAX_SEND_RATE in @millionsend/config); each process
@@ -217,18 +254,32 @@ const enqueueSend = (emailId: string, startAfter?: Date, priority?: EmailSendPri
 // Account mail rides the pipeline, so the mailer needs the queue it enqueues into.
 const mailer = createSystemMailer({ db, keyring, enqueueSend });
 
-// The content monitor: off unless ABUSE_JUDGE names a provider. When on, an
-// accepted send may be drawn and judged after the fact; the sampling key is
-// derived like the token keys, the settings row is re-read once a minute.
+// The content monitor: off unless ABUSE_JUDGE names a provider. When on, a
+// new team's mail is judged before SES and an accepted send may be drawn and
+// judged after the fact; the sampling key is derived like the token keys,
+// the settings row is re-read once a minute.
 const judgeConfig = abuseJudgeConfig();
 const judge = createAbuseJudge(judgeConfig);
+// The image reader the judge's media read hands images to; null while ABUSE_VISION is off.
+const vision = createAbuseVision(abuseVisionConfig());
+// The parsing threads boot now, WASM compiled, so the first email with a file never waits on them.
+mediaPool().warm();
 const monitorSettings = monitorSettingsReader(db, env as unknown as Record<string, unknown>);
 const monitor: MonitorDeps | undefined = judge
   ? {
       samplingKey: deriveSamplingKey(masterKeyBytes),
       settings: monitorSettings,
-      enqueueJudge: async (sampleId) => {
-        await queue.send("abuse.judge", { sampleId }, { dedupeKey: sampleId });
+      enqueueJudge: async (sampleId, opts) => {
+        await queue.send(
+          "abuse.judge",
+          { sampleId },
+          {
+            dedupeKey: sampleId,
+            group: opts?.teamId,
+            priority: opts?.screening ? JUDGE_PRIORITY.screening : JUDGE_PRIORITY.sample,
+            startAfter: opts?.startAfter,
+          },
+        );
       },
     }
   : undefined;
@@ -263,9 +314,18 @@ const enqueueWebhook = async (deliveries: readonly QueuedWebhookDelivery[]): Pro
 const enqueueDomainAge = async (domainId: string): Promise<void> => {
   await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
 };
+// The warm-up caps by a sending domain's age and the review hold reads it,
+// so registries are asked while either can act.
+const domainAgeWanted = async (): Promise<boolean> => {
+  const s = await monitorSettings();
+  return s.warmupEnabled || (judge !== null && s.autoHold);
+};
 // One resolver for the process: it holds the RDAP bootstrap, the WHOIS
 // referrals, the hosts in Retry-After backoff and the crt.sh clock.
 const domainAge = createDomainAgeResolver();
+// How long a verdict waits on a new link domain's age; a lookup still
+// running then fills the shared cache for the next one.
+const LINK_AGE_BUDGET_MS = 10_000;
 
 const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
   await queue.send(
@@ -316,6 +376,8 @@ await queue.scheduleCrons({
     const stripeEvents = await purgeStripeEvents(db);
     const probes = await pruneProbes(db);
     const monitorSamples = await pruneMonitorSamples(db);
+    const signups = await purgeAccountSignups(db);
+    const fingerprints = await purgeCampaignFingerprints(db);
     // The console's retention row: how many bodies the last run purged.
     await recordProbes(db, [{ probe: "retention_purged", value: purged, ok: true }]);
     const counts = {
@@ -332,6 +394,8 @@ await queue.scheduleCrons({
       receivedPurged,
       receivedDeleted,
       sessions,
+      signups,
+      fingerprints,
       stripeEvents,
     };
     if (Object.values(counts).some((n) => n > 0)) {
@@ -397,11 +461,23 @@ await queue.scheduleCrons({
       appBaseUrl: env.APP_BASE_URL,
     });
     if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);
+    const linked = await alertLinkedTeams(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    if (linked > 0) console.log(`notifications.sweep: linkedTeamAlerts=${linked}`);
   },
   "platform.breaker": async () => {
-    // Without SES events there are no bounce/complaint counts to judge.
-    if (!env.SNS_TOPIC_ARNS?.length) return;
-    await runPlatformBreaker(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    // Runs without SES events too: SES's own complaint rate needs none.
+    await runPlatformBreaker(db, {
+      mailer,
+      appBaseUrl: env.APP_BASE_URL,
+      ses: {
+        regions,
+        complaintRate: async (region) => {
+          const client = reputationClients.get(region);
+          return client ? getSesComplaintRate(client) : null;
+        },
+        loggedAt: sesUnreadableLoggedAt,
+      },
+    });
   },
   "instance.probe": async () => {
     await runInstanceProbes(db, {
@@ -422,6 +498,11 @@ await queue.scheduleCrons({
         `safety.flags: teams=${result.teams} opened=${result.opened} cleared=${result.cleared} warmupGraduated=${result.graduated}`,
       );
     }
+    // Phishing teams suspended before linkage existed, or whose capture failed.
+    await recordMissingFingerprints(db, {
+      keyring: () => keyring,
+      cards: stripe ? (customerId) => cardFingerprints(stripe, customerId) : undefined,
+    });
   },
   "safety.reveal_notices": async () => {
     const result = await runRevealNotices(db);
@@ -437,6 +518,7 @@ await queue.scheduleCrons({
       mailer,
       appBaseUrl: env.APP_BASE_URL,
       state: monitorHealthState,
+      enqueueJudge: monitor?.enqueueJudge,
     });
     if (result.lost > 0 || result.degraded) {
       console.warn(
@@ -463,8 +545,8 @@ await queue.scheduleCrons({
       console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
     }
     // Domains no age lookup has answered for: rows from before the job, a
-    // lost enqueue, or added while the warm-up was off.
-    if ((await monitorSettings()).warmupEnabled) {
+    // lost enqueue, or added while neither the warm-up nor the hold was on.
+    if (await domainAgeWanted()) {
       const awaiting = await domainsAwaitingAge(db);
       for (const domainId of awaiting) await enqueueDomainAge(domainId);
       if (awaiting.length > 0) console.log(`domains.age: queued=${awaiting.length}`);
@@ -493,6 +575,19 @@ await queue.scheduleCrons({
       console.log(`tenants.sync: associated=${result.associated} failed=${result.failed}`);
     }
   },
+  "reference.refresh": async () => {
+    if (disposableEmailsBlocked()) {
+      console.log(`reference.refresh: disposable_domains=${await refreshDisposableDomains(db)}`);
+    }
+    if (ipGeolocationEnabled()) {
+      const held = await refreshIpGeoDatabases(db);
+      console.log(
+        `reference.refresh: ${Object.entries(held)
+          .map(([name, month]) => `${name}=${month ?? "none"}`)
+          .join(" ")}`,
+      );
+    }
+  },
   "domains.reap": async () => {
     // Cloud-only: squatting is a cross-tenant problem. Self-host is one
     // operator's own teams and adopts existing SES identities on create, so
@@ -511,6 +606,11 @@ if (stripe) {
     console.warn("billing.reconcile at boot failed; the daily run covers it", err);
   });
 }
+
+// A fresh instance would otherwise wait for the daily run to have any copy.
+queue.runCronNow("reference.refresh").catch((err) => {
+  console.warn("reference.refresh at boot failed; the daily run covers it", err);
+});
 
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
 // to resurrect forever.
@@ -568,6 +668,7 @@ await queue.work(
         enqueueWebhookDelivery: enqueueWebhook,
         tracking,
         monitor,
+        platformDomains,
         ...(unsubscribe ? { unsubscribe } : {}),
       },
       payload,
@@ -594,6 +695,7 @@ await queue.work(
         sesQuota: sendControls,
         horizonDays,
         monitor,
+        platformDomains,
       },
       payload,
     );
@@ -603,8 +705,10 @@ await queue.work(
   { concurrency: 2 },
 );
 
-// Judge calls: a plain queue, a few lanes. A throttle is retried through
-// the queue's backoff, not in-process.
+// Judge calls: a few lanes, each pulling two jobs a fetch so a burst is
+// worked continuously, and one team (the job's group) on at most two of them
+// so its burst never starves another team's screening. A throttle is retried
+// through the queue's backoff, not in-process.
 await queue.work(
   "abuse.judge",
   async ({ sampleId }) => {
@@ -620,11 +724,17 @@ await queue.work(
         syncTenant: async (teamId) => {
           await queue.send("tenant.status", { teamId }, { dedupeKey: teamId });
         },
+        enqueueSend: (emailId, priority) => enqueueSend(emailId, undefined, priority),
+        enqueueBroadcast: (broadcastId) => enqueueBroadcast(broadcastId),
+        platformDomains,
+        linkDomainYoung: (domains, at) =>
+          anyYoungLinkDomain(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
+        media: { vision },
       },
       { sampleId },
     );
   },
-  { concurrency: 4 },
+  { concurrency: 4, batchSize: 2, groupConcurrency: 2 },
 );
 
 await queue.work(
@@ -701,8 +811,8 @@ await queue.work(
 // One lane: crt.sh is spaced per process, and a lookup is a few slow GETs.
 // A retryable failure throws into pg-boss's backoff.
 await queue.work("domain.age", async ({ domainId }) => {
-  // No registry is asked while the warm-up is off; the sweep asks once it is on.
-  if (!(await monitorSettings()).warmupEnabled) return;
+  // No registry is asked while nothing reads the age; the sweep asks once something does.
+  if (!(await domainAgeWanted())) return;
   try {
     const age = await recordDomainAge(db, domainAge, domainId);
     if (age) {

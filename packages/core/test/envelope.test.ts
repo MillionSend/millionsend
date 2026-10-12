@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import type { MediaReview } from "../src/abuse-judge/media.js";
 import {
   BOUND_ENVELOPE_VERSION_OFFSET,
   decryptEmailBody,
@@ -7,7 +8,9 @@ import {
   encryptEmailBody,
   encryptPayload,
   openAttachments,
+  openMediaReview,
   sealAttachments,
+  sealMediaReview,
 } from "../src/crypto/envelope.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 
@@ -128,6 +131,37 @@ describe("envelope encryption", () => {
       await expect(
         openAttachments(sealed, keyring, { ...owner, rowId: "row-2" }),
       ).rejects.toThrow();
+    });
+
+    it("keeps a media review's digest beside its ciphertext: the same read, the same digest", async () => {
+      const review: MediaReview = {
+        text: [{ source: "attachment Fatura.pdf page 1", text: "Pague em m365-verify.example" }],
+        links: [
+          {
+            source: "QR code",
+            url: "https://m365-verify.example/login",
+            domain: "m365-verify.example",
+          },
+        ],
+        pix: [],
+        files: [{ filename: "Fatura.pdf", kind: "pdf", size: 1024, pages: 1, flags: [] }],
+        previews: [],
+        issues: ["qr_undecoded"],
+      };
+      const digest = (sealed: string) => (JSON.parse(sealed) as { digest?: string }).digest;
+      const sealed = await sealMediaReview(review, keyring, owner);
+      expect(digest(sealed)).toMatch(/^[0-9a-f]{64}$/);
+      expect(sealed).not.toContain("m365-verify");
+      await expect(openMediaReview(sealed, keyring, owner)).resolves.toEqual(review);
+      // Another copy of a blast: another row, its keys written in another order.
+      const { issues, ...rest } = review;
+      const copy = await sealMediaReview({ issues, ...rest }, keyring, {
+        ...owner,
+        rowId: "row-2",
+      });
+      expect(digest(copy)).toBe(digest(sealed));
+      const other = await sealMediaReview({ ...review, issues: [] }, keyring, owner);
+      expect(digest(other)).not.toBe(digest(sealed));
     });
 
     it("keeps the raw payload primitive bound by kind", async () => {

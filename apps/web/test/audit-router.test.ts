@@ -252,6 +252,17 @@ describe("audit.list", () => {
       data: { reason: "phishing_or_malware", emails: 1, fields: "subject, rendered text" },
       createdAt: new Date(Date.now() - 8 * 86_400_000),
     });
+    // And one of a grant that also opened the media panel.
+    const mediaFields =
+      "subject, rendered text, what screening read from its images and attachments";
+    await db.insert(schema.auditLog).values({
+      teamId,
+      actorId: "system",
+      action: "content.accessed",
+      target: `content_access_grant:${crypto.randomUUID()}`,
+      data: { reason: "phishing_or_malware", emails: 1, fields: mediaFields },
+      createdAt: new Date(Date.now() - 9 * 86_400_000),
+    });
 
     const { items } = await callerFor("alice", teamId, "owner").audit.list({});
     expect(items.map(({ action, actor, data }) => ({ action, actor, data }))).toEqual([
@@ -264,6 +275,11 @@ describe("audit.list", () => {
         action: "content.accessed",
         actor: { kind: "system" },
         data: { reason: "phishing_or_malware", emails: 1, fields: "subject, rendered text" },
+      },
+      {
+        action: "content.accessed",
+        actor: { kind: "system" },
+        data: { reason: "phishing_or_malware", emails: 1, fields: mediaFields },
       },
     ]);
     expect(JSON.stringify(items)).not.toMatch(/monitor|lure kit|report|risk|score/);

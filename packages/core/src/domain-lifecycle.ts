@@ -2,17 +2,24 @@ import { type Db, schema } from "@millionsend/db";
 import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { parseSingleSender } from "./sender-address.js";
 
-/** Consumer mailbox providers no tenant can own; refused on every deployment. */
-const PUBLIC_MAILBOX_DOMAINS = [
+/**
+ * Consumer mailbox providers: no tenant can own one as a sender, on every
+ * deployment, and no disposable-domain list can block one.
+ */
+export const PUBLIC_MAILBOX_DOMAINS = [
   "gmail.com",
   "googlemail.com",
   "yahoo.com",
+  "yahoo.com.br",
   "outlook.com",
+  "outlook.com.br",
   "hotmail.com",
+  "hotmail.com.br",
   "live.com",
   "msn.com",
   "icloud.com",
   "me.com",
+  "mac.com",
   "aol.com",
   "proton.me",
   "protonmail.com",
@@ -23,6 +30,7 @@ const PUBLIC_MAILBOX_DOMAINS = [
   "uol.com.br",
   "bol.com.br",
   "terra.com.br",
+  "ig.com.br",
 ] as const;
 
 /** The hosted product's own domain; a cloud tenant must never hold its SES identity. */

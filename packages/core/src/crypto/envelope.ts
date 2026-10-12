@@ -1,5 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
+import type { MediaReview } from "../abuse-judge/media.js";
+import { canonicalBodyHash } from "../canonical-json.js";
 import { GCM_IV_LENGTH, GCM_TAG_LENGTH } from "./constants.js";
 import type { DekContext, Keyring } from "./keyring.js";
 
@@ -24,6 +26,7 @@ export interface EncryptedBody {
 export type EnvelopeKind =
   | "email_body"
   | "email_attachments"
+  | "email_media"
   | "webhook_secret"
   | "received_raw"
   | "received_attachments";
@@ -169,10 +172,14 @@ export interface EmailAttachment {
 /**
  * An envelope as one text value, for tables that give a sealed payload a
  * single text column instead of four dedicated ones: the parts travel inside
- * the blob as base64 JSON.
+ * the blob as base64 JSON, beside any `unsealed` fields, which stay readable.
  */
-export function packEnvelope(encrypted: EncryptedBody): string {
+export function packEnvelope(
+  encrypted: EncryptedBody,
+  unsealed: Record<string, string> = {},
+): string {
   return JSON.stringify({
+    ...unsealed,
     keyVersion: encrypted.keyVersion,
     iv: encrypted.iv.toString("base64"),
     wrappedDek: encrypted.wrappedDek.toString("base64"),
@@ -220,6 +227,37 @@ export async function openAttachments(
     owner && { ...owner, kind: "email_attachments" },
   );
   return JSON.parse(plaintext.toString("utf8")) as EmailAttachment[];
+}
+
+/**
+ * What screening read from a held email, packed into emails.media. The
+ * review's digest rides beside its ciphertext, unsealed, as `digest`: equal
+ * for every email screening read the same images and files from (a blast's
+ * copies), so the review list finds them all without opening one. It tells
+ * nothing else of the content.
+ */
+export async function sealMediaReview(
+  review: MediaReview,
+  keyring: Keyring,
+  owner: EnvelopeOwner,
+): Promise<string> {
+  const encrypted = await encryptPayload(Buffer.from(JSON.stringify(review), "utf8"), keyring, {
+    ...owner,
+    kind: "email_media",
+  });
+  return packEnvelope(encrypted, { digest: canonicalBodyHash(review) });
+}
+
+export async function openMediaReview(
+  sealed: string,
+  keyring: Keyring,
+  owner: EnvelopeOwner,
+): Promise<MediaReview> {
+  const plaintext = await decryptPayload(unpackEnvelope(sealed), keyring, {
+    ...owner,
+    kind: "email_media",
+  });
+  return JSON.parse(plaintext.toString("utf8")) as MediaReview;
 }
 
 export async function decryptEmailBody(

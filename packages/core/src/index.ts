@@ -1,12 +1,36 @@
 export type { ContactActivityType, SegmentCondition, SegmentFilter } from "@millionsend/db/schema";
 export {
   buildJudgeBlock,
-  decodeEntities,
   JUDGE_LINK_ROWS_MAX,
   JUDGE_TEXT_MAX_CHARS,
   type JudgeBlockInput,
-  stripHiddenElements,
 } from "./abuse-judge/block.js";
+export {
+  decodeEntities,
+  extractImageRefs,
+  hasQrArt,
+  type ImageRef,
+  type OpaqueFacts,
+  opaqueFacts,
+  stripHiddenElements,
+  type VisibleHtml,
+} from "./abuse-judge/body.js";
+export {
+  MEDIA_FILE_TEXT_MAX_CHARS,
+  MEDIA_IMAGE_TEXT_MAX_CHARS,
+  MEDIA_ISSUES,
+  MEDIA_LINK_ROWS_MAX,
+  MEDIA_PREVIEWS_MAX,
+  type MediaFile,
+  type MediaFindings,
+  type MediaIssue,
+  type MediaLink,
+  type MediaLinkSource,
+  type MediaPix,
+  type MediaReview,
+  VISION_REPORT_JSON_SCHEMA,
+  visionReportSchema,
+} from "./abuse-judge/media.js";
 export {
   ABUSE_JUDGE_POLICY,
   ABUSE_JUDGE_QUESTIONS,
@@ -35,6 +59,8 @@ export {
   drawBroadcastCopy,
   foldRisk,
   type HoldRule,
+  inFirstWindow,
+  isHoldVerdict,
   loadMonitorState,
   MONITOR_ALERT_INTERVAL_MS,
   MONITOR_ANOMALY_CHECKS,
@@ -62,6 +88,7 @@ export {
   monitorDayCounts,
   monitorHealth,
   monitorRate,
+  monitorRowWithHistory,
   monitorSamplesByTeam,
   monitorTier,
   noteAcceptedSend,
@@ -79,6 +106,7 @@ export {
   teamMonitorOverview,
   teamMonitorRow,
   type VerdictOutcome,
+  YOUNG_DOMAIN_DAYS,
 } from "./abuse-monitor.js";
 export {
   type AcceptEmailAuth,
@@ -87,6 +115,7 @@ export {
   type AcceptEmailResult,
   acceptEmail,
   countDistinctRecipients,
+  countParked,
   enforceDomainWarmup,
   estimateMimeBytes,
   exceededSendSize,
@@ -94,6 +123,7 @@ export {
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
   RESERVED_TAG_PREFIX,
+  reviewBacklogLimit,
   SES_MAX_MESSAGE_BYTES,
   type SenderDomainVerdict,
   SYSTEM_MAIL_TAG,
@@ -134,6 +164,7 @@ export {
   fetchContentFactors,
   MIN_OUTCOME_SENDS,
 } from "./account-score.js";
+export { purgeAccountSignups, recordSignup } from "./account-signups.js";
 export {
   type ApiKeyAuth,
   authenticateApiKey,
@@ -148,6 +179,21 @@ export {
   MAX_ACTIVE_API_KEYS,
   verifyApiKey,
 } from "./api-keys.js";
+export {
+  ATTACHMENT_FLAGS,
+  ATTACHMENT_REJECTIONS,
+  type AttachmentFile,
+  type AttachmentFlag,
+  type AttachmentRejection,
+  type AttachmentVerdict,
+  attachmentVerdict,
+  BLOCKED_CONTENT_TYPES,
+  BLOCKED_EXTENSIONS,
+  fileExtensions,
+  MEDIA_TYPE_TOKEN,
+  sentContentType,
+  UNNAMED_ATTACHMENT,
+} from "./attachment-policy.js";
 export {
   AUDIT_ACTIONS,
   type AuditAction,
@@ -187,6 +233,17 @@ export {
   type SendingBroadcast,
   sendingBroadcasts,
 } from "./broadcast-pacing.js";
+export type { FingerprintMessage } from "./campaign-fingerprints.js";
+export {
+  type FingerprintSources,
+  forgetAbuseRecords,
+  forgetPhishingPrints,
+  linkTeam,
+  purgeCampaignFingerprints,
+  recordMissingFingerprints,
+  recordPhishingFingerprints,
+  type TeamLinkResult,
+} from "./campaign-linkage.js";
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export { forwardedClientIp } from "./client-ip.js";
 export {
@@ -222,6 +279,7 @@ export {
   CONTENT_REVEAL_FIELDS,
   CONTENT_REVEAL_JUSTIFICATION_MAX,
   CONTENT_REVEAL_JUSTIFICATION_MIN,
+  CONTENT_REVEAL_MEDIA_FIELDS,
   CONTENT_REVEAL_NOTICE_DAYS,
   CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
@@ -231,10 +289,17 @@ export {
   type ContentRevealReason,
   type ContentRevealScope,
   contentRevealExpiry,
+  grantDisclosureFields,
   type RevealedContent,
   type RevealSpan,
 } from "./content-reveal.js";
-export { redactRevealedText, renderRevealedBody } from "./content-reveal-render.js";
+export {
+  type RevealedMedia,
+  redactRevealedText,
+  renderRevealedBody,
+  renderRevealedMedia,
+  urlsInText,
+} from "./content-reveal-render.js";
 export {
   BOUND_ENVELOPE_VERSION_OFFSET,
   decryptEmailBody,
@@ -248,8 +313,10 @@ export {
   encryptEmailBody,
   encryptPayload,
   openAttachments,
+  openMediaReview,
   packEnvelope,
   sealAttachments,
+  sealMediaReview,
   unpackEnvelope,
 } from "./crypto/envelope.js";
 export { type DekContext, EnvKeyring, type Keyring } from "./crypto/keyring.js";
@@ -289,6 +356,11 @@ export {
   WARN_COMPLAINT_RATE,
   type WindowCounts,
 } from "./deliverability.js";
+export {
+  disposableDomains,
+  isDisposableDomain,
+  refreshDisposableDomains,
+} from "./disposable-domains.js";
 export {
   createDomainAgeResolver,
   DomainAgeRetryableError,
@@ -333,10 +405,13 @@ export {
   type EmailCheckResult,
   type EmailInsightsInput,
   evaluateEmailInsights,
+  extractAnchors,
+  MIN_BODY_TEXT_CHARS,
   SCORE_VERSION,
   type ScoreBand,
   SHORTENER_HOSTS,
   scoreBand,
+  visibleText,
 } from "./email-insights.js";
 export {
   type EmailInsightsRow,
@@ -346,7 +421,21 @@ export {
 } from "./email-insights-lookup.js";
 export { purgedEmailBodyColumns } from "./email-retention.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
+export { errorSummary } from "./error-summary.js";
 export { type SesEventsHealth, sesEventsHealth } from "./events-health.js";
+export {
+  type ArchiveType,
+  type ExecutableType,
+  type FileKind,
+  IMAGE_TYPES,
+  type ImageType,
+  readZipDirectory,
+  readZipEntry,
+  sniffFileType,
+  sniffImageType,
+  type ZipDirectory,
+  type ZipEntry,
+} from "./file-type.js";
 export {
   accountMailCard,
   EMAIL_WHITE_TILE_URL,
@@ -362,6 +451,7 @@ export {
   purgeExpiredIdempotencyKeys,
   releaseIdempotent,
 } from "./idempotency.js";
+export { IMITATED_BRAND_WORDS, IMITATED_BRANDS, imitatedBrandIn } from "./imitated-brands.js";
 export { findInstanceOperator, isInstanceOperator } from "./instance-operator.js";
 export {
   isProbeKey,
@@ -379,12 +469,21 @@ export {
   recordProbes,
 } from "./instance-probes.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
+export { type IpGeo, lookupIpGeo, refreshIpGeoDatabases } from "./ip-geo.js";
+export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export {
-  ANCHOR_HREF,
-  anchorHrefParts,
-  type RewriteOptions,
-  rewriteForTracking,
-} from "./link-tracking.js";
+  type BodyLink,
+  extractLinks,
+  type HtmlTag,
+  type HtmlVisitor,
+  type LinkSource,
+  type ResolvedLink,
+  resolveLink,
+  resolveTextUrl,
+  scanHtml,
+  type TagAttr,
+  UNRESOLVED_DESTINATION,
+} from "./links.js";
 export {
   isMailPreferenceKey,
   MAIL_PREFERENCE_GROUPS,
@@ -392,6 +491,7 @@ export {
   type MailPreferenceKey,
   mailPreferenceOf,
 } from "./mail-preferences.js";
+export { sentWithoutComplaintFeedback } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,
   isValidMonitorSetting,
@@ -426,8 +526,15 @@ export {
 } from "./oauth-scopes.js";
 export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.js";
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
-export { asciiHostname, isRootDomainSend, registrableDomain } from "./org-domain.js";
+export {
+  asciiHostname,
+  isRootDomainSend,
+  linkDomain,
+  ownerDomain,
+  registrableDomain,
+} from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
+export { findPixCodes, type PixCode, type PixKeyKind, parsePix } from "./pix.js";
 export {
   effectivePlan,
   formatVolume,
@@ -461,8 +568,8 @@ export {
 export {
   applyRegionBreakers,
   BREAKER_BOUNCE_RATE,
-  BREAKER_COMPLAINT_RATE,
   BREAKER_MIN_SENT,
+  BREAKER_SES_COMPLAINT_RATE,
   BREAKER_WINDOWS_HOURS,
   evaluateRegionBreakers,
   holdRegion,
@@ -471,11 +578,19 @@ export {
   type RegionContributor,
   type RegionDecision,
   type RegionWindowCounts,
+  recordSesComplaintRates,
   regionCounterTotals,
   regionPause,
   regionWindowCounts,
   releaseRegion,
+  SES_COMPLAINT_ALERT_RATE,
+  SES_COMPLAINT_PAUSE_RATE,
+  SES_COMPLAINT_REVIEW_RATE,
+  type SesComplaintAlert,
+  type SesComplaintReading,
+  sesComplaintReadings,
 } from "./platform-breaker.js";
+export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
 export {
   dailyCeiling,
   type QuotaResult,
@@ -491,6 +606,47 @@ export {
   reserveQuota,
 } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
+export {
+  anyYoungLinkDomain,
+  broadcastScreen,
+  cancelWaitingEmails,
+  clearDestinations,
+  DESTINATION_CLEAR_BELOW,
+  DESTINATION_PROBATION_DAYS,
+  DESTINATION_SCREENS_PER_DAY,
+  DESTINATIONS_CLEARED_MAX,
+  destinationStanding,
+  destinationVerdictParks,
+  isShortener,
+  judgeAfterSend,
+  LINK_AGE_LOOKUPS_PER_VERDICT,
+  mediaParks,
+  messageDestinations,
+  NOVEL_DESTINATIONS_MAX,
+  OPERATOR_PARK_REASONS,
+  releaseWaitingEmails,
+  revokeDestinations,
+  SCREEN_HOLD_WAIT_MS,
+  SCREEN_JUDGE_TIMEOUT_MS,
+  SCREEN_OUTSTANDING_MAX,
+  SCREEN_RETRIES,
+  SCREEN_RETRY_MS,
+  type ScreenDecision,
+  type ScreeningRead,
+  type ScreeningTeam,
+  type ScreenParkReason,
+  type ScreenReason,
+  type SendMedia,
+  screenBeforeSend,
+  screeningReasons,
+  screeningTeam,
+  screeningTier,
+  sendingDomainYoung,
+  teamDestinationStanding,
+  teamNovelDestinations,
+  unclearedDestinations,
+  verdictClearsDestinations,
+} from "./screening.js";
 export {
   countSegment,
   markSegmentsStale,
@@ -546,6 +702,11 @@ export {
   type TenantStatusOutcome,
 } from "./ses-tenant.js";
 export {
+  type FetchedImage,
+  type GetImageOptions,
+  getImage,
+  IMAGE_FETCH_MAX_BYTES,
+  IMAGE_FETCH_TIMEOUT_MS,
   isBlockedIp,
   type PostFailureCode,
   type PostJsonOptions,
@@ -610,6 +771,7 @@ export {
   FLAG_WINDOW_DAYS,
   type FlagTrigger,
   type FlagTriggerOptions,
+  flagImitatedBrand,
   flagTrigger,
   pruneTeamStandings,
   STANDING_WINDOW_DAYS,
@@ -679,7 +841,7 @@ export {
   type UpdatesSource,
   verifyUpdatesToken,
 } from "./updates-token.js";
-export { isLoopbackUrl } from "./url.js";
+export { isLoopbackUrl, unwrapRedirect } from "./url.js";
 export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./usage-hourly.js";
 export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 export {

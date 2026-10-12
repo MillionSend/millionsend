@@ -23,7 +23,7 @@
   "chart": {
     "soFar": "até agora",
     "ofSent": "{count} de {sent} enviados",
-    "belowFloor": "abaixo do piso do guardrail · não avaliado"
+    "belowFloor": "abaixo do mínimo da proteção de envio · não avaliado"
   },
   "engagement": {
     "denominator": "das entregues"
@@ -45,25 +45,25 @@
       "title": "Detalhes da nota",
       "window": "{days} dias · {sent} envios",
       "composition": "Composição",
-      "contentOnly": "Só o sub-score de conteúdo conta até a janela ter envios suficientes.",
+      "contentOnly": "Só a nota de conteúdo conta até a janela ter envios suficientes.",
       "governor": "Teto pelo resultado",
       "governorLine": "resultado + 1,5 = {value}",
-      "applied": "aplicou",
+      "applied": "limitou",
       "notApplied": "não limitou",
       "guardrail": "Proteção de envio",
       "guardrailOk": "ok · sem teto",
       "guardrailCapped": "teto {value}",
-      "compositionNote": "O resultado manda. Conteúdo impecável nunca passa de 1,5 acima do resultado, e uma proteção de envio em aviso ou pausa limita a nota a 6,9 ou 4,9, por construção.",
+      "compositionNote": "O resultado manda. Conteúdo impecável nunca passa de 1,5 acima do resultado, e uma proteção de envio em alerta ou pausada sempre limita a nota a 6,9 ou 4,9.",
       "contentSection": "Conteúdo · o que pesa, ponderado por destinatários",
       "factorMeta": "{emails, plural, one {# e-mail} other {# e-mails}} · {recipients} destinatários",
       "noFactors": "Todas as verificações passam em todos os e-mails avaliados.",
       "passing": "{count, plural, one {# verificação passando} other {# verificações passando}} em todo o volume",
-      "outcomeSection": "Resultado · as taxas contra as linhas",
-      "outcomeNote": "Taxas sobre {sent} envios. As linhas seguem o Google Postmaster: reclamações abaixo de 0,10% e nunca em 0,30%.",
-      "lift": "Como subir",
-      "liftLine": "{title} · nota da conta a {score}",
+      "outcomeSection": "Resultado · as taxas comparadas aos limites",
+      "outcomeNote": "Taxas sobre {sent} envios. Os limites seguem o Google Postmaster: reclamações abaixo de 0,10% e nunca chegando a 0,30%.",
+      "lift": "Como melhorar",
+      "liftLine": "{title} · nota da conta sobe para {score}",
       "liftNone": "Não há mais o que ganhar no conteúdo. O que resta está nas taxas de resultado.",
-      "agentPrompt": "Na nossa conta MillionSend a nota é {score}/10 nos últimos 30 dias. A verificação de entregabilidade \"{title}\" falha em {emails} e-mails ({recipients} destinatários), custando {points} pontos do sub-score de conteúdo.\n\n{description}\n\nO que fazer: {advice}\n\nEncontre os templates ou o código que enviam esses e-mails e aplique a correção. Mantenha a mudança mínima e explique o que mudou."
+      "agentPrompt": "Na nossa conta MillionSend a nota é {score}/10 nos últimos 30 dias. A verificação de entregabilidade \"{title}\" falha em {emails} e-mails ({recipients} destinatários), custando {points} pontos da nota de conteúdo.\n\n{description}\n\nO que fazer: {advice}\n\nEncontre os templates ou o código que enviam esses e-mails e aplique a correção. Mantenha a mudança mínima e explique o que mudou."
     }
   },
   "open": {
@@ -71,7 +71,7 @@
     "opened": "Aberturas",
     "prefetched": "Pré-carregados",
     "notCounted": "não contados",
-    "prefetchedHint": "Buscas da imagem de rastreamento feitas por um cliente de email ou scanner de segurança antes de alguém abrir. Nunca entram na taxa de abertura."
+    "prefetchedHint": "Buscas da imagem de rastreamento feitas por um cliente de e-mail ou scanner de segurança antes de alguém abrir. Nunca entram na taxa de abertura."
   },
   "click": {
     "title": "Taxa de cliques",

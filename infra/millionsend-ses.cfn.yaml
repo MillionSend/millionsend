@@ -35,7 +35,7 @@ Resources:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       ManagedPolicyName: millionsend-ses
-      # Every SES action the instance issues — mirrors SES_IAM_POLICY in
+      # Every action the instance issues — mirrors SES_IAM_POLICY in
       # packages/ses/src/setup-constants.ts (a test pins the two equal).
       PolicyDocument:
         Version: "2012-10-17"
@@ -64,6 +64,12 @@ Resources:
               - ses:CreateTenantResourceAssociation
               - ses:DeleteTenantResourceAssociation
               - ses:UpdateReputationEntityCustomerManagedStatus
+            Resource: "*"
+          # SES's own complaint rate, which the region breaker judges, is a
+          # CloudWatch metric.
+          - Effect: Allow
+            Action:
+              - cloudwatch:GetMetricData
             Resource: "*"
 
   SendUser:

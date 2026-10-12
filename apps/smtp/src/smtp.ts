@@ -134,17 +134,24 @@ async function handleMessage(
     throw smtpError(550, "This API key can only send from its assigned domain");
   }
 
-  const result = await acceptEmail(deps, auth, {
-    from,
-    to,
-    cc: cc.length > 0 ? cc : undefined,
-    bcc: bcc.length > 0 ? bcc : undefined,
-    replyTo: replyTo.length > 0 ? replyTo : undefined,
-    subject,
-    html,
-    text,
-    domainId: domain.domainId,
-  });
+  const result = await acceptEmail(
+    deps,
+    auth,
+    {
+      from,
+      to,
+      cc: cc.length > 0 ? cc : undefined,
+      bcc: bcc.length > 0 ? bcc : undefined,
+      replyTo: replyTo.length > 0 ? replyTo : undefined,
+      subject,
+      html,
+      text,
+      domainId: domain.domainId,
+    },
+    // A refusal would bounce the message at the client's server: a hold
+    // that ends in a release must not have lost it.
+    { parkUnderReview: true },
+  );
   // acceptEmail reads the team's admission per message, as the HTTP API
   // does: a suspension or a pause lands on the next message of an open
   // session, not on its next AUTH.

@@ -22,6 +22,7 @@ import {
   contactRoom,
   contactSnapshotColumns,
   countDistinctRecipients,
+  countParked,
   DAY_MS,
   decryptEmailBody,
   emitContactEvents,
@@ -58,9 +59,11 @@ import {
   regionPause,
   releaseIdempotent,
   releasePeriodCount,
+  releaseQuota,
   reserveDailyQuota,
   reservedSenderRefusal,
   reserveQuota,
+  reviewBacklogLimit,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
   type SendRefusal,
@@ -3668,6 +3671,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
     try {
       const result = await acceptEmail(deps, auth, toAcceptPayload(body, domain.domainId), {
+        parkUnderReview: true,
         completeInTx: idemKey
           ? async (tx, emailId) => {
               const recorded = await completeIdempotent(tx, {
@@ -3873,9 +3877,15 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           recipientCount: number;
           domainId: string | null;
         }[] = [];
+        let underReview = false;
         for (const { payload, index } of payloads) {
-          const result = await acceptEmail(deps, auth, payload, { tx: txDb, quota: "deferred" });
+          const result = await acceptEmail(deps, auth, payload, {
+            tx: txDb,
+            quota: "deferred",
+            parkUnderReview: true,
+          });
           if (!result.ok) throw new AcceptRejectedError(result, index);
+          underReview ||= result.underReview;
           out.push({
             id: result.id,
             parked: false,
@@ -3975,6 +3985,37 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
               ),
             );
           for (const o of toPark) o.parked = true;
+        }
+        if (underReview) {
+          // A review hold parks the batch as it parks a single send: charged
+          // above, so a cap refuses it as usual, then handed back, since a
+          // parked row holds no reservation; the drain charges it on release.
+          for (const o of out) {
+            if (o.parked) continue;
+            await releaseQuota(txDb, {
+              teamId: auth.teamId,
+              count: o.recipientCount,
+              quota,
+              day: o.day,
+              at: o.at,
+            });
+            o.parked = true;
+          }
+          await txDb
+            .update(schema.emails)
+            .set({ latestStatus: "queued_quota", parkReason: "review", parkedAt: new Date() })
+            .where(
+              inArray(
+                schema.emails.id,
+                out.map((o) => o.id),
+              ),
+            );
+          if ((await countParked(txDb, auth.teamId)) > reviewBacklogLimit(quota)) {
+            throw new AcceptRejectedError(
+              { ok: false, reason: "quota_backlog_full" },
+              out[0]?.index ?? 0,
+            );
+          }
         }
         // The warm-up after the plan, each item as its own send would meet it.
         for (const o of out) {

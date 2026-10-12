@@ -117,31 +117,6 @@ export function teamRegionSubquery(db: Db) {
     .as("team_region");
 }
 
-/** Sends per UTC hour per region over the trailing `hours`, zero-filled. */
-export async function regionHourlySends(
-  db: Db,
-  opts: { now: Date; hours: number },
-): Promise<Map<string, { t: string; sent: number }[]>> {
-  const h = schema.usageCountersHourly;
-  const teamRegion = teamRegionSubquery(db);
-  const from = new Date(opts.now.getTime() - opts.hours * 3_600_000);
-  const rows = await db
-    .select({ region: teamRegion.region, t: sql<string>`${h.hour}`, sent: total(h.sent) })
-    .from(h)
-    .innerJoin(teamRegion, sql`${teamRegion.teamId} = ${h.teamId}`)
-    .where(gte(h.hour, from))
-    .groupBy(teamRegion.region, h.hour);
-  const keys = hourKeys(from, opts.now);
-  const out = new Map<string, { t: string; sent: number }[]>();
-  for (const row of rows) {
-    const series = out.get(row.region) ?? keys.map((t) => ({ t, sent: 0 }));
-    const point = series.find((p) => p.t === new Date(row.t).toISOString());
-    if (point) point.sent = Number(row.sent);
-    out.set(row.region, series);
-  }
-  return out;
-}
-
 /** Sends per region over the trailing whole UTC days (today included). */
 export async function regionDailySends(
   db: Db,
@@ -170,10 +145,6 @@ export async function regionDailySends(
 }
 
 /** The empty series a region with no traffic shows, on the same axis as the others. */
-export function emptyHourly(now: Date, hours: number): { t: string; sent: number }[] {
-  return hourKeys(new Date(now.getTime() - hours * 3_600_000), now).map((t) => ({ t, sent: 0 }));
-}
-
 export function emptyDaily(now: Date, days: number): { t: string; sent: number }[] {
   const from = new Date(`${isoDay(new Date(now.getTime() - (days - 1) * 86_400_000))}T00:00:00Z`);
   return dayKeys(from, now).map((t) => ({ t, sent: 0 }));

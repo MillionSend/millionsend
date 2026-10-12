@@ -59,35 +59,19 @@ describe("buildResetEmail", () => {
   it("localizes and carries the reset link in html and text", () => {
     const en = buildResetEmail({
       to: "ada@example.com",
-      name: "Ada",
       url: "https://app.example.com/api/auth/reset-password/tok?callbackURL=%2Freset",
       locale: "en",
     });
     expect(en.subject).toBe("Reset your MillionSend password");
     expect(en.from).toBe("MillionSend <no-reply@mail.example.com>");
-    expect(en.text).toContain("Hi Ada,");
+    expect(en.text).toContain("Hi,");
     expect(en.text).toContain("https://app.example.com/api/auth/reset-password/tok");
     expect(en.text).toContain("30");
     expect(en.html).toContain("reset-password/tok");
 
-    const pt = buildResetEmail({
-      to: "a@b.com",
-      name: "Ada",
-      url: "https://x.com/r",
-      locale: "pt-BR",
-    });
+    const pt = buildResetEmail({ to: "a@b.com", url: "https://x.com/r", locale: "pt-BR" });
     expect(pt.subject).toBe("Redefina sua senha do MillionSend");
-  });
-
-  it("escapes the user-controlled name in the html body", () => {
-    const mail = buildResetEmail({
-      to: "a@b.com",
-      name: '<img src="x">',
-      url: "https://x.com/r",
-      locale: "en",
-    });
-    expect(mail.html).not.toContain('<img src="x">');
-    expect(mail.html).toContain("&lt;img");
+    expect(pt.text).toContain("Olá,");
   });
 });
 
@@ -203,6 +187,29 @@ describe("sendPasswordResetEmail", () => {
     );
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.subject).toBe("Redefina sua senha do MillionSend");
+  });
+
+  it("prints no part of the account's name, whatever it says", async () => {
+    // A name stored before names refused phone numbers.
+    const name = "Ada Lovelace, call 0800 555 0199";
+    await db.insert(schema.verification).values({
+      id: "v-named",
+      identifier: "reset-password:named",
+      value: user.id,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+    await sendPasswordResetEmail(
+      db,
+      { user: { ...user, name }, url: "https://x.com/r/named", token: "named" },
+      undefined,
+      deps,
+    );
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    const mail = sent[0];
+    for (const part of [mail?.subject, mail?.text, mail?.html]) {
+      expect(part).not.toMatch(/Ada|Lovelace|0800|555/);
+    }
+    expect(mail?.text).toMatch(/^Hi,$/m);
   });
 });
 

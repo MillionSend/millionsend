@@ -76,6 +76,25 @@ describe("team.createTeam", () => {
     }
   });
 
+  it("creates a team named after a brand and flags it for the operator, naming the brand", async () => {
+    await insertUser("u1", "u1@example.com");
+    const flagOf = async (name: string) => {
+      const { teamId } = await callerFor("u1").team.createTeam({ name });
+      const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+      expect(team?.name, name).toBe(name);
+      return db
+        .select({ reason: schema.teamFlags.reason, detail: schema.teamFlags.detail })
+        .from(schema.teamFlags)
+        .where(eq(schema.teamFlags.teamId, teamId));
+    };
+    expect(await flagOf("Rnicrosoft 0ffice 365")).toEqual([
+      { reason: "brand", detail: { brand: "Microsoft" } },
+    ]);
+    expect(await flagOf("Vivo")).toEqual([{ reason: "brand", detail: { brand: "Vivo" } }]);
+    expect(await flagOf("Vivo Bem Nutrição")).toEqual([]);
+    expect(await flagOf("Acme Inc")).toEqual([]);
+  });
+
   it("suffixes the slug when the name collides", async () => {
     await insertUser("u1", "u1@example.com");
     await insertUser("u2", "u2@example.com");

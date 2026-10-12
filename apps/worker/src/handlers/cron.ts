@@ -9,6 +9,7 @@ import {
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
   nextUtcDayStart,
+  OPERATOR_PARK_REASONS,
   type PlanSnapshot,
   purgedEmailBodyColumns,
   QUOTA_COLUMNS,
@@ -395,9 +396,14 @@ async function releaseParkedRows(
           eq(schema.emails.latestStatus, "queued_quota"),
           opts.where,
           // The operator's holds: a suspended team releases nothing, a paused
-          // team releases only its transactional rows.
+          // team releases only its transactional rows, and what screening
+          // parked waits for the review list.
           isNull(schema.teams.suspendedAt),
           or(isNull(schema.emails.broadcastId), isNull(schema.teams.broadcastsPausedByOperatorAt)),
+          or(
+            isNull(schema.emails.parkReason),
+            notInArray(schema.emails.parkReason, [...OPERATOR_PARK_REASONS]),
+          ),
           // A row due on a later UTC day is charged on that day, its warm-up
           // included, when it comes: reserved against today, days of the cap
           // could all go out at one future instant.

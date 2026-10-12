@@ -916,31 +916,27 @@ describe("the review hold", () => {
     ).toEqual(held);
   });
 
-  it("counts only the verdicts of the team's first seven days of sending, from its first send", async () => {
-    // Signed up ten days before its first send: the week starts at the send.
-    const week = async (slug: string, fifthAfter: number) => {
-      const teamId = await newTeam(slug, {
-        firstSendAt: NOW,
-        createdAt: new Date(NOW.getTime() - 10 * DAY_MS),
-      });
+  it("counts the verdicts of any seven days while the team is new, sent yet or not", async () => {
+    // One send ten days back keeps a team in its first window: waiting disarms nothing.
+    const span = async (slug: string, fifthAfter: number) => {
+      const teamId = await newTeam(slug, { firstSendAt: new Date(NOW.getTime() - 10 * DAY_MS) });
       for (let i = 1; i <= 4; i++) {
-        await judge(teamId, 85, PHISHING, new Date(NOW.getTime() + DAY_MS + i * 60_000));
+        expect(await judge(teamId, 85, PHISHING, minute(i))).toBeNull();
       }
       return judge(teamId, 85, PHISHING, new Date(NOW.getTime() + fifthAfter));
     };
-    expect(await week("repeat-in-week", 7 * DAY_MS - 60_000)).toEqual({
-      rule: "repeat",
-      verdicts: 5,
-    });
-    expect(await week("repeat-past-week", 7 * DAY_MS)).toBeNull();
-    // A team that has not sent yet has no week to count.
+    expect(await span("repeat-in-week", 7 * DAY_MS)).toEqual({ rule: "repeat", verdicts: 5 });
+    // The first of the four has left the seven days.
+    expect(await span("repeat-past-week", 7 * DAY_MS + 90_000)).toBeNull();
+    // Judged before its first send, as mail screened ahead of SES is: counted all the same.
     const unsent = await createTeam(db, "repeat-unsent");
     await db
       .update(schema.teams)
       .set({ createdAt: new Date(NOW.getTime() - HOUR) })
       .where(eq(schema.teams.id, unsent));
-    for (let i = 1; i <= 5; i++) expect(await judge(unsent, 85, PHISHING, minute(i))).toBeNull();
-    expect((await team(unsent))?.suspendedAt).toBeNull();
+    for (let i = 1; i <= 4; i++) expect(await judge(unsent, 85, PHISHING, minute(i))).toBeNull();
+    expect(await judge(unsent, 85, PHISHING, minute(5))).toEqual({ rule: "repeat", verdicts: 5 });
+    expect((await team(unsent))?.suspensionReason).toBe("review");
   });
 
   it("shares the hold's scope and switch, never holds a released team again, and reads both settings", async () => {

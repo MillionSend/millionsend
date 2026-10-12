@@ -125,17 +125,40 @@ export function formatDurationShort(ms: number): string {
 }
 
 /** Cents as US dollars with a bare "$" in every locale ("$20", "$0.30", pt-BR "$0,30"
-    rather than "US$ 0,30"): whole dollars drop the decimals. */
-export function formatUsd(cents: number, locale: string): string {
+    rather than "US$ 0,30"): whole dollars drop the decimals. A price per
+    thousand passes 3 digits to keep a tenth of a cent ("$0.105"). */
+export function formatUsd(cents: number, locale: string, maxFractionDigits = 2): string {
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: maxFractionDigits,
   })
     .formatToParts(cents / 100)
     .map((part) => (part.type === "currency" ? "$" : part.type === "literal" ? "" : part.value))
     .join("");
+}
+
+/**
+ * Amounts in minor units (Stripe's), summed per currency: US dollars as
+ * formatUsd writes them, any other currency as the locale does ("$40",
+ * "$40 + R$ 98,00").
+ */
+export function formatMoneyTotals(
+  items: readonly { amount: number; currency: string }[],
+  locale: string,
+): string {
+  const totals = new Map<string, number>();
+  for (const { amount, currency } of items) {
+    totals.set(currency, (totals.get(currency) ?? 0) + amount);
+  }
+  return [...totals]
+    .map(([currency, minor]) => {
+      if (currency.toLowerCase() === "usd") return formatUsd(minor, locale);
+      const format = new Intl.NumberFormat(locale, { style: "currency", currency });
+      return format.format(minor / 10 ** (format.resolvedOptions().maximumFractionDigits ?? 2));
+    })
+    .join(" + ");
 }
 
 /** Payload size label ("512 B", "12.4 KB", "1.2 MB"): 1024-based, trailing zeros trimmed. */
@@ -164,6 +187,14 @@ export function maskApiKey(tokenPrefix: string, last4: string): string {
 export function addrSpec(from: string): string {
   const inner = /<([^>]+)>/.exec(from);
   return (inner?.[1] ?? from).trim();
+}
+
+/** The flag of an ISO 3166 alpha-2 country code ("FR" → 🇫🇷); "" for anything else. */
+export function countryFlag(code: string): string {
+  if (!/^[A-Za-z]{2}$/.test(code)) return "";
+  return String.fromCodePoint(
+    ...[...code.toUpperCase()].map((letter) => 0x1f1e6 + letter.charCodeAt(0) - 65),
+  );
 }
 
 /** The domain part of an address, lowercased; "" when there is none. */

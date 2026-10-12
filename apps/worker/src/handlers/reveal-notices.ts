@@ -1,4 +1,4 @@
-import { CONTENT_REVEAL_FIELDS, CONTENT_REVEAL_NOTICE_DAYS } from "@millionsend/core";
+import { CONTENT_REVEAL_NOTICE_DAYS, grantDisclosureFields } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
@@ -10,7 +10,9 @@ export interface RevealNoticeDeps {
 /**
  * The disclosure side of break-glass content access: seven days after a
  * grant, the team's own audit gains a `content.accessed` row dated at the
- * access. Nobody is emailed, then or ever.
+ * access, naming what the grant read: the subject and rendered text, and what
+ * screening read from the media once the grant opened the media panel.
+ * Nobody is emailed, then or ever.
  *
  * Withheld for good from a team suspended for phishing — telling the account
  * under investigation what was read, and when, is the one case where
@@ -34,6 +36,7 @@ export async function runRevealNotices(
       reason: g.reason,
       emailIds: g.emailIds,
       createdAt: g.createdAt,
+      mediaViewedAt: g.mediaViewedAt,
       suspendedAt: t.suspendedAt,
       suspensionReason: t.suspensionReason,
     })
@@ -73,7 +76,7 @@ export async function runRevealNotices(
           data: {
             reason: grant.reason,
             emails: grant.emailIds.length,
-            fields: CONTENT_REVEAL_FIELDS,
+            fields: grantDisclosureFields(grant.mediaViewedAt !== null),
           },
           createdAt: grant.createdAt,
         });

@@ -23,6 +23,7 @@ import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamActions } from "../team-actions";
+import { LinkedTeams } from "../teams/linked-teams";
 import {
   CardHead,
   LoadErrorCard,
@@ -32,6 +33,7 @@ import {
   usePlanLabel,
 } from "./parts";
 import { RevealCell, useContentReveal } from "./reveal";
+import { WaitingList } from "./waiting-list";
 
 const TILE: React.CSSProperties = { padding: "16px 20px" };
 // The monitoring rows are sentences, not figures: sans, left, the body size.
@@ -245,7 +247,9 @@ export function ReviewView({ teamId }: { teamId: string }) {
                     ? "menu.reopenTip"
                     : flag.reason === "manual"
                       ? "menu.clearManualTip"
-                      : "menu.clearTip",
+                      : flag.reason === "brand"
+                        ? "menu.clearBrandTip"
+                        : "menu.clearTip",
                 )}
               >
                 <button
@@ -336,6 +340,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         <Tile label={t("tiles.sent7d")}>{nf.format(standing.sent7d)}</Tile>
         <Tile label={t("tiles.contacts")}>{nf.format(team.contacts)}</Tile>
       </div>
+      <LinkedTeams teamId={team.id} framed />
 
       <div className="ms-card" style={{ padding: 20, marginBottom: 16 }}>
         <div
@@ -574,6 +579,8 @@ export function ReviewView({ teamId }: { teamId: string }) {
           )}
         </div>
       </div>
+
+      <WaitingList teamId={team.id} onChanged={refetch} />
 
       <div className="ms-card" style={{ padding: 0, marginBottom: 16 }}>
         <CardHead

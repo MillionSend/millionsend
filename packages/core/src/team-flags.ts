@@ -11,6 +11,7 @@ import {
   GUARDRAIL_WINDOW_DAYS,
   MIN_GUARDRAIL_VOLUME,
 } from "./deliverability.js";
+import { imitatedBrandIn } from "./imitated-brands.js";
 import { fetchTeamStanding } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -198,6 +199,9 @@ export function flagTrigger(s: TeamStandingRow, opts: FlagTriggerOptions = {}): 
   return null;
 }
 
+/** The reasons flagTrigger reads off a standing: the only flags syncTeamFlags opens and clears. */
+const STANDING_REASONS: TeamFlagReason[] = ["monitor", "complaints", "guardrail", "score"];
+
 /**
  * Bring the automatic flags in line with the standings. A team with a
  * trigger and no open flag gets one, unless an operator cleared a flag for
@@ -206,8 +210,9 @@ export function flagTrigger(s: TeamStandingRow, opts: FlagTriggerOptions = {}): 
  * previous run's standings, so `previous` must be the rows saved before this
  * run's); an open automatic flag whose trigger is gone is cleared, unless
  * the team is held for review, which waits on an operator; an operator's
- * manual flag is never touched. `opened_at` of an open flag is left alone so
- * the list's "since" holds still.
+ * manual flag, and brand and linkage flags, which no standing triggers, are
+ * never touched. `opened_at` of an open flag is left alone so the list's "since"
+ * holds still.
  */
 export async function syncTeamFlags(
   db: Db,
@@ -242,7 +247,11 @@ export async function syncTeamFlags(
   for (const [teamId, trigger] of triggered) {
     const current = openByTeam.get(teamId);
     if (current) {
-      if (current.openedBy === null && current.reason !== trigger.reason) {
+      if (
+        current.openedBy === null &&
+        current.reason !== trigger.reason &&
+        STANDING_REASONS.includes(current.reason)
+      ) {
         await db
           .update(f)
           .set({ reason: trigger.reason, detail: trigger.detail })
@@ -280,7 +289,11 @@ export async function syncTeamFlags(
     ).map((row) => row.id),
   );
   const stale = open.filter(
-    (row) => row.openedBy === null && !triggered.has(row.teamId) && !held.has(row.teamId),
+    (row) =>
+      row.openedBy === null &&
+      STANDING_REASONS.includes(row.reason) &&
+      !triggered.has(row.teamId) &&
+      !held.has(row.teamId),
   );
   if (stale.length > 0) {
     await db
@@ -328,4 +341,25 @@ export async function upgradesHeld(db: Db, teamId: string): Promise<boolean> {
       ),
     );
   return flag !== undefined;
+}
+
+/**
+ * Flags a team whose name borrows an imitated brand, for the operator's
+ * list; the name itself stands. Called when a team is created or renamed. A
+ * team that already has an open flag keeps that one, since a team holds one
+ * open flag at a time. Returns the brand matched.
+ */
+export async function flagImitatedBrand(
+  db: Db,
+  teamId: string,
+  name: string,
+): Promise<string | null> {
+  const brand = imitatedBrandIn(name);
+  if (brand) {
+    await db
+      .insert(schema.teamFlags)
+      .values({ teamId, reason: "brand", detail: { brand } })
+      .onConflictDoNothing();
+  }
+  return brand;
 }

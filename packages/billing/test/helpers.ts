@@ -103,10 +103,38 @@ export function subscription(
   } as unknown as Stripe.Subscription;
 }
 
+/** A succeeded $20 card payment by `customer`, created at `created` (Stripe seconds). */
+export function charge(
+  id: string,
+  customer: string,
+  created: number,
+  extra: Partial<Pick<Stripe.Charge, "amount" | "amount_refunded" | "currency">> & {
+    status?: Stripe.Charge.Status;
+    disputed?: boolean;
+    refunded?: boolean;
+  } = {},
+): Stripe.Charge {
+  return {
+    id,
+    object: "charge",
+    customer,
+    created,
+    amount: 2000,
+    amount_refunded: 0,
+    currency: "usd",
+    status: "succeeded",
+    disputed: false,
+    refunded: false,
+    ...extra,
+  } as unknown as Stripe.Charge;
+}
+
 /**
  * In-memory BillingStripe: subscriptions are plain fixtures the tests seed
  * and mutate; item, subscription and schedule updates edit them in place so
  * a re-fetch sees the change, and every write is recorded in `state`.
+ * Charges are seeded the same way; a refund marks its charge refunded, and a
+ * charge named in `refundErrors` fails its refund with that error.
  */
 export function fakeStripe() {
   const state = {
@@ -116,6 +144,11 @@ export function fakeStripe() {
     retrieveParams: undefined as Stripe.SubscriptionRetrieveParams | undefined,
     listParams: undefined as Stripe.SubscriptionListParams | undefined,
     cancels: [] as string[],
+    cancelParams: undefined as Stripe.SubscriptionCancelParams | undefined,
+    charges: [] as Stripe.Charge[],
+    chargeListParams: undefined as Stripe.ChargeListParams | undefined,
+    refunds: [] as [Stripe.RefundCreateParams, Stripe.RequestOptions | undefined][],
+    refundErrors: {} as Record<string, Error>,
     updates: [] as [string, Stripe.SubscriptionUpdateParams][],
     itemCreates: [] as Stripe.SubscriptionItemCreateParams[],
     itemUpdates: [] as [string, Stripe.SubscriptionItemUpdateParams | undefined][],
@@ -204,10 +237,33 @@ export function fakeStripe() {
         }
         return s;
       },
-      async cancel(id: string) {
+      async cancel(id: string, params?: Stripe.SubscriptionCancelParams) {
         state.calls.push("subscriptions.cancel");
         state.cancels.push(id);
+        state.cancelParams = params;
         return { ...sub(id), status: "canceled" };
+      },
+    },
+    charges: {
+      // Newest first, the customer's created in the window only, like Stripe.
+      async *list(params: Stripe.ChargeListParams) {
+        state.calls.push("charges.list");
+        state.chargeListParams = params;
+        const since = typeof params.created === "object" ? (params.created.gte ?? 0) : 0;
+        yield* state.charges
+          .filter((c) => c.customer === params.customer && c.created >= since)
+          .sort((a, b) => b.created - a.created);
+      },
+    },
+    refunds: {
+      async create(p: Stripe.RefundCreateParams, options?: Stripe.RequestOptions) {
+        state.calls.push("refunds.create");
+        const error = state.refundErrors[p.charge ?? ""];
+        if (error) throw error;
+        state.refunds.push([p, options]);
+        const refunded = state.charges.find((c) => c.id === p.charge);
+        if (refunded) Object.assign(refunded, { amount_refunded: refunded.amount, refunded: true });
+        return { id: `re_${state.refunds.length}`, object: "refund", charge: p.charge };
       },
     },
     subscriptionItems: {

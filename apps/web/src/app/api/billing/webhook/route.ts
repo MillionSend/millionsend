@@ -1,4 +1,4 @@
-import { handleWebhook, isLiveKey } from "@millionsend/billing";
+import { cardFingerprints, handleWebhook, isLiveKey } from "@millionsend/billing";
 import { accountEmailFrom, env, notificationsEmailFrom } from "@millionsend/config";
 import {
   type AccountMailKind,
@@ -7,8 +7,10 @@ import {
   claimNotification,
   clearNotifications,
   DAY_MS,
+  errorSummary,
   formatMailDate,
   freeCapText,
+  linkTeam,
   listTeamOwners,
   type MailLocale,
   planCapPhrase,
@@ -86,6 +88,15 @@ export async function POST(request: Request) {
         await mailOwners(db, event, before, after);
       } catch (err) {
         console.error("billing webhook: owner mail skipped", err);
+      }
+      // A team's card is known once it first pays; linkage compares it with
+      // the cards of teams suspended for phishing.
+      if (before.plan === "free" && after.plan !== "free") {
+        const cards = await cardFingerprints(getStripe(), event.customerId).catch((err) => {
+          console.error(`billing webhook: cards not read for linkage: ${errorSummary(err)}`);
+          return [];
+        });
+        await linkTeam(db, { teamId: after.id, trigger: "payment", cards });
       }
     }
   }

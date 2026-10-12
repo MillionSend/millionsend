@@ -1,3 +1,4 @@
+export { cardFingerprints } from "./cards.js";
 export {
   type BillingDeps,
   type BillingTeam,
@@ -22,8 +23,10 @@ export {
 } from "./prices.js";
 export { type BillingStripe, createStripe, isLiveKey } from "./stripe.js";
 export {
+  cancelAndRefundFraud,
   cancelTeamSubscription,
   changeRung,
+  type FraudRefund,
   type RungChange,
   reconcileTeamPlan,
   setOverage,

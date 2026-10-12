@@ -148,6 +148,39 @@ describe("isPlainName", () => {
       expect(isPlainName(name), JSON.stringify(name)).toBe(false);
     }
   });
+
+  it("refuses a run of digits a phone number fits in, however it is spaced", () => {
+    for (const name of [
+      "Ligue 0800 555 0199",
+      "Suporte +55 (11) 98765-4321",
+      "Call +1 (888) 555-0199",
+      "Acme 3456-7890",
+      "Acme 34567890",
+      "Acme 34.56.78.90",
+      "Acme 1-888-555-0199 support",
+      "Call ＋１ ８８８ ５５５ ０１９９",
+      "Call 888ー555ー0199",
+    ]) {
+      expect(isPlainName(name), name).toBe(false);
+    }
+  });
+
+  it("accepts years, dates, spans of years and short numbers", () => {
+    for (const name of [
+      "Studio 54",
+      "Acme 2026",
+      "Turma 2025-2026",
+      "Turma 2025/2026",
+      "Newsletter 09/10/2026",
+      "Black Friday 2026 · 50% off",
+      "Acme 2026 Q4, order 123456",
+      "Loja 24/7 365",
+      "R$ 1.000.000",
+      "Escritório 3, sala 1203",
+    ]) {
+      expect(isPlainName(name), name).toBe(true);
+    }
+  });
 });
 
 describe("system mail catalogs and customer text", () => {

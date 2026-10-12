@@ -1,5 +1,6 @@
 "use client";
 
+import type { RevealSpan } from "@millionsend/core/content-reveal";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
 import { useLocale, useTranslations } from "next-intl";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
@@ -9,7 +10,25 @@ import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
 
 export type Guardrail = "ok" | "warning" | "paused";
-export type FlagReason = "monitor" | "complaints" | "guardrail" | "score" | "report" | "manual";
+export type FlagReason =
+  | "monitor"
+  | "complaints"
+  | "guardrail"
+  | "score"
+  | "report"
+  | "manual"
+  | "brand"
+  | "linked";
+
+// What makes each email wait: a hold or a verdict the operator decides on,
+// or a judge or reader that could not answer.
+export const WHY_DOT: Record<string, string> = {
+  held: "var(--ms-warn)",
+  verdict: "var(--ms-warn)",
+  destination: "var(--ms-warn)",
+  outage: "var(--ms-danger)",
+  media: "var(--ms-danger)",
+};
 
 const PAID = ["starter", "pro", "scale"];
 const PLAN_KEYS = ["free", "starter", "pro", "scale", "system"];
@@ -122,6 +141,9 @@ export function ReasonLabel({
         samples: detail?.samples ?? 0,
       });
       break;
+    case "brand":
+      label = t("reasonLabel.brand", { brand: detail?.brand ?? "" });
+      break;
     default:
       label = t(`reasonLabel.${reason}`);
   }
@@ -227,4 +249,23 @@ export function RiskCell({
       {formatRisk(risk)}
     </span>
   );
+}
+
+/** Where a span starts: the text is one immutable string, so an offset is identity. */
+function keyedSpans(spans: RevealSpan[]): { key: string; span: RevealSpan }[] {
+  let offset = 0;
+  return spans.map((span) => {
+    const key = String(offset);
+    offset += span.text.length;
+    return { key, span };
+  });
+}
+
+/** Text the server redacted, a masked or shortened run marked as such. */
+export function RevealText({ spans }: { spans: RevealSpan[] }) {
+  return keyedSpans(spans).map(({ key, span }) => (
+    <span key={key} className={span.redacted ? "ms-redact" : undefined}>
+      {span.text}
+    </span>
+  ));
 }
