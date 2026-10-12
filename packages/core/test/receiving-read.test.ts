@@ -170,6 +170,17 @@ describe("readReceived: hidden text never reaches the read", () => {
     expect(read(FIXTURES.img_alt as string).extracted.text).toBe("Hi");
   });
 
+  it("drops control characters from the text part and from entities in the HTML", () => {
+    const plain = readReceived({
+      subject: "s",
+      html: null,
+      text: "Hi\u001b[2J\u0000 there\r\nnext\tline\rend",
+      fromDomain: null,
+    });
+    expect(plain.extracted.text).toBe("Hi[2J there\nnext\tline\nend");
+    expect(read("<p>Hi&#27;[31m there</p>").extracted.text).toBe("Hi[31m there");
+  });
+
   for (const [name, needle] of Object.entries(VISIBLE)) {
     it(`keeps ${name}`, () => {
       expect(read(FIXTURES[name] as string).extracted.text).toContain(needle);

@@ -17,7 +17,7 @@ import { simpleParser } from "mailparser";
 import { createSemaphore } from "../concurrency.js";
 import { decryptEmailBody, openAttachments } from "../crypto/envelope.js";
 import type { Keyring } from "../crypto/keyring.js";
-import { dropInvisible } from "../customer-text.js";
+import { dropControls, dropInvisible } from "../customer-text.js";
 import { resultRows } from "../driver-result.js";
 import { escapeRegex } from "../erase-recipient.js";
 import {
@@ -833,7 +833,7 @@ async function inboundContent(
     return {
       // Mail carrying malware shows its text only, released or not.
       html: row.virusVerdict === "fail" ? null : html,
-      text: text === null ? null : dropInvisible(text),
+      text: text === null ? null : dropInvisible(dropControls(text)),
       attachments: files.map((a) => ({ id: a.id, filename: a.filename, size: a.size })),
       extractedText: extracted?.text ?? null,
     };

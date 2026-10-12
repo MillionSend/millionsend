@@ -6,7 +6,7 @@ import {
   type VisibleHtml,
   VOID_TAGS,
 } from "../abuse-judge/body.js";
-import { dropInvisible, type InvisibleClass } from "../customer-text.js";
+import { dropControls, dropInvisible, type InvisibleClass } from "../customer-text.js";
 import { decodeEntities } from "../html.js";
 import { type BodyLink, extractLinks, type HtmlTag, scanHtml } from "../links.js";
 import { extractCode, extractLink, receivedSecretValues, type SecretKind } from "./codes.js";
@@ -288,8 +288,10 @@ export function readReceived(p: {
   } else {
     links = extractLinks(null, body);
   }
-  const parts = splitTextQuotes(dropInvisible(body, invisible));
-  const quoted = [parts.quoted, dropInvisible(htmlQuoted, invisible)].filter(Boolean).join("\n\n");
+  const parts = splitTextQuotes(dropInvisible(dropControls(body), invisible));
+  const quoted = [parts.quoted, dropInvisible(dropControls(htmlQuoted), invisible)]
+    .filter(Boolean)
+    .join("\n\n");
   const text = cap(parts.reply, TEXT_MAX, flags);
   const subject = dropInvisible(p.subject);
   const code = extractCode({ subject, text });

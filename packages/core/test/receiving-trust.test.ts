@@ -16,7 +16,7 @@ const base = {
   from: "support@stripe.com",
   fromFields: 1,
   fromMailboxes: 1,
-  owners: ["helio@gmail.example"],
+  owners: ["ana@gmail.example"],
   allowlist: [] as string[],
 };
 
@@ -25,9 +25,9 @@ describe("senderTrust", () => {
     expect(senderTrust(base)).toBe("external");
     expect(senderTrust({ ...base, allowlist: ["*@stripe.com"] })).toBe("allowlisted");
     expect(senderTrust({ ...base, allowlist: ["support@stripe.com"] })).toBe("allowlisted");
-    expect(
-      senderTrust({ ...base, from: "helio@gmail.example", mailFrom: "helio@gmail.example" }),
-    ).toBe("owner");
+    expect(senderTrust({ ...base, from: "ana@gmail.example", mailFrom: "ana@gmail.example" })).toBe(
+      "owner",
+    );
   });
 
   it("rebuilds alignment from the folded verdicts: p=none with aligned SPF, never another org's SPF or a foreign DKIM", () => {
@@ -51,7 +51,7 @@ describe("senderTrust", () => {
     expect(
       senderTrust({
         ...base,
-        from: "helio@gmail.example",
+        from: "ana@gmail.example",
         authentication: { ...NONE, spf: "softfail", dmarc: "fail" },
       }),
     ).toBe("failed");
@@ -75,7 +75,7 @@ describe("senderTrust", () => {
         ...base,
         from: "intern@gmail.example",
         mailFrom: "intern@gmail.example",
-        owners: ["helio@gmail.example"],
+        owners: ["ana@gmail.example"],
       }),
     ).toBe("external");
   });
@@ -108,10 +108,10 @@ describe("senderTrust", () => {
       dkim: { aligned: ["evil.example"] },
       dmarc: { result: "pass", policy: "reject" as const, domain: "evil.example" },
     };
-    const owner = { ...base, from: "helio@gmail.example", authDetail: evil };
+    const owner = { ...base, from: "ana@gmail.example", authDetail: evil };
     expect(senderTrust(owner)).toBe("unauthenticated");
     expect(
-      senderTrust({ ...owner, thread: { proven: true, participants: ["helio@gmail.example"] } }),
+      senderTrust({ ...owner, thread: { proven: true, participants: ["ana@gmail.example"] } }),
     ).toBe("unauthenticated");
     expect(
       senderTrust({

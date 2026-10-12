@@ -115,6 +115,18 @@ export function dropInvisible(
   return value.replace(INVISIBLE, drop).replace(STRAY_SELECTOR, drop).replace(STRAY_JOINER, drop);
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching controls is the point
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
+
+/**
+ * Multi-line text with line feeds as its only line breaks and no other C0 or
+ * C1 control, so an escape sequence in a malformed part can't drive the
+ * terminal an agent prints it to. Tabs stay.
+ */
+export function dropControls(value: string): string {
+  return value.replace(/\r\n?/g, "\n").replace(CONTROL, "");
+}
+
 /** How many characters dropInvisible would take out of `value`. */
 export function countInvisible(value: string): number {
   const counts: Partial<Record<InvisibleClass, number>> = {};
