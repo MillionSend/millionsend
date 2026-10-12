@@ -145,7 +145,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `ALLOW_SIGNUP` | The first user can always register; after that signup stays closed unless this is `true`. Keep `false` when the dashboard is reachable from the internet. |
 | `TRUSTED_PROXIES` | Reverse proxies whose forwarded-client-IP headers (`X-Forwarded-For`, `CF-Connecting-IP`) are believed, comma-separated IPs or CIDRs. Default `127.0.0.1,::1` covers a proxy on the same host; add your proxy's address when it runs elsewhere. See the [nginx section](#production-nginx--tls). |
 | `WEBHOOK_ALLOW_LOCALHOST` | Local development only: lets webhook endpoints (test fires included) target `http://` and loopback/private addresses on any port. Keep `false` on any internet-reachable instance. |
-| `COMPOSE_PROFILES` | Optional compose services, comma-separated: `smtp` (the relay; mount a STARTTLS keypair first), and in the standalone file also `docs` (this documentation site), `backup` (scheduled dumps) and `mx` (the inbound MX; see [Receiving](#receiving-beta)). |
+| `COMPOSE_PROFILES` | Optional compose services, comma-separated: `smtp` (the relay; mount a STARTTLS keypair first), `mx` (the inbound MX; see [Receiving](#receiving-beta)) and `clamav` (virus scanning of received mail; see [Virus scanning](#virus-scanning)), and in the standalone file also `docs` (this documentation site) and `backup` (scheduled dumps). |
 | `PORT` | API port (default `3001`). Under compose this moves both the container's listen port and the published host port together. |
 | `UNSUBSCRIBE_BASE_URL` | Optional own host for the hosted unsubscribe pages (e.g. `https://unsubscribe.example.com`), pointed at the same web process. Unsubscribe links in mail and the page's redirects use it, and that host serves the unsubscribe flow only, so recipients and link scanners never reach the dashboard's origin, cookies or reputation. Unset: `APP_BASE_URL`. |
 | `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
@@ -195,15 +195,17 @@ connections, so separate containers and worker replicas fit without tuning.
 
 ### Inbound mail (receiving)
 
-See [Receiving](#receiving-beta). The app reads the first two; the MX process
+See [Receiving](#receiving-beta). The app reads the first four; the MX process
 reads only the `MX_*` variables. The compose `mx` service sets
 `MX_INGEST_URL`, `MX_HOSTNAME` (from `RECEIVING_MX_HOST`) and the TLS paths
 itself, so set those only for an MX on another host.
 
 | Variable | Purpose |
 | --- | --- |
-| `RECEIVING_MX_HOST` | Hostname the MX process answers at (e.g. `mx.example.com`); receiving domains point their MX record at it. Unset, receiving doesn't exist on the instance: no dashboard tab or switch, every domain reports `capabilities.receiving: "disabled"`, and the internal MX endpoints answer `404`. |
+| `RECEIVING_MX_HOST` | Hostname the MX process answers at (e.g. `mx.example.com`); receiving domains point their MX record at it. Unset, receiving doesn't exist on the instance: no dashboard tab or switch, no inboxes, every domain reports `capabilities.receiving: "disabled"`, and the internal MX endpoints answer `404`. |
 | `MX_INGEST_SECRET` | Bearer secret the MX presents to the API, at least 32 characters (`openssl rand -hex 32`). Set it together with `RECEIVING_MX_HOST`: the app refuses to boot with only one of the two. The MX process needs the same value. |
+| `SHARED_INBOX_DOMAIN` | Optional domain for inboxes that need no DNS: each team gets a subdomain of it (see [Shared inbox domain](#shared-inbox-domain)). Its wildcard MX must point at `RECEIVING_MX_HOST`, and an SES identity for it must exist in the default region. Needs `RECEIVING_MX_HOST`; unset hides the shared domain. |
+| `CLAMAV_HOST` | Optional clamd that scans every received message, as `host[:port]` (port `3310` by default), e.g. `clamav:3310` for the compose service (see [Virus scanning](#virus-scanning)). Unset, mail isn't scanned. |
 | `MX_INGEST_URL` | MX process: your API's origin plus `/internal/mx` (e.g. `https://api.example.com/internal/mx`). |
 | `MX_HOSTNAME` | MX process: the name in its greeting and EHLO, normally the same as `RECEIVING_MX_HOST`. |
 | `MX_PORT` | MX process: listen port (default `2525`). Publish host port 25 to it. |
@@ -499,7 +501,8 @@ session instead.
 
 From another machine, `nc mx.example.com 25` should answer with a `220`
 greeting naming `mx.example.com`. Then turn receiving on for a verified
-domain, publish its MX record and send it a message.
+domain, switch on its catch-all or create an inbox on it, publish its MX
+record and send it a message.
 
 To run the MX on another host, use
 [`deploy/mx`](https://github.com/MillionSend/millionsend/tree/main/deploy/mx)
@@ -512,6 +515,101 @@ travels in one request header of up to about 13 KB, past nginx's default
 8 KB (the example raises it to 16 KB). The internal MX
 endpoints answer `404` unless `RECEIVING_MX_HOST` is set, and refuse any
 request without the secret.
+
+When a release changes what the MX sends the app, such as the detailed
+authentication results the MX records for each message, upgrade the app
+first and a separate MX after. Either order keeps mail flowing: an older app
+ignores the new details, and a newer app accepts mail without them. The
+compose `mx` service runs the app's own image, so it moves with the app.
+
+**Settings → Receiving** shows the operator what the instance receives: the
+MX host, the last message, today's count, virus scanning and the shared
+inbox domain.
+
+### Shared inbox domain
+
+Optional. With a shared domain, teams create [inboxes](/concepts/inboxes#shared-domain)
+that need no DNS of their own: every team gets a subdomain, such as
+`acme.agents.example`, and each inbox a random address on it. Those addresses
+expire within 30 days, reply only inside their own threads and send to 50
+recipients a day at most.
+
+Use a domain of its own, not a subdomain of one your teams send from: the
+mail customers' agents send from it, and any abuse of it, then stays off your
+main domain's reputation. Once it is set, no team can add it, or any name
+under it, as a sending domain.
+
+1. **DNS.** At the domain's DNS provider, a wildcard MX record covers every
+   team's subdomain, so new teams need no DNS change:
+
+   | Type | Name | Value |
+   | --- | --- | --- |
+   | MX | `*.agents.example` | `mx.example.com` (your `RECEIVING_MX_HOST`), priority `10` |
+   | TXT | `_dmarc.agents.example` | `v=DMARC1; p=reject` |
+
+2. **SES identity.** Verify `agents.example` as a domain identity with Easy
+   DKIM, and publish its three DKIM records, in the instance's default SES
+   region: the first of `AWS_REGIONS`, or `AWS_REGION`. Mail from shared
+   addresses carries no team domain, so it goes out from that region and its
+   default configuration set. A verified domain identity lets SES send from
+   any subdomain of it without verifying each one
+   ([AWS: Creating and verifying identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html)).
+3. **Turn it on.** Set `SHARED_INBOX_DOMAIN=agents.example` in `.env` and run
+   `docker compose up -d`. The app refuses to boot when the value isn't a
+   lowercase hostname, or when `RECEIVING_MX_HOST` is unset.
+4. **Check.** `dig +short MX test.agents.example` prints your MX host. Create
+   an inbox with **Random address** in the dashboard, send it a message, and
+   reply from the inbox to a mailbox you own: the reply's headers should show
+   DKIM passing for `agents.example` and DMARC passing.
+
+### Virus scanning
+
+Optional. With `CLAMAV_HOST` set, every received message is scanned by
+ClamAV's clamd before it is stored: infected mail is held and its downloads
+are blocked for good (see
+[Receiving](/concepts/receiving#spam-virus-and-trust)). Both compose files
+carry a `clamav` service:
+
+1. Add `clamav` to `COMPOSE_PROFILES` and set `CLAMAV_HOST=clamav:3310` in
+   `.env`.
+2. `docker compose up -d`.
+
+The service runs ClamAV's official Debian image, `clamav/clamav-debian:1.4`,
+published for amd64 and arm64 (the Alpine-based `clamav/clamav` image is
+amd64 only). It keeps its signatures up to date by itself in the `clamav-db`
+volume. clamd listens on port 3310 inside the compose network only: its
+protocol has no authentication or encryption, so never publish the port.
+Give the host room: clamd keeps its signatures in memory, over 1 GiB and
+about twice that for a moment while it reloads them each day, and ClamAV
+recommends 4 GiB of RAM for it. After each start it takes up to a minute to
+load them.
+
+A clamd elsewhere works too, on a private network:
+`CLAMAV_HOST=scanner.internal:3310`. Messages are streamed to it with clamd's
+`INSTREAM` command, so its `StreamMaxLength` must be at least 40 MB.
+
+When clamd can't answer (stopped, still loading, slower than 30 seconds),
+mail is delivered with `virus_verdict: "processing_failed"` and a warning,
+and the failure goes to [error tracking](#error-tracking-optional): a
+scanner outage never holds mail back.
+
+### Screening agent inboxes
+
+Agent inboxes [screen](/concepts/agent-safety#prompt-injection-screening)
+mail from outside senders for prompt injection with the
+[content monitoring](#content-monitoring-optional) judge: with
+`ABUSE_JUDGE=typesafe` screening runs, and with the judge off inboxes decide
+by their rules alone. It counts apart from content monitoring, under the same
+`MONITOR_TEAM_DAILY_CAP` and `MONITOR_INSTANCE_DAILY_CAP` values, plus 200
+messages per inbox per day; past any of them, mail that needs screening is
+quarantined rather than delivered unscreened. Its verdicts never touch a
+team's risk or hold its sending.
+
+Each screened message sends TypeSafe the sender and its authentication
+results, the subject and visible text with codes masked and addresses cut to
+their domain, the hidden text that was removed, the links' text and domains
+(never fetched) and the attachment names. That is third parties' mail to your
+users: list it in your privacy notice before turning the judge on.
 
 ## Documentation site
 

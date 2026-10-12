@@ -1,21 +1,28 @@
 ---
 title: Recebimento
-description: Receba e-mails em qualquer endereço do seu próprio domínio, leia-os pela API compatível com o Resend e seja avisado pelo webhook email.received a cada mensagem. Beta.
+description: Receba e-mails no seu próprio domínio, leia pela API compatível com o Resend, espere por eles, responda e seja avisado pelo webhook email.received a cada mensagem. Beta.
 ---
 
-O recebimento transforma um domínio que você verificou numa caixa de entrada
-para todos os endereços dele. Um e-mail enviado para qualquer endereço ali
-chega ao servidor de e-mail do MillionSend, fica guardado com criptografia e
-volta para você pela API, pelo webhook `email.received`, pelo painel
-(**E-mails → Recebidos**) e pelo [servidor MCP](/pt-BR/mcp). A API é a de
-recebimento do Resend, então os SDKs oficiais do Resend funcionam com o
-MillionSend sem mudanças, `forward()` incluído.
+O recebimento transforma um domínio que você verificou num lugar que recebe
+e-mails. Um e-mail enviado para os endereços dele chega ao servidor de e-mail
+do MillionSend, fica guardado com criptografia e volta para você pela API,
+pelo webhook `email.received`, pelo painel (**Caixas de entrada → Todos os
+recebidos**) e pelo [servidor MCP](/pt-BR/mcp). A API é a de recebimento do
+Resend, então os SDKs oficiais do Resend funcionam com o MillionSend sem
+mudanças, `forward()` incluído.
+
+Quais endereços recebem é você quem decide: o endereço de cada
+[caixa de entrada](/pt-BR/concepts/inboxes) que você criar, que guarda os
+e-mails em conversas com respostas, rascunhos e regras de segurança para um
+agente de IA ou para pessoas, e, com o **pega-tudo** ligado, todos os outros
+endereços do domínio.
 
 <Callout type="info">
 O recebimento está em beta público e aparece com o selo **Beta** no painel.
-Ainda não há filtro de spam nem de vírus: o MillionSend guarda tudo o que
-chega ao seu domínio de recebimento e informa os resultados de SPF, DKIM e
-DMARC para o seu código decidir o que fazer.
+Toda mensagem ganha uma nota de spam e um nível de confiança no remetente, e
+passa por um antivírus onde a instância roda um. E-mail infectado fica
+retido; fora isso, o e-mail num endereço do pega-tudo é guardado do jeito que
+chegou, com esses resultados para o seu código decidir o que fazer.
 </Callout>
 
 ## Como funciona
@@ -26,14 +33,17 @@ entrega no host que ele indica.
 
 1. O servidor de quem envia lê o registro MX do seu domínio e se conecta ao
    MX do MillionSend.
-2. Para cada destinatário (`RCPT TO`), o MX confere se o domínio recebe aqui.
-   Um endereço de qualquer outro domínio é recusado, então o MX nunca repassa
-   e-mail para lugar nenhum.
+2. Para cada destinatário (`RCPT TO`), o MX confere se o domínio recebe aqui
+   e se o endereço tem uma caixa de entrada, a não ser que o pega-tudo do
+   domínio esteja ligado. Um endereço de qualquer outro domínio é recusado,
+   então o MX nunca repassa e-mail para lugar nenhum.
 3. A mensagem vai chegando (no máximo 40 MB). O MX verifica SPF, DKIM, DMARC
-   e ARC e entrega a mensagem ao MillionSend, que a guarda antes de o MX
-   responder `250`. A partir daí a mensagem é sua, e o servidor de quem
-   enviou terminou o trabalho.
-4. O `email.received` dispara, e a mensagem aparece na API e no painel.
+   e ARC; o MillionSend passa a mensagem pelo antivírus, onde a instância roda
+   um, dá uma nota de spam e a guarda antes de o MX responder `250`. A partir
+   daí a mensagem é sua, e o servidor de quem enviou terminou o trabalho.
+4. O `email.received` dispara, e a mensagem aparece na API e no painel. O
+   e-mail que uma caixa retém, na quarentena ou durante a análise, dispara
+   quando é entregue ou liberado.
 
 Toda recusa acontece durante essa conversa SMTP, então o servidor de quem
 envia continua com a mensagem e decide o que fazer com ela. O MillionSend
@@ -42,9 +52,10 @@ nunca envia um bounce por conta própria.
 | Resposta | Quando | O servidor de quem envia |
 | --- | --- | --- |
 | `550 5.1.1` | O domínio não recebe aqui: é desconhecido ou está com o recebimento desligado. | Devolve a mensagem ao remetente. |
+| `550 5.1.1` | O endereço não tem caixa de entrada, ou a caixa dele expirou, e o pega-tudo do domínio está desligado ("No such recipient here"). | Devolve a mensagem ao remetente. |
 | `550 5.7.1` | A equipe dona do domínio está suspensa. | Devolve a mensagem ao remetente. |
 | `552 5.3.4` | A mensagem passa de 40 MB. | Devolve a mensagem ao remetente. |
-| `452 4.2.2` | A franquia de recebimento da equipe acabou (veja [preços](#preços)). | Guarda a mensagem e tenta de novo mais tarde. |
+| `452 4.2.2` | A franquia de recebimento da equipe acabou (veja [preços](#preços)), ou a caixa recebeu mais e-mails do que pode numa hora (200 mensagens numa caixa de agente, 2.000 numa caixa de pessoas). | Guarda a mensagem e tenta de novo mais tarde. |
 | Outros `4xx`, como `451 4.3.0` | Um problema temporário do lado do MillionSend, ou mais destinatários do que uma entrega aceita (50). | Guarda a mensagem e tenta de novo, por dias se precisar. |
 
 ## Configuração
@@ -118,23 +129,49 @@ tenha um número menor. A checagem é feita ao vivo e nunca afeta o status de
 envio do domínio. Na auto-hospedagem, o valor é o `RECEIVING_MX_HOST` da sua
 instância.
 
-### 5. Faça um teste
+### 5. Escolha quais endereços recebem
 
-De qualquer caixa de e-mail, mande uma mensagem para um endereço do domínio,
-como `hello@inbound.example.com`. Ela aparece em **E-mails → Recebidos** em
-segundos, e todo endpoint de webhook inscrito em `email.received` recebe uma
-entrega.
+[Crie uma caixa de entrada](/pt-BR/concepts/inboxes#criar-uma-caixa-de-entrada)
+para cada endereço que deve receber, ou ligue o **Pega-tudo** na página do
+domínio para receber em todos os endereços (veja
+[Quais endereços recebem](#quais-endereços-recebem)). Sem nenhum dos dois, o
+domínio recusa todos os e-mails.
+
+### 6. Faça um teste
+
+De qualquer caixa de e-mail, mande uma mensagem para um desses endereços,
+como `hello@inbound.example.com`. Ela aparece em **Caixas de entrada → Todos
+os recebidos** em segundos, e todo endpoint de webhook inscrito em
+`email.received` recebe uma entrega.
 
 Para parar de receber, desligue o recebimento (`"receiving": "disabled"`).
 E-mails novos passam a ser recusados em até um minuto; o que já chegou fica
 até a [retenção](#limites) apagar. Remova também o registro MX.
 
-## Endereços
+## Quais endereços recebem
 
-Um domínio de recebimento aceita qualquer endereço dele. `support@`,
-`invoices@`, `reply+ticket-4821@`: qualquer parte local funciona, sem nada
-para criar antes. Decida no seu código o destino de cada mensagem pelo
-endereço em que ela chegou.
+Um domínio de recebimento recebe e-mails:
+
+- no endereço de cada [caixa de entrada](/pt-BR/concepts/inboxes) dele, e
+  nas variações com `+tag`: `orders+4821@` chega à caixa de `orders@`;
+- com o **pega-tudo** ligado, em todos os outros endereços também.
+  `support@`, `invoices@`, `reply+ticket-4821@`: qualquer parte local
+  funciona, sem nada para criar antes; decida no seu código o destino de cada
+  mensagem pelo endereço em que ela chegou.
+
+Com o pega-tudo desligado, qualquer outro endereço é recusado durante a
+conversa SMTP com `550 5.1.1 No such recipient here`, então o servidor de
+quem envia devolve a mensagem ao remetente e nada é guardado. O e-mail para
+uma caixa aparece nas conversas dela e em **Todos os recebidos**; o e-mail
+para um endereço do pega-tudo aparece só em **Todos os recebidos**.
+
+Donos e admins ligam o pega-tudo na página do domínio, ou com
+`PATCH /domains/{id}` e `{ "receiving_catch_all": true }`; as respostas de
+domínio trazem `receiving_catch_all`. Ele começa desligado, e foi ligado em
+todo domínio que já recebia e-mail antes de as caixas existirem. No
+MillionSend Cloud ele exige um plano pago (o Free responde
+`403 plan_limit_reached`); depois de ligado, continua ligado mesmo depois de
+um downgrade.
 
 - `received_for` lista os endereços dos seus domínios para os quais o
   servidor de quem envia de fato entregou (os destinatários do envelope
@@ -160,7 +197,7 @@ endereço em que ela chegou.
 | --- | --- |
 | Tamanho da mensagem | 40 MB (41.943.040 bytes) para a mensagem inteira como foi enviada: cabeçalhos, texto, HTML e anexos codificados para e-mail. A codificação base64 deixa os anexos cerca de um terço maiores, então cabem uns 30 MB de arquivos. Uma mensagem maior é recusada com `552 5.3.4` enquanto ainda está chegando. |
 | Retenção | 30 dias na nuvem. Na auto-hospedagem, o conteúdo segue a retenção de e-mails da instância (**Configurações → Instância**, 30 dias por padrão), e remetente, destinatários e assunto seguem `EMAIL_METADATA_RETENTION_DAYS` (30 por padrão). |
-| Filtro | Sem filtro de spam ou vírus durante o beta; confira `authentication` antes de confiar num remetente. |
+| Filtro | E-mail infectado fica retido. Fora isso, o e-mail num endereço do pega-tudo é guardado do jeito que chegou: confira `authentication`, `screening` e `spam_verdict` antes de confiar num remetente. As caixas de entrada somam [as próprias regras](/pt-BR/concepts/agent-safety). |
 
 Quando a retenção do conteúdo termina, `html`, `text`, `headers` e `raw`
 passam a vir `null`, `attachments` fica vazio e os links de download param de
@@ -197,15 +234,18 @@ dos seus envios. Quanto custa depende do plano:
   houver espaço.
 
 **Configurações → Uso** mostra os e-mails recebidos e a franquia grátis. Uma
-instância auto-hospedada conta os e-mails recebidos e nunca os limita.
+instância auto-hospedada conta os e-mails recebidos e nunca os limita. As
+caixas de entrada em si são grátis.
 
 ## Lendo e-mails recebidos
 
-Use o SDK oficial do Resend apontado para o MillionSend (`RESEND_BASE_URL`)
-ou HTTP direto. Os SDKs do MillionSend ainda não têm métodos de recebimento.
-Todo endpoint abaixo exige uma chave de **acesso total**; uma chave de
-somente envio recebe `403 restricted_api_key`, e uma chave restrita a um
-domínio só lê os e-mails recebidos nesse domínio.
+Use um [SDK do MillionSend](/pt-BR/sdks) a partir da 0.9.0
+(`emails.receiving`), o SDK oficial do Resend apontado para o MillionSend
+(`RESEND_BASE_URL`) ou HTTP direto. Todo endpoint abaixo exige uma chave de
+**acesso total**; uma chave de somente envio recebe
+`403 restricted_api_key`. Uma chave restrita a um domínio só lê os e-mails
+recebidos nesse domínio, e uma chave restrita a uma caixa só os e-mails
+entregues nela.
 
 ```ts
 import { Resend } from "resend";
@@ -224,7 +264,19 @@ const { data: files } = await resend.emails.receiving.attachments.list({ emailId
 Resend: `after` avança para e-mails mais antigos, `before` volta para os mais
 novos. Aceita `limit` (1–100, padrão 20; o Resend devolve todos quando falta
 o `limit`) e um cursor `after` ou `before`, como toda
-[listagem](/pt-BR/api-reference#paginação).
+[listagem](/pt-BR/api-reference#paginação), além destes filtros:
+
+| Parâmetro | Lista |
+| --- | --- |
+| `inbox_id` | Os e-mails entregues nessa caixa. |
+| `to` | Os e-mails com esse endereço em `received_for`. |
+| `from` | Os e-mails desse endereço, ou de um domínio e dos subdomínios dele. |
+| `subject_contains` | Os e-mails cujo assunto contém o texto (até 200 caracteres). |
+| `since` | Os e-mails recebidos depois desse momento (ISO 8601). |
+| `unread` | `true` ou `false`, junto com `inbox_id`. |
+| `wait` | Veja [Esperar por e-mails novos](#esperar-por-e-mails-novos). |
+| `include_quarantined=true` | Os retidos também. |
+| `quarantined=true` | Só os retidos. |
 
 ```sh
 curl "https://api.millionsend.com/emails/receiving?limit=20" \
@@ -256,11 +308,67 @@ curl "https://api.millionsend.com/emails/receiving?limit=20" \
           "content_disposition": "attachment",
           "size": 48213
         }
-      ]
+      ],
+      "inbox_id": null,
+      "thread_id": null,
+      "inboxes": [],
+      "screening": { "verdict": "clean", "sender_trust": "external" },
+      "spam_verdict": "pass",
+      "virus_verdict": "pass",
+      "extracted": { "kinds": [] }
     }
   ]
 }
 ```
+
+A listagem mostra os e-mails de endereços do pega-tudo e os entregues numa
+caixa; os retidos ficam de fora, a não ser que você peça. Os itens trazem os
+campos do MillionSend depois dos do Resend:
+
+- `inbox_id` e `thread_id`: a caixa em que a mensagem foi entregue (com uma
+  chave restrita a uma caixa, a dela), senão `null`. `inboxes` lista todas as
+  caixas a que ela chegou, com `inbox_id`, `thread_id` e `verdict`, nas
+  leituras com acesso total.
+- `screening`: `verdict` e `sender_trust` (veja
+  [Segurança de agentes](/pt-BR/concepts/agent-safety#confiança-no-remetente)).
+- `spam_verdict`, `virus_verdict`: veja
+  [Spam, vírus e confiança](#spam-vírus-e-confiança).
+- `extracted.kinds`: `code` e `link` quando a mensagem traz um código de
+  verificação ou um link de acesso; os valores em si só aparecem em
+  [Ler um](#ler-um).
+- `read`, quando a leitura é sobre uma caixa (`inbox_id`, ou uma chave
+  restrita a uma caixa).
+
+`include_quarantined` e `quarantined` pedem uma chave de acesso total que não
+esteja restrita a uma caixa; uma chave restrita, e o servidor MCP, recebem
+`403 restricted_api_key`.
+
+### Esperar por e-mails novos
+
+O `wait` (de 1 a 50 segundos) segura a requisição até chegar um e-mail que
+bata com os filtros, e aí responde na hora; no fim do prazo, responde uma
+lista vazia. Ele funciona junto com os filtros acima, então um agente pode
+esperar a próxima mensagem para uma caixa, de um remetente:
+
+```sh
+curl "https://api.millionsend.com/emails/receiving?inbox_id=7eeb9517-aed7-40d7-ad65-500be42ed147&from=example.org&wait=30" \
+  -H "Authorization: Bearer ms_..."
+```
+
+- Ele devolve e-mails mais novos que o `before`, o cursor desta listagem em
+  direção aos mais novos, ou mais novos que o `since`. Sem nenhum dos dois,
+  contam os últimos 60 segundos, então uma mensagem que chegou logo antes da
+  chamada não se perde.
+- A resposta traz também `held`: as mensagens que bateram e ficaram retidas
+  desde então, como `{ id, inbox_id, reason, created_at }` e nada mais, para
+  o agente saber que deve parar de esperar e avisar uma pessoa.
+- Quando o prazo acaba, a resposta é `200` com
+  `{ "object": "list", "has_more": false, "data": [], "held": [] }`.
+- Uma equipe segura 20 esperas ao mesmo tempo em cada processo da API; mais
+  uma responde `429 too_many_waits` com `retry-after: 1`.
+
+50 segundos fica abaixo dos limites de 60 segundos dos clientes MCP e de
+proxies comuns, como o `proxy_read_timeout` padrão do nginx.
 
 ### Ler um
 
@@ -303,7 +411,31 @@ autenticação e um link de download da mensagem original:
       "content_disposition": "attachment",
       "size": 48213
     }
-  ]
+  ],
+  "inbox_id": null,
+  "thread_id": null,
+  "inboxes": [],
+  "screening": {
+    "verdict": "clean",
+    "sender_trust": "external",
+    "quarantine_reason": null,
+    "reasons": [],
+    "injection_score": null,
+    "phishing_score": null,
+    "hidden_text_removed": false
+  },
+  "spam_verdict": "pass",
+  "spam_score": 0,
+  "virus_verdict": "pass",
+  "virus_signature": null,
+  "extracted_text": "Hi! The invoice is attached.",
+  "extracted": {
+    "kinds": [],
+    "code": null,
+    "link": null,
+    "link_domain_matches_sender": null,
+    "ambiguous": false
+  }
 }
 ```
 
@@ -324,8 +456,24 @@ autenticação e um link de download da mensagem original:
   mensagem cujo MIME não dá para interpretar ainda é guardada e listada; o
   que não dá para ler dela vem `null` (`headers` também, quando nenhum
   cabeçalho é reconhecido), e o `raw` traz a mensagem inteira.
+- O `html` vem exatamente como chegou. O `text` vem sem caracteres invisíveis
+  (de largura zero, de direção do texto, tags Unicode), com as quebras de
+  linha mantidas.
 - `message_id` vem do cabeçalho `Message-ID` da mensagem. Quando ela não tem
   um, o MillionSend cria `<id@received.invalid>`.
+- `extracted_text` é a parte da resposta da mensagem, sem o texto que uma
+  pessoa não vê, com o histórico citado e as assinaturas separados (veja
+  [Segurança de agentes](/pt-BR/concepts/agent-safety#texto-oculto-e-extracted_text)).
+- `extracted` traz o `code` de verificação ou o `link` de acesso da mensagem
+  (com `link_domain_matches_sender`), ou `ambiguous: true` quando dois são
+  igualmente prováveis. Eles nunca saem de e-mail retido nem de um remetente
+  que falhou na autenticação, e toda leitura de um deles fica registrada na
+  atividade da caixa.
+
+O e-mail retido responde `403 email_quarantined` ("This email is
+quarantined; a person can release it in the dashboard") para chaves
+restritas a uma caixa e clientes MCP, e o e-mail ainda em análise responde
+`404` para eles.
 
 `authentication` informa SPF, DKIM e DMARC com as palavras do Resend:
 
@@ -347,6 +495,52 @@ painel.
 Qualquer outro valor quer dizer que o `from` pode ser falso, mas `gray`
 também aparece em e-mail legítimo de um domínio que pede para o DMARC não ser
 aplicado.
+
+O MX também guarda os detalhes por trás dessas palavras: o resultado do DMARC
+antes de ser resumido, a política que o domínio do remetente publica, os
+domínios cujas assinaturas DKIM estavam alinhadas e o domínio que o SPF
+checou. A API mantém as palavras do Resend; o painel usa os detalhes para
+explicar cada resultado cinza, e o nível de
+[confiança no remetente](/pt-BR/concepts/agent-safety#confiança-no-remetente)
+é calculado a partir deles:
+
+| Resultado cinza | O que quer dizer |
+| --- | --- |
+| DMARC, a mensagem passou | Passou no DMARC, mas o domínio do remetente usa `p=none`, então os servidores não são orientados a bloquear e-mails que falham. |
+| DMARC, a mensagem falhou | Falhou no DMARC, e o domínio do remetente usa `p=none`, que não pede para bloquear. |
+| DMARC, sem registro | O domínio do remetente não tem política DMARC. |
+| DKIM `policy` | Assinatura válida de outro domínio, não do domínio do remetente, então não prova quem escreveu. |
+| SPF `softfail` | O servidor de envio não está na lista do domínio do remetente, que só pede uma falha leve. |
+| SPF `neutral` ou `none` | O domínio do remetente não diz quais servidores podem enviar por ele. |
+
+`processing_failed` quer dizer que não deu para verificar: o DNS demorou ou o
+registro está malformado.
+
+### Spam, vírus e confiança
+
+Cada mensagem traz mais três resultados:
+
+- **`spam_verdict`**: `pass`, `gray` ou `fail`, a partir do `spam_score`, uma
+  nota local montada com a autenticação, a saudação do servidor de envio,
+  cabeçalhos que faltam, um nome de exibição que mostra outro endereço, um
+  Reply-To de outra organização, texto oculto, encurtadores de link e links
+  com endereço IP, links cujo texto cita outro domínio, e anexos de programas
+  ou scripts. De 50 para cima é reprovado, de 25 a 49 é cinza. Nenhuma lista
+  de bloqueio externa é consultada. Numa caixa, o e-mail reprovado vai para a
+  pasta `spam`; num endereço do pega-tudo, ele só é informado.
+- **`virus_verdict`**: `pass`, `fail` (com `virus_signature`, o malware
+  encontrado), `processing_failed` (o antivírus não terminou; a mensagem é
+  entregue, com um aviso) ou `null` (a instância não verifica). O e-mail
+  infectado fica retido: numa caixa ele vai para a quarentena, e num endereço
+  do pega-tudo sai da listagem e não dispara `email.received` até uma pessoa
+  liberá-lo no painel. O `raw` dele vem `null`, os downloads respondem
+  `410 email_blocked`, e o encaminhamento pelo servidor o recusa, mesmo
+  depois de liberado.
+- **`screening.sender_trust`**: o quanto o remetente está comprovado, de
+  `owner` até `failed`; veja
+  [Segurança de agentes](/pt-BR/concepts/agent-safety#confiança-no-remetente).
+
+As mensagens recebidas antes de esses resultados existirem vêm com `null`.
 
 ### Anexos
 
@@ -389,6 +583,9 @@ API: o próprio link é a credencial.
   que o remetente declarou fica em `content_type`.
 - Downloads sempre são servidos como arquivo (`Content-Disposition:
   attachment`), nunca exibidos numa aba do navegador.
+- Uma mensagem com vírus responde `410 email_blocked` ("This email carries
+  malware; downloads are blocked") antes de qualquer coisa ser
+  descriptografada.
 
 ## Encaminhar e responder
 
@@ -427,11 +624,62 @@ await resend.emails.send({
 });
 ```
 
+### Responder e encaminhar pelo servidor
+
+`POST /emails/receiving/{id}/reply` e `POST /emails/receiving/{id}/forward`
+fazem isso numa chamada só, com os cabeçalhos da conversa já preenchidos:
+
+```sh
+curl -X POST "https://api.millionsend.com/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/reply" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-1042-reply" \
+  -d '{ "text": "Thanks, we are on it." }'
+```
+
+- **Responder** aceita `text` ou `html`, `subject`, `cc`, `bcc` e
+  `reply_all`. Vai para o `Reply-To` da mensagem, ou então para o remetente;
+  o `reply_all` acrescenta os outros destinatários como `cc`, e o `bcc` nunca
+  é copiado.
+- **Encaminhar** aceita `to` (obrigatório), `cc`, `bcc`, um recado em `text`
+  ou `html`, `subject` e `mode`: `inline`, o padrão, cita o original abaixo de
+  uma linha `---------- Forwarded message ---------` com os anexos dele;
+  `attachment` anexa a mensagem inteira como `forwarded_message.eml`. Os dois
+  contam nos 10 MiB de anexos que um envio leva.
+- O `from` é qualquer endereço de um domínio verificado da sua equipe; por
+  padrão, o endereço da caixa a que a mensagem chegou, senão o primeiro
+  endereço de `received_for`. O `inbox_id` escolhe entre as caixas a que a
+  mensagem chegou.
+- `requires_approval: true` segura o envio para uma pessoa.
+
+Eles respondem `200` com `{ "object": "email", "id", "thread_id", "inbox_id" }`;
+`202` com um rascunho quando as regras da caixa retêm o envio; `403` para
+e-mail retido ou infectado (`email_quarantined`), para as regras da caixa
+(`inbox_send_policy`) ou para uma chave restrita fora da própria caixa
+(`restricted_api_key`); `404`; `409` para um `Idempotency-Key` reaproveitado;
+`422`; e `429 inbox_send_cap_reached`. O e-mail de um endereço do pega-tudo é
+enviado como qualquer envio: nenhuma regra de caixa vale, a não ser que o
+`from` seja o endereço de uma caixa. Veja
+[Caixas de entrada → Responder e encaminhar](/pt-BR/concepts/inboxes#responder-e-encaminhar).
+
+## Excluir e-mails recebidos
+
+`DELETE /emails/receiving/{id}` apaga um e-mail recebido agora, em vez de no
+fim da retenção: a mensagem, os anexos e o lugar dela em caixas e conversas
+(uma conversa que fica vazia vai junto). Responde
+`{ "object": "email", "id": "…", "deleted": true }`. Exige uma chave de
+acesso total que não esteja restrita a uma caixa, e no painel um dono ou
+admin (**Excluir agora**). As entregas de webhook já feitas mantêm a cópia só
+com metadados até a retenção do próprio log de entregas.
+
 ## Webhook
 
 `email.received` dispara uma vez para cada mensagem guardada para a sua
-equipe, nos endpoints inscritos nele ou em todos os eventos. Como o do Resend,
-ele só traz metadados: busque o conteúdo com
+equipe, nos endpoints inscritos nele ou em todos os eventos, assim que a
+mensagem fica visível: na hora para um endereço do pega-tudo, e na entrega
+para uma caixa. O e-mail que uma caixa retém, na quarentena ou durante a
+análise, e o e-mail infectado só disparam depois de entregues ou liberados.
+Como o do Resend, ele só traz metadados: busque o conteúdo com
 `GET /emails/receiving/{email_id}`. Quando uma entrega posterior da mesma
 mensagem chega a mais endereços seus, chega mais um `email.received` com o
 mesmo `email_id`, e o `received_for` dele só lista os endereços novos, para
@@ -464,34 +712,51 @@ cada endereço ser avisado uma vez só.
 }
 ```
 
-Assinaturas, novas tentativas e o log de entregas funcionam como em qualquer
-outro evento; veja [Webhooks](/pt-BR/concepts/webhooks).
+Um endpoint limitado a algumas caixas (`inbox_ids`) só recebe o
+`email.received` dos e-mails entregues numa delas. Assinaturas, novas
+tentativas e o log de entregas funcionam como em qualquer outro evento; veja
+[Webhooks](/pt-BR/concepts/webhooks).
 
 ## Painel
 
-**E-mails → Recebidos** lista os e-mails recebidos com remetente,
-destinatários, assunto, horário, resultados de SPF, DKIM e DMARC e número de
-anexos. Ao abrir uma mensagem, o HTML aparece isolado, com scripts e imagens
-remotas bloqueados e imagens inline exibidas, junto com a versão em texto, os
-cabeçalhos, os resultados de autenticação, os downloads dos anexos e a
-mensagem original.
+**Caixas de entrada → Todos os recebidos** lista tudo o que os seus domínios
+receberam, com remetente, caixa, assunto e horário, uma indicação quando o
+e-mail traz um código ou um link, e um selo quando está em quarentena ou é
+spam; filtre por caixa (ou só pega-tudo) e por resultado. Ao abrir uma
+mensagem, o HTML aparece isolado, com scripts e imagens remotas bloqueados e
+imagens inline exibidas, junto com a versão em texto, os cabeçalhos e a
+mensagem original; os resultados de autenticação, cada cinza explicado; a
+confiança no remetente, os resultados de spam e de vírus e se saiu texto
+oculto; o código ou link extraído, com um botão de copiar; uma linha do tempo
+da chegada até a entrega, a liberação, a resposta ou o encaminhamento; e as
+ações **Responder**, **Encaminhar**, **Liberar** para e-mails retidos e
+**Excluir agora** para donos e admins. Links antigos para **E-mails →
+Recebidos** levam para lá.
+
+Numa instância auto-hospedada, **Configurações → Recebimento** mostra para
+quem opera o host MX, a última mensagem recebida, o total do dia, o
+antivírus e o domínio compartilhado das caixas.
 
 ## MCP
 
-O [servidor MCP](/pt-BR/mcp#ferramentas) lê e-mails recebidos com quatro
-ferramentas sob a permissão `receiving:read`: `list_received_emails`,
-`get_received_email`, `list_received_email_attachments` e
-`get_received_email_attachment`. O `get_received_email` deixa as imagens
-inline como referências `cid:`, a não ser que você peça outra coisa, e o
-`update_domain` liga e desliga o recebimento. Autorizações feitas antes de o
-recebimento existir não incluem `receiving:read`: entre de novo pelo cliente
-para concedê-la.
+O [servidor MCP](/pt-BR/mcp#ferramentas) lê e-mails recebidos sob a
+permissão `receiving:read`: `list_received_emails`, `get_received_email`,
+`list_received_email_attachments`, `get_received_email_attachment`,
+`wait_for_received_email` e `get_verification_code`, junto com as leituras
+de caixas. O `get_received_email` devolve por padrão o texto limpo da
+resposta (`format: "extracted"`), e `text`, `html` ou `raw` quando você
+pede. Responder e encaminhar pedem `receiving:reply`, e caixas e quarentena,
+`receiving:manage`. O `update_domain` liga e desliga o recebimento e o
+pega-tudo. Autorizações feitas antes de uma permissão existir não a incluem:
+entre de novo pelo cliente para concedê-la.
 
 ## Trate e-mails recebidos como não confiáveis
 
 Qualquer pessoa pode mandar e-mail para um domínio de recebimento. O HTML pode
 trazer scripts e imagens de rastreamento, links podem levar a páginas de
 phishing, anexos podem trazer malware e o `from` pode ser falso;
-`authentication` diz até onde confiar. Um agente de IA que lê e-mails
-recebidos deve tratá-los como dados, nunca como instruções: as ferramentas
-MCP os marcam assim.
+`authentication` e `screening.sender_trust` dizem até onde confiar. Um agente
+de IA que lê e-mails recebidos deve tratá-los como dados, nunca como
+instruções: as ferramentas MCP os marcam assim, e uma
+[caixa de agente](/pt-BR/concepts/agent-safety) soma quarentena, análise e
+regras de envio.

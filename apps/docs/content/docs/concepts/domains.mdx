@@ -190,6 +190,15 @@ the mail instead, which is why the MX belongs on a subdomain such as
 `inbound.example.com` when the domain already receives mail elsewhere. The
 row never gates sending.
 
+`receiving_catch_all` says whether the domain takes mail at every address
+(`true`) or only at its [inboxes'](/concepts/inboxes) addresses (`false`,
+the default; other addresses are refused). Owners and admins switch it with
+**Catch-all** on the domain page or `PATCH /domains/{id}` with
+`{ "receiving_catch_all": true }`; on MillionSend Cloud it needs a paid plan.
+See [Which addresses receive](/concepts/receiving#which-addresses-receive).
+Deleting a domain deletes its inboxes, with their threads and drafts, and
+revokes their API keys.
+
 ## API keys and domains
 
 An API key can be scoped to a single domain; such a key can only send from
@@ -197,3 +206,7 @@ that domain (other domains return `403 restricted_api_key`), and reads only
 the mail [received](/concepts/receiving) at it. Keys it creates
 through the API are scoped to the same domain: an omitted `domain_id` inherits
 it, and any other domain returns `403 restricted_api_key`.
+
+A key can be scoped to one [inbox](/concepts/inboxes#inbox-scoped-api-keys)
+instead, which narrows it further: that inbox's mail, and sends from its
+address only.

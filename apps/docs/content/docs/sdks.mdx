@@ -10,8 +10,8 @@ repositories under the [MillionSend GitHub org](https://github.com/MillionSend).
 
 Since the API is Resend wire-compatible, the official Resend SDKs also work —
 point them at MillionSend via their base-URL option (e.g. `RESEND_BASE_URL`).
-That is also the way to [received mail](/concepts/receiving) for now: the
-MillionSend SDKs don't have receiving methods yet.
+From 0.9.0, every MillionSend SDK also covers
+[received mail and inboxes](#receiving-and-inboxes).
 
 ## Base URL
 
@@ -155,7 +155,7 @@ $email = $ms->emails->send([
 
 ```toml
 [dependencies]
-millionsend = "0.2"
+millionsend = "0.9"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -181,7 +181,7 @@ let sent = ms.emails.send(&SendEmailOptions {
 <dependency>
   <groupId>com.millionsend</groupId>
   <artifactId>millionsend-java</artifactId>
-  <version>0.2.0</version>
+  <version>0.9.0</version>
 </dependency>
 ```
 
@@ -226,7 +226,7 @@ var res = await client.EmailSendAsync(new EmailMessage
 ```elixir
 # mix.exs
 def deps do
-  [{:millionsend, "~> 0.2"}]
+  [{:millionsend, "~> 0.9"}]
 end
 ```
 
@@ -243,3 +243,45 @@ config :millionsend, MillionSend.Client,
     html: "<strong>It works!</strong>"
   })
 ```
+
+## Receiving and inboxes
+
+From 0.9.0, every SDK reads [received mail](/concepts/receiving) and works
+with [inboxes](/concepts/inboxes), with the same tree in each language's
+idiom (the names below are Node's):
+
+| Resource | Methods |
+| --- | --- |
+| `emails.receiving` | `list` (with `wait`, `since`, `inboxId`, `to`, `from`, `subjectContains`, `unread`, `includeQuarantined`), `get`, `reply`, `forward`, `remove` |
+| `emails.receiving.attachments` | `list`, `get` |
+| `inboxes` | `create`, `list`, `get` (by id or address), `update`, `remove` |
+| `inboxes.safety` | `get`, `update` |
+| `inboxes.codes` | `latest` (with `from`, `wait`, `maxAge`) |
+| `inboxes.quarantine` | `list`, `release` (with `trustSender`) |
+| `inboxes.labels` | `list`, `create`, `update`, `remove` |
+| `inboxes.threads` | `list`, `search`, `get`, `update`, `remove` |
+| `inboxes.threads.emails` | `list`, `get`, `reply`, `forward` |
+| `inboxes.drafts` | `list`, `create`, `get`, `update`, `remove`, `send`, `reject` |
+
+```ts
+import { MillionSend } from "millionsend";
+
+const ms = new MillionSend("ms_123");
+
+// Wait up to 30 seconds for the next email delivered to an inbox.
+const { data: page } = await ms.emails.receiving.list({ inboxId: "7eeb9517-aed7-40d7-ad65-500be42ed147", wait: 30 });
+
+// The newest verification code or sign-in link it received.
+const { data: code } = await ms.inboxes.codes.latest("7eeb9517-aed7-40d7-ad65-500be42ed147", { wait: 30 });
+```
+
+- Reply, forward and draft sends take an idempotency key, and the SDK sends
+  one for you.
+- A reply or forward the inbox's rules hold answers a draft instead of the
+  sent email, and the SDKs say which: in Node the result carries
+  `kind: "sent"` or `kind: "draft"`, and each language has its equivalent.
+- Unknown fields and enum values are kept or ignored, never an error, so a
+  newer API doesn't break an older SDK.
+- Domains gain `receiving_catch_all`, API keys `inbox_id`, webhooks
+  `inbox_ids`, and the webhook event types `email.received` and the inbox
+  events.

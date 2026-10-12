@@ -202,6 +202,16 @@ com número menor leva os e-mails no lugar dele, e é por isso que o MX deve
 ficar num subdomínio como `inbound.example.com` quando o domínio já recebe
 e-mail em outro lugar. A linha nunca condiciona o envio.
 
+O `receiving_catch_all` diz se o domínio recebe em qualquer endereço
+(`true`) ou só nos endereços das [caixas de entrada](/pt-BR/concepts/inboxes)
+dele (`false`, o padrão; os outros endereços são recusados). Donos e admins
+ligam e desligam no **Pega-tudo** da página do domínio ou com
+`PATCH /domains/{id}` e `{ "receiving_catch_all": true }`; no MillionSend
+Cloud ele exige um plano pago. Veja
+[Quais endereços recebem](/pt-BR/concepts/receiving#quais-endereços-recebem).
+Excluir um domínio exclui as caixas dele, com as conversas e os rascunhos, e
+revoga as chaves de API delas.
+
 ## Chaves de API e domínios
 
 Uma chave de API pode ficar restrita a um único domínio; essa chave só envia
@@ -210,3 +220,8 @@ e só lê os e-mails [recebidos](/pt-BR/concepts/receiving) nele. As chaves que
 ela cria pela API ficam restritas ao mesmo domínio: um
 `domain_id` omitido herda esse domínio, e qualquer outro domínio retorna
 `403 restricted_api_key`.
+
+Uma chave também pode ficar restrita a uma
+[caixa de entrada](/pt-BR/concepts/inboxes#chaves-de-api-restritas-a-uma-caixa),
+o que a limita ainda mais: os e-mails dessa caixa, e envios só pelo endereço
+dela.

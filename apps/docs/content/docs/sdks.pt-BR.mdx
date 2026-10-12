@@ -11,9 +11,8 @@ repositórios próprios na
 
 Como a API é compatível com a do Resend, os SDKs oficiais do
 Resend também funcionam — aponte-os para o MillionSend pela opção de URL base
-(ex.: `RESEND_BASE_URL`). Por enquanto, esse também é o caminho para os
-[e-mails recebidos](/pt-BR/concepts/receiving): os SDKs do MillionSend ainda
-não têm métodos de recebimento.
+(ex.: `RESEND_BASE_URL`). A partir da 0.9.0, todo SDK do MillionSend também
+cobre os [e-mails recebidos e as caixas de entrada](#recebimento-e-caixas-de-entrada).
 
 ## URL base
 
@@ -158,7 +157,7 @@ $email = $ms->emails->send([
 
 ```toml
 [dependencies]
-millionsend = "0.2"
+millionsend = "0.9"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -184,7 +183,7 @@ let sent = ms.emails.send(&SendEmailOptions {
 <dependency>
   <groupId>com.millionsend</groupId>
   <artifactId>millionsend-java</artifactId>
-  <version>0.2.0</version>
+  <version>0.9.0</version>
 </dependency>
 ```
 
@@ -229,7 +228,7 @@ var res = await client.EmailSendAsync(new EmailMessage
 ```elixir
 # mix.exs
 def deps do
-  [{:millionsend, "~> 0.2"}]
+  [{:millionsend, "~> 0.9"}]
 end
 ```
 
@@ -246,3 +245,46 @@ config :millionsend, MillionSend.Client,
     html: "<strong>It works!</strong>"
   })
 ```
+
+## Recebimento e caixas de entrada
+
+A partir da 0.9.0, todo SDK lê os [e-mails recebidos](/pt-BR/concepts/receiving)
+e trabalha com as [caixas de entrada](/pt-BR/concepts/inboxes), com a mesma
+árvore no jeito de cada linguagem (os nomes abaixo são os do Node):
+
+| Recurso | Métodos |
+| --- | --- |
+| `emails.receiving` | `list` (com `wait`, `since`, `inboxId`, `to`, `from`, `subjectContains`, `unread`, `includeQuarantined`), `get`, `reply`, `forward`, `remove` |
+| `emails.receiving.attachments` | `list`, `get` |
+| `inboxes` | `create`, `list`, `get` (pelo id ou pelo endereço), `update`, `remove` |
+| `inboxes.safety` | `get`, `update` |
+| `inboxes.codes` | `latest` (com `from`, `wait`, `maxAge`) |
+| `inboxes.quarantine` | `list`, `release` (com `trustSender`) |
+| `inboxes.labels` | `list`, `create`, `update`, `remove` |
+| `inboxes.threads` | `list`, `search`, `get`, `update`, `remove` |
+| `inboxes.threads.emails` | `list`, `get`, `reply`, `forward` |
+| `inboxes.drafts` | `list`, `create`, `get`, `update`, `remove`, `send`, `reject` |
+
+```ts
+import { MillionSend } from "millionsend";
+
+const ms = new MillionSend("ms_123");
+
+// Espera até 30 segundos pelo próximo e-mail entregue numa caixa.
+const { data: page } = await ms.emails.receiving.list({ inboxId: "7eeb9517-aed7-40d7-ad65-500be42ed147", wait: 30 });
+
+// O código de verificação ou link de acesso mais recente que ela recebeu.
+const { data: code } = await ms.inboxes.codes.latest("7eeb9517-aed7-40d7-ad65-500be42ed147", { wait: 30 });
+```
+
+- Responder, encaminhar e enviar rascunhos aceitam uma chave de
+  idempotência, e o SDK manda uma por você.
+- Uma resposta ou um encaminhamento que as regras da caixa retêm devolve um
+  rascunho em vez do e-mail enviado, e os SDKs dizem qual dos dois veio: no
+  Node o resultado traz `kind: "sent"` ou `kind: "draft"`, e cada linguagem
+  tem o equivalente.
+- Campos e valores de enum desconhecidos são mantidos ou ignorados, nunca
+  viram erro, então uma API mais nova não quebra um SDK mais antigo.
+- Os domínios ganham `receiving_catch_all`, as chaves de API `inbox_id`, os
+  webhooks `inbox_ids`, e os tipos de evento de webhook ganham o
+  `email.received` e os eventos das caixas.

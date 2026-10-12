@@ -44,6 +44,13 @@ equipe, e o mesmo vale para todo endpoint `/emails/receiving`. Uma chave
 também pode ficar restrita a um único domínio, limitando de quais endereços
 `from` ela pode enviar e quais e-mails recebidos ela lê.
 
+Uma chave de acesso total pode, em vez disso, ficar restrita a uma
+[caixa de entrada](/pt-BR/concepts/inboxes) (`inbox_id`): ela só lê e
+trabalha nessa caixa, só envia pelo endereço dela e recebe
+`403 restricted_api_key` em todas as outras rotas, inclusive a de criar
+chaves. Veja
+[Chaves de API restritas a uma caixa](/pt-BR/concepts/inboxes#chaves-de-api-restritas-a-uma-caixa).
+
 Uma chave criada com `POST /api-keys` nunca é mais ampla que a chave que a
 criou. Uma chave restrita a um domínio cria chaves restritas ao mesmo domínio:
 um `domain_id` omitido ou nulo herda esse domínio, e qualquer outro domínio
@@ -75,8 +82,28 @@ deliberadas e explícitas:
   o domínio e depois ligue o recebimento com `PATCH /domains/{id}`.
   `GET /emails/receiving` sem `limit` devolve 20 e-mails, não todos, e um HTML
   que passaria de 40 MB com as imagens inline (no Resend, 100 MB) vem com as
-  referências `cid:` (`html_format: "cid"`). Veja
+  referências `cid:` (`html_format: "cid"`). Diferente do Resend, um domínio
+  de recebimento só recebe nos endereços das caixas de entrada dele, a não ser
+  que o pega-tudo esteja ligado (`receiving_catch_all`, um recurso pago na
+  nuvem); os outros endereços são recusados durante a conversa SMTP. Os
+  e-mails recebidos ganham campos de extensão (`screening`, `spam_verdict`,
+  `virus_verdict`, `extracted_text`, `extracted` e outros), o `text` vem sem
+  caracteres invisíveis, e o e-mail infectado fica retido, com os downloads
+  respondendo `410 email_blocked`. O MillionSend acrescenta long-polling
+  (`?wait=`), `POST /emails/receiving/{id}/reply` e `/forward` pelo servidor,
+  e `DELETE /emails/receiving/{id}`. Veja
   [Recebimento](/pt-BR/concepts/receiving).
+- As caixas de entrada são suportadas (beta): os 26 endpoints do
+  pré-lançamento das Inboxes do Resend, em `/inboxes`, com os mesmos caminhos
+  e formatos, então `resend.inboxes.*` do `resend@6.32.1-preview-inboxes.6`
+  funciona. Criar uma caixa ou um rascunho devolve o objeto inteiro; o `kind`
+  padrão é `agent`; as configurações do agente hospedado devolvem um agente
+  vazio no `GET` e `422` no `PATCH`; a busca de conversas só procura nos
+  assuntos, nos remetentes e nos destinatários; e uma resposta, um
+  encaminhamento ou um envio de rascunho que as regras da caixa retêm responde
+  `202` com o rascunho em vez de `200` com o e-mail. As extensões são só campos e endpoints extras, nunca
+  valores novos nos enums do Resend. Veja
+  [Caixas de entrada → Compatibilidade com o Resend](/pt-BR/concepts/inboxes#compatibilidade-com-o-resend).
 - Contatos são globais à equipe — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
@@ -118,7 +145,7 @@ deliberadas e explícitas:
   falham.
 - `GET /usage` existe (o Resend não tem endpoint de uso): o plano efetivo,
   seus limites (`emails_per_day` em planos diários, `emails_per_month` em
-  planos mensais, `domains`, `contacts`), o total aceito hoje e, em um plano mensal, um
+  planos mensais, `domains`, `contacts`, `inboxes`), o total aceito hoje e, em um plano mensal, um
   objeto `period` — `emails_sent`, `included`, `overage_enabled`,
   `overage_usd_per_1k`, `starts_at`, `ends_at`. Instâncias auto-hospedadas
   reportam `cloud: false` com plano, limites e period nulos.
@@ -231,20 +258,53 @@ Erros usam o formato do Resend:
 { "statusCode": 422, "name": "validation_error", "message": "..." }
 ```
 
+Além dos nomes do Resend, os [e-mails recebidos](/pt-BR/concepts/receiving) e
+as [caixas de entrada](/pt-BR/concepts/inboxes) respondem estes:
+
+| Status, nome | Quando |
+| --- | --- |
+| `403 restricted_api_key` | Uma chave restrita a uma caixa fora da caixa dela, ou enviando de outro endereço; `include_quarantined` vindo de uma chave restrita ou do servidor MCP. |
+| `403 inbox_send_policy` | As regras de uma caixa recusam um envio: um endereço do domínio compartilhado começando uma conversa, ou um envio pelo endereço de uma caixa de agente no `POST /emails`, no `POST /emails/batch` ou no relay SMTP que as regras reteriam. A mensagem lista os motivos. |
+| `429 inbox_send_cap_reached` | O limite diário de envios da caixa acabou; o `retry-after` conta até a meia-noite UTC. |
+| `403 approval_required` | Um agente enviando um rascunho que espera aprovação. |
+| `403 email_quarantined` | Um agente lendo, respondendo ou encaminhando um e-mail retido, ou qualquer encaminhamento de e-mail infectado. |
+| `410 email_blocked` | Um download de e-mail infectado. |
+| `429 too_many_waits` | Long-polls demais ao mesmo tempo de uma equipe; `retry-after: 1`. |
+| `403 validation_error` | O limite de caixas do plano, com a mensagem do Resend. |
+| `403 plan_limit_reached` | Pega-tudo no plano Free. |
+| `404 not_found` | Uma caixa, conversa, etiqueta, rascunho ou cursor de paginação desconhecido, com as mensagens do Resend (`Inbox not found.`). |
+
 ## Idempotência
 
-`POST /emails` e `POST /emails/batch` aceitam um header `Idempotency-Key`.
-Repetir com a mesma chave e o mesmo payload retorna a resposta original em
-vez de enviar de novo; a mesma chave com payload diferente retorna `409`.
+`POST /emails` e `POST /emails/batch` aceitam um header `Idempotency-Key`, e
+os envios dos e-mails recebidos e das caixas também: respostas,
+encaminhamentos e envios de rascunho das caixas, e
+`POST /emails/receiving/{id}/reply` e `/forward`. Repetir com a mesma chave e
+o mesmo payload retorna a resposta original em vez de enviar de novo; a mesma
+chave com payload diferente retorna `409`. Um envio que ficou retido para
+aprovação responde à repetição com o mesmo rascunho, como `202`.
 
 ## Paginação
 
 Endpoints de listagem aceitam `limit` (1–100, padrão 20) e cursores `after` /
 `before` carregando o id de um item de uma página anterior. As respostas
 incluem `has_more`. As listagens vêm do mais antigo para o mais novo, menos
-`GET /emails/receiving`, que vem do mais novo para o mais antigo como no
-Resend: ali `after` avança para e-mails mais antigos. Os anexos de um e-mail
-recebido vêm todos de uma vez, a não ser que você passe `limit`.
+onde o Resend ordena de outro jeito, e ali o `after` avança na direção dessa
+ordem:
+
+| Listagem | Ordem |
+| --- | --- |
+| `GET /emails/receiving` | Do mais novo para o mais antigo: o `after` avança para e-mails mais antigos. |
+| `GET /inboxes` | Das mais novas para as mais antigas. |
+| `GET /inboxes/{id}/threads` e `/threads/search` | Da atividade mais recente para a mais antiga. |
+| `GET /inboxes/{id}/threads/{thread_id}/emails` | Do mais antigo para o mais novo: o `after` avança para e-mails mais novos. |
+| `GET /inboxes/{id}/drafts` | Dos atualizados mais recentemente para os mais antigos. |
+| `GET /inboxes/{id}/labels` | Das mais antigas para as mais novas, todas de uma vez, sem `has_more`. |
+| `GET /inboxes/{id}/quarantine` | Do mais novo para o mais antigo. |
+
+Os anexos de um e-mail recebido vêm todos de uma vez, a não ser que você
+passe `limit`. Em `/inboxes`, um cursor que não aponta nenhum item da
+listagem responde `404`, como no Resend.
 
 ## Links de download assinados
 
@@ -255,5 +315,6 @@ da API, `/receiving/raw/{email_id}` e
 `/receiving/attachments/{email_id}/{attachment_id}`, com `expires` (segundos
 Unix) e `signature` na query. Não precisam de chave de API, valem por uma
 hora (`expires_at`) para um e-mail e um anexo de uma equipe, e respondem `403`
-depois de expirar ou se forem alterados; peça links novos à API. Veja
+depois de expirar ou se forem alterados; peça links novos à API. Uma mensagem
+com vírus responde `410 email_blocked` no lugar, para sempre. Veja
 [Recebimento → Downloads](/pt-BR/concepts/receiving#downloads).

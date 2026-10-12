@@ -42,6 +42,12 @@ and the team's whole archive, and so does every `/emails/receiving` endpoint.
 A key can additionally be scoped to a single domain, restricting which `from`
 addresses it may send and which received mail it reads.
 
+A full-access key can instead be scoped to one [inbox](/concepts/inboxes)
+(`inbox_id`): it reads and works that inbox only, sends only from its
+address, and gets `403 restricted_api_key` on every other route, key creation
+included. See
+[Inbox-scoped API keys](/concepts/inboxes#inbox-scoped-api-keys).
+
 A key created with `POST /api-keys` is never broader than the key that
 created it. A domain-scoped key creates keys scoped to its own domain: an
 omitted or null `domain_id` inherits that domain, and any other domain returns
@@ -72,7 +78,26 @@ remaining deltas are deliberate and loud:
   enable it with `PATCH /domains/{id}`. `GET /emails/receiving` without
   `limit` returns 20 emails rather than all of them, and HTML whose inline
   images would take it past 40 MB (Resend: 100 MB) is served with its `cid:`
-  references (`html_format: "cid"`). See [Receiving](/concepts/receiving).
+  references (`html_format: "cid"`). Unlike Resend, a receiving domain takes
+  mail only at its inboxes' addresses unless its catch-all is on
+  (`receiving_catch_all`, a paid feature on Cloud); other addresses are
+  refused during the SMTP session. Received mail gains extension fields
+  (`screening`, `spam_verdict`, `virus_verdict`, `extracted_text`,
+  `extracted` and more), `text` comes without invisible characters, and
+  infected mail is held, with its downloads answering `410 email_blocked`.
+  MillionSend adds long-polling (`?wait=`), server-side
+  `POST /emails/receiving/{id}/reply` and `/forward`, and
+  `DELETE /emails/receiving/{id}`. See [Receiving](/concepts/receiving).
+- Inboxes are supported (beta): the 26 endpoints of Resend's Inboxes
+  preview, under `/inboxes`, with the same paths and shapes, so
+  `resend.inboxes.*` from `resend@6.32.1-preview-inboxes.6` works.
+  Creating an inbox or a draft answers the whole object; `kind` defaults to
+  `agent`; the hosted-agent settings answer an empty agent on `GET` and
+  `422` on `PATCH`; thread search reads subjects, senders and recipients
+  only; and a reply, forward or draft send that the inbox's rules hold
+  answers `202` with the draft instead of `200` with the email. Extensions
+  are extra fields and endpoints only, never new values in Resend's enums.
+  See [Inboxes → Resend compatibility](/concepts/inboxes#resend-compatibility).
 - Contacts are team-global — audience endpoints are served as aliases of
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
@@ -111,7 +136,7 @@ remaining deltas are deliberate and loud:
   contacts still update; in a batch only the new ones fail.
 - `GET /usage` exists (Resend has no usage endpoint): the effective plan, its
   limits (`emails_per_day` on daily plans, `emails_per_month` on monthly ones,
-  `domains`, `contacts`), today's accepted count and, on a monthly plan, a `period` object
+  `domains`, `contacts`, `inboxes`), today's accepted count and, on a monthly plan, a `period` object
   — `emails_sent`, `included`, `overage_enabled`, `overage_usd_per_1k`,
   `starts_at`, `ends_at`. Self-hosted instances report `cloud: false` with
   null plan, limits and period.
@@ -223,20 +248,51 @@ Errors use Resend's format:
 { "statusCode": 422, "name": "validation_error", "message": "..." }
 ```
 
+Besides Resend's names, [received mail](/concepts/receiving) and
+[inboxes](/concepts/inboxes) answer these:
+
+| Status, name | When |
+| --- | --- |
+| `403 restricted_api_key` | An inbox-scoped key outside its inbox, or sending from another address; `include_quarantined` from an inbox-scoped key or the MCP server. |
+| `403 inbox_send_policy` | An inbox's rules refuse a send: a shared-domain address starting a conversation, or a send from an agent inbox's address on `POST /emails`, `POST /emails/batch` or the SMTP relay that the rules would hold. The message lists the reasons. |
+| `429 inbox_send_cap_reached` | The inbox's daily send cap is used; `retry-after` counts to midnight UTC. |
+| `403 approval_required` | An agent sending a draft that waits for approval. |
+| `403 email_quarantined` | An agent reading, replying to or forwarding held mail, or any forward of infected mail. |
+| `410 email_blocked` | A download of infected mail. |
+| `429 too_many_waits` | Too many long-polls at once from one team; `retry-after: 1`. |
+| `403 validation_error` | The plan's inbox limit, with Resend's message. |
+| `403 plan_limit_reached` | Catch-all on the Free plan. |
+| `404 not_found` | An unknown inbox, thread, label, draft or pagination cursor, with Resend's messages (`Inbox not found.`). |
+
 ## Idempotency
 
-`POST /emails` and `POST /emails/batch` accept an `Idempotency-Key` header.
+`POST /emails` and `POST /emails/batch` accept an `Idempotency-Key` header,
+and so do the sends of received mail and inboxes: inbox replies, forwards and
+draft sends, and `POST /emails/receiving/{id}/reply` and `/forward`.
 Retrying with the same key and payload returns the original response instead
-of sending again; the same key with a different payload returns `409`.
+of sending again; the same key with a different payload returns `409`. A send
+that was held for approval answers the retry with the same draft, as `202`.
 
 ## Pagination
 
 List endpoints accept `limit` (1–100, default 20) plus `after` / `before`
 cursors carrying an item id from a previous page. Responses include
-`has_more`. Lists run oldest first, except `GET /emails/receiving`, which runs
-newest first as on Resend: there `after` pages toward older mail. The
-attachments of a received email come back all at once unless you pass
-`limit`.
+`has_more`. Lists run oldest first, except where Resend orders them
+otherwise, and there `after` pages toward the end of that order:
+
+| List | Order |
+| --- | --- |
+| `GET /emails/receiving` | Newest first: `after` pages toward older mail. |
+| `GET /inboxes` | Newest first. |
+| `GET /inboxes/{id}/threads` and `/threads/search` | Latest activity first. |
+| `GET /inboxes/{id}/threads/{thread_id}/emails` | Oldest first: `after` pages toward newer emails. |
+| `GET /inboxes/{id}/drafts` | Most recently updated first. |
+| `GET /inboxes/{id}/labels` | Oldest first, all at once, without `has_more`. |
+| `GET /inboxes/{id}/quarantine` | Newest first. |
+
+The attachments of a received email come back all at once unless you pass
+`limit`. Under `/inboxes`, a cursor that names no item of the list answers
+`404`, as on Resend.
 
 ## Signed download links
 
@@ -247,5 +303,6 @@ on the API origin, `/receiving/raw/{email_id}` and
 `/receiving/attachments/{email_id}/{attachment_id}`, with `expires` (Unix
 seconds) and `signature` in the query. They need no API key, work for one
 hour (`expires_at`) for one email and attachment of one team, and answer
-`403` once expired or altered; ask the API again for fresh ones. See
+`403` once expired or altered; ask the API again for fresh ones. A message
+carrying a virus answers `410 email_blocked` instead, for good. See
 [Receiving → Downloads](/concepts/receiving#downloads).
