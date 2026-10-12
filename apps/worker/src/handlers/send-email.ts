@@ -19,6 +19,7 @@ import {
   isSubscribedToTopic,
   judgeAfterSend,
   type Keyring,
+  linkTeam,
   MONITOR_ANOMALY_CHECKS,
   type MonitorDeps,
   makeUnsubscribeToken,
@@ -35,6 +36,7 @@ import {
   SYSTEM_MAIL_TAG,
   sampleAcceptedEmail,
   screenBeforeSend,
+  screeningFirstWindow,
   substituteUnsubscribeUrl,
   transitionQueueState,
   utcDay,
@@ -615,6 +617,22 @@ async function sendQueued(
   // never customer content, so they never wait.
   let screened: { id: string; unjudged: boolean } | null = null;
   let media: SendMedia | null = null;
+  // A team in its first window that shares people, domains or this message
+  // with a team suspended for phishing is held before it sends anything.
+  if (deps.monitor && !systemMail && !platformSend && !email.broadcastId) {
+    const s = await deps.monitor.settings().catch(() => null);
+    if (s && (await screeningFirstWindow(db, s, email.teamId, new Date()))) {
+      const linked = await linkTeam(db, {
+        teamId: email.teamId,
+        trigger: "send",
+        message: { from: email.from, subject: email.subject, html: body.html, text: body.text },
+      });
+      if (linked?.held) {
+        await parkQueued(db, email, "team linked to a team suspended for phishing", "review");
+        return "parked";
+      }
+    }
+  }
   if (deps.monitor && !systemMail && !platformSend) {
     const files = attachments ?? [];
     const scan = files.length > 0 ? await scanAttachments(files) : null;

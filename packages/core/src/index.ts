@@ -593,6 +593,7 @@ export {
   type ScreenReason,
   type SendMedia,
   screenBeforeSend,
+  screeningFirstWindow,
   screeningReasons,
   screeningTier,
   sendingDomainYoung,

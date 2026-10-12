@@ -302,6 +302,17 @@ export async function screeningTier(
   return monitorTier(await loadMonitorState(db, row, now), s, now);
 }
 
+/** Whether the team is in its first window as screening reads it: with the usage history. */
+export async function screeningFirstWindow(
+  db: Db,
+  s: MonitorSettings,
+  teamId: string,
+  now: Date,
+): Promise<boolean> {
+  const row = await monitorRowWithHistory(db, teamId, now);
+  return inFirstWindow(await loadMonitorState(db, row, now), s, now);
+}
+
 /**
  * Whether the team's sending domain reads as young at `at`: registered
  * under YOUNG_DOMAIN_DAYS before it, or of unknown age (no source had a

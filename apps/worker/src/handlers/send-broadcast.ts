@@ -20,6 +20,7 @@ import {
   injectPreheader,
   isSubscribedToTopic,
   type Keyring,
+  linkTeam,
   type MailLocale,
   type MonitorDeps,
   makeUnsubscribeToken,
@@ -39,6 +40,7 @@ import {
   reserveWarmup,
   roundUpToSlot,
   type ScreenParkReason,
+  screeningFirstWindow,
   segmentContactsWhere,
   substituteUnsubscribeUrl,
   teamNovelDestinations,
@@ -229,6 +231,24 @@ export async function sendBroadcast(
     }
     await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
     return "deferred";
+  }
+  // A team in its first window that shares people, domains or this
+  // broadcast with a team suspended for phishing is held before it fans
+  // out: the standing read below then parks the fan-out.
+  if (deps.monitor) {
+    const s = await deps.monitor.settings().catch(() => null);
+    if (s && (await screeningFirstWindow(db, s, broadcast.teamId, new Date()))) {
+      await linkTeam(db, {
+        teamId: broadcast.teamId,
+        trigger: "send",
+        message: {
+          from: broadcast.from,
+          subject: broadcast.subject,
+          html: broadcast.html,
+          text: broadcast.text,
+        },
+      });
+    }
   }
   // An operator's pause or suspension parks the fan-out the way a region
   // hold does; the owners heard about it when the operator acted.
