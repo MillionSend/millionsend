@@ -9,6 +9,7 @@ import {
   accountMailPhrase,
   fetchAccountScore,
   fetchDeliverabilityHealth,
+  forgetAbuseRecords,
   isSilentlySuspended,
   liveSupportViewForTeam,
   PLAN_RUNGS,
@@ -686,6 +687,7 @@ export const consoleTeamsRouter = router({
         .update(t)
         .set({ suspendedAt: null, suspensionReason: null, suspensionNote: null })
         .where(eq(t.id, team.id));
+      await forgetAbuseRecords(ctx.db, team.id);
       // The flag the suspension opened goes with it; any other stays open.
       const f = schema.teamFlags;
       const [flag] = await ctx.db

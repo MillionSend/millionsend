@@ -48,7 +48,7 @@ it("mails the operator once per link, naming the kinds of evidence and never the
   expect(text).toContain(
     "newcomer matches facture-vexto, a team you suspended for phishing, on its sender name, domain name, and phone number.",
   );
-  expect(text).toContain("It is held for review before it sends anything");
+  expect(text).toContain("It is held for review: its mail waits until you decide");
   expect(text).toContain(`https://app.example.test/console/safety/${teamId}`);
   for (const value of ["Facture Vexto", "cadeaux-vexto", "123456789"]) {
     expect(text).not.toContain(value);

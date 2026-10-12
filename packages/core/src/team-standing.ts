@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { recordContactActivity } from "./contact-activities.js";
 import {
   type DeliverabilityReason,
@@ -20,11 +20,12 @@ export const SUSPENSION_REASONS = schema.suspensionReasonEnum.enumValues;
 export const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
 
 /**
- * Suspensions over the rules, which take the team's people off the
- * instance's own contact list. A review hold is still pending a verdict, and
- * non_payment is a billing state.
+ * Suspensions over the rules (abuse), which take the team's people off the
+ * instance's own contact list and keep their sign-up records 12 months past
+ * their deletion. A review hold is still pending a verdict, and non_payment
+ * is a billing state.
  */
-const UNSUBSCRIBING_SUSPENSIONS: readonly string[] = ["manual", "reputation", "phishing"];
+export const ABUSE_SUSPENSIONS: readonly SuspensionReason[] = ["manual", "reputation", "phishing"];
 
 /** Whether the team row is under a silent suspension. */
 export function isSilentlySuspended(team: {
@@ -135,10 +136,22 @@ export async function suspendTeam(
       .where(and(eq(t.id, input.teamId), input.ifNotSuspended ? isNull(t.suspendedAt) : undefined))
       .returning({ id: t.id });
     if (changed.length === 0) return null;
-    return UNSUBSCRIBING_SUSPENSIONS.includes(input.reason) &&
-      !UNSUBSCRIBING_SUSPENSIONS.includes(before?.reason ?? "")
-      ? unsubscribeSuspendedMembers(tx as unknown as Db, input.teamId)
-      : [];
+    if (!ABUSE_SUSPENSIONS.includes(input.reason)) return [];
+    // Marked here, not left to the hourly sweep: a member who leaves or is
+    // deleted before it runs keeps the longer retention.
+    const m = schema.teamMembers;
+    await tx
+      .update(schema.accountSignups)
+      .set({ abuseSuspended: true })
+      .where(
+        inArray(
+          schema.accountSignups.userId,
+          tx.select({ userId: m.userId }).from(m).where(eq(m.teamId, input.teamId)),
+        ),
+      );
+    return before?.reason && ABUSE_SUSPENSIONS.includes(before.reason)
+      ? []
+      : unsubscribeSuspendedMembers(tx as unknown as Db, input.teamId);
   });
   if (!timeline) return false;
   await recordContactActivity(db, timeline);

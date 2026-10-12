@@ -101,10 +101,12 @@ const DISPOSABLE_REFUSAL = {
 } as const;
 
 /**
- * A new address on the disposable list is refused where the instance blocks
- * them, in the requester's language. An address some account already holds
- * is not new, so an account registered with one before the block keeps
- * working whatever writes its row.
+ * An address on the disposable list is refused where the instance blocks
+ * them, in the requester's language. On a change, an address some account
+ * already holds is not new (the write is that account's own row), so an
+ * account registered with one before the block keeps working. Sign-up
+ * never asks: refusing a held address differently would tell anyone which
+ * disposable addresses have accounts.
  */
 async function assertPermanentAddress(
   db: Db,
@@ -114,12 +116,14 @@ async function assertPermanentAddress(
 ): Promise<void> {
   if (typeof email !== "string" || !disposableEmailsBlocked()) return;
   if (!(await disposableAddressTest(db))(email)) return;
-  const [held] = await db
-    .select({ id: schema.user.id })
-    .from(schema.user)
-    .where(eq(schema.user.email, email.toLowerCase()))
-    .limit(1);
-  if (held) return;
+  if (when === "change") {
+    const [held] = await db
+      .select({ id: schema.user.id })
+      .from(schema.user)
+      .where(eq(schema.user.email, email.toLowerCase()))
+      .limit(1);
+    if (held) return;
+  }
   throw new APIError("BAD_REQUEST", {
     code: "DISPOSABLE_EMAIL",
     message: DISPOSABLE_REFUSAL[when][localeFromHeaders(headers)],

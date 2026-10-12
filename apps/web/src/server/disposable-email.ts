@@ -1,4 +1,4 @@
-import { disposableDomains, isListedDomain } from "@millionsend/core";
+import { disposableDomains, isDisposableDomain } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { mailDomain } from "@/lib/format";
 import shipped from "../../data/disposable-email-domains.json";
@@ -10,5 +10,5 @@ const SHIPPED: ReadonlySet<string> = new Set(shipped);
 /** A test for addresses on the disposable list, its domain or a parent of it, read once per batch. */
 export async function disposableAddressTest(db: Db): Promise<(email: string) => boolean> {
   const list = await disposableDomains(db, SHIPPED);
-  return (email) => isListedDomain(mailDomain(email), list);
+  return (email) => isDisposableDomain(mailDomain(email), list);
 }

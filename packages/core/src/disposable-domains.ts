@@ -1,6 +1,9 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
+import { getDomain } from "tldts";
+import { PUBLIC_MAILBOX_DOMAINS } from "./domain-lifecycle.js";
+import { errorSummary } from "./error-summary.js";
 import { storeReferenceData } from "./reference-data.js";
 import { getBytes } from "./ssrf.js";
 
@@ -15,33 +18,51 @@ export const DISPOSABLE_LIST_URL =
 const NAME = "disposable_domains";
 /** Fewer than this is a broken download, not a list: the last good copy stays. */
 const MIN_DOMAINS = 1000;
+/** A day's change past this share of the stored list is held back as suspect, not applied. */
+const MAX_DAILY_CHANGE = 0.2;
 const MAX_LIST_BYTES = 8 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 // Under a day, so a daily run never skips a day; a restart within it downloads nothing.
 const FRESH_FOR_MS = 20 * 3600_000;
 const DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+const PROVIDERS: ReadonlySet<string> = new Set(PUBLIC_MAILBOX_DOMAINS);
 
-/** The list's lines that are domains, lowercased; comments, blanks and anything else are left out. */
+/** A name nobody registers (a public suffix, "co.uk" or "github.io"), which no list entry may stand for. */
+const isPublicSuffix = (domain: string): boolean =>
+  getDomain(domain, { allowPrivateDomains: true }) === null;
+
+/** The list's lines that are domains, lowercased; comments, blanks, public suffixes and anything else are left out. */
 export function parseDomainList(text: string): string[] {
   return text
     .split("\n")
     .map((line) => line.trim().toLowerCase())
-    .filter((line) => DOMAIN.test(line));
+    .filter((line) => DOMAIN.test(line) && !isPublicSuffix(line));
 }
 
-/** True when the domain or any parent of it is listed: sub.mailinator.com counts as mailinator.com. */
-export function isListedDomain(domain: string, list: ReadonlySet<string>): boolean {
-  const labels = domain.trim().toLowerCase().replace(/\.$/, "").split(".");
+/**
+ * True when the domain or a parent of it is listed: sub.mailinator.com counts
+ * as mailinator.com. A public suffix never counts, and neither does a consumer
+ * mailbox provider, whatever the list says: a poisoned entry must not lock
+ * out everyone on Gmail or UOL.
+ */
+export function isDisposableDomain(domain: string, list: ReadonlySet<string>): boolean {
+  const name = domain.trim().toLowerCase().replace(/\.$/, "");
+  const owner = getDomain(name, { allowPrivateDomains: true });
+  if (owner && PROVIDERS.has(owner)) return false;
+  const labels = name.split(".");
   for (let i = 0; i < labels.length - 1; i++) {
-    if (list.has(labels.slice(i).join("."))) return true;
+    const candidate = labels.slice(i).join(".");
+    if (list.has(candidate) && !isPublicSuffix(candidate)) return true;
   }
   return false;
 }
 
 /**
  * Downloads the list unless the stored copy is under a day old. A download
- * that fails, or parses to too few domains, leaves the stored copy as it
- * was. Returns what happened.
+ * that fails, parses to too few domains, or grows or shrinks the stored
+ * copy by more than a fifth leaves the stored copy as it was; the last case
+ * is logged, since upstream may have changed on purpose. Returns what
+ * happened.
  */
 export async function refreshDisposableDomains(
   db: Db,
@@ -49,7 +70,10 @@ export async function refreshDisposableDomains(
 ): Promise<"fresh" | "stored" | "kept"> {
   const now = deps.now ?? new Date();
   const r = schema.referenceData;
-  const [stored] = await db.select({ fetchedAt: r.fetchedAt }).from(r).where(eq(r.name, NAME));
+  const [stored] = await db
+    .select({ fetchedAt: r.fetchedAt, content: r.content })
+    .from(r)
+    .where(eq(r.name, NAME));
   if (stored && now.getTime() - stored.fetchedAt.getTime() < FRESH_FOR_MS) return "fresh";
   const download =
     deps.download ??
@@ -59,6 +83,12 @@ export async function refreshDisposableDomains(
     if (domains.length < MIN_DOMAINS) {
       throw new Error(`the list parsed to ${domains.length} domains`);
     }
+    if (stored) {
+      const before = parseDomainList(Buffer.from(stored.content).toString("utf8")).length;
+      if (Math.abs(domains.length - before) > MAX_DAILY_CHANGE * before) {
+        throw new Error(`the list went from ${before} to ${domains.length} domains`);
+      }
+    }
     await storeReferenceData(db, {
       name: NAME,
       version: now.toISOString(),
@@ -67,7 +97,9 @@ export async function refreshDisposableDomains(
     });
     return "stored";
   } catch (err) {
-    console.warn("disposable domains: list not refreshed, keeping the last good copy", err);
+    console.warn(
+      `disposable domains: list not refreshed, keeping the last good copy: ${errorSummary(err)}`,
+    );
     return "kept";
   }
 }

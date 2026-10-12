@@ -28,8 +28,10 @@ export type CampaignFingerprintKind =
  * What a team suspended for phishing left behind, kept at its suspension so
  * new teams can be compared with it. No foreign key on purpose: the
  * fingerprints outlive the team, and its name is kept for the console.
- * Names, subjects and domains are stored as sent; phones, addresses, IPs,
- * cards and the text hash in the normalized form they are compared in.
+ * Names, subjects and domains are stored as sent, cut to a bounded length;
+ * phones, addresses, IPs, cards and the text hash in the normalized form
+ * they are compared in. They go when the team is reinstated, and 12 months
+ * after its suspension (IPs after 90 days).
  */
 export const campaignFingerprints = pgTable(
   "campaign_fingerprints",
@@ -43,6 +45,18 @@ export const campaignFingerprints = pgTable(
   },
   (t) => [uniqueIndex("campaign_fingerprints_team_kind_value_idx").on(t.teamId, t.kind, t.value)],
 );
+
+/**
+ * A team suspended for phishing whose fingerprints could not be captured, or
+ * came to none: the backfill tries it again a day later rather than on every
+ * run, so a few failing teams never take every slot.
+ */
+export const campaignCaptureFailures = pgTable("campaign_capture_failures", {
+  teamId: uuid("team_id")
+    .primaryKey()
+    .references(() => teams.id, { onDelete: "cascade" }),
+  failedAt: timestamp("failed_at", { withTimezone: true }).notNull(),
+});
 
 /** One fingerprint a team shares with a team suspended for phishing: the team's own value and the one it matched. */
 export interface LinkMatch {

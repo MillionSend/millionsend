@@ -1,4 +1,4 @@
-import { accountMailPhrase } from "@millionsend/core";
+import { accountMailPhrase, errorSummary } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, isNull } from "drizzle-orm";
@@ -64,7 +64,7 @@ export async function alertLinkedTeams(
       );
       if (mailed) sent += 1;
     } catch (err) {
-      console.error(`linkage: operator mail for team ${link.teamId} failed`, err);
+      console.error(`linkage: operator mail for team ${link.teamId} failed: ${errorSummary(err)}`);
     }
   }
   return sent;

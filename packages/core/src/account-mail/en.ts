@@ -379,8 +379,9 @@ export const en = {
     ],
     button: "Open review",
     extra: {
-      held: "It is held for review before it sends anything: its mail waits until you decide, and its owner sees sending as paused pending review, with no email about it.",
-      notHeld: "The automatic hold is off, so the team is not held.",
+      held: "It is held for review: its mail waits until you decide, and its owner sees sending as paused pending review, with no email about it.",
+      notHeld:
+        "It is not held: a match holds a new team when it sends, and only when it includes an email address, a card or two kinds of evidence and the automatic hold is on.",
       display_name: "sender name",
       subject: "subject",
       sending_domain: "domain name",

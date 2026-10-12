@@ -726,7 +726,11 @@ conta como o domínio acima dele (`sub.mailinator.com` é `mailinator.com`). Con
 já usam um desses endereços continuam funcionando; a janela da equipe no
 console as marca. O app já vem com uma cópia da lista e, enquanto o bloqueio
 está ligado, o worker baixa uma nova de `raw.githubusercontent.com` todo dia,
-mantendo a última cópia boa quando um download falha.
+mantendo a última cópia boa quando um download falha. Uma lista do dia que
+cresce ou encolhe mais de um quinto também não é aplicada: o worker registra
+isso no log e fica com a cópia que tem. Diga a lista o que disser, um provedor
+de e-mail pessoal (Gmail, Outlook, Yahoo, iCloud, Proton, UOL, BOL, Terra e
+parecidos) e um sufixo público (`com.br`, `github.io`) nunca são recusados.
 
 ## E-mails de conta, contatos e novidades
 
@@ -915,7 +919,7 @@ O IP e o navegador de cada cadastro ficam em um registro que só o console lê,
 separado das sessões de login, que expiram. Ele sobrevive à conta: a limpeza
 de retenção, que roda de hora em hora, o apaga 90 dias depois da exclusão da
 conta, ou 12 meses depois quando a conta estava em uma equipe suspensa por
-phishing, por motivo manual ou por reputação. A janela de uma equipe lista o
+phishing, por motivo manual ou por reputação e que não foi reativada. A janela de uma equipe lista o
 IP de cadastro de cada membro, o IP da sessão mais recente e as outras contas
 vistas nesses IPs, incluindo as excluídas, com as suspensas marcadas. Com
 `IP_GEOLOCATION` ligado (o padrão na nuvem), o worker mantém as bases
@@ -925,17 +929,29 @@ janela mostra a rede e o país de cada IP de cadastro, consultados localmente.
 
 Uma equipe suspensa por phishing deixa suas impressões digitais, que ficam
 guardadas depois da equipe: os endereços de e-mail das pessoas (ignorando os
-pontos do Gmail e qualquer `+tag`) e os IPs de cadastro e de sessão delas, os
-domínios, o cartão na nuvem e, dos e-mails mais recentes guardados, os nomes
-de remetente, assuntos, domínios dos links, telefones e um hash do texto
-visível. Uma equipe nova é comparada com elas quando é criada, adiciona um
-domínio, faz o primeiro pagamento e envia. Uma coincidência a pausa para
-revisão antes de enviar qualquer coisa (a menos que a pausa automática esteja
-desligada), abre uma sinalização `linked` na lista de confiança e segurança e
-avisa o operador por e-mail sobre os tipos de evidência que coincidiram; a
-janela da equipe e a página de revisão mostram os valores. Só contam equipes
-que continuam suspensas por phishing. IPs, endereços, telefones (os nove
-últimos dígitos), cartões e hashes de texto precisam ser iguais. Nomes de
+pontos do Gmail e qualquer `+tag`) e os IPs de onde elas se cadastraram, os
+domínios verificados, o cartão na nuvem e, dos e-mails mais recentes
+guardados, os nomes de remetente, assuntos (cortados em 256 caracteres),
+domínios dos links, telefones e um hash do texto visível. Um IP de uma rede
+de saída compartilhada, em que um endereço representa muita gente
+(Cloudflare WARP, Retransmissão Privada do iCloud, Vivo, Claro e TIM), fica de
+fora, pela base de ASN que o `IP_GEOLOCATION` mantém. Uma equipe nova é
+comparada com elas quando é criada, adiciona um domínio, faz o primeiro
+pagamento e envia. Uma coincidência abre uma sinalização `linked` na lista de
+confiança e segurança e avisa o operador por e-mail sobre os tipos de
+evidência que coincidiram; a janela da equipe e a página de revisão mostram
+os valores. Nada que a equipe vê muda até ela enviar: aí, com a pausa
+automática ligada, a coincidência a pausa para revisão e os e-mails ficam em
+espera sem aviso, quando a evidência de uma equipe suspensa inclui um
+endereço de e-mail ou um cartão, ou dois tipos. Um IP, um domínio ou um tipo
+de conteúdo sozinho nunca pausa uma equipe, e uma equipe pausada uma vez, ou
+liberada de qualquer pausa para revisão, não é pausada de novo. Só contam
+equipes que continuam suspensas por phishing: reativar uma equipe apaga as
+impressões digitais dela, e a limpeza de retenção as apaga 12 meses depois da
+suspensão, e os IPs depois de 90 dias. IPs, endereços, telefones (os nove
+últimos dígitos, lidos só ao lado de um `+`, de um número 0800 ou 0300, de um
+formato brasileiro `(11) 9xxxx-xxxx` ou de uma palavra como "tel" ou
+"WhatsApp"), cartões e hashes de texto precisam ser iguais. Nomes de
 remetente coincidem quando as palavras marcantes de um, pelo menos duas,
 estão todas no outro, que tem no máximo uma a mais; assuntos, quando os
 conjuntos de palavras, com quatro palavras ou mais e sem os números, se

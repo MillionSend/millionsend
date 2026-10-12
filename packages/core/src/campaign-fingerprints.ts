@@ -43,6 +43,36 @@ export const PHONE_KEY_DIGITS = 9;
 export const TEXT_HASH_MIN_LETTERS = 60;
 
 /**
+ * The longest value kept or compared, per kind: free text (sender names,
+ * subjects) to 256 characters, the rest to its natural size (a domain name,
+ * an address, an IPv6 address, a card fingerprint, the phone digits, a
+ * SHA-256). Every index entry stays far under Postgres's 2.7 KB btree limit.
+ */
+const VALUE_MAX: Record<CampaignFingerprintKind, number> = {
+  display_name: 256,
+  subject: 256,
+  sending_domain: 253,
+  link_domain: 253,
+  address: 254,
+  ip: 45,
+  card: 64,
+  phone: PHONE_KEY_DIGITS,
+  text_hash: 64,
+};
+
+/** A fingerprint with its value cut to its kind's limit, on code points; both sides of a comparison are built here. */
+export function fingerprint(kind: CampaignFingerprintKind, value: string): Fingerprint {
+  const max = VALUE_MAX[kind];
+  if (value.length <= max) return { kind, value };
+  return {
+    kind,
+    value: Array.from(value.slice(0, max * 2))
+      .slice(0, max)
+      .join(""),
+  };
+}
+
+/**
  * Words that name a role rather than a sender, folded as fingerprintWords
  * folds them: "Support", "Equipe Financeiro" or "No reply" says nothing
  * about who sent the mail.
@@ -157,7 +187,15 @@ const HOSTNAME_WORDS = new Set([
   "acesso",
 ]);
 
-const PHONE_RUN = /\+?\d[\d\s().-]{6,}\d/g;
+/** Digits joined by the spaces, dots, dashes and brackets numbers are written with. */
+const PHONE_RUN = /\+?\(?\d[\d\s().-]{6,}\d/g;
+/** A Brazilian number as written: the area code in brackets, then 8 or 9 digits split by a dash. */
+const BR_PHONE = /^\(\d{2}\)\s?9?\d{4}-?\d{4}$/;
+/** Toll-free and non-geographic service numbers (0800, 0300). */
+const SERVICE_PHONE = /^0[38]00/;
+/** A word that puts a number to call or message right after it, as the text before the number folds. */
+const PHONE_WORD =
+  /\b(?:tel|telefone|telephone|phone|fone|celular|whats?app|zap|call|ligue|ligar|appelez|appeler)\b[^\d+(]{0,24}$/;
 const URL_IN_TEXT = /https?:\/\/[^\s<>"']+/gi;
 
 /** Lowercase, accents and compatibility forms folded, invisible characters gone. */
@@ -268,12 +306,25 @@ export function domainsMatch(a: Fingerprint, b: Fingerprint): boolean {
   );
 }
 
-/** Each phone-like run's last digits, for runs of 9 to 15 digits, the lengths phone numbers have. */
+/**
+ * The last digits of each phone number in the text: a run of 9 to 15 digits
+ * written the way phones are (an international "+", a 0800 or 0300 service
+ * number, a Brazilian "(11) 98765-4321"), or right after a word like
+ * "tel", "WhatsApp" or "ligue". A CPF or an order number has none of these
+ * and is left out.
+ */
 export function phoneKeys(text: string): string[] {
   const keys = new Set<string>();
-  for (const run of text.match(PHONE_RUN) ?? []) {
+  for (const match of text.matchAll(PHONE_RUN)) {
+    const run = match[0];
     const digits = run.replace(/\D/g, "");
-    if (digits.length >= PHONE_KEY_DIGITS && digits.length <= 15) {
+    if (digits.length < PHONE_KEY_DIGITS || digits.length > 15) continue;
+    if (
+      run.startsWith("+") ||
+      SERVICE_PHONE.test(digits) ||
+      BR_PHONE.test(run) ||
+      PHONE_WORD.test(fold(text.slice(Math.max(0, match.index - 48), match.index)))
+    ) {
       keys.add(digits.slice(-PHONE_KEY_DIGITS));
     }
   }
@@ -317,12 +368,12 @@ export interface FingerprintMessage {
 export function messageFingerprints(message: FingerprintMessage): Fingerprint[] {
   const out: Fingerprint[] = [];
   const sender = parseMailbox(message.from);
-  if (sender?.name?.trim()) out.push({ kind: "display_name", value: sender.name.trim() });
+  if (sender?.name?.trim()) out.push(fingerprint("display_name", sender.name.trim()));
   if (sender) {
     const domain = sender.address.slice(sender.address.lastIndexOf("@") + 1).toLowerCase();
-    out.push({ kind: "sending_domain", value: domain });
+    out.push(fingerprint("sending_domain", domain));
   }
-  if (message.subject.trim()) out.push({ kind: "subject", value: message.subject.trim() });
+  if (message.subject.trim()) out.push(fingerprint("subject", message.subject.trim()));
   const shown =
     message.html === null
       ? (message.text ?? "")
@@ -332,13 +383,13 @@ export function messageFingerprints(message: FingerprintMessage): Fingerprint[] 
     ...((message.text ?? "").match(URL_IN_TEXT) ?? []),
   ];
   for (const domain of new Set(hrefs.flatMap((href) => linkDomain(href) ?? []))) {
-    out.push({ kind: "link_domain", value: domain });
+    out.push(fingerprint("link_domain", domain));
   }
   for (const key of phoneKeys(`${message.subject}\n${shown}\n${message.text ?? ""}`)) {
-    out.push({ kind: "phone", value: key });
+    out.push(fingerprint("phone", key));
   }
   const hash = visibleTextHash(shown);
-  if (hash) out.push({ kind: "text_hash", value: hash });
+  if (hash) out.push(fingerprint("text_hash", hash));
   return out;
 }
 

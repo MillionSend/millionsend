@@ -40,6 +40,7 @@ import {
   pruneMonitorSamples,
   pruneProbes,
   purgeAccountSignups,
+  purgeCampaignFingerprints,
   purgeExpiredIdempotencyKeys,
   type QueuedWebhookDelivery,
   recordDomainAge,
@@ -365,6 +366,7 @@ await queue.scheduleCrons({
     const probes = await pruneProbes(db);
     const monitorSamples = await pruneMonitorSamples(db);
     const signups = await purgeAccountSignups(db);
+    const fingerprints = await purgeCampaignFingerprints(db);
     // The console's retention row: how many bodies the last run purged.
     await recordProbes(db, [{ probe: "retention_purged", value: purged, ok: true }]);
     const counts = {
@@ -380,6 +382,7 @@ await queue.scheduleCrons({
       broadcastsFrozen: metadata.broadcasts,
       sessions,
       signups,
+      fingerprints,
       stripeEvents,
     };
     if (Object.values(counts).some((n) => n > 0)) {

@@ -133,6 +133,6 @@ describe("the match with a team suspended for phishing", () => {
     expect(html).not.toContain("ab12");
     expect(html).toContain('href="/console/safety/p"');
     expect(html).toContain("when a domain was added");
-    expect(html).toContain("Held for review before sending.");
+    expect(html).toContain("Held for review at a send: its mail waits until you decide.");
   });
 });

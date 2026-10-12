@@ -230,7 +230,9 @@ export {
 export type { FingerprintMessage } from "./campaign-fingerprints.js";
 export {
   type FingerprintSources,
+  forgetAbuseRecords,
   linkTeam,
+  purgeCampaignFingerprints,
   recordMissingFingerprints,
   recordPhishingFingerprints,
   type TeamLinkResult,
@@ -338,7 +340,7 @@ export {
 } from "./deliverability.js";
 export {
   disposableDomains,
-  isListedDomain,
+  isDisposableDomain,
   refreshDisposableDomains,
 } from "./disposable-domains.js";
 export {
@@ -401,6 +403,7 @@ export {
 } from "./email-insights-lookup.js";
 export { purgedEmailBodyColumns } from "./email-retention.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
+export { errorSummary } from "./error-summary.js";
 export { type SesEventsHealth, sesEventsHealth } from "./events-health.js";
 export {
   type ArchiveType,

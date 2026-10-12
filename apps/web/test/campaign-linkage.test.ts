@@ -37,6 +37,7 @@ beforeEach(async () => {
   await db.insert(schema.domains).values({
     teamId: phisher,
     name: "vexto-cadeaux.example",
+    status: "verified",
     region: "us-east-1",
     dkimSelector: "ms",
     dkimPublicKey: "key",
@@ -91,6 +92,15 @@ describe("the console's suspension", () => {
       "sending_domain",
     ]);
   });
+
+  it("forgets them, and the abuse marks, when the team is reinstated", async () => {
+    await callerFor(OPERATOR).console.teams.suspend({ id: phisher, reason: "phishing" });
+    await callerFor(OPERATOR).console.teams.reinstate({ id: phisher });
+    expect(await fingerprints(phisher)).toEqual([]);
+    expect(
+      await db.select({ abuse: schema.accountSignups.abuseSuspended }).from(schema.accountSignups),
+    ).toEqual([{ abuse: false }]);
+  });
 });
 
 describe("a new team linked to a team suspended for phishing", () => {
@@ -98,23 +108,23 @@ describe("a new team linked to a team suspended for phishing", () => {
     await callerFor(OPERATOR).console.teams.suspend({ id: phisher, reason: "phishing" });
   });
 
-  it("is held as it is created by someone signed up from the same IP", async () => {
+  it("is recorded, not held, as it is created by someone signed up from the same IP", async () => {
     const user = await person("novo@outlook.com", "203.0.113.9");
     const { teamId } = await callerFor(user).team.createTeam({ name: "Newcomer" });
-    expect(await suspension(teamId)).toBe("review");
+    expect(await suspension(teamId)).toBeNull();
     const links = await callerFor(OPERATOR).console.accounts.links({ teamId });
     expect(links).toMatchObject([
       {
         linkedTeamId: phisher,
         linkedTeamName: "facture-vexto",
         trigger: "team",
-        held: true,
+        held: false,
         matches: [{ kind: "ip", value: "203.0.113.9", matched: "203.0.113.9" }],
       },
     ]);
   });
 
-  it("is held when it adds a return's domain", async () => {
+  it("is recorded, not held, when it adds a return's domain", async () => {
     const user = await person("novo@outlook.com", "198.51.100.7");
     const teamId = await createTeam(db, "newcomer");
     await db.insert(schema.teamMembers).values({ teamId, userId: user, role: "owner" });
@@ -133,6 +143,9 @@ describe("a new team linked to a team suspended for phishing", () => {
       role: "owner",
     } as Context);
     await domains.domains.create({ name: "cadeaux-vexto.example", region: "us-east-1" });
-    expect(await suspension(teamId)).toBe("review");
+    expect(await suspension(teamId)).toBeNull();
+    expect(await callerFor(OPERATOR).console.accounts.links({ teamId })).toMatchObject([
+      { trigger: "domain", held: false, matches: [{ kind: "sending_domain" }] },
+    ]);
   });
 });

@@ -389,8 +389,9 @@ export const ptBR = {
     ],
     button: "Abrir revisão",
     extra: {
-      held: "Ela fica pausada para revisão antes de enviar qualquer coisa: os e-mails ficam em espera até você decidir, e o proprietário vê o envio como pausado aguardando revisão, sem receber e-mail sobre isso.",
-      notHeld: "A pausa automática para revisão está desligada, então a equipe não foi pausada.",
+      held: "Ela fica pausada para revisão: os e-mails ficam em espera até você decidir, e o proprietário vê o envio como pausado aguardando revisão, sem receber e-mail sobre isso.",
+      notHeld:
+        "Ela não foi pausada: uma coincidência pausa uma equipe nova quando ela envia, e só quando inclui um endereço de e-mail, um cartão ou dois tipos de evidência e a pausa automática está ligada.",
       display_name: "nome do remetente",
       subject: "assunto",
       sending_domain: "nome do domínio",

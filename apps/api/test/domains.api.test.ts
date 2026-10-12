@@ -1216,7 +1216,7 @@ describe("permission confinement", () => {
 });
 
 describe("POST /domains and teams suspended for phishing", () => {
-  it("holds a new team for review when the domain it adds is a return's", async () => {
+  it("records, without holding, a new team whose added domain is a return's", async () => {
     const phisher = await createTeam(db, "facture-vexto");
     await db
       .update(schema.teams)
@@ -1238,6 +1238,11 @@ describe("POST /domains and teams suspended for phishing", () => {
       .select({ reason: schema.teams.suspensionReason })
       .from(schema.teams)
       .where(eq(schema.teams.id, team));
-    expect(row).toEqual({ reason: "review" });
+    expect(row).toEqual({ reason: null });
+    const links = await db
+      .select({ held: schema.teamLinks.held, trigger: schema.teamLinks.trigger })
+      .from(schema.teamLinks)
+      .where(eq(schema.teamLinks.teamId, team));
+    expect(links).toEqual([{ held: false, trigger: "domain" }]);
   });
 });

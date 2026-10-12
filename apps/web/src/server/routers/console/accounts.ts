@@ -1,7 +1,7 @@
 import { ipGeolocationEnabled } from "@millionsend/config";
 import { type IpGeo, lookupIpGeo, type SuspensionReason } from "@millionsend/core";
 import { schema } from "@millionsend/db";
-import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { disposableAddressTest } from "../../disposable-email";
 import { operatorProcedure, router } from "../../trpc";
@@ -74,6 +74,11 @@ export const consoleAccountsRouter = router({
     >();
     if (ips.length > 0) {
       const outside = ids.length > 0 ? notInArray(su.userId, ids) : undefined;
+      // Ranked before the limit, so a crowd of fresh accounts on a shared
+      // IP cannot push the suspended ones out of the list.
+      const t = schema.teams;
+      const suspended = (userId: typeof su.userId | typeof s.userId) =>
+        sql<boolean>`exists (select 1 from ${m} sm join ${t} st on st.id = sm.team_id where sm.user_id = ${userId} and st.suspended_at is not null)`;
       for (const row of await ctx.db
         .select({
           userId: su.userId,
@@ -84,7 +89,7 @@ export const consoleAccountsRouter = router({
         })
         .from(su)
         .where(and(inArray(su.ip, ips), outside))
-        .orderBy(desc(su.createdAt))
+        .orderBy(desc(sql`${su.abuseSuspended} or ${suspended(su.userId)}`), desc(su.createdAt))
         .limit(OTHERS_MAX)) {
         others.set(row.userId, {
           userId: row.userId,
@@ -96,13 +101,18 @@ export const consoleAccountsRouter = router({
         });
       }
       for (const row of await ctx.db
-        .selectDistinctOn([s.userId], { userId: s.userId, email: u.email, ip: s.ipAddress })
+        .selectDistinct({
+          userId: s.userId,
+          email: u.email,
+          ip: s.ipAddress,
+          suspended: suspended(s.userId),
+        })
         .from(s)
         .innerJoin(u, eq(u.id, s.userId))
         .where(
           and(inArray(s.ipAddress, ips), ids.length > 0 ? notInArray(s.userId, ids) : undefined),
         )
-        .orderBy(s.userId, desc(s.updatedAt))
+        .orderBy(desc(suspended(s.userId)), asc(u.email))
         .limit(OTHERS_MAX)) {
         if (others.has(row.userId) || !row.ip) continue;
         others.set(row.userId, {

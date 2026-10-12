@@ -699,7 +699,11 @@ subdomain counts as its parent (`sub.mailinator.com` is `mailinator.com`). Accou
 that already use one keep working; the console's team dialog tags them. The
 app ships a copy of the list, and while the block is on the worker downloads
 a fresh one from `raw.githubusercontent.com` each day, keeping the last good
-copy when a download fails.
+copy when a download fails. A day's list that grows or shrinks by more than a
+fifth is not applied either: the worker logs it and keeps its copy. Whatever
+the list says, a consumer mailbox provider (Gmail, Outlook, Yahoo, iCloud,
+Proton, UOL, BOL, Terra and the like) and a public suffix (`com.br`,
+`github.io`) are never refused.
 
 ## Account mail, contacts and product updates
 
@@ -895,7 +899,7 @@ Every sign-up's IP and browser are kept in a record only the console reads,
 apart from the login sessions, which expire. It outlives the account: the
 hourly retention sweep deletes it 90 days after the account is deleted, or
 12 months after when the account was in a team suspended for phishing,
-manual or reputation reasons. A team's dialog lists each member's sign-up
+manual or reputation reasons and not reinstated. A team's dialog lists each member's sign-up
 IP, the IP of their latest session and the other accounts seen on those
 IPs, deleted ones included, with the suspended ones marked. With
 `IP_GEOLOCATION` on (the default on the cloud), the worker keeps DB-IP's
@@ -905,16 +909,26 @@ dialog adds each sign-up IP's network and country, looked up locally.
 
 A team suspended for phishing leaves its fingerprints behind, kept after
 the team: its people's email addresses (Gmail's dots and any `+tag`
-ignored) and their sign-up and session IPs, its domains, its card on the
-cloud, and from its latest stored mail the sender names, subjects, link
-domains, phone numbers and a hash of the visible text. A new team is
+ignored) and the IPs they signed up from, its verified domains, its card on
+the cloud, and from its latest stored mail the sender names, subjects (cut
+to 256 characters), link domains, phone numbers and a hash of the visible
+text. An IP of a shared egress network, where one address stands for
+crowds (Cloudflare WARP, iCloud Private Relay, Vivo, Claro and TIM), is
+left out, by the ASN database `IP_GEOLOCATION` keeps. A new team is
 compared with them when it is created, adds a domain, first pays and
-sends. A match holds it for review before it sends anything (unless the
-automatic hold is off), opens a `linked` flag on the trust & safety list,
-and mails the operator which kinds of evidence matched; the team's dialog
-and review page show the values. Only teams still suspended for phishing
-count. IPs, addresses, phone numbers (their last nine digits), cards and
-text hashes must be equal. Sender names match when one's distinctive words,
+sends. A match opens a `linked` flag on the trust & safety list and mails
+the operator which kinds of evidence matched; the team's dialog and review
+page show the values. Nothing the team can see changes until it sends: then,
+with the automatic hold on, the match holds it for review and its mail is
+parked without a word, when the evidence from one suspended team includes an
+email address or a card, or two kinds. An IP, a domain or one kind of
+content alone never holds a team, and a team held once, or released from any
+review hold, is not held again. Only teams still suspended for phishing
+count: a reinstatement deletes a team's fingerprints, and the retention
+sweep deletes them 12 months after the suspension, IPs after 90 days. IPs,
+addresses, phone numbers (their last nine digits, read only beside a `+`, a
+0800 or 0300 number, a Brazilian `(11) 9xxxx-xxxx` or a word such as "tel"
+or "WhatsApp"), cards and text hashes must be equal. Sender names match when one's distinctive words,
 at least two, are all in the other, which has at most one more; subjects
 when their word sets, four words or more with numbers left out, overlap by
 75%; domain names when one's words, at least two of four letters or more

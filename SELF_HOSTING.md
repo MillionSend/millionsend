@@ -367,7 +367,10 @@ list (public domain) are refused at sign-up, on invitations and on email changes
 subdomain counts as its parent. Accounts that already use one keep working, and the
 console tags them. The app ships the list; while the block is on, the worker refreshes
 it daily from `raw.githubusercontent.com` and keeps the last good copy when a download
-fails.
+fails or the list grows or shrinks by more than a fifth in a day (that one is logged).
+Consumer mailbox providers (Gmail, Outlook, Yahoo, iCloud, Proton, UOL, BOL, Terra and
+the like) and public suffixes (`com.br`, `github.io`) are never refused, whatever the
+list says.
 
 </details>
 
@@ -759,7 +762,7 @@ content insights (never email bodies), and an instance-wide audit log.
   only the console reads, apart from the sessions, which expire. The hourly
   retention sweep deletes it 90 days after the account is deleted, or 12
   months after when the account was in a team suspended for phishing, manual
-  or reputation reasons. A team's dialog lists each member's sign-up IP, the
+  or reputation reasons and not reinstated. A team's dialog lists each member's sign-up IP, the
   IP of their latest session and the other accounts seen on those IPs,
   suspended ones marked. With `IP_GEOLOCATION` on (the cloud default), the
   worker downloads DB-IP's free country and ASN databases (CC BY 4.0) from
@@ -767,16 +770,21 @@ content insights (never email bodies), and an instance-wide audit log.
   fails, and the dialog adds each sign-up IP's network and country, looked up
   locally.
 - **Campaign linkage:** a team suspended for phishing leaves fingerprints that
-  outlive it (its people's addresses, Gmail dots and `+tags` ignored, and IPs,
-  its domains and card, and from its latest stored mail the sender names,
-  subjects, link domains, phone numbers and a visible-text hash). A new team is
-  compared with them when it is created, adds a domain, first pays and sends; a
-  match holds it for review before it sends anything (unless the automatic hold
-  is off), opens a `linked` flag and mails the operator the kinds of evidence;
-  the team's dialog and review page show the values. Only teams still suspended
-  for phishing count, and the fuzzy rules are strict: sender names need two
-  shared distinctive words, subjects four words overlapping by 75%, domain names
-  two words of four letters or more filling 80% of the other name.
+  outlive it (its people's addresses, Gmail dots and `+tags` ignored, and sign-up
+  IPs, its verified domains and card, and from its latest stored mail the sender
+  names, subjects, link domains, phone numbers and a visible-text hash). IPs of
+  shared egress networks (Cloudflare WARP, iCloud Private Relay, Vivo, Claro,
+  TIM) are left out. A new team is compared with them when it is created, adds a
+  domain, first pays and sends; a match opens a `linked` flag and mails the
+  operator the kinds of evidence, and the team's dialog and review page show the
+  values. Only a send holds the team for review, its mail parked silently, and
+  only when the match includes an email address, a card or two kinds of evidence
+  and the automatic hold is on. Only teams still suspended for phishing count,
+  and the fuzzy rules are strict: sender names need two shared distinctive
+  words, subjects four words overlapping by 75%, domain names two words of four
+  letters or more filling 80% of the other name. A reinstatement deletes a team's
+  fingerprints; otherwise they go 12 months after the suspension, IPs after 90
+  days.
 
 </details>
 

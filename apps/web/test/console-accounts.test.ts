@@ -91,7 +91,8 @@ describe("console.accounts.members", () => {
         seen: "signup",
         deleted: false,
         suspension: "phishing",
-        abuseSuspended: false,
+        // Marked by the suspension itself, not left for the hourly sweep.
+        abuseSuspended: true,
       },
       {
         email: "bob@example.com",
@@ -118,6 +119,28 @@ describe("console.accounts.members", () => {
     expect(located.geo).toBe(true);
     // No database downloaded yet: the network and country are unknown.
     expect(located.members[0]?.signup?.geo).toEqual({ country: null, asn: null, org: null });
+  });
+
+  it("keeps the suspended accounts listed under a crowd of fresh ones on the same IPs", async () => {
+    const team = await createTeam(db, "flooded");
+    const member = await person("member@flooded.dev", "192.0.2.77", team);
+    await session(member, "192.0.2.78", new Date());
+    const burned = await createTeam(db, "burned");
+    await person("burned@gmail.com", "192.0.2.77", burned);
+    const returning = await person("zz-returning@gmail.com", null, burned);
+    await session(returning, "192.0.2.78", new Date());
+    await suspendTeam(db, { teamId: burned, reason: "phishing" });
+    for (let i = 0; i < 25; i++) {
+      await person(`fresh${i}@example.com`, "192.0.2.77");
+      const crowd = await person(`crowd${i}@example.com`, null);
+      await session(crowd, "192.0.2.78", new Date());
+    }
+    vi.stubEnv("IP_GEOLOCATION", "false");
+    const view = await operator().console.accounts.members({ teamId: team });
+    expect(view.others.slice(0, 2)).toMatchObject([
+      { email: "burned@gmail.com", seen: "signup", suspension: "phishing" },
+      { email: "zz-returning@gmail.com", seen: "session", suspension: "phishing" },
+    ]);
   });
 
   it("is the operator's alone", async () => {

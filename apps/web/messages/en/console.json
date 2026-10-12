@@ -504,8 +504,8 @@
         "payment": "at its first payment",
         "send": "on a send"
       },
-      "held": "Held for review before sending.",
-      "notHeld": "This match held nothing: the automatic hold is off, or the team was already suspended."
+      "held": "Held for review at a send: its mail waits until you decide.",
+      "notHeld": "This match held nothing: a match holds a team only when it sends, if it includes an email address, a card or two kinds of evidence and the automatic hold is on."
     },
     "members": {
       "title": "Members",

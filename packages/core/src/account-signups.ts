@@ -1,7 +1,9 @@
 import { isIP } from "node:net";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, isNull, lt, notExists, or, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, lt, ne, notExists, or } from "drizzle-orm";
+import { errorSummary } from "./error-summary.js";
+import { ABUSE_SUSPENSIONS } from "./team-standing.js";
 import { DAY_MS } from "./utc-day.js";
 
 /** Days a deleted account's sign-up record is kept, as the privacy policy keeps account data. */
@@ -27,18 +29,33 @@ export async function recordSignup(
       })
       .onConflictDoNothing();
   } catch (error) {
-    console.error(`account sign-up record for ${input.userId} not written`, error);
+    console.error(`account sign-up record for ${input.userId} not written: ${errorSummary(error)}`);
   }
+}
+
+/** Membership in a team suspended for abuse, other than `exceptTeamId` when given. */
+function inAbuseTeam(db: Db, exceptTeamId?: string) {
+  const m = schema.teamMembers;
+  const t = schema.teams;
+  return db
+    .select({ userId: m.userId })
+    .from(m)
+    .innerJoin(t, eq(t.id, m.teamId))
+    .where(
+      and(
+        eq(m.userId, schema.accountSignups.userId),
+        inArray(t.suspensionReason, [...ABUSE_SUSPENSIONS]),
+        exceptTeamId ? ne(m.teamId, exceptTeamId) : undefined,
+      ),
+    );
 }
 
 /**
  * The retention sweep. A record whose account is gone is stamped deleted
- * now; a live account's abuse mark follows its teams; then every record past
- * its window goes: 90 days after deletion, or 12 months for an account that
- * sat in a team suspended for phishing, manual or reputation reasons.
- * Returns how many were deleted.
- * ponytail: the abuse mark is refreshed by this hourly sweep, so an account
- * deleted within the hour of its team's suspension keeps the 90-day window.
+ * now; a live account in a team suspended for abuse gets the abuse mark
+ * (suspendTeam sets it at once, and only a reinstatement takes it away);
+ * then every record past its window goes: 90 days after deletion, or 12
+ * months for an account with the mark. Returns how many were deleted.
  */
 export async function purgeAccountSignups(db: Db, now: Date = new Date()): Promise<number> {
   const s = schema.accountSignups;
@@ -53,11 +70,10 @@ export async function purgeAccountSignups(db: Db, now: Date = new Date()): Promi
         ),
       ),
     );
-  const inAbuseTeam = sql<boolean>`exists (select 1 from ${schema.teamMembers} m join ${schema.teams} t on t.id = m.team_id where m.user_id = ${s.userId} and t.suspension_reason in ('phishing', 'manual', 'reputation'))`;
   await db
     .update(s)
-    .set({ abuseSuspended: inAbuseTeam })
-    .where(and(isNull(s.deletedAt), sql`${s.abuseSuspended} <> ${inAbuseTeam}`));
+    .set({ abuseSuspended: true })
+    .where(and(isNull(s.deletedAt), eq(s.abuseSuspended, false), exists(inAbuseTeam(db))));
   const before = (days: number) => new Date(now.getTime() - days * DAY_MS);
   const purged = await db
     .delete(s)
@@ -69,4 +85,24 @@ export async function purgeAccountSignups(db: Db, now: Date = new Date()): Promi
     )
     .returning({ userId: s.userId });
   return purged.length;
+}
+
+/**
+ * A reinstated team's people lose the abuse mark, unless another team of
+ * theirs is suspended for abuse. An account deleted while the team was
+ * suspended keeps it: nothing ties its record to the team any more.
+ */
+export async function clearAbuseMarks(db: Db, teamId: string): Promise<void> {
+  const s = schema.accountSignups;
+  const m = schema.teamMembers;
+  await db
+    .update(s)
+    .set({ abuseSuspended: false })
+    .where(
+      and(
+        eq(s.abuseSuspended, true),
+        inArray(s.userId, db.select({ userId: m.userId }).from(m).where(eq(m.teamId, teamId))),
+        notExists(inAbuseTeam(db, teamId)),
+      ),
+    );
 }

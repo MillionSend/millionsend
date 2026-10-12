@@ -7,6 +7,7 @@ import {
   claimNotification,
   clearNotifications,
   DAY_MS,
+  errorSummary,
   formatMailDate,
   freeCapText,
   linkTeam,
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
       // the cards of teams suspended for phishing.
       if (before.plan === "free" && after.plan !== "free") {
         const cards = await cardFingerprints(getStripe(), event.customerId).catch((err) => {
-          console.error("billing webhook: cards not read for linkage", err);
+          console.error(`billing webhook: cards not read for linkage: ${errorSummary(err)}`);
           return [];
         });
         await linkTeam(db, { teamId: after.id, trigger: "payment", cards });

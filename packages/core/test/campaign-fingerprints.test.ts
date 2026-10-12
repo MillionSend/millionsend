@@ -3,6 +3,7 @@ import {
   displayNamesMatch,
   domainsMatch,
   type Fingerprint,
+  fingerprint,
   fingerprintsMatch,
   messageFingerprints,
   phoneKeys,
@@ -98,10 +99,39 @@ describe("phoneKeys", () => {
     expect(phoneKeys("Appelez le +33 1 23 45 67 89")).toEqual(["123456789"]);
     expect(phoneKeys("Appelez le 01 23 45 67 89")).toEqual(["123456789"]);
     expect(phoneKeys("Ligue (11) 98765-4321")).toEqual(phoneKeys("+55 11 98765-4321"));
+    expect(phoneKeys("(11) 98765-4321")).toEqual(["987654321"]);
+  });
+
+  it("takes a number only where it is written as one, or after a word that calls it", () => {
+    expect(phoneKeys("Central 0800 555 0199")).toEqual(["005550199"]);
+    expect(phoneKeys("Nosso WhatsApp: 11 98765 4321")).toEqual(["987654321"]);
+    expect(phoneKeys("Téléphone : 01 23 45 67 89")).toEqual(["123456789"]);
+    expect(phoneKeys("CPF 123.456.789-09")).toEqual([]);
+    expect(phoneKeys("Commande n° 123456789 expédiée")).toEqual([]);
+    expect(phoneKeys("Pedido 2026 1004 1234 5678 confirmado")).toEqual([]);
   });
 
   it("leaves dates, amounts and short codes out", () => {
     expect(phoneKeys("Le 04/10/2026, 1.234,56 EUR, code 482913")).toEqual([]);
+  });
+});
+
+describe("value caps", () => {
+  it("cut free text at 256 characters on both sides, so a long subject still meets its kept copy", () => {
+    const long = `Votre facture Vexto est disponible ${"et ".repeat(3000)}`;
+    const kept = fingerprint("subject", long);
+    expect(Array.from(kept.value)).toHaveLength(256);
+    const [subject] = messageFingerprints({
+      from: "a@b.co",
+      subject: long,
+      html: null,
+      text: null,
+    }).filter((print) => print.kind === "subject");
+    expect(subject).toEqual(kept);
+    expect(subjectsMatch(subject?.value ?? "", kept.value)).toBe(true);
+    // A cut never splits a character.
+    expect(fingerprint("display_name", "😀".repeat(300)).value).toBe("😀".repeat(256));
+    expect(fingerprint("ip", "203.0.113.9")).toEqual({ kind: "ip", value: "203.0.113.9" });
   });
 });
 

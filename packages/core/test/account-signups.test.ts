@@ -4,7 +4,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { purgeAccountSignups, recordSignup } from "../src/account-signups.js";
+import { clearAbuseMarks, purgeAccountSignups, recordSignup } from "../src/account-signups.js";
 import { suspendTeam } from "../src/team-standing.js";
 import { DAY_MS } from "../src/utc-day.js";
 
@@ -85,22 +85,58 @@ describe("purgeAccountSignups", () => {
     expect(await purgeAccountSignups(db, daysAfter(start, 367))).toBe(1);
   });
 
-  it("does not count a review hold or non-payment as abuse, and follows a reinstatement", async () => {
+  it("does not count a review hold or non-payment as abuse", async () => {
     const teamId = await createTeam(db, "held");
     const id = await account(teamId);
-    await suspendTeam(db, { teamId, reason: "review" });
-    await purgeAccountSignups(db);
-    expect(await record(id)).toMatchObject({ abuseSuspended: false });
+    for (const reason of ["review", "non_payment"] as const) {
+      await suspendTeam(db, { teamId, reason });
+      await purgeAccountSignups(db);
+      expect(await record(id), reason).toMatchObject({ abuseSuspended: false });
+    }
+  });
+});
 
-    await suspendTeam(db, { teamId, reason: "manual" });
-    await purgeAccountSignups(db);
-    expect(await record(id)).toMatchObject({ abuseSuspended: true });
-
-    await db
+describe("the abuse mark", () => {
+  const reinstate = (teamId: string) =>
+    db
       .update(schema.teams)
       .set({ suspendedAt: null, suspensionReason: null })
       .where(eq(schema.teams.id, teamId));
+
+  it("is set by the suspension itself, so leaving the team first keeps it", async () => {
+    const teamId = await createTeam(db, "phish");
+    const id = await account(teamId);
+    await suspendTeam(db, { teamId, reason: "manual" });
+    expect(await record(id)).toMatchObject({ abuseSuspended: true });
+    await db.delete(schema.teamMembers).where(eq(schema.teamMembers.userId, id));
+    await deleteAccount(id);
     await purgeAccountSignups(db);
+    expect(await record(id)).toMatchObject({ abuseSuspended: true });
+  });
+
+  it("is only ever set by the sweep, and cleared by a reinstatement unless another team holds it", async () => {
+    const teamId = await createTeam(db, "phish");
+    const other = await createTeam(db, "other");
+    const id = await account(teamId);
+    const alsoElsewhere = await account(teamId);
+    await db
+      .insert(schema.teamMembers)
+      .values({ teamId: other, userId: alsoElsewhere, role: "member" });
+    await suspendTeam(db, { teamId, reason: "phishing" });
+    await suspendTeam(db, { teamId: other, reason: "reputation" });
+
+    await reinstate(teamId);
+    await purgeAccountSignups(db);
+    expect(await record(id)).toMatchObject({ abuseSuspended: true });
+
+    await clearAbuseMarks(db, teamId);
     expect(await record(id)).toMatchObject({ abuseSuspended: false });
+    expect(await record(alsoElsewhere)).toMatchObject({ abuseSuspended: true });
+
+    // An account that joins a suspended team later is marked by the sweep.
+    const late = await account(other);
+    expect(await record(late)).toMatchObject({ abuseSuspended: false });
+    await purgeAccountSignups(db);
+    expect(await record(late)).toMatchObject({ abuseSuspended: true });
   });
 });

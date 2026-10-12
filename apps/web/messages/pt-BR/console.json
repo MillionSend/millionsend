@@ -504,8 +504,8 @@
         "payment": "no primeiro pagamento",
         "send": "em um envio"
       },
-      "held": "Pausada para revisão antes de enviar.",
-      "notHeld": "Esta coincidência não pausou nada: a pausa automática está desligada ou a equipe já estava suspensa."
+      "held": "Pausada para revisão em um envio: os e-mails ficam em espera até você decidir.",
+      "notHeld": "Esta coincidência não pausou nada: uma coincidência só pausa a equipe quando ela envia, se incluir um endereço de e-mail, um cartão ou dois tipos de evidência e a pausa automática estiver ligada."
     },
     "members": {
       "title": "Membros",

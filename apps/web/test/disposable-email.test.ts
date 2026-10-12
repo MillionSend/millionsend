@@ -57,6 +57,16 @@ describe("disposable addresses at sign-up", () => {
     expect((await signUp(createAuth(db), "second@mailinator.com")).status).toBe(400);
   });
 
+  it("are refused alike whether or not an account already has the address", async () => {
+    expect((await signUp(createAuth(db), "held@mailinator.com")).status).toBe(200);
+    vi.stubEnv("BLOCK_DISPOSABLE_EMAILS", "true");
+    const auth = createAuth(db);
+    const held = await signUp(auth, "held@mailinator.com");
+    const fresh = await signUp(auth, "fresh@mailinator.com");
+    expect([held.status, fresh.status]).toEqual([400, 400]);
+    expect(await held.json()).toEqual(await fresh.json());
+  });
+
   it("are refused when an account is created outside the form, as a social sign-in does", async () => {
     vi.stubEnv("BLOCK_DISPOSABLE_EMAILS", "true");
     const ctx = await createAuth(db).$context;
