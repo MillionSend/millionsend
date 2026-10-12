@@ -22,6 +22,12 @@ export const MCP_SCOPES = [
   "api-keys:write",
   // Inbound mail is third-party content: its own scope, which no other grant implies.
   "receiving:read",
+  // Neither implies the other nor receiving:read. Reply covers replying,
+  // forwarding and organizing threads; manage covers creating, updating and
+  // deleting inboxes and releasing quarantined mail. No scope changes an
+  // inbox's safety rules or approves a held send.
+  "receiving:reply",
+  "receiving:manage",
 ] as const;
 
 export type McpScope = (typeof MCP_SCOPES)[number];

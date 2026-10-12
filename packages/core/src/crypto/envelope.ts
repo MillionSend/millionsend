@@ -29,7 +29,9 @@ export type EnvelopeKind =
   | "email_media"
   | "webhook_secret"
   | "received_raw"
-  | "received_attachments";
+  | "received_attachments"
+  | "received_extracted"
+  | "inbox_draft";
 
 /** The row an envelope belongs to; the helpers below fix the kind. */
 export interface EnvelopeOwner {

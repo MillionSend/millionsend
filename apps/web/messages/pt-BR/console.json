@@ -838,7 +838,8 @@
           "override": "amostragem total",
           "broadcast_skeleton": "esqueleto da transmissão",
           "broadcast_copy": "cópia da transmissão",
-          "destination": "destino novo"
+          "destination": "destino novo",
+          "agent_first_contact": "primeiro contato do agente"
         },
         "pending": "pendente",
         "unjudged": "sem avaliação · {error}",

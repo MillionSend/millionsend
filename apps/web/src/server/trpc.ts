@@ -1,3 +1,4 @@
+import { receivingEnabled } from "@millionsend/config";
 import { recordSupportViewRead, type WebhookEnqueue } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { getDb } from "@millionsend/db";
@@ -187,6 +188,14 @@ export const adminProcedure = teamProcedure.use(({ ctx, next }) => {
   if (ctx.role !== "owner" && ctx.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
   return next();
 });
+
+/** Without RECEIVING_MX_HOST the instance takes no mail, and these read as routes that do not exist. */
+export const receivingOnly = t.middleware(({ next }) => {
+  if (!receivingEnabled()) throw new TRPCError({ code: "NOT_FOUND" });
+  return next();
+});
+
+export const receivingProcedure = teamProcedure.use(receivingOnly);
 
 /**
  * The instance console: only the first registered user, re-checked on every

@@ -393,6 +393,7 @@ export function WebhookDetail({ id }: { id: string }) {
                     url: data.url,
                     description: data.description,
                     eventTypes: data.eventTypes,
+                    inboxIds: data.inboxIds,
                   }),
               },
               { label: t("rotateSecret"), onSelect: () => setRotating(true) },

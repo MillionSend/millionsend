@@ -38,6 +38,14 @@ export const enqueueWebhookDeliveries: WebhookEnqueue = async (deliveries) => {
   await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
 
+/** Forward a message released from quarantine to its inbox's forward_to addresses, in the worker. */
+export async function enqueueInboxForward(p: {
+  receivedEmailId: string;
+  inboxId: string;
+}): Promise<void> {
+  await (await getQueue()).enqueueInboxForward(p);
+}
+
 /** Scrub one address from the team's history in the worker, after its contact row is gone. */
 export async function enqueueRecipientErase(teamId: string, address: string): Promise<void> {
   const queue = await getQueue();

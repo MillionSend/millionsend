@@ -1,3 +1,4 @@
+import type { ReceivedAuthDetail } from "@millionsend/db/schema";
 import type { BadgeTone } from "@/components/status-badge";
 
 /** The checks the MX runs on every received message, in display order. */
@@ -16,4 +17,48 @@ const TONE: Record<string, BadgeTone> = {
 /** Badge tone for a mailauth verdict (RFC 8601 result words); anything else is neutral. */
 export function authResultTone(result: string): BadgeTone {
   return TONE[result] ?? "neutral";
+}
+
+/**
+ * Why a check reads gray, as a key under inboxes.gray; null for a verdict
+ * that needs no explaining. The unfolded detail tells a DMARC pass under
+ * p=none from a fail the domain does not ask to block, which the folded
+ * word "none" alone cannot.
+ */
+export function grayExplanation(
+  check: AuthCheck,
+  folded: string,
+  detail: ReceivedAuthDetail | null,
+):
+  | "dmarcPassNone"
+  | "dmarcFailNone"
+  | "dmarcNoRecord"
+  | "dmarcGeneric"
+  | "dkimPolicy"
+  | "spfSoftfail"
+  | "spfNeutral"
+  | "checkError"
+  | null {
+  if (check === "arc") return null;
+  if (folded === "temperror" || folded === "permerror") return "checkError";
+  if (check === "spf") {
+    if (folded === "softfail") return "spfSoftfail";
+    return folded === "neutral" || folded === "none" ? "spfNeutral" : null;
+  }
+  if (check === "dkim") return folded === "policy" ? "dkimPolicy" : null;
+  if (folded !== "none") return null;
+  if (detail?.dmarc.policy === null) return "dmarcNoRecord";
+  if (detail?.dmarc.policy === "none") {
+    if (detail.dmarc.result === "pass") return "dmarcPassNone";
+    if (detail.dmarc.result === "fail") return "dmarcFailNone";
+  }
+  return "dmarcGeneric";
+}
+
+/** The d= domains of DKIM-Signature header values (one per line), minus the From domain. */
+export function dkimSignerDomains(signatures: string, fromDomain: string): string[] {
+  const domains = [...signatures.matchAll(/(?:^|;)\s*d=([^;\s]+)/gim)].map((match) =>
+    (match[1] ?? "").toLowerCase(),
+  );
+  return [...new Set(domains)].filter((domain) => domain && domain !== fromDomain);
 }

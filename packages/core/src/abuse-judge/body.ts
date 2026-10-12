@@ -1,3 +1,4 @@
+import { countInvisible, dropInvisible } from "../customer-text.js";
 import { MIN_BODY_TEXT_CHARS } from "../email-insights.js";
 import { decodeEntities, visibleText } from "../html.js";
 
@@ -5,18 +6,11 @@ export { decodeEntities };
 
 /**
  * What a reader sees of an email body. Regex-driven, with no DOM: inline
- * styles and the `<style>` rules reached by type, class, id, descendant and
- * child selectors are resolved; attribute selectors, pseudo-classes and
- * sibling combinators are not, and a selector using one is skipped.
+ * styles and the `<style>` rules reached by type, class, id, attribute
+ * presence or exact value, descendant and child selectors are resolved;
+ * other attribute matches, pseudo-classes and sibling combinators are not,
+ * and a selector using one is skipped.
  */
-
-/**
- * Zero-width characters, the soft hyphen, bidi controls and isolates,
- * invisible operators and the Unicode tag block: none shows, and each can
- * split a word the judge would otherwise read. Global: replace or match only.
- */
-export const INVISIBLE =
-  /[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff\u{e0000}-\u{e007f}]/gu;
 
 /** Block elements, the characters a QR code is drawn with in text. Global: replace or match only. */
 const BLOCK_ELEMENTS = /[\u2580-\u259f]/g;
@@ -29,7 +23,9 @@ interface Element {
   tag: string;
   id: string | null;
   classes: string[];
-  /** The keys rules are indexed by that it carries: #id, each .class, its tag. */
+  /** Its attributes by lowercase name, for attribute selectors. */
+  attrs: ReadonlyMap<string, string>;
+  /** The keys rules are indexed by that it carries: #id, each .class, each [attribute], its tag. */
   keys: string[];
 }
 
@@ -37,7 +33,9 @@ interface Compound {
   tag: string | null;
   id: string | null;
   classes: string[];
-  /** Its id, else its first class, else its tag, else "*": the key rules are indexed and pre-checked by. */
+  /** [name] (value null) or [name=value]. */
+  attrs: { name: string; value: string | null }[];
+  /** Its id, else its first class, else its first attribute, else its tag, else "*": the key rules are indexed and pre-checked by. */
   key: string;
 }
 
@@ -51,10 +49,14 @@ interface Rule {
 }
 
 interface Sheet {
-  /** Rules that always apply, by the key of their last compound. */
+  /** Rules that always apply, by the key of their last compound: under no condition, or one every screen meets. */
   base: Map<string, Rule[]>;
-  /** Rules under a media or supports condition some real screen meets. */
+  /** Rules under a media or supports condition only some real screens meet. */
   conditional: Map<string, Rule[]>;
+  /** A rule that hides was left unresolved: its selector is not read, or its condition holds on some screens only. */
+  unresolved: boolean;
+  /** Some rule is keyed by an attribute, so an element with any attribute can match one. */
+  attrKeyed: boolean;
 }
 
 /** An element as the walk keeps it: what it inherits to its text and children. */
@@ -65,7 +67,32 @@ interface Frame extends Element {
   color: Rgba | null;
   /** What shows behind the text; "image" when that cannot be known. */
   bg: Rgba | "image";
+  /** visibility, which a descendant can set back to visible. */
+  visible: boolean;
+  /** -webkit-text-fill-color, which paints the glyphs over color; undefined follows color. */
+  fill?: Rgba | undefined;
+  /** A <details> without open: only its summary is drawn. */
+  closed?: boolean | undefined;
 }
+
+/**
+ * Why text was taken out, the read pipeline's hidden-text flags; invisible
+ * characters add their own (customer-text InvisibleClass).
+ */
+export type HiddenFlag =
+  | "display_none"
+  | "visibility"
+  | "opacity"
+  | "font_size"
+  | "zero_size"
+  | "offscreen"
+  | "clip"
+  | "same_color"
+  | "hidden_attribute"
+  | "comment"
+  | "template"
+  | "noscript"
+  | "css_unresolved";
 
 /** The only properties the resolver reads; every other declaration is dropped on parse. */
 const STYLE_PROPS = new Set([
@@ -90,20 +117,46 @@ const STYLE_PROPS = new Set([
   "clip",
   "clip-path",
   "text-indent",
+  "position",
+  "left",
+  "top",
+  "right",
+  "bottom",
+  "margin",
+  "margin-left",
+  "margin-top",
+  "transform",
+  "scale",
+  "zoom",
+  "filter",
+  "content-visibility",
+  "-webkit-text-fill-color",
+]);
+
+/** Never drawn by a mail client that reads their text: their whole content is hidden. */
+const HIDDEN_TAGS = new Map<string, HiddenFlag>([
+  ["template", "template"],
+  // Shown only where scripting is off; agents read what scripting clients show.
+  ["noscript", "noscript"],
+  // Fallback content, which a client drawing the object never shows.
+  ["object", "display_none"],
 ]);
 
 const BLACK: Rgba = [0, 0, 0, 1];
 const WHITE: Rgba = [255, 255, 255, 1];
 const LINK_BLUE: Rgba = [0, 0, 238, 1];
 const NO_CLASSES: string[] = [];
+const NO_ATTRS: ReadonlyMap<string, string> = new Map();
 const ROOT: Frame = {
   tag: "",
   id: null,
   classes: NO_CLASSES,
+  attrs: NO_ATTRS,
   keys: [],
   em: 16,
   color: BLACK,
   bg: WHITE,
+  visible: true,
 };
 
 /** Enough names for white-on-white and its near misses; any other name compares as written. */
@@ -142,7 +195,9 @@ const NAMED_COLORS = new Map([
 const SAME_COLOR_DISTANCE = 16;
 /** Below this opacity, text is not there for a reader. */
 const MIN_OPACITY = 0.1;
-/** A text-indent this far left puts the text off the page. */
+/** A box scaled or zoomed below this shows its text as a speck. */
+const MIN_SCALE = 0.1;
+/** A text-indent, a positioned box's offset or a translation this far left or up puts the text off the page. */
 const OFF_PAGE_INDENT_PX = -500;
 /** Width or height at or under this many px, with overflow hidden, shows nothing. */
 const COLLAPSED_PX = 1;
@@ -171,11 +226,20 @@ const ATTR = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
 // An unclosed <style> swallows the rest, as a browser does, so no scan restarts from each one.
 const STYLE_BLOCK = /<style\b[^<>]*>(?:([\s\S]*?)<\/style\s*>|([\s\S]*))/gi;
 const CSS_COMMENT = /\/\*(?:[\s\S]*?\*\/|[\s\S]*)/g;
+// A CSS escape: up to six hex digits and one optional space, or any other character as itself.
+const CSS_ESCAPE = /\\(?:([0-9a-f]{1,6})\s?|([\s\S]))/gi;
+// HTML comments as a browser ends them (<!--> and <!---> are empty ones), or a
+// style or script element, whose "<!--" is no comment and which is kept whole.
+const COMMENT_OR_RAW =
+  /<(style|script)\b[^<>]*>[\s\S]*?(?:<\/\1\s*>|$)|<!--(?:-?>|[\s\S]*?(?:--!?>|$))/gi;
+// Outlook's conditional comment, which only Outlook renders as markup.
+const CONDITIONAL_COMMENT = /^<!--\[if\b[^\]]*\]>([\s\S]*?)(?:<!\[endif\]\s*|<!)?(?:--!?>)?$/i;
 const RAW_TEXT_CLOSE = new Map([
   ["style", /<\/style\s*>/gi],
   ["script", /<\/script\s*>/gi],
 ]);
-const VOID_TAGS = new Set([
+/** Elements that never hold content: no end tag closes them. */
+export const VOID_TAGS: ReadonlySet<string> = new Set([
   "img",
   "br",
   "hr",
@@ -197,7 +261,7 @@ const BLOCK_TAGS = new Set(
   ),
 );
 /** The open element a new one closes without an end tag, as an HTML parser does: <p>a<p>b are siblings. */
-const IMPLIED_END = new Map([
+export const IMPLIED_END: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["p", BLOCK_TAGS],
   ["li", new Set(["li"])],
   ["td", new Set(["td", "th", "tr"])],
@@ -215,7 +279,8 @@ const STYLING_ATTR =
 /** Attributes and tags that can carry an image, to skip parsing the rest. */
 const IMAGE_ATTR = /background|url\(/i;
 const IMAGE_TAGS = new Set(["img", "v:imagedata", "v:fill", "v:image", "image", "svg"]);
-const COMPOUND = /^(\*|[a-z][a-z0-9-]*)?((?:[.#][a-z_-][\w-]*)*)$/i;
+const COMPOUND =
+  /^(\*|[a-z][a-z0-9-]*)?((?:[.#][a-z_-][\w-]*|\[[a-z_][\w:-]*(?:=(?:"[^"]*"|'[^']*'|[\w-]+))?\])*)$/i;
 // Numbers are written so a run of digits splits only one way: \d*\.?\d+
 // backtracks quadratically on a long run that then fails.
 const LENGTH = /^(-?(?:\d+(?:\.\d+)?|\.\d+))(px|pt|em|rem|%)?$/;
@@ -241,12 +306,29 @@ function elementOf(tag: string, attrs: Map<string, string>): Element {
     tag,
     id,
     classes,
-    keys: [...(id ? [`#${id}`] : []), ...classes.map((c) => `.${c}`), tag],
+    attrs,
+    keys: [
+      ...(id ? [`#${id}`] : []),
+      ...classes.map((c) => `.${c}`),
+      ...[...attrs.keys()].slice(0, MAX_CLASSES).map((name) => `[${name}]`),
+      tag,
+    ],
   };
 }
 
-function parseDeclarations(css: string): Declaration[] {
+function parseDeclarations(raw: string): Declaration[] {
   const out: Declaration[] = [];
+  // A browser reads "display:/**/none" and "d\69 splay:none" as display:none.
+  let css = raw.includes("/*") ? raw.replace(CSS_COMMENT, "") : raw;
+  if (css.includes("\\")) {
+    css = css.replace(CSS_ESCAPE, (_, hex: string | undefined, ch: string | undefined) => {
+      if (hex === undefined) return ch ?? "";
+      const cp = Number.parseInt(hex, 16);
+      return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)
+        ? String.fromCodePoint(cp)
+        : "\ufffd";
+    });
+  }
   for (const part of css.split(";")) {
     const colon = part.indexOf(":");
     if (colon < 1) continue;
@@ -279,29 +361,72 @@ function parseSelector(text: string): Omit<Rule, "order" | "declarations"> | nul
     const tag = m[1] && m[1] !== "*" ? m[1].toLowerCase() : null;
     let id: string | null = null;
     const classes: string[] = [];
-    for (const part of m[2]?.match(/[.#][^.#]+/g) ?? []) {
-      if (part[0] === ".") classes.push(part.slice(1).toLowerCase());
+    const attrs: Compound["attrs"] = [];
+    for (const part of m[2]?.match(/\[[^\]]*\]|[.#][^.#[]+/g) ?? []) {
+      if (part[0] === "[") {
+        const eq = part.indexOf("=");
+        const name = part.slice(1, eq === -1 ? -1 : eq).toLowerCase();
+        const value = eq === -1 ? null : part.slice(eq + 1, -1).replace(/^(["'])(.*)\1$/, "$2");
+        attrs.push({ name, value });
+      } else if (part[0] === ".") classes.push(part.slice(1).toLowerCase());
       else if (id === null) id = part.slice(1).toLowerCase();
       else return null;
     }
-    specificity += (id ? 10_000 : 0) + classes.length * 100 + (tag ? 1 : 0);
+    specificity += (id ? 10_000 : 0) + (classes.length + attrs.length) * 100 + (tag ? 1 : 0);
     if (compounds.length > 0) child.push(pendingChild);
     pendingChild = false;
-    const key = id ? `#${id}` : classes[0] ? `.${classes[0]}` : (tag ?? "*");
-    compounds.push({ tag, id, classes, key });
+    const key = id
+      ? `#${id}`
+      : classes[0]
+        ? `.${classes[0]}`
+        : attrs[0]
+          ? `[${attrs[0].name}]`
+          : (tag ?? "*");
+    compounds.push({ tag, id, classes, attrs, key });
   }
   if (pendingChild || compounds.length === 0 || compounds.length > MAX_COMPOUNDS) return null;
   return { compounds, child, specificity };
 }
 
+const WIDTH_BOUND = /(min|max)-(?:device-)?width\s*:\s*(\d+(?:\.\d+)?)px/gi;
+
 /** A media or supports condition some real screen meets: not print only, no freak width bound. */
 function someScreen(prelude: string): boolean {
   if (/\bprint\b/i.test(prelude) && !/\b(?:screen|all)\b/i.test(prelude)) return false;
-  for (const m of prelude.matchAll(/(min|max)-(?:device-)?width\s*:\s*(\d+(?:\.\d+)?)px/gi)) {
+  for (const m of prelude.matchAll(WIDTH_BOUND)) {
     const px = Number(m[2]);
     if (m[1]?.toLowerCase() === "min" ? px > 2000 : px < 200) return false;
   }
   return true;
+}
+
+/**
+ * A condition every screen meets, so its rules hide as if unconditioned: a
+ * supports test, or media types and width bounds no real screen falls
+ * outside of ((min-width:1px)). Any other media feature (dark mode, an
+ * orientation) holds on some screens only.
+ */
+function everyScreen(prelude: string): boolean {
+  if (!someScreen(prelude)) return false;
+  if (/^@supports\b/i.test(prelude)) return true;
+  const rest = prelude
+    .replace(/^@media\b/i, "")
+    .replace(WIDTH_BOUND, (_, kind: string, px: string) =>
+      (kind.toLowerCase() === "min" ? Number(px) <= 100 : Number(px) >= 10_000) ? "" : "bound",
+    )
+    .replace(/\b(?:only|screen|all|and)\b|[()\s,]/gi, "");
+  return rest === "";
+}
+
+/** Whether a rule's declarations would take an element out of view. */
+function declarationsHide(declarations: Declaration[]): boolean {
+  const props: Declarations = new Map(
+    declarations.map(([prop, value, important]) => [prop, { value, important }]),
+  );
+  return (
+    hideReason(props, 16) !== null ||
+    /^(?:hidden|collapse)$/.test(props.get("visibility")?.value ?? "")
+  );
 }
 
 function matchingBrace(css: string, open: number): number {
@@ -319,17 +444,32 @@ function matchingBrace(css: string, open: number): number {
  * its rules from the resolver.
  */
 function parseSheet(html: string): Sheet {
-  const sheet: Sheet = { base: new Map(), conditional: new Map() };
+  const sheet: Sheet = {
+    base: new Map(),
+    conditional: new Map(),
+    unresolved: false,
+    attrKeyed: false,
+  };
   let order = 0;
   const add = (prelude: string, block: string, conditional: boolean) => {
     const declarations = parseDeclarations(block);
     if (declarations.length === 0) return;
+    let hides: boolean | undefined;
+    const unresolved = () => {
+      hides ??= declarationsHide(declarations);
+      if (hides) sheet.unresolved = true;
+    };
+    if (conditional) unresolved();
     for (const text of prelude.split(",")) {
       if (order >= MAX_RULES) return;
       const selector = parseSelector(text);
-      if (!selector) continue;
+      if (!selector) {
+        unresolved();
+        continue;
+      }
       const index = conditional ? sheet.conditional : sheet.base;
       const key = (selector.compounds.at(-1) as Compound).key;
+      if (selector.compounds.some((c) => c.attrs.length > 0)) sheet.attrKeyed = true;
       const rule: Rule = { ...selector, order: order++, declarations };
       const rules = index.get(key);
       if (rules) rules.push(rule);
@@ -347,7 +487,7 @@ function parseSheet(html: string): Sheet {
       if (prelude.startsWith("@")) {
         const close = matchingBrace(css, open);
         if (depth < 3 && /^@(?:media|supports)\b/i.test(prelude) && someScreen(prelude)) {
-          walk(css.slice(open + 1, close), true, depth + 1);
+          walk(css.slice(open + 1, close), conditional || !everyScreen(prelude), depth + 1);
         }
         i = close + 1;
         continue;
@@ -359,7 +499,8 @@ function parseSheet(html: string): Sheet {
     }
   };
   for (const m of html.matchAll(STYLE_BLOCK)) {
-    walk((m[1] ?? m[2] ?? "").replace(CSS_COMMENT, ""), false, 0);
+    // CSS reads "<!--" and "-->" (old mail wraps its rules in them) as nothing.
+    walk((m[1] ?? m[2] ?? "").replace(CSS_COMMENT, "").replace(/<!--|-->/g, " "), false, 0);
   }
   return sheet;
 }
@@ -368,7 +509,10 @@ function compoundMatches(c: Compound, el: Element): boolean {
   return (
     (c.tag === null || c.tag === el.tag) &&
     (c.id === null || c.id === el.id) &&
-    c.classes.every((k) => el.classes.includes(k))
+    c.classes.every((k) => el.classes.includes(k)) &&
+    c.attrs.every((a) =>
+      a.value === null ? el.attrs.has(a.name) : el.attrs.get(a.name) === a.value,
+    )
   );
 }
 
@@ -428,30 +572,48 @@ function parseColor(raw: string): Rgba | null {
     const at = (i: number) => Number.parseInt(full.slice(i, i + 2), 16);
     return [at(0), at(2), at(4), full.length === 8 ? at(6) / 255 : 1];
   }
-  const rgb =
-    /^rgba?\(\s*([\d.]+%?)[\s,]+([\d.]+%?)[\s,]+([\d.]+%?)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/.exec(
-      value,
-    );
-  if (!rgb) return null;
-  const channel = (s: string) =>
-    s.endsWith("%") ? (Number(s.slice(0, -1)) * 255) / 100 : Number(s);
-  const alpha =
-    rgb[4] === undefined
-      ? 1
-      : rgb[4].endsWith("%")
-        ? Number(rgb[4].slice(0, -1)) / 100
-        : Number(rgb[4]);
-  const color: Rgba = [
-    channel(rgb[1] as string),
-    channel(rgb[2] as string),
-    channel(rgb[3] as string),
-    alpha,
-  ];
+  const fn = /^(rgba?|hsla?|hwb)\(([^()]*)\)$/.exec(value);
+  const args = fn?.[2]?.trim().split(/[\s,/]+/) ?? [];
+  if (!fn || args.length < 3 || args.length > 4) return null;
+  const [a, b, c, alpha] = args as [string, string, string, string?];
+  // A percentage of `max`, or a number as is.
+  const num = (v: string, max: number) =>
+    v.endsWith("%") ? (Number(v.slice(0, -1)) * max) / 100 : Number(v);
+  let rgb: [number, number, number];
+  if (fn[1]?.startsWith("rgb")) {
+    rgb = [num(a, 255), num(b, 255), num(c, 255)];
+  } else {
+    // hsl() and hwb() take percentages, or numbers on the same 0-100 scale.
+    const unit = (v: string) => Number(v.replace(/%$/, "")) / 100;
+    const turns = /^(-?[\d.]+)(deg|turn|rad|grad)?$/.exec(a);
+    const scale = { turn: 360, rad: 180 / Math.PI, grad: 0.9, deg: 1 }[turns?.[2] ?? "deg"] ?? 1;
+    const h = Number(turns?.[1]) * scale;
+    const hsl = (sat: number, light: number) =>
+      [0, 8, 4].map((n) => {
+        const k = (n + h / 30) % 12;
+        const swing = sat * Math.min(light, 1 - light);
+        return 255 * (light - swing * Math.max(-1, Math.min(k - 3, 9 - k, 1)));
+      }) as [number, number, number];
+    if (fn[1]?.startsWith("hsl")) {
+      rgb = hsl(unit(b), unit(c));
+    } else {
+      const [white, black] = [unit(b), unit(c)];
+      rgb =
+        white + black >= 1
+          ? ([0, 0, 0].map(() => (255 * white) / (white + black)) as [number, number, number])
+          : (hsl(1, 0.5).map((ch) => ch * (1 - white - black) + 255 * white) as [
+              number,
+              number,
+              number,
+            ]);
+    }
+  }
+  const color: Rgba = [...rgb, alpha === undefined ? 1 : num(alpha, 1)];
   return color.every(Number.isFinite) ? color : null;
 }
 
 function firstColor(shorthand: string): Rgba | null {
-  for (const m of shorthand.matchAll(/#[0-9a-f]{3,8}\b|rgba?\([^()]*\)|[a-z]+/g)) {
+  for (const m of shorthand.matchAll(/#[0-9a-f]{3,8}\b|(?:rgba?|hsla?|hwb)\([^()]*\)|[a-z]+/g)) {
     const color = parseColor(m[0]);
     if (color) return color;
   }
@@ -491,6 +653,13 @@ function textColor(
   const value = props.get("color")?.value ?? attr?.trim().toLowerCase();
   if (value === undefined) return tag === "a" && attrs.has("href") ? LINK_BLUE : parent.color;
   return value === "inherit" || value === "currentcolor" ? parent.color : parseColor(value);
+}
+
+/** The glyphs' paint: -webkit-text-fill-color when set, which wins over color; undefined follows color. */
+function textFill(props: Declarations, parent: Frame): Rgba | undefined {
+  const value = props.get("-webkit-text-fill-color")?.value;
+  if (value === undefined || value === "inherit") return parent.fill;
+  return value === "currentcolor" ? undefined : (parseColor(value) ?? undefined);
 }
 
 function fontSize(props: Declarations, parent: number): number {
@@ -542,17 +711,50 @@ function clipPathHides(value: string | undefined): boolean {
   return top + bottom >= 100 || left + right >= 100;
 }
 
-/** Whether the element's declarations take it and everything inside it out of view. */
-function hidesSubtree(props: Declarations, em: number): boolean {
-  const get = (prop: string) => props.get(prop)?.value;
-  if (get("display") === "none") return true;
-  if (/^(?:hidden|collapse)$/.test(get("visibility") ?? "")) return true;
-  const opacity = get("opacity");
-  if (opacity !== undefined) {
-    const n = opacity.endsWith("%") ? Number(opacity.slice(0, -1)) / 100 : Number(opacity);
-    if (n < MIN_OPACITY) return true;
+/** Whether scale factors (numbers or percentages) shrink the box to a speck. */
+function tinyScale(factors: string[]): boolean {
+  return factors.some((f) => {
+    const n = f.endsWith("%") ? Number(f.slice(0, -1)) / 100 : Number(f);
+    return Math.abs(n) < MIN_SCALE;
+  });
+}
+
+/** A transform that shrinks the box to nothing, or moves it off the page. */
+function transformHides(value: string | undefined): HiddenFlag | null {
+  if (!value) return null;
+  for (const m of value.matchAll(/\bscale(3d|[xy])?\(([^()]*)\)/g)) {
+    const factors = (m[2] as string).split(/[\s,]+/).filter(Boolean);
+    if (tinyScale(factors.slice(0, m[1] === "x" || m[1] === "y" ? 1 : 2))) return "zero_size";
   }
-  if (toPx(get("max-height"), em) === 0) return true;
+  for (const m of value.matchAll(/\btranslate[xy]?\(\s*(-(?:\d+(?:\.\d+)?|\.\d+))px/g)) {
+    if (Number(m[1]) <= OFF_PAGE_INDENT_PX) return "offscreen";
+  }
+  return null;
+}
+
+/**
+ * Why the element's declarations take it and everything inside it out of
+ * view, or null. Visibility is inherited instead (a descendant can show
+ * again), so it is read per frame.
+ */
+function hideReason(props: Declarations, em: number): HiddenFlag | null {
+  const get = (prop: string) => props.get(prop)?.value;
+  if (get("display") === "none" || get("content-visibility") === "hidden") return "display_none";
+  const filterOpacity = /\bopacity\(\s*((?:\d+(?:\.\d+)?|\.\d+)%?)\s*\)/.exec(
+    get("filter") ?? "",
+  )?.[1];
+  for (const opacity of [get("opacity"), filterOpacity]) {
+    if (opacity === undefined) continue;
+    const n = opacity.endsWith("%") ? Number(opacity.slice(0, -1)) / 100 : Number(opacity);
+    if (n < MIN_OPACITY) return "opacity";
+  }
+  const zoom = get("zoom");
+  if (zoom !== undefined && /^[\d.]+%?$/.test(zoom) && tinyScale([zoom])) return "zero_size";
+  const scale = get("scale");
+  if (scale !== undefined && scale !== "none" && tinyScale(scale.split(/\s+/).slice(0, 2))) {
+    return "zero_size";
+  }
+  if (toPx(get("max-height"), em) === 0) return "zero_size";
   const overflowHidden = ["overflow", "overflow-x", "overflow-y"].some((p) =>
     /^(?:hidden|clip)\b/.test(get(p) ?? ""),
   );
@@ -563,16 +765,27 @@ function hidesSubtree(props: Declarations, em: number): boolean {
       return px !== null && px <= COLLAPSED_PX;
     })
   ) {
-    return true;
+    return "zero_size";
   }
-  if (clipHides(get("clip")) || clipPathHides(get("clip-path"))) return true;
+  if (clipHides(get("clip")) || clipPathHides(get("clip-path"))) return "clip";
   const indent = get("text-indent");
   if (indent !== undefined) {
     const px = toPx(indent, em);
-    if (px !== null && px <= OFF_PAGE_INDENT_PX) return true;
-    if (indent.endsWith("%") && Number(indent.slice(0, -1)) <= -100) return true;
+    if (px !== null && px <= OFF_PAGE_INDENT_PX) return "offscreen";
+    if (indent.endsWith("%") && Number(indent.slice(0, -1)) <= -100) return "offscreen";
   }
-  return false;
+  // A negative margin moves a box in the flow as well as a positioned one.
+  const margins = (get("margin") ?? "").split(/\s+/);
+  const leftMargin = get("margin-left") ?? margins[3] ?? margins[1] ?? margins[0];
+  const topMargin = get("margin-top") ?? margins[0];
+  const sides = /^(?:absolute|fixed)$/.test(get("position") ?? "")
+    ? [get("left"), get("top"), get("right"), get("bottom")]
+    : [];
+  for (const side of [leftMargin, topMargin, ...sides]) {
+    const px = toPx(side, em);
+    if (px !== null && px <= OFF_PAGE_INDENT_PX) return "offscreen";
+  }
+  return transformHides(get("transform"));
 }
 
 function sameColor(a: Rgba, b: Rgba): boolean {
@@ -581,21 +794,23 @@ function sameColor(a: Rgba, b: Rgba): boolean {
   );
 }
 
-/** Text in this element that a reader cannot see: too small, transparent, or the colour of its ground. */
-function textHidden(frame: Frame): boolean {
-  if (frame.em <= 1) return true;
-  const color = frame.color;
-  if (!color) return false;
-  if (color[3] < MIN_OPACITY) return true;
-  return frame.bg !== "image" && sameColor(color, frame.bg);
+/** Why text in this element is not seen: hidden, too small, transparent, or the colour of its ground. */
+function textHidden(frame: Frame): HiddenFlag | null {
+  if (frame.closed) return "display_none";
+  if (!frame.visible) return "visibility";
+  if (frame.em <= 1) return "font_size";
+  const color = frame.fill ?? frame.color;
+  if (!color) return null;
+  if (color[3] < MIN_OPACITY) return "same_color";
+  return frame.bg !== "image" && sameColor(color, frame.bg) ? "same_color" : null;
 }
 
 function readable(run: string): boolean {
-  return decodeEntities(visibleText(run)).replace(INVISIBLE, "").trim() !== "";
+  return dropInvisible(decodeEntities(visibleText(run))).trim() !== "";
 }
 
 export interface VisibleHtml {
-  /** The html without its hidden elements and hidden runs of text. */
+  /** The html without its hidden elements, hidden runs of text and comments. */
   html: string;
   /** Text a reader cannot see, decoded, in document order: salting and text written for scanners. */
   hidden: string;
@@ -606,18 +821,35 @@ export interface VisibleHtml {
   preview: string;
   /** Characters of hidden text, the preview's included. */
   hiddenChars: number;
+  /** Why anything was taken out, sorted; never the text itself. */
+  flags: HiddenFlag[];
 }
 
 /**
- * Takes out what a reader cannot see: elements hidden by the `hidden`
- * attribute, an inline style or a stylesheet rule (display, visibility,
- * opacity, a collapsed or clipped box, an off-page indent, zero max-height),
- * and runs of text set at 1px or less, transparent, or in their background's
- * colour. An element shown again by a media or supports rule (a mobile-only
- * block) stays. Closing tags pop the open elements back to their match, so
+ * Takes out what a reader cannot see: comments (Outlook's conditional ones
+ * read as hidden text), template and noscript content, elements hidden by
+ * the `hidden` attribute, an inline style or a stylesheet rule (display,
+ * opacity, a collapsed, clipped, scaled or off-page box, zero max-height),
+ * and runs of text set invisible, at 1px or less, transparent, or in their
+ * background's colour. An element shown again by a media or supports rule
+ * (a mobile-only block) stays; a hiding rule under a condition every screen
+ * meets applies. Closing tags pop the open elements back to their match, so
  * malformed nesting can still fool it.
  */
-export function stripHiddenElements(html: string): VisibleHtml {
+export function stripHiddenElements(input: string): VisibleHtml {
+  const flags = new Set<HiddenFlag>();
+  // Comments go before anything else reads the body: a tag inside one is no
+  // tag, and a stylesheet inside one applies nowhere.
+  const outlookOnly: string[] = [];
+  const html = input.includes("<!--")
+    ? input.replace(COMMENT_OR_RAW, (m: string, raw: string | undefined) => {
+        if (raw) return m;
+        flags.add("comment");
+        const conditional = CONDITIONAL_COMMENT.exec(m)?.[1];
+        if (conditional) outlookOnly.push(conditional);
+        return "";
+      })
+    : input;
   const sheet = parseSheet(html);
   const hasRules = sheet.base.size > 0 || sheet.conditional.size > 0;
   const out: string[] = [];
@@ -645,8 +877,19 @@ export function stripHiddenElements(html: string): VisibleHtml {
       keys = [tag];
       plainKeys.set(tag, keys);
     }
-    const { em, color, bg } = parent;
-    return { tag, id: null, classes: NO_CLASSES, keys, em, color, bg };
+    const { em, color, bg, visible, fill } = parent;
+    return {
+      tag,
+      id: null,
+      classes: NO_CLASSES,
+      attrs: NO_ATTRS,
+      keys,
+      em,
+      color,
+      bg,
+      visible,
+      fill,
+    };
   };
   const has = (key: string) => key === "*" || (keys.get(key) ?? 0) > 0;
   /** Whether the rule's ancestor compounds match the open elements; its last one already matched. */
@@ -692,7 +935,9 @@ export function stripHiddenElements(html: string): VisibleHtml {
   const text = (run: string) => {
     if (run === "") return;
     const top = stack.at(-1) ?? ROOT;
-    if (removedAt !== -1 || budget <= 0 || textHidden(top)) {
+    const reason = removedAt !== -1 ? null : budget <= 0 ? "css_unresolved" : textHidden(top);
+    if (removedAt !== -1 || reason) {
+      if (reason && run.trim() !== "") flags.add(reason);
       (seenVisible ? hidden : preview).push(run);
       return;
     }
@@ -735,8 +980,16 @@ export function stripHiddenElements(html: string): VisibleHtml {
     }
     const raw = m[3] as string;
     const parent = stack.at(-1) ?? ROOT;
-    let frame = STYLING_ATTR.test(raw) ? null : plainFrame(tag, parent);
-    let hides = false;
+    const tagReason =
+      HIDDEN_TAGS.get(tag) ?? (parent.closed && tag !== "summary" ? "display_none" : null);
+    let reason: HiddenFlag | null = tagReason;
+    let frame =
+      tagReason ||
+      tag === "details" ||
+      STYLING_ATTR.test(raw) ||
+      (sheet.attrKeyed && /[^\s/]/.test(raw))
+        ? null
+        : plainFrame(tag, parent);
     if (!frame) {
       const attrs = parseAttrs(raw);
       const el = elementOf(tag, attrs);
@@ -744,23 +997,39 @@ export function stripHiddenElements(html: string): VisibleHtml {
       const own = hasRules && budget > 0 ? matched(sheet.base, el) : [];
       const props = cascade(own, inline);
       const em = fontSize(props, parent.em);
-      hides = attrs.has("hidden") || hidesSubtree(props, em);
-      if (hides && !attrs.has("hidden") && sheet.conditional.size > 0 && budget > 0) {
+      if (!reason) reason = attrs.has("hidden") ? "hidden_attribute" : hideReason(props, em);
+      // A rule only some screens meet can still show what the rest hide (a
+      // mobile-only block); the hidden attribute and hidden tags it cannot.
+      const styled = reason !== null && reason !== "hidden_attribute" && !tagReason;
+      const unseen = /^(?:hidden|collapse)$/.test(props.get("visibility")?.value ?? "");
+      let shownProps: Declarations | null = null;
+      if ((styled || unseen) && sheet.conditional.size > 0 && budget > 0) {
         const shown = matched(sheet.conditional, el);
-        if (shown.length > 0 && !hidesSubtree(cascade([...own, ...shown], inline), em)) {
-          hides = false;
-        }
+        if (shown.length > 0) shownProps = cascade([...own, ...shown], inline);
       }
+      if (styled && shownProps && !hideReason(shownProps, em)) reason = null;
+      const visibility = (shownProps ?? props).get("visibility")?.value;
       frame = {
         ...el,
         em,
         color: textColor(tag, attrs, props, parent),
+        fill: textFill(props, parent),
+        closed: tag === "details" && !attrs.has("open"),
         bg: backgroundOf(props, attrs) ?? parent.bg,
+        visible:
+          visibility === "hidden" || visibility === "collapse"
+            ? false
+            : visibility === "visible" || visibility === "initial"
+              ? true
+              : parent.visible,
       };
+      // An invisible link is no link a reader can follow: it goes whole, its href with it.
+      if (!reason && !frame.visible && (tag === "a" || tag === "area")) reason = "visibility";
     }
     const selfClosing =
       VOID_TAGS.has(tag) || (raw.trimEnd().endsWith("/") && (tag.includes(":") || has("svg")));
-    if (removedAt === -1 && hides) {
+    if (removedAt === -1 && reason) {
+      flags.add(reason);
       if (!selfClosing) removedAt = stack.length;
     } else if (removedAt === -1) {
       out.push(m[0]);
@@ -771,15 +1040,17 @@ export function stripHiddenElements(html: string): VisibleHtml {
     }
   }
   text(html.slice(cursor));
+  if (sheet.unresolved) flags.add("css_unresolved");
 
   const join = (runs: string[]) => decodeEntities(visibleText(runs.join(" ")));
-  const hiddenText = join(hidden);
+  const hiddenText = join([...hidden, ...outlookOnly]);
   const previewText = join(preview);
   return {
     html: out.join(""),
     hidden: hiddenText,
     preview: previewText,
     hiddenChars: hiddenText.length + previewText.length,
+    flags: [...flags].sort(),
   };
 }
 
@@ -935,8 +1206,8 @@ export function readBody(html: string | null, text: string | null): BodyText {
   const raw = stripped ? decodeEntities(visibleText(stripped.html)) : (text ?? "");
   return {
     stripped,
-    visible: raw.replace(INVISIBLE, ""),
-    invisible: raw.match(INVISIBLE)?.length ?? 0,
+    visible: dropInvisible(raw),
+    invisible: countInvisible(raw),
   };
 }
 

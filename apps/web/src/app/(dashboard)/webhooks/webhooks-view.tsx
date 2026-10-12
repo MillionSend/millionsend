@@ -28,6 +28,7 @@ import { ListFooter, PAGE_SIZES } from "../emails/list-parts";
 import {
   type EditableWebhook,
   EventTypesPicker,
+  InboxFilterField,
   WebhookEditModal,
   WebhookRotateModal,
 } from "./webhook-dialogs";
@@ -89,6 +90,8 @@ export function WebhooksView() {
   const [description, setDescription] = useState("");
   const [allEvents, setAllEvents] = useState(true);
   const [selectedEvents, setSelectedEvents] = useState<WebhookEventType[]>([]);
+  // Empty = every inbox.
+  const [inboxIds, setInboxIds] = useState<string[]>([]);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; url: string } | null>(null);
   const [editTarget, setEditTarget] = useState<EditableWebhook | null>(null);
@@ -132,6 +135,7 @@ export function WebhooksView() {
     setDescription("");
     setAllEvents(true);
     setSelectedEvents([]);
+    setInboxIds([]);
     resetCreate();
   }, [resetCreate]);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
@@ -150,6 +154,7 @@ export function WebhooksView() {
       url: url.trim(),
       eventTypes: allEvents ? [] : selectedEvents,
       ...(trimmedDescription ? { description: trimmedDescription } : {}),
+      ...(inboxIds.length > 0 ? { inboxIds } : {}),
     });
   };
   const submitDelete = () => {
@@ -298,6 +303,7 @@ export function WebhooksView() {
                               url: webhook.url,
                               description: webhook.description,
                               eventTypes: webhook.eventTypes,
+                              inboxIds: webhook.inboxIds,
                             }),
                         },
                         {
@@ -418,6 +424,12 @@ export function WebhooksView() {
                 onChange={setSelectedEvents}
               />
             </div>
+            <InboxFilterField
+              id="webhook-inboxes"
+              value={inboxIds}
+              onChange={setInboxIds}
+              disabled={createMutation.isPending}
+            />
             <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeCreate}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>

@@ -218,6 +218,7 @@ describe("GET /webhooks and GET /webhooks/{id}", () => {
       endpoint: "https://example.com/hooks/get",
       status: "enabled",
       events: ["email.opened"],
+      inbox_ids: null,
       created_at: expect.any(String),
       signing_secret: created.signing_secret,
       previous_secret_expires_at: null,
@@ -237,6 +238,7 @@ describe("GET /webhooks and GET /webhooks/{id}", () => {
       "endpoint",
       "events",
       "id",
+      "inbox_ids",
       "status",
     ]);
     expect(JSON.stringify(listBody)).not.toContain(created.signing_secret);

@@ -1,3 +1,4 @@
+import { sharedInboxDomain } from "@millionsend/config";
 import {
   applyStatusCas,
   buildUnsubscribeHeaders,
@@ -17,6 +18,7 @@ import {
   findSuppressed,
   hashRecipient,
   isOnboardingSender,
+  isSharedInboxSender,
   isSubscribedToTopic,
   judgeAfterSend,
   type Keyring,
@@ -30,6 +32,7 @@ import {
   openAttachments,
   parseSingleSender,
   purgedEmailBodyColumns,
+  recordMonitorSample,
   releaseQuota,
   rewriteForTracking,
   SCORE_VERSION,
@@ -88,6 +91,8 @@ export interface SendDeps {
   defaultConfigurationSet?: string | undefined;
   /** ONBOARDING_EMAIL_FROM: the fixed onboarding email carries no team domain (see core isOnboardingSender). */
   onboardingEmailFrom?: string | undefined;
+  /** SHARED_INBOX_DOMAIN, whose inbox replies carry no team domain either; the environment's when absent. */
+  sharedInboxDomain?: string | null | undefined;
   /**
    * Awaited right before the send claim, after every check that can still
    * skip or fail the email — a token spent on a row that never reaches SES
@@ -573,9 +578,18 @@ async function sendQueued(
 
   // SES rejects a tenant send whose identity or configuration set is not
   // associated, so the tenant rides along only once the row is marked.
-  // The shared onboarding sender is an identity of this instance's own SES
-  // account: no team domain, the default region and configuration set.
-  const platformSend = !email.domainId && isOnboardingSender(email.from, deps.onboardingEmailFrom);
+  // The shared onboarding sender and the shared inbox domain are identities
+  // of this instance's own SES account: no team domain, the default region
+  // and configuration set. Only the onboarding email is the platform's own
+  // content; shared-domain mail is a customer's and is screened like any.
+  const onboarding = !email.domainId && isOnboardingSender(email.from, deps.onboardingEmailFrom);
+  const platformSend =
+    onboarding ||
+    (!email.domainId &&
+      isSharedInboxSender(
+        email.from,
+        deps.sharedInboxDomain === undefined ? sharedInboxDomain() : deps.sharedInboxDomain,
+      ));
   if (!platformSend && domain?.status !== "verified") {
     // Terminal, not retried: a domain demoted or deleted after accept does
     // not come back on its own, and the row would otherwise ride the retry
@@ -630,7 +644,7 @@ async function sendQueued(
   let screened: { id: string; unjudged: boolean } | null = null;
   let probation = false;
   let media: SendMedia | null = null;
-  if (deps.monitor && !systemMail && !platformSend) {
+  if (deps.monitor && !systemMail && !onboarding) {
     // Read once for the linkage check and the gate.
     const settings = await deps.monitor.settings().catch(() => null);
     const team = settings ? await screeningTeam(db, settings, email.teamId, new Date()) : undefined;
@@ -1036,7 +1050,7 @@ async function sendQueued(
   // a failure here is logged and changes nothing. The instance's own account
   // mail and the fixed onboarding email are never customer content, so they
   // are never drawn.
-  if (deps.monitor && !systemMail && !platformSend) {
+  if (deps.monitor && !systemMail && !onboarding) {
     try {
       if (screened) {
         // Judged before it went out: counted, never drawn again, which would
@@ -1045,6 +1059,18 @@ async function sendQueued(
         if (screened.unjudged) {
           await judgeAfterSend(db, deps.monitor, { id: screened.id, teamId: email.teamId });
         }
+      } else if (email.firstContact && (await sentByAgentInbox(db, email.inboxId))) {
+        // An agent writing to someone new is always judged, and its verdict
+        // folds into the team's hold policy like any outbound sample.
+        const now = new Date();
+        await noteAcceptedSend(db, email.teamId, now);
+        await recordMonitorSample(db, deps.monitor, await deps.monitor.settings(), {
+          teamId: email.teamId,
+          emailId: email.id,
+          broadcastId: null,
+          kind: "agent_first_contact",
+          now,
+        });
       } else {
         // An opaque email and one with files each add an anomaly: both
         // together draw it at every tier.
@@ -1078,6 +1104,15 @@ async function sendQueued(
     });
   }
   return "sent";
+}
+
+async function sentByAgentInbox(db: Db, inboxId: string | null): Promise<boolean> {
+  if (!inboxId) return false;
+  const [inbox] = await db
+    .select({ kind: schema.inboxes.kind })
+    .from(schema.inboxes)
+    .where(eq(schema.inboxes.id, inboxId));
+  return inbox?.kind === "agent";
 }
 
 interface MimeInput {

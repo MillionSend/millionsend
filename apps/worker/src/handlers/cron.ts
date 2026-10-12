@@ -14,6 +14,7 @@ import {
   purgedEmailBodyColumns,
   QUOTA_COLUMNS,
   type QuotaTeamRow,
+  RECEIVED_SECRET_WINDOW,
   recordAudit,
   releaseQuota,
   reserveQuota,
@@ -796,6 +797,7 @@ export async function purgeExpiredReceivedContent(
           rawWrappedDek: null,
           rawKeyVersion: null,
           attachments: null,
+          extracted: null,
           contentPurgedAt: now,
         })
         .where(
@@ -1426,4 +1428,99 @@ export async function reconcileBillingPlans(
     }
   }
   return { reconciled: teams.length - failed, failed };
+}
+
+/** Daily inbox usage kept: the dashboard reads the last 30 days. */
+const INBOX_USAGE_DAYS = 35;
+
+/** Deletes `table` rows matching `where` in PURGE_BATCH slices; how many went. */
+async function deleteInBatches(
+  db: Db,
+  table: typeof schema.inboxActivity | typeof schema.inboxDrafts | typeof schema.inboxThreads,
+  where: SQL,
+): Promise<number> {
+  let deleted = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db.execute(sql`
+        delete from ${table} where id in (select id from ${table} where ${where} limit ${PURGE_BATCH})
+      `),
+    );
+    deleted += batch;
+    if (batch < PURGE_BATCH) return deleted;
+  }
+}
+
+/**
+ * The inbox data steps of retention.purge, after the received metadata
+ * purge (whose deletes cascade to memberships): threads left empty, draft
+ * bodies on the content clock and draft rows on the metadata clock, the
+ * activity trail and correspondents on the metadata clock, daily inbox
+ * usage past the 30 days the dashboard reads, and received-secret MACs
+ * after their day. Counts by step name.
+ */
+export async function purgeInboxData(
+  db: Db,
+  p: { contentDays: number; metadataDays: number; now?: Date | undefined },
+): Promise<Record<string, number>> {
+  const now = p.now ?? new Date();
+  const contentCutoff = new Date(now.getTime() - p.contentDays * DAY_MS);
+  const metadataCutoff = new Date(now.getTime() - p.metadataDays * DAY_MS);
+  const t = schema.inboxThreads;
+  const d = schema.inboxDrafts;
+  const emptyThreads = await deleteInBatches(
+    db,
+    t,
+    sql`not exists (select 1 from ${schema.receivedEmailInboxes} m where m.thread_id = ${t.id})
+      and not exists (select 1 from ${schema.emails} e where e.thread_id = ${t.id})
+      and not exists (select 1 from ${d} x where x.thread_id = ${t.id} and x.status in ('draft', 'pending_approval'))`,
+  );
+  let draftBodies = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db
+        .update(d)
+        .set({
+          bodyCiphertext: null,
+          bodyIv: null,
+          bodyWrappedDek: null,
+          bodyKeyVersion: null,
+          bodyPurgedAt: now,
+        })
+        .where(
+          inArray(
+            d.id,
+            db
+              .select({ id: d.id })
+              .from(d)
+              .where(and(isNull(d.bodyPurgedAt), lt(d.updatedAt, contentCutoff)))
+              .limit(PURGE_BATCH),
+          ),
+        ),
+    );
+    draftBodies += batch;
+    if (batch < PURGE_BATCH) break;
+  }
+  const drafts = await deleteInBatches(db, d, sql`${d.updatedAt} < ${metadataCutoff}`);
+  const a = schema.inboxActivity;
+  const activity = await deleteInBatches(db, a, sql`${a.createdAt} < ${metadataCutoff}`);
+  const c = schema.inboxCorrespondents;
+  const correspondents = affectedRows(await db.delete(c).where(lt(c.lastSeenAt, metadataCutoff)));
+  const u = schema.inboxUsageDaily;
+  const usage = affectedRows(
+    await db.delete(u).where(lt(u.day, utcDay(now.getTime() - INBOX_USAGE_DAYS * DAY_MS))),
+  );
+  const rs = schema.receivedSecrets;
+  const secrets = affectedRows(
+    await db.delete(rs).where(lt(rs.createdAt, new Date(now.getTime() - RECEIVED_SECRET_WINDOW))),
+  );
+  return {
+    inboxEmptyThreads: emptyThreads,
+    inboxDraftBodies: draftBodies,
+    inboxDrafts: drafts,
+    inboxActivity: activity,
+    inboxCorrespondents: correspondents,
+    inboxUsage: usage,
+    receivedSecrets: secrets,
+  };
 }

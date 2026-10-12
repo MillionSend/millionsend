@@ -2,9 +2,21 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, count, eq } from "drizzle-orm";
+import type { ApiKeyAuth } from "./api-key-auth.js";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 import { admitWarmup } from "./domain-warmup.js";
+import { type InboxActor, inboxActorFromAuth } from "./inboxes/activity.js";
+import type { InboxKeys } from "./inboxes/keys.js";
+import {
+  beginInboxAccept,
+  deferredEnqueue,
+  finishInboxAccept,
+  gateGenericSend,
+  type InboxAcceptState,
+  refundInboxAccept,
+} from "./inboxes/send.js";
+import { secondsToNextUtcDay } from "./inboxes/send-policy.js";
 import { monthlyCapacity, type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
 import { quotaChargeAt, releaseQuota, reserveQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
@@ -12,6 +24,7 @@ import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppression
 import { type SendRefusal, sendRefusal } from "./team-standing.js";
 import { findTopicOptOuts } from "./topics.js";
 import { utcDay } from "./utc-day.js";
+import type { WebhookEnqueue } from "./webhooks.js";
 
 /**
  * Domain part of an RFC 5322 sender, lowercased. SECURITY: strict
@@ -65,6 +78,16 @@ export interface AcceptEmailDeps {
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
   enqueueEmailSend: (emailId: string, opts?: { startAfter?: Date }) => Promise<void>;
+  /** Thread-token keys: a send from an inbox address resolves its thread through them. */
+  inboxKeys?: InboxKeys | undefined;
+  /** SHARED_INBOX_DOMAIN: its addresses send only through the inbox endpoints. */
+  sharedInboxDomain?: string | null | undefined;
+  /**
+   * Arms the webhook drain for the inbox events an inbox send writes.
+   * Optional: without it the rows still land and the webhooks.reconcile
+   * sweep sends them.
+   */
+  enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
 }
 
 /** SECURITY: must come from verified authentication, never from the payload. */
@@ -78,6 +101,8 @@ export interface AcceptEmailAuth {
   billing: QuotaTeamRow | "uncapped";
   /** Null when the caller authenticated with something other than an API key (OAuth/MCP). */
   apiKeyId: string | null;
+  /** An inbox-scoped key's inbox: it sends from that inbox's address only. */
+  inboxId?: string | null | undefined;
 }
 
 export interface AcceptEmailPayload {
@@ -99,6 +124,21 @@ export interface AcceptEmailPayload {
   domainId: string | null;
   /** Topic-scoped send; callers validate team ownership before accepting. */
   topicId?: string | undefined;
+  /**
+   * Set by inbox-aware callers after their own send decision; the accept
+   * transaction then records the inbox, thread and cap usage with the row.
+   */
+  inbox?: InboxAccept | undefined;
+}
+
+export interface InboxAccept {
+  inboxId: string;
+  /** Null: a new thread is created (folder sent). */
+  threadId: string | null;
+  firstContact: boolean;
+  newRecipients: string[];
+  /** False for approved sends: counted, never refused by the cap. */
+  countTowardCap: boolean;
 }
 
 /**
@@ -317,7 +357,12 @@ export type AcceptEmailResult =
    */
   | { ok: false; reason: "monthly_quota_exceeded"; periodEnd: Date; overage: boolean }
   /** The team may not send at all right now (sendRefusal); nothing was accepted. */
-  | ({ ok: false } & SendRefusal);
+  | ({ ok: false } & SendRefusal)
+  /** An inbox's send rules hold it; `reasons` are rule codes, never content. */
+  | { ok: false; reason: "inbox_send_policy"; reasons: string[] }
+  | { ok: false; reason: "inbox_send_cap_reached"; retryAfterSec: number }
+  /** An inbox-scoped key sending from another address. */
+  | { ok: false; reason: "inbox_scope" };
 
 /**
  * The single accept pipeline behind every send surface: the team's send
@@ -356,6 +401,13 @@ export async function acceptEmail(
      * was caught. Releasing the hold sends it. Every other check still runs.
      */
     parkUnderReview?: boolean | undefined;
+    /** Who an inbox send's activity names; read from `auth` when absent. */
+    actor?: InboxActor | undefined;
+    /**
+     * With `tx`: where an inbox send's webhook rows go, for the caller to
+     * queue after its own commit, as it queues the send.
+     */
+    inboxWebhooks?: WebhookEnqueue | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
   let underReview = false;
@@ -369,6 +421,19 @@ export async function acceptEmail(
   }
   const tooLarge = exceededSendSize(payload);
   if (tooLarge !== null) return { ok: false, reason: "attachments_too_large", maxBytes: tooLarge };
+
+  const now = new Date();
+  // Every surface meets the inbox rails here; inbox-aware callers decided
+  // already and say so with payload.inbox. The accept surfaces (API, SMTP
+  // relay) pass their ApiKeyAuth, and the actor reads only its key, inbox
+  // and OAuth fields.
+  const actor = opts.actor ?? inboxActorFromAuth(auth as ApiKeyAuth);
+  let inboxAccept = payload.inbox;
+  if (!inboxAccept && auth.billing !== "uncapped") {
+    const gate = await gateGenericSend(opts.tx ?? deps.db, deps, { auth, payload, actor, now });
+    if (!gate.ok) return gate;
+    inboxAccept = gate.inbox ?? undefined;
+  }
 
   // Suppression: dedupe, check every recipient field, and strip suppressed
   // addresses; refuse only when no `to` recipient remains.
@@ -432,7 +497,8 @@ export async function acceptEmail(
   // against the current billing period, whenever it delivers.
   const deliveryAt = quotaChargeAt(payload.scheduledAt);
   const day = utcDay(deliveryAt);
-  const runAccept = async (txDb: Db) => {
+  const inboxEvents = deferredEnqueue();
+  const acceptRow = async (txDb: Db, inbox: InboxAcceptState | null) => {
     const reservation =
       opts.quota === "deferred"
         ? { reserved: true }
@@ -507,7 +573,7 @@ export async function acceptEmail(
         replyTo: payload.replyTo ?? null,
         subject: payload.subject,
         tags,
-        headers: payload.headers ?? null,
+        headers: inbox?.headers ?? payload.headers ?? null,
         attachments: sealedAttachments,
         topicId: payload.topicId ?? null,
         latestStatus: parked ? "queued_quota" : "queued",
@@ -518,17 +584,53 @@ export async function acceptEmail(
         bodyIv: encrypted.iv,
         bodyWrappedDek: encrypted.wrappedDek,
         bodyKeyVersion: encrypted.keyVersion,
+        inboxId: inbox?.inbox.id ?? null,
+        threadId: inbox?.threadId ?? null,
+        firstContact: inbox?.accept.firstContact ?? false,
       })
-      .returning({ id: schema.emails.id });
+      .returning();
     if (!row) throw new Error("email insert returned no row");
     await opts.completeInTx?.(txDb, row.id);
+    if (inbox) {
+      await finishInboxAccept(txDb, inbox, {
+        email: row,
+        attachments: payload.attachments,
+        actor,
+        now,
+        enqueue: opts.inboxWebhooks ?? inboxEvents.enqueue,
+      });
+    }
     return { id: row.id, parked };
+  };
+  // The inbox's cap is charged before anything else is written, and handed
+  // back if a later step refuses: the transaction commits on a refusal.
+  const runAccept = async (txDb: Db) => {
+    if (!inboxAccept) return acceptRow(txDb, null);
+    const inbox = await beginInboxAccept(txDb, deps, {
+      teamId: auth.teamId,
+      accept: inboxAccept,
+      recipients: recipientCount,
+      subject: payload.subject,
+      headers: payload.headers,
+      now,
+    });
+    if (inbox === "cap") return "inbox_send_cap_reached" as const;
+    const out = await acceptRow(txDb, inbox);
+    if (typeof out === "string") await refundInboxAccept(txDb, inbox);
+    return out;
   };
   const accepted = opts.tx
     ? await runAccept(opts.tx)
     : await deps.db.transaction((tx) => runAccept(tx as unknown as Db));
   if (accepted === "quota_backlog_full" || accepted === "warmup_backlog_full") {
     return { ok: false, reason: accepted };
+  }
+  if (accepted === "inbox_send_cap_reached") {
+    return {
+      ok: false,
+      reason: accepted,
+      retryAfterSec: secondsToNextUtcDay(now),
+    };
   }
   if (accepted === "monthly_quota_exceeded") {
     return {
@@ -554,6 +656,7 @@ export async function acceptEmail(
       console.error("email.send enqueue failed; reconcile sweep will recover", err);
     }
   }
+  if (!opts.tx) await inboxEvents.flush(deps.enqueueWebhookDeliveries);
   return {
     ok: true,
     id: accepted.id,

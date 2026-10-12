@@ -365,6 +365,13 @@
       "when": 1791815731423,
       "tag": "0051_complaint_feedback_sends",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1791832739361,
+      "tag": "0052_inboxes",
+      "breakpoints": true
     }
   ]
 }

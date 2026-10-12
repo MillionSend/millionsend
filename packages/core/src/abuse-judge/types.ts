@@ -20,10 +20,26 @@ export interface JudgeVerdict {
   model?: string;
 }
 
+/** The inbound question set's answer for one received message (abuse-judge/inbound.ts). */
+export interface InboundJudgeVerdict {
+  /** 0-100 each. */
+  injectionScore: number;
+  phishingScore: number;
+  spamScore: number;
+  /** Reason keys among targets_agent, override, exfiltration, unsafe_action, concealed, credential_lure. */
+  reasons: string[];
+  category: string | null;
+  language: string;
+  /** The versioned model id that answered, when the provider reported one. */
+  model?: string;
+}
+
 export interface AbuseJudge {
   readonly provider: JudgeProvider;
   readonly model: string;
   judge(block: string, opts: { signal: AbortSignal }): Promise<JudgeVerdict>;
+  /** The inbound set on received mail; a judge without it screens nothing. */
+  screen?(block: string, opts: { signal: AbortSignal }): Promise<InboundJudgeVerdict>;
 }
 
 /**

@@ -64,6 +64,7 @@ beforeAll(async () => {
       status: "verified",
       verifiedAt: new Date(),
       receivingEnabled: true,
+      receivingCatchAll: true,
     },
   ]);
   const key = generateApiKey();

@@ -18,7 +18,7 @@ import {
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit";
 import { getKeyring } from "../keyring";
@@ -39,6 +39,28 @@ function toStoredEvents(eventTypes: readonly string[] | undefined): string[] | n
 }
 
 const descriptionInput = z.string().trim().max(200);
+
+// Null (or empty) = every inbox; otherwise inbox events and email.received
+// reach the endpoint only for these inboxes.
+const inboxIdsInput = z.array(z.uuid()).max(100).nullable();
+
+/** The team's own inboxes only: an endpoint never filters on another team's ids. */
+async function toStoredInboxIds(
+  db: Db,
+  teamId: string,
+  inboxIds: readonly string[] | null,
+): Promise<string[] | null> {
+  if (!inboxIds || inboxIds.length === 0) return null;
+  const ids = [...new Set(inboxIds)];
+  const [owned] = await db
+    .select({ n: count() })
+    .from(schema.inboxes)
+    .where(and(eq(schema.inboxes.teamId, teamId), inArray(schema.inboxes.id, ids)));
+  if ((owned?.n ?? 0) !== ids.length) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "inboxIds must be inboxes of this team" });
+  }
+  return ids;
+}
 
 /** Empty/whitespace descriptions store as null, not "". */
 function toStoredDescription(description: string | undefined | null): string | null {
@@ -173,6 +195,7 @@ export const webhooksRouter = router({
         url: t.url,
         description: t.description,
         events: t.events,
+        inboxIds: t.inboxIds,
         status: t.status,
         createdAt: t.createdAt,
       })
@@ -188,6 +211,7 @@ export const webhooksRouter = router({
       url: e.url,
       description: e.description,
       eventTypes: e.events,
+      inboxIds: e.inboxIds,
       enabled: toEnabled(e.status),
       status: e.status,
       createdAt: e.createdAt,
@@ -201,9 +225,11 @@ export const webhooksRouter = router({
         url: httpsUrl,
         description: descriptionInput.optional(),
         eventTypes: eventTypesInput.optional(),
+        inboxIds: inboxIdsInput.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const inboxIds = await toStoredInboxIds(ctx.db, ctx.teamId, input.inboxIds ?? null);
       const secret = generateWebhookSecret();
       const id = randomUUID();
       const encrypted = await encryptWebhookSecret(secret, getKeyring(), {
@@ -223,6 +249,7 @@ export const webhooksRouter = router({
           secretKeyVersion: encrypted.keyVersion,
           secretLast4: secret.slice(-4),
           events: toStoredEvents(input.eventTypes),
+          inboxIds,
         })
         .returning({ id: schema.webhookEndpoints.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -246,6 +273,7 @@ export const webhooksRouter = router({
         url: t.url,
         description: t.description,
         events: t.events,
+        inboxIds: t.inboxIds,
         status: t.status,
         createdAt: t.createdAt,
         secretLast4: t.secretLast4,
@@ -260,6 +288,7 @@ export const webhooksRouter = router({
       url: row.url,
       description: row.description,
       eventTypes: row.events,
+      inboxIds: row.inboxIds,
       enabled: toEnabled(row.status),
       status: row.status,
       createdAt: row.createdAt,
@@ -281,6 +310,7 @@ export const webhooksRouter = router({
           url: httpsUrl.optional(),
           description: descriptionInput.nullable().optional(),
           eventTypes: eventTypesInput.optional(),
+          inboxIds: inboxIdsInput.optional(),
           enabled: z.boolean().optional(),
         })
         .refine(
@@ -288,6 +318,7 @@ export const webhooksRouter = router({
             v.url !== undefined ||
             v.description !== undefined ||
             v.eventTypes !== undefined ||
+            v.inboxIds !== undefined ||
             v.enabled !== undefined,
           { message: "nothing to update" },
         ),
@@ -298,6 +329,9 @@ export const webhooksRouter = router({
       if (input.url !== undefined) set.url = input.url;
       if (input.description !== undefined) set.description = toStoredDescription(input.description);
       if (input.eventTypes !== undefined) set.events = toStoredEvents(input.eventTypes);
+      if (input.inboxIds !== undefined) {
+        set.inboxIds = await toStoredInboxIds(ctx.db, ctx.teamId, input.inboxIds);
+      }
       if (input.enabled !== undefined) set.status = input.enabled ? "enabled" : "disabled";
       const [row] = await ctx.db
         .update(t)

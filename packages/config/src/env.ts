@@ -409,6 +409,13 @@ export const env = createEnv({
     // Bearer secret the MX (PROCESS=mx) sends to the internal MX endpoints.
     // Required whenever RECEIVING_MX_HOST is set, at least 32 characters.
     MX_INGEST_SECRET: z.string().optional(),
+    // Agent inboxes on a shared domain: customers get addresses on per-team
+    // subdomains of it with no DNS of their own. Its own registrable domain,
+    // with a wildcard MX at RECEIVING_MX_HOST. Read through sharedInboxDomain().
+    SHARED_INBOX_DOMAIN: z.string().optional(),
+    // clamd over TCP (host[:port], 3310 by default) scanning received mail
+    // for viruses; unset, nothing is scanned. Read through clamavHost().
+    CLAMAV_HOST: z.string().optional(),
 
     // Social login for the dashboard. A provider's sign-in button appears
     // only when BOTH its client id and secret are set.
@@ -673,6 +680,21 @@ export function receivingEnabled(e: Env = env): boolean {
   return receivingMxHost(e) !== undefined;
 }
 
+/** The domain whose per-team subdomains hold shared inbox addresses; undefined hides it. */
+export function sharedInboxDomain(e: Env = env): string | undefined {
+  return e.SHARED_INBOX_DOMAIN || undefined;
+}
+
+/** Where clamd listens (host[:port]); undefined when received mail is not scanned. */
+export function clamavHost(e: Env = env): string | undefined {
+  return e.CLAMAV_HOST || undefined;
+}
+
+// PLATFORM_DOMAIN mirrors packages/core/src/domain-lifecycle.ts (this
+// package cannot import core); millionsend-dns.com holds the cloud's MX and
+// tracking hosts.
+const PLATFORM_DOMAINS = ["millionsend.com", "millionsend-dns.com"] as const;
+
 // Mirrors MX_INGEST_SECRET_MIN_LENGTH in packages/core/src/receiving/protocol.ts
 // (this package cannot import core).
 const MX_INGEST_SECRET_MIN_LENGTH = 32;
@@ -743,6 +765,27 @@ export function assertEnvConsistency(e: Env): void {
     throw new Error(
       `MX_INGEST_SECRET must be at least ${MX_INGEST_SECRET_MIN_LENGTH} characters (openssl rand -hex 32)`,
     );
+  }
+  // Shared addresses go to any team that asks: under the platform's own
+  // domains their mail would ride the platform's reputation and read as its own.
+  if (e.SHARED_INBOX_DOMAIN) {
+    const shared = e.SHARED_INBOX_DOMAIN;
+    if (!MX_HOST_RE.test(shared)) {
+      throw new Error(
+        "SHARED_INBOX_DOMAIN must be a lowercase hostname such as agents.example.com",
+      );
+    }
+    if (!e.RECEIVING_MX_HOST) {
+      throw new Error("SHARED_INBOX_DOMAIN requires RECEIVING_MX_HOST");
+    }
+    if (
+      isCloudDeployment(e) &&
+      PLATFORM_DOMAINS.some((d) => shared === d || shared.endsWith(`.${d}`))
+    ) {
+      throw new Error(
+        `SHARED_INBOX_DOMAIN must be its own registrable domain, not under ${PLATFORM_DOMAINS.join(" or ")}`,
+      );
+    }
   }
   // A judge switched on without its key would fail every sample as
   // "no credentials" forever, silently; refuse the boot instead.

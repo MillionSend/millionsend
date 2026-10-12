@@ -242,6 +242,14 @@ export const en = {
     muted: ["You get this at most once per day per endpoint."],
     extra: { moreThan: "More than {n}" },
   },
+  "inbox.attention": {
+    subject: "Your inboxes need a look",
+    body: [
+      "Today so far: {quarantined} emails in quarantine, {drafts} drafts waiting for approval and {refused} sends held by your inbox rules.",
+      "Review them in the dashboard.",
+    ],
+    button: "Review inboxes",
+  },
   "billing.payment_failed": {
     subject: "Payment failed for your {plan} plan",
     body: [

@@ -109,6 +109,14 @@ export function formatHoursMinutes(ms: number): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+/** Time left as one compact unit, rounded: "45m", "23h", "29d". */
+export function formatTimeLeft(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
+}
+
 /** A countdown as mm:ss, floored at 00:00. */
 export function formatMmSs(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -187,6 +195,20 @@ export function maskApiKey(tokenPrefix: string, last4: string): string {
 export function addrSpec(from: string): string {
   const inner = /<([^>]+)>/.exec(from);
   return (inner?.[1] ?? from).trim();
+}
+
+/** A From value as a person reads it: the display name, else the bare address. */
+export function senderName(from: string | null): string {
+  if (!from) return "";
+  const open = from.lastIndexOf("<");
+  const name =
+    open > 0
+      ? from
+          .slice(0, open)
+          .trim()
+          .replace(/^"(.*)"$/, "$1")
+      : "";
+  return name || addrSpec(from);
 }
 
 /** The flag of an ISO 3166 alpha-2 country code ("FR" → 🇫🇷); "" for anything else. */

@@ -4,17 +4,23 @@ import {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
+  customHeaderIssues,
   DAY_MS,
   formatMailbox,
+  hasHeaderControlChar,
   isReservedTagName,
+  LONG_POLL_MAX_SECONDS,
   MEDIA_TYPE_TOKEN,
   parseMailbox,
   parseScheduledAt,
   parseSingleSender,
+  QUARANTINE_REASONS,
   RESERVED_TAG_PREFIX,
   SCHEDULED_AT_FORMS,
+  SCREENING_VERDICTS,
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
+  SENDER_TRUSTS,
   WEBHOOK_EVENT_TYPES,
   WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
   WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,
@@ -150,122 +156,9 @@ const attachmentSchema = z
     }
   });
 
-/**
- * Custom headers are allowlisted, not denylisted: mail leaves through a
- * shared SES identity, so a tenant must not be able to forge authentication
- * verdicts (Authentication-Results, ARC-*, Received-SPF), alternate senders
- * (Resent-*, Sender, Return-Path), read-receipt targets
- * (Disposition-Notification-To, Return-Receipt-To, Errors-To) or list
- * headers the transport owns. Allowed: any X-* header except the X-SES-* and
- * X-MillionSend-* families, plus this vetted set of threading/priority
- * headers. Matched case-insensitively; the worker still reassigns its own
- * headers last (defense in depth).
- */
-const ALLOWED_HEADERS = new Set([
-  "in-reply-to",
-  "references",
-  "importance",
-  "priority",
-  "comments",
-  "keywords",
-  "organization",
-  // RFC 2369/8058 one-click unsubscribe pair: a sender running its own opt-out
-  // endpoint may point recipients at it. Values are checked below so only
-  // https/mailto targets go out; on a topic send they replace the generated pair.
-  "list-unsubscribe",
-  "list-unsubscribe-post",
-]);
-
-// RFC 2369: one or more <https://…> or <mailto:…> targets, comma-separated.
-const LIST_UNSUBSCRIBE_RE =
-  /^\s*<(?:https:\/\/|mailto:)[^<>\s]+>(?:\s*,\s*<(?:https:\/\/|mailto:)[^<>\s]+>)*\s*$/i;
-const LIST_UNSUBSCRIBE_POST_VALUE = "List-Unsubscribe=One-Click";
-
-/** Value rule for the two unsubscribe headers; null when the value is acceptable. */
-function unsubscribeHeaderIssue(name: string, value: string): string | null {
-  const lower = name.toLowerCase();
-  if (lower === "list-unsubscribe" && !LIST_UNSUBSCRIBE_RE.test(value)) {
-    return "List-Unsubscribe must be one or more <https://…> or <mailto:…> targets";
-  }
-  if (
-    lower === "list-unsubscribe-post" &&
-    value.trim().toLowerCase() !== LIST_UNSUBSCRIBE_POST_VALUE.toLowerCase()
-  ) {
-    return `List-Unsubscribe-Post must be "${LIST_UNSUBSCRIBE_POST_VALUE}"`;
-  }
-  return null;
-}
-
-const ALLOWED_HEADERS_HINT = `X-* (except X-SES-*) or ${[...ALLOWED_HEADERS].join(", ")}`;
-
-function isAllowedHeaderName(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (lower.startsWith("x-")) {
-    return !lower.startsWith("x-ses-") && !lower.startsWith("x-millionsend-");
-  }
-  return ALLOWED_HEADERS.has(lower);
-}
-
-// RFC 5322 field name: printable US-ASCII except colon.
-const HEADER_NAME_RE = /^[!-9;-~]+$/;
-
-/** True when the value carries a control char that could smuggle a header. */
-function hasHeaderControlChar(value: string): boolean {
-  for (const ch of value) {
-    const code = ch.charCodeAt(0);
-    if ((code < 0x20 && code !== 0x09) || code === 0x7f) return true;
-  }
-  return false;
-}
-
 const customHeadersSchema = z.record(z.string(), z.string()).superRefine((headers, ctx) => {
-  for (const [name, value] of Object.entries(headers)) {
-    if (!HEADER_NAME_RE.test(name)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" is not a valid header name`,
-      });
-    } else if (!isAllowedHeaderName(name)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" is not an allowed header; use ${ALLOWED_HEADERS_HINT}`,
-      });
-    }
-    if (hasHeaderControlChar(value)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" value must not contain control characters`,
-      });
-    }
-    const unsubscribeIssue = unsubscribeHeaderIssue(name, value);
-    if (unsubscribeIssue) ctx.addIssue({ code: "custom", path: [name], message: unsubscribeIssue });
-  }
-  // RFC 8058: one-click needs both headers and an https target. Half a pair
-  // would either ship without one-click or, on a topic send, collide with the
-  // generated pair — so the two come together or not at all.
-  const names = Object.keys(headers).map((n) => n.toLowerCase());
-  const hasList = names.includes("list-unsubscribe");
-  const hasPost = names.includes("list-unsubscribe-post");
-  if (hasList !== hasPost) {
-    ctx.addIssue({
-      code: "custom",
-      path: [hasList ? "List-Unsubscribe" : "List-Unsubscribe-Post"],
-      message: "List-Unsubscribe and List-Unsubscribe-Post must be sent together",
-    });
-  }
-  const listValue = Object.entries(headers).find(
-    ([n]) => n.toLowerCase() === "list-unsubscribe",
-  )?.[1];
-  if (listValue !== undefined && !/<https:\/\//i.test(listValue)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["List-Unsubscribe"],
-      message:
-        "List-Unsubscribe must include an <https://…> target (RFC 8058); mailto may only accompany it",
-    });
+  for (const issue of customHeaderIssues(headers)) {
+    ctx.addIssue({ code: "custom", path: [issue.header], message: issue.message });
   }
 });
 
@@ -483,11 +376,73 @@ const receivedEmailListItemSchema = z.object({
   attachments: z.array(inboundAttachmentSchema),
 });
 
+const screeningVerdictSchema = z.enum(SCREENING_VERDICTS);
+const senderTrustSchema = z.enum(SENDER_TRUSTS);
+const spamVerdictSchema = z.enum(["pass", "gray", "fail"]);
+const virusVerdictSchema = z.enum(["pass", "fail", "processing_failed"]);
+
+/** MillionSend's keys on a received email: Resend's fields are untouched, these come after them. */
+const receivedExtensionFields = {
+  inbox_id: z
+    .uuid()
+    .nullable()
+    .describe(
+      "MillionSend extension: the inbox this read is about (an inbox-scoped key's own, the inbox_id filter's, else the oldest inbox the email reached); null for mail no inbox took",
+    ),
+  thread_id: z.uuid().nullable().describe("MillionSend extension: that inbox's thread"),
+  inboxes: z
+    .array(z.object({ inbox_id: z.uuid(), thread_id: z.uuid(), verdict: screeningVerdictSchema }))
+    .optional()
+    .describe(
+      "MillionSend extension, full access keys only: every inbox the email reached and its screening verdict there",
+    ),
+  spam_verdict: spamVerdictSchema
+    .nullable()
+    .describe(
+      "MillionSend extension: the local spam score's verdict; null for mail from before it existed",
+    ),
+  virus_verdict: virusVerdictSchema
+    .nullable()
+    .describe(
+      "MillionSend extension: clamd's verdict (fail blocks every download for good); null when nothing scanned it",
+    ),
+  read: z
+    .boolean()
+    .optional()
+    .describe("MillionSend extension, with an inbox in context: whether that inbox marked it read"),
+};
+
+const receivedListItemExtensions = receivedEmailListItemSchema.extend({
+  ...receivedExtensionFields,
+  screening: z
+    .object({ verdict: screeningVerdictSchema, sender_trust: senderTrustSchema })
+    .describe("MillionSend extension: the screening verdict and the sender's trust tier"),
+  extracted: z
+    .object({ kinds: z.array(z.enum(["code", "link"])) })
+    .describe(
+      "MillionSend extension: whether a verification code or sign-in link was found; the values come with GET of one email",
+    ),
+});
+
 export const listReceivedEmailsResponseSchema = z
   .object({
     object: z.literal("list"),
     has_more: z.boolean(),
-    data: z.array(receivedEmailListItemSchema),
+    data: z.array(receivedListItemExtensions),
+    held: z
+      .array(
+        z.object({
+          id: z.uuid(),
+          inbox_id: z.uuid().nullable(),
+          reason: z.enum(["pending", "quarantined"]),
+          quarantine_reason: z.enum(QUARANTINE_REASONS).nullable(),
+          created_at: z.string(),
+        }),
+      )
+      .optional()
+      .describe(
+        "MillionSend extension, with wait only: matching mail that arrived but is held (being screened or quarantined), ids and why only",
+      ),
   })
   .openapi("ListReceivedEmailsResponse");
 
@@ -502,6 +457,46 @@ export const getReceivedEmailQuerySchema = z.object({
 
 export const getReceivedEmailResponseSchema = receivedEmailListItemSchema
   .extend({
+    ...receivedExtensionFields,
+    screening: z
+      .object({
+        verdict: screeningVerdictSchema,
+        sender_trust: senderTrustSchema,
+        quarantine_reason: z.enum(QUARANTINE_REASONS).nullable(),
+        reasons: z.array(z.string()),
+        injection_score: z.number().int().nullable(),
+        phishing_score: z.number().int().nullable(),
+        hidden_text_removed: z.boolean(),
+      })
+      .describe(
+        "MillionSend extension: the screening verdict, the sender's trust tier, why it was held, the inbound judge's reasons and scores (0-100), and whether hidden text was removed from what agents read",
+      ),
+    spam_score: z
+      .number()
+      .int()
+      .nullable()
+      .describe("MillionSend extension: the local spam score, 0-100"),
+    virus_signature: z
+      .string()
+      .nullable()
+      .describe("MillionSend extension: clamd's signature name when it failed"),
+    extracted_text: z
+      .string()
+      .nullable()
+      .describe(
+        "MillionSend extension: what a person sees of the reply, as text with light markdown: hidden text, invisible characters, quoted history and signature taken out. null once the content retention removed it",
+      ),
+    extracted: z
+      .object({
+        kinds: z.array(z.enum(["code", "link"])),
+        code: z.string().nullable(),
+        link: z.string().nullable(),
+        link_domain_matches_sender: z.boolean().nullable(),
+        ambiguous: z.boolean(),
+      })
+      .describe(
+        "MillionSend extension: the verification code or sign-in link, served only from delivered mail of a sender that did not fail authentication, in an inbox that extracts codes. Links are never fetched.",
+      ),
     object: z.literal("email"),
     html: z.string().nullable(),
     html_format: z.enum(["data_uri", "cid"]),
@@ -523,6 +518,10 @@ export const getReceivedEmailResponseSchema = receivedEmailListItemSchema
       ),
   })
   .openapi("GetReceivedEmailResponse");
+
+export const deleteReceivedEmailResponseSchema = z
+  .object({ object: z.literal("email"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("DeleteReceivedEmailResponse");
 
 const receivedAttachmentDataSchema = z.object({
   id: z.uuid(),
@@ -628,6 +627,11 @@ export const usageResponseSchema = z
         .int()
         .nullable()
         .describe("Contacts the team may hold; null = unlimited or self-hosted"),
+      inboxes: z
+        .number()
+        .int()
+        .nullable()
+        .describe("Inboxes the team may hold at once; null = unlimited or self-hosted"),
     }),
     today: z.object({
       emails_sent: z.number().int().describe("Emails accepted so far this UTC day"),
@@ -685,6 +689,62 @@ const oneCursor = <T extends z.ZodObject>(fields: T) =>
     message: "after and before cannot be used together",
   });
 export const listQuerySchema = oneCursor(listQueryFields);
+
+const booleanQuery = z.enum(["true", "false"]);
+
+export const listReceivedEmailsQuerySchema = oneCursor(
+  listQueryFields.extend({
+    wait: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(LONG_POLL_MAX_SECONDS)
+      .optional()
+      .describe(
+        `MillionSend extension: hold the request up to this many seconds (0-${LONG_POLL_MAX_SECONDS}) until matching mail newer than the cursor arrives; an empty list with 200 when none did`,
+      ),
+    since: z.iso
+      .datetime({ offset: true })
+      .optional()
+      .describe(
+        "MillionSend extension: only mail received after this instant; with wait and no cursor it defaults to one minute before the request",
+      ),
+    inbox_id: z
+      .uuid()
+      .optional()
+      .describe("MillionSend extension: only mail delivered into this inbox"),
+    to: z
+      .string()
+      .max(320)
+      .optional()
+      .describe("MillionSend extension: only mail with this address in received_for"),
+    from: z
+      .string()
+      .max(320)
+      .optional()
+      .describe(
+        "MillionSend extension: a sender address, or a domain matching itself and its subdomains",
+      ),
+    subject_contains: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("MillionSend extension: case-insensitive subject substring"),
+    unread: booleanQuery
+      .optional()
+      .describe("MillionSend extension, with inbox_id: read state in that inbox"),
+    include_quarantined: booleanQuery
+      .optional()
+      .describe(
+        "MillionSend extension, full access keys only: list held mail too, flagged by screening",
+      ),
+    quarantined: booleanQuery
+      .optional()
+      .describe("MillionSend extension, full access keys only: list held mail only"),
+  }),
+).refine((q) => q.unread === undefined || q.inbox_id !== undefined, {
+  message: "unread needs inbox_id",
+});
 
 export const CONTACT_INCLUDES = ["properties", "topics"] as const;
 export type ContactInclude = (typeof CONTACT_INCLUDES)[number];
@@ -1428,6 +1488,12 @@ export const updateDomainRequestSchema = z
     // instead of silently ignoring a security-relevant setting.
     tls: z.unknown().optional(),
     capabilities: domainCapabilitiesRequestSchema.optional(),
+    receiving_catch_all: z
+      .boolean()
+      .optional()
+      .describe(
+        "MillionSend extension: store mail to addresses without an inbox (true) or refuse it at RCPT (false). Turning it on needs receiving enabled and, on MillionSend Cloud, a paid plan.",
+      ),
   })
   .openapi("UpdateDomainRequest");
 
@@ -1488,6 +1554,11 @@ const domainSchema = z.object({
         "enabled while the domain receives mail; always disabled on an instance that does not",
       ),
   }),
+  receiving_catch_all: z
+    .boolean()
+    .describe(
+      "MillionSend extension: whether mail to an address without an inbox is stored (true) or refused at RCPT (false)",
+    ),
 });
 
 export const createDomainResponseSchema = domainSchema
@@ -1533,10 +1604,15 @@ const webhookEndpointUrl = z
     message: "endpoint must be an https:// URL",
   });
 
+const INBOX_IDS_DESC =
+  "MillionSend extension: inbox events and email.received reach this endpoint only for these inboxes of the team (at most 100). null means every inbox.";
+const webhookInboxIds = z.array(z.uuid()).max(100).nullable();
+
 export const createWebhookRequestSchema = z
   .object({
     endpoint: webhookEndpointUrl,
     events: z.array(webhookEventSchema).min(1),
+    inbox_ids: webhookInboxIds.optional().describe(`${INBOX_IDS_DESC} Omitted: every inbox.`),
     signing_secret: z
       .string()
       .optional()
@@ -1551,6 +1627,7 @@ export const updateWebhookRequestSchema = z
     endpoint: webhookEndpointUrl.optional(),
     events: z.array(webhookEventSchema).min(1).optional(),
     status: webhookWireStatusSchema.optional(),
+    inbox_ids: webhookInboxIds.optional().describe(`${INBOX_IDS_DESC} Omitted: unchanged.`),
   })
   .openapi("UpdateWebhookRequest");
 
@@ -1562,6 +1639,7 @@ const webhookListItemSchema = z.object({
   created_at: z.string(),
   status: webhookWireStatusSchema,
   events: z.array(z.string()).nullable(),
+  inbox_ids: z.array(z.string()).nullable().describe(INBOX_IDS_DESC),
 });
 
 export const createWebhookResponseSchema = z
@@ -1646,6 +1724,15 @@ export const createApiKeyRequestSchema = z
           "domain-scoped. A domain-scoped calling key cannot name any other domain " +
           "(403 restricted_api_key).",
       ),
+    inbox_id: z
+      .uuid()
+      .nullish()
+      .describe(
+        "MillionSend extension: restricts the key to one inbox of the team. It reads that inbox's " +
+          "threads, drafts and received mail and sends only from its address; every other route " +
+          "answers 403 restricted_api_key. Needs full_access, can't be combined with domain_id, " +
+          "and an inbox holds at most 5 active keys (outside the team's 25).",
+      ),
   })
   .openapi("CreateApiKeyRequest");
 
@@ -1662,6 +1749,10 @@ export const listApiKeysResponseSchema = z
         name: z.string(),
         created_at: z.string(),
         last_used_at: z.string().nullable(),
+        inbox_id: z
+          .uuid()
+          .nullable()
+          .describe("MillionSend extension: the one inbox the key is restricted to, or null"),
       }),
     ),
     has_more: z.boolean(),

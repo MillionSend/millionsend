@@ -9,6 +9,8 @@
     "templates",
     "domains",
     "receiving",
+    "inboxes",
+    "agent-safety",
     "webhooks",
     "suppressions",
     "deliverability-insights"

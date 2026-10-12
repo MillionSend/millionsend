@@ -20,7 +20,7 @@ entregas por endpoint.
 | `email.opened` | Uma pessoa carregou o pixel de rastreamento (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). `data.open` traz `ipAddress`, `userAgent` e `timestamp` da busca. Um clique em uma mensagem ainda sem abertura também registra uma, com `data.open.reason: "click"`: ninguém clica no que nunca renderizou, e para leitores do Apple Mail é a única abertura que pode ser vista. |
 | `email.clicked` | Uma pessoa clicou em um link reescrito (exige rastreamento de cliques). `data.click` traz `link`, `ipAddress`, `userAgent` e `timestamp`, como no Resend. Um link que uma máquina seguiu — gateway de segurança, pré-visualização de link, busca segundos após a entrega — é registrado como `email.prefetched`. |
 | `email.prefetched` | O pixel foi buscado, ou um link seguido, por uma máquina — o Mail Privacy Protection da Apple, o pré-carregamento do Gmail, um scanner de segurança, uma identidade de navegador que nenhum navegador real envia, uma busca segundos após a entrega ou todos os links da mensagem em um segundo; `data.open.reason` ou `data.click.reason` diz qual (veja [precisão da taxa de abertura](/pt-BR/concepts/domains#precisão-da-taxa-de-abertura)). Um clique registrado antes de o resto da rajada chegar é registrado de novo aqui com o mesmo `data.click.timestamp` que seu `email.clicked` levou: trate isso como o clique sendo desfeito, junto com qualquer `email.opened` com `data.open.reason: "click"` marcado um milissegundo antes dele. Opt-in: entregue só a endpoints que o listam, nunca a "todos os eventos". |
-| `email.received` | Uma mensagem chegou a um dos seus [domínios de recebimento](/pt-BR/concepts/receiving) e foi guardada, uma vez por mensagem. `data.email_id` é um e-mail recebido: leia com `GET /emails/receiving/{id}`. Veja [o payload](#e-mails-recebidos) abaixo. |
+| `email.received` | Uma mensagem chegou a um dos seus [domínios de recebimento](/pt-BR/concepts/receiving) e foi guardada, uma vez por mensagem, assim que fica visível: o e-mail que uma [caixa de entrada](/pt-BR/concepts/inboxes) retém na quarentena ou durante a análise, e o e-mail infectado, só disparam depois de entregues ou liberados. `data.email_id` é um e-mail recebido: leia com `GET /emails/receiving/{id}`. Veja [o payload](#e-mails-recebidos) abaixo. |
 
 Eventos de conta não carregam e-mail; `data` descreve a situação da equipe:
 
@@ -85,6 +85,107 @@ mesmo `email_id` lista só esses.
   }
 }
 ```
+
+### Eventos de caixas de entrada
+
+As [caixas de entrada](/pt-BR/concepts/inboxes) emitem os eventos `inbox.*`
+do Resend, mais dois do próprio MillionSend. Eles são **opt-in**: um endpoint
+só os recebe quando os escolhe pelo nome, nunca por "todos os eventos".
+
+| Evento | Disparado quando | `data`, além de `source` e `inbox_id` |
+| --- | --- | --- |
+| `inbox.created` | Uma caixa foi criada. | `inbox` |
+| `inbox.updated` | O nome, o nome de remetente, a validade ou as configurações de segurança de uma caixa mudaram. | `inbox` |
+| `inbox.deleted` | Uma caixa foi excluída, por uma pessoa, pela API, por ter expirado ou porque o domínio dela foi excluído. | |
+| `inbox.expired` | Uma caixa chegou ao `expires_at`; o `inbox.deleted` vem em seguida. Do MillionSend. | `inbox`, como estava |
+| `inbox.thread.created` | Uma conversa ganhou a primeira mensagem: a primeira entregue ou liberada, ou a primeira que a caixa enviou. | `thread_id`, `email_id`, `thread`, `email` |
+| `inbox.thread.folder.updated` | Uma conversa mudou de pasta, à mão ou porque um e-mail novo a trouxe de volta para `inbox`. | `from`, `to`, `thread_id`, `thread` |
+| `inbox.thread.labels.updated` | Uma etiqueta entrou ou saiu de uma conversa; uma etiqueta por evento. | `added`, `removed`, `thread_id`, `thread` |
+| `inbox.email.received` | Uma mensagem recebida foi entregue ou liberada numa conversa. | `thread_id`, `email_id`, `thread`, `email` |
+| `inbox.email.sent` | Um envio da caixa foi aceito. | `thread_id`, `email_id`, `thread`, `email` |
+| `inbox.email.quarantined` | Uma mensagem recebida foi para a quarentena. Do MillionSend. | `thread_id`, `email_id`, `reason`, `sender_trust`, `from`, `subject`, `received_at` |
+| `inbox.draft.created` | Um rascunho foi criado, inclusive um envio retido para aprovação. | `draft_id`, `draft`; `thread_id` e `thread` nos rascunhos de resposta |
+| `inbox.draft.updated` | Um rascunho mudou. | igual ao de criação |
+| `inbox.draft.sent` | Um rascunho foi enviado; dispara antes do `inbox.email.sent`. | `thread_id`, `email_id`, `draft_id`, `thread`, `draft` |
+| `inbox.draft.deleted` | Um rascunho foi excluído, recusado ou expirou. | `draft_id`; `thread_id` e `thread` nos rascunhos de resposta |
+
+- O `source` é `api` (uma chave de API ou um cliente MCP), `dashboard` ou
+  `system` (e-mails chegando, envios, caixas expirando). Nunca é `agent`.
+- `inbox` é o [objeto da caixa](/pt-BR/concepts/inboxes#criar-uma-caixa-de-entrada),
+  `thread` é `{ object, id, subject, folder, labels, read }`, `email` é um
+  e-mail de conversa e `draft`, um rascunho. `email` e `draft` nunca trazem
+  `html`, `text`, `extracted_text`, códigos ou links: busque o conteúdo pela
+  API.
+- Os objetos são capturados quando o evento acontece, não quando ele é
+  entregue, então uma segunda mudança rápida não reescreve o primeiro evento.
+- Chaves que não se aplicam ficam de fora, nunca vêm como `null`.
+
+```json title="inbox.email.received"
+{
+  "type": "inbox.email.received",
+  "created_at": "2026-10-12T14:03:12.301Z",
+  "data": {
+    "source": "system",
+    "inbox_id": "7eeb9517-aed7-40d7-ad65-500be42ed147",
+    "thread_id": "b9e1837b-c150-45c6-a055-73b02ec9f1dc",
+    "email_id": "155252fb-e93e-45ee-8c19-5080a929c28b",
+    "thread": {
+      "object": "inbox_thread",
+      "id": "b9e1837b-c150-45c6-a055-73b02ec9f1dc",
+      "subject": "Where is my order?",
+      "folder": "inbox",
+      "labels": [],
+      "read": false
+    },
+    "email": {
+      "id": "155252fb-e93e-45ee-8c19-5080a929c28b",
+      "direction": "inbound",
+      "from": "Maria Silva <maria@example.org>",
+      "to": ["orders@inbound.example.com"],
+      "cc": [],
+      "bcc": [],
+      "reply_to": [],
+      "subject": "Where is my order?",
+      "message_id": "<CAF7c1f0a2e5d3b@mail.example.org>",
+      "attachments": [],
+      "read": false,
+      "received_at": "2026-10-12T14:03:11.229Z"
+    }
+  }
+}
+```
+
+```json title="inbox.email.quarantined"
+{
+  "type": "inbox.email.quarantined",
+  "created_at": "2026-10-12T14:05:40.017Z",
+  "data": {
+    "source": "system",
+    "inbox_id": "7eeb9517-aed7-40d7-ad65-500be42ed147",
+    "thread_id": "6581da0f-148e-49c7-8ba3-b1c2fcabc5ef",
+    "email_id": "6166ec82-4ea7-481a-a78d-42c6f84af265",
+    "reason": "injection",
+    "sender_trust": "external",
+    "from": "billing@example.net",
+    "subject": "Invoice overdue",
+    "received_at": "2026-10-12T14:05:38.442Z"
+  }
+}
+```
+
+**Só algumas caixas.** `POST /webhooks` e `PATCH /webhooks/{id}` aceitam
+`inbox_ids`, até 100 caixas da equipe (`null`, o padrão, quer dizer todas), e
+os objetos de webhook o devolvem. Um endpoint assim só recebe os eventos de
+caixas e o `email.received` dessas caixas, então os e-mails de endereços do
+pega-tudo não chegam a ele. No painel: **Só estas caixas**.
+
+<Callout type="warn">
+Os SDKs de .NET e de Rust do Resend não conhecem os tipos de evento
+`inbox.*`: ler um webhook inscrito em algum deles pelo `GET /webhooks` falha
+nos dois, e o leitor de webhooks do .NET dá erro com esses payloads. Os
+próprios eventos de caixas do Resend fazem o mesmo hoje. Leia esses endpoints
+e as entregas deles com um SDK do MillionSend ou por HTTP direto.
+</Callout>
 
 ## Assinaturas (Standard Webhooks)
 

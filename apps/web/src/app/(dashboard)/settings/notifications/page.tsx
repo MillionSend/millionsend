@@ -1,4 +1,4 @@
-import { env } from "@millionsend/config";
+import { env, receivingEnabled } from "@millionsend/config";
 import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { SettingsTabs } from "../settings-tabs";
@@ -10,8 +10,8 @@ export default async function NotificationsSettingsPage() {
     <>
       <PageHeader title={t("notifications.title")} />
       <SettingsTabs />
-      {/* Billing notices exist only where billing does. */}
-      <NotificationsView cloud={env.IS_CLOUD} />
+      {/* Billing notices exist only where billing does, inbox alerts where mail is received. */}
+      <NotificationsView cloud={env.IS_CLOUD} receiving={receivingEnabled()} />
     </>
   );
 }

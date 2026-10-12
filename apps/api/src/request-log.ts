@@ -12,8 +12,10 @@ export const LOGGED_JSON_MAX_BYTES = 64 * 1024;
 /** Above this declared size a body is never read back for the log; the marker carries the size. */
 export const LOGGED_BODY_READ_MAX_BYTES = 1024 * 1024;
 
-const CONTENT_KEYS = new Set(["html", "text"]);
+const CONTENT_KEYS = new Set(["html", "text", "extracted_text"]);
 const SECRET_KEYS = new Set(["token", "secret", "password"]);
+/** A received email's verification code and sign-in link, as its reads serve them. */
+const CODE_KEYS = new Set(["code", "link", "url"]);
 const JSON_CONTENT_TYPE = /\bjson\b/i;
 
 export function maskEmailPathSegments(path: string): string {
@@ -52,6 +54,7 @@ function contentMarker(kind: string, value: unknown): string {
 export function redactLoggedBody(path: string, value: unknown): unknown {
   const urlIsSecret = path.endsWith("/preferences-link");
   const headersAreContent = path.startsWith("/emails/receiving");
+  const codesAreSecret = headersAreContent || path.endsWith("/codes/latest");
   const walk = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(walk);
     if (node === null || typeof node !== "object") return node;
@@ -67,7 +70,8 @@ export function redactLoggedBody(path: string, value: unknown): unknown {
         key.endsWith("_secret") ||
         // Signed received-mail links: anyone holding one downloads the file.
         key === "download_url" ||
-        (urlIsSecret && key === "url")
+        (urlIsSecret && key === "url") ||
+        (codesAreSecret && CODE_KEYS.has(key))
       )
         out[key] = "[redacted]";
       else out[key] = walk(v);

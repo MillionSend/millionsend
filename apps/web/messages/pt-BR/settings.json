@@ -421,6 +421,14 @@
       "domain_deleted": "Excluiu domínio",
       "domain_receiving_enabled": "Ativou recebimento",
       "domain_receiving_disabled": "Desativou recebimento",
+      "domain_catch_all_enabled": "Pega-tudo ativado",
+      "domain_catch_all_disabled": "Pega-tudo desativado",
+      "inbox_created": "Caixa de entrada criada",
+      "inbox_deleted": "Caixa de entrada excluída",
+      "inbox_safety_updated": "Regras de segurança da caixa alteradas",
+      "inbox_email_released": "E-mail liberado da quarentena",
+      "inbox_draft_approved": "Rascunho aprovado e enviado",
+      "received_email_deleted": "E-mail recebido excluído",
       "webhook_created": "Criou webhook",
       "webhook_updated": "Atualizou webhook",
       "webhook_secret_rotated": "Rotacionou o segredo de assinatura do webhook",
@@ -488,6 +496,7 @@
       "broadcasts": "Transmissões",
       "sending": "Saúde do envio",
       "webhooks": "Webhooks",
+      "inboxes": "Caixas de entrada",
       "billing": "Cobrança"
     },
     "items": {
@@ -534,6 +543,10 @@
       "webhook_backlog": {
         "label": "Fila de webhooks",
         "note": "As entregas a um endpoint estão se acumulando."
+      },
+      "inbox_attention": {
+        "label": "Alertas das caixas",
+        "note": "Quarentena, rascunhos para aprovar e envios barrados, no máximo uma vez por dia."
       },
       "billing_payment_failed": {
         "label": "Pagamento recusado",

@@ -19,6 +19,8 @@ Find every Resend touchpoint before changing anything, and show the user the lis
 - Webhook receivers that verify `svix-*` signature headers, and the endpoint URLs registered at Resend.
 - Audience, segment, topic and template ids or aliases referenced in code or config.
 - Broadcast or template bodies using `{{{RESEND_UNSUBSCRIBE_URL}}}` (it keeps working on MillionSend as an alias of `{{{UNSUBSCRIBE_URL}}}`).
+- Receiving: calls to `resend.emails.receiving.*`, `email.received` handlers, and which addresses of each receiving domain the code relies on.
+- Inboxes (Resend's preview): the `resend@*-preview-inboxes.*` package, calls to `resend.inboxes.*`, the inbox addresses they use, and handlers for `inbox.*` webhook events.
 
 ## Step 2 — Move the account
 
@@ -61,12 +63,16 @@ Then fix what the report lists:
 
 - Update topic and segment ids in code and config using the report's id map.
 - Templates: MillionSend templates do not store `from` or `reply_to`; pass them on each send.
-- Webhooks: endpoint, events and signing secret were copied, so the existing receiver keeps verifying the `svix-*` headers. Event types outside MillionSend's eight `email.*` types (`email.received` included) were dropped per webhook and are listed; remove or replace handlers for them.
+- Webhooks: endpoint, events and signing secret were copied, so the existing receiver keeps verifying the `svix-*` headers. Event types MillionSend doesn't send (`domain.*`, `email.suppressed`, `inbox.thread.assigned`, `inbox.thread.unassigned`) were dropped per webhook and are listed; remove or replace handlers for them. MillionSend sends `inbox.*` events only to endpoints that name them, never to "all events".
 - API keys cannot be migrated (Resend exposes their names only). Create one per name the report lists, in the dashboard, and place them in the matching environments.
+- Receiving: a receiving domain here takes mail only at its inboxes' addresses unless its **Catch-all** is on (domain page, or `PATCH /domains/{id}` with `{"receiving_catch_all": true}`; a paid plan on Cloud). If the code receives at arbitrary addresses, as on Resend, the user turns catch-all on before the MX cutover; otherwise each address needs an inbox. Ask which. Docs: https://docs.millionsend.com/concepts/receiving.md.
+- Inboxes: the account move does not create inboxes. Recreate each inbox the code uses with the same address (`POST /inboxes`), after its domain receives here. Inboxes created through a Resend SDK default to `kind: "agent"` (quarantine, screening, reply-only sending); inboxes read by people need `kind: "human"`, set over plain HTTP or in the dashboard. A reply, forward or draft send can answer `202` with a draft (`object: "inbox_draft"`) when the inbox's rules hold it: make the code handle that. Docs: https://docs.millionsend.com/concepts/inboxes.md.
 
 ## Step 4 — DNS, done by the user
 
 MillionSend uses its own DKIM keypair, so every domain needs new DNS records even if it already sends through Resend. The records are in the report and under **Domains** in the dashboard. Both providers can stay verified side by side. Do not switch traffic until each domain reads **Verified**.
+
+A domain that receives mail moves with its MX record: once receiving is on here and catch-all or the inboxes are set up (step 3), the user points the MX at `mx.millionsend-dns.com` (self-hosted: the instance's `RECEIVING_MX_HOST`). That change is the receiving cutover; mail Resend already received stays there.
 
 ## Step 5 — Cut over and verify
 

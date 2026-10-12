@@ -37,6 +37,7 @@ export const ACCOUNT_MAIL_KINDS = [
   "webhook.failing",
   "webhook.auto_disabled",
   "webhook.backlog",
+  "inbox.attention",
   "billing.payment_failed",
   "billing.plan_activated",
   "billing.plan_changed",

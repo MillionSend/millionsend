@@ -120,7 +120,8 @@ client's config.
   their token expires.
 - Your team role applies, matching the dashboard: only owners and admins
   manage domains, webhooks and API keys, remove suppressions, delete
-  contacts in bulk or erase a contact (`delete_contact` with `erase`). The
+  contacts in bulk, erase a contact (`delete_contact` with `erase`) or
+  delete an inbox (`delete_inbox`). The
   tools marked **admin** below are not offered to members, and the role is
   checked again on every call. A **member** with those permissions granted
   still gets the read-only domain, webhook and API key listings.
@@ -138,20 +139,42 @@ Questions or problems connecting a client: [support@millionsend.com](mailto:supp
 Each tool requires a permission (OAuth scope). Clients only see the tools
 their granted permissions cover. `broadcasts:write` also covers the two
 `broadcasts:read` tools. Tools marked **admin** are offered only to owners
-and admins. `receiving:read`, for [received mail](/concepts/receiving), came
-later than most grants: a client authorized before it existed doesn't have
-it until you sign in again from the client and grant it. Its tools exist
-only on an instance that receives mail.
+and admins.
+
+[Received mail](/concepts/receiving) and [inboxes](/concepts/inboxes) have
+three permissions of their own, none of which includes another:
+`receiving:read` to read mail, wait for it, read codes and list inboxes,
+threads, labels and drafts; `receiving:reply` to reply, forward and organize
+threads; and `receiving:manage` to create, change and delete inboxes and to
+list and release quarantined mail. They came later than most grants: a
+client authorized before one existed doesn't have it until you sign in again
+from the client and grant it. Their tools exist only on an instance that
+receives mail.
+
+An MCP client reads mail the way an agent does: it never sees mail an inbox
+holds in quarantine or is still screening, and message text comes fenced as
+untrusted (see [Tool results](#tool-results)). It can't approve drafts or
+change an inbox's safety settings; `create_inbox` makes agent inboxes only and
+takes `accept_from` and no other safety setting.
 
 | Tool | Permission | Description |
 | --- | --- | --- |
 | `list_emails` | `emails:read` | List sent, queued and scheduled emails. |
 | `get_email` | `emails:read` | Get one email with its delivery status. |
 | `get_usage` | `emails:read` | Plan, send limit (daily on Free and Starter, monthly on Pro and Scale), domain limit, today's accepted count and, on monthly plans, the billing period's usage — check before bulk work. |
-| `list_received_emails` | `receiving:read` | List the emails received at your [receiving domains](/concepts/receiving). |
-| `get_received_email` | `receiving:read` | Get one received email with its text, HTML, headers, authentication results and a download link for the raw message. `html_format` defaults to `cid` here, keeping inline images out of the result. |
+| `list_received_emails` | `receiving:read` | List the emails received at your [receiving domains](/concepts/receiving), newest first; filter by inbox, sender, recipient or unread. |
+| `get_received_email` | `receiving:read` | Get one received email. `format` picks the content: `extracted` (the default: sender, trust, screening and the cleaned reply text), `text`, `html` or `raw` (a download link only). With `html`, `html_format` defaults to `cid`, keeping inline images out of the result. |
 | `list_received_email_attachments` | `receiving:read` | List a received email's attachments with their download links. |
 | `get_received_email_attachment` | `receiving:read` | Get one attachment of a received email with its download link. |
+| `wait_for_received_email` | `receiving:read` | Wait up to 50 seconds (45 by default) for a new email to an inbox or address, optionally from a sender or with a subject. Answers `received` with the email, `timeout`, or `quarantined` with the id and the quarantine reason when a match was held. |
+| `get_verification_code` | `receiving:read` | The verification code or sign-in link of one email, or the newest one an inbox received, optionally from a sender and waiting up to 50 seconds. |
+| `list_inboxes` | `receiving:read` | List [inboxes](/concepts/inboxes), optionally one kind. |
+| `get_inbox` | `receiving:read` | Get an inbox by id or address. |
+| `list_threads` | `receiving:read` | List an inbox's threads by folder, label or read state. |
+| `get_thread` | `receiving:read` | Get a thread and its emails, oldest first, each with its sender's trust and fenced text; up to 48,000 characters, the newest emails whole and older ones cut to 2,000. |
+| `list_labels` | `receiving:read` | List an inbox's labels. |
+| `get_draft` | `receiving:read` | Get a draft with its status, approval reasons and fenced text. |
+| `list_quarantined_emails` | `receiving:manage` | List an inbox's quarantined emails with their reasons and scores, without content. |
 | `list_contacts` | `audience:read` | List contacts, optionally one segment's members. |
 | `get_contact` | `audience:read` | Get a contact by id or email address. |
 | `get_contact_topics` | `audience:read` | Every topic with the contact's effective subscription and whether it was explicit. |
@@ -209,9 +232,16 @@ only on an instance that receives mail.
 | `delete_webhook` | `webhooks:write` | **admin** Delete a webhook endpoint. |
 | `revoke_api_key` | `api-keys:write` | **admin** Revoke an API key. |
 | `create_domain` | `domains:write` | **admin** Add a sending domain and get its DNS records; optional tracking settings apply at creation. |
-| `update_domain` | `domains:write` | **admin** Change a domain's tracking settings, or switch [receiving](/concepts/receiving) with `capabilities.receiving`; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |
+| `update_domain` | `domains:write` | **admin** Change a domain's tracking settings, switch [receiving](/concepts/receiving) with `capabilities.receiving`, or switch catch-all with `receiving_catch_all`; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |
 | `verify_domain` | `domains:write` | **admin** Re-check a domain's DNS and SES verification. |
 | `delete_domain` | `domains:write` | **admin** Remove a domain and its SES identity. |
+| `reply_to_received_email` | `receiving:reply` | Reply to a received email from its inbox. Answers `sent` with the email and thread, or `draft` with the reasons when the inbox's rules hold the reply for a person. |
+| `forward_received_email` | `receiving:reply` | Forward a received email, quoted inline or attached as `.eml`; same answers as the reply. |
+| `update_thread` | `receiving:reply` | Mark a thread read or unread, move it to a folder, or add a label. |
+| `create_inbox` | `receiving:manage` | Create an agent inbox (people's inboxes are made in the dashboard); `accept_from` is the only safety setting it takes. |
+| `update_inbox` | `receiving:manage` | Change an inbox's name, from name or expiry; making it expire sooner takes the owner or admin role. |
+| `delete_inbox` | `receiving:manage` | **admin** Delete an inbox with its threads and drafts; its API keys are revoked. |
+| `release_email` | `receiving:manage` | Release a quarantined email into its inbox; `trust_sender` also adds the sender to the allowlist. |
 
 ## Tool results
 
@@ -235,3 +265,23 @@ third parties. The envelope lets an agent keep them apart from tool output,
 so a contact whose name reads like an instruction is not followed as one.
 Read `untrusted_data` for the payload; an `isError` result carries the REST
 error body in the same place.
+
+Received mail is fenced once more. Every message text a tool returns
+(`get_received_email`, `wait_for_received_email`, `get_thread`,
+`get_draft`) sits in an `untrusted_text` field, between two marker lines
+that carry a random value per call:
+
+```
+-----BEGIN UNTRUSTED EMAIL CONTENT 95253f15-----
+Hi! Your order shipped today.
+-----END UNTRUSTED EMAIL CONTENT 95253f15-----
+```
+
+A marker line written inside the message is altered before fencing, so a
+message can't close its own fence. The text is cleaned of anything a person
+couldn't see first (see
+[Agent safety](/concepts/agent-safety#hidden-text-and-extracted_text)),
+except what `get_received_email` returns with `format: "html"` or
+`format: "text"`: those are the message's own parts, as sent. A
+wait that ends without mail answers `timeout`, and a code lookup with
+nothing to find `none`: normal results, not errors.

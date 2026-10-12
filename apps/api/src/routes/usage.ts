@@ -3,6 +3,7 @@ import {
   nextUtcDayStart,
   PLAN_CONTACT_LIMIT,
   PLAN_DOMAIN_LIMIT,
+  PLAN_INBOX_LIMIT,
   readPeriodUsage,
   teamQuota,
   utcDay,
@@ -24,7 +25,7 @@ export function registerUsageRoutes(
         200: {
           content: { "application/json": { schema: usageResponseSchema } },
           description:
-            "Effective plan, its send, domain and contact limits, today's accepted send count (UTC day) and, on a monthly plan, the billing period's usage. MillionSend extension; plan, limits and period are null on a self-hosted instance and on the instance's own (system) team.",
+            "Effective plan, its send, domain, contact and inbox limits, today's accepted send count (UTC day) and, on a monthly plan, the billing period's usage. MillionSend extension; plan, limits and period are null on a self-hosted instance and on the instance's own (system) team.",
         },
         403: {
           content: { "application/json": { schema: errorSchema } },
@@ -59,6 +60,7 @@ export function registerUsageRoutes(
             emails_per_month: quota.kind === "month" ? quota.included : null,
             domains: plan ? PLAN_DOMAIN_LIMIT[plan] : null,
             contacts: plan ? PLAN_CONTACT_LIMIT[plan] : null,
+            inboxes: plan ? PLAN_INBOX_LIMIT[plan] : null,
           },
           today: {
             emails_sent: today?.accepted ?? 0,

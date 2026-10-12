@@ -55,6 +55,24 @@ describe("isReservedSenderDomain", () => {
     ).toBe(false);
     expect(isReservedSenderDomain("gmail.com", { isCloud: true, isOperator: true })).toBe(true);
   });
+
+  it("reserves the shared inbox domain and its team subdomains for everyone, operator included", () => {
+    const sharedInboxDomain = "agents.example.com";
+    for (const isCloud of [true, false]) {
+      for (const isOperator of [true, false]) {
+        const opts = { isCloud, isOperator, sharedInboxDomain };
+        expect(isReservedSenderDomain("agents.example.com", opts)).toBe(true);
+        expect(isReservedSenderDomain("acme.agents.example.com", opts)).toBe(true);
+        expect(isReservedSenderDomain("example.com", opts)).toBe(false);
+        expect(isReservedSenderDomain("notagents.example.com", opts)).toBe(false);
+      }
+    }
+    // Unset (the default here: SHARED_INBOX_DOMAIN is not set in tests) reserves nothing more.
+    expect(isReservedSenderDomain("agents.example.com", { isCloud: true })).toBe(false);
+    expect(
+      isReservedSenderDomain("agents.example.com", { isCloud: true, sharedInboxDomain: null }),
+    ).toBe(false);
+  });
 });
 
 describe("isOperatorTeam", () => {
