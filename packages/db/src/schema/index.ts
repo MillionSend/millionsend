@@ -17,6 +17,7 @@ export * from "./idempotency.js";
 export * from "./instance-probes.js";
 export * from "./instance-settings.js";
 export * from "./monitor.js";
+export * from "./received-emails.js";
 export * from "./reference-data.js";
 export * from "./region-breakers.js";
 export * from "./segments.js";

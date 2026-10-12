@@ -62,8 +62,10 @@ const recipientList = z
 /** SES rejects a message with more destinations than this, across to+cc+bcc. */
 export const MAX_RECIPIENTS_PER_EMAIL = 50;
 
-// Strict base64: canonical alphabet, correct padding, no whitespace.
-const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+// Strict base64 with the length check below: canonical alphabet, correct
+// padding, no whitespace. No nested quantifier: grouping by four made V8's
+// backtracking overflow the stack on attachments of a few MiB.
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 // RFC 7231 media type: type "/" subtype, optional ; token=token|"quoted" parameters.
 const MEDIA_TYPE_RE = new RegExp(
@@ -74,23 +76,41 @@ const MEDIA_TYPE_RE = new RegExp(
  * Wire shape from resend's parseEmailToApiOptions. Only inline base64
  * `content` is supported: a `path` URL would have the server fetch an
  * attacker-chosen location (SSRF), so it is rejected and never fetched.
- * Program files are refused here for every team (attachmentVerdict), so the
- * sender hears it now instead of from a send that fails at SES later.
+ * `filename` may be null, false or absent and `content_id` names an inline
+ * part: emails.receiving.forward() re-sends a received message's parts that
+ * way, and postal-mime reads an unnamed part's filename as null. Program
+ * files are refused here for every team (attachmentVerdict), so the sender
+ * hears it now instead of from a send that fails at SES later.
  */
 const attachmentSchema = z
   .object({
-    filename: z.string().min(1).max(1000),
+    filename: z
+      .union([z.string().min(1).max(1000), z.literal(false)])
+      .nullable()
+      .optional(),
     content: z.string().optional(),
     content_type: z.string().optional(),
-    content_id: z.string().optional(),
+    content_id: z
+      .string()
+      .min(1)
+      .max(255)
+      .optional()
+      .describe('Inline part: the HTML shows it with <img src="cid:<content_id>">'),
     path: z.string().optional(),
   })
   .superRefine((a, ctx) => {
-    if (hasHeaderControlChar(a.filename)) {
+    if (typeof a.filename === "string" && hasHeaderControlChar(a.filename)) {
       ctx.addIssue({
         code: "custom",
         path: ["filename"],
         message: "filename must not contain control characters",
+      });
+    }
+    if (a.content_id !== undefined && hasHeaderControlChar(a.content_id)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["content_id"],
+        message: "content_id must not contain control characters",
       });
     }
     if (a.content_type !== undefined && !MEDIA_TYPE_RE.test(a.content_type)) {
@@ -108,14 +128,6 @@ const attachmentSchema = z
       });
       return;
     }
-    if (a.content_id !== undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["content_id"],
-        message: "content_id (inline attachments) is not supported",
-      });
-      return;
-    }
     if (!a.content) {
       ctx.addIssue({
         code: "custom",
@@ -124,12 +136,12 @@ const attachmentSchema = z
       });
       return;
     }
-    if (!BASE64_RE.test(a.content)) {
+    if (a.content.length % 4 !== 0 || !BASE64_RE.test(a.content)) {
       ctx.addIssue({ code: "custom", path: ["content"], message: "content must be valid base64" });
       return;
     }
     const verdict = attachmentVerdict({
-      filename: a.filename,
+      filename: typeof a.filename === "string" ? a.filename : undefined,
       contentType: a.content_type,
       bytes: Buffer.from(a.content, "base64"),
     });
@@ -439,6 +451,103 @@ export const getEmailResponseSchema = emailListItemSchema
     score: z.number().nullable(),
   })
   .openapi("GetEmailResponse");
+
+/**
+ * Received mail (Resend's emails.receiving surface). Every string in it came
+ * from whoever sent the message; addresses are bare, cleaned of controls.
+ */
+const inboundAttachmentSchema = z.object({
+  id: z.uuid(),
+  filename: z.string().nullable(),
+  content_type: z.string(),
+  content_id: z.string().nullable(),
+  content_disposition: z.string().nullable(),
+  size: z.number().int(),
+});
+
+const receivedEmailListItemSchema = z.object({
+  id: z.uuid(),
+  to: z.array(z.string()),
+  from: z
+    .string()
+    .describe("Bare address from the From header; the display name is in headers.from"),
+  created_at: z.string(),
+  subject: z.string(),
+  bcc: z.array(z.string()),
+  cc: z.array(z.string()),
+  reply_to: z.array(z.string()),
+  received_for: z
+    .array(z.string())
+    .describe("The team's envelope recipients: the addresses the message was delivered to here"),
+  message_id: z.string(),
+  attachments: z.array(inboundAttachmentSchema),
+});
+
+export const listReceivedEmailsResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    has_more: z.boolean(),
+    data: z.array(receivedEmailListItemSchema),
+  })
+  .openapi("ListReceivedEmailsResponse");
+
+export const getReceivedEmailQuerySchema = z.object({
+  html_format: z
+    .enum(["data_uri", "cid"])
+    .optional()
+    .describe(
+      "data_uri (default) inlines images the HTML references by cid: as data: URIs; cid leaves the cid: references, the parts being in attachments",
+    ),
+});
+
+export const getReceivedEmailResponseSchema = receivedEmailListItemSchema
+  .extend({
+    object: z.literal("email"),
+    html: z.string().nullable(),
+    html_format: z.enum(["data_uri", "cid"]),
+    text: z.string().nullable(),
+    headers: z
+      .record(z.string(), z.string())
+      .nullable()
+      .describe(
+        "Top-level headers, lowercase names; a repeated header's values joined by newlines",
+      ),
+    authentication: z
+      .object({ spf: z.string(), dkim: z.string(), dmarc: z.string() })
+      .describe("pass, fail, gray, processing_failed or unknown, checked when the message arrived"),
+    raw: z
+      .object({ download_url: z.string(), expires_at: z.string() })
+      .nullable()
+      .describe(
+        "The original RFC 822 message: a signed link valid for one hour that needs no API key. null once the content retention period removed the message.",
+      ),
+  })
+  .openapi("GetReceivedEmailResponse");
+
+const receivedAttachmentDataSchema = z.object({
+  id: z.uuid(),
+  filename: z.string().optional(),
+  size: z.number().int(),
+  content_type: z.string(),
+  content_disposition: z.enum(["inline", "attachment"]),
+  content_id: z.string().optional(),
+  download_url: z
+    .string()
+    .describe("Signed link to the file's bytes, valid for one hour; it needs no API key"),
+  expires_at: z.string(),
+});
+
+export const listReceivedAttachmentsResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    has_more: z.boolean(),
+    data: z.array(receivedAttachmentDataSchema),
+  })
+  .openapi("ListReceivedAttachmentsResponse");
+
+export const getReceivedAttachmentResponseSchema = receivedAttachmentDataSchema
+  .extend({ object: z.literal("attachment") })
+  .openapi("GetReceivedAttachmentResponse");
 
 const scoreBandEnum = z.enum(["excellent", "good", "needs_attention", "at_risk"]);
 
@@ -1246,6 +1355,21 @@ const OPEN_TRACKING_DESC =
 const TRACKING_SUBDOMAIN_DESC =
   'DNS label of the branded tracking host, e.g. "links" for links.<domain>. Setting it adds a Tracking CNAME to records[]; links are tracked through it once that CNAME resolves. Required on MillionSend Cloud to turn tracking on.';
 
+const capabilityStatusSchema = z.enum(["enabled", "disabled"]);
+
+const domainCapabilitiesRequestSchema = z
+  .object({
+    sending: capabilityStatusSchema
+      .optional()
+      .describe("Always enabled: receive-only domains are not supported, so disabled is a 422."),
+    receiving: capabilityStatusSchema
+      .optional()
+      .describe(
+        "Inbound mail for every address at the domain (a catch-all), readable at /emails/receiving and announced by the email.received webhook. Enabling needs a verified domain on an instance that receives mail, and adds a Receiving MX record to records[]. A domain that already has mailboxes is best received on a subdomain (inbound.example.com): the Receiving MX would take their mail.",
+      ),
+  })
+  .describe("Resend's domain capabilities; omitted fields keep their value.");
+
 /**
  * Built per deployment so `region` lists only what it serves (the default
  * first): SES configuration sets, SNS topics and tenants are all regional, so
@@ -1282,6 +1406,9 @@ export const createDomainRequestSchema = (regions: readonly [string, ...string[]
         .refine((v) => SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
         .optional()
         .describe(TRACKING_SUBDOMAIN_DESC),
+      // A new domain is never verified yet, so receiving: "enabled" is a 422
+      // here; it is switched on with PATCH once the domain verifies.
+      capabilities: domainCapabilitiesRequestSchema.optional(),
     })
     .openapi("CreateDomainRequest");
 
@@ -1300,7 +1427,7 @@ export const updateDomainRequestSchema = z
     // Accepted by the SDK but unsupported here; the handler answers 422
     // instead of silently ignoring a security-relevant setting.
     tls: z.unknown().optional(),
-    capabilities: z.unknown().optional(),
+    capabilities: domainCapabilitiesRequestSchema.optional(),
   })
   .openapi("UpdateDomainRequest");
 
@@ -1308,7 +1435,7 @@ const domainRecordSchema = z.object({
   record: z
     .string()
     .describe(
-      "Which record this is: DKIM, SPF (the MAIL FROM MX and TXT rows), DMARC, or Tracking (the branded tracking CNAME, present once a tracking subdomain is set). Only the DKIM and SPF rows gate sending.",
+      "Which record this is: DKIM, SPF (the MAIL FROM MX and TXT rows), DMARC, Tracking (the branded tracking CNAME, present once a tracking subdomain is set) or Receiving (the MX inbound mail needs, present while receiving is enabled; it reads verified only when it is among the domain's lowest-numbered MX records). Only the DKIM and SPF rows gate sending.",
     ),
   name: z.string(),
   type: z.string(),
@@ -1353,8 +1480,14 @@ const domainSchema = z.object({
   open_tracking: z.boolean(),
   click_tracking: z.boolean(),
   tracking_subdomain: z.string().nullable(),
-  // Sending-only platform; present for SDK-shape parity.
-  capabilities: z.object({ sending: z.string(), receiving: z.string() }),
+  capabilities: z.object({
+    sending: z.string().describe("Always enabled"),
+    receiving: z
+      .string()
+      .describe(
+        "enabled while the domain receives mail; always disabled on an instance that does not",
+      ),
+  }),
 });
 
 export const createDomainResponseSchema = domainSchema

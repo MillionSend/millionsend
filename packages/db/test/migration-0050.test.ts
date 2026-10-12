@@ -5,14 +5,14 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { migrationsFolder } from "../src/migrate.js";
 
 let client: PGlite;
-const sql = readFileSync(join(migrationsFolder, "0053_screening_holds.sql"), "utf8");
+const sql = readFileSync(join(migrationsFolder, "0050_phishing_defenses.sql"), "utf8");
 const journal = JSON.parse(readFileSync(join(migrationsFolder, "meta/_journal.json"), "utf8")) as {
   entries: { idx: number; tag: string }[];
 };
 
 beforeAll(async () => {
   client = new PGlite();
-  for (const entry of journal.entries.filter((e) => e.idx < 53)) {
+  for (const entry of journal.entries.filter((e) => e.idx < 50)) {
     await client.exec(readFileSync(join(migrationsFolder, `${entry.tag}.sql`), "utf8"));
   }
 });

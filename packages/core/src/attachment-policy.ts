@@ -213,8 +213,12 @@ function entryFlags(
  */
 const DIRECTION_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
+/** How an attachment without a filename (an inline image, say) is named where a name is shown. */
+export const UNNAMED_ATTACHMENT = "(unnamed)";
+
 /** A filename for an API message: invisible characters spelled out, length capped. */
-function shownName(filename: string): string {
+function shownName(filename: string | undefined): string {
+  if (!filename) return "An unnamed attachment";
   const visible = filename.replace(
     /\p{Cf}/gu,
     (ch) => `<U+${(ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}>`,
@@ -223,7 +227,8 @@ function shownName(filename: string): string {
 }
 
 export interface AttachmentFile {
-  filename: string;
+  /** Absent for an unnamed part, such as an inline image. */
+  filename?: string | undefined;
   contentType?: string | undefined;
   bytes: Uint8Array;
 }
@@ -274,7 +279,8 @@ export function attachmentVerdict(
     rejection,
     reason: `${shownName(file.filename)} is refused: ${why}`,
   });
-  const control = DIRECTION_CONTROLS.exec(file.filename)?.[0];
+  const name = file.filename ?? "";
+  const control = DIRECTION_CONTROLS.exec(name)?.[0];
   if (control) {
     const code = (control.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
     return reject(
@@ -282,7 +288,7 @@ export function attachmentVerdict(
       `its name holds a text-direction control (U+${code}) that can disguise the file's type`,
     );
   }
-  const extensions = fileExtensions(file.filename);
+  const extensions = fileExtensions(name);
   const blocked = extensions.find((ext) => BLOCKED_EXTENSIONS.has(ext));
   if (blocked) return reject("blocked_extension", `.${blocked} files can't be sent`);
   const type = mediaType(file.contentType);

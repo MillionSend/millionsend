@@ -275,7 +275,14 @@
     "bounced": "Devolvidos",
     "complained": "Reclamações",
     "sentThisPeriod": "E-mails enviados neste período",
-    "renewsOn": "Renova em {date}"
+    "renewsOn": "Renova em {date}",
+    "receivedToday": "E-mails recebidos hoje",
+    "receivedThisPeriod": "E-mails recebidos neste período",
+    "sentAndReceivedToday": "E-mails enviados e recebidos hoje",
+    "receivedShared": "Conta no mesmo limite diário dos envios. Reinicia à meia-noite UTC.",
+    "receivedDay": "Grátis até {allowance} por dia; acima disso, quem envia tenta de novo mais tarde. Reinicia à meia-noite UTC.",
+    "receivedMonth": "Grátis até {allowance} neste período; acima disso, {per} recebidos contam como 1 e-mail.",
+    "received": "Recebidos"
   },
   "billing": {
     "plan": "Plano",
@@ -412,6 +419,8 @@
       "domain_created": "Adicionou domínio",
       "domain_verified": "Verificou domínio",
       "domain_deleted": "Excluiu domínio",
+      "domain_receiving_enabled": "Ativou recebimento",
+      "domain_receiving_disabled": "Desativou recebimento",
       "webhook_created": "Criou webhook",
       "webhook_updated": "Atualizou webhook",
       "webhook_secret_rotated": "Rotacionou o segredo de assinatura do webhook",

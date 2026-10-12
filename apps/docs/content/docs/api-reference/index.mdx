@@ -26,8 +26,9 @@ setup, or wherever you exposed port 3001 (e.g. `https://api.acme.dev`). See
 
 ## Authentication
 
-Every endpoint (except the SES event ingestion webhook) requires an API key
-created in the dashboard:
+Every endpoint requires an API key created in the dashboard, except the SES
+event ingestion webhook and the signed download links of
+[received mail](/concepts/receiving#downloads):
 
 ```
 Authorization: Bearer ms_...
@@ -37,8 +38,9 @@ Keys have a permission level: **full access** keys can use every endpoint,
 **sending only** keys are confined to `/emails*` (anything else returns
 `403 restricted_api_key`) — and even there, `GET /emails`, `GET /emails/{id}`
 and `DELETE /emails/{id}` need full access, since reads return stored bodies
-and the team's whole archive. A key can additionally be scoped to a single
-domain, restricting which `from` addresses it may send.
+and the team's whole archive, and so does every `/emails/receiving` endpoint.
+A key can additionally be scoped to a single domain, restricting which `from`
+addresses it may send and which received mail it reads.
 
 A key created with `POST /api-keys` is never broader than the key that
 created it. A domain-scoped key creates keys scoped to its own domain: an
@@ -53,8 +55,24 @@ against MillionSend by pointing their base URL at it. CI runs the official
 remaining deltas are deliberate and loud:
 
 - Attachments take inline base64 `content` only — a remote `path` URL is
-  rejected with `422` (never fetched), as is `content_id` (inline images).
-  Program files are refused too; see [Attachments](#attachments).
+  rejected with `422` (never fetched). An attachment with a `content_id` is
+  an inline image the HTML references as `cid:<content_id>`, and may leave
+  `filename` out or null. Attachments can total up to 10 MiB per email
+  (Resend allows 40 MB), and the whole email must fit SES's 40 MB as it goes
+  out; a larger one is refused with `422`. Program files are refused too; see
+  [Attachments](#attachments).
+- Receiving is supported (beta): `GET /emails/receiving`,
+  `GET /emails/receiving/{id}` with `html_format`, the attachment endpoints,
+  signed one-hour download links, the `email.received` webhook, and
+  `capabilities.receiving` with a `Receiving` record on domains — so
+  `resend.emails.receiving.*`, `forward()` included, works unchanged. A
+  domain's `capabilities.sending` is always `enabled` (asking to disable it
+  is a `422`). Receiving needs a verified domain, so `POST /domains` with
+  `capabilities.receiving: "enabled"` is a `422`: verify the domain, then
+  enable it with `PATCH /domains/{id}`. `GET /emails/receiving` without
+  `limit` returns 20 emails rather than all of them, and HTML whose inline
+  images would take it past 40 MB (Resend: 100 MB) is served with its `cid:`
+  references (`html_format: "cid"`). See [Receiving](/concepts/receiving).
 - Contacts are team-global — audience endpoints are served as aliases of
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
@@ -215,4 +233,19 @@ of sending again; the same key with a different payload returns `409`.
 
 List endpoints accept `limit` (1–100, default 20) plus `after` / `before`
 cursors carrying an item id from a previous page. Responses include
-`has_more`.
+`has_more`. Lists run oldest first, except `GET /emails/receiving`, which runs
+newest first as on Resend: there `after` pages toward older mail. The
+attachments of a received email come back all at once unless you pass
+`limit`.
+
+## Signed download links
+
+Received mail carries download links instead of inline bytes:
+`raw.download_url` on `GET /emails/receiving/{id}`, and `download_url` on
+each attachment the attachment endpoints return. They are plain `GET` URLs
+on the API origin, `/receiving/raw/{email_id}` and
+`/receiving/attachments/{email_id}/{attachment_id}`, with `expires` (Unix
+seconds) and `signature` in the query. They need no API key, work for one
+hour (`expires_at`) for one email and attachment of one team, and answer
+`403` once expired or altered; ask the API again for fresh ones. See
+[Receiving → Downloads](/concepts/receiving#downloads).

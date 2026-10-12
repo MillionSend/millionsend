@@ -61,7 +61,7 @@ Então resolva o que o relatório lista:
 
 - Atualize ids de tópicos e segmentos em código e configuração usando o mapa de ids do relatório.
 - Templates: templates do MillionSend não armazenam `from` nem `reply_to`; passe-os em cada envio.
-- Webhooks: endpoint, eventos e segredo de assinatura foram copiados, então o receptor existente continua verificando os cabeçalhos `svix-*`. Tipos de evento fora dos sete tipos `email.*` do MillionSend foram descartados por webhook e estão listados; remova ou substitua os handlers deles.
+- Webhooks: endpoint, eventos e segredo de assinatura foram copiados, então o receptor existente continua verificando os cabeçalhos `svix-*`. Tipos de evento fora dos oito tipos `email.*` do MillionSend (inclusive `email.received`) foram descartados por webhook e estão listados; remova ou substitua os handlers deles.
 - Chaves de API não podem ser migradas (o Resend expõe apenas os nomes). Crie uma para cada nome que o relatório lista, no painel, e coloque-as nos ambientes correspondentes.
 
 ## Passo 4 — DNS, feito pelo usuário

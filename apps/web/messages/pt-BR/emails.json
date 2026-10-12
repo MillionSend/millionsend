@@ -50,7 +50,8 @@
       "label": "Origem",
       "transactional": "Transacionais",
       "broadcast": "Transmissões",
-      "all": "Todos"
+      "all": "Todos",
+      "receiving": "Recebidos"
     },
     "hiddenBroadcasts": "{count} e-mails de transmissões não aparecem nesta lista.",
     "showBroadcasts": "Ver transmissões →",
@@ -127,7 +128,9 @@
       "waitingBody": "Sai assim que houver capacidade de envio.",
       "warmup": "Domínio em aquecimento",
       "warmupBody": "Domínios novos aumentam o volume aos poucos para proteger a entregabilidade. Sai conforme o volume diário permitir."
-    }
+    },
+    "headers": "Cabeçalhos",
+    "noHeaders": "Sem cabeçalhos."
   },
   "insights": {
     "outOfTen": "/ 10",
@@ -367,5 +370,34 @@
     "when": "Quando",
     "recipient": "Destinatário",
     "note": "O destinatário se descadastrou pelo link deste e-mail. Mensagens de conta continuam chegando; transmissões para este escopo param."
+  },
+  "receiving": {
+    "auth": "Autenticação",
+    "attachments": "Anexos",
+    "received": "Recebido",
+    "noSubject": "(sem assunto)",
+    "empty": "Nenhum e-mail recebido ainda.",
+    "emptyHint": "Ative o recebimento de um domínio em <link>Domínios</link> e aponte o registro MX dele para cá.",
+    "pageOf": "Página 1 – {pages} de {total} e-mails recebidos",
+    "loadError": "Não foi possível carregar os e-mails recebidos.",
+    "detail": {
+      "breadcrumb": "E-mail recebido",
+      "error": "Não foi possível carregar este e-mail.",
+      "notFound": "E-mail não encontrado.",
+      "downloadRaw": "Baixar .eml",
+      "receivedFor": "Recebido por",
+      "messageId": "Message-ID",
+      "envelopeFrom": "Remetente do envelope",
+      "server": "Servidor de envio",
+      "noTls": "sem TLS",
+      "attachments": "Anexos",
+      "download": "Baixar",
+      "unnamed": "Anexo sem nome",
+      "inline": "no corpo",
+      "attachmentCount": "{count, plural, one {# anexo} other {# anexos}}",
+      "file": "Arquivo",
+      "type": "Tipo",
+      "size": "Tamanho"
+    }
   }
 }

@@ -33,6 +33,7 @@
       "opened": "E-mail aberto",
       "clicked": "Link clicado",
       "prefetched": "E-mail pré-carregado",
+      "received": "E-mail recebido",
       "bounced": "E-mail devolvido",
       "complained": "Marcado como spam"
     },

@@ -6,6 +6,7 @@ import {
   invitesPerTeamPerDay,
   isCloudDeployment,
   notificationsEmailFrom,
+  receivingEnabled,
 } from "@millionsend/config";
 import {
   accountLocale,
@@ -25,7 +26,10 @@ import {
   type MailPreferenceKey,
   monitorTier,
   QUOTA_COLUMNS,
+  type QuotaTeamRow,
+  RECEIVED_PER_BILLED_EMAIL,
   readPeriodUsage,
+  receivingRule,
   resolveMonitorSettings,
   SystemMailRefused,
   signInviteToken,
@@ -1038,6 +1042,7 @@ export function createSettingsRouter(
               delivered: c.delivered,
               bounced: c.bounced,
               complained: c.complained,
+              received: c.received,
             })
             .from(c)
             .where(and(eq(c.teamId, ctx.teamId), gte(c.day, since)))
@@ -1053,18 +1058,51 @@ export function createSettingsRouter(
                   overage: quota.overage,
                 }
               : null;
+          const todayRow = rows.find((r) => r.day === today);
           return {
             rows,
             today: {
-              accepted: rows.find((r) => r.day === today)?.accepted ?? 0,
+              accepted: todayRow?.accepted ?? 0,
               limit: quota.kind === "day" ? quota.limit : null,
             },
             /** The billing period a monthly plan counts against; null on a daily cap or self-host. */
             period,
+            receiving: receivingEnabled()
+              ? await receivingUsage(ctx.db, ctx.teamId, team, todayRow?.received ?? 0)
+              : null,
           };
         }),
     }),
   });
+}
+
+/**
+ * Received mail against its free allowance (receivingRule): the shared daily
+ * cap on Free, twice the plan's volume per day or per billing period
+ * otherwise, uncapped on self-host. `allowance` is null when nothing caps it.
+ */
+async function receivingUsage(db: Db, teamId: string, team: QuotaTeamRow, receivedToday: number) {
+  const rule = receivingRule(team, isCloudDeployment());
+  if (rule.kind !== "month") {
+    return {
+      kind: rule.kind,
+      received: receivedToday,
+      allowance:
+        rule.kind === "day" ? rule.allowance : rule.kind === "shared_day" ? rule.quota.limit : null,
+      perBilledEmail: RECEIVED_PER_BILLED_EMAIL,
+    };
+  }
+  const p = schema.usagePeriods;
+  const [period] = await db
+    .select({ received: p.received })
+    .from(p)
+    .where(and(eq(p.teamId, teamId), eq(p.periodStart, rule.periodStart)));
+  return {
+    kind: rule.kind,
+    received: period?.received ?? 0,
+    allowance: rule.allowance,
+    perBilledEmail: RECEIVED_PER_BILLED_EMAIL,
+  };
 }
 
 /** The keys a person turned off, as stored; a key the app no longer knows is dropped on read. */

@@ -371,10 +371,18 @@ export async function readMediaForJudge(
   const signal = AbortSignal.timeout(MEDIA_STEP_TIMEOUT_MS);
   const cache = deps.cache ?? mediaCache;
   const notRead: string[] = [];
+  // A cid: image is an inline part of the email: it is read with the files.
+  const inlineIds = new Set(
+    input.attachments.flatMap((a) => (a.contentId ? [a.contentId.toLowerCase()] : [])),
+  );
+  const bodyImages = input.bodyImages.filter((source) => {
+    const cid = /^\s*cid:(.+)$/i.exec(source)?.[1];
+    return !(cid && inlineIds.has(cid.trim().toLowerCase()));
+  });
   const [files, body] = await Promise.all([
     scanFiles(input.attachments, "judge", deps),
     input.readBodyImages
-      ? bodyItems(input.bodyImages, deps, cache, signal, notRead)
+      ? bodyItems(bodyImages, deps, cache, signal, notRead)
       : Promise.resolve([]),
   ]);
   const scanned = await bodyQr(body, deps, cache, notRead);

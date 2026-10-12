@@ -1,1 +1,0 @@
-ALTER TABLE "content_access_grants" ADD COLUMN "media_viewed_at" timestamp with time zone;

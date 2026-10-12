@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatMailbox, parseMailbox, parseSingleSender } from "../src/sender-address.js";
+import {
+  formatMailbox,
+  parseMailbox,
+  parseSingleSender,
+  routableAddress,
+} from "../src/sender-address.js";
 
 describe("parseSingleSender", () => {
   it("accepts a bare addr-spec", () => {
@@ -138,5 +143,32 @@ describe("parseMailbox / formatMailbox", () => {
     expect(formatMailbox({ name: "Acme Sales", address: "a@b.com" })).toBe("Acme Sales <a@b.com>");
     expect(formatMailbox({ name: "Doe, John", address: "a@b.com" })).toBe('"Doe, John" <a@b.com>');
     expect(formatMailbox({ name: "  ", address: "a@b.com" })).toBe("a@b.com");
+  });
+});
+
+describe("routableAddress", () => {
+  it("normalizes the domain and keeps the local part as written", () => {
+    expect(routableAddress(" Agent+Tag@INBOUND.Example.com. ")).toEqual({
+      address: "Agent+Tag@inbound.example.com",
+      domain: "inbound.example.com",
+    });
+    expect(routableAddress("josé@bücher.example")).toEqual({
+      address: "josé@xn--bcher-kva.example",
+      domain: "xn--bcher-kva.example",
+    });
+  });
+
+  it("refuses non-addresses and anything that could inject", () => {
+    for (const bad of [
+      "no-at-sign",
+      "@example.com",
+      "user@",
+      "a b@example.com",
+      "a@example.com\r\nRCPT TO:<x@y>",
+      "<a@example.com>",
+      `${"a".repeat(320)}@example.com`,
+    ]) {
+      expect(routableAddress(bad)).toBeNull();
+    }
   });
 });

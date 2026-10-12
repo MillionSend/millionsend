@@ -27,8 +27,9 @@ local, ou onde você expôs a porta 3001 (ex.: `https://api.acme.dev`). Veja
 
 ## Autenticação
 
-Todo endpoint (exceto o webhook de ingestão de eventos do SES) exige uma
-chave de API criada no painel:
+Todo endpoint exige uma chave de API criada no painel, exceto o webhook de
+ingestão de eventos do SES e os links de download assinados dos
+[emails recebidos](/pt-BR/concepts/receiving#downloads):
 
 ```
 Authorization: Bearer ms_...
@@ -39,8 +40,9 @@ os endpoints, chaves de **somente envio** ficam confinadas a `/emails*`
 (qualquer outra coisa retorna `403 restricted_api_key`) — e mesmo ali,
 `GET /emails`, `GET /emails/{id}` e `DELETE /emails/{id}` exigem acesso
 total, já que as leituras devolvem os corpos armazenados e todo o arquivo da
-equipe. Uma chave também pode ficar restrita a um único domínio, limitando de
-quais endereços `from` ela pode enviar.
+equipe, e o mesmo vale para todo endpoint `/emails/receiving`. Uma chave
+também pode ficar restrita a um único domínio, limitando de quais endereços
+`from` ela pode enviar e quais e-mails recebidos ela lê.
 
 Uma chave criada com `POST /api-keys` nunca é mais ampla que a chave que a
 criou. Uma chave restrita a um domínio cria chaves restritas ao mesmo domínio:
@@ -56,9 +58,25 @@ endpoints como um teste de conformidade. As poucas diferenças restantes são
 deliberadas e explícitas:
 
 - Anexos aceitam apenas `content` em base64 inline — uma URL em `path` é
-  rejeitada com `422` (nunca é buscada), assim como `content_id` (imagens
-  inline). Arquivos de programa também são recusados; veja
-  [Anexos](#anexos).
+  rejeitada com `422` (nunca é buscada). Um anexo com `content_id` é uma
+  imagem inline que o HTML referencia como `cid:<content_id>`, e pode deixar
+  `filename` de fora ou nulo. Os anexos podem somar até 10 MiB por e-mail (no
+  Resend, 40 MB), e o e-mail inteiro precisa caber nos 40 MB do SES do jeito
+  que sai; um maior é recusado com `422`. Arquivos de programa também são recusados;
+  veja [Anexos](#anexos).
+- O recebimento é suportado (beta): `GET /emails/receiving`,
+  `GET /emails/receiving/{id}` com `html_format`, os endpoints de anexos, os
+  links de download assinados de uma hora, o webhook `email.received` e
+  `capabilities.receiving` com um registro `Receiving` nos domínios — então
+  `resend.emails.receiving.*`, `forward()` incluído, funciona sem mudanças.
+  O `capabilities.sending` de um domínio é sempre `enabled` (pedir para
+  desligá-lo dá `422`). O recebimento exige um domínio verificado, então
+  `POST /domains` com `capabilities.receiving: "enabled"` dá `422`: verifique
+  o domínio e depois ligue o recebimento com `PATCH /domains/{id}`.
+  `GET /emails/receiving` sem `limit` devolve 20 e-mails, não todos, e um HTML
+  que passaria de 40 MB com as imagens inline (no Resend, 100 MB) vem com as
+  referências `cid:` (`html_format: "cid"`). Veja
+  [Recebimento](/pt-BR/concepts/receiving).
 - Contatos são globais à equipe — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
@@ -223,4 +241,19 @@ vez de enviar de novo; a mesma chave com payload diferente retorna `409`.
 
 Endpoints de listagem aceitam `limit` (1–100, padrão 20) e cursores `after` /
 `before` carregando o id de um item de uma página anterior. As respostas
-incluem `has_more`.
+incluem `has_more`. As listagens vêm do mais antigo para o mais novo, menos
+`GET /emails/receiving`, que vem do mais novo para o mais antigo como no
+Resend: ali `after` avança para emails mais antigos. Os anexos de um email
+recebido vêm todos de uma vez, a não ser que você passe `limit`.
+
+## Links de download assinados
+
+Emails recebidos trazem links de download em vez dos bytes:
+`raw.download_url` em `GET /emails/receiving/{id}` e `download_url` em cada
+anexo que os endpoints de anexos devolvem. São URLs `GET` comuns na origem
+da API, `/receiving/raw/{email_id}` e
+`/receiving/attachments/{email_id}/{attachment_id}`, com `expires` (segundos
+Unix) e `signature` na query. Não precisam de chave de API, valem por uma
+hora (`expires_at`) para um email e um anexo de um time, e respondem `403`
+depois de expirar ou se forem alterados; peça links novos à API. Veja
+[Recebimento → Downloads](/pt-BR/concepts/receiving#downloads).

@@ -20,6 +20,7 @@ import {
   sha256Hex,
   stripHiddenElements,
   stripInvisible,
+  UNNAMED_ATTACHMENT,
   urlsInText,
   visibleText,
 } from "@millionsend/core";
@@ -227,7 +228,7 @@ function readMarkup(page: string): { text: string; urls: string[]; flags: Attach
 
 function isCalendar(file: EmailAttachment, bytes: Buffer): boolean {
   return (
-    fileExtensions(file.filename)[0] === "ics" ||
+    fileExtensions(file.filename ?? "")[0] === "ics" ||
     file.contentType?.toLowerCase().startsWith("text/calendar") === true ||
     bytes.subarray(0, 64).toString("latin1").trimStart().startsWith("BEGIN:VCALENDAR")
   );
@@ -279,7 +280,7 @@ export async function scanFiles(
     const markup =
       first.kind === "html" ||
       first.kind === "svg" ||
-      fileExtensions(attachment.filename).some((ext) => MARKUP_EXTENSIONS.has(ext));
+      fileExtensions(attachment.filename ?? "").some((ext) => MARKUP_EXTENSIONS.has(ext));
     if (first.action !== "reject" && markup) {
       const page = readMarkup(bytes.toString("utf8"));
       text = page.text;
@@ -298,7 +299,7 @@ export async function scanFiles(
       .map((url) => ({ source, url }));
     const qr = qrFindings(read?.qr ?? []);
     return {
-      filename: attachment.filename,
+      filename: attachment.filename ?? UNNAMED_ATTACHMENT,
       size: bytes.length,
       verdict: attachmentVerdict(
         { filename: attachment.filename, contentType: attachment.contentType, bytes },

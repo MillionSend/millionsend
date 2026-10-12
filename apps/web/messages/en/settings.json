@@ -275,7 +275,14 @@
     "bounced": "Bounced",
     "complained": "Complained",
     "sentThisPeriod": "Emails sent this period",
-    "renewsOn": "Renews on {date}"
+    "renewsOn": "Renews on {date}",
+    "receivedToday": "Emails received today",
+    "receivedThisPeriod": "Emails received this period",
+    "sentAndReceivedToday": "Emails sent and received today",
+    "receivedShared": "Counts toward the same daily limit as sending. Resets at midnight UTC.",
+    "receivedDay": "Free up to {allowance} a day; past that, senders retry later. Resets at midnight UTC.",
+    "receivedMonth": "Free up to {allowance} this period; past that, every {per} count as 1 email.",
+    "received": "Received"
   },
   "billing": {
     "plan": "Plan",
@@ -412,6 +419,8 @@
       "domain_created": "Added domain",
       "domain_verified": "Verified domain",
       "domain_deleted": "Deleted domain",
+      "domain_receiving_enabled": "Enabled receiving",
+      "domain_receiving_disabled": "Disabled receiving",
       "webhook_created": "Created webhook",
       "webhook_updated": "Updated webhook",
       "webhook_secret_rotated": "Rotated webhook signing secret",

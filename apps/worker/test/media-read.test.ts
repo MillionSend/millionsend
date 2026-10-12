@@ -8,6 +8,7 @@ import {
   encryptEmailBody,
   openMediaReview,
   purgedEmailBodyColumns,
+  UNNAMED_ATTACHMENT,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -275,6 +276,26 @@ describe("readMediaForJudge", () => {
     );
     expect(fetchImage).not.toHaveBeenCalled();
     expect(media.issues).toEqual([]);
+  });
+
+  it("reads a cid: image through its inline part, never as an image left unread", async () => {
+    const media = await readMediaForJudge(
+      {
+        attachments: [
+          {
+            content: fixture("qr.png").toString("base64"),
+            contentType: "image/png",
+            contentId: "Logo-1",
+          },
+        ],
+        bodyImages: ["cid:logo-1"],
+        readBodyImages: true,
+      },
+      deps(null),
+    );
+    expect(media.findings.images.why).not.toContain("cid reference");
+    expect(media.findings.links.some((link) => link.source === "QR code")).toBe(true);
+    expect(media.findings.files[0]?.filename).toBe(UNNAMED_ATTACHMENT);
   });
 
   it("flags a QR code the reader saw but nothing decoded", async () => {

@@ -79,6 +79,8 @@ import {
   purgeExpiredApiRequests,
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
+  purgeExpiredReceivedContent,
+  purgeExpiredReceivedMetadata,
   purgeExpiredSessions,
   purgeStaleHourlyUsage,
   reapStaleTrackingSubdomains,
@@ -363,6 +365,12 @@ await queue.scheduleCrons({
       retentionDays: metadataRetentionDays,
       deliveryRetentionDays: env.WEBHOOK_DELIVERY_RETENTION_DAYS,
     });
+    const receivedPurged = await purgeExpiredReceivedContent(db, {
+      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+    });
+    const receivedDeleted = await purgeExpiredReceivedMetadata(db, {
+      retentionDays: metadataRetentionDays,
+    });
     const sessions = await purgeExpiredSessions(db);
     const hourlyUsage = await purgeStaleHourlyUsage(db);
     const stripeEvents = await purgeStripeEvents(db);
@@ -383,6 +391,8 @@ await queue.scheduleCrons({
       emails: metadata.emails,
       oldDeliveries: metadata.deliveries,
       broadcastsFrozen: metadata.broadcasts,
+      receivedPurged,
+      receivedDeleted,
       sessions,
       signups,
       fingerprints,

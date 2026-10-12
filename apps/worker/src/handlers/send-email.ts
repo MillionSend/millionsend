@@ -1107,6 +1107,11 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
               content: a.content,
               encoding: "base64" as const,
               ...(contentType ? { contentType } : {}),
+              // nodemailer would send a message/* part (a forwarded .eml) inline;
+              // only a part the html references by content id is.
+              ...(a.contentId
+                ? { cid: a.contentId }
+                : { contentDisposition: "attachment" as const }),
             };
           }),
         }

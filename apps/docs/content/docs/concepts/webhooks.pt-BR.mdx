@@ -20,6 +20,7 @@ entregas por endpoint.
 | `email.opened` | Uma pessoa carregou o pixel de rastreamento (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). `data.open` traz `ipAddress`, `userAgent` e `timestamp` da busca. Um clique em uma mensagem ainda sem abertura também registra uma, com `data.open.reason: "click"`: ninguém clica no que nunca renderizou, e para leitores do Apple Mail é a única abertura que pode ser vista. |
 | `email.clicked` | Uma pessoa clicou em um link reescrito (exige rastreamento de cliques). `data.click` traz `link`, `ipAddress`, `userAgent` e `timestamp`, como no Resend. Um link que uma máquina seguiu — gateway de segurança, pré-visualização de link, busca segundos após a entrega — é registrado como `email.prefetched`. |
 | `email.prefetched` | O pixel foi buscado, ou um link seguido, por uma máquina — o Mail Privacy Protection da Apple, o pré-carregamento do Gmail, um scanner de segurança, uma identidade de navegador que nenhum navegador real envia, uma busca segundos após a entrega ou todos os links da mensagem em um segundo; `data.open.reason` ou `data.click.reason` diz qual (veja [precisão da taxa de abertura](/pt-BR/concepts/domains#precisão-da-taxa-de-abertura)). Um clique registrado antes de o resto da rajada chegar é registrado de novo aqui com o mesmo `data.click.timestamp` que seu `email.clicked` levou: trate isso como o clique sendo desfeito, junto com qualquer `email.opened` com `data.open.reason: "click"` marcado um milissegundo antes dele. Opt-in: entregue só a endpoints que o listam, nunca a "todos os eventos". |
+| `email.received` | Uma mensagem chegou a um dos seus [domínios de recebimento](/pt-BR/concepts/receiving) e foi guardada, uma vez por mensagem. `data.email_id` é um e-mail recebido: leia com `GET /emails/receiving/{id}`. Veja [o payload](#emails-recebidos) abaixo. |
 
 Eventos de conta não carregam e-mail; `data` descreve a situação da equipe:
 
@@ -48,6 +49,42 @@ extensões do MillionSend.
 | `contact.resubscribed` | Uma reinscrição explícita (`unsubscribed: false`). | |
 | `contact.topic_opt_in` / `contact.topic_opt_out` | A inscrição efetiva do contato em um tópico mudou. | `topic_id`, `topic_name` |
 | `suppression.added` / `suppression.removed` | Um endereço entrou ou saiu da [lista de supressão](/pt-BR/concepts/suppressions). Linhas de bounce e reclamação vêm do SES, com `source: null`. | `data` é `{ id, email, origin, source, created_at }` |
+
+### Emails recebidos
+
+`email.received` traz o payload do Resend, só com metadados: sem corpo, sem
+cabeçalhos e sem tamanho dos anexos, e `from` é só o endereço.
+`received_for` lista os endereços dos seus domínios para os quais a mensagem
+foi entregue, incluindo quem estava em Cco. Quando uma entrega posterior da
+mesma mensagem chega a mais endereços seus, outro `email.received` com o
+mesmo `email_id` lista só esses.
+
+```json title="email.received"
+{
+  "type": "email.received",
+  "created_at": "2026-10-11T14:37:40.951Z",
+  "data": {
+    "email_id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+    "created_at": "2026-10-11T14:37:40.951Z",
+    "from": "ada@example.org",
+    "to": ["support@inbound.example.com"],
+    "bcc": [],
+    "cc": [],
+    "received_for": ["support@inbound.example.com"],
+    "message_id": "<CAF1x7Qm9@mail.example.org>",
+    "subject": "Order #1042",
+    "attachments": [
+      {
+        "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+        "filename": "invoice.pdf",
+        "content_type": "application/pdf",
+        "content_disposition": "attachment",
+        "content_id": null
+      }
+    ]
+  }
+}
+```
 
 ## Assinaturas (Standard Webhooks)
 

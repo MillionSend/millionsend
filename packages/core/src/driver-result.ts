@@ -18,3 +18,13 @@ export function resultRows<T>(result: unknown): T[] {
 export function firstRow<T>(result: unknown): T | undefined {
   return resultRows<T>(result)[0];
 }
+
+/** Whether a query failed on a unique constraint (SQLSTATE 23505), however the driver wrapped it. */
+export function isUniqueViolation(err: unknown): boolean {
+  let e: unknown = err;
+  while (e instanceof Error) {
+    if ((e as { code?: string }).code === "23505") return true;
+    e = e.cause;
+  }
+  return false;
+}

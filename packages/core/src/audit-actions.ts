@@ -6,6 +6,8 @@ export const AUDIT_ACTIONS = [
   "domain.created",
   "domain.verified",
   "domain.deleted",
+  "domain.receiving_enabled",
+  "domain.receiving_disabled",
   "webhook.created",
   "webhook.updated",
   "webhook.secret_rotated",

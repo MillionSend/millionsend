@@ -40,6 +40,10 @@ export const usageCounters = pgTable(
     // Tracking-image fetches a machine made before anyone opened, unique per
     // email like `opened`, kept apart so open rates count people only.
     prefetched: integer("prefetched").notNull().default(0),
+    // Inbound messages stored for the team, one per message whatever its
+    // recipient count. On the Free plan they also count in `accepted`, the
+    // daily cap sending and receiving share.
+    received: integer("received").notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.day] }),
@@ -74,6 +78,7 @@ export const usageCountersHourly = pgTable(
     opened: integer("opened").notNull().default(0),
     clicked: integer("clicked").notNull().default(0),
     prefetched: integer("prefetched").notNull().default(0),
+    received: integer("received").notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.hour] }),
@@ -102,6 +107,10 @@ export const usagePeriods = pgTable(
     // is sent and cleared once the row caught up, so a report whose commit
     // was lost is re-sent with the same value under the same identifier.
     pendingOverage: integer("pending_overage"),
+    // Inbound messages this period. Up to twice the included volume they are
+    // free; past that every tenth one adds one email to `accepted`, which is
+    // how received mail reaches quota and overage.
+    received: integer("received").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.periodStart] })],
 );

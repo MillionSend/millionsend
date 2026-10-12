@@ -71,6 +71,12 @@ export function stripInvisible(value: string): string {
   return dropInvisible(value.replace(LINE_BREAKING, " ")).replace(/\s+/g, " ").trim();
 }
 
+/** stripInvisible, cut to at most `max` code points (never inside a surrogate pair). */
+export function visibleLine(value: string, max: number): string {
+  const line = stripInvisible(value);
+  return line.length <= max ? line : Array.from(line).slice(0, max).join("");
+}
+
 /**
  * ".", ":", "@" or "\", or a character whose compatibility form is one ("．"
  * "＠" "﹕"), or the ideographic full stop, which IDNA reads as a dot.

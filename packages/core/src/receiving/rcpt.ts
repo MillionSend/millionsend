@@ -1,0 +1,297 @@
+import type { Db } from "@millionsend/db";
+import { schema } from "@millionsend/db";
+import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
+import { firstRow, isUniqueViolation } from "../driver-result.js";
+import { OVERAGE_HARD_CAP, type QuotaTeamRow, type TeamQuota, teamQuota } from "../plans.js";
+import { dailyCeiling, reserveQuota } from "../quota.js";
+import { routableAddress } from "../sender-address.js";
+import { QUOTA_COLUMNS } from "../team-plan.js";
+import { bumpHourlyUsage } from "../usage-hourly.js";
+import { utcDay } from "../utc-day.js";
+import type { RcptResponse } from "./protocol.js";
+
+/** The free receiving allowance on Starter and on monthly plans, as a multiple of the plan's volume. */
+export const RECEIVING_ALLOWANCE_MULTIPLIER = 2;
+
+/** Past a monthly plan's allowance, this many received messages count as one email. */
+export const RECEIVED_PER_BILLED_EMAIL = 10;
+
+/**
+ * How received mail is counted against a team, by plan (the approved pricing).
+ * Self-host never caps it, whatever the operator's sending ceiling says.
+ */
+export type ReceivingRule =
+  /** Self-host and the instance's own team: counted, never capped. */
+  | { kind: "none" }
+  /**
+   * Free: received mail spends the same daily counter sends do, so both
+   * share the cap, up to the ceiling where sends park (tolerance included).
+   */
+  | { kind: "shared_day"; quota: Extract<TeamQuota, { kind: "day" }>; ceiling: number }
+  /** Starter: free up to its own daily allowance, apart from sending. */
+  | { kind: "day"; allowance: number }
+  /**
+   * Monthly plans: free up to the allowance per billing period; past it every
+   * RECEIVED_PER_BILLED_EMAIL-th message adds one email to the period's
+   * counter (quota and overage), and none is taken once that counter sits at
+   * the period ceiling (the overage hard cap, or the volume with overage off).
+   */
+  | { kind: "month"; allowance: number; periodStart: Date; ceiling: number };
+
+export function receivingRule(
+  team: QuotaTeamRow,
+  isCloud: boolean,
+  now: Date = new Date(),
+): ReceivingRule {
+  const quota = teamQuota(team, isCloud, now);
+  // The plan's own cap: the operator's ceiling limits sending, not receiving.
+  const plan = teamQuota({ ...team, dailySendCeiling: null }, isCloud, now);
+  if (quota.kind === "none" || plan.kind === "none") return { kind: "none" };
+  if (plan.kind === "day") {
+    if (plan.plan === "free" && quota.kind === "day") {
+      const ceiling = Math.min(
+        dailyCeiling(quota.limit),
+        quota.dailyCeiling ?? Number.POSITIVE_INFINITY,
+      );
+      return { kind: "shared_day", quota, ceiling };
+    }
+    return { kind: "day", allowance: plan.limit * RECEIVING_ALLOWANCE_MULTIPLIER };
+  }
+  return {
+    kind: "month",
+    allowance: plan.included * RECEIVING_ALLOWANCE_MULTIPLIER,
+    periodStart: plan.periodStart,
+    ceiling: plan.overage ? plan.included * OVERAGE_HARD_CAP : plan.included,
+  };
+}
+
+/** Whether one more received message fits the rule right now; read-only, for the RCPT answer. */
+export async function hasReceivingRoom(
+  db: Db,
+  teamId: string,
+  rule: ReceivingRule,
+  now: Date = new Date(),
+): Promise<boolean> {
+  if (rule.kind === "none") return true;
+  if (rule.kind === "month") {
+    const p = schema.usagePeriods;
+    const [row] = await db
+      .select({ received: p.received, accepted: p.accepted })
+      .from(p)
+      .where(and(eq(p.teamId, teamId), eq(p.periodStart, rule.periodStart)));
+    return (row?.received ?? 0) < rule.allowance || (row?.accepted ?? 0) < rule.ceiling;
+  }
+  const c = schema.usageCounters;
+  const [row] = await db
+    .select({ accepted: c.accepted, received: c.received })
+    .from(c)
+    .where(and(eq(c.teamId, teamId), eq(c.day, utcDay(now))));
+  return rule.kind === "shared_day"
+    ? (row?.accepted ?? 0) < rule.ceiling
+    : (row?.received ?? 0) < rule.allowance;
+}
+
+/**
+ * Counts one received message against a team, in the caller's transaction:
+ * the daily and hourly `received` counters always, plus what the rule
+ * charges. False when the allowance is spent; the caller then rolls back, so
+ * a refusal never leaves a partial count behind. Every check sits inside its
+ * upsert's WHERE, so concurrent deliveries cannot overshoot.
+ */
+export async function chargeReceived(
+  db: Db,
+  params: { teamId: string; rule: ReceivingRule; now: Date },
+): Promise<boolean> {
+  const { teamId, rule, now } = params;
+  const day = utcDay(now);
+  if (rule.kind === "shared_day") {
+    const reserved = await reserveQuota(db, { teamId, count: 1, quota: rule.quota, day, at: now });
+    if (!reserved.reserved) return false;
+  }
+  if (rule.kind === "month") {
+    const p = schema.usagePeriods;
+    // Postgres reads every SET expression against the row before the update,
+    // so `received + 1` here is the message being counted.
+    const unit = sql`case when ${p.received} + 1 > ${rule.allowance} and (${p.received} + 1 - ${rule.allowance}) % ${RECEIVED_PER_BILLED_EMAIL} = 0 then 1 else 0 end`;
+    const charged = await db.execute<{ received: number }>(sql`
+      insert into ${p} (team_id, period_start, received)
+      values (${teamId}, ${rule.periodStart}, 1)
+      on conflict (team_id, period_start) do update
+        set received = ${p.received} + 1, accepted = ${p.accepted} + ${unit}
+        where ${p.received} < ${rule.allowance} or ${p.accepted} < ${rule.ceiling}
+      returning received
+    `);
+    if (!firstRow(charged)) return false;
+  }
+  const c = schema.usageCounters;
+  const guard = rule.kind === "day" ? sql`${c.received} < ${rule.allowance}` : sql`true`;
+  const counted = await db.execute<{ received: number }>(sql`
+    insert into ${c} (team_id, day, received)
+    values (${teamId}, ${day}, 1)
+    on conflict (team_id, day) do update
+      set received = ${c.received} + 1
+      where ${guard}
+    returning received
+  `);
+  if (!firstRow(counted)) return false;
+  await bumpHourlyUsage(db, { teamId, at: now, counts: { received: 1 } });
+  return true;
+}
+
+/** A receiving-enabled domain with what routing and the pricing rule need of its team. */
+export interface ReceivingDomain extends QuotaTeamRow {
+  domainId: string;
+  name: string;
+  teamId: string;
+  suspendedAt: Date | null;
+}
+
+/** The receiving-enabled domains among `names` (already ASCII, lowercase); at most one row per name. */
+export async function findReceivingDomains(
+  db: Db,
+  names: readonly string[],
+): Promise<ReceivingDomain[]> {
+  if (names.length === 0) return [];
+  const d = schema.domains;
+  return db
+    .select({
+      domainId: d.id,
+      name: d.name,
+      teamId: d.teamId,
+      suspendedAt: schema.teams.suspendedAt,
+      ...QUOTA_COLUMNS,
+    })
+    .from(d)
+    .innerJoin(schema.teams, eq(schema.teams.id, d.teamId))
+    .where(and(inArray(d.name, [...names]), eq(d.receivingEnabled, true)));
+}
+
+/**
+ * Permanent refusals are cached only briefly: the sender bounces on a 550, so
+ * one must not outlive the state behind it (a domain switching receiving on).
+ */
+const REFUSAL_TTL_SECONDS = 10;
+
+const UNKNOWN_RECIPIENT = {
+  accept: false,
+  code: 550,
+  enhanced: "5.1.1",
+  message: "Recipient domain does not receive mail here",
+  ttlSeconds: REFUSAL_TTL_SECONDS,
+} as const satisfies RcptResponse;
+
+const SUSPENDED_RECIPIENT = {
+  accept: false,
+  code: 550,
+  enhanced: "5.7.1",
+  message: "Recipient account is not accepting mail",
+  ttlSeconds: REFUSAL_TTL_SECONDS,
+} as const satisfies RcptResponse;
+
+const OVER_QUOTA = {
+  accept: false,
+  code: 452,
+  enhanced: "4.2.2",
+  message: "Recipient account is over its receiving limit, try again later",
+  ttlSeconds: 30,
+} as const satisfies RcptResponse;
+
+/**
+ * The MX's question per RCPT TO: recipient → domain (lowercase, IDNA-encoded)
+ * → a receiving-enabled domain → its team, then the team's standing and its
+ * receiving allowance. Any local part is accepted (catch-all). Only the
+ * envelope decides; nothing here reads a header.
+ */
+export async function decideRecipient(
+  db: Db,
+  params: { recipient: string; isCloud: boolean; now?: Date },
+): Promise<RcptResponse> {
+  const now = params.now ?? new Date();
+  const recipient = routableAddress(params.recipient);
+  if (!recipient) return UNKNOWN_RECIPIENT;
+  const [domain] = await findReceivingDomains(db, [recipient.domain]);
+  if (!domain) return UNKNOWN_RECIPIENT;
+  if (domain.suspendedAt) return SUSPENDED_RECIPIENT;
+  const rule = receivingRule(domain, params.isCloud, now);
+  if (!(await hasReceivingRoom(db, domain.teamId, rule, now))) return OVER_QUOTA;
+  return { accept: true, ttlSeconds: 30 };
+}
+
+export type DomainReceivingResult =
+  | {
+      ok: true;
+      /** False when the domain was already in the asked state. */
+      changed: boolean;
+      name: string;
+      receivingEnabled: boolean;
+      receivingEnabledAt: Date | null;
+    }
+  | {
+      ok: false;
+      /** not_found: no such domain in the team; not_verified: receiving needs a verified domain; taken: another team receives this name. */
+      reason: "not_found" | "not_verified" | "taken";
+    };
+
+/**
+ * Switches a domain's receiving on or off. On requires the domain verified in
+ * the team; the database refuses a name another team already receives
+ * (domains_receiving_name_idx), which reads as `taken`. Callers check that
+ * the instance receives mail at all (RECEIVING_MX_HOST) before calling.
+ */
+export async function setDomainReceiving(
+  db: Db,
+  params: { teamId: string; domainId: string; enabled: boolean; now?: Date },
+): Promise<DomainReceivingResult> {
+  const d = schema.domains;
+  const scope = and(eq(d.id, params.domainId), eq(d.teamId, params.teamId));
+  const [domain] = await db
+    .select({
+      name: d.name,
+      status: d.status,
+      receivingEnabled: d.receivingEnabled,
+      receivingEnabledAt: d.receivingEnabledAt,
+    })
+    .from(d)
+    .where(scope);
+  if (!domain) return { ok: false, reason: "not_found" };
+  if (domain.receivingEnabled === params.enabled) {
+    return {
+      ok: true,
+      changed: false,
+      name: domain.name,
+      receivingEnabled: domain.receivingEnabled,
+      receivingEnabledAt: domain.receivingEnabledAt,
+    };
+  }
+  if (params.enabled && domain.status !== "verified") return { ok: false, reason: "not_verified" };
+  try {
+    const [row] = await db
+      .update(d)
+      .set({
+        receivingEnabled: params.enabled,
+        receivingEnabledAt: params.enabled ? (params.now ?? new Date()) : null,
+      })
+      .where(scope)
+      .returning({
+        receivingEnabled: d.receivingEnabled,
+        receivingEnabledAt: d.receivingEnabledAt,
+      });
+    if (!row) return { ok: false, reason: "not_found" };
+    return { ok: true, changed: true, name: domain.name, ...row };
+  } catch (err) {
+    if (isUniqueViolation(err)) return { ok: false, reason: "taken" };
+    throw err;
+  }
+}
+
+/**
+ * The received_emails rows a caller may read: its team's, and for a
+ * domain-scoped API key only mail addressed to that domain.
+ */
+export function receivedEmailScope(params: { teamId: string; domainId?: string | null }): SQL {
+  const r = schema.receivedEmails;
+  const team = eq(r.teamId, params.teamId);
+  return params.domainId
+    ? (and(team, sql`${params.domainId}::uuid = any(${r.domainIds})`) as SQL)
+    : team;
+}

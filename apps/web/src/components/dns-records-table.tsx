@@ -15,18 +15,20 @@ import {
 import { abbreviateDkim } from "@/lib/format";
 import { zoneRelativeName } from "@/lib/zone";
 
-const GROUPS = ["verification", "sending", "dmarc", "tracking"] as const;
+const GROUPS = ["verification", "sending", "dmarc", "tracking", "receiving"] as const;
 
 /**
- * Rows per group as dnsRecordsForDomain emits them (packages/ses). Tracking is
- * 0 here: the branded-tracking CNAME only exists once a subdomain is set, so it
- * never appears in the loading skeleton.
+ * Rows per group as dnsRecordsForDomain emits them (packages/ses). Tracking and
+ * receiving are 0 here: the branded-tracking CNAME only exists once a subdomain
+ * is set and the Receiving MX once receiving is on, so neither appears in the
+ * loading skeleton.
  */
 const GROUP_ROWS: Record<(typeof GROUPS)[number], number> = {
   verification: 1,
   sending: 2,
   dmarc: 1,
   tracking: 0,
+  receiving: 0,
 };
 
 export type DnsRecord = {
@@ -76,6 +78,7 @@ const GROUP_HAS_PRIORITY: Record<(typeof GROUPS)[number], boolean> = {
   sending: true,
   dmarc: false,
   tracking: false,
+  receiving: true,
 };
 
 const IP_RE = /^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:]+)$/i;
@@ -131,8 +134,9 @@ function RecordsTable({
 }
 
 /**
- * The grouped DNS-record tables (Domain verification / Enable sending / DMARC)
- * shared by the domain-detail page and the add-domain wizard's step 02.
+ * The grouped DNS-record tables (Domain verification / Enable sending / DMARC /
+ * tracking / Enable receiving) shared by the domain-detail page and the
+ * add-domain wizard's step 02.
  * The Name pill shows and copies the zone-relative name (what a DNS
  * provider's Name field expects); the full hostname rides in the title.
  * Content pills end-ellipsize; the full value is copied.

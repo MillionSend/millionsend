@@ -117,12 +117,14 @@ export {
   countDistinctRecipients,
   countParked,
   enforceDomainWarmup,
-  estimateAttachmentBytes,
+  estimateMimeBytes,
+  exceededSendSize,
   isReservedTagName,
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
   RESERVED_TAG_PREFIX,
   reviewBacklogLimit,
+  SES_MAX_MESSAGE_BYTES,
   type SenderDomainVerdict,
   SYSTEM_MAIL_TAG,
   senderDomain,
@@ -190,6 +192,7 @@ export {
   fileExtensions,
   MEDIA_TYPE_TOKEN,
   sentContentType,
+  UNNAMED_ATTACHMENT,
 } from "./attachment-policy.js";
 export {
   AUDIT_ACTIONS,
@@ -311,8 +314,10 @@ export {
   encryptPayload,
   openAttachments,
   openMediaReview,
+  packEnvelope,
   sealAttachments,
   sealMediaReview,
+  unpackEnvelope,
 } from "./crypto/envelope.js";
 export { type DekContext, EnvKeyring, type Keyring } from "./crypto/keyring.js";
 export {
@@ -328,6 +333,7 @@ export {
   inertText,
   isPlainName,
   stripInvisible,
+  visibleLine,
 } from "./customer-text.js";
 export {
   broadcastSendSpacingMs,
@@ -390,7 +396,7 @@ export {
   type WarmupCap,
   warmupCap,
 } from "./domain-warmup.js";
-export { firstRow, resultRows } from "./driver-result.js";
+export { firstRow, isUniqueViolation, resultRows } from "./driver-result.js";
 export {
   CHECKS,
   type CheckId,
@@ -430,7 +436,6 @@ export {
   type ZipDirectory,
   type ZipEntry,
 } from "./file-type.js";
-export { sha256Hex } from "./hash.js";
 export {
   accountMailCard,
   EMAIL_WHITE_TILE_URL,
@@ -520,7 +525,13 @@ export {
 } from "./oauth-scopes.js";
 export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.js";
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
-export { isRootDomainSend, linkDomain, ownerDomain, registrableDomain } from "./org-domain.js";
+export {
+  asciiHostname,
+  isRootDomainSend,
+  linkDomain,
+  ownerDomain,
+  registrableDomain,
+} from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
 export { findPixCodes, type PixCode, type PixKeyKind, parsePix } from "./pix.js";
 export {
@@ -651,7 +662,13 @@ export {
   segmentFilterSchema,
   segmentWhere,
 } from "./segment-filter.js";
-export { formatMailbox, type Mailbox, parseMailbox, parseSingleSender } from "./sender-address.js";
+export {
+  formatMailbox,
+  type Mailbox,
+  parseMailbox,
+  parseSingleSender,
+  routableAddress,
+} from "./sender-address.js";
 export {
   type BroadcastEstimate,
   bulkShare,
@@ -867,4 +884,62 @@ export {
 // either touch different lines. Blank lines around this comment end Biome's
 // run of exports, which would otherwise merge the two.
 
+export { createSemaphore, releasingStream } from "./concurrency.js";
+export { secretsEqual, sha256Hex } from "./hash.js";
+export { attachmentDisposition } from "./http-headers.js";
+export {
+  type DownloadSigning,
+  deriveReceivedDownloadKey,
+  RECEIVED_ATTACHMENT_PATH,
+  RECEIVED_DOWNLOAD_TTL_MS,
+  RECEIVED_RAW_PATH,
+  type SignedDownload,
+  signReceivedDownload,
+  verifyReceivedDownload,
+} from "./receiving/downloads.js";
+export {
+  type IngestDeps,
+  type IngestResult,
+  ingestReceivedEmail,
+  MESSAGE_TOO_LARGE,
+  type StoredReceivedEmail,
+} from "./receiving/ingest.js";
+export {
+  type AttachmentDataWire,
+  type InboundAttachmentWire,
+  openReceivedAttachment,
+  openReceivedAttachments,
+  openReceivedRaw,
+  parseReceivedMetadata,
+  RECEIVED_EMAIL_META_COLUMNS,
+  type ReceivedAttachment,
+  type ReceivedEmailDetail,
+  type ReceivedEmailListItem,
+  type ReceivedEmailMeta,
+  type ReceivedEmailRow,
+  type ReceivedMetadata,
+  receivedAttachmentId,
+  receivedEmailAttachment,
+  receivedEmailAttachments,
+  receivedEmailDetail,
+  receivedEmailEventData,
+  receivedEmailListItem,
+  sealReceivedAttachments,
+  sealReceivedRaw,
+} from "./receiving/message.js";
+export * from "./receiving/protocol.js";
+export {
+  chargeReceived,
+  type DomainReceivingResult,
+  decideRecipient,
+  findReceivingDomains,
+  hasReceivingRoom,
+  RECEIVED_PER_BILLED_EMAIL,
+  RECEIVING_ALLOWANCE_MULTIPLIER,
+  type ReceivingDomain,
+  type ReceivingRule,
+  receivedEmailScope,
+  receivingRule,
+  setDomainReceiving,
+} from "./receiving/rcpt.js";
 export { linksDisabled } from "./team-standing.js";

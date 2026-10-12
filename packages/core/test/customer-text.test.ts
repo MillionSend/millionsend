@@ -9,7 +9,13 @@ import {
   buildAccountMail,
   MAIL_LOCALES,
 } from "../src/account-mail.js";
-import { CUSTOMER_SLOTS, CUSTOMER_TEXT_MAX, inertText, isPlainName } from "../src/customer-text.js";
+import {
+  CUSTOMER_SLOTS,
+  CUSTOMER_TEXT_MAX,
+  inertText,
+  isPlainName,
+  visibleLine,
+} from "../src/customer-text.js";
 import { unescapeHtml } from "../src/html.js";
 
 const HIDDEN = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/u;
@@ -289,5 +295,13 @@ describe("system mail catalogs and customer text", () => {
     expect(mailLinks(mail).sort()).toEqual(
       ["https://app.example/settings", "https://millionsend.com"].sort(),
     );
+  });
+});
+
+describe("visibleLine", () => {
+  it("flattens to one visible line and cuts on code points", () => {
+    expect(visibleLine("Hello\r\nBcc: x\u202e\u0000 there", 100)).toBe("Hello Bcc: x there");
+    expect(visibleLine("ab\u{1f600}cd", 3)).toBe("ab\u{1f600}");
+    expect(visibleLine("short", 10)).toBe("short");
   });
 });
