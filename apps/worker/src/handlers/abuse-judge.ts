@@ -7,15 +7,21 @@ import {
   clearDestinations,
   decryptEmailBody,
   destinationVerdictParks,
+  type EmailAttachment,
   isHoldVerdict,
   type JudgeBlockInput,
   type JudgeVerdict,
   judgeErrorClass,
   type Keyring,
+  type MediaIssue,
   type MonitorSettings,
+  type MonitorTier,
+  mediaParks,
+  opaqueFacts,
   openAttachments,
   parseSingleSender,
   SCREEN_JUDGE_TIMEOUT_MS,
+  screeningTier,
   sendingDomainYoung,
   teamMonitorOverview,
   teamMonitorRow,
@@ -27,6 +33,12 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq } from "drizzle-orm";
+import {
+  type MediaRead,
+  type MediaReadDeps,
+  readMediaForJudge,
+  saveMediaReview,
+} from "../media/read.js";
 import { mailOperator, type SystemMailer } from "../system-mail.js";
 
 export interface JudgeDeps {
@@ -50,6 +62,12 @@ export interface JudgeDeps {
    * 7 days ago, by the shared cache and a bounded lookup; absent, none is.
    */
   linkDomainYoung?: ((domains: readonly string[], at: Date) => Promise<boolean>) | undefined;
+  /**
+   * How images and files are read for the judge: the image reader (null
+   * while ABUSE_VISION is off) and, in tests, the parsing threads and cache.
+   * Absent, files are read and images are not.
+   */
+  media?: MediaReadDeps | undefined;
 }
 
 /** A throttled call is retried this many times through the queue's backoff before the sample gives up. */
@@ -63,6 +81,8 @@ const ms = schema.monitorSamples;
 
 /** Failures a second screening call may not meet: a slow or stumbling provider. */
 const SCREEN_RETRYABLE = new Set(["timeout", "upstream"]);
+/** Images our side could not read: a new team's young domain waits on them as on a judge outage. */
+const MEDIA_UNREAD: ReadonlySet<MediaIssue> = new Set(["images_not_read", "vision_unavailable"]);
 
 /**
  * Judge one pending sample. The block is built in memory from the stored
@@ -91,7 +111,7 @@ async function judgePending(
   sample: typeof schema.monitorSamples.$inferSelect,
   now: Date,
 ): Promise<JudgeOutcome> {
-  const unjudged = async (errorClass: string, latencyMs?: number) => {
+  const unjudged = async (errorClass: string, latencyMs?: number, mediaIssues?: MediaIssue[]) => {
     await db
       .update(ms)
       .set({
@@ -100,6 +120,7 @@ async function judgePending(
         model: deps.judge?.model ?? null,
         latencyMs: latencyMs ?? null,
         judgedAt: now,
+        mediaIssues: mediaIssues ?? null,
       })
       .where(and(eq(ms.id, sample.id), eq(ms.status, "pending")));
     console.warn(`abuse.judge: sample ${sample.id} unjudged (${errorClass})`);
@@ -107,10 +128,53 @@ async function judgePending(
   };
   if (!deps.judge) return unjudged("off");
 
-  const loaded = await loadBlockInput(db, deps.keyring, sample, now, deps.platformDomains);
+  const loaded = await loadBlockInput(db, deps.keyring, sample, now);
   if (!loaded) return unjudged("body_purged");
+  const settings = await deps.settings();
+  const tier = await screeningTier(db, settings, sample.teamId, now);
+  const media = await readMedia(loaded.input, loaded.files, tier, deps.media);
+  const issues = media?.issues ?? [];
+  const destinations = await teamNovelDestinations(db, {
+    teamId: sample.teamId,
+    html: loaded.input.html,
+    text: loaded.input.text,
+    replyTo: loaded.input.replyTo,
+    links: media?.findings.links.map((link) => link.url),
+    ignore: deps.platformDomains,
+  });
+  const youngSendingDomain =
+    (await sendingDomainYoung(db, { teamId: sample.teamId, ...loaded.sendingDomain }, now)) ===
+    true;
+  if (issues.includes("vision_blocked")) await notifyMediaBlocked(db, deps, sample.teamId, now);
+  // Mail this verdict holds back keeps what screening read, for the person who decides on it.
+  const waiting = sample.screening && loaded.waiting;
+  let kept = false;
+  const keepMedia = async () => {
+    if (kept || !media || !loaded.email) return;
+    kept = true;
+    try {
+      await saveMediaReview(db, deps.keyring, loaded.email, await media.review());
+    } catch (err) {
+      console.error(`abuse.judge: media review for sample ${sample.id} not saved`, err);
+    }
+  };
+  const mediaParked = waiting && mediaParks(issues, tier);
+  if (mediaParked || loaded.email?.parkReason === "media") await keepMedia();
+  if (
+    waiting &&
+    !mediaParked &&
+    tier === "new" &&
+    youngSendingDomain &&
+    issues.some((issue) => MEDIA_UNREAD.has(issue))
+  ) {
+    return unjudged("media_unavailable", undefined, issues);
+  }
   // Links to destinations the team never cleared lead the judge's link table.
-  const block = buildJudgeBlock({ ...loaded.input, novelDomains: new Set(loaded.destinations) });
+  const block = buildJudgeBlock({
+    ...loaded.input,
+    novelDomains: new Set(destinations),
+    media: media?.findings,
+  });
   const timeoutMs = sample.screening
     ? SCREEN_JUDGE_TIMEOUT_MS
     : (deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -133,16 +197,11 @@ async function judgePending(
         .where(eq(ms.id, sample.id));
       throw err;
     }
-    return unjudged(errorClass, latencyMs);
+    return unjudged(errorClass, latencyMs, issues);
   }
   const latencyMs = Date.now() - started;
-  const settings = await deps.settings();
   const model = verdict.model ?? judge.model;
-  const youngSendingDomain =
-    (await sendingDomainYoung(db, { teamId: sample.teamId, ...loaded.sendingDomain }, now)) ===
-    true;
   // Only a destination that drew a phishing-type verdict is dated.
-  const { destinations } = loaded;
   const linkYoung =
     destinations.length > 0 && isHoldVerdict(verdict, settings.holdRepeatScore)
       ? ((await deps.linkDomainYoung?.(destinations, now)) ?? false)
@@ -165,6 +224,7 @@ async function judgePending(
         latencyMs,
         destinations,
         linkYoung,
+        mediaIssues: issues,
         judgedAt: now,
       })
       .where(and(eq(ms.id, sample.id), eq(ms.status, "pending")))
@@ -186,15 +246,16 @@ async function judgePending(
   if (verdict.score < settings.holdRepeatScore) {
     await clearDestinations(db, sample.teamId, destinations, now);
   }
-  if (
+  const destinationParks =
     sample.screening &&
     destinations.length > 0 &&
     outcome.tier !== "new" &&
     outcome.tier !== "exempt" &&
-    destinationVerdictParks({ ...verdict, linkYoung }, settings)
-  ) {
+    destinationVerdictParks({ ...verdict, linkYoung }, settings);
+  if (destinationParks) {
     await notifyDestinationParked(db, deps, sample.teamId, verdict, destinations, now);
   }
+  if (waiting && (destinationParks || outcome.held)) await keepMedia();
   if ((outcome.alert || outcome.paused || outcome.held) && deps.mailer) {
     await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings, now);
   }
@@ -208,6 +269,26 @@ async function judgePending(
     }
   }
   return "judged";
+}
+
+/**
+ * What the judge reads of a message's media: its files always, its body's
+ * images while the team is new or the body is opaque. Null when there is
+ * nothing to read.
+ */
+async function readMedia(
+  input: JudgeBlockInput,
+  files: EmailAttachment[],
+  tier: MonitorTier,
+  deps: MediaReadDeps | undefined,
+): Promise<MediaRead | null> {
+  const facts = opaqueFacts({ html: input.html, text: input.text, attachments: files.length });
+  const readBodyImages = tier === "new" || facts.opaque;
+  if (files.length === 0 && (!readBodyImages || facts.imageRefs.length === 0)) return null;
+  return readMediaForJudge(
+    { attachments: files, bodyImages: facts.imageRefs.map((ref) => ref.src), readBodyImages },
+    deps ?? { vision: null },
+  );
 }
 
 /**
@@ -280,20 +361,22 @@ async function notifyDestinationParked(
 }
 
 /**
- * The judge's input for a sample: the email's decrypted body, or the
- * broadcast's own HTML for a skeleton; with the sending domain, whose age
- * the hold reads, and the destinations the team has not cleared.
+ * The judge's input for a sample: the email's decrypted body and opened
+ * files, or the broadcast's own HTML for a skeleton; with the sending
+ * domain, whose age the hold reads, and the email itself: whether it still
+ * waits on this verdict, and why it is parked if it is.
  */
 async function loadBlockInput(
   db: Db,
   keyring: Keyring,
   sample: typeof schema.monitorSamples.$inferSelect,
   now: Date,
-  platformDomains: ReadonlySet<string> | undefined,
 ): Promise<{
   input: JudgeBlockInput;
   sendingDomain: { domainId?: string | null; name?: string | null };
-  destinations: string[];
+  files: EmailAttachment[];
+  waiting: boolean;
+  email: { id: string; teamId: string; parkReason: string | null } | null;
 } | null> {
   const [team] = await db
     .select({ name: schema.teams.name, plan: schema.teams.plan })
@@ -340,13 +423,9 @@ async function loadBlockInput(
         attachments: [],
       },
       sendingDomain: { name: parseSingleSender(broadcast.from)?.domain ?? null },
-      destinations: await teamNovelDestinations(db, {
-        teamId: sample.teamId,
-        html: broadcast.html,
-        text: broadcast.text,
-        replyTo,
-        ignore: platformDomains,
-      }),
+      files: [],
+      waiting: true,
+      email: null,
     };
   }
   if (!sample.emailId) return null;
@@ -372,12 +451,7 @@ async function loadBlockInput(
     keyring,
     owner,
   );
-  const attachments = email.attachments
-    ? (await openAttachments(email.attachments, keyring, owner)).map((a) => ({
-        filename: a.filename,
-        contentType: a.contentType,
-      }))
-    : [];
+  const files = email.attachments ? await openAttachments(email.attachments, keyring, owner) : [];
   return {
     input: {
       team: context,
@@ -386,17 +460,44 @@ async function loadBlockInput(
       subject: email.subject,
       html: body.html,
       text: body.text,
-      attachments,
+      attachments: files.map((a) => ({ filename: a.filename, contentType: a.contentType })),
     },
     sendingDomain: { domainId: email.domainId },
-    destinations: await teamNovelDestinations(db, {
-      teamId: email.teamId,
-      html: body.html,
-      text: body.text,
-      replyTo: email.replyTo,
-      ignore: platformDomains,
-    }),
+    files,
+    waiting: email.latestStatus === "queued" && !email.sentAt,
+    email: { id: email.id, teamId: email.teamId, parkReason: email.parkReason },
   };
+}
+
+/**
+ * The operator hears once a day per team that the image reader's provider
+ * refused an email's images (HTTP 400, which is also how Bedrock's CSAM
+ * check answers); unsent mail of it waits on the review list.
+ */
+async function notifyMediaBlocked(db: Db, deps: JudgeDeps, teamId: string, now: Date) {
+  if (!deps.mailer) return;
+  try {
+    const claimed = await claimNotification(db, {
+      teamId,
+      kind: "monitor.media_blocked",
+      periodKey: utcDay(now),
+    });
+    if (!claimed) return;
+    const [team] = await db
+      .select({ name: schema.teams.name })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, teamId));
+    await mailOperator(
+      db,
+      deps.mailer,
+      "monitor.media_blocked",
+      "/console/safety",
+      { team: team?.name ?? teamId },
+      deps.appBaseUrl,
+    );
+  } catch (err) {
+    console.error(`abuse.judge: blocked-images mail for team ${teamId} failed`, err);
+  }
 }
 
 async function notifyOperator(

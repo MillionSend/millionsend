@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
+import type { MediaIssue } from "./abuse-judge/media.js";
 import {
   inFirstWindow,
   isHoldVerdict,
@@ -32,10 +33,22 @@ import { DAY_MS } from "./utc-day.js";
  */
 
 /**
- * Why an email is judged before SES: its team is in its first window, or it
- * carries a destination its team has not cleared.
+ * Why an email is judged before SES: its team is in its first window, it
+ * carries a destination its team has not cleared, or its team is new and it
+ * carries files or rides in images.
  */
-export type ScreenReason = "first_window" | "destination";
+export type ScreenReason = "first_window" | "destination" | "media";
+
+/** What the send path read of an email's body and files, locally: nothing fetched. */
+export interface SendMedia {
+  attachments: number;
+  /** opaqueFacts: images, files or QR art carry the message, not its text. */
+  opaque: boolean;
+  /** URLs read from the files: QR codes, PDF, Office and calendar links. */
+  links: readonly string[];
+  /** A file the policy flags, that won't open, or that the API now refuses. */
+  unsafe: boolean;
+}
 
 /**
  * A phishing-type verdict that held nothing waits this long before it is
@@ -53,6 +66,27 @@ const SCREEN_STALE_MS = 10 * 60_000;
 
 /** Park reasons the drain never releases: only an operator does, from the review list. */
 export const OPERATOR_PARK_REASONS = ["screening", "destination", "media"] as const;
+export type ScreenParkReason = (typeof OPERATOR_PARK_REASONS)[number];
+
+const MEDIA_PARKS_NEW: ReadonlySet<string> = new Set<MediaIssue>([
+  "risky_file",
+  "refused_file",
+  "unreadable_file",
+  "qr_undecoded",
+  "vision_refused",
+]);
+
+/**
+ * Whether what the judge could not clear in an email's images and files
+ * parks the mail waiting on its verdict: for a team in new, a flagged,
+ * refused or unreadable file, a QR code seen but not decoded, or a refused
+ * read; for any team, images the reader's provider blocked.
+ */
+export function mediaParks(issues: readonly string[] | null, tier: MonitorTier): boolean {
+  return (issues ?? []).some(
+    (issue) => issue === "vision_blocked" || (tier === "new" && MEDIA_PARKS_NEW.has(issue)),
+  );
+}
 
 /** A cached link age without a date is asked again after this. */
 const LINK_AGE_UNKNOWN_TTL_MS = DAY_MS;
@@ -79,7 +113,8 @@ const LINK_HOST = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])$/;
  * and the text part, a known redirect wrapper read through to its target as
  * the judge reads it, and of each Reply-To address; less the team's verified
  * domains and `ignore` (the platform's own hosts: unsubscribe and tracking
- * links). Each once, sorted.
+ * links), and of `links`, the URLs read from its images and files. Each
+ * once, sorted.
  *
  * A verified domain owns what shares its owner domain, which the suffix list
  * makes the registrable domain wherever one owner holds it: tx.acme.com.br
@@ -90,6 +125,7 @@ export function messageDestinations(input: {
   html: string | null;
   text: string | null;
   replyTo: readonly string[] | null;
+  links?: readonly string[] | undefined;
   verifiedDomains: readonly string[];
   ignore?: ReadonlySet<string> | undefined;
 }): string[] {
@@ -108,6 +144,7 @@ export function messageDestinations(input: {
     link(unescapeHtml(anchor.href).trim());
   }
   for (const match of (input.text ?? "").matchAll(TEXT_URL)) link(match[0]);
+  for (const url of input.links ?? []) link(url.trim());
   for (const address of input.replyTo ?? []) {
     const domain = parseSingleSender(address)?.domain;
     if (domain) hosts.push(domain);
@@ -142,6 +179,7 @@ export async function teamNovelDestinations(
     html: string | null;
     text: string | null;
     replyTo: readonly string[] | null;
+    links?: readonly string[] | undefined;
     ignore?: ReadonlySet<string> | undefined;
   },
 ): Promise<string[]> {
@@ -254,7 +292,12 @@ export async function anyYoungLinkDomain(
 }
 
 /** A team's monitor tier as screening reads it: with the usage history, so a quiet old team is not new. */
-async function tierOf(db: Db, s: MonitorSettings, teamId: string, now: Date): Promise<MonitorTier> {
+export async function screeningTier(
+  db: Db,
+  s: MonitorSettings,
+  teamId: string,
+  now: Date,
+): Promise<MonitorTier> {
   const row = await monitorRowWithHistory(db, teamId, now);
   return monitorTier(await loadMonitorState(db, row, now), s, now);
 }
@@ -294,6 +337,8 @@ export async function sendingDomainYoung(
  * is decided here, so one more is one more branch. A broadcast's own HTML
  * and its first copy are screened at its fan-out: a copy here only for the
  * destinations its contact fields put in it, which the HTML does not carry.
+ * Links read from files count as destinations at every tier; files and an
+ * opaque body screen a transactional email while its team is new.
  */
 export async function screeningReasons(
   db: Db,
@@ -302,6 +347,7 @@ export async function screeningReasons(
     email: { teamId: string; broadcastId: string | null; replyTo: readonly string[] | null };
     /** The decrypted body; without it no destination is read. */
     body: { html: string | null; text: string | null } | null;
+    media?: SendMedia | undefined;
     /** The platform's own hosts, which are nobody's destination. */
     ignore?: ReadonlySet<string> | undefined;
     now: Date;
@@ -316,7 +362,12 @@ export async function screeningReasons(
   if (team?.plan === "system") return reasons;
   if (email.broadcastId === null) {
     const row = await monitorRowWithHistory(db, email.teamId, now);
-    if (inFirstWindow(await loadMonitorState(db, row, now), s, now)) reasons.push("first_window");
+    const state = await loadMonitorState(db, row, now);
+    if (inFirstWindow(state, s, now)) reasons.push("first_window");
+    const { media } = input;
+    if (media && (media.attachments > 0 || media.opaque) && monitorTier(state, s, now) === "new") {
+      reasons.push("media");
+    }
   }
   if (input.body) {
     let novel = await teamNovelDestinations(db, {
@@ -324,6 +375,7 @@ export async function screeningReasons(
       html: input.body.html,
       text: input.body.text,
       replyTo: email.replyTo,
+      links: input.media?.links,
       ignore: input.ignore,
     });
     // ponytail: two small reads per copy of a broadcast that links off the
@@ -406,6 +458,17 @@ async function unanswered(
   return "wait";
 }
 
+/** Whether an answered screening sample's media parks what waits on it (mediaParks). */
+async function mediaParksSample(
+  db: Db,
+  s: MonitorSettings,
+  sample: Sample,
+  now: Date,
+): Promise<boolean> {
+  if (sample.status === "pending" || !sample.mediaIssues?.length) return false;
+  return mediaParks(sample.mediaIssues, await screeningTier(db, s, sample.teamId, now));
+}
+
 export type ScreenDecision =
   /**
    * Send now. `sample` is the email's screening sample when it has one: no
@@ -417,10 +480,12 @@ export type ScreenDecision =
   | { action: "wait"; until: Date | null }
   /**
    * It waits for an operator: the judge kept failing on a young domain's
-   * email ("screening"), or read a team past new's mail to a new destination
-   * as phishing ("destination").
+   * email ("screening"), read a team past new's mail to a new destination as
+   * phishing ("destination"), or could not clear its images or files
+   * ("media", see mediaParks; a new team's flagged file parks on the send
+   * path's own read, before any verdict).
    */
-  | { action: "park"; reason: "screening" | "destination" };
+  | { action: "park"; reason: ScreenParkReason };
 
 const SEND_UNSCREENED: ScreenDecision = { action: "send", sample: null };
 
@@ -432,8 +497,9 @@ const SEND_UNSCREENED: ScreenDecision = { action: "send", sample: null };
  * burst it belongs to holds the team; mail to a new destination of a team
  * past new parks on a verdict that destinationVerdictParks; a judge that
  * keeps failing parks a young domain's email and lets an older one's
- * through. The team's own standing (a hold, a pause) is the caller's to
- * read first, on every pass.
+ * through; media the judge could not clear parks as mediaParks says. The
+ * team's own standing (a hold, a pause) is the caller's to read first, on
+ * every pass.
  */
 export async function screenBeforeSend(
   db: Db,
@@ -448,6 +514,7 @@ export async function screenBeforeSend(
       screenReleasedAt: Date | null;
     };
     body: { html: string | null; text: string | null };
+    media?: SendMedia | undefined;
     ignore?: ReadonlySet<string> | undefined;
     now: Date;
   },
@@ -486,23 +553,34 @@ export async function screenBeforeSend(
         teamId: email.teamId,
         emailId: email.id,
         broadcastId: email.broadcastId,
-        kind: novelty ? "destination" : "first_sends",
+        kind: novelty
+          ? "destination"
+          : reasons.includes("first_window")
+            ? "first_sends"
+            : "anomaly",
         now,
         screening: true,
         novelty,
       });
+      // The file waits for a person whatever the verdict; the judge still
+      // reads it, for the hold and for the review list.
+      if (reasons.includes("media") && input.media?.unsafe) {
+        return { action: "park", reason: "media" };
+      }
       // Past the team's daily cap the email goes unscreened, as the draw would.
       return id ? { action: "wait", until: null } : SEND_UNSCREENED;
     }
   }
   const screened = { id: sample.id, unjudged: false };
+  // Media that parks whatever the verdict parks now, a judge outage or not.
+  if (await mediaParksSample(db, s, sample, now)) return { action: "park", reason: "media" };
   const waiting = await unanswered(db, deps, sample, { domainId: email.domainId, now });
   if (waiting === "wait") return { action: "wait", until: null };
   if (waiting === "park") return { action: "park", reason: "screening" };
   if (waiting === "proceed") return { action: "send", sample: { id: sample.id, unjudged: true } };
   if (!isHoldVerdict(sample, s.holdRepeatScore)) return { action: "send", sample: screened };
   if (sample.destinations?.length && destinationVerdictParks(sample, s)) {
-    const tier = await tierOf(db, s, email.teamId, now);
+    const tier = await screeningTier(db, s, email.teamId, now);
     if (tier !== "new") return { action: "park", reason: "destination" };
   }
   if (
@@ -518,29 +596,28 @@ export async function screenBeforeSend(
 /**
  * Where a screened fan-out stands on its broadcast's own HTML: wait for the
  * verdict (the judge re-queues the fan-out), go, or park every copy for an
- * operator: once the judge kept failing on a young sending domain, or when
- * a team past new's HTML sends readers to a new destination read as
- * phishing. A verdict that pauses or holds the team is read by the fan-out's
- * own checks.
+ * operator: once the judge kept failing on a young sending domain, when a
+ * team past new's HTML sends readers to a new destination read as
+ * phishing, or when its images were not cleared (mediaParks). A verdict that
+ * pauses or holds the team is read by the fan-out's own checks.
  */
 export async function broadcastScreen(
   db: Db,
   deps: MonitorDeps,
   input: { skeletonSampleId: string; domainId: string; now: Date },
-): Promise<
-  { action: "wait" } | { action: "go" } | { action: "park"; reason: "screening" | "destination" }
-> {
+): Promise<{ action: "wait" } | { action: "go" } | { action: "park"; reason: ScreenParkReason }> {
   const [sample] = await db.select().from(ms).where(eq(ms.id, input.skeletonSampleId));
   if (!sample?.screening) return { action: "go" };
+  const s = await deps.settings();
+  if (await mediaParksSample(db, s, sample, input.now)) return { action: "park", reason: "media" };
   const waiting = await unanswered(db, deps, sample, input);
   if (waiting === "wait") return { action: "wait" };
   if (waiting === "park") return { action: "park", reason: "screening" };
-  const s = await deps.settings();
   if (
     waiting === null &&
     sample.destinations?.length &&
     destinationVerdictParks(sample, s) &&
-    (await tierOf(db, s, sample.teamId, input.now)) !== "new"
+    (await screeningTier(db, s, sample.teamId, input.now)) !== "new"
   ) {
     return { action: "park", reason: "destination" };
   }

@@ -22,5 +22,6 @@ ALTER TABLE "monitor_samples" ADD COLUMN "screening" boolean DEFAULT false NOT N
 ALTER TABLE "monitor_samples" ADD COLUMN "screen_retries" smallint DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "monitor_samples" ADD COLUMN "destinations" jsonb;--> statement-breakpoint
 ALTER TABLE "monitor_samples" ADD COLUMN "link_young" boolean;--> statement-breakpoint
+ALTER TABLE "monitor_samples" ADD COLUMN "media_issues" jsonb;--> statement-breakpoint
 ALTER TABLE "team_destinations" ADD CONSTRAINT "team_destinations_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "emails_review_list_idx" ON "emails" USING btree ("created_at") WHERE "emails"."latest_status" = 'queued_quota' and "emails"."park_reason" <> 'warmup';

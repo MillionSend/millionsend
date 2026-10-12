@@ -475,17 +475,26 @@ export async function readMediaForJudge(
 
 /**
  * Seals what screening read into the held email's `media` column. Call it
- * only for mail parked for review; a purged body stays purged.
+ * only for mail parked for review; a purged body stays purged. `keep` leaves
+ * a review already saved in place: the send path's file facts never replace
+ * the judge's fuller read, whichever lands first.
  */
 export async function saveMediaReview(
   db: Db,
   keyring: Keyring,
   email: { id: string; teamId: string },
   review: MediaReview,
+  opts: { keep?: boolean } = {},
 ): Promise<void> {
   const media = await sealMediaReview(review, keyring, { teamId: email.teamId, rowId: email.id });
   await db
     .update(schema.emails)
     .set({ media })
-    .where(and(eq(schema.emails.id, email.id), isNull(schema.emails.bodyPurgedAt)));
+    .where(
+      and(
+        eq(schema.emails.id, email.id),
+        isNull(schema.emails.bodyPurgedAt),
+        opts.keep ? isNull(schema.emails.media) : undefined,
+      ),
+    );
 }

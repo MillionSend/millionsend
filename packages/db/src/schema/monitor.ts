@@ -109,6 +109,9 @@ export const monitorSamples = pgTable(
     // insights keep them.
     destinations: jsonb("destinations").$type<string[]>(),
     linkYoung: boolean("link_young"),
+    // What screening could not clear in the message's images and files
+    // (core MEDIA_ISSUES), which can park the mail waiting on this verdict.
+    mediaIssues: jsonb("media_issues").$type<string[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     judgedAt: timestamp("judged_at", { withTimezone: true }),
   },

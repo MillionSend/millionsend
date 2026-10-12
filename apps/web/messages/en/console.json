@@ -915,7 +915,7 @@
         "verdict": "Short wait after a phishing-type verdict",
         "outage": "Judge unavailable",
         "destination": "New destination",
-        "media": "Content not readable"
+        "media": "Images or files"
       },
       "count": "{count, plural, one {# email} other {# emails}}",
       "heldTeam": "held for review",
@@ -1023,7 +1023,7 @@
         "trustedRate": "120 days, 50,000 sends, no flag in 90 days",
         "broadcastCopies": "established and trusted teams; the skeleton is judged besides",
         "broadcastCopiesNew": "new, ramp and probation teams",
-        "anomalyMultiplier": "one failing critical or major check; two or more force the sample",
+        "anomalyMultiplier": "one failing critical or major check, a message carried by images or files, or an attachment; two or more force the sample",
         "teamDailyCap": "past it, sampling stops for the team, first sends included",
         "instanceDailyCap": "past it, tier sampling stops; first sends and anomalies continue",
         "flagRisk": "opens the monitor flag and quadruples the team's rate",

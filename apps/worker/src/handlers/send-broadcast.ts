@@ -38,6 +38,7 @@ import {
   reserveQuota,
   reserveWarmup,
   roundUpToSlot,
+  type ScreenParkReason,
   segmentContactsWhere,
   substituteUnsubscribeUrl,
   teamNovelDestinations,
@@ -344,7 +345,7 @@ export async function sendBroadcast(
   let monitorCopies = 0;
   let monitorAudience = 0;
   let screenFirstCopy = false;
-  let screenParked: "screening" | "destination" | null = null;
+  let screenParked: ScreenParkReason | null = null;
   if (deps.monitor) {
     try {
       const novel = await teamNovelDestinations(db, {

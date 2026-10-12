@@ -957,6 +957,21 @@ a new team's email carrying a risky file waits for review (see
 the API reference's "Attachments"). None of this leaves the
 instance: parsing runs on two worker threads, with 4 seconds per email.
 
+For a New-tier team, an email that carries a file, or whose message rides in
+images, files or a QR code drawn with characters (under 100 characters of
+readable text), is judged before SES, and its body images are read too. A
+file the policy flags, refuses or cannot open parks it at once; after the
+verdict, so does a QR code the image reader saw that no decoder read, or
+images the reader declined. Images Bedrock refuses (HTTP 400) park any
+team's unsent email, keep no preview, and the operator is mailed at most
+once a day per team. When a body image cannot be fetched or Bedrock does not
+answer, a New-tier team's mail from a sending domain under 7 days old waits
+as for a judge outage; other mail is judged without those images, and Jev is
+told what was not read. Links in files and QR codes count as destinations at
+every tier. Past New, a sampled email has its body images read when its
+readable text is under 100 characters, and such an email, like one with
+files, counts as an anomaly in the draw.
+
 **Image reading (optional).** Off by default. With it on, Claude Haiku 5.5
 on Amazon Bedrock writes down the text and the brands shown in an email's
 images and in attachment pages that are images, and Jev receives that text
@@ -1007,7 +1022,7 @@ as its `MONITOR_*` environment variable until it is; the console wins.
 | `MONITOR_TRUSTED_RATE` | 0.005 | 120 days, 50,000 sends and no flag in 90 days |
 | `MONITOR_BROADCAST_COPIES` | 3 | Rendered copies judged per broadcast (plus the broadcast's own HTML), established and trusted teams |
 | `MONITOR_BROADCAST_COPIES_NEW` | 10 | The same for new, ramp and probation teams |
-| `MONITOR_ANOMALY_MULTIPLIER` | 20 | One failing link-domain, shortener or phishing-pattern check multiplies the rate; two force the sample |
+| `MONITOR_ANOMALY_MULTIPLIER` | 20 | One anomaly (a failing link-domain, shortener or phishing-pattern check, under 100 characters of text carried by images or files, an attachment) multiplies the rate; two force the sample |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Judged messages per team per UTC day; past it sampling stops silently |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide; past it tier sampling stops, first sends and anomalies continue |
 | `MONITOR_FLAG_RISK` | 0.5 | The team gets the `monitor` flag and samples four times as much |

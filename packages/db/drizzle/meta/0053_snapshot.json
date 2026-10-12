@@ -1,5 +1,5 @@
 {
-  "id": "c8cd9579-2dfe-4e21-a0cb-120b45e42022",
+  "id": "36b3e4ff-42a6-4024-b594-e3843617d10d",
   "prevId": "0dccf77b-d98e-4735-840e-7a4c78b61cf3",
   "version": "7",
   "dialect": "postgresql",
@@ -4660,6 +4660,12 @@
         "link_young": {
           "name": "link_young",
           "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "media_issues": {
+          "name": "media_issues",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

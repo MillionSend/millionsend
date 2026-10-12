@@ -1150,6 +1150,24 @@ equipe nova com um arquivo arriscado fica em espera até a revisão (veja
 [Anexos](/pt-BR/api-reference#anexos)). Nada disso sai da instância: a
 leitura roda em duas threads do worker, com 4 segundos por e-mail.
 
+Para uma equipe no nível Nova, o e-mail que traz um arquivo, ou cuja mensagem
+vem em imagens, arquivos ou num QR code desenhado com caracteres (menos de
+100 caracteres de texto legível), é avaliado antes do SES, e as imagens do
+corpo também são lidas. Um arquivo que a política sinaliza, recusa ou não
+consegue abrir deixa o e-mail em espera na hora; depois da avaliação, também
+deixam um QR code que o leitor de imagens viu e nenhum decodificador leu, ou
+imagens que o leitor se recusou a ler. Imagens que o Bedrock recusa (HTTP
+400) deixam em espera o e-mail ainda não enviado de qualquer equipe, nenhuma
+prévia fica guardada, e o operador recebe e-mail no máximo uma vez por dia
+por equipe. Quando uma imagem do corpo não pode ser baixada ou o Bedrock não
+responde, o e-mail de uma equipe no nível Nova enviado de um domínio com
+menos de 7 dias espera como numa falha do avaliador; os outros são avaliados
+sem essas imagens, e o Jev fica sabendo o que não foi lido. Links em arquivos
+e QR codes contam como destinos em qualquer nível. Depois do nível Nova, o
+e-mail sorteado tem as imagens do corpo lidas quando tem menos de 100
+caracteres de texto legível, e esse e-mail, como um com arquivos, conta como
+anomalia no sorteio.
+
 **Leitura de imagens (opcional).** Desligada por padrão. Ligada, o Claude
 Haiku 5.5 no Amazon Bedrock lê o texto e as marcas que aparecem nas
 imagens do e-mail e nas páginas de anexos que são imagens, e o Jev recebe
@@ -1201,7 +1219,7 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_TRUSTED_RATE` | 0.005 | 120 dias, 50.000 envios e nenhuma sinalização em 90 dias |
 | `MONITOR_BROADCAST_COPIES` | 3 | Cópias renderizadas avaliadas por transmissão (mais o HTML da própria transmissão), equipes estabelecidas e confiáveis |
 | `MONITOR_BROADCAST_COPIES_NEW` | 10 | O mesmo para equipes novas, em rampa e em observação |
-| `MONITOR_ANOMALY_MULTIPLIER` | 20 | Uma checagem de domínio de link, encurtador ou padrão de phishing falhando multiplica a taxa; duas forçam a amostra |
+| `MONITOR_ANOMALY_MULTIPLIER` | 20 | Uma anomalia (uma checagem de domínio de link, encurtador ou padrão de phishing falhando, menos de 100 caracteres de texto com imagens ou arquivos levando a mensagem, um anexo) multiplica a taxa; duas forçam a amostra |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Mensagens avaliadas por equipe por dia UTC; além disso a amostragem para em silêncio |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Para a instância toda; além disso a amostragem por nível para, primeiros envios e anomalias continuam |
 | `MONITOR_FLAG_RISK` | 0.5 | A equipe recebe a sinalização `monitor` e é amostrada quatro vezes mais |

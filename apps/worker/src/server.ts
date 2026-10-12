@@ -8,6 +8,7 @@ import {
 } from "@millionsend/billing";
 import {
   abuseJudgeConfig,
+  abuseVisionConfig,
   disposableEmailsBlocked,
   env,
   ipGeolocationEnabled,
@@ -101,6 +102,7 @@ import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
 import { abandonTenantStatus, retryTenantStatus, syncTenants } from "./handlers/tenants.js";
+import { createAbuseVision } from "./media/vision.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
 import { createSystemMailer } from "./system-mail.js";
@@ -254,6 +256,8 @@ const mailer = createSystemMailer({ db, keyring, enqueueSend });
 // the settings row is re-read once a minute.
 const judgeConfig = abuseJudgeConfig();
 const judge = createAbuseJudge(judgeConfig);
+// The image reader the judge's media read hands images to; null while ABUSE_VISION is off.
+const vision = createAbuseVision(abuseVisionConfig());
 const monitorSettings = monitorSettingsReader(db, env as unknown as Record<string, unknown>);
 const monitor: MonitorDeps | undefined = judge
   ? {
@@ -708,6 +712,7 @@ await queue.work(
         platformDomains,
         linkDomainYoung: (domains, at) =>
           anyYoungLinkDomain(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
+        media: { vision },
       },
       { sampleId },
     );

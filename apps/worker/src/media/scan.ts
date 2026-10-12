@@ -9,9 +9,12 @@ import {
   type FileKind,
   fileExtensions,
   findPixCodes,
+  linkDomain,
+  type MediaIssue,
   type MediaLink,
   type MediaLinkSource,
   type MediaPix,
+  type MediaReview,
   type PromiseCache,
   parsePix,
   sha256Hex,
@@ -345,5 +348,31 @@ export async function scanAttachments(
     links: files.flatMap((f) => f.links),
     pix: files.flatMap((f) => f.pix),
     ...fileIssues(files),
+  };
+}
+
+/**
+ * What a person reviewing mail the send path parked sees until the judge's
+ * fuller read replaces it: the files' facts and flags, their links and Pix
+ * codes. Text and previews come only from the judge's read.
+ */
+export function scanReview(scan: AttachmentScan): MediaReview {
+  const issues: MediaIssue[] = [];
+  if (scan.risky) issues.push("risky_file");
+  if (scan.unreadable) issues.push("unreadable_file");
+  if (scan.refused) issues.push("refused_file");
+  return {
+    text: [],
+    links: scan.links.map((link) => ({ ...link, domain: linkDomain(link.url) ?? "" })),
+    pix: scan.pix,
+    files: scan.files.map((f) => ({
+      filename: f.filename,
+      kind: f.kind,
+      size: f.size,
+      pages: f.pages,
+      flags: f.flags,
+    })),
+    previews: [],
+    issues,
   };
 }

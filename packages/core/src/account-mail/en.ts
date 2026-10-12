@@ -412,6 +412,15 @@ export const en = {
     button: "Open review list",
     muted: ["Sent to the instance operator at most once a day per team."],
   },
+  "monitor.media_blocked": {
+    subject: "Content monitor: the image reader refused an email's images",
+    body: [
+      "Amazon Bedrock refused to read the images in an email from {team} (HTTP 400). Bedrock answers this way when its abuse detection blocks an image, which includes child sexual abuse material. No preview of these images is kept.",
+      "An email that had not been sent yet waits on Trust & safety until you release or cancel it; one judged after sending was already delivered. This alone does not hold the team, and the team is not told.",
+    ],
+    button: "Open review list",
+    muted: ["Sent to the instance operator at most once a day per team."],
+  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 /** Sentences several kinds share, filled by the builders. */

@@ -422,6 +422,15 @@ export const ptBR = {
     button: "Abrir lista de revisão",
     muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
   },
+  "monitor.media_blocked": {
+    subject: "Monitor de conteúdo: o leitor de imagens recusou as imagens de um e-mail",
+    body: [
+      "O Amazon Bedrock se recusou a ler as imagens de um e-mail de {team} (HTTP 400). O Bedrock responde assim quando a detecção de abuso dele bloqueia uma imagem, o que inclui material de abuso sexual infantil. Nenhuma prévia dessas imagens fica guardada.",
+      "Um e-mail que ainda não tinha sido enviado fica em espera em Confiança e segurança até você liberar ou cancelar; um avaliado depois do envio já foi entregue. Isso sozinho não deixa a equipe pausada para revisão, e ela não fica sabendo.",
+    ],
+    button: "Abrir lista de revisão",
+    muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
+  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 export const ptBRPhrases = {

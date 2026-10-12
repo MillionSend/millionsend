@@ -24,12 +24,14 @@ import {
   makeUnsubscribeToken,
   noteAcceptedSend,
   noteConsoleCodeUndelivered,
+  opaqueFacts,
   openAttachments,
   parseSingleSender,
   purgedEmailBodyColumns,
   releaseQuota,
   rewriteForTracking,
   SCORE_VERSION,
+  type SendMedia,
   SYSTEM_MAIL_TAG,
   sampleAcceptedEmail,
   screenBeforeSend,
@@ -43,6 +45,8 @@ import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
+import { saveMediaReview } from "../media/read.js";
+import { scanAttachments, scanReview } from "../media/scan.js";
 import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-quota.js";
 
 /**
@@ -610,10 +614,20 @@ async function sendQueued(
   // read above, on this pass. Account mail and the fixed onboarding email are
   // never customer content, so they never wait.
   let screened: { id: string; unjudged: boolean } | null = null;
+  let media: SendMedia | null = null;
   if (deps.monitor && !systemMail && !platformSend) {
+    const files = attachments ?? [];
+    const scan = files.length > 0 ? await scanAttachments(files) : null;
+    media = {
+      attachments: files.length,
+      opaque: opaqueFacts({ html: body.html, text: body.text, attachments: files.length }).opaque,
+      links: scan?.links.map((link) => link.url) ?? [],
+      unsafe: scan !== null && (scan.risky || scan.unreadable || scan.refused),
+    };
     const gate = await screenBeforeSend(db, deps.monitor, {
       email,
       body: { html: body.html, text: body.text },
+      media,
       ignore: deps.platformDomains,
       now: new Date(),
     });
@@ -623,6 +637,13 @@ async function sendQueued(
     }
     if (gate.action === "park") {
       await parkQueued(db, email, `screening parked it (${gate.reason})`, gate.reason);
+      if (gate.reason === "media" && scan) {
+        try {
+          await saveMediaReview(db, deps.keyring, email, scanReview(scan), { keep: true });
+        } catch (err) {
+          console.error(`email.send: media review for ${email.id} not saved`, err);
+        }
+      }
       return "parked";
     }
     screened = gate.sample;
@@ -983,15 +1004,19 @@ async function sendQueued(
           await judgeAfterSend(db, deps.monitor, { id: screened.id, teamId: email.teamId });
         }
       } else {
+        // An opaque email and one with files each add an anomaly: both
+        // together draw it at every tier.
         await sampleAcceptedEmail(db, deps.monitor, {
           teamId: email.teamId,
           emailId: email.id,
           broadcast: email.broadcastId !== null,
           anomalies:
-            insights?.checks.filter(
+            (insights?.checks.filter(
               (c) =>
                 c.status === "fail" && (MONITOR_ANOMALY_CHECKS as readonly string[]).includes(c.id),
-            ).length ?? 0,
+            ).length ?? 0) +
+            (media?.opaque ? 1 : 0) +
+            (media && media.attachments > 0 ? 1 : 0),
         });
       }
     } catch (err) {

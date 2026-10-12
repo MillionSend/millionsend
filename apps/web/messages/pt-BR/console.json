@@ -915,7 +915,7 @@
         "verdict": "Espera curta após avaliação de phishing",
         "outage": "Avaliador indisponível",
         "destination": "Destino novo",
-        "media": "Conteúdo ilegível"
+        "media": "Imagens ou arquivos"
       },
       "count": "{count, plural, one {# e-mail} other {# e-mails}}",
       "heldTeam": "pausada para revisão",
@@ -1023,7 +1023,7 @@
         "trustedRate": "120 dias, 50.000 envios, nenhuma sinalização em 90 dias",
         "broadcastCopies": "equipes estabelecidas e confiáveis; o esqueleto é avaliado à parte",
         "broadcastCopiesNew": "equipes novas, em rampa e em observação",
-        "anomalyMultiplier": "uma checagem crítica ou importante falhando; duas ou mais forçam a amostra",
+        "anomalyMultiplier": "uma checagem crítica ou importante falhando, uma mensagem levada por imagens ou arquivos, ou um anexo; duas ou mais anomalias forçam a amostra",
         "teamDailyCap": "além dele, a amostragem para na equipe, primeiros envios incluídos",
         "instanceDailyCap": "além dele, a amostragem por nível para; primeiros envios e anomalias continuam",
         "flagRisk": "abre a sinalização do monitor e quadruplica a taxa da equipe",
