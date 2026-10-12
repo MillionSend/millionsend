@@ -85,6 +85,7 @@ function Check() {
 }
 
 export function BillingView({ checkout }: { checkout: "success" | "cancel" | null }) {
+  const ti = useTranslations("inboxes");
   const t = useTranslations("settings.billing");
   const planName = useTranslations("settings.plans");
   const usageT = useTranslations("settings.usage");
@@ -213,6 +214,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     usage,
     hasCustomer,
     hasLiveSubscription,
+    inboxes,
     upgradesHeld,
   } = status.data;
   if (plan === "system") {
@@ -260,9 +262,20 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const features = (p: Plan): string[] => {
     const domains = PLAN_DOMAIN_LIMIT[p];
     const contacts = PLAN_CONTACT_LIMIT[p];
+    const inboxLimit = inboxes?.limits[p];
     return [
       domains === null ? t("features.domainsUnlimited") : t("features.domains", { n: domains }),
       contacts === null ? t("features.contacts") : t("features.contactsLimit", { n: contacts }),
+      // Only where the instance receives mail; the team's own plan shows its usage.
+      ...(inboxes && inboxLimit !== undefined
+        ? [
+            inboxLimit === null
+              ? ti("billing.unlimited")
+              : p === plan
+                ? ti("billing.used", { used: inboxes.used, limit: inboxLimit })
+                : ti("billing.limit", { n: inboxLimit }),
+          ]
+        : []),
       t("features.broadcasts"),
       t("features.integrations"),
       t("features.agents"),

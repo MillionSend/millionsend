@@ -9,6 +9,7 @@ import { consoleRouter } from "./console";
 import { domainsRouter } from "./domains";
 import { emailRouter } from "./email";
 import { emailsRouter } from "./emails";
+import { inboxesRouter } from "./inboxes";
 import { logsRouter } from "./logs";
 import { metricsRouter } from "./metrics";
 import { onboardingRouter } from "./onboarding";
@@ -33,6 +34,7 @@ export const appRouter = router({
   emails: emailsRouter,
   domains: domainsRouter,
   apiKeys: apiKeysRouter,
+  inboxes: inboxesRouter,
   logs: logsRouter,
   metrics: metricsRouter,
   onboarding: onboardingRouter,

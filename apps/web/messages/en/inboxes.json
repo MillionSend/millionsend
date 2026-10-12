@@ -1,1 +1,425 @@
-{}
+{
+  "title": "Inboxes",
+  "inbox": "Inbox",
+  "more": "More actions",
+  "retry": "Try again",
+  "loadMore": "Load more",
+  "pageSize": "{count} items",
+  "total": "{count, plural, one {# inbox} other {# inboxes}}",
+  "loadError": "Couldn't load your inboxes.",
+  "notFound": "Inbox not found.",
+  "noSubject": "(no subject)",
+  "noSender": "(no sender)",
+  "summary": "{kind} · {count} received in 30 days",
+  "sendEmail": "Send email",
+  "search": "Search threads…",
+  "emptyFolder": "Nothing in this folder.",
+  "threadsError": "Couldn't load the threads.",
+  "threadError": "Couldn't load this thread.",
+  "close": "Close",
+  "moveTo": "Move to…",
+  "addLabel": "Add label…",
+  "removeLabel": "Remove {label}",
+  "newLabel": "New label…",
+  "newLabelPlaceholder": "Label name",
+  "addLabelSubmit": "Add label",
+  "messageCount": "{count, plural, one {# message} other {# messages}}",
+  "newerMessages": "Newer messages",
+  "openEmail": "Open email",
+  "expired": "This inbox expired. It stays here, read-only, until it's removed within the hour.",
+  "delete": "Delete inbox",
+  "deleteConfirm": "Delete {address}? Its threads, drafts and labels go with it, and its API keys stop working.",
+  "deleteError": "Couldn't delete this inbox.",
+  "edit": {
+    "title": "Edit inbox",
+    "fromName": "Sender name",
+    "fromNameHint": "The From name on mail this inbox sends. Empty: the address alone.",
+    "expiresKeep": "Keep as it is",
+    "save": "Save",
+    "saved": "Inbox saved."
+  },
+  "expiresIn": "expires in {time}",
+  "forwardsTo": "forwards to {address}",
+  "planUsage": "Plan: {used} of {limit} inboxes",
+  "tabs": {
+    "all": "All",
+    "agent": "Agent",
+    "human": "People",
+    "threads": "Threads",
+    "review": "Needs review",
+    "safety": "Safety & rules",
+    "activity": "Activity"
+  },
+  "type": {
+    "catchAll": "Catch-all"
+  },
+  "col": {
+    "inbox": "Inbox",
+    "type": "Type",
+    "attention": "Needs attention",
+    "received30d": "Received 30d",
+    "last": "Last message"
+  },
+  "attention": {
+    "drafts": "{count, plural, one {# draft to approve} other {# drafts to approve}}",
+    "unread": "{count, plural, one {# unread} other {# unread}}",
+    "quarantined": "{count} in quarantine"
+  },
+  "channel": {
+    "webhook": "webhook",
+    "key": "inbox key"
+  },
+  "empty": {
+    "title": "No inboxes yet",
+    "body": "Create an address that receives mail. Agents read it over the API, webhooks or MCP; people read it here.",
+    "noReceiving": "Turn on receiving for a domain first, or use the shared domain."
+  },
+  "limit": {
+    "reached": "You've used all {limit} inboxes on your plan. <link>Upgrade</link> to create more.",
+    "full": "You've reached the inbox limit of your plan. Upgrade to create more."
+  },
+  "catchAll": {
+    "row": "Catch-all · addresses without an inbox"
+  },
+  "create": {
+    "title": "Create inbox",
+    "address": "Address",
+    "addressHint": "Your domains with receiving on, or the shared {domain}, ready with no DNS.",
+    "random": "Random address",
+    "name": "Name",
+    "namePlaceholder": "Orders agent",
+    "kind": "Who reads it",
+    "agent": "An agent",
+    "agentHint": "Threads, reply API, code and link extraction, injection guard, drafts that wait for approval.",
+    "human": "People",
+    "humanHint": "Read and reply in the dashboard, forward to a mailbox, route to a webhook.",
+    "errors": {
+      "taken": "This address is already in use.",
+      "notReceiving": "Turn on receiving for {domain} first.",
+      "rate": "Too many inboxes created in the last hour. Try again later.",
+      "localPart": "Use lowercase letters, digits and . _ % + - (up to 64), with no dot at either end."
+    }
+  },
+  "acceptFrom": {
+    "label": "Accept mail from",
+    "anyone": "Anyone",
+    "verified": "Verified senders",
+    "allowlist": "Allowlist only"
+  },
+  "expires": {
+    "label": "Expires",
+    "never": "Never",
+    "1h": "1 hour",
+    "24h": "24 hours",
+    "7d": "7 days",
+    "30d": "30 days"
+  },
+  "folder": {
+    "inbox": "Inbox",
+    "archive": "Archive",
+    "spam": "Spam",
+    "sent": "Sent",
+    "trash": "Trash"
+  },
+  "badge": {
+    "draft": "Draft to approve",
+    "replied": "Replied",
+    "quarantined": "Quarantined · {reason}",
+    "injection": "injection {score}"
+  },
+  "message": {
+    "screening": "Being screened…",
+    "quarantined": "Held in quarantine: your agent can't see it until someone releases it.",
+    "hiddenText": "Hidden text removed"
+  },
+  "draft": {
+    "title": "Draft · waiting for approval",
+    "created": "created {time}",
+    "discard": "Discard",
+    "edit": "Edit",
+    "save": "Save draft",
+    "approve": "Approve and send"
+  },
+  "reason": {
+    "approval_required": "the agent asked for a person",
+    "require_approval": "every reply from this inbox needs approval",
+    "send_policy": "a new recipient for this inbox's send rules",
+    "ramp": "too many new recipients today",
+    "private_code": "it contains a code or sign-in link this inbox received",
+    "loop_guard": "a reply to an automatic message",
+    "loop_burst": "too many automatic replies to this address",
+    "reply_to_redirect": "the Reply-To points somewhere else"
+  },
+  "review": {
+    "drafts": "Drafts to approve",
+    "quarantine": "Quarantine",
+    "empty": "Nothing to review.",
+    "to": "To",
+    "subject": "Subject",
+    "reasons": "Why it waits",
+    "reason": "Reason",
+    "scores": "Scores"
+  },
+  "release": "Release",
+  "releaseTrust": "Release and trust sender",
+  "qr": {
+    "failed_auth": "failed authentication",
+    "unauthenticated_sender": "sender not verified",
+    "not_allowlisted": "not on the allowlist",
+    "injection": "prompt injection",
+    "phishing": "phishing",
+    "virus": "virus",
+    "unscreened": "couldn't be screened",
+    "screening_cap": "daily screening limit reached"
+  },
+  "trust": {
+    "owner": "Owner",
+    "allowlisted": "Allowlisted",
+    "known_thread": "Known thread",
+    "external": "External, verified",
+    "unauthenticated": "Not verified",
+    "failed": "Failed authentication"
+  },
+  "spam": {
+    "pass": "Not spam",
+    "gray": "Maybe spam",
+    "fail": "Spam"
+  },
+  "virus": {
+    "pass": "No virus",
+    "fail": "Virus: {signature}",
+    "processing_failed": "Not scanned (scanner unavailable)",
+    "none": "Not scanned"
+  },
+  "downloadsBlocked": "Downloads are blocked: this email carries malware.",
+  "chip": {
+    "code": "code",
+    "link": "link"
+  },
+  "gray": {
+    "dmarcPassNone": "DMARC gray: the message passed DMARC, but the sender's domain publishes p=none, so receivers aren't asked to block mail that fails.",
+    "dmarcFailNone": "DMARC gray: the message failed DMARC, and the sender's domain publishes p=none, which doesn't ask receivers to block it.",
+    "dmarcNoRecord": "DMARC gray: the sender's domain has no DMARC policy.",
+    "dmarcGeneric": "DMARC gray: the sender's domain doesn't ask receivers to block mail that fails (p=none, or no policy).",
+    "dkimPolicy": "DKIM gray: a valid signature from {domains}, not from the From domain, so it doesn't prove who wrote it.",
+    "spfSoftfail": "SPF gray: the sending server isn't listed by the sender's domain, which asks only for a soft fail.",
+    "spfNeutral": "SPF gray: the sender's domain doesn't say which servers may send for it.",
+    "checkError": "Couldn't be checked (a DNS timeout or a malformed record).",
+    "anotherDomain": "another domain"
+  },
+  "received": {
+    "title": "All received",
+    "hint": "Every email your domains received, including addresses without an inbox.",
+    "search": "Search sender, inbox or subject…",
+    "loadError": "Couldn't load received emails.",
+    "empty": "No received emails yet.",
+    "emptyHint": "Turn on receiving for a domain in <link>Domains</link>, then point its MX record here.",
+    "noMatch": "No received emails match these filters.",
+    "clearFilters": "Clear filters",
+    "pageOf": "Page 1 – {pages} of {total} received emails",
+    "col": {
+      "from": "From",
+      "subject": "Subject",
+      "received": "Received"
+    },
+    "badge": {
+      "quarantined": "Quarantined",
+      "spam": "Spam",
+      "virus": "Virus"
+    },
+    "filter": {
+      "allInboxes": "All inboxes",
+      "catchAllOnly": "Catch-all only",
+      "allVerdicts": "All verdicts"
+    },
+    "verdict": {
+      "clean": "Clean",
+      "suspicious": "Suspicious",
+      "quarantined": "Quarantined",
+      "spam": "Spam",
+      "virus": "Virus"
+    },
+    "range": {
+      "h24": "Last 24 hours",
+      "d7": "Last 7 days",
+      "d15": "Last 15 days",
+      "d30": "Last 30 days",
+      "all": "All time"
+    }
+  },
+  "detail": {
+    "breadcrumb": "Received email",
+    "error": "Couldn't load this email.",
+    "notFound": "Email not found.",
+    "more": "More actions",
+    "reply": "Reply",
+    "forward": "Forward",
+    "deleteNow": "Delete now",
+    "deleteConfirm": "Delete this email now? It can't be undone.",
+    "deleteError": "Couldn't delete this email.",
+    "downloadRaw": "Download .eml",
+    "auth": "Authentication",
+    "inboxes": "Inboxes",
+    "catchAllOnly": "Catch-all · no inbox",
+    "trust": "Sender",
+    "spam": "Spam",
+    "virus": "Virus",
+    "hiddenText": "Hidden text",
+    "code": "Code",
+    "link": "Sign-in link",
+    "linkElsewhere": "The link points to a domain other than the sender's.",
+    "scores": "injection {injection} · phishing {phishing}",
+    "receivedFor": "Received for",
+    "messageId": "Message-ID",
+    "envelopeFrom": "Envelope from",
+    "server": "Sending server",
+    "noTls": "no TLS",
+    "attachments": "Attachments",
+    "download": "Download",
+    "unnamed": "Unnamed attachment",
+    "inline": "inline",
+    "attachmentCount": "{count, plural, one {# attachment} other {# attachments}}",
+    "file": "File",
+    "type": "Type",
+    "size": "Size"
+  },
+  "timeline": {
+    "received": "Received",
+    "scanned": "Scanned",
+    "screened": "Screened",
+    "delivered": "Delivered to {inbox}",
+    "quarantined": "Quarantined",
+    "released": "Released by {who}",
+    "replied": "Replied",
+    "forwarded": "Forwarded",
+    "webhook": "Webhook"
+  },
+  "compose": {
+    "from": "From {address}",
+    "to": "To",
+    "subject": "Subject",
+    "message": "Message",
+    "note": "Note",
+    "mode": "Forward as",
+    "inline": "Inline, under the note",
+    "attachment": "An attached .eml file",
+    "replyAll": "Reply all",
+    "replyPlaceholder": "Write a reply…",
+    "send": "Send",
+    "sent": "Sent.",
+    "drafted": "Held for approval. It's waiting in Needs review."
+  },
+  "safety": {
+    "whoCanWrite": "Who can write in",
+    "whoCanWriteHint": "Mail that fails these rules is quarantined: it's stored and listed, but your agent never receives it until a person releases it.",
+    "anyoneHint": "Every message reaches the agent.",
+    "verifiedHint": "DMARC-aligned senders, replies in known threads, and the allowlist.",
+    "allowlistHint": "Only the addresses and domains below.",
+    "allowlist": "Allowlist",
+    "addSender": "Add sender",
+    "addOwner": "Add address",
+    "remove": "Remove {value}",
+    "beforeRead": "Before your agent reads it",
+    "screening": "Scan for prompt injection",
+    "screeningHint": "Scores mail from external and unauthenticated senders from 0 to 100; at 80 or more it's quarantined. One signal on top of the rules, not a guarantee. Read it as screening.injection_score.",
+    "hiddenText": "Strip hidden text",
+    "hiddenTextHint": "Removes text a person can't see (hidden elements, white-on-white, zero-width and Unicode tag characters) from text and markdown. The original HTML stays in the raw message. Always on.",
+    "extractCodes": "Extract codes and links",
+    "extractCodesHint": "Adds extracted.code and extracted.link for verification emails, so an agent never has to parse HTML.",
+    "maySend": "What your agent may send",
+    "sendPolicy": "Send policy",
+    "requireApproval": "Every reply needs approval",
+    "requireApprovalHint": "Off: drafts wait only when a rule asks for it (the API sets requires_approval).",
+    "privateCodes": "Codes and magic links stay private",
+    "privateCodesHint": "An extracted code or sign-in link can't be sent or forwarded to anyone but you and the allowlist.",
+    "sendCap": "Sends per day",
+    "sendCapNone": "No daily cap",
+    "retention": "Kept for",
+    "retentionValue": "{days} days (instance setting)",
+    "forwardTo": "Forward every message to",
+    "forwardToHint": "Team members' addresses and the owner addresses below.",
+    "owners": "Owner addresses",
+    "alwaysOn": "Always on: replies carry Auto-Submitted and never answer another auto-reply, and first-contact sends go through the same abuse review as any send.",
+    "save": "Save changes",
+    "saved": "Rules saved.",
+    "adminOnly": "Only owners and admins can change these rules."
+  },
+  "policy": {
+    "reply_only": "Reply only inside existing threads",
+    "reply_onlyHint": "New conversations to new recipients become drafts that wait for a person.",
+    "allowlist": "Replies, plus new conversations with the allowlist",
+    "open": "Anyone (needs your own verified domain)",
+    "sharedOnly": "Addresses on the shared domain only reply inside their threads."
+  },
+  "activity": {
+    "empty": "No activity yet.",
+    "loadError": "Couldn't load the activity.",
+    "when": "When",
+    "who": "Who",
+    "what": "What",
+    "why": "Why",
+    "actor": {
+      "user": "A person",
+      "api_key": "An API key",
+      "oauth": "A connected app",
+      "system": "MillionSend"
+    },
+    "actions": {
+      "inbox": {
+        "created": "Created the inbox",
+        "updated": "Changed the inbox",
+        "deleted": "Deleted the inbox",
+        "expired": "The inbox expired",
+        "safety_updated": "Changed the safety rules"
+      },
+      "email": {
+        "quarantined": "Quarantined an email",
+        "released": "Released an email",
+        "sent": "Sent an email",
+        "drafted": "Held a send as a draft",
+        "refused": "Refused a send",
+        "forwarded": "Forwarded an email",
+        "deleted": "Deleted an email"
+      },
+      "code": {
+        "read": "Read a code or sign-in link"
+      },
+      "thread": {
+        "updated": "Changed a thread"
+      },
+      "label": {
+        "created": "Created a label",
+        "updated": "Changed a label",
+        "deleted": "Deleted a label"
+      },
+      "draft": {
+        "created": "Created a draft",
+        "updated": "Changed a draft",
+        "sent": "Sent a draft",
+        "approved": "Approved a draft",
+        "rejected": "Discarded a draft",
+        "deleted": "Deleted a draft",
+        "expired": "A draft expired unapproved"
+      },
+      "key": {
+        "created": "Created an inbox API key",
+        "revoked": "Revoked an inbox API key"
+      }
+    }
+  },
+  "settingsReceiving": {
+    "title": "Receiving",
+    "mxHost": "MX host",
+    "lastMessage": "Last message",
+    "receivedToday": "Received today",
+    "virus": "Virus scanning",
+    "sharedDomain": "Shared inbox domain",
+    "maxSize": "Max message size",
+    "off": "Off"
+  },
+  "billing": {
+    "limit": "{n, plural, one {# inbox} other {# inboxes}}",
+    "unlimited": "Unlimited inboxes",
+    "used": "{used} of {limit} inboxes"
+  }
+}

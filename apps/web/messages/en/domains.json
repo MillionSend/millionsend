@@ -199,7 +199,7 @@
     "notFound": "Domain not found.",
     "receiving": {
       "enable": "Enable receiving",
-      "note": "Accepts mail sent to any address at {domain}. Read it under Emails → Receiving, through the API or with the email.received webhook.",
+      "note": "Accepts mail sent to any address at {domain}. Read it under Inboxes → All received, through the API or with the email.received webhook.",
       "noteApex": "Accepts mail sent to any address at {domain}, and its MX record brings all of the domain's mail here. If people already get email at {domain}, use a subdomain such as {example} so their mailboxes stay as they are.",
       "notVerified": "Available once the domain is verified.",
       "confirmEnableTitle": "Enable receiving?",
@@ -211,7 +211,17 @@
       "confirmDisableCta": "Disable receiving",
       "errorNotVerified": "Verify the domain before turning on receiving.",
       "errorTaken": "Another team already receives mail for {domain}.",
-      "error": "Couldn't change receiving. Try again."
+      "error": "Couldn't change receiving. Try again.",
+      "summaryLabel": "Receiving",
+      "summary": "{count, plural, one {# inbox} other {# inboxes}}",
+      "summaryCatchAll": "{count, plural, one {# inbox} other {# inboxes}} + catch-all",
+      "catchAll": "Catch-all",
+      "catchAllHint": "Mail to addresses without an inbox lands in All received. Off: those addresses are refused.",
+      "catchAllPaid": "Catch-all needs a paid plan.",
+      "catchAllError": "Couldn't change catch-all. Try again.",
+      "catchAllOffTitle": "Turn off catch-all?",
+      "catchAllOffConfirm": "Mail to addresses at {domain} that have no inbox is refused from now on. Inbox addresses keep receiving.",
+      "catchAllOffCta": "Turn off catch-all"
     }
   },
   "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",

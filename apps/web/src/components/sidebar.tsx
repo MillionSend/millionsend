@@ -1,9 +1,11 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BetaPill } from "@/components/beta-pill";
 import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/nav-icons";
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
@@ -11,11 +13,19 @@ import { signOutToLogin } from "@/lib/auth-client";
 import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
+import { useTRPC } from "@/lib/trpc";
 import { useSwitchLocale } from "@/lib/use-switch-locale";
 
 // Canvas nav order (Row 1 chrome): Settings lives in the main list.
-export const NAV_ITEMS: ReadonlyArray<{ key: string; href: string; icon: NavIconName }> = [
+export const NAV_ITEMS: ReadonlyArray<{
+  key: string;
+  href: string;
+  icon: NavIconName;
+  /** Only on an instance that takes mail (system.features.receiving); in beta. */
+  receiving?: true;
+}> = [
   { key: "emails", href: "/emails", icon: "emails" },
+  { key: "inboxes", href: "/inboxes", icon: "inboxes", receiving: true },
   { key: "broadcasts", href: "/broadcasts", icon: "broadcasts" },
   { key: "templates", href: "/templates", icon: "templates" },
   { key: "audience", href: "/audience", icon: "audience" },
@@ -49,8 +59,20 @@ function NavItem({
     >
       <NavGlyph name={item.icon} hovered={hovered} />
       {label}
+      {item.receiving ? <BetaPill /> : null}
     </Link>
   );
+}
+
+/** The nav items an instance offers: Inboxes only where it takes mail. */
+export function navItemsFor(receiving: boolean) {
+  return NAV_ITEMS.filter((item) => receiving || !item.receiving);
+}
+
+export function useNavItems() {
+  const trpc = useTRPC();
+  const receiving = useQuery(trpc.system.features.queryOptions()).data?.receiving === true;
+  return useMemo(() => navItemsFor(receiving), [receiving]);
 }
 
 /* Language row — the same segmented pill with the two language codes. */
@@ -160,6 +182,7 @@ export function Sidebar({
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
+  const navItems = useNavItems();
   const [menuOpen, setMenuOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   useDismiss(accountRef, menuOpen, () => setMenuOpen(false));
@@ -217,7 +240,7 @@ export function Sidebar({
             : undefined
         }
       >
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavItem
             key={item.key}
             item={item}

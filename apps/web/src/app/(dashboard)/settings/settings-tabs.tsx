@@ -1,4 +1,4 @@
-import { env } from "@millionsend/config";
+import { env, receivingEnabled } from "@millionsend/config";
 import { smtpRelayOffered } from "@/server/smtp";
 import { SettingsTabsNav } from "./settings-tabs-nav";
 
@@ -10,6 +10,7 @@ export function SettingsTabs() {
       showBilling={env.IS_CLOUD}
       showSes={!env.IS_CLOUD}
       showSmtp={smtpRelayOffered()}
+      showReceiving={receivingEnabled()}
     />
   );
 }
