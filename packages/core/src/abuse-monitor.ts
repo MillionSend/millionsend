@@ -416,7 +416,8 @@ const dayStart = (now: Date) => new Date(`${utcDay(now)}T00:00:00Z`);
  * meet them: mail waiting on a verdict before SES is never let through
  * unjudged by a cap. The team cap also spares an after-send draw of mail to
  * a destination still in its probation (`novelty`); the instance cap spares
- * the first-sends and anomaly kinds, the ones worth the most.
+ * the first-sends, anomaly and agent first-contact kinds, the ones worth the
+ * most.
  */
 export async function recordMonitorSample(
   db: Db,
@@ -443,7 +444,11 @@ export async function recordMonitorSample(
         .where(and(eq(ms.teamId, input.teamId), drawn));
       if ((team?.n ?? 0) >= s.teamDailyCap) return null;
     }
-    if (input.kind !== "first_sends" && input.kind !== "anomaly") {
+    if (
+      input.kind !== "first_sends" &&
+      input.kind !== "anomaly" &&
+      input.kind !== "agent_first_contact"
+    ) {
       const [all] = await db.select({ n: sql<number>`count(*)::int` }).from(ms).where(drawn);
       if ((all?.n ?? 0) >= s.instanceDailyCap) return null;
     }
