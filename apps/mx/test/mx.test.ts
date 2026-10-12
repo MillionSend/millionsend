@@ -504,6 +504,8 @@ describe("mx session", () => {
       dmarc: "temperror",
       arc: "temperror",
     });
+    // Unknown, so left out rather than made up.
+    expect(envelopeOf(deliveries()[0] as Hit)).not.toHaveProperty("authDetail");
   });
 
   it("never ends DATA on a bare LF dot: smuggled commands stay message content", async () => {
@@ -559,6 +561,11 @@ describe("mx session", () => {
       spf: "v=spf1 ip4:127.0.0.1 -all",
       policy: "reject",
       auth: { spf: "pass", dkim: "pass", dmarc: "pass", arc: "none" },
+      authDetail: {
+        spf: { result: "pass", domain: "sender.test" },
+        dkim: { aligned: ["sender.test"] },
+        dmarc: { result: "pass", policy: "reject", domain: "sender.test" },
+      },
     },
     {
       // A forged From signed by the forger's own domain: DKIM is valid, but not for From.
@@ -567,17 +574,28 @@ describe("mx session", () => {
       spf: "v=spf1 ip4:192.0.2.1 -all",
       policy: "reject",
       auth: { spf: "fail", dkim: "policy", dmarc: "fail", arc: "none" },
+      authDetail: {
+        spf: { result: "fail", domain: "sender.test" },
+        dkim: { aligned: [] },
+        dmarc: { result: "fail", policy: "reject", domain: "sender.test" },
+      },
     },
     {
+      // The folded verdict reads none; the detail keeps the pass and the policy.
       label: "a passing message from a p=none domain",
       signer: "sender.test",
       spf: "v=spf1 ip4:127.0.0.1 -all",
       policy: "none",
       auth: { spf: "pass", dkim: "pass", dmarc: "none", arc: "none" },
+      authDetail: {
+        spf: { result: "pass", domain: "sender.test" },
+        dkim: { aligned: ["sender.test"] },
+        dmarc: { result: "pass", policy: "none", domain: "sender.test" },
+      },
     },
   ])(
     "hands SPF, DKIM and DMARC verdicts to the app: $label",
-    async ({ signer, spf, policy, auth }) => {
+    async ({ signer, spf, policy, auth, authDetail }) => {
       const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
       const signed = await dkimSign(MESSAGE, {
         signatureData: [
@@ -604,6 +622,7 @@ describe("mx session", () => {
         /^250 /,
       );
       expect(envelopeOf(deliveries()[0] as Hit)?.auth).toEqual(auth);
+      expect(envelopeOf(deliveries()[0] as Hit)?.authDetail).toEqual(authDetail);
     },
   );
 
@@ -618,6 +637,7 @@ describe("mx session", () => {
       dmarc: "permerror",
       arc: "permerror",
     });
+    expect(envelopeOf(deliveries()[0] as Hit)).not.toHaveProperty("authDetail");
     expect(resolver).not.toHaveBeenCalled();
   });
 

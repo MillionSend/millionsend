@@ -925,3 +925,132 @@ it("a team, its people and its endpoint named like lures get every notice with n
     "Your account is locked, visit acme-support.com has used 80 of its 100 emails for today.",
   );
 });
+
+async function inboxAttention(team = teamId) {
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: team,
+      name: `in-${randomUUID().slice(0, 8)}.example`,
+      region: "us-east-1",
+      status: "verified",
+    })
+    .returning({ id: schema.domains.id });
+  const [inbox] = await db
+    .insert(schema.inboxes)
+    .values({
+      teamId: team,
+      kind: "agent",
+      emailAddress: `bot@${randomUUID().slice(0, 8)}.example`,
+      localPart: "bot",
+      domainId: domain?.id ?? null,
+      name: "Bot",
+      safety: {
+        accept_from: "verified",
+        allowlist: [],
+        owner_addresses: [],
+        screening: true,
+        extract_codes: true,
+        send_policy: "reply_only",
+        require_approval: false,
+        private_codes: true,
+        send_cap: 200,
+        forward_to: [],
+      },
+    })
+    .returning({ id: schema.inboxes.id });
+  const inboxId = inbox?.id as string;
+  const [thread] = await db
+    .insert(schema.inboxThreads)
+    .values({ teamId: team, inboxId })
+    .returning({ id: schema.inboxThreads.id });
+  const [row] = await db
+    .insert(schema.receivedEmails)
+    .values({
+      teamId: team,
+      domainIds: [],
+      rawSha256: randomUUID().replace(/-/g, "").padEnd(64, "0"),
+      messageId: "<lure@evil.example>",
+      from: "ceo@evil.example",
+      subject: "Wire the money https://evil.example now",
+      receivedFor: ["bot@x.example"],
+      envelope: { mailFrom: "", clientIp: "192.0.2.1", helo: "h", tls: null },
+      authentication: { spf: "fail", dkim: "none", dmarc: "fail", arc: "none" },
+      sizeBytes: 1,
+      catchAll: false,
+    })
+    .returning({ id: schema.receivedEmails.id });
+  await db.insert(schema.receivedEmailInboxes).values({
+    receivedEmailId: row?.id as string,
+    inboxId,
+    teamId: team,
+    threadId: thread?.id as string,
+    address: "bot@x.example",
+    senderTrust: "failed",
+    verdict: "quarantined",
+    quarantineReason: "failed_auth",
+    quarantinedAt: new Date(),
+  });
+  await db.insert(schema.inboxDrafts).values({
+    teamId: team,
+    inboxId,
+    type: "standalone",
+    status: "pending_approval",
+    createdBy: "system",
+  });
+  await db.insert(schema.inboxActivity).values([
+    { teamId: team, inboxId, actor: "system", action: "email.refused" },
+    { teamId: team, inboxId, actor: "system", action: "email.refused" },
+  ]);
+}
+
+it("mails a team's owners once a day about held inbox mail, drafts to approve and refused sends, counts only", async () => {
+  await inboxAttention();
+  await sweepNotifications(db, deps(false));
+  expect(sends).toHaveLength(1);
+  expect(sends[0]).toMatchObject({ to: "owner@example.com", subject: "Your inboxes need a look" });
+  expect(sends[0]?.text).toContain(
+    "1 emails in quarantine, 1 drafts waiting for approval and 2 sends held",
+  );
+  expect(sends[0]?.text).toContain("https://app.example.test/inboxes");
+  // A stranger's address and subject never reach the mail.
+  expect(`${sends[0]?.text}${sends[0]?.html}`).not.toMatch(/evil\.example|ceo@|Wire the money/);
+  await sweepNotifications(db, deps(false));
+  expect(sends).toHaveLength(1);
+});
+
+it("skips an owner who turned inbox alerts off", async () => {
+  await db
+    .update(schema.user)
+    .set({ mailOptOuts: ["inbox.attention"] })
+    .where(eq(schema.user.id, "owner"));
+  await inboxAttention();
+  await sweepNotifications(db, deps(false));
+  expect(sends).toEqual([]);
+});
+
+it("mutes inbox alerts for a suspended team", async () => {
+  vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "MillionSend <notify@mail.system.test>");
+  const system = await createTeam(db, "system");
+  await db.insert(schema.domains).values({
+    teamId: system,
+    name: "mail.system.test",
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: new Date(),
+  });
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+    .where(eq(schema.teams.id, teamId));
+  await inboxAttention();
+  await sweepNotifications(db, {
+    ...deps(false),
+    mailer: createSystemMailer({ db, keyring, enqueueSend: async () => {} }),
+  });
+  const mailed = await db
+    .select({ tags: schema.emails.tags })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, system));
+  expect(mailed).toEqual([]);
+});

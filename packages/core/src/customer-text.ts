@@ -62,8 +62,64 @@ const DIGIT_RUN = /\p{N}(?:[^\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N}]*\p{N})*/gu;
  */
 const CODE_POINT_MAX = CUSTOMER_TEXT_MAX * 4;
 
-function dropInvisible(value: string): string {
-  return value.replace(INVISIBLE, "").replace(STRAY_SELECTOR, "").replace(STRAY_JOINER, "");
+/** What dropInvisible took out, by kind: the read pipeline records these as hidden-text flags. */
+export type InvisibleClass =
+  | "unicode_tags"
+  | "variation_selectors"
+  | "bidi"
+  | "zero_width"
+  | "other_invisible";
+
+function invisibleClass(ch: string): InvisibleClass {
+  const cp = ch.codePointAt(0) ?? 0;
+  if (cp >= 0xe0000 && cp <= 0xe007f) return "unicode_tags";
+  if ((cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef)) {
+    return "variation_selectors";
+  }
+  if (
+    cp === 0x061c ||
+    cp === 0x200e ||
+    cp === 0x200f ||
+    (cp >= 0x202a && cp <= 0x202e) ||
+    (cp >= 0x2066 && cp <= 0x2069)
+  ) {
+    return "bidi";
+  }
+  if ((cp >= 0x200b && cp <= 0x200d) || cp === 0x2060 || cp === 0xfeff || cp === 0x180e) {
+    return "zero_width";
+  }
+  return "other_invisible";
+}
+
+/**
+ * Invisible characters out, line breaks and the joiners and selectors
+ * writing uses kept. `counts`, when given, tallies each removal by class.
+ */
+export function dropInvisible(
+  value: string,
+  counts?: Partial<Record<InvisibleClass, number>>,
+): string {
+  // Every character the set holds lies outside ASCII.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the ASCII range is the test
+  if (!/[^\x00-\x7f]/.test(value)) return value;
+  if (!counts) {
+    return value.replace(INVISIBLE, "").replace(STRAY_SELECTOR, "").replace(STRAY_JOINER, "");
+  }
+  const drop = (m: string) => {
+    for (const ch of m) {
+      const k = invisibleClass(ch);
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return "";
+  };
+  return value.replace(INVISIBLE, drop).replace(STRAY_SELECTOR, drop).replace(STRAY_JOINER, drop);
+}
+
+/** How many characters dropInvisible would take out of `value`. */
+export function countInvisible(value: string): number {
+  const counts: Partial<Record<InvisibleClass, number>> = {};
+  dropInvisible(value, counts);
+  return Object.values(counts).reduce((a, b) => a + b, 0);
 }
 
 /** One line of visible text: line breaks and controls become spaces, invisible characters go. */

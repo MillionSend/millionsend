@@ -3,6 +3,8 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { INBOX_FLOOD_PER_HOUR } from "../src/inboxes/limits.js";
+import { defaultSafety } from "../src/inboxes/safety.js";
 import type { QuotaTeamRow } from "../src/plans.js";
 import {
   chargeReceived,
@@ -28,7 +30,7 @@ afterAll(() => close());
 async function addDomain(
   teamId: string,
   name: string,
-  opts: { receiving?: boolean; status?: "verified" | "pending" } = {},
+  opts: { receiving?: boolean; status?: "verified" | "pending"; catchAll?: boolean } = {},
 ): Promise<string> {
   const [row] = await db
     .insert(schema.domains)
@@ -39,6 +41,7 @@ async function addDomain(
       status: opts.status ?? "verified",
       receivingEnabled: opts.receiving ?? false,
       receivingEnabledAt: opts.receiving ? NOW : null,
+      receivingCatchAll: opts.catchAll ?? opts.receiving ?? false,
     })
     .returning({ id: schema.domains.id });
   if (!row) throw new Error("domain insert failed");
@@ -341,5 +344,247 @@ describe("receivedEmailScope", () => {
     expect(await visible(null)).toEqual([onlyX?.id, both?.id].sort());
     expect(await visible(x)).toEqual([onlyX?.id, both?.id].sort());
     expect(await visible(y)).toEqual([both?.id]);
+  });
+});
+
+async function addInbox(
+  teamId: string,
+  values: Partial<typeof schema.inboxes.$inferInsert> & { emailAddress: string },
+): Promise<string> {
+  const [row] = await db
+    .insert(schema.inboxes)
+    .values({
+      teamId,
+      kind: "agent",
+      localPart: values.emailAddress.split("@")[0] as string,
+      name: "Inbox",
+      safety: defaultSafety(values.kind ?? "agent", false),
+      ...values,
+    })
+    .returning({ id: schema.inboxes.id });
+  if (!row) throw new Error("inbox insert failed");
+  return row.id;
+}
+
+describe("decideRecipient with inboxes (S1, S29, S30)", () => {
+  let team: string;
+  let strictDomain: string;
+  let agentInbox: string;
+
+  beforeAll(async () => {
+    team = await createTeam(db, "rcpt-inboxes");
+    strictDomain = await addDomain(team, "strict.inbox.test", { receiving: true, catchAll: false });
+    await addDomain(team, "open.inbox.test", { receiving: true, catchAll: true });
+    await addDomain(team, "plain.inbox.test", { receiving: true, catchAll: true });
+    agentInbox = await addInbox(team, {
+      emailAddress: "bot@strict.inbox.test",
+      domainId: strictDomain,
+    });
+    await addInbox(team, {
+      emailAddress: "old@strict.inbox.test",
+      domainId: strictDomain,
+      expiresAt: new Date(NOW.getTime() - 1000),
+    });
+    const [openDomain] = await db
+      .select({ id: schema.domains.id })
+      .from(schema.domains)
+      .where(eq(schema.domains.name, "open.inbox.test"));
+    await addInbox(team, {
+      emailAddress: "desk@open.inbox.test",
+      domainId: openDomain?.id ?? null,
+      kind: "human",
+    });
+  });
+
+  const decide = (recipient: string) =>
+    decideRecipient(db, { recipient, isCloud: false, now: NOW });
+
+  it("refuses an address with no live inbox where catch-all is off, never cached", async () => {
+    for (const recipient of ["nobody@strict.inbox.test", "old@strict.inbox.test"]) {
+      expect(await decide(recipient)).toEqual({
+        accept: false,
+        code: 550,
+        enhanced: "5.1.1",
+        message: "No such recipient here",
+        ttlSeconds: 0,
+      });
+    }
+  });
+
+  it("accepts an inbox address, exactly or by its +tag, without letting the MX cache it", async () => {
+    for (const recipient of [
+      "bot@strict.inbox.test",
+      "BOT@Strict.Inbox.Test",
+      "bot+signup@strict.inbox.test",
+    ]) {
+      expect(await decide(recipient)).toEqual({ accept: true, ttlSeconds: 0 });
+    }
+  });
+
+  it("accepts any local part on a catch-all domain: cached only while no inbox lives there", async () => {
+    expect(await decide("anyone@plain.inbox.test")).toEqual({ accept: true, ttlSeconds: 30 });
+    expect(await decide("anyone@open.inbox.test")).toEqual({ accept: true, ttlSeconds: 0 });
+    expect(await decide("desk@open.inbox.test")).toEqual({ accept: true, ttlSeconds: 0 });
+  });
+
+  it("answers 452 once an inbox took its hourly flood limit, temporary and uncached (S29)", async () => {
+    const thread = await db
+      .insert(schema.inboxThreads)
+      .values({ teamId: team, inboxId: agentInbox })
+      .returning({ id: schema.inboxThreads.id });
+    const rows = await db
+      .insert(schema.receivedEmails)
+      .values(
+        Array.from({ length: INBOX_FLOOD_PER_HOUR.agent }, (_, i) => ({
+          teamId: team,
+          domainIds: [strictDomain],
+          rawSha256: String(i).padStart(64, "f"),
+          messageId: `<f${i}@x>`,
+          from: "a@b.example",
+          receivedFor: ["bot@strict.inbox.test"],
+          envelope: { mailFrom: "", clientIp: "192.0.2.1", helo: "h", tls: null },
+          authentication: { spf: "none", dkim: "none", dmarc: "none", arc: "none" },
+          sizeBytes: 1,
+          createdAt: NOW,
+        })),
+      )
+      .returning({ id: schema.receivedEmails.id });
+    await db.insert(schema.receivedEmailInboxes).values(
+      rows.map((r) => ({
+        receivedEmailId: r.id,
+        inboxId: agentInbox,
+        teamId: team,
+        threadId: thread[0]?.id as string,
+        address: "bot@strict.inbox.test",
+        senderTrust: "external" as const,
+        verdict: "clean" as const,
+        createdAt: new Date(NOW.getTime() - 60_000),
+      })),
+    );
+    expect(await decide("bot@strict.inbox.test")).toEqual({
+      accept: false,
+      code: 452,
+      enhanced: "4.2.2",
+      message: "This mailbox is receiving too much mail, try again later",
+      ttlSeconds: 0,
+    });
+    // An hour later the window is clear.
+    expect(
+      await decideRecipient(db, {
+        recipient: "bot@strict.inbox.test",
+        isCloud: false,
+        now: new Date(NOW.getTime() + 3_600_000),
+      }),
+    ).toMatchObject({ accept: true });
+  });
+
+  it("routes a team's shared subdomain and a forwarding inbox's receiving address", async () => {
+    const [shared] = await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId: team, name: "team-a.shared.example" })
+      .returning({ id: schema.sharedInboxDomains.id });
+    await addInbox(team, {
+      emailAddress: "signup-bot-7f3k@team-a.shared.example",
+      sharedDomainId: shared?.id ?? null,
+    });
+    await addInbox(team, {
+      emailAddress: "support@plain.inbox.test",
+      domainId: strictDomain,
+      sharedDomainId: shared?.id ?? null,
+      receivingAddress: "fwd-1a2b3c4d@team-a.shared.example",
+    });
+    expect(await decide("signup-bot-7f3k@team-a.shared.example")).toEqual({
+      accept: true,
+      ttlSeconds: 0,
+    });
+    expect(await decide("fwd-1a2b3c4d@team-a.shared.example")).toEqual({
+      accept: true,
+      ttlSeconds: 0,
+    });
+    // A shared subdomain is never a catch-all.
+    expect(await decide("guess@team-a.shared.example")).toMatchObject({ code: 550, ttlSeconds: 0 });
+  });
+
+  it("never routes an address to another team's inbox (S2)", async () => {
+    const other = await createTeam(db, "rcpt-other");
+    await addDomain(other, "other.inbox.test", { receiving: true, catchAll: false });
+    // An inbox row pointing at a name another team receives cannot take its mail.
+    await addInbox(team, { emailAddress: "spy@other.inbox.test", domainId: strictDomain });
+    expect(await decide("spy@other.inbox.test")).toMatchObject({ code: 550, enhanced: "5.1.1" });
+  });
+});
+
+describe("receivedEmailScope: held mail", () => {
+  it("shows agents delivered and catch-all mail only, owners everything, and held mail alone on request", async () => {
+    const teamId = await createTeam(db, "scope-held");
+    const domainId = await addDomain(teamId, "held.scope.test", {
+      receiving: true,
+      catchAll: true,
+    });
+    const inboxId = await addInbox(teamId, { emailAddress: "bot@held.scope.test", domainId });
+    const [thread] = await db
+      .insert(schema.inboxThreads)
+      .values({ teamId, inboxId })
+      .returning({ id: schema.inboxThreads.id });
+    const row = async (
+      name: string,
+      values: Partial<typeof schema.receivedEmails.$inferInsert> = {},
+    ) => {
+      const [inserted] = await db
+        .insert(schema.receivedEmails)
+        .values({
+          teamId,
+          domainIds: [domainId],
+          rawSha256: name.padEnd(64, "0"),
+          messageId: `<${name}@x>`,
+          from: "a@b.example",
+          receivedFor: ["x@held.scope.test"],
+          envelope: { mailFrom: "", clientIp: "192.0.2.1", helo: "h", tls: null },
+          authentication: { spf: "none", dkim: "none", dmarc: "none", arc: "none" },
+          sizeBytes: 1,
+          ...values,
+        })
+        .returning({ id: schema.receivedEmails.id });
+      return inserted?.id as string;
+    };
+    const member = (
+      receivedEmailId: string,
+      verdict: "clean" | "pending" | "quarantined",
+      delivered: boolean,
+    ) =>
+      db.insert(schema.receivedEmailInboxes).values({
+        receivedEmailId,
+        inboxId,
+        teamId,
+        threadId: thread?.id as string,
+        address: "bot@held.scope.test",
+        senderTrust: "external",
+        verdict,
+        deliveredAt: delivered ? NOW : null,
+      });
+    const catchAll = await row("catchall");
+    const virus = await row("virus", { virusVerdict: "fail" });
+    const delivered = await row("delivered", { catchAll: false });
+    await member(delivered, "clean", true);
+    const pending = await row("pending", { catchAll: false });
+    await member(pending, "pending", false);
+    const held = await row("held", { catchAll: false });
+    await member(held, "quarantined", false);
+    const ids = async (scope: Parameters<typeof receivedEmailScope>[0]) =>
+      (
+        await db
+          .select({ id: schema.receivedEmails.id })
+          .from(schema.receivedEmails)
+          .where(receivedEmailScope(scope))
+      )
+        .map((r) => r.id)
+        .sort();
+    expect(await ids({ teamId, held: "exclude" })).toEqual([catchAll, delivered].sort());
+    expect(await ids({ teamId, held: "include" })).toEqual(
+      [catchAll, virus, delivered, pending, held].sort(),
+    );
+    expect(await ids({ teamId, held: "only" })).toEqual([virus, pending, held].sort());
+    expect(await ids({ teamId, inboxId, held: "exclude" })).toEqual([delivered]);
+    expect(await ids({ teamId, inboxId, held: "only" })).toEqual([pending, held].sort());
   });
 });

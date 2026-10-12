@@ -9,14 +9,18 @@ import {
   formatMailbox,
   hasHeaderControlChar,
   isReservedTagName,
+  LONG_POLL_MAX_SECONDS,
   MEDIA_TYPE_TOKEN,
   parseMailbox,
   parseScheduledAt,
   parseSingleSender,
+  QUARANTINE_REASONS,
   RESERVED_TAG_PREFIX,
   SCHEDULED_AT_FORMS,
+  SCREENING_VERDICTS,
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
+  SENDER_TRUSTS,
   WEBHOOK_EVENT_TYPES,
   WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
   WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,
@@ -372,11 +376,72 @@ const receivedEmailListItemSchema = z.object({
   attachments: z.array(inboundAttachmentSchema),
 });
 
+const screeningVerdictSchema = z.enum(SCREENING_VERDICTS);
+const senderTrustSchema = z.enum(SENDER_TRUSTS);
+const spamVerdictSchema = z.enum(["pass", "gray", "fail"]);
+const virusVerdictSchema = z.enum(["pass", "fail", "processing_failed"]);
+
+/** MillionSend's keys on a received email: Resend's fields are untouched, these come after them. */
+const receivedExtensionFields = {
+  inbox_id: z
+    .uuid()
+    .nullable()
+    .describe(
+      "MillionSend extension: the inbox this read is about (an inbox-scoped key's own, the inbox_id filter's, else the oldest inbox the email reached); null for mail no inbox took",
+    ),
+  thread_id: z.uuid().nullable().describe("MillionSend extension: that inbox's thread"),
+  inboxes: z
+    .array(z.object({ inbox_id: z.uuid(), thread_id: z.uuid(), verdict: screeningVerdictSchema }))
+    .optional()
+    .describe(
+      "MillionSend extension, full access keys only: every inbox the email reached and its screening verdict there",
+    ),
+  spam_verdict: spamVerdictSchema
+    .nullable()
+    .describe(
+      "MillionSend extension: the local spam score's verdict; null for mail from before it existed",
+    ),
+  virus_verdict: virusVerdictSchema
+    .nullable()
+    .describe(
+      "MillionSend extension: clamd's verdict (fail blocks every download for good); null when nothing scanned it",
+    ),
+  read: z
+    .boolean()
+    .optional()
+    .describe("MillionSend extension, with an inbox in context: whether that inbox marked it read"),
+};
+
+const receivedListItemExtensions = receivedEmailListItemSchema.extend({
+  ...receivedExtensionFields,
+  screening: z
+    .object({ verdict: screeningVerdictSchema, sender_trust: senderTrustSchema })
+    .describe("MillionSend extension: the screening verdict and the sender's trust tier"),
+  extracted: z
+    .object({ kinds: z.array(z.enum(["code", "link"])) })
+    .describe(
+      "MillionSend extension: whether a verification code or sign-in link was found; the values come with GET of one email",
+    ),
+});
+
 export const listReceivedEmailsResponseSchema = z
   .object({
     object: z.literal("list"),
     has_more: z.boolean(),
-    data: z.array(receivedEmailListItemSchema),
+    data: z.array(receivedListItemExtensions),
+    held: z
+      .array(
+        z.object({
+          id: z.uuid(),
+          inbox_id: z.uuid().nullable(),
+          reason: z.enum(["pending", "quarantined"]),
+          created_at: z.string(),
+        }),
+      )
+      .optional()
+      .describe(
+        "MillionSend extension, with wait only: matching mail that arrived but is held (being screened or quarantined), ids only",
+      ),
   })
   .openapi("ListReceivedEmailsResponse");
 
@@ -391,6 +456,46 @@ export const getReceivedEmailQuerySchema = z.object({
 
 export const getReceivedEmailResponseSchema = receivedEmailListItemSchema
   .extend({
+    ...receivedExtensionFields,
+    screening: z
+      .object({
+        verdict: screeningVerdictSchema,
+        sender_trust: senderTrustSchema,
+        quarantine_reason: z.enum(QUARANTINE_REASONS).nullable(),
+        reasons: z.array(z.string()),
+        injection_score: z.number().int().nullable(),
+        phishing_score: z.number().int().nullable(),
+        hidden_text_removed: z.boolean(),
+      })
+      .describe(
+        "MillionSend extension: the screening verdict, the sender's trust tier, why it was held, the inbound judge's reasons and scores (0-100), and whether hidden text was removed from what agents read",
+      ),
+    spam_score: z
+      .number()
+      .int()
+      .nullable()
+      .describe("MillionSend extension: the local spam score, 0-100"),
+    virus_signature: z
+      .string()
+      .nullable()
+      .describe("MillionSend extension: clamd's signature name when it failed"),
+    extracted_text: z
+      .string()
+      .nullable()
+      .describe(
+        "MillionSend extension: what a person sees of the reply, as text with light markdown: hidden text, invisible characters, quoted history and signature taken out. null once the content retention removed it",
+      ),
+    extracted: z
+      .object({
+        kinds: z.array(z.enum(["code", "link"])),
+        code: z.string().nullable(),
+        link: z.string().nullable(),
+        link_domain_matches_sender: z.boolean().nullable(),
+        ambiguous: z.boolean(),
+      })
+      .describe(
+        "MillionSend extension: the verification code or sign-in link, served only from delivered mail of a sender that did not fail authentication, in an inbox that extracts codes. Links are never fetched.",
+      ),
     object: z.literal("email"),
     html: z.string().nullable(),
     html_format: z.enum(["data_uri", "cid"]),
@@ -412,6 +517,47 @@ export const getReceivedEmailResponseSchema = receivedEmailListItemSchema
       ),
   })
   .openapi("GetReceivedEmailResponse");
+
+export const deleteReceivedEmailResponseSchema = z
+  .object({ object: z.literal("email"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("DeleteReceivedEmailResponse");
+
+export const latestCodeQuerySchema = z.object({
+  from: z
+    .string()
+    .max(320)
+    .optional()
+    .describe("A sender address, or a domain matching itself and its subdomains"),
+  wait: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(LONG_POLL_MAX_SECONDS)
+    .optional()
+    .describe(`Seconds to wait for one to arrive, 0-${LONG_POLL_MAX_SECONDS} (default 0)`),
+  max_age: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(86_400)
+    .optional()
+    .describe("Only mail received this many seconds ago or later, 60-86400 (default 600)"),
+});
+
+export const verificationCodeResponseSchema = z
+  .object({
+    object: z.literal("verification_code"),
+    status: z.enum(["found", "none", "ambiguous", "timeout"]),
+    kind: z.enum(["otp", "link"]).nullable(),
+    code: z.string().nullable(),
+    url: z.string().nullable(),
+    link_domain_matches_sender: z.boolean().nullable(),
+    email_id: z.uuid().nullable(),
+    from: z.string().nullable(),
+    received_at: z.string().nullable(),
+    sender_trust: senderTrustSchema.nullable(),
+  })
+  .openapi("VerificationCode");
 
 const receivedAttachmentDataSchema = z.object({
   id: z.uuid(),
@@ -574,6 +720,62 @@ const oneCursor = <T extends z.ZodObject>(fields: T) =>
     message: "after and before cannot be used together",
   });
 export const listQuerySchema = oneCursor(listQueryFields);
+
+const booleanQuery = z.enum(["true", "false"]);
+
+export const listReceivedEmailsQuerySchema = oneCursor(
+  listQueryFields.extend({
+    wait: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(LONG_POLL_MAX_SECONDS)
+      .optional()
+      .describe(
+        `MillionSend extension: hold the request up to this many seconds (0-${LONG_POLL_MAX_SECONDS}) until matching mail newer than the cursor arrives; an empty list with 200 when none did`,
+      ),
+    since: z.iso
+      .datetime({ offset: true })
+      .optional()
+      .describe(
+        "MillionSend extension: only mail received after this instant; with wait and no cursor it defaults to one minute before the request",
+      ),
+    inbox_id: z
+      .uuid()
+      .optional()
+      .describe("MillionSend extension: only mail delivered into this inbox"),
+    to: z
+      .string()
+      .max(320)
+      .optional()
+      .describe("MillionSend extension: only mail with this address in received_for"),
+    from: z
+      .string()
+      .max(320)
+      .optional()
+      .describe(
+        "MillionSend extension: a sender address, or a domain matching itself and its subdomains",
+      ),
+    subject_contains: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("MillionSend extension: case-insensitive subject substring"),
+    unread: booleanQuery
+      .optional()
+      .describe("MillionSend extension, with inbox_id: read state in that inbox"),
+    include_quarantined: booleanQuery
+      .optional()
+      .describe(
+        "MillionSend extension, full access keys only: list held mail too, flagged by screening",
+      ),
+    quarantined: booleanQuery
+      .optional()
+      .describe("MillionSend extension, full access keys only: list held mail only"),
+  }),
+).refine((q) => q.unread === undefined || q.inbox_id !== undefined, {
+  message: "unread needs inbox_id",
+});
 
 export const CONTACT_INCLUDES = ["properties", "topics"] as const;
 export type ContactInclude = (typeof CONTACT_INCLUDES)[number];
