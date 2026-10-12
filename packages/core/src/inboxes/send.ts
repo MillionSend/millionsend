@@ -83,9 +83,6 @@ import {
   threadSummaryWire,
 } from "./wire.js";
 
-// The composition helpers ride on this module's exports: core's index lists it.
-export * from "./compose.js";
-
 /** sent: 200; draft: 202 (held for approval); refused: the error's status. */
 export type SendOutcome =
   | { kind: "sent"; email: SentEmailWire; threadId: string | null; inboxId: string | null }

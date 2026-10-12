@@ -8,13 +8,13 @@ import {
   type InboxSendDeps,
   liveInbox,
   PLAN_INBOX_LIMIT,
+  parseInboxActor,
   type SendOutcome,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, eq, inArray } from "drizzle-orm";
-import { parseInboxActor } from "@/lib/inbox-actor";
 import { getKeyring } from "./keyring";
 import { enqueueInboxForward } from "./queue";
 

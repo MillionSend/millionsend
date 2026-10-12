@@ -4,7 +4,12 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { recordInboxActivity } from "../src/inboxes/activity.js";
+import {
+  encodeInboxActor,
+  type InboxActor,
+  parseInboxActor,
+  recordInboxActivity,
+} from "../src/inboxes/activity.js";
 import { inboxDeletedEvent, inboxEvent } from "../src/inboxes/events.js";
 import { expiresInMs, inboxCreatesLeft, inboxRoom } from "../src/inboxes/limits.js";
 import { defaultSafety } from "../src/inboxes/safety.js";
@@ -110,6 +115,24 @@ describe("expiresInMs", () => {
     for (const bad of ["0h", "01h", "10000h", "1w", "h", "1.5h", " 1h", "1H"]) {
       expect(expiresInMs(bad), bad).toBeNull();
     }
+  });
+});
+
+describe("parseInboxActor", () => {
+  it("reads back every actor encodeInboxActor writes, an OAuth client id with colons included", () => {
+    const actors: InboxActor[] = [
+      { kind: "user", userId: "u1" },
+      { kind: "api_key", apiKeyId: "k1", inboxId: null },
+      { kind: "oauth", clientId: "https://client.example/a:b", userId: "u2" },
+      { kind: "system" },
+    ];
+    expect(actors.map((a) => parseInboxActor(encodeInboxActor(a)))).toEqual([
+      { kind: "user", userId: "u1" },
+      { kind: "api_key", apiKeyId: "k1" },
+      { kind: "oauth", clientId: "https://client.example/a:b", userId: "u2" },
+      { kind: "system" },
+    ]);
+    expect(parseInboxActor("garbage")).toEqual({ kind: "system" });
   });
 });
 

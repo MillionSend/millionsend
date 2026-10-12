@@ -897,6 +897,7 @@ export { secretsEqual, sha256Hex } from "./hash.js";
 export { attachmentDisposition } from "./http-headers.js";
 export * from "./inboxes/activity.js";
 export * from "./inboxes/api-key-scope.js";
+export * from "./inboxes/compose.js";
 export * from "./inboxes/drafts.js";
 export * from "./inboxes/events.js";
 export * from "./inboxes/inboxes.js";
