@@ -437,6 +437,7 @@ export async function acceptEmail(
         topicId: payload.topicId ?? null,
         latestStatus: parked ? "queued_quota" : "queued",
         parkReason,
+        parkedAt: parked ? new Date() : null,
         scheduledAt: payload.scheduledAt ?? null,
         bodyCiphertext: encrypted.ciphertext,
         bodyIv: encrypted.iv,

@@ -432,6 +432,15 @@ export const ptBR = {
     button: "Abrir lista de revisão",
     muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
   },
+  "monitor.destination_revoked": {
+    subject: "Monitor de conteúdo: e-mail para um destino já liberado foi avaliado como phishing",
+    body: [
+      "{team} enviou e-mail para {domain}, um destino que e-mails anteriores tinham liberado na última semana, e o avaliador deu pontuação {score} ({verdict}) depois do envio. O destino deixou de estar liberado: e-mails para ele voltam a ser avaliados antes do envio e ficam em espera em Confiança e segurança com uma avaliação do tipo phishing, e nenhuma avaliação o libera de novo. Liberar e-mails para ele na lista de revisão libera.",
+      "Isso sozinho não deixa a equipe pausada para revisão: o resto do e-mail dela continua saindo, e ela não fica sabendo.",
+    ],
+    button: "Abrir lista de revisão",
+    muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
+  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 export const ptBRPhrases = {

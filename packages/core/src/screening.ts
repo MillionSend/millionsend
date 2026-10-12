@@ -1,11 +1,25 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { MediaIssue } from "./abuse-judge/media.js";
 import {
   inFirstWindow,
   isHoldVerdict,
   loadMonitorState,
+  MONITOR_HOLD_CATEGORIES,
+  MONITOR_HOLD_REASONS,
   type MonitorDeps,
   type MonitorTier,
   monitorRowWithHistory,
@@ -27,7 +41,7 @@ import { ownerDomain, registrableDomain } from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
 import { fetchTeamQuota } from "./team-plan.js";
-import { DAY_MS } from "./utc-day.js";
+import { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 
 /**
  * Screening before SES: which mail waits for the judge's verdict before it
@@ -67,6 +81,25 @@ export const SCREEN_RETRIES = 3;
 export const SCREEN_JUDGE_TIMEOUT_MS = 5_000;
 /** A screening sample still pending after this lost its job; the next pass queues it again. */
 const SCREEN_STALE_MS = 10 * 60_000;
+/** A team's screening samples waiting on the judge at once; past it more mail waits its turn. */
+export const SCREEN_OUTSTANDING_MAX = 20;
+/** More new destinations than this in one message are not judged: an operator decides. */
+export const NOVEL_DESTINATIONS_MAX = 20;
+/** A team's daily screenings of mail for its new destinations; past it such mail waits a day. */
+export const DESTINATION_SCREENS_PER_DAY = 200;
+/**
+ * A verdict clears a message's new destinations only under this score,
+ * naming nothing phishing-type, and only when they are this many at most.
+ */
+export const DESTINATION_CLEAR_BELOW = 70;
+export const DESTINATIONS_CLEARED_MAX = 5;
+/** For this long after a destination clears, every email to it is judged after sending. */
+export const DESTINATION_PROBATION_DAYS = 7;
+/** Link-age lookups one verdict waits on; the rest are looked up in the background. */
+export const LINK_AGE_LOOKUPS_PER_VERDICT = 3;
+/** A failed link-age lookup is not asked again for this long. */
+const LINK_AGE_FAILED_TTL_MS = 3600_000;
+const LINK_AGE_BACKLOG_MAX = 1_000;
 
 /** Park reasons the drain never releases: only an operator does, from the review list. */
 export const OPERATOR_PARK_REASONS = ["screening", "destination", "media"] as const;
@@ -150,25 +183,74 @@ export function messageDestinations(input: {
   return [...new Set(hosts.map(ownerDomain))].filter((d) => d !== "" && !own.has(d)).sort();
 }
 
+/**
+ * A message's destinations as its team stands with them: `novel`, never
+ * cleared, revoked, or a shortener, which a shortener always is; and
+ * `probation`, cleared under DESTINATION_PROBATION_DAYS before `now`.
+ */
+export async function destinationStanding(
+  db: Db,
+  teamId: string,
+  destinations: readonly string[],
+  now: Date,
+): Promise<{ novel: string[]; probation: string[] }> {
+  if (destinations.length === 0) return { novel: [], probation: [] };
+  const rows = await db
+    .select({ domain: td.domain, clearedAt: td.clearedAt })
+    .from(td)
+    .where(and(eq(td.teamId, teamId), inArray(td.domain, [...destinations]), isNull(td.revokedAt)));
+  const cleared = new Map(rows.map((row) => [row.domain, row.clearedAt.getTime()]));
+  const since = now.getTime() - DESTINATION_PROBATION_DAYS * DAY_MS;
+  return {
+    novel: destinations.filter((d) => isShortener(d) || !cleared.has(d)),
+    probation: destinations.filter((d) => !isShortener(d) && (cleared.get(d) ?? 0) > since),
+  };
+}
+
 /** The destinations among these the team has not cleared; a shortener never is. */
 export async function unclearedDestinations(
   db: Db,
   teamId: string,
   destinations: readonly string[],
 ): Promise<string[]> {
-  if (destinations.length === 0) return [];
-  const cleared = await db
-    .select({ domain: td.domain })
-    .from(td)
-    .where(and(eq(td.teamId, teamId), inArray(td.domain, [...destinations])));
-  const known = new Set(cleared.map((row) => row.domain));
-  return destinations.filter((d) => isShortener(d) || !known.has(d));
+  return (await destinationStanding(db, teamId, destinations, new Date())).novel;
 }
 
 /**
- * The destinations of a message its team has not cleared: what is new to
- * it, which the gate judges before SES and the judge lists first.
+ * Where a message sends its reader, as its team stands with it (see
+ * destinationStanding): what is new to it, which the gate judges before SES
+ * and the judge lists first, and what cleared lately, which is judged after
+ * the send.
  */
+export async function teamDestinationStanding(
+  db: Db,
+  input: {
+    teamId: string;
+    html: string | null;
+    text: string | null;
+    replyTo: readonly string[] | null;
+    links?: readonly string[] | undefined;
+    ignore?: ReadonlySet<string> | undefined;
+    now: Date;
+  },
+): Promise<{ novel: string[]; probation: string[] }> {
+  const d = schema.domains;
+  const verified = await db
+    .select({ name: d.name })
+    .from(d)
+    .where(and(eq(d.teamId, input.teamId), eq(d.status, "verified")));
+  const destinations = messageDestinations({
+    html: input.html,
+    text: input.text,
+    replyTo: input.replyTo,
+    links: input.links,
+    ignore: input.ignore,
+    verifiedDomains: verified.map((row) => row.name),
+  });
+  return destinationStanding(db, input.teamId, destinations, input.now);
+}
+
+/** The destinations of a message its team has not cleared (see teamDestinationStanding). */
 export async function teamNovelDestinations(
   db: Db,
   input: {
@@ -180,38 +262,77 @@ export async function teamNovelDestinations(
     ignore?: ReadonlySet<string> | undefined;
   },
 ): Promise<string[]> {
-  const d = schema.domains;
-  const verified = await db
-    .select({ name: d.name })
-    .from(d)
-    .where(and(eq(d.teamId, input.teamId), eq(d.status, "verified")));
-  const destinations = messageDestinations({
-    ...input,
-    verifiedDomains: verified.map((row) => row.name),
-  });
-  return unclearedDestinations(db, input.teamId, destinations);
+  return (await teamDestinationStanding(db, { ...input, now: new Date() })).novel;
 }
 
-/** The team cleared these destinations: mail to them no longer waits. A shortener never clears. */
+/**
+ * Whether a verdict vouches for the new destinations of the message it
+ * judged: under DESTINATION_CLEAR_BELOW, naming no phishing-type category or
+ * reason, on a message that carried DESTINATIONS_CLEARED_MAX of them at most.
+ */
+export function verdictClearsDestinations(
+  v: { score: number; categories: readonly string[]; reasons: readonly string[] },
+  destinations: number,
+): boolean {
+  return (
+    v.score < DESTINATION_CLEAR_BELOW &&
+    destinations <= DESTINATIONS_CLEARED_MAX &&
+    !v.categories.some((c) => (MONITOR_HOLD_CATEGORIES as readonly string[]).includes(c)) &&
+    !v.reasons.some((r) => (MONITOR_HOLD_REASONS as readonly string[]).includes(r))
+  );
+}
+
+/**
+ * The team cleared these destinations: mail to them no longer waits. A
+ * shortener never clears, and a verdict never clears a revoked destination
+ * again; an operator's release (`operator`) does.
+ */
 export async function clearDestinations(
   db: Db,
   teamId: string,
   destinations: readonly string[],
   now: Date = new Date(),
+  opts: { operator?: boolean } = {},
 ): Promise<void> {
   const domains = destinations.filter((d) => !isShortener(d));
   if (domains.length === 0) return;
-  await db
-    .insert(td)
-    .values(domains.map((domain) => ({ teamId, domain, clearedAt: now })))
-    .onConflictDoNothing();
+  const rows = db.insert(td).values(domains.map((domain) => ({ teamId, domain, clearedAt: now })));
+  await (opts.operator
+    ? rows.onConflictDoUpdate({
+        target: [td.teamId, td.domain],
+        set: { clearedAt: now, revokedAt: null },
+        setWhere: isNotNull(td.revokedAt),
+      })
+    : rows.onConflictDoNothing());
+}
+
+/**
+ * Mail to these destinations drew a phishing-type verdict within their
+ * probation: they are new again until an operator releases mail to them.
+ * The ones revoked now.
+ */
+export async function revokeDestinations(
+  db: Db,
+  teamId: string,
+  destinations: readonly string[],
+  now: Date,
+): Promise<string[]> {
+  if (destinations.length === 0) return [];
+  const rows = await db
+    .update(td)
+    .set({ revokedAt: now })
+    .where(and(eq(td.teamId, teamId), inArray(td.domain, [...destinations]), isNull(td.revokedAt)))
+    .returning({ domain: td.domain });
+  return rows.map((row) => row.domain);
 }
 
 /**
  * Whether a verdict on mail to a new destination parks it for a team past
  * new: a phishing-type one from `holdScore`, or from `holdRepeatScore` when
- * one of its link domains is under YOUNG_DOMAIN_DAYS old. Such a team is
- * never held for it: an agency's every client would stop with it.
+ * one of its link domains is under YOUNG_DOMAIN_DAYS old or of an age not
+ * known yet (`linkYoung` null on such a verdict: see anyYoungLinkDomain).
+ * Such a team is never held for it: an agency's every client would stop
+ * with it.
  */
 export function destinationVerdictParks(
   v: {
@@ -224,17 +345,93 @@ export function destinationVerdictParks(
   s: Pick<MonitorSettings, "holdScore" | "holdRepeatScore">,
 ): boolean {
   return (
-    isHoldVerdict(v, s.holdScore) || (v.linkYoung === true && isHoldVerdict(v, s.holdRepeatScore))
+    isHoldVerdict(v, s.holdScore) || (v.linkYoung !== false && isHoldVerdict(v, s.holdRepeatScore))
   );
+}
+
+const young = (registeredAt: Date | null, at: Date) =>
+  registeredAt !== null && at.getTime() - registeredAt.getTime() < YOUNG_DOMAIN_DAYS * DAY_MS;
+
+/** Link-age lookups in flight, by domain: verdicts that ask at once share one. */
+const linkAgeLookups = new Map<string, Promise<boolean | null>>();
+/** When a domain's lookup last failed: it is not asked again for LINK_AGE_FAILED_TTL_MS. */
+const linkAgeFailures = new Map<string, number>();
+/** Domains a verdict had no room to look up, looked up one at a time in the background. */
+const linkAgeBacklog = new Set<string>();
+let linkAgeDraining = false;
+
+/** One lookup, written to the shared cache: whether the domain is young, null when it failed. */
+function lookUpLinkAge(
+  db: Db,
+  resolver: DomainAgeResolver,
+  domain: string,
+  at: Date,
+): Promise<boolean | null> {
+  const running = linkAgeLookups.get(domain);
+  if (running) return running;
+  const lookup = (async () => {
+    try {
+      const age = await resolver.lookup(domain);
+      const row = {
+        domain,
+        registeredAt: age.registeredAt,
+        source: age.source,
+        checkedAt: new Date(),
+      };
+      const la = schema.linkDomainAges;
+      await db.insert(la).values(row).onConflictDoUpdate({ target: la.domain, set: row });
+      return young(age.registeredAt, at);
+    } catch {
+      const failedAt = Date.now();
+      if (linkAgeFailures.size >= LINK_AGE_BACKLOG_MAX) {
+        for (const [d, t] of linkAgeFailures) {
+          if (t < failedAt - LINK_AGE_FAILED_TTL_MS) linkAgeFailures.delete(d);
+        }
+      }
+      linkAgeFailures.set(domain, failedAt);
+      return null;
+    } finally {
+      linkAgeLookups.delete(domain);
+    }
+  })();
+  linkAgeLookups.set(domain, lookup);
+  return lookup;
+}
+
+function queueLinkAges(
+  db: Db,
+  resolver: DomainAgeResolver,
+  domains: readonly string[],
+  at: Date,
+): void {
+  for (const domain of domains) {
+    if (linkAgeBacklog.size < LINK_AGE_BACKLOG_MAX) linkAgeBacklog.add(domain);
+  }
+  if (linkAgeDraining) return;
+  linkAgeDraining = true;
+  void (async () => {
+    try {
+      // A Set's iterator visits what is added while it runs.
+      for (const domain of linkAgeBacklog) {
+        linkAgeBacklog.delete(domain);
+        await lookUpLinkAge(db, resolver, domain, at);
+      }
+    } finally {
+      linkAgeDraining = false;
+    }
+  })();
 }
 
 /**
  * Whether any of these link domains was registered under YOUNG_DOMAIN_DAYS
- * before `at`, by a cache every team shares; what it lacks is looked up,
- * waiting at most `budgetMs`, and a lookup still running then fills the
- * cache for the next verdict. An unknown age is not young, and a free
- * host's names, which no registry dates (only their first certificate),
- * and shorteners are never looked up.
+ * before `at`: true as soon as one is known to be, false once every one is
+ * known not to be, null while an age is not known (its lookup failed in the
+ * last hour, ran past `budgetMs`, or waits in the background beyond the
+ * LINK_AGE_LOOKUPS_PER_VERDICT this verdict asks). Ages live in a cache every
+ * team shares, and a lookup still running fills it for the next verdict. A
+ * free host's names, which no registry dates (only their first
+ * certificate), and shorteners are never looked up; an age no source has is
+ * not young.
  */
 export async function anyYoungLinkDomain(
   db: Db,
@@ -242,11 +439,13 @@ export async function anyYoungLinkDomain(
   domains: readonly string[],
   at: Date,
   opts: { budgetMs: number },
-): Promise<boolean> {
+): Promise<boolean | null> {
   const la = schema.linkDomainAges;
-  const datable = domains.filter(
-    (d) => !isShortener(d) && registrableDomain(d) === d && ownerDomain(d) === d,
-  );
+  const datable = [
+    ...new Set(
+      domains.filter((d) => !isShortener(d) && registrableDomain(d) === d && ownerDomain(d) === d),
+    ),
+  ];
   if (datable.length === 0) return false;
   const cached = await db
     .select({ domain: la.domain, registeredAt: la.registeredAt })
@@ -260,54 +459,66 @@ export async function anyYoungLinkDomain(
         ),
       ),
     );
-  const young = (registeredAt: Date | null) =>
-    registeredAt !== null && at.getTime() - registeredAt.getTime() < YOUNG_DOMAIN_DAYS * DAY_MS;
-  if (cached.some((row) => young(row.registeredAt))) return true;
+  if (cached.some((row) => young(row.registeredAt, at))) return true;
   const missing = datable.filter((d) => !cached.some((row) => row.domain === d));
-  if (missing.length === 0) return false;
-  const lookups = missing.map(async (domain) => {
-    try {
-      const age = await resolver.lookup(domain);
-      const row = {
-        domain,
-        registeredAt: age.registeredAt,
-        source: age.source,
-        checkedAt: new Date(),
-      };
-      await db.insert(la).values(row).onConflictDoUpdate({ target: la.domain, set: row });
-      return young(age.registeredAt);
-    } catch {
-      // A registry that failed is asked again by the next verdict.
-      return false;
+  const failedSince = Date.now() - LINK_AGE_FAILED_TTL_MS;
+  const askable = missing.filter((d) => (linkAgeFailures.get(d) ?? 0) <= failedSince);
+  const asked = askable.slice(0, LINK_AGE_LOOKUPS_PER_VERDICT);
+  const later = askable.slice(LINK_AGE_LOOKUPS_PER_VERDICT);
+  if (later.length > 0) queueLinkAges(db, resolver, later, at);
+  let unknown = askable.length < missing.length || later.length > 0;
+  if (asked.length === 0) return unknown ? null : false;
+  return new Promise((resolve) => {
+    let left = asked.length;
+    const timer = setTimeout(() => resolve(null), opts.budgetMs);
+    timer.unref?.();
+    for (const domain of asked) {
+      void lookUpLinkAge(db, resolver, domain, at).then((found) => {
+        if (found === true) {
+          clearTimeout(timer);
+          resolve(true);
+          return;
+        }
+        if (found === null) unknown = true;
+        left -= 1;
+        if (left === 0) {
+          clearTimeout(timer);
+          resolve(unknown ? null : false);
+        }
+      });
     }
   });
-  const answered = Promise.all(lookups).then((found) => found.some(Boolean));
-  const timeout = new Promise<boolean>((resolve) => {
-    setTimeout(() => resolve(false), opts.budgetMs).unref?.();
-  });
-  return Promise.race([answered, timeout]);
 }
 
-/** A team's monitor tier as screening reads it: with the usage history, so a quiet old team is not new. */
+/**
+ * What screening reads of a team, once per send: its monitor tier, and
+ * whether it is in its first window, both with the usage history so a quiet
+ * old team is not new. An exempt team never has a first window.
+ */
+export interface ScreeningTeam {
+  tier: MonitorTier;
+  firstWindow: boolean;
+}
+
+export async function screeningTeam(
+  db: Db,
+  s: MonitorSettings,
+  teamId: string,
+  now: Date,
+): Promise<ScreeningTeam> {
+  const state = await loadMonitorState(db, await monitorRowWithHistory(db, teamId, now), now);
+  const tier = monitorTier(state, s, now);
+  return { tier, firstWindow: tier !== "exempt" && inFirstWindow(state, s, now) };
+}
+
+/** A team's monitor tier as screening reads it (see screeningTeam). */
 export async function screeningTier(
   db: Db,
   s: MonitorSettings,
   teamId: string,
   now: Date,
 ): Promise<MonitorTier> {
-  const row = await monitorRowWithHistory(db, teamId, now);
-  return monitorTier(await loadMonitorState(db, row, now), s, now);
-}
-
-/** Whether the team is in its first window as screening reads it: with the usage history. */
-export async function screeningFirstWindow(
-  db: Db,
-  s: MonitorSettings,
-  teamId: string,
-  now: Date,
-): Promise<boolean> {
-  const row = await monitorRowWithHistory(db, teamId, now);
-  return inFirstWindow(await loadMonitorState(db, row, now), s, now);
+  return (await screeningTeam(db, s, teamId, now)).tier;
 }
 
 /**
@@ -340,17 +551,26 @@ export async function sendingDomainYoung(
   );
 }
 
+/** What screening reads of one email before SES. */
+export interface ScreeningRead {
+  /** Why it is judged before SES; empty when it is not. */
+  reasons: ScreenReason[];
+  /** Its destinations the team has not cleared. */
+  novel: string[];
+  /** It carries a destination cleared within its probation: judged after the send, always. */
+  probation: boolean;
+}
+
 /**
- * Why this email is judged before SES; empty when it is not. Every reason
- * is decided here, so one more is one more branch. A broadcast's own HTML
- * and its first copy are screened at its fan-out: a copy here only for the
- * destinations its contact fields put in it, which the HTML does not carry.
- * Links read from files count as destinations at every tier; files and an
- * opaque body screen a transactional email while its team is new.
+ * Why this email is judged before SES. Every reason is decided here, so one
+ * more is one more branch. A broadcast's own HTML and its first copy are
+ * screened at its fan-out: a copy here only for the destinations its
+ * contact fields put in it, which the HTML does not carry. Links read from
+ * files count as destinations at every tier; files and an opaque body
+ * screen a transactional email while its team is new.
  */
 export async function screeningReasons(
   db: Db,
-  s: MonitorSettings,
   input: {
     email: { teamId: string; broadcastId: string | null; replyTo: readonly string[] | null };
     /** The decrypted body; without it no destination is read. */
@@ -358,38 +578,37 @@ export async function screeningReasons(
     media?: SendMedia | undefined;
     /** The platform's own hosts, which are nobody's destination. */
     ignore?: ReadonlySet<string> | undefined;
+    team: ScreeningTeam;
     now: Date;
   },
-): Promise<ScreenReason[]> {
-  const { email, now } = input;
-  const reasons: ScreenReason[] = [];
-  const [team] = await db
-    .select({ plan: schema.teams.plan })
-    .from(schema.teams)
-    .where(eq(schema.teams.id, email.teamId));
-  if (team?.plan === "system") return reasons;
+): Promise<ScreeningRead> {
+  const { email, team, now } = input;
+  const read: ScreeningRead = { reasons: [], novel: [], probation: false };
+  if (team.tier === "exempt") return read;
   if (email.broadcastId === null) {
-    const row = await monitorRowWithHistory(db, email.teamId, now);
-    const state = await loadMonitorState(db, row, now);
-    if (inFirstWindow(state, s, now)) reasons.push("first_window");
+    if (team.firstWindow) read.reasons.push("first_window");
     const { media } = input;
-    if (media && (media.attachments > 0 || media.opaque) && monitorTier(state, s, now) === "new") {
-      reasons.push("media");
+    if (media && (media.attachments > 0 || media.opaque) && team.tier === "new") {
+      read.reasons.push("media");
     }
   }
   if (input.body) {
-    let novel = await teamNovelDestinations(db, {
+    const standing = await teamDestinationStanding(db, {
       teamId: email.teamId,
       html: input.body.html,
       text: input.body.text,
       replyTo: email.replyTo,
       links: input.media?.links,
       ignore: input.ignore,
+      now,
     });
+    read.novel = standing.novel;
+    // A broadcast's own HTML is judged at its fan-out, its probation too.
+    read.probation = email.broadcastId === null && standing.probation.length > 0;
     // ponytail: two small reads per copy of a broadcast that links off the
     // team's domains; cache the broadcast's own destinations per process if
     // large fan-outs make them show.
-    if (novel.length > 0 && email.broadcastId) {
+    if (read.novel.length > 0 && email.broadcastId) {
       const [broadcast] = await db
         .select({
           html: schema.broadcasts.html,
@@ -409,11 +628,11 @@ export async function screeningReasons(
             })
           : [],
       );
-      novel = novel.filter((d) => !own.has(d));
+      read.novel = read.novel.filter((d) => !own.has(d));
     }
-    if (novel.length > 0) reasons.push("destination");
+    if (read.novel.length > 0) read.reasons.push("destination");
   }
-  return reasons;
+  return read;
 }
 
 /**
@@ -467,47 +686,121 @@ async function unanswered(
 }
 
 /** Whether an answered screening sample's media parks what waits on it (mediaParks). */
-async function mediaParksSample(
-  db: Db,
-  s: MonitorSettings,
-  sample: Sample,
-  now: Date,
-): Promise<boolean> {
-  if (sample.status === "pending" || !sample.mediaIssues?.length) return false;
-  return mediaParks(sample.mediaIssues, await screeningTier(db, s, sample.teamId, now));
+function mediaParksSample(sample: Sample, tier: MonitorTier): boolean {
+  return sample.status !== "pending" && mediaParks(sample.mediaIssues, tier);
 }
 
 export type ScreenDecision =
   /**
    * Send now. `sample` is the email's screening sample when it has one: no
    * second sample is drawn after the send, and one the judge never answered
-   * is judged then (`unjudged`), as unscreened mail is.
+   * is judged then (`unjudged`), as unscreened mail is. `probation`: it
+   * carries a destination cleared within its probation, so the send is
+   * always judged afterwards.
    */
-  | { action: "send"; sample: { id: string; unjudged: boolean } | null }
+  | {
+      action: "send";
+      sample: { id: string; unjudged: boolean } | null;
+      probation?: boolean | undefined;
+    }
   /** Wait: run the send again at `until`, or when the judge re-queues it (null). */
   | { action: "wait"; until: Date | null }
   /**
    * It waits for an operator: the judge kept failing on a young domain's
    * email ("screening"), read a team past new's mail to a new destination as
-   * phishing ("destination"), or could not clear its images or files
-   * ("media", see mediaParks; a new team's flagged file parks on the send
-   * path's own read, before any verdict).
+   * phishing, or it carries more new destinations than a verdict can vouch
+   * for ("destination"), or its images or files were not cleared ("media",
+   * see mediaParks; a new team's flagged file parks on the send path's own
+   * read, before any verdict).
    */
   | { action: "park"; reason: ScreenParkReason };
 
 const SEND_UNSCREENED: ScreenDecision = { action: "send", sample: null };
 
 /**
+ * Starts screening an email that has a reason and no sample: more new
+ * destinations than NOVEL_DESTINATIONS_MAX park for an operator unjudged; a
+ * team with SCREEN_OUTSTANDING_MAX samples already waiting on the judge
+ * waits its turn; one past its DESTINATION_SCREENS_PER_DAY waits for the
+ * next UTC day when a new destination is the only reason. None of these
+ * ever sends the email unscreened.
+ */
+async function startScreening(
+  db: Db,
+  deps: MonitorDeps,
+  s: MonitorSettings,
+  input: {
+    email: { id: string; teamId: string; broadcastId: string | null };
+    read: ScreeningRead;
+    unsafe: boolean;
+    now: Date;
+  },
+): Promise<ScreenDecision> {
+  const { email, read, now } = input;
+  if (read.novel.length > NOVEL_DESTINATIONS_MAX) return { action: "park", reason: "destination" };
+  const unsafe = read.reasons.includes("media") && input.unsafe;
+  const [outstanding] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(ms)
+    .where(and(eq(ms.teamId, email.teamId), eq(ms.status, "pending"), eq(ms.screening, true)));
+  const full = (outstanding?.n ?? 0) >= SCREEN_OUTSTANDING_MAX;
+  if (full && !unsafe) return { action: "wait", until: new Date(now.getTime() + SCREEN_RETRY_MS) };
+  let destination = read.reasons.includes("destination");
+  if (destination && !full) {
+    const [screened] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(ms)
+      .where(
+        and(
+          eq(ms.teamId, email.teamId),
+          gte(ms.createdAt, new Date(`${utcDay(now)}T00:00:00Z`)),
+          eq(ms.screening, true),
+          inArray(ms.kind, ["destination", "broadcast_copy"]),
+        ),
+      );
+    if ((screened?.n ?? 0) >= DESTINATION_SCREENS_PER_DAY) {
+      // Another reason screens it anyway, as that reason's sample.
+      if (read.reasons.length === 1 && !unsafe) {
+        return { action: "wait", until: nextUtcDayStart(now) };
+      }
+      destination = false;
+    }
+  }
+  if (!full) {
+    await recordMonitorSample(db, deps, s, {
+      teamId: email.teamId,
+      emailId: email.id,
+      broadcastId: email.broadcastId,
+      kind: email.broadcastId
+        ? "broadcast_copy"
+        : destination
+          ? "destination"
+          : read.reasons.includes("first_window")
+            ? "first_sends"
+            : "anomaly",
+      now,
+      screening: true,
+    });
+  }
+  // The file waits for a person whatever the verdict; the judge still reads
+  // it, for the hold and for the review list, when it has room.
+  if (unsafe) return { action: "park", reason: "media" };
+  return { action: "wait", until: null };
+}
+
+/**
  * The gate in front of SES for one queued customer email, on when the
  * judge (`deps`) and the auto-hold are. An email with a screening reason
- * and no verdict waits for one; a phishing-type verdict that held nothing
- * waits SCREEN_HOLD_WAIT_MS more in the team's first window, in case the
- * burst it belongs to holds the team; mail to a new destination of a team
- * past new parks on a verdict that destinationVerdictParks; a judge that
- * keeps failing parks a young domain's email and lets an older one's
- * through; media the judge could not clear parks as mediaParks says. The
- * team's own standing (a hold, a pause) is the caller's to read first, on
- * every pass.
+ * and no verdict waits for one (startScreening); a phishing-type verdict
+ * that held nothing waits SCREEN_HOLD_WAIT_MS more while its team is new
+ * (first-window mail, broadcast copies, and mail whose new link domain's age
+ * is not known), in case the burst it belongs to holds the team; mail to a
+ * new destination of a team past new parks on a verdict that
+ * destinationVerdictParks; a judge that keeps failing parks a young
+ * domain's email and lets an older one's through; media the judge could not
+ * clear parks as mediaParks says. The team's own standing (a hold, a pause)
+ * is the caller's to read first, on every pass; `team` is what it already
+ * read of the team this pass.
  */
 export async function screenBeforeSend(
   db: Db,
@@ -524,6 +817,7 @@ export async function screenBeforeSend(
     body: { html: string | null; text: string | null };
     media?: SendMedia | undefined;
     ignore?: ReadonlySet<string> | undefined;
+    team?: ScreeningTeam | undefined;
     now: Date;
   },
 ): Promise<ScreenDecision> {
@@ -541,60 +835,47 @@ export async function screenBeforeSend(
   if (email.screenReleasedAt) {
     return {
       action: "send",
-      sample: sample?.screening ? { id: sample.id, unjudged: false } : null,
+      sample: sample?.screening ? { id: sample.id, unjudged: sample.status !== "judged" } : null,
     };
   }
+  const team = input.team ?? (await screeningTeam(db, s, email.teamId, now));
   if (!sample?.screening) {
-    const reasons = await screeningReasons(db, s, input);
-    if (reasons.length === 0) return SEND_UNSCREENED;
-    if (sample) {
-      // A rendered copy drawn at fan-out: the email now waits on its verdict.
-      await db.update(ms).set({ screening: true }).where(eq(ms.id, sample.id));
-      sample.screening = true;
-      if (sample.status === "pending") {
-        await deps.enqueueJudge(sample.id, { teamId: email.teamId, screening: true });
-        return { action: "wait", until: null };
-      }
-    } else {
-      const novelty = reasons.includes("destination");
-      const id = await recordMonitorSample(db, deps, s, {
-        teamId: email.teamId,
-        emailId: email.id,
-        broadcastId: email.broadcastId,
-        kind: novelty
-          ? "destination"
-          : reasons.includes("first_window")
-            ? "first_sends"
-            : "anomaly",
+    const read = await screeningReasons(db, { ...input, team });
+    if (read.reasons.length === 0) {
+      return { action: "send", sample: null, probation: read.probation };
+    }
+    if (!sample) {
+      return startScreening(db, deps, s, {
+        email,
+        read,
+        unsafe: input.media?.unsafe === true,
         now,
-        screening: true,
-        novelty,
       });
-      // The file waits for a person whatever the verdict; the judge still
-      // reads it, for the hold and for the review list.
-      if (reasons.includes("media") && input.media?.unsafe) {
-        return { action: "park", reason: "media" };
-      }
-      // Past the team's daily cap the email goes unscreened, as the draw would.
-      return id ? { action: "wait", until: null } : SEND_UNSCREENED;
+    }
+    // A rendered copy drawn at fan-out: the email now waits on its verdict.
+    await db.update(ms).set({ screening: true }).where(eq(ms.id, sample.id));
+    sample.screening = true;
+    if (sample.status === "pending") {
+      await deps.enqueueJudge(sample.id, { teamId: email.teamId, screening: true });
+      return { action: "wait", until: null };
     }
   }
   const screened = { id: sample.id, unjudged: false };
   // Media that parks whatever the verdict parks now, a judge outage or not.
-  if (await mediaParksSample(db, s, sample, now)) return { action: "park", reason: "media" };
+  if (mediaParksSample(sample, team.tier)) return { action: "park", reason: "media" };
   const waiting = await unanswered(db, deps, sample, { domainId: email.domainId, now });
   if (waiting === "wait") return { action: "wait", until: null };
   if (waiting === "park") return { action: "park", reason: "screening" };
   if (waiting === "proceed") return { action: "send", sample: { id: sample.id, unjudged: true } };
   if (!isHoldVerdict(sample, s.holdRepeatScore)) return { action: "send", sample: screened };
-  if (sample.destinations?.length && destinationVerdictParks(sample, s)) {
-    const tier = await screeningTier(db, s, email.teamId, now);
-    if (tier !== "new") return { action: "park", reason: "destination" };
+  const destinations = sample.destinations?.length ?? 0;
+  if (destinations > 0 && destinationVerdictParks(sample, s) && team.tier !== "new") {
+    return { action: "park", reason: "destination" };
   }
-  if (
-    sample.judgedAt &&
-    (await screeningReasons(db, s, { email, body: null, now })).includes("first_window")
-  ) {
+  const waits = email.broadcastId
+    ? team.tier === "new"
+    : team.firstWindow || (team.tier === "new" && destinations > 0 && sample.linkYoung === null);
+  if (sample.judgedAt && waits) {
     const until = new Date(sample.judgedAt.getTime() + SCREEN_HOLD_WAIT_MS);
     if (now < until) return { action: "wait", until };
   }
@@ -617,7 +898,8 @@ export async function broadcastScreen(
   const [sample] = await db.select().from(ms).where(eq(ms.id, input.skeletonSampleId));
   if (!sample?.screening) return { action: "go" };
   const s = await deps.settings();
-  if (await mediaParksSample(db, s, sample, input.now)) return { action: "park", reason: "media" };
+  const tier = await screeningTier(db, s, sample.teamId, input.now);
+  if (mediaParksSample(sample, tier)) return { action: "park", reason: "media" };
   const waiting = await unanswered(db, deps, sample, input);
   if (waiting === "wait") return { action: "wait" };
   if (waiting === "park") return { action: "park", reason: "screening" };
@@ -625,14 +907,17 @@ export async function broadcastScreen(
     waiting === null &&
     sample.destinations?.length &&
     destinationVerdictParks(sample, s) &&
-    (await screeningTier(db, s, sample.teamId, input.now)) !== "new"
+    tier !== "new"
   ) {
     return { action: "park", reason: "destination" };
   }
   return { action: "go" };
 }
 
-/** A screened email that went out without a verdict is judged afterwards, as unscreened mail is. */
+/**
+ * A screened email that went out without a verdict, its sample unanswered
+ * or still waiting on the judge, is judged afterwards, as unscreened mail is.
+ */
 export async function judgeAfterSend(
   db: Db,
   deps: MonitorDeps,
@@ -641,7 +926,7 @@ export async function judgeAfterSend(
   const [rearmed] = await db
     .update(ms)
     .set({ status: "pending", screening: false, errorClass: null, judgedAt: null, attempts: 0 })
-    .where(and(eq(ms.id, sample.id), eq(ms.status, "unjudged")))
+    .where(and(eq(ms.id, sample.id), inArray(ms.status, ["pending", "unjudged"])))
     .returning({ id: ms.id });
   if (rearmed) await deps.enqueueJudge(rearmed.id, { teamId: sample.teamId, screening: false });
 }
@@ -654,8 +939,24 @@ const parkedForReview = (): SQL | undefined =>
     inArray(e.parkReason, ["review", ...OPERATOR_PARK_REASONS]),
   );
 
-function scope(teamId: string, emailIds: readonly string[] | undefined): SQL | undefined {
-  return and(eq(e.teamId, teamId), emailIds ? inArray(e.id, [...emailIds]) : undefined);
+/**
+ * Which of the team's waiting emails an operator acts on: the ones named, or
+ * every one parked by `parkedBefore` (the moment they were shown the list),
+ * so mail parked after they looked is never released unseen; all of them
+ * when neither is given.
+ */
+interface Selection {
+  teamId: string;
+  emailIds?: readonly string[] | undefined;
+  parkedBefore?: Date | undefined;
+}
+
+function scope(input: Selection): SQL | undefined {
+  return and(
+    eq(e.teamId, input.teamId),
+    input.emailIds ? inArray(e.id, [...input.emailIds]) : undefined,
+    input.parkedBefore ? or(isNull(e.parkedAt), lte(e.parkedAt, input.parkedBefore)) : undefined,
+  );
 }
 
 /**
@@ -664,7 +965,7 @@ function scope(teamId: string, emailIds: readonly string[] | undefined): SQL | u
  */
 async function waitingOnVerdict(
   db: Db,
-  input: { teamId: string; emailIds?: readonly string[] | undefined; holdLine: number },
+  input: Selection & { holdLine: number },
 ): Promise<string[]> {
   const rows = await db
     .select({
@@ -678,7 +979,9 @@ async function waitingOnVerdict(
     .innerJoin(ms, and(eq(ms.emailId, e.id), eq(ms.screening, true)))
     .where(
       and(
-        scope(input.teamId, input.emailIds),
+        eq(e.teamId, input.teamId),
+        input.emailIds ? inArray(e.id, [...input.emailIds]) : undefined,
+        input.parkedBefore ? lte(ms.judgedAt, input.parkedBefore) : undefined,
         eq(e.latestStatus, "queued"),
         isNull(e.sentAt),
         isNull(e.screenReleasedAt),
@@ -693,30 +996,41 @@ async function waitingOnVerdict(
  * being screened again. Parked rows lose their park reason, so quota.drain
  * releases them, charging the plan and the warm-up as for any parked row;
  * rows waiting out a verdict are returned for the caller to queue now. Mail
- * a review hold parks is released with the hold, never here.
+ * a review hold parks is released with the hold, never here. Releasing mail
+ * a new destination parked, or a verdict's short wait, clears the
+ * destinations it carries; a park for media or a failing judge vouches for
+ * none.
  */
 export async function releaseWaitingEmails(
   db: Db,
-  input: {
-    teamId: string;
-    emailIds?: readonly string[] | undefined;
-    holdLine: number;
-    now?: Date;
-  },
+  input: Selection & { holdLine: number; now?: Date },
 ): Promise<{ parked: number; queued: string[] }> {
   const now = input.now ?? new Date();
-  const parked = await db
-    .update(e)
-    .set({ parkReason: null, screenReleasedAt: now })
-    .where(
-      and(
-        scope(input.teamId, input.emailIds),
-        eq(e.latestStatus, "queued_quota"),
-        isNull(e.sentAt),
-        inArray(e.parkReason, [...OPERATOR_PARK_REASONS]),
-      ),
-    )
-    .returning({ id: e.id });
+  const operatorParked = and(
+    eq(e.latestStatus, "queued_quota"),
+    isNull(e.sentAt),
+    inArray(e.parkReason, [...OPERATOR_PARK_REASONS]),
+  );
+  const candidates = await db
+    .select({ id: e.id, parkReason: e.parkReason })
+    .from(e)
+    .where(and(scope(input), operatorParked));
+  const parked =
+    candidates.length === 0
+      ? []
+      : await db
+          .update(e)
+          .set({ parkReason: null, screenReleasedAt: now })
+          .where(
+            and(
+              inArray(
+                e.id,
+                candidates.map((row) => row.id),
+              ),
+              operatorParked,
+            ),
+          )
+          .returning({ id: e.id });
   const waiting = await waitingOnVerdict(db, input);
   const queued =
     waiting.length === 0
@@ -726,18 +1040,24 @@ export async function releaseWaitingEmails(
           .set({ screenReleasedAt: now })
           .where(and(inArray(e.id, waiting), eq(e.latestStatus, "queued"), isNull(e.sentAt)))
           .returning({ id: e.id });
-  // The operator vouched for where the mail leads: those destinations clear.
-  const released = [...parked, ...queued].map((row) => row.id);
-  if (released.length > 0) {
+  const released = new Set(parked.map((row) => row.id));
+  const vouched = [
+    ...candidates
+      .filter((row) => row.parkReason === "destination" && released.has(row.id))
+      .map((row) => row.id),
+    ...queued.map((row) => row.id),
+  ];
+  if (vouched.length > 0) {
     const samples = await db
       .select({ destinations: ms.destinations })
       .from(ms)
-      .where(and(inArray(ms.emailId, released), eq(ms.screening, true)));
+      .where(and(inArray(ms.emailId, vouched), eq(ms.screening, true)));
     await clearDestinations(
       db,
       input.teamId,
       [...new Set(samples.flatMap((row) => row.destinations ?? []))],
       now,
+      { operator: true },
     );
   }
   return { parked: parked.length, queued: queued.map((row) => row.id) };
@@ -749,7 +1069,7 @@ export async function releaseWaitingEmails(
  */
 export async function cancelWaitingEmails(
   db: Db,
-  input: { teamId: string; emailIds?: readonly string[] | undefined; holdLine: number },
+  input: Selection & { holdLine: number },
 ): Promise<number> {
   const waiting = await waitingOnVerdict(db, input);
   return db.transaction(async (tx) => {
@@ -759,7 +1079,7 @@ export async function cancelWaitingEmails(
       .set({ latestStatus: "canceled" })
       .where(
         or(
-          and(scope(input.teamId, input.emailIds), parkedForReview()),
+          and(scope(input), parkedForReview()),
           waiting.length === 0
             ? undefined
             : and(inArray(e.id, waiting), eq(e.latestStatus, "queued"), isNull(e.sentAt)),

@@ -115,13 +115,25 @@ it("sends what waited once the hold is released", async () => {
   expect(sent).toEqual(expect.arrayContaining(ids));
 });
 
-it("keeps it parked once the hold becomes a phishing suspension", async () => {
+it("cancels it once the hold becomes a phishing suspension, so no reinstatement drains it", async () => {
   const { teamId, ids } = await heldTeam("converted");
   await suspendTeam(db, { teamId, reason: "phishing" });
-  expect(await drain()).toEqual([]);
   for (const id of ids) {
     const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, id));
-    expect(row).toMatchObject({ latestStatus: "queued_quota", sentAt: null });
-    expect(sent).not.toContain(id);
+    expect(row).toMatchObject({ latestStatus: "canceled", sentAt: null });
   }
+  const [audit] = await db
+    .select({ action: schema.auditLog.action, data: schema.auditLog.data })
+    .from(schema.auditLog)
+    .where(eq(schema.auditLog.teamId, teamId));
+  expect(audit).toMatchObject({
+    action: "screening.canceled",
+    data: { emails: ids.length, reason: "phishing" },
+  });
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: null, suspensionReason: null })
+    .where(eq(schema.teams.id, teamId));
+  expect(await drain()).toEqual([]);
+  expect(sent.filter((id) => ids.includes(id))).toEqual([]);
 });

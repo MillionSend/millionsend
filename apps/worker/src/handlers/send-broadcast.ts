@@ -24,6 +24,7 @@ import {
   type MailLocale,
   type MonitorDeps,
   makeUnsubscribeToken,
+  NOVEL_DESTINATIONS_MAX,
   nextUtcDayStart,
   PACING_HORIZON_MAX_RETENTION_DAYS,
   pacingHorizonDays,
@@ -40,10 +41,10 @@ import {
   reserveWarmup,
   roundUpToSlot,
   type ScreenParkReason,
-  screeningFirstWindow,
+  screeningTeam,
   segmentContactsWhere,
   substituteUnsubscribeUrl,
-  teamNovelDestinations,
+  teamDestinationStanding,
   utcDay,
   warmupCap,
 } from "@millionsend/core";
@@ -237,7 +238,8 @@ export async function sendBroadcast(
   // out: the standing read below then parks the fan-out.
   if (deps.monitor) {
     const s = await deps.monitor.settings().catch(() => null);
-    if (s && (await screeningFirstWindow(db, s, broadcast.teamId, new Date()))) {
+    const team = s ? await screeningTeam(db, s, broadcast.teamId, new Date()) : null;
+    if (team?.firstWindow) {
       await linkTeam(db, {
         teamId: broadcast.teamId,
         trigger: "send",
@@ -247,6 +249,7 @@ export async function sendBroadcast(
           html: broadcast.html,
           text: broadcast.text,
         },
+        tier: team.tier,
       });
     }
   }
@@ -358,27 +361,34 @@ export async function sendBroadcast(
 
   // The monitor judges the broadcast's own HTML once and a few rendered
   // copies: the expected count is `copies`, so the draw needs the audience
-  // size. Every step is best-effort. For a new team, or HTML that sends
-  // readers somewhere the team has not cleared, with the hold on, the walk
-  // writes no row until the HTML has its verdict; a new team's first copy
-  // waits for its own too: a contact field can carry a whole link.
+  // size. For a new team, or HTML that sends readers somewhere the team has
+  // not cleared, with the hold on, the walk writes no row until the HTML has
+  // its verdict; a new team's first copy waits for its own too: a contact
+  // field can carry a whole link. HTML with more new destinations than a
+  // verdict can vouch for parks every row for an operator unjudged. A
+  // failure here fails the walk, which is retried: never fanned out
+  // unscreened.
   let monitorCopies = 0;
   let monitorAudience = 0;
   let screenFirstCopy = false;
   let screenParked: ScreenParkReason | null = null;
   if (deps.monitor) {
-    try {
-      const novel = await teamNovelDestinations(db, {
-        teamId: broadcast.teamId,
-        html: broadcast.html,
-        text: broadcast.text,
-        replyTo: broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null,
-        ignore: deps.platformDomains,
-      });
+    const standing = await teamDestinationStanding(db, {
+      teamId: broadcast.teamId,
+      html: broadcast.html,
+      text: broadcast.text,
+      replyTo: broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null,
+      ignore: deps.platformDomains,
+      now: new Date(),
+    });
+    if (standing.novel.length > NOVEL_DESTINATIONS_MAX) {
+      screenParked = "destination";
+    } else {
       const plan = await planBroadcastSamples(db, deps.monitor, {
         teamId: broadcast.teamId,
         broadcastId: broadcast.id,
-        novel: novel.length > 0,
+        novel: standing.novel.length > 0,
+        probation: standing.probation.length > 0,
       });
       if (plan.copies > 0) {
         monitorAudience = audienceCount;
@@ -398,8 +408,6 @@ export async function sendBroadcast(
           plan.tier === "new" &&
           !(await firstCopyScreened(db, broadcast.id));
       }
-    } catch (err) {
-      console.error(`broadcast ${broadcast.id}: monitor skeleton skipped`, err);
     }
   }
   // Admission: the first `admitted` rows this walk writes get a job now; the
@@ -566,6 +574,8 @@ export async function sendBroadcast(
         // Quota reservation and email insert commit atomically (the quota
         // contract), same as the API accept path — a broadcast must not
         // bypass the plan's cap.
+        const firstCopy = screenFirstCopy;
+        const judgeNow: string[] = [];
         const accepted = await db.transaction(async (tx) => {
           // Insert before reserving: a conflict means a previous run already
           // fanned this contact out (and reserved quota for it), so a re-run
@@ -584,6 +594,7 @@ export async function sendBroadcast(
               subject: applyMergeFields(broadcast.subject, contact, { html: false }),
               latestStatus: paced || held || screenParked ? "queued_quota" : "queued",
               parkReason: screenParked ?? (held ? "warmup" : null),
+              parkedAt: screenParked ? new Date() : null,
               // The drip lives on the row: the send handler defers to it and
               // the reconcile sweep leaves a not-yet-due row alone instead of
               // re-enqueueing every throttled send each pass.
@@ -599,6 +610,23 @@ export async function sendBroadcast(
             })
             .returning({ id: schema.emails.id });
           if (!row) return null;
+          // The copy that waits for its own verdict is written with its
+          // sample or not at all: without one it would go out unscreened.
+          if (firstCopy && deps.monitor) {
+            await recordMonitorSample(
+              tx as unknown as Db,
+              { ...deps.monitor, enqueueJudge: async (id) => void judgeNow.push(id) },
+              await deps.monitor.settings(),
+              {
+                teamId: broadcast.teamId,
+                emailId: row.id,
+                broadcastId: broadcast.id,
+                kind: "broadcast_copy",
+                now: new Date(),
+                screening: true,
+              },
+            );
+          }
           if (paced || held || screenParked) return { id: row.id, parked: true };
           const txDb = tx as unknown as Db;
           const reservation = await reserveQuota(txDb, {
@@ -636,21 +664,26 @@ export async function sendBroadcast(
           nextSendMs += spacingMs;
           batch.push({ emailId: accepted.id, startAfter });
         }
-        if (
+        if (accepted && firstCopy && deps.monitor) {
+          screenFirstCopy = false;
+          for (const sampleId of judgeNow) {
+            await deps.monitor.enqueueJudge(sampleId, {
+              teamId: broadcast.teamId,
+              screening: true,
+            });
+          }
+        } else if (
           accepted &&
           deps.monitor &&
-          (screenFirstCopy ||
-            (monitorCopies > 0 &&
-              drawBroadcastCopy(
-                deps.monitor.samplingKey,
-                broadcast.id,
-                accepted.id,
-                monitorCopies,
-                monitorAudience,
-              )))
+          monitorCopies > 0 &&
+          drawBroadcastCopy(
+            deps.monitor.samplingKey,
+            broadcast.id,
+            accepted.id,
+            monitorCopies,
+            monitorAudience,
+          )
         ) {
-          const screening = screenFirstCopy;
-          screenFirstCopy = false;
           try {
             await recordMonitorSample(db, deps.monitor, await deps.monitor.settings(), {
               teamId: broadcast.teamId,
@@ -658,7 +691,6 @@ export async function sendBroadcast(
               broadcastId: broadcast.id,
               kind: "broadcast_copy",
               now: new Date(),
-              screening,
             });
           } catch (err) {
             console.error(`broadcast ${broadcast.id}: monitor copy skipped`, err);

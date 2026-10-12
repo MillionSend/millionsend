@@ -3945,7 +3945,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           }
           await txDb
             .update(schema.emails)
-            .set({ latestStatus: "queued_quota", parkReason: "review" })
+            .set({ latestStatus: "queued_quota", parkReason: "review", parkedAt: new Date() })
             .where(
               inArray(
                 schema.emails.id,

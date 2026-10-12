@@ -41,6 +41,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lte,
   or,
   type SQL,
   sql,
@@ -368,7 +369,12 @@ const mediaDigest = sql<string | null>`(${schema.emails.media}::jsonb ->> 'diges
  * images and files from as this one (a blast's copies), itself included
  * while it waits; none when it has no media review.
  */
-async function sameMediaParked(db: Db, teamId: string, emailId: string): Promise<string[]> {
+async function sameMediaParked(
+  db: Db,
+  teamId: string,
+  emailId: string,
+  parkedBefore?: Date,
+): Promise<string[]> {
   const e = schema.emails;
   const [own] = await db
     .select({ digest: mediaDigest })
@@ -387,6 +393,7 @@ async function sameMediaParked(db: Db, teamId: string, emailId: string): Promise
         isNull(e.sentAt),
         inArray(e.parkReason, [...OPERATOR_PARK_REASONS]),
         sql`${mediaDigest} = ${own.digest}`,
+        parkedBefore ? or(isNull(e.parkedAt), lte(e.parkedAt, parkedBefore)) : undefined,
       ),
     );
   return rows.map((row) => row.id);
@@ -394,19 +401,20 @@ async function sameMediaParked(db: Db, teamId: string, emailId: string): Promise
 
 /**
  * The review list's Release and its instance audit row: these emails of
- * the team, or every waiting one when none are named. A team held for
- * review is released with its hold, from its review page.
+ * the team, or every one parked by `parkedBefore`, when the operator was
+ * shown the list. A team held for review is released with its hold, from
+ * its review page.
  */
 async function releaseEmails(
   ctx: OperatorCtx,
   team: { id: string; name: string; suspendedAt: Date | null },
-  emailIds?: string[],
+  pick: { emailIds: string[] } | { parkedBefore: Date },
 ): Promise<{ released: number }> {
   if (team.suspendedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "held" });
-  if (emailIds?.length === 0) return { released: 0 };
+  if ("emailIds" in pick && pick.emailIds.length === 0) return { released: 0 };
   const released = await releaseWaitingEmails(ctx.db, {
     teamId: team.id,
-    emailIds,
+    ...pick,
     holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
   });
   for (const emailId of released.queued) await enqueueEmailSend(emailId);
@@ -422,6 +430,17 @@ async function releaseEmails(
   }
   return { released: count };
 }
+
+/** Which waiting emails an action takes: the ones named, or all parked by a time the operator saw. */
+const waitingPick = z
+  .object({
+    teamId: z.uuid(),
+    emailIds: z.array(z.uuid()).min(1).max(500).optional(),
+    parkedBefore: z.date().optional(),
+  })
+  .refine((input) => (input.emailIds === undefined) !== (input.parkedBefore === undefined), {
+    message: "emails_or_parked_before",
+  });
 
 export const consoleSafetyRouter = router({
   list: operatorProcedure
@@ -963,6 +982,7 @@ export const consoleSafetyRouter = router({
           registeredAt: ages.get(link.domain) ?? null,
         })),
         sameMedia: sameMedia.length,
+        asOf: now,
         releasable: team.suspendedAt === null,
         expiresAt: grant.expiresAt,
         viewCount: await countView(ctx, grant, now),
@@ -993,50 +1013,58 @@ export const consoleSafetyRouter = router({
                   sql`${g.expiresAt} > now()`,
                 ),
               );
-      return { groups, grants, contentReveal: contentRevealOn() };
+      // A Release or Cancel of "all" takes only what was parked by now.
+      return { groups, grants, contentReveal: contentRevealOn(), asOf: new Date() };
     }),
 
   /**
-   * Release: the emails go out without being screened again, every waiting
-   * one of the team when no ids are named. A team held for review is
-   * released with its hold, from its review page.
+   * Release: the emails go out without being screened again: the ones
+   * named, or every one parked by `parkedBefore`, the moment the list was
+   * read (its `asOf`). A team held for review is released with its hold,
+   * from its review page.
    */
   releaseWaiting: operatorProcedure
-    .input(z.object({ teamId: z.uuid(), emailIds: z.array(z.uuid()).min(1).max(500).optional() }))
+    .input(waitingPick)
     .mutation(async ({ ctx, input }) =>
-      releaseEmails(ctx, await loadTeam(ctx.db, input.teamId), input.emailIds),
+      releaseEmails(
+        ctx,
+        await loadTeam(ctx.db, input.teamId),
+        input.emailIds
+          ? { emailIds: input.emailIds }
+          : { parkedBefore: input.parkedBefore as Date },
+      ),
     ),
 
   /**
-   * Release every email of the team parked with the same media as this one,
-   * so a held blast clears in one step: the same release, the same audit row.
+   * Release every email of the team parked with the same media as this one
+   * by `parkedBefore` (when the panel was read), so a held blast clears in
+   * one step: the same release, the same audit row.
    */
   releaseSameMedia: operatorProcedure
-    .input(z.object({ teamId: z.uuid(), emailId: z.uuid() }))
+    .input(z.object({ teamId: z.uuid(), emailId: z.uuid(), parkedBefore: z.date() }))
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.teamId);
-      return releaseEmails(ctx, team, await sameMediaParked(ctx.db, team.id, input.emailId));
+      const emailIds = await sameMediaParked(ctx.db, team.id, input.emailId, input.parkedBefore);
+      return releaseEmails(ctx, team, { emailIds });
     }),
 
-  /** Cancel: the emails never go out, every waiting one of the team when no ids are named. */
-  cancelWaiting: operatorProcedure
-    .input(z.object({ teamId: z.uuid(), emailIds: z.array(z.uuid()).min(1).max(500).optional() }))
-    .mutation(async ({ ctx, input }) => {
-      const team = await loadTeam(ctx.db, input.teamId);
-      const canceled = await cancelWaitingEmails(ctx.db, {
-        ...input,
-        holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+  /** Cancel: the emails never go out: the ones named, or every one parked by `parkedBefore`. */
+  cancelWaiting: operatorProcedure.input(waitingPick).mutation(async ({ ctx, input }) => {
+    const team = await loadTeam(ctx.db, input.teamId);
+    const canceled = await cancelWaitingEmails(ctx.db, {
+      ...input,
+      holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+    });
+    if (canceled > 0) {
+      await auditOperator(ctx, {
+        teamId: null,
+        action: "screening.canceled",
+        target: { type: "team", id: team.id },
+        metadata: { team: team.name, emails: canceled },
       });
-      if (canceled > 0) {
-        await auditOperator(ctx, {
-          teamId: null,
-          action: "screening.canceled",
-          target: { type: "team", id: team.id },
-          metadata: { team: team.name, emails: canceled },
-        });
-      }
-      return { canceled };
-    }),
+    }
+    return { canceled };
+  }),
 
   clearFlag: operatorProcedure
     /** `afterGrantId` marks the clear as the verdict of a content reveal. */

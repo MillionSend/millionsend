@@ -805,10 +805,12 @@ judge's four lanes, and a screened email gets a 5 s timeout and one retry.
 When the judge still cannot answer, mail from a sending domain under 7 days
 old, or of unknown age, waits: the judge is tried again every 2 minutes, 3
 times, then the email is parked for the operator, who hears of it through
-the judge-health notice; any other mail is sent and judged afterwards. Past
-the team's daily sample cap, mail goes out unscreened. The rest of accepted
-mail is drawn after SES has taken it, at its tier's rate. Account mail and
-the onboarding email are never judged.
+the judge-health notice; any other mail is sent and judged afterwards. No
+daily cap lets mail that waits on a verdict through unjudged: the caps count
+and stop only draws made after sending. A team with 20 screenings waiting on
+the judge has its next mail wait its turn. The rest of accepted mail is
+drawn after SES has taken it, at its tier's rate. Account mail and the
+onboarding email are never judged.
 
 A judge failure of any kind (feature off, missing credentials, throttling,
 timeout, upstream error, unparseable answer, body already purged by
@@ -871,28 +873,43 @@ hold off, and the screening before SES with it.
 whatever the team's tier (Trusted included), when it carries a destination
 the team has not cleared: the owner domain of a link (a free host's
 `x.pages.dev` counts on its own) or of its Reply-To, less the team's
-verified domains. A verdict under 80 clears the message's destinations for
-the team for good, and so does an operator's release; a link shortener is
-never cleared. A broadcast is judged before its fan-out when its own HTML
-carries a new destination, and a rendered copy when a contact field put one
-there; mail that links only to the team's own domains never waits for this.
-When a new destination draws a phishing-type verdict from 80, its link
-domain's registration date is looked up, in a cache every team shares (a
-free host's names and shorteners are not dated, and an unknown date is not
-young). For a New-tier team, such a verdict on a link domain registered
-under 7 days ago holds the team. Past New, the mail is parked for the review
-list on a phishing-type verdict from 90, or from 80 with a link domain under
-7 days old, and the operator is mailed at most once a day per team; a team
-past New is never held automatically. These samples count against no daily
-cap.
+verified domains. A verdict under 70 that names nothing phishing-type clears
+the message's destinations for the team, when it carried 5 new ones at most;
+so does releasing mail parked for a new destination, or waiting after a
+verdict, while releasing mail parked for its media or a failing judge clears
+none. A link shortener is never cleared. For 7 days after a destination
+clears, every email to it is judged after it is sent, and a phishing-type
+verdict from 80 on one takes the clearance back: mail to it is judged before
+SES again, no verdict clears it again (an operator's release does), and the
+operator is mailed at most once a day per team. A message with more than 20
+new destinations is not judged: it waits for the operator. A broadcast is
+judged before its fan-out when its own HTML carries a new destination, and a
+rendered copy when a contact field put one there; mail that links only to
+the team's own domains never waits for this. When a new destination draws a
+phishing-type verdict from 80, its link domains' registration dates are
+looked up, in a cache every team shares: 3 per verdict, the rest in the
+background, and a failed lookup is not repeated for an hour (a free host's
+names and shorteners are not dated, and a date no registry has is not
+young). An age not known yet, because its lookup failed, ran past 10
+seconds or waits its turn, counts as young. For a New-tier team, such a
+verdict on a link domain registered under 7 days ago holds the team, and one
+of an age not known makes its mail wait 2 minutes. Past New, the mail is
+parked for the review list on a phishing-type verdict from 90, or from 80
+with a link domain under 7 days old or of an age not known, and the operator
+is mailed at most once a day per team; a team past New is never held
+automatically. These samples count against no daily cap; a team has 200 of
+them a day, past which its mail with a new destination waits for the next
+UTC day.
 
 **The review list.** Trust & safety lists every unsent email screening
 stopped, grouped by team: parked behind a review hold, waiting out its 2
 minutes, parked for a new destination, or parked after the judge kept
 failing. **Release** sends an email
 without screening it again (`quota.drain` charges it as any parked mail);
-**Cancel** means it never goes out. A held team's mail is released with its
-hold. The team's review page also lists its held unsent emails among the
+**Cancel** means it never goes out. **Release all** and **Cancel all** ask
+first, with the count, and take only mail held before the list was loaded.
+A held team's mail is released with its hold, and a suspension for anything
+else cancels it, so no later reinstatement sends it. The team's review page also lists its held unsent emails among the
 flagged ones, so a content access can name them.
 
 **Turning it on** (in the instance's `.env`, read by the worker and the
@@ -1031,8 +1048,8 @@ as its `MONITOR_*` environment variable until it is; the console wins.
 | `MONITOR_BROADCAST_COPIES` | 3 | Rendered copies judged per broadcast (plus the broadcast's own HTML), established and trusted teams |
 | `MONITOR_BROADCAST_COPIES_NEW` | 10 | The same for new, ramp and probation teams |
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | One anomaly (a failing link-domain, shortener or phishing-pattern check, under 100 characters of text carried by images or files, an attachment) multiplies the rate; two force the sample |
-| `MONITOR_TEAM_DAILY_CAP` | 600 | Judged messages per team per UTC day; past it sampling stops silently |
-| `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide; past it tier sampling stops, first sends and anomalies continue |
+| `MONITOR_TEAM_DAILY_CAP` | 600 | Draws after sending per team per UTC day; past it they stop silently. Mail judged before SES neither counts nor is capped |
+| `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide draws after sending; past it tier sampling stops, first sends and anomalies continue |
 | `MONITOR_FLAG_RISK` | 0.5 | The team gets the `monitor` flag and samples four times as much |
 | `MONITOR_ALERT_RISK` | 0.7 | The operator is emailed, once per team per day |
 | `MONITOR_PAUSE_RISK` | 0.85 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |

@@ -4,6 +4,7 @@ import {
   buildUnsubscribeUrl,
   bumpHourlyUsage,
   CREDENTIAL_MAIL_KINDS,
+  countDistinctRecipients,
   decryptEmailBody,
   deliverabilityHold,
   type EmailAttachment,
@@ -36,7 +37,7 @@ import {
   SYSTEM_MAIL_TAG,
   sampleAcceptedEmail,
   screenBeforeSend,
-  screeningFirstWindow,
+  screeningTeam,
   sentContentType,
   substituteUnsubscribeUrl,
   transitionQueueState,
@@ -316,17 +317,23 @@ async function parkQueued(
       to: "queued_quota",
     });
     if (!moved) return;
-    if (reason) {
-      await txDb
-        .update(schema.emails)
-        .set({ parkReason: reason })
-        .where(eq(schema.emails.id, email.id));
-    }
-    // Against the same counter accept charged: on a monthly plan that is the
-    // billing period, which the drain will charge again on release. The cap
-    // itself is irrelevant here, so the row is read as Cloud reads it.
+    const [row] = await txDb
+      .update(schema.emails)
+      .set({ parkReason: reason, parkedAt: new Date() })
+      .where(eq(schema.emails.id, email.id))
+      .returning({ to: schema.emails.to, cc: schema.emails.cc, bcc: schema.emails.bcc });
+    // Against the same counter accept charged, one unit per recipient as the
+    // drain charges again on release: on a monthly plan that is the billing
+    // period. The cap itself is irrelevant here, so the row is read as Cloud
+    // reads it.
     const quota = await fetchTeamQuota(txDb, email.teamId, true);
-    if (quota) await releaseQuota(txDb, { teamId: email.teamId, count: 1, quota });
+    if (quota && row) {
+      await releaseQuota(txDb, {
+        teamId: email.teamId,
+        count: countDistinctRecipients(row.to, row.cc, row.bcc),
+        quota,
+      });
+    }
   });
   console.warn(`email.send: ${why}, parked ${email.id}`);
 }
@@ -620,24 +627,26 @@ async function sendQueued(
   // read above, on this pass. Account mail and the fixed onboarding email are
   // never customer content, so they never wait.
   let screened: { id: string; unjudged: boolean } | null = null;
+  let probation = false;
   let media: SendMedia | null = null;
-  // A team in its first window that shares people, domains or this message
-  // with a team suspended for phishing is held before it sends anything.
-  if (deps.monitor && !systemMail && !platformSend && !email.broadcastId) {
-    const s = await deps.monitor.settings().catch(() => null);
-    if (s && (await screeningFirstWindow(db, s, email.teamId, new Date()))) {
+  if (deps.monitor && !systemMail && !platformSend) {
+    // Read once for the linkage check and the gate.
+    const settings = await deps.monitor.settings().catch(() => null);
+    const team = settings ? await screeningTeam(db, settings, email.teamId, new Date()) : undefined;
+    // A team in its first window that shares people, domains or this message
+    // with a team suspended for phishing is held before it sends anything.
+    if (team?.firstWindow && !email.broadcastId) {
       const linked = await linkTeam(db, {
         teamId: email.teamId,
         trigger: "send",
         message: { from: email.from, subject: email.subject, html: body.html, text: body.text },
+        tier: team.tier,
       });
       if (linked?.held) {
         await parkQueued(db, email, "team linked to a team suspended for phishing", "review");
         return "parked";
       }
     }
-  }
-  if (deps.monitor && !systemMail && !platformSend) {
     const files = attachments ?? [];
     const scan = files.length > 0 ? await scanAttachments(files, deps.media) : null;
     // Threads too busy to read a file say nothing about it: the job tries
@@ -654,6 +663,7 @@ async function sendQueued(
       body: { html: body.html, text: body.text },
       media,
       ignore: deps.platformDomains,
+      team,
       now: new Date(),
     });
     if (gate.action === "wait") {
@@ -672,6 +682,7 @@ async function sendQueued(
       return "parked";
     }
     screened = gate.sample;
+    probation = gate.probation === true;
   }
 
   // App-layer engagement tracking: when the domain has click or open tracking
@@ -1035,6 +1046,7 @@ async function sendQueued(
           teamId: email.teamId,
           emailId: email.id,
           broadcast: email.broadcastId !== null,
+          probation,
           anomalies:
             (insights?.checks.filter(
               (c) =>

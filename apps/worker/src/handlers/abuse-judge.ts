@@ -20,14 +20,16 @@ import {
   opaqueFacts,
   openAttachments,
   parseSingleSender,
+  revokeDestinations,
   SCREEN_JUDGE_TIMEOUT_MS,
   screeningTier,
   sendingDomainYoung,
+  teamDestinationStanding,
   teamMonitorOverview,
   teamMonitorRow,
-  teamNovelDestinations,
   utcDay,
   type VerdictOutcome,
+  verdictClearsDestinations,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -59,9 +61,10 @@ export interface JudgeDeps {
   platformDomains?: ReadonlySet<string> | undefined;
   /**
    * Whether any of these new destinations is a link domain registered under
-   * 7 days ago, by the shared cache and a bounded lookup; absent, none is.
+   * 7 days ago, by the shared cache and a bounded lookup, null while an age
+   * is not known (see core anyYoungLinkDomain); absent, none is.
    */
-  linkDomainYoung?: ((domains: readonly string[], at: Date) => Promise<boolean>) | undefined;
+  linkDomainYoung?: ((domains: readonly string[], at: Date) => Promise<boolean | null>) | undefined;
   /**
    * How images and files are read for the judge: the image reader (null
    * while ABUSE_VISION is off) and, in tests, the parsing threads and cache.
@@ -134,14 +137,16 @@ async function judgePending(
   const tier = await screeningTier(db, settings, sample.teamId, now);
   const media = await readMedia(loaded.input, loaded.files, tier, deps.media);
   const issues = media?.issues ?? [];
-  const destinations = await teamNovelDestinations(db, {
+  const standing = await teamDestinationStanding(db, {
     teamId: sample.teamId,
     html: loaded.input.html,
     text: loaded.input.text,
     replyTo: loaded.input.replyTo,
     links: media?.findings.links.map((link) => link.url),
     ignore: deps.platformDomains,
+    now,
   });
+  const destinations = standing.novel;
   const youngSendingDomain =
     (await sendingDomainYoung(db, { teamId: sample.teamId, ...loaded.sendingDomain }, now)) ===
     true;
@@ -204,7 +209,9 @@ async function judgePending(
   // Only a destination that drew a phishing-type verdict is dated.
   const linkYoung =
     destinations.length > 0 && isHoldVerdict(verdict, settings.holdRepeatScore)
-      ? ((await deps.linkDomainYoung?.(destinations, now)) ?? false)
+      ? deps.linkDomainYoung
+        ? await deps.linkDomainYoung(destinations, now)
+        : false
       : null;
   // The verdict and its fold commit together: a crash between them would
   // leave a judged row the retry skips and a risk that never saw it.
@@ -236,15 +243,31 @@ async function judgePending(
       score: verdict.score,
       verdict,
       kind: sample.kind,
+      broadcast: sample.broadcastId !== null,
       youngSendingDomain,
       youngLinkDomain: linkYoung === true,
       now,
     });
   });
   if (!outcome) return "skipped";
-  // A verdict under the repeat line vouches for where the message leads.
-  if (verdict.score < settings.holdRepeatScore) {
+  if (verdictClearsDestinations(verdict, destinations.length)) {
     await clearDestinations(db, sample.teamId, destinations, now);
+  }
+  // Mail to a destination that cleared within its probation, read as
+  // phishing: the clearance goes, and the operator hears of it.
+  if (standing.probation.length > 0 && isHoldVerdict(verdict, settings.holdRepeatScore)) {
+    const revoked = await revokeDestinations(db, sample.teamId, standing.probation, now);
+    if (revoked.length > 0) {
+      await notifyDestination(
+        db,
+        deps,
+        "monitor.destination_revoked",
+        sample.teamId,
+        verdict,
+        revoked,
+        now,
+      );
+    }
   }
   const destinationParks =
     sample.screening &&
@@ -253,7 +276,15 @@ async function judgePending(
     outcome.tier !== "exempt" &&
     destinationVerdictParks({ ...verdict, linkYoung }, settings);
   if (destinationParks) {
-    await notifyDestinationParked(db, deps, sample.teamId, verdict, destinations, now);
+    await notifyDestination(
+      db,
+      deps,
+      "monitor.destination_parked",
+      sample.teamId,
+      verdict,
+      destinations,
+      now,
+    );
   }
   if (waiting && (destinationParks || outcome.held)) await keepMedia();
   if ((outcome.alert || outcome.paused || outcome.held) && deps.mailer) {
@@ -319,12 +350,15 @@ async function resumeScreened(
 }
 
 /**
- * The operator hears once a day per team that mail to a new destination was
- * parked; the review list holds every parked email.
+ * The operator hears once a day per team, per kind, that mail to a new
+ * destination was parked, or that a cleared destination drew a
+ * phishing-type verdict and is new again; the review list holds every
+ * parked email.
  */
-async function notifyDestinationParked(
+async function notifyDestination(
   db: Db,
   deps: JudgeDeps,
+  kind: "monitor.destination_parked" | "monitor.destination_revoked",
   teamId: string,
   verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons">,
   destinations: readonly string[],
@@ -332,11 +366,7 @@ async function notifyDestinationParked(
 ): Promise<void> {
   if (!deps.mailer) return;
   try {
-    const claimed = await claimNotification(db, {
-      teamId,
-      kind: "monitor.destination_parked",
-      periodKey: utcDay(now),
-    });
+    const claimed = await claimNotification(db, { teamId, kind, periodKey: utcDay(now) });
     if (!claimed) return;
     const [team] = await db
       .select({ name: schema.teams.name })
@@ -345,7 +375,7 @@ async function notifyDestinationParked(
     await mailOperator(
       db,
       deps.mailer,
-      "monitor.destination_parked",
+      kind,
       "/console/safety",
       {
         team: team?.name ?? teamId,

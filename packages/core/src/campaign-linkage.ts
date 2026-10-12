@@ -2,8 +2,13 @@ import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { CampaignFingerprintKind, LinkMatch, LinkTrigger } from "@millionsend/db/schema";
-import { and, asc, desc, eq, gt, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
-import { loadMonitorState, monitorTier, teamMonitorRow } from "./abuse-monitor.js";
+import { and, asc, desc, eq, isNull, lt, notExists, or, sql } from "drizzle-orm";
+import {
+  loadMonitorState,
+  type MonitorTier,
+  monitorTier,
+  teamMonitorRow,
+} from "./abuse-monitor.js";
 import { clearAbuseMarks } from "./account-signups.js";
 import { recordAudit } from "./audit.js";
 import {
@@ -42,6 +47,51 @@ const STRONG_KINDS: ReadonlySet<CampaignFingerprintKind> = new Set(["address", "
 const cf = schema.campaignFingerprints;
 const links = schema.teamLinks;
 const failures = schema.campaignCaptureFailures;
+
+/** How long a process trusts its read of the phishing teams' fingerprints. */
+const PHISHING_PRINTS_TTL_MS = 5 * 60_000;
+
+interface PhishingPrint {
+  teamId: string;
+  teamName: string;
+  kind: CampaignFingerprintKind;
+  value: string;
+  /** The team's suspension, or the print's own time once the team is gone. */
+  since: Date;
+}
+
+/**
+ * The fingerprints of the teams suspended for phishing, which every send of
+ * a new team compares with, per database handle. A write here refreshes
+ * them in this process; another process's suspension or reinstatement
+ * reaches it within PHISHING_PRINTS_TTL_MS.
+ */
+const phishingPrintsRead = new WeakMap<Db, { at: number; prints: PhishingPrint[] }>();
+
+/** Drops this process's read of the phishing teams' fingerprints, after writing them elsewhere. */
+export function forgetPhishingPrints(db: Db): void {
+  phishingPrintsRead.delete(db);
+}
+
+async function phishingPrints(db: Db): Promise<PhishingPrint[]> {
+  const read = phishingPrintsRead.get(db);
+  if (read && Date.now() - read.at < PHISHING_PRINTS_TTL_MS) return read.prints;
+  const t = schema.teams;
+  const prints = await db
+    .select({
+      teamId: cf.teamId,
+      teamName: cf.teamName,
+      kind: cf.kind,
+      value: cf.value,
+      since: sql<Date>`coalesce(${t.suspendedAt}, ${cf.createdAt})`.mapWith(cf.createdAt),
+    })
+    .from(cf)
+    .leftJoin(t, eq(t.id, cf.teamId))
+    .where(or(isNull(t.id), eq(t.suspensionReason, "phishing")))
+    .orderBy(cf.kind, cf.value);
+  phishingPrintsRead.set(db, { at: Date.now(), prints });
+  return prints;
+}
 
 /**
  * The team's people: their mailboxes, and the IPs they signed up from,
@@ -218,6 +268,7 @@ export async function recordPhishingFingerprints(
       );
     }
   }
+  forgetPhishingPrints(db);
   return recorded;
 }
 
@@ -275,6 +326,7 @@ export async function recordMissingFingerprints(
  */
 export async function forgetAbuseRecords(db: Db, teamId: string): Promise<void> {
   await db.delete(cf).where(eq(cf.teamId, teamId));
+  forgetPhishingPrints(db);
   await db.delete(failures).where(eq(failures.teamId, teamId));
   await clearAbuseMarks(db, teamId);
 }
@@ -298,6 +350,7 @@ export async function purgeCampaignFingerprints(db: Db, now: Date = new Date()):
       ),
     )
     .returning({ id: cf.id });
+  forgetPhishingPrints(db);
   return purged.length;
 }
 
@@ -329,8 +382,10 @@ export interface TeamLinkResult {
  * hold policy must be on, and a team held once, or released by an operator
  * after any review hold, is not held again. Only new teams are compared.
  *
- * Safe to call on every send of a new team: with no team ever suspended for
- * phishing it costs one query, and a failure is logged, never thrown.
+ * Safe to call on every send of a new team: the phishing teams'
+ * fingerprints are read once every few minutes per process, so with none it
+ * costs no query, and a failure is logged, never thrown. `tier` is the
+ * team's monitor tier when the caller has read it this send.
  */
 export async function linkTeam(
   db: Db,
@@ -339,6 +394,7 @@ export async function linkTeam(
     trigger: LinkTrigger;
     message?: FingerprintMessage | undefined;
     cards?: readonly string[] | undefined;
+    tier?: MonitorTier | undefined;
     now?: Date | undefined;
   },
 ): Promise<TeamLinkResult | null> {
@@ -359,11 +415,15 @@ async function link(
     trigger: LinkTrigger;
     message?: FingerprintMessage | undefined;
     cards?: readonly string[] | undefined;
+    tier?: MonitorTier | undefined;
     now: Date;
   },
 ): Promise<TeamLinkResult | null> {
-  const [anyPrint] = await db.select({ id: cf.id }).from(cf).limit(1);
-  if (!anyPrint) return null;
+  const ipSince = daysBefore(input.now, IP_FINGERPRINT_RETENTION_DAYS);
+  const stored = (await phishingPrints(db)).filter(
+    (print) => print.teamId !== input.teamId && (print.kind !== "ip" || print.since > ipSince),
+  );
+  if (stored.length === 0) return null;
   const known = await db
     .select({
       linkedTeamId: links.linkedTeamId,
@@ -379,8 +439,9 @@ async function link(
     env as unknown as Record<string, unknown>,
   );
   const monitor = await teamMonitorRow(db, input.teamId);
-  const state = await loadMonitorState(db, monitor, input.now);
-  if (monitorTier(state, settings, input.now) !== "new") return null;
+  const tier =
+    input.tier ?? monitorTier(await loadMonitorState(db, monitor, input.now), settings, input.now);
+  if (tier !== "new") return null;
 
   const mine: Fingerprint[] = [
     ...(await peopleFingerprints(db, input.teamId)),
@@ -388,25 +449,7 @@ async function link(
     ...(input.cards ?? []).map((card) => fingerprint("card", card)),
     ...(input.message ? messageFingerprints(input.message) : []),
   ];
-  const t = schema.teams;
-  const stored = await db
-    .select({ teamId: cf.teamId, teamName: cf.teamName, kind: cf.kind, value: cf.value })
-    .from(cf)
-    .leftJoin(t, eq(t.id, cf.teamId))
-    .where(
-      and(
-        ne(cf.teamId, input.teamId),
-        or(isNull(t.id), eq(t.suspensionReason, "phishing")),
-        or(
-          ne(cf.kind, "ip"),
-          gt(
-            sql`coalesce(${t.suspendedAt}, ${cf.createdAt})`,
-            daysBefore(input.now, IP_FINGERPRINT_RETENTION_DAYS),
-          ),
-        ),
-      ),
-    )
-    .orderBy(cf.kind, cf.value);
+
   const found = new Map(
     known.map((row) => [
       row.linkedTeamId,

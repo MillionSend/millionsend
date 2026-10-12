@@ -508,6 +508,7 @@ await queue.scheduleCrons({
       mailer,
       appBaseUrl: env.APP_BASE_URL,
       state: monitorHealthState,
+      enqueueJudge: monitor?.enqueueJudge,
     });
     if (result.lost > 0 || result.degraded) {
       console.warn(

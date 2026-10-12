@@ -1426,6 +1426,33 @@ it("parks the email as queued_quota when SES refuses for its daily quota", async
   expect(counter?.accepted).toBe(4);
 });
 
+it("hands back one reservation per recipient when it parks, as the drain charges them", async () => {
+  const emailId = await insertEmail({
+    to: ["a@example.org", "b@example.org"],
+    cc: ["c@example.org", "A@example.org"],
+  });
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: utcDay(Date.now()), accepted: 5 })
+    .onConflictDoUpdate({
+      target: [schema.usageCounters.teamId, schema.usageCounters.day],
+      set: { accepted: 5 },
+    });
+  const ses: SesSender = {
+    async sendRaw() {
+      throw Object.assign(new Error("Daily message quota exceeded"), {
+        name: "TooManyRequestsException",
+      });
+    },
+  };
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("parked");
+  const [counter] = await db
+    .select({ accepted: schema.usageCounters.accepted })
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.accepted).toBe(2);
+});
+
 it("a rate refusal with quota headroom stays a retry; the same refusal at the ceiling parks", async () => {
   const rate = () =>
     Object.assign(new Error("Maximum sending rate exceeded"), {

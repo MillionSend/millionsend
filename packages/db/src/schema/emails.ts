@@ -138,6 +138,10 @@ export const emails = pgTable(
     // An operator released it from the review list: no screening reason
     // stops it again.
     screenReleasedAt: timestamp("screen_released_at", { withTimezone: true }),
+    // When it was last parked (null for mail parked before this was kept): a
+    // release of "everything shown" takes only mail parked before the
+    // operator looked.
+    parkedAt: timestamp("parked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp("sent_at", { withTimezone: true }),
   },

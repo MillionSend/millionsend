@@ -97,7 +97,7 @@ it("samples the skeleton once and the rendered copies by the keyed draw", async 
   ).toHaveLength(4);
 });
 
-it("fans out untouched when the monitor fails", async () => {
+it("fails the fan-out while the monitor fails, writing no row to go out unscreened", async () => {
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
     settings: async () => {
@@ -124,13 +124,11 @@ it("fans out untouched when the monitor fails", async () => {
       status: "scheduled",
     })
     .returning({ id: schema.broadcasts.id });
-  expect(await sendBroadcast(db, deps, { broadcastId: broadcast?.id ?? "" })).toBe("sent");
-  expect(enqueued).toHaveLength(3);
+  const broadcastId = broadcast?.id ?? "";
+  await expect(sendBroadcast(db, deps, { broadcastId })).rejects.toThrow("down");
+  expect(enqueued).toEqual([]);
   expect(
-    await db
-      .select()
-      .from(schema.monitorSamples)
-      .where(eq(schema.monitorSamples.broadcastId, broadcast?.id ?? "")),
+    await db.select().from(schema.emails).where(eq(schema.emails.broadcastId, broadcastId)),
   ).toEqual([]);
 });
 

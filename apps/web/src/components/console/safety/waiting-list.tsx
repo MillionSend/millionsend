@@ -26,7 +26,13 @@ const LINK_BUTTON: React.CSSProperties = {
   cursor: "pointer",
 };
 
-type Cancel = { teamId: string; team: string; emailIds?: string[]; count: number };
+type Confirm = {
+  action: "release" | "cancel";
+  teamId: string;
+  team: string;
+  emailIds?: string[];
+  count: number;
+};
 
 /**
  * The review list: unsent emails screening stopped before SES, grouped by
@@ -53,7 +59,7 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
   const reveal = useContentReveal({ onChanged: refetch });
   const release = useMutation(trpc.console.safety.releaseWaiting.mutationOptions());
   const cancel = useMutation(trpc.console.safety.cancelWaiting.mutationOptions());
-  const [confirm, setConfirm] = useState<Cancel | null>(null);
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
   const failed = (error: { message: string }) =>
     toast(t("toast.error", { message: error.message }), "danger");
 
@@ -70,13 +76,17 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
   const contentReveal = query.data?.contentReveal ?? false;
   const total = groups.reduce((n, group) => n + group.total, 0);
   const busy = release.isPending || cancel.isPending;
+  // "All" means what this list showed: mail parked after it was read stays.
+  const asOf = query.data?.asOf ?? new Date(0);
+  const pick = (emailIds?: string[]) => (emailIds ? { emailIds } : { parkedBefore: asOf });
 
-  const doRelease = (group: (typeof groups)[number], emailIds?: string[]) =>
+  const doRelease = (team: { id: string; name: string }, emailIds?: string[]) =>
     release.mutate(
-      { teamId: group.team.id, ...(emailIds ? { emailIds } : {}) },
+      { teamId: team.id, ...pick(emailIds) },
       {
         onSuccess: ({ released }) => {
-          toast(t("toast.released", { team: group.team.name, count: released }));
+          toast(t("toast.released", { team: team.name, count: released }));
+          setConfirm(null);
           refetch();
         },
         onError: failed,
@@ -101,10 +111,14 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
       media: true,
     });
   };
-  const doCancel = () => {
-    if (!confirm || cancel.isPending) return;
+  const doConfirm = () => {
+    if (!confirm || busy) return;
+    if (confirm.action === "release") {
+      doRelease({ id: confirm.teamId, name: confirm.team }, confirm.emailIds);
+      return;
+    }
     cancel.mutate(
-      { teamId: confirm.teamId, ...(confirm.emailIds ? { emailIds: confirm.emailIds } : {}) },
+      { teamId: confirm.teamId, ...pick(confirm.emailIds) },
       {
         onSuccess: ({ canceled }) => {
           toast(t("toast.canceled", { team: confirm.team, count: canceled }));
@@ -181,7 +195,14 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
                           className="ms-link"
                           style={LINK_BUTTON}
                           disabled={busy}
-                          onClick={() => doRelease(group)}
+                          onClick={() =>
+                            setConfirm({
+                              action: "release",
+                              teamId: group.team.id,
+                              team: group.team.name,
+                              count: group.total,
+                            })
+                          }
                         >
                           {t("releaseAll")}
                         </button>
@@ -194,6 +215,7 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
                         disabled={busy}
                         onClick={() =>
                           setConfirm({
+                            action: "cancel",
                             teamId: group.team.id,
                             team: group.team.name,
                             count: group.total,
@@ -257,7 +279,7 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
                             className="ms-link"
                             style={LINK_BUTTON}
                             disabled={busy}
-                            onClick={() => doRelease(group, [email.id])}
+                            onClick={() => doRelease(group.team, [email.id])}
                           >
                             {t("release")}
                           </button>
@@ -270,6 +292,7 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
                           disabled={busy}
                           onClick={() =>
                             setConfirm({
+                              action: "cancel",
                               teamId: group.team.id,
                               team: group.team.name,
                               emailIds: [email.id],
@@ -298,11 +321,14 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
       <Modal
         open={confirm !== null}
         onClose={() => setConfirm(null)}
-        onConfirm={doCancel}
-        title={t("cancelTitle", { count: confirm?.count ?? 1, team: confirm?.team ?? "" })}
+        onConfirm={doConfirm}
+        title={t(confirm?.action === "release" ? "releaseTitle" : "cancelTitle", {
+          count: confirm?.count ?? 1,
+          team: confirm?.team ?? "",
+        })}
       >
         <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>
-          {t("cancelLead")}
+          {t(confirm?.action === "release" ? "releaseLead" : "cancelLead")}
         </p>
         <ModalFooter>
           <button
@@ -313,16 +339,29 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
             {t("keep")}
             <span className="ms-keycap">Esc</span>
           </button>
-          <button
-            type="button"
-            className="ms-btn ms-btn-destructive"
-            disabled={cancel.isPending}
-            onClick={doCancel}
-          >
-            <BtnSpinner on={cancel.isPending} />
-            {t("cancelConfirm")}
-            <ConfirmKeycap />
-          </button>
+          {confirm?.action === "release" ? (
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              disabled={busy}
+              onClick={doConfirm}
+            >
+              <BtnSpinner on={release.isPending} />
+              {t("releaseConfirm")}
+              <ConfirmKeycap />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="ms-btn ms-btn-destructive"
+              disabled={busy}
+              onClick={doConfirm}
+            >
+              <BtnSpinner on={cancel.isPending} />
+              {t("cancelConfirm")}
+              <ConfirmKeycap />
+            </button>
+          )}
         </ModalFooter>
       </Modal>
       {actions.dialogs}

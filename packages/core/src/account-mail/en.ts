@@ -422,6 +422,15 @@ export const en = {
     button: "Open review list",
     muted: ["Sent to the instance operator at most once a day per team."],
   },
+  "monitor.destination_revoked": {
+    subject: "Content monitor: mail to a cleared destination was judged as phishing",
+    body: [
+      "{team} sent mail to {domain}, a destination its earlier mail had cleared in the last week, and the judge scored it {score} ({verdict}) after it went out. The destination is no longer cleared: mail to it is judged before sending again and waits on Trust & safety on a phishing-type verdict, and no verdict clears it again. Releasing mail to it from the review list does.",
+      "This alone does not hold the team: the rest of its mail flows, and it is not told.",
+    ],
+    button: "Open review list",
+    muted: ["Sent to the instance operator at most once a day per team."],
+  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 /** Sentences several kinds share, filled by the builders. */

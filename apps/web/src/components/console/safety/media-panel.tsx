@@ -76,9 +76,9 @@ export function MediaPanel({
   const expired = data !== undefined && left === 0;
   const errorMessage = query.error?.message;
 
-  const releaseSame = () =>
+  const releaseSame = (parkedBefore: Date) =>
     release.mutate(
-      { teamId: team.id, emailId },
+      { teamId: team.id, emailId, parkedBefore },
       {
         onSuccess: ({ released }) => {
           toast(waiting("toast.released", { team: team.name, count: released }));
@@ -298,7 +298,7 @@ export function MediaPanel({
             type="button"
             className="ms-btn ms-btn-primary"
             disabled={release.isPending}
-            onClick={releaseSame}
+            onClick={() => releaseSame(data.asOf)}
           >
             <BtnSpinner on={release.isPending} />
             {t("releaseSame", { count: data.sameMedia })}

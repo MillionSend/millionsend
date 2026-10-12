@@ -216,7 +216,7 @@ describe("console.safety.media", () => {
       code: "NOT_FOUND",
     });
     await expect(
-      member().console.safety.releaseSameMedia({ teamId, emailId }),
+      member().console.safety.releaseSameMedia({ teamId, emailId, parkedBefore: new Date() }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     vi.stubEnv("CONTENT_REVEAL", "off");
     await expect(operator().console.safety.media({ grantId, emailId })).rejects.toMatchObject({
@@ -326,7 +326,13 @@ describe("console.safety.releaseSameMedia", () => {
     const elsewhere = await parked(otherTeam, review());
     const drains = h.drains;
 
-    expect(await operator().console.safety.releaseSameMedia({ teamId, emailId: first })).toEqual({
+    expect(
+      await operator().console.safety.releaseSameMedia({
+        teamId,
+        emailId: first,
+        parkedBefore: new Date(),
+      }),
+    ).toEqual({
       released: 2,
     });
     const rows = await db
@@ -359,7 +365,13 @@ describe("console.safety.releaseSameMedia", () => {
     expect(audits.map((row) => row.data)).toEqual([{ team: "acme", emails: 2 }]);
 
     // Nothing left with that media: nothing released, nothing recorded.
-    expect(await operator().console.safety.releaseSameMedia({ teamId, emailId: first })).toEqual({
+    expect(
+      await operator().console.safety.releaseSameMedia({
+        teamId,
+        emailId: first,
+        parkedBefore: new Date(),
+      }),
+    ).toEqual({
       released: 0,
     });
   });
@@ -371,7 +383,7 @@ describe("console.safety.releaseSameMedia", () => {
       .set({ suspendedAt: new Date(), suspensionReason: "review" })
       .where(eq(schema.teams.id, teamId));
     await expect(
-      operator().console.safety.releaseSameMedia({ teamId, emailId }),
+      operator().console.safety.releaseSameMedia({ teamId, emailId, parkedBefore: new Date() }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "held" });
   });
 });

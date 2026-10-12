@@ -128,7 +128,9 @@ it("lists what screening stopped, grouped by team, and releases or cancels it", 
     operator().console.safety.releaseWaiting({ teamId: held, emailIds: [heldMail] }),
   ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
 
-  expect(await operator().console.safety.releaseWaiting({ teamId: open })).toEqual({
+  expect(
+    await operator().console.safety.releaseWaiting({ teamId: open, parkedBefore: new Date() }),
+  ).toEqual({
     released: 2,
   });
   expect(h.sent).toEqual([shortWait]);
@@ -196,10 +198,50 @@ it("lists mail parked for a new destination with it, and a release clears the de
   expect(groups[0]?.emails).toMatchObject([
     { id: parked?.id, why: "destination", score: 93, destinations: ["evil-pay.com"] },
   ]);
-  expect(await operator().console.safety.releaseWaiting({ teamId })).toEqual({ released: 1 });
+  expect(
+    await operator().console.safety.releaseWaiting({ teamId, parkedBefore: new Date() }),
+  ).toEqual({ released: 1 });
   const cleared = await db
     .select({ domain: schema.teamDestinations.domain })
     .from(schema.teamDestinations)
     .where(eq(schema.teamDestinations.teamId, teamId));
   expect(cleared).toEqual([{ domain: "evil-pay.com" }]);
+});
+
+it("releases only what the list showed: named emails, or those parked by the time it was read", async () => {
+  const teamId = await createTeam(db, "release-shown");
+  const park = async (parkedAt: Date) => {
+    const [row] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        from: "Team <a@release-shown.dev>",
+        to: ["r@example.org"],
+        subject: "s",
+        latestStatus: "queued_quota",
+        parkReason: "screening",
+        parkedAt,
+      })
+      .returning({ id: schema.emails.id });
+    return row?.id ?? "";
+  };
+  const shown = await park(new Date(Date.now() - 60_000));
+  const { asOf } = await operator().console.safety.waiting({ teamId });
+  const later = await park(new Date(asOf.getTime() + 1_000));
+  // "All" with nothing to bound it is refused.
+  await expect(operator().console.safety.releaseWaiting({ teamId })).rejects.toMatchObject({
+    code: "BAD_REQUEST",
+  });
+  await expect(operator().console.safety.cancelWaiting({ teamId })).rejects.toMatchObject({
+    code: "BAD_REQUEST",
+  });
+  expect(await operator().console.safety.releaseWaiting({ teamId, parkedBefore: asOf })).toEqual({
+    released: 1,
+  });
+  const reasons = await db
+    .select({ id: schema.emails.id, parkReason: schema.emails.parkReason })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, teamId));
+  expect(reasons.find((row) => row.id === shown)?.parkReason).toBeNull();
+  expect(reasons.find((row) => row.id === later)?.parkReason).toBe("screening");
 });

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import {
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   EnvKeyring,
+  forgetPhishingPrints,
   generateApiKey,
   hashApiKey,
   PLAN_DOMAIN_LIMIT,
@@ -1228,6 +1229,7 @@ describe("POST /domains and teams suspended for phishing", () => {
       kind: "sending_domain",
       value: "vexto-cadeaux.example",
     });
+    forgetPhishingPrints(db);
     const team = await createTeam(db, "newcomer-api");
     const token = await insertKey(team);
     const res = await call(makeApp({ client: fakeSes().client }), token, "POST", "/domains", {

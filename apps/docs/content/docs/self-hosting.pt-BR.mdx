@@ -978,9 +978,11 @@ Se o avaliador ainda assim não responder, o e-mail de um domínio de envio
 com menos de 7 dias, ou de idade desconhecida, espera: o avaliador é chamado
 de novo a cada 2 minutos, 3 vezes, e depois o e-mail fica em espera para o
 operador, que fica sabendo pelo aviso de saúde do avaliador; qualquer outro
-e-mail é enviado e avaliado depois. Passado o limite diário de amostras da
-equipe, o e-mail sai sem avaliação. O resto do e-mail aceito é sorteado
-depois que o SES o recebe, na taxa do seu nível. E-mails da conta e o e-mail
+e-mail é enviado e avaliado depois. Nenhum limite diário deixa sair sem
+avaliação um e-mail que espera por ela: os limites contam e param só os
+sorteios feitos depois do envio. Uma equipe com 20 avaliações esperando o
+avaliador tem o próximo e-mail esperando a vez. O resto do e-mail aceito é
+sorteado depois que o SES o recebe, na taxa do seu nível. E-mails da conta e o e-mail
 do onboarding nunca são avaliados.
 
 Uma falha do avaliador de qualquer tipo (recurso desligado, credenciais
@@ -1052,32 +1054,50 @@ cliente de e-mail seguiria (uma âncora, uma área de mapa de imagem, uma ação
 de formulário, um link em SVG ou um URL do texto, lido como o navegador lê e
 passando por até três redirecionadores; um nome como `x.pages.dev`, de um
 serviço gratuito, conta sozinho) ou do seu Reply-To, menos os domínios
-verificados da equipe. Um link que não dá para ler também conta como
-destino. Uma avaliação abaixo de 80 torna os destinos da mensagem conhecidos
-da equipe para sempre, assim como uma liberação do operador; um encurtador
-de links, ou um link que não dá para ler, nunca se torna conhecido.
+verificados da equipe. Um link que não dá para ler também conta como destino.
+Uma avaliação abaixo de 70 que não aponta nada do tipo phishing torna os
+destinos da mensagem conhecidos da equipe, quando ela levava no máximo 5
+destinos novos; liberar um e-mail em espera por um destino novo, ou esperando
+depois de uma avaliação, também torna, e liberar um e-mail em espera pelas
+imagens ou arquivos, ou por uma falha do avaliador, não torna nenhum. Um
+encurtador de links, ou um link que não dá para ler, nunca se torna conhecido.
+Por 7 dias depois que um destino se torna conhecido, todo e-mail para ele é
+avaliado depois do envio, e uma avaliação do tipo phishing a partir de 80 num
+deles desfaz isso: e-mails para ele voltam a ser avaliados antes do SES,
+nenhuma avaliação o torna conhecido de novo (a liberação do operador torna), e
+o operador recebe e-mail no máximo uma vez por dia por equipe. Uma mensagem
+com mais de 20 destinos novos não é avaliada: fica em espera para o operador.
 Uma transmissão é avaliada antes de gravar as cópias quando o próprio HTML
 leva um destino novo, e uma cópia renderizada quando um campo do contato
 colocou um nela; e-mail com links só para os domínios da própria equipe nunca
 espera por isso. Quando um destino novo recebe uma avaliação do tipo phishing
-a partir de 80, a data de registro do domínio do link é consultada, num cache
-comum a todas as equipes (nomes de serviços gratuitos e encurtadores não são
-datados, e uma data desconhecida não conta como recente). Para uma equipe no
-nível Nova, essa avaliação com um domínio de link registrado há menos de 7
-dias pausa a equipe para revisão. Depois do nível Nova, o e-mail fica em
-espera na lista de revisão com uma avaliação do tipo phishing a partir de 90,
-ou a partir de 80 com um domínio de link com menos de 7 dias, e o operador
-recebe e-mail no máximo uma vez por dia por equipe; uma equipe depois do
-nível Nova nunca é pausada para revisão automaticamente. Essas amostras não
-contam para nenhum limite diário.
+a partir de 80, as datas de registro dos domínios dos links são consultadas,
+num cache comum a todas as equipes: 3 por avaliação, o resto em segundo plano,
+e uma consulta que falhou não se repete por uma hora (nomes de serviços
+gratuitos e encurtadores não são datados, e uma data que nenhum registro tem
+não conta como recente). Uma idade ainda desconhecida, porque a consulta
+falhou, passou de 10 segundos ou espera a vez, conta como recente. Para uma
+equipe no nível Nova, essa avaliação com um domínio de link registrado há
+menos de 7 dias pausa a equipe para revisão, e uma de idade desconhecida faz o
+e-mail esperar 2 minutos. Depois do nível Nova, o e-mail fica em espera na
+lista de revisão com uma avaliação do tipo phishing a partir de 90, ou a
+partir de 80 com um domínio de link com menos de 7 dias ou de idade
+desconhecida, e o operador recebe e-mail no máximo uma vez por dia por equipe;
+uma equipe depois do nível Nova nunca é pausada para revisão automaticamente.
+Essas amostras não contam para nenhum limite diário; uma equipe tem 200 delas
+por dia, e depois disso o e-mail dela com um destino novo espera o próximo dia
+UTC.
 
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
 não enviado que a avaliação antes do envio segurou: em espera atrás de uma
 pausa para revisão, cumprindo os seus 2 minutos, em espera por um destino
 novo ou pelas imagens ou arquivos, ou em espera depois de o avaliador falhar repetidas vezes. **Liberar** envia o e-mail sem avaliá-lo de
 novo (o `quota.drain` o cobra como qualquer e-mail em espera); **Cancelar**
-faz com que ele nunca saia. O e-mail de uma equipe pausada para revisão é
-liberado junto com a equipe. A página de revisão da equipe também lista, entre
+faz com que ele nunca saia. **Liberar todos** e **Cancelar todos** pedem
+confirmação, com a contagem, e só pegam e-mails em espera desde antes de a
+lista ser carregada. O e-mail de uma equipe pausada para revisão é liberado
+junto com a equipe, e uma suspensão por qualquer outro motivo o cancela, para
+que nenhuma reativação depois o envie. A página de revisão da equipe também lista, entre
 os sinalizados, os e-mails não enviados que foram segurados, para que um
 acesso ao conteúdo possa citá-los. O que a avaliação leu de um e-mail em
 espera abre num painel de **Mídia**, com um acesso ao conteúdo (veja Acesso
@@ -1245,8 +1265,8 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_BROADCAST_COPIES` | 3 | Cópias renderizadas avaliadas por transmissão (mais o HTML da própria transmissão), equipes estabelecidas e confiáveis |
 | `MONITOR_BROADCAST_COPIES_NEW` | 10 | O mesmo para equipes novas, em rampa e em observação |
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | Uma anomalia (uma checagem de domínio de link, encurtador ou padrão de phishing falhando, menos de 100 caracteres de texto com imagens ou arquivos levando a mensagem, um anexo) multiplica a taxa; duas forçam a amostra |
-| `MONITOR_TEAM_DAILY_CAP` | 600 | Mensagens avaliadas por equipe por dia UTC; além disso a amostragem para em silêncio |
-| `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Para a instância toda; além disso a amostragem por nível para, primeiros envios e anomalias continuam |
+| `MONITOR_TEAM_DAILY_CAP` | 600 | Sorteios depois do envio por equipe por dia UTC; além disso param em silêncio. E-mail avaliado antes do SES não conta nem tem limite |
+| `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Sorteios depois do envio na instância toda; além disso a amostragem por nível para, primeiros envios e anomalias continuam |
 | `MONITOR_FLAG_RISK` | 0.5 | A equipe recebe a sinalização `monitor` e é amostrada quatro vezes mais |
 | `MONITOR_ALERT_RISK` | 0.7 | O operador é avisado por e-mail, uma vez por equipe por dia |
 | `MONITOR_PAUSE_RISK` | 0.85 | Só equipes novas: as transmissões são pausadas, com uma pontuação de 90 ou mais no último dia |

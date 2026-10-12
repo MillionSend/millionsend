@@ -145,11 +145,12 @@ describe("what a verdict on a new destination does", () => {
     linkYoung,
   });
 
-  it("parks a team past new's mail on 90, or on 80 with a link domain under 7 days old", () => {
+  it("parks a team past new's mail on 90, or on 80 with a link domain under 7 days old or of an age not known", () => {
     expect(destinationVerdictParks(verdict(91, null), S)).toBe(true);
     expect(destinationVerdictParks(verdict(84, true), S)).toBe(true);
     expect(destinationVerdictParks(verdict(84, false), S)).toBe(false);
-    expect(destinationVerdictParks(verdict(84, null), S)).toBe(false);
+    expect(destinationVerdictParks(verdict(84, null), S)).toBe(true);
+    expect(destinationVerdictParks(verdict(79, null), S)).toBe(false);
     expect(destinationVerdictParks({ ...verdict(95, true), categories: ["spam"] }, S)).toBe(false);
   });
 
@@ -167,26 +168,32 @@ describe("what a verdict on a new destination does", () => {
     ).toMatchObject({ held: { rule: "young_link" } });
   });
 
-  it("never caps a sample of mail to a new destination", async () => {
+  it("never caps a screening sample, and counts only after-send draws toward the caps", async () => {
     const teamId = await createTeam(db, "capped");
-    const capped = { ...S, teamDailyCap: 1, instanceDailyCap: 1 };
+    const capped = { ...S, teamDailyCap: 1, instanceDailyCap: 1_000 };
     const deps = {
       samplingKey: Buffer.alloc(32),
       settings: async () => capped,
       enqueueJudge: async () => {},
     };
-    const draw = (novelty: boolean) =>
+    const draw = (kind: "tier" | "destination" | "first_sends", flags = {}) =>
       recordMonitorSample(db, deps, capped, {
         teamId,
         emailId: null,
         broadcastId: null,
-        kind: novelty ? "destination" : "tier",
+        kind,
         now: NOW,
-        novelty,
+        ...flags,
       });
-    expect(await draw(false)).not.toBeNull();
-    expect(await draw(false)).toBeNull();
-    expect(await draw(true)).not.toBeNull();
+    // Screening samples, however many, leave the team's cap untouched.
+    for (const kind of ["first_sends", "destination"] as const) {
+      expect(await draw(kind, { screening: true })).not.toBeNull();
+    }
+    expect(await draw("tier")).not.toBeNull();
+    expect(await draw("tier")).toBeNull();
+    // Past it, mail waiting on a verdict is still judged; so is a probation draw.
+    expect(await draw("first_sends", { screening: true })).not.toBeNull();
+    expect(await draw("destination", { novelty: true })).not.toBeNull();
   });
 });
 
@@ -228,9 +235,9 @@ describe("link domain ages", () => {
     expect(asked).toEqual(["no-date.de"]);
   });
 
-  it("stops waiting at its budget, and the lookup still fills the cache", async () => {
+  it("stops waiting at its budget with the age not known, and the lookup still fills the cache", async () => {
     const { r } = resolver({ "slow-lure.com": new Date(NOW.getTime() - DAY_MS) }, 200);
-    expect(await anyYoungLinkDomain(db, r, ["slow-lure.com"], NOW, { budgetMs: 20 })).toBe(false);
+    expect(await anyYoungLinkDomain(db, r, ["slow-lure.com"], NOW, { budgetMs: 20 })).toBeNull();
     await new Promise((done) => setTimeout(done, 300));
     const [cached] = await db
       .select()

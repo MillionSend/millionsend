@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { recordAudit } from "./audit.js";
 import { recordContactActivity } from "./contact-activities.js";
 import {
   type DeliverabilityReason,
@@ -108,6 +109,10 @@ export async function isTeamSuspended(db: Db, teamId: string): Promise<boolean> 
  * the same transaction, so a retry after a failure never finds the team
  * suspended and its people still subscribed. A suspension already over the
  * rules has done it once: a person who opted back in since stays in.
+ *
+ * Any suspension but a review hold cancels the mail parked for an operator
+ * or for a review hold, in the same transaction and audited, so a later
+ * reinstatement never drains lures held before it.
  */
 export async function suspendTeam(
   db: Db,
@@ -136,7 +141,24 @@ export async function suspendTeam(
       .where(and(eq(t.id, input.teamId), input.ifNotSuspended ? isNull(t.suspendedAt) : undefined))
       .returning({ id: t.id });
     if (changed.length === 0) return null;
-    if (!ABUSE_SUSPENSIONS.includes(input.reason)) return [];
+    const e = schema.emails;
+    const canceled =
+      input.reason === "review"
+        ? []
+        : await tx
+            .update(e)
+            .set({ latestStatus: "canceled" })
+            .where(
+              and(
+                eq(e.teamId, input.teamId),
+                eq(e.latestStatus, "queued_quota"),
+                isNull(e.sentAt),
+                inArray(e.parkReason, ["review", "screening", "destination", "media"]),
+              ),
+            )
+            .returning({ id: e.id });
+    if (!ABUSE_SUSPENSIONS.includes(input.reason))
+      return { activity: [], canceled: canceled.length };
     // Marked here, not left to the hourly sweep: a member who leaves or is
     // deleted before it runs keeps the longer retention.
     const m = schema.teamMembers;
@@ -149,12 +171,25 @@ export async function suspendTeam(
           tx.select({ userId: m.userId }).from(m).where(eq(m.teamId, input.teamId)),
         ),
       );
-    return before?.reason && ABUSE_SUSPENSIONS.includes(before.reason)
-      ? []
-      : unsubscribeSuspendedMembers(tx as unknown as Db, input.teamId);
+    return {
+      activity:
+        before?.reason && ABUSE_SUSPENSIONS.includes(before.reason)
+          ? []
+          : await unsubscribeSuspendedMembers(tx as unknown as Db, input.teamId),
+      canceled: canceled.length,
+    };
   });
   if (!timeline) return false;
-  await recordContactActivity(db, timeline);
+  await recordContactActivity(db, timeline.activity);
+  if (timeline.canceled > 0) {
+    await recordAudit(db, {
+      teamId: input.teamId,
+      actor: "system",
+      action: "screening.canceled",
+      target: { type: "team", id: input.teamId },
+      metadata: { emails: timeline.canceled, reason: input.reason },
+    });
+  }
   return true;
 }
 

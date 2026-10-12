@@ -1,4 +1,10 @@
-import { markLostSamples, monitorHealth, recordProbes, SCREEN_RETRIES } from "@millionsend/core";
+import {
+  type MonitorDeps,
+  markLostSamples,
+  monitorHealth,
+  recordProbes,
+  SCREEN_RETRIES,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, gte, or, sql } from "drizzle-orm";
@@ -11,6 +17,8 @@ export interface MonitorHealthDeps {
   appBaseUrl?: string | undefined;
   /** Kept by the caller across runs: when the degraded notice last went out. */
   state: { degradedMailedAt: Date | null };
+  /** Queues a lost screening sample again: mail waits on it. */
+  enqueueJudge?: MonitorDeps["enqueueJudge"] | undefined;
   now?: Date | undefined;
 }
 
@@ -35,7 +43,7 @@ export async function runMonitorHealth(
 ): Promise<{ samples: number; unjudged: number; lost: number; degraded: boolean }> {
   const now = deps.now ?? new Date();
   if (!deps.judge) return { samples: 0, unjudged: 0, lost: 0, degraded: false };
-  const lost = await markLostSamples(db, now);
+  const lost = await markLostSamples(db, now, deps.enqueueJudge);
   const health = await monitorHealth(db, now);
   const ms = schema.monitorSamples;
   // A revoked key fails every call until someone replaces it, so one is enough

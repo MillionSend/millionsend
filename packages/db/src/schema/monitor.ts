@@ -105,8 +105,9 @@ export const monitorSamples = pgTable(
     screenRetries: smallint("screen_retries").notNull().default(0),
     // The judged message's destinations the team had not cleared (link owner
     // domains and the Reply-To's domain), and whether one of them was a link
-    // domain under 7 days old (null: not looked up). Domains only, as the
-    // insights keep them.
+    // domain under 7 days old. A phishing-type verdict from 80 is always
+    // looked up, so null on one means an age not known yet; on any other,
+    // not looked up. Domains only, as the insights keep them.
     destinations: jsonb("destinations").$type<string[]>(),
     linkYoung: boolean("link_young"),
     // What screening could not clear in the message's images and files
@@ -129,9 +130,10 @@ export const monitorSamples = pgTable(
 
 /**
  * The destinations a team has cleared: a link owner domain or a Reply-To
- * domain one of its messages carried with a verdict under 80, or that an
- * operator released mail to. Once cleared it stays cleared; mail to any
- * other destination is judged before SES at every tier.
+ * domain one of its messages carried with a verdict under 70 naming nothing
+ * phishing-type, among at most 5 new ones, or that an operator released mail
+ * to. Mail to any other destination, or to a revoked one, is judged before
+ * SES at every tier.
  */
 export const teamDestinations = pgTable(
   "team_destinations",
@@ -141,6 +143,9 @@ export const teamDestinations = pgTable(
       .references(() => teams.id, { onDelete: "cascade" }),
     domain: text("domain").notNull(),
     clearedAt: timestamp("cleared_at", { withTimezone: true }).notNull().defaultNow(),
+    // Mail to it drew a phishing-type verdict after it cleared: new again
+    // until an operator releases mail to it; no verdict clears it again.
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.domain] })],
 );
