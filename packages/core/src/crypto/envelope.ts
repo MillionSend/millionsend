@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { MediaReview } from "../abuse-judge/media.js";
+import { canonicalBodyHash } from "../canonical-json.js";
 import { GCM_IV_LENGTH, GCM_TAG_LENGTH } from "./constants.js";
 import type { DekContext, Keyring } from "./keyring.js";
 
@@ -163,6 +164,7 @@ async function sealJson(
   value: unknown,
   keyring: Keyring,
   binding: EnvelopeBinding | undefined,
+  unsealed: Record<string, string> = {},
 ): Promise<string> {
   const encrypted = await encryptPayload(
     Buffer.from(JSON.stringify(value), "utf8"),
@@ -170,6 +172,7 @@ async function sealJson(
     binding,
   );
   return JSON.stringify({
+    ...unsealed,
     keyVersion: encrypted.keyVersion,
     iv: encrypted.iv.toString("base64"),
     wrappedDek: encrypted.wrappedDek.toString("base64"),
@@ -221,12 +224,23 @@ export async function openAttachments(
   )) as EmailAttachment[];
 }
 
+/**
+ * The review's digest rides beside its ciphertext, unsealed, as `digest`:
+ * equal for every email screening read the same images and files from (a
+ * blast's copies), so the review list finds them all without opening one.
+ * It tells nothing else of the content.
+ */
 export function sealMediaReview(
   review: MediaReview,
   keyring: Keyring,
   owner: EnvelopeOwner,
 ): Promise<string> {
-  return sealJson(review, keyring, { ...owner, kind: "email_media" });
+  return sealJson(
+    review,
+    keyring,
+    { ...owner, kind: "email_media" },
+    { digest: canonicalBodyHash(review) },
+  );
 }
 
 export async function openMediaReview(

@@ -16,11 +16,13 @@ import {
   getMonitorSettingsRow,
   isHoldVerdict,
   OPERATOR_PARK_REASONS,
+  openMediaReview,
   parseAuditActor,
   recentMonitorSamples,
   redactRevealedText,
   releaseWaitingEmails,
   renderRevealedBody,
+  renderRevealedMedia,
   resolveMonitorSettings,
   TEAM_FLAG_REASONS,
   teamMonitorOverview,
@@ -49,7 +51,7 @@ import { judgeStatus, monitorSettingsNow } from "../../console/monitor";
 import { getKeyring } from "../../keyring";
 import { enqueueEmailSend } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
-import { auditOperator, kickQuotaDrain, loadTeam } from "./shared";
+import { auditOperator, kickQuotaDrain, loadTeam, type OperatorCtx } from "./shared";
 
 const f = schema.teamFlags;
 const t = schema.teams;
@@ -97,8 +99,9 @@ function flaggedSince(now: Date): Date {
  * The flagged emails of a team's window: one row per sent email with a
  * failing check, a broadcast's recipients sharing its insights row, then the
  * unsent ones a phishing-type verdict stopped before SES, which have no
- * insights yet. The review page lists these and a grant may only ever name
- * ids from here.
+ * insights yet, and the held ones screening kept a media review of, however
+ * long they have waited. The review page lists these and a grant may only
+ * ever name ids from here.
  */
 async function flaggedEmails(db: Db, teamId: string, since: Date, holdLine: number) {
   const e = schema.emails;
@@ -154,17 +157,30 @@ async function flaggedEmails(db: Db, teamId: string, since: Date, holdLine: numb
     )
     .orderBy(desc(e.createdAt))
     .limit(50);
+  const withMedia = await db
+    .select({ id: e.id, sentAt: e.sentAt, from: e.from, recipients, broadcastId: e.broadcastId })
+    .from(e)
+    .where(
+      and(
+        eq(e.teamId, teamId),
+        isNull(e.sentAt),
+        eq(e.latestStatus, "queued_quota"),
+        isNotNull(e.media),
+      ),
+    )
+    .orderBy(desc(e.createdAt))
+    .limit(50);
+  const unsent = held.filter((row) => isHoldVerdict(row, holdLine));
+  const listed = new Set(unsent.map((row) => row.id));
   return [
-    ...held
-      .filter((row) => isHoldVerdict(row, holdLine))
-      .map((row) => ({
-        id: row.id,
-        sentAt: row.sentAt,
-        from: row.from,
-        recipients: row.recipients,
-        broadcastId: row.broadcastId,
-        checks: [] as schema.EmailInsightCheck[],
-      })),
+    ...[...unsent, ...withMedia.filter((row) => !listed.has(row.id))].map((row) => ({
+      id: row.id,
+      sentAt: row.sentAt,
+      from: row.from,
+      recipients: row.recipients,
+      broadcastId: row.broadcastId,
+      checks: [] as schema.EmailInsightCheck[],
+    })),
     ...sent,
   ];
 }
@@ -174,6 +190,19 @@ const WAITING_SHOWN_PER_TEAM = 20;
 
 /** Why an email waits, as the review list words it. */
 type WaitingWhy = "held" | "verdict" | "outage" | "destination" | "media";
+
+/** A queued row without a park reason waits out a verdict's short wait. */
+function waitingWhy(parkReason: string | null): WaitingWhy {
+  return parkReason === "review"
+    ? "held"
+    : parkReason === "screening"
+      ? "outage"
+      : parkReason === "destination"
+        ? "destination"
+        : parkReason === "media"
+          ? "media"
+          : "verdict";
+}
 
 /**
  * The review list: every unsent email screening stopped before SES, newest
@@ -197,6 +226,7 @@ async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
     categories: ms.categories,
     reasons: ms.reasons,
     destinations: ms.destinations,
+    media: sql<boolean>`${e.media} is not null`,
   };
   const parked = and(
     teamId ? eq(e.teamId, teamId) : undefined,
@@ -261,16 +291,6 @@ async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
           })
           .from(t)
           .where(inArray(t.id, teamIds));
-  const why = (row: (typeof shown)[number]): WaitingWhy =>
-    row.parkReason === "review"
-      ? "held"
-      : row.parkReason === "screening"
-        ? "outage"
-        : row.parkReason === "destination"
-          ? "destination"
-          : row.parkReason === "media"
-            ? "media"
-            : "verdict";
   return teams
     .map((team) => {
       const emails = shown.filter((row) => row.teamId === team.id);
@@ -284,10 +304,11 @@ async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
           from: row.from,
           recipients: row.recipients,
           broadcastId: row.broadcastId,
-          why: why(row),
+          why: waitingWhy(row.parkReason),
           score: row.verdict === null ? null : row.score,
           reasons: row.reasons ?? [],
           destinations: row.destinations ?? [],
+          media: row.media,
         })),
       };
     })
@@ -297,6 +318,108 @@ async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
 /** Every content procedure refuses the same way while the feature is off. */
 function assertContentRevealOn(): void {
   if (!contentRevealOn()) throw new TRPCError({ code: "FORBIDDEN", message: "off" });
+}
+
+/**
+ * The email a live grant of this operator names, for one view of its
+ * content. Someone else's grant reads as no grant at all.
+ */
+async function grantedEmail(ctx: OperatorCtx, input: { grantId: string; emailId: string }) {
+  assertContentRevealOn();
+  const [grant] = await ctx.db.select().from(g).where(eq(g.id, input.grantId));
+  if (!grant || grant.operatorUserId !== ctx.operator.id) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+  const now = new Date();
+  if (grant.expiresAt <= now) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "expired" });
+  }
+  if (!grant.emailIds.includes(input.emailId)) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "not_in_grant" });
+  }
+  const [email] = await ctx.db
+    .select()
+    .from(schema.emails)
+    .where(and(eq(schema.emails.id, input.emailId), eq(schema.emails.teamId, grant.teamId)));
+  if (!email) throw new TRPCError({ code: "NOT_FOUND" });
+  return { grant, email, now };
+}
+
+/** Counts one view on the grant, which is the record of how often the content was read. */
+async function countView(
+  ctx: OperatorCtx,
+  grant: { id: string; viewCount: number },
+  now: Date,
+): Promise<number> {
+  const [counted] = await ctx.db
+    .update(g)
+    .set({ viewCount: sql`${g.viewCount} + 1`, lastViewedAt: now })
+    .where(eq(g.id, grant.id))
+    .returning({ viewCount: g.viewCount });
+  return counted?.viewCount ?? grant.viewCount + 1;
+}
+
+/** The digest sealMediaReview keeps beside a review's ciphertext. */
+const mediaDigest = sql<string | null>`(${schema.emails.media}::jsonb ->> 'digest')`;
+
+/**
+ * The team's emails parked for an operator that screening read the same
+ * images and files from as this one (a blast's copies), itself included
+ * while it waits; none when it has no media review.
+ */
+async function sameMediaParked(db: Db, teamId: string, emailId: string): Promise<string[]> {
+  const e = schema.emails;
+  const [own] = await db
+    .select({ digest: mediaDigest })
+    .from(e)
+    .where(and(eq(e.id, emailId), eq(e.teamId, teamId)));
+  if (!own?.digest) return [];
+  // ponytail: parses every parked review of the team on each call; an indexed
+  // digest column if held blasts grow past a few thousand emails.
+  const rows = await db
+    .select({ id: e.id })
+    .from(e)
+    .where(
+      and(
+        eq(e.teamId, teamId),
+        eq(e.latestStatus, "queued_quota"),
+        isNull(e.sentAt),
+        inArray(e.parkReason, [...OPERATOR_PARK_REASONS]),
+        sql`${mediaDigest} = ${own.digest}`,
+      ),
+    );
+  return rows.map((row) => row.id);
+}
+
+/**
+ * The review list's Release and its instance audit row: these emails of
+ * the team, or every waiting one when none are named. A team held for
+ * review is released with its hold, from its review page.
+ */
+async function releaseEmails(
+  ctx: OperatorCtx,
+  team: { id: string; name: string; suspendedAt: Date | null },
+  emailIds?: string[],
+): Promise<{ released: number }> {
+  if (team.suspendedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "held" });
+  if (emailIds?.length === 0) return { released: 0 };
+  const released = await releaseWaitingEmails(ctx.db, {
+    teamId: team.id,
+    emailIds,
+    holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+  });
+  for (const emailId of released.queued) await enqueueEmailSend(emailId);
+  if (released.parked > 0) await kickQuotaDrain();
+  const count = released.parked + released.queued.length;
+  if (count > 0) {
+    await auditOperator(ctx, {
+      teamId: null,
+      action: "screening.released",
+      target: { type: "team", id: team.id },
+      metadata: { team: team.name, emails: count },
+    });
+  }
+  return { released: count };
 }
 
 export const consoleSafetyRouter = router({
@@ -733,24 +856,7 @@ export const consoleSafetyRouter = router({
   revealed: operatorProcedure
     .input(z.object({ grantId: z.uuid(), emailId: z.uuid() }))
     .query(async ({ ctx, input }) => {
-      assertContentRevealOn();
-      const [grant] = await ctx.db.select().from(g).where(eq(g.id, input.grantId));
-      // Someone else's grant reads as no grant at all.
-      if (!grant || grant.operatorUserId !== ctx.operator.id) {
-        throw new TRPCError({ code: "NOT_FOUND" });
-      }
-      const now = new Date();
-      if (grant.expiresAt <= now) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "expired" });
-      }
-      if (!grant.emailIds.includes(input.emailId)) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "not_in_grant" });
-      }
-      const [email] = await ctx.db
-        .select()
-        .from(schema.emails)
-        .where(and(eq(schema.emails.id, input.emailId), eq(schema.emails.teamId, grant.teamId)));
-      if (!email) throw new TRPCError({ code: "NOT_FOUND" });
+      const { grant, email, now } = await grantedEmail(ctx, input);
       if (
         email.bodyPurgedAt ||
         !email.bodyCiphertext ||
@@ -786,31 +892,87 @@ export const consoleSafetyRouter = router({
         .where(eq(ms.emailId, email.id))
         .orderBy(desc(ms.createdAt))
         .limit(1);
-      const [counted] = await ctx.db
-        .update(g)
-        .set({ viewCount: sql`${g.viewCount} + 1`, lastViewedAt: now })
-        .where(eq(g.id, grant.id))
-        .returning({ viewCount: g.viewCount });
       return {
         subject: subject.spans,
         spans: content.spans,
         redactions: content.redactions + subject.redactions,
         verdict: verdict ?? null,
         expiresAt: grant.expiresAt,
-        viewCount: counted?.viewCount ?? grant.viewCount + 1,
+        viewCount: await countView(ctx, grant, now),
+      };
+    }),
+
+  /**
+   * What screening read from a held email's images and attachments, under a
+   * live grant as its text is: redacted like the body, previews only as the
+   * worker's re-encoded JPEGs, link domains with the age the screening cache
+   * knows. Never the files themselves.
+   */
+  media: operatorProcedure
+    .input(z.object({ grantId: z.uuid(), emailId: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { grant, email, now } = await grantedEmail(ctx, input);
+      if (email.bodyPurgedAt) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "purged" });
+      }
+      if (!email.media) throw new TRPCError({ code: "NOT_FOUND", message: "no_media" });
+      const view = renderRevealedMedia(
+        await openMediaReview(email.media, getKeyring(), { teamId: email.teamId, rowId: email.id }),
+      );
+      const la = schema.linkDomainAges;
+      const domains = [...new Set(view.links.map((link) => link.domain).filter(Boolean))];
+      const ages = new Map(
+        domains.length === 0
+          ? []
+          : (
+              await ctx.db
+                .select({ domain: la.domain, registeredAt: la.registeredAt })
+                .from(la)
+                .where(inArray(la.domain, domains))
+            ).map((row) => [row.domain, row.registeredAt]),
+      );
+      const team = await loadTeam(ctx.db, email.teamId);
+      const sameMedia = await sameMediaParked(ctx.db, team.id, email.id);
+      return {
+        ...view,
+        why: email.parkReason && waitingWhy(email.parkReason),
+        links: view.links.map((link) => ({
+          ...link,
+          registeredAt: ages.get(link.domain) ?? null,
+        })),
+        sameMedia: sameMedia.length,
+        releasable: team.suspendedAt === null,
+        expiresAt: grant.expiresAt,
+        viewCount: await countView(ctx, grant, now),
       };
     }),
 
   /** The review list, across teams or for one: what screening stopped before SES. */
   waiting: operatorProcedure
     .input(z.object({ teamId: z.uuid().optional() }))
-    .query(async ({ ctx, input }) => ({
-      groups: await waitingEmails(
+    .query(async ({ ctx, input }) => {
+      const groups = await waitingEmails(
         ctx.db,
         (await monitorSettingsNow(ctx.db)).holdRepeatScore,
         input.teamId,
-      ),
-    })),
+      );
+      const teamIds = groups.map((group) => group.team.id);
+      // This operator's own live grants: a media panel opens under one without asking again.
+      const grants =
+        teamIds.length === 0
+          ? []
+          : await ctx.db
+              .select({ id: g.id, emailIds: g.emailIds, expiresAt: g.expiresAt })
+              .from(g)
+              .where(
+                and(
+                  eq(g.operatorUserId, ctx.operator.id),
+                  inArray(g.teamId, teamIds),
+                  sql`${g.expiresAt} > now()`,
+                ),
+              );
+      return { groups, grants, contentReveal: contentRevealOn() };
+    }),
 
   /**
    * Release: the emails go out without being screened again, every waiting
@@ -819,25 +981,19 @@ export const consoleSafetyRouter = router({
    */
   releaseWaiting: operatorProcedure
     .input(z.object({ teamId: z.uuid(), emailIds: z.array(z.uuid()).min(1).max(500).optional() }))
+    .mutation(async ({ ctx, input }) =>
+      releaseEmails(ctx, await loadTeam(ctx.db, input.teamId), input.emailIds),
+    ),
+
+  /**
+   * Release every email of the team parked with the same media as this one,
+   * so a held blast clears in one step: the same release, the same audit row.
+   */
+  releaseSameMedia: operatorProcedure
+    .input(z.object({ teamId: z.uuid(), emailId: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.teamId);
-      if (team.suspendedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "held" });
-      const released = await releaseWaitingEmails(ctx.db, {
-        ...input,
-        holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
-      });
-      for (const emailId of released.queued) await enqueueEmailSend(emailId);
-      if (released.parked > 0) await kickQuotaDrain();
-      const count = released.parked + released.queued.length;
-      if (count > 0) {
-        await auditOperator(ctx, {
-          teamId: null,
-          action: "screening.released",
-          target: { type: "team", id: team.id },
-          metadata: { team: team.name, emails: count },
-        });
-      }
-      return { released: count };
+      return releaseEmails(ctx, team, await sameMediaParked(ctx.db, team.id, input.emailId));
     }),
 
   /** Cancel: the emails never go out, every waiting one of the team when no ids are named. */

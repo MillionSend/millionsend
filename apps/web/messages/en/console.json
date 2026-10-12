@@ -1118,6 +1118,67 @@
         "failedPurged": "Every message in scope had its body purged by retention.",
         "failedNotFlagged": "That email is no longer in the team's flagged window."
       }
+    },
+    "media": {
+      "row": "Media",
+      "title": "Images and attachments · {team}",
+      "lead": "What screening read from this email's images and attachments. Read it, decide, close.",
+      "scopeSub": "What screening read from its images and attachments: text, links, file details and small redrawn previews. The files themselves, headers and the recipient list stay hidden.",
+      "redrawn": "previews redrawn as JPEG",
+      "why": "Why it waits",
+      "issues": {
+        "risky_file": "risky file",
+        "refused_file": "refused file type",
+        "unreadable_file": "a file would not open",
+        "qr_undecoded": "a QR code could not be decoded",
+        "images_not_read": "images not read",
+        "vision_off": "image reading is off",
+        "vision_refused": "the image reader declined",
+        "vision_blocked": "blocked by Bedrock",
+        "vision_unavailable": "image reader unavailable"
+      },
+      "text": "Text read · credentials and one-time links redacted",
+      "noText": "Nothing was read as text.",
+      "links": "Links",
+      "noLinks": "No links found.",
+      "files": "Attachments",
+      "noFiles": "No attachments.",
+      "previews": "Previews",
+      "noPreviews": "No previews kept.",
+      "cols": {
+        "source": "Found in",
+        "link": "Link",
+        "registered": "Domain registered",
+        "name": "Name",
+        "kind": "Type",
+        "flags": "Flags",
+        "size": "Size",
+        "pages": "Pages"
+      },
+      "sources": {
+        "qr": "QR code",
+        "pdf": "PDF",
+        "office": "Office file",
+        "pass": "Wallet pass",
+        "calendar": "Calendar invite",
+        "page": "Attached web page"
+      },
+      "flags": {
+        "markup": "web page or SVG",
+        "archive": "archive",
+        "disk_image": "disk image",
+        "macros": "macros",
+        "risky_type": "risky type",
+        "type_mismatch": "name doesn't match content",
+        "encrypted": "password-protected",
+        "pdf_actions": "PDF actions",
+        "nested_archive": "archive inside an archive",
+        "scripts": "scripts",
+        "forms": "forms",
+        "over_caps": "over the reading limits",
+        "unreadable": "won't open"
+      },
+      "releaseSame": "{count, plural, one {Release this email} other {Release all # with the same media}}"
     }
   },
   "audit": {

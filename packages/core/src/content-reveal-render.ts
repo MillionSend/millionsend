@@ -1,10 +1,18 @@
 import { decodeEntities, stripHiddenElements } from "./abuse-judge/body.js";
 import {
+  MEDIA_PREVIEWS_MAX,
+  type MediaIssue,
+  type MediaLinkSource,
+  type MediaReview,
+} from "./abuse-judge/media.js";
+import type { AttachmentFlag } from "./attachment-policy.js";
+import {
   CONTENT_REVEAL_TEXT_MAX_CHARS,
   type RevealedContent,
   type RevealSpan,
 } from "./content-reveal.js";
 import { isIpLiteral, visibleText } from "./email-insights.js";
+import { sniffImageType } from "./file-type.js";
 import { API_KEY_PATTERN, MASK } from "./mask.js";
 import { registrableDomain } from "./org-domain.js";
 
@@ -223,4 +231,62 @@ export function renderRevealedBody(body: {
     ? decodeEntities(visibleText(stripHiddenElements(body.html).html))
     : (body.text ?? "").trim();
   return truncate(redactRevealedText(source), CONTENT_REVEAL_TEXT_MAX_CHARS);
+}
+
+/** What screening read from a held email's images and attachments, as an operator sees it. */
+export interface RevealedMedia {
+  /** Transcripts and extracted text, each under where it was read from. */
+  text: { source: RevealSpan[]; spans: RevealSpan[] }[];
+  links: { source: MediaLinkSource; link: RevealSpan[]; domain: string }[];
+  files: {
+    name: RevealSpan[];
+    kind: string;
+    size: number;
+    pages: number | null;
+    flags: AttachmentFlag[];
+  }[];
+  /** data:image/jpeg URLs only. */
+  previews: { label: RevealSpan[]; src: string }[];
+  issues: MediaIssue[];
+  redactions: number;
+}
+
+/**
+ * A held email's media review for the operator's eyes: every string a
+ * sender wrote or a reader transcribed goes through the body's redaction,
+ * text cut as the body is. Previews go out only as JPEG data: URLs, and
+ * bytes that are not a JPEG are dropped, so no original file, SVG or HTML
+ * ever reaches a page.
+ */
+export function renderRevealedMedia(review: MediaReview): RevealedMedia {
+  let redactions = 0;
+  const take = (content: RevealedContent): RevealSpan[] => {
+    redactions += content.redactions;
+    return content.spans;
+  };
+  const text = review.text.map((entry) => ({
+    source: take(redactRevealedText(entry.source)),
+    spans: take(truncate(redactRevealedText(entry.text), CONTENT_REVEAL_TEXT_MAX_CHARS)),
+  }));
+  const links = review.links.map((link) => ({
+    source: link.source,
+    link: take(redactRevealedText(link.url)),
+    domain: link.domain,
+  }));
+  const files = review.files.map((file) => ({
+    name: take(redactRevealedText(file.filename)),
+    kind: file.kind,
+    size: file.size,
+    pages: file.pages,
+    flags: file.flags,
+  }));
+  const previews = review.previews
+    .map((preview) => ({ label: preview.label, bytes: Buffer.from(preview.jpeg, "base64") }))
+    .filter((preview) => sniffImageType(preview.bytes) === "jpeg")
+    .slice(0, MEDIA_PREVIEWS_MAX)
+    .map((preview) => ({
+      label: take(redactRevealedText(preview.label)),
+      src: `data:image/jpeg;base64,${preview.bytes.toString("base64")}`,
+    }));
+  return { text, links, files, previews, issues: review.issues, redactions };
 }

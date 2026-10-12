@@ -20,6 +20,7 @@ export {
   MEDIA_IMAGE_TEXT_MAX_CHARS,
   MEDIA_ISSUES,
   MEDIA_LINK_ROWS_MAX,
+  MEDIA_PREVIEWS_MAX,
   type MediaFile,
   type MediaFindings,
   type MediaIssue,
@@ -286,7 +287,13 @@ export {
   type RevealedContent,
   type RevealSpan,
 } from "./content-reveal.js";
-export { redactRevealedText, renderRevealedBody, urlsInText } from "./content-reveal-render.js";
+export {
+  type RevealedMedia,
+  redactRevealedText,
+  renderRevealedBody,
+  renderRevealedMedia,
+  urlsInText,
+} from "./content-reveal-render.js";
 export {
   BOUND_ENVELOPE_VERSION_OFFSET,
   decryptEmailBody,

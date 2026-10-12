@@ -70,6 +70,9 @@ export const MEDIA_ISSUES = [
 ] as const;
 export type MediaIssue = (typeof MEDIA_ISSUES)[number];
 
+/** Previews a media review keeps, and an operator is shown. */
+export const MEDIA_PREVIEWS_MAX = 4;
+
 /**
  * What a person reviewing a held email sees of its media, sealed in the
  * email's `media` column and purged with its body. Previews are re-encoded

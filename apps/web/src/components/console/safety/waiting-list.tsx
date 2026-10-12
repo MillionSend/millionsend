@@ -14,18 +14,10 @@ import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamActions } from "../team-actions";
-import { CardHead } from "./parts";
+import { CardHead, WHY_DOT } from "./parts";
+import { useContentReveal } from "./reveal";
 
 const COLUMNS = 6;
-// What makes each email wait: a hold or a verdict the operator decides on,
-// or a judge or reader that could not answer.
-const WHY_DOT: Record<string, string> = {
-  held: "var(--ms-warn)",
-  verdict: "var(--ms-warn)",
-  destination: "var(--ms-warn)",
-  outage: "var(--ms-danger)",
-  media: "var(--ms-danger)",
-};
 const LINK_BUTTON: React.CSSProperties = {
   font: "inherit",
   padding: 0,
@@ -40,10 +32,14 @@ type Cancel = { teamId: string; team: string; emailIds?: string[]; count: number
  * The review list: unsent emails screening stopped before SES, grouped by
  * team, released (sent without being screened again) or canceled (never
  * sent) one by one or per team. A team held for review is released with its
- * hold. Renders nothing while no email waits.
+ * hold. An email screening kept a media review of opens it in the media
+ * panel, behind the same content grant as its text. Renders nothing while no
+ * email waits.
  */
 export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?: () => void }) {
   const t = useTranslations("console.safety.waiting");
+  const mediaT = useTranslations("console.safety.media");
+  const revealT = useTranslations("console.safety.reveal");
   const common = useTranslations("console.common");
   const locale = useLocale();
   const nf = new Intl.NumberFormat(locale);
@@ -54,6 +50,7 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
     onChanged?.();
   };
   const actions = useTeamActions(refetch);
+  const reveal = useContentReveal({ onChanged: refetch });
   const release = useMutation(trpc.console.safety.releaseWaiting.mutationOptions());
   const cancel = useMutation(trpc.console.safety.cancelWaiting.mutationOptions());
   const [confirm, setConfirm] = useState<Cancel | null>(null);
@@ -61,7 +58,16 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
     toast(t("toast.error", { message: error.message }), "danger");
 
   const groups = query.data?.groups ?? [];
-  if (groups.length === 0) return actions.dialogs;
+  if (groups.length === 0) {
+    return (
+      <>
+        {actions.dialogs}
+        {reveal.dialogs}
+      </>
+    );
+  }
+  const grants = query.data?.grants ?? [];
+  const contentReveal = query.data?.contentReveal ?? false;
   const total = groups.reduce((n, group) => n + group.total, 0);
   const busy = release.isPending || cancel.isPending;
 
@@ -76,6 +82,25 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
         onError: failed,
       },
     );
+  const openMedia = (
+    team: { id: string; name: string },
+    email: (typeof groups)[number]["emails"][number],
+  ) => {
+    const grant = grants.find(
+      (g) => g.emailIds.includes(email.id) && g.expiresAt.getTime() > Date.now(),
+    );
+    if (grant) {
+      reveal.media({ id: team.id, name: team.name }, grant.id, email.id);
+      return;
+    }
+    reveal.request({
+      team: { id: team.id, name: team.name },
+      email: { id: email.id, from: email.from, sentAt: null, recipients: email.recipients },
+      flaggedCount: 0,
+      flagLabel: t(`why.${email.why}`),
+      media: true,
+    });
+  };
   const doCancel = () => {
     if (!confirm || cancel.isPending) return;
     cancel.mutate(
@@ -202,6 +227,26 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
                       <td className="right num">{email.score ?? common("none")}</td>
                       <td className="right num">{nf.format(email.recipients)}</td>
                       <td className="right">
+                        {email.media ? (
+                          <>
+                            {contentReveal ? (
+                              <button
+                                type="button"
+                                className="ms-link"
+                                style={LINK_BUTTON}
+                                disabled={busy}
+                                onClick={() => openMedia(group.team, email)}
+                              >
+                                {mediaT("row")}
+                              </button>
+                            ) : (
+                              <Tooltip inline text={revealT("off")}>
+                                <span style={{ color: "var(--ms-muted)" }}>{mediaT("row")}</span>
+                              </Tooltip>
+                            )}
+                            {" · "}
+                          </>
+                        ) : null}
                         {suspended ? (
                           <Tooltip inline text={releaseTip}>
                             <span style={{ color: "var(--ms-muted)" }}>{t("release")}</span>
@@ -281,6 +326,7 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
         </ModalFooter>
       </Modal>
       {actions.dialogs}
+      {reveal.dialogs}
     </>
   );
 }

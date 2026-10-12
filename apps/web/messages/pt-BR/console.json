@@ -1118,6 +1118,67 @@
         "failedPurged": "Todas as mensagens no alcance tiveram o corpo apagado pela retenção.",
         "failedNotFlagged": "Esse e-mail não está mais na janela de sinalizados da equipe."
       }
+    },
+    "media": {
+      "row": "Mídia",
+      "title": "Imagens e anexos · {team}",
+      "lead": "O que a avaliação leu nas imagens e anexos deste e-mail. Leia, decida, feche.",
+      "scopeSub": "O que a avaliação leu nas imagens e anexos: texto, links, detalhes dos arquivos e prévias pequenas redesenhadas. Os próprios arquivos, os cabeçalhos e a lista de destinatários continuam ocultos.",
+      "redrawn": "prévias redesenhadas em JPEG",
+      "why": "Por que está em espera",
+      "issues": {
+        "risky_file": "arquivo de risco",
+        "refused_file": "tipo de arquivo recusado",
+        "unreadable_file": "um arquivo não abriu",
+        "qr_undecoded": "um QR code não foi decodificado",
+        "images_not_read": "imagens não lidas",
+        "vision_off": "a leitura de imagens está desligada",
+        "vision_refused": "o leitor de imagens recusou",
+        "vision_blocked": "bloqueado pelo Bedrock",
+        "vision_unavailable": "leitor de imagens indisponível"
+      },
+      "text": "Texto lido · credenciais e links de uso único ocultados",
+      "noText": "Nada foi lido como texto.",
+      "links": "Links",
+      "noLinks": "Nenhum link encontrado.",
+      "files": "Anexos",
+      "noFiles": "Sem anexos.",
+      "previews": "Prévias",
+      "noPreviews": "Nenhuma prévia guardada.",
+      "cols": {
+        "source": "Onde estava",
+        "link": "Link",
+        "registered": "Domínio registrado",
+        "name": "Nome",
+        "kind": "Tipo",
+        "flags": "Alertas",
+        "size": "Tamanho",
+        "pages": "Páginas"
+      },
+      "sources": {
+        "qr": "QR code",
+        "pdf": "PDF",
+        "office": "Arquivo do Office",
+        "pass": "Passe de carteira digital",
+        "calendar": "Convite de agenda",
+        "page": "Página web anexada"
+      },
+      "flags": {
+        "markup": "página web ou SVG",
+        "archive": "arquivo compactado",
+        "disk_image": "imagem de disco",
+        "macros": "macros",
+        "risky_type": "tipo de risco",
+        "type_mismatch": "nome não bate com o conteúdo",
+        "encrypted": "protegido por senha",
+        "pdf_actions": "ações no PDF",
+        "nested_archive": "arquivo compactado dentro de outro",
+        "scripts": "scripts",
+        "forms": "formulários",
+        "over_caps": "acima dos limites de leitura",
+        "unreadable": "não abre"
+      },
+      "releaseSame": "{count, plural, one {Liberar este e-mail} other {Liberar os # com as mesmas imagens e anexos}}"
     }
   },
   "audit": {
