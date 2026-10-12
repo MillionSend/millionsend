@@ -6,10 +6,12 @@ import {
   formatDurationShort,
   formatHoursMinutes,
   formatMoneyTotals,
+  formatTimeLeft,
   formatUsd,
   formatUtcMinute,
   formatUtcTimestampMs,
   maskApiKey,
+  senderName,
 } from "@/lib/format";
 
 describe("formatDayUtc", () => {
@@ -101,5 +103,24 @@ describe("formatMoneyTotals", () => {
     );
     expect(formatMoneyTotals([{ amount: 500, currency: "jpy" }], "en")).toBe("¥500");
     expect(formatMoneyTotals([], "en")).toBe("");
+  });
+});
+
+describe("senderName", () => {
+  it("reads a From value as its display name, else its address", () => {
+    expect(senderName('"Ana Souza" <ana@sender.example>')).toBe("Ana Souza");
+    expect(senderName("Ana <ana@sender.example>")).toBe("Ana");
+    expect(senderName("<ana@sender.example>")).toBe("ana@sender.example");
+    expect(senderName("ana@sender.example")).toBe("ana@sender.example");
+    expect(senderName(null)).toBe("");
+  });
+});
+
+describe("formatTimeLeft", () => {
+  it("rounds to one compact unit", () => {
+    expect(formatTimeLeft(30_000)).toBe("1m");
+    expect(formatTimeLeft(45 * 60_000)).toBe("45m");
+    expect(formatTimeLeft(23 * 3_600_000 + 20 * 60_000)).toBe("23h");
+    expect(formatTimeLeft(7 * 86_400_000)).toBe("7d");
   });
 });

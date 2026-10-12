@@ -75,6 +75,7 @@ describe("official resend SDK: webhooks", () => {
       status: "enabled",
       endpoint: "https://example.com/hooks/contract",
       events: ["email.sent", "email.delivered"],
+      inbox_ids: null,
       signing_secret: signingSecret,
       previous_secret_expires_at: null,
     });
@@ -92,6 +93,7 @@ describe("official resend SDK: webhooks", () => {
         created_at: expect.any(String),
         status: "enabled",
         events: ["email.sent", "email.delivered"],
+        inbox_ids: null,
       },
     ]);
     expect(JSON.stringify(listed.data)).not.toContain(signingSecret);

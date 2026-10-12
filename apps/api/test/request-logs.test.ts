@@ -157,6 +157,28 @@ describe("redactLoggedBody", () => {
       headers: { "X-Ref": "1" },
     });
   });
+
+  it("treats received text as content and a received code or sign-in link as a secret", () => {
+    expect(
+      redactLoggedBody("/emails/receiving/x", {
+        extracted_text: "Your code is 482913",
+        extracted: { kinds: ["code"], code: "482913", link: null },
+      }),
+    ).toEqual({
+      extracted_text: "[extracted_text, 19 B]",
+      extracted: { kinds: ["code"], code: "[redacted]", link: null },
+    });
+    expect(
+      redactLoggedBody("/inboxes/i/codes/latest", {
+        status: "found",
+        code: null,
+        url: "https://login.example/magic?t=1",
+      }),
+    ).toEqual({ status: "found", code: null, url: "[redacted]" });
+    expect(
+      redactLoggedBody("/inboxes/i/threads/t/emails", { data: [{ extracted_text: "hi" }] }),
+    ).toEqual({ data: [{ extracted_text: "[extracted_text, 2 B]" }] });
+  });
 });
 
 describe("api request logging", () => {
@@ -201,6 +223,7 @@ describe("api request logging", () => {
       oauthClientId: "client-abc",
       permission: "full_access",
       domainId: null,
+      inboxId: null,
     });
     const res = await app.fetch(req);
     expect(res.status).toBe(200);
@@ -427,8 +450,14 @@ describe("api request logging", () => {
     expect(res.status).toBe(200);
 
     await vi.waitFor(() => {
-      expect(errors).toHaveBeenCalledWith("api request log failed", expect.anything());
+      expect(errors).toHaveBeenCalledWith(
+        "api request log failed",
+        expect.any(String),
+        expect.any(String),
+      );
     });
+    // The failed row's values (bodies, addresses) never reach the process log.
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("still-works@example.com");
     errors.mockRestore();
   });
 });

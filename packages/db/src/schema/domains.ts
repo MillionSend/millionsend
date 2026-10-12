@@ -86,11 +86,14 @@ export const domains = pgTable(
     warmupTierAt: timestamp("warmup_tier_at", { withTimezone: true }),
     // Operator override: no warm-up for this domain row.
     warmupTrustedAt: timestamp("warmup_trusted_at", { withTimezone: true }),
-    // Inbound mail (Resend's capabilities.receiving): a catch-all for every
-    // local part at this name, enabled only once the domain is verified.
+    // Inbound mail (Resend's capabilities.receiving) at this name, enabled
+    // only once the domain is verified.
     receivingEnabled: boolean("receiving_enabled").notNull().default(false),
     // When receiving was last switched on; null while it is off.
     receivingEnabledAt: timestamp("receiving_enabled_at", { withTimezone: true }),
+    // Mail to an address without an inbox is stored (on) or refused at RCPT
+    // (off). Paid plans only on cloud; a stored true is honored after a downgrade.
+    receivingCatchAll: boolean("receiving_catch_all").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),

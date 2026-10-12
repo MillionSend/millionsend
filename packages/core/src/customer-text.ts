@@ -62,8 +62,76 @@ const DIGIT_RUN = /\p{N}(?:[^\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N}]*\p{N})*/gu;
  */
 const CODE_POINT_MAX = CUSTOMER_TEXT_MAX * 4;
 
-function dropInvisible(value: string): string {
-  return value.replace(INVISIBLE, "").replace(STRAY_SELECTOR, "").replace(STRAY_JOINER, "");
+/** What dropInvisible took out, by kind: the read pipeline records these as hidden-text flags. */
+export type InvisibleClass =
+  | "unicode_tags"
+  | "variation_selectors"
+  | "bidi"
+  | "zero_width"
+  | "other_invisible";
+
+function invisibleClass(ch: string): InvisibleClass {
+  const cp = ch.codePointAt(0) ?? 0;
+  if (cp >= 0xe0000 && cp <= 0xe007f) return "unicode_tags";
+  if ((cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef)) {
+    return "variation_selectors";
+  }
+  if (
+    cp === 0x061c ||
+    cp === 0x200e ||
+    cp === 0x200f ||
+    (cp >= 0x202a && cp <= 0x202e) ||
+    (cp >= 0x2066 && cp <= 0x2069)
+  ) {
+    return "bidi";
+  }
+  if ((cp >= 0x200b && cp <= 0x200d) || cp === 0x2060 || cp === 0xfeff || cp === 0x180e) {
+    return "zero_width";
+  }
+  return "other_invisible";
+}
+
+/**
+ * Invisible characters out, line breaks and the joiners and selectors
+ * writing uses kept. `counts`, when given, tallies each removal by class.
+ */
+export function dropInvisible(
+  value: string,
+  counts?: Partial<Record<InvisibleClass, number>>,
+): string {
+  // Every character the set holds lies outside ASCII.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the ASCII range is the test
+  if (!/[^\x00-\x7f]/.test(value)) return value;
+  if (!counts) {
+    return value.replace(INVISIBLE, "").replace(STRAY_SELECTOR, "").replace(STRAY_JOINER, "");
+  }
+  const drop = (m: string) => {
+    for (const ch of m) {
+      const k = invisibleClass(ch);
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return "";
+  };
+  return value.replace(INVISIBLE, drop).replace(STRAY_SELECTOR, drop).replace(STRAY_JOINER, drop);
+}
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching controls is the point
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
+
+/**
+ * Multi-line text with line feeds as its only line breaks and no other C0 or
+ * C1 control, so an escape sequence in a malformed part can't drive the
+ * terminal an agent prints it to. Tabs stay.
+ */
+export function dropControls(value: string): string {
+  return value.replace(/\r\n?/g, "\n").replace(CONTROL, "");
+}
+
+/** How many characters dropInvisible would take out of `value`. */
+export function countInvisible(value: string): number {
+  const counts: Partial<Record<InvisibleClass, number>> = {};
+  dropInvisible(value, counts);
+  return Object.values(counts).reduce((a, b) => a + b, 0);
 }
 
 /** One line of visible text: line breaks and controls become spaces, invisible characters go. */
@@ -204,16 +272,15 @@ const NAME_NUMBER_DIGITS = 8;
 
 /**
  * Whether a team or display name may be stored: one line of visible text, at
- * most CUSTOMER_TEXT_MAX characters, no "@", no URL scheme and no run of
- * digits a phone number fits in, judged on the NFKC form so fullwidth
- * look-alikes count. A name that only looks like a domain ("acme.dev") is a
- * company's name and passes; system mail prints every name through
- * inertText anyway.
+ * most `max` characters, no "@", no URL scheme and no run of digits a phone
+ * number fits in, judged on the NFKC form so fullwidth look-alikes count. A
+ * name that only looks like a domain ("acme.dev") is a company's name and
+ * passes; system mail prints every name through inertText anyway.
  */
-export function isPlainName(value: string): boolean {
+export function isPlainName(value: string, max = CUSTOMER_TEXT_MAX): boolean {
   const folded = value.normalize("NFKC");
   return (
-    value.length <= CUSTOMER_TEXT_MAX &&
+    value.length <= max &&
     !NOT_PLAIN.test(folded) &&
     dropInvisible(folded) === folded &&
     !URL_SCHEME.test(folded) &&

@@ -17,7 +17,8 @@ segmentos e tópicos são ilimitados em todos os planos, e contatos também a
 partir do Starter. Domínios de envio são limitados a 3 no Free e 10 no
 Starter, ilimitados acima. Em qualquer um desses limites a API responde
 `403 plan_limit_reached` ("Your plan allows up to 1000 contacts") e o painel
-mostra a mesma frase.
+mostra a mesma frase. Caixas de entrada são limitadas a 3 no Free e 25 no
+Starter, ilimitadas acima (veja [Caixas de entrada](#caixas-de-entrada)).
 
 | Faixa | Plano | Preço | Incluído | Limite | Excedente por 1.000 |
 | --- | --- | --- | --- | --- | --- |
@@ -108,6 +109,40 @@ mensagem, não por destinatário, em `usage_counters.received` e
 O MX pergunta a cada `RCPT TO`, então, se a equipe estiver sem espaço, a
 mensagem é adiada antes de ser enviada; o remetente tenta de novo. Instâncias
 auto-hospedadas contam os e-mails recebidos e nunca os limitam.
+
+### Caixas de entrada
+
+As [caixas de entrada](/pt-BR/concepts/inboxes) em si não custam nada; o que
+elas recebem é contado como acima. O plano limita quantas uma equipe mantém e
+com que rapidez as cria, a partir de `PLAN_INBOX_LIMIT` e
+`INBOX_CREATES_PER_HOUR` em `packages/core/src/inboxes/limits.ts`:
+
+| Plano | Caixas | Criadas por hora | Pega-tudo |
+| --- | --- | --- | --- |
+| Free | 3 | 10 | Não |
+| Starter | 25 | 60 | Sim |
+| Pro, Scale | Ilimitadas | 600 | Sim |
+
+- No limite de caixas, `POST /inboxes` responde `403 validation_error` com a
+  mensagem do Resend, "You have reached the inbox limit of your plan. Upgrade
+  to add more.", e o painel desativa **Criar caixa de entrada** com o mesmo
+  conselho. Acima da taxa por hora, responde `429 rate_limit_exceeded` com
+  `retry-after`. A taxa conta as caixas criadas, então excluí-las não zera a
+  conta.
+- O recebimento pega-tudo (`receiving_catch_all` num domínio) exige o Starter
+  ou acima: no Free, ligá-lo responde `403 plan_limit_reached` ("Catch-all
+  receiving needs a paid plan"). Ele continua ligado num downgrade, e foi
+  ligado em todo domínio que já recebia e-mail antes de as caixas existirem.
+- `GET /usage` informa o limite em `limits.inboxes` (`null` quando é
+  ilimitado), e o cartão de cobrança o mostra como "6 de 25".
+- A análise de injeção de prompt dos e-mails recebidos tem contagem própria
+  (`usage_counters.inbound_judged`), separada das amostras do monitoramento de
+  conteúdo dos envios, com os mesmos valores diários: 600 por equipe e 50.000
+  por instância, mais 200 por caixa. O e-mail recebido nunca gasta as cotas de
+  amostragem dos envios.
+
+Instâncias auto-hospedadas não têm limite de caixas nem taxa de criação, e o
+pega-tudo vale para qualquer domínio.
 
 ## O modelo no Stripe
 

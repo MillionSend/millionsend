@@ -9,13 +9,13 @@ import {
   linkTeam,
   liveSupportViewForTeam,
   PLAN_TEAM_LIMIT,
+  slugify,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
-import { slugify } from "@/lib/slug";
 import { recordAudit } from "../audit";
 import { listMemberships } from "../membership";
 import { belongsToSilentlySuspendedTeam, suspensionLockError } from "../suspension-lock";

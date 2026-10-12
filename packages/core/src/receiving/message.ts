@@ -1,7 +1,8 @@
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
+import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { getTableColumns } from "drizzle-orm";
+import { asc, eq, getTableColumns, inArray } from "drizzle-orm";
 import {
   type AddressObject,
   type Attachment,
@@ -22,25 +23,39 @@ import {
   unpackEnvelope,
 } from "../crypto/envelope.js";
 import type { Keyring } from "../crypto/keyring.js";
-import { visibleLine } from "../customer-text.js";
+import { dropInvisible, visibleLine } from "../customer-text.js";
+import type {
+  QuarantineReason,
+  ScreeningVerdict,
+  ScreeningWire,
+  SenderTrust,
+  SpamVerdict,
+  VirusVerdict,
+} from "../inboxes/types.js";
+import { hiddenTextRemoved, screeningWire } from "../inboxes/wire.js";
 import { routableAddress } from "../sender-address.js";
+import { AUTOMATED_HEADERS } from "./automated.js";
 import { type DownloadSigning, signReceivedDownload } from "./downloads.js";
 import { MAX_RECEIVED_MESSAGE_BYTES } from "./protocol.js";
+import { READ_BODY_MAX_CHARS } from "./read.js";
 
 export type ReceivedEmailRow = typeof schema.receivedEmails.$inferSelect;
 
-const { rawCiphertext, rawIv, rawWrappedDek, ...metaColumns } = getTableColumns(
+const { rawCiphertext, rawIv, rawWrappedDek, extracted, ...metaColumns } = getTableColumns(
   schema.receivedEmails,
 );
 
 /**
  * Every received_emails column but the sealed raw message (up to 40 MiB a
- * row): what lists, webhooks and attachment records select. Only a GET of one
- * email and the downloads need the full row.
+ * row) and the sealed extracted read: what lists, webhooks and attachment
+ * records select. Only a GET of one email and the downloads need the full row.
  */
 export const RECEIVED_EMAIL_META_COLUMNS = metaColumns;
 
-export type ReceivedEmailMeta = Omit<ReceivedEmailRow, "rawCiphertext" | "rawIv" | "rawWrappedDek">;
+export type ReceivedEmailMeta = Omit<
+  ReceivedEmailRow,
+  "rawCiphertext" | "rawIv" | "rawWrappedDek" | "extracted"
+>;
 
 /** One attachment as the sealed list records it. */
 export interface ReceivedAttachment {
@@ -71,6 +86,22 @@ export interface ReceivedMetadata {
   subject: string;
   messageId: string | null;
   attachments: Omit<ReceivedAttachment, "id">[];
+  /** The From display name, one visible line. */
+  fromName: string;
+  /** In-Reply-To's first msg-id. */
+  inReplyTo: string | null;
+  /** References' msg-ids (at most 50), then bare ms1. thread tokens some clients write unbracketed. */
+  references: string[];
+  /** From fields in the header, and mailboxes in the one the parser kept; 0 when the address kept is not written in it. */
+  fromFields: number;
+  fromMailboxes: number;
+  hasDate: boolean;
+  /** The headers automatedReason reads, present ones only, values on one line. */
+  automatedHeaders: Record<string, string>;
+  /** At most READ_BODY_MAX_CHARS of each body part; bodyTruncated when either was longer. */
+  html: string | null;
+  bodyTruncated: boolean;
+  text: string | null;
 }
 
 const EMPTY_METADATA: ReceivedMetadata = {
@@ -82,6 +113,16 @@ const EMPTY_METADATA: ReceivedMetadata = {
   subject: "",
   messageId: null,
   attachments: [],
+  fromName: "",
+  inReplyTo: null,
+  references: [],
+  fromFields: 0,
+  fromMailboxes: 0,
+  hasDate: false,
+  automatedHeaders: {},
+  html: null,
+  bodyTruncated: false,
+  text: null,
 };
 
 /** MIME parses in flight per process: each can hold a 40 MiB message several times over. */
@@ -135,9 +176,12 @@ function attachmentEntry(data: AttachmentStream, index: number): Omit<ReceivedAt
 
 interface Walk {
   headers: Headers | undefined;
+  headerLines: HeaderLines;
   attachments: Omit<ReceivedAttachment, "id">[];
   /** The bytes of the attachment at the requested index, when one was asked for. */
   captured: Buffer | null;
+  html: string | null;
+  text: string | null;
 }
 
 /**
@@ -147,7 +191,14 @@ interface Walk {
 function walk(raw: Buffer, captureIndex?: number): Promise<Walk> {
   return new Promise((resolve, reject) => {
     const parser = new MailParser({ ...TEXT_ONLY, skipImageLinks: true });
-    const result: Walk = { headers: undefined, attachments: [], captured: null };
+    const result: Walk = {
+      headers: undefined,
+      headerLines: [],
+      attachments: [],
+      captured: null,
+      html: null,
+      text: null,
+    };
     const timer = setTimeout(() => {
       parser.destroy();
       reject(new Error("mime parse timed out"));
@@ -156,7 +207,15 @@ function walk(raw: Buffer, captureIndex?: number): Promise<Walk> {
     parser.on("headers", (headers) => {
       result.headers = headers;
     });
+    parser.on("headerLines", (lines: HeaderLines) => {
+      result.headerLines = lines;
+    });
     parser.on("data", (data) => {
+      if (data.type === "text") {
+        result.html = typeof data.html === "string" ? data.html : null;
+        result.text = typeof data.text === "string" ? data.text : null;
+        return;
+      }
       if (data.type !== "attachment") return;
       const entry = attachmentEntry(data, result.attachments.length);
       result.attachments.push(entry);
@@ -201,16 +260,83 @@ function headerText(headers: Headers | undefined, key: string, max: number): str
   return typeof value === "string" ? visibleLine(value, max) : "";
 }
 
+/** A header line's value, unfolded, as mailsplit hands it over (latin1 for raw UTF-8). */
+function lineValue(line: string): string {
+  const bytes = Buffer.from(line.slice(line.indexOf(":") + 1), "latin1");
+  return bytes.toString(isUtf8(bytes) ? "utf8" : "latin1").replace(/\r?\n[ \t]/g, " ");
+}
+
+// A msg-id as stored: printable ASCII without angle brackets inside, so a
+// header-shaped value can never carry a line break into anything built from it.
+const MSG_ID = /<[\x21-\x3b\x3d\x3f-\x7e]{3,996}>/g;
+const BARE_TOKEN = /(?<![<\w.])ms1\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{22}@[A-Za-z0-9.-]{1,253}/g;
+const MAX_REFERENCES = 50;
+
+/** Mailboxes in a parsed address header, group members counted. */
+function mailboxCount(value: unknown): number {
+  const objects = (Array.isArray(value) ? value : value ? [value] : []) as AddressObject[];
+  let n = 0;
+  const visit = (entries: EmailAddress[]) => {
+    for (const entry of entries) {
+      if (entry.group) visit(entry.group);
+      else n++;
+    }
+  };
+  for (const object of objects) if (Array.isArray(object?.value)) visit(object.value);
+  return n;
+}
+
 /**
- * Metadata for storage, parsed with mailparser. Never throws: a message that
- * does not parse (malformed MIME, a parser error, a timeout) is still stored,
- * with empty metadata, and its raw bytes stay downloadable.
+ * Whether a From line spells out `address` itself. mailparser decodes an
+ * encoded-word display name and parses the result again, so
+ * "=?utf-8?B?…?=: eve@evil.example;" can yield an address that no DMARC
+ * check read (RFC 2047 §5 keeps encoded words out of addresses).
+ */
+function writtenIn(lines: readonly string[], address: string): boolean {
+  const wanted = address.toLowerCase();
+  return lines.some((line) =>
+    line
+      .split(/[\s<>(),;:"]+/)
+      .some((token) => routableAddress(token)?.address.toLowerCase() === wanted),
+  );
+}
+
+function displayName(value: unknown): string {
+  const object = (Array.isArray(value) ? value[0] : value) as AddressObject | undefined;
+  const first = Array.isArray(object?.value) ? object.value[0] : undefined;
+  return visibleLine(first?.name ?? "", 256);
+}
+
+/**
+ * Metadata for storage, parsed with mailparser, and the HTML and text the
+ * read pipeline takes, from the same streaming pass. Never throws: a message
+ * that does not parse (malformed MIME, a parser error, a timeout) is still
+ * stored, with empty metadata, and its raw bytes stay downloadable.
  */
 export async function parseReceivedMetadata(raw: Buffer): Promise<ReceivedMetadata> {
   try {
-    const { headers, attachments } = await parseSlot(() => walk(raw));
+    const { headers, headerLines, attachments, html, text } = await parseSlot(() => walk(raw));
+    const lines = (key: string) =>
+      headerLines.filter((l) => l.key === key).map((l) => lineValue(l.line));
+    const inReplyTo = lines("in-reply-to").join(" ").match(MSG_ID)?.[0] ?? null;
+    const refs = lines("references").join(" ");
+    const ids = refs.match(MSG_ID) ?? [];
+    // Our thread token leads References, and a long chain must not push it out.
+    const tokens = [
+      ...ids.filter((id) => id.startsWith("<ms1.")),
+      ...(`${lines("in-reply-to").join(" ")} ${refs}`.replace(MSG_ID, " ").match(BARE_TOKEN) ?? []),
+    ].slice(0, 5);
+    const references = [...new Set([...tokens, ...ids.slice(-(MAX_REFERENCES - tokens.length))])];
+    const automatedHeaders: Record<string, string> = {};
+    for (const name of AUTOMATED_HEADERS) {
+      const values = lines(name);
+      if (values.length > 0) automatedHeaders[name] = visibleLine(values.join(", "), 998);
+    }
+    const capped = (body: string | null) => body?.slice(0, READ_BODY_MAX_CHARS) || null;
+    const from = addresses(headers?.get("from"))[0] ?? null;
+    const fromLines = lines("from");
     return {
-      from: addresses(headers?.get("from"))[0] ?? null,
+      from,
       to: addresses(headers?.get("to")),
       cc: addresses(headers?.get("cc")),
       bcc: addresses(headers?.get("bcc")),
@@ -218,6 +344,17 @@ export async function parseReceivedMetadata(raw: Buffer): Promise<ReceivedMetada
       subject: headerText(headers, "subject", 998),
       messageId: headerText(headers, "message-id", 998) || null,
       attachments,
+      fromName: displayName(headers?.get("from")),
+      inReplyTo,
+      references,
+      fromFields: fromLines.length,
+      fromMailboxes:
+        from !== null && writtenIn(fromLines, from) ? mailboxCount(headers?.get("from")) : 0,
+      hasDate: lines("date").length > 0,
+      automatedHeaders,
+      html: capped(html),
+      bodyTruncated: Math.max(html?.length ?? 0, text?.length ?? 0) > READ_BODY_MAX_CHARS,
+      text: capped(text),
     };
   } catch {
     return EMPTY_METADATA;
@@ -265,6 +402,43 @@ export async function openReceivedRaw(
     keyring,
     { ...ownerOf(row), kind: "received_raw" },
   );
+}
+
+/** The read pipeline's output, sealed as received_emails.extracted. */
+export interface ReceivedExtracted {
+  text: string;
+  quoted: string;
+  signature: string;
+  code: { kind: "otp"; value: string } | { ambiguous: true } | null;
+  link: { url: string; linkDomainMatchesSender: boolean } | { ambiguous: true } | null;
+  flags: string[];
+}
+
+export async function sealReceivedExtracted(
+  extracted: ReceivedExtracted,
+  keyring: Keyring,
+  owner: EnvelopeOwner,
+): Promise<string> {
+  return packEnvelope(
+    await encryptPayload(Buffer.from(JSON.stringify(extracted), "utf8"), keyring, {
+      ...owner,
+      kind: "received_extracted",
+    }),
+  );
+}
+
+/** The sealed extracted read, or null when there is none or the content purge emptied it. */
+export async function openReceivedExtracted(
+  row: { teamId: string; id: string; extracted: string | null },
+  keyring: Keyring,
+): Promise<ReceivedExtracted | null> {
+  if (!row.extracted) return null;
+  const plaintext = await decryptPayload(unpackEnvelope(row.extracted), keyring, {
+    teamId: row.teamId,
+    rowId: row.id,
+    kind: "received_extracted",
+  });
+  return JSON.parse(plaintext.toString("utf8")) as ReceivedExtracted;
 }
 
 /** The sealed attachment list; empty once purged. */
@@ -516,7 +690,8 @@ export async function receivedEmailDetail(
         return {
           html,
           html_format: htmlFormat,
-          text: parsed.text || null,
+          // Invisible characters out, line breaks kept; html stays byte for byte.
+          text: parsed.text ? dropInvisible(parsed.text) : null,
           headers: Object.keys(headers).length > 0 ? withReturnPath(headers, row) : null,
         };
       });
@@ -524,9 +699,11 @@ export async function receivedEmailDetail(
       // Malformed MIME: the raw download below is the way to its bytes.
     }
   }
-  const signed = raw
-    ? signReceivedDownload({ ...options.downloads, teamId: row.teamId, emailId: row.id })
-    : null;
+  // SECURITY: mail carrying malware is never served whole, released or not.
+  const signed =
+    raw && row.virusVerdict !== "fail"
+      ? signReceivedDownload({ ...options.downloads, teamId: row.teamId, emailId: row.id })
+      : null;
   const item = listItem(row, attachments);
   return {
     object: "email",
@@ -626,5 +803,241 @@ export function receivedEmailEventData(
       content_disposition: a.contentDisposition,
       content_id: a.contentId,
     })),
+  };
+}
+
+/** One of a received row's inbox memberships, as reads show it. */
+export interface ReceivedMembershipView {
+  inboxId: string;
+  threadId: string;
+  verdict: ScreeningVerdict;
+  senderTrust: SenderTrust;
+  quarantineReason: QuarantineReason | null;
+  reasons: string[];
+  injectionScore: number | null;
+  phishingScore: number | null;
+  readAt: Date | null;
+  deliveredAt: Date | null;
+  /** Its inbox serves codes and links (safety.extract_codes). */
+  extractCodes: boolean;
+}
+
+/** The memberships of these rows, each row's in its inboxes' creation order. */
+export async function receivedMemberships(
+  db: Db,
+  rowIds: readonly string[],
+): Promise<Map<string, ReceivedMembershipView[]>> {
+  const out = new Map<string, ReceivedMembershipView[]>();
+  if (rowIds.length === 0) return out;
+  const m = schema.receivedEmailInboxes;
+  const i = schema.inboxes;
+  const rows = await db
+    .select({
+      receivedEmailId: m.receivedEmailId,
+      inboxId: m.inboxId,
+      threadId: m.threadId,
+      verdict: m.verdict,
+      senderTrust: m.senderTrust,
+      quarantineReason: m.quarantineReason,
+      reasons: m.reasons,
+      injectionScore: m.injectionScore,
+      phishingScore: m.phishingScore,
+      readAt: m.readAt,
+      deliveredAt: m.deliveredAt,
+      safety: i.safety,
+    })
+    .from(m)
+    .innerJoin(i, eq(i.id, m.inboxId))
+    .where(inArray(m.receivedEmailId, [...rowIds]))
+    .orderBy(asc(i.createdAt), asc(i.id));
+  for (const { receivedEmailId, safety, ...membership } of rows) {
+    const list = out.get(receivedEmailId) ?? [];
+    list.push({ ...membership, extractCodes: safety.extract_codes });
+    out.set(receivedEmailId, list);
+  }
+  return out;
+}
+
+type RowFacts = Pick<
+  ReceivedEmailMeta,
+  | "senderTrust"
+  | "spamVerdict"
+  | "spamScore"
+  | "virusVerdict"
+  | "virusSignature"
+  | "releasedAt"
+  | "hiddenText"
+  | "extractedKinds"
+>;
+
+/** A row that reached no inbox: held for a virus until released, else suspicious or clean by its facts. */
+function rowVerdict(row: RowFacts): ScreeningVerdict {
+  if (row.virusVerdict === "fail") return row.releasedAt ? "released" : "quarantined";
+  return row.senderTrust === "unauthenticated" ||
+    row.senderTrust === "failed" ||
+    row.spamVerdict === "gray" ||
+    row.spamVerdict === "fail" ||
+    row.virusVerdict === "processing_failed"
+    ? "suspicious"
+    : "clean";
+}
+
+/** Whose read this is: an inbox in context (an inbox-scoped key, an inbox_id filter), and whether an agent reads. */
+export interface ReceivedReadView {
+  inboxId: string | null;
+  /** Inbox-scoped keys and MCP tokens: held memberships are never theirs to see. */
+  agent: boolean;
+}
+
+/** The membership a read is about: the inbox in context, else the first by inbox age; agents see delivered ones only. */
+export function chosenMembership(
+  memberships: readonly ReceivedMembershipView[],
+  view: ReceivedReadView,
+): { chosen: ReceivedMembershipView | null; shown: ReceivedMembershipView[] } {
+  const shown = view.agent ? memberships.filter((m) => m.deliveredAt !== null) : [...memberships];
+  const chosen = view.inboxId
+    ? (shown.find((m) => m.inboxId === view.inboxId) ?? null)
+    : (shown[0] ?? null);
+  return { chosen, shown };
+}
+
+/**
+ * Why an agent may not read a row: "quarantined" (403, it may learn the id
+ * is held) or "pending" (404, still being screened, or no membership in its
+ * inbox); null when the row is visible to it.
+ */
+export function heldFrom(
+  row: Pick<ReceivedEmailMeta, "catchAll" | "virusVerdict" | "releasedAt">,
+  memberships: readonly ReceivedMembershipView[],
+  inboxId: string | null,
+): "pending" | "quarantined" | null {
+  const relevant = inboxId ? memberships.filter((m) => m.inboxId === inboxId) : memberships;
+  if (relevant.some((m) => m.deliveredAt !== null)) return null;
+  const virusHeld = row.virusVerdict === "fail" && !row.releasedAt;
+  // The catch-all copy shows nothing an inbox holds (every membership here is
+  // held) unless a person released it.
+  if (!inboxId && row.catchAll && (row.releasedAt || (!virusHeld && relevant.length === 0))) {
+    return null;
+  }
+  if (virusHeld || relevant.some((m) => m.verdict === "quarantined")) return "quarantined";
+  return "pending";
+}
+
+/** MillionSend's keys on a GET /emails/receiving list item. */
+export interface ReceivedListExtras {
+  inbox_id: string | null;
+  thread_id: string | null;
+  /** Owner views only. */
+  inboxes?: { inbox_id: string; thread_id: string; verdict: ScreeningVerdict }[];
+  screening: { verdict: ScreeningVerdict; sender_trust: SenderTrust };
+  spam_verdict: SpamVerdict | null;
+  virus_verdict: VirusVerdict | null;
+  extracted: { kinds: ("code" | "link")[] };
+  /** With an inbox in context. */
+  read?: boolean;
+}
+
+export function receivedListExtras(
+  row: RowFacts,
+  memberships: readonly ReceivedMembershipView[],
+  view: ReceivedReadView,
+): ReceivedListExtras {
+  const { chosen, shown } = chosenMembership(memberships, view);
+  return {
+    inbox_id: chosen?.inboxId ?? null,
+    thread_id: chosen?.threadId ?? null,
+    ...(view.agent
+      ? {}
+      : {
+          inboxes: shown.map((m) => ({
+            inbox_id: m.inboxId,
+            thread_id: m.threadId,
+            verdict: m.verdict,
+          })),
+        }),
+    screening: {
+      verdict: chosen?.verdict ?? rowVerdict(row),
+      sender_trust: chosen?.senderTrust ?? row.senderTrust,
+    },
+    spam_verdict: row.spamVerdict,
+    virus_verdict: row.virusVerdict,
+    extracted: { kinds: row.extractedKinds },
+    ...(view.inboxId ? { read: chosen?.readAt != null } : {}),
+  };
+}
+
+/** extracted as GET /emails/receiving/{id} shows it: the code and link only where they may be served. */
+export interface ExtractedWire {
+  kinds: ("code" | "link")[];
+  code: string | null;
+  link: string | null;
+  link_domain_matches_sender: boolean | null;
+  ambiguous: boolean;
+}
+
+/**
+ * MillionSend's keys on GET /emails/receiving/{id}. The code and link are
+ * served only from delivered mail of a sender that did not fail
+ * authentication, in an inbox that extracts codes; `codeServed` says one
+ * was, for the code.read activity.
+ */
+export async function receivedDetailExtras(
+  row: RowFacts & { teamId: string; id: string; extracted: string | null; catchAll: boolean },
+  memberships: readonly ReceivedMembershipView[],
+  view: ReceivedReadView,
+  keyring: Keyring,
+): Promise<{
+  extras: Record<string, unknown>;
+  codeServed: { inboxId: string; threadId: string } | null;
+}> {
+  const { chosen } = chosenMembership(memberships, view);
+  const list = receivedListExtras(row, memberships, view);
+  const screening: ScreeningWire = chosen
+    ? screeningWire(chosen, row.hiddenText)
+    : {
+        verdict: rowVerdict(row),
+        sender_trust: row.senderTrust,
+        quarantine_reason: row.virusVerdict === "fail" ? "virus" : null,
+        reasons: [],
+        injection_score: null,
+        phishing_score: null,
+        hidden_text_removed: hiddenTextRemoved(row.hiddenText),
+      };
+  const extracted = await openReceivedExtracted(row, keyring);
+  const delivered = chosen
+    ? chosen.deliveredAt !== null
+    : row.catchAll && rowVerdict(row) !== "quarantined";
+  const serves =
+    extracted !== null &&
+    delivered &&
+    screening.sender_trust !== "failed" &&
+    (chosen ? chosen.extractCodes : true);
+  const code = serves ? extracted.code : null;
+  const link = serves ? extracted.link : null;
+  const wire: ExtractedWire = {
+    kinds: row.extractedKinds,
+    code: code && "value" in code ? code.value : null,
+    link: link && "url" in link ? link.url : null,
+    link_domain_matches_sender: link && "url" in link ? link.linkDomainMatchesSender : null,
+    ambiguous: Boolean((code && "ambiguous" in code) || (link && "ambiguous" in link)),
+  };
+  return {
+    extras: {
+      inbox_id: list.inbox_id,
+      thread_id: list.thread_id,
+      ...(list.inboxes ? { inboxes: list.inboxes } : {}),
+      screening,
+      spam_verdict: row.spamVerdict,
+      spam_score: row.spamScore,
+      virus_verdict: row.virusVerdict,
+      virus_signature: row.virusSignature,
+      extracted_text: extracted?.text ?? null,
+      extracted: wire,
+      ...(view.inboxId ? { read: chosen?.readAt != null } : {}),
+    },
+    codeServed:
+      chosen && (wire.code !== null || wire.link !== null)
+        ? { inboxId: chosen.inboxId, threadId: chosen.threadId }
+        : null,
   };
 }

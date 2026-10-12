@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import type { BillingStripe } from "@millionsend/billing";
 import {
   DAY_MS,
+  defaultSafety,
+  PLAN_INBOX_LIMIT,
   PLAN_RUNGS,
   type PlanRungKey,
   rungByKey,
@@ -315,6 +317,36 @@ describe("billing router", () => {
       hasCustomer: false,
       hasLiveSubscription: false,
       upgradesHeld: false,
+      // No mail is received here, so no plan line counts inboxes.
+      inboxes: null,
+    });
+  });
+
+  it("status reports each plan's inbox cap and the team's count where mail is received", async () => {
+    vi.stubEnv("RECEIVING_MX_HOST", "mx.example.net");
+    const teamId = await createTeam(db);
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: "in.billing.test", region: "us-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("no domain");
+    const inbox = (localPart: string, expiresAt: Date | null) => ({
+      teamId,
+      kind: "agent" as const,
+      emailAddress: `${localPart}@in.billing.test`,
+      localPart,
+      domainId: domain.id,
+      name: localPart,
+      safety: defaultSafety("agent", false),
+      expiresAt,
+    });
+    // An expired inbox no longer counts against the cap.
+    await db
+      .insert(schema.inboxes)
+      .values([inbox("live", null), inbox("gone", new Date(Date.now() - 1000))]);
+    expect((await callerFor(teamId, "member").billing.status()).inboxes).toEqual({
+      limits: PLAN_INBOX_LIMIT,
+      used: 1,
     });
   });
 

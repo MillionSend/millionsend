@@ -3,15 +3,22 @@ import {
   type ApiKeyAuth,
   acceptEmail,
   authenticateApiKey,
+  customHeaderIssues,
+  findLiveInbox,
   formatMailbox,
+  INBOX_KEY_FROM_MESSAGE,
+  isSharedInboxSender,
   monthlyQuotaMessage,
+  msgIds,
   parseMailbox,
+  parseSingleSender,
   reservedSenderRefusal,
   SES_MAX_MESSAGE_BYTES,
+  SHARED_REPLY_ONLY_MESSAGE,
   sendRefusalError,
   verifySenderDomain,
 } from "@millionsend/core";
-import { type AddressObject, simpleParser } from "mailparser";
+import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { SMTPServer, type SMTPServerDataStream, type SMTPServerSession } from "smtp-server";
 
 /** Mirrors Resend's SMTP contract: fixed username, an API key as password. */
@@ -74,6 +81,22 @@ const addrKey = (mailbox: string): string =>
   (parseMailbox(mailbox)?.address ?? mailbox).toLowerCase();
 
 /**
+ * In-Reply-To and References as msg-ids, through the same header rules as
+ * POST /emails, so a reply over SMTP threads like one over the API.
+ */
+function threadingHeaders(parsed: ParsedMail): Record<string, string> | undefined {
+  const inReplyTo = msgIds(parsed.inReplyTo)[0];
+  const references = msgIds(parsed.references);
+  const headers: Record<string, string> = {
+    ...(inReplyTo ? { "In-Reply-To": inReplyTo } : {}),
+    ...(references.length > 0 ? { References: references.join(" ") } : {}),
+  };
+  const [issue] = customHeaderIssues(headers);
+  if (issue) throw smtpError(554, issue.message);
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+/**
  * MIME message → the shared accept pipeline. Throws errors carrying SMTP
  * response codes: 553/554 validation, 550 all-suppressed or suspended, 451
  * while the team's sending is paused.
@@ -117,10 +140,22 @@ async function handleMessage(
     throw smtpError(554, "Either an HTML or a text body is required");
   }
 
+  // SECURITY: an inbox-scoped key sends from its inbox address and no other.
+  if (auth.inboxId !== null) {
+    const inbox = await findLiveInbox(deps.db, { teamId: auth.teamId, inboxId: auth.inboxId });
+    if (parseSingleSender(from)?.address.toLowerCase() !== inbox?.emailAddress) {
+      throw smtpError(550, `5.7.1 ${INBOX_KEY_FROM_MESSAGE}`);
+    }
+  }
+  const headers = threadingHeaders(parsed);
+
   // The authenticated key's team decides which senders are allowed — the
   // MAIL FROM envelope identity is never trusted.
   const reserved = reservedSenderRefusal(from, deps.onboardingEmailFrom);
   if (reserved) throw smtpError(550, reserved.message);
+  if (isSharedInboxSender(from, deps.sharedInboxDomain)) {
+    throw smtpError(550, `5.7.1 ${SHARED_REPLY_ONLY_MESSAGE}`);
+  }
   const domain = await verifySenderDomain(deps.db, auth.teamId, from);
   if (!domain.ok) {
     throw smtpError(
@@ -146,6 +181,7 @@ async function handleMessage(
       subject,
       html,
       text,
+      headers,
       domainId: domain.domainId,
     },
     // A refusal would bounce the message at the client's server: a hold
@@ -174,6 +210,16 @@ async function handleMessage(
       throw smtpError(452, monthlyQuotaMessage(result));
     }
     if (result.reason === "attachments_too_large") throw smtpError(552, "Attachments too large");
+    if (result.reason === "inbox_scope") throw smtpError(550, `5.7.1 ${INBOX_KEY_FROM_MESSAGE}`);
+    if (result.reason === "inbox_send_policy") {
+      throw smtpError(
+        550,
+        `5.7.1 The sending inbox's rules hold this email${result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : ""}; create it as a draft for a person to approve`,
+      );
+    }
+    if (result.reason === "inbox_send_cap_reached") {
+      throw smtpError(452, "4.3.1 Daily send limit for this inbox reached");
+    }
     throw smtpError(550, "All recipients are suppressed");
   }
   return `Queued as ${result.id}`;

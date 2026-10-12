@@ -2,8 +2,13 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   apiRequestActor,
   generateApiKey,
+  getInboxSafety,
+  INBOX_KEY_SCOPE_MESSAGE,
+  INBOX_KEYS_MAX,
+  inboxActorFromAuth,
   MAX_ACTIVE_API_KEYS,
   recordAudit,
+  recordInboxActivity,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -39,7 +44,7 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
           description: "API key created; the token is returned only here",
         },
         403: jsonErr(
-          "Restricted API key: a sending_access key, or a domain_id outside the calling key's domain",
+          "Restricted API key: a sending_access key, an inbox-scoped key, or a domain_id outside the calling key's domain",
         ),
         422: jsonErr("Validation error"),
       },
@@ -47,6 +52,10 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
+      // SECURITY: an inbox-scoped key never mints, whatever the route allow-list says.
+      if (auth.inboxId) {
+        return c.json(errorBody(403, "restricted_api_key", INBOX_KEY_SCOPE_MESSAGE), 403);
+      }
       // SECURITY: a minted key is never broader than the key minting it. Under
       // a domain-scoped minter, an omitted or null domain_id inherits the
       // minter's domain and any other is refused; only a full_access minter
@@ -73,16 +82,48 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
           403,
         );
       }
+      const inboxId = body.inbox_id?.toLowerCase() ?? null;
+      if (inboxId !== null) {
+        if (auth.domainId !== null) {
+          return c.json(
+            errorBody(
+              403,
+              "restricted_api_key",
+              "A domain-scoped API key can't create inbox-scoped keys",
+            ),
+            403,
+          );
+        }
+        const refusal =
+          body.permission !== "full_access"
+            ? "An inbox-scoped key needs permission full_access"
+            : domainId !== null
+              ? "inbox_id can't be combined with domain_id"
+              : (await getInboxSafety(db, { teamId: auth.teamId, inboxId })) === null
+                ? "inbox_id must be an inbox of this team"
+                : null;
+        if (refusal) return c.json(errorBody(422, "validation_error", refusal), 422);
+      }
+      // Inbox-scoped keys have their own cap per inbox, outside the team's.
       const [active] = await db
         .select({ n: count() })
         .from(k)
-        .where(and(eq(k.teamId, auth.teamId), isNull(k.revokedAt)));
-      if ((active?.n ?? 0) >= MAX_ACTIVE_API_KEYS) {
+        .where(
+          and(
+            eq(k.teamId, auth.teamId),
+            isNull(k.revokedAt),
+            inboxId === null ? isNull(k.inboxId) : eq(k.inboxId, inboxId),
+          ),
+        );
+      const cap = inboxId === null ? MAX_ACTIVE_API_KEYS : INBOX_KEYS_MAX;
+      if ((active?.n ?? 0) >= cap) {
         return c.json(
           errorBody(
             422,
             "validation_error",
-            `A team can have at most ${MAX_ACTIVE_API_KEYS} active API keys; revoke one first`,
+            inboxId === null
+              ? `A team can have at most ${MAX_ACTIVE_API_KEYS} active API keys; revoke one first`
+              : `An inbox can have at most ${INBOX_KEYS_MAX} active API keys; revoke one first`,
           ),
           422,
         );
@@ -119,10 +160,19 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
           last4: generated.last4,
           permission: body.permission,
           domainId,
+          inboxId,
           createdByApiKeyId: auth.apiKeyId,
         })
         .returning({ id: k.id });
       if (!row) throw new Error("api key insert returned no row");
+      if (inboxId !== null) {
+        await recordInboxActivity(db, {
+          teamId: auth.teamId,
+          inboxId,
+          actor: inboxActorFromAuth(auth),
+          action: "key.created",
+        });
+      }
       await recordAudit(db, {
         teamId: auth.teamId,
         actor: apiRequestActor(auth),
@@ -132,6 +182,7 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
           name: body.name,
           permission: body.permission,
           domainId,
+          inboxId,
         },
       });
       // The full secret exists only in this response — the row stores
@@ -194,6 +245,7 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
             name: row.name,
             created_at: row.createdAt.toISOString(),
             last_used_at: row.lastUsedAt?.toISOString() ?? null,
+            inbox_id: row.inboxId,
           })),
           has_more: page.hasMore,
         },
@@ -226,8 +278,16 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
         .where(
           and(eq(k.id, c.req.valid("param").id), eq(k.teamId, auth.teamId), isNull(k.revokedAt)),
         )
-        .returning({ id: k.id });
+        .returning({ id: k.id, inboxId: k.inboxId });
       if (!row) return c.json(errorBody(404, "not_found", "API key not found"), 404);
+      if (row.inboxId !== null) {
+        await recordInboxActivity(db, {
+          teamId: auth.teamId,
+          inboxId: row.inboxId,
+          actor: inboxActorFromAuth(auth),
+          action: "key.revoked",
+        });
+      }
       await recordAudit(db, {
         teamId: auth.teamId,
         actor: apiRequestActor(auth),

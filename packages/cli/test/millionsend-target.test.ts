@@ -14,7 +14,7 @@ import {
 } from "../src/millionsend.js";
 import type { Snapshot } from "../src/model.js";
 import { buildPlan } from "../src/plan.js";
-import { TARGET_WEBHOOK_EVENTS } from "../src/translate.js";
+import { TARGET_ALL_EVENTS } from "../src/translate.js";
 import { createApiKey, type LiveApi, startLiveApi } from "./helpers/live-api.js";
 
 let cloud: LiveApi;
@@ -461,7 +461,7 @@ describe("readState", () => {
       {
         id: ids.webhook2,
         endpoint: "https://hooks.example.test/b",
-        events: [...TARGET_WEBHOOK_EVENTS],
+        events: [...TARGET_ALL_EVENTS],
         status: "enabled",
       },
     ]);
@@ -493,7 +493,7 @@ describe("readState", () => {
         {
           id: "src-b",
           endpoint: "https://hooks.example.test/b",
-          events: [...TARGET_WEBHOOK_EVENTS],
+          events: [...TARGET_ALL_EVENTS],
           status: "enabled",
           signingSecret: null,
         },

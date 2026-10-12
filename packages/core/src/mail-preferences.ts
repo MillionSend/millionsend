@@ -22,6 +22,7 @@ export const MAIL_PREFERENCE_GROUPS = [
     cloudOnly: false,
     keys: ["webhook.failing", "webhook.auto_disabled", "webhook.backlog"],
   },
+  { group: "inboxes", cloudOnly: false, keys: ["inbox.attention"] },
   {
     group: "billing",
     cloudOnly: true,

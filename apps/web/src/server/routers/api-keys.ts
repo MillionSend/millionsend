@@ -1,9 +1,15 @@
-import { generateApiKey, MAX_ACTIVE_API_KEYS } from "@millionsend/core";
+import {
+  generateApiKey,
+  INBOX_KEYS_MAX,
+  MAX_ACTIVE_API_KEYS,
+  recordInboxActivity,
+} from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit";
+import { userActor } from "../inboxes";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
 export const apiKeysRouter = router({
@@ -18,11 +24,15 @@ export const apiKeysRouter = router({
         domainId: schema.apiKeys.domainId,
         // Null when the key is not domain-scoped (any verified domain).
         domainName: schema.domains.name,
+        inboxId: schema.apiKeys.inboxId,
+        // Null unless the key reads and sends from one inbox only.
+        inboxAddress: schema.inboxes.emailAddress,
         lastUsedAt: schema.apiKeys.lastUsedAt,
         createdAt: schema.apiKeys.createdAt,
       })
       .from(schema.apiKeys)
       .leftJoin(schema.domains, eq(schema.apiKeys.domainId, schema.domains.id))
+      .leftJoin(schema.inboxes, eq(schema.apiKeys.inboxId, schema.inboxes.id))
       .where(and(eq(schema.apiKeys.teamId, ctx.teamId), isNull(schema.apiKeys.revokedAt)))
       .orderBy(desc(schema.apiKeys.createdAt));
     return rows;
@@ -35,17 +45,48 @@ export const apiKeysRouter = router({
         permission: z.enum(schema.apiKeyPermissionEnum.enumValues).default("full_access"),
         // Null/omitted = any verified domain; a uuid scopes the key to one domain.
         domainId: z.uuid().nullish(),
+        // A uuid restricts the key to one inbox: it reads and sends from that inbox only.
+        inboxId: z.uuid().nullish(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const k = schema.apiKeys;
+      if (input.inboxId) {
+        if (input.permission !== "full_access" || input.domainId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "An inbox key needs full access and no domain",
+          });
+        }
+        const [inbox] = await ctx.db
+          .select({ id: schema.inboxes.id })
+          .from(schema.inboxes)
+          .where(and(eq(schema.inboxes.id, input.inboxId), eq(schema.inboxes.teamId, ctx.teamId)));
+        if (!inbox) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "inboxId must be an inbox of this team",
+          });
+        }
+      }
+      // Inbox keys have their own cap per inbox, outside the team's.
       const [active] = await ctx.db
         .select({ n: count() })
-        .from(schema.apiKeys)
-        .where(and(eq(schema.apiKeys.teamId, ctx.teamId), isNull(schema.apiKeys.revokedAt)));
-      if ((active?.n ?? 0) >= MAX_ACTIVE_API_KEYS) {
+        .from(k)
+        .where(
+          and(
+            eq(k.teamId, ctx.teamId),
+            isNull(k.revokedAt),
+            input.inboxId ? eq(k.inboxId, input.inboxId) : isNull(k.inboxId),
+          ),
+        );
+      const cap = input.inboxId ? INBOX_KEYS_MAX : MAX_ACTIVE_API_KEYS;
+      if ((active?.n ?? 0) >= cap) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: `A team can have at most ${MAX_ACTIVE_API_KEYS} active API keys; revoke one first.`,
+          message: input.inboxId
+            ? `An inbox can have at most ${INBOX_KEYS_MAX} active API keys; revoke one first.`
+            : `A team can have at most ${MAX_ACTIVE_API_KEYS} active API keys; revoke one first.`,
         });
       }
       if (input.domainId) {
@@ -79,9 +120,18 @@ export const apiKeysRouter = router({
           last4: generated.last4,
           permission: input.permission,
           domainId: input.domainId ?? null,
+          inboxId: input.inboxId ?? null,
         })
         .returning({ id: schema.apiKeys.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      if (input.inboxId) {
+        await recordInboxActivity(ctx.db, {
+          teamId: ctx.teamId,
+          inboxId: input.inboxId,
+          actor: userActor(ctx),
+          action: "key.created",
+        });
+      }
       await recordAudit(ctx, {
         action: "api_key.created",
         target: { type: "api_key", id: row.id },
@@ -89,6 +139,7 @@ export const apiKeysRouter = router({
           name: input.name.trim(),
           permission: input.permission,
           domainId: input.domainId ?? null,
+          inboxId: input.inboxId ?? null,
         },
       });
       // The full secret exists only in this response — the row stores
@@ -109,8 +160,16 @@ export const apiKeysRouter = router({
           isNull(schema.apiKeys.revokedAt),
         ),
       )
-      .returning({ id: schema.apiKeys.id });
+      .returning({ id: schema.apiKeys.id, inboxId: schema.apiKeys.inboxId });
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    if (row.inboxId) {
+      await recordInboxActivity(ctx.db, {
+        teamId: ctx.teamId,
+        inboxId: row.inboxId,
+        actor: userActor(ctx),
+        action: "key.revoked",
+      });
+    }
     await recordAudit(ctx, { action: "api_key.revoked", target: { type: "api_key", id: row.id } });
     return { id: row.id };
   }),

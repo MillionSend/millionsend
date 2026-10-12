@@ -1,7 +1,8 @@
 # Inbound MX box (MillionSend Cloud)
 
 The mail server that receives for every receiving-enabled domain on MillionSend
-Cloud: `mx.millionsend-dns.com`, a small EC2 instance in `us-east-1`. It runs
+Cloud, and for the teams' subdomains of the shared inbox domain:
+`mx.millionsend-dns.com`, a small EC2 instance in `us-east-1`. It runs
 the app's own image as `PROCESS=mx` and holds no database. Per recipient it asks
 the API whether the domain receives here, and it hands every message to the
 API before it answers `250`. The only secret on the box is `MX_INGEST_SECRET`,
@@ -220,9 +221,10 @@ with `550 5.1.1 Recipient domain does not receive mail here`.
 ### 10. End-to-end test with real mail
 
 1. In the dashboard, add a subdomain such as `inbound-test.example.com` to a
-   team and verify it, turn on **Receiving**, and add the MX record it shows:
-   name `inbound-test`, mail server `mx.millionsend-dns.com`, priority 10.
-   A subdomain keeps the parent domain's mailboxes untouched.
+   team and verify it, turn on **Receiving** and **Catch-all** (or create an
+   inbox on it and send to that address below), and add the MX record it
+   shows: name `inbound-test`, mail server `mx.millionsend-dns.com`,
+   priority 10. A subdomain keeps the parent domain's mailboxes untouched.
 2. Wait for the record's live check to pass (`dig +short MX inbound-test.example.com`
    prints `10 mx.millionsend-dns.com.`).
 3. From an ordinary mailbox (Gmail, Outlook), send a message with an
@@ -230,18 +232,25 @@ with `550 5.1.1 Recipient domain does not receive mail here`.
 4. `docker compose logs mx` shows `"event":"delivered"` with
    `"to_domains":["inbound-test.example.com"]` and the SPF, DKIM and DMARC
    verdicts (`pass` from Gmail).
-5. The message appears under Emails → Receiving, and `email.received` webhooks
-   fire.
+5. The message appears under Inboxes → All received, and `email.received`
+   webhooks fire.
 
 When it does not arrive: `rcpt_refused` with code 550 means receiving is off
-for that exact domain; `rcpt_failed` or `deliver_failed` means the API did not
-answer as expected (the line carries the error or HTTP status). The sender
-keeps retrying in both of the latter cases, so the message arrives once the
-cause is fixed.
+for that exact domain, or the address has no inbox and catch-all is off;
+`rcpt_failed` or `deliver_failed` means the API did not answer as expected
+(the line carries the error or HTTP status). The sender keeps retrying in both
+of the latter cases, so the message arrives once the cause is fixed.
 
 ## Upgrades
 
-Set `MILLIONSEND_TAG` in `.env` to the release the app moves to, then:
+Upgrade the app first, then this box. A release can add to what the MX sends
+the app: the unfolded authentication results (`authDetail`), for one, that
+sender trust is built from. An older app ignores them and a newer app accepts
+mail without them, so neither order loses mail; app first means they are
+stored from the box's first message on.
+
+Once the app runs the new release, set `MILLIONSEND_TAG` in `.env` to it,
+then:
 
 ```bash
 cd /opt/millionsend-mx
@@ -250,6 +259,35 @@ docker compose pull && docker compose up -d && docker image prune -f
 
 During the few seconds of restart, senders find the port closed and retry;
 nothing is lost.
+
+## Shared inbox domain
+
+Teams' shared-domain inboxes (`SHARED_INBOX_DOMAIN` in the app's `.env`)
+receive here too, through one wildcard MX record. The domain is its own
+registrable domain, never under `millionsend.com` or `millionsend-dns.com`:
+the cloud app refuses to boot with one there. Agent mail, and abuse of it,
+then never touches the platform's own reputation.
+
+1. **DNS**, in the shared domain's zone (`<shared>` below stands for it):
+
+   | Type | Name | Content |
+   | ---- | ---- | ------- |
+   | MX | `*.<shared>` | `mx.millionsend-dns.com`, priority 10 |
+   | TXT | `_dmarc.<shared>` | `v=DMARC1; p=reject` |
+
+2. **SES identity**: verify `<shared>` as a domain identity with Easy DKIM in
+   the app's default region (the first of `AWS_REGIONS`) and publish its
+   three DKIM CNAME records in the same zone. Shared addresses send with no
+   team domain, from that region and its default configuration set.
+3. **App**: set `SHARED_INBOX_DOMAIN=<shared>` in the app's `.env`, then
+   `docker compose up -d` there. Nothing changes on this box.
+4. **Checks**: `dig +short MX test.<shared>` prints
+   `10 mx.millionsend-dns.com.`. Create an inbox with **Random address**,
+   send it a message from Gmail, then reply from the inbox: Gmail's "Show
+   original" should read `DKIM: 'PASS' with domain <shared>` and
+   `DMARC: 'PASS'`. SES documents sending from any subdomain of a verified
+   domain identity, but not which key signs it, so this check is what proves
+   the signature.
 
 ## Operations
 

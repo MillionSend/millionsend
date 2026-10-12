@@ -82,6 +82,26 @@ async function storedRow(raw: Buffer, overrides: Partial<ReceivedEmailRow> = {})
     rawKeyVersion: sealed.keyVersion,
     attachments: await sealReceivedAttachments(attachments, keyring, { teamId, rowId: id }),
     contentPurgedAt: null,
+    fromName: "",
+    inReplyTo: null,
+    references: [],
+    fromFields: 1,
+    fromMailboxes: 1,
+    automated: null,
+    authDetail: null,
+    senderTrust: "unauthenticated",
+    spamVerdict: null,
+    spamScore: null,
+    spamReasons: [],
+    virusVerdict: null,
+    virusSignature: null,
+    hiddenText: null,
+    extractedKinds: [],
+    extracted: null,
+    catchAll: true,
+    announcedAt: null,
+    releasedAt: null,
+    releasedBy: null,
     createdAt: new Date("2026-10-11T12:00:00Z"),
     ...overrides,
   };
@@ -141,6 +161,31 @@ describe("parseReceivedMetadata", () => {
     }
     expect(metadata.cc).toEqual([]);
     expect(metadata.messageId).toBe("<id @sender.example>");
+  });
+
+  it("counts no From mailbox when the address kept is not written in the header", async () => {
+    const b64 = (s: string) => Buffer.from(s).toString("base64");
+    const read = async (from: string) => {
+      const m = await parseReceivedMetadata(
+        Buffer.from(`From: ${from}\r\nTo: bot@inbound.acme.test\r\nSubject: hi\r\n\r\nbody\r\n`),
+      );
+      return [m.from, m.fromMailboxes];
+    };
+    // An encoded-word group name, and a lone encoded word, that decode to another address.
+    expect(
+      await read(`=?utf-8?B?${b64("Owner <owner@corp.example>")}?=: eve@evil.example;`),
+    ).toEqual(["owner@corp.example", 0]);
+    expect(await read(`=?utf-8?B?${b64("Owner <owner@corp.example>")}?=`)).toEqual([
+      "owner@corp.example",
+      0,
+    ]);
+    expect(await read(`=?utf-8?B?${b64("Ana Souza")}?= <ana@sender.example>`)).toEqual([
+      "ana@sender.example",
+      1,
+    ]);
+    expect(await read("Ana <ANA@Sender.Example>")).toEqual(["ANA@sender.example", 1]);
+    expect(await read("Undisclosed: eve@evil.example;")).toEqual(["eve@evil.example", 1]);
+    expect(await read("José <jose@bücher.example>")).toEqual(["jose@xn--bcher-kva.example", 1]);
   });
 
   it("never throws on malformed MIME: what it cannot read comes back empty", async () => {

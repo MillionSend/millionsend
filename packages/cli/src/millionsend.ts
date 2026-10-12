@@ -14,7 +14,7 @@ import type {
   TargetUsage,
   TargetWebhook,
 } from "./model.js";
-import { TARGET_WEBHOOK_EVENTS } from "./translate.js";
+import { TARGET_ALL_EVENTS } from "./translate.js";
 import { chunk } from "./utils.js";
 
 /** POST /contacts/batch and /suppressions/batch/* accept at most this many items. */
@@ -285,7 +285,7 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
         (w): TargetWebhook => ({
           id: w.id,
           endpoint: w.endpoint,
-          events: w.events ?? [...TARGET_WEBHOOK_EVENTS],
+          events: w.events ?? [...TARGET_ALL_EVENTS],
           status: w.status,
         }),
       ),

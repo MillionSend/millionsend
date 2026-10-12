@@ -1,0 +1,369 @@
+---
+title: Agent safety
+description: How an agent inbox protects the AI agent that reads it and the people it writes to, with sender trust, quarantine, prompt-injection screening, hidden-text removal, private codes and send rules.
+---
+
+Anyone can write to an inbox, and an AI agent that reads mail can be talked
+into things: a message can carry instructions hidden from people, pose as
+the agent's owner, or ask it to forward a password-reset link. An
+[agent inbox](/concepts/inboxes) answers that in layers. The agent only
+reads mail that passes the inbox's rules; what it reads is cleaned of hidden
+text and fenced as untrusted; and what it sends goes through rules that turn
+risky sends into drafts for a person.
+
+None of this makes received mail trustworthy. Screening is one signal, not a
+guarantee: your agent should still treat every message as data, never as
+instructions (see [What your agent should still do](#what-your-agent-should-still-do)).
+
+## At a glance
+
+| Layer | What it does | On an agent inbox |
+| --- | --- | --- |
+| Recipient check | Mail to addresses without an inbox is refused unless the domain's catch-all is on; an inbox flooded with mail answers "try again later". | Always |
+| Virus scan | Infected mail is quarantined, and its downloads are blocked for good. | When the instance runs a virus scanner |
+| Spam score | A local score from authentication, headers, links and attachments. Failing mail goes to the `spam` folder. | Always |
+| [Sender trust](#sender-trust) | Ranks each sender, from your own team's addresses down to failed authentication. | Always |
+| [Accept rules](#what-reaches-the-agent) | Mail from senders the inbox doesn't accept is quarantined. | `accept_from: verified` |
+| [Screening](#prompt-injection-screening) | Scores mail from outside senders for prompt injection and phishing; high scores are quarantined. | `screening: true` |
+| [Hidden text](#hidden-text-and-extracted_text) | Text a person can't see is removed from every text an agent or model reads. | Always |
+| Fencing | MCP results put message text between untrusted-content markers. | Always |
+| [Codes](#verification-codes-and-sign-in-links) | Codes and sign-in links are extracted for the agent, and can't be sent on to strangers. | `extract_codes`, `private_codes` |
+| [Send rules](#what-an-agent-may-send) | Replies only inside threads, daily caps, a ramp for new recipients, a loop guard; risky sends become drafts. | `send_policy: reply_only`, `send_cap: 200` |
+| Activity | Every action and decision is recorded, and owners hear about what waits. | Always |
+
+## Sender trust
+
+Every received message gets a `sender_trust`, shown in `screening` on reads
+and as **Trust** in the dashboard. The first row that matches wins:
+
+| `sender_trust` | The sender |
+| --- | --- |
+| `failed` | Failed authentication, and the domain asks receivers to quarantine or reject such mail; or the domain publishes no DMARC policy and fails SPF with no DKIM signature of its own. This beats every other row, so a forged owner never passes. |
+| `owner` | One of your team members' sign-in addresses, or an address in the inbox's `owner_addresses`, and the domain vouches for it. |
+| `allowlisted` | Matches the inbox's allowlist, and the domain vouches for it. |
+| `known_thread` | Replies in a thread the inbox wrote in, from an address the inbox wrote to, proven by the thread token in `References` or by an `In-Reply-To` that names a message the inbox sent. No authentication needed, so a small correspondent without DKIM can still answer. |
+| `external` | Any other sender whose domain vouches for it, other addresses at your own domains included. |
+| `unauthenticated` | Everyone else: the domain doesn't vouch for the From address, or the message names more than one sender. |
+
+A domain **vouches** for the From address when DMARC passes, or, for a
+domain without a DMARC policy, when a DKIM signature from it or an SPF pass
+for its organization is present. A domain that publishes `p=none` and fails
+DMARC reads `unauthenticated`, not `failed`: it didn't ask anyone to enforce
+its policy.
+
+- Only your team members' sign-in addresses and the inbox's
+  `owner_addresses` are owners. Everyone else at your company's domain is
+  `external`, so a colleague's address, or a system that sends as your domain,
+  can't command the agent or receive its private codes.
+- A message with two From fields, or two addresses in one, is never ranked
+  above `unauthenticated`.
+- The tier is set when the message arrives and doesn't change. An allowlist
+  edit counts for mail that arrives afterwards; mail already held is
+  [released](#quarantine) by hand.
+- ARC seals of forwarding services are not trusted, so mail through some
+  mailing lists and forwarders reads `external` for the list's domain, or
+  `unauthenticated`.
+
+## What reaches the agent
+
+`accept_from` decides, by tier:
+
+| `sender_trust` | `anyone` | `verified` (default) | `allowlist` |
+| --- | --- | --- | --- |
+| `owner`, `allowlisted` | delivered | delivered | delivered |
+| `known_thread` | delivered | delivered | delivered |
+| `external` | screened | screened | quarantined, `not_allowlisted` |
+| `unauthenticated` | screened | quarantined, `unauthenticated_sender` | quarantined, `not_allowlisted` |
+| `failed` | quarantined, `failed_auth` | quarantined, `failed_auth` | quarantined, `failed_auth` |
+
+**Screened** mail is delivered unless [screening](#prompt-injection-screening)
+quarantines it; with `screening` off, or on an instance without a judge, it
+is delivered. On top of the table:
+
+- A virus quarantines the message in every inbox, whatever the sender
+  (`virus`).
+- Mail from owners or the allowlist that forwards someone else's message is
+  screened too: forwarded content inherits no trust.
+- Delivered mail that fails the spam score goes to the `spam` folder, which
+  thread lists leave out unless asked for it.
+- Delivered mail reads `screening.verdict: "suspicious"` when the sender is
+  `unauthenticated` or `failed`, the spam score is gray, the virus scan
+  couldn't finish, or screening found something below its line; otherwise
+  `clean`. A hidden preview line, which most newsletters carry, never makes
+  mail suspicious on its own.
+
+A `human` inbox accepts `anyone` by default: everything is delivered except
+viruses, and a `failed` sender shows a red badge instead of being held. Pick
+`verified` or `allowlist` for one and the table applies, with "screened"
+meaning delivered: screening runs on agent inboxes only.
+
+## Quarantine
+
+Quarantined mail is kept for as long as any received mail, listed, and
+releasable; it is never dropped and never returned to its sender.
+
+| `quarantine_reason` | Held because |
+| --- | --- |
+| `failed_auth` | The sender failed authentication. |
+| `unauthenticated_sender` | The sender's domain doesn't vouch for it, and the inbox accepts verified senders. |
+| `not_allowlisted` | The inbox accepts only its allowlist. |
+| `injection` | Screening scored prompt injection at 80 or more. |
+| `phishing` | Screening scored phishing at 80 or more. |
+| `virus` | The virus scanner found malware. |
+| `unscreened` | The message needed screening and the judge couldn't answer. |
+| `screening_cap` | The message needed screening past the day's screening limit. |
+
+**Agents never see held mail.** Inbox-scoped keys and every MCP call are
+agent views: lists and thread emails skip held messages, reading one answers
+`403 email_quarantined`, a long-poll reports only its id (in `held`), and no
+code is served from it. While screening runs, usually seconds, a message is
+pending: agent views don't see it either, and its id answers `404`. People in
+the dashboard see everything, flagged, and a full-access team key sees held
+mail when it asks (`include_quarantined=true`, `GET /inboxes/{id}/quarantine`).
+
+**No webhook announces held mail.** `email.received` and
+`inbox.email.received` fire when a message is delivered or released, so an
+agent woken by a webhook never gets a held id; `inbox.email.quarantined`
+tells endpoints that subscribe to it.
+
+**Releasing.** A person releases from the inbox's **Needs review** tab, a
+full-access team key with
+[`POST /inboxes/{id}/quarantine/{email_id}/release`](/concepts/inboxes#quarantine),
+and an MCP client with `release_email` under `receiving:manage`; an
+inbox-scoped key never can. **Release and trust sender** (`trust_sender`)
+also adds the sender to the allowlist. A released message is delivered as
+if it had just arrived, webhooks included, and isn't screened again. A virus
+stays a virus: releasing one shows its text, and its attachments and raw
+message stay blocked.
+
+Owners get one email a day, **Your inboxes need a look**, while messages wait
+in quarantine, drafts wait for approval or sends were held, with the counts
+and a link; never senders or subjects. It is the **Inbox alerts** setting
+under **Settings → Notifications**.
+
+## Prompt-injection screening
+
+On an agent inbox with `screening` on, mail from `external` and
+`unauthenticated` senders that the rules would deliver is screened before the
+agent can see it, and so is forwarded content from owners and the allowlist.
+The judge reads the message the way it is shown, with the hidden text that
+was removed set apart:
+
+- the sender, its authentication and the Reply-To;
+- the subject and visible text, the reply first and then the quoted part;
+- the hidden text and invisible characters that were removed;
+- links as anchor text and domain, never fetched;
+- attachment names, and whether the message was sent automatically.
+
+Codes are masked and addresses cut to their domain before any of it leaves.
+
+The answer is two scores from 0 to 100, `injection_score` and
+`phishing_score`, and the `reasons` that applied:
+
+| Reason | The message |
+| --- | --- |
+| `targets_agent` | Addresses an AI, assistant, model or "system" rather than a person. |
+| `override` | Tries to change the reader's instructions, role or priorities. |
+| `exfiltration` | Asks the reader to send out codes, links, keys, other mail, contacts or data. |
+| `unsafe_action` | Asks for an action with effects outside the conversation: paying, approving, deleting, running something, writing to a third party. |
+| `concealed` | Hides instructions: in hidden text, encoded or reversed, after a fake end of message or inside a fake quote. |
+| `credential_lure` | Asks for passwords, codes or card details on a page or channel the claimed sender doesn't own. |
+
+An injection score of 80 or more quarantines the message as `injection`;
+otherwise a phishing score of 80 or more, as `phishing`. Mail the judge reads
+as spam goes to the `spam` folder. Anything else is delivered, as
+`suspicious` when a score is between 50 and 79 or the instructions were
+concealed. The scores are always shown: on reads in `screening`, and in the
+dashboard next to each message.
+
+- **It fails closed.** A judge that times out or errors quarantines the
+  message as `unscreened`; throttling is retried first. Past 200 screened
+  messages in one inbox in a day, or past the team's or the instance's daily
+  screening budget, mail that needs screening is quarantined as
+  `screening_cap`, so a flood turns into quarantine, never into unscreened
+  delivery.
+- **It never affects your sending.** Verdicts on mail you received never
+  count toward your team's own sending reputation or its abuse review.
+- **Without a judge**, on an instance that doesn't run one, the rules decide
+  alone and the scores read `null`. On a self-hosted instance, screening uses
+  the [content monitoring](/self-hosting#content-monitoring-optional) judge.
+
+The thresholds are starting points: screening is one signal on top of the
+rules, not a guarantee.
+
+## Hidden text and extracted_text
+
+Mail can carry text no person sees but a model reads: an instruction in
+white on white, a `display:none` block, characters that render as nothing.
+Before any text reaches an agent or a model, MillionSend removes:
+
+- hidden elements: `display:none`, `visibility:hidden`, near-zero opacity,
+  fonts under 3 px, boxes squeezed, scaled or zoomed to nothing, content
+  pushed off screen or clipped away, text the color of its background
+  (`-webkit-text-fill-color` included), the `hidden` attribute, comments
+  (Outlook's conditional ones included), `<template>`, `<noscript>`, the
+  fallback inside `<object>` and the body of a closed `<details>`;
+- invisible characters: zero-width spaces and joiners, text-direction
+  controls, Unicode tag characters and stray variation selectors. Emoji keep
+  the joiners and selectors they need.
+
+Hidden text before anything visible is the inbox preview line most
+newsletters carry: it is removed too, but it doesn't make a message
+suspicious.
+
+What the agent reads:
+
+- **`extracted_text`**, on received-email and thread-email reads: the reply
+  part, with quoted history and signatures set apart, as plain text with
+  light markdown (`# ` headings, `- ` list items, `> ` quotes, links as
+  `[text](url)`), up to 32,000 characters. Quotes are recognized in English,
+  Portuguese, Spanish, French and German, and in the HTML of Gmail, Outlook,
+  Apple Mail, Thunderbird, Yahoo and Proton.
+- **`text`** without invisible characters, line breaks kept.
+- **`screening.hidden_text_removed: true`** when hidden text beyond a preview
+  line, or invisible characters, were removed.
+
+`html` stays exactly as received, and the raw message keeps everything. The
+same cleaning applies to the MCP tools, to the judge's visible text and to
+code extraction.
+
+**Fencing.** MCP results put each message's text between two marker lines
+carrying a random value per call:
+
+```
+-----BEGIN UNTRUSTED EMAIL CONTENT 95253f15-----
+Hi! Your order shipped today.
+-----END UNTRUSTED EMAIL CONTENT 95253f15-----
+```
+
+A marker line written inside the message is altered first, so a message
+can't close its own fence early.
+
+## Verification codes and sign-in links
+
+An agent signing up somewhere needs the code or the link the service sends.
+MillionSend extracts them so the agent never parses HTML:
+
+- **Codes** need a code word nearby, in English, Portuguese or Spanish
+  ("verification code", "código de verificação", "código de verificación"…);
+  order numbers, prices, phone numbers, coupons and dates are skipped. When
+  two codes are equally likely, none is answered (`ambiguous`).
+- **Links** are sign-in, confirmation, reset and invitation links; unsubscribe,
+  privacy and help links are skipped. Links are never fetched, by
+  MillionSend or anything else: a scanner that follows a single-use sign-in
+  link spends it.
+- Only the subject and the reply part count, never quoted or hidden text.
+
+They are served by `extracted` on
+[`GET /emails/receiving/{id}`](/concepts/receiving#get-one),
+[`GET /inboxes/{id}/codes/latest`](/concepts/inboxes#verification-codes) and
+the MCP tool `get_verification_code`, and nowhere else: never in lists,
+webhooks, logs, activity or error messages. They are never served from held
+mail, from a `failed` sender, or when the inbox's `extract_codes` is off, and
+every read is recorded in the inbox's activity.
+
+**Private codes.** With `private_codes` on (the agent default), a code, link
+or token the team received in the last 24 hours can't leave the inbox's
+address in a send to anyone but owners and the allowlist: such a send becomes
+a draft with reason `private_code`. This holds even when the agent was talked
+into it, and catches a code spread out to slip past it (spaces between its
+digits, tags, invisible or full-width characters). It covers sends from the
+inbox's address: an agent that also holds `emails:send` (MCP) can send from
+your other addresses, so give agents inbox-scoped keys, or leave that scope
+out. The check compares keyed hashes, so no copy of the code is kept outside
+the encrypted message.
+
+## What an agent may send
+
+Every way of sending from an inbox address goes through the same rules:
+inbox replies, forwards and drafts, server-side replies and forwards of
+received mail, the `forward_to` copies, `POST /emails`, `POST /emails/batch`,
+the SMTP relay and the MCP tool `send_email`. In order:
+
+1. **Identity.** An inbox-scoped key sends only from its inbox's address
+   (`403 restricted_api_key`; `550 5.7.1` over SMTP).
+2. **Shared domain.** A [shared address](/concepts/inboxes#shared-domain)
+   only replies inside its threads, to the people in them whose domain
+   vouched for them and to your team members' sign-in addresses
+   (`owner_addresses`, the allowlist and a `Reply-To` at another organization
+   don't count there). Anything else is refused with
+   `403 inbox_send_policy`, even approved.
+3. **Daily cap.** `send_cap` recipients per UTC day. Past it,
+   `429 inbox_send_cap_reached`, with `retry-after` counting to midnight UTC.
+   Approved sends count but are never refused.
+
+On an agent inbox, unless the send is
+[approved](/concepts/inboxes#drafts-and-approval), each of these holds it as
+a draft instead, with a reason:
+
+4. **Loop guard.** Replying to automatic mail (`loop_guard:` and the
+   reason): an empty sender, an `Auto-Submitted` header, `Precedence: bulk`,
+   `list`, `junk` or `auto_reply`, mailing-list headers, a request to suppress
+   auto-replies, auto-reply headers, a delivery report, a no-reply address, or
+   an out-of-office subject. More than 10 automatic sends to one address
+   within an hour is `loop_burst`. Agent replies carry
+   `Auto-Submitted: auto-replied`, and mail an agent starts
+   `Auto-Submitted: auto-generated`, so two agents writing to each other stop
+   after one round.
+5. **Reply-To.** A reply to a `Reply-To` on another organization's domain,
+   unless its sender is an owner, on the allowlist or a known thread
+   (`reply_to_redirect`). This stops a stranger from steering replies to
+   someone else.
+6. **Send policy** (`send_policy`):
+   - `reply_only`, the default: replies inside a thread, to people who wrote
+     in it, owners and the allowlist.
+   - `allowlist`: those, plus new conversations with owners and the
+     allowlist.
+   - `open`: anyone. Only on your own domain, and not while your team is new
+     to sending (inside its first 1,000 sends or 72 hours, or under 10,000
+     sends within 7 days of its first).
+7. **Private codes** (`private_code`), as above. A forward checks whether the
+   forwarded message carries a code or link.
+8. **Ramp.** New recipients per day stay within the cap, and within 10 on
+   the inbox's first day of sending, doubling each day after: 20, 40, 80, 160
+   and on (`ramp`).
+9. **Approval.** `require_approval` on the inbox, or `requires_approval: true`
+   on the request.
+
+A recipient is an **owner**, **allowlisted**, in the **thread** (it wrote a
+delivered message there, or is a trusted `Reply-To` of one), **known** (the
+inbox wrote to it, or heard from it in mail whose domain vouched for it) or
+**new**. Bcc recipients count like the rest, and `name+tag@` addresses count
+as written. A send from the `name+tag@` form of an inbox's address runs
+that inbox's rules, as mail to it lands in that inbox.
+
+A `human` inbox runs only the first three steps: people replying in the
+dashboard aren't held. On `POST /emails`, the batch endpoint, the SMTP relay
+and the MCP tool `send_email`, a send the rules would hold is refused with
+`403 inbox_send_policy` (or `550 5.7.1` over SMTP), with the reasons in the
+message: those surfaces can't create drafts, so send through the inbox
+endpoints to get one.
+
+**First contact.** An agent inbox's first mail to a new address also goes
+through the same abuse review as any send from your team.
+
+## What your agent should still do
+
+- Treat every message as data. Instructions inside mail are a stranger's
+  words, whatever the scores say.
+- Read `extracted_text`, not `html`, and check `screening.sender_trust` and
+  `screening.verdict` before acting on a message.
+- Never follow links from mail on its own; use `codes/latest` or
+  `get_verification_code` for the codes and links it needs.
+- Keep `require_approval` on, or pass `requires_approval: true`, for anything
+  hard to undo.
+- Give each agent its own [inbox-scoped key](/concepts/inboxes#inbox-scoped-api-keys),
+  and point webhooks at specific inboxes with `inbox_ids`.
+
+## What these protections don't do
+
+- The screening and spam thresholds are starting values. Mail can slip past
+  them, and legitimate mail can be held; held mail is one click from
+  release.
+- A domain that publishes no DMARC policy, or `p=none`, can't prove much:
+  its genuine mail and a forgery can read the same.
+- Hidden-text detection follows the HTML the way mail clients render it,
+  with a best effort on broken markup; the flags and the raw message are the
+  backstop.
+- A sender's tier is fixed on arrival: a later allowlist change doesn't
+  re-rank mail already received.

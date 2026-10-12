@@ -150,7 +150,7 @@ auto-hospedada não tem limites de plano.
 | `ALLOW_SIGNUP` | O primeiro usuário sempre pode se registrar; depois disso o cadastro fica fechado a menos que isto seja `true`. Mantenha `false` quando o painel é acessível pela internet. |
 | `TRUSTED_PROXIES` | Reverse proxies cujos headers de IP do cliente (`X-Forwarded-For`, `CF-Connecting-IP`) são confiáveis, IPs ou CIDRs separados por vírgula. O padrão `127.0.0.1,::1` cobre um proxy no mesmo host; adicione o endereço do seu proxy quando ele roda em outro lugar. Veja a [seção de nginx](#produção-nginx--tls). |
 | `WEBHOOK_ALLOW_LOCALHOST` | Só para desenvolvimento local: permite que endpoints de webhook (disparos de teste incluídos) apontem para `http://` e endereços de loopback/privados em qualquer porta. Mantenha `false` em qualquer instância acessível pela internet. |
-| `COMPOSE_PROFILES` | Serviços opcionais do compose, separados por vírgula: `smtp` (o relay; monte um par de chaves STARTTLS antes) e, no arquivo standalone, também `docs` (este site de documentação), `backup` (dumps agendados) e `mx` (o MX de entrada; veja [Recebimento](#recebimento-beta)). |
+| `COMPOSE_PROFILES` | Serviços opcionais do compose, separados por vírgula: `smtp` (o relay; monte um par de chaves STARTTLS antes), `mx` (o MX de entrada; veja [Recebimento](#recebimento-beta)) e `clamav` (antivírus para os e-mails recebidos; veja [Antivírus](#antivírus)) e, no arquivo standalone, também `docs` (este site de documentação) e `backup` (dumps agendados). |
 | `PORT` | Porta da API (padrão `3001`). No compose, move junto a porta interna do contêiner e a porta publicada no host. |
 | `UNSUBSCRIBE_BASE_URL` | Host próprio, opcional, para as páginas hospedadas de descadastro (ex.: `https://unsubscribe.example.com`), apontado para o mesmo processo web. Os links de descadastro nos e-mails e os redirecionamentos da página usam esse host, e ele serve só o fluxo de descadastro, então destinatários e scanners de links nunca alcançam a origem, os cookies nem a reputação do painel. Sem definir: `APP_BASE_URL`. |
 | `WEB_PORT` | Porta do host em que o compose publica o painel (o processo web é sempre 3000 dentro do contêiner). Mantenha `APP_BASE_URL` em sincronia. |
@@ -201,15 +201,17 @@ worker cabem sem ajuste.
 
 ### E-mail de entrada (recebimento)
 
-Veja [Recebimento](#recebimento-beta). O app lê as duas primeiras; o processo
-MX lê só as variáveis `MX_*`. O serviço `mx` do compose já define
+Veja [Recebimento](#recebimento-beta). O app lê as quatro primeiras; o
+processo MX lê só as variáveis `MX_*`. O serviço `mx` do compose já define
 `MX_INGEST_URL`, `MX_HOSTNAME` (a partir do `RECEIVING_MX_HOST`) e os caminhos
 do TLS, então só defina essas para um MX em outro host.
 
 | Variável | Propósito |
 | --- | --- |
-| `RECEIVING_MX_HOST` | Hostname em que o processo MX atende (ex.: `mx.example.com`); os domínios de recebimento apontam o registro MX para ele. Sem ela, o recebimento não existe na instância: nem aba nem opção de ativar no painel, todo domínio informa `capabilities.receiving: "disabled"` e os endpoints internos do MX respondem `404`. |
+| `RECEIVING_MX_HOST` | Hostname em que o processo MX atende (ex.: `mx.example.com`); os domínios de recebimento apontam o registro MX para ele. Sem ela, o recebimento não existe na instância: nem aba nem opção de ativar no painel, nada de caixas de entrada, todo domínio informa `capabilities.receiving: "disabled"` e os endpoints internos do MX respondem `404`. |
 | `MX_INGEST_SECRET` | Segredo bearer que o MX apresenta à API, com pelo menos 32 caracteres (`openssl rand -hex 32`). Defina junto com `RECEIVING_MX_HOST`: o app se recusa a subir com só uma das duas. O processo MX precisa do mesmo valor. |
+| `SHARED_INBOX_DOMAIN` | Domínio opcional para caixas de entrada que não precisam de DNS: cada equipe ganha um subdomínio dele (veja [Domínio compartilhado das caixas](#domínio-compartilhado-das-caixas)). O MX curinga dele precisa apontar para o `RECEIVING_MX_HOST`, e precisa existir uma identidade do SES para ele na região padrão. Exige `RECEIVING_MX_HOST`; sem ela, o domínio compartilhado não aparece. |
+| `CLAMAV_HOST` | clamd opcional que verifica todo e-mail recebido, como `host[:porta]` (porta `3310` por padrão), ex.: `clamav:3310` para o serviço do compose (veja [Antivírus](#antivírus)). Sem ela, os e-mails não passam por antivírus. |
 | `MX_INGEST_URL` | Processo MX: a origem da sua API mais `/internal/mx` (ex.: `https://api.example.com/internal/mx`). |
 | `MX_HOSTNAME` | Processo MX: o nome na saudação e no EHLO, normalmente igual ao `RECEIVING_MX_HOST`. |
 | `MX_PORT` | Processo MX: porta de escuta (padrão `2525`). Publique a porta 25 do host nela. |
@@ -513,7 +515,8 @@ durante a sessão SMTP.
 
 De outra máquina, `nc mx.example.com 25` deve responder com uma saudação
 `220` com o nome `mx.example.com`. Depois ative o recebimento num domínio
-verificado, publique o registro MX dele e mande uma mensagem para ele.
+verificado, ligue o pega-tudo dele ou crie uma caixa de entrada nele, publique
+o registro MX dele e mande uma mensagem para ele.
 
 Para rodar o MX em outro host, use o
 [`deploy/mx`](https://github.com/MillionSend/millionsend/tree/main/deploy/mx)
@@ -526,6 +529,112 @@ vai num único cabeçalho de até uns 13 KB, acima dos 8 KB padrão do nginx (o
 exemplo sobe para 16 KB). Os endpoints
 internos do MX respondem `404` a não ser que `RECEIVING_MX_HOST` esteja
 definida, e recusam qualquer requisição sem o segredo.
+
+Quando uma versão muda o que o MX manda para o app, como os resultados de
+autenticação detalhados que o MX registra para cada mensagem, atualize
+primeiro o app e depois um MX separado. Qualquer ordem mantém os e-mails
+chegando: um app mais antigo ignora os detalhes novos, e um app mais novo
+aceita e-mails sem eles. O serviço `mx` do compose roda a própria imagem do
+app, então acompanha o app.
+
+**Configurações → Recebimento** mostra para quem opera o que a instância
+recebe: o host MX, a última mensagem, o total de hoje, o antivírus e o
+domínio compartilhado das caixas.
+
+### Domínio compartilhado das caixas
+
+Opcional. Com um domínio compartilhado, as equipes criam
+[caixas de entrada](/pt-BR/concepts/inboxes#domínio-compartilhado) que não
+precisam de DNS próprio: cada equipe ganha um subdomínio, como
+`acme.agents.example`, e cada caixa um endereço aleatório nele. Esses
+endereços expiram em até 30 dias, só respondem dentro das próprias conversas
+e enviam para no máximo 50 destinatários por dia.
+
+Use um domínio só para isso, não um subdomínio de um domínio pelo qual as
+suas equipes enviam: assim os e-mails que os agentes dos clientes mandam por
+ele, e qualquer abuso dele, ficam longe da reputação do seu domínio principal.
+Depois de definido, nenhuma equipe consegue adicioná-lo, nem um nome abaixo
+dele, como domínio de envio.
+
+1. **DNS.** No provedor de DNS do domínio, um registro MX curinga cobre o
+   subdomínio de todas as equipes, então equipes novas não precisam de
+   mudança no DNS:
+
+   | Tipo | Nome | Valor |
+   | --- | --- | --- |
+   | MX | `*.agents.example` | `mx.example.com` (o seu `RECEIVING_MX_HOST`), prioridade `10` |
+   | TXT | `_dmarc.agents.example` | `v=DMARC1; p=reject` |
+
+2. **Identidade do SES.** Verifique `agents.example` como identidade de
+   domínio com Easy DKIM, e publique os três registros DKIM dela, na região
+   padrão do SES da instância: a primeira de `AWS_REGIONS`, ou a
+   `AWS_REGION`. O e-mail dos endereços compartilhados não tem domínio de
+   equipe, então sai dessa região e do conjunto de configuração padrão dela.
+   Uma identidade de domínio verificada deixa o SES enviar por qualquer
+   subdomínio dela sem verificar um por um
+   ([AWS: Creating and verifying identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html)).
+3. **Ligue.** Defina `SHARED_INBOX_DOMAIN=agents.example` no `.env` e rode
+   `docker compose up -d`. O app se recusa a subir quando o valor não é um
+   hostname em minúsculas, ou quando falta o `RECEIVING_MX_HOST`.
+4. **Confira.** `dig +short MX test.agents.example` mostra o seu host MX.
+   Crie uma caixa com **Endereço aleatório** no painel, mande uma mensagem para
+   ela e responda pela caixa para um endereço seu: os cabeçalhos da resposta
+   devem mostrar o DKIM passando para `agents.example` e o DMARC passando.
+
+### Antivírus
+
+Opcional. Com `CLAMAV_HOST` definida, todo e-mail recebido passa pelo clamd do
+ClamAV antes de ser guardado: o e-mail infectado fica retido e os downloads
+dele ficam bloqueados para sempre (veja
+[Recebimento](/pt-BR/concepts/receiving#spam-vírus-e-confiança)). Os dois
+arquivos do compose trazem um serviço `clamav`:
+
+1. Adicione `clamav` ao `COMPOSE_PROFILES` e defina
+   `CLAMAV_HOST=clamav:3310` no `.env`.
+2. `docker compose up -d`.
+
+O serviço roda a imagem oficial do ClamAV em Debian,
+`clamav/clamav-debian:1.4`, publicada para amd64 e arm64 (a imagem
+`clamav/clamav`, baseada em Alpine, só existe para amd64). Ela mantém as
+assinaturas atualizadas sozinha no volume `clamav-db`. O clamd escuta na
+porta 3310 só dentro da rede do compose: o protocolo dele não tem
+autenticação nem criptografia, então nunca publique essa porta. Garanta memória
+no servidor: o clamd guarda as assinaturas na memória, mais de 1 GiB e cerca do
+dobro por um instante quando as recarrega a cada dia, e o ClamAV recomenda
+4 GiB de RAM para ele. Depois de cada início, ele leva até um minuto para
+carregá-las.
+
+Um clamd em outro lugar também funciona, numa rede privada:
+`CLAMAV_HOST=scanner.internal:3310`. As mensagens vão para ele pelo comando
+`INSTREAM` do clamd, então o `StreamMaxLength` dele precisa ser de pelo menos
+40 MB.
+
+Quando o clamd não responde (parado, ainda carregando, mais lento que 30
+segundos), o e-mail é entregue com `virus_verdict: "processing_failed"` e um
+aviso, e a falha vai para o
+[rastreamento de erros](#rastreamento-de-erros-opcional): uma queda do
+antivírus nunca segura e-mails.
+
+### Análise das caixas de agentes
+
+As caixas de agente
+[analisam](/pt-BR/concepts/agent-safety#análise-de-injeção-de-prompt) os
+e-mails de remetentes de fora em busca de injeção de prompt com o juiz do
+[monitoramento de conteúdo](#monitoramento-de-conteúdo-opcional): com
+`ABUSE_JUDGE=typesafe` a análise roda, e com o juiz desligado as caixas
+decidem só pelas próprias regras. Ela conta à parte do monitoramento de
+conteúdo, com os mesmos valores de `MONITOR_TEAM_DAILY_CAP` e
+`MONITOR_INSTANCE_DAILY_CAP`, mais 200 mensagens por caixa por dia; acima de
+qualquer um deles, o e-mail que precisa de análise vai para a quarentena em
+vez de ser entregue sem análise. Os resultados dela nunca mexem no risco de
+uma equipe nem seguram os envios dela.
+
+Cada mensagem analisada manda para a TypeSafe o remetente e os resultados de
+autenticação dele, o assunto e o texto visível com os códigos mascarados e os
+endereços reduzidos ao domínio, o texto oculto que foi removido, o texto e o
+domínio dos links (nunca acessados) e os nomes dos anexos. São e-mails de
+terceiros para os seus usuários: inclua isso no seu aviso de privacidade
+antes de ligar o juiz.
 
 ## Site de documentação
 

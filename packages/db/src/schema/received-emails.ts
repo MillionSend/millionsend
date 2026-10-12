@@ -1,9 +1,12 @@
 import { isNull } from "drizzle-orm";
 import {
+  boolean,
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -19,6 +22,49 @@ export interface ReceivedAuthentication {
   dmarc: string;
   arc: string;
 }
+
+/**
+ * The MX's unfolded results for trust decisions (core authDetailSchema);
+ * Resend-shaped reads never echo them. Null from an MX that predates them.
+ */
+export interface ReceivedAuthDetail {
+  spf: { result: string; domain: string | null };
+  /** Passing DKIM signatures aligned with From, at most 3 domains. */
+  dkim: { aligned: string[] };
+  dmarc: {
+    /** Never folded under p=none, unlike authentication.dmarc. */
+    result: string;
+    policy: "none" | "quarantine" | "reject" | null;
+    /** The author (From) domain. */
+    domain: string | null;
+  };
+}
+
+/** What the read pipeline removed as hidden: counts and flags only, never content. */
+export interface ReceivedHiddenText {
+  chars: number;
+  preview_chars: number;
+  invisible_chars: number;
+  flags: string[];
+}
+
+/** Who a sender is to the team, strongest first; failed beats every other rule. */
+export const senderTrustEnum = pgEnum("sender_trust", [
+  "owner",
+  "allowlisted",
+  "known_thread",
+  "external",
+  "unauthenticated",
+  "failed",
+]);
+
+export const receivedSpamVerdictEnum = pgEnum("received_spam_verdict", ["pass", "gray", "fail"]);
+
+export const receivedVirusVerdictEnum = pgEnum("received_virus_verdict", [
+  "pass",
+  "fail",
+  "processing_failed",
+]);
 
 /** What the MX saw of the SMTP session, recipients aside (they live in received_for). */
 export interface ReceivedEnvelope {
@@ -75,6 +121,46 @@ export const receivedEmails = pgTable(
     // emails.attachments), so lists never open the raw message.
     attachments: text("attachments"),
     contentPurgedAt: timestamp("content_purged_at", { withTimezone: true }),
+    // From display name, one visible line.
+    fromName: text("from_name").notNull().default(""),
+    // Threading headers as msg-ids (each <= 998 chars, at most 50), plus bare
+    // ms1. thread tokens that some clients write without angle brackets.
+    inReplyTo: text("in_reply_to"),
+    references: jsonb("references").$type<string[]>().notNull().default([]),
+    // From fields in the header and mailboxes in them: anything but one and
+    // one is never trusted above unauthenticated.
+    fromFields: smallint("from_fields").notNull().default(1),
+    fromMailboxes: smallint("from_mailboxes").notNull().default(1),
+    // Why an automatic answer must not go out (RFC 3834), or null.
+    automated: text("automated"),
+    authDetail: jsonb("auth_detail").$type<ReceivedAuthDetail>(),
+    // The row tier: team owners only, no allowlist, no thread proof. Each
+    // inbox membership keeps its own.
+    senderTrust: senderTrustEnum("sender_trust").notNull().default("unauthenticated"),
+    // Null: not computed (rows from before verdicts existed).
+    spamVerdict: receivedSpamVerdictEnum("spam_verdict"),
+    spamScore: smallint("spam_score"),
+    spamReasons: text("spam_reasons").array().notNull().default([]),
+    // Null: not scanned.
+    virusVerdict: receivedVirusVerdictEnum("virus_verdict"),
+    virusSignature: text("virus_signature"),
+    hiddenText: jsonb("hidden_text").$type<ReceivedHiddenText>(),
+    // Metadata, so finding a code never opens a seal.
+    extractedKinds: text("extracted_kinds")
+      .array()
+      .$type<("code" | "link")[]>()
+      .notNull()
+      .default([]),
+    // Content: the sealed read (text, quoted, signature, code, link), envelope
+    // kind received_extracted, nulled by the content purge with the raw message.
+    extracted: text("extracted"),
+    // At least one recipient landed without an inbox.
+    catchAll: boolean("catch_all").notNull().default(true),
+    // When email.received was enqueued; its only emitter sets it once.
+    announcedAt: timestamp("announced_at", { withTimezone: true }),
+    // A virus-held catch-all row released by a person.
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    releasedBy: text("released_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -85,5 +171,7 @@ export const receivedEmails = pgTable(
     index("received_emails_content_unpurged_idx").on(t.createdAt).where(isNull(t.contentPurgedAt)),
     // Metadata retention deletes by age across every team.
     index("received_emails_created_idx").on(t.createdAt),
+    // Threading: a reply's References name an earlier message of the team.
+    index("received_emails_team_message_id_idx").on(t.teamId, t.messageId),
   ],
 );

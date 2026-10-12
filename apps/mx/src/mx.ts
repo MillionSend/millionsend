@@ -4,10 +4,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createSecureContext } from "node:tls";
 import {
   AUTH_RESULTS,
+  type AuthDetail,
   type AuthResult,
   type AuthVerdicts,
   type DeliverEnvelope,
   encodeEnvelopeHeader,
+  MAX_ALIGNED_DKIM_DOMAINS,
   MAX_ENVELOPE_RECIPIENT_BYTES,
   MAX_RECEIVED_MESSAGE_BYTES,
   MX_DELIVER_PATH,
@@ -118,6 +120,14 @@ const heloOf = (session: SMTPServerSession): string =>
 /** mailauth words outside the wire vocabulary (a check that did not run, BIMI's skipped) read as none. */
 const known = (result: string | undefined): AuthResult =>
   (AUTH_RESULTS as readonly string[]).includes(result ?? "") ? (result as AuthResult) : "none";
+
+/** A domain the wire carries: lowercase, at most 253 characters of [a-z0-9.-]; anything else is left out. */
+function wireDomain(value: unknown): string | null {
+  const domain = typeof value === "string" ? value.toLowerCase().replace(/\.$/, "") : "";
+  return /^[a-z0-9.-]{1,253}$/.test(domain) ? domain : null;
+}
+
+const DMARC_POLICIES = new Set(["none", "quarantine", "reject"]);
 
 function dkimSignatureCount(raw: Buffer): number {
   const ends = [raw.indexOf("\r\n\r\n"), raw.indexOf("\n\n")].filter((i) => i >= 0);
@@ -240,16 +250,19 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
     throw smtpError(answer);
   }
 
+  /**
+   * The folded verdicts Resend's surface reads, and the unfolded detail
+   * trust decisions read. The detail is left out, never made up, whenever
+   * authentication did not run to the end (too many signatures, a timeout,
+   * an error).
+   */
   async function verdicts(
     raw: Buffer,
     client: { ip: string; helo: string; sender: string },
     sessionId: string,
-  ): Promise<AuthVerdicts> {
-    const all = (result: AuthResult): AuthVerdicts => ({
-      spf: result,
-      dkim: result,
-      dmarc: result,
-      arc: result,
+  ): Promise<{ auth: AuthVerdicts; authDetail?: AuthDetail }> {
+    const all = (result: AuthResult) => ({
+      auth: { spf: result, dkim: result, dmarc: result, arc: result },
     });
     if (dkimSignatureCount(raw) > MAX_DKIM_SIGNATURES) return all("permerror");
     try {
@@ -269,7 +282,8 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
       const signatures = result.dkim.results;
       const passing = signatures.filter((r) => r.status.result === "pass");
       const spf = known(result.spf ? result.spf.status.result : undefined);
-      let dmarc = known(result.dmarc ? result.dmarc.status.result : undefined);
+      const unfolded = known(result.dmarc ? result.dmarc.status.result : undefined);
+      let dmarc = unfolded;
       // Resend's reading, which agents check before trusting a sender. A
       // valid signature from a domain other than From's says nothing about
       // who wrote the message: RFC 8601's DKIM "policy", reported gray.
@@ -287,7 +301,31 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
       ) {
         dmarc = "none";
       }
-      return { spf, dkim, dmarc, arc: known(result.arc ? result.arc.status.result : undefined) };
+      const policy = result.dmarc ? result.dmarc.policy : undefined;
+      const authDetail: AuthDetail = {
+        spf: { result: spf, domain: wireDomain(result.spf ? result.spf.domain : null) },
+        dkim: {
+          aligned: [
+            ...new Set(
+              passing
+                .map((r) => (r.status.aligned ? wireDomain(r.signingDomain) : null))
+                .filter((d): d is string => d !== null),
+            ),
+          ].slice(0, MAX_ALIGNED_DKIM_DOMAINS),
+        },
+        dmarc: {
+          result: unfolded,
+          policy:
+            policy && DMARC_POLICIES.has(policy)
+              ? (policy as "none" | "quarantine" | "reject")
+              : null,
+          domain: wireDomain(result.dmarc ? result.dmarc.status.header?.from : null),
+        },
+      };
+      return {
+        auth: { spf, dkim, dmarc, arc: known(result.arc ? result.arc.status.result : undefined) },
+        authDetail,
+      };
     } catch (err) {
       // The name only: a parser's message could quote the message itself.
       log("auth_failed", { session: sessionId, error: err instanceof Error ? err.name : "error" });
@@ -300,13 +338,19 @@ export function createMxServer(env: MxEnv, options: MxOptions = {}): MxServer {
     const mailFrom = session.envelope.mailFrom ? session.envelope.mailFrom.address : "";
     const helo = heloOf(session);
     const cipher = session.tlsOptions as unknown as { name?: string; version?: string } | false;
+    const checked = await verdicts(
+      raw,
+      { ip: session.remoteAddress, helo, sender: mailFrom },
+      session.id,
+    );
     const envelope: DeliverEnvelope = {
       mailFrom,
       recipients: session.envelope.rcptTo.map((r) => r.address),
       clientIp: session.remoteAddress,
       helo,
       tls: session.secure && cipher ? { protocol: cipher.version, cipher: cipher.name } : null,
-      auth: await verdicts(raw, { ip: session.remoteAddress, helo, sender: mailFrom }, session.id),
+      auth: checked.auth,
+      ...(checked.authDetail ? { authDetail: checked.authDetail } : {}),
       receivedAt: receivedAt.toISOString(),
     };
     const summary = {

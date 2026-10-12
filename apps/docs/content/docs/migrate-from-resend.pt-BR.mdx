@@ -105,15 +105,16 @@ Três coisas encurtam isso:
 | Contatos | E-mail, nomes, `unsubscribed`, propriedades, inscrições em tópicos, associações a segmentos. Descadastros são preservados; ninguém é reinscrito. |
 | Segmentos, tópicos, propriedades | Casados por nome / nome / chave: criados quando faltam, atualizados quando diferem. |
 | Templates | Nome, alias, assunto, html, texto. `from`, `reply_to` e `variables` não podem ser armazenados — listados como passos manuais. |
-| Webhooks | Endpoint e eventos. O segredo de assinatura é copiado, então o receptor que você já roda continua verificando (as entregas carregam os headers `svix-*`). `--fresh-webhook-secrets` gera segredos novos. Eventos que o MillionSend também emite são levados junto — os oito tipos `email.*`, inclusive `email.received`, mais `contact.created`, `contact.updated` e `contact.deleted`; os demais (`domain.*`, `email.suppressed`) são descartados por webhook e listados. |
+| Webhooks | Endpoint e eventos. O segredo de assinatura é copiado, então o receptor que você já roda continua verificando (as entregas carregam os headers `svix-*`). `--fresh-webhook-secrets` gera segredos novos. Eventos que o MillionSend também emite são levados junto — os oito tipos `email.*`, inclusive `email.received`, `contact.created`, `contact.updated` e `contact.deleted`, e os doze tipos `inbox.*` que o MillionSend envia; os demais (`domain.*`, `email.suppressed`, `inbox.thread.assigned`, `inbox.thread.unassigned`) são descartados por webhook e listados. |
 | Supressões | Bounces, reclamações e entradas manuais, com sua origem. |
 | Domínios | Criados com return path e configurações de rastreamento, na única região do SES atendida pela sua instância do MillionSend (MillionSend Cloud: `sa-east-1`) — a região do Resend não é levada junto. No MillionSend Cloud, as opções de rastreamento só vêm junto com um subdomínio de rastreamento; sem ele, o relatório as lista para você configurar no painel. Os registros DNS precisam ser adicionados de novo — veja o passo 3. |
 | Transmissões | Rascunhos e transmissões agendadas entram como rascunhos. As já enviadas são puladas, a menos que `--include-sent`. |
 
 O que não vem: **chaves de API** (o Resend expõe apenas os nomes — o relatório
-as lista como pendência), **registros DKIM/DNS** (as chaves são por provedor) e
-o **histórico de e-mails**, enviados ou recebidos. Audiências, descontinuadas no Resend, são
-puladas — segmentos as cobrem.
+as lista como pendência), **registros DKIM/DNS** (as chaves são por provedor),
+**caixas de entrada** com as conversas e os rascunhos delas (crie de novo; veja
+o passo 3) e o **histórico de e-mails**, enviados ou recebidos. Audiências,
+descontinuadas no Resend, são puladas — segmentos as cobrem.
 
 Flags, variáveis de ambiente, arquivos, códigos de saída e uso em CI estão na
 [referência da CLI](/pt-BR/cli).
@@ -176,13 +177,28 @@ MillionSend não emite. Corpos de transmissão não precisam de mudança:
 `{{{UNSUBSCRIBE_URL}}}`.
 
 Também recebe e-mails pelo Resend? Ative o recebimento do domínio aqui depois
-que ele estiver verificado (**Ativar recebimento**, na página dele) e troque o
-registro MX do domínio, do que o Resend passou para `mx.millionsend-dns.com`
-(na auto-hospedagem: o `RECEIVING_MX_HOST` da sua instância). O e-mail vai
-para o registro MX com o menor número de prioridade, então essa troca é a
-virada; o que o Resend já recebeu fica lá. Código que chama
-`resend.emails.receiving.*` e handlers de `email.received` não precisam de
-mudança. Veja [Recebimento](/pt-BR/concepts/receiving).
+que ele estiver verificado (**Ativar recebimento**, na página dele) e escolha
+quais endereços recebem. O Resend recebe em qualquer endereço do domínio;
+aqui isso é o **Pega-tudo**, na mesma página (um plano pago no MillionSend
+Cloud), ou então uma [caixa de entrada](/pt-BR/concepts/inboxes) por
+endereço. Depois troque o registro MX do domínio, do que o Resend passou para
+`mx.millionsend-dns.com` (na auto-hospedagem: o `RECEIVING_MX_HOST` da sua
+instância). O e-mail vai para o registro MX com o menor número de prioridade,
+então essa troca é a virada; o que o Resend já recebeu fica lá. Código que
+chama `resend.emails.receiving.*` e handlers de `email.received` não precisam
+de mudança. Veja [Recebimento](/pt-BR/concepts/receiving).
+
+Usa o pré-lançamento das Inboxes do Resend? Aponte o
+`resend@6.32.1-preview-inboxes.6` para o MillionSend como qualquer outro SDK
+do Resend, e crie de novo cada caixa com o mesmo endereço (`POST /inboxes`,
+ou **Caixas de entrada → Criar caixa de entrada**); as conversas e os
+rascunhos ficam no Resend. Uma caixa criada por um SDK do Resend é uma caixa
+de agente, com as proteções do MillionSend ligadas: o e-mail de remetentes
+que o próprio domínio não garante, por exemplo, espera na quarentena. Crie as
+caixas lidas por pessoas como `kind: "human"`, no painel ou por HTTP direto.
+O `forwarding: true` dá um `receiving_address` no domínio compartilhado das
+caixas da instância, então exige um. Veja
+[Caixas de entrada → Compatibilidade com o Resend](/pt-BR/concepts/inboxes#compatibilidade-com-o-resend).
 
 Envie um e-mail pela nova URL base e veja-o chegar a **Entregue** na página de
 E-mails — a migração é isso.

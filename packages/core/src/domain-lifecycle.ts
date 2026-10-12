@@ -1,3 +1,4 @@
+import { sharedInboxDomain } from "@millionsend/config";
 import { type Db, schema } from "@millionsend/db";
 import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { parseSingleSender } from "./sender-address.js";
@@ -41,9 +42,9 @@ export const DOMAIN_CREATE_LIMIT_PER_HOUR = 10;
 
 /**
  * Whether `name` (or a subdomain of it) may not be registered as a sender
- * identity: public mailbox providers everywhere, plus in cloud the platform
- * domain and the operator's AUTH_EMAIL_FROM / ONBOARDING_EMAIL_FROM /
- * NOTIFICATIONS_EMAIL_FROM domains —
+ * identity: public mailbox providers and the shared inbox domain everywhere,
+ * plus in cloud the platform domain and the operator's AUTH_EMAIL_FROM /
+ * ONBOARDING_EMAIL_FROM / NOTIFICATIONS_EMAIL_FROM domains —
  * SES identities are account-wide, so a tenant registering them would take
  * over system mail.
  */
@@ -55,10 +56,17 @@ export function isReservedSenderDomain(
     onboardingEmailFrom?: string | null | undefined;
     notificationsEmailFrom?: string | null | undefined;
     isOperator?: boolean;
+    /** Defaults to SHARED_INBOX_DOMAIN. */
+    sharedInboxDomain?: string | null | undefined;
   },
 ): boolean {
   // Consumer mailbox providers are refused to everyone — nobody owns them.
   const reserved: string[] = [...PUBLIC_MAILBOX_DOMAINS];
+  // The shared inbox domain's subdomains are handed to teams' inboxes; a
+  // domain row there, even the operator's, would compete for their mail.
+  const shared =
+    opts.sharedInboxDomain === undefined ? sharedInboxDomain() : opts.sharedInboxDomain;
+  if (shared) reserved.push(shared);
   // The platform domain and the system-mail domain are the operator's own, so
   // the operator may send from them (dogfooding); a tenant registering them
   // would take over account-wide system mail.

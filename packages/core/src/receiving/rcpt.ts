@@ -2,12 +2,14 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { firstRow, isUniqueViolation } from "../driver-result.js";
+import { INBOX_FLOOD_PER_HOUR } from "../inboxes/limits.js";
 import { OVERAGE_HARD_CAP, type QuotaTeamRow, type TeamQuota, teamQuota } from "../plans.js";
 import { dailyCeiling, reserveQuota } from "../quota.js";
 import { routableAddress } from "../sender-address.js";
 import { QUOTA_COLUMNS } from "../team-plan.js";
 import { bumpHourlyUsage } from "../usage-hourly.js";
 import { utcDay } from "../utc-day.js";
+import { findInboxesForRecipients } from "./inbox-routing.js";
 import type { RcptResponse } from "./protocol.js";
 
 /** The free receiving allowance on Starter and on monthly plans, as a multiple of the plan's volume. */
@@ -140,30 +142,62 @@ export async function chargeReceived(
 
 /** A receiving-enabled domain with what routing and the pricing rule need of its team. */
 export interface ReceivingDomain extends QuotaTeamRow {
-  domainId: string;
+  /** Null for a team's subdomain of the shared inbox domain, which is no domains row. */
+  domainId: string | null;
+  sharedDomainId: string | null;
   name: string;
   teamId: string;
   suspendedAt: Date | null;
+  /** Mail to an address without an inbox is stored; off, it is refused at RCPT. */
+  catchAll: boolean;
+  /** Whether any inbox lives at this name: then RCPT answers depend on the address. */
+  hasInboxes: boolean;
 }
 
-/** The receiving-enabled domains among `names` (already ASCII, lowercase); at most one row per name. */
+/**
+ * The receiving-enabled domains among `names` (already ASCII, lowercase),
+ * and the teams' shared-domain subdomains among them; at most one row per
+ * name. A shared subdomain is never a catch-all: only its inboxes receive.
+ */
 export async function findReceivingDomains(
   db: Db,
   names: readonly string[],
 ): Promise<ReceivingDomain[]> {
   if (names.length === 0) return [];
   const d = schema.domains;
-  return db
-    .select({
-      domainId: d.id,
-      name: d.name,
-      teamId: d.teamId,
-      suspendedAt: schema.teams.suspendedAt,
-      ...QUOTA_COLUMNS,
-    })
-    .from(d)
-    .innerJoin(schema.teams, eq(schema.teams.id, d.teamId))
-    .where(and(inArray(d.name, [...names]), eq(d.receivingEnabled, true)));
+  const s = schema.sharedInboxDomains;
+  const i = schema.inboxes;
+  const [custom, shared] = await Promise.all([
+    db
+      .select({
+        domainId: d.id,
+        sharedDomainId: sql<string | null>`null`,
+        name: d.name,
+        teamId: d.teamId,
+        suspendedAt: schema.teams.suspendedAt,
+        catchAll: d.receivingCatchAll,
+        hasInboxes: sql<boolean>`exists (select 1 from ${i} where ${i.domainId} = ${d.id})`,
+        ...QUOTA_COLUMNS,
+      })
+      .from(d)
+      .innerJoin(schema.teams, eq(schema.teams.id, d.teamId))
+      .where(and(inArray(d.name, [...names]), eq(d.receivingEnabled, true))),
+    db
+      .select({
+        domainId: sql<string | null>`null`,
+        sharedDomainId: s.id,
+        name: s.name,
+        teamId: s.teamId,
+        suspendedAt: schema.teams.suspendedAt,
+        catchAll: sql<boolean>`false`,
+        hasInboxes: sql<boolean>`true`,
+        ...QUOTA_COLUMNS,
+      })
+      .from(s)
+      .innerJoin(schema.teams, eq(schema.teams.id, s.teamId))
+      .where(inArray(s.name, [...names])),
+  ]);
+  return [...custom, ...shared];
 }
 
 /**
@@ -196,11 +230,52 @@ const OVER_QUOTA = {
   ttlSeconds: 30,
 } as const satisfies RcptResponse;
 
+// The MX caches answers per domain, and these depend on the address: never cached.
+const NO_SUCH_RECIPIENT = {
+  accept: false,
+  code: 550,
+  enhanced: "5.1.1",
+  message: "No such recipient here",
+  ttlSeconds: 0,
+} as const satisfies RcptResponse;
+
+const MAILBOX_FLOODED = {
+  accept: false,
+  code: 452,
+  enhanced: "4.2.2",
+  message: "This mailbox is receiving too much mail, try again later",
+  ttlSeconds: 0,
+} as const satisfies RcptResponse;
+
+const HOUR_MS = 3_600_000;
+
+/** Whether an inbox took `limit` messages or more in the last hour; counts no further than that. */
+export async function inboxFlooded(
+  db: Db,
+  inboxId: string,
+  limit: number,
+  now: Date,
+): Promise<boolean> {
+  const m = schema.receivedEmailInboxes;
+  const counted = firstRow<{ n: number }>(
+    await db.execute(sql`
+      select count(*)::int as n from (
+        select 1 from ${m}
+        where ${m.inboxId} = ${inboxId} and ${m.createdAt} > ${new Date(now.getTime() - HOUR_MS)}
+        limit ${limit}
+      ) recent
+    `),
+  );
+  return (counted?.n ?? 0) >= limit;
+}
+
 /**
  * The MX's question per RCPT TO: recipient → domain (lowercase, IDNA-encoded)
- * → a receiving-enabled domain → its team, then the team's standing and its
- * receiving allowance. Any local part is accepted (catch-all). Only the
- * envelope decides; nothing here reads a header.
+ * → a receiving-enabled domain or a shared subdomain → its team, the
+ * address's live inbox (exact, then without its +tag) or the domain's
+ * catch-all, then the inbox's hourly flood limit and the team's receiving
+ * allowance. Only the envelope decides; nothing here reads a header. An
+ * answer that depends on the address is never cached by the MX.
  */
 export async function decideRecipient(
   db: Db,
@@ -212,9 +287,19 @@ export async function decideRecipient(
   const [domain] = await findReceivingDomains(db, [recipient.domain]);
   if (!domain) return UNKNOWN_RECIPIENT;
   if (domain.suspendedAt) return SUSPENDED_RECIPIENT;
+  const perAddress = domain.hasInboxes || !domain.catchAll;
+  if (perAddress) {
+    const inbox = (await findInboxesForRecipients(db, [domain], [recipient.address], now)).get(
+      recipient.address,
+    );
+    if (!inbox && !domain.catchAll) return NO_SUCH_RECIPIENT;
+    if (inbox && (await inboxFlooded(db, inbox.id, INBOX_FLOOD_PER_HOUR[inbox.kind], now))) {
+      return MAILBOX_FLOODED;
+    }
+  }
   const rule = receivingRule(domain, params.isCloud, now);
   if (!(await hasReceivingRoom(db, domain.teamId, rule, now))) return OVER_QUOTA;
-  return { accept: true, ttlSeconds: 30 };
+  return { accept: true, ttlSeconds: perAddress ? 0 : 30 };
 }
 
 export type DomainReceivingResult =
@@ -285,13 +370,50 @@ export async function setDomainReceiving(
 }
 
 /**
- * The received_emails rows a caller may read: its team's, and for a
- * domain-scoped API key only mail addressed to that domain.
+ * Whether a received row is visible without asking for held mail: a row
+ * delivered into any inbox (released mail counts as delivered), or a
+ * catch-all row that a person released, or that carries no virus and no
+ * inbox holds, so the catch-all copy never shows what an inbox quarantined
+ * or still screens.
  */
-export function receivedEmailScope(params: { teamId: string; domainId?: string | null }): SQL {
+export function receivedEmailVisible(): SQL {
   const r = schema.receivedEmails;
-  const team = eq(r.teamId, params.teamId);
-  return params.domainId
-    ? (and(team, sql`${params.domainId}::uuid = any(${r.domainIds})`) as SQL)
-    : team;
+  const m = schema.receivedEmailInboxes;
+  return sql`((${r.catchAll} and (${r.releasedAt} is not null or (${r.virusVerdict} is distinct from 'fail' and not exists (select 1 from ${m} where ${m.receivedEmailId} = ${r.id} and ${m.deliveredAt} is null)))) or exists (select 1 from ${m} where ${m.receivedEmailId} = ${r.id} and ${m.deliveredAt} is not null))`;
+}
+
+/**
+ * The received_emails rows a caller may read: its team's, and for a
+ * domain-scoped API key only mail addressed to that domain. `held` decides
+ * whether pending and quarantined mail is left out (agents, Resend-shaped
+ * lists), included (the dashboard, include_quarantined) or the only mail
+ * read; `inboxId` narrows to mail that reached that inbox, delivered unless
+ * held mail is asked for.
+ */
+export function receivedEmailScope(params: {
+  teamId: string;
+  domainId?: string | null | undefined;
+  inboxId?: string | null | undefined;
+  held: "include" | "exclude" | "only";
+}): SQL {
+  const r = schema.receivedEmails;
+  const m = schema.receivedEmailInboxes;
+  const parts: SQL[] = [eq(r.teamId, params.teamId)];
+  if (params.domainId) parts.push(sql`${params.domainId}::uuid = any(${r.domainIds})`);
+  if (params.inboxId) {
+    const delivered =
+      params.held === "exclude"
+        ? sql` and ${m.deliveredAt} is not null`
+        : params.held === "only"
+          ? sql` and ${m.deliveredAt} is null`
+          : sql``;
+    parts.push(
+      sql`exists (select 1 from ${m} where ${m.receivedEmailId} = ${r.id} and ${m.inboxId} = ${params.inboxId}${delivered})`,
+    );
+  } else if (params.held === "exclude") {
+    parts.push(receivedEmailVisible());
+  } else if (params.held === "only") {
+    parts.push(sql`not ${receivedEmailVisible()}`);
+  }
+  return and(...parts) as SQL;
 }

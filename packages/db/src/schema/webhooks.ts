@@ -30,6 +30,9 @@ export const webhookEndpoints = pgTable("webhook_endpoints", {
   prevSecretExpiresAt: timestamp("prev_secret_expires_at", { withTimezone: true }),
   // null = subscribe to all event types.
   events: jsonb("events").$type<string[]>(),
+  // null = every inbox. Set, events carrying inbox ids reach this endpoint
+  // only for those inboxes.
+  inboxIds: jsonb("inbox_ids").$type<string[]>(),
   status: webhookStatusEnum("status").notNull().default("enabled"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

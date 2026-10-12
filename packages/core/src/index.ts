@@ -15,6 +15,7 @@ export {
   stripHiddenElements,
   type VisibleHtml,
 } from "./abuse-judge/body.js";
+export * from "./abuse-judge/inbound.js";
 export {
   MEDIA_FILE_TEXT_MAX_CHARS,
   MEDIA_IMAGE_TEXT_MAX_CHARS,
@@ -43,6 +44,7 @@ export {
 } from "./abuse-judge/questions.js";
 export {
   type AbuseJudge,
+  type InboundJudgeVerdict,
   JUDGE_ERROR_CLASSES,
   JUDGE_PROVIDERS,
   JudgeError,
@@ -119,6 +121,7 @@ export {
   enforceDomainWarmup,
   estimateMimeBytes,
   exceededSendSize,
+  type InboxAccept,
   isReservedTagName,
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
@@ -329,7 +332,10 @@ export {
 export {
   CUSTOMER_SLOTS,
   CUSTOMER_TEXT_MAX,
+  countInvisible,
+  dropInvisible,
   fillMailTemplate,
+  type InvisibleClass,
   inertText,
   isPlainName,
   stripInvisible,
@@ -655,6 +661,7 @@ export {
   type SegmentCounts,
 } from "./segment-counts.js";
 export {
+  escapeLike,
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
   SegmentFilterError,
@@ -885,8 +892,30 @@ export {
 // run of exports, which would otherwise merge the two.
 
 export { createSemaphore, releasingStream } from "./concurrency.js";
+export * from "./custom-headers.js";
 export { secretsEqual, sha256Hex } from "./hash.js";
 export { attachmentDisposition } from "./http-headers.js";
+export * from "./inboxes/activity.js";
+export * from "./inboxes/api-key-scope.js";
+export * from "./inboxes/compose.js";
+export * from "./inboxes/drafts.js";
+export * from "./inboxes/events.js";
+export * from "./inboxes/inboxes.js";
+export * from "./inboxes/keys.js";
+export * from "./inboxes/labels.js";
+export * from "./inboxes/limits.js";
+export * from "./inboxes/quarantine.js";
+export * from "./inboxes/safety.js";
+export * from "./inboxes/send.js";
+export * from "./inboxes/send-policy.js";
+export * from "./inboxes/shared-domain.js";
+export * from "./inboxes/threads.js";
+export * from "./inboxes/types.js";
+export * from "./inboxes/wire.js";
+export * from "./receiving/automated.js";
+export * from "./receiving/clamd.js";
+export * from "./receiving/codes.js";
+export * from "./receiving/delivery.js";
 export {
   type DownloadSigning,
   deriveReceivedDownloadKey,
@@ -897,6 +926,9 @@ export {
   signReceivedDownload,
   verifyReceivedDownload,
 } from "./receiving/downloads.js";
+export * from "./receiving/erase.js";
+export * from "./receiving/inbound-rules.js";
+export * from "./receiving/inbox-routing.js";
 export {
   type IngestDeps,
   type IngestResult,
@@ -906,9 +938,13 @@ export {
 } from "./receiving/ingest.js";
 export {
   type AttachmentDataWire,
+  chosenMembership,
+  type ExtractedWire,
+  heldFrom,
   type InboundAttachmentWire,
   openReceivedAttachment,
   openReceivedAttachments,
+  openReceivedExtracted,
   openReceivedRaw,
   parseReceivedMetadata,
   RECEIVED_EMAIL_META_COLUMNS,
@@ -917,29 +953,46 @@ export {
   type ReceivedEmailListItem,
   type ReceivedEmailMeta,
   type ReceivedEmailRow,
+  type ReceivedExtracted,
+  type ReceivedListExtras,
+  type ReceivedMembershipView,
   type ReceivedMetadata,
+  type ReceivedReadView,
   receivedAttachmentId,
+  receivedDetailExtras,
   receivedEmailAttachment,
   receivedEmailAttachments,
   receivedEmailDetail,
   receivedEmailEventData,
   receivedEmailListItem,
+  receivedListExtras,
+  receivedMemberships,
   sealReceivedAttachments,
+  sealReceivedExtracted,
   sealReceivedRaw,
 } from "./receiving/message.js";
 export * from "./receiving/protocol.js";
+export * from "./receiving/quotes.js";
 export {
   chargeReceived,
   type DomainReceivingResult,
   decideRecipient,
   findReceivingDomains,
   hasReceivingRoom,
+  inboxFlooded,
   RECEIVED_PER_BILLED_EMAIL,
   RECEIVING_ALLOWANCE_MULTIPLIER,
   type ReceivingDomain,
   type ReceivingRule,
   receivedEmailScope,
+  receivedEmailVisible,
   receivingRule,
   setDomainReceiving,
 } from "./receiving/rcpt.js";
+export * from "./receiving/read.js";
+export * from "./receiving/spam.js";
+export * from "./receiving/trust.js";
+export * from "./receiving/verification.js";
+export * from "./receiving/wait.js";
+export * from "./slug.js";
 export { linksDisabled } from "./team-standing.js";

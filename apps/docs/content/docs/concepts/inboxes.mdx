@@ -1,0 +1,619 @@
+---
+title: Inboxes
+description: Addresses that keep their mail in threads and reply from the same address, for an AI agent or for people, with drafts that wait for approval, quarantine and screening, through a Resend-compatible API. Beta.
+---
+
+An inbox is one email address that receives mail into threads and sends from
+the same address. Give one to an AI agent, which reads it through the API,
+webhooks or the [MCP server](/mcp), or to people, who read it in the
+dashboard. Inboxes build on [receiving](/concepts/receiving): an inbox is an
+address on one of your receiving domains, or a random address on the
+instance's shared domain, ready with no DNS.
+
+The API mirrors Resend's Inboxes, so Resend's preview SDK works against
+MillionSend. What MillionSend adds comes as extra fields and extra endpoints;
+see [Resend compatibility](#resend-compatibility).
+
+<Callout type="info">
+Inboxes are in beta, under **Inboxes** in the dashboard, and exist on any
+instance that receives mail. Resend's Inboxes are a private beta whose shapes
+may still change; this mirror follows Resend's latest preview.
+</Callout>
+
+## Agent or people
+
+Every inbox has a `kind`, chosen when it is created and never changed. The
+kind sets the defaults of the inbox's [safety settings](#safety-settings):
+
+| Setting | Agent, own domain | Agent, shared domain | People, own domain | People, shared domain |
+| --- | --- | --- | --- | --- |
+| `accept_from` | `verified` | `verified` | `anyone` | `anyone` |
+| `screening` | on | on | off | off |
+| `extract_codes` | on | on | on | on |
+| `send_policy` | `reply_only` | `reply_only` | `open` | `reply_only` |
+| `require_approval` | off | off | off | off |
+| `private_codes` | on | on | off | off |
+| `send_cap` | 200 | 50 | none | 50 |
+
+- **`agent`**, the default when `kind` is left out (a Resend SDK can't send
+  it). Mail from senders whose domain doesn't vouch for them waits in
+  [quarantine](#quarantine), mail from other outside senders is screened for
+  prompt injection, and the agent replies inside existing threads: a new
+  conversation it starts becomes a draft that waits for a person. See
+  [Agent safety](/concepts/agent-safety).
+- **`human`**, for people reading in the dashboard: everyone's mail is
+  delivered (a failed authentication shows as a red badge), nothing is
+  screened, and replies carry no `Auto-Submitted` header.
+
+Mail carrying a virus is quarantined in every inbox, whatever its kind.
+
+## Create an inbox
+
+```sh
+curl -X POST "https://api.millionsend.com/inboxes" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email_address": "orders@inbound.example.com",
+    "name": "Orders agent",
+    "kind": "agent"
+  }'
+```
+
+The answer is the whole inbox, with `201`:
+
+```json
+{
+  "object": "inbox",
+  "id": "7eeb9517-aed7-40d7-ad65-500be42ed147",
+  "name": "Orders agent",
+  "email_address": "orders@inbound.example.com",
+  "domain_id": "af8ad875-319f-4df5-a359-4f2430f3e766",
+  "receiving_address": null,
+  "from_name": null,
+  "unread": 0,
+  "drafts": 0,
+  "last_received": null,
+  "created_at": "2026-10-12T14:03:11.229Z",
+  "kind": "agent",
+  "shared": false,
+  "expires_at": null,
+  "quarantined": 0,
+  "pending_approval": 0
+}
+```
+
+`unread` counts threads with an unread message, `drafts` the unsent drafts,
+`last_received` when a thread was last active, `quarantined` the messages
+held and not released, and `pending_approval` the drafts waiting for a
+person. The last five fields are MillionSend's.
+
+| Field | Rules |
+| --- | --- |
+| `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for a random address on the [shared domain](#shared-domain). |
+| `name` | 1–64 characters; the address when left out. |
+| `from_name` | The display name of the mail the inbox sends, up to 78 characters: a plain name, without `@`, `:`, `<`, `>`, line breaks, links or phone numbers. |
+| `kind` | `agent` (the default) or `human`. |
+| `expires_in` | When the inbox [expires](#expiry), such as `1h`, `24h` or `7d`. |
+| `safety` | Any of the [safety settings](#safety-settings); the rest take the kind's defaults. |
+| `forwarding` | `true` adds a `receiving_address` on the shared domain, for forwarding a mailbox you keep elsewhere into the inbox (see [Forwarding into an inbox](#forwarding-into-an-inbox)). |
+
+| Answer | When |
+| --- | --- |
+| `409 validation_error` | Another inbox already uses the address. |
+| `403 validation_error` | The plan's inbox limit is reached: "You have reached the inbox limit of your plan. Upgrade to add more." |
+| `429 rate_limit_exceeded` | Too many inboxes were created in the last hour; `retry-after` says when to try again. Deleting inboxes doesn't give that room back. |
+| `422 validation_error` | The domain isn't a verified domain of your team, it doesn't receive here, the instance has no shared domain, the instance doesn't receive mail at all, or a setting breaks a rule. |
+
+The other calls:
+
+- `GET /inboxes` lists inboxes, newest first; `?kind=agent` or `?kind=human`
+  narrows it.
+- `GET /inboxes/{id}` reads one, by id or by address.
+- `PATCH /inboxes/{id}` changes `name`, `from_name` or `expires_in` and
+  answers the whole inbox.
+- `DELETE /inboxes/{id}` deletes the inbox with its threads, drafts and
+  labels. Messages sent only to the inbox's address go with it; a message
+  that also reached another inbox, or a catch-all address, stays there. The
+  inbox's API keys are revoked first.
+
+With Resend's preview SDK:
+
+```ts
+import { Resend } from "resend"; // resend@6.32.1-preview-inboxes.6
+
+// RESEND_API_KEY=ms_...  RESEND_BASE_URL=https://api.millionsend.com
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+const { data } = await resend.inboxes.create({
+  emailAddress: "orders@inbound.example.com",
+  name: "Orders agent",
+});
+```
+
+## Addresses
+
+### Your own domain
+
+An inbox on your own domain needs the domain to
+[receive here](/concepts/receiving#set-up): verified, with receiving on and
+its MX record published. Each message then goes by the address the sending
+server delivered to:
+
+1. to the inbox with exactly that address;
+2. otherwise, for `name+tag@`, to the inbox of `name@`, while `received_for`
+   keeps the address as written;
+3. otherwise, when the domain's **catch-all** is on, to **All received**,
+   without an inbox. With catch-all off, the address is refused during the
+   SMTP session (`550 5.1.1`), so the sender's own server returns the
+   message to its sender.
+
+Catch-all starts off, and is on for domains that already received mail
+before inboxes existed. On MillionSend Cloud it needs a paid plan. See
+[Which addresses receive](/concepts/receiving#which-addresses-receive).
+
+Mail sent from an inbox's address follows the inbox's rules on every
+surface, `POST /emails`, the batch endpoint, the SMTP relay and MCP
+included, and an agent inbox starts as `reply_only`. Give an inbox an
+address your app doesn't already send from.
+
+### Shared domain
+
+An instance can offer a shared domain for inboxes that need no DNS at all
+(its operator sets `SHARED_INBOX_DOMAIN`; see
+[Self-hosting](/self-hosting#shared-inbox-domain)). Each team gets its own
+subdomain there, named after the team, such as `acme.agents.example`, or
+`team-` and six random characters when the name looks like a well-known
+brand. Leave `email_address` out and the inbox gets a random address on it,
+built from its name: `signup-bot-7f3k@acme.agents.example`. The dashboard's
+create dialog offers it as **Random address**.
+
+Shared addresses are made for short agent tasks, such as signing up for a
+service and reading the confirmation code:
+
+- They expire: after 24 hours unless `expires_in` says otherwise, 30 days at
+  most, never "never".
+- They only reply, inside their own threads, to senders whose domain vouched
+  for them and to your team members' sign-in addresses. Owner addresses, the
+  allowlist and a `Reply-To` at another organization don't count here, and
+  `forward_to` takes members' sign-in addresses only: the shared domain is
+  every team's, so it never writes to an address nobody proved. Starting a conversation answers
+  `403 inbox_send_policy`, approved or not: use your own domain for that.
+  `send_policy` stays `reply_only`.
+- They send to 50 recipients a day at most (`send_cap` from 1 to 50).
+- They send only through the inbox endpoints: `POST /emails` from a shared
+  address answers `403`.
+- Their `domain_id` is the id of the team's shared subdomain, which
+  `GET /domains` doesn't list.
+
+On an instance without a shared domain, `POST /inboxes` without
+`email_address` answers `422`.
+
+### Forwarding into an inbox
+
+`forwarding: true`, Resend's option, is for an address whose mail lives
+elsewhere, such as a Google Workspace mailbox. The inbox gets a
+`receiving_address`, a random address on your team's shared subdomain:
+forward the mailbox there, and the inbox receives it while replying from its
+own address. The domain then only needs to be verified for sending, not to
+receive here. It needs the instance's shared domain.
+
+## Expiry
+
+`expires_in` is a number followed by `h` or `d`, from `1h` to `365d`, and up
+to `30d` on the shared domain. A `PATCH` with a new `expires_in` counts from
+that moment, and `null` removes the expiry of an inbox on your own domain.
+`expires_at` shows when it ends.
+
+At `expires_at` the inbox stops: mail to it is refused (`550 5.1.1`), or, on
+a domain with catch-all on, kept in All received like mail to any other
+address; reads answer `404 Inbox not found.` and its API keys stop working.
+Within the hour it is deleted as a `DELETE` would, with an `inbox.expired`
+webhook followed by `inbox.deleted`, and its API keys are revoked. Making an
+inbox expire sooner than it would takes the owner or admin role, as deleting
+it does; any member can extend it.
+
+## Threads
+
+Every message of an inbox belongs to a thread, and a thread holds both
+directions: what the inbox received and what it sent.
+
+**How replies find their thread.** Mail the inbox sends carries a thread
+token in its `References` header. A reply lands in the same thread when it
+carries that token, when its `In-Reply-To` names a message the inbox sent,
+or when it refers to an earlier message of the thread by its Message-ID.
+Subjects never join threads. The first two cases also prove that the reply
+belongs to the conversation, which can make its sender a
+[known thread](/concepts/agent-safety#sender-trust).
+
+**Folders.** A thread sits in one folder: `inbox`, `archive`, `spam`,
+`sent` (threads with only mail the inbox sent; set automatically) or
+`trash`. New mail moves an archived or sent thread back to `inbox`.
+`DELETE` moves a thread to `trash` (with `deleted: false` when it was there
+already), and a trashed thread is deleted after 30 days unless it is moved
+out first.
+
+**Read state.** Every received message is read or unread. A `PATCH` with
+`read` marks the whole thread. A thread is read when all its messages are,
+and the inbox's `unread` counts the threads with an unread message. Mail the
+inbox sent is always read.
+
+**Labels.** Up to 100 per inbox. Names take 1–64 characters and are unique
+regardless of letter case; colors are `#RRGGBB`, in uppercase, and random
+when left out. A `PATCH` with `label_id` puts one label on a thread at a
+time. Labels come off a thread in the dashboard, and deleting a label takes
+it off every thread.
+
+| Call | Does |
+| --- | --- |
+| `GET /inboxes/{id}/threads` | Threads, latest activity first. `folders` (`inbox` by default, `inbox,archive,sent` with `labels`), `labels` (up to 50 ids; any of them matches), `read` (`true` or `false`). |
+| `GET /inboxes/{id}/threads/search` | The same filters, plus `query` (up to 256 characters and 32 words; `"exact phrase"` and `-excluded` work), `from`, `to`, `cc` and `bcc` (up to 20 values each, matching part of an address or name), `has_attachment`, `start_date` and `end_date`. Each result adds `matched_email_id` and `highlights`. |
+| `GET /inboxes/{id}/threads/{thread_id}` | One thread: subject, folder, labels and read state. |
+| `PATCH /inboxes/{id}/threads/{thread_id}` | `read`, `folder` (`inbox`, `archive`, `spam` or `trash`) or `label_id`. |
+| `DELETE /inboxes/{id}/threads/{thread_id}` | Moves the thread to trash. |
+| `GET /inboxes/{id}/threads/{thread_id}/emails` | Its emails, oldest first; `after` pages toward newer ones. |
+| `GET /inboxes/{id}/threads/{thread_id}/emails/{email_id}` | One email. |
+
+Search reads subjects, senders (address and display name) and recipients,
+not message bodies or attachment names: those are encrypted at rest. It
+covers the 10,000 threads with the newest matches.
+
+A thread email has Resend's fields: `direction`, `from`, `to`, `cc`, `bcc`,
+`reply_to`, `subject`, `message_id`, `html`, `text`, `attachments`, `read`
+and `received_at`. Received mail adds `extracted_text` (the reply, cleaned of
+hidden text; see
+[Agent safety](/concepts/agent-safety#hidden-text-and-extracted_text)),
+`screening`, `spam_verdict` and `virus_verdict`. Mail the inbox sent adds
+`status`, its latest delivery event as on `GET /emails/{id}`. `text` comes
+without invisible characters, and `html` exactly as received.
+
+```json
+"screening": {
+  "verdict": "clean",
+  "sender_trust": "external",
+  "quarantine_reason": null,
+  "reasons": [],
+  "injection_score": 3,
+  "phishing_score": 1,
+  "hidden_text_removed": false
+}
+```
+
+## Reply and forward
+
+```sh
+curl -X POST "https://api.millionsend.com/inboxes/{id}/threads/{thread_id}/emails/{email_id}/reply" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-1042-reply" \
+  -d '{ "text": "Thanks, your order ships today." }'
+```
+
+A reply goes to the message's `Reply-To`, or else to its sender; replying to
+a message the inbox sent goes to that message's recipients. `reply_all` adds
+the message's other `to` and `cc` addresses as `cc`. `bcc` is never copied,
+and one send takes 50 recipients at most. The subject defaults to `Re: ` and
+the thread's subject. The reply carries `In-Reply-To`, `References` with the
+thread token and, from an agent inbox, `Auto-Submitted: auto-replied`.
+
+`…/forward` needs `to`, takes a note in `text` or `html`, and quotes the
+original under a `---------- Forwarded message ---------` line with its
+`From`, `Date`, `Subject` and `To`. The original's attachments go along, up
+to 10 MiB in all; past that, `422`. The subject defaults to `Fwd: ` and the
+thread's subject.
+
+Both take `requires_approval: true` to have a person approve the send, and
+answer:
+
+| Answer | Means |
+| --- | --- |
+| `200` | Sent: the email, with `email_id`, `thread_id` and `inbox_id`. |
+| `202` | Held for a person: the [draft](#drafts-and-approval), with `status: "pending_approval"` and its `approval_reasons`. |
+| `403 inbox_send_policy` | The inbox's rules refuse the send outright, such as a shared address starting a conversation. |
+| `403 email_quarantined` | The email is held in quarantine, or carries a virus (forwarding). |
+| `403 restricted_api_key` | An inbox-scoped key reaching another inbox. |
+| `429 inbox_send_cap_reached` | The inbox's daily cap is used; `retry-after` counts to midnight UTC. |
+
+To reply to any received email, in an inbox or not, use
+[`POST /emails/receiving/{id}/reply`](/concepts/receiving#reply-and-forward-from-the-server).
+
+## Drafts and approval
+
+Drafts are Resend's: standalone, for a new conversation, or replies, with
+`thread_id` and `reply_to_email_id` together. MillionSend adds `status`:
+
+| `status` | Means |
+| --- | --- |
+| `draft` | Being written; nothing sends it until `…/send`. |
+| `pending_approval` | A send was held and waits for a person; `approval_reasons` says why. It expires after 7 days. |
+| `sent` | Sent; `email_id` names the email. |
+| `rejected` | A person turned it down. |
+| `expired` | Nobody approved it within 7 days. |
+
+Drafts also carry `forward` (a held forward), `decided_by`, `decided_at` and
+`expires_at`.
+
+| Call | Does |
+| --- | --- |
+| `POST /inboxes/{id}/drafts` | Creates a draft: `to`, `cc`, `bcc`, `subject`, `text` and `html`, plus `thread_id` and `reply_to_email_id` for a reply. An email has one unsent reply draft at most: asking again answers `200` with the existing one. A reply draft doesn't copy recipients, so set `to` before sending. |
+| `GET /inboxes/{id}/drafts` | Unsent drafts, most recently updated first. |
+| `GET /inboxes/{id}/drafts/{draft_id}` | One draft, also once sent. |
+| `PATCH /inboxes/{id}/drafts/{draft_id}` | Changes fields. Setting `text` or `html` replaces the whole body: the part left out becomes `null`. `409` once sent, or when another request changed it meanwhile. An agent's edit sends a pending draft back to `draft`. |
+| `DELETE /inboxes/{id}/drafts/{draft_id}` | Deletes it; `409` once sent. |
+| `POST /inboxes/{id}/drafts/{draft_id}/send` | Sends it: no body, `Idempotency-Key` accepted. `200` with `email_id`, `202` when held, `409` once sent, `422` without a recipient. |
+| `POST /inboxes/{id}/drafts/{draft_id}/reject` | Turns a draft down (approvers only). |
+
+**Who approves.** Sending a draft runs the inbox's rules for whoever sends
+it. A person in the dashboard, or a full-access API key of the team that
+isn't restricted to an inbox, approves by sending: the send skips the rules
+that hold agent mail. It still counts toward the daily cap (without being
+refused by it), a shared address still replies only inside its threads, and
+your team's usual sending limits apply. An agent can't approve: an
+inbox-scoped key or an MCP client sending a pending draft gets
+`403 approval_required`, and one sending a plain draft that the rules hold
+gets `202`, with the draft now pending.
+
+In the dashboard, any member approves, edits or discards drafts under the
+inbox's **Needs review** tab, and owners get one email a day while there is
+something to review.
+
+The reasons a send was held:
+
+| Reason | Held because |
+| --- | --- |
+| `approval_required` | The request asked for a person (`requires_approval: true`). |
+| `require_approval` | The inbox has every send approved. |
+| `send_policy` | A recipient isn't allowed by the inbox's send policy. |
+| `ramp` | Too many new recipients today for a young inbox. |
+| `private_code` | It contains a code or sign-in link the inbox received. |
+| `loop_guard:<reason>` | It replies to an automatic message (an out-of-office, a mailing list, a bounce…). |
+| `loop_burst` | Too many automatic replies to one address within an hour. |
+| `reply_to_redirect` | The message's Reply-To points to another organization. |
+
+## Safety settings
+
+`GET /inboxes/{id}/safety` reads an inbox's rules, and `PATCH` changes any of
+them and answers the whole set:
+
+```sh
+curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "accept_from": "allowlist", "allowlist": ["*@billing.example.net", "maria@example.org"] }'
+```
+
+| Setting | Does |
+| --- | --- |
+| `accept_from` | Whose mail reaches the inbox: `anyone`; `verified`, senders whose domain vouches for the From address, plus owners, the allowlist and known threads; or `allowlist`, owners, the allowlist and known threads only. The rest is quarantined. |
+| `allowlist` | Up to 500 entries: `name@domain`, exact and as written, or `*@domain` for a domain and its subdomains. An entry counts only for mail whose domain vouches for it. |
+| `owner_addresses` | Up to 50 more addresses treated as the inbox's owners, besides your team members' sign-in addresses. |
+| `screening` | Score mail from outside senders for prompt injection and phishing (agent inboxes). |
+| `extract_codes` | Pull verification codes and sign-in links out of mail (`extracted.code`, `extracted.link`, `codes/latest`). |
+| `send_policy` | `reply_only`; `allowlist`, which adds new conversations with owners and the allowlist; or `open`, anyone, on your own domain and once the team is past its first sends. |
+| `require_approval` | Every send from the inbox waits for a person. |
+| `private_codes` | A code or sign-in link the inbox received can't be sent to anyone but owners and the allowlist. |
+| `send_cap` | Recipients the inbox may send to per UTC day without a person: 1–100,000, or `null` for no cap; 1–50 on the shared domain. |
+| `forward_to` | Up to 5 addresses that get a copy of every delivered message: team members' sign-in addresses or owner addresses. |
+
+A setting that breaks a rule answers `422` with the reason: `open` on the
+shared domain or for a team still new to sending, `screening` on a `human`
+inbox, or a `forward_to` address that is neither a member's nor an owner
+address. An inbox-scoped key can't change these settings
+(`403 restricted_api_key`), the MCP server has no tool for them, and in the
+dashboard only owners and admins can. [Agent safety](/concepts/agent-safety)
+explains what each one does.
+
+## Quarantine
+
+Mail an inbox's rules don't let in is quarantined: kept, listed and
+releasable, never dropped and never returned to its sender. It fires no
+`email.received` or `inbox.email.received` until it is released, and agents
+never see it (see [Agent safety](/concepts/agent-safety#quarantine)).
+
+`GET /inboxes/{id}/quarantine` lists the held messages, newest first, with
+`id`, `thread_id`, `from`, `subject`, `received_at`, `quarantine_reason`,
+`sender_trust`, `injection_score`, `phishing_score` and `virus_signature`,
+and no content. `POST /inboxes/{id}/quarantine/{email_id}/release` delivers
+one, and `{ "trust_sender": true }` also adds its sender to the allowlist:
+
+```json
+{
+  "object": "inbox_release",
+  "inbox_id": "7eeb9517-aed7-40d7-ad65-500be42ed147",
+  "email_id": "155252fb-e93e-45ee-8c19-5080a929c28b",
+  "released_at": "2026-10-12T14:20:05.112Z",
+  "trusted_sender": "maria@example.org"
+}
+```
+
+Both take a full-access key that isn't restricted to an inbox (inbox-scoped
+keys get `403`). A message that isn't quarantined answers `404`. People
+release from the inbox's **Needs review** tab, and MCP clients with
+`receiving:manage` with `release_email`.
+
+## Verification codes
+
+`GET /inboxes/{id}/codes/latest` answers the newest verification code or
+sign-in link the inbox received, so an agent never has to read HTML:
+
+```sh
+curl "https://api.millionsend.com/inboxes/{id}/codes/latest?from=example.org&wait=30" \
+  -H "Authorization: Bearer ms_..."
+```
+
+```json
+{
+  "object": "verification_code",
+  "status": "found",
+  "kind": "link",
+  "code": null,
+  "url": "https://app.example.org/verify?token=Qm9vdHN0cmFwLTQ4MjkxMw",
+  "link_domain_matches_sender": true,
+  "email_id": "155252fb-e93e-45ee-8c19-5080a929c28b",
+  "from": "no-reply@example.org",
+  "received_at": "2026-10-12T14:03:11.229Z",
+  "sender_trust": "external"
+}
+```
+
+- `kind` is `otp`, with the code in `code`, or `link`, with the address in
+  `url` and whether its domain is the sender's in
+  `link_domain_matches_sender`.
+- `from` narrows it to a sender: an address, or a domain with its
+  subdomains.
+- `wait`, from 0 to 50 seconds, waits for one to arrive; `max_age`, from 60
+  to 86,400 seconds (600 by default), skips older mail.
+- `status` is `found`; `none`; `ambiguous`, when two different codes or links
+  are equally likely, so none is answered; or `timeout`, when `wait` ran out
+  with nothing new. The answer is always `200`.
+- Codes never come from quarantined mail, from mail still being screened,
+  from senders who failed authentication, or from an inbox with
+  `extract_codes` off. Every read is recorded in the inbox's activity.
+
+`GET /emails/receiving/{id}` also carries the code or link of one email, in
+`extracted`.
+
+## Waiting for mail
+
+`GET /emails/receiving?inbox_id={id}&wait=30` holds the request until a
+message is delivered to the inbox, for up to 50 seconds; see
+[Waiting for new mail](/concepts/receiving#waiting-for-new-mail). Webhooks
+push the same news instead.
+
+## Inbox-scoped API keys
+
+Give each agent a key that reaches only its own inbox:
+
+```sh
+curl -X POST "https://api.millionsend.com/api-keys" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "orders agent", "permission": "full_access", "inbox_id": "7eeb9517-aed7-40d7-ad65-500be42ed147" }'
+```
+
+- It needs `permission: "full_access"` and can't take a `domain_id` too. An
+  inbox holds 5 active keys at most, outside the team's limit of 25.
+- The key reads its inbox (threads, emails, drafts, labels, codes, and
+  `/emails/receiving` limited to mail delivered into it), replies, forwards,
+  writes drafts and sends them, and sends from the inbox's address only:
+  through `POST /emails` and `POST /emails/batch`, another `from` answers
+  `403 restricted_api_key`, and through the SMTP relay `550 5.7.1`.
+- Everything else answers `403 restricted_api_key`: it can't change safety
+  settings, list or release quarantine, approve drafts, create keys or reach
+  any other inbox.
+- It stops working when its inbox expires, and deleting the inbox revokes
+  it.
+
+A key scoped to a domain (`domain_id`) reaches only the inboxes on that
+domain, as it reads only mail received there: others, shared-domain inboxes
+included, read as not found, and it creates inboxes on its own domain only.
+
+In the dashboard, owners and admins pick the inbox under **Restrict to an
+inbox** when creating a key.
+
+## Webhooks
+
+Inbox events (`inbox.created`, `inbox.thread.created`,
+`inbox.email.received`, `inbox.email.sent`, `inbox.email.quarantined`, the
+`inbox.draft.*` events and more) go only to endpoints that name them, never
+to an endpoint subscribed to all events, and an endpoint can be limited to
+some inboxes with `inbox_ids`. `email.received` still fires for inbox mail,
+once it is delivered. Payloads and caveats:
+[Webhooks](/concepts/webhooks#inbox-events).
+
+## Activity
+
+Everything done in an inbox is recorded: sends and the rules' decisions,
+refusals, drafts, approvals and rejections, releases, code reads, safety
+changes, deletions and keys. The inbox's **Activity** tab lists it with who
+acted: a person, an API key or a connected app. Decisions keep reason codes
+only, never content, codes or addresses. Owner and admin actions in the
+dashboard also go to the team's audit log.
+
+## Limits
+
+| Limit | Value |
+| --- | --- |
+| Inboxes | 3 on Free, 25 on Starter, unlimited on Pro and Scale. Self-hosted instances have no limit. |
+| Inboxes created per hour | 10 on Free, 60 on Starter, 600 on Pro and Scale; no limit self-hosted. |
+| Mail per inbox | 200 accepted messages per rolling hour for an agent inbox, 2,000 for a people inbox. Past that, senders get `452 4.2.2` and try again later. |
+| Sends | `send_cap` recipients per UTC day. A new inbox reaches new recipients gradually: 10 on its first day of sending, then 20, 40, 80, 160 and so on, up to the cap. |
+| Recipients per send | 50: `to`, `cc` and `bcc` together. |
+| Labels | 100 per inbox. |
+| Safety lists | 500 allowlist entries, 50 owner addresses, 5 `forward_to` addresses. |
+| Inbox-scoped keys | 5 active per inbox. |
+| Screening | 200 messages per inbox per day; past it, mail that needs screening is quarantined (`screening_cap`). |
+| Waiting | 50 seconds per request; 20 waits at once per team on each API process. |
+| Drafts and trash | A pending draft expires after 7 days; a trashed thread is deleted after 30. |
+| Retention | Inbox mail follows received mail's retention: 30 days on Cloud. |
+
+Inboxes themselves cost nothing: received mail counts once per message, as
+in [Receiving → Pricing](/concepts/receiving#pricing).
+
+## Dashboard
+
+**Inboxes** in the sidebar lists your inboxes under the **All**, **Agent**
+and **People** tabs, with what needs attention: drafts to approve, unread
+threads and messages in quarantine. A pinned **All received** row opens every
+email your domains received, in an inbox or not, and each catch-all domain
+gets a row for the mail at its other addresses. An inbox's page has four
+tabs: **Threads**, where you read, reply and approve drafts in place,
+**Needs review** (drafts to approve and quarantine), **Safety & rules** and
+**Activity**.
+
+Any member can create inboxes, work their threads, approve drafts and release
+quarantine. Owners and admins can also delete inboxes, change safety rules,
+create inbox-scoped keys, delete received mail and switch catch-all.
+
+## MCP
+
+[MCP clients](/mcp#tools) work with inboxes under three permissions:
+`receiving:read` (read mail, wait for it, read codes, list inboxes, threads,
+labels and drafts), `receiving:reply` (reply, forward and organize threads)
+and `receiving:manage` (create, change and delete inboxes, list and release
+quarantine). An MCP client always sees mail the way an agent does, without
+held mail and with message text fenced as untrusted. It can't change safety
+settings, beyond picking `accept_from` when it creates an inbox, and it never
+approves drafts.
+
+## Resend compatibility
+
+The 26 endpoints of Resend's Inboxes preview are served at the same paths
+and with the same shapes, so `resend.inboxes.*` from
+`resend@6.32.1-preview-inboxes.6` works against MillionSend, and list orders
+follow Resend's (see [Pagination](/api-reference#pagination)). Where Resend
+leaves room, or MillionSend differs:
+
+- Creating an inbox or a draft answers the whole object; Resend's
+  `{ object, id }` is part of it.
+- `kind` defaults to `agent`, since a Resend SDK can't send it, so inboxes
+  created through one get an agent's protections. Create `human` inboxes in
+  the dashboard, with a MillionSend SDK or over plain HTTP.
+- MillionSend runs no hosted agent: `GET /inboxes/{id}/agent` answers
+  `{ "object": "inbox_agent", "instructions": null, "tone": null, "enabled_actions": [] }`,
+  and `PATCH /inboxes/{id}/agent` answers `422`.
+- Thread search reads subjects, senders and recipients, not bodies or
+  attachment names.
+- A reply draft doesn't copy recipients; setting `text` or `html` on a draft
+  replaces the whole body; a forward carries the original's attachments, up
+  to 10 MiB; sending a draft needs at least one recipient.
+- A reply, forward or draft send held by the inbox's rules answers `202`
+  with the draft instead of `200` with the email: check `object`, which reads
+  `inbox_draft`, before treating the result as sent.
+- New errors: `403 inbox_send_policy`, `429 inbox_send_cap_reached`,
+  `403 approval_required` and `403 email_quarantined` (see
+  [Errors](/api-reference#errors)). An address already in use, or a draft
+  edited after it was sent or while another request changed it, answers
+  `409 validation_error`.
+- MillionSend's additions are extra fields (`kind`, `shared`, `expires_at`,
+  `screening`, `extracted_text` and others) and extra endpoints (`/safety`,
+  `/quarantine`, `/codes/latest`, `/drafts/{id}/reject`). Resend's enums
+  never gain a value: quarantined mail is hidden from agents rather than put
+  in a new folder, and a webhook's `source` is `api`, `dashboard` or
+  `system`, never `agent`.
+- Label colors are hex only, as in Resend's latest preview.
+- `from_name` keeps Resend's 78 characters but takes a plain name only: no
+  `@`, links or phone numbers, which answer `422`.
+- `inbox.*` webhook events are opt-in; `inbox.expired` and
+  `inbox.email.quarantined` are MillionSend's own, and
+  `inbox.thread.assigned` and `inbox.thread.unassigned` aren't sent.

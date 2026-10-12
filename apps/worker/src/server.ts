@@ -7,13 +7,16 @@ import {
   reportOverage,
 } from "@millionsend/billing";
 import {
+  ABUSE_JUDGE_TIMEOUT_MS_DEFAULT,
   abuseJudgeConfig,
   abuseVisionConfig,
   disposableEmailsBlocked,
   env,
   ipGeolocationEnabled,
+  receivingEnabled,
   servedRegions,
   sesTenantsEnabled,
+  sharedInboxDomain,
   trackingCnameTarget,
   trackingSubdomainsSupported,
   unsubscribeBaseUrl,
@@ -23,13 +26,18 @@ import {
   committedDailyVolume,
   createDomainAgeResolver,
   DomainAgeRetryableError,
+  deriveInboxKeys,
   deriveSamplingKey,
   deriveTrackingKey,
   deriveUnsubscribeKey,
   domainsAwaitingAge,
   eraseRecipient,
+  expireDrafts,
+  expireInboxes,
   getInstanceSettings,
   hashRecipient,
+  type InboxDeps,
+  type InboxSendDeps,
   type MonitorDeps,
   markDomainAgeUnknown,
   monitorSettingsReader,
@@ -42,7 +50,9 @@ import {
   purgeAccountSignups,
   purgeCampaignFingerprints,
   purgeExpiredIdempotencyKeys,
+  purgeTrashedThreads,
   type QueuedWebhookDelivery,
+  reconcilePendingScreens,
   recordDomainAge,
   recordMissingFingerprints,
   recordProbes,
@@ -82,6 +92,7 @@ import {
   purgeExpiredReceivedContent,
   purgeExpiredReceivedMetadata,
   purgeExpiredSessions,
+  purgeInboxData,
   purgeStaleHourlyUsage,
   reapStaleTrackingSubdomains,
   reapUnverifiedDomains,
@@ -93,6 +104,7 @@ import {
   stripExpiredEventPayloads,
 } from "./handlers/cron.js";
 import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
+import { forwardToOwners } from "./handlers/inbox-forward.js";
 import { runInstanceProbes } from "./handlers/instance-probes.js";
 import { alertLinkedTeams } from "./handlers/linkage-alerts.js";
 import { runMonitorHealth } from "./handlers/monitor-health.js";
@@ -101,6 +113,7 @@ import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
 import { runRevealNotices } from "./handlers/reveal-notices.js";
 import { runSafetyFlags } from "./handlers/safety-flags.js";
+import { screenReceived } from "./handlers/screen-received.js";
 import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
@@ -311,6 +324,24 @@ const enqueueWebhook = async (deliveries: readonly QueuedWebhookDelivery[]): Pro
   await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
 
+const inboxDeps: InboxDeps = {
+  sharedInboxDomain: sharedInboxDomain() ?? null,
+  receivingEnabled: receivingEnabled(),
+  enqueueWebhookDeliveries: enqueueWebhook,
+};
+// forward_to passes go through the accept pipeline like an API send, so they
+// enqueue as transactional mail.
+const inboxSendDeps: InboxSendDeps = {
+  db,
+  keyring,
+  isCloud: env.IS_CLOUD,
+  enqueueEmailSend: (emailId, opts) =>
+    enqueueSend(emailId, opts?.startAfter, EMAIL_SEND_PRIORITY.transactional),
+  inboxKeys: deriveInboxKeys(masterKeyBytes),
+  sharedInboxDomain: inboxDeps.sharedInboxDomain,
+  enqueueWebhookDeliveries: enqueueWebhook,
+};
+
 const enqueueDomainAge = async (domainId: string): Promise<void> => {
   await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
 };
@@ -350,6 +381,8 @@ await queue.scheduleCrons({
   "sends.reconcile": async () => {
     const requeued = await reconcileStalledSends(db, { enqueueSends });
     if (requeued > 0) console.log(`sends.reconcile: requeued=${requeued}`);
+    const screens = await reconcilePendingScreens(db, (p) => queue.enqueueScreening(p));
+    if (screens > 0) console.log(`sends.reconcile: screens=${screens}`);
   },
   "retention.purge": async () => {
     const purged = await purgeExpiredEmailBodies(db, {
@@ -371,6 +404,16 @@ await queue.scheduleCrons({
     const receivedDeleted = await purgeExpiredReceivedMetadata(db, {
       retentionDays: metadataRetentionDays,
     });
+    // After the received metadata purge, whose deletes cascade to memberships.
+    const now = new Date();
+    const inboxData = await purgeInboxData(db, {
+      contentDays: (await getInstanceSettings(db)).emailRetentionDays ?? env.EMAIL_RETENTION_DAYS,
+      metadataDays: metadataRetentionDays,
+      now,
+    });
+    const inboxesExpired = await expireInboxes(db, inboxDeps, now);
+    const trashedThreads = await purgeTrashedThreads(db, now);
+    const draftsExpired = await expireDrafts(db, inboxSendDeps, now);
     const sessions = await purgeExpiredSessions(db);
     const hourlyUsage = await purgeStaleHourlyUsage(db);
     const stripeEvents = await purgeStripeEvents(db);
@@ -393,6 +436,10 @@ await queue.scheduleCrons({
       broadcastsFrozen: metadata.broadcasts,
       receivedPurged,
       receivedDeleted,
+      ...inboxData,
+      inboxesExpired,
+      trashedThreads,
+      draftsExpired,
       sessions,
       signups,
       fingerprints,
@@ -648,6 +695,16 @@ await queue.workDeadLetter("abuse.judge", async ({ sampleId }) => {
 
 await queue.workDeadLetter("tenant.status", ({ teamId }) => abandonTenantStatus(db, teamId));
 
+// A screening that kept throwing leaves its membership pending, invisible
+// to agents; sends.reconcile retries it.
+await queue.workDeadLetter("received.screen", async ({ receivedEmailId, inboxId }) => {
+  console.error(`received.screen: dead-lettered ${receivedEmailId} inbox=${inboxId}`);
+});
+
+await queue.workDeadLetter("inbox.forward", async ({ receivedEmailId, inboxId }) => {
+  console.error(`inbox.forward: dead-lettered ${receivedEmailId} inbox=${inboxId}`);
+});
+
 // Every source kept failing: the domain reads as unknown age, which the
 // warm-up treats by the team's standing, until verification asks again.
 await queue.workDeadLetter("domain.age", ({ domainId }) => markDomainAgeUnknown(db, domainId));
@@ -736,6 +793,30 @@ await queue.work(
   },
   { concurrency: 4, batchSize: 2, groupConcurrency: 2 },
 );
+
+// The inbound judge: a few lanes, at most two on one inbox's mail at a time.
+await queue.work(
+  "received.screen",
+  async (job) => {
+    await screenReceived(
+      db,
+      {
+        judge,
+        keyring,
+        settings: await monitorSettings(),
+        timeoutMs: judgeConfig?.timeoutMs ?? ABUSE_JUDGE_TIMEOUT_MS_DEFAULT,
+        enqueueWebhookDeliveries: enqueueWebhook,
+        enqueueInboxForward: (p) => queue.enqueueInboxForward(p),
+      },
+      job,
+    );
+  },
+  { concurrency: 4, groupConcurrency: 2 },
+);
+
+await queue.work("inbox.forward", (job) => forwardToOwners(db, inboxSendDeps, job), {
+  concurrency: 2,
+});
 
 await queue.work(
   "ses.event",

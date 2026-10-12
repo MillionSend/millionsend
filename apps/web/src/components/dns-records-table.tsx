@@ -149,6 +149,7 @@ export function DnsRecordsTable({
   forceGroups = [],
   groupExtras = {},
   emptyNotes = {},
+  groupFooters = {},
 }: {
   records: DnsRecord[];
   /** The domain the records belong to; omitted, names render absolute. */
@@ -161,6 +162,8 @@ export function DnsRecordsTable({
   /** Right-aligned header content per group (e.g. a toggle). */
   groupExtras?: Partial<Record<(typeof GROUPS)[number], React.ReactNode>>;
   emptyNotes?: Partial<Record<(typeof GROUPS)[number], string>>;
+  /** Content under a group's records (a setting that belongs to the group). */
+  groupFooters?: Partial<Record<(typeof GROUPS)[number], React.ReactNode>>;
 }) {
   const t = useTranslations("domains");
   return (
@@ -253,6 +256,7 @@ export function DnsRecordsTable({
                 })}
               </RecordsTable>
             )}
+            {groupFooters[group] ?? null}
           </div>
         );
       })}

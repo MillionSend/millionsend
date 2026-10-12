@@ -594,6 +594,59 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
     }
   }
 
+  // Inboxes that need a person today: mail held in quarantine, sends waiting
+  // for approval, sends the rules refused. Counts only: sender addresses and
+  // subjects are a stranger's words and never reach this mail.
+  const dayStart = new Date(`${today}T00:00:00.000Z`);
+  const m = schema.receivedEmailInboxes;
+  const drafts = schema.inboxDrafts;
+  const activity = schema.inboxActivity;
+  const attention = resultRows<{
+    team_id: string;
+    quarantined: number;
+    drafts: number;
+    refused: number;
+  }>(
+    await db.execute(sql`
+      select team_id, sum(quarantined)::int as quarantined, sum(drafts)::int as drafts, sum(refused)::int as refused
+      from (
+        select ${m.teamId} as team_id, count(*) as quarantined, 0 as drafts, 0 as refused
+        from ${m} where ${m.quarantinedAt} >= ${dayStart} group by ${m.teamId}
+        union all
+        select ${drafts.teamId}, 0, count(*), 0
+        from ${drafts} where ${drafts.status} = 'pending_approval' and ${drafts.updatedAt} >= ${dayStart}
+        group by ${drafts.teamId}
+        union all
+        select ${activity.teamId}, 0, 0, count(*)
+        from ${activity} where ${activity.action} = 'email.refused' and ${activity.createdAt} >= ${dayStart}
+        group by ${activity.teamId}
+      ) counts
+      group by team_id
+    `),
+  );
+  for (const row of attention) {
+    if (
+      !(await claimNotification(db, {
+        teamId: row.team_id,
+        kind: "inbox.attention",
+        periodKey: today,
+      }))
+    ) {
+      continue;
+    }
+    await attempt(row.team_id, "inbox.attention", "mail", () =>
+      mailOwners(
+        row.team_id,
+        "inbox.attention",
+        account("inbox.attention", "/inboxes", (locale) => ({
+          quarantined: row.quarantined.toLocaleString(locale),
+          drafts: row.drafts.toLocaleString(locale),
+          refused: row.refused.toLocaleString(locale),
+        })),
+      ),
+    );
+  }
+
   // Security receipts off the audit trail, one per row. A row for a team
   // that is gone is skipped by the join; claims for rows that left the
   // window are dropped, since those rows are never read again.
