@@ -112,7 +112,7 @@ function Row({
         <QuotaCell region={r} />
       </td>
       <td>
-        <BroadcastsCell region={r} />
+        <BroadcastsCell region={r} complaintLine={lines.breaker} />
       </td>
       <td>
         <SesAccountCell region={r} />
@@ -145,8 +145,9 @@ function Row({
               t(r.sesComplaintRead ? "sesNone" : "sesUnreadable"),
               t("oursWatched", {
                 ours: r.week ? f.pct3(r.week.complaintRate) : "—",
-                limit: f.pctLimit(lines.ours),
+                limit: f.pctLimit(lines.breaker),
               }),
+              tr("complaintEstimate"),
             ].join("\n")}
           >
             {mutedDash}
@@ -164,6 +165,7 @@ function Row({
                 limit: f.pctLimit(lines.breaker),
                 ours: r.week ? f.pct3(r.week.complaintRate) : "—",
               }),
+              tr("complaintEstimate"),
             ].join("\n")}
           >
             <span style={sesTone ? { color: `var(--ms-${sesTone})` } : undefined}>

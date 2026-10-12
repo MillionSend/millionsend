@@ -63,15 +63,16 @@ export function regionPausedMail(input: {
 }): MailContent {
   const { reason } = input;
   const windowed = "windowHours" in reason;
+  const complaints = reason.metric === "complaint";
   return layout({
     subject: `Broadcasts paused in ${input.region}: ${windowed ? "platform" : "SES"} ${metricLabel(reason.metric)} rate at ${percent(reason.rate)}`,
     paragraphs: [
       windowed
-        ? `Across every team sending from ${input.region}, the ${metricLabel(reason.metric)} rate over the last ${reason.windowHours} hours is ${percent(reason.rate)} (${reason.events} of ${reason.sent} sends), at or over the breaker's ${percent(reason.limit)} line, set short of SES's own review line for the whole account.`
+        ? `Across every team sending from ${input.region}, the ${metricLabel(reason.metric)} rate over the last ${reason.windowHours} hours is ${percent(reason.rate)} (${reason.events} of ${reason.sent} sends${complaints ? " to providers that report complaints" : ""}), at or over the breaker's ${percent(reason.limit)} line${complaints ? `. ${sesLines}.` : ", set short of SES's own review line for the whole account."}`
         : `SES measures the account's complaint rate in ${input.region} at ${percent(reason.rate)}, at or over the breaker's ${percent(reason.limit)} line. ${sesLines}.`,
-      ...(windowed && reason.metric === "complaint"
+      ...(windowed && complaints
         ? [
-            "SES's own complaint rate couldn't be read (the instance's IAM policy needs cloudwatch:GetMetricData), so the breaker judged our own count of complaints.",
+            "SES's own complaint rate wasn't available (reading it takes cloudwatch:GetMetricData in the instance's IAM policy), so the breaker estimated it from our own count of complaints, leaving out mail to providers that never report them, such as Gmail.",
           ]
         : []),
       "Broadcasts in this region are held until the rate drops back under the line; transactional email keeps flowing.",
@@ -106,7 +107,7 @@ export function regionResumedMail(input: { region: string; url: string }): MailC
   return layout({
     subject: `Broadcasts resumed in ${input.region}`,
     paragraphs: [
-      `The platform's hard-bounce rate in ${input.region} is back under the line over both the 24-hour and 7-day windows, and so is SES's own complaint rate. Held broadcasts resume on their own.`,
+      `The platform's hard-bounce rate in ${input.region} is back under the line over both the 24-hour and 7-day windows, and so is the complaint rate the breaker judges: SES's own, or our estimate of it while that isn't available. Held broadcasts resume on their own.`,
     ],
     button: { label: "Open console", url: input.url },
     footnote: "Sent to the instance operator when a region breaker clears.",

@@ -1,3 +1,5 @@
+import { APPLE_MAIL_DOMAINS, GMAIL_DOMAINS } from "./mailbox-providers.js";
+
 /**
  * Maps SES bounce/complaint detail to a stable i18n key + category. The prose
  * lives in the messages/{locale}/bounce-guidance.json catalog; this resolver
@@ -117,8 +119,6 @@ const GENERIC_TABLE: Record<string, string> = {
 };
 
 const APPLE_RELAY = "privaterelay.appleid.com";
-const APPLE_MAILBOX = new Set(["icloud.com", "me.com", "mac.com"]);
-const GOOGLE_DOMAINS = new Set(["gmail.com", "googlemail.com"]);
 const MICROSOFT_DOMAINS = new Set(["outlook.com", "hotmail.com", "live.com", "msn.com"]);
 // Microsoft SmartScreen block markers appear in the diagnostic text, not as an
 // RFC 3463 enhanced status.
@@ -135,10 +135,10 @@ function matchProvider(
   if (domain === APPLE_RELAY) return "provider.apple";
   // iCloud family: only the auth/policy blocks map to the Apple hint; mailbox
   // problems (full, disabled) fall through to the enhanced-code table.
-  if (APPLE_MAILBOX.has(domain) && enhanced?.startsWith("5.7.")) {
+  if (APPLE_MAIL_DOMAINS.has(domain) && enhanced?.startsWith("5.7.")) {
     return "provider.apple";
   }
-  if (GOOGLE_DOMAINS.has(domain) && enhanced === "5.7.26") return "provider.googleBulk";
+  if (GMAIL_DOMAINS.has(domain) && enhanced === "5.7.26") return "provider.googleBulk";
   if (
     MICROSOFT_DOMAINS.has(domain) &&
     diagnostic != null &&

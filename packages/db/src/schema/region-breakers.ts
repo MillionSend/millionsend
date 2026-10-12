@@ -2,8 +2,8 @@ import { boolean, doublePrecision, jsonb, pgTable, text, timestamp } from "drizz
 
 /**
  * Why a region's broadcasts were paused: the window and metric of our own
- * counts that tripped, or SES's own complaint rate. Our own complaint count
- * only trips while SES's rate can't be read.
+ * counts that tripped, or SES's own complaint rate. Our own complaint count,
+ * an estimate of SES's rate, only trips while SES's rate can't be read.
  */
 export type RegionBreakerReason =
   | {
@@ -13,6 +13,11 @@ export type RegionBreakerReason =
       rate: number;
       limit: number;
       windowHours: number;
+      /**
+       * The rate's denominator. For complaints it counts sends to providers
+       * that report them; a reason stored on an older, lower line counted
+       * every send.
+       */
       sent: number;
       events: number;
     }

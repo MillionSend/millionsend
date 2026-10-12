@@ -26,6 +26,12 @@ export const usageCounters = pgTable(
     day: date("day").notNull(),
     accepted: integer("accepted").notNull().default(0),
     sent: integer("sent").notNull().default(0),
+    // Sends no recipient can report as a complaint, every one at a provider
+    // that never sends SES complaint feedback (core's
+    // NO_COMPLAINT_FEEDBACK_DOMAINS). The complaint rate's denominator is
+    // `sent` minus this. Filled in for the week before the column was added;
+    // older days read 0, so they count all their sends.
+    sentNoFeedback: integer("sent_no_feedback").notNull().default(0),
     delivered: integer("delivered").notNull().default(0),
     bounced: integer("bounced").notNull().default(0),
     // bounced counts ALL bounce events including Transient; hardBounced counts
@@ -59,10 +65,11 @@ export const usageCounters = pgTable(
  * The same counters per UTC hour, for the Metrics chart only: hours sum into
  * days in whichever timezone the viewer is in, so two teammates each see
  * their own calendar days from one set of rows. Every writer of a daily
- * counter bumps the hour as well; quota, the deliverability guardrail and the
- * account score keep reading the daily table. Rows before the table existed
- * were backfilled at noon UTC of their day, which is the same calendar date
- * in every timezone between UTC-11 and UTC+11.
+ * counter bumps the hour as well, except sent_no_feedback, which only the
+ * platform breaker's region counts read, by day; quota, the deliverability
+ * guardrail and the account score keep reading the daily table. Rows before
+ * the table existed were backfilled at noon UTC of their day, which is the
+ * same calendar date in every timezone between UTC-11 and UTC+11.
  */
 export const usageCountersHourly = pgTable(
   "usage_counters_hourly",

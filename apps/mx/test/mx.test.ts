@@ -699,7 +699,9 @@ describe("mx STARTTLS", () => {
     execFileSync(
       "openssl",
       [
-        ...["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", `/CN=${name}`],
+        // P-256 generates in milliseconds; RSA key generation can stall a busy CI runner.
+        ...["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1"],
+        ...["-nodes", "-days", "2", "-subj", `/CN=${name}`],
         ...["-keyout", join(dir, `${name}.key`), "-out", join(dir, `${name}.crt`)],
       ],
       { stdio: "ignore" },

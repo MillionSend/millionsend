@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { BillingStripe } from "@millionsend/billing";
-import { recordAudit, upgradesHeld } from "@millionsend/core";
+import { recordAudit, upgradesHeld, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -937,13 +937,12 @@ describe("console.regions and SES's own complaint rate", () => {
     await db.delete(schema.regionBreakers);
     const region = async () =>
       (await operator().console.regions.list()).served.find((r) => r.region === REGION);
-    // Never read: our own count is judged.
+    // Never read: our own estimate is judged, on the same line.
     expect(await region()).toMatchObject({ sesComplaintRate: null, sesComplaintRead: false });
     expect((await operator().console.regions.list()).complaintLines).toEqual({
       sesReview: 0.001,
       sesPause: 0.005,
       breaker: 0.004,
-      ours: 0.0008,
     });
 
     await db
@@ -961,6 +960,42 @@ describe("console.regions and SES's own complaint rate", () => {
       .set({ sesComplaintReadAt: new Date(Date.now() - 25 * 3_600_000) });
     expect(await region()).toMatchObject({ sesComplaintRate: null, sesComplaintRead: false });
     await db.delete(schema.regionBreakers);
+  });
+});
+
+describe("console.regions complaint estimate", () => {
+  it("divides complaints by the sends a provider can report, on the table and the access request alike", async () => {
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId,
+        name: "estimate.example",
+        region: REGION,
+        status: "verified",
+        verifiedAt: new Date(),
+      })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    // 2 complaints over 2000 sends, 1500 of them to Gmail: 0.4% of the 500 left.
+    const week = { sent: 2000, sentNoFeedback: 1500, complained: 2 };
+    const c = schema.usageCounters;
+    await db
+      .insert(c)
+      .values({ teamId, day: utcDay(), ...week })
+      .onConflictDoUpdate({ target: [c.teamId, c.day], set: week });
+    const region = (await operator().console.regions.list()).served.find(
+      (r) => r.region === REGION,
+    );
+    expect(region?.week).toEqual({ sent: 2000, hardBounceRate: 0, complaintRate: 0.004 });
+    expect(await operator().console.regions.accessRequestFacts({ region: REGION })).toMatchObject({
+      hardBounceRate7d: 0,
+      complaintRate7d: 0.004,
+    });
+    await db
+      .update(c)
+      .set({ sent: 0, sentNoFeedback: 0, complained: 0 })
+      .where(eq(c.teamId, teamId));
+    await db.delete(schema.domains).where(eq(schema.domains.id, domain.id));
   });
 });
 

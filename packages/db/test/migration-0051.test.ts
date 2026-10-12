@@ -2,125 +2,74 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, expect, it } from "vitest";
 import { migrationsFolder } from "../src/migrate.js";
 
 const journal = JSON.parse(readFileSync(join(migrationsFolder, "meta/_journal.json"), "utf8")) as {
   entries: { idx: number; tag: string }[];
 };
-const INBOXES = 51;
-const sql = readFileSync(join(migrationsFolder, "0051_inboxes.sql"), "utf8");
+const migration = (idx: number) => {
+  const entry = journal.entries.find((e) => e.idx === idx);
+  if (!entry) throw new Error(`no migration ${idx}`);
+  return readFileSync(join(migrationsFolder, `${entry.tag}.sql`), "utf8");
+};
+const BACKFILL = 51;
+const TODAY = "(now() AT TIME ZONE 'UTC')::date";
 
 let client: PGlite;
-let team: string;
-let receivingDomain: string;
-let sendingDomain: string;
-let receivedId: string;
-
-async function domain(name: string, receiving: boolean): Promise<string> {
-  const { rows } = await client.query<{ id: string }>(
-    `insert into domains (team_id, name, region, status, receiving_enabled)
-     values ($1, $2, 'us-east-1', 'verified', $3) returning id`,
-    [team, name, receiving],
-  );
-  const id = rows[0]?.id;
-  if (!id) throw new Error("no domain row");
-  return id;
-}
-
-beforeAll(async () => {
-  client = new PGlite();
-  for (const entry of journal.entries.filter((e) => e.idx < INBOXES)) {
-    await client.exec(readFileSync(join(migrationsFolder, `${entry.tag}.sql`), "utf8"));
-  }
-  team = randomUUID();
-  await client.query("insert into teams (id, name, slug) values ($1, $2, $2)", [team, `t-${team}`]);
-  receivingDomain = await domain("inbound.acme.test", true);
-  sendingDomain = await domain("acme.test", false);
-  const { rows } = await client.query<{ id: string }>(
-    `insert into received_emails
-       (team_id, domain_ids, raw_sha256, message_id, "from", received_for, envelope, authentication, size_bytes, created_at)
-     values ($1, '{}', $2, '<m@x>', 'a@x.test', '["r@inbound.acme.test"]', '{}', '{}', 1, '2026-10-01T10:00:00Z')
-     returning id`,
-    [team, "f".repeat(64)],
-  );
-  receivedId = rows[0]?.id ?? "";
-  await client.exec(sql);
-});
 afterAll(() => client.close());
 
-it("keeps every domain receiving today a catch-all, and leaves the rest off", async () => {
-  const { rows } = await client.query<{ id: string; receiving_catch_all: boolean }>(
-    "select id, receiving_catch_all from domains",
-  );
-  expect(Object.fromEntries(rows.map((r) => [r.id, r.receiving_catch_all]))).toEqual({
-    [receivingDomain]: true,
-    [sendingDomain]: false,
-  });
-});
+it("fills in the trailing week's sends no recipient can report, never past the day's sends", async () => {
+  client = new PGlite();
+  for (const entry of journal.entries.filter((e) => e.idx < BACKFILL)) {
+    await client.exec(migration(entry.idx));
+  }
+  const teamId = randomUUID();
+  await client.query("insert into teams (id, name, slug) values ($1, 't', 't')", [teamId]);
+  /** A send `daysAgo` days back from now, or still queued when null. */
+  const send = (daysAgo: number | null, to: string[], cc?: string[], bcc?: string[]) =>
+    client.query(
+      `insert into emails (team_id, "from", "to", cc, bcc, subject, sent_at)
+       values ($1, 'f@a.example', $2, $3, $4, 's', now() - make_interval(days => $5))`,
+      [
+        teamId,
+        JSON.stringify(to),
+        cc ? JSON.stringify(cc) : null,
+        bcc ? JSON.stringify(bcc) : null,
+        daysAgo,
+      ],
+    );
+  const counters = (daysAgo: number, sent: number) =>
+    client.query(
+      `insert into usage_counters (team_id, day, sent) values ($1, ${TODAY} - $2::int, $3)`,
+      [teamId, daysAgo, sent],
+    );
+  await send(0, ["Ana <ana@GMail.COM>"]);
+  await send(0, ["b@icloud.com"], ["c@me.com"], ["d@t-online.de"]);
+  await send(0, ["e@gmail.com"], undefined, ["f@example.com"]);
+  await send(0, []);
+  await send(null, ["g@gmail.com"]);
+  await counters(0, 4);
+  // More rows than the day counted sends.
+  await send(1, ["h@googlemail.com"]);
+  await send(1, ["i@googlemail.com"]);
+  await counters(1, 1);
+  // The oldest day the week reads, and the day before it.
+  await send(6, ["j@magenta.de"]);
+  await counters(6, 5);
+  await send(7, ["k@gmail.com"]);
+  await counters(7, 1);
 
-it("marks mail stored before the migration as already announced", async () => {
-  const { rows } = await client.query<{ same: boolean; catch_all: boolean; trust: string }>(
-    `select announced_at = created_at as same, catch_all, sender_trust as trust
-     from received_emails where id = $1`,
-    [receivedId],
-  );
-  expect(rows[0]).toEqual({ same: true, catch_all: true, trust: "unauthenticated" });
-});
-
-it("adds the emails foreign keys unvalidated and lets operators prebuild the emails indexes", async () => {
-  const { rows } = await client.query<{ conname: string; convalidated: boolean }>(
-    `select conname, convalidated from pg_constraint
-     where conname in ('emails_inbox_id_inboxes_id_fk', 'emails_thread_id_inbox_threads_id_fk')
-     order by conname`,
+  await client.exec(migration(BACKFILL));
+  const { rows } = await client.query<{ days_ago: number; sent_no_feedback: number }>(
+    `select ${TODAY} - day as days_ago, sent_no_feedback from usage_counters
+     where team_id = $1 order by day desc`,
+    [teamId],
   );
   expect(rows).toEqual([
-    { conname: "emails_inbox_id_inboxes_id_fk", convalidated: false },
-    { conname: "emails_thread_id_inbox_threads_id_fk", convalidated: false },
+    { days_ago: 0, sent_no_feedback: 2 },
+    { days_ago: 1, sent_no_feedback: 1 },
+    { days_ago: 6, sent_no_feedback: 1 },
+    { days_ago: 7, sent_no_feedback: 0 },
   ]);
-  expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS "emails_inbox_idx"/);
-  expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS "emails_thread_created_idx"/);
-});
-
-it("holds an inbox to a domain, and a draft's thread and target together", async () => {
-  await expect(
-    client.query(
-      `insert into inboxes (team_id, kind, email_address, local_part, name, safety)
-       values ($1, 'agent', 'a@nowhere.test', 'a', 'a', '{}')`,
-      [team],
-    ),
-  ).rejects.toThrow(/inboxes_has_domain/);
-  const { rows } = await client.query<{ id: string }>(
-    `insert into inboxes (team_id, kind, email_address, local_part, domain_id, name, safety)
-     values ($1, 'agent', 'bot@inbound.acme.test', 'bot', $2, 'bot', '{}') returning id`,
-    [team, receivingDomain],
-  );
-  const inbox = rows[0]?.id;
-  await expect(
-    client.query(
-      `insert into inbox_drafts (team_id, inbox_id, type, reply_to_email_id, created_by)
-       values ($1, $2, 'standalone', $3, 'system')`,
-      [team, inbox, receivedId],
-    ),
-  ).rejects.toThrow(/inbox_drafts_reply_pair/);
-  // An inbox-scoped key keeps its inbox from being deleted until it is revoked.
-  await client.query(
-    `insert into api_keys (team_id, name, token_prefix, key_hash, last4, inbox_id)
-     values ($1, 'agent', 'ms_live_x', 'hash', 'abcd', $2)`,
-    [team, inbox],
-  );
-  await expect(client.query("delete from inboxes where id = $1", [inbox])).rejects.toThrow(
-    /api_keys_inbox_id_inboxes_id_fk/,
-  );
-});
-
-it("lets the content monitor sample an agent's first contact", async () => {
-  await client.query(
-    `insert into monitor_samples (team_id, kind) values ($1, 'agent_first_contact')`,
-    [team],
-  );
-  const { rows } = await client.query<{ n: number }>(
-    "select count(*)::int as n from monitor_samples where kind = 'agent_first_contact'",
-  );
-  expect(rows[0]?.n).toBe(1);
 });

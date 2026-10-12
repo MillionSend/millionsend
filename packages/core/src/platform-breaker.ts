@@ -4,6 +4,7 @@ import type { RegionBreakerReason } from "@millionsend/db/schema";
 import { and, asc, desc, eq, gte, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { MIN_PAUSE_COMPLAINTS, MIN_PAUSE_HARD_BOUNCES } from "./deliverability.js";
+import { NO_COMPLAINT_FEEDBACK_DOMAINS } from "./mailbox-providers.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -12,20 +13,19 @@ import { DAY_MS, utcDay } from "./utc-day.js";
  * the aggregate and holds broadcasts (never transactional mail) short of
  * SES's own lines, so the platform stops itself before AWS does.
  */
-// 80% of SES's review lines (5% / 0.1%), written as literals: 0.8 * 0.05 is
+// 80% of SES's 5% bounce review line, written as a literal: 0.8 * 0.05 is
 // 0.04000000000000001 in floating point, and 40 bounces in 1000 must trip.
-// The complaint line applies to our own count, only while SES's own rate
-// can't be read (an instance whose IAM policy predates the CloudWatch read).
 export const BREAKER_BOUNCE_RATE = 0.04;
-export const BREAKER_COMPLAINT_RATE = 0.0008;
 /** Sends a region needs in a window before its aggregate rate means anything. */
 export const BREAKER_MIN_SENT = 1000;
 export const BREAKER_WINDOWS_HOURS = [24, 24 * 7] as const;
 /**
  * Complaints are judged on SES's own rate (Reputation.ComplaintRate) when it
  * can be read, the one its review and pause lines apply to. It counts only
- * the mailbox providers that report complaints, so it runs well above our own
- * count over all mail.
+ * mail to the providers that report complaints. While it can't be read (an
+ * instance whose IAM policy predates the CloudWatch read), our own count
+ * estimates it the same way, leaving out sends no recipient can report.
+ * BREAKER_SES_COMPLAINT_RATE judges both.
  */
 export const SES_COMPLAINT_REVIEW_RATE = 0.001;
 export const SES_COMPLAINT_PAUSE_RATE = 0.005;
@@ -35,9 +35,16 @@ export const BREAKER_SES_COMPLAINT_RATE = 0.004;
 
 export interface RegionWindowCounts {
   sent: number;
+  /**
+   * The complaint rate's denominator: sends with a recipient at a provider
+   * that reports complaints.
+   */
+  complaintSent: number;
   hardBounced: number;
   complained: number;
 }
+
+const NO_COUNTS: RegionWindowCounts = { sent: 0, complaintSent: 0, hardBounced: 0, complained: 0 };
 
 export interface RegionContributor {
   teamId: string;
@@ -60,6 +67,12 @@ const HOUR_MS = 60 * 60 * 1000;
 // existed (until retention strips their payload).
 const hardBounceFilter = sql`${schema.emailEvents.type} = 'bounced' and coalesce(${schema.emailEvents.bounceType}, ${schema.emailEvents.data}->'bounce'->>'bounceType') = 'Permanent'`;
 const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
+// sentWithoutComplaintFeedback over the stored recipients, each domain read
+// the same way: what follows the last '@', less a closing '>'.
+const noComplaintFeedback = sql`coalesce((
+  select bool_and(lower(rtrim(split_part(r, '@', -1), '>')) in ${[...NO_COMPLAINT_FEEDBACK_DOMAINS]})
+  from jsonb_array_elements_text(${schema.emails.to} || coalesce(${schema.emails.cc}, '[]') || coalesce(${schema.emails.bcc}, '[]')) as r
+), false)`;
 
 /**
  * Sends and SES-reported hard bounces/complaints per region over the trailing
@@ -73,12 +86,18 @@ export async function regionWindowCounts(
   const teamFilter = opts.teamIds ? inArray(schema.emails.teamId, opts.teamIds) : undefined;
   const out = new Map<string, RegionWindowCounts>();
   const sent = await db
-    .select({ region: schema.domains.region, n: sql<number>`count(*)::int` })
+    .select({
+      region: schema.domains.region,
+      n: sql<number>`count(*)::int`,
+      complaintSent: sql<number>`count(*) filter (where not ${noComplaintFeedback})::int`,
+    })
     .from(schema.emails)
     .innerJoin(schema.domains, eq(schema.domains.id, schema.emails.domainId))
     .where(and(gte(schema.emails.sentAt, since), teamFilter))
     .groupBy(schema.domains.region);
-  for (const row of sent) out.set(row.region, { sent: row.n, hardBounced: 0, complained: 0 });
+  for (const row of sent) {
+    out.set(row.region, { ...NO_COUNTS, sent: row.n, complaintSent: row.complaintSent });
+  }
   const events = await db
     .select({
       region: schema.domains.region,
@@ -97,7 +116,7 @@ export async function regionWindowCounts(
     )
     .groupBy(schema.domains.region);
   for (const row of events) {
-    const counts = out.get(row.region) ?? { sent: 0, hardBounced: 0, complained: 0 };
+    const counts = out.get(row.region) ?? NO_COUNTS;
     out.set(row.region, { ...counts, hardBounced: row.hardBounced, complained: row.complained });
   }
   return out;
@@ -106,8 +125,9 @@ export async function regionWindowCounts(
 /**
  * The same totals over the trailing `days` UTC days (today included) from
  * usage_counters, which the send and SES-event paths bump alongside the
- * rows the raw scan reads: `sent` per accepted send, `hard_bounced` per
- * Permanent bounce, `complained` per complaint. Counters carry no domain,
+ * rows the raw scan reads: `sent` per accepted send, `sent_no_feedback` per
+ * send no recipient can report as a complaint, `hard_bounced` per Permanent
+ * bounce, `complained` per complaint. Counters carry no domain,
  * so a team's traffic goes to the region of its most recently verified
  * domain. A team whose verified domains span more than one region cannot
  * be attributed that way: it is left out of the counters and its window is
@@ -140,6 +160,7 @@ export async function regionCounterTotals(
     .select({
       region: teamRegion.region,
       sent: total(c.sent),
+      sentNoFeedback: total(c.sentNoFeedback),
       hardBounced: total(c.hardBounced),
       complained: total(c.complained),
     })
@@ -156,6 +177,7 @@ export async function regionCounterTotals(
   for (const row of rows) {
     const counts = {
       sent: Number(row.sent),
+      complaintSent: Number(row.sent) - Number(row.sentNoFeedback),
       hardBounced: Number(row.hardBounced),
       complained: Number(row.complained),
     };
@@ -172,9 +194,10 @@ export async function regionCounterTotals(
       teamIds: multiRegion,
     });
     for (const [region, counts] of raw) {
-      const base = out.get(region) ?? { sent: 0, hardBounced: 0, complained: 0 };
+      const base = out.get(region) ?? NO_COUNTS;
       out.set(region, {
         sent: base.sent + counts.sent,
+        complaintSent: base.complaintSent + counts.complaintSent,
         hardBounced: base.hardBounced + counts.hardBounced,
         complained: base.complained + counts.complained,
       });
@@ -216,16 +239,19 @@ async function contributors(
     .limit(5);
 }
 
-/** Our own counts over a window; `complaints` adds the complaint line to the bounce one. */
+/**
+ * Our own counts over a window, each line over its own sends; `complaints`
+ * adds the complaint line, over the sends that can draw one, to the bounce one.
+ */
 function windowTrip(
   counts: RegionWindowCounts,
   windowHours: number,
   complaints: boolean,
 ): RegionBreakerReason | null {
-  if (counts.sent < BREAKER_MIN_SENT) return null;
   const checks = [
     {
       metric: "bounce" as const,
+      sent: counts.sent,
       events: counts.hardBounced,
       limit: BREAKER_BOUNCE_RATE,
       min: MIN_PAUSE_HARD_BOUNCES,
@@ -234,15 +260,17 @@ function windowTrip(
       ? [
           {
             metric: "complaint" as const,
+            sent: counts.complaintSent,
             events: counts.complained,
-            limit: BREAKER_COMPLAINT_RATE,
+            limit: BREAKER_SES_COMPLAINT_RATE,
             min: MIN_PAUSE_COMPLAINTS,
           },
         ]
       : []),
   ];
   for (const c of checks) {
-    const rate = c.events / counts.sent;
+    if (c.sent < BREAKER_MIN_SENT) continue;
+    const rate = c.events / c.sent;
     if (rate >= c.limit && c.events >= c.min) {
       return {
         metric: c.metric,
@@ -250,7 +278,7 @@ function windowTrip(
         rate,
         limit: c.limit,
         windowHours,
-        sent: counts.sent,
+        sent: c.sent,
         events: c.events,
       };
     }

@@ -55,7 +55,14 @@ export function StatusText({
 }
 
 /** Whether broadcasts flow in the region (the Overview's Broadcasts, the Regions page's breaker column). */
-export function BroadcastsCell({ region }: { region: ServedRegion }) {
+export function BroadcastsCell({
+  region,
+  complaintLine,
+}: {
+  region: ServedRegion;
+  /** The breaker's complaint line: a complaint pause stored on another one counted all mail. */
+  complaintLine: number;
+}) {
   const t = useTranslations("console.overview.regions");
   const tr = useTranslations("console.region");
   const f = useRegionFormats();
@@ -72,12 +79,17 @@ export function BroadcastsCell({ region }: { region: ServedRegion }) {
     breaker.manualReason !== null || !reason
       ? t("pauseManual", { reason: breaker.manualReason ?? "" })
       : "windowHours" in reason
-        ? t("pauseWindow", {
-            metric: tr(`metric.${reason.metric}`),
-            rate: f.pct2(reason.rate),
-            hours: reason.windowHours,
-            limit: f.pctLimit(reason.limit),
-          })
+        ? t(
+            reason.metric === "complaint" && reason.limit === complaintLine
+              ? "pauseComplaints"
+              : "pauseWindow",
+            {
+              metric: tr(`metric.${reason.metric}`),
+              rate: f.pct2(reason.rate),
+              hours: reason.windowHours,
+              limit: f.pctLimit(reason.limit),
+            },
+          )
         : t("pauseSes", { rate: f.pct2(reason.rate), limit: f.pctLimit(reason.limit) });
   return (
     <StatusText

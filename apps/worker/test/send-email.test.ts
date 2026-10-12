@@ -1789,3 +1789,36 @@ it("a row of a canceled broadcast is canceled, not sent", async () => {
     .where(eq(schema.emailEvents.emailId, emailId));
   expect(events).toHaveLength(0);
 });
+
+it("counts a send no recipient can report as a complaint only when every recipient is at such a provider", async () => {
+  const team = await createTeam(db, "feedback-team");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: team,
+      name: "feedback.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const own = { teamId: team, domainId: domain?.id, from: "F <f@feedback.example>" };
+  const send = async (over: Partial<typeof schema.emails.$inferInsert>) => {
+    const { ses } = fakeSes(randomUUID());
+    const emailId = await insertEmail({ ...own, ...over });
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  };
+  await send({ to: ["Ana <ana@GMAIL.com>"], cc: ["b@icloud.com"], bcc: ["c@t-online.de"] });
+  await send({ to: ["d@gmail.com"], cc: ["e@example.com"] });
+  await send({ to: ["f@gmail.com"], bcc: ["g@example.com"] });
+  // The day's row exists by now: this one counts through the upsert's update.
+  await send({ to: ["h@me.com"] });
+  const counters = await db
+    .select({
+      sent: schema.usageCounters.sent,
+      sentNoFeedback: schema.usageCounters.sentNoFeedback,
+    })
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, team));
+  expect(counters).toEqual([{ sent: 4, sentNoFeedback: 2 }]);
+});
