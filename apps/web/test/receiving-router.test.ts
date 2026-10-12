@@ -331,6 +331,7 @@ describe("received mail as Inboxes reads it", () => {
   let withCode: string;
   let delivered: string;
   let inboxId: string;
+  let threadId: string;
 
   beforeAll(async () => {
     held = await receive(message("Held for screening"), ["agent@inbound.acme.test"]);
@@ -361,6 +362,7 @@ describe("received mail as Inboxes reads it", () => {
       .values({ teamId: acme, inboxId })
       .returning({ id: schema.inboxThreads.id });
     if (!thread) throw new Error("no thread");
+    threadId = thread.id;
     const membership = {
       inboxId,
       teamId: acme,
@@ -448,6 +450,61 @@ describe("received mail as Inboxes reads it", () => {
       .from(schema.inboxActivity)
       .where(eq(schema.inboxActivity.emailId, delivered));
     expect(activity).toEqual([{ action: "code.read", actor: "user:u1" }]);
+  });
+
+  it("puts a reply and a forward of the email on its timeline", async () => {
+    const [original] = await db
+      .select({ messageId: schema.receivedEmails.messageId })
+      .from(schema.receivedEmails)
+      .where(eq(schema.receivedEmails.id, delivered));
+    if (!original?.messageId) throw new Error("no message id");
+    const [reply, unrelated] = await db
+      .insert(schema.emails)
+      .values(
+        [original.messageId, "<other@sender.example>"].map((parent) => ({
+          teamId: acme,
+          inboxId,
+          threadId,
+          from: "agent@inbound.acme.test",
+          to: ["ana@sender.example"],
+          subject: "Re: Delivered code",
+          headers: { "In-Reply-To": parent },
+        })),
+      )
+      .returning({ id: schema.emails.id });
+    if (!reply || !unrelated) throw new Error("no emails");
+    const at = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+    await db.insert(schema.inboxActivity).values([
+      {
+        teamId: acme,
+        inboxId,
+        actor: "user:u1",
+        action: "email.sent",
+        threadId,
+        emailId: reply.id,
+        createdAt: at(1),
+      },
+      {
+        teamId: acme,
+        inboxId,
+        actor: "user:u1",
+        action: "email.sent",
+        threadId,
+        emailId: unrelated.id,
+        createdAt: at(2),
+      },
+      {
+        teamId: acme,
+        inboxId,
+        actor: "system",
+        action: "email.forwarded",
+        threadId,
+        emailId: delivered,
+        createdAt: at(3),
+      },
+    ]);
+    const email = await caller(acme).receiving.get({ id: delivered });
+    expect(email.activity.map((a) => a.action)).toEqual(["email.sent", "email.forwarded"]);
   });
 
   it("erases an email for owners and admins only", async () => {

@@ -244,14 +244,32 @@ export const receivingRouter = router({
     }
 
     const a = schema.inboxActivity;
+    const e = schema.emails;
+    // A reply is recorded under the email it sent, which names this one in In-Reply-To.
+    const threadIds = [...new Set(memberships.map((x) => x.threadId))];
+    const replies =
+      row.messageId && threadIds.length > 0
+        ? ctx.db
+            .select({ id: e.id })
+            .from(e)
+            .where(
+              and(
+                inArray(e.threadId, threadIds),
+                eq(e.teamId, ctx.teamId),
+                sql`${e.headers}->>'In-Reply-To' = ${row.messageId}`,
+              ),
+            )
+        : null;
     const activity = await ctx.db
       .select({ action: a.action, actor: a.actor, createdAt: a.createdAt })
       .from(a)
       .where(
         and(
           eq(a.teamId, ctx.teamId),
-          eq(a.emailId, row.id),
-          inArray(a.action, ["email.released", "email.forwarded", "email.sent"]),
+          or(
+            and(eq(a.emailId, row.id), inArray(a.action, ["email.released", "email.forwarded"])),
+            replies ? and(eq(a.action, "email.sent"), inArray(a.emailId, replies)) : undefined,
+          ),
         ),
       )
       .orderBy(asc(a.createdAt))

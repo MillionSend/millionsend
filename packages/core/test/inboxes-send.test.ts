@@ -677,9 +677,10 @@ describe("the forward_to pass", () => {
     const row = await emailRow(email.id);
     expect(row.headers?.["X-MillionSend-Forwarded"]).toBe(inbox.id);
     expect(row.headers?.["Auto-Submitted"]).toBe("auto-generated");
-    expect((await activity(inbox.id)).map((a) => a.action).sort()).toEqual([
-      "email.forwarded",
-      "email.sent",
+    const rows = await activity(inbox.id);
+    expect(rows.map((a) => [a.action, a.emailId]).sort()).toEqual([
+      ["email.forwarded", t.id],
+      ["email.sent", email.id],
     ]);
   });
 

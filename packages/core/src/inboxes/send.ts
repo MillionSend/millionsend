@@ -964,6 +964,8 @@ export async function dispatchSend(
     };
   }
   const { complete, onSent } = opts;
+  // Keyed on the forwarded message, so that message's history shows the forward.
+  const forwarded = p.inbox && p.hold.forward ? p.hold.targetId : null;
   const result = await acceptEmail(
     deps,
     acceptAuth(p.teamId, p.billing, p.actor),
@@ -984,15 +986,25 @@ export async function dispatchSend(
       actor: p.actor,
       parkUnderReview: true,
       completeInTx:
-        complete || onSent
+        complete || onSent || forwarded
           ? async (tx, emailId) => {
               await complete?.(tx, emailId);
-              if (!onSent) return;
+              if (!onSent && !forwarded) return;
               const [row] = await tx
                 .select({ threadId: schema.emails.threadId })
                 .from(schema.emails)
                 .where(eq(schema.emails.id, emailId));
-              await onSent(tx, emailId, row?.threadId ?? null);
+              if (forwarded && p.inbox) {
+                await recordInboxActivity(tx, {
+                  teamId: p.teamId,
+                  inboxId: p.inbox.id,
+                  actor: p.actor,
+                  action: "email.forwarded",
+                  threadId: row?.threadId ?? null,
+                  emailId: forwarded,
+                });
+              }
+              await onSent?.(tx, emailId, row?.threadId ?? null);
             }
           : undefined,
     },
@@ -1848,50 +1860,35 @@ export async function forwardToForwardTargets(
     },
   );
   const system: InboxActor = { kind: "system" };
-  return dispatchSend(
-    db,
-    deps,
-    {
-      teamId,
-      billing,
-      actor: system,
-      inbox,
-      threadId: membership.threadId,
-      from: inboxFrom(inbox),
-      domainId,
-      to: targets,
-      cc: [],
-      bcc: [],
-      subject: forwardSubject(row.subject === "" ? null : row.subject),
-      html: content.html,
-      text: content.text,
-      // ponytail: files past the cap or refused stay behind; the owner opens
-      // the original in the dashboard. A link to it if owners ask for the files.
-      attachments: forwardedFilesProblem(opened.attachments) === null ? opened.attachments : [],
-      headers: {
-        "X-MillionSend-Forwarded": inbox.id,
-        ...(inbox.kind === "agent" ? { "Auto-Submitted": "auto-generated" } : {}),
-      },
-      approved: true,
-      requiresApproval: false,
-      replyTarget: null,
-      untrustedReplyTo: [],
-      forwardedSecret: false,
-      hold: { type: "reply", forward: true, targetId: row.id },
-      now: new Date(),
+  return dispatchSend(db, deps, {
+    teamId,
+    billing,
+    actor: system,
+    inbox,
+    threadId: membership.threadId,
+    from: inboxFrom(inbox),
+    domainId,
+    to: targets,
+    cc: [],
+    bcc: [],
+    subject: forwardSubject(row.subject === "" ? null : row.subject),
+    html: content.html,
+    text: content.text,
+    // ponytail: files past the cap or refused stay behind; the owner opens
+    // the original in the dashboard. A link to it if owners ask for the files.
+    attachments: forwardedFilesProblem(opened.attachments) === null ? opened.attachments : [],
+    headers: {
+      "X-MillionSend-Forwarded": inbox.id,
+      ...(inbox.kind === "agent" ? { "Auto-Submitted": "auto-generated" } : {}),
     },
-    {
-      onSent: (tx, emailId, threadId) =>
-        recordInboxActivity(tx, {
-          teamId,
-          inboxId: inbox.id,
-          actor: system,
-          action: "email.forwarded",
-          threadId,
-          emailId,
-        }),
-    },
-  );
+    approved: true,
+    requiresApproval: false,
+    replyTarget: null,
+    untrustedReplyTo: [],
+    forwardedSecret: false,
+    hold: { type: "reply", forward: true, targetId: row.id },
+    now: new Date(),
+  });
 }
 
 /**
