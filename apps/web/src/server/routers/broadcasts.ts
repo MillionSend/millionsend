@@ -37,7 +37,7 @@ import {
   sendingProgress,
 } from "../broadcast-plan";
 import { resolveEditorSave } from "../email-content";
-import { getKeyring } from "../keyring";
+import { inboxSendDeps } from "../inboxes";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { activeLocale } from "../locale";
 import { router, teamProcedure } from "../trpc";
@@ -656,13 +656,7 @@ export const broadcastsRouter = router({
           ? injectPreheader(input.html, input.previewText)
           : input.html;
       const result = await acceptEmail(
-        {
-          db: ctx.db,
-          keyring: getKeyring(),
-          isCloud: env.IS_CLOUD,
-          // Absent in tests: the reconcile sweep re-enqueues accepted rows.
-          enqueueEmailSend: ctx.enqueueEmailSend ?? (async () => {}),
-        },
+        inboxSendDeps(ctx),
         {
           teamId: ctx.teamId,
           billing: await fetchQuotaRow(ctx.db, ctx.teamId),
