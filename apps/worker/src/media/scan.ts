@@ -65,6 +65,8 @@ export interface ScannedFile {
   parts: string[];
   sha: string;
   bytes: Buffer;
+  /** The parsing threads' queue was full: nothing is known of the file yet. */
+  busy: boolean;
 }
 
 export interface AttachmentScan {
@@ -84,6 +86,11 @@ export interface AttachmentScan {
   unreadable: boolean;
   /** A file the API now refuses, accepted before the refusal existed. */
   refused: boolean;
+  /**
+   * A file the parsing threads had no room for: not read, so none of the
+   * above is known of it. Read again later; never a reason to park.
+   */
+  busy: boolean;
 }
 
 export const UNREADABLE_FLAGS: ReadonlySet<AttachmentFlag> = new Set(["over_caps", "unreadable"]);
@@ -263,8 +270,9 @@ export async function scanFiles(
     const index = threaded.findIndex((f) => f.sha === sha);
     const parse = index === -1 ? undefined : parsed[index];
     const read = parse && !("failed" in parse) ? parse : undefined;
+    const busy = parse !== undefined && "failed" in parse && parse.failed === "busy";
     const found: AttachmentFlag[] =
-      parse && "failed" in parse ? ["unreadable"] : [...(read?.flags ?? [])];
+      parse && "failed" in parse && !busy ? ["unreadable"] : [...(read?.flags ?? [])];
     let text = read?.text ?? "";
     // Office links come out of XML attributes, entities and all.
     const urls = (read?.links ?? []).map((link) => decodeEntities(link));
@@ -308,6 +316,7 @@ export async function scanFiles(
       parts: read?.parts ?? [],
       sha,
       bytes,
+      busy,
     };
   });
 }
@@ -348,6 +357,7 @@ export async function scanAttachments(
     links: files.flatMap((f) => f.links),
     pix: files.flatMap((f) => f.pix),
     ...fileIssues(files),
+    busy: files.some((f) => f.busy),
   };
 }
 

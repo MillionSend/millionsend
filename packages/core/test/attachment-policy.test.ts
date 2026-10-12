@@ -4,6 +4,7 @@ import {
   BLOCKED_CONTENT_TYPES,
   BLOCKED_EXTENSIONS,
   fileExtensions,
+  sentContentType,
 } from "../src/attachment-policy.js";
 import { readZipDirectory, readZipEntry, sniffFileType, sniffImageType } from "../src/file-type.js";
 
@@ -382,6 +383,33 @@ describe("attachmentVerdict: names", () => {
       "fa\u00ADtura.pdf",
     ]) {
       expect(verdict(name, PDF).action, name).toBe("allow");
+    }
+  });
+});
+
+describe("sentContentType", () => {
+  it("keeps the bare media type and its charset, never a declared name", () => {
+    expect(sentContentType("application/pdf")).toBe("application/pdf");
+    expect(sentContentType("Application/PDF; name=report.pdf")).toBe("application/pdf");
+    expect(sentContentType("application/octet-stream; name=notes.txt; name=report.pdf")).toBe(
+      "application/octet-stream",
+    );
+    expect(sentContentType('text/plain; name="a.txt"; charset="UTF-8"')).toBe(
+      "text/plain; charset=UTF-8",
+    );
+    expect(sentContentType("text/csv;charset=iso-8859-1")).toBe("text/csv; charset=iso-8859-1");
+  });
+
+  it("drops what is not a media type, for the MIME writer to infer", () => {
+    for (const declared of [
+      undefined,
+      "",
+      "pdf",
+      "text/plain/extra",
+      "text/pl ain",
+      "a/b\r\nX: y",
+    ]) {
+      expect(sentContentType(declared), String(declared)).toBeUndefined();
     }
   });
 });

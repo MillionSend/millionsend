@@ -382,6 +382,7 @@ export async function readMediaForJudge(
   for (const _ of candidates.slice(MEDIA_IMAGES_MAX)) notRead.push("over the cap");
   const items = candidates.slice(0, MEDIA_IMAGES_MAX);
 
+  for (const _ of files.filter((file) => file.busy)) notRead.push("busy");
   const issues = new Set<MediaIssue>();
   const { risky, unreadable, refused } = fileIssues(files);
   if (risky) issues.add("risky_file");

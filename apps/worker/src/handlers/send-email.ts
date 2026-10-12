@@ -37,6 +37,7 @@ import {
   sampleAcceptedEmail,
   screenBeforeSend,
   screeningFirstWindow,
+  sentContentType,
   substituteUnsubscribeUrl,
   transitionQueueState,
   utcDay,
@@ -47,8 +48,9 @@ import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
+import { MediaPoolError } from "../media/pool.js";
 import { saveMediaReview } from "../media/read.js";
-import { scanAttachments, scanReview } from "../media/scan.js";
+import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
 import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-quota.js";
 
 /**
@@ -120,6 +122,8 @@ export interface SendDeps {
   monitor?: MonitorDeps | undefined;
   /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
   platformDomains?: ReadonlySet<string> | undefined;
+  /** The parsing threads and cache the file scan uses; the process's own when absent. */
+  media?: MediaDeps | undefined;
   tracking?:
     | {
         secretKey: Buffer;
@@ -635,7 +639,10 @@ async function sendQueued(
   }
   if (deps.monitor && !systemMail && !platformSend) {
     const files = attachments ?? [];
-    const scan = files.length > 0 ? await scanAttachments(files) : null;
+    const scan = files.length > 0 ? await scanAttachments(files, deps.media) : null;
+    // Threads too busy to read a file say nothing about it: the job tries
+    // again through the queue's backoff instead of parking or sending blind.
+    if (scan?.busy) throw new MediaPoolError("busy");
     media = {
       attachments: files.length,
       opaque: opaqueFacts({ html: body.html, text: body.text, attachments: files.length }).opaque,
@@ -1081,12 +1088,15 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
     ...(input.text ? { text: input.text } : {}),
     ...(input.attachments
       ? {
-          attachments: input.attachments.map((a) => ({
-            filename: a.filename,
-            content: a.content,
-            encoding: "base64" as const,
-            ...(a.contentType ? { contentType: a.contentType } : {}),
-          })),
+          attachments: input.attachments.map((a) => {
+            const contentType = sentContentType(a.contentType);
+            return {
+              filename: a.filename,
+              content: a.content,
+              encoding: "base64" as const,
+              ...(contentType ? { contentType } : {}),
+            };
+          }),
         }
       : {}),
     headers: input.headers,

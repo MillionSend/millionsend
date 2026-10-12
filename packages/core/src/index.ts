@@ -187,6 +187,8 @@ export {
   BLOCKED_CONTENT_TYPES,
   BLOCKED_EXTENSIONS,
   fileExtensions,
+  MEDIA_TYPE_TOKEN,
+  sentContentType,
 } from "./attachment-policy.js";
 export {
   AUDIT_ACTIONS,

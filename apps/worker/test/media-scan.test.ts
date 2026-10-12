@@ -204,15 +204,17 @@ describe("scanAttachments (the send path)", () => {
     });
   });
 
-  it("says when the threads were too busy to read a file", async () => {
+  it("says when the threads were too busy to read a file, which is no finding about it", async () => {
     const busy = new MediaPool({ queueMax: 0 });
     const scan = await scanAttachments([attach("Fatura.pdf", fixture("lure.pdf"))], {
       pool: busy,
       cache: createPromiseCache({ maxEntries: 10, ttlMs: 60_000 }),
     });
     expect(scan).toMatchObject({
-      unreadable: true,
-      files: [{ action: "park", flags: ["unreadable"] }],
+      busy: true,
+      unreadable: false,
+      risky: false,
+      files: [{ action: "allow", flags: [] }],
     });
   });
 

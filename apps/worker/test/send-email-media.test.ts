@@ -33,6 +33,8 @@ let close: () => Promise<void>;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 const DAY = 86_400_000;
 const pool = new MediaPool();
+// No room in its queue: every read is refused as busy.
+const fullPool = new MediaPool({ queueMax: 0 });
 const QR_PNG = readFileSync(new URL("./fixtures/media/qr.png", import.meta.url));
 const LURE_HTML = `<img src="data:image/png;base64,${QR_PNG.toString("base64")}" width="148" height="148">`;
 const TRANSCRIPT = "Your Microsoft 365 password expires today";
@@ -52,6 +54,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await pool.close();
+  await fullPool.close();
   await close();
 });
 beforeEach(() => {
@@ -126,7 +129,14 @@ const transcribes = reader((count) => ({
 }));
 const timesOut = reader(() => ({ status: "unavailable", reason: "timeout" }));
 
-const judge = (sampleId: string, answer: AbuseJudge, vision: VisionReader | null, now?: Date) =>
+const freshCache = () => createPromiseCache({ maxEntries: 100, ttlMs: 60_000 });
+const judge = (
+  sampleId: string,
+  answer: AbuseJudge,
+  vision: VisionReader | null,
+  now?: Date,
+  threads: MediaPool = pool,
+) =>
   judgeSample(
     db,
     {
@@ -135,7 +145,7 @@ const judge = (sampleId: string, answer: AbuseJudge, vision: VisionReader | null
       settings: async () => MONITOR_SETTING_DEFAULTS,
       mailer: { send: async (_to, m) => void mails.push({ kind: m.kind, text: m.text }) },
       enqueueSend: async (emailId) => void resent.push(emailId),
-      media: { vision, pool, cache: createPromiseCache({ maxEntries: 100, ttlMs: 60_000 }) },
+      media: { vision, pool: threads, cache: freshCache() },
       ...(now ? { now: () => now } : {}),
     },
     { sampleId },
@@ -344,4 +354,40 @@ it("screens an established team's mail when a file in it points somewhere new", 
   expect(await judge((await sampleOf(id))?.id ?? "", fakeJudge(5), null)).toBe("judged");
   expect(await sampleOf(id)).toMatchObject({ destinations: ["m365-verify.example"] });
   expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("sent");
+});
+
+const receipt = (): EmailAttachment => ({
+  filename: "comprovante.png",
+  content: QR_PNG.toString("base64"),
+  contentType: "image/png",
+});
+
+it("retries the send when the parsing threads have no room for a file, and never parks it", async () => {
+  const t = await team("busy-send", 400, "new");
+  const id = await email(t, "<p>Segue o comprovante.</p>", [receipt()]);
+  const full = { pool: fullPool, cache: freshCache() };
+  await expect(sendEmail(db, { ...sendDeps(), media: full }, { emailId: id })).rejects.toThrow(
+    "media parse busy",
+  );
+  expect(await row(id)).toMatchObject({ latestStatus: "queued", parkReason: null });
+  expect(await sampleOf(id)).toBeUndefined();
+  // With room again, the file is read and the email screened as usual.
+  const room = { pool, cache: freshCache() };
+  expect(await sendEmail(db, { ...sendDeps(), media: room }, { emailId: id })).toBe("deferred");
+  expect(await sampleOf(id)).toMatchObject({ screening: true, status: "pending" });
+  expect(sesCalls).toEqual([]);
+});
+
+it("judges without a file the parsing threads had no room for, says so, and never parks it", async () => {
+  const t = await team("busy-judge", 400, "new");
+  const id = await email(t, "<p>Segue o comprovante.</p>", [receipt()]);
+  expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("deferred");
+  const sampleId = (await sampleOf(id))?.id ?? "";
+  expect(await judge(sampleId, fakeJudge(5), null, undefined, fullPool)).toBe("judged");
+  expect(blocks[0]).toContain("busy");
+  const issues = (await sampleOf(id))?.mediaIssues;
+  expect(issues).toContain("images_not_read");
+  expect(issues).not.toContain("unreadable_file");
+  expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("sent");
+  expect(sesCalls).toEqual([id]);
 });

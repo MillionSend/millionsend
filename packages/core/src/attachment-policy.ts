@@ -160,6 +160,25 @@ function mediaType(contentType: string | undefined): string | null {
   return type ? type : null;
 }
 
+/** An RFC 7231 token, as a media type's type, subtype and parameters are written. */
+export const MEDIA_TYPE_TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
+const BARE_MEDIA_TYPE = new RegExp(`^${MEDIA_TYPE_TOKEN}/${MEDIA_TYPE_TOKEN}$`);
+const CHARSET_PARAM = new RegExp(`;\\s*charset\\s*=\\s*"?(${MEDIA_TYPE_TOKEN})"?\\s*(?=;|$)`, "i");
+
+/**
+ * The Content-Type an attachment goes out with: the declared media type and
+ * its charset, every other parameter dropped; undefined when none usable
+ * was declared, and the MIME writer infers it. A declared `name` would give
+ * the file a second name the policy never checked, beside the one the
+ * writer takes from the checked filename.
+ */
+export function sentContentType(contentType: string | undefined): string | undefined {
+  const type = mediaType(contentType);
+  if (!type || !BARE_MEDIA_TYPE.test(type)) return undefined;
+  const charset = CHARSET_PARAM.exec(contentType ?? "")?.[1];
+  return charset ? `${type}; charset=${charset}` : type;
+}
+
 /** UTF-16LE, the way OLE directory entries store stream names. */
 function oleStream(name: string): Buffer {
   return Buffer.from(name, "utf16le");

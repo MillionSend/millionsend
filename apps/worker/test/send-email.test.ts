@@ -617,6 +617,37 @@ it("attachments and custom headers ride the raw MIME; tracking still rewrites th
   expect(mime).not.toContain("dest.test");
 });
 
+it("sends an attachment's bare media type and charset: a declared name never reaches the MIME", async () => {
+  const { ses, sends } = fakeSes("mid-attach-type");
+  const content = Buffer.from("hello attachment").toString("base64");
+  const emailId = await insertEmail(
+    {
+      attachments: await sealAttachments(
+        [
+          {
+            filename: "notes.txt",
+            content,
+            contentType: "application/octet-stream; name=notes.txt; name=report.pdf",
+          },
+          {
+            filename: "data.csv",
+            content,
+            contentType: 'text/csv; charset=utf-8; name="invoice.pdf"',
+          },
+        ],
+        keyring,
+      ),
+    },
+    "<p>Hi</p>",
+  );
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  const lower = (sends[0]?.raw.toString("utf8") ?? "").toLowerCase();
+  expect(lower).toContain("content-type: application/octet-stream; name=notes.txt");
+  expect(lower).toContain("content-type: text/csv; charset=utf-8; name=data.csv");
+  expect(lower).not.toContain("report.pdf");
+  expect(lower).not.toContain("invoice.pdf");
+});
+
 it("clickTracking on routes <a href> through /t/c and the token verifies to the original url", async () => {
   const { ses, sends } = fakeSes("mid-click-track");
   const url = "https://dest.test/landing?x=1";

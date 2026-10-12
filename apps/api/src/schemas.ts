@@ -7,6 +7,7 @@ import {
   DAY_MS,
   formatMailbox,
   isReservedTagName,
+  MEDIA_TYPE_TOKEN,
   parseMailbox,
   parseScheduledAt,
   parseSingleSender,
@@ -65,7 +66,6 @@ export const MAX_RECIPIENTS_PER_EMAIL = 50;
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 // RFC 7231 media type: type "/" subtype, optional ; token=token|"quoted" parameters.
-const MEDIA_TYPE_TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
 const MEDIA_TYPE_RE = new RegExp(
   `^${MEDIA_TYPE_TOKEN}/${MEDIA_TYPE_TOKEN}(?:\\s*;\\s*${MEDIA_TYPE_TOKEN}=(?:${MEDIA_TYPE_TOKEN}|"[^"\\r\\n]*"))*$`,
 );
