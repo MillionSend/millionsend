@@ -150,7 +150,10 @@ the worker long-polls, and the SES configuration set. The policy also carries th
 `ses:*Tenant*` actions and `ses:UpdateReputationEntityCustomerManagedStatus`
 behind `SES_TENANTS` (one SES tenant per team, disabled while the team is
 suspended); a deployment set up before those existed re-runs the wizard, or
-updates the `millionsend-ses` policy, before enabling the flag. An https
+updates the `millionsend-ses` policy, before enabling the flag. It also
+carries `cloudwatch:GetMetricData`, for SES's own complaint rate; without it
+the regional pause judges complaints on the instance's own count instead, so
+a deployment set up before it updates the policy the same way. An https
 `APP_BASE_URL` additionally gets events pushed to your host; the queue works
 without any public URL.
 
