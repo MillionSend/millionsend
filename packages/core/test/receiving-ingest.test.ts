@@ -6,6 +6,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { createTransport } from "nodemailer";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EnvKeyring } from "../src/crypto/keyring.js";
+import { deriveInboxKeys } from "../src/inboxes/keys.js";
 import { type IngestDeps, ingestReceivedEmail } from "../src/receiving/ingest.js";
 import {
   openReceivedAttachments,
@@ -28,10 +29,14 @@ const NOW = new Date("2026-10-11T15:00:00Z");
 const transport = createTransport({ streamTransport: true, buffer: true });
 const enqueued: QueuedWebhookDelivery[] = [];
 
+const inboxKeys = deriveInboxKeys(randomBytes(32));
+
 const deps = (overrides: Partial<IngestDeps> = {}): IngestDeps => ({
   db,
   keyring,
   isCloud: false,
+  inboxKeys,
+  judgeAvailable: false,
   now: () => NOW,
   enqueueWebhookDeliveries: async (rows) => {
     enqueued.push(...rows);
@@ -65,7 +70,14 @@ async function message(subject: string): Promise<Buffer> {
 async function addDomain(teamId: string, name: string, receiving = true): Promise<string> {
   const [row] = await db
     .insert(schema.domains)
-    .values({ teamId, name, region: "us-east-1", status: "verified", receivingEnabled: receiving })
+    .values({
+      teamId,
+      name,
+      region: "us-east-1",
+      status: "verified",
+      receivingEnabled: receiving,
+      receivingCatchAll: receiving,
+    })
     .returning({ id: schema.domains.id });
   if (!row) throw new Error("domain insert failed");
   return row.id;

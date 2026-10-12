@@ -106,7 +106,7 @@ export class SegmentFilterError extends Error {
  * contains/starts_with/ends_with matching literal substrings (still a bound
  * parameter — this is pattern correctness, not injection defense).
  */
-function escapeLike(value: string): string {
+export function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 

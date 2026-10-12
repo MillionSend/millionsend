@@ -1,4 +1,5 @@
 import { redactRevealedText } from "../content-reveal-render.js";
+import { countInvisible, dropInvisible } from "../customer-text.js";
 import {
   type BodyLink,
   extractLinks,
@@ -8,7 +9,7 @@ import {
 } from "../links.js";
 import { maskEmailLocalParts } from "../mask.js";
 import { ownerDomain, registrableDomain, vouchedRegistrableDomain } from "../org-domain.js";
-import { decodeEntities, INVISIBLE, opaqueFactsOf, readBody } from "./body.js";
+import { decodeEntities, opaqueFactsOf, readBody } from "./body.js";
 import { type MediaFindings, renderMediaLines } from "./media.js";
 
 /**
@@ -39,10 +40,10 @@ import { type MediaFindings, renderMediaLines } from "./media.js";
 export const JUDGE_TEXT_MAX_CHARS = 6000;
 export const JUDGE_LINK_ROWS_MAX = 30;
 const ANCHOR_TEXT_MAX = 80;
-const HIDDEN_TEXT_MAX_CHARS = 1000;
-const PLAIN_TEXT_MAX_CHARS = 1500;
+export const JUDGE_HIDDEN_TEXT_MAX_CHARS = 1000;
+export const JUDGE_PLAIN_TEXT_MAX_CHARS = 1500;
 /** About what an inbox lists of a preview line; past it the line is hidden text like any other. */
-const PREVIEW_MAX_CHARS = 200;
+export const JUDGE_PREVIEW_MAX_CHARS = 200;
 /** A plain-text part with fewer of its words in the HTML's visible text says something else. */
 const PLAIN_TEXT_SHARED_WORDS = 0.8;
 
@@ -72,7 +73,7 @@ const ANY_SPACE = /[\s\x1c-\x1e\x85]+/g;
 const WORD = /[\p{L}\p{N}]+/gu;
 const URL_IN_TEXT = /(?:https?:\/\/|www\.)\S+/gi;
 
-function oneLine(s: string): string {
+export function oneLine(s: string): string {
   return s.replace(ANY_SPACE, " ").trim();
 }
 
@@ -90,7 +91,7 @@ function verifiedDomains(names: string[]): string[] {
   return [...new Set([...verified, ...owned])];
 }
 
-function redacted(s: string): string {
+export function redacted(s: string): string {
   // Addresses are masked on both sides of the link pass: a path stub can end
   // inside one before its @, and a mask written into a link would come back
   // percent-encoded, so the first pass leaves a plain placeholder.
@@ -99,12 +100,12 @@ function redacted(s: string): string {
 }
 
 function label(text: string): string {
-  const t = redacted(text.replace(INVISIBLE, ""));
+  const t = redacted(dropInvisible(text));
   return t ? t.slice(0, ANCHOR_TEXT_MAX) : "(image)";
 }
 
 /** At most `max` characters of the text: its first two thirds and its last third, the gap named. */
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
   if (text.length <= max) return text;
   const tail = Math.floor(max / 3);
   return `${text.slice(0, max - tail)} […${text.length - max} characters left out…] ${text.slice(-tail)}`;
@@ -126,7 +127,11 @@ function destinationName(raw: string, link: ResolvedLink): string {
  * then the rest, each group in document order, so a lure cannot hide behind
  * thirty links to the sender's own site.
  */
-function linkRows(links: BodyLink[], verified: string[], novel?: ReadonlySet<string>): string[] {
+export function linkRows(
+  links: BodyLink[],
+  verified: string[],
+  novel?: ReadonlySet<string>,
+): string[] {
   const owned = new Set(verified.map(ownerDomain));
   const group = (link: BodyLink): number => {
     if (link.unresolved) return novel?.has(UNRESOLVED_DESTINATION) ? 0 : 1;
@@ -147,7 +152,7 @@ function linkRows(links: BodyLink[], verified: string[], novel?: ReadonlySet<str
 }
 
 /** Whether the plain-text part says something the HTML's visible text does not. */
-function plainTextDiffers(text: string, visible: string): boolean {
+export function plainTextDiffers(text: string, visible: string): boolean {
   const words = text.replace(URL_IN_TEXT, " ").toLowerCase().match(WORD);
   if (!words) return false;
   const seen = new Set(visible.toLowerCase().match(WORD));
@@ -163,16 +168,16 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
   const facts = opaqueFactsOf(body, input.attachments.length);
   const stripped = body.stripped;
   // Redacted before it is cut, so a secret across the cut is masked whole.
-  const preview = redacted((stripped?.preview ?? "").replace(INVISIBLE, ""));
+  const preview = redacted(dropInvisible(stripped?.preview ?? ""));
   const hidden = [
-    preview.slice(PREVIEW_MAX_CHARS),
-    redacted((stripped?.hidden ?? "").replace(INVISIBLE, "")),
+    preview.slice(JUDGE_PREVIEW_MAX_CHARS),
+    redacted(dropInvisible(stripped?.hidden ?? "")),
   ]
     .filter(Boolean)
     .join(" ");
   const plain = stripped && input.text ? input.text : "";
   const plainShown = plain && plainTextDiffers(plain, body.visible);
-  const plainInvisible = plainShown ? (plain.match(INVISIBLE)?.length ?? 0) : 0;
+  const plainInvisible = plainShown ? countInvisible(plain) : 0;
   const attachments = input.attachments
     .map((a) => {
       const name = redacted(a.filename);
@@ -195,19 +200,22 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     `Subject: ${redacted(input.subject)}`,
   ];
   if (preview) {
-    lines.push("Inbox preview (hidden in the body):", `  ${preview.slice(0, PREVIEW_MAX_CHARS)}`);
+    lines.push(
+      "Inbox preview (hidden in the body):",
+      `  ${preview.slice(0, JUDGE_PREVIEW_MAX_CHARS)}`,
+    );
   }
   lines.push("Visible text:", `  ${clip(redacted(body.visible), JUDGE_TEXT_MAX_CHARS)}`);
   if (hidden) {
     lines.push(
       "Hidden text (not shown to the reader):",
-      `  ${clip(hidden, HIDDEN_TEXT_MAX_CHARS)}`,
+      `  ${clip(hidden, JUDGE_HIDDEN_TEXT_MAX_CHARS)}`,
     );
   }
   if (plainShown) {
     lines.push(
       "Plain-text part (differs from the HTML):",
-      `  ${clip(redacted(plain.replace(INVISIBLE, "")), PLAIN_TEXT_MAX_CHARS)}`,
+      `  ${clip(redacted(dropInvisible(plain)), JUDGE_PLAIN_TEXT_MAX_CHARS)}`,
     );
   }
   if (facts.opaque) {

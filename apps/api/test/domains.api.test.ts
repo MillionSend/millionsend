@@ -16,6 +16,13 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type ApiDeps, createApi } from "../src/app.js";
 
+// Inbox deletion is the inbox module's; here only that the domain delete asks for it.
+const deleteInboxes = vi.hoisted(() => vi.fn());
+vi.mock("@millionsend/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@millionsend/core")>()),
+  deleteInboxes,
+}));
+
 let db: Db;
 let close: () => Promise<void>;
 let teamId: string;
@@ -1422,5 +1429,122 @@ describe("POST /domains and teams suspended for phishing", () => {
       .from(schema.teamLinks)
       .where(eq(schema.teamLinks.teamId, team));
     expect(links).toEqual([{ held: false, trigger: "domain" }]);
+  });
+});
+
+describe("receiving_catch_all", () => {
+  const receiving = { mxHost: "mx.millionsend.test", ingestSecret: "s".repeat(32) };
+  const receivingDomain = async (app: ReturnType<typeof createApi>, name: string) => {
+    const { id } = await createDomain(app, name);
+    await db
+      .update(schema.domains)
+      .set({ status: "verified", receivingEnabled: true })
+      .where(eq(schema.domains.id, id));
+    return id;
+  };
+  const setPlan = (plan: "free" | "pro") =>
+    db.update(schema.teams).set({ plan }).where(eq(schema.teams.id, teamId));
+
+  it("needs a paid plan on the cloud to turn on, and receiving enabled (S30)", async () => {
+    // Domains are added on a self-host app: the cloud's domain cap is not under test here.
+    const local = makeApp({ ...fakeSes(), receiving });
+    const app = makeApp({ ...fakeSes(), receiving, isCloud: true });
+    const id = await receivingDomain(local, "catchall.example.com");
+    await setPlan("free");
+    const free = await call(app, fullKey, "PATCH", `/domains/${id}`, { receiving_catch_all: true });
+    expect(free.status).toBe(403);
+    expect(await free.json()).toMatchObject({
+      name: "plan_limit_reached",
+      message: "Catch-all receiving needs a paid plan",
+    });
+    await setPlan("pro");
+    const on = await call(app, fullKey, "PATCH", `/domains/${id}`, { receiving_catch_all: true });
+    expect(on.status).toBe(200);
+    expect(await on.json()).toMatchObject({ receiving_catch_all: true });
+    // A stored true outlives a downgrade.
+    await setPlan("free");
+    const again = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      receiving_catch_all: true,
+    });
+    expect(again.status).toBe(200);
+    const off = await call(app, fullKey, "PATCH", `/domains/${id}`, { receiving_catch_all: false });
+    expect(await off.json()).toMatchObject({ receiving_catch_all: false });
+    const audit = await db
+      .select({ action: schema.auditLog.action })
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.target, `domain:${id}`));
+    expect(audit.map((a) => a.action).filter((a) => a.startsWith("domain.catch_all"))).toEqual([
+      "domain.catch_all_enabled",
+      "domain.catch_all_disabled",
+    ]);
+    const sending = await createDomain(local, "sending-only.example.com");
+    await setPlan("pro");
+    const refused = await call(app, fullKey, "PATCH", `/domains/${sending.id}`, {
+      receiving_catch_all: true,
+    });
+    expect(refused.status).toBe(422);
+    await setPlan("free");
+  });
+
+  it("deletes the domain's inboxes with it, their scoped keys revoked first", async () => {
+    deleteInboxes.mockImplementation(
+      async (database: Db, _deps: unknown, p: { inboxIds: string[] }) => {
+        for (const inboxId of p.inboxIds) {
+          await database
+            .update(schema.apiKeys)
+            .set({ revokedAt: new Date(), inboxId: null })
+            .where(eq(schema.apiKeys.inboxId, inboxId));
+          await database.delete(schema.inboxes).where(eq(schema.inboxes.id, inboxId));
+        }
+        return p.inboxIds.length;
+      },
+    );
+    const app = makeApp({ ...fakeSes(), receiving });
+    const id = await receivingDomain(app, "inboxes-gone.example.com");
+    const [inbox] = await db
+      .insert(schema.inboxes)
+      .values({
+        teamId,
+        kind: "agent",
+        emailAddress: "bot@inboxes-gone.example.com",
+        localPart: "bot",
+        domainId: id,
+        name: "Bot",
+        safety: {
+          accept_from: "verified",
+          allowlist: [],
+          owner_addresses: [],
+          screening: true,
+          extract_codes: true,
+          send_policy: "reply_only",
+          require_approval: false,
+          private_codes: true,
+          send_cap: 200,
+          forward_to: [],
+        },
+      })
+      .returning({ id: schema.inboxes.id });
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId,
+      name: "inbox",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+      inboxId: inbox?.id ?? null,
+    });
+    const res = await call(app, fullKey, "DELETE", `/domains/${id}`);
+    expect(res.status).toBe(200);
+    expect(deleteInboxes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ receivingEnabled: true }),
+      expect.objectContaining({ teamId, inboxIds: [inbox?.id], reason: "domain_deleted" }),
+    );
+    const [revoked] = await db
+      .select()
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.keyHash, key.keyHash));
+    expect(revoked).toMatchObject({ inboxId: null });
+    expect(revoked?.revokedAt).not.toBeNull();
   });
 });

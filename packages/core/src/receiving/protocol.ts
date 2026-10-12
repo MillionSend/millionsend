@@ -121,6 +121,30 @@ export const authVerdictsSchema = z.object({
 });
 export type AuthVerdicts = z.infer<typeof authVerdictsSchema>;
 
+/** Most aligned DKIM signing domains authDetail carries: three keep the envelope header under 14 KiB. */
+export const MAX_ALIGNED_DKIM_DOMAINS = 3;
+
+const authDomain = z
+  .string()
+  .max(253)
+  .regex(/^[a-z0-9.-]+$/);
+
+/**
+ * The unfolded results trust decisions read; Resend's surface never shows
+ * them. DMARC's result is never folded under p=none here, and its policy is
+ * the one applied, null when no record applied.
+ */
+export const authDetailSchema = z.object({
+  spf: z.object({ result: authResult, domain: authDomain.nullable() }),
+  dkim: z.object({ aligned: z.array(authDomain).max(MAX_ALIGNED_DKIM_DOMAINS) }),
+  dmarc: z.object({
+    result: authResult,
+    policy: z.enum(["none", "quarantine", "reject"]).nullable(),
+    domain: authDomain.nullable(),
+  }),
+});
+export type AuthDetail = z.infer<typeof authDetailSchema>;
+
 export const deliverEnvelopeSchema = z.object({
   mailFrom: reversePath,
   recipients: z
@@ -139,6 +163,11 @@ export const deliverEnvelopeSchema = z.object({
     .partial()
     .nullable(),
   auth: authVerdictsSchema,
+  /**
+   * Absent from an MX that predates it, and dropped (never refused) when
+   * malformed: an envelope the app refuses is a 451 the sender retries forever.
+   */
+  authDetail: authDetailSchema.optional().catch(undefined),
   receivedAt: z.iso.datetime({ offset: true }),
 });
 export type DeliverEnvelope = z.infer<typeof deliverEnvelopeSchema>;

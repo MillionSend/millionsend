@@ -6,8 +6,10 @@ import {
   clearTrackingClock,
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
+  deleteInboxes,
   failQueuedEmailsForDomain,
   fetchTeamStanding,
+  inboxActorFromAuth,
   isIdentitySharedByOtherDomains,
   isLoopbackUrl,
   isOperatorTeam,
@@ -46,7 +48,7 @@ import {
   type SesIdentityClient,
   verificationDbPatch,
 } from "@millionsend/ses";
-import { and, asc, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { type ApiDeps, type Env, errorBody, isUniqueViolation, keysetPage } from "../app.js";
 import {
   createDomainRequestSchema,
@@ -742,6 +744,7 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: getDomainResponseSchema } },
           description: "Domain updated; full object with records",
         },
+        403: jsonErr("Catch-all receiving needs a paid plan"),
         404: jsonErr("Not found"),
         409: jsonErr("Another team receives mail for this domain"),
         422: jsonErr("Validation error"),
@@ -775,11 +778,29 @@ export function registerDomainRoutes(
       if (trackingError) {
         return c.json(errorBody(422, "validation_error", trackingError), 422);
       }
+      const wantReceiving = body.capabilities?.receiving;
+      const wantCatchAll = body.receiving_catch_all;
+      if (wantCatchAll === true && !domain.receivingCatchAll) {
+        const receivingAfter =
+          wantReceiving !== undefined ? wantReceiving === "enabled" : domain.receivingEnabled;
+        if (!receives || !receivingAfter) {
+          return c.json(
+            errorBody(422, "validation_error", "Catch-all needs receiving enabled on this domain"),
+            422,
+          );
+        }
+        // A stored true outlives a downgrade; only turning it on needs the plan.
+        if (deps.isCloud && auth.plan === "free") {
+          return c.json(
+            errorBody(403, "plan_limit_reached", "Catch-all receiving needs a paid plan"),
+            403,
+          );
+        }
+      }
 
       // Before the tracking write: the receiving switch is the one change here
       // that can still be refused, and a refusal must leave nothing applied.
       let receiving: Pick<DomainRow, "receivingEnabled" | "receivingEnabledAt"> | undefined;
-      const wantReceiving = body.capabilities?.receiving;
       if (wantReceiving !== undefined) {
         const result = await setDomainReceiving(db, {
           teamId: auth.teamId,
@@ -846,12 +867,28 @@ export function registerDomainRoutes(
           .set(set)
           .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
       }
+      const catchAllChanged =
+        wantCatchAll !== undefined && wantCatchAll !== domain.receivingCatchAll;
+      if (catchAllChanged) {
+        await db
+          .update(d)
+          .set({ receivingCatchAll: wantCatchAll })
+          .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
+        await recordAudit(db, {
+          teamId: auth.teamId,
+          actor: apiRequestActor(auth),
+          action: wantCatchAll ? "domain.catch_all_enabled" : "domain.catch_all_disabled",
+          target: { type: "domain", id: domain.id },
+          metadata: { name: domain.name },
+        });
+      }
       // Full object so the caller sees the settings it just changed —
       // additive over the SDK's { id }. Records are read the same way GET
       // reads them, for the subdomain that was just set.
       const updated = {
         ...domain,
         ...receiving,
+        receivingCatchAll: catchAllChanged ? wantCatchAll : domain.receivingCatchAll,
         openTracking: set.openTracking ?? domain.openTracking,
         clickTracking: set.clickTracking ?? domain.clickTracking,
         trackingSubdomain:
@@ -924,9 +961,47 @@ export function registerDomainRoutes(
           if ((error as { name?: string }).name !== "NotFoundException") throw error;
         }
       }
+      // The domain's inboxes go first, each with its keys revoked and its
+      // inbox.deleted event (api_keys.inbox_id is restrict, never widened).
+      const i = schema.inboxes;
+      const inboxIds = (
+        await db
+          .select({ id: i.id })
+          .from(i)
+          .where(and(eq(i.teamId, auth.teamId), eq(i.domainId, domain.id)))
+      ).map((row) => row.id);
+      if (inboxIds.length > 0) {
+        await deleteInboxes(
+          db,
+          {
+            sharedInboxDomain: deps.sharedInboxDomain ?? null,
+            receivingEnabled: receives,
+            enqueueWebhookDeliveries: deps.enqueueWebhookDeliveries,
+          },
+          {
+            teamId: auth.teamId,
+            inboxIds,
+            actor: inboxActorFromAuth(auth),
+            reason: "domain_deleted",
+          },
+        );
+      }
       await db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
         await failQueuedEmailsForDomain(txDb, { teamId: auth.teamId, domainId: domain.id });
+        // An inbox created since the step above: its keys must not block the cascade.
+        await txDb
+          .update(schema.apiKeys)
+          .set({ revokedAt: new Date(), inboxId: null })
+          .where(
+            and(
+              eq(schema.apiKeys.teamId, auth.teamId),
+              inArray(
+                schema.apiKeys.inboxId,
+                txDb.select({ id: i.id }).from(i).where(eq(i.domainId, domain.id)),
+              ),
+            ),
+          );
         // api_keys.domainId is ON DELETE restrict (a scoped key must never
         // silently widen to all domains): revoke every scoped key and drop its
         // FK first — a revoked key never authenticates, and clearing domainId

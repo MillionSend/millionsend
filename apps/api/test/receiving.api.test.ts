@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   type DeliverEnvelope,
+  deriveInboxKeys,
   EnvKeyring,
   encodeEnvelopeHeader,
   generateApiKey,
@@ -42,6 +43,7 @@ let betaKey: string;
 let hook: string;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 const downloadKey = randomBytes(32);
+const inboxKeys = deriveInboxKeys(randomBytes(32));
 const enqueuedHooks: string[] = [];
 const transport = createTransport({ streamTransport: true, buffer: true });
 
@@ -60,6 +62,7 @@ function makeApp(overrides: Partial<ApiDeps> = {}) {
     publicApiUrl: API_BASE,
     receivedDownloadKey: downloadKey,
     receiving: { mxHost: "mx.millionsend.test", ingestSecret: SECRET },
+    inboxKeys,
     ...overrides,
   });
 }
@@ -135,7 +138,14 @@ const local = (url: string) => {
 async function addDomain(teamId: string, name: string) {
   const [row] = await db
     .insert(schema.domains)
-    .values({ teamId, name, region: "us-east-1", status: "verified", receivingEnabled: true })
+    .values({
+      teamId,
+      name,
+      region: "us-east-1",
+      status: "verified",
+      receivingEnabled: true,
+      receivingCatchAll: true,
+    })
     .returning({ id: schema.domains.id });
   if (!row) throw new Error("domain insert failed");
   return row.id;
