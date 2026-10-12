@@ -31,7 +31,8 @@ const attach = (filename: string, bytes: Uint8Array): EmailAttachment => ({
 });
 const QR_DATA_URI = `data:image/png;base64,${fixture("qr.png").toString("base64")}`;
 
-const pool = new MediaPool();
+// Room for CI under load; the parse budget itself is tested in media-scan.
+const pool = new MediaPool({ timeoutMs: 30_000 });
 afterAll(() => pool.close());
 
 const report = (overrides: Partial<VisionReport> = {}): VisionReport => ({

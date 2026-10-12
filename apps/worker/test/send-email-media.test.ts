@@ -32,7 +32,8 @@ let db: Db;
 let close: () => Promise<void>;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 const DAY = 86_400_000;
-const pool = new MediaPool();
+// Room for CI under load; the parse budget itself is tested in media-scan.
+const pool = new MediaPool({ timeoutMs: 30_000 });
 // No room in its queue: every read is refused as busy.
 const fullPool = new MediaPool({ queueMax: 0 });
 const QR_PNG = readFileSync(new URL("./fixtures/media/qr.png", import.meta.url));

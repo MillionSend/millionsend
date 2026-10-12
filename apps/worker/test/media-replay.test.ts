@@ -32,7 +32,8 @@ let close: () => Promise<void>;
 let newTeam: string;
 let oldTeam: string;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
-const pool = new MediaPool();
+// Room for CI under load; the parse budget itself is tested in media-scan.
+const pool = new MediaPool({ timeoutMs: 30_000 });
 const NOW = Date.now();
 
 async function insertEmail(

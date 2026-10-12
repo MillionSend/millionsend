@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createPromiseCache, type EmailAttachment } from "@millionsend/core";
 import sharp from "sharp";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -15,7 +17,8 @@ const attach = (filename: string, bytes: Uint8Array | string, contentType?: stri
     ...(contentType ? { contentType } : {}),
   }) satisfies EmailAttachment;
 
-const pool = new MediaPool();
+// Room for CI under load; the parse budget itself is tested on its own pools.
+const pool = new MediaPool({ timeoutMs: 30_000 });
 afterAll(() => pool.close());
 const deps = () => ({ pool, cache: createPromiseCache({ maxEntries: 100, ttlMs: 60_000 }) });
 
@@ -40,16 +43,18 @@ describe("the parsing threads", () => {
 
   it("kill a hung parse at the timeout and start a fresh thread", async () => {
     expect(MEDIA_TASK_TIMEOUT_MS).toBe(4_000);
-    // Long enough for a fresh thread to boot, which the timeout also covers.
     const hang = new MediaPool({
       size: 1,
-      timeoutMs: 1_500,
+      timeoutMs: 500,
       script: new URL("./fixtures/media/hang-thread.mjs", import.meta.url),
     });
     try {
+      // Booted first: the budget runs only once a ready thread has the job.
+      expect(await hang.run("warm")).toMatchObject({ message: "warm" });
       const started = Date.now();
       await expect(hang.run("hang")).rejects.toMatchObject({ reason: "timeout" });
-      expect(Date.now() - started).toBeLessThan(3_000);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(450);
+      expect(Date.now() - started).toBeLessThan(2_000);
       expect(await hang.run("next")).toMatchObject({ message: "next" });
       await expect(hang.run("crash")).rejects.toBeInstanceOf(MediaPoolError);
       expect(await hang.run("after")).toMatchObject({ message: "after" });
@@ -61,19 +66,64 @@ describe("the parsing threads", () => {
 
 describe("the pool's limits", () => {
   const hangScript = new URL("./fixtures/media/hang-thread.mjs", import.meta.url);
+  const slowBootScript = new URL("./fixtures/media/slow-boot-thread.mjs", import.meta.url);
 
-  it("counts queue time against the budget, and refuses work past the queue's bound", async () => {
-    const pool = new MediaPool({ size: 1, timeoutMs: 1_500, queueMax: 1, script: hangScript });
+  it("refuses work past the queue's bound, and starts a waiting job's budget only on a thread", async () => {
+    const pool = new MediaPool({ size: 1, timeoutMs: 500, queueMax: 1, script: hangScript });
     try {
+      expect(await pool.run("warm")).toMatchObject({ message: "warm" });
       const hung = pool.run("hang");
-      const waiting = pool.run("never runs");
+      const waiting = pool.run("waits behind it");
       await expect(pool.run("one too many")).rejects.toMatchObject({ reason: "busy" });
       await expect(hung).rejects.toMatchObject({ reason: "timeout" });
-      // It never reached a thread: the budget ran out while it waited for one.
-      await expect(waiting).rejects.toMatchObject({ reason: "timeout" });
-      expect(await pool.run("after")).toMatchObject({ message: "after" });
+      // It waited out the hung parse's whole budget, and still runs on the replacement.
+      expect(await waiting).toMatchObject({ message: "waits behind it" });
     } finally {
       await pool.close();
+    }
+  });
+
+  it("refuses a job that waited too long for a thread as busy, never a timeout", async () => {
+    const pool = new MediaPool({
+      size: 1,
+      timeoutMs: 100,
+      queueWaitMs: 500,
+      script: slowBootScript,
+    });
+    try {
+      await expect(pool.run("waits")).rejects.toMatchObject({ reason: "busy" });
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it("doesn't count a thread's boot against the parse budget", async () => {
+    const pool = new MediaPool({ size: 1, timeoutMs: 500, script: slowBootScript });
+    try {
+      const started = Date.now();
+      expect(await pool.run("first file")).toMatchObject({ message: "first file" });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(1_400);
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it("replaces a thread that fails to boot, without failing its job", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "media-boot-"));
+    const marker = join(dir, "failed-once");
+    // A thread starts with a copy of the environment.
+    vi.stubEnv("MEDIA_BOOT_MARKER", marker);
+    const pool = new MediaPool({
+      size: 1,
+      script: new URL("./fixtures/media/flaky-boot-thread.mjs", import.meta.url),
+    });
+    try {
+      expect(await pool.run("survives")).toMatchObject({ message: "survives" });
+      expect(existsSync(marker)).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      await pool.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

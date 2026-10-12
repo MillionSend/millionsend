@@ -103,6 +103,7 @@ import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
 import { abandonTenantStatus, retryTenantStatus, syncTenants } from "./handlers/tenants.js";
+import { mediaPool } from "./media/scan.js";
 import { createAbuseVision } from "./media/vision.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
@@ -259,6 +260,8 @@ const judgeConfig = abuseJudgeConfig();
 const judge = createAbuseJudge(judgeConfig);
 // The image reader the judge's media read hands images to; null while ABUSE_VISION is off.
 const vision = createAbuseVision(abuseVisionConfig());
+// The parsing threads boot now, WASM compiled, so the first email with a file never waits on them.
+mediaPool().warm();
 const monitorSettings = monitorSettingsReader(db, env as unknown as Record<string, unknown>);
 const monitor: MonitorDeps | undefined = judge
   ? {

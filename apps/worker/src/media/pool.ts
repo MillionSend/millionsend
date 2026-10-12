@@ -16,19 +16,27 @@ import {
  * a hostile file can make either spin or crash: they run here, on a thread
  * the pool kills and replaces past MEDIA_TASK_TIMEOUT_MS, never on the
  * worker's event loop. This module is both sides: the pool the worker
- * imports, and the thread's entry, which loads mupdf, zxing and sharp on
- * first use. Threads import only light core subpaths; the core barrel would
- * cost each one half a second and a hundred MB.
+ * imports, and the thread's entry, which loads mupdf, zxing and sharp before
+ * it says it is ready. Threads import only light core subpaths; the core
+ * barrel would cost each one half a second and a hundred MB.
  */
 
 // ponytail: fixed at two threads; size from os.availableParallelism() if parsing queues.
 export const MEDIA_POOL_SIZE = 2;
-/** One email's budget, from the moment its job is queued: waiting for a thread counts. */
+/** One email's parse budget, from the moment a booted thread takes its job. */
 export const MEDIA_TASK_TIMEOUT_MS = 4_000;
-/** Jobs waiting past this many are refused as busy, and their files count as not read. */
+/**
+ * How long a job may wait for a booted thread: past it the job is refused as
+ * busy, which the send path retries and the judge counts as not read. Queue
+ * time and a thread's boot never come out of the parse budget.
+ */
+export const MEDIA_QUEUE_WAIT_MS = 10_000;
+/** Jobs waiting past this many are refused as busy at once. */
 export const MEDIA_QUEUE_MAX = 64;
 /** A thread whose mupdf heap grew past this is replaced: WASM memory only ever grows. */
 export const MEDIA_THREAD_WASM_MAX_BYTES = 512 * 1024 * 1024;
+/** A thread not ready by then is replaced; a slow boot is never a job's fault. */
+const THREAD_BOOT_TIMEOUT_MS = 60_000;
 const THREAD = "millionsend-media-thread";
 const THREAD_HEAP_MB = 512;
 
@@ -45,19 +53,27 @@ interface Job {
   message: unknown;
   resolve(value: unknown): void;
   reject(err: Error): void;
+  /** Queue wait first, then the parse budget once a thread takes it. */
   timer: NodeJS.Timeout;
-  thread?: Worker;
 }
 
-type Reply = ({ ok: true; result: unknown } | { ok: false; error: string }) & { wasmBytes: number };
+type Reply =
+  | { ready: true }
+  | (({ ok: true; result: unknown } | { ok: false; error: string }) & { wasmBytes: number });
 
-/** Runs one job per thread at a time, in order; a thread that times out or dies is replaced. */
+/**
+ * Runs one job per thread at a time, in order, on threads that have booted:
+ * each posts "ready" once mupdf, zxing and sharp are loaded. A thread that
+ * times out, dies or fails to boot is replaced.
+ */
 export class MediaPool {
   readonly #size: number;
   readonly #timeoutMs: number;
+  readonly #queueWaitMs: number;
   readonly #queueMax: number;
   readonly #wasmMaxBytes: number;
   readonly #script: URL;
+  readonly #booting = new Map<Worker, NodeJS.Timeout>();
   readonly #idle: Worker[] = [];
   readonly #busy = new Map<Worker, Job>();
   readonly #queue: Job[] = [];
@@ -67,6 +83,7 @@ export class MediaPool {
     opts: {
       size?: number;
       timeoutMs?: number;
+      queueWaitMs?: number;
       queueMax?: number;
       wasmMaxBytes?: number;
       script?: URL;
@@ -74,6 +91,7 @@ export class MediaPool {
   ) {
     this.#size = opts.size ?? MEDIA_POOL_SIZE;
     this.#timeoutMs = opts.timeoutMs ?? MEDIA_TASK_TIMEOUT_MS;
+    this.#queueWaitMs = opts.queueWaitMs ?? MEDIA_QUEUE_WAIT_MS;
     this.#queueMax = opts.queueMax ?? MEDIA_QUEUE_MAX;
     this.#wasmMaxBytes = opts.wasmMaxBytes ?? MEDIA_THREAD_WASM_MAX_BYTES;
     this.#script = opts.script ?? new URL(import.meta.url);
@@ -86,11 +104,20 @@ export class MediaPool {
         message,
         resolve: resolve as (value: unknown) => void,
         reject,
-        timer: setTimeout(() => this.#expire(job), this.#timeoutMs),
+        timer: setTimeout(() => {
+          const at = this.#queue.indexOf(job);
+          if (at !== -1) this.#queue.splice(at, 1);
+          reject(new MediaPoolError("busy"));
+        }, this.#queueWaitMs),
       };
       this.#queue.push(job);
       this.#pump();
     });
+  }
+
+  /** Boots every thread now, so the first file never waits for one. */
+  warm(): void {
+    while (this.#threads < this.#size) this.#spawn();
   }
 
   async close(): Promise<void> {
@@ -98,33 +125,27 @@ export class MediaPool {
       clearTimeout(job.timer);
       job.reject(new MediaPoolError("closed"));
     }
-    const threads = [...this.#idle, ...this.#busy.keys()];
+    const threads = [...this.#booting.keys(), ...this.#idle, ...this.#busy.keys()];
     await Promise.all(threads.map((thread) => this.#drop(thread, new MediaPoolError("closed"))));
   }
 
-  #expire(job: Job): void {
-    if (job.thread) {
-      void this.#drop(job.thread, new MediaPoolError("timeout"));
-      return;
-    }
-    const queued = this.#queue.indexOf(job);
-    if (queued !== -1) this.#queue.splice(queued, 1);
-    job.reject(new MediaPoolError("timeout"));
-  }
-
   #pump(): void {
-    while (this.#queue.length > 0) {
-      const thread = this.#idle.pop() ?? this.#spawn();
-      if (!thread) return;
+    while (this.#queue.length > 0 && this.#idle.length > 0) {
+      const thread = this.#idle.pop() as Worker;
       const job = this.#queue.shift() as Job;
-      job.thread = thread;
+      clearTimeout(job.timer);
+      job.timer = setTimeout(
+        () => void this.#drop(thread, new MediaPoolError("timeout")),
+        this.#timeoutMs,
+      );
       this.#busy.set(thread, job);
       thread.postMessage(job.message);
     }
+    // ponytail: a thread that can never boot is respawned for as long as jobs wait; back off between boots if that shows up.
+    while (this.#queue.length > this.#booting.size && this.#threads < this.#size) this.#spawn();
   }
 
-  #spawn(): Worker | undefined {
-    if (this.#threads >= this.#size) return undefined;
+  #spawn(): void {
     this.#threads++;
     const thread = new Worker(this.#script, {
       workerData: THREAD,
@@ -133,7 +154,23 @@ export class MediaPool {
       resourceLimits: { maxOldGenerationSizeMb: THREAD_HEAP_MB },
     });
     thread.unref();
+    this.#booting.set(
+      thread,
+      setTimeout(
+        () => void this.#drop(thread, new MediaPoolError("crashed")),
+        THREAD_BOOT_TIMEOUT_MS,
+      ),
+    );
     thread.on("message", (reply: Reply) => {
+      if ("ready" in reply) {
+        const boot = this.#booting.get(thread);
+        if (boot === undefined) return;
+        clearTimeout(boot);
+        this.#booting.delete(thread);
+        this.#idle.push(thread);
+        this.#pump();
+        return;
+      }
       const job = this.#busy.get(thread);
       if (!job) return;
       clearTimeout(job.timer);
@@ -153,19 +190,21 @@ export class MediaPool {
     thread.on("exit", () => {
       void this.#drop(thread, new MediaPoolError("crashed"));
     });
-    return thread;
   }
 
-  /** Fails the thread's job, if any, and kills it; the next job starts a fresh thread. */
+  /** Fails the thread's job, if it had one, and kills it; the next job starts a fresh thread. */
   #drop(thread: Worker, err: MediaPoolError): Promise<void> {
     const job = this.#busy.get(thread);
+    const boot = this.#booting.get(thread);
     const idle = this.#idle.indexOf(thread);
-    if (!job && idle === -1) return Promise.resolve();
+    if (!job && boot === undefined && idle === -1) return Promise.resolve();
     if (job) {
       clearTimeout(job.timer);
       this.#busy.delete(thread);
       job.reject(err);
     }
+    clearTimeout(boot);
+    this.#booting.delete(thread);
     if (idle !== -1) this.#idle.splice(idle, 1);
     return this.#retire(thread, err.reason !== "closed");
   }
@@ -511,6 +550,12 @@ export async function parseFiles(req: ParseRequest): Promise<ParsedFile[]> {
 
 if (!isMainThread && workerData === THREAD && parentPort) {
   const port = parentPort;
+  // A boot that throws ends the thread, and the pool replaces it.
+  mupdfModule();
+  void Promise.all([import("mupdf"), zxing(), import("sharp")]).then(([, , { default: sharp }]) => {
+    sharp.concurrency(1);
+    port.postMessage({ ready: true });
+  });
   const wasmBytes = () => mupdfModule().HEAPU8?.byteLength ?? 0;
   port.on("message", (req: ParseRequest) => {
     parseFiles(req).then(
