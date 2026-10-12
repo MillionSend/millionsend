@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { type ServerType, serve } from "@hono/node-server";
-import { EnvKeyring, generateApiKey } from "@millionsend/core";
+import { deriveInboxKeys, EnvKeyring, generateApiKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -45,6 +45,7 @@ beforeAll(async () => {
     isCloud: true,
     enqueueEmailSend: async () => {},
     receiving: { mxHost: "mx.millionsend.test", ingestSecret: "c".repeat(40) },
+    inboxKeys: deriveInboxKeys(randomBytes(32)),
   });
   await new Promise<void>((resolve) => {
     server = serve({ fetch: app.fetch, port: 0 }, () => resolve());
@@ -216,5 +217,54 @@ describe("resend preview SDK: inboxes", () => {
     expect(trashed.data).toEqual({ object: "inbox_thread", id: threadId, deleted: true });
     const removedLabel = await resend.inboxes.labels.remove({ inboxId, labelId });
     expect(removedLabel.data).toEqual({ object: "inbox_label", id: labelId, deleted: true });
+  });
+
+  it("creates, reads, lists, updates, sends and removes drafts", async () => {
+    const inbox = await resend.inboxes.create({ emailAddress: "drafts@in.acme.dev" });
+    const inboxId = inbox.data?.id as string;
+
+    const created = await resend.inboxes.drafts.create({
+      inboxId,
+      to: "ana@sender.dev",
+      subject: "Hello",
+      html: "<p>Hi Ana</p>",
+      text: "Hi Ana",
+    });
+    expect(created.error).toBeNull();
+    const draftId = created.data?.id as string;
+    expect(created.data).toMatchObject({ object: "inbox_draft", id: draftId });
+
+    const got = await resend.inboxes.drafts.get({ inboxId, draftId });
+    expect(got.data).toMatchObject({
+      object: "inbox_draft",
+      id: draftId,
+      type: "standalone",
+      to: ["ana@sender.dev"],
+      subject: "Hello",
+      html: "<p>Hi Ana</p>",
+      text: "Hi Ana",
+      thread_id: null,
+      email_id: null,
+    });
+
+    const list = await resend.inboxes.drafts.list({ inboxId });
+    expect(list.data).toMatchObject({ object: "list", has_more: false });
+    expect(list.data?.data.map((d) => d.id)).toEqual([draftId]);
+
+    // Setting one body part replaces both: the part left out becomes null.
+    const updated = await resend.inboxes.drafts.update({ inboxId, draftId, text: "Hi again" });
+    expect(updated.data).toMatchObject({ id: draftId, text: "Hi again", html: null });
+
+    const sent = await resend.inboxes.drafts.send({ inboxId, draftId });
+    expect(sent.error).toBeNull();
+    expect(sent.data).toMatchObject({ object: "inbox_draft", id: draftId });
+    expect(sent.data?.email_id).toEqual(expect.any(String));
+    expect(sent.data?.thread_id).toEqual(expect.any(String));
+    expect((await resend.inboxes.drafts.list({ inboxId })).data?.data).toEqual([]);
+
+    const spare = await resend.inboxes.drafts.create({ inboxId, subject: "Later" });
+    const spareId = spare.data?.id as string;
+    const removed = await resend.inboxes.drafts.remove({ inboxId, draftId: spareId });
+    expect(removed.data).toEqual({ object: "inbox_draft", id: spareId, deleted: true });
   });
 });
