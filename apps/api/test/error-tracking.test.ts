@@ -52,3 +52,42 @@ it("reports an unhandled error with its route pattern and the key's team, still 
     tags: { route: "/topics/:id/boom" },
   });
 });
+
+it("answers a malformed or non-JSON body as the caller's error, without reporting it", async () => {
+  const teamId = await createTeam(db, "error-tracking-client");
+  const key = generateApiKey();
+  await db.insert(schema.apiKeys).values({
+    teamId,
+    name: "k",
+    tokenPrefix: key.tokenPrefix,
+    keyHash: key.keyHash,
+    last4: key.last4,
+  });
+  const app = createApi({
+    db,
+    keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+    isCloud: false,
+    enqueueEmailSend: async () => {},
+  });
+  h.captureError.mockClear();
+  const auth = { authorization: `Bearer ${key.token}` };
+  const malformed = await app.request("/emails", {
+    method: "POST",
+    headers: { ...auth, "content-type": "application/json" },
+    body: "{not json",
+  });
+  expect(malformed.status).toBe(400);
+  expect(await malformed.json()).toEqual({
+    statusCode: 400,
+    name: "invalid_parameter",
+    message: "Malformed JSON in request body",
+  });
+  const text = await app.request("/emails", {
+    method: "POST",
+    headers: { ...auth, "content-type": "text/plain" },
+    body: "{}",
+  });
+  expect(text.status).toBe(415);
+  expect(await text.json()).toMatchObject({ statusCode: 415, name: "invalid_parameter" });
+  expect(h.captureError).not.toHaveBeenCalled();
+});

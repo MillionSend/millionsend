@@ -231,6 +231,9 @@ Erros usam o formato do Resend:
 { "statusCode": 422, "name": "validation_error", "message": "..." }
 ```
 
+Um corpo que não é JSON válido recebe `400 invalid_parameter`, e um corpo
+enviado com `Content-Type` diferente de `application/json` recebe `415`.
+
 ## Idempotência
 
 `POST /emails` e `POST /emails/batch` aceitam um header `Idempotency-Key`.
