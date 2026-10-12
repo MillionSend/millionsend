@@ -21,7 +21,6 @@ import { type InboxActor, isAgentActor, recordInboxActivity, webhookSource } fro
 import { threadFolderEvent, threadLabelsEvent } from "./events.js";
 import {
   CURSOR_NOT_FOUND,
-  findLiveInbox,
   INBOX_NOT_FOUND,
   invalid,
   isInboxError,
@@ -31,7 +30,7 @@ import {
   webhookBatch,
 } from "./inbox-common.js";
 import type { InboxDeps } from "./inboxes.js";
-import { TRASH_RETENTION } from "./limits.js";
+import { findLiveInbox, TRASH_RETENTION } from "./limits.js";
 import {
   EMAIL_QUARANTINED_MESSAGE,
   type InboxError,
@@ -355,7 +354,7 @@ export async function listThreads(
   db: Db,
   p: { teamId: string; inboxId: string; query: ThreadListQuery; agentView: boolean },
 ): Promise<{ data: ThreadListItemWire[]; hasMore: boolean } | { error: InboxError }> {
-  const inbox = await findLiveInbox(db, p.teamId, p.inboxId);
+  const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId });
   if (!inbox) return { error: INBOX_NOT_FOUND };
   const includeHeld = !p.agentView && Boolean(p.query.includeHeld);
   const scope = await threadScope(db, { ...p, includeHeld });
@@ -463,7 +462,7 @@ export async function searchThreads(
   if (start && end && start >= end) {
     return { error: invalid("The `start_date` must be on or before the `end_date`.") };
   }
-  const inbox = await findLiveInbox(db, p.teamId, p.inboxId);
+  const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId });
   if (!inbox) return { error: INBOX_NOT_FOUND };
   const includeHeld = !p.agentView && Boolean(q.includeHeld);
   const scope = await threadScope(db, { ...p, includeHeld });
@@ -589,7 +588,7 @@ export async function getThread(
   db: Db,
   p: { teamId: string; inboxId: string; threadId: string; agentView: boolean },
 ): Promise<ThreadSummaryWire | null> {
-  if (!(await findLiveInbox(db, p.teamId, p.inboxId))) return null;
+  if (!(await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId }))) return null;
   const row = await findThread(db, p);
   return row ? summaryOf(db, row, p.agentView) : null;
 }
@@ -618,7 +617,7 @@ async function changeThread(
   const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
   const result = await db.transaction(async (tx): Promise<ThreadChange> => {
     const t = tx as unknown as Db;
-    if (!(await findLiveInbox(t, p.teamId, p.inboxId, now)))
+    if (!(await findLiveInbox(t, { teamId: p.teamId, inboxId: p.inboxId, now: now })))
       return { ok: false, error: INBOX_NOT_FOUND };
     const thread = await findThread(t, { ...p, agentView });
     if (!thread) return { ok: false, error: THREAD_NOT_FOUND };
@@ -900,7 +899,7 @@ async function threadFor(
   db: Db,
   p: { teamId: string; inboxId: string; threadId: string; agentView: boolean },
 ): Promise<InboxError | null> {
-  if (!(await findLiveInbox(db, p.teamId, p.inboxId))) return INBOX_NOT_FOUND;
+  if (!(await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId }))) return INBOX_NOT_FOUND;
   return (await findThread(db, p)) ? null : THREAD_NOT_FOUND;
 }
 

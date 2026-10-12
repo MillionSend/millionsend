@@ -20,6 +20,7 @@ import {
   isOperatorTeam,
   isReservedSenderDomain,
   linkTeam,
+  liveInbox,
   PLAN_DOMAIN_LIMIT,
   setDomainReceiving,
   warmupCap,
@@ -52,7 +53,7 @@ import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
-import { catchAllAllowed, inboxDeps, liveInbox, userActor } from "../inboxes";
+import { catchAllAllowed, inboxDeps, userActor } from "../inboxes";
 import { enqueueDomainAge } from "../queue";
 import { assertTeamNotSuspended } from "../suspension-lock";
 import { adminProcedure, router, teamProcedure } from "../trpc";

@@ -14,21 +14,21 @@ import { type InboxActor, recordInboxActivity, webhookSource } from "./activity.
 import { inboxDeletedEvent, inboxEvent } from "./events.js";
 import {
   auditActorOf,
-  findLiveInbox,
   INBOX_NOT_FOUND,
   invalid,
   isInboxError,
   keysetRows,
-  liveInbox,
   oneLineName,
   randomAlnum,
   webhookBatch,
 } from "./inbox-common.js";
 import {
   expiresInMs,
+  findLiveInbox,
   INBOX_MAX_TTL,
   inboxCreatesLeft,
   inboxRoom,
+  liveInbox,
   SHARED_INBOX_DEFAULT_TTL,
   SHARED_INBOX_MAX_TTL,
 } from "./limits.js";
@@ -541,7 +541,7 @@ export async function updateInbox(
   },
 ): Promise<{ ok: true; inbox: InboxWire } | { ok: false; error: InboxError }> {
   const now = new Date();
-  const inbox = await findLiveInbox(db, p.teamId, p.inboxId, now);
+  const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId, now: now });
   if (!inbox) return fail(INBOX_NOT_FOUND);
   const set: Partial<typeof schema.inboxes.$inferInsert> = { updatedAt: now };
   if (p.patch.name !== undefined) {
@@ -717,7 +717,7 @@ export async function getInboxSafety(
   db: Db,
   p: { teamId: string; inboxId: string },
 ): Promise<InboxSafety | null> {
-  return (await findLiveInbox(db, p.teamId, p.inboxId))?.safety ?? null;
+  return (await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId }))?.safety ?? null;
 }
 
 export async function updateInboxSafety(
@@ -726,7 +726,7 @@ export async function updateInboxSafety(
   p: { teamId: string; inboxId: string; actor: InboxActor; patch: Partial<InboxSafety> },
 ): Promise<{ ok: true; safety: InboxSafety } | { ok: false; error: InboxError }> {
   const now = new Date();
-  const inbox = await findLiveInbox(db, p.teamId, p.inboxId, now);
+  const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId, now: now });
   if (!inbox) return fail(INBOX_NOT_FOUND);
   const patch = setKeys(p.patch);
   const safety = await checkedSafety(db, {

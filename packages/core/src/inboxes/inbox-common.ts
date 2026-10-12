@@ -1,7 +1,6 @@
 import { randomInt } from "node:crypto";
 import type { Db } from "@millionsend/db";
-import { schema } from "@millionsend/db";
-import { and, eq, gt, isNull, or, type SQL, sql } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { AuditActor } from "../audit.js";
 import {
@@ -58,24 +57,6 @@ export function oneLineName(value: string): string | InboxError {
   return name.length === 0 || name.length > NAME_MAX || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(name)
     ? invalid(`name must be 1-${NAME_MAX} characters on one line`)
     : name;
-}
-
-/** An inbox reads as gone from the moment it expires, before the sweep deletes it. */
-export const liveInbox = (now: Date): SQL | undefined =>
-  or(isNull(schema.inboxes.expiresAt), gt(schema.inboxes.expiresAt, now));
-
-export async function findLiveInbox(
-  db: Db,
-  teamId: string,
-  inboxId: string,
-  now: Date = new Date(),
-): Promise<typeof schema.inboxes.$inferSelect | undefined> {
-  const i = schema.inboxes;
-  const [row] = await db
-    .select()
-    .from(i)
-    .where(and(eq(i.id, inboxId), eq(i.teamId, teamId), liveInbox(now)));
-  return row;
 }
 
 /**

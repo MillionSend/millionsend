@@ -22,11 +22,10 @@ import {
 } from "./activity.js";
 import { addressKey, forwardSubject, replySubject } from "./compose.js";
 import { draftDeletedEvent, draftEvent, draftSentEvent } from "./events.js";
-import { DRAFT_APPROVAL_TTL, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
+import { DRAFT_APPROVAL_TTL, findLiveInbox, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
 import {
   deferredEnqueue,
   dispatchSend,
-  findLiveInbox,
   forwardFiles,
   type HoldSpec,
   type InboxSendDeps,

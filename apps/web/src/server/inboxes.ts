@@ -6,13 +6,14 @@ import {
   type InboxDeps,
   type InboxError,
   type InboxSendDeps,
+  liveInbox,
   PLAN_INBOX_LIMIT,
   type SendOutcome,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, count, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import { parseInboxActor } from "@/lib/inbox-actor";
 import { getKeyring } from "./keyring";
 import { enqueueInboxForward } from "./queue";
@@ -144,9 +145,6 @@ export async function actorNames(db: Db, teamId: string, encoded: string[]) {
 export async function catchAllAllowed(db: Db, teamId: string): Promise<boolean> {
   return !isCloudDeployment() || ((await fetchEffectivePlan(db, teamId)) ?? "free") !== "free";
 }
-
-export const liveInbox = (now: Date) =>
-  or(isNull(schema.inboxes.expiresAt), gt(schema.inboxes.expiresAt, now));
 
 /** The team's live inboxes against its plan's cap; no limit off cloud or on uncapped plans. */
 export async function planUsage(db: Db, teamId: string) {

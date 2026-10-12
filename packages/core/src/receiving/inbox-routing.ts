@@ -1,8 +1,9 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import type { InboxKeys } from "../inboxes/keys.js";
 import { verifyThreadTokenRef } from "../inboxes/keys.js";
+import { liveInbox } from "../inboxes/limits.js";
 import type { InboxSafety } from "../inboxes/safety.js";
 import type { InboxKind } from "../inboxes/types.js";
 import type { ReceivingDomain } from "./rcpt.js";
@@ -60,10 +61,7 @@ export async function findInboxesForRecipients(
     })
     .from(i)
     .where(
-      and(
-        or(inArray(i.emailAddress, keys), inArray(i.receivingAddress, keys)),
-        or(isNull(i.expiresAt), gt(i.expiresAt, now)),
-      ),
+      and(or(inArray(i.emailAddress, keys), inArray(i.receivingAddress, keys)), liveInbox(now)),
     );
   const byKey = new Map<string, InboxTarget>();
   for (const { receivingAddress, ...row } of rows) {

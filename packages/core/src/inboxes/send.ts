@@ -1,7 +1,7 @@
 import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { simpleParser } from "mailparser";
 import {
   type AcceptEmailAuth,
@@ -57,7 +57,7 @@ import {
 import { draftForHeldSend, loadDraftWire } from "./drafts.js";
 import { threadEmailEvent } from "./events.js";
 import { type InboxKeys, secretMac, threadTokenId } from "./keys.js";
-import { RECEIVED_SECRET_WINDOW, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
+import { findLiveInbox, RECEIVED_SECRET_WINDOW, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
 import {
   type AgentSendDecision,
   decideAgentSend,
@@ -149,24 +149,6 @@ export const isOutcome = (v: unknown): v is SendOutcome =>
   typeof v === "object" && v !== null && "kind" in v;
 
 const MiB = 1024 * 1024;
-
-/** A live inbox of the team by id or by address; expired ones read as gone. */
-export async function findLiveInbox(
-  db: Db,
-  p: { teamId: string; inboxId?: string | undefined; address?: string | undefined; now?: Date },
-): Promise<InboxRow | null> {
-  const i = schema.inboxes;
-  const now = p.now ?? new Date();
-  const match = p.inboxId
-    ? eq(i.id, p.inboxId)
-    : eq(i.emailAddress, (p.address ?? "").toLowerCase());
-  const [row] = await db
-    .select()
-    .from(i)
-    .where(and(eq(i.teamId, p.teamId), match, or(isNull(i.expiresAt), gt(i.expiresAt, now))))
-    .limit(1);
-  return row ?? null;
-}
 
 /**
  * Whether the team sits in the content monitor's new tier, where send_policy

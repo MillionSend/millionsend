@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, count, eq, gt, isNull, min, or } from "drizzle-orm";
+import { and, count, eq, gt, isNull, min, or, type SQL } from "drizzle-orm";
 import type { Plan } from "../plans.js";
 import { MAX_RECEIVED_MESSAGE_BYTES } from "../receiving/protocol.js";
 import { DAY_MS } from "../utc-day.js";
@@ -72,8 +72,26 @@ export function expiresInMs(value: string): number | null {
   return Number(value.slice(0, -1)) * (value.endsWith("d") ? DAY_MS : HOUR_MS);
 }
 
-/** Whether an inbox is still live at `now`. */
-const live = (now: Date) => or(isNull(schema.inboxes.expiresAt), gt(schema.inboxes.expiresAt, now));
+/** An inbox reads as gone from the moment it expires, before the sweep deletes it. */
+export const liveInbox = (now: Date): SQL | undefined =>
+  or(isNull(schema.inboxes.expiresAt), gt(schema.inboxes.expiresAt, now));
+
+/** A live inbox of the team by id or by address. */
+export async function findLiveInbox(
+  db: Db,
+  p: { teamId: string; inboxId?: string | undefined; address?: string | undefined; now?: Date },
+): Promise<typeof schema.inboxes.$inferSelect | null> {
+  const i = schema.inboxes;
+  const match = p.inboxId
+    ? eq(i.id, p.inboxId)
+    : eq(i.emailAddress, (p.address ?? "").toLowerCase());
+  const [row] = await db
+    .select()
+    .from(i)
+    .where(and(eq(i.teamId, p.teamId), match, liveInbox(p.now ?? new Date())))
+    .limit(1);
+  return row ?? null;
+}
 
 /**
  * How many more inboxes the team may create under its plan's cap; null when
@@ -92,7 +110,7 @@ export async function inboxRoom(
   const [row] = await db
     .select({ n: count() })
     .from(schema.inboxes)
-    .where(and(eq(schema.inboxes.teamId, teamId), live(now)));
+    .where(and(eq(schema.inboxes.teamId, teamId), liveInbox(now)));
   return Math.max(0, limit - (row?.n ?? 0));
 }
 

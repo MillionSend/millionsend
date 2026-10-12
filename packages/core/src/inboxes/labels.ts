@@ -5,7 +5,6 @@ import { and, asc, count, eq } from "drizzle-orm";
 import { isUniqueViolation } from "../driver-result.js";
 import { type InboxActor, recordInboxActivity } from "./activity.js";
 import {
-  findLiveInbox,
   INBOX_NOT_FOUND,
   invalid,
   isInboxError,
@@ -13,7 +12,7 @@ import {
   oneLineName,
 } from "./inbox-common.js";
 import type { InboxDeps } from "./inboxes.js";
-import { INBOX_LABELS_MAX } from "./limits.js";
+import { findLiveInbox, INBOX_LABELS_MAX } from "./limits.js";
 import type { InboxError, LabelWire } from "./types.js";
 import { labelWire } from "./wire.js";
 
@@ -80,7 +79,7 @@ export async function createLabel(
   const l = schema.inboxLabels;
   return db.transaction(async (tx): Promise<LabelResult> => {
     const t = tx as unknown as Db;
-    if (!(await findLiveInbox(t, p.teamId, p.inboxId)))
+    if (!(await findLiveInbox(t, { teamId: p.teamId, inboxId: p.inboxId })))
       return { ok: false, error: INBOX_NOT_FOUND };
     // The inbox row's lock serializes creates, so two at once cannot pass the cap together.
     await t
@@ -136,7 +135,7 @@ export async function updateLabel(
   try {
     return await db.transaction(async (tx): Promise<LabelResult> => {
       const t = tx as unknown as Db;
-      if (!(await findLiveInbox(t, p.teamId, p.inboxId))) {
+      if (!(await findLiveInbox(t, { teamId: p.teamId, inboxId: p.inboxId }))) {
         return { ok: false, error: INBOX_NOT_FOUND };
       }
       const [row] =
