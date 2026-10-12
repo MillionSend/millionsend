@@ -232,6 +232,18 @@ describe("link_domains_match", () => {
     });
   });
 
+  it("reads links as a browser does: past a decoy, after a slash, with backslashes, and in areas", () => {
+    const html =
+      `<a title=" href='https://mail.acme.com/' " href="https://evil.example/x">a</a>` +
+      "<a/href=https://slash.example/y>b</a>" +
+      '<a href="https:\\\\back.example/z">c</a>' +
+      '<map><area href="https://area.example/" alt="d"></map>' +
+      '<form action="https://form.example/post"></form>';
+    expect(check(input({ preTrackingHtml: html }), "link_domains_match").detail).toEqual({
+      linkDomains: ["evil.example", "slash.example", "back.example", "area.example"],
+    });
+  });
+
   it("fails with unique registrable domains capped at 10", () => {
     const hosts = Array.from({ length: 12 }, (_, i) => `host${i}.example${i}.com`);
     const html = hosts.map((h) => `<a href="https://${h}/x">l</a>`).join("");

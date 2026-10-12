@@ -75,7 +75,6 @@ describe("unwrapRedirect", () => {
       `https://l.facebook.com.evil.example/l.php?u=${encoded}`,
       `https://evil.example/safelinks.protection.outlook.com/?url=${encoded}`,
       "https://www.google.com/url?q=javascript:alert(1)",
-      "https://www.google.com/url?q=/relative/path",
       "https://protect-us.mimecast.com/s/x?domain=not a host",
       "https://acme.dev/welcome",
       "mailto:help@acme.dev",
@@ -83,6 +82,15 @@ describe("unwrapRedirect", () => {
     ]) {
       expect(unwrapRedirect(href), href).toBe(href);
     }
+  });
+
+  it("resolves a destination written relative to the wrapper, as its redirect would", () => {
+    expect(unwrapRedirect("https://www.google.com/url?q=//evil.example/login")).toBe(
+      "https://evil.example/login",
+    );
+    expect(unwrapRedirect("https://www.google.com/url?q=/maps/place")).toBe(
+      "https://www.google.com/maps/place",
+    );
   });
 
   it("decodes only one level", () => {

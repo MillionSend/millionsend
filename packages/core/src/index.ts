@@ -464,12 +464,20 @@ export {
 } from "./instance-probes.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { type IpGeo, lookupIpGeo, refreshIpGeoDatabases } from "./ip-geo.js";
+export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export {
-  ANCHOR_HREF,
-  anchorHrefParts,
-  type RewriteOptions,
-  rewriteForTracking,
-} from "./link-tracking.js";
+  type BodyLink,
+  extractLinks,
+  type HtmlTag,
+  type HtmlVisitor,
+  type LinkSource,
+  type ResolvedLink,
+  resolveLink,
+  resolveTextUrl,
+  scanHtml,
+  type TagAttr,
+  UNRESOLVED_DESTINATION,
+} from "./links.js";
 export {
   isMailPreferenceKey,
   MAIL_PREFERENCE_GROUPS,

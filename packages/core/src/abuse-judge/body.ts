@@ -1,4 +1,7 @@
-import { MIN_BODY_TEXT_CHARS, visibleText } from "../email-insights.js";
+import { MIN_BODY_TEXT_CHARS } from "../email-insights.js";
+import { decodeEntities, visibleText } from "../html.js";
+
+export { decodeEntities };
 
 /**
  * What a reader sees of an email body. Regex-driven, with no DOM: inline
@@ -6,33 +9,6 @@ import { MIN_BODY_TEXT_CHARS, visibleText } from "../email-insights.js";
  * child selectors are resolved; attribute selectors, pseudo-classes and
  * sibling combinators are not, and a selector using one is skipped.
  */
-
-const ENTITIES = new Map([
-  ["amp", "&"],
-  ["lt", "<"],
-  ["gt", ">"],
-  ["quot", '"'],
-  ["apos", "'"],
-  ["nbsp", " "],
-  // Invisible ones decode to their characters, so they are counted and stripped like them.
-  ["zwnj", "\u200c"],
-  ["zwj", "\u200d"],
-  ["shy", "\u00ad"],
-  ["lrm", "\u200e"],
-  ["rlm", "\u200f"],
-  ["zerowidthspace", "\u200b"],
-]);
-
-export function decodeEntities(s: string): string {
-  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, body: string) => {
-    if (body[0] === "#") {
-      const code =
-        body[1]?.toLowerCase() === "x" ? Number.parseInt(body.slice(2), 16) : Number(body.slice(1));
-      return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : m;
-    }
-    return ENTITIES.get(body.toLowerCase()) ?? m;
-  });
-}
 
 /**
  * Zero-width characters, the soft hyphen, bidi controls and isolates,

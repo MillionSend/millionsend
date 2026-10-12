@@ -114,9 +114,11 @@ function wrappedTarget(href: string, url: URL): string | null {
  * The destination a well-known redirect wrapper (Google's /url, Facebook's
  * l.php, Outlook Safe Links, Proofpoint URL Defense and the like) carries in
  * its own URL: decoded one level, never visited, so a single-use link is
- * never spent. Any other URL, or a wrapper whose destination is not an
- * absolute http(s) URL, comes back as written. Hosts match exactly: on any
- * other host the parameters say nothing about where the link goes.
+ * never spent. A destination written relative to the wrapper (//host/path)
+ * resolves against it, as its redirect would. Any other URL, or a wrapper
+ * whose destination is no http(s) URL, comes back as written. Hosts match
+ * exactly: on any other host the parameters say nothing about where the
+ * link goes.
  */
 export function unwrapRedirect(href: string): string {
   let url: URL;
@@ -129,7 +131,7 @@ export function unwrapRedirect(href: string): string {
   const target = wrappedTarget(href, url);
   if (!target) return href;
   try {
-    const out = new URL(target);
+    const out = new URL(target, url);
     return out.protocol === "https:" || out.protocol === "http:" ? out.href : href;
   } catch {
     return href;

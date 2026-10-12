@@ -14,6 +14,7 @@ import {
 } from "../src/abuse-judge/questions.js";
 import { JudgeError, judgeErrorClass } from "../src/abuse-judge/types.js";
 import { extractAnchors, visibleText } from "../src/email-insights.js";
+import { UNRESOLVED_DESTINATION } from "../src/links.js";
 
 describe("composeJudgeVerdict", () => {
   it("scores is_abuse and ORs high impersonation so a brand clone still flags", () => {
@@ -631,6 +632,49 @@ describe("buildJudgeBlock: the body as the reader sees it", () => {
       "  Own 0 -> acme.dev",
     ]);
     expect(rows).toHaveLength(30);
+  });
+
+  it("lists every link a client follows, read as a browser reads it", () => {
+    const block = buildJudgeBlock({
+      ...base,
+      html:
+        `<a title=" href='https://www.acme.dev/' " href="https://evil.example/x">Sign in</a>` +
+        '<form action="https://collect.example/post"><button>Send</button></form>' +
+        '<map><area href="https://area.example/" alt="Pay here"></map>' +
+        "<p>Or go to www.bare.example/login</p>" +
+        '<a href="https://exa mple.com/">Broken</a>',
+    });
+    expect(section(block, "Links (anchor text -> domain):")).toEqual([
+      "  Sign in -> evil.example",
+      "  (form) -> collect.example",
+      "  Pay here -> area.example",
+      "  bare.example/login -> bare.example",
+      "  Broken -> (unresolved)",
+    ]);
+  });
+
+  it("leads with a link it cannot read while the team has not cleared one", () => {
+    const block = buildJudgeBlock({
+      ...base,
+      html: '<a href="https://acme.dev/a">Own</a><a href="https://partner.example/">P</a><a href="data:text/html,x">Open</a>',
+      novelDomains: new Set([UNRESOLVED_DESTINATION]),
+    });
+    expect(section(block, "Links (anchor text -> domain):")).toEqual([
+      "  Open -> (unresolved)",
+      "  P -> partner.example",
+      "  Own -> acme.dev",
+    ]);
+  });
+
+  it("lists the links of a text part the judge reads", () => {
+    const block = buildJudgeBlock({
+      ...base,
+      html: null,
+      text: "Pay at https://pay-lure.example/boleto now",
+    });
+    expect(section(block, "Links (anchor text -> domain):")).toEqual([
+      "  https://pay-lure.example/boleto -> pay-lure.example",
+    ]);
   });
 
   it("decodes a known redirect wrapper before reducing a link to its domain, never a look-alike", () => {

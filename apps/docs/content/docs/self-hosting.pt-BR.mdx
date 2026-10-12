@@ -1047,11 +1047,15 @@ revisão, e a avaliação antes do SES junto com ela.
 
 **Destinos novos, em qualquer nível.** Uma mensagem também é avaliada antes
 do SES, seja qual for o nível da equipe (Confiável incluído), quando leva um
-destino que a equipe ainda não conhece: o domínio dono de um link (um nome
-como `x.pages.dev`, de um serviço gratuito, conta sozinho) ou do seu
-Reply-To, menos os domínios verificados da equipe. Uma avaliação abaixo de 80
-torna os destinos da mensagem conhecidos da equipe para sempre, assim como
-uma liberação do operador; um encurtador de links nunca se torna conhecido.
+destino que a equipe ainda não conhece: o domínio dono de um link que um
+cliente de e-mail seguiria (uma âncora, uma área de mapa de imagem, uma ação
+de formulário, um link em SVG ou um URL do texto, lido como o navegador lê e
+passando por até três redirecionadores; um nome como `x.pages.dev`, de um
+serviço gratuito, conta sozinho) ou do seu Reply-To, menos os domínios
+verificados da equipe. Um link que não dá para ler também conta como
+destino. Uma avaliação abaixo de 80 torna os destinos da mensagem conhecidos
+da equipe para sempre, assim como uma liberação do operador; um encurtador
+de links, ou um link que não dá para ler, nunca se torna conhecido.
 Uma transmissão é avaliada antes de gravar as cópias quando o próprio HTML
 leva um destino novo, e uma cópia renderizada quando um campo do contato
 colocou um nela; e-mail com links só para os domínios da própria equipe nunca
@@ -1129,10 +1133,13 @@ cor do fundo; o texto escondido desse jeito, numa seção própria (até 1.000
 caracteres), separado da linha de prévia que aparece na caixa de entrada e
 abre a mensagem (até 200); a parte em texto puro, quando menos de 80% das
 palavras dela aparecem no texto visível (até 1.500 caracteres); uma tabela
-com os textos dos links e seus domínios registráveis, com redirecionadores
-conhecidos, como o `/url?q=` do Google, decodificados antes, e os links para
-domínios que a equipe nunca usou e para fora dos domínios verificados dela
-listados primeiro (até 30 linhas); uma linha que avisa quando a mensagem
+com todo link que um cliente de e-mail seguiria (âncoras, áreas de mapa de
+imagem, ações de formulário, links em SVG e os URLs do texto), cada um com o
+seu texto e o domínio registrável onde ele chega, lido como o navegador lê e
+passando por até três redirecionadores conhecidos, como o `/url?q=` do
+Google, e os links para domínios que a equipe nunca usou, os que não dá para
+ler e os que saem dos domínios verificados dela listados primeiro (até 30
+linhas); uma linha que avisa quando a mensagem
 mostra menos de 100 caracteres de texto ao lado de uma imagem, de um anexo
 ou de um QR code desenhado com caracteres ou células de tabela; o número de
 imagens que ela mostra (`<img>`, fundos em CSS, VML do Outlook, SVG); os

@@ -1016,11 +1016,14 @@ hold off, and the screening before SES with it.
 
 **New destinations, at every tier.** A message is also judged before SES,
 whatever the team's tier (Trusted included), when it carries a destination
-the team has not cleared: the owner domain of a link (a free host's
-`x.pages.dev` counts on its own) or of its Reply-To, less the team's
-verified domains. A verdict under 80 clears the message's destinations for
-the team for good, and so does an operator's release; a link shortener is
-never cleared. A broadcast is judged before its fan-out when its own HTML
+the team has not cleared: the owner domain of a link a mail client would
+follow (an anchor, an image-map area, a form action, an SVG link or a URL in
+the text, read as a browser reads it and through up to three redirect
+wrappers; a free host's `x.pages.dev` counts on its own) or of its Reply-To,
+less the team's verified domains. A link that cannot be read counts as a
+destination too. A verdict under 80 clears the message's destinations for
+the team for good, and so does an operator's release; a link shortener, or a
+link that cannot be read, is never cleared. A broadcast is judged before its fan-out when its own HTML
 carries a new destination, and a rendered copy when a contact field put one
 there; mail that links only to the team's own domains never waits for this.
 When a new destination draws a phishing-type verdict from 80, its link
@@ -1089,10 +1092,12 @@ at 1px or less, transparent, or in its background's colour; the text hidden
 that way, in a section of its own (up to 1,000 characters), apart from the
 inbox preview line it opens with (up to 200); the plain-text part when fewer
 than 80% of its words appear in the visible text (up to 1,500 characters); a
-table of link anchor texts and their registrable domains, well-known redirect
-wrappers such as Google's `/url?q=` decoded first, and links to domains the
-team has never sent to and other links off its verified domains listed first
-(up to 30 rows); a line flagging a message that shows under 100 characters of
+table of every link a mail client would follow (anchors, image-map areas,
+form actions, SVG links and the URLs in the text), each with its anchor text
+and the registrable domain it lands on, read as a browser reads it and
+through up to three redirect wrappers such as Google's `/url?q=`, and links
+to domains the team has never sent to, links that cannot be read and other
+links off its verified domains listed first (up to 30 rows); a line flagging a message that shows under 100 characters of
 text beside an image, an attachment or a QR code drawn with characters or
 table cells; the number of images it shows (`<img>`, CSS backgrounds,
 Outlook's VML, SVG); the attachment names and content types; and the count of

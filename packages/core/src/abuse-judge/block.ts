@@ -1,9 +1,13 @@
 import { redactRevealedText } from "../content-reveal-render.js";
-import { type Anchor, extractAnchors } from "../email-insights.js";
-import { unescapeHtml } from "../html.js";
+import {
+  type BodyLink,
+  extractLinks,
+  type ResolvedLink,
+  resolveTextUrl,
+  UNRESOLVED_DESTINATION,
+} from "../links.js";
 import { maskEmailLocalParts } from "../mask.js";
 import { ownerDomain, registrableDomain, vouchedRegistrableDomain } from "../org-domain.js";
-import { unwrapRedirect } from "../url.js";
 import { decodeEntities, INVISIBLE, opaqueFactsOf, readBody } from "./body.js";
 import { type MediaFindings, renderMediaLines } from "./media.js";
 
@@ -106,49 +110,37 @@ function clip(text: string, max: number): string {
   return `${text.slice(0, max - tail)} […${text.length - max} characters left out…] ${text.slice(-tail)}`;
 }
 
-/** Where a link leads, a known redirect wrapper decoded: the host, and the name its row shows. */
-function linkTarget(href: string): { host: string | null; shown: string } {
-  const value = unwrapRedirect(unescapeHtml(href).trim());
-  if (/^https?:\/\//i.test(value)) {
-    try {
-      const host = new URL(value).hostname;
-      return { host, shown: registrableDomain(host) };
-    } catch {
-      return { host: null, shown: "(invalid)" };
-    }
-  }
-  if (/^mailto:/i.test(value)) return { host: null, shown: "mailto" };
-  if (/^tel:/i.test(value)) return { host: null, shown: "tel" };
-  return { host: null, shown: "(other)" };
+/** The name a link's row shows: the registrable domain it lands on, or what kind of link it is. */
+function destinationName(raw: string, link: ResolvedLink): string {
+  if (link.url) return registrableDomain(new URL(link.url).hostname);
+  if (link.unresolved) return "(unresolved)";
+  if (/^\s*mailto:/i.test(raw)) return "mailto";
+  if (/^\s*tel:/i.test(raw)) return "tel";
+  return "(other)";
 }
 
 /**
  * The link table, at most JUDGE_LINK_ROWS_MAX distinct rows: links to a
- * domain the team never used first, then other links off its verified
- * domains, then the rest, each group in document order, so a lure cannot
- * hide behind thirty links to the sender's own site.
+ * domain the team never used first (an unresolved link among them while
+ * the team has not cleared one), then other links off its verified domains,
+ * then the rest, each group in document order, so a lure cannot hide behind
+ * thirty links to the sender's own site.
  */
-function linkRows(anchors: Anchor[], verified: string[], novel?: ReadonlySet<string>): string[] {
+function linkRows(links: BodyLink[], verified: string[], novel?: ReadonlySet<string>): string[] {
   const owned = new Set(verified.map(ownerDomain));
-  const group = (host: string | null, shown: string): number => {
-    if (host === null) return shown === "(invalid)" ? 1 : 2;
+  const group = (link: BodyLink): number => {
+    if (link.unresolved) return novel?.has(UNRESOLVED_DESTINATION) ? 0 : 1;
+    if (!link.url) return 2;
+    const host = new URL(link.url).hostname;
     if (novel?.has(registrableDomain(host)) || novel?.has(ownerDomain(host))) return 0;
     return owned.has(ownerDomain(host)) ? 2 : 1;
   };
-  const groups: [Anchor, string][][] = [[], [], []];
-  const seen = new Map<string, [number, string]>();
-  for (const anchor of anchors) {
-    let target = seen.get(anchor.href);
-    if (!target) {
-      const { host, shown } = linkTarget(anchor.href);
-      target = [group(host, shown), shown];
-      seen.set(anchor.href, target);
-    }
-    groups[target[0]]?.push([anchor, target[1]]);
-  }
+  const groups: BodyLink[][] = [[], [], []];
+  for (const link of links) groups[group(link)]?.push(link);
   const rows = new Set<string>();
-  for (const [anchor, shown] of groups.flat()) {
-    rows.add(`  ${label(decodeEntities(anchor.text))} -> ${shown}`);
+  for (const link of groups.flat()) {
+    const text = link.source === "form" ? "(form)" : label(decodeEntities(link.text));
+    rows.add(`  ${text} -> ${destinationName(link.raw, link)}`);
     if (rows.size >= JUDGE_LINK_ROWS_MAX) break;
   }
   return [...rows];
@@ -187,8 +179,9 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
       return a.contentType ? `${name} (${oneLine(a.contentType)})` : name;
     })
     .join(", ");
+  // The text part's own links count when the judge reads it: as the body, or beside a different HTML.
   const rows = linkRows(
-    stripped ? extractAnchors(stripped.html) : [],
+    extractLinks(stripped?.html ?? null, !stripped || plainShown ? input.text : null),
     input.team.verifiedDomains,
     input.novelDomains,
   );
@@ -233,7 +226,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
   lines.push(
     ...renderMediaLines(input.media, {
       redact: redacted,
-      target: (href) => linkTarget(href).shown,
+      target: (href) => destinationName(href, resolveTextUrl(href)),
     }),
   );
   return lines.join("\n");

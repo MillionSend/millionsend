@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { rewriteForTracking } from "../src/link-tracking.js";
-import { verifyClickToken, verifyOpenToken } from "../src/tracking.js";
+import { makeClickToken, verifyClickToken, verifyOpenToken } from "../src/tracking.js";
 
 const key = randomBytes(32);
 const emailId = randomUUID();
@@ -72,6 +72,51 @@ describe("rewriteForTracking — click", () => {
     expect(out).toMatch(/^<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">a<\/a>/);
     expect(out).toMatch(/<a class=btn href = "https:\/\/track\.example\.com\/t\/c\/[^"]+">b<\/a>/);
     expect(out).toMatch(/<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">c<\/a>$/);
+  });
+
+  it("changes nothing but the href's value, byte for byte", () => {
+    const url = "https://acme.example/welcome?a=1&b=2";
+    const token = makeClickToken({ emailId, teamId, url, secretKey: key });
+    expect(
+      rewriteForTracking(
+        '<p><a class="btn" href="https://acme.example/welcome?a=1&amp;b=2" style="color:red">Hi</a></p>',
+        opts({ click: true }),
+      ),
+    ).toBe(
+      `<p><a class="btn" href="https://track.example.com/t/c/${token}" style="color:red">Hi</a></p>`,
+    );
+  });
+
+  it("rewrites a real <a> or <area> href only: never a decoy inside another attribute, nor a form", () => {
+    const decoy = `title=" href='https://www.team.dev/' "`;
+    const src =
+      `<a ${decoy} href="https://evil.example/x">a</a>` +
+      '<form action="https://acme.example/post"><button formaction="https://acme.example/f">b</button></form>' +
+      "<a/href=https://acme.example/slash>c</a>" +
+      '<map><area href="https://acme.example/area" alt="d"></map>';
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://evil.example/x",
+      "https://acme.example/slash",
+      "https://acme.example/area",
+    ]);
+    expect(out).toContain(`<a ${decoy} href="https://track.example.com/t/c/`);
+    expect(out).toContain('action="https://acme.example/post"');
+    expect(out).toContain('formaction="https://acme.example/f"');
+    expect(out).toMatch(/<a\/href="https:\/\/track\.example\.com\/t\/c\/[^"]+">c<\/a>/);
+  });
+
+  it("tracks the links of Outlook's conditional markup and leaves commented-out ones alone", () => {
+    const src =
+      '<!--[if mso]><a href="https://acme.example/outlook">o</a><![endif]-->' +
+      '<!-- <a href="https://acme.example/old">x</a> -->';
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://acme.example/outlook",
+    ]);
+    expect(out).toContain('<!-- <a href="https://acme.example/old">x</a> -->');
   });
 
   it("walks a crafted body of repeated unclosed hrefs in linear time", () => {

@@ -15,14 +15,18 @@ import {
 } from "./abuse-monitor.js";
 import { countDistinctRecipients } from "./accept-email.js";
 import type { DomainAgeResolver } from "./domain-age.js";
-import { extractAnchors, SHORTENER_HOSTS } from "./email-insights.js";
-import { unescapeHtml } from "./html.js";
+import { SHORTENER_HOSTS } from "./email-insights.js";
+import {
+  extractLinks,
+  type ResolvedLink,
+  resolveTextUrl,
+  UNRESOLVED_DESTINATION,
+} from "./links.js";
 import type { MonitorSettings } from "./monitor-settings.js";
 import { ownerDomain, registrableDomain } from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
 import { fetchTeamQuota } from "./team-plan.js";
-import { unwrapRedirect } from "./url.js";
 import { DAY_MS } from "./utc-day.js";
 
 /**
@@ -102,19 +106,20 @@ export function isShortener(domain: string): boolean {
   return [...SHORTENER_HOSTS].some((s) => domain === s || domain.endsWith(`.${s}`));
 }
 
-const TEXT_URL = /\bhttps?:\/\/[^\s<>"'()]+/gi;
 // What a link can resolve to: a DNS name (URL hands IDNs over in punycode),
 // or an address. A merge field still in a template is neither.
 const LINK_HOST = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])$/;
 
 /**
  * Where a message sends its reader: the owner domain (ownerDomain, so a free
- * host's x.pages.dev is its own) of every http(s) link in the HTML's anchors
- * and the text part, a known redirect wrapper read through to its target as
- * the judge reads it, and of each Reply-To address; less the team's verified
+ * host's x.pages.dev is its own) of every link a mail client would follow
+ * (extractLinks: anchors, image-map areas, form actions, SVG links and the
+ * URLs clients link in the text, each resolved as a browser resolves it and
+ * read through redirect wrappers), of `links`, the URLs read from its
+ * images and files, and of each Reply-To address; less the team's verified
  * domains and `ignore` (the platform's own hosts: unsubscribe and tracking
- * links), and of `links`, the URLs read from its images and files. Each
- * once, sorted.
+ * links). A link that leads nowhere this can read counts as
+ * UNRESOLVED_DESTINATION, so the mail is screened. Each once, sorted.
  *
  * A verified domain owns what shares its owner domain, which the suffix list
  * makes the registrable domain wherever one owner holds it: tx.acme.com.br
@@ -130,21 +135,13 @@ export function messageDestinations(input: {
   ignore?: ReadonlySet<string> | undefined;
 }): string[] {
   const hosts: string[] = [];
-  const link = (href: string) => {
-    const url = unwrapRedirect(href);
-    if (!/^https?:\/\//i.test(url)) return;
-    try {
-      const host = new URL(url).hostname;
-      if (LINK_HOST.test(host)) hosts.push(host);
-    } catch {
-      // Not a URL a mail client could open either.
-    }
+  const add = (link: ResolvedLink) => {
+    if (link.unresolved) hosts.push(UNRESOLVED_DESTINATION);
+    const host = link.url ? new URL(link.url).hostname : "";
+    if (LINK_HOST.test(host)) hosts.push(host);
   };
-  for (const anchor of input.html ? extractAnchors(input.html) : []) {
-    link(unescapeHtml(anchor.href).trim());
-  }
-  for (const match of (input.text ?? "").matchAll(TEXT_URL)) link(match[0]);
-  for (const url of input.links ?? []) link(url.trim());
+  for (const link of extractLinks(input.html, input.text)) add(link);
+  for (const url of input.links ?? []) add(resolveTextUrl(url));
   for (const address of input.replyTo ?? []) {
     const domain = parseSingleSender(address)?.domain;
     if (domain) hosts.push(domain);
