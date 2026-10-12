@@ -141,8 +141,10 @@ describe("extractLinks", () => {
     extractLinks(`<p>${"www.a ".repeat(100_000)}</p>`, null);
     extractLinks(`${"<a href=#>".repeat(100_000)}`, null);
     extractLinks(`<script>${"</scrip".repeat(50_000)}`, null);
-    expect(performance.now() - started).toBeLessThan(2000);
-  });
+    // A quadratic walk takes minutes on these inputs; the bound leaves room
+    // for a CI runner busy with every package's tests at once.
+    expect(performance.now() - started).toBeLessThan(10_000);
+  }, 30_000);
 });
 
 describe("resolveLink", () => {

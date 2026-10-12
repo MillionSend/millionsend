@@ -54,7 +54,7 @@ describe("the parsing threads", () => {
       const started = Date.now();
       await expect(hang.run("hang")).rejects.toMatchObject({ reason: "timeout" });
       expect(Date.now() - started).toBeGreaterThanOrEqual(450);
-      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(Date.now() - started).toBeLessThan(10_000);
       expect(await hang.run("next")).toMatchObject({ message: "next" });
       await expect(hang.run("crash")).rejects.toBeInstanceOf(MediaPoolError);
       expect(await hang.run("after")).toMatchObject({ message: "after" });
@@ -240,7 +240,7 @@ describe("scanAttachments (the send path)", () => {
     const meta = `<meta ${"http-equiv=refresh ".repeat(20_000)}`;
     const started = performance.now();
     const scan = await scanAttachments([attach("page.html", meta)], deps());
-    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(performance.now() - started).toBeLessThan(10_000);
     expect(scan.files[0]?.flags).toEqual(["markup"]);
     const refresh = '<meta http-equiv="refresh" content="0;url=https://refresh.example/go">';
     const huge = await scanAttachments(

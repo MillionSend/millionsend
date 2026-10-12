@@ -149,15 +149,15 @@ describe("link domain ages", () => {
         "slow-decoy.com": new Date(NOW.getTime() - 900 * DAY_MS),
         "fresh-lure-2.com": new Date(NOW.getTime() - DAY_MS),
       },
-      { "slow-decoy.com": 400 },
+      { "slow-decoy.com": 5_000 },
     );
     const started = Date.now();
     expect(
       await anyYoungLinkDomain(db, r, ["slow-decoy.com", "fresh-lure-2.com"], NOW, {
-        budgetMs: 5_000,
+        budgetMs: 10_000,
       }),
     ).toBe(true);
-    expect(Date.now() - started).toBeLessThan(300);
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });
 
