@@ -6,8 +6,8 @@ import {
   createLabel,
   deleteInboxes,
   deleteLabel,
+  findLiveInbox,
   getInbox,
-  getInboxSafety,
   getThread,
   getThreadEmail,
   INBOX_NOT_FOUND_MESSAGE,
@@ -16,6 +16,7 @@ import {
   type InboxError,
   type InboxSafety,
   inboxActorFromAuth,
+  isAdminRole,
   isAgentActor,
   latestVerificationCode,
   listInboxes,
@@ -119,13 +120,16 @@ export function registerInboxRoutes(
   const cursorNotFound = (c: Context<Env>) => notFound(c, CURSOR_NOT_FOUND_MESSAGE);
 
   /**
-   * SECURITY: the inbox must be the team's, live, and the key's own when the
-   * key is inbox-scoped; anything else reads as not found.
+   * SECURITY: the inbox must be the team's, live, the key's own when the key
+   * is inbox-scoped, and on the key's domain when it is domain-scoped (as
+   * its received-mail reads are); anything else reads as not found.
    */
   const ownInboxSafety = async (c: Context<Env>, inboxId: string) => {
     const auth = c.get("auth");
     if (auth.inboxId && auth.inboxId !== inboxId.toLowerCase()) return null;
-    return getInboxSafety(db, { teamId: auth.teamId, inboxId });
+    const inbox = await findLiveInbox(db, { teamId: auth.teamId, inboxId });
+    if (!inbox || (auth.domainId !== null && inbox.domainId !== auth.domainId)) return null;
+    return inbox.safety;
   };
   const inboxFound = async (c: Context<Env>, inboxId: string) =>
     (await ownInboxSafety(c, inboxId)) !== null;
@@ -186,6 +190,7 @@ export function registerInboxRoutes(
         plan: auth.plan,
         isCloud: deps.isCloud,
         actor: actorOf(c),
+        onlyDomainId: auth.domainId,
         // JSON never carries an undefined key, so the parsed partial is exactly one.
         input: { ...body, safety: body.safety as Partial<InboxSafety> | undefined },
       });
@@ -217,6 +222,7 @@ export function registerInboxRoutes(
         query: paging.value,
         kind: q.kind,
         onlyInboxId: auth.inboxId,
+        onlyDomainId: auth.domainId,
       });
       if (page === "bad_cursor") return cursorNotFound(c);
       return c.json({ object: "list" as const, has_more: page.hasMore, data: page.data }, 200);
@@ -250,7 +256,9 @@ export function registerInboxRoutes(
         idOrEmail: ref.value,
         onlyInboxId: auth.inboxId,
       });
-      return inbox ? c.json(inbox, 200) : notFound(c, INBOX_NOT_FOUND_MESSAGE);
+      return inbox && (auth.domainId === null || inbox.domain_id === auth.domainId)
+        ? c.json(inbox, 200)
+        : notFound(c, INBOX_NOT_FOUND_MESSAGE);
     },
   );
 
@@ -282,11 +290,14 @@ export function registerInboxRoutes(
       ) {
         return invalid(c, "Provide at least one of name, from_name or expires_in");
       }
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const result = await updateInbox(db, inboxDeps(), {
         teamId: auth.teamId,
         inboxId: inbox_id,
         actor: actorOf(c),
         patch: body,
+        // An API key carries no role (only owners and admins mint full-access keys); an MCP call does.
+        mayShorten: auth.role === undefined || isAdminRole(auth.role),
       });
       return result.ok ? c.json(result.inbox, 200) : failure(c, result.error);
     },
@@ -309,6 +320,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id } = c.req.valid("param");
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const deleted = await deleteInboxes(db, inboxDeps(), {
         teamId: auth.teamId,
         inboxIds: [inbox_id],
@@ -416,6 +428,7 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const { inbox_id } = c.req.valid("param");
+      if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const result = await updateInboxSafety(db, inboxDeps(), {
         teamId: auth.teamId,
         inboxId: inbox_id,

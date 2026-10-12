@@ -4,6 +4,7 @@ import {
   MONITOR_SETTING_DEFAULTS,
   type MonitorDeps,
   type MonitorSettings,
+  verifyForwardMarker,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -135,7 +136,9 @@ describe("the inbox.forward job", () => {
       .from(schema.emails)
       .where(eq(schema.emails.inboxId, inbox.id));
     expect(email).toMatchObject({ from: inbox.emailAddress, to: [w.owner], threadId });
-    expect(email?.headers?.["X-MillionSend-Forwarded"]).toBe(inbox.id);
+    const marker = email?.headers?.["X-MillionSend-Forwarded"] ?? "";
+    expect(marker.startsWith(`${inbox.id}.`)).toBe(true);
+    expect(verifyForwardMarker(w.keys, marker)).toBe(true);
   });
 
   it("logs a refusal by its name only and does not retry it", async () => {

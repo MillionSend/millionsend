@@ -225,10 +225,15 @@ export async function markDelivered(
   const moved = to !== null && !isFirst;
   await tx
     .update(t)
-    .set({ lastMessageAt: p.now, ...(to ? { folder: to, trashedAt: null } : {}) })
+    .set({
+      lastMessageAt: p.now,
+      subject: sql`coalesce(nullif(${t.subject}, ''), ${p.row.subject})`,
+      ...(to ? { folder: to, trashedAt: null } : {}),
+    })
     .where(eq(t.id, thread.id));
   const from = p.row.from.toLowerCase();
-  if (from) {
+  // A From anyone could have forged must not make its address a known correspondent.
+  if (from && membership.senderTrust !== "unauthenticated" && membership.senderTrust !== "failed") {
     const c = schema.inboxCorrespondents;
     await tx
       .insert(c)

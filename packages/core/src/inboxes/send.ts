@@ -1,7 +1,7 @@
 import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { simpleParser } from "mailparser";
 import {
   type AcceptEmailAuth,
@@ -24,7 +24,7 @@ import { getMonitorSettingsRow, resolveMonitorSettings } from "../monitor-settin
 import { registrableDomain } from "../org-domain.js";
 import { monthlyQuotaMessage, type QuotaTeamRow } from "../plans.js";
 import { outgoingSecretValues } from "../receiving/codes.js";
-import { resolveThread, teamMemberEmails } from "../receiving/inbox-routing.js";
+import { inboxKey, resolveThread, teamMemberEmails } from "../receiving/inbox-routing.js";
 import {
   openReceivedRaw,
   RECEIVED_EMAIL_META_COLUMNS,
@@ -56,7 +56,13 @@ import {
 } from "./compose.js";
 import { draftForHeldSend, loadDraftWire } from "./drafts.js";
 import { threadEmailEvent } from "./events.js";
-import { type InboxKeys, secretMac, threadTokenId } from "./keys.js";
+import {
+  forwardMarker,
+  type InboxKeys,
+  secretMac,
+  threadTokenId,
+  verifyForwardMarker,
+} from "./keys.js";
 import { findLiveInbox, RECEIVED_SECRET_WINDOW, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
 import {
   type AgentSendDecision,
@@ -164,12 +170,12 @@ const TRUSTED_TIERS: ReadonlySet<string> = new Set(["owner", "allowlisted", "kno
 
 /**
  * A Reply-To counts as its message's own only at the From's organization,
- * or when that message came from someone the inbox already trusts: anything
- * else could steer a reply to a third party.
+ * or when that message came from someone the inbox already trusts (a null
+ * tier trusts no one): anything else could steer a reply to a third party.
  */
-function replyToTrusted(replyTo: string, from: string, senderTrust: string): boolean {
+function replyToTrusted(replyTo: string, from: string, senderTrust: string | null): boolean {
   const org = (a: string) => registrableDomain(a.slice(a.lastIndexOf("@") + 1));
-  return TRUSTED_TIERS.has(senderTrust) || org(replyTo) === org(from);
+  return (senderTrust !== null && TRUSTED_TIERS.has(senderTrust)) || org(replyTo) === org(from);
 }
 
 /** The answered message's Reply-To entries it does not vouch for. */
@@ -180,20 +186,36 @@ export function untrustedReplyTos(target: SendTarget): string[] {
   );
 }
 
-/** The From and trusted Reply-To of every delivered inbound message of a thread. */
-async function threadSenders(db: Db, inboxId: string, threadId: string): Promise<Set<string>> {
+/**
+ * The From and trusted Reply-To of every delivered inbound message of a
+ * thread. On the shared domain only authenticated senders count, since a
+ * forged From would make a "reply" a first message to whoever it names, and
+ * a Reply-To only at its From's organization: an owner or allowlisted
+ * sender is someone the team named, not someone who proved the address.
+ */
+async function threadSenders(
+  db: Db,
+  p: { inboxId: string; threadId: string; shared: boolean },
+): Promise<Set<string>> {
   const m = schema.receivedEmailInboxes;
   const r = schema.receivedEmails;
   const rows = await db
     .select({ from: r.from, replyTo: r.replyTo, trust: m.senderTrust })
     .from(m)
     .innerJoin(r, eq(r.id, m.receivedEmailId))
-    .where(and(eq(m.inboxId, inboxId), eq(m.threadId, threadId), isNotNull(m.deliveredAt)));
+    .where(
+      and(
+        eq(m.inboxId, p.inboxId),
+        eq(m.threadId, p.threadId),
+        isNotNull(m.deliveredAt),
+        p.shared ? notInArray(m.senderTrust, ["unauthenticated", "failed"]) : undefined,
+      ),
+    );
   const out = new Set<string>();
   for (const row of rows) {
     if (row.from) out.add(addressKey(row.from));
     for (const rt of row.replyTo) {
-      if (replyToTrusted(rt, row.from, row.trust)) out.add(addressKey(rt));
+      if (replyToTrusted(rt, row.from, p.shared ? null : row.trust)) out.add(addressKey(rt));
     }
   }
   return out;
@@ -218,9 +240,15 @@ async function classifyRecipients(
   burstExceeded: boolean;
 }> {
   const c = schema.inboxCorrespondents;
+  // The shared domain is every team's: there, only addresses a member proved
+  // (a login) or an authenticated sender count as people the inbox answers,
+  // never owner_addresses or allowlist entries a team typed in.
+  const shared = p.inbox.domainId === null;
   const [logins, senders, known] = await Promise.all([
     teamMemberEmails(db, p.teamId),
-    p.threadId ? threadSenders(db, p.inbox.id, p.threadId) : new Set<string>(),
+    p.threadId
+      ? threadSenders(db, { inboxId: p.inbox.id, threadId: p.threadId, shared })
+      : new Set<string>(),
     p.recipients.length > 0
       ? db
           .select({ address: c.address, burstStart: c.burstStart, burstCount: c.burstCount })
@@ -228,7 +256,10 @@ async function classifyRecipients(
           .where(and(eq(c.inboxId, p.inbox.id), inArray(c.address, [...p.recipients])))
       : [],
   ]);
-  const owners = new Set([...logins, ...p.inbox.safety.owner_addresses.map(addressKey)]);
+  const owners = new Set([
+    ...logins,
+    ...(shared ? [] : p.inbox.safety.owner_addresses.map(addressKey)),
+  ]);
   const knownAddresses = new Set(known.map((k) => k.address));
   const burstExceeded = known.some(
     (k) =>
@@ -239,7 +270,7 @@ async function classifyRecipients(
   const recipients = p.recipients.map((address) => {
     const cls: RecipientClass = owners.has(address)
       ? "owner"
-      : allowlisted(address, p.inbox.safety.allowlist)
+      : !shared && allowlisted(address, p.inbox.safety.allowlist)
         ? "allowlisted"
         : senders.has(address)
           ? "thread"
@@ -426,6 +457,23 @@ async function receivedAutomated(
   return row ? row.automated : undefined;
 }
 
+/** The RFC 3834 reason of the newest message the inbox received in a thread; null for none. */
+async function latestInboundAutomated(
+  db: Db,
+  p: { inboxId: string; threadId: string },
+): Promise<string | null> {
+  const r = schema.receivedEmails;
+  const m = schema.receivedEmailInboxes;
+  const [row] = await db
+    .select({ automated: r.automated })
+    .from(m)
+    .innerJoin(r, eq(r.id, m.receivedEmailId))
+    .where(and(eq(m.inboxId, p.inboxId), eq(m.threadId, p.threadId), isNotNull(m.deliveredAt)))
+    .orderBy(desc(m.createdAt))
+    .limit(1);
+  return row?.automated ?? null;
+}
+
 /**
  * The acceptEmail hook for every surface that does not decide itself (POST
  * /emails, batch, the SMTP relay, MCP send_email): a From that is an inbox
@@ -439,9 +487,11 @@ export async function gateGenericSend(
 ): Promise<{ ok: true; inbox: InboxAccept | null } | Exclude<AcceptEmailResult, { ok: true }>> {
   const { auth, payload } = p;
   const address = parseSingleSender(payload.from)?.address;
-  const inbox = address
-    ? await findLiveInbox(db, { teamId: auth.teamId, address, now: p.now })
-    : null;
+  // A +tag form of an inbox's address is that inbox's own, as routing reads it.
+  let inbox: InboxRow | null = null;
+  for (const key of address ? new Set([inboxKey(address, false), inboxKey(address, true)]) : []) {
+    inbox ??= await findLiveInbox(db, { teamId: auth.teamId, address: key, now: p.now });
+  }
   if (!inbox) {
     if (auth.inboxId) return { ok: false, reason: "inbox_scope" };
     if (isSharedInboxSender(payload.from, deps.sharedInboxDomain)) {
@@ -449,7 +499,13 @@ export async function gateGenericSend(
     }
     return { ok: true, inbox: null };
   }
-  if (auth.inboxId && auth.inboxId !== inbox.id) return { ok: false, reason: "inbox_scope" };
+  // An inbox-scoped key sends from its address as written, never a +tag form, as over SMTP.
+  if (
+    auth.inboxId &&
+    (auth.inboxId !== inbox.id || address?.toLowerCase() !== inbox.emailAddress)
+  ) {
+    return { ok: false, reason: "inbox_scope" };
+  }
   if (!deps.inboxKeys) throw new Error("inboxKeys is not configured");
   const inReplyTo = msgIds(headerValue(payload.headers, "In-Reply-To"))[0];
   const refs = msgIds([
@@ -462,14 +518,15 @@ export async function gateGenericSend(
     refs,
   });
   const threadId = thread?.threadId ?? null;
-  const automated =
-    threadId && inReplyTo
-      ? await receivedAutomated(db, {
-          teamId: auth.teamId,
-          inboxId: inbox.id,
-          messageId: inReplyTo,
-        })
-      : undefined;
+  const parent = inReplyTo
+    ? await receivedAutomated(db, { teamId: auth.teamId, inboxId: inbox.id, messageId: inReplyTo })
+    : undefined;
+  // Threaded by References or a token alone, it answers the thread's newest received message.
+  const automated = threadId
+    ? parent !== undefined
+      ? parent
+      : await latestInboundAutomated(db, { inboxId: inbox.id, threadId })
+    : undefined;
   const decision = await decideInboxSend(db, deps.inboxKeys, {
     teamId: auth.teamId,
     inbox,
@@ -1031,7 +1088,7 @@ export async function openReceivedForForward(
   html: string | null;
   text: string | null;
   attachments: EmailAttachment[];
-  /** X-MillionSend-Forwarded: the message is already one of our forwards. */
+  /** X-MillionSend-Forwarded as received: one of our forwards when verifyForwardMarker says so. */
   forwardedBy: string | null;
 } | null> {
   const r = schema.receivedEmails;
@@ -1840,7 +1897,12 @@ export async function forwardToForwardTargets(
     .where(and(eq(r.id, job.receivedEmailId), eq(r.teamId, teamId)));
   if (!row || row.virusVerdict === "fail") return null;
   const opened = await openReceivedForForward(db, deps, { teamId, id: row.id });
-  if (!opened || opened.forwardedBy !== null) return null;
+  if (
+    !opened ||
+    (opened.forwardedBy !== null && verifyForwardMarker(deps.inboxKeys, opened.forwardedBy))
+  ) {
+    return null;
+  }
   const domainId = await inboxSendDomain(db, teamId, inbox);
   if (isOutcome(domainId)) return domainId;
   const [billing] = await db
@@ -1878,7 +1940,7 @@ export async function forwardToForwardTargets(
     // the original in the dashboard. A link to it if owners ask for the files.
     attachments: forwardedFilesProblem(opened.attachments) === null ? opened.attachments : [],
     headers: {
-      "X-MillionSend-Forwarded": inbox.id,
+      "X-MillionSend-Forwarded": forwardMarker(deps.inboxKeys, inbox.id),
       ...(inbox.kind === "agent" ? { "Auto-Submitted": "auto-generated" } : {}),
     },
     approved: true,

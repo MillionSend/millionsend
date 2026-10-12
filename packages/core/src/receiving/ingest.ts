@@ -232,7 +232,7 @@ export async function ingestReceivedEmail(
     subject: metadata.subject,
     html: metadata.html,
     text: metadata.text,
-    htmlTruncated: metadata.htmlTruncated,
+    bodyTruncated: metadata.bodyTruncated,
     fromDomain: from ? from.slice(from.lastIndexOf("@") + 1) : null,
   });
   const facts: MessageFacts = {
@@ -548,7 +548,9 @@ async function admit(
       .values({
         teamId: row.teamId,
         inboxId: inbox.id,
-        subject: row.subject,
+        // markDelivered names it after the first message delivered into it,
+        // so a held message's subject never reaches an agent through the thread.
+        subject: "",
         folder: decision.action === "spam" ? "spam" : "inbox",
         lastMessageAt: now,
         createdAt: now,

@@ -7,6 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   encodeInboxActor,
   type InboxActor,
+  inboxActorFromAuth,
+  isAgentActor,
   parseInboxActor,
   recordInboxActivity,
 } from "../src/inboxes/activity.js";
@@ -133,6 +135,32 @@ describe("parseInboxActor", () => {
       { kind: "system" },
     ]);
     expect(parseInboxActor("garbage")).toEqual({ kind: "system" });
+  });
+});
+
+describe("inboxActorFromAuth", () => {
+  it("reads a key as itself and anything else as an agent, never as the system", () => {
+    const auth = {
+      teamId: "t",
+      plan: "pro",
+      billing: {},
+      permission: "full_access",
+      domainId: null,
+      inboxId: null,
+    } as never as Parameters<typeof inboxActorFromAuth>[0];
+    expect(inboxActorFromAuth({ ...auth, apiKeyId: "k1" })).toEqual({
+      kind: "api_key",
+      apiKeyId: "k1",
+      inboxId: null,
+    });
+    const mcp = inboxActorFromAuth({ ...auth, apiKeyId: null, userId: "u", oauthClientId: "c" });
+    expect(mcp).toEqual({ kind: "oauth", userId: "u", clientId: "c" });
+    for (const unknown of [
+      { ...auth, apiKeyId: null },
+      { ...auth, apiKeyId: null, userId: "u" },
+    ]) {
+      expect(isAgentActor(inboxActorFromAuth(unknown))).toBe(true);
+    }
   });
 });
 

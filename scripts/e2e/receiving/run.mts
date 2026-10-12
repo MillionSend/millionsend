@@ -624,6 +624,40 @@ async function smtp(raw: Buffer, envelope: Envelope, mode: "starttls" | "plain" 
   }
 }
 
+/**
+ * Hands a message to the app as the MX does after authenticating it, with
+ * the sender's domain vouching for it: the harness has no DNS to sign
+ * against, so real SMTP can only bring unauthenticated mail.
+ */
+async function deliverAuthenticated(raw: Buffer, p: { from: string; to: string[] }) {
+  const domain = p.from.slice(p.from.lastIndexOf("@") + 1);
+  const envelope = {
+    mailFrom: p.from,
+    recipients: p.to,
+    clientIp: "192.0.2.25",
+    helo: `mail.${domain}`,
+    tls: null,
+    auth: { spf: "pass", dkim: "pass", dmarc: "pass", arc: "none" },
+    authDetail: {
+      spf: { result: "pass", domain },
+      dkim: { aligned: [domain] },
+      dmarc: { result: "pass", policy: "reject", domain },
+    },
+    receivedAt: new Date().toISOString(),
+  };
+  const res = await fetch(`${API}/internal/mx/deliver`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${ingestSecret}`,
+      "content-type": "application/octet-stream",
+      "x-millionsend-envelope": Buffer.from(JSON.stringify(envelope)).toString("base64url"),
+    },
+    body: raw,
+  });
+  assert.equal(res.status, 200, await res.clone().text());
+  return res.status;
+}
+
 async function refused(raw: Buffer, envelope: Envelope): Promise<SmtpRefusal> {
   try {
     const info = await smtp(raw, envelope);
@@ -2327,8 +2361,9 @@ try {
         `expires in 1h (${lifetime} ms)`,
       );
 
-      // No DNS here, so the sender is unauthenticated: accept_from anyone lets
-      // the judge see it, and the fake judge finds nothing.
+      // A shared address answers only senders whose domain vouches for them,
+      // so the sign-up mail comes as the MX hands over an authenticated one;
+      // accept_from anyone lets the judge see it, and the fake judge finds nothing.
       const mid = msgId("signup");
       const raw = await compose({
         from: `hello@${ACME}`,
@@ -2340,7 +2375,7 @@ try {
       const waiting = tool("wait_for_received_email", { inbox_id: inbox.id, timeout: 20 });
       await sleep(500);
       note(
-        `(b) smtp: ${(await smtp(raw, { from: `hello@${ACME}`, to: [inbox.email_address] })).response}`,
+        `(b) MX deliver, DMARC-aligned: ${await deliverAuthenticated(raw, { from: `hello@${ACME}`, to: [inbox.email_address] })}`,
       );
       const waited = await waiting;
       assert.equal(waited.data.status, "received", JSON.stringify(waited.data));

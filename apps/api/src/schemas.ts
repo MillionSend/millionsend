@@ -435,12 +435,13 @@ export const listReceivedEmailsResponseSchema = z
           id: z.uuid(),
           inbox_id: z.uuid().nullable(),
           reason: z.enum(["pending", "quarantined"]),
+          quarantine_reason: z.enum(QUARANTINE_REASONS).nullable(),
           created_at: z.string(),
         }),
       )
       .optional()
       .describe(
-        "MillionSend extension, with wait only: matching mail that arrived but is held (being screened or quarantined), ids only",
+        "MillionSend extension, with wait only: matching mail that arrived but is held (being screened or quarantined), ids and why only",
       ),
   })
   .openapi("ListReceivedEmailsResponse");

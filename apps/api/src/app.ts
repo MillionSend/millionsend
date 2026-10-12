@@ -25,6 +25,7 @@ import {
   countParked,
   DAY_MS,
   decryptEmailBody,
+  deferredEnqueue,
   emitContactEvents,
   emitSuppressionEvents,
   enforceDomainWarmup,
@@ -3467,7 +3468,16 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         ),
         responseBody: await loggedBody(path, responseType, responseLength, () => resClone.text()),
       });
-    })().catch((err) => console.error("api request log failed", err));
+    })().catch((err: unknown) => {
+      // A failed insert's message quotes the row, request and response bodies
+      // included, so only its class and SQLSTATE reach the process log.
+      const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
+      console.error(
+        "api request log failed",
+        err instanceof Error ? err.name : "error",
+        typeof code === "string" ? code : "",
+      );
+    });
   });
 
   // Failed authentications are counted per client IP: every attempt costs a
@@ -3952,6 +3962,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // enqueue happens only after commit (reconcile re-enqueues any lost job).
     try {
       const quota = teamQuota(auth.billing, deps.isCloud);
+      const inboxWebhooks = deferredEnqueue();
       const accepted = await deps.db.transaction(async (dbTx) => {
         const txDb = dbTx as unknown as Db;
         const out: {
@@ -3970,6 +3981,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             tx: txDb,
             quota: "deferred",
             parkUnderReview: true,
+            inboxWebhooks: inboxWebhooks.enqueue,
           });
           if (!result.ok) throw new AcceptRejectedError(result, index);
           underReview ||= result.underReview;
@@ -4147,6 +4159,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           console.error("batch email.send enqueue failed; reconcile sweep will recover", err);
         }
       }
+      await inboxWebhooks.flush(deps.enqueueWebhookDeliveries);
       return c.json(
         {
           data: accepted.map((o) => ({ id: o.id })),

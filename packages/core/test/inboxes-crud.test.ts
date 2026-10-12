@@ -293,7 +293,13 @@ describe("createInbox", () => {
 
   it("checks names, from_name and a custom inbox's lifetime", async () => {
     const t = await team("create-fields");
-    for (const from of ["a@b.test", "Acme <x>", "Support: now", "Call +1 (888) 555-0199"]) {
+    for (const from of [
+      "a@b.test",
+      "Acme <x>",
+      "Support: now",
+      "Call +1 (888) 555-0199",
+      "x".repeat(79),
+    ]) {
       const result = await create(t.teamId, { email_address: `f@${t.receiving}`, from_name: from });
       expect(result.ok ? null : result.error.status, from).toBe(422);
     }
@@ -305,6 +311,13 @@ describe("createInbox", () => {
       name: "  Support desk ",
     });
     expect(named).toMatchObject({ from_name: "Acme Support", name: "Support desk" });
+    // Resend's limit: 78 characters.
+    const long = "Acme Support ".repeat(6);
+    const resend = await created(t.teamId, {
+      email_address: `long@${t.receiving}`,
+      from_name: long,
+    });
+    expect(resend.from_name).toBe(long.trim());
     const longName = await create(t.teamId, {
       email_address: `n@${t.receiving}`,
       name: "x".repeat(65),
@@ -496,6 +509,7 @@ describe("updateInbox and updateInboxSafety", () => {
       inboxId: inbox.id,
       actor: person,
       patch: { name: "Desk", from_name: "Acme Desk", expires_in: "7d" },
+      mayShorten: true,
     });
     expect(result.ok && result.inbox).toMatchObject({ name: "Desk", from_name: "Acme Desk" });
     expect(result.ok && result.inbox.expires_at).toBeTruthy();
@@ -504,8 +518,18 @@ describe("updateInbox and updateInboxSafety", () => {
       inboxId: inbox.id,
       actor: person,
       patch: { from_name: "", expires_in: null },
+      mayShorten: false,
     });
     expect(cleared.ok && cleared.inbox).toMatchObject({ from_name: null, expires_at: null });
+    // Expiring sooner deletes the inbox sooner: owners and admins only, as delete is.
+    const sooner = await updateInbox(db, deps, {
+      teamId: t.teamId,
+      inboxId: inbox.id,
+      actor: person,
+      patch: { expires_in: "1h" },
+      mayShorten: false,
+    });
+    expect(sooner.ok ? null : sooner.error).toMatchObject({ status: 403, name: "forbidden" });
     const [first] = await deliveries(hook);
     expect(first?.payload).toMatchObject({
       data: { source: "dashboard", inbox: { name: "Desk" } },
@@ -519,6 +543,7 @@ describe("updateInbox and updateInboxSafety", () => {
       inboxId: inbox.id,
       actor: person,
       patch: { name: "x" },
+      mayShorten: true,
     });
     expect(gone.ok ? null : gone.error).toEqual({
       status: 404,

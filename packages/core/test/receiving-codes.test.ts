@@ -152,4 +152,19 @@ describe("received secrets", () => {
     expect(out).toContain("https://x.example/login?t=Zz9Zz9Zz9Zz9Zz9Zz9Zz9&a=1");
     expect(out).toContain("Zz9Zz9Zz9Zz9Zz9Zz9Zz9");
   });
+
+  it("finds a code spread out to slip past the shapes: separators, tags, invisible and fullwidth characters, a longer number", () => {
+    for (const written of [
+      "your code: 4 8 2 9 1 3",
+      "48 · 29 · 13",
+      "<p>48<b></b>2913</p>",
+      "4\u200b8\u200b2\u200b9\u200b1\u200b3",
+      "４８２９１３",
+      "ref 1 4 8 2 9 1 3 7",
+    ]) {
+      expect(outgoingSecretValues(written), written).toContain("482913");
+    }
+    expect(outgoingSecretValues("C O D E: A B 1 2 C D")).toContain("AB12CD");
+    expect(outgoingSecretValues("Meet at 5 pm on the 3rd")).not.toContain("53");
+  });
 });

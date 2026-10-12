@@ -66,6 +66,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       permission: schema.apiKeys.permission,
       domainId: schema.apiKeys.domainId,
       inboxId: schema.apiKeys.inboxId,
+      inboxExpiresAt: schema.inboxes.expiresAt,
       plan: schema.teams.plan,
       planQuota: schema.teams.planQuota,
       currentPeriodStart: schema.teams.currentPeriodStart,
@@ -75,10 +76,13 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
     })
     .from(schema.apiKeys)
     .innerJoin(schema.teams, eq(schema.apiKeys.teamId, schema.teams.id))
+    .leftJoin(schema.inboxes, eq(schema.inboxes.id, schema.apiKeys.inboxId))
     .where(and(eq(schema.apiKeys.tokenPrefix, prefix), isNull(schema.apiKeys.revokedAt)));
   const match = candidates.find((k) => verifyApiKey(token, k.keyHash));
   if (!match) return null;
   const now = Date.now();
+  // An inbox key dies with its inbox's lifetime, before the sweep revokes it.
+  if (match.inboxExpiresAt && match.inboxExpiresAt.getTime() <= now) return null;
   if (!match.lastUsedAt || now - match.lastUsedAt.getTime() > LAST_USED_STAMP_INTERVAL_MS) {
     db.update(schema.apiKeys)
       .set({ lastUsedAt: new Date(now) })

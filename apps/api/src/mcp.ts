@@ -14,6 +14,7 @@ import {
   type McpScope,
   mcpResourceUrl,
   QUOTA_COLUMNS,
+  readReceived,
   type TeamRole,
   THREAD_FOLDERS,
 } from "@millionsend/core";
@@ -1075,7 +1076,12 @@ function buildServer(
         if (!list.ok) return toolResult(list.json, false);
         const { data, held = [] } = list.json as {
           data: Record<string, unknown>[];
-          held?: { id: string; inbox_id: string | null; reason: string }[];
+          held?: {
+            id: string;
+            inbox_id: string | null;
+            reason: string;
+            quarantine_reason: string | null;
+          }[];
         };
         const [email] = data;
         if (!email) {
@@ -1087,7 +1093,7 @@ function buildServer(
                   status: "quarantined",
                   email_id: quarantined.id,
                   inbox_id: quarantined.inbox_id,
-                  reason: quarantined.reason,
+                  reason: quarantined.quarantine_reason ?? quarantined.reason,
                 }
               : { status: "timeout" },
           );
@@ -1245,7 +1251,7 @@ function buildServer(
             .boolean()
             .optional()
             .describe(
-              "Give the oldest received message's whole plain-text part, quoted history included: the only record of what came before the thread",
+              "Give the oldest received message with its quoted history, hidden text still taken out: the only record of what came before the thread",
             ),
         }),
         readOnly: true,
@@ -1264,11 +1270,22 @@ function buildServer(
           emails.push(...data);
           more = has_more && data.length > 0;
         }
+        // The quoted history comes from the same read as extracted_text, never
+        // from the plain-text part, which can say what the HTML a person sees hides.
+        const withQuoted = (e: ThreadEmailRead) => {
+          const { text, quoted } = readReceived({
+            subject: "",
+            html: e.html,
+            text: e.text,
+            fromDomain: null,
+          }).extracted;
+          return [text, quoted].filter(Boolean).join("\n\n");
+        };
         const fitted = fitThreadBudget(
           emails.map((e, i) =>
             e.direction === "outbound"
               ? (e.text ?? e.html ?? "")
-              : ((include_quoted && i === 0 ? e.text : null) ?? e.extracted_text ?? ""),
+              : ((include_quoted && i === 0 ? withQuoted(e) : null) ?? e.extracted_text ?? ""),
           ),
         );
         return toolResult({
@@ -1963,7 +1980,7 @@ function buildServer(
       {
         title: "Create inbox",
         description:
-          "Create an inbox: an address on one of the team's verified domains with receiving on or, with email_address omitted, a random address on the instance's shared inbox domain, which needs no DNS, only replies inside its threads and expires (24h by default, at most 30d). kind agent (the default) screens incoming mail and holds risky sends as drafts for a person; human is a team mailbox. accept_from decides who may write in; mail that fails it is quarantined. Every other safety rule keeps the kind's default and is changed by a person in the dashboard. Returns the inbox.",
+          "Create an agent inbox: an address on one of the team's verified domains with receiving on or, with email_address omitted, a random address on the instance's shared inbox domain, which needs no DNS, only replies inside its threads and expires (24h by default, at most 30d). It screens incoming mail and holds risky sends as drafts for a person; human inboxes (team mailboxes) are made in the dashboard. accept_from decides who may write in; mail that fails it is quarantined. Every other safety rule keeps the agent default and is changed by a person in the dashboard. Returns the inbox.",
         inputSchema: z.object({
           email_address: z
             .string()
@@ -1973,15 +1990,20 @@ function buildServer(
             ),
           name: createInboxRequestSchema.shape.name,
           from_name: createInboxRequestSchema.shape.from_name,
-          kind: createInboxRequestSchema.shape.kind,
+          kind: z.literal("agent").optional().describe("Always agent"),
           expires_in: createInboxRequestSchema.shape.expires_in,
           accept_from: inboxSafetyPatchBodySchema.shape.accept_from,
         }),
       },
       // SECURITY: accept_from is the one safety rule an agent may set, and only
-      // when it creates the inbox; the schema strips any other safety field.
+      // when it creates the inbox; the schema strips any other safety field. A
+      // human inbox would come without the send rules, so an agent never makes one.
       ({ accept_from, ...body }) =>
-        api("POST", "/inboxes", accept_from ? { ...body, safety: { accept_from } } : body),
+        api("POST", "/inboxes", {
+          ...body,
+          kind: "agent",
+          ...(accept_from ? { safety: { accept_from } } : {}),
+        }),
     );
     tool(
       "update_inbox",
@@ -1989,7 +2011,7 @@ function buildServer(
       {
         title: "Update inbox",
         description:
-          'Rename an inbox, change the name recipients see (from_name), or give it a new lifetime counted from now (expires_in, like "24h" or "7d"; null never expires, which a shared-domain address refuses). An inbox is deleted when it expires. Returns the inbox.',
+          'Rename an inbox, change the name recipients see (from_name), or give it a new lifetime counted from now (expires_in, like "24h" or "7d"; null never expires, which a shared-domain address refuses). An inbox is deleted when it expires, so making it expire sooner takes the owner or admin role. Returns the inbox.',
         inputSchema: updateInboxRequestSchema.extend({ inbox_id: inboxId }),
         destructive: true,
         idempotent: true,

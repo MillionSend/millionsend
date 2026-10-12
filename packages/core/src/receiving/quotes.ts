@@ -38,6 +38,13 @@ export interface TextQuotes {
 
 /** Where the quoted history starts in `lines`, or lines.length when there is none. */
 function quoteStart(lines: string[]): number {
+  // Where the run of ">", blank and mobile-footer lines that ends the text starts.
+  let tail = lines.length;
+  while (tail > 0) {
+    const line = (lines[tail - 1] as string).trim();
+    if (line && !line.startsWith(">") && !MOBILE_FOOTER.test(line)) break;
+    tail--;
+  }
   for (let i = 0; i < lines.length; i++) {
     const line = (lines[i] as string).trim();
     // A forwarded original is what the sender wants read: nothing after its marker is cut.
@@ -59,13 +66,7 @@ function quoteStart(lines: string[]): number {
       }
     }
     // A trailing ">" block only: answers written between quoted lines stay in the reply.
-    if (line.startsWith(">")) {
-      const rest = lines
-        .slice(i)
-        .map((l) => l.trim())
-        .filter(Boolean);
-      if (rest.every((l) => l.startsWith(">") || MOBILE_FOOTER.test(l))) return i;
-    }
+    if (line.startsWith(">") && i >= tail) return i;
   }
   return lines.length;
 }

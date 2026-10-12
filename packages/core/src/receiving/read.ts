@@ -21,13 +21,17 @@ import { splitTextQuotes } from "./quotes.js";
  * the raw message stay byte-faithful elsewhere.
  */
 
-/** Longest HTML read; past it the rest is left out and `truncated` flagged. */
-export const READ_HTML_MAX_CHARS = 2 * 1024 * 1024;
+/** Longest HTML or text body read; past it the rest is left out and `truncated` flagged. */
+export const READ_BODY_MAX_CHARS = 2 * 1024 * 1024;
 const TEXT_MAX = 32_000;
 const QUOTED_MAX = 16_000;
 const SIGNATURE_MAX = 1_000;
 /** Nesting past this is pruned: nothing a person reads sits this deep. */
 const MAX_DEPTH = 256;
+/** Quote levels that get their own "> ": each one rewrites everything inside it once more. */
+const QUOTE_PREFIX_LEVELS = 8;
+/** Reply links kept for the sign-in link search, which checks each against the capped text. */
+const MAX_ANCHORS = 1_000;
 
 const BLOCK = new Set(
   "address article aside center dd details div dl dt fieldset figcaption figure footer form header main nav section summary tr body html".split(
@@ -48,6 +52,8 @@ interface Open {
   /** Where its content went: the reply, or the quoted history. */
   sink: string[];
   start: number;
+  /** A blockquote's nesting level, counting itself; 0 for any other element. */
+  level: number;
   quote: boolean;
   pre: boolean;
   /** An anchor's href, invisible characters out; null for any other element. */
@@ -86,6 +92,7 @@ export function htmlToModelText(html: string): {
   const stack: Open[] = [];
   let quoteDepth = 0;
   let preDepth = 0;
+  let blockquotes = 0;
   let overflow = 0;
   let depthLimited = false;
   let cut = false;
@@ -96,7 +103,8 @@ export function htmlToModelText(html: string): {
   };
   const finish = (o: Open) => {
     const out = o.sink;
-    if (o.name === "blockquote") {
+    if (o.level > 0) blockquotes--;
+    if (o.level > 0 && o.level <= QUOTE_PREFIX_LEVELS) {
       const inner = out.splice(o.start).join("").trim();
       if (inner) {
         out.push(
@@ -111,7 +119,9 @@ export function htmlToModelText(html: string): {
       if (/^(?:https?|mailto):/i.test(o.href) && label !== o.href && `mailto:${label}` !== o.href) {
         out.splice(o.start, out.length - o.start, `[${label || o.href}](${o.href})`);
       }
-      if (out === main && /^https?:/i.test(o.href)) anchors.push({ href: o.href, text: label });
+      if (out === main && /^https?:/i.test(o.href) && anchors.length < MAX_ANCHORS) {
+        anchors.push({ href: o.href, text: label });
+      }
     }
     out.push(PARAGRAPH.has(o.name) ? "\n\n" : BLOCK.has(o.name) ? "\n" : "");
     if (o.quote) quoteDepth--;
@@ -155,6 +165,11 @@ export function htmlToModelText(html: string): {
         return;
       }
       if (VOID_TAGS.has(t.name)) return;
+      // A link never holds another: a browser ends the open one first.
+      if (t.name === "a") {
+        const open = stack.findLastIndex((o) => o.name === "a");
+        while (open !== -1 && stack.length > open) finish(stack.pop() as Open);
+      }
       for (
         let top = stack.at(-1);
         top && IMPLIED_END.get(top.name)?.has(t.name);
@@ -186,10 +201,12 @@ export function htmlToModelText(html: string): {
                 : "",
       );
       if (/^h[1-6]$/.test(t.name)) out.push(`${"#".repeat(Number(t.name[1]))} `);
+      if (t.name === "blockquote") blockquotes++;
       stack.push({
         name: t.name,
         sink: out,
         start: out.length,
+        level: t.name === "blockquote" ? blockquotes : 0,
         quote,
         pre,
         href: t.name === "a" ? dropInvisible(attr(t, "href")?.trim() ?? "") : null,
@@ -238,22 +255,22 @@ export function readReceived(p: {
   subject: string;
   html: string | null;
   text: string | null;
-  /** The parse cut the HTML at READ_HTML_MAX_CHARS. */
-  htmlTruncated?: boolean | undefined;
+  /** The parse cut the HTML or the text at READ_BODY_MAX_CHARS. */
+  bodyTruncated?: boolean | undefined;
   /** The From address's domain: whether a sign-in link points at the sender. */
   fromDomain: string | null;
 }): ReceivedRead {
   const flags = new Set<string>();
-  if (p.htmlTruncated) flags.add("truncated");
+  if (p.bodyTruncated) flags.add("truncated");
   const invisible: Partial<Record<InvisibleClass, number>> = {};
   let chars = 0;
   let previewChars = 0;
-  let body = p.text ?? "";
+  let body = (p.text ?? "").slice(0, READ_BODY_MAX_CHARS);
   let htmlQuoted = "";
   let anchors: ModelAnchor[] | null = null;
   let links: BodyLink[];
   let stripped: VisibleHtml | null = null;
-  const html = p.html?.trim() ? p.html.slice(0, READ_HTML_MAX_CHARS) : null;
+  const html = p.html?.trim() ? p.html.slice(0, READ_BODY_MAX_CHARS) : null;
   if (html) {
     stripped = stripHiddenElements(html);
     links = extractLinks(stripped.html, null);

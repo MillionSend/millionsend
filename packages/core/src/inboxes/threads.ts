@@ -1,6 +1,18 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, count, eq, inArray, isNotNull, isNull, lte, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { simpleParser } from "mailparser";
 import { createSemaphore } from "../concurrency.js";
 import { decryptEmailBody, openAttachments } from "../crypto/envelope.js";
@@ -243,7 +255,12 @@ function threadPage<R>(
   });
 }
 
-/** Thread list rows: counts, the latest message's recipients, the latest sender. */
+/**
+ * Thread list rows: counts, the latest message's recipients, the latest
+ * sender. A thread is named when its first message is delivered, so one
+ * that holds only held mail takes the latest counted message's subject,
+ * which an agent view never counts.
+ */
 async function listItems(
   db: Db,
   p: { teamId: string; inbox: InboxRow; rows: ThreadRow[]; includeHeld: boolean },
@@ -294,12 +311,16 @@ async function listItems(
     db
       .execute(
         sql`select distinct on (${m.threadId}) ${m.threadId} as thread_id,
-                   ${r.from} as sender, ${r.fromName} as sender_name
+                   ${r.from} as sender, ${r.fromName} as sender_name, ${r.subject} as subject
               from ${m} join ${r} on ${r.id} = ${m.receivedEmailId}
              where ${inArray(m.threadId, ids)} and ${inCounted}
              order by ${m.threadId}, ${r.createdAt} desc, ${r.id} desc`,
       )
-      .then((res) => resultRows<{ thread_id: string; sender: string; sender_name: string }>(res)),
+      .then((res) =>
+        resultRows<{ thread_id: string; sender: string; sender_name: string; subject: string }>(
+          res,
+        ),
+      ),
     threadLabels(db, ids),
     db
       .selectDistinct({ threadId: schema.inboxDrafts.threadId })
@@ -327,7 +348,7 @@ async function listItems(
     const sender = senderOf.get(row.id);
     return {
       id: row.id,
-      subject: row.subject === "" ? null : row.subject,
+      subject: row.subject || sender?.subject || null,
       from: sender
         ? formatMailbox({ name: sender.sender_name, address: sender.sender })
         : inboxFrom,
@@ -583,14 +604,28 @@ export async function searchThreads(
   };
 }
 
-/** ThreadSummary; null when the thread is not in the inbox, or holds nothing an agent may see. */
+/**
+ * ThreadSummary; null when the thread is not in the inbox, or holds nothing
+ * an agent may see. An owner view names a thread of held mail only after
+ * its latest message, as the thread list does.
+ */
 export async function getThread(
   db: Db,
   p: { teamId: string; inboxId: string; threadId: string; agentView: boolean },
 ): Promise<ThreadSummaryWire | null> {
   if (!(await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId }))) return null;
   const row = await findThread(db, p);
-  return row ? summaryOf(db, row, p.agentView) : null;
+  if (!row) return null;
+  const summary = await summaryOf(db, row, p.agentView);
+  if (summary.subject !== null || p.agentView) return summary;
+  const [latest] = await db
+    .select({ subject: r.subject })
+    .from(m)
+    .innerJoin(r, eq(r.id, m.receivedEmailId))
+    .where(eq(m.threadId, row.id))
+    .orderBy(desc(r.createdAt), desc(r.id))
+    .limit(1);
+  return { ...summary, subject: latest?.subject || null };
 }
 
 type ThreadChange =
@@ -727,14 +762,19 @@ export async function trashThread(
 
 /**
  * Deletes threads 30 days in the trash, and the received messages left in
- * no inbox and outside catch-all.
+ * no inbox and outside catch-all. A thread still holding mail a person has
+ * not released stays: quarantined mail is never dropped unseen.
  */
 export async function purgeTrashedThreads(db: Db, now: Date): Promise<number> {
   const due = await db
     .select({ id: th.id })
     .from(th)
     .where(
-      and(eq(th.folder, "trash"), lte(th.trashedAt, new Date(now.getTime() - TRASH_RETENTION))),
+      and(
+        eq(th.folder, "trash"),
+        lte(th.trashedAt, new Date(now.getTime() - TRASH_RETENTION)),
+        sql`not exists (select 1 from ${m} where ${m.threadId} = ${th.id} and ${m.deliveredAt} is null)`,
+      ),
     )
     .limit(PURGE_BATCH);
   if (due.length === 0) return 0;

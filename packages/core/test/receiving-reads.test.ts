@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { deriveInboxKeys } from "../src/inboxes/keys.js";
-import { WAITS_PER_TEAM_PER_PROCESS } from "../src/inboxes/limits.js";
+import { WAITS_PER_PROCESS, WAITS_PER_TEAM_PER_PROCESS } from "../src/inboxes/limits.js";
 import { defaultSafety } from "../src/inboxes/safety.js";
 import { reconcilePendingScreens } from "../src/receiving/delivery.js";
 import { deleteReceivedEmail } from "../src/receiving/erase.js";
@@ -243,6 +243,22 @@ describe("waitForReceived and wait slots (S28)", () => {
     const again = acquireWaitSlot("team-w");
     expect(again).not.toBeNull();
     expect(acquireWaitSlot("team-w")).toBeNull();
+  });
+
+  it("and the process at most WAITS_PER_PROCESS waits for all teams together", () => {
+    const releases: (() => void)[] = [];
+    for (let i = 0; i < WAITS_PER_PROCESS; i++) {
+      const release = acquireWaitSlot(`team-${i}`);
+      if (!release) break;
+      releases.push(release);
+    }
+    expect(releases.length).toBeGreaterThan(0);
+    expect(acquireWaitSlot("team-late")).toBeNull();
+    releases.pop()?.();
+    const late = acquireWaitSlot("team-late");
+    expect(late).not.toBeNull();
+    late?.();
+    for (const release of releases) release();
   });
 });
 

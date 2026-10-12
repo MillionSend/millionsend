@@ -163,6 +163,31 @@ describe("parseReceivedMetadata", () => {
     expect(metadata.messageId).toBe("<id @sender.example>");
   });
 
+  it("counts no From mailbox when the address kept is not written in the header", async () => {
+    const b64 = (s: string) => Buffer.from(s).toString("base64");
+    const read = async (from: string) => {
+      const m = await parseReceivedMetadata(
+        Buffer.from(`From: ${from}\r\nTo: bot@inbound.acme.test\r\nSubject: hi\r\n\r\nbody\r\n`),
+      );
+      return [m.from, m.fromMailboxes];
+    };
+    // An encoded-word group name, and a lone encoded word, that decode to another address.
+    expect(
+      await read(`=?utf-8?B?${b64("Owner <owner@corp.example>")}?=: eve@evil.example;`),
+    ).toEqual(["owner@corp.example", 0]);
+    expect(await read(`=?utf-8?B?${b64("Owner <owner@corp.example>")}?=`)).toEqual([
+      "owner@corp.example",
+      0,
+    ]);
+    expect(await read(`=?utf-8?B?${b64("Ana Souza")}?= <ana@sender.example>`)).toEqual([
+      "ana@sender.example",
+      1,
+    ]);
+    expect(await read("Ana <ANA@Sender.Example>")).toEqual(["ANA@sender.example", 1]);
+    expect(await read("Undisclosed: eve@evil.example;")).toEqual(["eve@evil.example", 1]);
+    expect(await read("José <jose@bücher.example>")).toEqual(["jose@xn--bcher-kva.example", 1]);
+  });
+
   it("never throws on malformed MIME: what it cannot read comes back empty", async () => {
     for (const raw of [
       Buffer.from([0, 1, 2, 255, 254, 10, 13, 0]),

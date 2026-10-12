@@ -1,18 +1,25 @@
-import { WAITS_PER_TEAM_PER_PROCESS } from "../inboxes/limits.js";
+import { WAITS_PER_PROCESS, WAITS_PER_TEAM_PER_PROCESS } from "../inboxes/limits.js";
 
 // ponytail: counted per API process, not per instance; a shared counter
 // (the database, Redis) is the upgrade if replicas multiply a team's waits.
 const waiting = new Map<string, number>();
+let waitingTotal = 0;
 
-/** A long-poll slot for the team in this process, or null at WAITS_PER_TEAM_PER_PROCESS; call the release once. */
+/**
+ * A long-poll slot for the team in this process, or null at
+ * WAITS_PER_TEAM_PER_PROCESS for the team or WAITS_PER_PROCESS in all; call
+ * the release once.
+ */
 export function acquireWaitSlot(teamId: string): (() => void) | null {
   const held = waiting.get(teamId) ?? 0;
-  if (held >= WAITS_PER_TEAM_PER_PROCESS) return null;
+  if (held >= WAITS_PER_TEAM_PER_PROCESS || waitingTotal >= WAITS_PER_PROCESS) return null;
   waiting.set(teamId, held + 1);
+  waitingTotal++;
   let released = false;
   return () => {
     if (released) return;
     released = true;
+    waitingTotal--;
     const left = (waiting.get(teamId) ?? 1) - 1;
     if (left > 0) waiting.set(teamId, left);
     else waiting.delete(teamId);

@@ -9,13 +9,15 @@ export type InboxActor =
   | { kind: "oauth"; userId: string; clientId: string }
   | { kind: "system" };
 
-/** The actor behind an authenticated API call: every MCP call is oauth. */
+/**
+ * The actor behind an authenticated API call: an API key, or else an agent
+ * (oauth), as every MCP call is. Never the system, which sees held mail.
+ */
 export function inboxActorFromAuth(auth: ApiKeyAuth): InboxActor {
-  if (auth.oauthClientId && auth.userId) {
-    return { kind: "oauth", userId: auth.userId, clientId: auth.oauthClientId };
+  if (auth.apiKeyId && !auth.oauthClientId) {
+    return { kind: "api_key", apiKeyId: auth.apiKeyId, inboxId: auth.inboxId };
   }
-  if (auth.apiKeyId) return { kind: "api_key", apiKeyId: auth.apiKeyId, inboxId: auth.inboxId };
-  return { kind: "system" };
+  return { kind: "oauth", userId: auth.userId ?? "", clientId: auth.oauthClientId ?? "" };
 }
 
 /** "user:<id>" | "api_key:<id>" | "oauth:<client_id>:<user_id>" | "system". */

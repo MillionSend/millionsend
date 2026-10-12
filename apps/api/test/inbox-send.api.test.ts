@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { generateApiKey, SHARED_REPLY_ONLY_MESSAGE, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTestDb } from "@millionsend/test-utils";
+import { createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -370,6 +370,23 @@ describe("the inbox rails on POST /emails and the batch", () => {
     expect(
       await db.select().from(schema.emails).where(eq(schema.emails.inboxId, shared.id)),
     ).toEqual([]);
+  });
+
+  it("queues a batch reply's inbox events once the batch commits", async () => {
+    await createWebhookEndpoint(db, w.teamId, ["inbox.email.sent"]);
+    const t = await thread();
+    w.enqueuedHooks.length = 0;
+    const res = await call(teamKey, "POST", "/emails/batch", [
+      {
+        from: inbox.emailAddress,
+        to: "ada@sender.example",
+        subject: "Re: Question",
+        text: "Sure",
+        headers: { "In-Reply-To": t.messageId },
+      },
+    ]);
+    expect(res.status).toBe(200);
+    expect(w.enqueuedHooks.length).toBeGreaterThan(0);
   });
 
   it("holds an inbox key to its own address", async () => {

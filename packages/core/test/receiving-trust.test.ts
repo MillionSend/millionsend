@@ -102,6 +102,25 @@ describe("senderTrust", () => {
     ).toBe("unauthenticated");
   });
 
+  it("trusts the MX's verdicts only for the From domain it judged: a From read another way is unauthenticated", () => {
+    const evil = {
+      spf: { result: "pass", domain: "evil.example" },
+      dkim: { aligned: ["evil.example"] },
+      dmarc: { result: "pass", policy: "reject" as const, domain: "evil.example" },
+    };
+    const owner = { ...base, from: "helio@gmail.example", authDetail: evil };
+    expect(senderTrust(owner)).toBe("unauthenticated");
+    expect(
+      senderTrust({ ...owner, thread: { proven: true, participants: ["helio@gmail.example"] } }),
+    ).toBe("unauthenticated");
+    expect(
+      senderTrust({
+        ...owner,
+        authDetail: { ...evil, dmarc: { result: "none", policy: null, domain: null } },
+      }),
+    ).toBe("unauthenticated");
+  });
+
   it("reads the MX's unfolded detail when present: p=none failures are unauthenticated, enforced ones failed", () => {
     const detail = (
       result: string,

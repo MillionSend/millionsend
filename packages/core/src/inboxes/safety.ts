@@ -110,13 +110,16 @@ export function safetyProblem(
   if (s.screening && ctx.kind !== "agent") {
     return "screening is available on agent inboxes only";
   }
+  // The shared domain is every team's: it forwards only to addresses a member proved.
   const owners = new Set([
     ...ctx.memberEmails.map((email) => email.toLowerCase()),
-    ...s.owner_addresses,
+    ...(ctx.shared ? [] : s.owner_addresses),
   ]);
   const stranger = s.forward_to.find((target) => !owners.has(target.toLowerCase()));
   if (stranger !== undefined) {
-    return `forward_to accepts team members' login addresses and owner_addresses only; ${stranger} is neither`;
+    return ctx.shared
+      ? `forward_to accepts team members' login addresses only on the shared domain; ${stranger} is not one`
+      : `forward_to accepts team members' login addresses and owner_addresses only; ${stranger} is neither`;
   }
   return null;
 }

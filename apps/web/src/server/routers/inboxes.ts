@@ -356,6 +356,7 @@ export const inboxesRouter = router({
         inboxId: input.id,
         actor: userActor(ctx),
         patch: { name: input.name, from_name: input.fromName, expires_in: input.expiresIn },
+        mayShorten: ctx.role === "owner" || ctx.role === "admin",
       });
       if (!result.ok) throw inboxFailure(result.error);
       return result.inbox;

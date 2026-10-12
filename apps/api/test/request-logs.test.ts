@@ -450,8 +450,14 @@ describe("api request logging", () => {
     expect(res.status).toBe(200);
 
     await vi.waitFor(() => {
-      expect(errors).toHaveBeenCalledWith("api request log failed", expect.anything());
+      expect(errors).toHaveBeenCalledWith(
+        "api request log failed",
+        expect.any(String),
+        expect.any(String),
+      );
     });
+    // The failed row's values (bodies, addresses) never reach the process log.
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("still-works@example.com");
     errors.mockRestore();
   });
 });

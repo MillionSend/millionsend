@@ -73,6 +73,18 @@ const PLAN_LIMIT: InboxError = {
   message: "You have reached the inbox limit of your plan. Upgrade to add more.",
 };
 
+const OUTSIDE_KEY_DOMAIN: InboxError = {
+  status: 403,
+  name: "restricted_api_key",
+  message: "This API key can only create inboxes on its assigned domain",
+};
+
+const SHORTEN_NEEDS_ADMIN: InboxError = {
+  status: 403,
+  name: "forbidden",
+  message: "Only owners and admins can make an inbox expire sooner; you can extend it",
+};
+
 const ADDRESS_TAKEN: InboxError = {
   status: 409,
   name: "validation_error",
@@ -85,6 +97,9 @@ const ADDRESS_ATTEMPTS = 5;
 const EXPIRE_BATCH = 1000;
 const LOCAL_PART = /^[a-z0-9._%+-]{1,64}$/;
 
+/** Resend's from_name limit. */
+const FROM_NAME_MAX = 78;
+
 /**
  * The display name recipients see: a plain name as team and display names
  * are everywhere (no "@", links or phone numbers), and nothing that would
@@ -93,10 +108,10 @@ const LOCAL_PART = /^[a-z0-9._%+-]{1,64}$/;
 function fromNameOf(value: string): string | null | InboxError {
   const name = value.trim();
   if (name === "") return null;
-  return isPlainName(name) && !/[:<>]/.test(name)
+  return isPlainName(name, FROM_NAME_MAX) && !/[:<>]/.test(name)
     ? name
     : invalid(
-        "from_name must be a plain name of at most 64 characters, without @ : < >, line breaks, links or phone numbers",
+        `from_name must be a plain name of at most ${FROM_NAME_MAX} characters, without @ : < >, line breaks, links or phone numbers`,
       );
 }
 
@@ -328,6 +343,8 @@ export async function createInbox(
     isCloud: boolean;
     actor: InboxActor;
     input: CreateInboxInput;
+    /** A domain-scoped key creates inboxes on its own domain only. */
+    onlyDomainId?: string | null | undefined;
     now?: Date | undefined;
   },
 ): Promise<{ ok: true; inbox: InboxWire } | { ok: false; error: InboxError }> {
@@ -352,8 +369,12 @@ export async function createInbox(
     });
   }
 
+  if (p.onlyDomainId && input.email_address === undefined) return fail(OUTSIDE_KEY_DOMAIN);
   const plan = await addressPlan(db, deps, { ...p, name });
   if (isInboxError(plan)) return fail(plan);
+  if (p.onlyDomainId && (plan.shared || plan.domainId !== p.onlyDomainId)) {
+    return fail(OUTSIDE_KEY_DOMAIN);
+  }
   const expiry = expiryOf(input.expires_in, plan.shared, now);
   if (isInboxError(expiry)) return fail(expiry);
   const defaults = defaultSafety(kind, plan.shared);
@@ -484,6 +505,8 @@ export async function listInboxes(
     query: ListQuery;
     kind?: InboxKind | undefined;
     onlyInboxId?: string | null | undefined;
+    /** A domain-scoped key's domain: shared-domain inboxes are on none. */
+    onlyDomainId?: string | null | undefined;
     now?: Date | undefined;
   },
 ): Promise<{ data: InboxListItemWire[]; hasMore: boolean } | "bad_cursor"> {
@@ -493,6 +516,7 @@ export async function listInboxes(
     liveInbox(p.now ?? new Date()),
     p.kind ? eq(i.kind, p.kind) : undefined,
     p.onlyInboxId ? eq(i.id, p.onlyInboxId) : undefined,
+    p.onlyDomainId ? eq(i.domainId, p.onlyDomainId) : undefined,
   );
   const page = await keysetRows({
     query: p.query,
@@ -538,6 +562,8 @@ export async function updateInbox(
       from_name?: string | undefined;
       expires_in?: string | null | undefined;
     };
+    /** Owners, admins and full-access keys: an earlier expiry deletes the inbox sooner, as a delete would. */
+    mayShorten: boolean;
   },
 ): Promise<{ ok: true; inbox: InboxWire } | { ok: false; error: InboxError }> {
   const now = new Date();
@@ -557,6 +583,9 @@ export async function updateInbox(
   if (p.patch.expires_in !== undefined) {
     const expiry = expiryOf(p.patch.expires_in, inbox.domainId === null, now);
     if (isInboxError(expiry)) return fail(expiry);
+    const earlier =
+      expiry.expiresAt !== null && (inbox.expiresAt === null || expiry.expiresAt < inbox.expiresAt);
+    if (earlier && !p.mayShorten) return fail(SHORTEN_NEEDS_ADMIN);
     set.expiresAt = expiry.expiresAt;
   }
   const i = schema.inboxes;

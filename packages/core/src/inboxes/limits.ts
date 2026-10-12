@@ -56,6 +56,8 @@ export const RECEIVED_SECRET_WINDOW = 24 * HOUR_MS;
 
 export const LONG_POLL_MAX_SECONDS = 50;
 export const WAITS_PER_TEAM_PER_PROCESS = 20;
+/** Long-polls one API process holds for all teams together: each polls the database about once a second. */
+export const WAITS_PER_PROCESS = 200;
 export const INBOUND_QUARANTINE_SCORE = 80;
 export const INBOUND_JUDGE_PER_INBOX_DAILY = 200;
 export const CLAMAV_TIMEOUT_MS = 30_000;

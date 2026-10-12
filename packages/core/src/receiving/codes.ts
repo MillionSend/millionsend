@@ -1,4 +1,5 @@
-import { decodeEntities } from "../html.js";
+import { dropInvisible } from "../customer-text.js";
+import { decodeEntities, visibleText } from "../html.js";
 import { registrableDomain } from "../org-domain.js";
 
 /**
@@ -233,11 +234,36 @@ export function receivedSecretValues(
   return [...out].map(([value, kind]) => ({ kind, value }));
 }
 
+/** Separators between a code's digits, or between single code characters, a sender could spread it with. */
+const DIGIT_GAP = /(?<=\d)[\s.·•_-]{1,3}(?=\d)/gu;
+const CHAR_GAP = /(?<=(?:^|[^A-Za-z0-9])[A-Z0-9])[\s.·•_-]{1,3}(?=[A-Z0-9](?![A-Za-z0-9]))/gu;
+const LONG_DIGITS = /\d{5,}/g;
+
+/**
+ * Code values in text written to slip past the code shapes: tags between
+ * its characters, invisible or fullwidth ones, separators ("4 8 2 9 1 3"),
+ * or digits run into a longer number, every 4-8 digit window of which is
+ * a candidate.
+ */
+function spreadCodes(raw: string): string[] {
+  const squeezed = dropInvisible(decodeEntities(visibleText(raw)).normalize("NFKC"))
+    .replace(CHAR_GAP, "")
+    .replace(DIGIT_GAP, "");
+  const out = codeShapes(squeezed);
+  for (const m of squeezed.matchAll(LONG_DIGITS)) {
+    const run = m[0].slice(0, 64);
+    for (let size = 4; size <= 8; size++) {
+      for (let i = 0; i + size <= run.length; i++) out.push(run.slice(i, i + size));
+    }
+  }
+  return out;
+}
+
 /**
  * Everything in outgoing text that could be a received secret passed on:
- * code shapes, links without their fragment, and token-like runs. Normalized
- * as receivedSecretValues normalizes, so a MAC of each finds a match. HTML
- * may be passed as is: entities are decoded first.
+ * code shapes, as written or spread out, links without their fragment, and
+ * token-like runs. Normalized as receivedSecretValues normalizes, so a MAC
+ * of each finds a match. HTML may be passed as is: entities are decoded first.
  */
 export function outgoingSecretValues(...texts: (string | null | undefined)[]): string[] {
   const out = new Set<string>();
@@ -250,6 +276,7 @@ export function outgoingSecretValues(...texts: (string | null | undefined)[]): s
       if (link) out.add(link);
     }
     for (const m of text.matchAll(TOKEN_RUN)) if (tokenLike(m[0])) out.add(m[0]);
+    for (const value of spreadCodes(raw)) out.add(value);
   }
   return [...out];
 }

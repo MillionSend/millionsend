@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
@@ -6,7 +7,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { acceptEmail } from "../src/accept-email.js";
 import type { InboxActor } from "../src/inboxes/activity.js";
 import { msgIds } from "../src/inboxes/compose.js";
-import { secretMac, verifyThreadTokenRef } from "../src/inboxes/keys.js";
+import {
+  forwardMarker,
+  secretMac,
+  verifyForwardMarker,
+  verifyThreadTokenRef,
+} from "../src/inboxes/keys.js";
 import {
   beginInboxAccept,
   forwardedFilesProblem,
@@ -183,6 +189,44 @@ describe("replyInThread", () => {
       result: "send",
       reasons: ["approved"],
     });
+  });
+
+  it("from a shared address answers members and authenticated senders only, never a forged From or an address the team typed in", async () => {
+    const inbox = await addInbox(w, {
+      local: "shared-replier",
+      shared: true,
+      safety: {
+        owner_addresses: ["victim@third-party.example"],
+        allowlist: ["*@third-party.example"],
+      },
+    });
+    const refusedBy = { kind: "refused", error: { status: 403, name: "inbox_send_policy" } };
+    const forged = await addThread(w, inbox.id);
+    const fromForged = await receive(w, {
+      inbox,
+      threadId: forged,
+      senderTrust: "unauthenticated",
+    });
+    expect(
+      await reply(inbox, { threadId: forged, id: fromForged.id }, { text: "Hi" }),
+    ).toMatchObject(refusedBy);
+    const real = await thread(inbox);
+    sent(await reply(inbox, real, { text: "Hi" }));
+    expect(
+      await reply(inbox, real, { text: "Hi", cc: "victim@third-party.example" }),
+    ).toMatchObject(refusedBy);
+    sent(await reply(inbox, real, { text: "Hi", cc: w.owner }));
+    // Even an owner's message can't point a shared address at someone else.
+    const steered = await addThread(w, inbox.id);
+    const fromOwner = await receive(w, {
+      inbox,
+      threadId: steered,
+      senderTrust: "owner",
+      message: { replyTo: "victim@elsewhere.example" },
+    });
+    expect(
+      await reply(inbox, { threadId: steered, id: fromOwner.id }, { text: "Hi" }),
+    ).toMatchObject(refusedBy);
   });
 
   it("holds a reply steered by a foreign Reply-To as a draft, one per answered email", async () => {
@@ -510,6 +554,9 @@ describe("private codes", () => {
     expect(drafted(await reply(inbox, t, { text: "Your code: 482 913" })).approval_reasons).toEqual(
       ["private_code"],
     );
+    expect(
+      drafted(await reply(inbox, t, { text: "Spelled out: 4 8 2 9 1 3" })).approval_reasons,
+    ).toEqual(["private_code"]);
     await db
       .update(schema.receivedSecrets)
       .set({ createdAt: new Date(Date.now() - 25 * 3_600_000) })
@@ -561,6 +608,30 @@ describe("the acceptEmail hook on generic surfaces", () => {
     expect(msgIds(row.headers?.References)).toHaveLength(1);
   });
 
+  it("gates a +tag form of an inbox's address as the inbox itself (D7)", async () => {
+    const inbox = await addInbox(w, { local: "tagged" });
+    expect(
+      await acceptEmail(w.deps, await auth(), payload(inbox, { from: `Tagged+x@${w.domain}` })),
+    ).toEqual({ ok: false, reason: "inbox_send_policy", reasons: ["send_policy"] });
+  });
+
+  it("guards against loops when References or a token alone thread the reply", async () => {
+    const inbox = await addInbox(w, { local: "generic-loop" });
+    const threadId = await addThread(w, inbox.id);
+    const auto = await receive(w, { inbox, threadId, automated: "auto_submitted" });
+    expect(
+      await acceptEmail(
+        w.deps,
+        await auth(),
+        payload(inbox, { to: ["ada@sender.example"], headers: { References: auto.messageId } }),
+      ),
+    ).toEqual({
+      ok: false,
+      reason: "inbox_send_policy",
+      reasons: ["loop_guard:auto_submitted"],
+    });
+  });
+
   it("holds an inbox-scoped key to its own address, and refuses shared addresses without an inbox", async () => {
     const inbox = await addInbox(w, { local: "scoped" });
     const other = await addInbox(w, { local: "scoped-other" });
@@ -573,6 +644,14 @@ describe("the acceptEmail hook on generic surfaces", () => {
         w.deps,
         await auth(other.id),
         payload(inbox, { from: `plain@${w.domain}` }),
+      ),
+    ).toEqual({ ok: false, reason: "inbox_scope" });
+    // Its own inbox's +tag form is still another address to it.
+    expect(
+      await acceptEmail(
+        w.deps,
+        await auth(inbox.id),
+        payload(inbox, { from: `scoped+x@${w.domain}` }),
       ),
     ).toEqual({ ok: false, reason: "inbox_scope" });
     expect(
@@ -675,7 +754,8 @@ describe("the forward_to pass", () => {
     const email = sent(out as SendOutcome).email;
     expect(email).toMatchObject({ to: [w.owner], subject: "Fwd: Question" });
     const row = await emailRow(email.id);
-    expect(row.headers?.["X-MillionSend-Forwarded"]).toBe(inbox.id);
+    expect(verifyForwardMarker(w.keys, row.headers?.["X-MillionSend-Forwarded"] ?? "")).toBe(true);
+    expect(row.headers?.["X-MillionSend-Forwarded"]).toMatch(new RegExp(`^${inbox.id}\\.`));
     expect(row.headers?.["Auto-Submitted"]).toBe("auto-generated");
     const rows = await activity(inbox.id);
     expect(rows.map((a) => [a.action, a.emailId]).sort()).toEqual([
@@ -684,7 +764,7 @@ describe("the forward_to pass", () => {
     ]);
   });
 
-  it("stops at one hop and skips held mail", async () => {
+  it("stops at one hop, never for a marker a sender wrote, and skips held mail", async () => {
     const inbox = await addInbox(w, {
       local: "forwarding-guard",
       safety: { forward_to: [w.owner] },
@@ -693,11 +773,22 @@ describe("the forward_to pass", () => {
     const looped = await receive(w, {
       inbox,
       threadId,
-      message: { headers: { "X-MillionSend-Forwarded": "some-other-inbox" } },
+      message: {
+        headers: { "X-MillionSend-Forwarded": forwardMarker(w.keys, randomUUID()) },
+      },
     });
     expect(
       await forwardToForwardTargets(db, w.deps, { receivedEmailId: looped.id, inboxId: inbox.id }),
     ).toBeNull();
+    const faked = await receive(w, {
+      inbox,
+      threadId,
+      message: { headers: { "X-MillionSend-Forwarded": `${inbox.id}.AAAAAAAAAAAAAAAAAAAAAA` } },
+    });
+    expect(
+      await forwardToForwardTargets(db, w.deps, { receivedEmailId: faked.id, inboxId: inbox.id }),
+    ).toMatchObject({ kind: "sent" });
+    await db.delete(schema.emails).where(eq(schema.emails.inboxId, inbox.id));
     const held = await receive(w, { inbox, threadId, verdict: "quarantined" });
     expect(
       await forwardToForwardTargets(db, w.deps, { receivedEmailId: held.id, inboxId: inbox.id }),

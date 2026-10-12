@@ -63,6 +63,26 @@ const FIXTURES: Record<string, string> = {
   normal_grey: `<p style="color:#777">SHOWN</p>`,
   emoji_zwj: `<p>Dev 👩‍💻 here</p>`,
   height_zero_no_overflow: `<div style="height:0">SHOWN</div>`,
+  details_closed: `<p>Hi</p><details><summary>More</summary>SECRET22<div>SECRET22b</div></details>`,
+  text_fill_transparent: `<p>Hi</p><span style="-webkit-text-fill-color:transparent"><b style="color:red">SECRET23</b></span>`,
+  filter_opacity: `<p>Hi</p><span style="filter:opacity(0)">SECRET24</span>`,
+  zoom_zero: `<p>Hi</p><div style="zoom:0">SECRET25</div>`,
+  margin_offscreen: `<p>Hi</p><div style="margin-left:-9999px">SECRET26</div>`,
+  margin_shorthand_offscreen: `<p>Hi</p><div style="margin:0 0 0 -9999px">SECRET26b</div>`,
+  style_attr_selector: `<style>[data-h]{display:none}</style><p>Hi</p><div data-h>SECRET27</div>`,
+  style_attr_value_selector: `<style>div[data-x="1"]{display:none}</style><p>Hi</p><div data-x="1">SECRET27b</div>`,
+  object_fallback: `<p>Hi</p><object data="x.png" type="image/png">SECRET28</object>`,
+  hsl_white: `<p>Hi</p><span style="color:hsl(0,0%,100%)">SECRET29</span>`,
+  hwb_white: `<p>Hi</p><span style="color:hwb(0 100% 0%)">SECRET29b</span>`,
+  content_visibility: `<p>Hi</p><div style="content-visibility:hidden">SECRET30</div>`,
+  scale_tiny: `<p>Hi</p><div style="transform:scale(0.001)">SECRET31</div>`,
+  scale_property: `<p>Hi</p><div style="scale:0.01">SECRET31b</div>`,
+  details_open: `<details open><summary>More</summary>SHOWN</details>`,
+  details_summary: `<details><summary>SHOWN</summary>hidden</details>`,
+  hsl_dark: `<p style="color:hsl(210, 40%, 30%)">SHOWN</p>`,
+  small_margin: `<p style="margin-left:-5px">SHOWN</p>`,
+  half_scale: `<p style="transform:scale(0.5);zoom:0.8">SHOWN</p>`,
+  attr_selector_miss: `<style>[data-h="2"]{display:none}</style><div data-h="1">SHOWN</div>`,
 };
 
 /** Each hidden case and the flag its removal records. */
@@ -95,6 +115,20 @@ const HIDDEN: Record<string, string> = {
   nested_same_tag: "display_none",
   svg_text: "zero_size",
   scale_zero: "zero_size",
+  details_closed: "display_none",
+  text_fill_transparent: "same_color",
+  filter_opacity: "opacity",
+  zoom_zero: "zero_size",
+  margin_offscreen: "offscreen",
+  margin_shorthand_offscreen: "offscreen",
+  style_attr_selector: "display_none",
+  style_attr_value_selector: "display_none",
+  object_fallback: "display_none",
+  hsl_white: "same_color",
+  hwb_white: "same_color",
+  content_visibility: "display_none",
+  scale_tiny: "zero_size",
+  scale_property: "zero_size",
 };
 
 const VISIBLE: Record<string, string> = {
@@ -106,6 +140,12 @@ const VISIBLE: Record<string, string> = {
   normal_grey: "SHOWN",
   emoji_zwj: "👩‍💻",
   height_zero_no_overflow: "SHOWN",
+  details_open: "SHOWN",
+  details_summary: "SHOWN",
+  hsl_dark: "SHOWN",
+  small_margin: "SHOWN",
+  half_scale: "SHOWN",
+  attr_selector_miss: "SHOWN",
 };
 
 const read = (html: string, extra: { text?: string; subject?: string } = {}) =>
@@ -216,6 +256,31 @@ describe("htmlToModelText", () => {
     expect(r.extracted.text).toBe("top\n\nafter");
     expect(r.hiddenText.flags).toContain("depth_limit");
     expect(performance.now() - started).toBeLessThan(5_000);
+  });
+
+  it("costs linear time on crafted bodies: quoted runs, nested quotes and links, uncapped text", () => {
+    const started = performance.now();
+    // Quoted lines with an answer after them: the worst case for finding the trailing quote.
+    const quotedRun = `${"> q\n".repeat(200_000)}reply`;
+    expect(splitTextQuotes(quotedRun).reply.endsWith("> q\nreply")).toBe(true);
+    const nested = (open: string, close: string, fill: string) =>
+      `${open.repeat(250)}${fill.repeat(50_000)}${close.repeat(250)}`;
+    const quotes = read(nested("<blockquote>", "</blockquote>", "line<br>"));
+    expect(quotes.extracted.quoted.split("\n").some((l) => l.startsWith("> ".repeat(9)))).toBe(
+      false,
+    );
+    // A link never holds another, so each closes before the next opens.
+    expect(read(nested('<a href="https://x.example/">', "</a>", "word ")).extracted.text).toContain(
+      "[word word",
+    );
+    const huge = readReceived({
+      subject: "",
+      html: null,
+      text: "> q\n".repeat(2_000_000),
+      fromDomain: null,
+    });
+    expect(huge.extracted.flags).toContain("truncated");
+    expect(performance.now() - started).toBeLessThan(10_000);
   });
 
   it("keeps long lists of unclosed items whole", () => {

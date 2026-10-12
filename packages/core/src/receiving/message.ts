@@ -37,7 +37,7 @@ import { routableAddress } from "../sender-address.js";
 import { AUTOMATED_HEADERS } from "./automated.js";
 import { type DownloadSigning, signReceivedDownload } from "./downloads.js";
 import { MAX_RECEIVED_MESSAGE_BYTES } from "./protocol.js";
-import { READ_HTML_MAX_CHARS } from "./read.js";
+import { READ_BODY_MAX_CHARS } from "./read.js";
 
 export type ReceivedEmailRow = typeof schema.receivedEmails.$inferSelect;
 
@@ -92,15 +92,15 @@ export interface ReceivedMetadata {
   inReplyTo: string | null;
   /** References' msg-ids (at most 50), then bare ms1. thread tokens some clients write unbracketed. */
   references: string[];
-  /** From fields in the header, and mailboxes in the one the parser kept. */
+  /** From fields in the header, and mailboxes in the one the parser kept; 0 when the address kept is not written in it. */
   fromFields: number;
   fromMailboxes: number;
   hasDate: boolean;
   /** The headers automatedReason reads, present ones only, values on one line. */
   automatedHeaders: Record<string, string>;
-  /** At most READ_HTML_MAX_CHARS of the HTML body; htmlTruncated when it was longer. */
+  /** At most READ_BODY_MAX_CHARS of each body part; bodyTruncated when either was longer. */
   html: string | null;
-  htmlTruncated: boolean;
+  bodyTruncated: boolean;
   text: string | null;
 }
 
@@ -121,7 +121,7 @@ const EMPTY_METADATA: ReceivedMetadata = {
   hasDate: false,
   automatedHeaders: {},
   html: null,
-  htmlTruncated: false,
+  bodyTruncated: false,
   text: null,
 };
 
@@ -286,6 +286,21 @@ function mailboxCount(value: unknown): number {
   return n;
 }
 
+/**
+ * Whether a From line spells out `address` itself. mailparser decodes an
+ * encoded-word display name and parses the result again, so
+ * "=?utf-8?B?…?=: eve@evil.example;" can yield an address that no DMARC
+ * check read (RFC 2047 §5 keeps encoded words out of addresses).
+ */
+function writtenIn(lines: readonly string[], address: string): boolean {
+  const wanted = address.toLowerCase();
+  return lines.some((line) =>
+    line
+      .split(/[\s<>(),;:"]+/)
+      .some((token) => routableAddress(token)?.address.toLowerCase() === wanted),
+  );
+}
+
 function displayName(value: unknown): string {
   const object = (Array.isArray(value) ? value[0] : value) as AddressObject | undefined;
   const first = Array.isArray(object?.value) ? object.value[0] : undefined;
@@ -317,9 +332,11 @@ export async function parseReceivedMetadata(raw: Buffer): Promise<ReceivedMetada
       const values = lines(name);
       if (values.length > 0) automatedHeaders[name] = visibleLine(values.join(", "), 998);
     }
-    const truncated = html !== null && html.length > READ_HTML_MAX_CHARS;
+    const capped = (body: string | null) => body?.slice(0, READ_BODY_MAX_CHARS) || null;
+    const from = addresses(headers?.get("from"))[0] ?? null;
+    const fromLines = lines("from");
     return {
-      from: addresses(headers?.get("from"))[0] ?? null,
+      from,
       to: addresses(headers?.get("to")),
       cc: addresses(headers?.get("cc")),
       bcc: addresses(headers?.get("bcc")),
@@ -330,13 +347,14 @@ export async function parseReceivedMetadata(raw: Buffer): Promise<ReceivedMetada
       fromName: displayName(headers?.get("from")),
       inReplyTo,
       references,
-      fromFields: lines("from").length,
-      fromMailboxes: mailboxCount(headers?.get("from")),
+      fromFields: fromLines.length,
+      fromMailboxes:
+        from !== null && writtenIn(fromLines, from) ? mailboxCount(headers?.get("from")) : 0,
       hasDate: lines("date").length > 0,
       automatedHeaders,
-      html: html && truncated ? html.slice(0, READ_HTML_MAX_CHARS) : html || null,
-      htmlTruncated: truncated,
-      text: text || null,
+      html: capped(html),
+      bodyTruncated: Math.max(html?.length ?? 0, text?.length ?? 0) > READ_BODY_MAX_CHARS,
+      text: capped(text),
     };
   } catch {
     return EMPTY_METADATA;
@@ -896,7 +914,11 @@ export function heldFrom(
   const relevant = inboxId ? memberships.filter((m) => m.inboxId === inboxId) : memberships;
   if (relevant.some((m) => m.deliveredAt !== null)) return null;
   const virusHeld = row.virusVerdict === "fail" && !row.releasedAt;
-  if (!inboxId && row.catchAll && !virusHeld) return null;
+  // The catch-all copy shows nothing an inbox holds (every membership here is
+  // held) unless a person released it.
+  if (!inboxId && row.catchAll && (row.releasedAt || (!virusHeld && relevant.length === 0))) {
+    return null;
+  }
   if (virusHeld || relevant.some((m) => m.verdict === "quarantined")) return "quarantined";
   return "pending";
 }

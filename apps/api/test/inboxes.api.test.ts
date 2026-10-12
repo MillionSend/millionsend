@@ -612,6 +612,67 @@ describe("inbox-scoped API keys", () => {
     expect((await call(token, "GET", "/inboxes")).status).toBe(401);
     expect((await call(token, "GET", "/domains")).status).toBe(401);
   });
+
+  it("stops working when its inbox expires, before the sweep revokes it (S21)", async () => {
+    const brief = await inbox(teamKey, {
+      email_address: "brief-key@in.acme.test",
+      expires_in: "1h",
+    });
+    const minted = await call(teamKey, "POST", "/api-keys", { name: "brief", inbox_id: brief.id });
+    const token = (await json<{ token: string }>(minted)).token;
+    expect((await call(token, "GET", "/emails/receiving")).status).toBe(200);
+    await db
+      .update(schema.inboxes)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.inboxes.id, brief.id));
+    expect((await call(token, "GET", "/emails/receiving")).status).toBe(401);
+  });
+});
+
+describe("domain-scoped API keys", () => {
+  it("reach only their domain's inboxes, as their received-mail reads do", async () => {
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "elsewhere.acme.test",
+      region: "us-east-1",
+      status: "verified",
+      receivingEnabled: true,
+    });
+    const own = await inbox(teamKey, { email_address: "dk-own@in.acme.test" });
+    const outside = [
+      await inbox(teamKey, { email_address: "dk-other@elsewhere.acme.test" }),
+      await inbox(teamKey, {}),
+    ];
+    const scoped = await key(teamId, { domainId });
+    const listed = await json<{ data: { id: string }[] }>(
+      await call(scoped, "GET", "/inboxes?limit=100"),
+    );
+    expect(listed.data.map((i) => i.id)).toContain(own.id);
+    expect((await call(scoped, "GET", `/inboxes/${own.id}/threads`)).status).toBe(200);
+    for (const { id, email_address } of outside) {
+      expect(listed.data.map((i) => i.id)).not.toContain(id);
+      for (const [method, path, body] of [
+        ["GET", `/inboxes/${id}`],
+        ["GET", `/inboxes/${encodeURIComponent(email_address)}`],
+        ["GET", `/inboxes/${id}/threads`],
+        ["GET", `/inboxes/${id}/quarantine`],
+        ["GET", `/inboxes/${id}/codes/latest`],
+        ["PATCH", `/inboxes/${id}`, { name: "x" }],
+        ["PATCH", `/inboxes/${id}/safety`, { screening: false }],
+        ["DELETE", `/inboxes/${id}`],
+      ] as [string, string, unknown?][]) {
+        expect((await call(scoped, method, path, body)).status, `${method} ${path}`).toBe(404);
+      }
+    }
+    for (const body of [{ email_address: "dk-new@elsewhere.acme.test" }, {}]) {
+      const refused = await call(scoped, "POST", "/inboxes", body);
+      expect(refused.status).toBe(403);
+      expect((await json(refused)).name).toBe("restricted_api_key");
+    }
+    expect(
+      (await call(scoped, "POST", "/inboxes", { email_address: "dk-new@in.acme.test" })).status,
+    ).toBe(201);
+  });
 });
 
 describe("webhook inbox_ids", () => {

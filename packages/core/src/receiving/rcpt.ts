@@ -370,14 +370,16 @@ export async function setDomainReceiving(
 }
 
 /**
- * Whether a received row is visible without asking for held mail: a
- * catch-all row not held for a virus, or a row delivered into any inbox
- * (released mail counts as delivered).
+ * Whether a received row is visible without asking for held mail: a row
+ * delivered into any inbox (released mail counts as delivered), or a
+ * catch-all row that a person released, or that carries no virus and no
+ * inbox holds, so the catch-all copy never shows what an inbox quarantined
+ * or still screens.
  */
 export function receivedEmailVisible(): SQL {
   const r = schema.receivedEmails;
   const m = schema.receivedEmailInboxes;
-  return sql`((${r.catchAll} and (${r.virusVerdict} is distinct from 'fail' or ${r.releasedAt} is not null)) or exists (select 1 from ${m} where ${m.receivedEmailId} = ${r.id} and ${m.deliveredAt} is not null))`;
+  return sql`((${r.catchAll} and (${r.releasedAt} is not null or (${r.virusVerdict} is distinct from 'fail' and not exists (select 1 from ${m} where ${m.receivedEmailId} = ${r.id} and ${m.deliveredAt} is null)))) or exists (select 1 from ${m} where ${m.receivedEmailId} = ${r.id} and ${m.deliveredAt} is not null))`;
 }
 
 /**

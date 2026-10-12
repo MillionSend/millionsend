@@ -93,8 +93,13 @@ export function senderTrust(
   if (!p.from) return "unauthenticated";
   const { aligned, failed } = authOutcome(p);
   if (failed) return "failed";
-  const single = p.fromFields === 1 && p.fromMailboxes === 1;
   const from = p.from.toLowerCase();
+  // The MX ran DMARC on the From domain its own parser found: when that is
+  // not the domain read here, the two parsers disagree on who wrote it.
+  const single =
+    p.fromFields === 1 &&
+    p.fromMailboxes === 1 &&
+    (p.authDetail === null || p.authDetail.dmarc.domain === domainOf(from));
   if (single && aligned && p.owners.includes(from)) return "owner";
   if (single && aligned && allowlisted(from, p.allowlist)) return "allowlisted";
   if (single && p.thread?.proven && p.thread.participants.includes(from)) return "known_thread";

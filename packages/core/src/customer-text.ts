@@ -260,16 +260,15 @@ const NAME_NUMBER_DIGITS = 8;
 
 /**
  * Whether a team or display name may be stored: one line of visible text, at
- * most CUSTOMER_TEXT_MAX characters, no "@", no URL scheme and no run of
- * digits a phone number fits in, judged on the NFKC form so fullwidth
- * look-alikes count. A name that only looks like a domain ("acme.dev") is a
- * company's name and passes; system mail prints every name through
- * inertText anyway.
+ * most `max` characters, no "@", no URL scheme and no run of digits a phone
+ * number fits in, judged on the NFKC form so fullwidth look-alikes count. A
+ * name that only looks like a domain ("acme.dev") is a company's name and
+ * passes; system mail prints every name through inertText anyway.
  */
-export function isPlainName(value: string): boolean {
+export function isPlainName(value: string, max = CUSTOMER_TEXT_MAX): boolean {
   const folded = value.normalize("NFKC");
   return (
-    value.length <= CUSTOMER_TEXT_MAX &&
+    value.length <= max &&
     !NOT_PLAIN.test(folded) &&
     dropInvisible(folded) === folded &&
     !URL_SCHEME.test(folded) &&

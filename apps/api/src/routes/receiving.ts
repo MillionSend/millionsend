@@ -248,9 +248,10 @@ export function registerReceivingRoutes(
         );
       }
       if (q.from) filters.push(receivedFromMatches(t.from, q.from));
-      if (q.subject_contains) {
-        filters.push(sql`${t.subject} ilike ${`%${escapeLike(q.subject_contains)}%`} escape '\\'`);
-      }
+      // Agents learn of held mail by id alone, so for them it is never matched on what it says.
+      const subject = q.subject_contains
+        ? sql`${t.subject} ilike ${`%${escapeLike(q.subject_contains)}%`} escape '\\'`
+        : undefined;
       if (q.unread && inboxId) {
         filters.push(
           sql`exists (select 1 from ${m} where ${m.receivedEmailId} = ${t.id} and ${m.inboxId} = ${inboxId} and ${m.readAt} is ${sql.raw(q.unread === "true" ? "null" : "not null")})`,
@@ -266,6 +267,7 @@ export function registerReceivingRoutes(
         and(
           receivedEmailScope({ teamId: auth.teamId, domainId: auth.domainId, inboxId, held: h }),
           ...filters,
+          h === "only" && agent ? undefined : subject,
         );
       if (!q.wait) {
         const page = await keysetPage({
@@ -343,6 +345,7 @@ export function registerReceivingRoutes(
             createdAt: t.createdAt,
             inboxId: m.inboxId,
             verdict: m.verdict,
+            quarantineReason: m.quarantineReason,
             virusVerdict: t.virusVerdict,
           })
           .from(t)
@@ -361,6 +364,11 @@ export function registerReceivingRoutes(
           id: r.id,
           inbox_id: r.inboxId,
           reason: r.verdict === "pending" ? ("pending" as const) : ("quarantined" as const),
+          // A catch-all copy without a membership is held for a virus only.
+          quarantine_reason:
+            r.verdict === "pending"
+              ? null
+              : (r.quarantineReason ?? (r.virusVerdict === "fail" ? ("virus" as const) : null)),
           created_at: r.createdAt.toISOString(),
         }));
       };

@@ -118,5 +118,13 @@ describe("safetyProblem", () => {
     expect(safetyProblem({ ...agent, forward_to: ["stranger@else.example"] }, ctx)).toMatch(
       /forward_to accepts/,
     );
+    // The shared domain is every team's: an owner address there was never proven.
+    const shared = { ...defaultSafety("agent", true), owner_addresses: ["boss@home.example"] };
+    expect(
+      safetyProblem({ ...shared, forward_to: ["boss@home.example"] }, { ...ctx, shared: true }),
+    ).toMatch(/login addresses only on the shared domain/);
+    expect(
+      safetyProblem({ ...shared, forward_to: ["owner@team.example"] }, { ...ctx, shared: true }),
+    ).toBeNull();
   });
 });

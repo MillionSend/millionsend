@@ -22,7 +22,7 @@ export interface InboxTarget {
 const domainOf = (address: string) => address.slice(address.lastIndexOf("@") + 1);
 
 /** The inbox key of an address: lowercase, the local part cut at its first "+" when `untagged`. */
-function inboxKey(address: string, untagged: boolean): string {
+export function inboxKey(address: string, untagged: boolean): string {
   const at = address.lastIndexOf("@");
   const local = address.slice(0, at).toLowerCase();
   const plus = local.indexOf("+");

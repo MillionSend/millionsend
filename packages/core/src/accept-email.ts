@@ -403,6 +403,11 @@ export async function acceptEmail(
     parkUnderReview?: boolean | undefined;
     /** Who an inbox send's activity names; read from `auth` when absent. */
     actor?: InboxActor | undefined;
+    /**
+     * With `tx`: where an inbox send's webhook rows go, for the caller to
+     * queue after its own commit, as it queues the send.
+     */
+    inboxWebhooks?: WebhookEnqueue | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
   let underReview = false;
@@ -592,7 +597,7 @@ export async function acceptEmail(
         attachments: payload.attachments,
         actor,
         now,
-        enqueue: inboxEvents.enqueue,
+        enqueue: opts.inboxWebhooks ?? inboxEvents.enqueue,
       });
     }
     return { id: row.id, parked };

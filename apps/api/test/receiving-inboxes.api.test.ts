@@ -420,9 +420,26 @@ describe("long-poll (S28)", () => {
         id: expect.any(String),
         inbox_id: vip,
         reason: "quarantined",
+        quarantine_reason: "not_allowlisted",
         created_at: expect.any(String),
       },
     ]);
+  });
+
+  it("never matches held mail on its subject for an agent, so it cannot probe what held mail says", async () => {
+    const vipKey = await addKey({ inboxId: vip });
+    const pending = get(
+      vipKey,
+      `/emails/receiving?wait=10&subject_contains=no-such-words&since=${new Date().toISOString()}`,
+    );
+    setTimeout(
+      () =>
+        void deliver(message("vip@in.acme.test", { subject: "Held probe" }), ["vip@in.acme.test"]),
+      300,
+    );
+    const list = await json<List>(await pending);
+    expect(list.data).toEqual([]);
+    expect(list.held).toHaveLength(1);
   });
 
   it("allows a team twenty waits at once in a process; the next gets 429", async () => {

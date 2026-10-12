@@ -519,7 +519,7 @@ describe("thread reads and updates", () => {
         threadId: heldOnly,
         agentView: false,
       }),
-    ).toMatchObject({ subject: null });
+    ).toMatchObject({ subject: "x" });
   });
 
   it("marks read, moves, labels and trashes, announcing each change once", async () => {
@@ -635,12 +635,20 @@ describe("thread reads and updates", () => {
     const catchAll = await inbound(s, old, { subject: "Also catch-all", catchAll: true });
     const recent = await thread(s, { folder: "trash" });
     await inbound(s, recent, { subject: "Recent" });
+    // Mail a person never released keeps its thread, trashed or not.
+    const holding = await thread(s, { folder: "trash" });
+    await db
+      .update(schema.inboxThreads)
+      .set({ trashedAt: new Date(now.getTime() - 31 * DAY) })
+      .where(eq(schema.inboxThreads.id, holding));
+    await inbound(s, holding, { subject: "Seen" });
+    await inbound(s, holding, { subject: "Held", held: "quarantined" });
     expect(await purgeTrashedThreads(db, now)).toBe(1);
     const threads = await db
       .select({ id: schema.inboxThreads.id })
       .from(schema.inboxThreads)
       .where(eq(schema.inboxThreads.inboxId, s.inboxId));
-    expect(threads.map((t) => t.id)).toEqual([recent]);
+    expect(threads.map((t) => t.id).sort()).toEqual([recent, holding].sort());
     const rows = await db
       .select({ id: schema.receivedEmails.id })
       .from(schema.receivedEmails)
