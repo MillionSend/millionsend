@@ -15,16 +15,8 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ApiDeps, createApi } from "../src/app.js";
-
-// The inbox-key allow-list belongs to the inbox routes; here, just its reads.
-vi.mock("@millionsend/core", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@millionsend/core")>()),
-  inboxKeyAllows: (method: string, path: string, inboxId: string) =>
-    method === "GET" &&
-    (path.startsWith("/emails/receiving") || path === `/inboxes/${inboxId}/codes/latest`),
-}));
 
 /**
  * The receiving surface with inboxes: who sees held mail, MillionSend's

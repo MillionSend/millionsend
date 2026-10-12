@@ -29,20 +29,6 @@ import {
   type World,
 } from "./inbox-send-fixtures.js";
 
-// A fixed thread summary for the event snapshots keeps these tests on the send path.
-vi.mock("../src/inboxes/threads.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/inboxes/threads.js")>()),
-  getThread: vi.fn(async (_db: unknown, p: { threadId: string }) => ({
-    object: "inbox_thread",
-    id: p.threadId,
-    subject: "Question",
-    folder: "inbox",
-    labels: [],
-    read: true,
-    quarantined: 0,
-  })),
-}));
-
 let db: Db;
 let close: () => Promise<void>;
 let w: World;

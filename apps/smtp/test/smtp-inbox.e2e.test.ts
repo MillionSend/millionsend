@@ -5,7 +5,7 @@ import { schema } from "@millionsend/db";
 import { createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import nodemailer, { type SendMailOptions } from "nodemailer";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   addInbox,
   addThread,
@@ -15,20 +15,6 @@ import {
   type World,
 } from "../../../packages/core/test/inbox-send-fixtures.js";
 import { createSmtpServer, SMTP_USERNAME } from "../src/smtp.js";
-
-// A fixed thread summary for the event snapshots keeps these tests on the relay.
-vi.mock("../../../packages/core/src/inboxes/threads.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../packages/core/src/inboxes/threads.js")>()),
-  getThread: vi.fn(async (_db: unknown, p: { threadId: string }) => ({
-    object: "inbox_thread",
-    id: p.threadId,
-    subject: "Question",
-    folder: "inbox",
-    labels: [],
-    read: true,
-    quarantined: 0,
-  })),
-}));
 
 let db: Db;
 let closeDb: () => Promise<void>;
