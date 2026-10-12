@@ -59,7 +59,7 @@ describe("isRootDomainSend", () => {
 
 describe("vouchedRegistrableDomain", () => {
   it("vouches under a listed multi-part suffix or a generic TLD", () => {
-    expect(vouchedRegistrableDomain("news.dinzo.com.br")).toBe("dinzo.com.br");
+    expect(vouchedRegistrableDomain("news.acme.com.br")).toBe("acme.com.br");
     expect(vouchedRegistrableDomain("mail.acme.co.uk")).toBe("acme.co.uk");
     expect(vouchedRegistrableDomain("tx.acme.com")).toBe("acme.com");
   });
