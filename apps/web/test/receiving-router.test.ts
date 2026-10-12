@@ -203,7 +203,7 @@ describe("receiving", () => {
       subject: "Newer",
       attachmentCount: 2,
       extractedKinds: [],
-      spamVerdict: null,
+      spamVerdict: "pass",
       virusVerdict: null,
       held: false,
       createdAt: expect.any(Date),
