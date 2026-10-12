@@ -15,7 +15,8 @@ past it. Free holds up to 1,000 contacts; segments and topics are unlimited
 everywhere, and so are contacts from Starter up. Sending domains are capped
 at 3 on Free and 10 on Starter, unlimited above. At either cap the API
 answers `403 plan_limit_reached` ("Your plan allows up to 1000 contacts")
-and the dashboard shows the same sentence.
+and the dashboard shows the same sentence. Inboxes are capped at 3 on Free
+and 25 on Starter, unlimited above (see [Inboxes](#inboxes)).
 
 | Rung | Plan | Price | Included | Cap | Overage per 1,000 |
 | --- | --- | --- | --- | --- | --- |
@@ -104,6 +105,40 @@ not per recipient, in `usage_counters.received` and
 The MX asks at every `RCPT TO`, so a team out of room is deferred before the
 message is sent; the sender retries. Self-hosted instances count received
 mail and never cap it.
+
+### Inboxes
+
+[Inboxes](/concepts/inboxes) cost nothing themselves; what they receive is
+counted as above. The plan caps how many a team keeps and how fast it creates
+them, from `PLAN_INBOX_LIMIT` and `INBOX_CREATES_PER_HOUR` in
+`packages/core/src/inboxes/limits.ts`:
+
+| Plan | Inboxes | Created per hour | Catch-all |
+| --- | --- | --- | --- |
+| Free | 3 | 10 | No |
+| Starter | 25 | 60 | Yes |
+| Pro, Scale | Unlimited | 600 | Yes |
+
+- At the inbox cap, `POST /inboxes` answers `403 validation_error` with
+  Resend's message, "You have reached the inbox limit of your plan. Upgrade
+  to add more.", and the dashboard disables **Create inbox** with the same
+  advice. Past the hourly rate it answers `429 rate_limit_exceeded` with
+  `retry-after`. The rate counts inboxes created, so deleting them doesn't
+  reset it.
+- Catch-all receiving (`receiving_catch_all` on a domain) needs Starter or
+  above: on Free, turning it on answers `403 plan_limit_reached` ("Catch-all
+  receiving needs a paid plan"). It stays on through a downgrade, and every
+  domain that received mail before inboxes existed was switched on.
+- `GET /usage` reports the cap as `limits.inboxes` (`null` when unlimited),
+  and the billing card shows it as "6 of 25".
+- Screening received mail for prompt injection keeps its own count
+  (`usage_counters.inbound_judged`), apart from the samples of outbound
+  content monitoring, under the same daily values: 600 per team and 50,000
+  per instance, plus 200 per inbox. Received mail never spends the outbound
+  sampling caps.
+
+Self-hosted instances have no inbox cap or creation rate, and catch-all is
+open to every domain.
 
 ## The Stripe model
 

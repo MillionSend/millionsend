@@ -19,6 +19,8 @@ Encontre todo ponto de contato com o Resend antes de mudar qualquer coisa e most
 - Receptores de webhook que verificam os cabeçalhos de assinatura `svix-*`, e as URLs de endpoint registradas no Resend.
 - Ids ou aliases de audiências, segmentos, tópicos e templates referenciados em código ou configuração.
 - Corpos de broadcast ou template que usam `{{{RESEND_UNSUBSCRIBE_URL}}}` (continua funcionando no MillionSend como alias de `{{{UNSUBSCRIBE_URL}}}`).
+- Recebimento: chamadas a `resend.emails.receiving.*`, handlers de `email.received` e quais endereços de cada domínio de recebimento o código usa.
+- Caixas de entrada (pré-lançamento do Resend): o pacote `resend@*-preview-inboxes.*`, chamadas a `resend.inboxes.*`, os endereços de caixa que elas usam e handlers de eventos de webhook `inbox.*`.
 
 ## Passo 2 — Mova a conta
 
@@ -61,12 +63,16 @@ Então resolva o que o relatório lista:
 
 - Atualize ids de tópicos e segmentos em código e configuração usando o mapa de ids do relatório.
 - Templates: templates do MillionSend não armazenam `from` nem `reply_to`; passe-os em cada envio.
-- Webhooks: endpoint, eventos e segredo de assinatura foram copiados, então o receptor existente continua verificando os cabeçalhos `svix-*`. Tipos de evento fora dos oito tipos `email.*` do MillionSend (inclusive `email.received`) foram descartados por webhook e estão listados; remova ou substitua os handlers deles.
+- Webhooks: endpoint, eventos e segredo de assinatura foram copiados, então o receptor existente continua verificando os cabeçalhos `svix-*`. Tipos de evento que o MillionSend não envia (`domain.*`, `email.suppressed`, `inbox.thread.assigned`, `inbox.thread.unassigned`) foram descartados por webhook e estão listados; remova ou substitua os handlers deles. O MillionSend só envia eventos `inbox.*` para endpoints que os escolhem pelo nome, nunca para "todos os eventos".
 - Chaves de API não podem ser migradas (o Resend expõe apenas os nomes). Crie uma para cada nome que o relatório lista, no painel, e coloque-as nos ambientes correspondentes.
+- Recebimento: aqui um domínio de recebimento só recebe nos endereços das caixas de entrada dele, a não ser que o **Pega-tudo** esteja ligado (página do domínio, ou `PATCH /domains/{id}` com `{"receiving_catch_all": true}`; um plano pago na nuvem). Se o código recebe em endereços quaisquer, como no Resend, o usuário liga o pega-tudo antes de trocar o MX; senão, cada endereço precisa de uma caixa. Pergunte qual. Documentação: https://docs.millionsend.com/pt-BR/concepts/receiving.md.
+- Caixas de entrada: a migração da conta não cria caixas. Crie de novo cada caixa que o código usa, com o mesmo endereço (`POST /inboxes`), depois que o domínio dela recebe aqui. As caixas criadas por um SDK do Resend têm `kind: "agent"` por padrão (quarentena, análise, envio só em respostas); as caixas lidas por pessoas precisam de `kind: "human"`, definido por HTTP direto ou no painel. Uma resposta, um encaminhamento ou um envio de rascunho pode responder `202` com um rascunho (`object: "inbox_draft"`) quando as regras da caixa o retêm: faça o código tratar isso. Documentação: https://docs.millionsend.com/pt-BR/concepts/inboxes.md.
 
 ## Passo 4 — DNS, feito pelo usuário
 
 O MillionSend usa seu próprio par de chaves DKIM, então todo domínio precisa de novos registros DNS mesmo que já envie pelo Resend. Os registros estão no relatório e em **Domínios** no painel. Os dois provedores podem ficar verificados lado a lado. Não mude o tráfego até cada domínio aparecer como **Verificado**.
+
+Um domínio que recebe e-mails muda junto com o registro MX: depois que o recebimento estiver ligado aqui e o pega-tudo ou as caixas estiverem prontos (passo 3), o usuário aponta o MX para `mx.millionsend-dns.com` (na auto-hospedagem: o `RECEIVING_MX_HOST` da instância). Essa troca é a virada do recebimento; o que o Resend já recebeu fica lá.
 
 ## Passo 5 — Faça a virada e verifique
 

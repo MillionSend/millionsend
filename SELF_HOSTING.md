@@ -56,7 +56,8 @@ In `.env` (everything else defaults to a working local setup):
   of the dashboard host.
 - `COMPOSE_PROFILES` — optional services, comma-separated: `docs` (the
   documentation site), `smtp` (the relay; mount a keypair first), `mx`
-  (inbound mail; see "Receiving mail" below), `backup` (scheduled dumps).
+  (inbound mail; see "Receiving mail" below), `clamav` (virus scanning of
+  received mail, same section), `backup` (scheduled dumps).
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — from the AWS setup below, or rely
   on the default AWS credential chain. The worker paces each region at the lower
   of its own SES send rate and `SES_MAX_SEND_RATE` (or the Settings → Instance
@@ -355,10 +356,11 @@ so it stays off until asked for: once the keypair is mounted, add `smtp` to
 <details>
 <summary><b>Receiving mail (built-in MX, beta)</b></summary>
 
-Point a domain's MX record at this instance and every message to any address
-on it is stored for the team, listed under Emails → Receiving, and sent to
-`email.received` webhooks (Resend's receiving API and payloads). The mail
-server is the `mx` compose service (`PROCESS=mx`):
+Point a domain's MX record at this instance and mail to its inboxes' addresses
+(or, with the domain's catch-all on, to any address on it) is stored for the
+team, listed under Inboxes → All received, and sent to `email.received`
+webhooks (Resend's receiving API and payloads). The mail server is the `mx`
+compose service (`PROCESS=mx`):
 
 - It accepts mail only for domains a team turned receiving on for, so it is
   never an open relay. Anything else gets `550 5.1.1` during the session.
@@ -404,7 +406,9 @@ outbound 25; inbound is usually open, but check yours).
 4. In the dashboard, open a verified domain, turn on **Receiving**, and add
    the MX record it shows (priority 10, pointing at `RECEIVING_MX_HOST`). Use
    a subdomain such as `inbound.example.com`: an MX record on the domain
-   itself would route all of its mail here, mailboxes included.
+   itself would route all of its mail here, mailboxes included. Then turn on
+   **Catch-all** to take mail at every address, or create an inbox per
+   address under Inboxes; with neither, the domain refuses all mail.
 
 Notes:
 
@@ -428,6 +432,64 @@ Notes:
   `environment` in `docker-compose.override.yml`.
 - Logs are one JSON object per line: envelope facts (domains, sizes,
   verdicts) and outcomes, never message content.
+- When a release changes what the MX sends the app (such as the detailed
+  authentication results it records per message), upgrade the app first and
+  a separate MX after. Either order keeps mail flowing; the compose `mx`
+  service runs the app's own image, so it moves with the app.
+- Settings → Receiving shows the operator the MX host, the last message,
+  today's count, virus scanning and the shared inbox domain.
+
+**Shared inbox domain (optional).** Teams can create inboxes that need no DNS
+of their own: each team gets a subdomain of `SHARED_INBOX_DOMAIN`
+(`acme.agents.example`), and each inbox a random address there. Use a domain
+of its own, not a subdomain of one your teams send from, so agent mail and
+any abuse of it stay off your main domain's reputation; no team can add it,
+or a name under it, as a sending domain.
+
+1. DNS: `*.agents.example MX 10 <RECEIVING_MX_HOST>` (one wildcard covers
+   every team) and `_dmarc.agents.example TXT "v=DMARC1; p=reject"`.
+2. SES: verify `agents.example` as a domain identity with Easy DKIM in the
+   default region (the first of `AWS_REGIONS`, or `AWS_REGION`) and publish
+   its DKIM records. Mail from shared addresses has no team domain, so it
+   goes out from that region and its default configuration set.
+3. `.env`: `SHARED_INBOX_DOMAIN=agents.example`, then `docker compose up -d`.
+   The app refuses to boot without `RECEIVING_MX_HOST`.
+4. Check: `dig +short MX test.agents.example` prints your MX host; create an
+   inbox with **Random address**, write to it, reply from it, and the reply
+   should arrive with DKIM passing for `agents.example` and DMARC passing.
+
+**Virus scanning (optional).** With `CLAMAV_HOST`, every received message is
+scanned by ClamAV's clamd before it is stored; infected mail is held and its
+downloads are blocked for good. Both compose files carry a `clamav` service:
+
+```sh
+COMPOSE_PROFILES=mx,clamav   # with any others
+CLAMAV_HOST=clamav:3310
+```
+
+It runs `clamav/clamav-debian:1.4`, ClamAV's Debian image, built for amd64
+and arm64 (the Alpine-based `clamav/clamav` is amd64 only), and keeps its
+signatures current by itself in the `clamav-db` volume. Port 3310 stays on
+the compose network: clamd's protocol has no authentication or encryption.
+clamd holds its signatures in memory, over 1 GiB and about twice that while
+it reloads them daily, and ClamAV recommends 4 GiB of RAM. A clamd elsewhere
+works as `CLAMAV_HOST=host:port` (3310 by default) on a private network, with
+a `StreamMaxLength` of at least 40 MB. When clamd can't answer (stopped,
+loading, over 30 seconds), mail is delivered with
+`virus_verdict: "processing_failed"` and a warning, and the failure goes to
+error tracking.
+
+**Screening agent inboxes.** Agent inboxes screen mail from outside senders
+for prompt injection with the content monitoring judge (`ABUSE_JUDGE`, below):
+on with the judge, rules alone without it. Screening counts apart from content
+monitoring, under the same `MONITOR_TEAM_DAILY_CAP` and
+`MONITOR_INSTANCE_DAILY_CAP` values plus 200 per inbox per day; past one, mail
+that needs screening is quarantined, never delivered unscreened, and its
+verdicts never touch a team's risk. Each screened message sends TypeSafe the
+sender and its authentication results, the subject and visible text (codes
+masked, addresses cut to their domain), the removed hidden text, link texts
+and domains (never fetched) and attachment names: list that in your privacy
+notice before turning the judge on.
 
 </details>
 

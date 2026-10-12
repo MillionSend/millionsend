@@ -111,6 +111,23 @@ services:
     tmpfs:
       - /tmp
 
+  clamav:
+    # ClamAV's Debian build: the Alpine-based clamav/clamav image is published
+    # for amd64 only, and this stack also runs on arm64.
+    image: clamav/clamav-debian:1.4
+    # Opt-in (COMPOSE_PROFILES=clamav, plus CLAMAV_HOST=clamav:3310 in .env):
+    # clamd keeps its signatures in memory; ClamAV recommends 4 GiB of RAM. No
+    # host port: clamd's protocol has neither authentication nor encryption.
+    profiles: ["clamav"]
+    volumes:
+      # Without it, every restart downloads the whole signature set again.
+      - clamav-db:/var/lib/clamav
+    restart: unless-stopped
+    # No cap_drop or read_only here: the image's entrypoint chowns the
+    # database and creates /run/clamav as root before dropping to its own user.
+    security_opt:
+      - no-new-privileges:true
+
   backup:
     # Optional scheduled pg_dump to S3-compatible storage. Stays disabled (the
     # container prints one line and exits 0, and restart "no" leaves it
@@ -158,3 +175,4 @@ services:
 volumes:
   pgdata:
   backup-scratch:
+  clamav-db:
