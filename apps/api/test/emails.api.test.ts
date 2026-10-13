@@ -607,6 +607,19 @@ describe("natural-language scheduled_at on send", () => {
       message: expect.stringMatching(/ISO 8601.*in 5 mins/),
     });
   });
+
+  it("422s a date the database cannot store, accepting nothing", async () => {
+    const stored = async () =>
+      (await db.select().from(schema.emails).where(eq(schema.emails.teamId, teamId))).length;
+    const before = await stored();
+    const res = await post({ ...validBody, scheduled_at: "0000-06-01T00:00:00Z" });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      name: "validation_error",
+      message: "Dates must be valid and fall between the years 1 and 9999",
+    });
+    expect(await stored()).toBe(before);
+  });
 });
 
 describe("batch permissive validation", () => {

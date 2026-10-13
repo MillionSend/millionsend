@@ -2,6 +2,9 @@
 
 export type MonitorSettingKind = "count" | "rate" | "multiplier" | "bool" | "score";
 
+/** The largest count an override can store: the columns are int4. */
+export const MONITOR_COUNT_MAX = 2_147_483_647;
+
 /** The same rule the router enforces per kind, so the form can refuse before it sends. */
 export function validMonitorValue(kind: MonitorSettingKind, value: number): boolean {
   if (!Number.isFinite(value)) return false;
@@ -13,7 +16,7 @@ export function validMonitorValue(kind: MonitorSettingKind, value: number): bool
     case "score":
       return Number.isInteger(value) && value >= 0 && value <= 100;
     case "count":
-      return Number.isInteger(value) && value >= 0;
+      return Number.isInteger(value) && value >= 0 && value <= MONITOR_COUNT_MAX;
     default:
       return false;
   }

@@ -138,7 +138,10 @@ export interface PostJsonOptions {
 
 export interface PostJsonResult {
   status: number;
-  /** Response body, truncated to maxResponseBytes. */
+  /**
+   * Response body, truncated to maxResponseBytes, with U+0000 as U+FFFD:
+   * callers store it as Postgres text, which cannot hold U+0000.
+   */
   body: string;
   /** The receiver's Retry-After header, verbatim, when it sent one. */
   retryAfter?: string;
@@ -221,7 +224,7 @@ export async function postJson(rawUrl: string, opts: PostJsonOptions): Promise<P
           const retryAfter = res.headers["retry-after"];
           resolve({
             status: res.statusCode ?? 0,
-            body: Buffer.concat(chunks).toString("utf8"),
+            body: Buffer.concat(chunks).toString("utf8").replaceAll("\0", "\uFFFD"),
             ...(typeof retryAfter === "string" ? { retryAfter } : {}),
           });
         };

@@ -319,6 +319,22 @@ describe("smtp relay", () => {
     ).rejects.toMatchObject({ responseCode: 553 });
   });
 
+  it("refuses a Subject with control characters with 554, as POST /emails does", async () => {
+    for (const subject of ["a\u0000b", "a\u0007b"]) {
+      await expect(
+        transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+          from: "a@acme.dev",
+          to: "r@example.com",
+          subject,
+          text: "t",
+        }),
+      ).rejects.toMatchObject({
+        responseCode: 554,
+        response: expect.stringContaining("Subject must not contain control characters"),
+      });
+    }
+  });
+
   it("delivers to the envelope only: header-only recipients are dropped, envelope extras are BCC", async () => {
     const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail({
       from: "a@acme.dev",

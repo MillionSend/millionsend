@@ -10,7 +10,7 @@ import {
   type UnsignedSnsMessage,
 } from "@millionsend/ses/test-support";
 import { createTestDb } from "@millionsend/test-utils";
-import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 
 /**
@@ -25,6 +25,7 @@ let app: ReturnType<typeof createApi>;
 let enqueued: { event: SerializedSesEvent; dedupeKey: string }[];
 let confirmed: string[];
 let certFetches: string[];
+let enqueueFailure: Error | null = null;
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
@@ -40,6 +41,7 @@ beforeAll(async () => {
         return snsTestCertPem();
       },
       enqueueSesEvent: async (event, dedupeKey) => {
+        if (enqueueFailure) throw enqueueFailure;
         enqueued.push({ event, dedupeKey });
       },
       confirmSubscription: async (url) => {
@@ -93,6 +95,21 @@ it("valid signed notification: 200 and one job keyed by SNS MessageId", async ()
   expect(enqueued[0]?.event.eventType).toBe("Delivery");
   expect(enqueued[0]?.event.sesMessageId).toBe("ses-mid-1");
   expect(enqueued[0]?.event.emailId).toBe("00000000-0000-4000-8000-000000000001");
+});
+
+it("a value the queue cannot store is a 500, never a 4xx SNS would not retry", async () => {
+  enqueueFailure = Object.assign(new Error("unsupported Unicode escape sequence"), {
+    code: "22P05",
+  });
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const res = await post(signSnsMessage(baseNotification(deliveryPayload)));
+    expect(res.status).toBe(500);
+    expect(logged).toHaveBeenCalled();
+  } finally {
+    enqueueFailure = null;
+    logged.mockRestore();
+  }
 });
 
 it("tampered message: 403, nothing enqueued", async () => {

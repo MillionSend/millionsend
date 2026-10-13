@@ -316,6 +316,17 @@ describe("broadcasts.send", () => {
     expect((await broadcastRow(id))?.status).toBe("draft");
   });
 
+  it("refuses a scheduledAt the database cannot store", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id } = await seedDraft(teamId);
+    const farPast = new Date(Date.UTC(-5000, 0, 1));
+    await expect(caller.broadcasts.send({ id, scheduledAt: farPast })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Dates must be valid and fall between the years 1 and 9999",
+    });
+    expect((await broadcastRow(id))?.status).toBe("draft");
+  });
+
   it("blocks sending when APP_BASE_URL is not configured", async () => {
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);

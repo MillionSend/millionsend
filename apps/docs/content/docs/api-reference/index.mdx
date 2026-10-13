@@ -254,6 +254,11 @@ Errors use Resend's format:
 A body that isn't valid JSON answers `400 invalid_parameter`, and a body sent
 with a `Content-Type` other than `application/json` answers `415`.
 
+A NUL character (U+0000) in text the database stores, such as a name, a
+property, a filter or an id in the URL, and a date outside the years 1 to 9999
+answer `422 validation_error`: the database can't store them. An email's `html`
+and `text` are stored encrypted, so they may contain it.
+
 A recipient whose domain can never receive mail is refused with
 `422 validation_error`, and the message names the address:
 

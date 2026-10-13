@@ -134,6 +134,16 @@ describe("segments CRUD and isolation", () => {
     });
     expect((await caller.segments.get({ id: segmentId })).id).toBe(segmentId);
   });
+
+  it("refuses an update with nothing to change, writing nothing", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id } = await caller.segments.create({ name: "Kept", filter: filterOf("all", []) });
+    const stored = () => db.select().from(schema.segments).where(eq(schema.segments.id, id));
+    const before = await stored();
+    await expect(caller.segments.update({ id })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await stored()).toEqual(before);
+  });
 });
 
 describe("segments count matches known filters (the same predicate the worker fans out on)", () => {

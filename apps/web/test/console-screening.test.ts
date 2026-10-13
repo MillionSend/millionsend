@@ -245,3 +245,19 @@ it("releases only what the list showed: named emails, or those parked by the tim
   expect(reasons.find((row) => row.id === shown)?.parkReason).toBeNull();
   expect(reasons.find((row) => row.id === later)?.parkReason).toBe("screening");
 });
+
+it("refuses a parkedBefore the database cannot store, changing nothing", async () => {
+  const teamId = await createTeam(db, "far-past");
+  const parked = await waiting(teamId, "queued_quota", "screening");
+  await expect(
+    operator().console.safety.cancelWaiting({
+      teamId,
+      parkedBefore: new Date(Date.UTC(-5000, 0, 1)),
+    }),
+  ).rejects.toMatchObject({
+    code: "BAD_REQUEST",
+    message: "Dates must be valid and fall between the years 1 and 9999",
+  });
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, parked));
+  expect(row).toMatchObject({ latestStatus: "queued_quota", parkReason: "screening" });
+});

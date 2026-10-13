@@ -1,5 +1,9 @@
 import { receivingEnabled } from "@millionsend/config";
-import { recordSupportViewRead, type WebhookEnqueue } from "@millionsend/core";
+import {
+  recordSupportViewRead,
+  unstorableValueMessage,
+  type WebhookEnqueue,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { getDb } from "@millionsend/db";
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -161,7 +165,15 @@ const supportViewGuard = t.middleware(async ({ ctx, type, path, next }) => {
   return next();
 });
 
-export const publicProcedure = t.procedure.use(supportViewGuard);
+/** A value the database cannot store is the caller's mistake, not a fault. */
+const unstorableValues = t.middleware(async ({ next }) => {
+  const result = await next();
+  const message = result.ok ? null : unstorableValueMessage(result.error);
+  if (message) throw new TRPCError({ code: "BAD_REQUEST", message });
+  return result;
+});
+
+export const publicProcedure = t.procedure.use(unstorableValues).use(supportViewGuard);
 
 export const protectedProcedure = publicProcedure.use(({ ctx, next }) => {
   if (!ctx.session) throw new TRPCError({ code: "UNAUTHORIZED" });

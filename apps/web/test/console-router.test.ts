@@ -580,6 +580,18 @@ describe("console.monitor", () => {
     ).toMatchObject({ value: 0.5 });
   });
 
+  it("refuses a count past its int4 column, storing nothing", async () => {
+    const teamDailyCap = async () =>
+      (await operator().console.monitor.settings.get()).settings.find(
+        (s) => s.key === "teamDailyCap",
+      );
+    const before = await teamDailyCap();
+    await expect(
+      operator().console.monitor.settings.update({ teamDailyCap: 3_000_000_000 }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await teamDailyCap()).toEqual(before);
+  });
+
   it("shows the judge and today's tallies once the env names a provider", async () => {
     vi.stubEnv("ABUSE_JUDGE", "typesafe");
     vi.stubEnv("ABUSE_JUDGE_API_KEY", "k");

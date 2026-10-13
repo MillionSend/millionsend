@@ -26,4 +26,21 @@ describe("parseSesEvent", () => {
     expect(parsed?.occurredAt.toISOString()).toBe(deliveryDelay.timestamp);
     expect(parsed?.data).toEqual({ eventType: "DeliveryDelay", deliveryDelay });
   });
+
+  it("turns a remote server's U+0000 into U+FFFD, so the event can be queued as jsonb", () => {
+    const parsed = parseSesEvent({
+      eventType: "Bounce",
+      mail: { messageId: "example-message-id-0002", timestamp: "2026-03-02T10:00:00.000Z" },
+      bounce: {
+        bounceType: "Permanent",
+        bounceSubType: "General",
+        bouncedRecipients: [
+          { emailAddress: "recipient@example.com", diagnosticCode: "smtp; 550 a\u0000b" },
+        ],
+      },
+    });
+
+    expect(parsed?.bounce?.diagnosticCode).toBe("smtp; 550 a\uFFFDb");
+    expect(JSON.stringify(parsed?.data)).not.toContain("\\u0000");
+  });
 });

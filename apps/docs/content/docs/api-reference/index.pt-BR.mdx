@@ -264,6 +264,12 @@ Erros usam o formato do Resend:
 Um corpo que não é JSON válido recebe `400 invalid_parameter`, e um corpo
 enviado com `Content-Type` diferente de `application/json` recebe `415`.
 
+Um caractere NUL (U+0000) num texto que o banco de dados guarda, como um nome,
+uma propriedade, um filtro ou um id na URL, e uma data fora dos anos 1 a 9999
+recebem `422 validation_error`: o banco de dados não consegue guardar esses
+valores. O `html` e o `text` de um e-mail ficam guardados criptografados, então
+podem ter esse caractere.
+
 Um destinatário cujo domínio nunca recebe e-mail é recusado com
 `422 validation_error`, e a mensagem cita o endereço:
 
