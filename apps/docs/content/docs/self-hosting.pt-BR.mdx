@@ -1558,10 +1558,11 @@ responde `429 daily_quota_exceeded` com uma mensagem de aquecimento (SMTP
 `452`) só quando a fila de espera da equipe está cheia (três dias do
 volume do plano, ou do limite do domínio quando ele é maior). Um domínio sobe
 um degrau antes quando os envios desde o último degrau estão limpos: pelo
-menos 50, o primeiro enviado há um dia ou
-mais, bounces permanentes abaixo de 2%, reclamações abaixo de 0,1% e nenhuma
-avaliação do tipo phishing do monitoramento de conteúdo (verificado pelo job
-`safety.flags` de 15 minutos).
+menos 50 entregues (e-mails para o simulador do SES nunca contam), o primeiro
+enviado há um dia ou mais, bounces permanentes abaixo de 2% dos envios
+entregues ou com bounce permanente, reclamações abaixo de 0,1% dos entregues e
+nenhuma avaliação do tipo phishing do monitoramento de conteúdo (verificado
+pelo job `safety.flags` de 15 minutos).
 Um operador pode confiar em uma equipe, ou em um domínio, na página de revisão de
 Confiança e segurança, o que libera o aquecimento e fica no registro de
 auditoria.

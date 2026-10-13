@@ -162,17 +162,26 @@ it("moves a warming domain up a step once its sends are clean", async () => {
     })
     .returning({ id: schema.domains.id });
   if (!domain) throw new Error("domain insert failed");
-  await db.insert(schema.emails).values(
-    Array.from({ length: 50 }, () => ({
-      teamId: warming,
-      domainId: domain.id,
-      from: "news@news.warming-up.com",
-      to: ["r@example.com"],
-      subject: "s",
-      latestStatus: "delivered" as const,
-      sentAt: new Date(NOW.getTime() - 25 * 3600_000),
-    })),
-  );
+  const sentAt = new Date(NOW.getTime() - 25 * 3600_000);
+  const sent = await db
+    .insert(schema.emails)
+    .values(
+      Array.from({ length: 50 }, () => ({
+        teamId: warming,
+        domainId: domain.id,
+        from: "news@news.warming-up.com",
+        to: ["r@example.com"],
+        subject: "s",
+        latestStatus: "delivered" as const,
+        sentAt,
+      })),
+    )
+    .returning({ id: schema.emails.id });
+  await db
+    .insert(schema.emailEvents)
+    .values(
+      sent.map(({ id }) => ({ emailId: id, type: "delivered" as const, occurredAt: sentAt })),
+    );
   expect(await runSafetyFlags(db, { now: NOW })).toMatchObject({ graduated: 1 });
   const [row] = await db
     .select({ tier: schema.domains.warmupTier })

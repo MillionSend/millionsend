@@ -548,6 +548,11 @@ describe("early graduation", () => {
     domainId: string,
     n: number,
     sentAt: Date,
+    over: {
+      to?: string[];
+      bcc?: string[];
+      events?: Pick<typeof schema.emailEvents.$inferInsert, "type" | "bounceType">[];
+    } = {},
   ): Promise<string[]> {
     const rows = await db
       .insert(schema.emails)
@@ -556,15 +561,31 @@ describe("early graduation", () => {
           teamId,
           domainId,
           from: "a@graduate.example",
-          to: ["r@example.com"],
+          to: over.to ?? ["r@example.com"],
+          bcc: over.bcc,
           subject: "s",
           latestStatus: "delivered" as const,
           sentAt,
         })),
       )
       .returning({ id: schema.emails.id });
+    const events = over.events ?? [{ type: "delivered" }];
+    await db
+      .insert(schema.emailEvents)
+      .values(
+        rows.flatMap(({ id }) => events.map((ev) => ({ ...ev, emailId: id, occurredAt: sentAt }))),
+      );
     return rows.map((r) => r.id);
   }
+
+  // A domain that never resolves: SES retries it for hours, then bounces it Transient.
+  const unreachable = {
+    to: ["r@unreachable.invalid"],
+    events: [
+      { type: "delivery_delayed" as const },
+      { type: "bounced" as const, bounceType: "Transient" },
+    ],
+  };
 
   async function verdict(
     teamId: string,
@@ -651,6 +672,64 @@ describe("early graduation", () => {
     const moved = await graduateWarmupDomains(db, NOW);
     expect(moved).not.toContain("bouncy-sender.com");
     expect(moved).not.toContain("spammy-sender.com");
+  });
+
+  it("counts only sends a receiving server took, and leaves the rest out of the rates", async () => {
+    const teamId = await newTeam();
+    const domainId = await newDomain(teamId, "unreachable-sender.example", REGISTERED);
+    await sent(teamId, domainId, 60, DAY_OLD, unreachable);
+    expect(await graduateWarmupDomains(db, NOW)).not.toContain("unreachable-sender.example");
+
+    await sent(teamId, domainId, 50, DAY_OLD);
+    expect(await graduateWarmupDomains(db, NOW)).toContain("unreachable-sender.example");
+  });
+
+  it("leaves out sends to the SES mailbox simulator, however the address is written, and counts named recipients", async () => {
+    const teamId = await newTeam();
+    const domainId = await newDomain(teamId, "simulated-sender.example", REGISTERED);
+    for (const to of [
+      ["success@simulator.amazonses.com"],
+      ["success+warmup@simulator.amazonses.com"],
+      ["SUCCESS@SIMULATOR.AMAZONSES.COM"],
+      ['"QA" <success@Simulator.AmazonSES.com>'],
+    ]) {
+      await sent(teamId, domainId, 50, DAY_OLD, { to });
+    }
+    // Delivered, but the delivered event may be the simulator's own.
+    await sent(teamId, domainId, 50, DAY_OLD, {
+      to: unreachable.to,
+      bcc: ["success@simulator.amazonses.com"],
+    });
+    const named = ["Ana Souza <ana@example.com>", '"Souza, Bia" <bia@Example.ORG>'];
+    await sent(teamId, domainId, 49, DAY_OLD, { to: named });
+    expect(await graduateWarmupDomains(db, NOW)).not.toContain("simulated-sender.example");
+
+    await sent(teamId, domainId, 1, DAY_OLD, { to: named });
+    expect(await graduateWarmupDomains(db, NOW)).toContain("simulated-sender.example");
+  });
+
+  it("reads the bounce rate over delivered and hard-bounced sends, the complaint rate over delivered ones", async () => {
+    const bouncy = await newTeam();
+    const bouncyDomain = await newDomain(bouncy, "edge-bounces.example", REGISTERED);
+    await sent(bouncy, bouncyDomain, 98, DAY_OLD);
+    await sent(bouncy, bouncyDomain, 2, DAY_OLD, {
+      events: [{ type: "bounced", bounceType: "Permanent" }],
+    });
+    await sent(bouncy, bouncyDomain, 10, DAY_OLD, unreachable);
+    expect(await graduateWarmupDomains(db, NOW)).not.toContain("edge-bounces.example");
+    await sent(bouncy, bouncyDomain, 1, DAY_OLD);
+    expect(await graduateWarmupDomains(db, NOW)).toContain("edge-bounces.example");
+
+    const complainer = await newTeam();
+    const complainerDomain = await newDomain(complainer, "edge-complaints.example", REGISTERED);
+    await sent(complainer, complainerDomain, 999, DAY_OLD);
+    await sent(complainer, complainerDomain, 1, DAY_OLD, {
+      events: [{ type: "delivered" }, { type: "complained" }],
+    });
+    await sent(complainer, complainerDomain, 10, DAY_OLD, unreachable);
+    expect(await graduateWarmupDomains(db, NOW)).not.toContain("edge-complaints.example");
+    await sent(complainer, complainerDomain, 1, DAY_OLD);
+    expect(await graduateWarmupDomains(db, NOW)).toContain("edge-complaints.example");
   });
 
   it("holds a domain back on a phishing-type verdict, not on other abuse", async () => {

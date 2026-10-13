@@ -10,6 +10,7 @@ import {
   teamMonitorRow,
 } from "./abuse-monitor.js";
 import { firstRow } from "./driver-result.js";
+import { SES_MAILBOX_SIMULATOR_DOMAIN } from "./mailbox-providers.js";
 import {
   getMonitorSettingsRow,
   type MonitorSettings,
@@ -35,9 +36,9 @@ export const WARMUP_FULL_TIER = WARMUP_TIER_DAYS.length;
 const UNKNOWN_AGE_TIER = 1;
 
 /**
- * Early graduation (the SES, Mailjet and Brevo pattern): this many sends
- * since the last tier change, under these hard-bounce and complaint rates,
- * move a domain up one tier ahead of the calendar.
+ * Early graduation (the SES, Mailjet and Brevo pattern): this many delivered
+ * sends since the last tier change, under these hard-bounce and complaint
+ * rates, move a domain up one tier ahead of the calendar.
  */
 const WARMUP_GRADUATION_SENDS = 50;
 const WARMUP_GRADUATION_MAX_BOUNCE_RATE = 0.02;
@@ -45,9 +46,9 @@ const WARMUP_GRADUATION_MAX_COMPLAINT_RATE = 0.001;
 /** A send counts toward graduation once its bounce has had time to come back. */
 const WARMUP_GRADUATION_SETTLE_MS = 3600_000;
 /**
- * A step also needs a day of sending behind it: the window's first send at
- * least this old. Complaints and verdicts lag the send and a phishing domain
- * is spent within hours, so a few clean seed sends to the sender's own
+ * A step also needs a day of sending behind it: the window's first delivered
+ * send at least this old. Complaints and verdicts lag the send and a phishing
+ * domain is spent within hours, so a few clean seed sends to the sender's own
  * inboxes must not lift a fresh domain to full volume on its first day.
  */
 const WARMUP_GRADUATION_MIN_SPAN_MS = DAY_MS;
@@ -267,11 +268,11 @@ export async function admitWarmup(
 /**
  * Early graduation, run by the safety cron: a domain still warming up moves
  * one tier up when its settled sends since its last tier change are clean —
- * at least WARMUP_GRADUATION_SENDS, the first a day old, hard bounces and
- * complaints under their lines, and no phishing-type verdict from the content
- * monitor on its team. Rows sharing a registrable domain move together, on
- * their pooled sends, as they share a counter. Returns the registrable
- * domains that moved.
+ * at least WARMUP_GRADUATION_SENDS delivered, the first a day old, hard
+ * bounces and complaints under their lines, and no phishing-type verdict from
+ * the content monitor on its team. Rows sharing a registrable domain move
+ * together, on their pooled sends, as they share a counter. Returns the
+ * registrable domains that moved.
  */
 export async function graduateWarmupDomains(db: Db, now: Date = new Date()): Promise<string[]> {
   if (!(await warmupSettings(db)).warmupEnabled) return [];
@@ -329,11 +330,14 @@ async function cleanSince(
   const spanStart = new Date(now.getTime() - WARMUP_GRADUATION_MIN_SPAN_MS).toISOString();
   // Spelled out: inside a subquery drizzle leaves column names unqualified,
   // and emails and email_events both have an id.
+  const delivered = sql`exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'delivered')`;
+  const bounced = sql`exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'bounced' and ev.bounce_type = 'Permanent')`;
   const [sends] = await db
     .select({
-      sent: sql<number>`count(*)::int`,
-      dayOld: sql<number>`count(*) filter (where emails.sent_at <= ${spanStart}::timestamptz)::int`,
-      bounced: sql<number>`count(*) filter (where exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'bounced' and ev.bounce_type = 'Permanent'))::int`,
+      delivered: sql<number>`count(*) filter (where ${delivered})::int`,
+      dayOld: sql<number>`count(*) filter (where ${delivered} and emails.sent_at <= ${spanStart}::timestamptz)::int`,
+      deliveredOrBounced: sql<number>`count(*) filter (where ${delivered} or ${bounced})::int`,
+      bounced: sql<number>`count(*) filter (where ${bounced})::int`,
       complained: sql<number>`count(*) filter (where exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'complained'))::int`,
     })
     .from(e)
@@ -346,12 +350,15 @@ async function cleanSince(
         ),
         gte(e.sentAt, since),
         lt(e.sentAt, new Date(now.getTime() - WARMUP_GRADUATION_SETTLE_MS)),
+        // Only mail that reached a real receiving server speaks for the
+        // domain. A send's delivered event may be the mailbox simulator's
+        // own, so a simulator address in any field leaves the send out.
+        sql`not exists (select 1 from jsonb_array_elements_text(emails.to || coalesce(emails.cc, '[]') || coalesce(emails.bcc, '[]')) as r where lower(rtrim(split_part(r, '@', -1), '>')) = ${SES_MAILBOX_SIMULATOR_DOMAIN})`,
       ),
     );
-  const sent = sends?.sent ?? 0;
-  if (sent < WARMUP_GRADUATION_SENDS || !sends?.dayOld) return false;
-  if ((sends?.bounced ?? 0) / sent >= WARMUP_GRADUATION_MAX_BOUNCE_RATE) return false;
-  if ((sends?.complained ?? 0) / sent >= WARMUP_GRADUATION_MAX_COMPLAINT_RATE) return false;
+  if (!sends || sends.delivered < WARMUP_GRADUATION_SENDS || !sends.dayOld) return false;
+  if (sends.bounced / sends.deliveredOrBounced >= WARMUP_GRADUATION_MAX_BOUNCE_RATE) return false;
+  if (sends.complained / sends.delivered >= WARMUP_GRADUATION_MAX_COMPLAINT_RATE) return false;
   const ms = schema.monitorSamples;
   const verdicts = await db
     .select({ categories: ms.categories, reasons: ms.reasons })

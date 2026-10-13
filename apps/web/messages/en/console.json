@@ -988,7 +988,7 @@
         "broadcasts": "A broadcast is judged as its own HTML plus this many rendered copies; recipients are never sampled per message on top.",
         "escalation": "A failing critical or major content check multiplies the rate; two force it. Caps stop sampling silently, never sending.",
         "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team when one message is judged phishing at the hold score, or the set number of them at the lower score in its first week, until you release it.",
-        "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day, and one daily limit a team's warming domains share, the highest of their caps; mail over either waits and goes out as they allow. No plan lifts them. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean sends move a domain up a step early."
+        "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day, and one daily limit a team's warming domains share, the highest of their caps; mail over either waits and goes out as they allow. No plan lifts them. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean deliveries move a domain up a step early."
       },
       "fields": {
         "firstSends": "First sends judged in full",
