@@ -1,5 +1,6 @@
 "use client";
 
+import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslations } from "next-intl";
 import type { BadgeTone } from "@/components/status-badge";
@@ -65,4 +66,20 @@ export function approvalReasonWords(
 /** The inbox's kind as its tab names it. */
 export function kindWord(t: ReturnType<typeof useTranslations>, kind: string): string {
   return t(kind === "human" ? "tabs.human" : "tabs.agent");
+}
+
+/** accept_from's choices, in the order every picker lists them. */
+export const ACCEPT_FROM = [
+  "anyone",
+  "verified",
+  "allowlist",
+] as const satisfies readonly InboxSafety["accept_from"][];
+
+/** What an accept_from choice lets in; "anyone" on a people inbox works like a plain mailbox. */
+export function acceptFromHint(
+  t: ReturnType<typeof useTranslations>,
+  kind: string,
+  value: InboxSafety["accept_from"],
+): string {
+  return t(`acceptFrom.${value === "anyone" && kind === "human" ? "anyoneHuman" : value}Hint`);
 }

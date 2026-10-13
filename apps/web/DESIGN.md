@@ -166,6 +166,14 @@ section of `components.css`; every rule above it holds at every width.
 - **Number fields** never show stepper arrows (one global
   `input[type="number"]` rule), and a `textarea.ms-input` takes its height
   from `rows`.
+- **Token inputs** (`<ChipMultiSelect>`): chips sit inside one 30px
+  `.ms-input` frame at 20px, so the first chip never grows the field; the
+  frame takes the focus ring and the bare input inside draws none. With
+  `onCreate`, Enter adds what was typed, so a list of addresses needs no
+  separate Add button.
+- **A warning inside a form** is a `WarnCard` (warn border, a warn glow from
+  the left), never a warn-colored hint line. In a gap-spaced stack, such as
+  a dialog's form grid, it takes `flush` so the gap spaces it like any field.
 - **Menus/popovers** use the `.ms-menu` grammar (canvas "…" dropdowns): panel
   bg, 1px `--ms-line-strong`, 14px radius, 6px padding; 13px item rows at
   7px 12px that raise to `--ms-panel-raised` (8px radius); `.ms-menu-sep`

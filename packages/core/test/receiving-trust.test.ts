@@ -325,6 +325,14 @@ describe("decideScreening", () => {
       });
       expect([tier, accept, d.action, d.reason]).toEqual([tier, accept, action, reason]);
     }
+    // A listed address that didn't prove itself is held as unverified, not as unlisted.
+    expect(
+      decide({
+        tier: "unauthenticated",
+        listed: true,
+        safety: agent({ accept_from: "allowlist" }),
+      }).reason,
+    ).toBe("unauthenticated_sender");
   });
 
   it("quarantines a virus on every kind and tier (S18)", () => {
@@ -353,9 +361,9 @@ describe("decideScreening", () => {
     expect(decide({})).toEqual({ action: "judge", verdict: "pending" });
   });
 
-  it("delivers anything to a people's inbox open to anyone, a failed sender included", () => {
+  it("delivers anything to a people's inbox open to anyone, a failed sender into spam", () => {
     expect(decide({ kind: "human", safety: human(), tier: "failed" })).toEqual({
-      action: "deliver",
+      action: "spam",
       verdict: "suspicious",
     });
     // A people's inbox never waits on the judge.

@@ -435,6 +435,10 @@ describe("safety rules", () => {
     const read = await caller(acme, "member").inboxes.safety({ id: inboxId });
     expect(read.memberEmails).toEqual(["mo@acme.test", "owner@acme.test"]);
     expect(read.retentionDays).toBeGreaterThan(0);
+    // Whole rows leaving first cut the bodies' longer clock short.
+    vi.stubEnv("EMAIL_RETENTION_DAYS", "90");
+    vi.stubEnv("EMAIL_METADATA_RETENTION_DAYS", "7");
+    expect((await caller(acme, "member").inboxes.safety({ id: inboxId })).retentionDays).toBe(7);
     core.getInboxSafety.mockResolvedValue(null);
     await expect(caller(beta).inboxes.safety({ id: inboxId })).rejects.toMatchObject({
       code: "NOT_FOUND",

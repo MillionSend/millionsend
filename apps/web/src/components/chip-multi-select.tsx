@@ -13,6 +13,7 @@ const LIST_MAX_HEIGHT = 220;
  * input-styled frame, and typing filters the remaining options into an
  * .ms-menu suggestion list. Enter/click adds, Backspace on an empty input
  * removes the last chip. Controlled: `value` is the selected option values.
+ * With `onCreate` it also takes typed values, such as a list of addresses.
  *
  * The list is portaled to <body> and fixed under the frame: inside a dialog
  * (a scroll container) an in-flow panel would be clipped at the dialog's edge.
@@ -26,6 +27,7 @@ export function ChipMultiSelect({
   removeLabel,
   disabled = false,
   id,
+  onCreate,
 }: {
   value: string[];
   onChange: (value: string[]) => void;
@@ -37,6 +39,12 @@ export function ChipMultiSelect({
   disabled?: boolean;
   /** Forwarded to the text input so an ms-field <label htmlFor> can target it. */
   id?: string;
+  /**
+   * Enter with no suggestion highlighted adds onCreate(typed text), the value
+   * to store. A value outside options then shows as itself, and the
+   * placeholder stays after the first chip, since it says how to add one.
+   */
+  onCreate?: (text: string) => string;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -47,9 +55,10 @@ export function ChipMultiSelect({
   const dismissRefs = useMemo(() => [rootRef, menuRef], []);
   const listboxId = useId();
 
-  const chips = value
-    .map((v) => options.find((o) => o.value === v))
-    .filter((o): o is { value: string; label: string } => o !== undefined);
+  const chips = value.flatMap((v) => {
+    const option = options.find((o) => o.value === v);
+    return option ? [option] : onCreate ? [{ value: v, label: v }] : [];
+  });
 
   const suggestions = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -84,7 +93,13 @@ export function ChipMultiSelect({
         // Never let Enter submit the surrounding form from inside the token input.
         event.preventDefault();
         const pick = suggestions[activeIndex];
+        const text = query.trim();
         if (open && pick) add(pick.value);
+        else if (onCreate && text) {
+          const created = onCreate(text);
+          if (value.includes(created)) setQuery("");
+          else add(created);
+        }
         break;
       }
       case "Escape":
@@ -116,7 +131,7 @@ export function ChipMultiSelect({
       {/* biome-ignore lint/a11y/noStaticElementInteractions: click just forwards focus to the input inside */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users focus the inner input directly; the click only forwards focus */}
       <div
-        className="ms-input"
+        className="ms-input ms-chip-input"
         onClick={() => inputRef.current?.focus()}
         style={{
           height: "auto",
@@ -156,7 +171,7 @@ export function ChipMultiSelect({
           {...(activeId !== undefined ? { "aria-activedescendant": activeId } : {})}
           disabled={disabled}
           value={query}
-          placeholder={chips.length === 0 ? placeholder : ""}
+          placeholder={chips.length === 0 || onCreate ? placeholder : ""}
           onFocus={() => setOpen(true)}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -172,7 +187,10 @@ export function ChipMultiSelect({
             background: "none",
             color: "var(--ms-bone)",
             font: "400 var(--ms-fs-ui) var(--ms-font-sans)",
-            padding: "2px 0",
+            // After font, whose shorthand resets it: the 20px compact chip's row.
+            lineHeight: "20px",
+            padding: 0,
+            textOverflow: "ellipsis",
           }}
         />
       </div>

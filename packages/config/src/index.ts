@@ -22,6 +22,7 @@ export {
   clamavHost,
   contentRevealOn,
   disposableEmailsBlocked,
+  EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
   EMAIL_RETENTION_DAYS_DEFAULT,
   type Env,
   type ErrorTrackingConfig,

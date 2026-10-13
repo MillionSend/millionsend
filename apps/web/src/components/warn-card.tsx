@@ -2,12 +2,21 @@ import type { ReactNode } from "react";
 import { statusGlow } from "@/lib/status-glow";
 
 /** Inline warn card used inside configuration sections. */
-export function WarnCard({ children, action }: { children: ReactNode; action?: ReactNode }) {
+export function WarnCard({
+  children,
+  action,
+  flush = false,
+}: {
+  children: ReactNode;
+  action?: ReactNode;
+  /** No space of its own above: it sits in a gap-spaced stack, such as a form grid. */
+  flush?: boolean;
+}) {
   return (
     <div
       role="status"
       style={{
-        marginTop: 14,
+        marginTop: flush ? 0 : 14,
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",

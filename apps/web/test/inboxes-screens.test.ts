@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
+import type { InboxSafety } from "@millionsend/db/schema";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { InboxDetail } from "@/app/(dashboard)/inboxes/parts";
 import { dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
+import { typedAllowlistEntry } from "@/lib/email-input";
 import { WEBHOOK_EVENT_META, WEBHOOK_EVENT_TYPES } from "@/lib/webhook-events";
 
 const en = {
@@ -69,12 +71,12 @@ const safety = {
   forward_to: [],
 };
 
-function form(inbox: Partial<InboxDetail>, admin = true) {
+function form(inbox: Partial<InboxDetail>, admin = true, rules: Partial<InboxSafety> = {}) {
   return renderToStaticMarkup(
     createElement(SafetyForm, {
       inbox: { id: "i1", kind: "agent", shared: false, expired: false, ...inbox } as InboxDetail,
       admin,
-      stored: safety,
+      stored: { ...safety, ...rules },
       memberEmails: ["owner@acme.test"],
       retentionDays: 30,
     }),
@@ -242,11 +244,39 @@ describe("inbox screens", () => {
     expect(html).toContain("Save changes");
   });
 
-  it("hides the injection scan from a people inbox", () => {
+  it("shows a people inbox only the rules that run on it", () => {
     const html = form({ kind: "human" });
     expect(html).not.toContain("Scan for prompt injection");
     expect(html).toContain("Strip hidden text");
+    expect(html).toContain("When mail arrives");
+    // Send rules and the always-on guards bind only an agent's own sends.
+    expect(html).toContain("Sending over the API");
+    expect(html).not.toContain("Send policy");
+    expect(html).not.toContain("Always on:");
     expect(html).toMatch(/id="safety-cap"[^>]*max="100000"/);
+  });
+
+  it("warns an agent inbox open to anyone, and explains anyone on a people inbox instead", () => {
+    const warning = "Also lets in mail whose sender";
+    const agent = form({}, true, { accept_from: "anyone" });
+    expect(agent).toContain(warning);
+    expect(agent).toContain("Takes mail from any sender");
+    const people = form({ kind: "human" }, true, { accept_from: "anyone" });
+    expect(people).not.toContain(warning);
+    expect(people).toContain("Like a regular mailbox");
+    expect(form({})).not.toContain(warning);
+  });
+
+  it("keeps owner addresses off the shared domain, which forwards to team members only", () => {
+    expect(form({})).toContain('id="safety-owners"');
+    expect(form({ shared: true })).not.toContain('id="safety-owners"');
+  });
+
+  it("reads a typed domain as an allowlist domain entry", () => {
+    expect(typedAllowlistEntry(" Acme.example ")).toBe("*@acme.example");
+    expect(typedAllowlistEntry("@acme.example")).toBe("*@acme.example");
+    expect(typedAllowlistEntry("*@acme.example")).toBe("*@acme.example");
+    expect(typedAllowlistEntry("Ana@Acme.example")).toBe("ana@acme.example");
   });
 
   it("says why no inbox can be created yet, and where to fix it", () => {
@@ -278,7 +308,9 @@ describe("inbox screens", () => {
     const html = form({}, false);
     expect(html).toContain("Only owners and admins can change these rules.");
     expect(html).not.toContain("Save changes");
-    expect(html).not.toContain("Add sender");
+    expect(html).toMatch(/id="safety-allowlist"[^>]*disabled/);
+    // A typed entry outside any option list still shows as its chip.
     expect(html).toContain("*@stripe.com");
+    expect(html).toContain("Mail is kept for 30 days.");
   });
 });

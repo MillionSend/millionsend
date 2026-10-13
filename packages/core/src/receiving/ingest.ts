@@ -49,7 +49,7 @@ import {
 } from "./rcpt.js";
 import { type ReceivedRead, readReceived } from "./read.js";
 import { spamVerdict } from "./spam.js";
-import { senderTrust } from "./trust.js";
+import { allowlisted, senderTrust } from "./trust.js";
 
 export interface IngestDeps {
   db: Db;
@@ -519,6 +519,7 @@ async function admit(
     inboxId: inbox.id,
     refs: [...(row.inReplyTo ? [row.inReplyTo] : []), ...row.references],
   });
+  const owners = [...p.memberEmails, ...inbox.safety.owner_addresses];
   const tier = senderTrust({
     authentication: row.authentication,
     authDetail: row.authDetail,
@@ -526,7 +527,7 @@ async function admit(
     from: row.from,
     fromFields: row.fromFields,
     fromMailboxes: row.fromMailboxes,
-    owners: [...p.memberEmails, ...inbox.safety.owner_addresses],
+    owners,
     allowlist: inbox.safety.allowlist,
     thread: resolved
       ? { proven: resolved.proof !== null, participants: resolved.participants }
@@ -536,6 +537,8 @@ async function admit(
     kind: inbox.kind,
     safety: inbox.safety,
     tier,
+    listed:
+      owners.includes(row.from.toLowerCase()) || allowlisted(row.from, inbox.safety.allowlist),
     spam: row.spamVerdict,
     virus: row.virusVerdict,
     judgeAvailable: deps.judgeAvailable ?? false,

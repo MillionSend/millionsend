@@ -1,5 +1,6 @@
 "use client";
 
+import type { InboxSafety } from "@millionsend/db/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -8,11 +9,13 @@ import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
+import { WarnCard } from "@/components/warn-card";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
+import { ACCEPT_FROM, acceptFromHint } from "./parts";
 
 type Kind = "agent" | "human";
-type AcceptFrom = "anyone" | "verified" | "allowlist";
+type AcceptFrom = InboxSafety["accept_from"];
 
 const SHARED = "shared";
 const EXPIRY = ["never", "1h", "24h", "7d", "30d"] as const;
@@ -161,7 +164,7 @@ export function CreateInboxDialog({
           />
         </div>
         <fieldset className="ms-field" style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend style={{ marginBottom: 6 }}>{t("create.kind")}</legend>
+          <legend>{t("create.kind")}</legend>
           <div style={{ display: "grid", gap: 6 }}>
             {(["agent", "human"] as const).map((value) => (
               <label key={value} className="ms-radio-card">
@@ -194,10 +197,7 @@ export function CreateInboxDialog({
               width="100%"
               disabled={create.isPending}
               ariaLabel={t("acceptFrom.label")}
-              options={(["anyone", "verified", "allowlist"] as const).map((value) => ({
-                value,
-                label: t(`acceptFrom.${value}`),
-              }))}
+              options={ACCEPT_FROM.map((value) => ({ value, label: t(`acceptFrom.${value}`) }))}
             />
           </div>
           <div className="ms-field">
@@ -216,6 +216,16 @@ export function CreateInboxDialog({
             />
           </div>
         </div>
+        {kind === "agent" && acceptFrom === "anyone" ? (
+          <WarnCard flush>{t("acceptFrom.anyoneWarn")}</WarnCard>
+        ) : (
+          // Pulled up to the selects it explains, as a field's own hint sits 6px under it.
+          <p
+            style={{ margin: "-8px 0 0", fontSize: 12, lineHeight: 1.5, color: "var(--ms-muted)" }}
+          >
+            {acceptFromHint(t, kind, acceptFrom)}
+          </p>
+        )}
         {error ? (
           <div className="ms-field-error" style={{ margin: 0 }}>
             {error}

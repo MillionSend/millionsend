@@ -16,6 +16,7 @@ import { formatTimeLeft } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
+import { confirmUnsavedNavigation } from "@/lib/use-unsaved-warning";
 import { kindWord } from "../parts";
 import { ActivityTab } from "./activity-tab";
 import { EditDialog } from "./edit-dialog";
@@ -152,7 +153,10 @@ export function InboxView() {
             role="tab"
             aria-selected={tab === key}
             className={tab === key ? "active" : undefined}
-            onClick={() => setTab(key)}
+            // A tab switch unmounts the one before it, so unsaved rules ask first, as leaving would.
+            onClick={() => {
+              if (key !== tab && confirmUnsavedNavigation()) setTab(key);
+            }}
           >
             {t(`tabs.${key}`)}
             {key === "review" && review > 0 ? (

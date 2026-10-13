@@ -459,12 +459,16 @@ table.ms-table {
   background: color-mix(in srgb, var(--ms-panel-raised) 60%, var(--ms-table-ground));
 }
 
-/* Inputs */
-.ms-field label {
+/* Inputs. A fieldset's legend labels its group like any field's label. */
+.ms-field label,
+.ms-field legend {
   display: block;
   font-size: var(--ms-fs-label);
   color: var(--ms-muted);
   margin-bottom: 6px;
+}
+.ms-field legend {
+  padding: 0;
 }
 .ms-input {
   background: var(--ms-inset);
@@ -630,6 +634,13 @@ table.ms-table {
 }
 .ms-chip button:hover {
   color: var(--ms-bone);
+}
+/* Chips inside the token input (chip-multi-select.tsx) are 20px, so one never
+   grows the 30px control; only a second row of chips does. */
+.ms-chip-input .ms-chip {
+  gap: 4px;
+  padding: 1px 6px;
+  line-height: 16px;
 }
 /* Inside dense tables the pill matches the table's 13px mono. */
 .ms-table.dense .ms-chip {
@@ -3217,6 +3228,15 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 /* The frame shows the focus ring (:focus-within); the bare input must not add its own. */
 .ms-code-find input:focus-visible {
+  box-shadow: none;
+}
+/* The token input (chip-multi-select.tsx) works the same way: the rounded
+   frame takes the ring, never a square around the bare input inside. */
+.ms-chip-input:focus-within {
+  border-color: var(--ms-focus-border);
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-chip-input input:focus-visible {
   box-shadow: none;
 }
 .ms-code-find-count {

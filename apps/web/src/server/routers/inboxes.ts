@@ -1,4 +1,5 @@
 import {
+  EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
   EMAIL_RETENTION_DAYS_DEFAULT,
   isCloudDeployment,
   sharedInboxDomain,
@@ -385,11 +386,19 @@ export const inboxesRouter = router({
       safety,
       // forward_to may name these, besides the owner addresses.
       memberEmails: members.sort(),
-      retentionDays: effectiveSetting(
-        stored.emailRetentionDays,
-        process.env.EMAIL_RETENTION_DAYS,
-        EMAIL_RETENTION_DAYS_DEFAULT,
-      ).value,
+      // Bodies go on the first clock and whole rows on the second, so mail lasts the shorter.
+      retentionDays: Math.min(
+        effectiveSetting(
+          stored.emailRetentionDays,
+          process.env.EMAIL_RETENTION_DAYS,
+          EMAIL_RETENTION_DAYS_DEFAULT,
+        ).value,
+        effectiveSetting(
+          null,
+          process.env.EMAIL_METADATA_RETENTION_DAYS,
+          EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
+        ).value,
+      ),
     };
   }),
 
