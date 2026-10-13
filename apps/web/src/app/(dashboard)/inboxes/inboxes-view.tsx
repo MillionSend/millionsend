@@ -155,12 +155,7 @@ export function InboxesView() {
           >
             {t(`tabs.${key}`)}
             {tabCount(key) !== null ? (
-              <span
-                className="ms-digits"
-                style={{ marginLeft: 7, fontWeight: 500, color: "var(--ms-faint)" }}
-              >
-                {nf.format(tabCount(key) ?? 0)}
-              </span>
+              <span className="count">{nf.format(tabCount(key) ?? 0)}</span>
             ) : null}
           </button>
         ))}

@@ -254,12 +254,7 @@ export default function EmailsPage() {
             >
               {t(`list.source.${key}`)}
               {sourceTotals && (key === "transactional" || key === "broadcast") ? (
-                <span
-                  className="ms-digits"
-                  style={{ marginLeft: 7, fontWeight: 500, color: "var(--ms-faint)" }}
-                >
-                  {nf.format(sourceTotals[key])}
-                </span>
+                <span className="count">{nf.format(sourceTotals[key])}</span>
               ) : null}
             </button>
           ))}

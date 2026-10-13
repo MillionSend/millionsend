@@ -20,6 +20,10 @@
   height: 30px;
   box-sizing: border-box;
 }
+/* The shared height would flatten a textarea to one line; rows sizes it. */
+textarea.ms-input {
+  height: auto;
+}
 
 /* Buttons — one primary (bone) per view; keycaps ride inside modal buttons */
 .ms-btn {
@@ -932,8 +936,9 @@ table.ms-table {
 }
 
 /* Tabs — one line that scrolls sideways when the row outgrows its container
-   (settings has nine tabs). The 2px padding/negative margin keeps the focus
-   ring inside the scroll clip. */
+   (settings has nine tabs). It never wraps: a second row would push the page
+   down, and the cut-off last tab already shows there is more. The 2px
+   padding/negative margin keeps the focus ring inside the scroll clip. */
 .ms-tabs {
   display: flex;
   gap: 6px;
@@ -943,30 +948,31 @@ table.ms-table {
   padding: 2px;
   margin: -2px;
 }
-/* Every tab carries the panel ground and a hairline so it reads as a
-   control before it is clicked; the active one lifts a shade. */
+/* Inactive tabs are plain text; the active one takes the raised fill of the
+   sidebar's current page, so nav and tabs share one "selected" look. */
 .ms-tabs button {
   flex: none;
   white-space: nowrap;
   font: 500 var(--ms-fs-ui) var(--ms-font-sans);
   color: var(--ms-muted);
-  background: var(--ms-panel);
-  border: 1px solid var(--ms-line);
-  padding: 6px 12px;
+  background: none;
+  border: 0;
+  padding: 7px 12px;
   border-radius: var(--ms-r-input);
   cursor: pointer;
-  transition:
-    color var(--ms-dur-fast) var(--ms-ease),
-    border-color var(--ms-dur-fast) var(--ms-ease);
+  transition: color var(--ms-dur-fast) var(--ms-ease);
 }
 .ms-tabs button:hover {
   color: var(--ms-bone);
-  border-color: var(--ms-line-strong);
 }
 .ms-tabs button.active {
   background: var(--ms-panel-raised);
-  border-color: var(--ms-line-strong);
   color: var(--ms-bone);
+}
+.ms-tabs .count {
+  margin-left: 7px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-faint);
 }
 
 /* Toast host (toast.tsx): a row across the viewport bottom, the toast centred
@@ -1524,7 +1530,8 @@ button.ms-notice-strip-action {
   flex: 1 1 14rem;
   text-align: left;
 }
-/* Radio-card rows in the console dialogs. */
+/* Radio cards hold every radio in the app. The radio is .ms-checkbox in a
+   circle, and the chosen card lifts like the active tab. */
 .ms-radio-card {
   display: flex;
   align-items: flex-start;
@@ -1534,6 +1541,16 @@ button.ms-notice-strip-action {
   border: 1px solid var(--ms-line);
   border-radius: var(--ms-r-input);
   cursor: pointer;
+  transition:
+    background-color var(--ms-dur-fast) var(--ms-ease),
+    border-color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-radio-card:has(input:checked) {
+  background: var(--ms-panel-raised);
+  border-color: var(--ms-line-strong);
+}
+.ms-radio-card:has(input:disabled) {
+  cursor: default;
 }
 /* Radio cards sit inside a .ms-field, whose "label" rule (a muted block)
    outranks .ms-radio-card: this keeps the radio beside its text, at the
@@ -1544,8 +1561,32 @@ button.ms-notice-strip-action {
   color: inherit;
 }
 .ms-radio-card input {
-  margin-top: 3px;
-  accent-color: var(--ms-steel);
+  appearance: none;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 3px 0 0;
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 50%;
+  background: var(--ms-inset);
+  cursor: inherit;
+  transition:
+    background-color var(--ms-dur-fast) var(--ms-ease),
+    border-color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-radio-card input:checked {
+  background-color: var(--ms-bone);
+  background-image: radial-gradient(circle, var(--ms-ground) 2.5px, transparent 3px);
+  border-color: var(--ms-bone);
+}
+.ms-radio-card input:disabled {
+  opacity: 0.55;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-radio-card,
+  .ms-radio-card input {
+    transition: none;
+  }
 }
 .ms-radio-card .sub {
   color: var(--ms-muted);
@@ -1991,6 +2032,11 @@ summary:focus-visible,
   color: inherit;
   cursor: inherit;
   white-space: nowrap;
+}
+/* Some browsers send no mouse events from a disabled button, so hover over
+   one would never open the tooltip around it: the pointer goes to the span. */
+.ms-tooltip-trigger.inline > :disabled {
+  pointer-events: none;
 }
 .ms-tooltip-trigger:hover {
   color: var(--ms-bone);
@@ -2822,11 +2868,6 @@ summary:focus-visible,
   .ms-drawer-scrim {
     display: none;
   }
-  /* With a mouse a sideways-scrolling strip hides its last tabs (settings has
-     eight), so a page-level strip wraps instead. */
-  .ms-tabs.bleed {
-    flex-wrap: wrap;
-  }
   /* A cell that takes what the other columns leave and ellipsizes inside it
      (the emails list's subject): with max-width 0 its text does not set the
      table's minimum width, so a long subject never pushes the time column off
@@ -2884,12 +2925,12 @@ summary:focus-visible,
 }
 
 /* Number inputs: the native stepper arrows clash with the control grammar. */
-.ms-number {
+input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
-.ms-number::-webkit-outer-spin-button,
-.ms-number::-webkit-inner-spin-button {
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   appearance: none;
   margin: 0;

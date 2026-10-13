@@ -6,10 +6,10 @@
     "ses": "SES",
     "smtp": "SMTP",
     "mcp": "MCP",
-    "unsubscribe": "Página de descadastro",
+    "unsubscribe": "Descadastro",
     "connectedApps": "Aplicativos conectados",
     "notifications": "Notificações",
-    "audit": "Registro de auditoria"
+    "audit": "Auditoria"
   },
   "smtp": {
     "title": "SMTP",

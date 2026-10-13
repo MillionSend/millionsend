@@ -154,6 +154,18 @@ section of `components.css`; every rule above it holds at every width.
   than 6 options, full keyboard + ARIA combobox support, ✓ on the selected
   row. Options are `{ value, label, hint? }`; controlled `value` +
   `onChange`.
+- **Tabs** (`.ms-tabs`): inactive tabs are plain muted text that turns bone
+  on hover; the active one takes the `--ms-panel-raised` fill of the
+  sidebar's current item. A strip stays on one line and scrolls sideways in
+  its own box, never wrapping: the cut-off last tab is the cue. A count after
+  a label is a `.count` span (tabular, faint).
+- **Radios** never show the browser's widget: every radio sits in a
+  `.ms-radio-card`, whose radio is `.ms-checkbox` in a circle (inset ground,
+  line-strong border, bone with a ground dot when chosen), and the chosen
+  card lifts to `--ms-panel-raised` with a line-strong border.
+- **Number fields** never show stepper arrows (one global
+  `input[type="number"]` rule), and a `textarea.ms-input` takes its height
+  from `rows`.
 - **Menus/popovers** use the `.ms-menu` grammar (canvas "…" dropdowns): panel
   bg, 1px `--ms-line-strong`, 14px radius, 6px padding; 13px item rows at
   7px 12px that raise to `--ms-panel-raised` (8px radius); `.ms-menu-sep`

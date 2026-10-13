@@ -1,3 +1,4 @@
+import { receivingEnabled } from "@millionsend/config";
 import { getDb } from "@millionsend/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -35,6 +36,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
       teamName={team.teamName}
       teamLogoUrl={team.logoUrl}
       userEmail={session.user.email}
+      receiving={receivingEnabled()}
+      role={membership?.role}
       banner={
         view ? (
           <SupportViewBanner

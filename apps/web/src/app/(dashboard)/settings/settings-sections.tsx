@@ -875,7 +875,7 @@ function InstanceField({
       <input
         id={id}
         type="number"
-        className="ms-input ms-number"
+        className="ms-input"
         style={{ width: "100%" }}
         min={min}
         max={max}

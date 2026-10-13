@@ -10,6 +10,8 @@ const en = {
   inboxes: (await import("../messages/en/inboxes.json")).default,
   common: (await import("../messages/en/common.json")).default,
   webhooks: (await import("../messages/en/webhooks.json")).default,
+  nav: (await import("../messages/en/nav.json")).default,
+  settings: (await import("../messages/en/settings.json")).default,
 };
 
 // The real English catalogs, so the test reads what a customer reads.
@@ -41,7 +43,9 @@ const { SafetyForm } = await import("@/app/(dashboard)/inboxes/[id]/safety-tab")
 const { approvalReasonWords, QuarantinedBadge, TrustBadge } = await import(
   "@/app/(dashboard)/inboxes/parts"
 );
-const { navItemsFor } = await import("@/components/sidebar");
+const { navItemsFor, Sidebar } = await import("@/components/sidebar");
+const { SettingsTabsNav } = await import("@/app/(dashboard)/settings/settings-tabs-nav");
+const { ServerTeamRole } = await import("@/lib/use-team-role");
 const { offeredEvents } = await import("@/app/(dashboard)/webhooks/webhook-dialogs");
 // The mocked hook is a plain function here, typed as the components see it.
 const { useTranslations: translatorFor } = await import("next-intl");
@@ -131,6 +135,32 @@ describe("navigation", () => {
     expect(navItemsFor(false).map((item) => item.key)).not.toContain("inboxes");
     const keys = navItemsFor(true).map((item) => item.key);
     expect(keys.slice(0, 2)).toEqual(["emails", "inboxes"]);
+  });
+
+  // useQuery is mocked to no data: what the server and the hydrating render see.
+  it("has Inboxes in the server HTML, before any query answers", () => {
+    const html = renderToStaticMarkup(
+      createElement(Sidebar, { teamName: "Acme", userEmail: "owner@example.com", receiving: true }),
+    );
+    expect(html).toContain('href="/inboxes"');
+  });
+
+  it("gates on the layout's role in the server HTML, before the team list loads", () => {
+    const tabs = (role: "admin" | "member") =>
+      renderToStaticMarkup(
+        createElement(
+          ServerTeamRole,
+          { value: role },
+          createElement(SettingsTabsNav, {
+            showBilling: false,
+            showSes: true,
+            showSmtp: true,
+            showReceiving: false,
+          }),
+        ),
+      );
+    expect(tabs("admin")).toContain(">Audit log<");
+    expect(tabs("member")).not.toContain(">Audit log<");
   });
 
   it("sends the old received-mail links to their new home", async () => {

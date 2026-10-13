@@ -167,12 +167,7 @@ export function InboxView() {
           >
             {t(`tabs.${key}`)}
             {key === "review" && review > 0 ? (
-              <span
-                className="ms-digits"
-                style={{ marginLeft: 7, fontWeight: 500, color: "var(--ms-faint)" }}
-              >
-                {nf.format(review)}
-              </span>
+              <span className="count">{nf.format(review)}</span>
             ) : null}
           </button>
         ))}

@@ -1,9 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useTRPC } from "@/lib/trpc";
 import { useActiveTabInView } from "@/lib/use-active-tab-in-view";
 import { useTeamRole } from "@/lib/use-team-role";
 
@@ -32,15 +30,11 @@ export function SettingsTabsNav({
   showBilling: boolean;
   showSes: boolean;
   showSmtp: boolean;
-  /** The instance takes mail; the tab is still its operator's only. */
+  /** The instance takes mail and the viewer is its operator. */
   showReceiving: boolean;
 }) {
   const t = useTranslations("settings.tabs");
   const ti = useTranslations("inboxes");
-  const trpc = useTRPC();
-  const operator = useQuery(
-    trpc.system.operator.queryOptions(undefined, { enabled: showReceiving }),
-  );
   const router = useRouter();
   const pathname = usePathname();
   const role = useTeamRole();
@@ -50,12 +44,10 @@ export function SettingsTabsNav({
     billing: showBilling,
     ses: showSes,
     smtp: showSmtp,
-    receiving: showReceiving && operator.data?.isOperator === true,
+    receiving: showReceiving,
     audit: role === "owner" || role === "admin",
   };
-  // The audit tab joins the row only once the role is known, after the first
-  // render; keying on it reveals the active tab again when it arrives.
-  const tabsRef = useActiveTabInView(`${pathname} ${visible.audit}`);
+  const tabsRef = useActiveTabInView(pathname);
   return (
     <div ref={tabsRef} className="ms-tabs bleed" style={{ marginBottom: 24 }}>
       {TABS.filter((tab) => visible[tab.key] ?? true).map(({ key, href }) => (
