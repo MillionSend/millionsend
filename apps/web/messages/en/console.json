@@ -113,10 +113,10 @@
     "kpi": {
       "sent": "Emails sent",
       "delivered": "Delivered",
-      "bounced": "Bounced",
+      "hardBounced": "Hard bounces",
       "complained": "Complaints",
       "deliveredOf": "{delivered} of {sent} delivered",
-      "hardOf": "hard {rate} · SES line 5%",
+      "withTransient": "SES line 5% · {rate} incl. transient",
       "complaintLines": "our own count over all mail · SES's rate is per region",
       "period": "Period",
       "noSends": "no sends in the window"
@@ -186,7 +186,7 @@
     "charts": {
       "sent": "Emails sent",
       "delivered": "Delivered rate",
-      "bounced": "Bounce rate",
+      "hardBounced": "Hard-bounce rate",
       "complained": "Complaint rate",
       "teams_total": "Teams",
       "contacts_total": "Contacts stored",

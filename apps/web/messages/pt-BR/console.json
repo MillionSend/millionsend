@@ -113,10 +113,10 @@
     "kpi": {
       "sent": "E-mails enviados",
       "delivered": "Entregues",
-      "bounced": "Bounces",
+      "hardBounced": "Hard bounces",
       "complained": "Reclamações",
       "deliveredOf": "{delivered} de {sent} entregues",
-      "hardOf": "hard {rate} · limite do SES 5%",
+      "withTransient": "limite do SES 5% · {rate} contando os temporários",
       "complaintLines": "nossa contagem em todos os e-mails · a taxa do SES é por região",
       "period": "Período",
       "noSends": "nenhum envio no período"
@@ -186,7 +186,7 @@
     "charts": {
       "sent": "E-mails enviados",
       "delivered": "Taxa de entrega",
-      "bounced": "Taxa de bounce",
+      "hardBounced": "Taxa de hard bounces",
       "complained": "Taxa de reclamações",
       "teams_total": "Equipes",
       "contacts_total": "Contatos armazenados",

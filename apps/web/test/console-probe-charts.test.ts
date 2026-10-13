@@ -2,7 +2,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ locale: "en" as "en" | "pt-BR", history: undefined as unknown }));
+const h = vi.hoisted(() => ({
+  locale: "en" as "en" | "pt-BR",
+  history: undefined as unknown,
+  kpis: undefined as unknown,
+}));
 
 vi.mock("next-intl", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next-intl")>();
@@ -30,14 +34,20 @@ vi.mock("@/lib/trpc", () => {
   return { useTRPC: () => at([]) };
 });
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { path: string }) =>
-    options.path === "console.overview.history"
-      ? { data: h.history, isError: false }
-      : { data: undefined, isError: false },
+  useQuery: (options: { path: string }) => ({
+    data:
+      options.path === "console.overview.history"
+        ? h.history
+        : options.path === "console.overview.kpis"
+          ? h.kpis
+          : undefined,
+    isError: false,
+  }),
 }));
 
 const { ProbeChart } = await import("@/components/console/overview/charts");
 const { StatTiles } = await import("@/components/console/overview/stat-tiles");
+const { KpiCards } = await import("@/components/console/overview/kpi-cards");
 
 const point = (t: string, value: number, readings: number) => ({
   t: new Date(t),
@@ -96,5 +106,27 @@ describe("the stat tiles", () => {
     expect(html).toContain(">123.456<");
     expect(html).toContain(">512<");
     expect(html).not.toMatch(/123\.456,|512,084/);
+  });
+});
+
+describe("the bounce KPI card", () => {
+  it("rates hard bounces, the line SES reviews, and leaves transient ones to its subline", () => {
+    // 40 bounces in 1000 sends, 10 of them hard.
+    const counts = { sent: 1000, delivered: 950, bounced: 40, hardBounced: 10, complained: 0 };
+    h.kpis = {
+      grain: "day",
+      points: [{ t: "2026-10-01", ...counts }],
+      totals: counts,
+      previous: counts,
+    };
+    h.locale = "en";
+    const html = renderToStaticMarkup(createElement(KpiCards));
+    expect(html).toContain(">Hard bounces<");
+    expect(html).toContain(">1.00%<");
+    expect(html).toContain(">SES line 5% · 4.00% incl. transient<");
+    h.locale = "pt-BR";
+    expect(renderToStaticMarkup(createElement(KpiCards))).toContain(
+      ">limite do SES 5% · 4,00% contando os temporários<",
+    );
   });
 });
