@@ -1336,9 +1336,10 @@ images, files or a QR code drawn with characters (under 100 characters of
 readable text), is judged before SES, and its body images are read too. A
 file the policy flags, refuses or cannot open parks it at once; after the
 verdict, so does a QR code the image reader saw that no decoder read, or
-images the reader declined. Images Bedrock refuses (HTTP 400) park any
-team's unsent email, keep no preview, and the operator is mailed at most
-once a day per team. When a body image cannot be fetched or Bedrock does not
+images the reader declined. Images Bedrock refuses (a `ValidationException`
+that the same request without the images does not get) park any team's
+unsent email, keep no preview, and the operator is mailed at most once a day
+per team. When a body image cannot be fetched or Bedrock does not
 answer, a New-tier team's mail from a sending domain under 7 days old waits
 as for a judge outage; other mail is judged without those images, and Jev is
 told what was not read. Links in files and QR codes count as destinations at
@@ -1362,8 +1363,9 @@ Off, an email is judged without its image text and the judge is told so.
 Refusing program files, holding risky files and reading PDFs, Office files
 and QR codes all work without Bedrock.
 
-`ABUSE_VISION_REGION` must be a region with such a profile; with image
-reading on, any other region stops the instance from starting: `us-east-1`,
+`ABUSE_VISION_REGION` must be a region with such a profile, outside
+GovCloud; with image reading on, any other region stops the instance from
+starting: `us-east-1`,
 `us-east-2`, `us-west-1`, `us-west-2`, `ca-central-1` and `ca-west-1` (US
 profile; from Canada, images may be read in the US too), `eu-central-1`,
 `eu-central-2`, `eu-north-1`, `eu-south-1`, `eu-south-2`, `eu-west-1`,
@@ -1414,9 +1416,8 @@ be read in the EU too), `ap-southeast-2` and `ap-southeast-4` (Australia),
    If the worker's credentials were given `bedrock-mantle:CreateInference`
    for image reading, replace it with these two statements: until then
    Bedrock denies every read (HTTP 403), and mail is handled as when Bedrock
-   does not answer. Check step 3 too: that quota is separate from the one
-   image reading used before. If `ABUSE_VISION_REGION` is not one of the
-   regions above (São Paulo, `sa-east-1`, has no such profile), set one of
+   does not answer. Check step 3 too. If `ABUSE_VISION_REGION` is not one of
+   the regions above (São Paulo, `sa-east-1`, has no such profile), set one of
    them or `ABUSE_VISION=off` before upgrading, or the instance will not
    start.
 3. In Service Quotas, check Amazon Bedrock's "Cross-region model inference
