@@ -5,7 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { fetchQuotaRow } from "../billing";
-import { inboxSendDeps } from "../inboxes";
+import { inboxSendDeps, userActor } from "../inboxes";
 import { buildOnboardingEmail, MAIL_LOCALES } from "../onboarding-mail";
 import { suspensionLockError } from "../suspension-lock";
 import { router, teamProcedure } from "../trpc";
@@ -93,7 +93,7 @@ export const onboardingRouter = router({
             text: message.text,
             domainId: null,
           },
-          { tx: tx as unknown as Db },
+          { tx: tx as unknown as Db, actor: userActor(ctx) },
         );
         if (!result.ok) {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: result.reason });
