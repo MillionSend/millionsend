@@ -5,7 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { fetchQuotaRow } from "../billing";
-import { getKeyring } from "../keyring";
+import { inboxSendDeps } from "../inboxes";
 import { buildOnboardingEmail, MAIL_LOCALES } from "../onboarding-mail";
 import { suspensionLockError } from "../suspension-lock";
 import { router, teamProcedure } from "../trpc";
@@ -83,7 +83,7 @@ export const onboardingRouter = router({
           .returning({ id: schema.teams.id });
         if (!claimed) return null;
         const result = await acceptEmail(
-          { db: ctx.db, keyring: getKeyring(), isCloud: env.IS_CLOUD, enqueueEmailSend },
+          { ...inboxSendDeps(ctx), enqueueEmailSend },
           { teamId: ctx.teamId, billing, apiKeyId: null },
           {
             from,

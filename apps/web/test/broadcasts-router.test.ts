@@ -1,4 +1,4 @@
-import { utcDay } from "@millionsend/core";
+import { defaultSafety, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -676,6 +676,38 @@ describe("broadcasts.sendTest", () => {
         text: null,
       }),
     ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+
+  it("sends from an inbox's address through that inbox", async () => {
+    const teamId = await createTeam(db, "team-test-inbox");
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: "acme.test", region: "us-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("no domain");
+    const [inbox] = await db
+      .insert(schema.inboxes)
+      .values({
+        teamId,
+        kind: "human",
+        emailAddress: "news@acme.test",
+        localPart: "news",
+        domainId: domain.id,
+        name: "News",
+        safety: defaultSafety("human", false),
+      })
+      .returning({ id: schema.inboxes.id });
+    await callerFor(teamId).broadcasts.sendTest({
+      from: "Acme <news@acme.test>",
+      subject: "s",
+      html: "<p>x</p>",
+      text: null,
+    });
+    const [row] = await db
+      .select({ inboxId: schema.emails.inboxId })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, teamId));
+    expect(row?.inboxId).toBe(inbox?.id);
   });
 });
 
