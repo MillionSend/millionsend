@@ -1401,8 +1401,9 @@ vem em imagens, arquivos ou num QR code desenhado com caracteres (menos de
 corpo também são lidas. Um arquivo que a política sinaliza, recusa ou não
 consegue abrir deixa o e-mail em espera na hora; depois da avaliação, também
 deixam um QR code que o leitor de imagens viu e nenhum decodificador leu, ou
-imagens que o leitor se recusou a ler. Imagens que o Bedrock recusa (HTTP
-400) deixam em espera o e-mail ainda não enviado de qualquer equipe, nenhuma
+imagens que o leitor se recusou a ler. Imagens que o Bedrock recusa (um
+`ValidationException` que a mesma requisição sem as imagens não recebe)
+deixam em espera o e-mail ainda não enviado de qualquer equipe, nenhuma
 prévia fica guardada, e o operador recebe e-mail no máximo uma vez por dia
 por equipe. Quando uma imagem do corpo não pode ser baixada ou o Bedrock não
 responde, o e-mail de uma equipe no nível Nova enviado de um domínio com
@@ -1430,8 +1431,9 @@ avaliador fica sabendo. Recusar arquivos de programa, deixar em espera os
 e-mails com arquivos arriscados e ler PDFs, arquivos do Office e QR codes:
 tudo isso funciona sem o Bedrock.
 
-`ABUSE_VISION_REGION` precisa ser uma região com esse perfil; com a leitura
-de imagens ligada, qualquer outra região impede a instância de iniciar:
+`ABUSE_VISION_REGION` precisa ser uma região com esse perfil, fora do
+GovCloud; com a leitura de imagens ligada, qualquer outra região impede a
+instância de iniciar:
 `us-east-1`, `us-east-2`, `us-west-1`, `us-west-2`, `ca-central-1` e
 `ca-west-1` (perfil dos EUA; a partir do Canadá, as imagens também podem ser
 lidas nos EUA), `eu-central-1`, `eu-central-2`, `eu-north-1`, `eu-south-1`,
@@ -1485,10 +1487,9 @@ de Londres ou Zurique, as imagens também podem ser lidas em países da UE),
    `bedrock-mantle:CreateInference` para a leitura de imagens, troque essa
    permissão por estas duas. Até lá, o Bedrock nega toda leitura (HTTP 403),
    e os e-mails são tratados como quando o Bedrock não responde. Confira
-   também o passo 3: essa cota é separada da que a leitura de imagens usava
-   antes. Se `ABUSE_VISION_REGION` não for uma das regiões acima (São Paulo,
-   `sa-east-1`, não tem esse perfil), defina uma delas ou `ABUSE_VISION=off`
-   antes de atualizar, senão a instância não inicia.
+   também o passo 3. Se `ABUSE_VISION_REGION` não for uma das regiões acima
+   (São Paulo, `sa-east-1`, não tem esse perfil), defina uma delas ou
+   `ABUSE_VISION=off` antes de atualizar, senão a instância não inicia.
 3. Em Service Quotas, confira a cota do Amazon Bedrock "Cross-region model
    inference tokens per minute for Anthropic Claude Haiku 5.5" nessa região.
    O padrão da AWS é 10.000.000, mas algumas contas começam com 0, e aí

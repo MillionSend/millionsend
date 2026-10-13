@@ -924,7 +924,7 @@ describe("console.regions during a region hold", () => {
 
     const { items } = await member().broadcasts.list({});
     expect(items.find((b) => b.id === broadcast.id)?.held).toBe(true);
-    expect(JSON.stringify(items)).not.toMatch(/complaint|0\.0009|0\.09|review/i);
+    expect(JSON.stringify(items)).not.toMatch(/complaint|\b0\.0009\b|\b0\.09\b|review/i);
 
     await db.delete(schema.regionBreakers);
     await db.delete(schema.broadcasts).where(eq(schema.broadcasts.id, broadcast.id));

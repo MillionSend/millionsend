@@ -708,6 +708,11 @@ describe("broadcasts.sendTest", () => {
       .from(schema.emails)
       .where(eq(schema.emails.teamId, teamId));
     expect(row?.inboxId).toBe(inbox?.id);
+    const activity = await db
+      .select({ actor: schema.inboxActivity.actor })
+      .from(schema.inboxActivity)
+      .where(eq(schema.inboxActivity.action, "email.sent"));
+    expect(activity).toEqual([{ actor: "user:u1" }]);
   });
 });
 

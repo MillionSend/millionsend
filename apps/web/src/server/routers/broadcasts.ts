@@ -37,7 +37,7 @@ import {
   sendingProgress,
 } from "../broadcast-plan";
 import { resolveEditorSave } from "../email-content";
-import { inboxSendDeps } from "../inboxes";
+import { inboxSendDeps, userActor } from "../inboxes";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { activeLocale } from "../locale";
 import { router, teamProcedure } from "../trpc";
@@ -672,6 +672,7 @@ export const broadcastsRouter = router({
           tags: { [TEST_SEND_TAG]: "1" },
           domainId: sender.domainId,
         },
+        { actor: userActor(ctx) },
       );
       if (!result.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: result.reason });
       return { to };
