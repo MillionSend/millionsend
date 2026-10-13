@@ -550,6 +550,7 @@ describe("early graduation", () => {
     sentAt: Date,
     over: {
       to?: string[];
+      cc?: string[];
       bcc?: string[];
       events?: Pick<typeof schema.emailEvents.$inferInsert, "type" | "bounceType">[];
     } = {},
@@ -562,6 +563,7 @@ describe("early graduation", () => {
           domainId,
           from: "a@graduate.example",
           to: over.to ?? ["r@example.com"],
+          cc: over.cc,
           bcc: over.bcc,
           subject: "s",
           latestStatus: "delivered" as const,
@@ -707,10 +709,9 @@ describe("early graduation", () => {
       await sent(teamId, domainId, 50, DAY_OLD, { to });
     }
     // Delivered, but the delivered event may be the simulator's own.
-    await sent(teamId, domainId, 50, DAY_OLD, {
-      to: unreachable.to,
-      bcc: ["success@simulator.amazonses.com"],
-    });
+    const simulator = ["success@simulator.amazonses.com"];
+    await sent(teamId, domainId, 50, DAY_OLD, { to: unreachable.to, cc: simulator });
+    await sent(teamId, domainId, 50, DAY_OLD, { to: unreachable.to, bcc: simulator });
     const named = ["Ana Souza <ana@example.com>", '"Souza, Bia" <bia@Example.ORG>'];
     await sent(teamId, domainId, 49, DAY_OLD, { to: named });
     expect(await graduateWarmupDomains(db, NOW)).not.toContain("simulated-sender.example");
