@@ -119,6 +119,9 @@ export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
     };
     parsed.data.delivery = d;
   }
+  if (eventType === "DeliveryDelay") {
+    parsed.data.deliveryDelay = obj.deliveryDelay;
+  }
   if (eventType === "Click") {
     const k = obj.click as Record<string, unknown> | undefined;
     parsed.click = { ...(typeof k?.link === "string" ? { link: k.link } : {}) };
