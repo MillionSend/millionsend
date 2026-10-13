@@ -206,7 +206,7 @@ export async function regionCounterTotals(
   return out;
 }
 
-/** Teams behind a region's events over the tripping window, worst first. */
+/** Teams behind a region's hard bounces and complaints over the tripping window, worst first. */
 async function contributors(
   db: Db,
   region: string,
@@ -235,6 +235,7 @@ async function contributors(
       ),
     )
     .groupBy(schema.teams.id, schema.teams.name)
+    .having(sql`${hardBounced} + ${complained} > 0`)
     .orderBy(desc(sql`${hardBounced} + ${complained}`))
     .limit(5);
 }

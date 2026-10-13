@@ -72,7 +72,11 @@ async function seedTraffic(
   teamId: string,
   domainId: string,
   sent: number,
-  events: { type: "complained" | "bounced"; bounceType?: string; n: number }[],
+  events: {
+    type: "complained" | "bounced" | "delivered" | "delivery_delayed";
+    bounceType?: string;
+    n: number;
+  }[],
   sentAt = hoursAgo(6),
   to = (i: number) => [`r${i}@b.com`],
 ): Promise<void> {
@@ -252,6 +256,32 @@ it("hard bounces still count after the retention purge strips event payloads", a
     reason: { metric: "bounce", windowHours: 24 },
     contributors: [{ teamId: teamC, hardBounced: 45 }],
   });
+});
+
+it("names only teams with hard bounces or complaints, not those with only deliveries, delays or transient bounces", async () => {
+  await clearTraffic();
+  await db.delete(schema.regionBreakers);
+  const [a] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
+  const [b] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamB));
+  if (!a || !b) throw new Error("no domain");
+  const delayed = await createTeam(db, "breaker-delayed");
+  const delivered = await createTeam(db, "breaker-delivered");
+  await seedTraffic(teamA, a.id, 1000, permanent(45));
+  await seedTraffic(teamB, b.id, 10, permanent(1));
+  await seedTraffic(delayed, await domainIn(delayed, "delayed.example", "sa-east-1"), 4, [
+    { type: "delivery_delayed", n: 2 },
+    { type: "bounced", bounceType: "Transient", n: 2 },
+  ]);
+  await seedTraffic(delivered, await domainIn(delivered, "delivered.example", "sa-east-1"), 2, [
+    { type: "delivered", n: 2 },
+  ]);
+  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const sa = decisions.find((d) => d.region === "sa-east-1");
+  expect(sa).toMatchObject({ trip: true, reason: { metric: "bounce", windowHours: 24 } });
+  expect(sa?.contributors.map((c) => [c.teamId, c.hardBounced])).toEqual([
+    [teamA, 45],
+    [teamB, 1],
+  ]);
 });
 
 it("the week window reads the daily counters: seven UTC days including today (reported as 168h), attributed to the team's verified domain, never a pending one", async () => {
