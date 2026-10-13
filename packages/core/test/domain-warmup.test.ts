@@ -684,6 +684,17 @@ describe("early graduation", () => {
     expect(await graduateWarmupDomains(db, NOW)).toContain("unreachable-sender.example");
   });
 
+  it("needs a delivered send a day old, not just any send", async () => {
+    const teamId = await newTeam();
+    const domainId = await newDomain(teamId, "late-delivery.example", REGISTERED);
+    await sent(teamId, domainId, 1, DAY_OLD, unreachable);
+    await sent(teamId, domainId, 50, new Date(NOW.getTime() - 2 * HOUR_MS));
+    expect(await graduateWarmupDomains(db, NOW)).not.toContain("late-delivery.example");
+
+    await sent(teamId, domainId, 1, DAY_OLD);
+    expect(await graduateWarmupDomains(db, NOW)).toContain("late-delivery.example");
+  });
+
   it("leaves out sends to the SES mailbox simulator, however the address is written, and counts named recipients", async () => {
     const teamId = await newTeam();
     const domainId = await newDomain(teamId, "simulated-sender.example", REGISTERED);
