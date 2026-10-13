@@ -7,6 +7,6 @@ export default defineConfig({
     // Tests that write hundreds of PGlite rows can outlast the 5s default there too.
     testTimeout: 60_000,
     include: ["test/**/*.test.ts"],
-    env: { SKIP_ENV_VALIDATION: "1" },
+    env: { SKIP_ENV_VALIDATION: "1", RECIPIENT_DOMAIN_CHECK: "off" },
   },
 });

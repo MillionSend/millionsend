@@ -611,6 +611,14 @@ export {
   reservePeriodQuota,
   reserveQuota,
 } from "./quota.js";
+export {
+  classifyRecipientDomain,
+  createTldExists,
+  type UndeliverableReason,
+  type UndeliverableRecipient,
+  undeliverableRecipientMessage,
+  undeliverableRecipients,
+} from "./recipient-domains.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
   anyYoungLinkDomain,

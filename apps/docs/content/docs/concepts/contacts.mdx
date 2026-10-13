@@ -18,7 +18,10 @@ the same, minus the audience nesting.
 ## What a contact holds
 
 - `email` — the identity. Creating a second contact with the same email (any
-  casing) returns `409`.
+  casing) returns `409`, and creating one at an address whose domain can
+  never receive mail, such as `example.com` or `.test`, returns `422` (see
+  [Errors](/api-reference#errors)). A contact already stored at such an
+  address stays, and still updates.
 - `first_name`, `last_name`
 - `unsubscribed` — the global subscribe state. Unsubscribed contacts are
   excluded from every broadcast.
@@ -128,6 +131,9 @@ curl -X POST "https://api.millionsend.com/contacts/batch?on_conflict=upsert" \
 }
 ```
 
+`ana@example.com` works here only because the contact already exists: a new
+contact at a reserved address like that one is refused.
+
 `data` keeps request order and lists one entry per successful item (status
 `created`, `updated` or `skipped`); `counts` always sum to the request
 length; `errors` appears only in permissive mode.
@@ -136,7 +142,8 @@ length; `errors` appears only in permissive mode.
 
 The dashboard imports contacts from CSV (parsed client-side, then created in
 bulk) and exports the current list — including segment or topic filtered
-views — back to CSV.
+views — back to CSV. Rows with an address that can never receive mail are
+skipped, like malformed ones.
 
 ## Unsubscribes
 

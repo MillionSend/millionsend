@@ -19,6 +19,7 @@ import {
 import { secondsToNextUtcDay } from "./inboxes/send-policy.js";
 import { monthlyCapacity, type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
 import { quotaChargeAt, releaseQuota, reserveQuota } from "./quota.js";
+import { type UndeliverableReason, undeliverableRecipients } from "./recipient-domains.js";
 import { parseSingleSender } from "./sender-address.js";
 import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppressions.js";
 import { type SendRefusal, sendRefusal } from "./team-standing.js";
@@ -362,7 +363,9 @@ export type AcceptEmailResult =
   | { ok: false; reason: "inbox_send_policy"; reasons: string[] }
   | { ok: false; reason: "inbox_send_cap_reached"; retryAfterSec: number }
   /** An inbox-scoped key sending from another address. */
-  | { ok: false; reason: "inbox_scope" };
+  | { ok: false; reason: "inbox_scope" }
+  /** A recipient whose domain can never receive mail (undeliverableRecipients); the first one. */
+  | { ok: false; reason: "undeliverable_recipient"; address: string; why: UndeliverableReason };
 
 /**
  * The single accept pipeline behind every send surface: the team's send
@@ -404,6 +407,11 @@ export async function acceptEmail(
     /** Who an inbox send's activity names; read from `auth` when absent. */
     actor?: InboxActor | undefined;
     /**
+     * Skip the undeliverable-recipient check: the caller already ran it on
+     * these recipients, or holds a transaction a DNS wait must not keep open.
+     */
+    recipientsChecked?: boolean | undefined;
+    /**
      * With `tx`: where an inbox send's webhook rows go, for the caller to
      * queue after its own commit, as it queues the send.
      */
@@ -421,6 +429,21 @@ export async function acceptEmail(
   }
   const tooLarge = exceededSendSize(payload);
   if (tooLarge !== null) return { ok: false, reason: "attachments_too_large", maxBytes: tooLarge };
+  if (!opts.recipientsChecked) {
+    const [hit] = await undeliverableRecipients([
+      ...payload.to,
+      ...(payload.cc ?? []),
+      ...(payload.bcc ?? []),
+    ]);
+    if (hit) {
+      return {
+        ok: false,
+        reason: "undeliverable_recipient",
+        address: hit.address,
+        why: hit.reason,
+      };
+    }
+  }
 
   const now = new Date();
   // Every surface meets the inbox rails here; inbox-aware callers decided

@@ -4,7 +4,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { createTransport } from "nodemailer";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   type AcceptEmailPayload,
   acceptEmail,
@@ -37,6 +37,9 @@ beforeAll(async () => {
   domainId = domain.id;
 });
 afterAll(() => close());
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const deps = () => ({
   db,
@@ -349,5 +352,25 @@ describe("acceptEmail", () => {
     };
     expect(await storedTags(FREE)).toEqual({ campaign: "launch" });
     expect(await storedTags("uncapped")).toEqual(tags);
+  });
+
+  it("refuses a recipient whose domain can never receive mail, unless the caller checked already", async () => {
+    vi.stubEnv("RECIPIENT_DOMAIN_CHECK", "on");
+    const teamAuth = { teamId: await createTeam(db, "unreachable"), billing: FREE, apiKeyId: null };
+    const impossible = payload({
+      domainId: null,
+      to: ["success@simulator.amazonses.com"],
+      cc: ["Printer <X@Printer.LOCAL>"],
+      bcc: ["x@mail.example.com"],
+    });
+    expect(await acceptEmail(deps(), teamAuth, impossible)).toEqual({
+      ok: false,
+      reason: "undeliverable_recipient",
+      address: "x@printer.local",
+      why: "reserved_name",
+    });
+    expect(
+      await acceptEmail(deps(), teamAuth, impossible, { recipientsChecked: true }),
+    ).toMatchObject({ ok: true, parked: false });
   });
 });

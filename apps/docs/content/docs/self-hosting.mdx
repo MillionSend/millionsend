@@ -391,6 +391,13 @@ sending is paused for its bounce or complaint rate, the relay answers
 `451 4.7.1` after DATA, so the client keeps the message and retries; a
 suspended team gets `550`.
 
+A recipient whose domain can never receive mail (see
+[Errors](/api-reference#errors)) gets `550 5.1.2` at `RCPT TO`, with the
+API's message, and the relay still accepts the other recipients. If it was
+the message's only `To` recipient while another recipient was accepted, the
+message then fails at DATA with `553`; if no recipient was accepted, DATA
+answers `503`.
+
 Connection details:
 
 - **Host:** wherever the `smtp` service is reachable (the compose files

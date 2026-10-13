@@ -13,6 +13,9 @@ import { fakeId, realisticAccount } from "../../test/helpers/realistic-account.t
 import { toHtml } from "./ansi-to-html.mjs";
 import { screen } from "./vt.mjs";
 
+// The API runs in this process, and the fixture contacts sit at reserved domains.
+process.env.RECIPIENT_DOMAIN_CHECK ??= "off";
+
 const HERE = new URL(".", import.meta.url).pathname;
 const OUT = join(HERE, "out");
 const PTY = join(HERE, "pty-run.py");

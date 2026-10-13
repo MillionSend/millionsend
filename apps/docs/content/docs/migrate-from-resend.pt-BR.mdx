@@ -131,7 +131,7 @@ RESEND_BASE_URL=https://api.millionsend.com
 
 Auto-hospedado, use a origem da API da sua instância.
 
-Três detalhes que diferem do que uma integração com o Resend pode assumir:
+Quatro detalhes que diferem do que uma integração com o Resend pode assumir:
 
 - Os campos de remetente e destinatário aceitam exatamente uma caixa postal
   cada, nas formas da RFC 5322 `ada@example.com`, `Ada <ada@example.com>` ou
@@ -147,6 +147,11 @@ Três detalhes que diferem do que uma integração com o Resend pode assumir:
   `POST /contacts/batch?on_conflict=upsert` em JSON, até 1.000 por chamada, com
   `x-batch-validation: permissive` para manter as linhas válidas quando algumas
   falham.
+- Um destinatário cujo domínio nunca recebe e-mail, como `x@example.com`,
+  `x@foo.test` ou `x@gmail.con`, é recusado com `422 validation_error`, e um
+  contato novo num endereço assim também: a migração lista esses contatos
+  entre as falhas em vez de trazê-los. Veja
+  [Erros](/pt-BR/api-reference#erros).
 
 Prefere usar um SDK oficial? Os [SDKs do MillionSend](/pt-BR/sdks)
 cobrem nove linguagens com a mesma superfície:

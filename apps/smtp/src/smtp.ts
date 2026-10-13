@@ -16,6 +16,9 @@ import {
   SES_MAX_MESSAGE_BYTES,
   SHARED_REPLY_ONLY_MESSAGE,
   sendRefusalError,
+  type UndeliverableReason,
+  undeliverableRecipientMessage,
+  undeliverableRecipients,
   verifySenderDomain,
 } from "@millionsend/core";
 import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
@@ -54,6 +57,11 @@ function toSmtpError(err: unknown): Error {
   if (err instanceof Error && "responseCode" in err) return err;
   console.error("smtp internal error", err);
   return smtpError(451, "Temporary local error, please retry");
+}
+
+/** 5.1.2: bad destination system address (RFC 3463). */
+function undeliverableError(hit: { address: string; reason: UndeliverableReason }): Error {
+  return smtpError(550, `5.1.2 ${undeliverableRecipientMessage(hit, { forSend: true })}`);
 }
 
 /**
@@ -184,9 +192,13 @@ async function handleMessage(
       headers,
       domainId: domain.domainId,
     },
-    // A refusal would bounce the message at the client's server: a hold
-    // that ends in a release must not have lost it.
-    { parkUnderReview: true },
+    {
+      // A refusal would bounce the message at the client's server: a hold
+      // that ends in a release must not have lost it.
+      parkUnderReview: true,
+      // Every recipient here is an envelope recipient, checked at RCPT TO.
+      recipientsChecked: true,
+    },
   );
   // acceptEmail reads the team's admission per message, as the HTTP API
   // does: a suspension or a pause lands on the next message of an open
@@ -220,6 +232,9 @@ async function handleMessage(
     if (result.reason === "inbox_send_cap_reached") {
       throw smtpError(452, "4.3.1 Daily send limit for this inbox reached");
     }
+    if (result.reason === "undeliverable_recipient") {
+      throw undeliverableError({ address: result.address, reason: result.why });
+    }
     throw smtpError(550, "All recipients are suppressed");
   }
   return `Queued as ${result.id}`;
@@ -236,6 +251,9 @@ export function createSmtpServer(deps: SmtpDeps): SMTPServer {
   // Sessions admitted by onConnect; onClose also fires for rejected ones.
   const admitted = new Set<string>();
   const authFailures = new Map<string, number>();
+  // Refused recipients never enter the envelope, so the envelope cap can't
+  // bound how many domain checks one session drives.
+  const rcptRefusals = new Map<string, number>();
   return new SMTPServer({
     // Without a keypair STARTTLS is withdrawn. Plaintext AUTH requires an
     // explicit opt-in; smtp-server otherwise rejects it before onAuth.
@@ -257,6 +275,7 @@ export function createSmtpServer(deps: SmtpDeps): SMTPServer {
     },
     onClose(session) {
       authFailures.delete(session.id);
+      rcptRefusals.delete(session.id);
       if (!admitted.delete(session.id)) return;
       const open = (connectionsByIp.get(session.remoteAddress) ?? 1) - 1;
       if (open <= 0) connectionsByIp.delete(session.remoteAddress);
@@ -283,12 +302,32 @@ export function createSmtpServer(deps: SmtpDeps): SMTPServer {
         );
       });
     },
-    onRcptTo(_address, session, callback) {
+    onRcptTo(address, session, callback) {
+      if ((rcptRefusals.get(session.id) ?? 0) >= MAX_RCPT_TO) {
+        // 421 makes smtp-server close the connection after the reply.
+        callback(smtpError(421, "Too many refused recipients"));
+        return;
+      }
       if (session.envelope.rcptTo.length >= MAX_RCPT_TO) {
         callback(smtpError(452, "Too many recipients"));
         return;
       }
-      callback();
+      void (async () => {
+        const [hit] = await undeliverableRecipients([address.address]);
+        if (!hit) return null;
+        // A check that settles after the client hung up must not outlive onClose.
+        if (admitted.has(session.id)) {
+          rcptRefusals.set(session.id, (rcptRefusals.get(session.id) ?? 0) + 1);
+        }
+        return undeliverableError(hit);
+      })().then(
+        (refusal) => callback(refusal),
+        // A failed check never refuses a recipient.
+        (err) => {
+          console.error("smtp recipient check failed", err);
+          callback();
+        },
+      );
     },
     onData(stream: SMTPServerDataStream, session, callback) {
       const chunks: Buffer[] = [];

@@ -7,6 +7,7 @@ import {
   generateApiKey,
   hashRecipient,
   OVERAGE_HARD_CAP,
+  undeliverableRecipientMessage,
   utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -342,6 +343,63 @@ describe("smtp relay", () => {
     });
     expect(info.accepted).toHaveLength(MAX_RCPT_TO);
     expect(info.rejected).toEqual([rcpts[MAX_RCPT_TO]]);
+  });
+
+  describe("recipient domains", () => {
+    beforeEach(() => {
+      vi.stubEnv("RECIPIENT_DOMAIN_CHECK", "on");
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("refuses an impossible recipient at RCPT TO with 550 5.1.2 and queues the message for the rest", async () => {
+      const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+        from: "a@acme.dev",
+        to: "success@simulator.amazonses.com",
+        cc: "someone@test.invalid",
+        subject: "s",
+        text: "t",
+      });
+      expect(info.accepted).toEqual(["success@simulator.amazonses.com"]);
+      expect(info.rejected).toEqual(["someone@test.invalid"]);
+      expect(info.rejectedErrors).toMatchObject([
+        {
+          responseCode: 550,
+          response: `550 5.1.2 ${undeliverableRecipientMessage(
+            { address: "someone@test.invalid", reason: "reserved_name" },
+            { forSend: true },
+          )}`,
+        },
+      ]);
+      const row = await emailRow(info.response ?? "");
+      expect(row).toMatchObject({
+        to: ["success@simulator.amazonses.com"],
+        cc: null,
+        bcc: null,
+        latestStatus: "queued",
+      });
+      expect(enqueued.map((e) => e.emailId)).toContain(row.id);
+    });
+
+    it("drops the session with 421 once MAX_RCPT_TO recipients were refused", async () => {
+      const auth = `AUTH PLAIN ${Buffer.from(`\0${SMTP_USERNAME}\0${token}`).toString("base64")}`;
+      const refused = Array.from({ length: MAX_RCPT_TO }, (_, i) => `RCPT TO:<r${i}@foo.test>`);
+      const replies = await dialogue([
+        "EHLO client.test",
+        auth,
+        "MAIL FROM:<a@acme.dev>",
+        ...refused,
+        "RCPT TO:<success@simulator.amazonses.com>",
+        "NOOP",
+      ]);
+      // After the greeting, EHLO, AUTH and MAIL replies.
+      const rcptReplies = replies.slice(4);
+      expect(rcptReplies.slice(0, MAX_RCPT_TO).every((r) => r.startsWith("550 5.1.2 "))).toBe(true);
+      expect(rcptReplies[MAX_RCPT_TO]).toMatch(/^421/);
+      // The server hung up: NOOP got no reply.
+      expect(rcptReplies).toHaveLength(MAX_RCPT_TO + 1);
+    });
   });
 
   it("drops the connection after repeated AUTH failures", async () => {

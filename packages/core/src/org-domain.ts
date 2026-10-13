@@ -5,6 +5,16 @@ export function normalizeHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/\.$/, "");
 }
 
+/** Whether `name` is `domain` itself or one of its subdomains; both already normalized. */
+export function isDomainOrSubdomain(name: string, domain: string): boolean {
+  return name === domain || name.endsWith(`.${domain}`);
+}
+
+/** The last label of a hostname: its top-level domain. */
+export function topLevelLabel(hostname: string): string {
+  return hostname.slice(hostname.lastIndexOf(".") + 1);
+}
+
 /**
  * normalizeHostname, IDNA-encoded the way DNS and the domains table store
  * names (bücher.de → xn--bcher-kva.de); null when it is not a hostname. Only

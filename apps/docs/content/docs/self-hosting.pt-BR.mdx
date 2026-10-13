@@ -404,6 +404,13 @@ pela taxa de bounce ou de reclamação, o relay responde `451 4.7.1` após o
 DATA, e o cliente guarda a mensagem e tenta de novo; uma equipe suspensa
 recebe `550`.
 
+Um destinatário cujo domínio nunca recebe e-mail (veja
+[Erros](/pt-BR/api-reference#erros)) recebe `550 5.1.2` no `RCPT TO`, com a
+mesma mensagem da API, e o relay continua aceitando os outros
+destinatários. Se ele era o único destinatário no `To` da mensagem e outro
+destinatário foi aceito, a mensagem depois falha no DATA com `553`; se nenhum
+destinatário foi aceito, o DATA responde `503`.
+
 Dados de conexão:
 
 - **Host:** onde o serviço `smtp` estiver acessível (os arquivos compose o

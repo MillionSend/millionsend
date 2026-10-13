@@ -8,6 +8,6 @@ export default defineConfig({
     // package's tests running at once they outlast the 5s default.
     testTimeout: 30_000,
     include: ["test/**/*.test.ts"],
-    env: { SKIP_ENV_VALIDATION: "1" },
+    env: { SKIP_ENV_VALIDATION: "1", RECIPIENT_DOMAIN_CHECK: "off" },
   },
 });

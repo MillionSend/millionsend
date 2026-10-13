@@ -155,9 +155,8 @@ API é idêntico.
   suprimido depois do primeiro uso; para repetir o teste, use um `+`:
   `bounce+2@simulator.amazonses.com`.
 - Endereços em `example.com`, ou terminados em `.test` ou `.invalid`, não
-  recebem e-mail: o SES tenta de novo por horas (o e-mail aparece como
-  `delivery_delayed`) antes de dar bounce, e na Nuvem cada envio ainda conta na
-  cota do seu plano.
+  recebem e-mail, então um envio para um deles é recusado com `422` (veja
+  [Erros](/pt-BR/api-reference#erros)).
 
 ## Próximos passos
 
