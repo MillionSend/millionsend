@@ -343,6 +343,11 @@ Drafts also carry `forward` (a held forward), `decided_by`, `decided_at` and
 | `POST /inboxes/{id}/drafts/{draft_id}/send` | Sends it: no body, `Idempotency-Key` accepted. `200` with `email_id`, `202` when held, `409` once sent, `422` without a recipient. |
 | `POST /inboxes/{id}/drafts/{draft_id}/reject` | Turns a draft down (approvers only). |
 
+Drafts are stored without checking their recipients: a draft with a
+recipient whose domain can never receive mail, such as `x@example.com`, is
+refused with `422 validation_error` when it is sent or approved (see
+[Errors](/api-reference#errors)).
+
 **Who approves.** Sending a draft runs the inbox's rules for whoever sends
 it. A person in the dashboard, or a full-access API key of the team that
 isn't restricted to an inbox, approves by sending: the send skips the rules

@@ -160,6 +160,9 @@ remaining deltas are deliberate and loud:
 - `to`, `cc` and `bcc` together cannot exceed 50 recipients, and each address
   must be a single mailbox — a display name containing `@` is rejected, and
   accepted addresses read back in canonical `Name <user@host>` form.
+- A recipient whose domain can never receive mail, such as `x@example.com`,
+  `x@foo.test` or `x@gmail.con`, is refused with `422 validation_error`, in
+  sends and new contacts alike; see [Errors](#errors).
 - The instance's onboarding sender (`ONBOARDING_EMAIL_FROM`;
   `hello@mail.millionsend.com` on the cloud) carries only MillionSend's own
   onboarding email: as `from` on `POST /emails`, `POST /emails/batch` or a
@@ -250,6 +253,36 @@ Errors use Resend's format:
 
 A body that isn't valid JSON answers `400 invalid_parameter`, and a body sent
 with a `Content-Type` other than `application/json` answers `415`.
+
+A recipient whose domain can never receive mail is refused with
+`422 validation_error`, and the message names the address:
+
+```json
+{
+  "statusCode": 422,
+  "name": "validation_error",
+  "message": "x@gmail.con can never receive mail: .con is not a top-level domain. To test sending without emailing anyone, use success@simulator.amazonses.com."
+}
+```
+
+- **Reserved names:** a domain ending in `.test`, `.invalid`, `.example`,
+  `.localhost`, `.local`, `.onion`, `.alt` or `.internal`, and `home.arpa`
+  with its subdomains.
+- **Documentation domains:** `example.com`, `example.net` and `example.org`,
+  with their subdomains.
+- **Top-level domains that don't exist,** such as `.con`, or one made only of
+  digits. MillionSend knows the real ones from the Public Suffix List and
+  looks any other up in the DNS root; when that lookup fails or times out,
+  the address passes, so a DNS problem never refuses a recipient.
+
+Sends through the API, the MCP server, inboxes and the
+[SMTP relay](/self-hosting#smtp-relay) check `to`, `cc` and `bcc`, never
+`reply_to`: a batch item fails like any invalid one, an inbox draft is
+checked when it is sent, and the relay answers `550 5.1.2` at `RCPT TO`.
+`POST /contacts`, `POST /contacts/batch` and the audience alias refuse the
+same addresses for a new contact. Nothing already stored changes: contacts,
+and queued or scheduled emails, stay as they are. A broadcast goes to stored
+contacts without checking their addresses.
 
 Besides Resend's names, [received mail](/concepts/receiving) and
 [inboxes](/concepts/inboxes) answer these:

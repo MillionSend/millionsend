@@ -358,6 +358,11 @@ Os rascunhos também trazem `forward` (um encaminhamento retido),
 | `POST /inboxes/{id}/drafts/{draft_id}/send` | Envia: sem corpo, com `Idempotency-Key` se quiser. `200` com `email_id`, `202` quando é retido, `409` depois de enviado, `422` sem destinatário. |
 | `POST /inboxes/{id}/drafts/{draft_id}/reject` | Recusa um rascunho (só quem aprova). |
 
+Os rascunhos são salvos sem checar os destinatários: um rascunho com um
+destinatário cujo domínio nunca recebe e-mail, como `x@example.com`, é
+recusado com `422 validation_error` quando é enviado ou aprovado (veja
+[Erros](/pt-BR/api-reference#erros)).
+
 **Quem aprova.** Enviar um rascunho passa pelas regras da caixa para quem
 está enviando. Uma pessoa no painel, ou uma chave de API da equipe com acesso
 total que não esteja restrita a uma caixa, aprova ao enviar: o envio pula as

@@ -149,9 +149,8 @@ identical.
   hand, not in automated test runs. Each address is suppressed after its first
   use, so add a label for a fresh one: `bounce+2@simulator.amazonses.com`.
 - Addresses at `example.com`, or under `.test` or `.invalid`, can't receive
-  mail: SES retries them for hours (the email shows `delivery_delayed`) before
-  it bounces them, and on Cloud each one still counts toward your plan's
-  quota.
+  mail, so a send to one is refused with a `422` (see
+  [Errors](/api-reference#errors)).
 
 ## Next steps
 

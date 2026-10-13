@@ -18,7 +18,10 @@ caminhos de contato são os mesmos, sem o aninhamento de audience.
 ## O que um contato armazena
 
 - `email` — a identidade. Criar um segundo contato com o mesmo e-mail
-  (qualquer capitalização) retorna `409`.
+  (qualquer capitalização) retorna `409`, e criar um contato em um endereço
+  cujo domínio nunca recebe e-mail, como `example.com` ou `.test`, retorna
+  `422` (veja [Erros](/pt-BR/api-reference#erros)). Um contato que já existe
+  num endereço assim continua lá e ainda pode ser atualizado.
 - `first_name`, `last_name`
 - `unsubscribed` — o estado global de inscrição. Contatos descadastrados são
   excluídos de toda transmissão.
@@ -131,6 +134,9 @@ curl -X POST "https://api.millionsend.com/contacts/batch?on_conflict=upsert" \
 }
 ```
 
+`ana@example.com` só funciona aqui porque o contato já existe: um contato novo
+em um endereço reservado como esse é recusado.
+
 `data` mantém a ordem da requisição e traz uma entrada por item bem-sucedido
 (status `created`, `updated` ou `skipped`); `counts` sempre soma o tamanho
 da requisição; `errors` só aparece no modo permissivo.
@@ -139,7 +145,8 @@ da requisição; `errors` só aparece no modo permissivo.
 
 O painel importa contatos de CSV (interpretado no cliente e criado em lote) e
 exporta a lista atual — inclusive visões filtradas por segmento ou tópico —
-de volta para CSV.
+de volta para CSV. Linhas com um endereço que nunca recebe e-mail são
+puladas, como as de endereço inválido.
 
 ## Descadastros
 

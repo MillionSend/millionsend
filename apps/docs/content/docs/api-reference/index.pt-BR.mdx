@@ -169,6 +169,9 @@ deliberadas e explícitas:
   endereço precisa ser uma única caixa postal — um nome de exibição contendo
   `@` é rejeitado, e endereços aceitos voltam na forma canônica
   `Nome <usuario@host>`.
+- Um destinatário cujo domínio nunca recebe e-mail, como `x@example.com`,
+  `x@foo.test` ou `x@gmail.con`, é recusado com `422 validation_error`, tanto
+  nos envios quanto nos contatos novos; veja [Erros](#erros).
 - O remetente de onboarding da instância (`ONBOARDING_EMAIL_FROM`;
   `hello@mail.millionsend.com` na nuvem) leva só o e-mail de onboarding do
   próprio MillionSend: como `from` em `POST /emails`, `POST /emails/batch` ou
@@ -260,6 +263,37 @@ Erros usam o formato do Resend:
 
 Um corpo que não é JSON válido recebe `400 invalid_parameter`, e um corpo
 enviado com `Content-Type` diferente de `application/json` recebe `415`.
+
+Um destinatário cujo domínio nunca recebe e-mail é recusado com
+`422 validation_error`, e a mensagem cita o endereço:
+
+```json
+{
+  "statusCode": 422,
+  "name": "validation_error",
+  "message": "x@gmail.con can never receive mail: .con is not a top-level domain. To test sending without emailing anyone, use success@simulator.amazonses.com."
+}
+```
+
+- **Nomes reservados:** um domínio terminado em `.test`, `.invalid`,
+  `.example`, `.localhost`, `.local`, `.onion`, `.alt` ou `.internal`, e o
+  `home.arpa` com os subdomínios dele.
+- **Domínios de documentação:** `example.com`, `example.net` e
+  `example.org`, com os subdomínios deles.
+- **TLDs que não existem,** como `.con`, ou um TLD só de números. O
+  MillionSend conhece os TLDs reais pela Public Suffix List e consulta
+  qualquer outro na raiz do DNS; se essa consulta falha ou demora demais, o
+  endereço passa, então um problema de DNS nunca recusa um destinatário.
+
+Os envios pela API, pelo servidor MCP, pelas caixas de entrada e pelo
+[relay SMTP](/pt-BR/self-hosting#relay-smtp) checam `to`, `cc` e `bcc`, mas
+nunca o `reply_to`: um item de lote falha como qualquer item inválido, um
+rascunho de caixa de entrada é checado quando é enviado, e o relay responde
+`550 5.1.2` no `RCPT TO`. `POST /contacts`, `POST /contacts/batch` e o alias
+de audience recusam os mesmos endereços para um contato novo. Nada do que já
+está salvo muda: contatos e e-mails na fila ou agendados continuam como
+estão. Uma transmissão vai para os contatos salvos sem checar os endereços
+deles.
 
 Além dos nomes do Resend, os [e-mails recebidos](/pt-BR/concepts/receiving) e
 as [caixas de entrada](/pt-BR/concepts/inboxes) respondem estes:
