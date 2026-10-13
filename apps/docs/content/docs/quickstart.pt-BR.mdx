@@ -139,20 +139,25 @@ API é idêntico.
 
 - Para testar de ponta a ponta sem mandar e-mail para ninguém, envie para
   `success@simulator.amazonses.com`, como nos exemplos acima: o SES simula a
-  entrega, e o e-mail aparece como `delivered`, com os eventos e webhooks de
-  sempre. Endereços com `+` também funcionam:
-  `success+cadastro@simulator.amazonses.com`.
+  entrega, e o e-mail aparece como `delivered`, com os webhooks `email.sent` e
+  `email.delivered` (sem aberturas nem cliques: ninguém lê o e-mail). Endereços
+  com `+` também funcionam: `success+cadastro@simulator.amazonses.com`.
 - O SES não conta os e-mails do simulador na própria cota de envio nem nas
   taxas de bounce e reclamação, mas na Nuvem cada envio ainda conta na cota do
-  seu plano, como qualquer outro e-mail.
+  seu plano, como qualquer outro e-mail. Em uma instância auto-hospedada, o
+  simulador funciona mesmo com a sua conta AWS ainda no sandbox do SES, e a AWS
+  cobra cada mensagem normalmente.
 - Os endereços `bounce@`, `complaint@` e `suppressionlist@` do simulador geram
   bounces e reclamações que o MillionSend trata como reais: o endereço entra na
   [lista de supressão](/pt-BR/concepts/suppressions) da sua equipe e pesa na
   sua taxa de bounce ou de reclamação, o que pode pausar seus envios. Use esses
-  endereços manualmente, não em testes automatizados.
+  endereços manualmente, não em testes automatizados. Cada endereço fica
+  suprimido depois do primeiro uso; para repetir o teste, use um `+`:
+  `bounce+2@simulator.amazonses.com`.
 - Endereços em `example.com`, ou terminados em `.test` ou `.invalid`, não
-  recebem e-mail: envios para eles dão bounce e contam na sua cota de envio do
-  mesmo jeito.
+  recebem e-mail: o SES tenta de novo por horas (o e-mail aparece como
+  `delivery_delayed`) antes de dar bounce, e na Nuvem cada envio ainda conta na
+  cota do seu plano.
 
 ## Próximos passos
 

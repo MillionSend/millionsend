@@ -134,18 +134,24 @@ identical.
 
 - To test end to end without emailing anyone, send to
   `success@simulator.amazonses.com`, as the examples above do: SES simulates
-  the delivery, and the email shows as `delivered` with the usual events and
-  webhooks. Labels work too: `success+signup@simulator.amazonses.com`.
+  the delivery, and the email shows as `delivered`, with the `email.sent` and
+  `email.delivered` webhooks (no opens or clicks: nobody reads it). Labels
+  work too: `success+signup@simulator.amazonses.com`.
 - SES doesn't count simulator mail toward its own sending quota or bounce and
   complaint rates, but on Cloud each send still counts toward your plan's
-  quota like any other email.
+  quota like any other email. On a self-hosted instance, the simulator works
+  even while your AWS account is in the SES sandbox, and AWS still bills each
+  message.
 - The simulator's `bounce@`, `complaint@` and `suppressionlist@` addresses
   produce bounces and complaints that MillionSend treats as real: the address
   goes on your team's [suppression list](/concepts/suppressions) and counts
   toward your bounce or complaint rate, which can pause sending. Use them by
-  hand, not in automated test runs.
+  hand, not in automated test runs. Each address is suppressed after its first
+  use, so add a label for a fresh one: `bounce+2@simulator.amazonses.com`.
 - Addresses at `example.com`, or under `.test` or `.invalid`, can't receive
-  mail: sends to them bounce and still count toward your sending quota.
+  mail: SES retries them for hours (the email shows `delivery_delayed`) before
+  it bounces them, and on Cloud each one still counts toward your plan's
+  quota.
 
 ## Next steps
 
