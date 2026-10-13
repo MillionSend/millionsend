@@ -883,7 +883,11 @@ export default function EmailDetailPage() {
                 type === "bounced" || type === "suppressed" || type === "unsubscribed"
                   ? first
                   : (group.occurrences[count - 1] ?? first);
-              const detail = eventDetail(type, first.data);
+              // A delay's reason and expiry belong with the time the node shows.
+              const detail = eventDetail(
+                type,
+                (type === "delivery_delayed" ? stamped : first).data,
+              );
               const opens =
                 type === "bounced" && bounceOf(first.data)
                   ? ("bounced" as const)

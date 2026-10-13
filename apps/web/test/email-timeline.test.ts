@@ -43,8 +43,7 @@ vi.mock("@/components/api-sheet", () => ({ ApiDocsButton: () => null }));
 
 const { default: EmailDetailPage } = await import("@/app/(dashboard)/emails/[id]/page");
 
-function renderDelay(deliveryDelay: Record<string, unknown>): string {
-  const event = { eventType: "DeliveryDelay", deliveryDelay };
+function renderDelay(...delays: Record<string, unknown>[]): string {
   data.email = {
     id: "email-1",
     from: "sender@example.com",
@@ -60,7 +59,13 @@ function renderDelay(deliveryDelay: Record<string, unknown>): string {
     latestStatus: "delivery_delayed",
     createdAt: new Date("2026-03-02T10:00:00.000Z"),
     sentAt: new Date("2026-03-02T10:00:01.000Z"),
-    events: [{ id: "ev-1", type: "delivery_delayed", occurredAt: new Date(), data: event }],
+    // Minutes apart at midday UTC: the same local day in every time zone.
+    events: delays.map((deliveryDelay, i) => ({
+      id: `ev-${i}`,
+      type: "delivery_delayed",
+      occurredAt: new Date(Date.UTC(2026, 2, 2, 12, i)),
+      data: { eventType: "DeliveryDelay", deliveryDelay },
+    })),
   };
   return renderToStaticMarkup(createElement(EmailDetailPage));
 }
@@ -81,5 +86,14 @@ describe("a delivery delay on the email timeline", () => {
     const html = renderDelay({ delayType: "NewKindOfDelay", expirationTime: "not a date" });
     expect(html).toContain(">NewKindOfDelay<");
     expect(html).not.toContain("retries until");
+  });
+
+  it("reads a day's repeated delays from the latest, whose time the node shows", () => {
+    const html = renderDelay(
+      { delayType: "TransientCommunicationFailure" },
+      { delayType: "MailboxFull" },
+    );
+    expect(html).toContain(">mailbox full<");
+    expect(html).not.toContain("connection failure");
   });
 });
