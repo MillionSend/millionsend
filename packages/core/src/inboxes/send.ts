@@ -31,6 +31,7 @@ import {
   type ReceivedEmailMeta,
 } from "../receiving/message.js";
 import { allowlisted } from "../receiving/trust.js";
+import { undeliverableRecipientMessage } from "../recipient-domains.js";
 import { screeningTier } from "../screening.js";
 import { formatMailbox, parseMailbox, parseSingleSender } from "../sender-address.js";
 import { QUOTA_COLUMNS } from "../team-plan.js";
@@ -437,6 +438,15 @@ export function acceptFailure(result: Exclude<AcceptEmailResult, { ok: true }>):
         status: 403,
         name: "restricted_api_key",
         message: INBOX_KEY_FROM_MESSAGE,
+      };
+    case "undeliverable_recipient":
+      return {
+        status: 422,
+        name: "validation_error",
+        message: undeliverableRecipientMessage(
+          { address: result.address, reason: result.why },
+          { forSend: true },
+        ),
       };
   }
 }

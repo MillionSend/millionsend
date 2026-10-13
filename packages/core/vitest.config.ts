@@ -12,6 +12,8 @@ export default defineConfig({
       // Tests construct partial environments; boot-time validation is
       // exercised explicitly in config's own tests, not implicitly here.
       SKIP_ENV_VALIDATION: "1",
+      // Fixtures send to reserved domains; recipient-domains tests turn it on.
+      RECIPIENT_DOMAIN_CHECK: "off",
     },
   },
 });

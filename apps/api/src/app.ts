@@ -83,6 +83,9 @@ import {
   sesMessageIdHeader,
   teamQuota,
   transitionQueueState,
+  type UndeliverableRecipient,
+  undeliverableRecipientMessage,
+  undeliverableRecipients,
   utcDay,
   type VirusResult,
   verifySenderDomain,
@@ -452,6 +455,18 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
       return {
         status: 403,
         body: errorBody(403, "restricted_api_key", INBOX_KEY_FROM_MESSAGE),
+      };
+    case "undeliverable_recipient":
+      return {
+        status: 422,
+        body: errorBody(
+          422,
+          "validation_error",
+          undeliverableRecipientMessage(
+            { address: result.address, reason: result.why },
+            { forSend: true },
+          ),
+        ),
       };
   }
 }
@@ -1117,6 +1132,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       name: "not_found",
       message,
     });
+    // Checked once, outside the retries: it may wait on DNS. Only a new
+    // contact is refused; a stored one still skips or upserts.
+    const candidates = [...rows.values()];
+    const undeliverable = new Map<BatchContactRow, UndeliverableRecipient>();
+    for (const hit of await undeliverableRecipients(candidates.map((r) => r.email))) {
+      const row = candidates[hit.index];
+      if (row) undeliverable.set(row, hit);
+    }
 
     for (let attempt = 0; ; attempt++) {
       const pending = [...rows.values()].filter((r) => results[r.indices[0] ?? -1] === undefined);
@@ -1158,7 +1181,16 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           fail(row, notFound("Topic not found"));
         } else {
           const found = existingByKey.get(row.key);
-          if (!found) inserts.push(row);
+          // Refused before the plan-room check, so it never uses up room.
+          const hit = found ? undefined : undeliverable.get(row);
+          if (hit) {
+            fail(row, {
+              ok: false,
+              status: 422,
+              name: "validation_error",
+              message: undeliverableRecipientMessage(hit),
+            });
+          } else if (!found) inserts.push(row);
           else if (onConflict === "error") {
             fail(row, {
               ok: false,
@@ -3837,19 +3869,19 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     },
   });
 
-  // One batch item's full validation (wire shape + business rules), no
-  // writes. A failure carries the strict-mode status so strict can answer
-  // with it verbatim while permissive downgrades it to a per-index error.
+  // One parsed batch item's business rules, no writes; `undeliverable` is
+  // its first recipient the batch-wide domain check refused. A failure
+  // carries the strict-mode status so strict can answer with it verbatim
+  // while permissive downgrades it to a per-index error.
   type BatchItemVerdict =
     | { payload: AcceptEmailPayload }
     | { status: 403 | 404 | 422; name: string; message: string };
 
-  const validateBatchItem = async (auth: ApiKeyAuth, raw: unknown): Promise<BatchItemVerdict> => {
-    const parsed = sendEmailRequestSchema.safeParse(raw);
-    if (!parsed.success) {
-      return { status: 422, name: "validation_error", message: validationMessage(parsed.error) };
-    }
-    const body = parsed.data;
+  const validateBatchItem = async (
+    auth: ApiKeyAuth,
+    body: SendEmailRequest,
+    undeliverable: UndeliverableRecipient | undefined,
+  ): Promise<BatchItemVerdict> => {
     if (body.topic_id != null && !(await findTeamTopic(deps.db, auth.teamId, body.topic_id))) {
       return { status: 404, name: "not_found", message: "Topic not found" };
     }
@@ -3883,6 +3915,13 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       });
       return { status: 422, name: "validation_error", message: rejected.message };
     }
+    if (undeliverable) {
+      return {
+        status: 422,
+        name: "validation_error",
+        message: undeliverableRecipientMessage(undeliverable, { forSend: true }),
+      };
+    }
     // Suppression (and topic opt-outs, which drop identically) is resolved
     // up front too, so an all-suppressed item fails at validation instead of
     // leaving earlier items accepted.
@@ -3912,23 +3951,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // and reports the rest as per-index errors.
     const permissive = c.req.header("x-batch-validation")?.toLowerCase() === "permissive";
 
-    // Pass 1 — validate every item with no writes.
-    const payloads: { payload: AcceptEmailPayload; index: number }[] = [];
-    const itemErrors: { index: number; message: string }[] = [];
-    for (const [i, raw] of items.entries()) {
-      const verdict = await validateBatchItem(auth, raw);
-      if ("payload" in verdict) {
-        payloads.push({ payload: verdict.payload, index: i });
-      } else if (permissive) {
-        itemErrors.push({ index: i, message: verdict.message });
-      } else {
-        return c.json(
-          errorBody(verdict.status, verdict.name, `emails.${i}: ${verdict.message}`),
-          verdict.status,
-        );
-      }
-    }
-
+    // Idempotency first, as in single send: a replay must return the stored
+    // response even if a recipient was suppressed or refused after the
+    // original batch.
     const idemKey = c.req.header("idempotency-key") ?? null;
     if (idemKey) {
       const begin = await beginIdempotent(deps.db, {
@@ -3961,12 +3986,47 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       }
     }
 
-    // Pass 2 — accept every validated item in ONE transaction so the batch is
-    // all-or-nothing, like single-send: a failure after item k rolls back
-    // items 1..k, so a retry can never re-send what a prior attempt already
-    // committed. Idempotency completion is recorded in the same transaction;
-    // enqueue happens only after commit (reconcile re-enqueues any lost job).
     try {
+      // Pass 1 — validate every item with no writes. Every item is parsed
+      // first, so one recipient-domain check covers the whole batch.
+      const parsed = items.map((raw) => sendEmailRequestSchema.safeParse(raw));
+      const recipients = parsed.flatMap((p, index) =>
+        p.success
+          ? [...p.data.to, ...(p.data.cc ?? []), ...(p.data.bcc ?? [])].map((address) => ({
+              index,
+              address,
+            }))
+          : [],
+      );
+      const undeliverable = new Map<number, UndeliverableRecipient>();
+      for (const hit of await undeliverableRecipients(recipients.map((r) => r.address))) {
+        const index = recipients[hit.index]?.index;
+        if (index !== undefined && !undeliverable.has(index)) undeliverable.set(index, hit);
+      }
+      const payloads: { payload: AcceptEmailPayload; index: number }[] = [];
+      const itemErrors: { index: number; message: string }[] = [];
+      for (const [i, p] of parsed.entries()) {
+        const verdict: BatchItemVerdict = p.success
+          ? await validateBatchItem(auth, p.data, undeliverable.get(i))
+          : { status: 422, name: "validation_error", message: validationMessage(p.error) };
+        if ("payload" in verdict) {
+          payloads.push({ payload: verdict.payload, index: i });
+        } else if (permissive) {
+          itemErrors.push({ index: i, message: verdict.message });
+        } else {
+          if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
+          return c.json(
+            errorBody(verdict.status, verdict.name, `emails.${i}: ${verdict.message}`),
+            verdict.status,
+          );
+        }
+      }
+
+      // Pass 2 — accept every validated item in ONE transaction so the batch is
+      // all-or-nothing, like single-send: a failure after item k rolls back
+      // items 1..k, so a retry can never re-send what a prior attempt already
+      // committed. Idempotency completion is recorded in the same transaction;
+      // enqueue happens only after commit (reconcile re-enqueues any lost job).
       const quota = teamQuota(auth.billing, deps.isCloud);
       const inboxWebhooks = deferredEnqueue();
       const accepted = await deps.db.transaction(async (dbTx) => {
@@ -3988,6 +4048,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             quota: "deferred",
             parkUnderReview: true,
             inboxWebhooks: inboxWebhooks.enqueue,
+            recipientsChecked: true,
           });
           if (!result.ok) throw new AcceptRejectedError(result, index);
           underReview ||= result.underReview;

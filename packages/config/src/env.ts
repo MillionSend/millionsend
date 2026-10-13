@@ -340,6 +340,11 @@ export const env = createEnv({
     // supportViewEnabled().
     SUPPORT_VIEW: z.enum(["off", "on"]).default("off"),
 
+    // Test seam, not operator configuration: "off" lets suites send to the
+    // reserved domains tests must use. Read through
+    // recipientDomainCheckEnabled().
+    RECIPIENT_DOMAIN_CHECK: z.enum(["on", "off"]).default("on"),
+
     // Optional error tracking through a Sentry SDK. Unset DSN: the SDK is
     // never loaded. SENTRY_DSN serves web, api and worker; SENTRY_BROWSER_DSN
     // turns on the dashboard's browser reporting, which reaches it through
@@ -642,6 +647,14 @@ export function abuseVisionConfig(e: Env = env): AbuseVisionConfig | null {
 /** Whether the operator may open a team's dashboard read-only; raw-string safe under SKIP_ENV_VALIDATION. */
 export function supportViewEnabled(e: Env = env): boolean {
   return (e.SUPPORT_VIEW as unknown) === "on";
+}
+
+/**
+ * Whether sends and new contacts refuse domains that can never receive mail.
+ * On unless set to "off": under SKIP_ENV_VALIDATION no default applies.
+ */
+export function recipientDomainCheckEnabled(e: Env = env): boolean {
+  return (e.RECIPIENT_DOMAIN_CHECK as unknown) !== "off";
 }
 
 export interface ErrorTrackingConfig {

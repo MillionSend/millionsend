@@ -390,6 +390,7 @@ const appEnv: Record<string, string> = {
   WEBHOOK_ALLOW_LOCALHOST: "true",
   WARMUP_ENABLED: "false",
   SES_TENANTS: "false",
+  RECIPIENT_DOMAIN_CHECK: "off",
   ABUSE_JUDGE: "typesafe",
   ABUSE_JUDGE_API_KEY: "e2e",
   ABUSE_JUDGE_BASE_URL: `http://127.0.0.1:${PORTS.judge}`,
