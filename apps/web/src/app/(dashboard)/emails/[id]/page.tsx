@@ -90,6 +90,15 @@ function deliveryOf(data: EventData): { recipients?: string[] } | null {
   const d = data?.delivery;
   return d && typeof d === "object" ? (d as { recipients?: string[] }) : null;
 }
+type DelayData = {
+  delayType?: string;
+  expirationTime?: string;
+  delayedRecipients?: Array<{ diagnosticCode?: string; status?: string }>;
+};
+function delayOf(data: EventData): DelayData | null {
+  const d = data?.deliveryDelay;
+  return d && typeof d === "object" ? (d as DelayData) : null;
+}
 function clickOf(data: EventData): { link?: string; userAgent?: string } | null {
   const c = data?.click;
   return c && typeof c === "object" ? (c as { link?: string; userAgent?: string }) : null;
@@ -692,6 +701,22 @@ export default function EmailDetailPage() {
       const parts = [code ?? b.bounceSubType, b.bounceType?.toLowerCase()].filter(Boolean);
       return parts.length > 0 ? parts.join(" · ") : null;
     }
+    if (type === "delivery_delayed") {
+      const d = delayOf(data);
+      if (!d) return null;
+      const delayed = d.delayedRecipients?.[0];
+      const parts = [
+        d.delayType && t.has(`detail.delayType.${d.delayType}`)
+          ? t(`detail.delayType.${d.delayType}`)
+          : d.delayType,
+        smtpCode(delayed?.diagnosticCode) ?? delayed?.status,
+        // Intl throws on an invalid date; a malformed stamp must not take the page down.
+        d.expirationTime && !Number.isNaN(Date.parse(d.expirationTime))
+          ? t("detail.retriesUntil", { time: formatDayTime(d.expirationTime, locale) })
+          : null,
+      ].filter(Boolean);
+      return parts.length > 0 ? parts.join(" · ") : null;
+    }
     if (type === "clicked") {
       const link = clickOf(data)?.link;
       return link ? displayUrl(link) : null;
@@ -930,7 +955,8 @@ export default function EmailDetailPage() {
                         color: "var(--ms-muted)",
                         marginTop: 3,
                         maxWidth: 220,
-                        whiteSpace: "nowrap",
+                        // Wraps instead of clipping: its last part is when SES stops retrying.
+                        whiteSpace: type === "delivery_delayed" ? "normal" : "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                       }}

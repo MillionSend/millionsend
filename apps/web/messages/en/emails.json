@@ -90,6 +90,19 @@
       "burst": "two links within a quarter second"
     },
     "suppressedLine": "future sends blocked",
+    "delayType": {
+      "InternalFailure": "internal SES failure",
+      "General": "SMTP failure",
+      "MailboxFull": "mailbox full",
+      "SpamDetected": "spam detected",
+      "RecipientServerError": "recipient server error",
+      "IPFailure": "sending IP blocked or throttled",
+      "TransientCommunicationFailure": "connection failure",
+      "BYOIPHostNameLookupUnavailable": "hostname lookup failed (BYOIP)",
+      "Undetermined": "reason undetermined",
+      "SendingDeferral": "deferred by SES"
+    },
+    "retriesUntil": "retries until {time}",
     "bounceBanner": {
       "hard": "Hard bounce — this address can't receive mail.",
       "suppressed": "It was added to your <link>suppression list</link>."

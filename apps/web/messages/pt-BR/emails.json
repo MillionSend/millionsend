@@ -90,6 +90,19 @@
       "burst": "dois links em um quarto de segundo"
     },
     "suppressedLine": "envios futuros bloqueados",
+    "delayType": {
+      "InternalFailure": "falha interna do SES",
+      "General": "falha no SMTP",
+      "MailboxFull": "caixa postal cheia",
+      "SpamDetected": "spam detectado",
+      "RecipientServerError": "erro no servidor do destinatário",
+      "IPFailure": "IP de envio bloqueado ou limitado",
+      "TransientCommunicationFailure": "falha de conexão",
+      "BYOIPHostNameLookupUnavailable": "falha na consulta de hostname (BYOIP)",
+      "Undetermined": "motivo indeterminado",
+      "SendingDeferral": "adiado pelo SES"
+    },
+    "retriesUntil": "tenta de novo até {time}",
     "bounceBanner": {
       "hard": "Bounce permanente — este endereço não pode receber e-mails.",
       "suppressed": "Ele foi adicionado à sua <link>lista de supressão</link>."
