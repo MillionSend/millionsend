@@ -196,7 +196,7 @@ export const sendEmailRequestSchema = z
       .openapi({ example: "Acme <onboarding@acme.dev>" }),
     to: recipientList
       .describe("Recipient address or list of up to 50")
-      .openapi({ example: ["delivered@resend.dev"] }),
+      .openapi({ example: ["success@simulator.amazonses.com"] }),
     subject: z
       .string()
       .min(1)

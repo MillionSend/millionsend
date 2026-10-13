@@ -67,20 +67,20 @@ const ms = new MillionSend("ms_xxxxxxxxx");
 
 await ms.emails.send({
   from: "Acme <onboarding@yourdomain.com>",
-  to: ["delivered@resend.dev"],
+  to: ["success@simulator.amazonses.com"],
   subject: "hello world",
   html: "<p>it works!</p>",
 });`,
     batch: `await ms.batch.send([
   {
     from: "Acme <onboarding@yourdomain.com>",
-    to: ["foo@gmail.com"],
+    to: ["success+1@simulator.amazonses.com"],
     subject: "hello world",
     html: "<h1>it works!</h1>",
   },
   {
     from: "Acme <onboarding@yourdomain.com>",
-    to: ["bar@outlook.com"],
+    to: ["success+2@simulator.amazonses.com"],
     subject: "world hello",
     html: "<p>it works!</p>",
   },
@@ -96,20 +96,20 @@ millionsend.api_key = "ms_xxxxxxxxx"
 
 millionsend.Emails.send({
     "from": "Acme <onboarding@yourdomain.com>",
-    "to": ["delivered@resend.dev"],
+    "to": ["success@simulator.amazonses.com"],
     "subject": "hello world",
     "html": "<p>it works!</p>",
 })`,
     batch: `millionsend.Batch.send([
     {
         "from": "Acme <onboarding@yourdomain.com>",
-        "to": ["foo@gmail.com"],
+        "to": ["success+1@simulator.amazonses.com"],
         "subject": "hello world",
         "html": "<h1>it works!</h1>",
     },
     {
         "from": "Acme <onboarding@yourdomain.com>",
-        "to": ["bar@outlook.com"],
+        "to": ["success+2@simulator.amazonses.com"],
         "subject": "world hello",
         "html": "<p>it works!</p>",
     },
@@ -123,20 +123,20 @@ millionsend.Emails.send({
 
 $ms->emails->send([
     'from' => 'Acme <onboarding@yourdomain.com>',
-    'to' => ['delivered@resend.dev'],
+    'to' => ['success@simulator.amazonses.com'],
     'subject' => 'hello world',
     'html' => '<p>it works!</p>',
 ]);`,
     batch: `$ms->batch->send([
     [
         'from' => 'Acme <onboarding@yourdomain.com>',
-        'to' => ['foo@gmail.com'],
+        'to' => ['success+1@simulator.amazonses.com'],
         'subject' => 'hello world',
         'html' => '<h1>it works!</h1>',
     ],
     [
         'from' => 'Acme <onboarding@yourdomain.com>',
-        'to' => ['bar@outlook.com'],
+        'to' => ['success+2@simulator.amazonses.com'],
         'subject' => 'world hello',
         'html' => '<p>it works!</p>',
     ],
@@ -150,20 +150,20 @@ $ms->emails->send([
 
 Millionsend::Emails.send(
   from: "Acme <onboarding@yourdomain.com>",
-  to: "delivered@resend.dev",
+  to: "success@simulator.amazonses.com",
   subject: "hello world",
   html: "<p>it works!</p>"
 )`,
     batch: `Millionsend::Batch.send([
   {
     from: "Acme <onboarding@yourdomain.com>",
-    to: ["foo@gmail.com"],
+    to: ["success+1@simulator.amazonses.com"],
     subject: "hello world",
     html: "<h1>it works!</h1>"
   },
   {
     from: "Acme <onboarding@yourdomain.com>",
-    to: ["bar@outlook.com"],
+    to: ["success+2@simulator.amazonses.com"],
     subject: "world hello",
     html: "<p>it works!</p>"
   }
@@ -177,20 +177,20 @@ Millionsend::Emails.send(
 
 sent, err := client.Emails.Send(&millionsend.SendEmailRequest{
     From:    "Acme <onboarding@yourdomain.com>",
-    To:      []string{"delivered@resend.dev"},
+    To:      []string{"success@simulator.amazonses.com"},
     Subject: "hello world",
     Html:    "<p>it works!</p>",
 })`,
     batch: `batch, err := client.Batch.Send([]*millionsend.SendEmailRequest{
     {
         From:    "Acme <onboarding@yourdomain.com>",
-        To:      []string{"foo@gmail.com"},
+        To:      []string{"success+1@simulator.amazonses.com"},
         Subject: "hello world",
         Html:    "<h1>it works!</h1>",
     },
     {
         From:    "Acme <onboarding@yourdomain.com>",
-        To:      []string{"bar@outlook.com"},
+        To:      []string{"success+2@simulator.amazonses.com"},
         Subject: "world hello",
         Html:    "<p>it works!</p>",
     },
@@ -204,7 +204,7 @@ sent, err := client.Emails.Send(&millionsend.SendEmailRequest{
 
 let email = CreateEmailBaseOptions::new(
     "Acme <onboarding@yourdomain.com>",
-    ["delivered@resend.dev"],
+    ["success@simulator.amazonses.com"],
     "hello world",
 )
 .with_html("<p>it works!</p>");
@@ -213,13 +213,13 @@ ms.emails.send(email).await?;`,
     batch: `let emails = vec![
     CreateEmailBaseOptions::new(
         "Acme <onboarding@yourdomain.com>",
-        ["foo@gmail.com"],
+        ["success+1@simulator.amazonses.com"],
         "hello world",
     )
     .with_html("<h1>it works!</h1>"),
     CreateEmailBaseOptions::new(
         "Acme <onboarding@yourdomain.com>",
-        ["bar@outlook.com"],
+        ["success+2@simulator.amazonses.com"],
         "world hello",
     )
     .with_html("<p>it works!</p>"),
@@ -236,7 +236,7 @@ ms.batch.send(emails).await?;`,
 
 CreateEmailOptions email = CreateEmailOptions.builder()
     .from("Acme <onboarding@yourdomain.com>")
-    .to("delivered@resend.dev")
+    .to("success@simulator.amazonses.com")
     .subject("hello world")
     .html("<p>it works!</p>")
     .build();
@@ -245,13 +245,13 @@ ms.emails().send(email);`,
     batch: `ms.batch().send(List.of(
     CreateEmailOptions.builder()
         .from("Acme <onboarding@yourdomain.com>")
-        .to("foo@gmail.com")
+        .to("success+1@simulator.amazonses.com")
         .subject("hello world")
         .html("<h1>it works!</h1>")
         .build(),
     CreateEmailOptions.builder()
         .from("Acme <onboarding@yourdomain.com>")
-        .to("bar@outlook.com")
+        .to("success+2@simulator.amazonses.com")
         .subject("world hello")
         .html("<p>it works!</p>")
         .build()
@@ -266,7 +266,7 @@ ms.emails().send(email);`,
 await ms.EmailSendAsync(new EmailMessage
 {
     From = "Acme <onboarding@yourdomain.com>",
-    To = new[] { "delivered@resend.dev" },
+    To = new[] { "success@simulator.amazonses.com" },
     Subject = "hello world",
     Html = "<p>it works!</p>",
 });`,
@@ -275,14 +275,14 @@ await ms.EmailSendAsync(new EmailMessage
     new EmailMessage
     {
         From = "Acme <onboarding@yourdomain.com>",
-        To = new[] { "foo@gmail.com" },
+        To = new[] { "success+1@simulator.amazonses.com" },
         Subject = "hello world",
         Html = "<h1>it works!</h1>",
     },
     new EmailMessage
     {
         From = "Acme <onboarding@yourdomain.com>",
-        To = new[] { "bar@outlook.com" },
+        To = new[] { "success+2@simulator.amazonses.com" },
         Subject = "world hello",
         Html = "<p>it works!</p>",
     },
@@ -296,20 +296,20 @@ await ms.EmailSendAsync(new EmailMessage
 
 MillionSend.Emails.send(client, %{
   from: "Acme <onboarding@yourdomain.com>",
-  to: ["delivered@resend.dev"],
+  to: ["success@simulator.amazonses.com"],
   subject: "hello world",
   html: "<p>it works!</p>"
 })`,
     batch: `MillionSend.Emails.send_batch(client, [
   %{
     from: "Acme <onboarding@yourdomain.com>",
-    to: ["foo@gmail.com"],
+    to: ["success+1@simulator.amazonses.com"],
     subject: "hello world",
     html: "<h1>it works!</h1>"
   },
   %{
     from: "Acme <onboarding@yourdomain.com>",
-    to: ["bar@outlook.com"],
+    to: ["success+2@simulator.amazonses.com"],
     subject: "world hello",
     html: "<p>it works!</p>"
   }
