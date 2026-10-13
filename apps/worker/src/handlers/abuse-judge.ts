@@ -505,8 +505,8 @@ async function loadBlockInput(
 
 /**
  * The operator hears once a day per team that the image reader's provider
- * refused an email's images (HTTP 400, which is also how Bedrock's CSAM
- * check answers); unsent mail of it waits on the review list.
+ * refused an email's images themselves, as Bedrock's CSAM check does;
+ * unsent mail of it waits on the review list.
  */
 async function notifyMediaBlocked(db: Db, deps: JudgeDeps, teamId: string, now: Date) {
   if (!deps.mailer) return;

@@ -1,11 +1,10 @@
-import { AnthropicBedrockMantle } from "@anthropic-ai/bedrock-sdk";
+import { AnthropicBedrock } from "@anthropic-ai/bedrock-sdk";
 import {
   APIConnectionTimeoutError,
+  APIError,
   APIUserAbortError,
-  BadRequestError,
-  RateLimitError,
 } from "@anthropic-ai/bedrock-sdk/core/error";
-import { ABUSE_VISION_MODEL, type AbuseVisionConfig } from "@millionsend/config";
+import type { AbuseVisionConfig } from "@millionsend/config";
 import { VISION_REPORT_JSON_SCHEMA, visionReportSchema } from "@millionsend/core";
 
 /**
@@ -50,7 +49,8 @@ export interface VisionReport {
 /**
  * ok: one report per image sent, null where the model skipped one.
  * refused: the model's safety classifiers declined (stop_reason "refusal").
- * blocked: Bedrock answered 400, which is also how its CSAM check answers.
+ * blocked: Bedrock refused the images themselves, as its CSAM check does
+ * (ValidationException, HTTP 400).
  * unavailable: anything else; the read can be tried again later.
  */
 export type VisionResult =
@@ -64,45 +64,94 @@ export interface VisionReader {
   read(items: VisionItem[], signal?: AbortSignal): Promise<VisionResult>;
 }
 
-function failure(err: unknown): VisionResult {
-  if (err instanceof BadRequestError) return { status: "blocked" };
+/**
+ * The error type Bedrock names in x-amzn-errortype ("ValidationException:..."
+ * or "...#ValidationException").
+ */
+function errorType(err: unknown): string | undefined {
+  if (!(err instanceof APIError)) return undefined;
+  return err.headers?.get("x-amzn-errortype")?.split(":")[0]?.split("#").pop();
+}
+
+/**
+ * Goes by the error type Bedrock names, not by status: quota, signature and
+ * model-id errors are 400s too.
+ */
+async function failure(err: unknown, withoutImages: () => Promise<unknown>): Promise<VisionResult> {
   if (err instanceof APIConnectionTimeoutError || err instanceof APIUserAbortError) {
     return { status: "unavailable", reason: "timeout" };
   }
-  if (err instanceof RateLimitError) return { status: "unavailable", reason: "throttled" };
+  if (!(err instanceof APIError)) return { status: "unavailable", reason: "upstream" };
+  const type = errorType(err);
+  if (type === "ValidationException") {
+    // The CSAM check answers ValidationException, and so do a wrong model or
+    // profile id and an account restriction, which refuse the same request
+    // without the images the same way. That request failing any other way
+    // (throttled, timed out, down) clears nothing, so the images stay blocked.
+    try {
+      await withoutImages();
+    } catch (probe) {
+      if (errorType(probe) === "ValidationException") {
+        return { status: "unavailable", reason: "upstream" };
+      }
+    }
+    return { status: "blocked" };
+  }
+  if (
+    err.status === 429 ||
+    type === "ThrottlingException" ||
+    type === "ServiceQuotaExceededException"
+  ) {
+    return { status: "unavailable", reason: "throttled" };
+  }
+  if (err.status === 408) return { status: "unavailable", reason: "timeout" };
+  // Any other 400 is not the CSAM check, which AWS documents as
+  // ValidationException, and "blocked" parks every tier's mail with these
+  // images: a misconfiguration must not look like abuse.
   return { status: "unavailable", reason: "upstream" };
 }
 
 /**
- * The Bedrock reader, on the region's own Mantle host with the bare model
- * id: the in-region route, so images are read in that region. The host is
- * set here, never left to ANTHROPIC_BEDROCK_MANTLE_BASE_URL. Credentials are
- * the worker's AWS keys when set, else the SDK's default chain.
+ * The Bedrock reader: InvokeModel on bedrock-runtime in the configured
+ * region, through its geographic inference profile, so images are read
+ * within that geography, on Mantle, the zero-operator-access engine that
+ * serves bedrock-runtime as it does bedrock-mantle. The host is set here,
+ * never left to ANTHROPIC_BEDROCK_BASE_URL. Credentials are the worker's AWS
+ * keys when set, else a Bedrock API key in AWS_BEARER_TOKEN_BEDROCK, else the
+ * SDK's default chain.
  */
 export function createBedrockVision(
   config: AbuseVisionConfig,
   opts: { fetch?: typeof fetch } = {},
 ): VisionReader {
-  const client = new AnthropicBedrockMantle({
+  const options = {
     awsRegion: config.region,
-    baseURL: `https://bedrock-mantle.${config.region}.api.aws/anthropic`,
-    ...(config.accessKeyId && config.secretAccessKey
-      ? { awsAccessKey: config.accessKeyId, awsSecretAccessKey: config.secretAccessKey }
-      : {}),
+    baseURL: `https://bedrock-runtime.${config.region}.amazonaws.com`,
     timeout: VISION_TIMEOUT_MS,
-    // Retries 429 and 5xx once; a 400 is never retried.
+    // Retries 408, 429 and 5xx once; a 400 is never retried.
     maxRetries: 1,
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
-  });
+  };
+  // Two calls, not a spread: the constructor's overloads take both keys or neither.
+  const client =
+    config.accessKeyId && config.secretAccessKey
+      ? new AnthropicBedrock({
+          ...options,
+          // null, though the types leave it out: undefined lets
+          // AWS_BEARER_TOKEN_BEDROCK win over these keys.
+          apiKey: null as unknown as undefined,
+          awsAccessKey: config.accessKeyId,
+          awsSecretKey: config.secretAccessKey,
+        })
+      : new AnthropicBedrock(options);
   return {
-    model: ABUSE_VISION_MODEL,
+    model: config.model,
     async read(items, signal) {
-      let message: Awaited<ReturnType<typeof client.messages.create>>;
-      try {
-        // No temperature: Haiku 5.5 refuses non-default sampling settings.
-        message = await client.messages.create(
+      // No temperature: Haiku 5.5 refuses non-default sampling settings.
+      const ask = (images: VisionItem[]) =>
+        client.messages.create(
           {
-            model: ABUSE_VISION_MODEL,
+            model: config.model,
             max_tokens: VISION_MAX_TOKENS,
             system: VISION_PROMPT,
             tools: [REPORT_MEDIA],
@@ -111,7 +160,7 @@ export function createBedrockVision(
               {
                 role: "user",
                 content: [
-                  ...items.flatMap((item, i) => [
+                  ...images.flatMap((item, i) => [
                     { type: "text" as const, text: `Image ${i + 1} (${item.hint}):` },
                     {
                       type: "image" as const,
@@ -129,8 +178,11 @@ export function createBedrockVision(
           },
           signal ? { signal } : {},
         );
+      let message: Awaited<ReturnType<typeof ask>>;
+      try {
+        message = await ask(items);
       } catch (err) {
-        return failure(err);
+        return failure(err, () => ask([]));
       }
       if (message.stop_reason === "refusal") return { status: "refused" };
       const call = message.content.find((block) => block.type === "tool_use");

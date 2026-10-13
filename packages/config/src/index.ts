@@ -13,6 +13,7 @@ export {
   AWS_REGION_DEFAULT,
   abuseJudgeConfig,
   abuseVisionConfig,
+  abuseVisionProfile,
   accountEmailFrom,
   accountMailDeliverable,
   assertEnvConsistency,

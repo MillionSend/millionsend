@@ -65,16 +65,29 @@ const deps = (vision: VisionReader | null, extra: Partial<MediaReadDeps> = {}): 
 });
 
 describe("createBedrockVision", () => {
-  const config = { region: "us-east-1", accessKeyId: "AKIATEST", secretAccessKey: "secret" };
+  // Not the default region, so a reader that ignores the config fails here.
+  const config = {
+    region: "eu-west-3",
+    model: "eu.anthropic.claude-haiku-5-5",
+    accessKeyId: "AKIATEST",
+    secretAccessKey: "secret",
+  };
   const image = [{ hint: "remote image", jpeg: Buffer.from("jpeg") }];
-  const answer = (status: number, body: unknown) =>
-    vi.fn(
-      async (_url: string | URL | Request, _init?: RequestInit) =>
-        new Response(JSON.stringify(body), {
-          status,
-          headers: { "content-type": "application/json" },
-        }),
+  const reply = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json", ...headers },
+    });
+  const answer = (status: number, body: unknown, headers?: Record<string, string>) =>
+    vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      reply(status, body, headers),
     );
+  const hang = (_url: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+    });
+  const read = (fetch: typeof globalThis.fetch, signal?: AbortSignal) =>
+    createBedrockVision(config, { fetch }).read(image, signal);
   const message = (content: unknown[], stopReason: string) => ({
     id: "msg_1",
     type: "message",
@@ -88,7 +101,7 @@ describe("createBedrockVision", () => {
   const toolUse = (input: unknown) =>
     message([{ type: "tool_use", id: "toolu_1", name: "report_media", input }], "tool_use");
 
-  it("forces report_media on Haiku 5.5, in-region, and parses what it reports", async () => {
+  it("forces report_media on Haiku 5.5 through the region's profile, and parses what it reports", async () => {
     const fetch = answer(
       200,
       toolUse({
@@ -104,7 +117,9 @@ describe("createBedrockVision", () => {
         ],
       }),
     );
+    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "example-not-a-token");
     const result = await createBedrockVision(config, { fetch }).read(image);
+    vi.unstubAllEnvs();
     expect(result).toEqual({
       status: "ok",
       reports: [
@@ -118,10 +133,16 @@ describe("createBedrockVision", () => {
       ],
     });
     const [url, init] = fetch.mock.calls[0] ?? [];
-    expect(String(url)).toBe("https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages");
+    expect(String(url)).toBe(
+      "https://bedrock-runtime.eu-west-3.amazonaws.com/model/eu.anthropic.claude-haiku-5-5/invoke",
+    );
+    expect(new Headers(init?.headers).get("authorization")).toMatch(
+      /^AWS4-HMAC-SHA256 Credential=AKIATEST\/\d{8}\/eu-west-3\/bedrock\/aws4_request,/,
+    );
     const body = JSON.parse(String(init?.body));
+    expect(body).not.toHaveProperty("model");
     expect(body).toMatchObject({
-      model: "anthropic.claude-haiku-5-5",
+      anthropic_version: "bedrock-2023-05-31",
       tool_choice: { type: "tool", name: "report_media" },
       messages: [
         {
@@ -144,27 +165,83 @@ describe("createBedrockVision", () => {
     expect(String(init?.body)).not.toContain("cache_control");
   });
 
-  it("rejects a malformed report, and reports a refusal, a 400 and a timeout apart", async () => {
-    const read = (fetch: typeof globalThis.fetch, signal?: AbortSignal) =>
-      createBedrockVision(config, { fetch }).read(image, signal);
+  it("blocks images Bedrock refuses, unless it refuses the same request without them too", async () => {
+    const refusal = () =>
+      reply(
+        400,
+        { message: "blocked" },
+        { "x-amzn-errortype": "com.example#ValidationException:http://example.com/" },
+      );
+    const csam = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(refusal())
+      .mockResolvedValueOnce(reply(200, toolUse({ items: [] })));
+    expect(await read(csam)).toEqual({ status: "blocked" });
+    expect(csam).toHaveBeenCalledTimes(2);
+    expect(String(csam.mock.calls[1]?.[0])).toBe(String(csam.mock.calls[0]?.[0]));
+    expect(JSON.parse(String(csam.mock.calls[1]?.[1]?.body))).toMatchObject({
+      tool_choice: { type: "tool", name: "report_media" },
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Report every image with report_media." }],
+        },
+      ],
+    });
+    const wrongModel = answer(
+      400,
+      { message: "The provided model identifier is invalid." },
+      { "x-amzn-errortype": "ValidationException" },
+    );
+    expect(await read(wrongModel)).toEqual({ status: "unavailable", reason: "upstream" });
+    expect(wrongModel).toHaveBeenCalledTimes(2);
+    const passing: (typeof globalThis.fetch)[] = [
+      async () => reply(429, { message: "x" }, { "x-amzn-errortype": "ThrottlingException" }),
+      async () =>
+        reply(400, { message: "x" }, { "x-amzn-errortype": "ServiceQuotaExceededException" }),
+      async () => reply(503, { message: "x" }),
+      () => Promise.reject(new TypeError("fetch failed")),
+    ];
+    for (const probe of passing) {
+      const fetch = vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValueOnce(refusal())
+        .mockImplementation(probe);
+      expect(await read(fetch)).toEqual({ status: "blocked" });
+    }
+    const deadline = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(refusal())
+      .mockImplementation(hang);
+    expect(await read(deadline, AbortSignal.timeout(500))).toEqual({ status: "blocked" });
+  });
+
+  it("never reads a quota, a permission or an unnamed 400 as blocked", async () => {
+    const throttled: VisionResult = { status: "unavailable", reason: "throttled" };
+    const upstream: VisionResult = { status: "unavailable", reason: "upstream" };
+    const cases: [status: number, type: string | null, result: VisionResult, calls: number][] = [
+      [400, "ServiceQuotaExceededException", throttled, 1],
+      [400, "ThrottlingException", throttled, 1],
+      [429, "ThrottlingException", throttled, 2],
+      [403, "AccessDeniedException", upstream, 1],
+      [404, "ResourceNotFoundException", upstream, 1],
+      [400, null, upstream, 1],
+      [408, "ModelTimeoutException", { status: "unavailable", reason: "timeout" }, 2],
+    ];
+    for (const [status, type, result, calls] of cases) {
+      const fetch = answer(status, { message: "x" }, type ? { "x-amzn-errortype": type } : {});
+      expect(await read(fetch)).toEqual(result);
+      expect(fetch).toHaveBeenCalledTimes(calls);
+    }
+  });
+
+  it("rejects a malformed report, and reports a refusal and a timeout apart", async () => {
     expect(await read(answer(200, toolUse({ items: [{ index: 1, text: 3 }] })))).toEqual({
       status: "unavailable",
       reason: "invalid_output",
     });
     expect(await read(answer(200, message([], "refusal")))).toEqual({ status: "refused" });
-    const blocked = answer(400, {
-      type: "error",
-      error: { type: "invalid_request_error", message: "blocked" },
-    });
-    expect(await read(blocked)).toEqual({ status: "blocked" });
-    expect(blocked).toHaveBeenCalledTimes(1);
-    const hanging = vi.fn(
-      (_url: string | URL | Request, init?: RequestInit) =>
-        new Promise<Response>((_, reject) => {
-          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
-        }),
-    );
-    expect(await read(hanging, AbortSignal.timeout(50))).toEqual({
+    expect(await read(hang, AbortSignal.timeout(50))).toEqual({
       status: "unavailable",
       reason: "timeout",
     });

@@ -1151,32 +1151,82 @@ files, counts as an anomaly in the draw.
 **Image reading (optional).** Off by default. With it on, Claude Haiku 5.5
 on Amazon Bedrock writes down the text and the brands shown in an email's
 images and in attachment pages that are images, and Jev receives that text
-(up to 3,000 characters) with the rest. The images go to Bedrock in
-`ABUSE_VISION_REGION` (default `us-east-1`), on that region's own endpoint,
-with the worker's AWS credentials; Bedrock keeps no copy, except that AWS
-may keep an image its automated checks flag as child sexual abuse material.
+(up to 3,000 characters) with the rest. The worker sends the images to
+Bedrock in `ABUSE_VISION_REGION` (default `us-east-1`) with its AWS
+credentials. Bedrock serves the model there only through cross-region
+inference profiles, and the worker uses the one for that region's
+geography: from `us-east-1`, `us.anthropic.claude-haiku-5-5`, which reads
+them in N. Virginia, Ohio or Oregon. The global profile, which may read
+them anywhere, is never used.
+Bedrock keeps no copy, except that AWS may keep an image its automated
+checks flag as child sexual abuse material, in the region that read it.
 Off, an email is judged without its image text and the judge is told so.
 Refusing program files, holding risky files and reading PDFs, Office files
-and QR codes all work without Bedrock. To turn it on:
+and QR codes all work without Bedrock.
+
+`ABUSE_VISION_REGION` must be a region with such a profile; with image
+reading on, any other region stops the instance from starting: `us-east-1`,
+`us-east-2`, `us-west-1`, `us-west-2`, `ca-central-1` and `ca-west-1` (US
+profile; from Canada, images may be read in the US too), `eu-central-1`,
+`eu-central-2`, `eu-north-1`, `eu-south-1`, `eu-south-2`, `eu-west-1`,
+`eu-west-2` and `eu-west-3` (EU profile; from London or Zurich, images may
+be read in the EU too), `ap-southeast-2` and `ap-southeast-4` (Australia),
+`ap-northeast-1` and `ap-northeast-3` (Japan). To turn it on:
 
 1. Accept Claude Haiku 5.5 in Amazon Bedrock in that region: on the
    console's model access page, or with
    `aws bedrock list-foundation-model-agreement-offers --model-id anthropic.claude-haiku-5-5`
    and then
    `aws bedrock create-foundation-model-agreement --model-id anthropic.claude-haiku-5-5 --offer-token <token>`.
-2. Give the worker's AWS credentials this statement, with your region and
-   account id:
+2. Give the worker's AWS credentials these two statements, with your region
+   and account id. The second lists the model in each region the profile
+   may send images to: from `us-east-1`, `us-east-2` or `us-west-2`, the
+   three below. From another region, list them with
+   `aws bedrock get-inference-profile --region <region> --inference-profile-identifier <geo>.anthropic.claude-haiku-5-5 --query 'models[].modelArn'`,
+   where `<geo>` is `us`, `eu`, `au` or `jp`, and use that prefix in both
+   statements. A service control policy that blocks any of these regions
+   makes reads fail unless it exempts this profile with the
+   `bedrock:InferenceProfileArn` condition key (see AWS's "Geographic
+   cross-Region inference").
 
    ```json
-   {
-     "Effect": "Allow",
-     "Action": "bedrock-mantle:CreateInference",
-     "Resource": "arn:aws:bedrock-mantle:<region>:<account-id>:project/*",
-     "Condition": { "StringEquals": { "bedrock-mantle:Model": "anthropic.claude-haiku-5-5" } }
-   }
+   [
+     {
+       "Effect": "Allow",
+       "Action": "bedrock:InvokeModel",
+       "Resource": "arn:aws:bedrock:<region>:<account-id>:inference-profile/us.anthropic.claude-haiku-5-5"
+     },
+     {
+       "Effect": "Allow",
+       "Action": "bedrock:InvokeModel",
+       "Resource": [
+         "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-5-5",
+         "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-5-5",
+         "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-haiku-5-5"
+       ],
+       "Condition": {
+         "StringEquals": {
+           "bedrock:InferenceProfileArn": "arn:aws:bedrock:<region>:<account-id>:inference-profile/us.anthropic.claude-haiku-5-5"
+         }
+       }
+     }
+   ]
    ```
 
-3. Set `ABUSE_VISION=bedrock` (and `ABUSE_VISION_REGION` for another
+   If the worker's credentials were given `bedrock-mantle:CreateInference`
+   for image reading, replace it with these two statements: until then
+   Bedrock denies every read (HTTP 403), and mail is handled as when Bedrock
+   does not answer. Check step 3 too: that quota is separate from the one
+   image reading used before. If `ABUSE_VISION_REGION` is not one of the
+   regions above (São Paulo, `sa-east-1`, has no such profile), set one of
+   them or `ABUSE_VISION=off` before upgrading, or the instance will not
+   start.
+3. In Service Quotas, check Amazon Bedrock's "Cross-region model inference
+   tokens per minute for Anthropic Claude Haiku 5.5" in that region. AWS's
+   default is 10,000,000, but some accounts start at 0, and then no read
+   gets through: request an increase, which must ask for more than
+   10,000,000.
+4. Set `ABUSE_VISION=bedrock` (and `ABUSE_VISION_REGION` for another
    region) and restart. Add Amazon Bedrock to the instance's privacy notice
    first.
 
