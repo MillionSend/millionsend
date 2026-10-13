@@ -171,6 +171,15 @@ describe("onboarding.sendFirstEmail", () => {
     });
   });
 
+  it("skips the recipient-domain check, whose DNS wait must stay out of the claim transaction", async () => {
+    vi.stubEnv("RECIPIENT_DOMAIN_CHECK", "on");
+    // The owner's reserved .example address would fail the check.
+    const teamId = await seedTeam("team-g");
+    expect(
+      await caller(teamId, "team-g").onboarding.sendFirstEmail({ locale: "en" }),
+    ).toMatchObject({ sent: true, to: "ada@team-g.example" });
+  });
+
   it("refuses a missing captcha token when Turnstile is on", async () => {
     vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "0x4BBB");

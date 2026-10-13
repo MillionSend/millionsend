@@ -93,7 +93,8 @@ export const onboardingRouter = router({
             text: message.text,
             domainId: null,
           },
-          { tx: tx as unknown as Db },
+          // No recipient-domain check: its DNS wait must not hold the claim transaction open.
+          { tx: tx as unknown as Db, recipientsChecked: true },
         );
         if (!result.ok) {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: result.reason });

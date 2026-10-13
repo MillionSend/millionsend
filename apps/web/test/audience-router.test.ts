@@ -3,6 +3,7 @@ import {
   hashRecipient,
   makeUnsubscribeToken,
   PLAN_CONTACT_LIMIT,
+  undeliverableRecipientMessage,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -301,6 +302,45 @@ describe("audience.contacts.addMany", () => {
     await expect(caller.audience.contacts.addMany({ rows })).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
+  });
+});
+
+describe("contacts at a domain that can never receive mail", () => {
+  it("add refuses a new one with BAD_REQUEST, while re-adding a stored one still conflicts", async () => {
+    vi.stubEnv("RECIPIENT_DOMAIN_CHECK", "on");
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await expect(
+      caller.audience.contacts.add({ email: "someone@app.invalid" }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: undeliverableRecipientMessage({
+        address: "someone@app.invalid",
+        reason: "reserved_name",
+      }),
+    });
+    await expect(
+      caller.audience.contacts.add({ email: "success@simulator.amazonses.com" }),
+    ).resolves.toMatchObject({ id: expect.any(String) });
+
+    await db.insert(schema.contacts).values({ teamId, email: "stored@app.invalid" });
+    await expect(
+      caller.audience.contacts.add({ email: "Stored@app.invalid" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect((await caller.audience.contacts.stats()).contacts).toBe(2);
+  });
+
+  it("addMany counts one as skipped", async () => {
+    vi.stubEnv("RECIPIENT_DOMAIN_CHECK", "on");
+    const caller = callerFor(await createTeam(db, "team-a"));
+    const result = await caller.audience.contacts.addMany({
+      rows: [
+        { email: "someone@app.invalid" },
+        { email: "not-an-email" },
+        { email: "success@simulator.amazonses.com" },
+      ],
+    });
+    expect(result).toEqual({ created: 1, skipped: 2 });
   });
 });
 
