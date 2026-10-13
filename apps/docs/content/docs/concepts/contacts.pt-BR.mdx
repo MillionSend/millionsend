@@ -130,7 +130,14 @@ curl -X POST "https://api.millionsend.com/contacts/batch?on_conflict=upsert" \
 {
   "data": [{ "object": "contact", "index": 0, "id": "9b2f…", "status": "updated" }],
   "counts": { "created": 0, "updated": 1, "skipped": 0, "failed": 1 },
-  "errors": [{ "index": 1, "message": "email: Invalid email address" }]
+  "errors": [
+    {
+      "index": 1,
+      "statusCode": 422,
+      "name": "validation_error",
+      "message": "email: Invalid email address"
+    }
+  ]
 }
 ```
 
@@ -139,7 +146,9 @@ em um endereço reservado como esse é recusado.
 
 `data` mantém a ordem da requisição e traz uma entrada por item bem-sucedido
 (status `created`, `updated` ou `skipped`); `counts` sempre soma o tamanho
-da requisição; `errors` só aparece no modo permissivo.
+da requisição; `errors` só aparece no modo permissivo. Cada entrada de
+`errors` traz o `statusCode` e o `name` que o modo estrito retornaria para
+esse item.
 
 ## Importação e exportação CSV
 

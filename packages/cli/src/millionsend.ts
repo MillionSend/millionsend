@@ -44,13 +44,14 @@ export interface BatchOutcome {
   /** Indices refer to the full input array, not the chunk. */
   data: { index: number; id: string; status: "created" | "updated" | "skipped" }[];
   counts: { created: number; updated: number; skipped: number; failed: number };
-  errors: { index: number; message: string }[];
+  /** Instances that predate per-row status codes send no `statusCode`. */
+  errors: { index: number; statusCode?: number | undefined; message: string }[];
 }
 
 export interface SuppressionsOutcome {
   /** One id per distinct address the API accepted, existing rows included. */
   ids: string[];
-  errors: { index: number; message: string }[];
+  errors: { index: number; statusCode: number; message: string }[];
 }
 
 interface ListPage<T> {
@@ -322,13 +323,17 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       }));
       if (!result.ok) {
         log.warn(`contacts batch ${n + 1}/${chunks.length} failed: ${result.message}`);
-        for (const i of slice.keys()) out.errors.push({ index: base + i, message: result.message });
+        for (const i of slice.keys()) {
+          out.errors.push({ index: base + i, statusCode: result.status, message: result.message });
+        }
         out.counts.failed += slice.length;
         continue;
       }
       const { body } = result;
       for (const row of body.data) out.data.push({ ...row, index: base + row.index });
-      for (const row of body.errors ?? []) out.errors.push({ ...row, index: base + row.index });
+      for (const { index, statusCode, message } of body.errors ?? []) {
+        out.errors.push({ index: base + index, statusCode, message });
+      }
       for (const key of Object.keys(out.counts) as (keyof BatchOutcome["counts"])[]) {
         out.counts[key] += body.counts[key];
       }
@@ -352,7 +357,11 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       if (!result.ok) {
         log.warn(`${path} ${n + 1}/${chunks.length} failed: ${result.message}`);
         for (const i of slice.keys()) {
-          out.errors.push({ index: n * BATCH_MAX + i, message: result.message });
+          out.errors.push({
+            index: n * BATCH_MAX + i,
+            statusCode: result.status,
+            message: result.message,
+          });
         }
         continue;
       }

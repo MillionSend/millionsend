@@ -334,7 +334,9 @@ describe("writers", () => {
       [1, "created"],
     ]);
     expect(first.counts).toEqual({ created: 2, updated: 0, skipped: 0, failed: 1 });
-    expect(first.errors).toEqual([{ index: 2, message: expect.stringMatching(/^email: /) }]);
+    expect(first.errors).toEqual([
+      { index: 2, statusCode: 422, message: expect.stringMatching(/^email: /) },
+    ]);
     ids.ada = first.data[0]?.id ?? "";
     ids.bob = first.data[1]?.id ?? "";
 
@@ -375,7 +377,7 @@ describe("writers", () => {
     expect(out.data).toHaveLength(BATCH_MAX + 1);
     expect(out.data.at(-1)?.index).toBe(BATCH_MAX);
     expect(out.errors).toEqual([
-      { index: BATCH_MAX + 1, message: expect.stringMatching(/^email/) },
+      { index: BATCH_MAX + 1, statusCode: 422, message: expect.stringMatching(/^email/) },
     ]);
     await cloud.db
       .update(schema.teams)
@@ -395,7 +397,9 @@ describe("writers", () => {
 
     const bad = await target.addSuppressions(["nope"], "manual");
     expect(bad.ids).toEqual([]);
-    expect(bad.errors).toEqual([{ index: 0, message: expect.stringMatching(/emails/) }]);
+    expect(bad.errors).toEqual([
+      { index: 0, statusCode: 422, message: expect.stringMatching(/emails/) },
+    ]);
 
     const listed = await fetch(`${cloud.baseUrl}/suppressions?origin=bounce`, {
       headers: { authorization: `Bearer ${cloud.apiKey}` },

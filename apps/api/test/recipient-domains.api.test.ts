@@ -208,7 +208,7 @@ describe("contacts", () => {
     expect(await permissive.json()).toMatchObject({
       data: [{ index: 0, status: "created" }],
       counts: { created: 1, updated: 0, skipped: 0, failed: 1 },
-      errors: [{ index: 1, message }],
+      errors: [{ index: 1, statusCode: 422, name: "validation_error", message }],
     });
   });
 

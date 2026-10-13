@@ -49,6 +49,18 @@ export const capitalize = (s: string): string => `${s[0]?.toUpperCase() ?? ""}${
 export const pluralize = (n: number, noun: string, plural = `${noun}s`): string =>
   `${formatNumber(n)} ${n === 1 ? noun : plural}`;
 
+/**
+ * Whether a write that failed with `status` could succeed on a re-run. 400 and
+ * 422 refuse the data itself, which a re-run sends unchanged. 409 means the
+ * target already holds a conflicting row the fresh plan did not match (a key
+ * differing only in case, a domain another team holds, a contact under
+ * `--on-conflict error`), so a re-run hits it again. Anything else, an unknown
+ * status included, may clear (a plan upgrade, a segment created again, a
+ * server back up).
+ */
+export const retryableStatus = (status: number | undefined): boolean =>
+  status !== 400 && status !== 409 && status !== 422;
+
 // CSI and OSC sequences first: a lone ESC also matches the C0 class, which
 // would leave the `[2J` / `]52;…` tail behind as visible junk.
 const CONTROL_RE =

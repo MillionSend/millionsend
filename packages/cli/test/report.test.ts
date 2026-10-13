@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { dnsCards, idRows, printSummary, type Report, renderReportMd } from "../src/report.js";
+import type { MigrateState } from "../src/model.js";
+import {
+  buildReport,
+  dnsCards,
+  idRows,
+  printSummary,
+  type Report,
+  renderReportMd,
+} from "../src/report.js";
 import { setColorMode } from "../src/theme.js";
 
 async function summary(r: Report): Promise<string> {
@@ -194,6 +202,44 @@ describe("report render helpers", () => {
     expect(idRows([{ resource: "segments", name: "S", sourceId: "src", targetId: UUID }])).toEqual([
       "  segments/S",
       `    src → ${UUID}`,
+    ]);
+  });
+});
+
+describe("buildReport checklist", () => {
+  /** The steps left after a run whose only outcome is `failures`. */
+  const left = (failures: MigrateState["failures"]): string[] =>
+    buildReport({
+      plan: { source: "resend", items: [], manual: [] } as never,
+      snapshot: {} as never,
+      outcome: { state: { failures }, counts: {}, domainRecords: {}, ids: [] } as never,
+      usage: { cloud: false } as never,
+      targetState: { domains: [] } as never,
+      baseUrl: "https://api.millionsend.com",
+      sourceLabel: "Resend",
+    }).checklist.left;
+  const failed = (statusCode: number) => ({
+    resource: "contacts" as const,
+    key: "ada@example.com",
+    message: `answered ${statusCode}`,
+    statusCode,
+  });
+  const baseUrlStep = "set RESEND_BASE_URL=https://api.millionsend.com in your app";
+
+  it("suggests a retry only for failures a re-run could clear; refusals get their own step", () => {
+    // A failure from a state file or instance older than per-row status codes.
+    const unknown = { resource: "topics" as const, key: "News", message: "failed" };
+    expect(left([...[422, 400, 503, 429, 409, 404, 403].map(failed), unknown])).toEqual([
+      baseUrlStep,
+      "retry 5 failed items",
+      "review 3 refused items (see Failed); re-running won't change that",
+    ]);
+  });
+
+  it("drops the retry step when every failure is a refusal", () => {
+    expect(left([failed(422)])).toEqual([
+      baseUrlStep,
+      "review 1 refused item (see Failed); re-running won't change that",
     ]);
   });
 });

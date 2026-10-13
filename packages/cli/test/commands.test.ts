@@ -50,7 +50,12 @@ function env(extra: Record<string, string> = {}): Record<string, string> {
 
 async function run(
   argv: string[],
-  options: { cwd?: string; env?: Record<string, string>; stdin?: string } = {},
+  options: {
+    cwd?: string;
+    env?: Record<string, string>;
+    stdin?: string;
+    fetch?: typeof fetch;
+  } = {},
 ) {
   const input = new PassThrough();
   input.end(options.stdin ?? "");
@@ -62,6 +67,7 @@ async function run(
     stderr: stderr.stream,
     env: env(options.env),
     cwd: options.cwd ?? cwd,
+    fetch: options.fetch,
   });
   return { code, stdout: stdout.text, stderr: stderr.text };
 }
@@ -341,15 +347,18 @@ describe("millionsend migrate", () => {
     SLOW,
   );
 
+  const notAnEmail = {
+    id: "00000000-0000-4000-8000-00000000bad1",
+    email: "not-an-email",
+    created_at: "2026-09-01 00:00:00.000+00",
+    unsubscribed: false,
+  };
+  const refusedStep = "review 1 refused item (see Failed); re-running won't change that";
+
   it(
     "a failed item is exit 3, listed, and does not stop the run",
     async () => {
-      fake.data.contacts.push({
-        id: "00000000-0000-4000-8000-00000000bad1",
-        email: "not-an-email",
-        created_at: "2026-09-01 00:00:00.000+00",
-        unsubscribed: false,
-      });
+      fake.data.contacts.push(notAnEmail);
       const { code, stdout } = await run([
         "migrate",
         "--from",
@@ -364,10 +373,72 @@ describe("millionsend migrate", () => {
       expect(stdout).toContain("contacts/not-an-email");
       const state = readState();
       expect(state?.failures).toEqual([
-        { resource: "contacts", key: "not-an-email", message: expect.stringMatching(/email/) },
+        {
+          resource: "contacts",
+          key: "not-an-email",
+          statusCode: 422,
+          message: expect.stringMatching(/email/),
+        },
       ]);
       expect(state?.created.contacts).toHaveLength(3);
-      expect(readReport().failures).toHaveLength(1);
+      const report = readReport();
+      expect(report.failures).toHaveLength(1);
+      // A re-run sends the same address and is refused again: no retry to suggest.
+      expect(report.checklist.left).toContain(refusedStep);
+      expect(report.checklist.left.filter((step) => step.startsWith("retry"))).toEqual([]);
+      expect(stdout).toContain(refusedStep);
+    },
+    SLOW,
+  );
+
+  it(
+    "contacts already on the target under --on-conflict error are refused, not retried",
+    async () => {
+      const { code } = await run([
+        "migrate",
+        "--from",
+        "resend",
+        "--yes",
+        "--only",
+        "contacts",
+        "--on-conflict",
+        "error",
+      ]);
+      expect(code).toBe(3);
+      expect(readState()?.failures.map((f) => f.statusCode)).toEqual([409, 409, 409]);
+      const { left } = readReport().checklist;
+      expect(left).toContain("review 3 refused items (see Failed); re-running won't change that");
+      expect(left.filter((step) => step.startsWith("retry"))).toEqual([]);
+    },
+    SLOW,
+  );
+
+  it(
+    "suggests a retry when an older instance sends per-row errors without a status",
+    async () => {
+      const olderInstance: typeof fetch = async (url, init) => {
+        const response = await fetch(url, init);
+        if (!String(url).includes("/contacts/batch")) return response;
+        const body = (await response.json()) as {
+          errors?: { index: number; message: string }[] | undefined;
+        };
+        body.errors = body.errors?.map(({ index, message }) => ({ index, message }));
+        return Response.json(body, { status: response.status });
+      };
+      fake.data.contacts.push(notAnEmail);
+      try {
+        const { code } = await run(["migrate", "--from", "resend", "--yes", "--only", "contacts"], {
+          fetch: olderInstance,
+        });
+        expect(code).toBe(3);
+      } finally {
+        fake.data.contacts.pop();
+      }
+      expect(readState()?.failures).toEqual([
+        { resource: "contacts", key: "not-an-email", message: expect.stringMatching(/email/) },
+      ]);
+      expect(readReport().checklist.left).toContain("retry 1 failed item");
+      expect(readReport().checklist.left).not.toContain(refusedStep);
     },
     SLOW,
   );
