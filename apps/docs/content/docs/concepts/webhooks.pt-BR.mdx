@@ -15,7 +15,7 @@ entregas por endpoint.
 | `email.sent` | O SES aceitou a mensagem para entrega. |
 | `email.delivered` | O servidor do destinatário a aceitou. |
 | `email.delivery_delayed` | A entrega está sendo repetida (ex.: caixa cheia, greylisting). |
-| `email.bounced` | A mensagem teve hard bounce. O endereço também é [suprimido](/pt-BR/concepts/suppressions). |
+| `email.bounced` | A mensagem voltou (bounce). `data.bounce.type` diz como: `Permanent` é um hard bounce, e o endereço também é [suprimido](/pt-BR/concepts/suppressions); `Transient` ou `Undetermined` quer dizer que o SES desistiu depois de tentar de novo (caixa cheia, um domínio que não existe), e o endereço não é suprimido. |
 | `email.complained` | O destinatário marcou como spam. Também suprimido. |
 | `email.opened` | Uma pessoa carregou o pixel de rastreamento (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). `data.open` traz `ipAddress`, `userAgent` e `timestamp` da busca. Um clique em uma mensagem ainda sem abertura também registra uma, com `data.open.reason: "click"`: ninguém clica no que nunca renderizou, e para leitores do Apple Mail é a única abertura que pode ser vista. |
 | `email.clicked` | Uma pessoa clicou em um link reescrito (exige rastreamento de cliques). `data.click` traz `link`, `ipAddress`, `userAgent` e `timestamp`, como no Resend. Um link que uma máquina seguiu — gateway de segurança, pré-visualização de link, busca segundos após a entrega — é registrado como `email.prefetched`. |

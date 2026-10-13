@@ -59,7 +59,7 @@ const ms = new MillionSend("ms_123", { baseUrl: "https://api.millionsend.com" })
 
 const { data, error } = await ms.emails.send({
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@example.com",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>",
 });
@@ -81,7 +81,7 @@ millionsend.base_url = "https://api.millionsend.com"
 
 email = millionsend.Emails.send({
     "from": "Acme <onboarding@acme.dev>",
-    "to": "delivered@example.com",
+    "to": "success@simulator.amazonses.com",
     "subject": "Hello from MillionSend",
     "html": "<strong>It works!</strong>",
 })
@@ -101,7 +101,7 @@ client.BaseURL = "https://api.millionsend.com"
 
 sent, err := client.Emails.Send(&millionsend.SendEmailRequest{
     From:    "Acme <onboarding@acme.dev>",
-    To:      []string{"delivered@example.com"},
+    To:      []string{"success@simulator.amazonses.com"},
     Subject: "Hello from MillionSend",
     Html:    "<strong>It works!</strong>",
 })
@@ -123,7 +123,7 @@ Millionsend.base_url = "https://api.millionsend.com"
 
 email = Millionsend::Emails.send(
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@example.com",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>"
 )
@@ -144,7 +144,7 @@ $ms = MillionSend::client('ms_123', 'https://api.millionsend.com');
 
 $email = $ms->emails->send([
     'from' => 'Acme <onboarding@acme.dev>',
-    'to' => 'delivered@example.com',
+    'to' => 'success@simulator.amazonses.com',
     'subject' => 'Hello from MillionSend',
     'html' => '<strong>It works!</strong>',
 ]);
@@ -168,7 +168,7 @@ let ms = MillionSend::with_base_url("ms_123", "https://api.millionsend.com");
 
 let sent = ms.emails.send(&SendEmailOptions {
     from: "Acme <onboarding@acme.dev>".into(),
-    to: "delivered@example.com".into(),
+    to: "success@simulator.amazonses.com".into(),
     subject: "Hello from MillionSend".into(),
     html: Some("<strong>It works!</strong>".into()),
     ..Default::default()
@@ -193,7 +193,7 @@ MillionSend ms = new MillionSend("ms_123", "https://api.millionsend.com");
 CreateEmailResponse sent = ms.emails().send(
     CreateEmailOptions.builder()
         .from("Acme <onboarding@acme.dev>")
-        .to("delivered@example.com")
+        .to("success@simulator.amazonses.com")
         .subject("Hello from MillionSend")
         .html("<strong>It works!</strong>")
         .build());
@@ -215,7 +215,7 @@ var client = new MillionSendClient("ms_123", "https://api.millionsend.com");
 var res = await client.EmailSendAsync(new EmailMessage
 {
     From = "Acme <onboarding@acme.dev>",
-    To = "delivered@example.com",
+    To = "success@simulator.amazonses.com",
     Subject = "Hello from MillionSend",
     Html = "<strong>It works!</strong>",
 });
@@ -240,7 +240,7 @@ config :millionsend, MillionSend.Client,
 {:ok, email} =
   MillionSend.Emails.send(%{
     from: "Acme <onboarding@acme.dev>",
-    to: "delivered@example.com",
+    to: "success@simulator.amazonses.com",
     subject: "Hello from MillionSend",
     html: "<strong>It works!</strong>"
   })

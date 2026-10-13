@@ -29,9 +29,9 @@ const ms = new MillionSend("ms_xxxxxxxxx");
 
 const { data, error } = await ms.contacts.list({ limit: 20 });`,
     create: `await ms.contacts.create({
-  email: "steve.wozniak@gmail.com",
-  firstName: "Steve",
-  lastName: "Wozniak",
+  email: "success+ana@simulator.amazonses.com",
+  firstName: "Ana",
+  lastName: "Souza",
 });`,
     update: `await ms.contacts.update({
   id: "${ID}",
@@ -45,9 +45,9 @@ millionsend.api_key = "ms_xxxxxxxxx"
 
 contacts = millionsend.Contacts.list(limit=20)`,
     create: `millionsend.Contacts.create({
-    "email": "steve.wozniak@gmail.com",
-    "first_name": "Steve",
-    "last_name": "Wozniak",
+    "email": "success+ana@simulator.amazonses.com",
+    "first_name": "Ana",
+    "last_name": "Souza",
 })`,
     update: `millionsend.Contacts.update({
     "id": "${ID}",
@@ -59,9 +59,9 @@ contacts = millionsend.Contacts.list(limit=20)`,
 
 $contacts = $ms->contacts->list(['limit' => 20]);`,
     create: `$ms->contacts->create([
-    'email' => 'steve.wozniak@gmail.com',
-    'firstName' => 'Steve',
-    'lastName' => 'Wozniak',
+    'email' => 'success+ana@simulator.amazonses.com',
+    'firstName' => 'Ana',
+    'lastName' => 'Souza',
 ]);`,
     update: `$ms->contacts->update([
     'id' => '${ID}',
@@ -73,9 +73,9 @@ $contacts = $ms->contacts->list(['limit' => 20]);`,
 
 contacts = Millionsend::Contacts.list(limit: 20)`,
     create: `Millionsend::Contacts.create(
-  email: "steve.wozniak@gmail.com",
-  first_name: "Steve",
-  last_name: "Wozniak"
+  email: "success+ana@simulator.amazonses.com",
+  first_name: "Ana",
+  last_name: "Souza"
 )`,
     update: `Millionsend::Contacts.update(
   id: "${ID}",
@@ -87,9 +87,9 @@ contacts = Millionsend::Contacts.list(limit: 20)`,
 
 contacts, err := client.Contacts.List(&millionsend.ListOptions{Limit: 20})`,
     create: `contact, err := client.Contacts.Create(&millionsend.CreateContactRequest{
-    Email:     "steve.wozniak@gmail.com",
-    FirstName: "Steve",
-    LastName:  "Wozniak",
+    Email:     "success+ana@simulator.amazonses.com",
+    FirstName: "Ana",
+    LastName:  "Souza",
 })`,
     update: `unsubscribed := true
 
@@ -108,9 +108,9 @@ let contacts = ms
         ..Default::default()
     }))
     .await?;`,
-    create: `let mut contact = CreateContactOptions::new("steve.wozniak@gmail.com");
-contact.first_name = Some("Steve".into());
-contact.last_name = Some("Wozniak".into());
+    create: `let mut contact = CreateContactOptions::new("success+ana@simulator.amazonses.com");
+contact.first_name = Some("Ana".into());
+contact.last_name = Some("Souza".into());
 
 ms.contacts.create(&contact).await?;`,
     update: `ms.contacts
@@ -130,9 +130,9 @@ ListResponse<Contact> contacts = ms.contacts().list(
     ListOptions.builder().limit(20).build()
 );`,
     create: `ms.contacts().create(CreateContactOptions.builder()
-    .email("steve.wozniak@gmail.com")
-    .firstName("Steve")
-    .lastName("Wozniak")
+    .email("success+ana@simulator.amazonses.com")
+    .firstName("Ana")
+    .lastName("Souza")
     .build());`,
     update: `ms.contacts().update(UpdateContactOptions.builder()
     .id("${ID}")
@@ -145,9 +145,9 @@ ListResponse<Contact> contacts = ms.contacts().list(
 var contacts = await ms.ContactListAsync(new ListOptions { Limit = 20 });`,
     create: `await ms.ContactAddAsync(new ContactCreateOptions
 {
-    Email = "steve.wozniak@gmail.com",
-    FirstName = "Steve",
-    LastName = "Wozniak",
+    Email = "success+ana@simulator.amazonses.com",
+    FirstName = "Ana",
+    LastName = "Souza",
 });`,
     update: `await ms.ContactUpdateAsync(new ContactUpdateOptions
 {
@@ -160,9 +160,9 @@ var contacts = await ms.ContactListAsync(new ListOptions { Limit = 20 });`,
 
 {:ok, contacts} = MillionSend.Contacts.list(client, limit: 20)`,
     create: `MillionSend.Contacts.create(client, %{
-  email: "steve.wozniak@gmail.com",
-  first_name: "Steve",
-  last_name: "Wozniak"
+  email: "success+ana@simulator.amazonses.com",
+  first_name: "Ana",
+  last_name: "Souza"
 })`,
     update: `MillionSend.Contacts.update(client, %{
   id: "${ID}",
