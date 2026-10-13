@@ -1723,7 +1723,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         }
       }
       const data: z.infer<typeof batchContactsResponseSchema>["data"] = [];
-      const errors: { index: number; message: string }[] = [];
+      const errors: { index: number; statusCode: number; name: string; message: string }[] = [];
       const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
       for (const [index, r] of results.entries()) {
         if (!r) throw new Error(`contact batch left item ${index} unresolved`);
@@ -1731,7 +1731,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           data.push({ object: "contact", index, id: r.id, status: r.status });
           counts[r.status]++;
         } else {
-          errors.push({ index, message: r.message });
+          errors.push({ index, statusCode: r.status, name: r.name, message: r.message });
           counts.failed++;
         }
       }

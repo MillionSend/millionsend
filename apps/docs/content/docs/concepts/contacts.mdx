@@ -127,7 +127,14 @@ curl -X POST "https://api.millionsend.com/contacts/batch?on_conflict=upsert" \
 {
   "data": [{ "object": "contact", "index": 0, "id": "9b2f…", "status": "updated" }],
   "counts": { "created": 0, "updated": 1, "skipped": 0, "failed": 1 },
-  "errors": [{ "index": 1, "message": "email: Invalid email address" }]
+  "errors": [
+    {
+      "index": 1,
+      "statusCode": 422,
+      "name": "validation_error",
+      "message": "email: Invalid email address"
+    }
+  ]
 }
 ```
 
@@ -136,7 +143,8 @@ contact at a reserved address like that one is refused.
 
 `data` keeps request order and lists one entry per successful item (status
 `created`, `updated` or `skipped`); `counts` always sum to the request
-length; `errors` appears only in permissive mode.
+length; `errors` appears only in permissive mode. Each `errors` entry carries
+the `statusCode` and `name` strict mode would answer for that item.
 
 ## CSV import and export
 

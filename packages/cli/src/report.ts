@@ -21,6 +21,7 @@ import {
   capitalize,
   formatNumber,
   pluralize,
+  retryableStatus,
   stripControlDeep,
   stripTrailingSlashes,
 } from "./utils.js";
@@ -198,6 +199,8 @@ export function buildReport({
     (m) => !m.title.startsWith("api-keys/") && !m.detail.startsWith("add DNS records"),
   );
   const failures = outcome.state.failures;
+  const retryable = failures.filter((f) => retryableStatus(f.statusCode)).length;
+  const refused = failures.length - retryable;
   const done = (Object.entries(outcome.counts) as [Resource, Counts[Resource]][])
     .filter(([, c]) => c !== undefined && c.failed === 0 && c.created + c.updated + c.unchanged > 0)
     .map(([resource]) => resource);
@@ -209,7 +212,10 @@ export function buildReport({
       ? [`replace ${sourceLabel} topic and segment ids in your code (id map below)`]
       : []),
     ...(manual.length > 0 ? [`review ${pluralize(manual.length, "manual note")}`] : []),
-    ...(failures.length > 0 ? [`retry ${pluralize(failures.length, "failed item")}`] : []),
+    ...(retryable > 0 ? [`retry ${pluralize(retryable, "failed item")}`] : []),
+    ...(refused > 0
+      ? [`review ${pluralize(refused, "refused item")} (see Failed); re-running won't change that`]
+      : []),
   ];
   const domains = targetState.domains.length + (outcome.counts.domains?.created ?? 0);
   return {

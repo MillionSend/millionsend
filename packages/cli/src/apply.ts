@@ -169,8 +169,12 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
     state.created[resource].push(id);
     tally(resource).created += 1;
   };
-  const failed = (resource: Resource, key: string, message: string): void => {
-    state.failures.push({ resource, key, message });
+  const failed = (
+    resource: Resource,
+    key: string,
+    { message, statusCode }: { message: string; statusCode?: number | undefined },
+  ): void => {
+    state.failures.push({ resource, key, message, statusCode });
     tally(resource).failed += 1;
     log.warn(`${resource}/${key}: ${message}`);
   };
@@ -230,7 +234,7 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
         if (item.action === "create") created(resource, result.id);
         else tally(resource).updated += 1;
       } else {
-        failed(resource, item.key, result.message);
+        failed(resource, item.key, { message: result.message, statusCode: result.status });
         failures += 1;
       }
       step.update(++n, items.length);
@@ -290,7 +294,10 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
     });
     if (patched.ok) outcome.domainRecords[create.name] = patched.records;
     else
-      failed("domains", create.name, `created, but tracking settings failed: ${patched.message}`);
+      failed("domains", create.name, {
+        message: `created, but tracking settings failed: ${patched.message}`,
+        statusCode: patched.status,
+      });
     return result;
   });
 
@@ -367,7 +374,7 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
       for (const error of out.errors) {
         const contact = slice[error.index];
         pass1.set(contact?.email.toLowerCase() ?? "", "failed");
-        failed("contacts", contact?.email ?? `#${error.index}`, error.message);
+        failed("contacts", contact?.email ?? `#${error.index}`, error);
       }
       done += slice.length;
       state.progress.contactsCursor = slice.at(-1)?.id ?? null;
@@ -415,7 +422,7 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
           }
         }
         for (const error of out.errors) {
-          failed("suppressions", slice[error.index]?.email ?? `#${error.index}`, error.message);
+          failed("suppressions", slice[error.index]?.email ?? `#${error.index}`, error);
         }
         done += slice.length;
         step.update(done, total);
@@ -504,7 +511,7 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
               failedNow.add(entry.id);
               failedIds.add(entry.id);
             }
-            failed("enrichment", entry?.item.email ?? `#${error.index}`, error.message);
+            failed("enrichment", entry?.item.email ?? `#${error.index}`, error);
           }
           // The upsert creates a contact the contacts pass never saw (a signup
           // since the last run); it is ours to roll back like any other.

@@ -1037,9 +1037,19 @@ export const batchContactsResponseSchema = z
       })
       .describe("Per-status totals over the request items; they sum to the request length"),
     errors: z
-      .array(z.object({ index: z.number().int(), message: z.string() }))
+      .array(
+        z.object({
+          index: z.number().int(),
+          statusCode: z.number().int(),
+          name: z.string(),
+          message: z.string(),
+        }),
+      )
       .optional()
-      .describe("Permissive mode only: the failed items by request index"),
+      .describe(
+        "Permissive mode only: the failed items by request index, each with the statusCode and " +
+          "name strict mode would answer for it",
+      ),
   })
   .openapi("BatchContactsResponse");
 
