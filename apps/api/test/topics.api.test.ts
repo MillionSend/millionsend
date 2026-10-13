@@ -170,6 +170,19 @@ describe("topics teamId isolation", () => {
     expect(row?.subscribed).toBe(true);
   });
 
+  it("PATCH contact-topics takes the last entry of a repeated topic", async () => {
+    const res = await call(tokenA, "PATCH", `/contacts/${contactA}/topics`, [
+      { id: topicA, subscription: "opt_in" },
+      { id: topicA, subscription: "opt_out" },
+    ]);
+    expect(res.status).toBe(200);
+    const rows = await db
+      .select({ subscribed: schema.contactTopicSubscriptions.subscribed })
+      .from(schema.contactTopicSubscriptions)
+      .where(eq(schema.contactTopicSubscriptions.contactId, contactA));
+    expect(rows).toEqual([{ subscribed: false }]);
+  });
+
   it("broadcast create rejects a topic owned by another team", async () => {
     const res = await call(tokenB, "POST", "/topics", {
       name: "B topic",

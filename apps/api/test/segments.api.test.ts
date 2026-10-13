@@ -131,6 +131,43 @@ describe("segments API (/segments)", () => {
     expect(await stored()).toBeNull();
   });
 
+  const storedSegment = async () =>
+    (await db.select().from(schema.segments).where(eq(schema.segments.id, segmentId)))[0];
+
+  it("422s an update with nothing to change, writing nothing", async () => {
+    const before = await storedSegment();
+    // The schema strips an `id` in the body, leaving it just as empty.
+    for (const body of [{}, { id: segmentId }]) {
+      const res = await call(tokenA, "PATCH", `/segments/${segmentId}`, body);
+      expect(res.status).toBe(422);
+      expect(await json(res)).toMatchObject({
+        name: "validation_error",
+        message: "Provide at least one of name or filter",
+      });
+    }
+    expect(await storedSegment()).toEqual(before);
+  });
+
+  it("422s a NUL character the database cannot store, in a body field or a path", async () => {
+    const before = await storedSegment();
+    const nulValue = {
+      match: "all",
+      conditions: [{ field: "property:plan", op: "equals", value: "a\u0000b" }],
+    };
+    for (const res of [
+      await call(tokenA, "PATCH", `/segments/${segmentId}`, { name: "a\u0000b" }),
+      await call(tokenA, "PATCH", `/segments/${segmentId}`, { filter: nulValue }),
+      await call(tokenA, "GET", "/contacts/a%00b@example.com"),
+    ]) {
+      expect(res.status).toBe(422);
+      expect(await json(res)).toMatchObject({
+        name: "validation_error",
+        message: "Text must not contain the NUL character (\\u0000)",
+      });
+    }
+    expect(await storedSegment()).toEqual(before);
+  });
+
   it("422s a malformed filter (unknown field) and never stores it", async () => {
     const res = await call(tokenA, "POST", "/segments", {
       name: "bad",

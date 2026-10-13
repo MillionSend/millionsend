@@ -315,6 +315,29 @@ describe("segmentFilterSchema / segmentWhere: validation", () => {
         .success,
     ).toBe(false);
   });
+
+  it("refuses a created_at year outside 1–9999 and counts every date it accepts", async () => {
+    for (const value of ["0000-06-01", "-000001-01-01", "+010000-01-01"]) {
+      expect(
+        segmentFilterSchema.safeParse(all({ field: "created_at", op: "before", value })).success,
+      ).toBe(false);
+    }
+    // Postgres cannot read "2026" or "2026-10" itself.
+    expect(await matched(all({ field: "created_at", op: "after", value: "2026" }))).toEqual([
+      "bob@other.test",
+      "carol@example.com",
+    ]);
+    expect(await matched(all({ field: "created_at", op: "before", value: "2026-07" }))).toEqual([
+      "alice@example.com",
+      "bob@other.test",
+    ]);
+    expect(await matched(all({ field: "created_at", op: "before", value: "0001-01-01" }))).toEqual(
+      [],
+    );
+    expect(await matched(all({ field: "created_at", op: "after", value: "9999-12-31" }))).toEqual(
+      [],
+    );
+  });
 });
 
 describe("segmentContactsWhere: resolution (filter OR manual membership)", () => {

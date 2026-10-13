@@ -90,6 +90,18 @@ describe("topics CRUD", () => {
     expect((await caller.topics.list()).find((t) => t.id === id)?.description).toBeNull();
   });
 
+  it("refuses a NUL character the database cannot store, creating nothing", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await expect(
+      caller.topics.create({ name: "a\u0000b", defaultSubscribed: true }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Text must not contain the NUL character (\\u0000)",
+    });
+    expect(await caller.topics.list()).toEqual([]);
+  });
+
   it("refuses to delete a topic referenced by a broadcast", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);

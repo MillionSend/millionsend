@@ -86,6 +86,7 @@ import {
   type UndeliverableRecipient,
   undeliverableRecipientMessage,
   undeliverableRecipients,
+  unstorableValueMessage,
   utcDay,
   type VirusResult,
   verifySenderDomain,
@@ -1965,14 +1966,16 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     async (c) => {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
-      const entries = c.req.valid("json");
+      // One entry per topic, the last one winning: an upsert may not reach
+      // the same row twice.
+      const entries = [...new Map(c.req.valid("json").map((e) => [e.id, e])).values()];
       const contact = await findContact(auth.teamId, id);
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       if (entries.length === 0) return c.json({ id: contact.id }, 200);
 
       // Topics are teamId-scoped: a subscription may only target one this
       // team owns, or a caller could write rows against another team's topic.
-      const topicIds = [...new Set(entries.map((e) => e.id))];
+      const topicIds = entries.map((e) => e.id);
       const topicInfo = await ownsTopics(auth.teamId, topicIds);
       if (!topicInfo) {
         return c.json(errorBody(404, "not_found", "Topic not found"), 404);
@@ -2023,7 +2026,6 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             data: { topicId: e.id, name: topic.name },
           });
         }
-        prior.set(e.id, next);
       }
       await recordContactActivity(db, changed, contactEvents);
       return c.json({ id: contact.id }, 200);
@@ -2661,6 +2663,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
+      if (body.name === undefined && body.filter === undefined) {
+        return c.json(
+          errorBody(422, "validation_error", "Provide at least one of name or filter"),
+          422,
+        );
+      }
       // undefined = keep; null = clear (the segment becomes manual-only).
       let filter: SegmentFilter | null | undefined;
       if (body.filter === null) {
@@ -3420,6 +3428,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (err instanceof HTTPException && err.status < 500) {
       return c.json(errorBody(err.status, "invalid_parameter", err.message), err.status);
     }
+    // A value the database cannot store, from the body, path or query, is
+    // the caller's mistake too. Not on /ses/events: that data is AWS's, and
+    // a 500 is reported here and retried by SNS.
+    const unstorable = c.req.path.startsWith("/ses/") ? null : unstorableValueMessage(err);
+    if (unstorable) return c.json(errorBody(422, "validation_error", unstorable), 422);
     console.error("unhandled api error", err);
     void captureError(err, { teamId: c.get("auth")?.teamId, tags: { route: routePath(c, -1) } });
     return c.json(errorBody(500, "internal_server_error", "An unexpected error occurred"), 500);

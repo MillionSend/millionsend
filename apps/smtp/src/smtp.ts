@@ -6,6 +6,7 @@ import {
   customHeaderIssues,
   findLiveInbox,
   formatMailbox,
+  hasHeaderControlChar,
   INBOX_KEY_FROM_MESSAGE,
   isSharedInboxSender,
   monthlyQuotaMessage,
@@ -19,6 +20,7 @@ import {
   type UndeliverableReason,
   undeliverableRecipientMessage,
   undeliverableRecipients,
+  unstorableValueMessage,
   verifySenderDomain,
 } from "@millionsend/core";
 import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
@@ -52,9 +54,14 @@ function smtpError(responseCode: number, message: string): Error {
   return Object.assign(new Error(message), { responseCode });
 }
 
-/** Unexpected failures become a 451 so internals never leak to the client. */
+/**
+ * Unexpected failures become a 451 so internals never leak to the client. A
+ * value the database cannot store fails on every retry, so it is a 554.
+ */
 function toSmtpError(err: unknown): Error {
   if (err instanceof Error && "responseCode" in err) return err;
+  const unstorable = unstorableValueMessage(err);
+  if (unstorable) return smtpError(554, unstorable);
   console.error("smtp internal error", err);
   return smtpError(451, "Temporary local error, please retry");
 }
@@ -142,6 +149,9 @@ async function handleMessage(
 
   const subject = parsed.subject;
   if (!subject) throw smtpError(553, "A non-empty Subject header is required");
+  if (hasHeaderControlChar(subject)) {
+    throw smtpError(554, "Subject must not contain control characters");
+  }
   const html = parsed.html === false ? undefined : parsed.html;
   const text = parsed.text;
   if (html === undefined && text === undefined) {

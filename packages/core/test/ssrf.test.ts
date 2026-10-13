@@ -145,6 +145,15 @@ describe("postJson delivery (allowLocalhost)", () => {
     expect(res.body).toBe("ok");
   });
 
+  it("answers a NUL byte in the body as U+FFFD, which Postgres text can hold", async () => {
+    const base = await listen((_req, res) => {
+      res.writeHead(500);
+      res.end(Buffer.from([0x6f, 0x6b, 0x00, 0x21]));
+    });
+    const res = await postJson(`${base}/hook`, { body: "{}", headers: {}, allowLocalhost: true });
+    expect(res.body).toBe("ok\uFFFD!");
+  });
+
   it("POSTs, returns status, does not follow redirects, caps the body", async () => {
     const seen: { method?: string; body?: string; sigHeader?: string } = {};
     const base = await listen((req, res) => {

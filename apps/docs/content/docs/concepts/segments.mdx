@@ -30,4 +30,5 @@ Conditions combine with and/or.
 
 `POST/GET/PATCH/DELETE /segments` and `GET /segments/{id}` (which includes the
 live `contact_count`) — see the [API reference](/api-reference). Invalid
-filter expressions are rejected with `422` and never stored.
+filter expressions are rejected with `422` and never stored. A `PATCH` with
+neither `name` nor `filter` is a `422` too.

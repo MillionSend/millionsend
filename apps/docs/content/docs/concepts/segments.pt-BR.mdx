@@ -33,3 +33,4 @@ data. As condições combinam com e/ou.
 `POST/GET/PATCH/DELETE /segments` e `GET /segments/{id}` (que inclui o
 `contact_count` ao vivo) — veja a [referência da API](/pt-BR/api-reference).
 Expressões de filtro inválidas são rejeitadas com `422` e nunca armazenadas.
+Um `PATCH` sem `name` e sem `filter` também recebe `422`.

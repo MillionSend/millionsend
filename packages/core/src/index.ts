@@ -402,7 +402,12 @@ export {
   type WarmupCap,
   warmupCap,
 } from "./domain-warmup.js";
-export { firstRow, isUniqueViolation, resultRows } from "./driver-result.js";
+export {
+  firstRow,
+  isUniqueViolation,
+  resultRows,
+  unstorableValueMessage,
+} from "./driver-result.js";
 export {
   CHECKS,
   type CheckId,
