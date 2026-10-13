@@ -20,8 +20,8 @@ export const NO_COMPLAINT_FEEDBACK_DOMAINS: ReadonlySet<string> = new Set([
 /**
  * Whether no recipient of a send can report it to SES as a complaint. A
  * stored recipient's domain is what follows its last '@', less the '>' that
- * closes a display-name form; the platform breaker's and the warm-up's SQL
- * read it the same way, so they must change together.
+ * closes a display-name form; the platform breaker's recipientDomains reads
+ * it the same way in SQL, so the two must change together.
  */
 export function sentWithoutComplaintFeedback(recipients: readonly string[]): boolean {
   return (

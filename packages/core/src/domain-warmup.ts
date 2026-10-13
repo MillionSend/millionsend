@@ -17,6 +17,7 @@ import {
   resolveMonitorSettings,
 } from "./monitor-settings.js";
 import { ownerDomain } from "./org-domain.js";
+import { recipientDomains } from "./platform-breaker.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -353,7 +354,7 @@ async function cleanSince(
         // Only mail that reached a real receiving server speaks for the
         // domain. A send's delivered event may be the mailbox simulator's
         // own, so a simulator address in any field leaves the send out.
-        sql`not exists (select 1 from jsonb_array_elements_text(emails.to || coalesce(emails.cc, '[]') || coalesce(emails.bcc, '[]')) as r where lower(rtrim(split_part(r, '@', -1), '>')) = ${SES_MAILBOX_SIMULATOR_DOMAIN})`,
+        sql`not exists (select 1 from (${recipientDomains}) d where d.domain = ${SES_MAILBOX_SIMULATOR_DOMAIN})`,
       ),
     );
   if (!sends || sends.delivered < WARMUP_GRADUATION_SENDS || !sends.dayOld) return false;

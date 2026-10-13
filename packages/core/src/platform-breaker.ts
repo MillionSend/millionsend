@@ -67,11 +67,16 @@ const HOUR_MS = 60 * 60 * 1000;
 // existed (until retention strips their payload).
 const hardBounceFilter = sql`${schema.emailEvents.type} = 'bounced' and coalesce(${schema.emailEvents.bounceType}, ${schema.emailEvents.data}->'bounce'->>'bounceType') = 'Permanent'`;
 const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
-// sentWithoutComplaintFeedback over the stored recipients, each domain read
-// the same way: what follows the last '@', less a closing '>'.
+/**
+ * A send's recipients in to, cc and bcc, one `domain` row each, read the way
+ * sentWithoutComplaintFeedback reads them: what follows the last '@', less a
+ * closing '>'.
+ */
+export const recipientDomains = sql`select lower(rtrim(split_part(r, '@', -1), '>')) as domain
+  from jsonb_array_elements_text(${schema.emails.to} || coalesce(${schema.emails.cc}, '[]') || coalesce(${schema.emails.bcc}, '[]')) as r`;
+// sentWithoutComplaintFeedback over the stored recipients.
 const noComplaintFeedback = sql`coalesce((
-  select bool_and(lower(rtrim(split_part(r, '@', -1), '>')) in ${[...NO_COMPLAINT_FEEDBACK_DOMAINS]})
-  from jsonb_array_elements_text(${schema.emails.to} || coalesce(${schema.emails.cc}, '[]') || coalesce(${schema.emails.bcc}, '[]')) as r
+  select bool_and(d.domain in ${[...NO_COMPLAINT_FEEDBACK_DOMAINS]}) from (${recipientDomains}) d
 ), false)`;
 
 /**
