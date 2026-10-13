@@ -3,11 +3,12 @@ import { generateKeyPairSync } from "node:crypto";
 import { once } from "node:events";
 import { copyFileSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders } from "node:http";
+import { createRequire } from "node:module";
 import { type AddressInfo, connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect as tlsConnect } from "node:tls";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   type DeliverEnvelope,
   decodeEnvelopeHeader,
@@ -794,7 +795,10 @@ describe("mx process", () => {
     await new Promise<void>((resolve) => probe.close(() => resolve()));
 
     const root = fileURLToPath(new URL("..", import.meta.url));
-    const child = spawn(join(root, "node_modules/.bin/tsx"), [join(root, "src/server.ts")], {
+    // As scripts/start.mjs runs it: node with the package's tsx loader.
+    const loader = createRequire(join(root, "package.json")).resolve("tsx");
+    const tsx = ["--import", pathToFileURL(loader).href];
+    const child = spawn(process.execPath, [...tsx, join(root, "src/server.ts")], {
       env: {
         PATH: process.env.PATH,
         MX_INGEST_URL: ingestUrl,
