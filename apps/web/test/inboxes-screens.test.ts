@@ -27,12 +27,16 @@ vi.mock("next-intl", async (importOriginal) => {
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => "/inboxes",
+  useSearchParams: () => new URLSearchParams(),
 }));
+// What the query hooks answer: nothing unless a test sets it.
+const rq = vi.hoisted(() => ({ data: undefined as unknown, pages: undefined as unknown }));
 // The form's save goes through the router; rendering never fires it.
 vi.mock("@tanstack/react-query", () => ({
   useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-  useQuery: () => ({ data: undefined }),
+  useQuery: () => ({ data: rq.data }),
+  useInfiniteQuery: () => ({ data: rq.pages, isPending: false }),
 }));
 vi.mock("@/lib/trpc", () => {
   const leaf: unknown = new Proxy(() => ({}), { get: () => leaf, apply: () => ({}) });
@@ -40,6 +44,7 @@ vi.mock("@/lib/trpc", () => {
 });
 
 const { SafetyForm } = await import("@/app/(dashboard)/inboxes/[id]/safety-tab");
+const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
 const { approvalReasonWords, QuarantinedBadge, TrustBadge } = await import(
   "@/app/(dashboard)/inboxes/parts"
 );
@@ -242,6 +247,31 @@ describe("inbox screens", () => {
     expect(html).not.toContain("Scan for prompt injection");
     expect(html).toContain("Strip hidden text");
     expect(html).toMatch(/id="safety-cap"[^>]*max="100000"/);
+  });
+
+  it("says why no inbox can be created yet, and where to fix it", () => {
+    const page = (sharedDomain: string | null) => {
+      rq.data = { domains: [], sharedDomain, plan: { used: 0, limit: 3 } };
+      rq.pages = {
+        pages: [
+          {
+            items: [],
+            counts: { agent: 0, human: 0 },
+            overview: { allReceived: { received30d: 0, lastReceived: null }, catchAll: [] },
+          },
+        ],
+      };
+      const html = renderToStaticMarkup(createElement(InboxesView));
+      rq.data = rq.pages = undefined;
+      return html;
+    };
+    const nowhere = page(null);
+    expect(nowhere).toMatch(/class="ms-tooltip-trigger inline"[^>]*><button[^>]*disabled/);
+    expect(nowhere).toContain('href="/domains"');
+    expect(nowhere).not.toContain("shared");
+    const shared = page("inboxes.example");
+    expect(shared).toContain("Create an address at inboxes.example");
+    expect(shared).not.toContain("disabled");
   });
 
   it("shows members the rules read-only", () => {

@@ -57,12 +57,12 @@
     "inbox": "Caixa",
     "type": "Tipo",
     "attention": "Precisa de atenção",
-    "received30d": "Recebidos em 30 dias",
+    "received30d": "Recebidos 30d",
     "last": "Última mensagem"
   },
   "attention": {
     "drafts": "{count, plural, one {# rascunho para aprovar} other {# rascunhos para aprovar}}",
-    "unread": "{count, plural, one {# não lido} other {# não lidos}}",
+    "unread": "{count, plural, one {# não lida} other {# não lidas}}",
     "quarantined": "{count} em quarentena"
   },
   "channel": {
@@ -72,19 +72,21 @@
   "empty": {
     "title": "Nenhuma caixa de entrada ainda",
     "body": "Crie um endereço que recebe e-mails. Agentes leem pela API, por webhooks ou pelo MCP; pessoas leem aqui.",
-    "noReceiving": "Ative o recebimento em um domínio primeiro, ou use o domínio compartilhado."
+    "sharedOnly": "Crie um endereço em {domain}, sem mexer no DNS. Para usar um domínio seu, ative o recebimento nele."
   },
   "limit": {
     "reached": "Você já usa as {limit} caixas do seu plano. <link>Faça upgrade</link> para criar mais.",
     "full": "Você chegou ao limite de caixas do seu plano. Faça upgrade para criar mais."
   },
   "catchAll": {
-    "row": "Pega-tudo · endereços sem caixa de entrada"
+    "row": "Endereços sem caixa de entrada · <link>desligar no domínio</link>"
   },
   "create": {
     "title": "Criar caixa de entrada",
+    "needsReceiving": "Ative o recebimento em um domínio para criar caixas.",
     "address": "Endereço",
     "addressHint": "Seus domínios com recebimento ativo, ou o domínio compartilhado {domain}, pronto sem DNS.",
+    "addressHintOwn": "Seus domínios com recebimento ativo.",
     "random": "Endereço aleatório",
     "name": "Nome",
     "namePlaceholder": "Agente de pedidos",

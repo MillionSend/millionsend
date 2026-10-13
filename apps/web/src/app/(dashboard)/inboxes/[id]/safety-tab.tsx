@@ -116,8 +116,8 @@ export function SafetyTab({ inbox, admin }: { inbox: InboxDetail; admin: boolean
   if (!query.data) return <Skeleton width="60%" height={14} />;
   return (
     <SafetyForm
-      // A fresh read starts the form over from what is stored.
-      key={query.dataUpdatedAt}
+      // New stored rules start the form over; a refetch of the same rules keeps unsaved edits.
+      key={JSON.stringify(query.data.safety)}
       inbox={inbox}
       admin={admin}
       stored={query.data.safety}

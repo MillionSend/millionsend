@@ -106,7 +106,7 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
               onAction={() => active.refetch()}
             />
           ) : rows.length === 0 ? (
-            <p style={{ ...muted, fontSize: 13, margin: "18px 0" }}>{t("emptyFolder")}</p>
+            <StateCard headline={t("emptyFolder")} />
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
               {rows.map((row) => (

@@ -171,4 +171,9 @@ section of `components.css`; every rule above it holds at every width.
   7px 12px that raise to `--ms-panel-raised` (8px radius); `.ms-menu-sep`
   hairline separators. `<PopoverMenu>` in `src/components/popover-menu.tsx`
   is the "…" overflow menu.
+- **Empty and blocked states:** a page with nothing in it yet is the tiled
+  `EmptyState`; an empty tab, folder or filtered list is a `StateCard` (no
+  tile, at most one action), never a bare muted line. A disabled button says
+  why: an inline `Tooltip` around it carries the reason to hover and to
+  keyboard focus.
 - Search inputs carry no "/" keycap for now (removed in visual QA).

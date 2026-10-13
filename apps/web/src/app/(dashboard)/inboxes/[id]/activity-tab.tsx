@@ -33,7 +33,7 @@ export function ActivityTab({ inboxId }: { inboxId: string }) {
   }
   const rows = query.data.pages.flatMap((page) => page.items);
   if (rows.length === 0) {
-    return <p style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("activity.empty")}</p>;
+    return <StateCard headline={t("activity.empty")} />;
   }
   return (
     <>

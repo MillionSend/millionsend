@@ -53,8 +53,7 @@ export function CreateInboxDialog({
   const create = useMutation(
     trpc.inboxes.create.mutationOptions({
       onSuccess: (inbox) => {
-        void queryClient.invalidateQueries({ queryKey: trpc.inboxes.list.queryKey() });
-        void queryClient.invalidateQueries({ queryKey: trpc.inboxes.options.queryKey() });
+        void queryClient.invalidateQueries(trpc.inboxes.pathFilter());
         router.push(`/inboxes/${inbox.id}`);
       },
     }),
@@ -143,7 +142,9 @@ export function CreateInboxDialog({
           <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
             {local && !localValid
               ? t("create.errors.localPart")
-              : t("create.addressHint", { domain: sharedDomain ?? "" })}
+              : sharedDomain
+                ? t("create.addressHint", { domain: sharedDomain })
+                : t("create.addressHintOwn")}
           </p>
         </div>
         <div className="ms-field">

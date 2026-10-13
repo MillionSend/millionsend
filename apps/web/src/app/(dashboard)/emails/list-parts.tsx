@@ -114,7 +114,7 @@ export function ListSkeleton({
   );
 }
 
-/** Filtered-to-zero / error card — bordered, centered, one action. */
+/** Filtered-to-zero / empty-tab / error card — bordered, centered, at most one action. */
 export function StateCard({
   headline,
   detail,
@@ -124,8 +124,8 @@ export function StateCard({
 }: {
   headline: string;
   detail?: string;
-  actionLabel: string;
-  onAction: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
   /** `error` marks a failed load (glyph); a filtered-empty list stays plain. */
   tone?: "error";
 }) {
@@ -138,11 +138,13 @@ export function StateCard({
       ) : null}
       <p className="ms-state-headline">{headline}</p>
       {detail ? <p className="ms-state-body">{detail}</p> : null}
-      <div className="ms-state-actions">
-        <button type="button" className="ms-btn ms-btn-secondary" onClick={onAction}>
-          {actionLabel}
-        </button>
-      </div>
+      {actionLabel && onAction ? (
+        <div className="ms-state-actions">
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={onAction}>
+            {actionLabel}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

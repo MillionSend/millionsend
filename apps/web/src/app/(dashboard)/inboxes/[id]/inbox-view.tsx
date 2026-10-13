@@ -7,6 +7,7 @@ import { useCallback, useState } from "react";
 import { BetaPill } from "@/components/beta-pill";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { LoadError } from "@/components/load-error";
+import { NoticeStrip } from "@/components/notice-strip";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { Skeleton } from "@/components/skeleton";
@@ -44,7 +45,9 @@ export function InboxView() {
   const remove = useMutation(
     trpc.inboxes.delete.mutationOptions({
       onSuccess: () => {
-        void queryClient.invalidateQueries({ queryKey: trpc.inboxes.list.queryKey() });
+        // Dropped, not invalidated: a stale list would paint the deleted inbox until its refetch landed.
+        queryClient.removeQueries(trpc.inboxes.list.pathFilter());
+        void queryClient.invalidateQueries(trpc.inboxes.options.pathFilter());
         router.push("/inboxes");
       },
       onError: () => toast(t("deleteError"), "danger"),
@@ -139,21 +142,7 @@ export function InboxView() {
         }
       />
 
-      {inbox.expired ? (
-        <p
-          role="status"
-          style={{
-            margin: "0 0 18px",
-            fontSize: 13.5,
-            color: "var(--ms-warn)",
-            border: "1px solid var(--ms-warn-border)",
-            borderRadius: 12,
-            padding: "11px 16px",
-          }}
-        >
-          {t("expired")}
-        </p>
-      ) : null}
+      {inbox.expired ? <NoticeStrip tone="warn" text={t("expired")} /> : null}
 
       <div className="ms-tabs bleed" role="tablist" style={{ marginBottom: 18 }}>
         {TABS.map((key) => (
