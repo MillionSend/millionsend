@@ -1294,10 +1294,11 @@ caps, counted per team and UTC day, so a second fresh domain never adds
 volume. Mail over either parks as `queued_quota` (`park_reason = 'warmup'`)
 and `quota.drain` releases it as both allow; `429 daily_quota_exceeded` (SMTP
 `452`) with a warm-up message only when the team's parked backlog is full.
-50 clean sends since the last step, the first a day old (hard bounces under
-2%, complaints under 0.1%, no phishing-type monitor verdict), move a domain up
-a step early, and an operator can trust a team or a domain from its review
-page (audited).
+50 clean deliveries since the last step, the first a day old (mail to the SES
+simulator never counts; hard bounces under 2% of the sends delivered or
+hard-bounced, complaints under 0.1% of the delivered ones, no phishing-type
+monitor verdict), move a domain up a step early, and an operator can trust a
+team or a domain from its review page (audited).
 
 The worker's `domain.age` job looks the age up off the send path, when a
 domain is added or verifies and from the `domains.reverify` sweep: RDAP via

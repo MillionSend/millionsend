@@ -10,11 +10,11 @@ import { durationUnit, formatHourMinute, formatPercent, periodDayKeys } from "@/
 import { formatDayTime, formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
-export type KpiKind = "sent" | "delivered" | "bounced" | "complained";
+export type KpiKind = "sent" | "delivered" | "hardBounced" | "complained";
 
 export const KPI_DECIMALS: Record<Exclude<KpiKind, "sent">, number> = {
   delivered: 1,
-  bounced: 2,
+  hardBounced: 2,
   complained: 3,
 };
 
@@ -25,7 +25,6 @@ export function kpiColor(kind: KpiKind): string {
 interface Counters {
   sent: number;
   delivered: number;
-  bounced: number;
   hardBounced: number;
   complained: number;
 }

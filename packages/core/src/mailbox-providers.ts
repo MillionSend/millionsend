@@ -2,6 +2,7 @@
 
 export const GMAIL_DOMAINS: ReadonlySet<string> = new Set(["gmail.com", "googlemail.com"]);
 export const APPLE_MAIL_DOMAINS: ReadonlySet<string> = new Set(["icloud.com", "me.com", "mac.com"]);
+export const SES_MAILBOX_SIMULATOR_DOMAIN = "simulator.amazonses.com";
 
 /**
  * Mailbox providers that never report a complaint to SES: Gmail's feedback
@@ -19,8 +20,8 @@ export const NO_COMPLAINT_FEEDBACK_DOMAINS: ReadonlySet<string> = new Set([
 /**
  * Whether no recipient of a send can report it to SES as a complaint. A
  * stored recipient's domain is what follows its last '@', less the '>' that
- * closes a display-name form; the platform breaker's SQL reads it the same
- * way, so the two must change together.
+ * closes a display-name form; the platform breaker's recipientDomains reads
+ * it the same way in SQL, so the two must change together.
  */
 export function sentWithoutComplaintFeedback(recipients: readonly string[]): boolean {
   return (

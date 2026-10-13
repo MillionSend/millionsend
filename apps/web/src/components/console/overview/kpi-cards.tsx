@@ -23,7 +23,7 @@ import {
 const KPIS: { kind: KpiKind; initial: PeriodKey }[] = [
   { kind: "sent", initial: "24h" },
   { kind: "delivered", initial: "24h" },
-  { kind: "bounced", initial: "7d" },
+  { kind: "hardBounced", initial: "7d" },
   { kind: "complained", initial: "7d" },
 ];
 
@@ -72,11 +72,11 @@ function KpiCard({ kind, initial }: { kind: KpiKind; initial: PeriodKey }) {
               delivered: fmt.format(totals.delivered),
               sent: fmt.format(totals.sent),
             })
-          : kind === "bounced"
-            ? t("kpi.hardOf", {
+          : kind === "hardBounced"
+            ? t("kpi.withTransient", {
                 rate:
                   totals.sent > 0
-                    ? formatPercent(totals.hardBounced / totals.sent, locale, KPI_DECIMALS.bounced)
+                    ? formatPercent(totals.bounced / totals.sent, locale, KPI_DECIMALS.hardBounced)
                     : common("none"),
               })
             : t("kpi.complaintLines");
