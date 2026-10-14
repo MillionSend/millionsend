@@ -29,11 +29,14 @@ export function CreateInboxDialog({
   onClose,
   domains,
   sharedDomain,
+  claiming,
 }: {
   open: boolean;
   onClose: () => void;
   domains: { id: string; name: string }[];
   sharedDomain: string | null;
+  /** Whether the team's shared subdomain is being claimed, so sharedDomain may still be the parent domain. */
+  claiming: boolean;
 }) {
   const t = useTranslations("inboxes");
   const common = useTranslations("common");
@@ -71,8 +74,10 @@ export function CreateInboxDialog({
     ? local === "" || SHARED_USERNAME.test(local)
     : LOCAL_PART_RE.test(local);
   const domainName = shared ? sharedDomain : domains.find((d) => d.id === domain)?.name;
+  // A shared address waits for the claim, so it is created at the domain the picker shows.
+  const blocked = !domain || !localValid || create.isPending || (shared && claiming);
   const submit = () => {
-    if (!domain || !localValid || create.isPending) return;
+    if (blocked) return;
     create.mutate({
       kind,
       acceptFrom,
@@ -224,11 +229,7 @@ export function CreateInboxDialog({
           <button type="button" className="ms-btn ms-btn-secondary" onClick={close}>
             {common("cancel")} <span className="ms-keycap">Esc</span>
           </button>
-          <button
-            type="submit"
-            className="ms-btn ms-btn-primary"
-            disabled={!domain || !localValid || create.isPending}
-          >
+          <button type="submit" className="ms-btn ms-btn-primary" disabled={blocked}>
             <BtnSpinner on={create.isPending} />
             {t("create.title")} <ConfirmKeycap />
           </button>

@@ -200,6 +200,29 @@ describe("ensureSharedSubdomain", () => {
     expect(asked).toEqual([]);
   });
 
+  it("claims nothing for a claim that can wait while the review can't answer; a refusal claims", async () => {
+    const wait = { sharedInboxDomain: SHARED, onTransient: "skip" } as const;
+    const down = await createTeam(db, "sub-wait-down");
+    expect(
+      await ensureSharedSubdomain(db, {
+        ...wait,
+        teamId: down,
+        teamName: "Wait Down",
+        review: reviewing(new Error("judge down")).judgeSharedNames,
+      }),
+    ).toBeNull();
+    expect(
+      await ensureSharedSubdomain(db, { ...wait, teamId: down, teamName: "Wait Down" }),
+    ).toEqual(expect.objectContaining({ name: `wait-down.${SHARED}` }));
+    const refused = await ensureSharedSubdomain(db, {
+      ...wait,
+      teamId: await createTeam(db, "sub-wait-no"),
+      teamName: "Wait No",
+      review: reviewing(["wait-no"]).judgeSharedNames,
+    });
+    expect(refused?.name).toMatch(/^team-[a-z0-9]{6}\./);
+  });
+
   it("never issues a deleted team's label again: its mail would reach the new owner", async () => {
     const gone = await createTeam(db, "sub-tomb-a");
     const first = await ensureSharedSubdomain(db, {

@@ -160,7 +160,10 @@ beforeEach(() => {
   vi.stubEnv("RECEIVING_MX_HOST", "mx.example.net");
   for (const fn of Object.values(core)) fn.mockReset();
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 /** A received row of the team; content columns stay empty unless a test seals one. */
 async function received(
@@ -834,6 +837,34 @@ describe("creating an inbox", () => {
         caller(acme).inboxes.create({ kind: "agent", acceptFrom: "verified", expiresIn: "1h" }),
       ).rejects.toMatchObject({ code, message: `refused ${status}` });
     }
+  });
+
+  it("claims the team's shared subdomain from its name before its first shared inbox, once the review answers", async () => {
+    const [team] = await db
+      .insert(schema.teams)
+      .values({ name: "Orbit Desk", slug: "inbox-orbit" })
+      .returning({ id: schema.teams.id });
+    const teamId = team?.id as string;
+    await expect(caller(teamId).inboxes.reserveSharedSubdomain()).resolves.toBeNull();
+    vi.stubEnv("SHARED_INBOX_DOMAIN", "agents.example.net");
+    expect(await caller(teamId).inboxes.options()).toMatchObject({
+      sharedDomain: "agents.example.net",
+      sharedSubdomainReady: false,
+    });
+    // A review that can't answer claims nothing: the label would be the team's for good.
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("judge down")));
+    await expect(caller(teamId).inboxes.reserveSharedSubdomain()).resolves.toBeNull();
+    expect(await caller(teamId).inboxes.options()).toMatchObject({ sharedSubdomainReady: false });
+    vi.stubEnv("ABUSE_JUDGE", "off");
+    const claimed = { name: "orbit-desk.agents.example.net" };
+    expect(await caller(teamId, "member").inboxes.reserveSharedSubdomain()).toEqual(claimed);
+    expect(await caller(teamId).inboxes.reserveSharedSubdomain()).toEqual(claimed);
+    expect(await caller(teamId).inboxes.options()).toMatchObject({
+      sharedDomain: claimed.name,
+      sharedSubdomainReady: true,
+    });
   });
 });
 

@@ -1,10 +1,10 @@
 "use client";
 
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BetaPill } from "@/components/beta-pill";
 import { Breakable } from "@/components/breakable";
 import { EmptyState } from "@/components/empty-state";
@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/skeleton";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { formatTimeLeft } from "@/lib/format";
+import { isReadOnly } from "@/lib/read-only";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { StateCard } from "../emails/list-parts";
@@ -83,6 +84,7 @@ export function InboxesView() {
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const router = useRouter();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const [tabParam, setTab] = useUrlState("tab", "all");
   const tab = oneOf(TABS, tabParam, "all");
   const [limit, setLimit] = useState(50);
@@ -137,6 +139,24 @@ export function InboxesView() {
     tab === "all" &&
     (overview === null ||
       (overview.allReceived.received30d === 0 && overview.catchAll.length === 0));
+
+  // The team's shared subdomain is claimed once this page names the shared
+  // domain (the create dialog, or the empty state offering it) rather than by
+  // its first shared inbox, so both show the address that inbox will get; a
+  // claim that fails leaves the parent domain shown.
+  const claim = useMutation(
+    trpc.inboxes.reserveSharedSubdomain.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries(trpc.inboxes.options.queryFilter()),
+    }),
+  );
+  const { mutate: claimSubdomain } = claim;
+  const reserve =
+    options.data?.sharedDomain != null &&
+    !options.data.sharedSubdomainReady &&
+    (createOpen || (sharedOnly !== null && nothing && !query.isPending && !query.isError));
+  useEffect(() => {
+    if (reserve && !isReadOnly()) claimSubdomain();
+  }, [reserve, claimSubdomain]);
 
   return (
     <>
@@ -346,6 +366,7 @@ export function InboxesView() {
           onClose={closeCreate}
           domains={options.data.domains}
           sharedDomain={options.data.sharedDomain}
+          claiming={claim.isPending}
         />
       ) : null}
     </>
