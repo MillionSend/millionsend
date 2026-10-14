@@ -25,6 +25,7 @@ import {
   linkTeam,
   MONITOR_ANOMALY_CHECKS,
   type MonitorDeps,
+  type MonitorSettings,
   makeUnsubscribeToken,
   noteAcceptedSend,
   noteConsoleCodeUndelivered,
@@ -57,6 +58,7 @@ import { MediaPoolError } from "../media/pool.js";
 import { saveMediaReview } from "../media/read.js";
 import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
 import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-quota.js";
+import { clearSharedTenant, isTenantNotAssociated } from "./tenants.js";
 
 /**
  * Sends one queued email through SES. The SES client is injected (tests use
@@ -79,7 +81,7 @@ export interface SesSender {
     configurationSetName?: string;
     /** SES region the sending identity is verified in; sender default when absent. */
     region?: string;
-    /** The team's SES tenant; only set once the domain's resources are associated with it. */
+    /** The team's SES tenant; only set once the send's identity and set are associated with it. */
     tenantName?: string;
   }): Promise<{ messageId: string }>;
 }
@@ -93,6 +95,15 @@ export interface SendDeps {
   onboardingEmailFrom?: string | undefined;
   /** SHARED_INBOX_DOMAIN, whose inbox replies carry no team domain either; the environment's when absent. */
   sharedInboxDomain?: string | null | undefined;
+  /** The instance settings reader: every shared-domain send reads the shared switches. Defaults when absent. */
+  settings?: (() => Promise<MonitorSettings>) | undefined;
+  /**
+   * The team's SES tenant for a shared-domain send, associated on first use;
+   * undefined sends without one. Wired only while SES tenants are on.
+   */
+  sharedTenant?:
+    | ((teamId: string, configurationSet: string | undefined) => Promise<string | undefined>)
+    | undefined;
   /**
    * Awaited right before the send claim, after every check that can still
    * skip or fail the email — a token spent on a row that never reaches SES
@@ -386,6 +397,8 @@ const TERMINAL_SES_ERRORS = new Set([
   "BadRequestException",
 ]);
 
+const SHARED_PAUSED_RETRY_MS = 5 * 60_000;
+
 /**
  * Whether an error came from infrastructure that may recover (a KMS/network
  * hiccup) rather than from the data itself. Envelope decrypt raises plain
@@ -576,36 +589,38 @@ async function sendQueued(
   if (!eligibility.eligible) return refuse(db, email, eligibility.reason);
   if (eligibility.strip) await stripRecipients(db, email, eligibility.strip);
 
-  // SES rejects a tenant send whose identity or configuration set is not
-  // associated, so the tenant rides along only once the row is marked.
   // The shared onboarding sender and the shared inbox domain are identities
   // of this instance's own SES account: no team domain, the default region
   // and configuration set. Only the onboarding email is the platform's own
-  // content; shared-domain mail is a customer's and is screened like any.
+  // content; shared-domain mail is a customer's, screened like any and sent
+  // under the team's tenant once associated.
   const onboarding = !email.domainId && isOnboardingSender(email.from, deps.onboardingEmailFrom);
-  const platformSend =
-    onboarding ||
-    (!email.domainId &&
-      isSharedInboxSender(
-        email.from,
-        deps.sharedInboxDomain === undefined ? sharedInboxDomain() : deps.sharedInboxDomain,
-      ));
-  if (!platformSend && domain?.status !== "verified") {
+  const sharedSend =
+    !email.domainId &&
+    !onboarding &&
+    isSharedInboxSender(
+      email.from,
+      deps.sharedInboxDomain === undefined ? sharedInboxDomain() : deps.sharedInboxDomain,
+    );
+  if (!onboarding && !sharedSend && domain?.status !== "verified") {
     // Terminal, not retried: a domain demoted or deleted after accept does
     // not come back on its own, and the row would otherwise ride the retry
     // and reconcile loops until its body is purged.
     await failQueuedEmail(db, email.id, "domain_not_verified");
     return "failed";
   }
+  // Read per send so the operator's switch also holds mail queued before it
+  // was turned off: that mail waits in the queue until sending resumes.
+  const sharedSettings = sharedSend ? await deps.settings?.() : undefined;
+  if (sharedSettings?.sharedInboxSend === false) {
+    await deps.reschedule?.(
+      email.id,
+      new Date(Date.now() + SHARED_PAUSED_RETRY_MS),
+      emailSendPriority(email),
+    );
+    return "deferred";
+  }
   const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
-  // TenantName rides only when the set this send names is the one associated
-  // with the tenant: SES rejects a tenant send referencing an unassociated set.
-  const tenantName =
-    domain?.sesTenantAssociatedAt &&
-    domain.sesTenantName &&
-    (domain.sesTenantConfigSet ?? null) === (configurationSet ?? null)
-      ? domain.sesTenantName
-      : undefined;
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
   if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
@@ -863,6 +878,21 @@ async function sendQueued(
     headers,
   });
 
+  // SES rejects a tenant send whose identity or configuration set is not
+  // associated, so TenantName rides only when the recorded association
+  // matches the set this send names. Shared mail associates here: after
+  // screening, so mail that waits or parks costs no SES calls, and before the
+  // claim, so a crash mid-association never leaves a claimed, unsent row.
+  const tenantName = domain
+    ? domain.sesTenantAssociatedAt &&
+      domain.sesTenantName &&
+      (domain.sesTenantConfigSet ?? null) === (configurationSet ?? null)
+      ? domain.sesTenantName
+      : undefined
+    : sharedSettings?.sharedInboxTenants
+      ? await deps.sharedTenant?.(email.teamId, configurationSet)
+      : undefined;
+
   // The rate-limit wait comes before the final re-check so that check stays
   // immediately ahead of the claim.
   await deps.throttle?.(domain?.region);
@@ -897,9 +927,8 @@ async function sendQueued(
     .returning({ id: schema.emails.id });
   if (claimed.length === 0) return "skipped";
 
-  let messageId: string;
-  try {
-    ({ messageId } = await deps.ses.sendRaw({
+  const send = (tenant: string | undefined) =>
+    deps.ses.sendRaw({
       raw: mime,
       emailId: email.id,
       to: email.to,
@@ -907,7 +936,17 @@ async function sendQueued(
       bcc: email.bcc,
       ...(configurationSet ? { configurationSetName: configurationSet } : {}),
       ...(domain?.region ? { region: domain.region } : {}),
-      ...(tenantName ? { tenantName } : {}),
+      ...(tenant ? { tenantName: tenant } : {}),
+    });
+  let messageId: string;
+  try {
+    ({ messageId } = await send(tenantName).catch(async (err: unknown) => {
+      // An association removed outside the app: forgotten, so the team's
+      // next shared send associates again, and this one goes out once more
+      // without the tenant.
+      if (!sharedSend || !tenantName || !isTenantNotAssociated(err)) throw err;
+      await clearSharedTenant(db, email.teamId);
+      return send(undefined);
     }));
   } catch (err) {
     // sendRaw threw ⇒ the SDK exhausted its own retries without an accept.

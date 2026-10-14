@@ -8,6 +8,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import type { SesTenantClient } from "@millionsend/ses";
 import { createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -20,6 +21,7 @@ import {
 } from "../../../packages/core/test/inbox-send-fixtures.js";
 import { forwardToOwners } from "../src/handlers/inbox-forward.js";
 import { type SesSender, sendEmail } from "../src/handlers/send-email.js";
+import { sharedTenantResolver } from "../src/handlers/tenants.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -122,6 +124,153 @@ describe("send-email for inbox mail", () => {
     const people = await queuedEmail({ inboxId: human.id, firstContact: true });
     expect(await sendEmail(db, deps, { emailId: people })).toBe("sent");
     expect((await samplesFor(people)).map((s) => s.kind)).not.toContain("agent_first_contact");
+  });
+});
+
+describe("shared-domain mail, the team's SES tenant and the operator's switch", () => {
+  /** A team of its own with one shared inbox, and a queued email from it. */
+  async function sharedSender(slug: string) {
+    const team = await seedWorld(db, slug);
+    const inbox = await addInbox(team, { local: "bot", shared: true });
+    const queue = () =>
+      queuedEmail({
+        teamId: team.teamId,
+        domainId: null,
+        from: inbox.emailAddress,
+        inboxId: inbox.id,
+      });
+    return { team, queue };
+  }
+  const switches = (over: Partial<MonitorSettings>) => async () => ({
+    ...MONITOR_SETTING_DEFAULTS,
+    ...over,
+  });
+  const marker = async (teamId: string) =>
+    (
+      await db
+        .select({ region: schema.sharedInboxDomains.sesTenantRegion })
+        .from(schema.sharedInboxDomains)
+        .where(eq(schema.sharedInboxDomains.teamId, teamId))
+    )[0]?.region;
+
+  it("a team's first shared send associates its tenant and names it, only while sharedInboxTenants is on", async () => {
+    const { team, queue } = await sharedSender("tenant-first");
+    const calls: string[] = [];
+    const client: SesTenantClient = {
+      async send(command) {
+        calls.push(command.constructor.name);
+        return { TenantArn: `arn:aws:ses:us-east-1:123456789012:tenant/${team.teamId}` };
+      },
+    };
+    const sharedTenant = vi.fn(
+      sharedTenantResolver(db, { client, region: "us-east-1", sharedInboxDomain: w.sharedDomain }),
+    );
+    let settings = switches({ sharedInboxTenants: true });
+    const deps = () => ({
+      keyring: w.deps.keyring,
+      ses,
+      defaultConfigurationSet: "default-set",
+      sharedInboxDomain: w.sharedDomain,
+      settings,
+      sharedTenant,
+    });
+
+    for (const _ of [1, 2]) {
+      expect(await sendEmail(db, deps(), { emailId: await queue() })).toBe("sent");
+      expect(sends.at(-1)).toMatchObject({
+        tenantName: team.teamId,
+        configurationSetName: "default-set",
+      });
+      expect(sends.at(-1)?.region).toBeUndefined();
+    }
+    expect(sharedTenant).toHaveBeenCalledWith(team.teamId, "default-set");
+    expect(calls).toEqual([
+      "CreateTenantCommand",
+      "CreateTenantResourceAssociationCommand",
+      "CreateTenantResourceAssociationCommand",
+    ]);
+    expect(await marker(team.teamId)).toBe("us-east-1");
+
+    settings = switches({ sharedInboxTenants: false });
+    expect(await sendEmail(db, deps(), { emailId: await queue() })).toBe("sent");
+    expect(sends.at(-1)?.tenantName).toBeUndefined();
+    expect(sharedTenant).toHaveBeenCalledTimes(2);
+  });
+
+  it("a send SES refuses as not associated with the tenant forgets the marker and goes out once without it", async () => {
+    const { team, queue } = await sharedSender("tenant-gone");
+    await db
+      .update(schema.sharedInboxDomains)
+      .set({ sesTenantRegion: "us-east-1", sesTenantConfigSet: "default-set" })
+      .where(eq(schema.sharedInboxDomains.teamId, team.teamId));
+    const attempts: (string | undefined)[] = [];
+    const refusal = {
+      name: "BadRequestException",
+      message: "Identity is not associated with the tenant",
+    };
+    const refusing: SesSender = {
+      async sendRaw(params) {
+        attempts.push(params.tenantName);
+        if (params.tenantName) throw Object.assign(new Error(refusal.message), refusal);
+        return { messageId: "mid-untenanted" };
+      },
+    };
+    const deps = {
+      keyring: w.deps.keyring,
+      ses: refusing,
+      defaultConfigurationSet: "default-set",
+      sharedInboxDomain: w.sharedDomain,
+      settings: switches({ sharedInboxTenants: true }),
+      sharedTenant: async () => team.teamId,
+    };
+
+    expect(await sendEmail(db, deps, { emailId: await queue() })).toBe("sent");
+    expect(attempts).toEqual([team.teamId, undefined]);
+    expect(await marker(team.teamId)).toBeNull();
+
+    // A paused or disabled tenant is never routed around: the claim is
+    // released for the job's retry, and nothing went out without the tenant.
+    attempts.length = 0;
+    refusal.name = "SendingPausedException";
+    refusal.message = "Sending is paused for this tenant";
+    const paused = await queue();
+    await expect(sendEmail(db, deps, { emailId: paused })).rejects.toThrow(/paused/);
+    expect(attempts).toEqual([team.teamId]);
+    const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, paused));
+    expect(row).toMatchObject({ latestStatus: "queued", sentAt: null });
+  });
+
+  it("holds queued shared-domain mail while the operator has shared sending off", async () => {
+    const { team, queue } = await sharedSender("shared-off");
+    let sending = false;
+    const rescheduled: Date[] = [];
+    const deps = {
+      keyring: w.deps.keyring,
+      ses,
+      sharedInboxDomain: w.sharedDomain,
+      settings: async () => ({ ...MONITOR_SETTING_DEFAULTS, sharedInboxSend: sending }),
+      reschedule: async (_id: string, at: Date) => void rescheduled.push(at),
+    };
+    const emailId = await queue();
+    const sent = sends.length;
+
+    expect(await sendEmail(db, deps, { emailId })).toBe("deferred");
+    expect(sends).toHaveLength(sent);
+    expect(rescheduled[0]?.getTime()).toBeGreaterThan(Date.now());
+    const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+    expect(row).toMatchObject({ latestStatus: "queued", sentAt: null });
+
+    // The team's own domain is not the shared domain: the switch never holds it.
+    const own = await queuedEmail({
+      teamId: team.teamId,
+      domainId: team.domainId,
+      from: `a@${team.domain}`,
+    });
+    expect(await sendEmail(db, deps, { emailId: own })).toBe("sent");
+
+    sending = true;
+    expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+    expect(sends.at(-1)?.emailId).toBe(emailId);
   });
 });
 
