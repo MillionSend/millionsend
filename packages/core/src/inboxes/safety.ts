@@ -3,6 +3,8 @@ import { z } from "zod";
 import { asciiHostname } from "../org-domain.js";
 import { parseMailbox, routableAddress } from "../sender-address.js";
 import { INBOX_ALLOWLIST_MAX, INBOX_FORWARD_TO_MAX, INBOX_OWNER_ADDRESSES_MAX } from "./limits.js";
+import { SHARED_REFUSALS, sharedModeReason } from "./send-policy.js";
+import type { SharedSending } from "./shared-mode.js";
 import type { InboxKind } from "./types.js";
 
 export type { InboxSafety };
@@ -93,10 +95,17 @@ export function safetyProblem(
     /** The team is in the content monitor's new tier (monitorTier). */
     teamTierNew: boolean;
     memberEmails: readonly string[];
+    /** The team's shared-domain mode; absent reads as reply-only. */
+    sharedSending?: SharedSending | undefined;
   },
 ): string | null {
-  if (ctx.shared && s.send_policy !== "reply_only") {
-    return "Addresses on the shared domain only reply inside their threads";
+  if (ctx.shared && s.send_policy === "allowlist") {
+    return 'send_policy "allowlist" is not available on the shared domain: its allowlist never counts there';
+  }
+  if (ctx.shared && s.send_policy === "open" && ctx.sharedSending?.mode !== "open") {
+    return SHARED_REFUSALS[
+      ctx.sharedSending ? sharedModeReason(ctx.sharedSending) : "shared_domain"
+    ].message;
   }
   if (ctx.shared && (s.send_cap === null || s.send_cap < 1 || s.send_cap > SHARED_SEND_CAP_MAX)) {
     return `send_cap must be between 1 and ${SHARED_SEND_CAP_MAX} on the shared domain`;
@@ -105,7 +114,9 @@ export function safetyProblem(
     return `send_cap must be between 1 and ${SEND_CAP_MAX}, or null`;
   }
   if (s.send_policy === "open" && ctx.teamTierNew) {
-    return 'send_policy "open" is not available to a new team yet; use "allowlist" for now';
+    return ctx.shared
+      ? 'send_policy "open" is not available to a new team yet'
+      : 'send_policy "open" is not available to a new team yet; use "allowlist" for now';
   }
   if (s.screening && ctx.kind !== "agent") {
     return "screening is available on agent inboxes only";

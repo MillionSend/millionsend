@@ -1,3 +1,4 @@
+import { sharedInboxDomain } from "@millionsend/config";
 import {
   type AbuseJudge,
   accountMailPhrase,
@@ -9,6 +10,7 @@ import {
   destinationVerdictParks,
   type EmailAttachment,
   isHoldVerdict,
+  isSharedInboxSender,
   type JudgeBlockInput,
   type JudgeVerdict,
   judgeErrorClass,
@@ -72,6 +74,8 @@ export interface JudgeDeps {
    * Absent, files are read and images are not.
    */
   media?: MediaReadDeps | undefined;
+  /** SHARED_INBOX_DOMAIN, whose mail holds as a young domain's does; the environment's when absent. */
+  sharedInboxDomain?: string | null | undefined;
 }
 
 /** A throttled call is retried this many times through the queue's backoff before the sample gives up. */
@@ -148,9 +152,16 @@ async function judgePending(
     now,
   });
   const destinations = standing.novel;
+  const shared = isSharedInboxSender(
+    loaded.input.from,
+    deps.sharedInboxDomain === undefined ? sharedInboxDomain() : deps.sharedInboxDomain,
+  );
   const youngSendingDomain =
-    (await sendingDomainYoung(db, { teamId: sample.teamId, ...loaded.sendingDomain }, now)) ===
-    true;
+    (await sendingDomainYoung(
+      db,
+      { teamId: sample.teamId, ...loaded.sendingDomain, shared },
+      now,
+    )) === true;
   if (issues.includes("vision_blocked")) await notifyMediaBlocked(db, deps, sample.teamId, now);
   // Mail this verdict holds back keeps what screening read, for the person who decides on it.
   const waiting = sample.screening && loaded.waiting;

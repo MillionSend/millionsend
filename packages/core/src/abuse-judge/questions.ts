@@ -142,7 +142,7 @@ export function judgeState(block: string): { policy: string; email: string } {
   return { policy: ABUSE_JUDGE_POLICY, email: block };
 }
 
-function noulOf(answers: Record<string, unknown>, key: string): number | null {
+export function noulOf(answers: Record<string, unknown>, key: string): number | null {
   const raw = answers[key];
   if (!raw || typeof raw !== "object") return null;
   const noul = (raw as { type?: unknown; noul?: unknown }).noul;

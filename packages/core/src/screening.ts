@@ -1,3 +1,4 @@
+import { sharedInboxDomain } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import {
@@ -30,6 +31,9 @@ import {
 import { countDistinctRecipients } from "./accept-email.js";
 import type { DomainAgeResolver } from "./domain-age.js";
 import { SHORTENER_HOSTS } from "./email-insights.js";
+import { addressKey } from "./inboxes/compose.js";
+import { threadSenders } from "./inboxes/send.js";
+import { isSharedInboxSender } from "./inboxes/send-policy.js";
 import {
   extractLinks,
   type ResolvedLink,
@@ -39,6 +43,7 @@ import {
 import type { MonitorSettings } from "./monitor-settings.js";
 import { ownerDomain, registrableDomain } from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
+import { teamMemberEmails } from "./receiving/inbox-routing.js";
 import { parseSingleSender } from "./sender-address.js";
 import { fetchTeamQuota } from "./team-plan.js";
 import { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
@@ -52,10 +57,11 @@ import { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 
 /**
  * Why an email is judged before SES: its team is in its first window, it
- * carries a destination its team has not cleared, or its team is new and it
- * carries files or rides in images.
+ * carries a destination its team has not cleared, its team is new and it
+ * carries files or rides in images, or it is cold shared-domain mail
+ * (coldSharedSend).
  */
-export type ScreenReason = "first_window" | "destination" | "media";
+export type ScreenReason = "first_window" | "destination" | "media" | "recipient";
 
 /** What the send path read of an email's body and files, locally: nothing fetched. */
 export interface SendMedia {
@@ -102,7 +108,7 @@ const LINK_AGE_FAILED_TTL_MS = 3600_000;
 const LINK_AGE_BACKLOG_MAX = 1_000;
 
 /** Park reasons the drain never releases: only an operator does, from the review list. */
-export const OPERATOR_PARK_REASONS = ["screening", "destination", "media"] as const;
+export const OPERATOR_PARK_REASONS = ["screening", "destination", "media", "recipient"] as const;
 export type ScreenParkReason = (typeof OPERATOR_PARK_REASONS)[number];
 
 const MEDIA_PARKS_NEW: ReadonlySet<string> = new Set<MediaIssue>([
@@ -524,14 +530,21 @@ export async function screeningTier(
 /**
  * Whether the team's sending domain reads as young at `at`: registered
  * under YOUNG_DOMAIN_DAYS before it, or of unknown age (no source had a
- * date, or the lookup has not answered yet). Null when the team has no
- * such domain row.
+ * date, or the lookup has not answered yet). Shared-domain mail always
+ * does: that domain is every team's, so its age vouches for none of them.
+ * Null when the team has no such domain row.
  */
 export async function sendingDomainYoung(
   db: Db,
-  input: { teamId: string; domainId?: string | null; name?: string | null },
+  input: {
+    teamId: string;
+    domainId?: string | null;
+    name?: string | null;
+    shared?: boolean | undefined;
+  },
   at: Date,
 ): Promise<boolean | null> {
+  if (input.shared) return true;
   const d = schema.domains;
   const match = input.domainId
     ? eq(d.id, input.domainId)
@@ -551,6 +564,56 @@ export async function sendingDomainYoung(
   );
 }
 
+type ScreenedEmail = Pick<
+  typeof schema.emails.$inferSelect,
+  | "id"
+  | "teamId"
+  | "domainId"
+  | "broadcastId"
+  | "from"
+  | "to"
+  | "cc"
+  | "bcc"
+  | "replyTo"
+  | "inboxId"
+  | "threadId"
+  | "screenReleasedAt"
+>;
+
+/**
+ * Whether shared-domain mail is cold: a recipient never wrote to its inbox
+ * (no first_in_at) and is neither a member's login nor a sender its thread
+ * vouches for: the owner and thread classes of classifyRecipients, the only
+ * recipients a reply-only inbox may write to. Mail of an inbox deleted
+ * since knows no one.
+ */
+async function coldSharedSend(
+  db: Db,
+  email: Pick<ScreenedEmail, "teamId" | "inboxId" | "threadId" | "to" | "cc" | "bcc">,
+): Promise<boolean> {
+  const recipients = [
+    ...new Set([...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])].map(addressKey)),
+  ];
+  const { inboxId, threadId } = email;
+  const c = schema.inboxCorrespondents;
+  const [members, senders, wroteIn] = await Promise.all([
+    teamMemberEmails(db, email.teamId),
+    inboxId && threadId
+      ? threadSenders(db, { inboxId, threadId, shared: true })
+      : new Set<string>(),
+    inboxId
+      ? db
+          .select({ address: c.address })
+          .from(c)
+          .where(
+            and(eq(c.inboxId, inboxId), inArray(c.address, recipients), isNotNull(c.firstInAt)),
+          )
+      : [],
+  ]);
+  const known = new Set([...members, ...senders, ...wroteIn.map((row) => row.address)]);
+  return recipients.some((address) => !known.has(address));
+}
+
 /** What screening reads of one email before SES. */
 export interface ScreeningRead {
   /** Why it is judged before SES; empty when it is not. */
@@ -567,12 +630,18 @@ export interface ScreeningRead {
  * screened at its fan-out: a copy here only for the destinations its
  * contact fields put in it, which the HTML does not carry. Links read from
  * files count as destinations at every tier; files and an opaque body
- * screen a transactional email while its team is new.
+ * screen a transactional email while its team is new; cold shared-domain
+ * mail is screened at every tier.
  */
 export async function screeningReasons(
   db: Db,
   input: {
-    email: { teamId: string; broadcastId: string | null; replyTo: readonly string[] | null };
+    email: Pick<
+      ScreenedEmail,
+      "teamId" | "broadcastId" | "replyTo" | "inboxId" | "threadId" | "to" | "cc" | "bcc"
+    >;
+    /** Sent from the shared inbox domain. */
+    shared?: boolean | undefined;
     /** The decrypted body; without it no destination is read. */
     body: { html: string | null; text: string | null } | null;
     media?: SendMedia | undefined;
@@ -591,6 +660,7 @@ export async function screeningReasons(
     if (media && (media.attachments > 0 || media.opaque) && team.tier === "new") {
       read.reasons.push("media");
     }
+    if (input.shared && (await coldSharedSend(db, email))) read.reasons.push("recipient");
   }
   if (input.body) {
     const standing = await teamDestinationStanding(db, {
@@ -638,15 +708,16 @@ export async function screeningReasons(
 /**
  * A screening sample without a verdict: wait for it ("wait", the judge
  * re-queues what waits on it), re-run a failed judge for a young or
- * unknown-age sending domain, give up on it ("park") once the re-runs are
- * spent, or go on unscreened ("proceed") for an older domain. Null once the
- * sample is judged.
+ * unknown-age sending domain (sendingDomainYoung: shared-domain mail is
+ * one), give up on it ("park") once the re-runs are spent, or go on
+ * unscreened ("proceed") for an older domain. Null once the sample is
+ * judged.
  */
 async function unanswered(
   db: Db,
   deps: MonitorDeps,
   sample: Sample,
-  input: { domainId: string | null; now: Date },
+  input: { domainId: string | null; shared?: boolean | undefined; now: Date },
 ): Promise<"wait" | "park" | "proceed" | null> {
   const { now } = input;
   if (sample.status === "judged") return null;
@@ -658,7 +729,7 @@ async function unanswered(
   }
   const young = await sendingDomainYoung(
     db,
-    { teamId: sample.teamId, domainId: input.domainId },
+    { teamId: sample.teamId, domainId: input.domainId, shared: input.shared },
     now,
   );
   if (!young) return "proceed";
@@ -709,9 +780,10 @@ export type ScreenDecision =
    * It waits for an operator: the judge kept failing on a young domain's
    * email ("screening"), read a team past new's mail to a new destination as
    * phishing, or it carries more new destinations than a verdict can vouch
-   * for ("destination"), or its images or files were not cleared ("media",
+   * for ("destination"), its images or files were not cleared ("media",
    * see mediaParks; a new team's flagged file parks on the send path's own
-   * read, before any verdict).
+   * read, before any verdict), or the judge read cold shared-domain mail as
+   * phishing ("recipient").
    */
   | { action: "park"; reason: ScreenParkReason };
 
@@ -796,28 +868,25 @@ async function startScreening(
  * (first-window mail, broadcast copies, and mail whose new link domain's age
  * is not known), in case the burst it belongs to holds the team; mail to a
  * new destination of a team past new parks on a verdict that
- * destinationVerdictParks; a judge that keeps failing parks a young
- * domain's email and lets an older one's through; media the judge could not
- * clear parks as mediaParks says. The team's own standing (a hold, a pause)
- * is the caller's to read first, on every pass; `team` is what it already
- * read of the team this pass.
+ * destinationVerdictParks, and cold shared-domain mail of any team not
+ * exempt on a phishing-type verdict from `holdRepeatScore`; a judge that
+ * keeps failing parks a young domain's email, shared-domain mail included,
+ * and lets an older one's through; media the judge could not clear parks
+ * as mediaParks says. The team's own standing (a hold, a pause) is the
+ * caller's to read first, on every pass; `team` is what it already read of
+ * the team this pass.
  */
 export async function screenBeforeSend(
   db: Db,
   deps: MonitorDeps,
   input: {
-    email: {
-      id: string;
-      teamId: string;
-      domainId: string | null;
-      broadcastId: string | null;
-      replyTo: string[] | null;
-      screenReleasedAt: Date | null;
-    };
+    email: ScreenedEmail;
     body: { html: string | null; text: string | null };
     media?: SendMedia | undefined;
     ignore?: ReadonlySet<string> | undefined;
     team?: ScreeningTeam | undefined;
+    /** SHARED_INBOX_DOMAIN; the environment's when absent. */
+    sharedInboxDomain?: string | null | undefined;
     now: Date;
   },
 ): Promise<ScreenDecision> {
@@ -826,6 +895,10 @@ export async function screenBeforeSend(
   // draw degrades to off the same way.
   const s = await deps.settings().catch(() => null);
   if (!s?.autoHold) return SEND_UNSCREENED;
+  const shared = isSharedInboxSender(
+    email.from,
+    input.sharedInboxDomain === undefined ? sharedInboxDomain() : input.sharedInboxDomain,
+  );
   const [sample] = await db
     .select()
     .from(ms)
@@ -840,7 +913,7 @@ export async function screenBeforeSend(
   }
   const team = input.team ?? (await screeningTeam(db, s, email.teamId, now));
   if (!sample?.screening) {
-    const read = await screeningReasons(db, { ...input, team });
+    const read = await screeningReasons(db, { ...input, team, shared });
     if (read.reasons.length === 0) {
       return { action: "send", sample: null, probation: read.probation };
     }
@@ -863,7 +936,7 @@ export async function screenBeforeSend(
   const screened = { id: sample.id, unjudged: false };
   // Media that parks whatever the verdict parks now, a judge outage or not.
   if (mediaParksSample(sample, team.tier)) return { action: "park", reason: "media" };
-  const waiting = await unanswered(db, deps, sample, { domainId: email.domainId, now });
+  const waiting = await unanswered(db, deps, sample, { domainId: email.domainId, shared, now });
   if (waiting === "wait") return { action: "wait", until: null };
   if (waiting === "park") return { action: "park", reason: "screening" };
   if (waiting === "proceed") return { action: "send", sample: { id: sample.id, unjudged: true } };
@@ -871,6 +944,9 @@ export async function screenBeforeSend(
   const destinations = sample.destinations?.length ?? 0;
   if (destinations > 0 && destinationVerdictParks(sample, s) && team.tier !== "new") {
     return { action: "park", reason: "destination" };
+  }
+  if (shared && team.tier !== "exempt" && (await coldSharedSend(db, email))) {
+    return { action: "park", reason: "recipient" };
   }
   const waits = email.broadcastId
     ? team.tier === "new"

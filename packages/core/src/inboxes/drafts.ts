@@ -37,11 +37,13 @@ import {
   type PreparedSend,
   refused,
   type SendOutcome,
+  sharedRecipientsExceeded,
   subjectProblem,
   targetParentHeaders,
   untrustedReplyTos,
   withIdempotency,
 } from "./send.js";
+import { SHARED_REFUSALS } from "./send-policy.js";
 import { getThread } from "./threads.js";
 import {
   type DraftListItemWire,
@@ -268,6 +270,10 @@ export async function createDraft(
   const now = new Date();
   const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId, now });
   if (!inbox) return fail(404, "not_found", INBOX_NOT_FOUND_MESSAGE);
+  if (sharedRecipientsExceeded(inbox, [...(fields.to ?? []), ...fields.cc, ...fields.bcc])) {
+    const { status, name, message } = SHARED_REFUSALS.shared_recipients;
+    return fail(status, name, message);
+  }
   if (threadId && targetId) {
     const target = await loadThreadTarget(db, {
       teamId: p.teamId,

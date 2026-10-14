@@ -2,6 +2,7 @@ import { parseSingleSender } from "../sender-address.js";
 import { DAY_MS, nextUtcDayStart } from "../utc-day.js";
 import type { InboxActor } from "./activity.js";
 import type { InboxSafety } from "./safety.js";
+import type { SharedSending } from "./shared-mode.js";
 import type { InboxKind } from "./types.js";
 
 /**
@@ -20,6 +21,12 @@ export interface AgentSendInput {
     firstSentAt: Date | null;
   };
   teamTierNew: boolean;
+  /** Read for a shared inbox only, as are sharedNamesOk and sharedTeamCap. */
+  sharedMode: SharedSending;
+  /** The inbox's from_name and the team's label pass the brand guard. */
+  sharedNamesOk: boolean;
+  /** Recipients the team may reach from the shared domain per UTC day. */
+  sharedTeamCap: number;
   actor: InboxActor;
   /** canApprove(actor) acting through the dashboard, or an approval. */
   approved: boolean;
@@ -34,7 +41,8 @@ export interface AgentSendInput {
   burstExceeded: boolean;
   /** Outgoing content matched a received secret within RECEIVED_SECRET_WINDOW. */
   privateHit: boolean;
-  usage: { recipientsToday: number; newRecipientsToday: number };
+  /** sharedRecipientsToday is the team's, from every shared inbox. */
+  usage: { recipientsToday: number; newRecipientsToday: number; sharedRecipientsToday: number };
   now: Date;
 }
 
@@ -47,12 +55,70 @@ export type AgentSendDecision =
       name: "inbox_send_policy" | "inbox_send_cap_reached" | "restricted_api_key";
       message: string;
       retryAfterSec?: number | undefined;
+      /** The shared-domain rule that refused, when one did. */
+      reason?: Exclude<SharedRefusalReason, "shared_recipients"> | undefined;
     };
 
 export const INBOX_KEY_FROM_MESSAGE = "This API key can only send from its inbox address";
 
 export const SHARED_REPLY_ONLY_MESSAGE =
   "Addresses on the shared domain only reply inside their threads";
+
+/** To, cc and bcc together, per email from a shared-domain address. */
+export const SHARED_RECIPIENTS_MAX = 10;
+
+/** Each cause the shared domain refuses a send for, with its answer on every surface. */
+export const SHARED_REFUSALS = {
+  shared_paused: {
+    status: 403,
+    name: "inbox_send_policy",
+    message: "Sending from addresses on the shared domain is paused; mail to them still arrives",
+  },
+  shared_plan: {
+    status: 403,
+    name: "inbox_send_policy",
+    message: "On the Free plan, addresses on the shared domain only reply inside their threads",
+  },
+  shared_domain: { status: 403, name: "inbox_send_policy", message: SHARED_REPLY_ONLY_MESSAGE },
+  shared_team_cap: {
+    status: 429,
+    name: "inbox_send_cap_reached",
+    message: "Your team reached today's limit for mail from the shared domain",
+  },
+  shared_recipients: {
+    status: 422,
+    name: "validation_error",
+    message: `At most ${SHARED_RECIPIENTS_MAX} recipients per email from the shared domain`,
+  },
+} as const;
+
+export type SharedRefusalReason = keyof typeof SHARED_REFUSALS;
+
+/**
+ * The refusal of a send the team's shared-domain mode doesn't allow. Open
+ * mode answers shared_domain: only the inbox's own names hold it back then.
+ */
+export function sharedModeReason(
+  s: SharedSending,
+): "shared_paused" | "shared_plan" | "shared_domain" {
+  if (s.mode === "receive_only") return "shared_paused";
+  return s.cause === "plan" ? "shared_plan" : "shared_domain";
+}
+
+function sharedRefusal(
+  reason: Exclude<SharedRefusalReason, "shared_recipients">,
+  now: Date,
+): AgentSendDecision {
+  const { status, name, message } = SHARED_REFUSALS[reason];
+  return {
+    result: "refuse",
+    status,
+    name,
+    message,
+    reason,
+    ...(reason === "shared_team_cap" ? { retryAfterSec: secondsToNextUtcDay(now) } : {}),
+  };
+}
 
 /** retry-after for a daily limit: whole seconds until the next UTC midnight, at least one. */
 export function secondsToNextUtcDay(now: Date): number {
@@ -83,13 +149,20 @@ export function decideAgentSend(input: AgentSendInput): AgentSendDecision {
     r.cls === "owner" || r.cls === "allowlisted" || r.cls === "thread";
   const ownerOrAllowlisted = (r: (typeof recipients)[number]) =>
     r.cls === "owner" || r.cls === "allowlisted";
-  if (inbox.shared && (!input.isReply || !recipients.every(trusted))) {
-    return {
-      result: "refuse",
-      status: 403,
-      name: "inbox_send_policy",
-      message: SHARED_REPLY_ONLY_MESSAGE,
-    };
+  // Ahead of `approved`: the shared domain's rules bind people too.
+  if (inbox.shared) {
+    const { sharedMode } = input;
+    // Names that fail the brand guard were never reviewed, so they keep the inbox replying only.
+    const replyOnly = sharedMode.mode !== "open" || !input.sharedNamesOk;
+    if (
+      sharedMode.mode === "receive_only" ||
+      (replyOnly && (!input.isReply || !recipients.every(trusted)))
+    ) {
+      return sharedRefusal(sharedModeReason(sharedMode), now);
+    }
+    if (input.usage.sharedRecipientsToday + recipients.length > input.sharedTeamCap) {
+      return sharedRefusal("shared_team_cap", now);
+    }
   }
   if (
     !input.approved &&
@@ -111,12 +184,9 @@ export function decideAgentSend(input: AgentSendInput): AgentSendDecision {
     if (input.replyTarget?.automated) reasons.push(`loop_guard:${input.replyTarget.automated}`);
     if (input.burstExceeded) reasons.push("loop_burst");
     if (recipients.some((r) => r.viaUntrustedReplyTo)) reasons.push("reply_to_redirect");
-    // "open" stands only for a custom-domain inbox of an established team;
-    // otherwise it reads as reply_only.
+    // "open" stands only for an established team; a new one's reads as reply_only.
     const policy =
-      safety.send_policy === "open" && (inbox.shared || input.teamTierNew)
-        ? "reply_only"
-        : safety.send_policy;
+      safety.send_policy === "open" && input.teamTierNew ? "reply_only" : safety.send_policy;
     const replyOk = input.isReply && recipients.every(trusted);
     const allowed =
       policy === "open" ||

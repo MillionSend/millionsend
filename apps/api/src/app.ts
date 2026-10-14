@@ -47,6 +47,7 @@ import {
   isSharedInboxSender,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
+  type MonitorSettings,
   MX_DELIVER_PATH,
   MX_INGEST_PATH,
   makeUnsubscribeToken,
@@ -73,7 +74,7 @@ import {
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
   type SendRefusal,
-  SHARED_REPLY_ONLY_MESSAGE,
+  SHARED_REFUSALS,
   scoreBand,
   segmentContactsWhere,
   segmentFilterSchema,
@@ -81,7 +82,9 @@ import {
   sendRefusal,
   sendRefusalError,
   sesMessageIdHeader,
+  sharedModeReason,
   teamQuota,
+  teamSharedSending,
   transitionQueueState,
   type UndeliverableRecipient,
   undeliverableRecipientMessage,
@@ -274,6 +277,8 @@ export interface ApiDeps {
   inboxKeys?: InboxKeys | undefined;
   /** SHARED_INBOX_DOMAIN; omitted → no inbox gets an address on the shared domain. */
   sharedInboxDomain?: string | undefined;
+  /** The trust & safety settings reader (monitorSettingsReader); omitted → sends read the row. */
+  monitorSettings?: (() => Promise<MonitorSettings>) | undefined;
   /** clamd's scan of received mail (CLAMAV_HOST); omitted → nothing is scanned. */
   scanVirus?: ((raw: Buffer) => Promise<VirusResult>) | undefined;
   /**
@@ -437,11 +442,26 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
         body: errorBody(
           403,
           "inbox_send_policy",
-          result.reasons.includes("shared_domain")
-            ? SHARED_REPLY_ONLY_MESSAGE
-            : `The sending inbox's rules hold this email${result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : ""}; create it as a draft with POST /inboxes/{inbox_id}/drafts for a person to approve`,
+          `The sending inbox's rules hold this email${result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : ""}; create it as a draft with POST /inboxes/{inbox_id}/drafts for a person to approve`,
         ),
       };
+    case "shared_paused":
+    case "shared_plan":
+    case "shared_domain":
+    case "shared_recipients": {
+      const { status, name, message } = SHARED_REFUSALS[result.reason];
+      return { status, body: errorBody(status, name, message) };
+    }
+    case "shared_team_cap": {
+      const { status, name, message } = SHARED_REFUSALS.shared_team_cap;
+      return {
+        status,
+        body: errorBody(status, name, message),
+        retryAfterSec: result.retryAfterSec,
+      };
+    }
+    case "shared_from":
+      return { status: 422, body: errorBody(422, "validation_error", result.message) };
     case "inbox_send_cap_reached":
       return {
         status: 429,
@@ -474,11 +494,26 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
 
 // Shared-domain addresses have no domains row, so they would otherwise fail
 // sender verification with a 422 before the inbox rails could refuse them.
-const sharedSenderRefusal = acceptRejection({
-  ok: false,
-  reason: "inbox_send_policy",
-  reasons: ["shared_domain"],
-});
+const sharedSenderRefusal = acceptRejection({ ok: false, reason: "shared_domain" });
+
+/**
+ * POST /emails's answer to a shared-domain From before anything else runs,
+ * or null when it goes on to the inbox rails: those addresses send there in
+ * open mode only, and never under a key held to one of the team's domains.
+ */
+async function sharedFromRefusal(deps: ApiDeps, auth: ApiKeyAuth) {
+  const sending = await teamSharedSending(deps.db, deps, auth.plan);
+  if (sending.mode !== "open") {
+    return acceptRejection({ ok: false, reason: sharedModeReason(sending) });
+  }
+  if (auth.domainId !== null) {
+    return {
+      status: 403 as const,
+      body: errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE),
+    };
+  }
+  return null;
+}
 
 /**
  * Wire body for a team sendRefusal holds; keys still authenticate so the
@@ -3753,24 +3788,28 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
     const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
     if (reserved) return c.json(errorBody(422, reserved.name, reserved.message), 422);
+    let domainId: string | null = null;
     if (isSharedInboxSender(body.from, deps.sharedInboxDomain)) {
-      return c.json(sharedSenderRefusal.body, sharedSenderRefusal.status);
-    }
-    const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
-    if (!domain.ok) {
-      return c.json(
-        errorBody(
+      const refusal = await sharedFromRefusal(deps, auth);
+      if (refusal) return c.json(refusal.body, refusal.status);
+    } else {
+      const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
+      if (!domain.ok) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            domain.reason === "invalid_sender"
+              ? 'from must be a single address like ada@example.com or "Ada Lovelace" <ada@example.com>; quote a display name that contains a comma'
+              : `The ${domain.fromDomain} domain is not verified for this team`,
+          ),
           422,
-          "validation_error",
-          domain.reason === "invalid_sender"
-            ? 'from must be a single address like ada@example.com or "Ada Lovelace" <ada@example.com>; quote a display name that contains a comma'
-            : `The ${domain.fromDomain} domain is not verified for this team`,
-        ),
-        422,
-      );
-    }
-    if (keyForbidsSendingDomain(auth, domain.domainId)) {
-      return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
+        );
+      }
+      if (keyForbidsSendingDomain(auth, domain.domainId)) {
+        return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
+      }
+      domainId = domain.domainId;
     }
 
     // Idempotency FIRST: a replay must return the stored response even if
@@ -3813,7 +3852,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
 
     try {
-      const result = await acceptEmail(deps, auth, toAcceptPayload(body, domain.domainId), {
+      const result = await acceptEmail(deps, auth, toAcceptPayload(body, domainId), {
         parkUnderReview: true,
         completeInTx: idemKey
           ? async (tx, emailId) => {

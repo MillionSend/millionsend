@@ -265,36 +265,41 @@ describe("the review list's release", () => {
 });
 
 describe("the suspension of a held team", () => {
-  it("cancels the mail its hold parked unless the suspension is the hold itself", async () => {
+  it("cancels the mail its hold or an operator parked unless the suspension is the hold itself", async () => {
     const teamId = await createTeam(db, "held-then-phishing");
-    const id = randomUUID();
-    await db.insert(schema.emails).values({
-      id,
-      teamId,
-      from: "T <hi@held.dev>",
-      to: ["r@example.org"],
-      subject: "s",
-      latestStatus: "queued_quota",
-      parkReason: "review",
-    });
+    const park = async (parkReason: "review" | "recipient") => {
+      const id = randomUUID();
+      await db.insert(schema.emails).values({
+        id,
+        teamId,
+        from: "T <hi@held.dev>",
+        to: ["r@example.org"],
+        subject: "s",
+        latestStatus: "queued_quota",
+        parkReason,
+      });
+      return id;
+    };
+    await park("review");
+    await park("recipient");
     await suspendTeam(db, { teamId, reason: "review" });
-    const status = async () =>
+    const statuses = async () =>
       (
         await db
           .select({ status: schema.emails.latestStatus })
           .from(schema.emails)
-          .where(eq(schema.emails.id, id))
-      )[0]?.status;
-    expect(await status()).toBe("queued_quota");
+          .where(eq(schema.emails.teamId, teamId))
+      ).map((row) => row.status);
+    expect(await statuses()).toEqual(["queued_quota", "queued_quota"]);
     await suspendTeam(db, { teamId, reason: "manual" });
-    expect(await status()).toBe("canceled");
+    expect(await statuses()).toEqual(["canceled", "canceled"]);
     const [audit] = await db
       .select({ action: schema.auditLog.action, data: schema.auditLog.data })
       .from(schema.auditLog)
       .where(
         and(eq(schema.auditLog.teamId, teamId), eq(schema.auditLog.action, "screening.canceled")),
       );
-    expect(audit?.data).toEqual({ emails: 1, reason: "manual" });
+    expect(audit?.data).toEqual({ emails: 2, reason: "manual" });
   });
 });
 
@@ -340,7 +345,13 @@ describe("the gate's read of the team", () => {
         teamId,
         domainId: null,
         broadcastId: null,
+        from: "T <hi@read-once.dev>",
+        to: ["r@example.org"],
+        cc: null,
+        bcc: null,
         replyTo: null,
+        inboxId: null,
+        threadId: null,
         screenReleasedAt: null,
       },
       body: { html: "<p>Hello</p>", text: null },

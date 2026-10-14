@@ -11,13 +11,14 @@ import { DAY_MS, utcDay } from "./utc-day.js";
 /**
  * The content monitor's sampling and risk model. A new team's mail in its
  * first window and its broadcasts, and any team's mail to a destination it
- * has not cleared, are judged before SES takes them (screening.ts holds that
- * gate); the rest is drawn by a keyed draw after SES accepts it. Verdicts decay into a per-team risk that opens the
- * monitor flag, alerts the operator and, for a new team, pauses broadcasts;
- * a confident phishing verdict on a new team, a slightly less confident one
- * while its sending domain is young, or a run of those within a week, holds
- * all of its sending for review. The draw after a send is safe to skip: a
- * failure in it changes nothing about the send.
+ * has not cleared or from the shared domain to someone who never wrote in,
+ * are judged before SES takes them (screening.ts holds that gate); the rest
+ * is drawn by a keyed draw after SES accepts it. Verdicts decay into a
+ * per-team risk that opens the monitor flag, alerts the operator and, for a
+ * new team, pauses broadcasts; a confident phishing verdict on a new team, a
+ * slightly less confident one while its sending domain is young, or a run of
+ * those within a week, holds all of its sending for review. The draw after a
+ * send is safe to skip: a failure in it changes nothing about the send.
  */
 
 export type MonitorSampleKind = (typeof schema.monitorSampleKindEnum.enumValues)[number];
