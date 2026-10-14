@@ -32,17 +32,36 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "i1" }),
   useSearchParams: () => new URLSearchParams(),
 }));
-// What the query hooks answer (nothing unless a test sets it), and the error
-// a mutation came back with.
+// What the query hooks answer (nothing unless a test sets it), the error
+// a mutation came back with, the options and calls mutations got, and the
+// queries invalidated.
 const rq = vi.hoisted(() => ({
   data: undefined as unknown,
   pages: undefined as unknown,
   error: null as unknown,
+  mutate: vi.fn(),
+  mutations: [] as { path?: string; onSuccess?: () => unknown }[],
+  invalidate: vi.fn(),
+}));
+// A server render runs no effect. While `on`, renders run them as a browser
+// does across renders: each one whose deps changed since the last render.
+const effects = vi.hoisted(() => ({ on: false, next: 0, deps: [] as (unknown[] | undefined)[] }));
+vi.mock("react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react")>()),
+  useEffect: (effect: () => void, deps?: unknown[]) => {
+    if (!effects.on) return;
+    const last = effects.deps[effects.next];
+    effects.deps[effects.next++] = deps;
+    if (!deps || !last || deps.some((dep, i) => !Object.is(dep, last[i]))) effect();
+  },
 }));
 // The form's save goes through the router; rendering never fires it.
 vi.mock("@tanstack/react-query", () => ({
-  useMutation: () => ({ mutate: vi.fn(), isPending: false, error: rq.error }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useMutation: (options: (typeof rq.mutations)[number]) => {
+    rq.mutations.push(options);
+    return { mutate: rq.mutate, isPending: false, error: rq.error };
+  },
+  useQueryClient: () => ({ invalidateQueries: rq.invalidate }),
   useQuery: () => ({ data: rq.data }),
   useInfiniteQuery: () => ({ data: rq.pages, isPending: false }),
 }));
@@ -70,9 +89,15 @@ vi.mock("@/app/(dashboard)/inboxes/[id]/threads-tab", async (importOriginal) => 
   ...(await importOriginal<typeof import("@/app/(dashboard)/inboxes/[id]/threads-tab")>()),
   ThreadsTab: () => null,
 }));
+// Each procedure helper answers with its path and the options it was given.
 vi.mock("@/lib/trpc", () => {
-  const leaf: unknown = new Proxy(() => ({}), { get: () => leaf, apply: () => ({}) });
-  return { useTRPC: () => leaf };
+  const at = (path: string): unknown =>
+    new Proxy(() => {}, {
+      get: (_, key) => at(path ? `${path}.${String(key)}` : String(key)),
+      apply: (_, __, [options]) => ({ ...options, path }),
+    });
+  const root = at("");
+  return { useTRPC: () => root };
 });
 
 const { SafetyForm } = await import("@/app/(dashboard)/inboxes/[id]/safety-tab");
@@ -488,10 +513,100 @@ describe("addresses on the shared domain", () => {
           onClose: () => {},
           domains: [],
           sharedDomain: "acme.agents.example",
+          claiming: false,
         }),
       ),
     );
   const fieldError = (html: string) => html.match(/class="ms-field-error"[^>]*>([^<]*)</)?.[1];
+
+  it("claims the team's subdomain while the empty state names the shared domain, once a showing", () => {
+    const empty = {
+      pages: [
+        {
+          items: [],
+          counts: { agent: 0, human: 0 },
+          overview: { allReceived: { received30d: 0, lastReceived: null }, catchAll: [] },
+        },
+      ],
+    };
+    const listed = {
+      pages: [
+        {
+          items: [
+            {
+              id: "i1",
+              email_address: "bot@agents.example",
+              name: "",
+              kind: "agent",
+              unread: 0,
+              pending_approval: 0,
+              quarantined: 0,
+              received_30d: 0,
+              last_received: null,
+              expires_at: null,
+              forward_to: [],
+            },
+          ],
+          counts: { agent: 1, human: 0 },
+          overview: null,
+        },
+      ],
+    };
+    const claims = (
+      pages: unknown,
+      sharedSubdomainReady = false,
+      domains: { id: string; name: string }[] = [],
+    ) => {
+      rq.data = { domains, sharedDomain: "agents.example", sharedSubdomainReady, plan: null };
+      rq.pages = pages;
+      effects.on = true;
+      effects.next = 0;
+      try {
+        renderToStaticMarkup(createElement(InboxesView));
+      } finally {
+        effects.on = false;
+        rq.data = rq.pages = undefined;
+      }
+      return rq.mutate.mock.calls.length;
+    };
+    // PageHeader names the browser tab from an effect.
+    vi.stubGlobal("document", { title: "" });
+    try {
+      rq.mutate.mockClear();
+      rq.mutations.length = 0;
+      effects.deps = [];
+      expect([claims(empty), claims(empty), claims(listed), claims(empty)]).toEqual([1, 1, 1, 2]);
+      expect(claims(empty, true)).toBe(2);
+      // A fresh page whose empty state names no shared domain: the team receives on its own.
+      effects.deps = [];
+      expect(claims(empty, false, [{ id: "d1", name: "in.acme.example" }])).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // A claim refreshes what the picker and the empty state show.
+    const claim = rq.mutations.find(
+      (options) => options.path === "inboxes.reserveSharedSubdomain.mutationOptions",
+    );
+    rq.invalidate.mockClear();
+    claim?.onSuccess?.();
+    expect(rq.invalidate).toHaveBeenCalledWith({ path: "inboxes.options.queryFilter" });
+  });
+
+  it("holds a shared address's create while the team's subdomain is being claimed", () => {
+    rq.error = null;
+    const createButton = (claiming: boolean) =>
+      renderToStaticMarkup(
+        createElement(CreateInboxDialog, {
+          open: true,
+          onClose: () => {},
+          domains: [],
+          sharedDomain: "agents.example",
+          claiming,
+        }),
+      ).match(/<button type="submit"[^>]*>/)?.[0];
+    expect(createButton(true)).toContain("disabled");
+    expect(createButton(false)).not.toContain("disabled");
+  });
 
   it("takes a username in the create dialog, random when empty, kept until told otherwise", () => {
     rq.error = null;

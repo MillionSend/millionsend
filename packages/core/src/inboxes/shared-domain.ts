@@ -142,6 +142,14 @@ export function sharedSlug(text: string, max: number): string {
   return imitatedBrandIn(text) !== null || refusedLabel(slug) ? "" : slug;
 }
 
+interface SharedSubdomainRequest {
+  teamId: string;
+  teamName: string;
+  sharedInboxDomain: string;
+  review?: SharedNameReview | undefined;
+  now?: Date | undefined;
+}
+
 /**
  * The team's subdomain of the shared inbox domain, created on first use:
  * the team name as a slug once the identity review passes it, else
@@ -150,17 +158,23 @@ export function sharedSlug(text: string, max: number): string {
  * budget all mean the random label. A label another team holds, or held
  * until it was deleted, gets a random suffix, so no label is ever issued
  * twice: a new owner would receive mail meant for the old one.
+ *
+ * With `onTransient: "skip"`, for a claim that can wait, an outage or a
+ * spent budget claims nothing and answers null instead: the label is the
+ * team's for good, and a later claim may still get its name.
  */
+export function ensureSharedSubdomain(
+  db: Db,
+  p: SharedSubdomainRequest & { onTransient: "skip" },
+): Promise<{ id: string; name: string } | null>;
+export function ensureSharedSubdomain(
+  db: Db,
+  p: SharedSubdomainRequest,
+): Promise<{ id: string; name: string }>;
 export async function ensureSharedSubdomain(
   db: Db,
-  p: {
-    teamId: string;
-    teamName: string;
-    sharedInboxDomain: string;
-    review?: SharedNameReview | undefined;
-    now?: Date | undefined;
-  },
-): Promise<{ id: string; name: string }> {
+  p: SharedSubdomainRequest & { onTransient?: "skip" },
+): Promise<{ id: string; name: string } | null> {
   const s = schema.sharedInboxDomains;
   const existing = async () =>
     (await db.select({ id: s.id, name: s.name }).from(s).where(eq(s.teamId, p.teamId)))[0];
@@ -174,6 +188,8 @@ export async function ensureSharedSubdomain(
       texts: [{ field: "label", value: base }],
       now: p.now ?? new Date(),
     });
+    // The string answers are the review's outage and spent budgets; a refusal is the text refused.
+    if (typeof refused === "string" && p.onTransient === "skip") return null;
     if (refused !== null) base = "";
   }
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
