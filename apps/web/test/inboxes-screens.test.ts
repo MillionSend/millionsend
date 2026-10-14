@@ -3,7 +3,7 @@ import type { InboxSafety } from "@millionsend/db/schema";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { InboxDetail, ThreadRow } from "@/app/(dashboard)/inboxes/parts";
+import type { InboxDetail, ThreadMessage, ThreadRow } from "@/app/(dashboard)/inboxes/parts";
 import { dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
 import { typedAllowlistEntry } from "@/lib/email-input";
 import { WEBHOOK_EVENT_META, WEBHOOK_EVENT_TYPES } from "@/lib/webhook-events";
@@ -48,9 +48,8 @@ vi.mock("@/lib/trpc", () => {
 const { SafetyForm } = await import("@/app/(dashboard)/inboxes/[id]/safety-tab");
 const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
-const { approvalReasonWords, QuarantinedBadge, replyAllAdds, TrustBadge } = await import(
-  "@/app/(dashboard)/inboxes/parts"
-);
+const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
+  await import("@/app/(dashboard)/inboxes/parts");
 const { navItemsFor, Sidebar } = await import("@/components/sidebar");
 const { SettingsTabsNav } = await import("@/app/(dashboard)/settings/settings-tabs-nav");
 const { ServerTeamRole } = await import("@/lib/use-team-role");
@@ -370,6 +369,10 @@ describe("inbox screens", () => {
     expect(button).toContain("It never arrived");
     // The time, the dot and the pills are its siblings, each its own stop.
     expect(button).not.toMatch(/tabindex|<time/);
+    // It reads them out instead: the unread dot, then the pills.
+    const [, prefix] = button.match(/aria-describedby="(\S+)-dot \1-pills"/) ?? [];
+    expect(agent).toContain(`id="${prefix}-dot"`);
+    expect(agent).toContain(`id="${prefix}-pills"`);
     expect(agent).toContain('aria-label="Your agent hasn&#x27;t marked it read yet"');
     expect(agent).toContain('class="ms-count">3<');
     expect(agent).toContain(">Suspicious<");
@@ -377,6 +380,18 @@ describe("inbox screens", () => {
     expect(people).toContain('aria-label="Unread"');
     expect(people).not.toContain("Suspicious");
     expect(render(false, true)).toContain("To Rita Recipient");
+  });
+
+  it("answers the newest message the inbox sent or let in, never held mail", () => {
+    const inbound = (id: string, verdict: string) =>
+      ({ id, direction: "inbound", screening: { verdict } }) as ThreadMessage;
+    const sent = { id: "sent", direction: "outbound" } as ThreadMessage;
+    const held = [inbound("quarantined", "quarantined"), inbound("pending", "pending")];
+    expect(replyTarget([inbound("clean", "clean"), sent, ...held])?.id).toBe("sent");
+    expect(
+      replyTarget([inbound("suspicious", "suspicious"), inbound("released", "released")])?.id,
+    ).toBe("released");
+    expect(replyTarget(held)).toBeUndefined();
   });
 
   it("offers Reply all only when it adds someone, as the server copies them", () => {

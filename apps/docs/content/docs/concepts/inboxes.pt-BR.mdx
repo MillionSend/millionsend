@@ -418,7 +418,7 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | `require_approval` | Todo envio da caixa espera uma pessoa. |
 | `private_codes` | Um código ou link de acesso que a caixa recebeu não pode ser enviado para ninguém além dos responsáveis e da lista de permitidos. |
 | `send_cap` | Para quantos destinatários a caixa pode enviar por dia UTC sem uma pessoa: de 1 a 100.000, ou `null` para não ter limite; de 1 a 50 no domínio compartilhado. |
-| `forward_to` | Até 5 endereços que recebem uma cópia de toda mensagem entregue: endereços de login de pessoas da equipe ou endereços de responsáveis. |
+| `forward_to` | Até 5 endereços que recebem uma cópia de toda mensagem entregue, menos spam: endereços de login de pessoas da equipe ou endereços de responsáveis. |
 
 Uma configuração que quebra uma regra responde `422` com o motivo: `open` no
 domínio compartilhado ou para uma equipe ainda nova no envio, `screening`

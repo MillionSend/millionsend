@@ -519,7 +519,12 @@ async function admit(
     inboxId: inbox.id,
     refs: [...(row.inReplyTo ? [row.inReplyTo] : []), ...row.references],
   });
-  const owners = [...p.memberEmails, ...inbox.safety.owner_addresses];
+  // The shared domain is every team's: there only members' logins are owners,
+  // as classifyRecipients (inboxes/send.ts) has it on the way out.
+  const owners = [
+    ...p.memberEmails,
+    ...(inbox.domainId === null ? [] : inbox.safety.owner_addresses),
+  ];
   const tier = senderTrust({
     authentication: row.authentication,
     authDetail: row.authDetail,
@@ -544,7 +549,11 @@ async function admit(
     judgeAvailable: deps.judgeAvailable ?? false,
     forwardedContent: facts.forwardedContent,
   });
-  let threadId = resolved?.threadId;
+  // A failed sender's spam opens a thread of its own, filed under Spam: in a
+  // live thread it would sit in the inbox, and a forged reply quoting a known
+  // Message-ID is how a conversation gets hijacked.
+  const thread = decision.action === "spam" && tier === "failed" ? null : resolved;
+  let threadId = thread?.threadId;
   if (!threadId) {
     const [thread] = await tx
       .insert(schema.inboxThreads)
@@ -569,7 +578,7 @@ async function admit(
     threadId,
     address: p.target.address,
     senderTrust: tier,
-    threadProof: resolved?.proof ?? null,
+    threadProof: thread?.proof ?? null,
     verdict: "pending",
     createdAt: now,
   });

@@ -12,6 +12,7 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { Skeleton } from "@/components/skeleton";
 import { toast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
 import { formatTimeLeft } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -48,7 +49,6 @@ export function InboxView() {
       onSuccess: () => {
         // Dropped, not invalidated: a stale list would paint the deleted inbox until its refetch landed.
         queryClient.removeQueries(trpc.inboxes.list.pathFilter());
-        void queryClient.invalidateQueries(trpc.inboxes.options.pathFilter());
         router.push("/inboxes");
       },
       onError: () => toast(t("deleteError"), "danger"),
@@ -91,6 +91,16 @@ export function InboxView() {
       : []),
   ].join(" · ");
   const review = inbox.pending_approval + inbox.quarantined;
+  const sendButton = (
+    <button
+      type="button"
+      className="ms-btn ms-btn-primary"
+      disabled={inbox.expired}
+      onClick={() => setSending(true)}
+    >
+      {t("sendEmail")}
+    </button>
+  );
 
   return (
     <>
@@ -105,14 +115,13 @@ export function InboxView() {
         badges={<BetaPill />}
         subtitle={subtitle}
         actions={
-          <button
-            type="button"
-            className="ms-btn ms-btn-primary"
-            disabled={inbox.expired}
-            onClick={() => setSending(true)}
-          >
-            {t("sendEmail")}
-          </button>
+          inbox.expired ? (
+            <Tooltip inline text={t("expired")}>
+              {sendButton}
+            </Tooltip>
+          ) : (
+            sendButton
+          )
         }
         menu={
           <PopoverMenu

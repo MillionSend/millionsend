@@ -16,7 +16,7 @@ import { WarnCard } from "@/components/warn-card";
 import { typedAllowlistEntry, typedListAddress } from "@/lib/email-input";
 import { useTRPC } from "@/lib/trpc";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
-import { ACCEPT_FROM, acceptFromHint, type InboxDetail } from "../parts";
+import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, type InboxDetail } from "../parts";
 
 const POLICIES = ["reply_only", "allowlist", "open"] as const;
 
@@ -51,8 +51,6 @@ export function SafetyTab({ inbox, admin }: { inbox: InboxDetail; admin: boolean
   if (!query.data) return <Skeleton width="60%" height={14} />;
   return (
     <SafetyForm
-      // New stored rules start the form over; a refetch of the same rules keeps unsaved edits.
-      key={JSON.stringify(query.data.safety)}
       inbox={inbox}
       admin={admin}
       stored={query.data.safety}
@@ -79,16 +77,20 @@ export function SafetyForm({
   const common = useTranslations("common");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [rules, setRules] = useState<InboxSafety>(stored);
+  // Edits ride over the stored rules, so no refetch can reset them.
+  const [draft, setDraft] = useState<InboxSafety | null>(null);
+  const rules = draft ?? stored;
   const set = <K extends keyof InboxSafety>(key: K, value: InboxSafety[K]) =>
-    setRules((current) => ({ ...current, [key]: value }));
+    setDraft((current) => ({ ...(current ?? stored), [key]: value }));
   const save = useMutation(
     trpc.inboxes.updateSafety.mutationOptions({
-      onSuccess: () => {
+      onSuccess: async () => {
         toast(t("safety.saved"));
-        void queryClient.invalidateQueries({
+        // The saved rules land before the draft goes, so the old ones never flash back.
+        await queryClient.invalidateQueries({
           queryKey: trpc.inboxes.safety.queryKey({ id: inbox.id }),
         });
+        setDraft(null);
       },
     }),
   );
@@ -99,7 +101,7 @@ export function SafetyForm({
   const forwardOptions = [
     ...new Set([...memberEmails, ...(inbox.shared ? [] : rules.owner_addresses)]),
   ].map((email) => ({ value: email, label: email }));
-  const changed = JSON.stringify(rules) !== JSON.stringify(stored);
+  const changed = draft !== null && JSON.stringify(draft) !== JSON.stringify(stored);
   useUnsavedChangesWarning(changed, common("unsavedWarn"));
 
   return (
@@ -137,7 +139,7 @@ export function SafetyForm({
             </label>
           ))}
         </div>
-        {agent && rules.accept_from === "anyone" ? (
+        {acceptFromWarns(inbox.kind, rules.accept_from) ? (
           <WarnCard>{t("acceptFrom.anyoneWarn")}</WarnCard>
         ) : null}
         <div className="ms-field" style={{ marginTop: 14 }}>

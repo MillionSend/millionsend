@@ -12,7 +12,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { WarnCard } from "@/components/warn-card";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
-import { ACCEPT_FROM, acceptFromHint } from "./parts";
+import { ACCEPT_FROM, acceptFromHint, acceptFromWarns } from "./parts";
 
 type Kind = "agent" | "human";
 type AcceptFrom = InboxSafety["accept_from"];
@@ -216,7 +216,7 @@ export function CreateInboxDialog({
             />
           </div>
         </div>
-        {kind === "agent" && acceptFrom === "anyone" ? (
+        {acceptFromWarns(kind, acceptFrom) ? (
           <WarnCard flush>{t("acceptFrom.anyoneWarn")}</WarnCard>
         ) : (
           // Pulled up to the selects it explains, as a field's own hint sits 6px under it.

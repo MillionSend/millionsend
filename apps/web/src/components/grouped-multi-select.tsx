@@ -59,6 +59,7 @@ export function GroupedMultiSelect({
   button = false,
   onCreate,
   createLabel,
+  maxLength,
 }: {
   value: string[];
   onChange: (value: string[]) => void;
@@ -84,6 +85,8 @@ export function GroupedMultiSelect({
   button?: boolean;
   onCreate?: (name: string) => void;
   createLabel?: (name: string) => string;
+  /** Caps the search text, and so the longest name the create row offers. */
+  maxLength?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -323,6 +326,7 @@ export function GroupedMultiSelect({
                 // biome-ignore lint/a11y/noAutofocus: focus moves into the popover by design, Esc restores the trigger
                 autoFocus
                 value={query}
+                maxLength={maxLength}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
                 {...(activeId !== undefined ? { "aria-activedescendant": activeId } : {})}

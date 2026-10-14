@@ -37,6 +37,7 @@ import {
   messageHref,
   QuarantinedBadge,
   replyAllAdds,
+  replyTarget,
   SuspiciousBadge,
   type ThreadMessage,
   type ThreadRow,
@@ -79,7 +80,10 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
     trpc.inboxes.threads.list.infiniteQueryOptions(base, {
       getNextPageParam: (page) => page.nextCursor,
       enabled: query === "",
-      refetchInterval: LIST_POLL_MS,
+      // Not under a support view, which counts every read on its grant, nor past
+      // the first page, since each loaded page refetches in turn; "Atualizar" covers both.
+      refetchInterval: (list) =>
+        !isReadOnly() && (list.state.data?.pages.length ?? 1) <= 1 ? LIST_POLL_MS : false,
     }),
   );
   const searched = useInfiniteQuery(
@@ -187,7 +191,13 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
           )}
         </div>
         {threadId ? (
-          <ThreadPane inbox={inbox} threadId={threadId} onClose={() => setThreadId("")} />
+          // Keyed so a request still in flight for the thread before can't close this one.
+          <ThreadPane
+            key={threadId}
+            inbox={inbox}
+            threadId={threadId}
+            onClose={() => setThreadId("")}
+          />
         ) : null}
       </div>
     </>
@@ -212,7 +222,9 @@ export function ThreadListRow({
   const t = useTranslations("inboxes");
   const id = useId();
   const unreadLabel = t(agent ? "unreadAgent" : "unread");
-  const dot = row.read ? null : <StatusDot color="var(--ms-bone)" label={unreadLabel} />;
+  const dot = row.read ? null : (
+    <StatusDot id={`${id}-dot`} color="var(--ms-bone)" label={unreadLabel} />
+  );
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the row only widens its button's click; keyboard users reach the button
     <li className={row.read ? "ms-thread-row" : "ms-thread-row unread"} onClick={onOpen}>
@@ -233,26 +245,30 @@ export function ThreadListRow({
         {row.message_count > 1 ? <span className="ms-count">{row.message_count}</span> : null}
       </span>
       <span className="ms-thread-subject">
-        {row.pending_approval ? (
-          <span className="ms-badge ms-badge-warn">{t("badge.draft")}</span>
-        ) : null}
-        {row.quarantined > 0 ? (
-          <QuarantinedBadge reason={row.quarantine_reason} />
-        ) : agent && row.suspicious ? (
-          <SuspiciousBadge injection={row.injection_score} phishing={row.phishing_score} />
-        ) : null}
-        {row.labels.map((label) => (
-          <span key={label.id} className="ms-badge ms-badge-neutral">
-            <StatusDot color={label.color} />
-            {label.name}
-          </span>
-        ))}
+        {/* Boxless, so the pills stay the subject line's flex items; the button reads them out. */}
+        <span id={`${id}-pills`} style={{ display: "contents" }}>
+          {row.pending_approval ? (
+            <span className="ms-badge ms-badge-warn">{t("badge.draft")}</span>
+          ) : null}
+          {row.quarantined > 0 ? (
+            <QuarantinedBadge reason={row.quarantine_reason} />
+          ) : agent && row.suspicious ? (
+            <SuspiciousBadge injection={row.injection_score} phishing={row.phishing_score} />
+          ) : null}
+          {row.labels.map((label) => (
+            <span key={label.id} className="ms-badge ms-badge-neutral">
+              <StatusDot color={label.color} />
+              {label.name}
+            </span>
+          ))}
+        </span>
         {/* No handler of its own: its click, Enter's included, bubbles to the row. */}
         <button
           type="button"
           className="ms-thread-open"
           aria-current={selected || undefined}
           aria-labelledby={`${id}-from ${id}-title`}
+          aria-describedby={dot ? `${id}-dot ${id}-pills` : `${id}-pills`}
         >
           <span className="ms-thread-text">
             <span id={`${id}-title`} className="ms-thread-title">
@@ -341,6 +357,7 @@ function ThreadPane({
   );
   // Messages load oldest first: the newest is known once the last page is in.
   const newest = messages.hasNextPage ? undefined : items[items.length - 1];
+  const target = messages.hasNextPage ? undefined : replyTarget(items);
   const summary = thread.data;
   const labelIds = summary?.labels.map((label) => label.id) ?? [];
 
@@ -405,6 +422,8 @@ function ThreadPane({
                   groups={[{ key: "labels", label: "" }]}
                   searchPlaceholder={t("labelSearch")}
                   noResultsLabel={tc("select.noResults")}
+                  // labels.create takes 64 characters at most.
+                  maxLength={64}
                   onCreate={(name) => createLabel.mutate({ inboxId: inbox.id, name })}
                   createLabel={(name) => t("createLabel", { name })}
                   onChange={(next) => {
@@ -451,7 +470,7 @@ function ThreadPane({
         <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {summary.labels.map((label) => (
             <span key={label.id} className="ms-chip">
-              <span className="ms-dot" style={{ background: label.color }} aria-hidden="true" />
+              <StatusDot color={label.color} />
               {label.name}
               <button
                 type="button"
@@ -496,14 +515,8 @@ function ThreadPane({
         />
       ))}
 
-      {newest && !inbox.expired ? (
-        <ReplyComposer
-          key={threadId}
-          inbox={inbox}
-          threadId={threadId}
-          latest={newest}
-          onSent={refresh}
-        />
+      {target && !inbox.expired ? (
+        <ReplyComposer inbox={inbox} threadId={threadId} target={target} onSent={refresh} />
       ) : null}
     </section>
   );
@@ -733,18 +746,18 @@ function DraftCard({
 }
 
 /**
- * Answers the thread's newest message. Key it by thread: a half-written reply
- * stays with the thread it was written in.
+ * Answers `target` (see replyTarget). One instance per thread, since the pane
+ * is keyed by thread: a half-written reply stays with the thread it was written in.
  */
 function ReplyComposer({
   inbox,
   threadId,
-  latest,
+  target,
   onSent,
 }: {
   inbox: InboxDetail;
   threadId: string;
-  latest: ThreadMessage;
+  target: ThreadMessage;
   onSent: () => void;
 }) {
   const t = useTranslations("inboxes");
@@ -774,10 +787,10 @@ function ReplyComposer({
   );
   const text = htmlToText(html);
   const ready = text !== "" && !reply.isPending;
-  const others = replyAllAdds(latest, inbox);
+  const others = replyAllAdds(target, inbox);
   const send = (replyAll: boolean) => {
     if (!ready) return;
-    reply.mutate({ inboxId: inbox.id, threadId, emailId: latest.id, html, text, replyAll });
+    reply.mutate({ inboxId: inbox.id, threadId, emailId: target.id, html, text, replyAll });
   };
   return (
     <div style={{ display: "grid", gap: 8 }}>

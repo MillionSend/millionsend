@@ -359,7 +359,7 @@
     "retentionValue": "Mail is kept for {days, plural, one {# day} other {# days}}.",
     "forwarding": "Forwarding",
     "forwardTo": "Forward every message to",
-    "forwardToTip": "Every message delivered to this inbox is also sent, as a copy, to these addresses (quarantined ones only once released). {shared, select, yes {You can pick team members.} other {You can pick team members and the owner addresses.}}",
+    "forwardToTip": "Every message delivered to this inbox is also sent, as a copy, to these addresses. Spam stays out, and quarantined mail goes only once released. {shared, select, yes {You can pick team members.} other {You can pick team members and the owner addresses.}}",
     "forwardPlaceholder": "{shared, select, yes {Pick team members} other {Pick team members or owners}}",
     "owners": "Owner addresses",
     "ownersTip": "People outside the team who also look after this inbox. They count as the team: their mail always gets in (when it authenticates){kind, select, agent {, the agent can reply to them without approval,} other {}} and they can receive forwarded mail.",

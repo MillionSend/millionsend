@@ -133,6 +133,12 @@
 .ms-maily-compact .ms-maily-surface {
   min-height: 120px;
 }
+/* The body takes the ring a textarea would: ProseMirror drops its outline and
+   a contenteditable has no tabindex for the global rule to catch. */
+.ms-maily-compact .ms-maily-surface:focus-within {
+  border-color: var(--ms-focus-border);
+  box-shadow: var(--ms-focus-ring);
+}
 /* Maily's selection bubble offers headings, alignment, colors and its footer
    block, all of which a message body leaves out; the toolbar has the rest. */
 .ms-maily-compact [data-tippy-root] {

@@ -52,17 +52,20 @@ export function StatusDot({
   status,
   color,
   label,
+  id,
 }: {
   status?: BadgeStatus;
   color?: string;
   label?: string;
+  /** For an aria-describedby that reads the label out on a control beside the dot. */
+  id?: string;
 }) {
   const fill = status ? DOT_COLORS[status] : color;
   const a11y = label ? { role: "img", "aria-label": label } : { "aria-hidden": true };
   return fill ? (
-    <span className="ms-dot" style={{ background: fill }} {...a11y} />
+    <span id={id} className="ms-dot" style={{ background: fill }} {...a11y} />
   ) : (
-    <span className="ms-dot ring" {...a11y} />
+    <span id={id} className="ms-dot ring" {...a11y} />
   );
 }
 

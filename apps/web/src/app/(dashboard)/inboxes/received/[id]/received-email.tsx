@@ -400,7 +400,10 @@ export function ReceivedEmailView() {
           ) : (
             <span style={{ display: "grid", gap: 4 }}>
               {email.memberships.map((m) => (
-                <span key={m.inboxId} style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <span
+                  key={m.inboxId}
+                  style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+                >
                   <Link
                     className="ms-link ms-mono"
                     href={`/inboxes/${m.inboxId}?thread=${m.threadId}`}

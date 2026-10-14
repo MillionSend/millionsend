@@ -318,6 +318,10 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
         setEraseOpen(false);
         setEraseEmail("");
         invalidate();
+        // Dropped, not invalidated: a stale copy would show the erased address until refetched.
+        queryClient.removeQueries(trpc.emails.pathFilter());
+        queryClient.removeQueries(trpc.logs.pathFilter());
+        queryClient.removeQueries(trpc.webhooks.deliveries.pathFilter());
       },
     }),
   );

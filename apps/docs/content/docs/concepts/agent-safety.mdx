@@ -39,7 +39,7 @@ and as **Trust** in the dashboard. The first row that matches wins:
 | `sender_trust` | The sender |
 | --- | --- |
 | `failed` | Failed authentication, and the domain asks receivers to quarantine or reject such mail; or the domain publishes no DMARC policy and fails SPF with no DKIM signature of its own. This beats every other row, so a forged owner never passes. |
-| `owner` | One of your team members' sign-in addresses, or an address in the inbox's `owner_addresses`, and the domain vouches for it. |
+| `owner` | One of your team members' sign-in addresses, or an address in the inbox's `owner_addresses` (never on the shared domain), and the domain vouches for it. |
 | `allowlisted` | Matches the inbox's allowlist, and the domain vouches for it. |
 | `known_thread` | Replies in a thread the inbox wrote in, from an address the inbox wrote to, proven by the thread token in `References` or by an `In-Reply-To` that names a message the inbox sent. No authentication needed, so a small correspondent without DKIM can still answer. |
 | `external` | Any other sender whose domain vouches for it, other addresses at your own domains included. |

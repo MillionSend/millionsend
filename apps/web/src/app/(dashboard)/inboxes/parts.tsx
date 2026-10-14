@@ -93,6 +93,19 @@ export function messageHref(message: Pick<ThreadMessage, "id" | "direction">): s
 }
 
 /**
+ * The message a thread's reply answers: the newest the inbox sent or let in.
+ * Held mail (still screening, or quarantined) may carry a forged Reply-To, so
+ * it is answered only from its own page, by choice.
+ */
+export function replyTarget(messages: readonly ThreadMessage[]): ThreadMessage | undefined {
+  return messages.findLast(
+    (message) =>
+      message.direction === "outbound" ||
+      (message.screening.verdict !== "pending" && message.screening.verdict !== "quarantined"),
+  );
+}
+
+/**
  * Whom "Reply all" adds to a plain reply, as core's replyRecipients copies
  * them: the answered message's other recipients (its cc alone for a send of
  * the inbox's), never the inbox itself or whom the reply already goes to.
@@ -140,4 +153,12 @@ export function acceptFromHint(
   value: InboxSafety["accept_from"],
 ): string {
   return t(`acceptFrom.${value === "anyone" && kind === "human" ? "anyoneHuman" : value}Hint`);
+}
+
+/**
+ * Whether an accept_from choice shows the warning card: an agent acts on what
+ * it reads, where a person judges it.
+ */
+export function acceptFromWarns(kind: string, value: InboxSafety["accept_from"]): boolean {
+  return kind === "agent" && value === "anyone";
 }

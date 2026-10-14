@@ -40,9 +40,10 @@ export function ChipMultiSelect({
   /** Forwarded to the text input so an ms-field <label htmlFor> can target it. */
   id?: string;
   /**
-   * Enter with no suggestion highlighted adds onCreate(typed text), the value
-   * to store. A value outside options then shows as itself, and the
-   * placeholder stays after the first chip, since it says how to add one.
+   * Enter with no suggestion highlighted, or leaving the field, adds
+   * onCreate(typed text), the value to store. A value outside options then
+   * shows as itself, and the placeholder stays after the first chip, since it
+   * says how to add one.
    */
   onCreate?: (text: string) => string;
 }) {
@@ -78,6 +79,16 @@ export function ChipMultiSelect({
     onChange(value.filter((v) => v !== optionValue));
   }
 
+  /** Adds onCreate(typed text) unless already chosen; either way the field empties. */
+  function createTyped() {
+    const text = query.trim();
+    if (!onCreate || !text) return;
+    const created = onCreate(text);
+    if (!value.includes(created)) onChange([...value, created]);
+    setQuery("");
+    setActiveIndex(0);
+  }
+
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     switch (event.key) {
       case "ArrowDown":
@@ -93,13 +104,8 @@ export function ChipMultiSelect({
         // Never let Enter submit the surrounding form from inside the token input.
         event.preventDefault();
         const pick = suggestions[activeIndex];
-        const text = query.trim();
         if (open && pick) add(pick.value);
-        else if (onCreate && text) {
-          const created = onCreate(text);
-          if (value.includes(created)) setQuery("");
-          else add(created);
-        }
+        else createTyped();
         break;
       }
       case "Escape":
@@ -173,6 +179,11 @@ export function ChipMultiSelect({
           value={query}
           placeholder={chips.length === 0 || onCreate ? placeholder : ""}
           onFocus={() => setOpen(true)}
+          // Leaving the field keeps what was typed, so a save never drops it unseen;
+          // a click on a suggestion blurs first, and adds that one instead.
+          onBlur={() => {
+            if (!showMenu) createTyped();
+          }}
           onChange={(event) => {
             setQuery(event.target.value);
             setActiveIndex(0);

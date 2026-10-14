@@ -489,7 +489,6 @@ export function DomainDetail({ id }: { id: string }) {
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
         void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
-        void queryClient.invalidateQueries(trpc.inboxes.pathFilter());
       },
       onError: (error) => {
         const code = trpcErrorCode(error);
@@ -510,7 +509,6 @@ export function DomainDetail({ id }: { id: string }) {
     trpc.domains.setCatchAll.mutationOptions({
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
-        void queryClient.invalidateQueries(trpc.inboxes.pathFilter());
       },
       onError: (error) =>
         toast(

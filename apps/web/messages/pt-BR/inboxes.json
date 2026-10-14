@@ -359,7 +359,7 @@
     "retentionValue": "Os e-mails ficam guardados por {days, plural, one {# dia} other {# dias}}.",
     "forwarding": "Encaminhamento",
     "forwardTo": "Encaminhar toda mensagem para",
-    "forwardToTip": "Cada e-mail que chega nesta caixa também vai, como cópia, para estes endereços (os da quarentena, só depois de liberados). {shared, select, yes {Você pode escolher pessoas do time.} other {Você pode escolher pessoas do time e os endereços de responsáveis.}}",
+    "forwardToTip": "Cada e-mail que chega nesta caixa também vai, como cópia, para estes endereços. O spam fica de fora, e o que estava em quarentena só vai depois de liberado. {shared, select, yes {Você pode escolher pessoas do time.} other {Você pode escolher pessoas do time e os endereços de responsáveis.}}",
     "forwardPlaceholder": "{shared, select, yes {Escolha pessoas do time} other {Escolha pessoas do time ou responsáveis}}",
     "owners": "Endereços de responsáveis",
     "ownersTip": "Pessoas de fora do time que também cuidam desta caixa. Elas contam como o time: o que mandam sempre entra (se o e-mail for autenticado){kind, select, agent {, o agente pode responder a elas sem aprovação} other {}} e elas podem receber o encaminhamento.",

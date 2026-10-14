@@ -174,17 +174,18 @@ section of `components.css`; every rule above it holds at every width.
   (inbox folders) has the same look with `aria-pressed` buttons, since there
   is no tab panel.
 - **Radios** never show the browser's widget: every radio sits in a
-  `.ms-radio-card`, whose radio is `.ms-checkbox` in a circle (inset ground,
-  line-strong border, bone with a ground dot when chosen), and the chosen
-  card lifts to `--ms-panel-raised` with a line-strong border.
+  `.ms-radio-card`, whose radio is `.ms-checkbox`'s box, declared with it, in
+  a circle (inset ground, line-strong border, bone with a ground dot when
+  chosen), and the chosen card lifts to `--ms-panel-raised` with a
+  line-strong border.
 - **Number fields** never show stepper arrows (one global
   `input[type="number"]` rule), and a `textarea.ms-input` takes its height
   from `rows`.
 - **Token inputs** (`<ChipMultiSelect>`): chips sit inside one 30px
   `.ms-input` frame at 20px, so the first chip never grows the field; the
   frame takes the focus ring and the bare input inside draws none. With
-  `onCreate`, Enter adds what was typed, so a list of addresses needs no
-  separate Add button.
+  `onCreate`, Enter or leaving the field adds what was typed, so a list of
+  addresses needs no separate Add button and a save never drops an entry.
 - **A warning inside a form** is a `WarnCard` (warn border, a warn glow from
   the left), never a warn-colored hint line. In a gap-spaced stack, such as
   a dialog's form grid, it takes `flush` so the gap spaces it like any field.
@@ -203,8 +204,9 @@ section of `components.css`; every rule above it holds at every width.
   editor in compact mode (`MessageEditor`, `components/maily-editor/lazy.tsx`):
   bold, italic, underline, strike, lists, link and clear formatting; no
   headings, alignment, variables, "/" menu or selection bubble. The body
-  starts at 120px and scrolls past 45vh, ⌘↵ sends, and the send carries the
-  editor's html with an `htmlToText` text part.
+  starts at 120px and scrolls past 45vh, its frame takes the focus ring, ⌘↵
+  sends, and the send carries the editor's html with an `htmlToText` text
+  part.
 - **Empty and blocked states:** a page with nothing in it yet is the tiled
   `EmptyState`; an empty tab, folder or filtered list is a `StateCard` (no
   tile, at most one action), never a bare muted line. A disabled button says

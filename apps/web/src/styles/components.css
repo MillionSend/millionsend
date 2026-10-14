@@ -499,6 +499,9 @@ table.ms-table {
   align-items: center;
   min-width: 0;
 }
+.ms-thread-from > .ms-count {
+  color: var(--ms-muted);
+}
 /* Pills, nowrap, keep their width; only the subject line (min-width 0) gives
    way and ellipsizes. */
 .ms-thread-subject {
@@ -508,7 +511,7 @@ table.ms-table {
   gap: 8px;
   min-width: 0;
 }
-.ms-thread-subject > .ms-badge {
+.ms-thread-subject .ms-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -559,6 +562,10 @@ table.ms-table {
       ". subject subject";
     row-gap: 2px;
     padding: 8px 12px;
+  }
+  .ms-thread-subject .ms-badge {
+    font-size: 10.5px;
+    padding: 1px 7px;
   }
 }
 
@@ -943,8 +950,10 @@ table.ms-table {
 
 /* Checkbox — bulk row selection. Checked/indeterminate fill with bone and draw
    the glyph in ground (the primary-button pairing); the glyph is an inline SVG
-   so the light theme re-declares it with the flipped ground color. */
-.ms-checkbox {
+   so the light theme re-declares it with the flipped ground color. A radio
+   card's radio is the same box, made round under .ms-radio-card. */
+.ms-checkbox,
+.ms-radio-card input {
   appearance: none;
   flex-shrink: 0;
   display: block;
@@ -960,7 +969,8 @@ table.ms-table {
     background-color var(--ms-dur-fast) var(--ms-ease);
 }
 .ms-checkbox:checked,
-.ms-checkbox:indeterminate {
+.ms-checkbox:indeterminate,
+.ms-radio-card input:checked {
   background-color: var(--ms-bone);
   border-color: var(--ms-bone);
 }
@@ -1644,8 +1654,8 @@ button.ms-notice-strip-action {
   flex: 1 1 14rem;
   text-align: left;
 }
-/* Radio cards hold every radio in the app. The radio is .ms-checkbox in a
-   circle, and the chosen card lifts like the active tab. */
+/* Radio cards hold every radio in the app. The radio is .ms-checkbox's box
+   (declared with it) in a circle, and the chosen card lifts like the active tab. */
 .ms-radio-card {
   display: flex;
   align-items: flex-start;
@@ -1675,23 +1685,12 @@ button.ms-notice-strip-action {
   color: inherit;
 }
 .ms-radio-card input {
-  appearance: none;
-  flex: none;
-  width: 15px;
-  height: 15px;
   margin: 3px 0 0;
-  border: 1px solid var(--ms-line-strong);
   border-radius: 50%;
-  background: var(--ms-inset);
   cursor: inherit;
-  transition:
-    background-color var(--ms-dur-fast) var(--ms-ease),
-    border-color var(--ms-dur-fast) var(--ms-ease);
 }
 .ms-radio-card input:checked {
-  background-color: var(--ms-bone);
   background-image: radial-gradient(circle, var(--ms-ground) 2.5px, transparent 3px);
-  border-color: var(--ms-bone);
 }
 .ms-radio-card input:disabled {
   opacity: 0.55;
