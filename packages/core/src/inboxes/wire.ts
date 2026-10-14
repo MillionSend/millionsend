@@ -14,6 +14,7 @@ import type {
   ThreadEmailAttachmentWire,
   ThreadLabelWire,
   ThreadSummaryWire,
+  WireLastEvent,
 } from "./types.js";
 
 // Row → wire serializers every surface (REST, tRPC, webhooks) shares, so
@@ -41,8 +42,7 @@ export function sesMessageIdHeader(sesMessageId: string): string {
   return sesMessageId.startsWith("<") ? sesMessageId : `<${sesMessageId}@email.amazonses.com>`;
 }
 
-/** Quota parking is internal: Resend's last_event union has no queued_quota. */
-export function wireLastEvent(status: EmailRow["latestStatus"]): string {
+export function wireLastEvent(status: EmailRow["latestStatus"]): WireLastEvent {
   return status === "queued_quota" ? "queued" : status;
 }
 

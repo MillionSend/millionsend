@@ -21,7 +21,7 @@ import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
-import { StatusDot } from "@/components/status-badge";
+import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { addrSpec, formatBytes, formatRelative, senderName } from "@/lib/format";
@@ -577,7 +577,7 @@ function MessageCard({
             ) : null}
           </>
         ) : (
-          <span className="ms-badge ms-badge-neutral">{message.status}</span>
+          <StatusBadge status={message.status} />
         )}
         <span style={{ ...muted, marginLeft: "auto" }}>
           <RelativeTime date={message.received_at} />

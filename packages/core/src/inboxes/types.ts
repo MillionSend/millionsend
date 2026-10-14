@@ -185,10 +185,16 @@ export interface InboundThreadEmailWire extends ThreadEmailFields {
   virus_verdict: VirusVerdict | null;
 }
 
+/** Quota parking is internal: Resend's last_event union has no queued_quota. */
+export type WireLastEvent = Exclude<
+  (typeof schema.emailStatusEnum.enumValues)[number],
+  "queued_quota"
+>;
+
 export interface OutboundThreadEmailWire extends ThreadEmailFields {
   direction: "outbound";
   /** The email's last_event. */
-  status: string;
+  status: WireLastEvent;
 }
 
 export type ThreadEmailWire = InboundThreadEmailWire | OutboundThreadEmailWire;

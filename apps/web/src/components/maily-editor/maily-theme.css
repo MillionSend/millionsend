@@ -27,10 +27,12 @@
 }
 
 /* ---- container ---------------------------------------------------------- */
-/* Maily's placeholder rule (an id selector, so no class override wins) reads
-   its color from this variable. */
+/* Maily's placeholder and link rules (id selectors, so no class override
+   wins) read their colors from these variables; its link default is
+   near-black, unreadable on the dark panel. */
 .ms-maily {
   --placeholder-color: var(--ms-faint);
+  --mly-link-color: var(--ms-bone);
   display: flex;
   flex-direction: column;
 }
@@ -141,12 +143,12 @@
 }
 /* The body's frame takes the ring a textarea would. Tiptap gives the body
    tabindex="0", so the global [tabindex="0"] ring would draw a second, square
-   ring inside the frame's. */
-.ms-maily-compact .ms-maily-surface:focus-within {
+   ring inside the frame's, its corners past the frame's rounded ones. */
+.ms-maily .ms-maily-surface:focus-within {
   border-color: var(--ms-focus-border);
   box-shadow: var(--ms-focus-ring);
 }
-.ms-maily-compact .ProseMirror:focus-visible {
+.ms-maily .ProseMirror:focus-visible {
   box-shadow: none;
 }
 /* Maily's selection bubble offers headings, alignment, colors and its footer
