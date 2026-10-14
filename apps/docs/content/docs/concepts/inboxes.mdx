@@ -235,10 +235,12 @@ team's:
   Each of these refusals answers `403 inbox_send_policy`, approved or not. A
   stored `send_policy` is never rewritten: it applies again once the plan or
   the instance allows it.
-- Owner addresses, the allowlist and a `Reply-To` at another organization
-  don't count here (`send_policy` can't be `allowlist`), and `forward_to`
-  takes members' sign-in addresses only: the shared domain is every team's,
-  so it never writes to an address nobody proved.
+- Owner addresses don't count here, for mail coming in or going out. The
+  allowlist counts for incoming mail only: it lets its senders in, but as a
+  recipient an address on it is like any other (`send_policy` can't be
+  `allowlist`), and a `Reply-To` at another organization never counts.
+  `forward_to` takes members' sign-in addresses only: the shared domain is
+  every team's, so it never writes to an address nobody proved.
 - They send to 10 recipients per email at most (`422 validation_error`) and
   50 a day per inbox (`send_cap` from 1 to 50). All your team's shared
   addresses together reach 1,000 recipients per UTC day, unless the instance
@@ -473,8 +475,8 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | Setting | Does |
 | --- | --- |
 | `accept_from` | Whose mail reaches the inbox: `anyone`; `verified`, senders whose domain vouches for the From address, plus owners, the allowlist and known threads; or `allowlist`, owners, the allowlist and known threads only. The rest is quarantined. |
-| `allowlist` | Up to 500 entries: `name@domain`, exact and as written, or `*@domain` for a domain and its subdomains. An entry counts only for mail whose domain vouches for it. |
-| `owner_addresses` | Up to 50 more addresses treated as the inbox's owners, besides your team members' sign-in addresses. |
+| `allowlist` | Up to 500 entries: `name@domain`, exact and as written, or `*@domain` for a domain and its subdomains. An entry counts only for mail whose domain vouches for it. On the shared domain it counts for incoming mail only. |
+| `owner_addresses` | Up to 50 more addresses treated as the inbox's owners, besides your team members' sign-in addresses. Ignored on the shared domain. |
 | `screening` | Score mail from outside senders for prompt injection and phishing (agent inboxes). |
 | `extract_codes` | Pull verification codes and sign-in links out of mail (`extracted.code`, `extracted.link`, `codes/latest`). |
 | `send_policy` | `reply_only`; `allowlist`, which adds new conversations with owners and the allowlist (not on the shared domain); or `open`, anyone, once the team is past its first sends, and on the shared domain only where it may start conversations. |
@@ -483,13 +485,13 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | `send_cap` | Recipients the inbox may send to per UTC day without a person: 1–100,000, or `null` for no cap; 1–50 on the shared domain. |
 | `forward_to` | Up to 5 addresses that get a copy of every delivered message except spam: team members' sign-in addresses or owner addresses. |
 
-A setting that breaks a rule answers `422` with the reason: `allowlist` on
-the shared domain, `open` on a shared address that may only reply or for a
-team still new to sending, `screening` on a `human` inbox, or a `forward_to`
-address that is neither a member's nor an owner address. An inbox-scoped key can't change these settings
-(`403 restricted_api_key`), the MCP server has no tool for them, and in the
-dashboard only owners and admins can. [Agent safety](/concepts/agent-safety)
-explains what each one does.
+A setting that breaks a rule answers `422` with the reason: `send_policy`
+`allowlist` on the shared domain, `open` on a shared address that may only
+reply or for a team still new to sending, `screening` on a `human` inbox, or
+a `forward_to` address that is neither a member's nor an owner address. An
+inbox-scoped key can't change these settings (`403 restricted_api_key`), the
+MCP server has no tool for them, and in the dashboard only owners and admins
+can. [Agent safety](/concepts/agent-safety) explains what each one does.
 
 ## Quarantine
 

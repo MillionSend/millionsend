@@ -567,6 +567,30 @@ describe("ingest into inboxes", () => {
     });
   });
 
+  it("lets a shared-domain inbox's allowlist admit its senders, unjudged as anywhere", async () => {
+    const team = await createTeam(db, "allowlist-shared");
+    const [shared] = await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId: team, name: "listed.agents.example" })
+      .returning({ id: schema.sharedInboxDomains.id });
+    const inbox = await addInbox(team, "signup-6g7h@listed.agents.example", null, {
+      sharedDomainId: shared?.id as string,
+      safety: { accept_from: "allowlist", allowlist: ["*@partner.example"] },
+    });
+    screens.length = 0;
+    const id = await ingestOne(
+      message({ from: "codes@partner.example", to: "signup-6g7h@listed.agents.example" }),
+      ["signup-6g7h@listed.agents.example"],
+      { judgeAvailable: true },
+    );
+    expect((await memberships(id))[0]).toMatchObject({
+      inboxId: inbox,
+      senderTrust: "allowlisted",
+      verdict: "clean",
+    });
+    expect(screens).toEqual([]);
+  });
+
   it("shows nothing an inbox holds through a catch-all copy or a thread subject (S4)", async () => {
     const inbox = await addInbox(acme, "guarded@in.acme.test", acmeDomain, {
       safety: { accept_from: "allowlist", allowlist: ["*@partner.example"] },

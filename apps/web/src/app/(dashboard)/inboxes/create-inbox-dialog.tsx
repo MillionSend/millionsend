@@ -217,7 +217,7 @@ export function CreateInboxDialog({
           <p
             style={{ margin: "-8px 0 0", fontSize: 12, lineHeight: 1.5, color: "var(--ms-muted)" }}
           >
-            {acceptFromHint(t, kind, acceptFrom)}
+            {acceptFromHint(t, kind, shared, acceptFrom)}
           </p>
         )}
         {error ? (

@@ -93,11 +93,11 @@ describe("safetyProblem", () => {
     expect(safetyProblem({ ...agent, send_cap: 50 }, shared)).toBeNull();
   });
 
-  it("never takes allowlist on the shared domain, and open only while the team's mode is open", () => {
+  it("never takes send_policy allowlist on the shared domain, and open only while the team's mode is open", () => {
     const shared = { ...ctx, shared: true };
     const base = defaultSafety("agent", true);
     expect(safetyProblem({ ...base, send_policy: "allowlist" }, shared)).toBe(
-      'send_policy "allowlist" is not available on the shared domain: its allowlist never counts there',
+      'send_policy "allowlist" is not available on the shared domain: there the allowlist counts for incoming mail only',
     );
     const open = { ...base, send_policy: "open" as const };
     const mode = (sharedSending: SharedSending) =>

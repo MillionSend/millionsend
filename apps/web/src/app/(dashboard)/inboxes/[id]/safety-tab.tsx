@@ -109,8 +109,8 @@ export function SafetyForm({
   const agent = inbox.kind === "agent";
   const shared = inbox.shared ? "yes" : "no";
   const sharedMode = sharedModeKey(inbox);
-  // The shared domain never counts the allowlist, and opens only in its open
-  // mode; a stored choice stays listed so a downgraded inbox can step back.
+  // On the shared domain the allowlist never vouches for a recipient, and open
+  // needs the open mode; a stored choice stays listed so a downgraded inbox can step back.
   const policies = inbox.shared
     ? POLICIES.filter(
         (p) =>
@@ -154,7 +154,7 @@ export function SafetyForm({
               />
               <span>
                 {t(`acceptFrom.${value}`)}
-                <div className="sub">{acceptFromHint(t, inbox.kind, value)}</div>
+                <div className="sub">{acceptFromHint(t, inbox.kind, inbox.shared, value)}</div>
               </span>
             </label>
           ))}

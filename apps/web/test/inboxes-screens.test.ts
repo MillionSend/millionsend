@@ -704,6 +704,15 @@ describe("addresses on the shared domain", () => {
     expect(html).not.toContain("SMTP");
   });
 
+  it("leaves owner addresses out of the allowlist-only hint on a shared address", () => {
+    const sharedHint = t("acceptFrom.allowlistHint", { shared: "yes" });
+    const ownHint = t("acceptFrom.allowlistHint", { shared: "no" });
+    expect(sharedHint).not.toContain("owner");
+    expect(text(form({ shared: true }))).toContain(sharedHint);
+    expect(text(form({ shared: true }))).not.toContain(ownHint);
+    expect(text(form({}))).toContain(ownHint);
+  });
+
   it("says in the inbox header when a shared address can't start conversations", () => {
     const header = (inbox: Partial<InboxDetail>) => {
       rq.data = {

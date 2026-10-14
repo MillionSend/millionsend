@@ -123,7 +123,7 @@
     "anyoneHint": "Recebe de qualquer remetente; quem falha na autenticação vai para a quarentena.",
     "anyoneHumanHint": "Como um e-mail comum: tudo chega, e o que falha na autenticação vai para o Spam.",
     "verifiedHint": "Aceita quem comprova que escreve do próprio domínio, como qualquer conta de Gmail ou Outlook, e respostas nas conversas desta caixa.",
-    "allowlistHint": "Aceita só o time, os responsáveis, a lista de permitidos e respostas nas conversas desta caixa.",
+    "allowlistHint": "{shared, select, yes {Aceita só o time, a lista de permitidos e respostas nas conversas desta caixa.} other {Aceita só o time, os responsáveis, a lista de permitidos e respostas nas conversas desta caixa.}}",
     "anyoneWarn": "Aceita também e-mails sem remetente comprovado, inclusive endereços falsos de gmail.com, outlook.com e outros domínios que não bloqueiam falsificação. Quem escreve de verdade pelo Gmail ou pelo Outlook já passa em “Remetentes verificados”: use esta opção só se precisar receber de domínios mal configurados."
   },
   "expires": {

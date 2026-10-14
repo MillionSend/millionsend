@@ -34,11 +34,13 @@ const safetyFields = {
   allowlist: z
     .array(z.string())
     .max(INBOX_ALLOWLIST_MAX)
-    .describe('"local@domain" (exact) or "*@domain" (the domain and its subdomains)'),
+    .describe(
+      '"local@domain" (exact) or "*@domain" (the domain and its subdomains). On the shared domain it only lets mail in',
+    ),
   owner_addresses: z
     .array(z.string())
     .max(INBOX_OWNER_ADDRESSES_MAX)
-    .describe("Owners besides the team members' login addresses"),
+    .describe("Owners besides the team members' login addresses; ignored on the shared domain"),
   screening: z.boolean().describe("Score external mail for prompt injection (agent inboxes only)"),
   extract_codes: z.boolean().describe("Expose extracted codes and sign-in links"),
   send_policy: z

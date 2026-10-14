@@ -246,11 +246,13 @@ as equipes:
   Cada uma dessas recusas responde `403 inbox_send_policy`, com ou sem
   aprovação. O `send_policy` salvo nunca é reescrito: ele volta a valer
   assim que o plano ou a instância permitem.
-- Os endereços de responsáveis, a lista de permitidos e um `Reply-To` de
-  outra organização não contam aqui (o `send_policy` não pode ser
-  `allowlist`), e o `forward_to` só aceita endereços de login da equipe: o
-  domínio compartilhado é de todas as equipes, então ele nunca escreve para
-  um endereço que ninguém comprovou.
+- Os endereços de responsáveis não contam aqui, nem no que chega nem no que
+  sai. A lista de permitidos só vale para o que chega: ela deixa os
+  remetentes dela entrarem, mas como destinatário um endereço dela é igual a
+  qualquer outro (o `send_policy` não pode ser `allowlist`), e um `Reply-To`
+  de outra organização nunca conta. O `forward_to` só aceita endereços de
+  login da equipe: o domínio compartilhado é de todas as equipes, então ele
+  nunca escreve para um endereço que ninguém comprovou.
 - Eles enviam para no máximo 10 destinatários por e-mail
   (`422 validation_error`) e 50 por dia por caixa (`send_cap` de 1 a 50).
   Todos os endereços compartilhados da sua equipe, somados, chegam a 1.000
@@ -494,8 +496,8 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | Configuração | Faz |
 | --- | --- |
 | `accept_from` | De quem o e-mail chega à caixa: `anyone`, qualquer pessoa; `verified`, remetentes cujo domínio garante o endereço do From, mais responsáveis, a lista de permitidos e conversas conhecidas; ou `allowlist`, só responsáveis, a lista de permitidos e conversas conhecidas. O resto vai para a quarentena. |
-| `allowlist` | Até 500 itens: `nome@domínio`, exato e como foi escrito, ou `*@domínio` para um domínio e os subdomínios dele. Um item só vale para e-mails que o domínio garante. |
-| `owner_addresses` | Até 50 endereços a mais tratados como responsáveis pela caixa, além dos endereços de login das pessoas da sua equipe. |
+| `allowlist` | Até 500 itens: `nome@domínio`, exato e como foi escrito, ou `*@domínio` para um domínio e os subdomínios dele. Um item só vale para e-mails que o domínio garante. No domínio compartilhado, ela só vale para o que chega. |
+| `owner_addresses` | Até 50 endereços a mais tratados como responsáveis pela caixa, além dos endereços de login das pessoas da sua equipe. São ignorados no domínio compartilhado. |
 | `screening` | Dá notas de injeção de prompt e phishing aos e-mails de remetentes de fora (caixas de agente). |
 | `extract_codes` | Tira dos e-mails os códigos de verificação e links de acesso (`extracted.code`, `extracted.link`, `codes/latest`). |
 | `send_policy` | `reply_only`; `allowlist`, que acrescenta conversas novas com responsáveis e com a lista de permitidos (fora do domínio compartilhado); ou `open`, qualquer pessoa, depois que a equipe passou dos primeiros envios, e no domínio compartilhado só quando ele pode começar conversas. |
@@ -505,12 +507,12 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | `forward_to` | Até 5 endereços que recebem uma cópia de toda mensagem entregue, menos spam: endereços de login de pessoas da equipe ou endereços de responsáveis. |
 
 Uma configuração que quebra uma regra responde `422` com o motivo:
-`allowlist` no domínio compartilhado, `open` num endereço compartilhado que
-só pode responder ou para uma equipe ainda nova no envio, `screening` numa
-caixa `human`, ou um endereço de `forward_to` que não é de alguém da equipe
-nem de responsável. Uma chave restrita a uma caixa não muda essas
-configurações (`403 restricted_api_key`), o servidor MCP não tem ferramenta
-para elas, e no painel só donos e admins mudam.
+`send_policy` `allowlist` no domínio compartilhado, `open` num endereço
+compartilhado que só pode responder ou para uma equipe ainda nova no envio,
+`screening` numa caixa `human`, ou um endereço de `forward_to` que não é de
+alguém da equipe nem de responsável. Uma chave restrita a uma caixa não muda
+essas configurações (`403 restricted_api_key`), o servidor MCP não tem
+ferramenta para elas, e no painel só donos e admins mudam.
 [Segurança de agentes](/pt-BR/concepts/agent-safety) explica o que cada uma
 faz.
 

@@ -182,7 +182,7 @@ describe("POST /emails from a shared address", () => {
 });
 
 describe("safety rules on the shared domain", () => {
-  it("refuses allowlist outright, and open while the team's mode is not open (422)", async () => {
+  it("refuses send_policy allowlist outright, and open while the team's mode is not open (422)", async () => {
     const shared = await addInbox(w, { local: "rules", shared: true });
     const patch = (body: Record<string, unknown>) =>
       call(teamKey, "PATCH", `/inboxes/${shared.id}/safety`, body);
@@ -191,7 +191,7 @@ describe("safety rules on the shared domain", () => {
     expect(await json(allowlist)).toMatchObject({
       name: "validation_error",
       message:
-        'send_policy "allowlist" is not available on the shared domain: its allowlist never counts there',
+        'send_policy "allowlist" is not available on the shared domain: there the allowlist counts for incoming mail only',
     });
     const open = await patch({ send_policy: "open" });
     expect(open.status).toBe(422);
