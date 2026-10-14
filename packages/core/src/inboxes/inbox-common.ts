@@ -51,11 +51,11 @@ export const isInboxError = (v: unknown): v is InboxError =>
 
 const NAME_MAX = 64;
 
-/** An inbox or label name: 1-64 characters after trimming, on one line. */
-export function oneLineName(value: string): string | InboxError {
+/** A label name, or an inbox name given `max`: 1 to `max` characters after trimming, on one line. */
+export function oneLineName(value: string, max = NAME_MAX): string | InboxError {
   const name = value.trim();
-  return name.length === 0 || name.length > NAME_MAX || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(name)
-    ? invalid(`name must be 1-${NAME_MAX} characters on one line`)
+  return name.length === 0 || name.length > max || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(name)
+    ? invalid(`name must be 1-${max} characters on one line`)
     : name;
 }
 

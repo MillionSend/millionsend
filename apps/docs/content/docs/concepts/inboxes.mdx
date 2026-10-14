@@ -92,7 +92,7 @@ person. The last five fields are MillionSend's.
 | --- | --- |
 | `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for an address on the [shared domain](#shared-domain). |
 | `username` | With `email_address` left out, the part before `@` of the [shared-domain](#shared-domain) address: trimmed and lowercased, 1–64 letters, digits and `. _ -`, starting and ending with a letter or digit, without `..`, never cut short. Left out, the address is random. It can't change later. |
-| `name` | 1–64 characters; the address when left out. |
+| `name` | 1–320 characters, so any address fits; the address when left out. |
 | `from_name` | The display name of the mail the inbox sends, up to 78 characters: a plain name, without `@`, `:`, `<`, `>`, line breaks, links or phone numbers. On the shared domain it is [reviewed](#shared-domain) first. |
 | `kind` | `agent` (the default) or `human`. |
 | `expires_in` | When the inbox [expires](#expiry), such as `1h`, `24h` or `7d`; left out, never. |

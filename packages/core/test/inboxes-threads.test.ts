@@ -688,6 +688,14 @@ describe("labels", () => {
       color: "red",
     });
     expect(badColor.ok ? null : badColor.error.status).toBe(422);
+    // Inbox names take up to 320; labels stay at 64.
+    const long = await createLabel(db, deps, {
+      teamId: s.teamId,
+      inboxId: s.inboxId,
+      actor: owner,
+      name: "x".repeat(65),
+    });
+    expect(long.ok ? null : long.error.message).toBe("name must be 1-64 characters on one line");
     if (!red.ok) return;
     const clash = await updateLabel(db, deps, {
       teamId: s.teamId,

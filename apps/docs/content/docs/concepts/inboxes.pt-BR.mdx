@@ -99,7 +99,7 @@ são do MillionSend.
 | --- | --- |
 | `email_address` | Um endereço de um domínio verificado da sua equipe que recebe aqui (veja [Endereços](#endereços)). Ele é guardado sem espaços nas pontas e em minúsculas; a parte antes do `@` aceita até 64 letras, dígitos e `. _ % + -`, sem ponto nas pontas e sem `..`. Não muda depois. Deixe de fora para ganhar um endereço no [domínio compartilhado](#domínio-compartilhado). |
 | `username` | Com o `email_address` de fora, a parte antes do `@` do endereço no [domínio compartilhado](#domínio-compartilhado): sem espaços nas pontas e em minúsculas, de 1 a 64 letras, dígitos e `. _ -`, começando e terminando com letra ou dígito, sem `..` e nunca cortado. Se ficar de fora, o endereço é aleatório. Não muda depois. |
-| `name` | De 1 a 64 caracteres; o próprio endereço quando fica de fora. |
+| `name` | De 1 a 320 caracteres, então cabe qualquer endereço; o próprio endereço quando fica de fora. |
 | `from_name` | O nome de exibição dos e-mails que a caixa envia, com até 78 caracteres: um nome simples, sem `@`, `:`, `<`, `>`, quebras de linha, links nem números de telefone. No domínio compartilhado, ele passa por uma [revisão](#domínio-compartilhado) antes. |
 | `kind` | `agent` (o padrão) ou `human`. |
 | `expires_in` | Quando a caixa [expira](#validade), como `1h`, `24h` ou `7d`; se ficar de fora, nunca. |

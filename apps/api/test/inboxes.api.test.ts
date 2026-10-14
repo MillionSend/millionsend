@@ -220,6 +220,12 @@ describe("POST /inboxes and the inbox object", () => {
       shared: true,
       expires_at: null,
     });
+    // The name a long address defaults to goes back as it came.
+    const long = await inbox(teamKey, { username: "x".repeat(64) });
+    const renamed = await call(teamKey, "PATCH", `/inboxes/${long.id}`, {
+      name: long.email_address,
+    });
+    expect(renamed.status).toBe(200);
     const taken = await call(teamKey, "POST", "/inboxes", { username: "leo.bot" });
     expect(taken.status).toBe(409);
     expect(await json(taken)).toEqual({

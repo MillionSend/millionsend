@@ -12,6 +12,7 @@ import {
   THREAD_FOLDERS,
   type ThreadFolder,
 } from "@millionsend/core";
+import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
 
 /**
  * Resend's Inboxes beta (/inboxes/**), plus MillionSend's extension keys.
@@ -96,7 +97,9 @@ export const createInboxRequestSchema = z
     name: z
       .string()
       .optional()
-      .describe("Internal name, 1-64 characters. Defaults to email_address."),
+      .describe(
+        `Internal name, 1-${INBOX_NAME_MAX} characters, so any address fits. Defaults to email_address.`,
+      ),
     from_name: z
       .string()
       .optional()
