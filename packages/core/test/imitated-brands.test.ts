@@ -1,6 +1,11 @@
 import { REAL_NAMES } from "@millionsend/test-utils";
 import { describe, expect, it } from "vitest";
-import { IMITATED_BRAND_WORDS, IMITATED_BRANDS, imitatedBrandIn } from "../src/imitated-brands.js";
+import {
+  IMITATED_BRAND_AFFIXES,
+  IMITATED_BRAND_WORDS,
+  IMITATED_BRANDS,
+  imitatedBrandIn,
+} from "../src/imitated-brands.js";
 
 describe("imitatedBrandIn", () => {
   it("finds every listed brand as written, in any case", () => {
@@ -52,6 +57,30 @@ describe("imitatedBrandIn", () => {
     }
   });
 
+  it("finds a brand fused into one word with digits or one affix, on either side", () => {
+    for (const [name, brand] of [
+      ["Microsoft365", "Microsoft"],
+      ["365microsoft", "Microsoft"],
+      ["paypalsupport", "PayPal"],
+      ["PAYPALSUPPORT", "PayPal"],
+      ["paypal1", "PayPal"],
+      ["appleid", "Apple"],
+      ["itausuporte", "Itaú"],
+      ["suportenubank", "Nubank"],
+      ["g00glelogin", "Google"],
+      ["Atendimento Caixaapp", "Caixa"],
+    ] as const) {
+      expect(imitatedBrandIn(name), name).toBe(brand);
+    }
+    for (const brand of IMITATED_BRANDS) {
+      const word = brand.replace(/[^\p{L}\p{N}]/gu, "");
+      for (const name of [`${word}support`, `suporte${word}`, `${word}2024`, `24${word}`]) {
+        expect(imitatedBrandIn(name), name).toBe(brand);
+      }
+    }
+    expect(IMITATED_BRAND_AFFIXES).toContain("support");
+  });
+
   it("matches a brand that is an everyday word only as the whole name", () => {
     for (const [name, brand] of [
       ["Claro", "Claro"],
@@ -79,7 +108,16 @@ describe("imitatedBrandIn", () => {
     }
   });
 
-  it("leaves names that only contain a brand inside a longer word alone", () => {
+  it("leaves everyday-word brands to the review when asked, never the others", () => {
+    for (const brand of IMITATED_BRAND_WORDS) {
+      expect(imitatedBrandIn(brand, { everydayWords: false }), brand).toBeNull();
+    }
+    expect(imitatedBrandIn("tim", { everydayWords: false })).toBeNull();
+    expect(imitatedBrandIn("PayPal", { everydayWords: false })).toBe("PayPal");
+    expect(imitatedBrandIn("paypalsupport", { everydayWords: false })).toBe("PayPal");
+  });
+
+  it("leaves a brand inside a longer word alone, unless all it is fused to is digits or one affix", () => {
     for (const name of [
       ...REAL_NAMES,
       "Acme",
@@ -94,6 +132,13 @@ describe("imitatedBrandIn", () => {
       "Upstream Labs",
       "Nimbra Cloud",
       "Kora",
+      "Metal Works",
+      "Caixão Antigo",
+      "Oups Studio",
+      "Amazonas Turismo",
+      "Startups",
+      "Uberaba",
+      "Upsell",
     ]) {
       expect(imitatedBrandIn(name), name).toBeNull();
     }

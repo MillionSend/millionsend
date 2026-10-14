@@ -46,7 +46,7 @@ export interface ListQuery {
 
 /** A refusal in the API's error shape; routes answer errorBody(status, name, message) with it. */
 export interface InboxError {
-  status: 403 | 404 | 409 | 422 | 429;
+  status: 403 | 404 | 409 | 422 | 429 | 503;
   name: string;
   message: string;
   retryAfterSec?: number | undefined;

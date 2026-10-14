@@ -75,6 +75,10 @@
     "./receiving-protocol": {
       "types": "./src/receiving/protocol.ts",
       "default": "./src/receiving/protocol.ts"
+    },
+    "./inbox-username": {
+      "types": "./src/inboxes/username.ts",
+      "default": "./src/inboxes/username.ts"
     }
   },
   "scripts": {

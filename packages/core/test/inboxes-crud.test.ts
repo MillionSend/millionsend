@@ -2,10 +2,10 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
-import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { and, eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { generateApiKey } from "../src/api-keys.js";
-import type { InboxActor } from "../src/inboxes/activity.js";
+import { type InboxActor, touchInbox } from "../src/inboxes/activity.js";
 import {
   createInbox,
   deleteInboxes,
@@ -17,14 +17,30 @@ import {
   updateInbox,
   updateInboxSafety,
 } from "../src/inboxes/inboxes.js";
+import { SHARED_NAME_REVIEWS_PER_DAY } from "../src/inboxes/limits.js";
 import { defaultSafety } from "../src/inboxes/safety.js";
-import { ensureSharedSubdomain } from "../src/inboxes/shared-domain.js";
+import { ensureSharedSubdomain, type SharedNameText } from "../src/inboxes/shared-domain.js";
+import { utcDay } from "../src/utc-day.js";
 
 const SHARED = "agents.example.test";
 const api: InboxActor = { kind: "api_key", apiKeyId: randomUUID(), inboxId: null };
 const person: InboxActor = { kind: "user", userId: "user-1" };
 const deps: InboxDeps = { sharedInboxDomain: SHARED, receivingEnabled: true };
 const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+const SHARED_RE = SHARED.replaceAll(".", "\\.");
+
+/** Deps whose identity review answers `refused` (an Error: can't answer), recording what it is asked. */
+function reviewing(refused: string[] | Error, asked: SharedNameText[][] = []): InboxDeps {
+  return {
+    ...deps,
+    judgeSharedNames: async (texts) => {
+      asked.push(texts);
+      if (refused instanceof Error) throw refused;
+      return { refused };
+    },
+  };
+}
 
 let db: Db;
 let close: () => Promise<void>;
@@ -61,8 +77,9 @@ const create = (
   teamId: string,
   input: Parameters<typeof createInbox>[2]["input"],
   extra: Partial<Parameters<typeof createInbox>[2]> = {},
+  inboxDeps: InboxDeps = deps,
 ) =>
-  createInbox(db, deps, {
+  createInbox(db, inboxDeps, {
     teamId,
     teamName: teamNames.get(teamId) ?? "Acme Robots",
     plan: "pro",
@@ -123,13 +140,81 @@ describe("ensureSharedSubdomain", () => {
       teamName: "株式会社",
       sharedInboxDomain: SHARED,
     });
-    expect(cjk.name).toBe(`team.${SHARED}`);
+    expect(cjk.name).toMatch(/^team-[a-z0-9]{6}\./);
     const long = await ensureSharedSubdomain(db, {
       teamId: await createTeam(db, "sub-long"),
       teamName: "abcdefghijklmnopqrstuvwxyzabc def",
       sharedInboxDomain: SHARED,
     });
     expect(long.name).toBe(`abcdefghijklmnopqrstuvwxyzabc.${SHARED}`);
+  });
+
+  it("never issues a reserved label, a brand fused into a word, or one the cut carves", async () => {
+    for (const [slug, teamName] of [
+      ["sub-mail", "Mail"],
+      ["sub-www", "WWW"],
+      ["sub-postmaster", "Post-Master"],
+      ["sub-team", "Team"],
+      ["sub-fused", "paypalsupport"],
+      // The 30-character cut leaves "aaaaaaaaaaaaaaaaaaaaaaa-paypal".
+      ["sub-carved", "aaaaaaaaaaaaaaaaaaaaaaa paypalish"],
+    ] as const) {
+      const sub = await ensureSharedSubdomain(db, {
+        teamId: await createTeam(db, slug),
+        teamName,
+        sharedInboxDomain: SHARED,
+      });
+      expect(sub.name, teamName).toMatch(/^team-[a-z0-9]{6}\./);
+    }
+  });
+
+  it("asks the review about a derived label once; a refusal or an outage means a random one", async () => {
+    const asked: SharedNameText[][] = [];
+    const passed = await ensureSharedSubdomain(db, {
+      teamId: await createTeam(db, "sub-review-ok"),
+      teamName: "Review Ok",
+      sharedInboxDomain: SHARED,
+      review: reviewing([], asked).judgeSharedNames,
+    });
+    expect(passed.name).toBe(`review-ok.${SHARED}`);
+    expect(asked).toEqual([[{ field: "label", value: "review-ok" }]]);
+    for (const [slug, answer] of [
+      ["sub-review-no", ["sub-review-no"]],
+      ["sub-review-down", new Error("judge down")],
+    ] as const) {
+      const sub = await ensureSharedSubdomain(db, {
+        teamId: await createTeam(db, slug),
+        teamName: slug,
+        sharedInboxDomain: SHARED,
+        review: reviewing(answer instanceof Error ? answer : [...answer]).judgeSharedNames,
+      });
+      expect(sub.name, slug).toMatch(/^team-[a-z0-9]{6}\./);
+    }
+    asked.length = 0;
+    await ensureSharedSubdomain(db, {
+      teamId: await createTeam(db, "sub-review-cjk"),
+      teamName: "株式会社",
+      sharedInboxDomain: SHARED,
+      review: reviewing([], asked).judgeSharedNames,
+    });
+    expect(asked).toEqual([]);
+  });
+
+  it("never issues a deleted team's label again: its mail would reach the new owner", async () => {
+    const gone = await createTeam(db, "sub-tomb-a");
+    const first = await ensureSharedSubdomain(db, {
+      teamId: gone,
+      teamName: "Tombstone Labs",
+      sharedInboxDomain: SHARED,
+    });
+    expect(first.name).toBe(`tombstone-labs.${SHARED}`);
+    await db.delete(schema.teams).where(eq(schema.teams.id, gone));
+    const next = await ensureSharedSubdomain(db, {
+      teamId: await createTeam(db, "sub-tomb-b"),
+      teamName: "Tombstone Labs",
+      sharedInboxDomain: SHARED,
+    });
+    expect(next.name).toMatch(new RegExp(`^tombstone-labs-[a-z0-9]{4}\\.${SHARED_RE}$`));
   });
 });
 
@@ -257,28 +342,28 @@ describe("createInbox", () => {
     expect(noShared.ok ? null : noShared.error.status).toBe(422);
   });
 
-  it("makes up a shared address that expires in a day, at most 30 days, never never", async () => {
+  it("makes up a permanent random shared address, whatever the inbox is named", async () => {
     const t = await team("create-shared");
-    const now = new Date();
     const inbox = await created(t.teamId, { name: "Signup Bot" });
     expect(inbox.email_address).toMatch(
-      new RegExp(`^signup-bot-[a-z0-9]{4}@create-shared\\.${SHARED.replaceAll(".", "\\.")}$`),
+      new RegExp(`^inbox-[a-z0-9]{8}@create-shared\\.${SHARED_RE}$`),
     );
-    expect(inbox).toMatchObject({ shared: true, kind: "agent", name: "Signup Bot" });
-    const ttl = new Date(inbox.expires_at as string).getTime() - now.getTime();
-    expect(Math.abs(ttl - 24 * HOUR)).toBeLessThan(60_000);
+    expect(inbox).toMatchObject({
+      shared: true,
+      kind: "agent",
+      name: "Signup Bot",
+      expires_at: null,
+    });
     const safety = await getInboxSafety(db, { teamId: t.teamId, inboxId: inbox.id });
     expect(safety).toMatchObject({ send_policy: "reply_only", send_cap: 50 });
-    const unnamed = await created(t.teamId, {});
-    expect(unnamed.email_address).toMatch(/^inbox-[a-z0-9]{8}@/);
     const brand = await created(t.teamId, { name: "PayPal security" });
     expect(brand.email_address).toMatch(/^inbox-[a-z0-9]{8}@/);
     for (const [expires, ok] of [
-      [null, false],
-      ["31d", false],
-      ["721h", false],
-      ["30d", true],
+      [null, true],
+      ["365d", true],
+      ["8760h", true],
       ["1h", true],
+      ["366d", false],
     ] as const) {
       const result = await create(t.teamId, { expires_in: expires });
       expect(result.ok, String(expires)).toBe(ok);
@@ -289,6 +374,208 @@ describe("createInbox", () => {
       { teamId: t.teamId, teamName: "x", plan: "pro", isCloud: true, actor: api, input: {} },
     );
     expect(noShared.ok ? null : noShared.error.message).toMatch(/email_address is required/);
+  });
+
+  it("takes a chosen username on the team's subdomain; a taken one answers 409", async () => {
+    const t = await team("create-username");
+    const leo = await created(t.teamId, { username: " Leo.Bot " });
+    expect(leo.email_address).toBe(`leo.bot@create-username.${SHARED}`);
+    expect(await create(t.teamId, { username: "leo.bot" })).toEqual({
+      ok: false,
+      error: {
+        status: 409,
+        name: "validation_error",
+        message: "This address is already used by an inbox",
+      },
+    });
+    // Brands that are everyday words are left to the identity review.
+    expect((await created(t.teamId, { username: "tim" })).email_address).toMatch(/^tim@/);
+    const both = await create(t.teamId, { username: "desk", email_address: `d@${t.receiving}` });
+    expect(both.ok ? null : both.error).toMatchObject({
+      status: 422,
+      message: "Send username or email_address, not both",
+    });
+  });
+
+  it("refuses a username off the rules, reserved, in the forwarding shape or imitating a brand, before any write", async () => {
+    const t = await team("create-bad-username");
+    for (const username of [
+      "",
+      "-leo",
+      "leo-",
+      ".leo",
+      "a..b",
+      "leo+x",
+      "50%off",
+      "léo",
+      "x".repeat(65),
+    ]) {
+      const result = await create(t.teamId, { username });
+      expect(result.ok ? null : result.error.message, username).toMatch(/^username must be 1-64/);
+    }
+    for (const username of [
+      "postmaster",
+      "Post-Master",
+      "no.reply",
+      "mailer_daemon",
+      "ROOT",
+      "fwd-abc",
+      "paypal",
+      "pay.pal-support",
+      "g00glelogin",
+      "microsoft365",
+    ]) {
+      expect(await create(t.teamId, { username }), username).toEqual({
+        ok: false,
+        error: {
+          status: 422,
+          name: "validation_error",
+          message: "username can't be used on the shared domain: pick another",
+        },
+      });
+    }
+    const late = await create(t.teamId, { username: "fine", expires_in: "366d" });
+    expect(late.ok ? null : late.error.status).toBe(422);
+    const subs = await db
+      .select()
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, t.teamId));
+    expect(subs).toEqual([]);
+  });
+
+  it("refuses a brand in from_name on the shared domain only", async () => {
+    const t = await team("create-from-brand");
+    expect(await create(t.teamId, { from_name: "PayPal Support" })).toEqual({
+      ok: false,
+      error: {
+        status: 422,
+        name: "validation_error",
+        message: "from_name can't be used on the shared domain: pick another",
+      },
+    });
+    const custom = await created(t.teamId, {
+      email_address: `pp@${t.receiving}`,
+      from_name: "PayPal Support",
+    });
+    expect(custom.from_name).toBe("PayPal Support");
+    expect((await created(t.teamId, { from_name: "Tim" })).from_name).toBe("Tim");
+  });
+
+  it("asks the review about a chosen username and a shared from_name, never about a random address", async () => {
+    const t = await team("create-review");
+    const asked: SharedNameText[][] = [];
+    const first = await create(t.teamId, { name: "Bot" }, {}, reviewing([], asked));
+    expect(first.ok).toBe(true);
+    // Only the team's label, derived once.
+    expect(asked).toEqual([[{ field: "label", value: "create-review" }]]);
+    asked.length = 0;
+    const chosen = await create(
+      t.teamId,
+      { username: "Leo", from_name: "Leo Bot", name: "Leo" },
+      {},
+      reviewing([], asked),
+    );
+    expect(chosen.ok).toBe(true);
+    expect(asked).toEqual([
+      [
+        { field: "username", value: "leo" },
+        { field: "from_name", value: "Leo Bot" },
+      ],
+    ]);
+    asked.length = 0;
+    await create(t.teamId, { name: "Random" }, {}, reviewing([], asked));
+    await create(
+      t.teamId,
+      { email_address: `own@${t.receiving}`, from_name: "Own Desk" },
+      {},
+      reviewing(["Own Desk"], asked),
+    );
+    expect(asked).toEqual([]);
+    const refused = await create(t.teamId, { username: "sly" }, {}, reviewing(["sly"]));
+    expect(refused.ok ? null : refused.error.message).toBe(
+      "username can't be used on the shared domain: pick another",
+    );
+    const refusedFrom = await create(
+      t.teamId,
+      { from_name: "Sly Desk" },
+      {},
+      reviewing(["Sly Desk"]),
+    );
+    expect(refusedFrom.ok ? null : refusedFrom.error.message).toBe(
+      "from_name can't be used on the shared domain: pick another",
+    );
+    expect(await create(t.teamId, { username: "later" }, {}, reviewing(new Error("down")))).toEqual(
+      {
+        ok: false,
+        error: {
+          status: 503,
+          name: "name_review_unavailable",
+          message:
+            "This name couldn't be reviewed right now: try again shortly, or leave username out for a random address",
+          retryAfterSec: 60,
+        },
+      },
+    );
+  });
+
+  it("stops reviewing a team's names once 20 were refused today, never the random ones", async () => {
+    const t = await team("create-budget");
+    const now = new Date();
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: t.teamId, day: utcDay(now), sharedNameRefusals: 19 });
+    const refuseAll: InboxDeps = {
+      ...deps,
+      judgeSharedNames: async (texts) => ({ refused: texts.map((text) => text.value) }),
+    };
+    const last = await create(t.teamId, { username: "one" }, { now }, refuseAll);
+    expect(last.ok ? null : last.error.status).toBe(422);
+    const asked: SharedNameText[][] = [];
+    const spent = await create(t.teamId, { username: "two" }, { now }, reviewing([], asked));
+    expect(spent.ok ? null : spent.error).toMatchObject({
+      status: 429,
+      name: "rate_limit_exceeded",
+      message:
+        "Too many names were refused today: try again tomorrow, or leave username out for a random address",
+    });
+    expect(spent.ok ? 0 : (spent.error.retryAfterSec ?? 0)).toBeGreaterThan(0);
+    expect(asked).toEqual([]);
+    const random = await create(t.teamId, {}, { now }, reviewing([], asked));
+    expect(random.ok && random.inbox.email_address).toMatch(/@team-[a-z0-9]{6}\./);
+    const [counter] = await db
+      .select({ refusals: schema.usageCounters.sharedNameRefusals })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, t.teamId));
+    expect(counter?.refusals).toBe(20);
+  });
+
+  it("counts every review against a daily budget, a failed one included, then answers 429", async () => {
+    const t = await team("create-reviews");
+    const now = new Date();
+    await db.insert(schema.usageCounters).values({
+      teamId: t.teamId,
+      day: utcDay(now),
+      sharedNameReviews: SHARED_NAME_REVIEWS_PER_DAY - 1,
+    });
+    const down = await create(t.teamId, { username: "one" }, { now }, reviewing(new Error("down")));
+    expect(down.ok ? null : down.error.status).toBe(503);
+    const asked: SharedNameText[][] = [];
+    const spent = await create(t.teamId, { username: "two" }, { now }, reviewing([], asked));
+    expect(spent.ok ? null : spent.error).toMatchObject({
+      status: 429,
+      name: "rate_limit_exceeded",
+      message:
+        "Too many names were reviewed today: try again tomorrow, or leave username out for a random address",
+    });
+    // The label isn't reviewed either: the team gets a random one.
+    const random = await create(t.teamId, {}, { now }, reviewing([], asked));
+    expect(random.ok && random.inbox.email_address).toMatch(/@team-[a-z0-9]{6}\./);
+    expect(asked).toEqual([]);
+    const [counter] = await db
+      .select({ reviews: schema.usageCounters.sharedNameReviews })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, t.teamId));
+    expect(counter?.reviews).toBe(SHARED_NAME_REVIEWS_PER_DAY);
   });
 
   it("checks names, from_name and a custom inbox's lifetime", async () => {
@@ -552,6 +839,66 @@ describe("updateInbox and updateInboxSafety", () => {
     });
   });
 
+  it("lets a shared inbox live forever, and reviews a new shared from_name, never a custom one", async () => {
+    const t = await team("update-shared");
+    const inbox = await created(t.teamId, {});
+    const update = (
+      patch: Parameters<typeof updateInbox>[2]["patch"],
+      inboxDeps: InboxDeps = deps,
+      inboxId = inbox.id,
+    ) =>
+      updateInbox(db, inboxDeps, {
+        teamId: t.teamId,
+        inboxId,
+        actor: person,
+        patch,
+        mayShorten: false,
+      });
+    // Any date on a permanent inbox is sooner: owners and admins only.
+    expect((await update({ expires_in: "7d" })).ok).toBe(false);
+    await db
+      .update(schema.inboxes)
+      .set({ expiresAt: new Date(Date.now() + DAY) })
+      .where(eq(schema.inboxes.id, inbox.id));
+    const forever = await update({ expires_in: null });
+    expect(forever.ok && forever.inbox.expires_at).toBeNull();
+    expect(await update({ from_name: "Netflix Billing" })).toEqual({
+      ok: false,
+      error: {
+        status: 422,
+        name: "validation_error",
+        message: "from_name can't be used on the shared domain: pick another",
+      },
+    });
+    const asked: SharedNameText[][] = [];
+    expect((await update({ from_name: "Leo Desk", name: "Desk" }, reviewing([], asked))).ok).toBe(
+      true,
+    );
+    expect(asked).toEqual([[{ field: "from_name", value: "Leo Desk" }]]);
+    asked.length = 0;
+    // Repeating the stored name asks nothing, so it never waits on the review either.
+    expect((await update({ from_name: "Leo Desk" }, reviewing(new Error("down"), asked))).ok).toBe(
+      true,
+    );
+    expect(asked).toEqual([]);
+    expect((await update({ name: "Renamed", from_name: "" }, reviewing([], asked))).ok).toBe(true);
+    expect(asked).toEqual([]);
+    const refused = await update({ from_name: "Sly Desk" }, reviewing(["Sly Desk"]));
+    expect(refused.ok ? null : refused.error.message).toBe(
+      "from_name can't be used on the shared domain: pick another",
+    );
+    const down = await update({ from_name: "Later Desk" }, reviewing(new Error("down")));
+    expect(down.ok ? null : down.error).toMatchObject({ status: 503, retryAfterSec: 60 });
+    const custom = await created(t.teamId, { email_address: `c@${t.receiving}` });
+    const own = await update(
+      { from_name: "Netflix Billing" },
+      reviewing(["Netflix Billing"], asked),
+      custom.id,
+    );
+    expect(own.ok && own.inbox.from_name).toBe("Netflix Billing");
+    expect(asked).toEqual([]);
+  });
+
   it("merges a safety patch, refuses a bad one and records activity and audit", async () => {
     const t = await team("update-safety");
     const hook = await createWebhookEndpoint(db, t.teamId, ["inbox.updated"]);
@@ -561,6 +908,8 @@ describe("updateInbox and updateInboxSafety", () => {
       inboxId: inbox.id,
       actor: api,
       patch: { accept_from: "allowlist", allowlist: ["A@B.test"], send_cap: 10 },
+      plan: "pro",
+      isCloud: true,
     });
     expect(result).toEqual({
       ok: true,
@@ -576,6 +925,8 @@ describe("updateInbox and updateInboxSafety", () => {
       inboxId: inbox.id,
       actor: api,
       patch: { send_cap: 0 },
+      plan: "pro",
+      isCloud: true,
     });
     expect(bad.ok ? null : bad.error.status).toBe(422);
     expect((await getInboxSafety(db, { teamId: t.teamId, inboxId: inbox.id }))?.send_cap).toBe(10);
@@ -595,6 +946,45 @@ describe("updateInbox and updateInboxSafety", () => {
       );
     expect(audit?.data).toEqual({ fields: ["accept_from", "allowlist", "send_cap"] });
     expect((await deliveries(hook)).map((d) => d.type)).toEqual(["inbox.updated"]);
+  });
+
+  it("takes open on a shared inbox only while the team's shared mode is open", async () => {
+    const t = await team("open-shared");
+    // Past the new tier, so only the shared mode decides.
+    await db.insert(schema.teamMonitor).values({
+      teamId: t.teamId,
+      sentTotal: 100_000,
+      firstSendAt: new Date(Date.now() - 200 * DAY),
+    });
+    const inbox = await created(t.teamId, {});
+    const open = (plan: "free" | "pro") =>
+      updateInboxSafety(db, deps, {
+        teamId: t.teamId,
+        inboxId: inbox.id,
+        actor: api,
+        patch: { send_policy: "open" },
+        plan,
+        isCloud: true,
+      });
+    const refusal = async (plan: "free" | "pro") => {
+      const result = await open(plan);
+      return result.ok ? null : result.error.message;
+    };
+    expect(await refusal("pro")).toBe(
+      "Addresses on the shared domain only reply inside their threads",
+    );
+    vi.stubEnv("SHARED_INBOX_OPEN", "true");
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    try {
+      expect(await refusal("free")).toBe(
+        "On the Free plan, addresses on the shared domain only reply inside their threads",
+      );
+      expect((await open("pro")).ok).toBe(true);
+      const createdOpen = await create(t.teamId, { safety: { send_policy: "open" } });
+      expect(createdOpen.ok && createdOpen.inbox.email_address).toMatch(/^inbox-/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
@@ -720,6 +1110,48 @@ describe("deleteInboxes and expireInboxes", () => {
         reason: "deleted",
       }),
     ).toBe(0);
+  });
+
+  it("sweeps shared inboxes unused for 90 days as expired, whatever their expiry, and keeps any used since", async () => {
+    const t = await team("idle-sweep");
+    const hook = await createWebhookEndpoint(db, t.teamId, ["inbox.expired", "inbox.deleted"]);
+    const idle = await created(t.teamId, { expires_in: "365d" });
+    const used = await created(t.teamId, {});
+    const custom = await created(t.teamId, { email_address: `idle@${t.receiving}` });
+    const forwarding = await created(t.teamId, {
+      email_address: "fw@idle-sweep.test",
+      forwarding: true,
+    });
+    const now = new Date();
+    await db
+      .update(schema.inboxes)
+      .set({ lastUsedAt: new Date(now.getTime() - 91 * DAY) })
+      .where(inArray(schema.inboxes.id, [idle.id, used.id, custom.id, forwarding.id]));
+    await touchInbox(db, used.id, now);
+    expect(await expireInboxes(db, deps, now)).toBeGreaterThanOrEqual(1);
+    expect(await getInbox(db, { teamId: t.teamId, idOrEmail: idle.id })).toBeNull();
+    for (const kept of [used, custom, forwarding]) {
+      expect(
+        await getInbox(db, { teamId: t.teamId, idOrEmail: kept.id }),
+        kept.email_address,
+      ).not.toBeNull();
+    }
+    expect((await deliveries(hook)).map((d) => d.type)).toEqual(["inbox.expired", "inbox.deleted"]);
+  });
+
+  it("deletes as expired only an inbox still due under its row lock", async () => {
+    const t = await team("idle-race");
+    const inbox = await created(t.teamId, {});
+    expect(
+      await deleteInboxes(db, deps, {
+        teamId: t.teamId,
+        inboxIds: [inbox.id],
+        actor: { kind: "system" },
+        reason: "expired",
+        now: new Date(),
+      }),
+    ).toBe(0);
+    expect(await getInbox(db, { teamId: t.teamId, idOrEmail: inbox.id })).not.toBeNull();
   });
 
   it("expires inboxes past expires_at with inbox.expired, then inbox.deleted", async () => {

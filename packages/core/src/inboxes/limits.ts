@@ -39,14 +39,16 @@ export const INBOX_FORWARD_TO_MAX = 5;
 /** Active inbox-scoped keys per inbox, outside the team's MAX_ACTIVE_API_KEYS. */
 export const INBOX_KEYS_MAX = 5;
 
-/** Milliseconds. */
-export const SHARED_INBOX_DEFAULT_TTL = 24 * HOUR_MS;
-/** Milliseconds; a shared address never lives longer, and never forever. */
-export const SHARED_INBOX_MAX_TTL = 30 * DAY_MS;
-/** Milliseconds; custom-domain inboxes may also never expire (null). */
+/** Milliseconds; an inbox may also never expire (null), which it does unless told otherwise. */
 export const INBOX_MAX_TTL = 365 * DAY_MS;
-/** Milliseconds. */
-export const INBOX_MIN_TTL = HOUR_MS;
+/** Milliseconds a shared-domain inbox may go unused before the hourly sweep deletes it, whatever its expiry. */
+export const SHARED_INBOX_IDLE_TTL = 90 * DAY_MS;
+/** Milliseconds between two stamps of an inbox's last use. */
+export const INBOX_USE_STAMP_INTERVAL = HOUR_MS;
+/** Names the shared domain's identity review may refuse per team per UTC day before it stops reviewing. */
+export const SHARED_NAME_REFUSALS_PER_DAY = 20;
+/** Reviews of shared-domain names per team per UTC day, each a judge call, refused or not. */
+export const SHARED_NAME_REVIEWS_PER_DAY = 200;
 /** Milliseconds a pending_approval draft waits before it expires. */
 export const DRAFT_APPROVAL_TTL = 7 * DAY_MS;
 /** Milliseconds a trashed thread is kept. */

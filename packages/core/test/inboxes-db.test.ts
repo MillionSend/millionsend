@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
@@ -11,11 +11,13 @@ import {
   isAgentActor,
   parseInboxActor,
   recordInboxActivity,
+  touchInbox,
 } from "../src/inboxes/activity.js";
 import { inboxDeletedEvent, inboxEvent } from "../src/inboxes/events.js";
 import { expiresInMs, inboxCreatesLeft, inboxRoom } from "../src/inboxes/limits.js";
 import { defaultSafety } from "../src/inboxes/safety.js";
 import { inboxWire } from "../src/inboxes/wire.js";
+import { afterCommit, markDelivered } from "../src/receiving/delivery.js";
 import { enqueueTeamWebhookEvents } from "../src/webhooks.js";
 
 let db: Db;
@@ -202,6 +204,100 @@ describe("recordInboxActivity", () => {
         draftId: null,
       }),
     ]);
+  });
+});
+
+describe("an inbox's last use", () => {
+  const lastUsed = async (inboxId: string) =>
+    (
+      await db
+        .select({ at: schema.inboxes.lastUsedAt })
+        .from(schema.inboxes)
+        .where(eq(schema.inboxes.id, inboxId))
+    )[0]?.at;
+  const usedAt = (inboxId: string, at: Date) =>
+    db.update(schema.inboxes).set({ lastUsedAt: at }).where(eq(schema.inboxes.id, inboxId));
+
+  it("is stamped at most once an hour", async () => {
+    const inboxId = await addInbox("touched");
+    await usedAt(inboxId, new Date(NOW.getTime() - 2 * HOUR));
+    await touchInbox(db, inboxId, NOW);
+    expect(await lastUsed(inboxId)).toEqual(NOW);
+    await touchInbox(db, inboxId, new Date(NOW.getTime() + HOUR / 2));
+    expect(await lastUsed(inboxId)).toEqual(NOW);
+  });
+
+  it("is anything but the system acting", async () => {
+    const inboxId = await addInbox("acted-on");
+    const stale = new Date(Date.now() - 2 * HOUR);
+    await usedAt(inboxId, stale);
+    await recordInboxActivity(db, {
+      teamId,
+      inboxId,
+      actor: { kind: "system" },
+      action: "draft.expired",
+    });
+    expect(await lastUsed(inboxId)).toEqual(stale);
+    await recordInboxActivity(db, {
+      teamId,
+      inboxId,
+      actor: { kind: "api_key", apiKeyId: randomUUID(), inboxId },
+      action: "code.read",
+    });
+    expect((await lastUsed(inboxId))?.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it("is delivered mail, never spam", async () => {
+    for (const [local, spam] of [
+      ["delivered", false],
+      ["spammed", true],
+    ] as const) {
+      const inboxId = await addInbox(local);
+      const stale = new Date(NOW.getTime() - 2 * HOUR);
+      await usedAt(inboxId, stale);
+      const [row] = await db
+        .insert(schema.receivedEmails)
+        .values({
+          teamId,
+          domainIds: [domainId],
+          rawSha256: createHash("sha256").update(randomBytes(16)).digest("hex"),
+          messageId: `<${randomUUID()}@sender.test>`,
+          from: "sender@sender.test",
+          receivedFor: [`${local}@inbound.acme.test`],
+          envelope: { mailFrom: "", clientIp: "192.0.2.1", helo: "h", tls: null },
+          authentication: { spf: "pass", dkim: "pass", dmarc: "pass", arc: "none" },
+          sizeBytes: 10,
+          catchAll: false,
+        })
+        .returning();
+      const [thread] = await db
+        .insert(schema.inboxThreads)
+        .values({ teamId, inboxId })
+        .returning({ id: schema.inboxThreads.id });
+      if (!row || !thread) throw new Error("no received email");
+      await db.insert(schema.receivedEmailInboxes).values({
+        receivedEmailId: row.id,
+        inboxId,
+        teamId,
+        threadId: thread.id,
+        address: `${local}@inbound.acme.test`,
+        senderTrust: "external",
+        verdict: "pending",
+      });
+      const delivered = await markDelivered(db, {
+        row,
+        key: { receivedEmailId: row.id, inboxId },
+        from: "pending",
+        set: {},
+        spam,
+        forwardTo: [],
+        attachments: [],
+        now: NOW,
+        after: afterCommit(),
+      });
+      expect(delivered).not.toBeNull();
+      expect(await lastUsed(inboxId), local).toEqual(spam ? stale : NOW);
+    }
   });
 });
 
