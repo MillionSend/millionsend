@@ -319,8 +319,12 @@ out first.
 **Read state.** Every received message is read or unread. A `PATCH` with
 `read` marks the whole thread. A thread is read when all its messages are,
 and the inbox's `unread` counts the threads with an unread message. Mail the
-inbox sent is always read. In the dashboard, opening a thread marks it read
-in a people inbox. In an agent inbox, read state belongs to your agent: it
+inbox sent is always read. Held mail stays out of read state until it's
+released: it never makes a thread unread, can't be marked read, and arrives
+unread when released. So a thread holding only held mail, listed with
+`include_quarantined=true`, has `read: true`, and its `quarantined` counts
+the held messages. In the dashboard, opening a thread marks it read in a
+people inbox. In an agent inbox, read state belongs to your agent: it
 marks a thread read once it's handled, and the threads listed with
 `read=false` are what's left. In either kind, a person can mark a thread read
 or unread from its menu.
@@ -333,7 +337,7 @@ it off every thread.
 
 | Call | Does |
 | --- | --- |
-| `GET /inboxes/{id}/threads` | Threads, latest activity first. `folders` (`inbox` by default, `inbox,archive,sent` with `labels`), `labels` (up to 50 ids; any of them matches), `read` (`true` or `false`). |
+| `GET /inboxes/{id}/threads` | Threads, latest activity first. `folders` (`inbox` by default, `inbox,archive,sent` with `labels`), `labels` (up to 50 ids; any of them matches), `read` (`true` or `false`), `include_quarantined=true` (a full-access key that isn't restricted to an inbox) to list held mail too, with each thread's `quarantined` count. |
 | `GET /inboxes/{id}/threads/search` | The same filters, plus `query` (up to 256 characters and 32 words; `"exact phrase"` and `-excluded` work), `from`, `to`, `cc` and `bcc` (up to 20 values each, matching part of an address or name), `has_attachment`, `start_date` and `end_date`. Each result adds `matched_email_id` and `highlights`. |
 | `GET /inboxes/{id}/threads/{thread_id}` | One thread: subject, folder, labels and read state. |
 | `PATCH /inboxes/{id}/threads/{thread_id}` | `read`, `folder` (`inbox`, `archive`, `spam` or `trash`) or `label_id`. |

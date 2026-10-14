@@ -339,7 +339,10 @@ describe("listThreads", () => {
       id: held,
       message_count: 1,
       from: "ana@sender.test",
+      read: true,
+      quarantined: 1,
     });
+    expect("data" in withHeld && withHeld.data.slice(1).map((t) => t.quarantined)).toEqual([0, 0]);
   });
 
   it("filters by read state and labels, and pages with Resend's cursor rules", async () => {

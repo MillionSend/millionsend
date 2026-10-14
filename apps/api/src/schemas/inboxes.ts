@@ -272,6 +272,13 @@ const threadListItemSchema = z.object({
   has_attachment: z.boolean(),
   has_draft: z.boolean(),
   read: z.boolean(),
+  quarantined: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "MillionSend extension, with include_quarantined=true: held messages not yet released; they never count as unread",
+    ),
   received_at: z.string(),
   folder: z.enum(THREAD_FOLDERS),
 });

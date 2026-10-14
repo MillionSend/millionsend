@@ -337,8 +337,13 @@ excluída depois de 30 dias, a não ser que saia de lá antes.
 **Lido e não lido.** Toda mensagem recebida está lida ou não lida. Um `PATCH`
 com `read` marca a conversa inteira. Uma conversa está lida quando todas as
 mensagens dela estão, e o `unread` da caixa conta as conversas com alguma
-mensagem não lida. O que a caixa enviou sempre conta como lido. No painel,
-abrir uma conversa marca como lida numa caixa de pessoas. Numa caixa de
+mensagem não lida. O que a caixa enviou sempre conta como lido. E-mail
+retido fica fora do lido e não lido até ser liberado: não deixa a conversa
+como não lida, não pode ser marcado como lido e chega como não lido quando é
+liberado. Por isso, uma conversa que só tem e-mail retido, listada com
+`include_quarantined=true`, vem com `read: true`, e o `quarantined` dela
+conta as mensagens retidas. No painel, abrir uma conversa marca como lida
+numa caixa de pessoas. Numa caixa de
 agente, quem marca é o agente: ele marca a conversa como lida quando
 terminar, e as conversas listadas com `read=false` são o que falta. Nas
 duas, dá para marcar uma conversa como lida ou não lida pelo menu dela.
@@ -351,7 +356,7 @@ etiqueta de uma conversa, use o painel; excluir a etiqueta a tira de todas.
 
 | Chamada | Faz |
 | --- | --- |
-| `GET /inboxes/{id}/threads` | As conversas, da atividade mais recente para a mais antiga. `folders` (`inbox` por padrão, `inbox,archive,sent` com `labels`), `labels` (até 50 ids; qualquer um deles serve), `read` (`true` ou `false`). |
+| `GET /inboxes/{id}/threads` | As conversas, da atividade mais recente para a mais antiga. `folders` (`inbox` por padrão, `inbox,archive,sent` com `labels`), `labels` (até 50 ids; qualquer um deles serve), `read` (`true` ou `false`), `include_quarantined=true` (uma chave de acesso total que não é restrita a uma caixa) para listar também os e-mails retidos, com o `quarantined` de cada conversa. |
 | `GET /inboxes/{id}/threads/search` | Os mesmos filtros, mais `query` (até 256 caracteres e 32 palavras; `"frase exata"` e `-excluída` funcionam), `from`, `to`, `cc` e `bcc` (até 20 valores cada, achando parte de um endereço ou nome), `has_attachment`, `start_date` e `end_date`. Cada resultado traz também `matched_email_id` e `highlights`. |
 | `GET /inboxes/{id}/threads/{thread_id}` | Uma conversa: assunto, pasta, etiquetas e se está lida. |
 | `PATCH /inboxes/{id}/threads/{thread_id}` | `read`, `folder` (`inbox`, `archive`, `spam` ou `trash`) ou `label_id`. |
