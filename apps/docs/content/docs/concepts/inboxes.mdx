@@ -7,8 +7,8 @@ An inbox is one email address that receives mail into threads and sends from
 the same address. Give one to an AI agent, which reads it through the API,
 webhooks or the [MCP server](/mcp), or to people, who read it in the
 dashboard. Inboxes build on [receiving](/concepts/receiving): an inbox is an
-address on one of your receiving domains, or a random address on the
-instance's shared domain, ready with no DNS.
+address on one of your receiving domains, or an address on the instance's
+shared domain, named by you or random, ready with no DNS.
 
 The API mirrors Resend's Inboxes, so Resend's preview SDK works against
 MillionSend. What MillionSend adds comes as extra fields and extra endpoints;
@@ -90,20 +90,22 @@ person. The last five fields are MillionSend's.
 
 | Field | Rules |
 | --- | --- |
-| `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for a random address on the [shared domain](#shared-domain). |
+| `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for an address on the [shared domain](#shared-domain). |
+| `username` | With `email_address` left out, the part before `@` of the [shared-domain](#shared-domain) address: trimmed and lowercased, 1–64 letters, digits and `. _ -`, starting and ending with a letter or digit, without `..`, never cut short. Left out, the address is random. It can't change later. |
 | `name` | 1–64 characters; the address when left out. |
-| `from_name` | The display name of the mail the inbox sends, up to 78 characters: a plain name, without `@`, `:`, `<`, `>`, line breaks, links or phone numbers. |
+| `from_name` | The display name of the mail the inbox sends, up to 78 characters: a plain name, without `@`, `:`, `<`, `>`, line breaks, links or phone numbers. On the shared domain it is [reviewed](#shared-domain) first. |
 | `kind` | `agent` (the default) or `human`. |
-| `expires_in` | When the inbox [expires](#expiry), such as `1h`, `24h` or `7d`. |
+| `expires_in` | When the inbox [expires](#expiry), such as `1h`, `24h` or `7d`; left out, never. |
 | `safety` | Any of the [safety settings](#safety-settings); the rest take the kind's defaults. |
 | `forwarding` | `true` adds a `receiving_address` on the shared domain, for forwarding a mailbox you keep elsewhere into the inbox (see [Forwarding into an inbox](#forwarding-into-an-inbox)). |
 
 | Answer | When |
 | --- | --- |
-| `409 validation_error` | Another inbox already uses the address. |
+| `409 validation_error` | Another inbox already uses the address, a chosen `username` included: no other name is picked for you. |
 | `403 validation_error` | The plan's inbox limit is reached: "You have reached the inbox limit of your plan. Upgrade to add more." |
-| `429 rate_limit_exceeded` | Too many inboxes were created in the last hour; `retry-after` says when to try again. Deleting inboxes doesn't give that room back. |
-| `422 validation_error` | The domain isn't a verified domain of your team, it doesn't receive here, the instance has no shared domain, the instance doesn't receive mail at all, or a setting breaks a rule. |
+| `429 rate_limit_exceeded` | Too many inboxes were created in the last hour, or the shared domain's name review reached today's limit for your team (20 refused names or 200 reviews); `retry-after` says when to try again. Deleting inboxes doesn't give that room back. |
+| `422 validation_error` | The domain isn't a verified domain of your team, it doesn't receive here, the instance has no shared domain, the instance doesn't receive mail at all, a `username` breaks a rule, is reserved or can't be used on the shared domain, `username` comes with `email_address`, or a setting breaks a rule. |
+| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now; `retry-after: 60`. A request with neither never gets this answer. |
 
 The other calls:
 
@@ -111,7 +113,8 @@ The other calls:
   narrows it.
 - `GET /inboxes/{id}` reads one, by id or by address.
 - `PATCH /inboxes/{id}` changes `name`, `from_name` or `expires_in` and
-  answers the whole inbox.
+  answers the whole inbox. On the shared domain a new `from_name` is
+  reviewed first, with the same answers as at creation.
 - `DELETE /inboxes/{id}` deletes the inbox with its threads, drafts and
   labels. Messages sent only to the inbox's address go with it; a message
   that also reached another inbox, or a catch-all address, stays there. The
@@ -164,25 +167,92 @@ An instance can offer a shared domain for inboxes that need no DNS at all
 [Self-hosting](/self-hosting#shared-inbox-domain)). Each team gets its own
 subdomain there, named after the team, such as `acme.agents.example`, or
 `team-` and six random characters when the name looks like a well-known
-brand. Leave `email_address` out and the inbox gets a random address on it,
-built from its name: `signup-bot-7f3k@acme.agents.example`. The dashboard's
-create dialog offers it as **Random address**.
+brand or a reserved name, or the review below doesn't pass it. A deleted
+team's subdomain is never given to another team. Leave `email_address` out
+and `username` names the address:
 
-Shared addresses are made for short agent tasks, such as signing up for a
-service and reading the confirmation code:
+```sh
+curl -X POST "https://api.millionsend.com/inboxes" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "username": "orders", "name": "Orders agent" }'
+```
 
-- They expire: after 24 hours unless `expires_in` says otherwise, 30 days at
-  most, never "never".
-- They only reply, inside their own threads, to senders whose domain vouched
-  for them and to your team members' sign-in addresses. Owner addresses, the
-  allowlist and a `Reply-To` at another organization don't count here, and
-  `forward_to` takes members' sign-in addresses only: the shared domain is
-  every team's, so it never writes to an address nobody proved. Starting a conversation answers
-  `403 inbox_send_policy`, approved or not: use your own domain for that.
-  `send_policy` stays `reply_only`.
-- They send to 50 recipients a day at most (`send_cap` from 1 to 50).
-- They send only through the inbox endpoints: `POST /emails` from a shared
-  address answers `403`.
+That inbox is `orders@acme.agents.example`. Without `username` the address
+is random, such as `inbox-7f3k9q2m@acme.agents.example`. In the dashboard's
+create dialog, type the username, or leave the field empty for a random
+address.
+
+A chosen username answers `422` when it is reserved (postmaster, abuse,
+admin, security, support, noreply, no-reply, billing, hostmaster, webmaster,
+mailer-daemon and root, compared without `.`, `_` and `-`, so `no.reply`
+counts), starts with `fwd-` (the shape of forwarding addresses) or looks
+like a well-known brand. One that's taken answers `409`: another name is
+never picked for you.
+
+**Name review.** Where the instance runs a content judge, a chosen username,
+a `from_name` (at creation and on every change) and the team's subdomain are
+reviewed before they're published, for posing as a brand, a bank, a
+government or an official role. A refused name answers
+`422 validation_error`, such as "username can't be used on the shared
+domain: pick another", never with the judge's reasoning. While the review
+can't answer, a username or `from_name` answers
+`503 name_review_unavailable` with `retry-after: 60`, and a new team
+subdomain falls back to `team-` and six random characters. After 20 refused
+names, or 200 reviews, in a UTC day, the answer is `429 rate_limit_exceeded`
+until midnight UTC. A random address with no `from_name` is never refused
+over the review, and an instance without a judge applies only the rules
+above.
+
+Mail to `postmaster@` and `abuse@` at the shared domain, or at any team's
+subdomain, goes to the instance's operator, never to an inbox.
+
+Shared addresses follow rules of their own, since the domain is every
+team's:
+
+- They last until deleted, unless `expires_in` says otherwise, and count
+  toward your plan's inbox limit until then. One nobody used for 90 days is
+  deleted (see [Expiry](#expiry)).
+- What they send depends on your plan and the instance:
+  - On a paid plan, where the instance allows it, people start
+    conversations from them, and an agent does when the inbox's
+    `send_policy` is `open` and your team is past its first sends;
+    otherwise its new conversations wait for a person as drafts. Each
+    message to someone outside your team who never wrote to the inbox is
+    judged by the instance's content judge before it goes out, and held for
+    review when it reads as phishing.
+  - On the Free plan, they only reply inside their own threads ("On the Free
+    plan, addresses on the shared domain only reply inside their threads").
+    So does every team's while the instance limits shared addresses to
+    replies, and an inbox whose `from_name`, address or team subdomain looks
+    like a well-known brand, or whose subdomain is a reserved name
+    ("Addresses on the shared domain only reply inside their threads"). Replies go to senders whose domain vouched for them and
+    to your team members' sign-in addresses.
+  - While the instance pauses shared sending, nothing goes out, replies
+    included ("Sending from addresses on the shared domain is paused; mail
+    to them still arrives").
+
+  Each of these refusals answers `403 inbox_send_policy`, approved or not. A
+  stored `send_policy` is never rewritten: it applies again once the plan or
+  the instance allows it.
+- Owner addresses, the allowlist and a `Reply-To` at another organization
+  don't count here (`send_policy` can't be `allowlist`), and `forward_to`
+  takes members' sign-in addresses only: the shared domain is every team's,
+  so it never writes to an address nobody proved.
+- They send to 10 recipients per email at most (`422 validation_error`) and
+  50 a day per inbox (`send_cap` from 1 to 50). All your team's shared
+  addresses together reach 1,000 recipients per UTC day, unless the instance
+  sets another limit; past it, approved sends included, they answer
+  `429 inbox_send_cap_reached` ("Your team reached today's limit for mail
+  from the shared domain").
+- They go through `POST /emails` and the MCP tool `send_email` only where
+  they may start conversations, under the inbox's rules. `from` must be the
+  inbox's address exactly, without a `+tag`, with no display name or the
+  inbox's `from_name`, and the email can't carry `scheduled_at`, `reply_to`,
+  attachments or custom headers: each answers `422 validation_error` naming
+  the rule. A key restricted to a domain gets `403 restricted_api_key`.
+  Elsewhere `POST /emails` answers `403 inbox_send_policy`, and
+  `POST /emails/batch` and the SMTP relay always refuse a shared address.
 - Their `domain_id` is the id of the team's shared subdomain, which
   `GET /domains` doesn't list.
 
@@ -200,10 +270,11 @@ receive here. It needs the instance's shared domain.
 
 ## Expiry
 
-`expires_in` is a number followed by `h` or `d`, from `1h` to `365d`, and up
-to `30d` on the shared domain. A `PATCH` with a new `expires_in` counts from
-that moment, and `null` removes the expiry of an inbox on your own domain.
-`expires_at` shows when it ends.
+`expires_in` is a number followed by `h` or `d`, from `1h` to `365d`; left
+out, the inbox never expires. A `PATCH` with a new `expires_in` counts from
+that moment, and `null` removes the expiry. `expires_at` shows when it ends.
+A shared inbox from before addresses there became permanent keeps its
+`expires_at` until a `PATCH` changes it.
 
 At `expires_at` the inbox stops: mail to it is refused (`550 5.1.1`), or, on
 a domain with catch-all on, kept in All received like mail to any other
@@ -212,6 +283,12 @@ Within the hour it is deleted as a `DELETE` would, with an `inbox.expired`
 webhook followed by `inbox.deleted`, and its API keys are revoked. Making an
 inbox expire sooner than it would takes the owner or admin role, as deleting
 it does; any member can extend it.
+
+A shared-domain inbox nobody used for 90 days goes the same way within the
+hour, whatever its `expires_at`. Use is mail delivered to it (spam doesn't
+count), anything its **Activity** records from a person, an API key or an
+app, such as a send or a code read, and any API or MCP call under
+`/inboxes/{id}/`.
 
 ## Threads
 
@@ -292,7 +369,8 @@ curl -X POST "https://api.millionsend.com/inboxes/{id}/threads/{thread_id}/email
 A reply goes to the message's `Reply-To`, or else to its sender; replying to
 a message the inbox sent goes to that message's recipients. `reply_all` adds
 the message's other `to` and `cc` addresses as `cc`. `bcc` is never copied,
-and one send takes 50 recipients at most. The subject defaults to `Re: ` and
+and one send takes 50 recipients at most, 10 from a shared address. The
+subject defaults to `Re: ` and
 the thread's subject. The reply carries `In-Reply-To`, `References` with the
 thread token and, from an agent inbox, `Auto-Submitted: auto-replied`.
 
@@ -309,10 +387,10 @@ answer:
 | --- | --- |
 | `200` | Sent: the email, with `email_id`, `thread_id` and `inbox_id`. |
 | `202` | Held for a person: the [draft](#drafts-and-approval), with `status: "pending_approval"` and its `approval_reasons`. |
-| `403 inbox_send_policy` | The inbox's rules refuse the send outright, such as a shared address starting a conversation. |
+| `403 inbox_send_policy` | The inbox's rules refuse the send outright, such as a shared address starting a conversation where it may only reply. |
 | `403 email_quarantined` | The email is held in quarantine, or carries a virus (forwarding). |
 | `403 restricted_api_key` | An inbox-scoped key reaching another inbox. |
-| `429 inbox_send_cap_reached` | The inbox's daily cap is used; `retry-after` counts to midnight UTC. |
+| `429 inbox_send_cap_reached` | The inbox's daily cap is used, or your team's daily limit for the shared domain; `retry-after` counts to midnight UTC. |
 
 To reply to any received email, in an inbox or not, use
 [`POST /emails/receiving/{id}/reply`](/concepts/receiving#reply-and-forward-from-the-server).
@@ -352,8 +430,9 @@ refused with `422 validation_error` when it is sent or approved (see
 it. A person in the dashboard, or a full-access API key of the team that
 isn't restricted to an inbox, approves by sending: the send skips the rules
 that hold agent mail. It still counts toward the daily cap (without being
-refused by it), a shared address still replies only inside its threads, and
-your team's usual sending limits apply. An agent can't approve: an
+refused by it), a shared address still follows the
+[shared domain's rules](#shared-domain), and your team's usual sending
+limits apply. An agent can't approve: an
 inbox-scoped key or an MCP client sending a pending draft gets
 `403 approval_required`, and one sending a plain draft that the rules hold
 gets `202`, with the draft now pending.
@@ -394,16 +473,16 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | `owner_addresses` | Up to 50 more addresses treated as the inbox's owners, besides your team members' sign-in addresses. |
 | `screening` | Score mail from outside senders for prompt injection and phishing (agent inboxes). |
 | `extract_codes` | Pull verification codes and sign-in links out of mail (`extracted.code`, `extracted.link`, `codes/latest`). |
-| `send_policy` | `reply_only`; `allowlist`, which adds new conversations with owners and the allowlist; or `open`, anyone, on your own domain and once the team is past its first sends. |
+| `send_policy` | `reply_only`; `allowlist`, which adds new conversations with owners and the allowlist (not on the shared domain); or `open`, anyone, once the team is past its first sends, and on the shared domain only where it may start conversations. |
 | `require_approval` | Every send from the inbox waits for a person. |
 | `private_codes` | A code or sign-in link the inbox received can't be sent to anyone but owners and the allowlist. |
 | `send_cap` | Recipients the inbox may send to per UTC day without a person: 1–100,000, or `null` for no cap; 1–50 on the shared domain. |
 | `forward_to` | Up to 5 addresses that get a copy of every delivered message: team members' sign-in addresses or owner addresses. |
 
-A setting that breaks a rule answers `422` with the reason: `open` on the
-shared domain or for a team still new to sending, `screening` on a `human`
-inbox, or a `forward_to` address that is neither a member's nor an owner
-address. An inbox-scoped key can't change these settings
+A setting that breaks a rule answers `422` with the reason: `allowlist` on
+the shared domain, `open` on a shared address that may only reply or for a
+team still new to sending, `screening` on a `human` inbox, or a `forward_to`
+address that is neither a member's nor an owner address. An inbox-scoped key can't change these settings
 (`403 restricted_api_key`), the MCP server has no tool for them, and in the
 dashboard only owners and admins can. [Agent safety](/concepts/agent-safety)
 explains what each one does.
@@ -543,7 +622,8 @@ dashboard also go to the team's audit log.
 | Inboxes created per hour | 10 on Free, 60 on Starter, 600 on Pro and Scale; no limit self-hosted. |
 | Mail per inbox | 200 accepted messages per rolling hour for an agent inbox, 2,000 for a people inbox. Past that, senders get `452 4.2.2` and try again later. |
 | Sends | `send_cap` recipients per UTC day. A new inbox reaches new recipients gradually: 10 on its first day of sending, then 20, 40, 80, 160 and so on, up to the cap. |
-| Recipients per send | 50: `to`, `cc` and `bcc` together. |
+| Recipients per send | 50: `to`, `cc` and `bcc` together; 10 from a shared address. |
+| Shared domain | 1,000 recipients per UTC day for all your team's shared addresses, unless the instance sets another limit; 20 refused names and 200 name reviews per UTC day; a shared inbox unused for 90 days is deleted. |
 | Labels | 100 per inbox. |
 | Safety lists | 500 allowlist entries, 50 owner addresses, 5 `forward_to` addresses. |
 | Inbox-scoped keys | 5 active per inbox. |
@@ -591,6 +671,10 @@ leaves room, or MillionSend differs:
 
 - Creating an inbox or a draft answers the whole object; Resend's
   `{ object, id }` is part of it.
+- Resend requires `email_address`; here it is optional: left out, the inbox
+  gets an address on the [shared domain](#shared-domain), random through a
+  Resend SDK, which can't send `username`, and permanent, since it can't
+  send `expires_in` either.
 - `kind` defaults to `agent`, since a Resend SDK can't send it, so inboxes
   created through one get an agent's protections. Create `human` inboxes in
   the dashboard, with a MillionSend SDK or over plain HTTP.
@@ -606,13 +690,14 @@ leaves room, or MillionSend differs:
   with the draft instead of `200` with the email: check `object`, which reads
   `inbox_draft`, before treating the result as sent.
 - New errors: `403 inbox_send_policy`, `429 inbox_send_cap_reached`,
-  `403 approval_required` and `403 email_quarantined` (see
-  [Errors](/api-reference#errors)). An address already in use, or a draft
+  `403 approval_required`, `403 email_quarantined` and
+  `503 name_review_unavailable` (see [Errors](/api-reference#errors)). An address already in use, or a draft
   edited after it was sent or while another request changed it, answers
   `409 validation_error`.
-- MillionSend's additions are extra fields (`kind`, `shared`, `expires_at`,
-  `screening`, `extracted_text` and others) and extra endpoints (`/safety`,
-  `/quarantine`, `/codes/latest`, `/drafts/{id}/reject`). Resend's enums
+- MillionSend's additions are extra fields (`username`, `kind`, `shared`,
+  `expires_at`, `screening`, `extracted_text` and others) and extra
+  endpoints (`/safety`, `/quarantine`, `/codes/latest`,
+  `/drafts/{id}/reject`). Resend's enums
   never gain a value: quarantined mail is hidden from agents rather than put
   in a new folder, and a webhook's `source` is `api`, `dashboard` or
   `system`, never `agent`.

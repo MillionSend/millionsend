@@ -96,8 +96,10 @@ deliberadas e explícitas:
 - As caixas de entrada são suportadas (beta): os 26 endpoints do
   pré-lançamento das Inboxes do Resend, em `/inboxes`, com os mesmos caminhos
   e formatos, então `resend.inboxes.*` do `resend@6.32.1-preview-inboxes.6`
-  funciona. Criar uma caixa ou um rascunho devolve o objeto inteiro; o `kind`
-  padrão é `agent`; as configurações do agente hospedado devolvem um agente
+  funciona. Criar uma caixa ou um rascunho devolve o objeto inteiro; o
+  `email_address` pode ficar de fora para um endereço no domínio
+  compartilhado; o `kind` padrão é `agent`; as configurações do agente
+  hospedado devolvem um agente
   vazio no `GET` e `422` no `PATCH`; a busca de conversas só procura nos
   assuntos, nos remetentes e nos destinatários; e uma resposta, um
   encaminhamento ou um envio de rascunho que as regras da caixa retêm responde
@@ -307,8 +309,9 @@ as [caixas de entrada](/pt-BR/concepts/inboxes) respondem estes:
 | Status, nome | Quando |
 | --- | --- |
 | `403 restricted_api_key` | Uma chave restrita a uma caixa fora da caixa dela, ou enviando de outro endereço; `include_quarantined` vindo de uma chave restrita ou do servidor MCP. |
-| `403 inbox_send_policy` | As regras de uma caixa recusam um envio: um endereço do domínio compartilhado começando uma conversa, ou um envio pelo endereço de uma caixa de agente no `POST /emails`, no `POST /emails/batch` ou no relay SMTP que as regras reteriam. A mensagem lista os motivos. |
-| `429 inbox_send_cap_reached` | O limite diário de envios da caixa acabou; o `retry-after` conta até a meia-noite UTC. |
+| `403 inbox_send_policy` | As regras de uma caixa recusam um envio: um endereço do domínio compartilhado começando uma conversa quando só pode responder (no plano Free, ou pela configuração da instância), qualquer envio por um deles enquanto a instância os pausa, ou um envio pelo endereço de uma caixa de agente no `POST /emails`, no `POST /emails/batch` ou no relay SMTP que as regras reteriam. A mensagem diz a regra, ou lista os motivos de um envio retido. |
+| `429 inbox_send_cap_reached` | O limite diário de envios da caixa acabou, ou o limite diário da equipe para e-mails do domínio compartilhado; o `retry-after` conta até a meia-noite UTC. |
+| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado; `retry-after: 60`. |
 | `403 approval_required` | Um agente enviando um rascunho que espera aprovação. |
 | `403 email_quarantined` | Um agente lendo, respondendo ou encaminhando um e-mail retido, ou qualquer encaminhamento de e-mail infectado. |
 | `410 email_blocked` | Um download de e-mail infectado. |

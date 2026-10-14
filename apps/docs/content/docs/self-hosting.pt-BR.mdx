@@ -210,7 +210,7 @@ do TLS, então só defina essas para um MX em outro host.
 | --- | --- |
 | `RECEIVING_MX_HOST` | Hostname em que o processo MX atende (ex.: `mx.example.com`); os domínios de recebimento apontam o registro MX para ele. Sem ela, o recebimento não existe na instância: nem aba nem opção de ativar no painel, nada de caixas de entrada, todo domínio informa `capabilities.receiving: "disabled"` e os endpoints internos do MX respondem `404`. |
 | `MX_INGEST_SECRET` | Segredo bearer que o MX apresenta à API, com pelo menos 32 caracteres (`openssl rand -hex 32`). Defina junto com `RECEIVING_MX_HOST`: o app se recusa a subir com só uma das duas. O processo MX precisa do mesmo valor. |
-| `SHARED_INBOX_DOMAIN` | Domínio opcional para caixas de entrada que não precisam de DNS: cada equipe ganha um subdomínio dele (veja [Domínio compartilhado das caixas](#domínio-compartilhado-das-caixas)). O MX curinga dele precisa apontar para o `RECEIVING_MX_HOST`, e precisa existir uma identidade do SES para ele na região padrão. Exige `RECEIVING_MX_HOST`; sem ela, o domínio compartilhado não aparece. |
+| `SHARED_INBOX_DOMAIN` | Domínio opcional para caixas de entrada que não precisam de DNS: cada equipe ganha um subdomínio dele (veja [Domínio compartilhado das caixas](#domínio-compartilhado-das-caixas)). O MX e o MX curinga dele precisam apontar para o `RECEIVING_MX_HOST`, e precisa existir uma identidade do SES para ele na região padrão. Exige `RECEIVING_MX_HOST`; sem ela, o domínio compartilhado não aparece. O que os endereços dele podem enviar é definido por `SHARED_INBOX_SEND`, `SHARED_INBOX_OPEN`, `SHARED_INBOX_TENANTS` e `SHARED_INBOX_TEAM_DAILY_CAP`, descritas lá. |
 | `CLAMAV_HOST` | clamd opcional que verifica todo e-mail recebido, como `host[:porta]` (porta `3310` por padrão), ex.: `clamav:3310` para o serviço do compose (veja [Antivírus](#antivírus)). Sem ela, os e-mails não passam por antivírus. |
 | `MX_INGEST_URL` | Processo MX: a origem da sua API mais `/internal/mx` (ex.: `https://api.example.com/internal/mx`). |
 | `MX_HOSTNAME` | Processo MX: o nome na saudação e no EHLO, normalmente igual ao `RECEIVING_MX_HOST`. |
@@ -373,7 +373,8 @@ mantém as métricas de bounce e reclamação — e a própria pausa de envio �
 cliente, não por conta. Domínios anteriores à flag, ou cuja associação falhou,
 são tratados pelo job `tenants.sync` de hora em hora. Suspender uma equipe
 pelo console coloca o status de envio do tenant em `DISABLED` em cada região
-onde a equipe tem um domínio, e reativá-la volta para `ENABLED` (nunca
+onde a equipe tem um domínio ou uma associação do domínio compartilhado, e
+reativá-la volta para `ENABLED` (nunca
 `REINSTATED`, para que as constatações de reputação do próprio SES continuem
 valendo). Uma falha na chamada à AWS nunca segura a suspensão: o console
 avisa, o registro de auditoria anota a falha e o worker tenta de novo com espera
@@ -384,6 +385,19 @@ instalam inclui as ações `ses:CreateTenant`, `ses:GetTenant`,
 `ses:UpdateReputationEntityCustomerManagedStatus`; uma implantação existente
 roda o assistente de novo (ou atualiza a política `millionsend-ses`) antes de
 ligar a flag.
+
+Com o `SHARED_INBOX_TENANTS` também ligado (veja
+[Domínio compartilhado das caixas](#domínio-compartilhado-das-caixas)), os
+e-mails dos endereços compartilhados de uma equipe também nomeiam o tenant
+dela. O primeiro envio compartilhado da equipe associa a identidade do
+domínio compartilhado e o `SES_CONFIGURATION_SET` ao tenant dela na região
+padrão, o mesmo tenant que os domínios dela lá usam, e uma região ou um
+conjunto de configuração diferente faz a associação de novo. Quando o SES
+recusa a associação, o e-mail sai sem tenant, como quando a opção está
+desligada, o worker registra um aviso, e aquele processo do worker deixa a
+equipe em paz por uma hora. Um envio que o SES recusa porque a identidade
+não está associada ao tenant sai mais uma vez sem ele; o e-mail de um tenant
+pausado ou desativado nunca sai assim.
 
 Para atualizar a política sem recriar nada, publique o JSON que a página de
 configurações do SES mostra como nova versão padrão:
@@ -553,9 +567,12 @@ domínio compartilhado das caixas.
 Opcional. Com um domínio compartilhado, as equipes criam
 [caixas de entrada](/pt-BR/concepts/inboxes#domínio-compartilhado) que não
 precisam de DNS próprio: cada equipe ganha um subdomínio, como
-`acme.agents.example`, e cada caixa um endereço aleatório nele. Esses
-endereços expiram em até 30 dias, só respondem dentro das próprias conversas
-e enviam para no máximo 50 destinatários por dia.
+`acme.agents.example`, e cada caixa um endereço nele, com um nome de usuário
+que a equipe escolhe ou aleatório. Essas caixas nunca expiram, a não ser que
+alguém peça, e uma que ninguém usa há 90 dias é excluída. O que elas podem
+enviar é você quem decide ([abaixo](#o-que-os-endereços-compartilhados-podem-enviar));
+de fábrica, elas só respondem dentro das próprias conversas, para no máximo
+10 destinatários por e-mail e 50 por dia por caixa.
 
 Use um domínio só para isso, não um subdomínio de um domínio pelo qual as
 suas equipes enviam: assim os e-mails que os agentes dos clientes mandam por
@@ -563,30 +580,113 @@ ele, e qualquer abuso dele, ficam longe da reputação do seu domínio principal
 Depois de definido, nenhuma equipe consegue adicioná-lo, nem um nome abaixo
 dele, como domínio de envio.
 
-1. **DNS.** No provedor de DNS do domínio, um registro MX curinga cobre o
-   subdomínio de todas as equipes, então equipes novas não precisam de
-   mudança no DNS:
+1. **DNS.** No provedor de DNS do domínio, um registro MX no próprio domínio
+   recebe os e-mails de `postmaster@` e `abuse@` dele, e um registro MX
+   curinga cobre o subdomínio de todas as equipes, então equipes novas não
+   precisam de mudança no DNS:
 
    | Tipo | Nome | Valor |
    | --- | --- | --- |
-   | MX | `*.agents.example` | `mx.example.com` (o seu `RECEIVING_MX_HOST`), prioridade `10` |
+   | MX | `agents.example` | `mx.example.com` (o seu `RECEIVING_MX_HOST`), prioridade `10` |
+   | MX | `*.agents.example` | `mx.example.com`, prioridade `10` |
    | TXT | `_dmarc.agents.example` | `v=DMARC1; p=reject` |
 
 2. **Identidade do SES.** Verifique `agents.example` como identidade de
    domínio com Easy DKIM, e publique os três registros DKIM dela, na região
    padrão do SES da instância: a primeira de `AWS_REGIONS`, ou a
    `AWS_REGION`. O e-mail dos endereços compartilhados não tem domínio de
-   equipe, então sai dessa região e do conjunto de configuração padrão dela.
+   equipe, então sai dessa região e do conjunto de configuração padrão dela,
+   com o [tenant do SES](#tenants-do-ses-reputação-por-equipe) da equipe que
+   envia quando o `SHARED_INBOX_TENANTS` está ligado.
    Uma identidade de domínio verificada deixa o SES enviar por qualquer
    subdomínio dela sem verificar um por um
    ([AWS: Creating and verifying identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html)).
 3. **Ligue.** Defina `SHARED_INBOX_DOMAIN=agents.example` no `.env` e rode
    `docker compose up -d`. O app se recusa a subir quando o valor não é um
    hostname em minúsculas, ou quando falta o `RECEIVING_MX_HOST`.
-4. **Confira.** `dig +short MX test.agents.example` mostra o seu host MX.
-   Crie uma caixa com **Endereço aleatório** no painel, mande uma mensagem para
-   ela e responda pela caixa para um endereço seu: os cabeçalhos da resposta
-   devem mostrar o DKIM passando para `agents.example` e o DMARC passando.
+4. **Receba o postmaster@ e o abuse@.** Os e-mails para `postmaster@` e
+   `abuse@` no domínio, ou no subdomínio de qualquer equipe, vão para a sua
+   própria equipe, nunca para a equipe dona do subdomínio: a equipe mais
+   antiga no plano `system` (Console → Equipes → Alterar plano → System).
+   Eles chegam em **Todos os recebidos** dessa equipe como e-mails do
+   pega-tudo, com o antivírus e a avaliação de spam de qualquer e-mail
+   recebido, mas sem regras de caixa, sem análise e sem limite. Sem uma
+   equipe `system`, eles são recusados com `550 5.1.1`, e enquanto essa
+   equipe está suspensa, com `550 5.7.1`.
+5. **Confira.** `dig +short MX agents.example` e
+   `dig +short MX test.agents.example` mostram o seu host MX. Crie uma caixa
+   no domínio compartilhado pelo painel, deixando o nome de usuário vazio,
+   mande uma mensagem para ela e responda pela caixa para um endereço seu: os
+   cabeçalhos da resposta devem mostrar o DKIM passando para
+   `agents.example` e o DMARC passando. Um e-mail para
+   `postmaster@agents.example` deve chegar em **Todos os recebidos** da sua
+   equipe `system`.
+
+#### O que os endereços compartilhados podem enviar
+
+Quatro configurações decidem isso, editadas no console em Confiança e
+segurança → Configurações de monitoramento (**Domínio compartilhado**), ou
+definidas nas variáveis de ambiente até serem editadas lá; o console
+prevalece:
+
+| Configuração | Padrão | Significado |
+| --- | --- | --- |
+| `SHARED_INBOX_SEND` | `true` | Se os endereços compartilhados enviam alguma coisa. Desligada, nada sai deles, nem respostas, e o que já está na fila espera até ela voltar; os e-mails para eles continuam chegando |
+| `SHARED_INBOX_OPEN` | `false` | Se os endereços compartilhados das equipes pagas (de todas, na auto-hospedagem) podem começar conversas. Desligada, sem juiz (`ABUSE_JUDGE`) ou com o `MONITOR_AUTO_HOLD` desligado, eles só respondem dentro das próprias conversas |
+| `SHARED_INBOX_TENANTS` | `false` | Se o e-mail compartilhado sai com o tenant do SES da equipe que envia, com `SES_TENANTS` ligado |
+| `SHARED_INBOX_TEAM_DAILY_CAP` | 1000 | Para quantos destinatários uma equipe pode enviar por dia UTC, somando todos os endereços compartilhados dela, envios aprovados incluídos |
+
+Com o envio aberto, a caixa compartilhada de uma equipe segue o próprio
+`send_policy` (o `allowlist` nunca existe lá), e cada mensagem para alguém
+de fora da equipe que nunca escreveu para a caixa é avaliada antes do SES,
+em todo nível menos o da equipe de sistema: uma avaliação do tipo phishing
+a partir de `MONITOR_HOLD_REPEAT_SCORE` deixa a mensagem em espera na lista
+de revisão, uma avaliação dessas pausa para revisão uma equipe no nível
+Nova, e quando o juiz não responde, o e-mail espera e depois fica em espera
+como o de um domínio novo.
+
+Para abrir o envio compartilhado numa instância com `SES_TENANTS` ligado
+(sem ele, pule para o passo 4):
+
+1. Confira a cota de tenants do SES na região padrão: cada equipe que envia
+   pelo domínio compartilhado precisa de um lá, o mesmo que os domínios dela
+   nessa região usam.
+2. Teste o SES uma vez com um tenant descartável que tenha só a identidade
+   do domínio compartilhado e o conjunto de configuração, enviando de um
+   endereço num subdomínio:
+
+   ```sh
+   aws sesv2 create-tenant --region <region> --tenant-name shared-probe
+   aws sesv2 create-tenant-resource-association --region <region> --tenant-name shared-probe \
+     --resource-arn arn:aws:ses:<region>:<account-id>:identity/agents.example
+   aws sesv2 create-tenant-resource-association --region <region> --tenant-name shared-probe \
+     --resource-arn arn:aws:ses:<region>:<account-id>:configuration-set/<SES_CONFIGURATION_SET>
+   aws sesv2 send-email --region <region> --tenant-name shared-probe \
+     --configuration-set-name <SES_CONFIGURATION_SET> \
+     --from-email-address probe@test.agents.example \
+     --destination ToAddresses=success@simulator.amazonses.com \
+     --content '{"Simple":{"Subject":{"Data":"Probe"},"Body":{"Text":{"Data":"Probe"}}}}'
+   ```
+
+   Depois desative o tenant com o `TenantArn` que o `create-tenant` mostrou,
+   rode o mesmo `send-email` de novo e exclua o tenant:
+
+   ```sh
+   aws sesv2 update-reputation-entity-customer-managed-status --region <region> \
+     --reputation-entity-type RESOURCE --reputation-entity-reference <TenantArn> \
+     --sending-status DISABLED
+   aws sesv2 delete-tenant --region <region> --tenant-name shared-probe
+   ```
+
+   O primeiro envio precisa passar, e o segundo precisa falhar com um erro
+   que não fale de associação: só com esse erro o e-mail compartilhado é
+   enviado de novo sem o tenant. Se algum dos dois for diferente, deixe o
+   `SHARED_INBOX_TENANTS` desligado.
+3. Ligue o `SHARED_INBOX_TENANTS`.
+4. Confira se o juiz revisa os nomes: com o `ABUSE_JUDGE` definido, criar
+   uma caixa compartilhada com um nome de usuário responde `201`, não
+   `503 name_review_unavailable`.
+5. Ligue o `SHARED_INBOX_OPEN`.
 
 ### Antivírus
 
@@ -1291,7 +1391,9 @@ UTC.
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
 não enviado que a avaliação antes do envio segurou: em espera atrás de uma
 pausa para revisão, cumprindo os seus 2 minutos, em espera por um destino
-novo ou pelas imagens ou arquivos, ou em espera depois de o avaliador falhar repetidas vezes. **Liberar** envia o e-mail sem avaliá-lo de
+novo ou pelas imagens ou arquivos, em espera por ser e-mail de um endereço
+compartilhado para alguém que nunca escreveu para ele, ou em espera depois
+de o avaliador falhar repetidas vezes. **Liberar** envia o e-mail sem avaliá-lo de
 novo (o `quota.drain` o cobra como qualquer e-mail em espera); **Cancelar**
 faz com que ele nunca saia. **Liberar todos** e **Cancelar todos** pedem
 confirmação, com a contagem, e só pegam e-mails em espera desde antes de a
@@ -1321,7 +1423,8 @@ propósito, depois de conferir as pontuações dela. Cada amostra registra o id
 versionado do modelo que respondeu. `ABUSE_JUDGE_BASE_URL` (padrão
 `https://api.typesafe.ai`) aponta o avaliador para outro endpoint que serve a
 mesma API; ele faz o POST em `<base>/v1/systemone`. As perguntas que o Jev
-responde estão em `packages/core/src/abuse-judge/questions.ts`.
+responde estão em `packages/core/src/abuse-judge/questions.ts`, e as sobre os
+nomes no domínio compartilhado das caixas em `names.ts`, ao lado.
 
 **Para onde vão as amostras.** Toda mensagem sorteada é enviada à TypeSafe, um
 subprocessador que hospeda o serviço nos Estados Unidos. Pelos termos
@@ -1380,6 +1483,15 @@ imagens ou os arquivos em si. Uma amostra avaliada guarda a pontuação, a avali
 categorias, os códigos de motivo, o idioma, a versão do modelo, a latência e
 a classe de erro; a página de revisão mostra isso e nunca um assunto ou um
 corpo. As linhas de amostra são removidas após 90 dias.
+
+**Nomes no domínio compartilhado.** Com um
+[domínio compartilhado das caixas](#domínio-compartilhado-das-caixas), a API
+e o painel também mandam para a TypeSafe os nomes que uma equipe publica
+nele, para revisão antes de serem usados: um nome de usuário escolhido, o
+nome de exibição (`from_name`) de uma caixa compartilhada e o subdomínio da
+equipe, como foram escritos, sem mais nada sobre a equipe ou a caixa. Só
+fica guardada uma contagem dos nomes revisados e recusados por equipe e
+dia. Inclua isso também no aviso de privacidade.
 
 **Imagens e anexos.** A triagem abre o que o e-mail traz, dentro do
 worker: o texto e os links de anexos PDF (até 50 páginas), Word, Excel,

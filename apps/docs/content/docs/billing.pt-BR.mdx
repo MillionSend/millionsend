@@ -117,11 +117,11 @@ elas recebem é contado como acima. O plano limita quantas uma equipe mantém e
 com que rapidez as cria, a partir de `PLAN_INBOX_LIMIT` e
 `INBOX_CREATES_PER_HOUR` em `packages/core/src/inboxes/limits.ts`:
 
-| Plano | Caixas | Criadas por hora | Pega-tudo |
-| --- | --- | --- | --- |
-| Free | 3 | 10 | Não |
-| Starter | 25 | 60 | Sim |
-| Pro, Scale | Ilimitadas | 600 | Sim |
+| Plano | Caixas | Criadas por hora | Pega-tudo | Endereços compartilhados |
+| --- | --- | --- | --- | --- |
+| Free | 3 | 10 | Não | Só respondem |
+| Starter | 25 | 60 | Sim | Começam conversas |
+| Pro, Scale | Ilimitadas | 600 | Sim | Começam conversas |
 
 - No limite de caixas, `POST /inboxes` responde `403 validation_error` com a
   mensagem do Resend, "You have reached the inbox limit of your plan. Upgrade
@@ -133,6 +133,14 @@ com que rapidez as cria, a partir de `PLAN_INBOX_LIMIT` e
   ou acima: no Free, ligá-lo responde `403 plan_limit_reached` ("Catch-all
   receiving needs a paid plan"). Ele continua ligado num downgrade, e foi
   ligado em todo domínio que já recebia e-mail antes de as caixas existirem.
+- Os endereços do
+  [domínio compartilhado](/pt-BR/concepts/inboxes#domínio-compartilhado)
+  começam conversas num plano pago, quando a instância permite, e no Free só
+  respondem dentro das próprias conversas. O plano é lido a cada envio:
+  depois de um downgrade, uma regra `open` salva vale como só respostas, sem
+  ser reescrita, e volta a valer depois de um upgrade. As caixas
+  compartilhadas contam no limite de caixas até serem excluídas, por você ou
+  depois de 90 dias sem uso.
 - `GET /usage` informa o limite em `limits.inboxes` (`null` quando é
   ilimitado), e o cartão de cobrança o mostra como "6 de 25".
 - A análise de injeção de prompt dos e-mails recebidos tem contagem própria
@@ -141,8 +149,10 @@ com que rapidez as cria, a partir de `PLAN_INBOX_LIMIT` e
   por instância, mais 200 por caixa. O e-mail recebido nunca gasta as cotas de
   amostragem dos envios.
 
-Instâncias auto-hospedadas não têm limite de caixas nem taxa de criação, e o
-pega-tudo vale para qualquer domínio.
+Instâncias auto-hospedadas não têm limite de caixas nem taxa de criação, o
+pega-tudo vale para qualquer domínio, e toda equipe conta como paga para os
+endereços compartilhados: o que eles enviam depende das configurações de
+quem opera a instância.
 
 ## O modelo no Stripe
 

@@ -283,11 +283,17 @@ the SMTP relay and the MCP tool `send_email`. In order:
 1. **Identity.** An inbox-scoped key sends only from its inbox's address
    (`403 restricted_api_key`; `550 5.7.1` over SMTP).
 2. **Shared domain.** A [shared address](/concepts/inboxes#shared-domain)
-   only replies inside its threads, to the people in them whose domain
-   vouched for them and to your team members' sign-in addresses
-   (`owner_addresses`, the allowlist and a `Reply-To` at another organization
-   don't count there). Anything else is refused with
-   `403 inbox_send_policy`, even approved.
+   sends nothing while the instance pauses shared sending. On the Free plan,
+   while the instance limits shared addresses to replies, or while its
+   `from_name` or team subdomain looks like a well-known brand, it only
+   replies inside its threads, to the people in them whose domain vouched
+   for them and to your team members' sign-in addresses (`owner_addresses`,
+   the allowlist and a `Reply-To` at another organization never count
+   there). Anything else is refused with `403 inbox_send_policy`, even
+   approved. Every shared send also counts toward the team's daily limit for
+   the shared domain (`429 inbox_send_cap_reached`) and takes 10 recipients
+   at most (`422 validation_error`); `POST /emails/batch` and the SMTP relay
+   refuse a shared address.
 3. **Daily cap.** `send_cap` recipients per UTC day. Past it,
    `429 inbox_send_cap_reached`, with `retry-after` counting to midnight UTC.
    Approved sends count but are never refused.
@@ -313,10 +319,11 @@ a draft instead, with a reason:
    - `reply_only`, the default: replies inside a thread, to people who wrote
      in it, owners and the allowlist.
    - `allowlist`: those, plus new conversations with owners and the
-     allowlist.
-   - `open`: anyone. Only on your own domain, and not while your team is new
-     to sending (inside its first 1,000 sends or 72 hours, or under 10,000
-     sends within 7 days of its first).
+     allowlist. Not on the shared domain.
+   - `open`: anyone. On your own domain, or on the shared domain where it may
+     start conversations, and not while your team is new to sending (inside
+     its first 1,000 sends or 72 hours, or under 10,000 sends within 7 days
+     of its first).
 7. **Private codes** (`private_code`), as above. A forward checks whether the
    forwarded message carries a code or link.
 8. **Ramp.** New recipients per day stay within the cap, and within 10 on

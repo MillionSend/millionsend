@@ -96,8 +96,8 @@ só os recebe quando os escolhe pelo nome, nunca por "todos os eventos".
 | --- | --- | --- |
 | `inbox.created` | Uma caixa foi criada. | `inbox` |
 | `inbox.updated` | O nome, o nome de remetente, a validade ou as configurações de segurança de uma caixa mudaram. | `inbox` |
-| `inbox.deleted` | Uma caixa foi excluída, por uma pessoa, pela API, por ter expirado ou porque o domínio dela foi excluído. | |
-| `inbox.expired` | Uma caixa chegou ao `expires_at`; o `inbox.deleted` vem em seguida. Do MillionSend. | `inbox`, como estava |
+| `inbox.deleted` | Uma caixa foi excluída, por uma pessoa, pela API, por ter expirado, por ser uma caixa compartilhada sem uso há 90 dias ou porque o domínio dela foi excluído. | |
+| `inbox.expired` | Uma caixa chegou ao `expires_at`, ou uma caixa do domínio compartilhado ficou 90 dias sem uso; o `inbox.deleted` vem em seguida. Do MillionSend. | `inbox`, como estava |
 | `inbox.thread.created` | Uma conversa ganhou a primeira mensagem: a primeira entregue ou liberada, ou a primeira que a caixa enviou. | `thread_id`, `email_id`, `thread`, `email` |
 | `inbox.thread.folder.updated` | Uma conversa mudou de pasta, à mão ou porque um e-mail novo a trouxe de volta para `inbox`. | `from`, `to`, `thread_id`, `thread` |
 | `inbox.thread.labels.updated` | Uma etiqueta entrou ou saiu de uma conversa; uma etiqueta por evento. | `added`, `removed`, `thread_id`, `thread` |

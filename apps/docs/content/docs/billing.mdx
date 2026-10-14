@@ -113,11 +113,11 @@ counted as above. The plan caps how many a team keeps and how fast it creates
 them, from `PLAN_INBOX_LIMIT` and `INBOX_CREATES_PER_HOUR` in
 `packages/core/src/inboxes/limits.ts`:
 
-| Plan | Inboxes | Created per hour | Catch-all |
-| --- | --- | --- | --- |
-| Free | 3 | 10 | No |
-| Starter | 25 | 60 | Yes |
-| Pro, Scale | Unlimited | 600 | Yes |
+| Plan | Inboxes | Created per hour | Catch-all | Shared addresses |
+| --- | --- | --- | --- | --- |
+| Free | 3 | 10 | No | Reply only |
+| Starter | 25 | 60 | Yes | Start conversations |
+| Pro, Scale | Unlimited | 600 | Yes | Start conversations |
 
 - At the inbox cap, `POST /inboxes` answers `403 validation_error` with
   Resend's message, "You have reached the inbox limit of your plan. Upgrade
@@ -129,6 +129,12 @@ them, from `PLAN_INBOX_LIMIT` and `INBOX_CREATES_PER_HOUR` in
   above: on Free, turning it on answers `403 plan_limit_reached` ("Catch-all
   receiving needs a paid plan"). It stays on through a downgrade, and every
   domain that received mail before inboxes existed was switched on.
+- Addresses on the [shared domain](/concepts/inboxes#shared-domain) start
+  conversations on a paid plan, where the instance allows it, and only reply
+  inside their threads on Free. The plan is read at every send: after a
+  downgrade a stored `open` rule reads as reply-only, without being
+  rewritten, and applies again after an upgrade. Shared inboxes count toward
+  the inbox cap until they're deleted, by you or after 90 days unused.
 - `GET /usage` reports the cap as `limits.inboxes` (`null` when unlimited),
   and the billing card shows it as "6 of 25".
 - Screening received mail for prompt injection keeps its own count
@@ -137,8 +143,9 @@ them, from `PLAN_INBOX_LIMIT` and `INBOX_CREATES_PER_HOUR` in
   per instance, plus 200 per inbox. Received mail never spends the outbound
   sampling caps.
 
-Self-hosted instances have no inbox cap or creation rate, and catch-all is
-open to every domain.
+Self-hosted instances have no inbox cap or creation rate, catch-all is open
+to every domain, and every team counts as paid for shared addresses: the
+operator's settings decide what they send.
 
 ## The Stripe model
 

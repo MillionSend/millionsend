@@ -317,8 +317,13 @@ ALLOW_TRACKING_SUBDOMAINS=false
 
 # Agent inboxes on a shared domain (beta). Customers get addresses on per-team
 # subdomains of this domain without DNS. It must be its own registrable domain,
-# its wildcard MX must point at RECEIVING_MX_HOST, and an SES identity for it
-# must exist in AWS_REGION. Unset hides the shared domain.
+# its MX and wildcard MX must point at RECEIVING_MX_HOST, and an SES identity
+# for it must exist in the default region (the first of AWS_REGIONS, or
+# AWS_REGION). Unset hides the shared domain. What its addresses may send is
+# edited in the console (Trust & safety → Monitoring settings) or seeded as
+# SHARED_INBOX_SEND (default true), SHARED_INBOX_OPEN and SHARED_INBOX_TENANTS
+# (default false) and SHARED_INBOX_TEAM_DAILY_CAP (default 1000); see "Shared
+# inbox domain" in SELF_HOSTING.md.
 # SHARED_INBOX_DOMAIN=agents.example.com
 
 # Optional virus scanning of received mail by clamd over TCP (host[:port],

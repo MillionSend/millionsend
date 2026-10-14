@@ -1,7 +1,7 @@
 # Inbound MX box (MillionSend Cloud)
 
 The mail server that receives for every receiving-enabled domain on MillionSend
-Cloud, and for the teams' subdomains of the shared inbox domain:
+Cloud, and for the shared inbox domain and its teams' subdomains:
 `mx.millionsend-dns.com`, a small EC2 instance in `us-east-1`. It runs
 the app's own image as `PROCESS=mx` and holds no database. Per recipient it asks
 the API whether the domain receives here, and it hands every message to the
@@ -263,28 +263,36 @@ nothing is lost.
 ## Shared inbox domain
 
 Teams' shared-domain inboxes (`SHARED_INBOX_DOMAIN` in the app's `.env`)
-receive here too, through one wildcard MX record. The domain is its own
-registrable domain, never under `millionsend.com` or `millionsend-dns.com`:
-the cloud app refuses to boot with one there. Agent mail, and abuse of it,
-then never touches the platform's own reputation.
+receive here too: one wildcard MX record covers every team's subdomain, and
+an MX record on the domain itself takes its `postmaster@` and `abuse@`. The
+domain is its own registrable domain, never under `millionsend.com` or
+`millionsend-dns.com`: the cloud app refuses to boot with one there. Agent
+mail, and abuse of it, then never touches the platform's own reputation.
 
 1. **DNS**, in the shared domain's zone (`<shared>` below stands for it):
 
    | Type | Name | Content |
    | ---- | ---- | ------- |
+   | MX | `<shared>` | `mx.millionsend-dns.com`, priority 10 |
    | MX | `*.<shared>` | `mx.millionsend-dns.com`, priority 10 |
    | TXT | `_dmarc.<shared>` | `v=DMARC1; p=reject` |
 
 2. **SES identity**: verify `<shared>` as a domain identity with Easy DKIM in
    the app's default region (the first of `AWS_REGIONS`) and publish its
    three DKIM CNAME records in the same zone. Shared addresses send with no
-   team domain, from that region and its default configuration set.
+   team domain, from that region and its default configuration set, under
+   the sending team's SES tenant once the app's `SHARED_INBOX_TENANTS`
+   setting is on.
 3. **App**: set `SHARED_INBOX_DOMAIN=<shared>` in the app's `.env`, then
-   `docker compose up -d` there. Nothing changes on this box.
-4. **Checks**: `dig +short MX test.<shared>` prints
-   `10 mx.millionsend-dns.com.`. Create an inbox with **Random address**,
-   send it a message from Gmail, then reply from the inbox: Gmail's "Show
-   original" should read `DKIM: 'PASS' with domain <shared>` and
+   `docker compose up -d` there. Nothing changes on this box. Mail to
+   `postmaster@` and `abuse@` at `<shared>`, or at any team's subdomain,
+   goes to the oldest team on the System plan, and is refused with
+   `550 5.1.1` while there is none.
+4. **Checks**: `dig +short MX <shared>` and `dig +short MX test.<shared>`
+   both print `10 mx.millionsend-dns.com.`. Create an inbox on the shared
+   domain, leaving the username empty, send it a message from Gmail, then
+   reply from the inbox: Gmail's "Show original" should read
+   `DKIM: 'PASS' with domain <shared>` and
    `DMARC: 'PASS'`. SES documents sending from any subdomain of a verified
    domain identity, but not which key signs it, so this check is what proves
    the signature.

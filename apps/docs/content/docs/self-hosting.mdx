@@ -204,7 +204,7 @@ itself, so set those only for an MX on another host.
 | --- | --- |
 | `RECEIVING_MX_HOST` | Hostname the MX process answers at (e.g. `mx.example.com`); receiving domains point their MX record at it. Unset, receiving doesn't exist on the instance: no dashboard tab or switch, no inboxes, every domain reports `capabilities.receiving: "disabled"`, and the internal MX endpoints answer `404`. |
 | `MX_INGEST_SECRET` | Bearer secret the MX presents to the API, at least 32 characters (`openssl rand -hex 32`). Set it together with `RECEIVING_MX_HOST`: the app refuses to boot with only one of the two. The MX process needs the same value. |
-| `SHARED_INBOX_DOMAIN` | Optional domain for inboxes that need no DNS: each team gets a subdomain of it (see [Shared inbox domain](#shared-inbox-domain)). Its wildcard MX must point at `RECEIVING_MX_HOST`, and an SES identity for it must exist in the default region. Needs `RECEIVING_MX_HOST`; unset hides the shared domain. |
+| `SHARED_INBOX_DOMAIN` | Optional domain for inboxes that need no DNS: each team gets a subdomain of it (see [Shared inbox domain](#shared-inbox-domain)). Its MX and wildcard MX must point at `RECEIVING_MX_HOST`, and an SES identity for it must exist in the default region. Needs `RECEIVING_MX_HOST`; unset hides the shared domain. What its addresses may send is set by `SHARED_INBOX_SEND`, `SHARED_INBOX_OPEN`, `SHARED_INBOX_TENANTS` and `SHARED_INBOX_TEAM_DAILY_CAP`, described there. |
 | `CLAMAV_HOST` | Optional clamd that scans every received message, as `host[:port]` (port `3310` by default), e.g. `clamav:3310` for the compose service (see [Virus scanning](#virus-scanning)). Unset, mail isn't scanned. |
 | `MX_INGEST_URL` | MX process: your API's origin plus `/internal/mx` (e.g. `https://api.example.com/internal/mx`). |
 | `MX_HOSTNAME` | MX process: the name in its greeting and EHLO, normally the same as `RECEIVING_MX_HOST`. |
@@ -362,7 +362,8 @@ SES keeps bounce and complaint metrics — and its own sending pause — per
 customer instead of per account. Domains that predate the flag, or whose
 association failed, are picked up by the hourly `tenants.sync` job.
 Suspending a team from the console sets its tenant's sending status to
-`DISABLED` in every region the team has a domain in, and reinstating sets it
+`DISABLED` in every region the team has a domain or a shared-domain
+association in, and reinstating sets it
 back to `ENABLED` (never `REINSTATED`, so SES's own reputation findings still
 apply). A failed AWS call never holds the suspension back: the console warns,
 the audit log records it, and the worker retries with backoff. The IAM
@@ -372,6 +373,18 @@ policy the wizard and the CloudFormation template install includes the
 and `ses:UpdateReputationEntityCustomerManagedStatus` actions; an existing
 deployment re-runs the wizard (or updates the `millionsend-ses` policy)
 before turning the flag on.
+
+With `SHARED_INBOX_TENANTS` on too (see
+[Shared inbox domain](#shared-inbox-domain)), mail from a team's shared
+addresses names its tenant as well. The team's first shared send associates
+the shared domain's identity and `SES_CONFIGURATION_SET` with its tenant in
+the default region, the same tenant its domains there use, and a changed
+region or configuration set associates them again. When SES refuses the
+association, the mail goes out without a tenant, as with the switch off, the
+worker logs a warning, and that worker process leaves the team alone for an
+hour. A send SES refuses because the identity isn't associated with the
+tenant goes once more without one; a paused or disabled tenant's mail never
+does.
 
 To update the policy in place, publish the JSON the SES settings page shows as a
 new default version:
@@ -537,37 +550,119 @@ inbox domain.
 
 Optional. With a shared domain, teams create [inboxes](/concepts/inboxes#shared-domain)
 that need no DNS of their own: every team gets a subdomain, such as
-`acme.agents.example`, and each inbox a random address on it. Those addresses
-expire within 30 days, reply only inside their own threads and send to 50
-recipients a day at most.
+`acme.agents.example`, and each inbox an address on it, with a username the
+team picks or a random one. Those inboxes never expire unless asked to, and
+one nobody used for 90 days is deleted. What they may send is yours to
+decide ([below](#what-shared-addresses-may-send)); out of the box they only
+reply inside their own threads, to 10 recipients per email and 50 a day per
+inbox at most.
 
 Use a domain of its own, not a subdomain of one your teams send from: the
 mail customers' agents send from it, and any abuse of it, then stays off your
 main domain's reputation. Once it is set, no team can add it, or any name
 under it, as a sending domain.
 
-1. **DNS.** At the domain's DNS provider, a wildcard MX record covers every
-   team's subdomain, so new teams need no DNS change:
+1. **DNS.** At the domain's DNS provider, an MX record on the domain itself
+   takes its `postmaster@` and `abuse@` mail, and a wildcard MX record covers
+   every team's subdomain, so new teams need no DNS change:
 
    | Type | Name | Value |
    | --- | --- | --- |
-   | MX | `*.agents.example` | `mx.example.com` (your `RECEIVING_MX_HOST`), priority `10` |
+   | MX | `agents.example` | `mx.example.com` (your `RECEIVING_MX_HOST`), priority `10` |
+   | MX | `*.agents.example` | `mx.example.com`, priority `10` |
    | TXT | `_dmarc.agents.example` | `v=DMARC1; p=reject` |
 
 2. **SES identity.** Verify `agents.example` as a domain identity with Easy
    DKIM, and publish its three DKIM records, in the instance's default SES
    region: the first of `AWS_REGIONS`, or `AWS_REGION`. Mail from shared
    addresses carries no team domain, so it goes out from that region and its
-   default configuration set. A verified domain identity lets SES send from
+   default configuration set, under the sending team's
+   [SES tenant](#ses-tenants-per-team-reputation) once `SHARED_INBOX_TENANTS`
+   is on. A verified domain identity lets SES send from
    any subdomain of it without verifying each one
    ([AWS: Creating and verifying identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html)).
 3. **Turn it on.** Set `SHARED_INBOX_DOMAIN=agents.example` in `.env` and run
    `docker compose up -d`. The app refuses to boot when the value isn't a
    lowercase hostname, or when `RECEIVING_MX_HOST` is unset.
-4. **Check.** `dig +short MX test.agents.example` prints your MX host. Create
-   an inbox with **Random address** in the dashboard, send it a message, and
-   reply from the inbox to a mailbox you own: the reply's headers should show
-   DKIM passing for `agents.example` and DMARC passing.
+4. **Give role mail a home.** Mail to `postmaster@` and `abuse@` at the
+   domain, or at any team's subdomain, goes to your own team, never to the
+   team whose subdomain it is: the oldest team on the `system` plan (Console
+   → Teams → Change plan → System). It lands in that team's **All received**
+   as catch-all mail, with the virus scan and spam verdict any received mail
+   gets, but no inbox rules, no screening and no cap. Without a `system`
+   team it is refused with `550 5.1.1`, and while that team is suspended
+   with `550 5.7.1`.
+5. **Check.** `dig +short MX agents.example` and
+   `dig +short MX test.agents.example` print your MX host. Create an inbox on
+   the shared domain in the dashboard, leaving the username empty, send it a
+   message, and reply from the inbox to a mailbox you own: the reply's
+   headers should show DKIM passing for `agents.example` and DMARC passing.
+   Mail to `postmaster@agents.example` should land in your `system` team's
+   **All received**.
+
+#### What shared addresses may send
+
+Four settings decide it, edited in the console under Trust & safety →
+Monitoring settings (**Shared domain**), or set as environment variables
+until they are; the console wins:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `SHARED_INBOX_SEND` | `true` | Whether shared addresses send at all. Off, nothing goes out from them, replies included, and mail already queued waits until it's back on; mail to them still arrives |
+| `SHARED_INBOX_OPEN` | `false` | Whether paid teams' shared addresses (every team's, self-hosted) may start conversations. Off, without a judge (`ABUSE_JUDGE`) or with `MONITOR_AUTO_HOLD` off, they only reply inside their threads |
+| `SHARED_INBOX_TENANTS` | `false` | Whether shared mail goes out under the sending team's SES tenant, with `SES_TENANTS` on |
+| `SHARED_INBOX_TEAM_DAILY_CAP` | 1000 | Recipients one team may reach per UTC day from all its shared addresses, approved sends included |
+
+With open sending, a team's shared inbox follows its own `send_policy`
+(`allowlist` is never available there), and each message to someone outside
+the team who never wrote to the inbox is judged before SES, at every tier
+but the system team's: a phishing-type verdict from
+`MONITOR_HOLD_REPEAT_SCORE` parks it for the review list, one such verdict
+holds a New-tier team for review, and when the judge can't answer, the mail
+waits and then parks as a young domain's does.
+
+To open shared sending on an instance with `SES_TENANTS` on (without it,
+skip to step 4):
+
+1. Check the default region's SES quota for tenants: each team that sends
+   from the shared domain needs one there, the same one its domains in that
+   region use.
+2. Probe SES once with a throwaway tenant that has only the shared domain's
+   identity and the configuration set, sending from an address on a
+   subdomain:
+
+   ```sh
+   aws sesv2 create-tenant --region <region> --tenant-name shared-probe
+   aws sesv2 create-tenant-resource-association --region <region> --tenant-name shared-probe \
+     --resource-arn arn:aws:ses:<region>:<account-id>:identity/agents.example
+   aws sesv2 create-tenant-resource-association --region <region> --tenant-name shared-probe \
+     --resource-arn arn:aws:ses:<region>:<account-id>:configuration-set/<SES_CONFIGURATION_SET>
+   aws sesv2 send-email --region <region> --tenant-name shared-probe \
+     --configuration-set-name <SES_CONFIGURATION_SET> \
+     --from-email-address probe@test.agents.example \
+     --destination ToAddresses=success@simulator.amazonses.com \
+     --content '{"Simple":{"Subject":{"Data":"Probe"},"Body":{"Text":{"Data":"Probe"}}}}'
+   ```
+
+   Then disable the tenant with the `TenantArn` that `create-tenant`
+   printed, run the same `send-email` again, and delete the tenant:
+
+   ```sh
+   aws sesv2 update-reputation-entity-customer-managed-status --region <region> \
+     --reputation-entity-type RESOURCE --reputation-entity-reference <TenantArn> \
+     --sending-status DISABLED
+   aws sesv2 delete-tenant --region <region> --tenant-name shared-probe
+   ```
+
+   The first send must go through, and the second must fail with an error
+   that doesn't mention association: on that error alone, shared mail is
+   sent again without its tenant. If either differs, leave
+   `SHARED_INBOX_TENANTS` off.
+3. Turn on `SHARED_INBOX_TENANTS`.
+4. Check that the judge reviews names: with `ABUSE_JUDGE` set, creating a
+   shared inbox with a username answers `201`, not
+   `503 name_review_unavailable`.
+5. Turn on `SHARED_INBOX_OPEN`.
 
 ### Virus scanning
 
@@ -1244,8 +1339,9 @@ day.
 
 **The review list.** Trust & safety lists every unsent email screening
 stopped, grouped by team: parked behind a review hold, waiting out its 2
-minutes, parked for a new destination or for its images or files, or parked
-after the judge kept failing. **Release** sends an email
+minutes, parked for a new destination or for its images or files, parked as
+a shared address's mail to someone who never wrote to it, or parked after
+the judge kept failing. **Release** sends an email
 without screening it again (`quota.drain` charges it as any parked mail);
 **Cancel** means it never goes out. **Release all** and **Cancel all** ask
 first, with the count, and take only mail held before the list was loaded.
@@ -1272,7 +1368,8 @@ one version's answers: move to a newer version deliberately, after checking
 its scores. Each sample records the versioned model id that answered.
 `ABUSE_JUDGE_BASE_URL` (default `https://api.typesafe.ai`) points the judge
 at another endpoint serving the same API; it posts to `<base>/v1/systemone`.
-The questions Jev answers ship in `packages/core/src/abuse-judge/questions.ts`.
+The questions Jev answers ship in `packages/core/src/abuse-judge/questions.ts`,
+and those about names on the shared inbox domain in `names.ts` beside it.
 
 **Where the samples go.** Every sampled message is sent to TypeSafe, a
 sub-processor that hosts its service in the United States. Per its published
@@ -1324,6 +1421,14 @@ header, never the raw HTML, never the images or files themselves. A judged sampl
 keeps its score, verdict, categories, reason codes, language, model version,
 latency and error class; the review page shows those and never a subject or
 a body. Sample rows are pruned after 90 days.
+
+**Names on the shared domain.** With a
+[shared inbox domain](#shared-inbox-domain), the API and the dashboard also
+send TypeSafe the names a team publishes there, for review before they're
+used: a chosen username, a shared inbox's display name (`from_name`) and
+the team's subdomain label, as written, with nothing else about the team or
+the inbox. Only a count of the names reviewed and refused per team and day
+is kept. List these in the privacy notice too.
 
 **Images and attachments.** Screening opens what an email carries, inside
 the worker: the text and links of PDF (up to 50 pages), Word, Excel,
