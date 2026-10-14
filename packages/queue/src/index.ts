@@ -430,9 +430,16 @@ export class Queue {
     });
   }
 
-  /** A delivered message's pass to its inbox's forward_to owners. */
-  async enqueueInboxForward(p: JobPayloads["inbox.forward"]): Promise<void> {
-    await this.send("inbox.forward", p, { dedupeKey: `${p.receivedEmailId}:${p.inboxId}` });
+  /**
+   * A delivered message's pass to its inbox's forward_to owners; `startAfter`
+   * runs it again later. The running job may enqueue its own successor: the
+   * short policy only collapses a key while a job is still created.
+   */
+  async enqueueInboxForward(p: JobPayloads["inbox.forward"], startAfter?: Date): Promise<void> {
+    await this.send("inbox.forward", p, {
+      dedupeKey: `${p.receivedEmailId}:${p.inboxId}`,
+      startAfter,
+    });
   }
 
   /**

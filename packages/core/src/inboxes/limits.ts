@@ -55,6 +55,10 @@ export const DRAFT_APPROVAL_TTL = 7 * DAY_MS;
 export const TRASH_RETENTION = 30 * DAY_MS;
 /** Milliseconds a received code or link counts as private for outgoing mail. */
 export const RECEIVED_SECRET_WINDOW = 24 * HOUR_MS;
+/** Milliseconds between two looks at the shared-domain switch by mail it holds. */
+export const SHARED_PAUSED_RETRY_MS = 5 * 60_000;
+/** Milliseconds after delivery a forward_to copy may wait for the shared domain to let it out. */
+export const FORWARD_WAIT_MAX = 2 * DAY_MS;
 
 export const LONG_POLL_MAX_SECONDS = 50;
 export const WAITS_PER_TEAM_PER_PROCESS = 20;

@@ -260,6 +260,11 @@ as equipes:
   acima disso, mesmo com aprovação, eles respondem
   `429 inbox_send_cap_reached` ("Your team reached today's limit for mail
   from the shared domain").
+- Uma cópia do `forward_to` espera em vez de se perder: enquanto a instância
+  pausa o envio pelo domínio compartilhado e, se a sua equipe passou do
+  limite do dia, até o próximo dia UTC. Se ela ainda não puder sair 2 dias
+  depois da entrega da mensagem, não é mais enviada; a mensagem continua na
+  caixa.
 - Eles passam pelo `POST /emails` e pela ferramenta MCP `send_email` só
   quando podem começar conversas, seguindo as regras da caixa. O `from`
   precisa ser exatamente o endereço da caixa, sem `+tag`, sem nome de

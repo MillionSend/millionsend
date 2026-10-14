@@ -631,7 +631,7 @@ prevalece:
 
 | Configuração | Padrão | Significado |
 | --- | --- | --- |
-| `SHARED_INBOX_SEND` | `true` | Se os endereços compartilhados enviam alguma coisa. Desligada, nada sai deles, nem respostas, e o que já está na fila espera até ela voltar; os e-mails para eles continuam chegando |
+| `SHARED_INBOX_SEND` | `true` | Se os endereços compartilhados enviam alguma coisa. Desligada, nada sai deles, nem respostas, e o que já está na fila espera até ela voltar (as cópias do `forward_to`, por até 2 dias); os e-mails para eles continuam chegando |
 | `SHARED_INBOX_OPEN` | `false` | Se os endereços compartilhados das equipes pagas (de todas, na auto-hospedagem) podem começar conversas. Desligada, sem juiz (`ABUSE_JUDGE`) ou com o `MONITOR_AUTO_HOLD` desligado, eles só respondem dentro das próprias conversas |
 | `SHARED_INBOX_TENANTS` | `false` | Se o e-mail compartilhado sai com o tenant do SES da equipe que envia, com `SES_TENANTS` ligado |
 | `SHARED_INBOX_TEAM_DAILY_CAP` | 1000 | Para quantos destinatários uma equipe pode enviar por dia UTC, somando todos os endereços compartilhados dela, envios aprovados incluídos |

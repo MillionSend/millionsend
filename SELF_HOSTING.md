@@ -485,7 +485,7 @@ wins:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `SHARED_INBOX_SEND` | `true` | Whether they send at all; off, nothing goes out, replies included, queued mail waits, and mail to them still arrives |
+| `SHARED_INBOX_SEND` | `true` | Whether they send at all; off, nothing goes out, replies included, queued mail waits (`forward_to` copies for up to 2 days), and mail to them still arrives |
 | `SHARED_INBOX_OPEN` | `false` | Whether paid teams' (every team's, self-hosted) may start conversations; off, with no judge (`ABUSE_JUDGE`) or with `MONITOR_AUTO_HOLD` off, they only reply inside their threads |
 | `SHARED_INBOX_TENANTS` | `false` | Whether shared mail goes out under the sending team's SES tenant, with `SES_TENANTS` on |
 | `SHARED_INBOX_TEAM_DAILY_CAP` | 1000 | Recipients one team reaches per UTC day from all its shared addresses, approved sends included |

@@ -247,6 +247,10 @@ team's:
   sets another limit; past it, approved sends included, they answer
   `429 inbox_send_cap_reached` ("Your team reached today's limit for mail
   from the shared domain").
+- A `forward_to` copy waits instead of being lost: while the instance pauses
+  shared sending, and, once your team is past today's limit, until the next
+  UTC day. If it still can't go out 2 days after the message was delivered,
+  it isn't sent; the message stays in the inbox.
 - They go through `POST /emails` and the MCP tool `send_email` only where
   they may start conversations, under the inbox's rules. `from` must be the
   inbox's address exactly, without a `+tag`, with no display name or the

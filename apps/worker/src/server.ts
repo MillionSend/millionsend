@@ -834,9 +834,11 @@ await queue.work(
   { concurrency: 4, groupConcurrency: 2 },
 );
 
-await queue.work("inbox.forward", (job) => forwardToOwners(db, inboxSendDeps, job), {
-  concurrency: 2,
-});
+await queue.work(
+  "inbox.forward",
+  (job) => forwardToOwners(db, inboxSendDeps, job, (at) => queue.enqueueInboxForward(job, at)),
+  { concurrency: 2 },
+);
 
 await queue.work(
   "ses.event",
