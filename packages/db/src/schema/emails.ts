@@ -82,7 +82,9 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
  * drain never releases: "screening" when the judge could not answer for a
  * young sending domain, "destination" for mail to a destination new to the
  * team that the judge read as phishing, "media" for content the judge could
- * not read. Never shown to the team.
+ * not read, "recipient" for mail from a shared inbox domain address, to
+ * someone who never wrote to it, that the judge read as phishing. Never
+ * shown to the team.
  */
 export const emailParkReasonEnum = pgEnum("email_park_reason", [
   "warmup",
@@ -90,6 +92,7 @@ export const emailParkReasonEnum = pgEnum("email_park_reason", [
   "screening",
   "destination",
   "media",
+  "recipient",
 ]);
 
 /**

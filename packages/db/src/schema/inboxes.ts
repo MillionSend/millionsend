@@ -96,12 +96,21 @@ export interface InboxJudgeRecord {
  */
 export const sharedInboxDomains = pgTable("shared_inbox_domains", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // Null once the team is deleted: the row stays so the label is never
+  // issued again, or a new team could receive the old team's mail.
   teamId: uuid("team_id")
-    .notNull()
     .unique()
-    .references(() => teams.id, { onDelete: "cascade" }),
+    .references(() => teams.id, { onDelete: "set null" }),
   // Lowercase FQDN: <label>.<SHARED_INBOX_DOMAIN>.
   name: text("name").notNull().unique(),
+  // The region whose SES tenant (named by the team id) has the shared
+  // identity associated; null until a shared send associates it. The
+  // identity serves every team: nothing done for one team deletes or
+  // disassociates it.
+  sesTenantRegion: text("ses_tenant_region"),
+  // The configuration set associated alongside (null = none was). A shared
+  // send names TenantName only while both columns match what it uses.
+  sesTenantConfigSet: text("ses_tenant_config_set"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -132,6 +141,9 @@ export const inboxes = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // The first accepted outbound send: day 0 of the new-recipient ramp.
     firstSentAt: timestamp("first_sent_at", { withTimezone: true }),
+    // Bumped by use at most once an hour; a shared inbox unused for 90 days
+    // is deleted.
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
