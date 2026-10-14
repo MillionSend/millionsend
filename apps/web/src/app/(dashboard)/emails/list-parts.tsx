@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { Table } from "@/components/table";
+import { shortcutBlocked } from "@/lib/keyboard";
 
 /** Filter-row chrome shared by the Emails-area list screens (emails + suppressions). */
 
@@ -20,15 +21,9 @@ export function SearchBox({
   // "/" focuses search from anywhere on the page.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement;
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        ref.current?.focus();
-      }
+      if (event.key !== "/" || shortcutBlocked(event.target)) return;
+      event.preventDefault();
+      ref.current?.focus();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -114,7 +109,7 @@ export function ListSkeleton({
   );
 }
 
-/** Filtered-to-zero / error card — bordered, centered, one action. */
+/** Filtered-to-zero / empty-tab / error card — bordered, centered, at most one action. */
 export function StateCard({
   headline,
   detail,
@@ -124,8 +119,8 @@ export function StateCard({
 }: {
   headline: string;
   detail?: string;
-  actionLabel: string;
-  onAction: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
   /** `error` marks a failed load (glyph); a filtered-empty list stays plain. */
   tone?: "error";
 }) {
@@ -138,11 +133,13 @@ export function StateCard({
       ) : null}
       <p className="ms-state-headline">{headline}</p>
       {detail ? <p className="ms-state-body">{detail}</p> : null}
-      <div className="ms-state-actions">
-        <button type="button" className="ms-btn ms-btn-secondary" onClick={onAction}>
-          {actionLabel}
-        </button>
-      </div>
+      {actionLabel && onAction ? (
+        <div className="ms-state-actions">
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={onAction}>
+            {actionLabel}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

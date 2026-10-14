@@ -42,7 +42,7 @@ kind sets the defaults of the inbox's [safety settings](#safety-settings):
   conversation it starts becomes a draft that waits for a person. See
   [Agent safety](/concepts/agent-safety).
 - **`human`**, for people reading in the dashboard: everyone's mail is
-  delivered (a failed authentication shows as a red badge), nothing is
+  delivered (a failed authentication lands in the `spam` folder), nothing is
   screened, and replies carry no `Auto-Submitted` header.
 
 Mail carrying a virus is quarantined in every inbox, whatever its kind.
@@ -313,7 +313,11 @@ out first.
 **Read state.** Every received message is read or unread. A `PATCH` with
 `read` marks the whole thread. A thread is read when all its messages are,
 and the inbox's `unread` counts the threads with an unread message. Mail the
-inbox sent is always read.
+inbox sent is always read. In the dashboard, opening a thread marks it read
+in a people inbox. In an agent inbox, read state belongs to your agent: it
+marks a thread read once it's handled, and the threads listed with
+`read=false` are what's left. In either kind, a person can mark a thread read
+or unread from its menu.
 
 **Labels.** Up to 100 per inbox. Names take 1–64 characters and are unique
 regardless of letter case; colors are `#RRGGBB`, in uppercase, and random
@@ -477,7 +481,7 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | `require_approval` | Every send from the inbox waits for a person. |
 | `private_codes` | A code or sign-in link the inbox received can't be sent to anyone but owners and the allowlist. |
 | `send_cap` | Recipients the inbox may send to per UTC day without a person: 1–100,000, or `null` for no cap; 1–50 on the shared domain. |
-| `forward_to` | Up to 5 addresses that get a copy of every delivered message: team members' sign-in addresses or owner addresses. |
+| `forward_to` | Up to 5 addresses that get a copy of every delivered message except spam: team members' sign-in addresses or owner addresses. |
 
 A setting that breaks a rule answers `422` with the reason: `allowlist` on
 the shared domain, `open` on a shared address that may only reply or for a
@@ -639,12 +643,12 @@ in [Receiving → Pricing](/concepts/receiving#pricing).
 
 **Inboxes** in the sidebar lists your inboxes under the **All**, **Agent**
 and **People** tabs, with what needs attention: drafts to approve, unread
-threads and messages in quarantine. A pinned **All received** row opens every
-email your domains received, in an inbox or not, and each catch-all domain
-gets a row for the mail at its other addresses. An inbox's page has four
-tabs: **Threads**, where you read, reply and approve drafts in place,
-**Needs review** (drafts to approve and quarantine), **Safety & rules** and
-**Activity**.
+threads (in people inboxes) and messages in quarantine. A pinned **All
+received** row opens every email your domains received, in an inbox or not,
+and each catch-all domain gets a row for the mail at its other addresses. An
+inbox's page has four tabs: **Threads**, where you read, reply and approve
+drafts in place, **Needs review** (drafts to approve and quarantine),
+**Safety & rules** and **Activity**.
 
 Any member can create inboxes, work their threads, approve drafts and release
 quarantine. Owners and admins can also delete inboxes, change safety rules,

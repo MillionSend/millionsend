@@ -476,6 +476,97 @@ describe("ingest into inboxes", () => {
     ).toEqual({ ok: false, reason: "not_found" });
   });
 
+  it("holds a member login or allowlisted address that didn't prove itself as unverified, not unlisted", async () => {
+    await addInbox(acme, "listed@in.acme.test", acmeDomain, {
+      safety: { accept_from: "allowlist", allowlist: ["*@partner.example"] },
+    });
+    const reasonFor = async (from: string) => {
+      const id = await ingestOne(
+        message({ from, to: "listed@in.acme.test" }),
+        ["listed@in.acme.test"],
+        {},
+        { auth: NONE, mailFrom: from },
+      );
+      return (await memberships(id))[0]?.quarantineReason;
+    };
+    expect(await reasonFor("ana@partner.example")).toBe("unauthenticated_sender");
+    expect(await reasonFor("owner@acme.test")).toBe("unauthenticated_sender");
+    expect(await reasonFor("stranger@sender.example")).toBe("not_allowlisted");
+  });
+
+  it("files mail from a sender that failed authentication under Spam in a people inbox", async () => {
+    await addInbox(acme, "people@in.acme.test", acmeDomain, { kind: "human" });
+    // SPF passed for another domain, so the spam score stays gray: only the failed tier files it.
+    const id = await ingestOne(
+      message({ to: "people@in.acme.test" }),
+      ["people@in.acme.test"],
+      {},
+      { auth: { ...NONE, spf: "pass", dmarc: "fail" }, mailFrom: "bounces@bulk.example" },
+    );
+    expect((await rowOf(id)).spamVerdict).toBe("gray");
+    const [m] = await memberships(id);
+    expect(m).toMatchObject({ senderTrust: "failed", verdict: "suspicious", deliveredAt: NOW });
+    const [thread] = await db
+      .select({ folder: schema.inboxThreads.folder })
+      .from(schema.inboxThreads)
+      .where(eq(schema.inboxThreads.id, m?.threadId as string));
+    expect(thread?.folder).toBe("spam");
+  });
+
+  it("files a failed sender's reply to a live people-inbox thread in a Spam thread of its own, forwarding none of it", async () => {
+    await addInbox(acme, "desk@in.acme.test", acmeDomain, {
+      kind: "human",
+      safety: { forward_to: ["owner@acme.test"] },
+    });
+    const first = await ingestOne(
+      message({ to: "desk@in.acme.test", messageId: "<order-1@sender.example>" }),
+      ["desk@in.acme.test"],
+    );
+    const reply = await ingestOne(
+      message({ to: "desk@in.acme.test", headers: ["In-Reply-To: <order-1@sender.example>"] }),
+      ["desk@in.acme.test"],
+      {},
+      { auth: { ...NONE, spf: "pass", dmarc: "fail" }, mailFrom: "bounces@bulk.example" },
+    );
+    const [live] = await memberships(first);
+    const [forged] = await memberships(reply);
+    expect(forged).toMatchObject({ senderTrust: "failed", threadProof: null });
+    expect(forged?.threadId).not.toBe(live?.threadId);
+    const folderOf = async (threadId: string | undefined) =>
+      (
+        await db
+          .select({ folder: schema.inboxThreads.folder })
+          .from(schema.inboxThreads)
+          .where(eq(schema.inboxThreads.id, threadId as string))
+      )[0]?.folder;
+    expect(await folderOf(live?.threadId)).toBe("inbox");
+    expect(await folderOf(forged?.threadId)).toBe("spam");
+    const forwarded = forwards.map((job) => job.receivedEmailId);
+    expect(forwarded).toContain(first);
+    expect(forwarded).not.toContain(reply);
+  });
+
+  it("counts only members' logins as owners of a shared-domain inbox, never its owner_addresses", async () => {
+    const team = await createTeam(db, "owners-shared");
+    const [shared] = await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId: team, name: "owners.agents.example" })
+      .returning({ id: schema.sharedInboxDomains.id });
+    await addInbox(team, "signup-4d5e@owners.agents.example", null, {
+      sharedDomainId: shared?.id as string,
+      safety: { accept_from: "allowlist", owner_addresses: ["boss@partner.example"] },
+    });
+    const id = await ingestOne(
+      message({ from: "boss@partner.example", to: "signup-4d5e@owners.agents.example" }),
+      ["signup-4d5e@owners.agents.example"],
+    );
+    expect((await memberships(id))[0]).toMatchObject({
+      senderTrust: "external",
+      verdict: "quarantined",
+      quarantineReason: "not_allowlisted",
+    });
+  });
+
   it("shows nothing an inbox holds through a catch-all copy or a thread subject (S4)", async () => {
     const inbox = await addInbox(acme, "guarded@in.acme.test", acmeDomain, {
       safety: { accept_from: "allowlist", allowlist: ["*@partner.example"] },

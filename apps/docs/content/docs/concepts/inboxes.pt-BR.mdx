@@ -47,7 +47,7 @@ caixa:
   conversas que já existem: uma conversa nova que ele começa vira um rascunho
   que espera uma pessoa. Veja [Segurança de agentes](/pt-BR/concepts/agent-safety).
 - **`human`**, para pessoas que leem no painel: o e-mail de todo mundo é
-  entregue (uma autenticação que falhou aparece como um selo vermelho), nada
+  entregue (uma autenticação que falhou vai para a pasta `spam`), nada
   é analisado e as respostas não levam o cabeçalho `Auto-Submitted`.
 
 E-mail com vírus vai para a quarentena em qualquer caixa, seja qual for o
@@ -330,7 +330,11 @@ excluída depois de 30 dias, a não ser que saia de lá antes.
 **Lido e não lido.** Toda mensagem recebida está lida ou não lida. Um `PATCH`
 com `read` marca a conversa inteira. Uma conversa está lida quando todas as
 mensagens dela estão, e o `unread` da caixa conta as conversas com alguma
-mensagem não lida. O que a caixa enviou sempre conta como lido.
+mensagem não lida. O que a caixa enviou sempre conta como lido. No painel,
+abrir uma conversa marca como lida numa caixa de pessoas. Numa caixa de
+agente, quem marca é o agente: ele marca a conversa como lida quando
+terminar, e as conversas listadas com `read=false` são o que falta. Nas
+duas, dá para marcar uma conversa como lida ou não lida pelo menu dela.
 
 **Etiquetas.** Até 100 por caixa. Os nomes têm de 1 a 64 caracteres e não
 podem se repetir, nem com letras maiúsculas e minúsculas trocadas; as cores
@@ -498,7 +502,7 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | `require_approval` | Todo envio da caixa espera uma pessoa. |
 | `private_codes` | Um código ou link de acesso que a caixa recebeu não pode ser enviado para ninguém além dos responsáveis e da lista de permitidos. |
 | `send_cap` | Para quantos destinatários a caixa pode enviar por dia UTC sem uma pessoa: de 1 a 100.000, ou `null` para não ter limite; de 1 a 50 no domínio compartilhado. |
-| `forward_to` | Até 5 endereços que recebem uma cópia de toda mensagem entregue: endereços de login de pessoas da equipe ou endereços de responsáveis. |
+| `forward_to` | Até 5 endereços que recebem uma cópia de toda mensagem entregue, menos spam: endereços de login de pessoas da equipe ou endereços de responsáveis. |
 
 Uma configuração que quebra uma regra responde `422` com o motivo:
 `allowlist` no domínio compartilhado, `open` num endereço compartilhado que
@@ -667,13 +671,13 @@ mensagem, como em [Recebimento → Preços](/pt-BR/concepts/receiving#preços).
 
 **Caixas de entrada**, na barra lateral, lista as suas caixas nas abas
 **Todas**, **Agente** e **Pessoas**, com o que precisa de atenção: rascunhos
-para aprovar, conversas não lidas e mensagens em quarentena. Uma linha fixa,
-**Todos os recebidos**, abre todo e-mail que os seus domínios receberam, numa
-caixa ou não, e cada domínio com pega-tudo ganha uma linha para os e-mails
-dos outros endereços dele. A página de uma caixa tem quatro abas:
-**Conversas**, onde você lê, responde e aprova rascunhos ali mesmo,
-**Precisa de revisão** (rascunhos para aprovar e quarentena), **Segurança e
-regras** e **Atividade**.
+para aprovar, conversas não lidas (nas caixas de pessoas) e mensagens em
+quarentena. Uma linha fixa, **Todos os recebidos**, abre todo e-mail que os
+seus domínios receberam, numa caixa ou não, e cada domínio com pega-tudo
+ganha uma linha para os e-mails dos outros endereços dele. A página de uma
+caixa tem quatro abas: **Conversas**, onde você lê, responde e aprova
+rascunhos ali mesmo, **Precisa de revisão** (rascunhos para aprovar e
+quarentena), **Segurança e regras** e **Atividade**.
 
 Qualquer pessoa da equipe cria caixas, trabalha nas conversas, aprova
 rascunhos e libera a quarentena. Donos e admins também excluem caixas, mudam

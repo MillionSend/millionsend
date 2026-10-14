@@ -182,7 +182,10 @@ export async function markDelivered(
         | "releasedBy"
       >
     >;
-    /** Spam: a thread it opens is filed as spam; a live thread keeps its folder. */
+    /**
+     * Spam: a thread it opens is filed as spam, a live thread keeps its
+     * folder, and no copy is forwarded.
+     */
     spam: boolean;
     forwardTo: readonly string[];
     attachments: readonly ReceivedAttachment[];
@@ -286,7 +289,9 @@ export async function markDelivered(
     }),
   );
   await emit(tx, p.row.teamId, events, p.after);
-  if (p.forwardTo.length > 0) p.after.forwards.push(p.key);
+  // Spam stays here: forwarded, it would reach a member's own mailbox signed
+  // by our domain, a forged sender's included.
+  if (p.forwardTo.length > 0 && !p.spam) p.after.forwards.push(p.key);
   return membership;
 }
 

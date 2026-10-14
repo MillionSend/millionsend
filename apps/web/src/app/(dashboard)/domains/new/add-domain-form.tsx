@@ -20,7 +20,6 @@ import { codeRichTags } from "@/lib/code-rich-tags";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
-import { AwsCredentialsBanner } from "../aws-credentials-banner";
 import { regionFlag, regionName } from "../regions";
 import { TrackingSetup } from "../tracking-setup";
 
@@ -52,17 +51,13 @@ function createErrorKey(
 }
 
 /** Wizard step 02: the created domain's DNS records, rendered in-page after create. */
-function DnsRecordsStep({ id }: { id: string }) {
+function DnsRecordsStep({ id, trackingStep }: { id: string; trackingStep: boolean }) {
   const t = useTranslations("domains");
   const router = useRouter();
   const trpc = useTRPC();
   const domain = useQuery(trpc.domains.get.queryOptions({ id }));
   const records = useQuery(trpc.domains.records.queryOptions({ id }));
-  const features = useQuery(trpc.system.features.queryOptions());
   const provider = records.data?.provider ?? null;
-  // Branded tracking is an optional middle step here; deployments that can't
-  // serve it collapse straight to the DNS records, keeping the two-step shape.
-  const trackingStep = features.data?.trackingSubdomainsSupported ?? false;
   const dnsMarker = trackingStep ? "03" : "02";
   return (
     <div className="ms-step-col" style={{ display: "flex", flexDirection: "column" }}>
@@ -229,7 +224,17 @@ function DnsRecordsStep({ id }: { id: string }) {
   );
 }
 
-export function AddDomainForm({ userEmail }: { userEmail: string }) {
+export function AddDomainForm({
+  userEmail,
+  trackingStep,
+  awsBanner,
+}: {
+  userEmail: string;
+  /** Branded tracking is an optional middle step after create; deployments
+   * that can't serve it collapse straight to the DNS records. */
+  trackingStep: boolean;
+  awsBanner: React.ReactNode;
+}) {
   const t = useTranslations("domains");
   const router = useRouter();
   const trpc = useTRPC();
@@ -272,13 +277,13 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
     create.mutate({ name, region, mailFromSubdomain: returnPath });
   }
 
-  if (createdId) return <DnsRecordsStep id={createdId} />;
+  if (createdId) return <DnsRecordsStep id={createdId} trackingStep={trackingStep} />;
 
   const errorKey = create.isError ? createErrorKey(create.error) : null;
 
   return (
     <>
-      <AwsCredentialsBanner />
+      {awsBanner}
       <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
         <MobileStepBar steps={[t("new.steps.one"), t("new.steps.two")]} active={1} />
         <StepRail current={1} />

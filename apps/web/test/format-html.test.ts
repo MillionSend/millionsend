@@ -41,4 +41,13 @@ describe("htmlToText", () => {
   it("decodes &amp; last so an escaped entity stays literal", () => {
     expect(htmlToText("<p>Type &lt;b&gt; to bold &amp;lt;</p>")).toBe("Type <b> to bold &lt;");
   });
+
+  it("keeps an editor's paragraphs apart and its list items one per line", () => {
+    const html =
+      "<p>Hello,</p><p>We got the order.<br>It ships today.</p>" +
+      "<ul><li><p>one</p></li><li><p>two</p></li></ul><p>Thanks</p>";
+    expect(htmlToText(html)).toBe(
+      "Hello,\n\nWe got the order.\nIt ships today.\n\n- one\n- two\n\nThanks",
+    );
+  });
 });

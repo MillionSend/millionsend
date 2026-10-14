@@ -1,7 +1,9 @@
+import { trackingSubdomainsSupported } from "@millionsend/config";
 import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { getAuth } from "@/server/auth";
+import { AwsCredentialsBanner } from "../aws-credentials-banner";
 import { AddDomainForm } from "./add-domain-form";
 
 export default async function NewDomainPage({
@@ -29,7 +31,11 @@ export default async function NewDomainPage({
       />
       {/* The dashboard layout already redirects unauthenticated users; the
           fallback only satisfies the nullable session type. */}
-      <AddDomainForm userEmail={session?.user.email ?? ""} />
+      <AddDomainForm
+        userEmail={session?.user.email ?? ""}
+        trackingStep={trackingSubdomainsSupported()}
+        awsBanner={<AwsCredentialsBanner />}
+      />
     </>
   );
 }

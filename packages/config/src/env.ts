@@ -36,6 +36,7 @@ export const SES_TRANSACTIONAL_RESERVE_MIN = 5;
 export const SES_TRANSACTIONAL_RESERVE_MAX = 90;
 export const AWS_REGION_DEFAULT = "us-east-1";
 export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
+export const EMAIL_METADATA_RETENTION_DAYS_DEFAULT = 30;
 export const OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT = 10;
 export const INVITES_PER_TEAM_PER_DAY_DEFAULT = 50;
 
@@ -245,7 +246,11 @@ export const env = createEnv({
     // window; bodies leave earlier on EMAIL_RETENTION_DAYS. Thirty days is the
     // industry norm (Resend keeps email data 30 days) and what the metadata
     // tables are sized for; daily counters and broadcast results outlive it.
-    EMAIL_METADATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
+    EMAIL_METADATA_RETENTION_DAYS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(EMAIL_METADATA_RETENTION_DAYS_DEFAULT),
     // A tracking-image fetch within this many seconds of delivery (or before
     // it) is recorded as prefetched, not opened: security gateways scan a
     // message within seconds, while a person reading a push notification

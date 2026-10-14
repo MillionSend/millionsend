@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { DraftBanner } from "@/components/draft-banner";
 import { FromField } from "@/components/from-field";
+import { MailyEditor } from "@/components/maily-editor/lazy";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -37,13 +37,6 @@ interface ComposerDraft {
   text: string;
   document: unknown;
 }
-
-// Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
-// must not render on the server. The ghost holds the field's height meanwhile.
-const MailyEditor = dynamic(() => import("@/components/maily-editor").then((m) => m.default), {
-  ssr: false,
-  loading: () => <Skeleton width="100%" height={340} radius="var(--ms-r-input)" />,
-});
 
 export interface ComposerInitial {
   id: string;

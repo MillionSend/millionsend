@@ -101,7 +101,8 @@ Depois de verificado, a aba **Configuração** de um domínio controla:
 - **Rastreamento de aberturas** — desligado por padrão. Ligado, um pixel 1×1
   servido por esse mesmo subdomínio de rastreamento registra eventos
   `email.opened`. O rastreamento é na camada do app e roda no seu próprio
-  domínio — nunca a reescrita de links do SES.
+  domínio — nunca a reescrita de links do SES. E-mails de caixas de pessoas
+  nunca são rastreados, como em qualquer programa de e-mail.
 - **Modo TLS** — `opportunistic` (padrão) ou `enforced`, aplicado via
   configuration set do SES do domínio.
 

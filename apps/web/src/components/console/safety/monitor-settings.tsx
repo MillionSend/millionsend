@@ -286,7 +286,7 @@ function Field({
       <input
         id={id}
         type="number"
-        className={invalid ? "ms-input ms-number error" : "ms-input ms-number"}
+        className={invalid ? "ms-input error" : "ms-input"}
         style={{ width: "100%" }}
         step={setting.kind === "rate" ? "any" : 1}
         min={setting.kind === "multiplier" ? 1 : 0}

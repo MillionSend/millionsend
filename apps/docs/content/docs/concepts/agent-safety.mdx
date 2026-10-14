@@ -39,7 +39,7 @@ and as **Trust** in the dashboard. The first row that matches wins:
 | `sender_trust` | The sender |
 | --- | --- |
 | `failed` | Failed authentication, and the domain asks receivers to quarantine or reject such mail; or the domain publishes no DMARC policy and fails SPF with no DKIM signature of its own. This beats every other row, so a forged owner never passes. |
-| `owner` | One of your team members' sign-in addresses, or an address in the inbox's `owner_addresses`, and the domain vouches for it. |
+| `owner` | One of your team members' sign-in addresses, or an address in the inbox's `owner_addresses` (never on the shared domain), and the domain vouches for it. |
 | `allowlisted` | Matches the inbox's allowlist, and the domain vouches for it. |
 | `known_thread` | Replies in a thread the inbox wrote in, from an address the inbox wrote to, proven by the thread token in `References` or by an `In-Reply-To` that names a message the inbox sent. No authentication needed, so a small correspondent without DKIM can still answer. |
 | `external` | Any other sender whose domain vouches for it, other addresses at your own domains included. |
@@ -73,7 +73,7 @@ its policy.
 | `owner`, `allowlisted` | delivered | delivered | delivered |
 | `known_thread` | delivered | delivered | delivered |
 | `external` | screened | screened | quarantined, `not_allowlisted` |
-| `unauthenticated` | screened | quarantined, `unauthenticated_sender` | quarantined, `not_allowlisted` |
+| `unauthenticated` | screened | quarantined, `unauthenticated_sender` | quarantined, `not_allowlisted`; `unauthenticated_sender` when From is an owner or on the allowlist |
 | `failed` | quarantined, `failed_auth` | quarantined, `failed_auth` | quarantined, `failed_auth` |
 
 **Screened** mail is delivered unless [screening](#prompt-injection-screening)
@@ -93,9 +93,9 @@ is delivered. On top of the table:
   mail suspicious on its own.
 
 A `human` inbox accepts `anyone` by default: everything is delivered except
-viruses, and a `failed` sender shows a red badge instead of being held. Pick
-`verified` or `allowlist` for one and the table applies, with "screened"
-meaning delivered: screening runs on agent inboxes only.
+viruses, and mail from a `failed` sender goes to the `spam` folder instead of
+being held. Pick `verified` or `allowlist` for one and the table applies, with
+"screened" meaning delivered: screening runs on agent inboxes only.
 
 ## Quarantine
 
@@ -105,7 +105,7 @@ releasable; it is never dropped and never returned to its sender.
 | `quarantine_reason` | Held because |
 | --- | --- |
 | `failed_auth` | The sender failed authentication. |
-| `unauthenticated_sender` | The sender's domain doesn't vouch for it, and the inbox accepts verified senders. |
+| `unauthenticated_sender` | The sender's domain doesn't vouch for it, and the inbox accepts verified senders, or lists the address as an owner or on its allowlist. |
 | `not_allowlisted` | The inbox accepts only its allowlist. |
 | `injection` | Screening scored prompt injection at 80 or more. |
 | `phishing` | Screening scored phishing at 80 or more. |

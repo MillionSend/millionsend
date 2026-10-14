@@ -80,17 +80,23 @@ export function useLocalDraft<T>({
     return () => clearTimeout(id);
   }, [state, storageKey]);
 
-  /** After a successful persist: the current state becomes the baseline. */
-  const markSaved = useCallback(() => {
-    baselineRef.current = JSON.stringify(stateRef.current);
-    recoveredPendingRef.current = false;
-    setRecovered(null);
-    try {
-      localStorage.removeItem(storageKey);
-    } catch {
-      /* best-effort */
-    }
-  }, [storageKey]);
+  /**
+   * After a successful persist: the current state becomes the baseline, or
+   * `saved` for a form that resets as it persists (a composer empties on send).
+   */
+  const markSaved = useCallback(
+    (saved: T = stateRef.current) => {
+      baselineRef.current = JSON.stringify(saved);
+      recoveredPendingRef.current = false;
+      setRecovered(null);
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {
+        /* best-effort */
+      }
+    },
+    [storageKey],
+  );
 
   /** The user declined the recovered draft — forget it. */
   const discardRecovered = useCallback(() => {

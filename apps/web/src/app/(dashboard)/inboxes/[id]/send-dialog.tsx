@@ -3,10 +3,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
+import { MessageEditor } from "@/components/maily-editor/lazy";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { BtnSpinner } from "@/components/spinner";
 import { toast } from "@/components/toast";
+import { htmlToText } from "@/lib/html";
 import { useTRPC } from "@/lib/trpc";
 
 /** A new conversation from the inbox; the inbox's send rules may hold it as a draft. */
@@ -27,7 +29,9 @@ export function SendDialog({
   const queryClient = useQueryClient();
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
-  const [text, setText] = useState("");
+  // The editor seeds from it on mount: the Modal unmounts it on close, so a
+  // reopen shows what was typed and a send leaves it empty.
+  const [html, setHtml] = useState("");
   const send = useMutation(
     trpc.inboxes.send.mutationOptions({
       onSuccess: (result) => {
@@ -35,7 +39,7 @@ export function SendDialog({
         void queryClient.invalidateQueries({ queryKey: trpc.inboxes.pathKey() });
         setTo("");
         setSubject("");
-        setText("");
+        setHtml("");
         onClose();
       },
     }),
@@ -49,10 +53,11 @@ export function SendDialog({
     .split(/[,\s]+/)
     .map((value) => value.trim())
     .filter(Boolean);
-  const ready = recipients.length > 0 && subject.trim() !== "" && text.trim() !== "";
+  const text = htmlToText(html);
+  const ready = recipients.length > 0 && subject.trim() !== "" && text !== "";
   const submit = () => {
     if (!ready || send.isPending) return;
-    send.mutate({ inboxId, to: recipients, subject: subject.trim(), text });
+    send.mutate({ inboxId, to: recipients, subject: subject.trim(), html, text });
   };
   return (
     <Modal open={open} onClose={close} onConfirm={submit} title={t("sendEmail")}>
@@ -92,15 +97,16 @@ export function SendDialog({
           />
         </div>
         <div className="ms-field">
-          <label htmlFor="send-text">{t("compose.message")}</label>
-          <textarea
-            id="send-text"
-            className="ms-input"
-            rows={8}
-            style={{ width: "100%", resize: "vertical" }}
-            value={text}
-            disabled={send.isPending}
-            onChange={(event) => setText(event.target.value)}
+          {/* biome-ignore lint/a11y/noLabelWithoutControl: a caption; the editor below carries the same name, and a contenteditable can't be a label's control */}
+          <label>{t("compose.message")}</label>
+          <MessageEditor
+            value={{ document: null, html }}
+            compact={{
+              placeholder: t("compose.messagePlaceholder"),
+              ariaLabel: t("compose.message"),
+              onSubmit: submit,
+            }}
+            onChange={(change) => setHtml(change.html ?? "")}
           />
         </div>
         {send.error ? (

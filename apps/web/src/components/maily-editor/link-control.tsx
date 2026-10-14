@@ -1,10 +1,14 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDismiss } from "@/components/popover-menu";
+import { clampInto } from "@/lib/panel-placement";
 import { chain, type TiptapEditor } from "./commands";
 import { LinkIcon } from "./icons";
+
+/** Room the link box keeps from the toolbar's edges. */
+const BOX_INSET = 8;
 
 /**
  * Link control: a small popover with a URL field, applying/removing a link on
@@ -18,8 +22,24 @@ export function LinkControl({ editor }: { editor: TiptapEditor | null }) {
   const [href, setHref] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   useDismiss(rootRef, open, () => setOpen(false));
+  // The box hangs from the toolbar, under its button where it fits, shifted to
+  // stay inside the editor: a dialog's scroll box would clip it, a phone scroll sideways.
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const toolbar = box?.offsetParent;
+    if (!open || !box || !(toolbar instanceof HTMLElement) || !triggerRef.current) return;
+    box.style.maxWidth = `${toolbar.clientWidth - 2 * BOX_INSET}px`;
+    const left = clampInto(
+      triggerRef.current.offsetLeft,
+      box.offsetWidth,
+      toolbar.clientWidth,
+      BOX_INSET,
+    );
+    box.style.left = `${left}px`;
+  }, [open]);
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
@@ -52,7 +72,6 @@ export function LinkControl({ editor }: { editor: TiptapEditor | null }) {
     // biome-ignore lint/a11y/noStaticElementInteractions: Escape-anywhere dismissal for the popover; interactive children handle their own input
     <div
       ref={rootRef}
-      style={{ position: "relative" }}
       onKeyDown={(e) => {
         if (e.key === "Escape" && open) {
           e.stopPropagation();
@@ -76,7 +95,7 @@ export function LinkControl({ editor }: { editor: TiptapEditor | null }) {
         <LinkIcon />
       </button>
       {open ? (
-        <div className="ms-maily-linkbox" role="dialog" aria-label={t("panel.link")}>
+        <div ref={boxRef} className="ms-maily-linkbox" role="dialog" aria-label={t("panel.link")}>
           <input
             ref={inputRef}
             type="url"

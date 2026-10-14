@@ -92,9 +92,9 @@ const PRODUCTION_PROBE_TTL_MS = 60_000;
 
 export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
   // Production access per served region, for the add-domain form: one
-  // GetAccount per region at most once a minute — features runs on every
-  // dashboard page and the non-send SES API is throttled at one request per
-  // second per region. Only a region's first probe is awaited (bounded by
+  // GetAccount per region at most once a minute — features backs several
+  // screens and the non-send SES API is throttled at one request per second
+  // per region. Only a region's first probe is awaited (bounded by
   // the client's timeouts); an expired answer is served at once while the
   // probe refreshes it, so a region that stops answering never stalls the
   // screens. A failed probe keeps the last answer; without credentials

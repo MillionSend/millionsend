@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { formatTimeLeft } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -22,6 +23,8 @@ import { CreateInboxDialog } from "./create-inbox-dialog";
 import { kindWord } from "./parts";
 
 const TABS = ["all", "agent", "human"] as const;
+// The overview rows count 30 days, so they open the list on the same range.
+const RECEIVED_30D = "/inboxes/received?range=d30";
 
 const muted: React.CSSProperties = { color: "var(--ms-muted)", fontSize: 12.5 };
 const none = <span style={{ color: "var(--ms-faint)" }}>—</span>;
@@ -104,17 +107,26 @@ export function InboxesView() {
     options.data !== undefined &&
     options.data.domains.length === 0 &&
     options.data.sharedDomain === null;
+  const sharedOnly = options.data?.domains.length === 0 ? options.data.sharedDomain : null;
+  const blocked = nowhere ? t("create.needsReceiving") : atLimit ? t("limit.full") : null;
 
   const createButton = (
     <button
       type="button"
       className="ms-btn ms-btn-primary"
-      disabled={atLimit || nowhere}
+      disabled={blocked !== null}
       onClick={() => setCreateOpen(true)}
     >
       <PlusGlyph size={14} />
       {t("create.title")}
     </button>
+  );
+  const createAction = blocked ? (
+    <Tooltip inline text={blocked}>
+      {createButton}
+    </Tooltip>
+  ) : (
+    createButton
   );
 
   const total = counts ? counts.agent + counts.human : null;
@@ -128,7 +140,7 @@ export function InboxesView() {
 
   return (
     <>
-      <PageHeader title={t("title")} badges={<BetaPill />} actions={createButton} />
+      <PageHeader title={t("title")} badges={<BetaPill />} actions={createAction} />
 
       {atLimit && plan?.limit != null ? (
         <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--ms-warn)" }}>
@@ -155,12 +167,7 @@ export function InboxesView() {
           >
             {t(`tabs.${key}`)}
             {tabCount(key) !== null ? (
-              <span
-                className="ms-digits"
-                style={{ marginLeft: 7, fontWeight: 500, color: "var(--ms-faint)" }}
-              >
-                {nf.format(tabCount(key) ?? 0)}
-              </span>
+              <span className="count">{nf.format(tabCount(key) ?? 0)}</span>
             ) : null}
           </button>
         ))}
@@ -179,8 +186,20 @@ export function InboxesView() {
         <EmptyState
           area="emails"
           headline={t("empty.title")}
-          body={nowhere ? t("empty.noReceiving") : t("empty.body")}
-          cta={nowhere ? undefined : createButton}
+          body={
+            nowhere
+              ? t.rich("received.emptyHint", {
+                  link: (chunks) => (
+                    <Link href="/domains" className="ms-link">
+                      {chunks}
+                    </Link>
+                  ),
+                })
+              : sharedOnly
+                ? t("empty.sharedOnly", { domain: sharedOnly })
+                : t("empty.body")
+          }
+          cta={nowhere ? undefined : createAction}
         />
       ) : (
         <>
@@ -188,9 +207,9 @@ export function InboxesView() {
             <InboxesHead />
             <tbody>
               {overview ? (
-                <tr className="hoverable" onClick={() => router.push("/inboxes/received")}>
+                <tr className="hoverable" onClick={() => router.push(RECEIVED_30D)}>
                   <td>
-                    <Link href="/inboxes/received" onClick={(event) => event.stopPropagation()}>
+                    <Link href={RECEIVED_30D} onClick={(event) => event.stopPropagation()}>
                       {t("received.title")}
                     </Link>
                     <div style={muted}>{t("received.hint")}</div>
@@ -208,7 +227,7 @@ export function InboxesView() {
                 </tr>
               ) : null}
               {overview?.catchAll.map((domain) => {
-                const href = "/inboxes/received?inbox=catch_all";
+                const href = `${RECEIVED_30D}&inbox=catch_all`;
                 return (
                   <tr key={domain.domainId} className="hoverable" onClick={() => router.push(href)}>
                     <td className="ms-cell-wrap">
@@ -219,7 +238,18 @@ export function InboxesView() {
                       >
                         <Breakable text={`*@${domain.name}`} />
                       </Link>
-                      <div style={muted}>{t("catchAll.row")}</div>
+                      <div style={muted}>
+                        {t.rich("catchAll.row", {
+                          link: (chunks) => (
+                            <Link
+                              href={`/domains/${domain.domainId}`}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {chunks}
+                            </Link>
+                          ),
+                        })}
+                      </div>
                     </td>
                     <td>{t("type.catchAll")}</td>
                     <td>{none}</td>
@@ -236,7 +266,10 @@ export function InboxesView() {
                   ...(inbox.pending_approval > 0
                     ? [t("attention.drafts", { count: inbox.pending_approval })]
                     : []),
-                  ...(inbox.unread > 0 ? [t("attention.unread", { count: inbox.unread })] : []),
+                  // An agent's unread mail is its own queue, not a person's to-do.
+                  ...(inbox.kind === "human" && inbox.unread > 0
+                    ? [t("attention.unread", { count: inbox.unread })]
+                    : []),
                   ...(inbox.quarantined > 0
                     ? [t("attention.quarantined", { count: nf.format(inbox.quarantined) })]
                     : []),

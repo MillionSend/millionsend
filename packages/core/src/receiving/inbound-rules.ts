@@ -19,15 +19,17 @@ export interface ScreeningDecision {
 /**
  * What happens to a received message in one inbox, before any judge: the
  * first rule that matches wins. A virus quarantines everywhere; a people's
- * inbox open to anyone delivers (a failed sender gets a badge, never a
- * hold); otherwise the inbox's accept_from and the sender's tier decide.
- * Judging is for agent inboxes with screening on and a judge to ask; spam
- * that fails goes to the spam folder instead of the inbox.
+ * inbox open to anyone delivers, a failed sender to the spam folder as a
+ * mailbox would, never a hold; otherwise the inbox's accept_from and the
+ * sender's tier decide. Judging is for agent inboxes with screening on and a
+ * judge to ask; spam that fails goes to the spam folder instead of the inbox.
  */
 export function decideScreening(i: {
   kind: InboxKind;
   safety: InboxSafety;
   tier: SenderTrust;
+  /** From names an owner or an allowlist entry, proven or not; absent reads as not listed. */
+  listed?: boolean | undefined;
   spam: SpamVerdict | null;
   virus: VirusVerdict | null;
   judgeAvailable: boolean;
@@ -60,8 +62,9 @@ export function decideScreening(i: {
         action = "judge";
         break;
       case "unauthenticated":
-        if (accept === "allowlist") return quarantine("not_allowlisted");
-        if (accept === "verified") return quarantine("unauthenticated_sender");
+        // A listed address counts only once proven: unproven, it is unverified, not a stranger.
+        if (accept === "allowlist" && !i.listed) return quarantine("not_allowlisted");
+        if (accept !== "anyone") return quarantine("unauthenticated_sender");
         action = "judge";
         break;
     }
@@ -77,7 +80,8 @@ export function decideScreening(i: {
     i.spam === "fail" ||
     i.virus === "processing_failed";
   return {
-    action: i.spam === "fail" ? "spam" : "deliver",
+    // Only a people's inbox open to anyone gets here with a failed sender.
+    action: i.spam === "fail" || i.tier === "failed" ? "spam" : "deliver",
     verdict: suspicious ? "suspicious" : "clean",
   };
 }

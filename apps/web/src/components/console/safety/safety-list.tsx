@@ -85,9 +85,10 @@ export function SafetyList() {
     ...(region !== "all" ? { region } : {}),
   };
   // Offset paging: the router pages by offset, which tRPC's cursor-only
-  // infiniteQueryOptions cannot express, so the pages are fetched by hand.
+  // infiniteQueryOptions cannot express, so the pages are fetched by hand. The
+  // suffix keeps the pages apart from a plain query of the same input.
   const query = useInfiniteQuery({
-    queryKey: trpc.console.safety.list.queryKey(input),
+    queryKey: [...trpc.console.safety.list.queryKey(input), "infinite"],
     queryFn: ({ pageParam }) => client.console.safety.list.query({ ...input, offset: pageParam }),
     initialPageParam: 0,
     getNextPageParam: (page) => page.nextOffset ?? undefined,

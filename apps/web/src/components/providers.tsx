@@ -1,6 +1,6 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { useState } from "react";
 import superjson from "superjson";
@@ -12,8 +12,15 @@ import type { AppRouter } from "@/server/routers";
 // caller may not see. Everything else keeps react-query's default three tries.
 const FINAL_CODES = new Set(["NOT_FOUND", "FORBIDDEN", "UNAUTHORIZED", "BAD_REQUEST"]);
 
-function makeQueryClient() {
+export function makeQueryClient() {
   return new QueryClient({
+    // A write can change what any screen shows, so every success marks the
+    // whole cache stale: each view refetches on its next mount or focus.
+    // Nothing refetches now — a view on screen refreshes in its own onSuccess.
+    mutationCache: new MutationCache({
+      onSuccess: (_data, _variables, _result, _mutation, { client }) =>
+        client.invalidateQueries({ refetchType: "none" }),
+    }),
     defaultOptions: {
       queries: {
         staleTime: 30_000,

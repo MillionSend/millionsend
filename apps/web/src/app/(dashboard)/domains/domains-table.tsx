@@ -21,12 +21,12 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
+import { shortcutBlocked } from "@/lib/keyboard";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage } from "@/lib/trpc-error";
 import { useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, StateCard } from "../emails/list-parts";
-import { AwsCredentialsBanner } from "./aws-credentials-banner";
 import {
   DOMAIN_TONE,
   type DomainStatus,
@@ -66,7 +66,7 @@ function SkeletonRows() {
 const shown = (d: { status: string; trackingPending: boolean }) =>
   displayDomainStatus(d.status as DomainStatus, d.trackingPending);
 
-export function DomainsView() {
+export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
   const t = useTranslations("domains");
   const common = useTranslations("common");
   const trpc = useTRPC();
@@ -118,8 +118,7 @@ export function DomainsView() {
   // "/" focuses search from anywhere on the page.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement;
-      if (event.key !== "/" || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (event.key !== "/" || shortcutBlocked(event.target)) return;
       event.preventDefault();
       searchRef.current?.focus();
     }
@@ -161,7 +160,7 @@ export function DomainsView() {
         menu={<ResourceApiButton resource="domains" />}
       />
 
-      <AwsCredentialsBanner />
+      {awsBanner}
 
       {domains.isError ? (
         <div

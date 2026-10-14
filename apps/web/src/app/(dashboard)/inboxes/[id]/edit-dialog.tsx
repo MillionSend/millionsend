@@ -31,12 +31,13 @@ export function EditDialog({
   const [name, setName] = useState(inbox.name);
   const [fromName, setFromName] = useState(inbox.from_name ?? "");
   const [expires, setExpires] = useState<(typeof EXPIRY)[number]>(KEEP);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: seeded on open only; a refetch while open must not overwrite what is being typed
   useEffect(() => {
     if (!open) return;
     setName(inbox.name);
     setFromName(inbox.from_name ?? "");
     setExpires(KEEP);
-  }, [open, inbox.name, inbox.from_name]);
+  }, [open]);
   const save = useMutation(
     trpc.inboxes.update.mutationOptions({
       onSuccess: () => {

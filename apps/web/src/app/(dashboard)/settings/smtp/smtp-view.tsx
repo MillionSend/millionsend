@@ -57,7 +57,7 @@ export function SmtpView() {
             {t.rich("insecureNote", codeRichTags)}
           </p>
         ) : (
-          <WarnCard>
+          <WarnCard flush>
             <strong style={{ display: "block", marginBottom: 2 }}>{t("tlsWarnTitle")}</strong>
             {t.rich("tlsWarnBody", codeRichTags)}
           </WarnCard>

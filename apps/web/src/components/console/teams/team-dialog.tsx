@@ -197,12 +197,7 @@ export function TeamDialog({
           // browser may reparent. The span is focusable, so the reason
           // reaches a keyboard user too.
           <Tooltip inline text={t(`menu.${viewOff}`)}>
-            <button
-              type="button"
-              className="ms-btn ms-btn-secondary"
-              disabled
-              style={{ pointerEvents: "none" }}
-            >
+            <button type="button" className="ms-btn ms-btn-secondary" disabled>
               {t("menu.view")}
             </button>
           </Tooltip>

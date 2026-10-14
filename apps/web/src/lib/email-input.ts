@@ -6,3 +6,15 @@
 export function typedEmail(value: string): string {
   return value.replace(/\s/g, "");
 }
+
+/** An address typed into a list of them, lowercase as the server stores it. */
+export function typedListAddress(value: string): string {
+  return typedEmail(value).toLowerCase();
+}
+
+/** An allowlist entry as typed: an address, or a domain ("acme.example", "@acme.example") as "*@domain". */
+export function typedAllowlistEntry(value: string): string {
+  const entry = typedListAddress(value);
+  if (entry.startsWith("@")) return `*${entry}`;
+  return entry.includes("@") ? entry : `*@${entry}`;
+}

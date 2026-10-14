@@ -3,14 +3,17 @@ import type { InboxSafety } from "@millionsend/db/schema";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { InboxDetail } from "@/app/(dashboard)/inboxes/parts";
+import type { InboxDetail, ThreadMessage, ThreadRow } from "@/app/(dashboard)/inboxes/parts";
 import { dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
+import { typedAllowlistEntry } from "@/lib/email-input";
 import { WEBHOOK_EVENT_META, WEBHOOK_EVENT_TYPES } from "@/lib/webhook-events";
 
 const en = {
   inboxes: (await import("../messages/en/inboxes.json")).default,
   common: (await import("../messages/en/common.json")).default,
   webhooks: (await import("../messages/en/webhooks.json")).default,
+  nav: (await import("../messages/en/nav.json")).default,
+  settings: (await import("../messages/en/settings.json")).default,
 };
 
 // The real English catalogs, so the test reads what a customer reads.
@@ -29,13 +32,19 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "i1" }),
   useSearchParams: () => new URLSearchParams(),
 }));
-const h = vi.hoisted(() => ({ data: undefined as unknown, error: null as unknown }));
-// The form's save goes through the router; rendering never fires it. A test
-// sets what every query answers and the error a mutation came back with.
+// What the query hooks answer (nothing unless a test sets it), and the error
+// a mutation came back with.
+const rq = vi.hoisted(() => ({
+  data: undefined as unknown,
+  pages: undefined as unknown,
+  error: null as unknown,
+}));
+// The form's save goes through the router; rendering never fires it.
 vi.mock("@tanstack/react-query", () => ({
-  useMutation: () => ({ mutate: vi.fn(), isPending: false, error: h.error }),
+  useMutation: () => ({ mutate: vi.fn(), isPending: false, error: rq.error }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-  useQuery: () => ({ data: h.data }),
+  useQuery: () => ({ data: rq.data }),
+  useInfiniteQuery: () => ({ data: rq.pages, isPending: false }),
 }));
 // A native select lists every option a picker offers, which a closed one never renders.
 vi.mock("@/components/select", () => ({
@@ -57,7 +66,10 @@ vi.mock("@/components/modal", () => ({
     p.open ? createElement("div", null, p.children) : null,
 }));
 // The inbox page opens on its threads, whose queries no test here answers.
-vi.mock("@/app/(dashboard)/inboxes/[id]/threads-tab", () => ({ ThreadsTab: () => null }));
+vi.mock("@/app/(dashboard)/inboxes/[id]/threads-tab", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/(dashboard)/inboxes/[id]/threads-tab")>()),
+  ThreadsTab: () => null,
+}));
 vi.mock("@/lib/trpc", () => {
   const leaf: unknown = new Proxy(() => ({}), { get: () => leaf, apply: () => ({}) });
   return { useTRPC: () => leaf };
@@ -67,10 +79,13 @@ const { SafetyForm } = await import("@/app/(dashboard)/inboxes/[id]/safety-tab")
 const { InboxView } = await import("@/app/(dashboard)/inboxes/[id]/inbox-view");
 const { EditDialog } = await import("@/app/(dashboard)/inboxes/[id]/edit-dialog");
 const { CreateInboxDialog } = await import("@/app/(dashboard)/inboxes/create-inbox-dialog");
-const { approvalReasonWords, QuarantinedBadge, TrustBadge } = await import(
-  "@/app/(dashboard)/inboxes/parts"
-);
-const { navItemsFor } = await import("@/components/sidebar");
+const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
+const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
+const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
+  await import("@/app/(dashboard)/inboxes/parts");
+const { navItemsFor, Sidebar } = await import("@/components/sidebar");
+const { SettingsTabsNav } = await import("@/app/(dashboard)/settings/settings-tabs-nav");
+const { ServerTeamRole } = await import("@/lib/use-team-role");
 const { offeredEvents } = await import("@/app/(dashboard)/webhooks/webhook-dialogs");
 // The mocked hook is a plain function here, typed as the components see it.
 const { useTranslations: translatorFor } = await import("next-intl");
@@ -89,12 +104,12 @@ const safety = {
   forward_to: [],
 };
 
-function form(inbox: Partial<InboxDetail>, admin = true, stored: InboxSafety = safety) {
+function form(inbox: Partial<InboxDetail>, admin = true, rules: Partial<InboxSafety> = {}) {
   return renderToStaticMarkup(
     createElement(SafetyForm, {
       inbox: { id: "i1", kind: "agent", shared: false, expired: false, ...inbox } as InboxDetail,
       admin,
-      stored,
+      stored: { ...safety, ...rules },
       memberEmails: ["owner@acme.test"],
       retentionDays: 30,
     }),
@@ -160,6 +175,32 @@ describe("navigation", () => {
     expect(navItemsFor(false).map((item) => item.key)).not.toContain("inboxes");
     const keys = navItemsFor(true).map((item) => item.key);
     expect(keys.slice(0, 2)).toEqual(["emails", "inboxes"]);
+  });
+
+  // useQuery is mocked to no data: what the server and the hydrating render see.
+  it("has Inboxes in the server HTML, before any query answers", () => {
+    const html = renderToStaticMarkup(
+      createElement(Sidebar, { teamName: "Acme", userEmail: "owner@example.com", receiving: true }),
+    );
+    expect(html).toContain('href="/inboxes"');
+  });
+
+  it("gates on the layout's role in the server HTML, before the team list loads", () => {
+    const tabs = (role: "admin" | "member") =>
+      renderToStaticMarkup(
+        createElement(
+          ServerTeamRole,
+          { value: role },
+          createElement(SettingsTabsNav, {
+            showBilling: false,
+            showSes: true,
+            showSmtp: true,
+            showReceiving: false,
+          }),
+        ),
+      );
+    expect(tabs("admin")).toContain(">Audit log<");
+    expect(tabs("member")).not.toContain(">Audit log<");
   });
 
   it("sends the old received-mail links to their new home", async () => {
@@ -236,19 +277,198 @@ describe("inbox screens", () => {
     expect(html).toContain("Save changes");
   });
 
-  it("hides the injection scan from a people inbox", () => {
+  it("shows a people inbox only the rules that run on it", () => {
     const html = form({ kind: "human" });
     expect(html).not.toContain("Scan for prompt injection");
     expect(html).toContain("Strip hidden text");
+    expect(html).toContain("When mail arrives");
+    // Send rules and the always-on guards bind only an agent's own sends.
+    expect(html).toContain("Sending over the API");
+    expect(html).not.toContain("Send policy");
+    expect(html).not.toContain("Always on:");
     expect(html).toMatch(/id="safety-cap"[^>]*max="100000"/);
+  });
+
+  it("warns an agent inbox open to anyone, and explains anyone on a people inbox instead", () => {
+    const warning = "Also lets in mail whose sender";
+    const agent = form({}, true, { accept_from: "anyone" });
+    expect(agent).toContain(warning);
+    expect(agent).toContain("Takes mail from any sender");
+    const people = form({ kind: "human" }, true, { accept_from: "anyone" });
+    expect(people).not.toContain(warning);
+    expect(people).toContain("Like a regular mailbox");
+    expect(form({})).not.toContain(warning);
+  });
+
+  it("keeps owner addresses off the shared domain, which forwards to team members only", () => {
+    expect(form({})).toContain('id="safety-owners"');
+    expect(form({ shared: true })).not.toContain('id="safety-owners"');
+  });
+
+  it("reads a typed domain as an allowlist domain entry", () => {
+    expect(typedAllowlistEntry(" Acme.example ")).toBe("*@acme.example");
+    expect(typedAllowlistEntry("@acme.example")).toBe("*@acme.example");
+    expect(typedAllowlistEntry("*@acme.example")).toBe("*@acme.example");
+    expect(typedAllowlistEntry("Ana@Acme.example")).toBe("ana@acme.example");
+  });
+
+  it("says why no inbox can be created yet, and where to fix it", () => {
+    const page = (sharedDomain: string | null) => {
+      rq.data = { domains: [], sharedDomain, plan: { used: 0, limit: 3 } };
+      rq.pages = {
+        pages: [
+          {
+            items: [],
+            counts: { agent: 0, human: 0 },
+            overview: { allReceived: { received30d: 0, lastReceived: null }, catchAll: [] },
+          },
+        ],
+      };
+      const html = renderToStaticMarkup(createElement(InboxesView));
+      rq.data = rq.pages = undefined;
+      return html;
+    };
+    const nowhere = page(null);
+    expect(nowhere).toMatch(/class="ms-tooltip-trigger inline"[^>]*><button[^>]*disabled/);
+    expect(nowhere).toContain('href="/domains"');
+    expect(nowhere).not.toContain("shared");
+    const shared = page("inboxes.example");
+    expect(shared).toContain("Create an address at inboxes.example");
+    expect(shared).not.toContain("disabled");
+  });
+
+  it("counts unread as needing attention in people inboxes only", () => {
+    const inbox = (kind: string, address: string, unread: number) => ({
+      id: address,
+      email_address: address,
+      name: "",
+      kind,
+      unread,
+      pending_approval: 0,
+      quarantined: 0,
+      received_30d: 0,
+      last_received: null,
+      expires_at: null,
+      forward_to: [],
+    });
+    rq.data = { domains: [], sharedDomain: "inboxes.example", plan: { used: 2, limit: 3 } };
+    rq.pages = {
+      pages: [
+        {
+          items: [inbox("agent", "bot@acme.example", 5), inbox("human", "team@acme.example", 3)],
+          counts: { agent: 1, human: 1 },
+          overview: null,
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(createElement(InboxesView));
+    rq.data = rq.pages = undefined;
+    // The agent's unread is its own queue.
+    expect(html).toContain("3 unread");
+    expect(html).not.toContain("5 unread");
+  });
+
+  it("lays a thread out on one line whose button wraps no other stop", () => {
+    const row = {
+      id: "t1",
+      subject: "Order #8841",
+      from: "Sam Sender <sam@example.com>",
+      to: ["Rita Recipient <rita@example.com>"],
+      cc: [],
+      bcc: [],
+      labels: [{ id: "l1", name: "Billing", color: "#C0A8E1" }],
+      message_count: 3,
+      has_attachment: false,
+      has_draft: false,
+      read: false,
+      received_at: new Date().toISOString(),
+      folder: "inbox",
+      quarantined: 0,
+      quarantine_reason: null,
+      injection_score: 62,
+      phishing_score: 12,
+      suspicious: true,
+      pending_approval: false,
+      snippet: "It never arrived",
+    } as ThreadRow;
+    const render = (agent: boolean, sent = false) =>
+      renderToStaticMarkup(
+        createElement(ThreadListRow, { row, agent, sent, selected: true, onOpen: () => {} }),
+      );
+    const agent = render(true);
+    const button = agent.match(/<button[^>]*class="ms-thread-open"[\s\S]*?<\/button>/)?.[0] ?? "";
+    expect(button).toContain('aria-current="true"');
+    expect(button).toContain("Order #8841");
+    expect(button).toContain("It never arrived");
+    // The time, the dot and the pills are its siblings, each its own stop.
+    expect(button).not.toMatch(/tabindex|<time/);
+    // It reads them out instead: the unread dot, then the pills.
+    const [, prefix] = button.match(/aria-describedby="(\S+)-dot \1-pills"/) ?? [];
+    expect(agent).toContain(`id="${prefix}-dot"`);
+    expect(agent).toContain(`id="${prefix}-pills"`);
+    expect(agent).toContain('aria-label="Your agent hasn&#x27;t marked it read yet"');
+    expect(agent).toContain('class="ms-count">3<');
+    expect(agent).toContain(">Suspicious<");
+    const people = render(false);
+    expect(people).toContain('aria-label="Unread"');
+    expect(people).not.toContain("Suspicious");
+    expect(render(false, true)).toContain("To Rita Recipient");
+  });
+
+  it("answers the newest message the inbox sent or let in, never held mail", () => {
+    const inbound = (id: string, verdict: string) =>
+      ({ id, direction: "inbound", screening: { verdict } }) as ThreadMessage;
+    const sent = { id: "sent", direction: "outbound" } as ThreadMessage;
+    const held = [inbound("quarantined", "quarantined"), inbound("pending", "pending")];
+    expect(replyTarget([inbound("clean", "clean"), sent, ...held])?.id).toBe("sent");
+    expect(
+      replyTarget([inbound("suspicious", "suspicious"), inbound("released", "released")])?.id,
+    ).toBe("released");
+    expect(replyTarget(held)).toBeUndefined();
+  });
+
+  it("offers Reply all only when it adds someone, as the server copies them", () => {
+    const inbox = {
+      email_address: "support@acme.example",
+      receiving_address: "support@mx.acme.example",
+    };
+    const inbound = {
+      direction: "inbound" as const,
+      from: "Ana Souza <ana@example.com>",
+      reply_to: [],
+      to: ["support@acme.example", "Bruno Lima <bruno@example.com>"],
+      cc: ["CARLA@example.com", "ana@example.com", "support@mx.acme.example"],
+    };
+    expect(replyAllAdds(inbound, inbox)).toEqual(["bruno@example.com", "CARLA@example.com"]);
+    // A Reply-To takes the reply, and reply all copies only To and Cc, never the sender.
+    expect(
+      replyAllAdds(
+        { ...inbound, reply_to: ["help@example.com"], to: ["support@acme.example"], cc: [] },
+        inbox,
+      ),
+    ).toEqual([]);
+    // The inbox's own send: its To gets the reply, its Cc the reply all.
+    const sent = {
+      direction: "outbound" as const,
+      from: "support@acme.example",
+      reply_to: [],
+      to: ["ana@example.com", "bruno@example.com"],
+      cc: [],
+    };
+    expect(replyAllAdds(sent, inbox)).toEqual([]);
+    expect(
+      replyAllAdds({ ...sent, cc: ["carla@example.com", "support@acme.example"] }, inbox),
+    ).toEqual(["carla@example.com"]);
   });
 
   it("shows members the rules read-only", () => {
     const html = form({}, false);
     expect(html).toContain("Only owners and admins can change these rules.");
     expect(html).not.toContain("Save changes");
-    expect(html).not.toContain("Add sender");
+    expect(html).toMatch(/id="safety-allowlist"[^>]*disabled/);
+    // A typed entry outside any option list still shows as its chip.
     expect(html).toContain("*@stripe.com");
+    expect(html).toContain("Mail is kept for 30 days.");
   });
 });
 
@@ -274,7 +494,7 @@ describe("addresses on the shared domain", () => {
   const fieldError = (html: string) => html.match(/class="ms-field-error"[^>]*>([^<]*)</)?.[1];
 
   it("takes a username in the create dialog, random when empty, kept until told otherwise", () => {
-    h.error = null;
+    rq.error = null;
     const html = createDialog();
     expect(html).toMatch(/<input id="inbox-local"[^>]*placeholder="Random address"/);
     const expires = picker(html, "inbox-expires");
@@ -284,7 +504,7 @@ describe("addresses on the shared domain", () => {
 
   it("words the name review's answers, told apart from other refusals with the same code", () => {
     const shown = (code: string, message: string) => {
-      h.error = { data: { code }, message };
+      rq.error = { data: { code }, message };
       return fieldError(createDialog());
     };
     const orRandom = t("create.errors.orRandom");
@@ -311,7 +531,7 @@ describe("addresses on the shared domain", () => {
     expect(shown("CONFLICT", "This address is already used by an inbox")).toBe(
       t("create.errors.taken"),
     );
-    h.error = null;
+    rq.error = null;
   });
 
   it("offers Never when editing a shared inbox, and words a refused sender name", () => {
@@ -325,14 +545,14 @@ describe("addresses on the shared domain", () => {
           }),
         ),
       );
-    h.error = null;
+    rq.error = null;
     expect(offered(picker(edit(), "inbox-edit-expires"))).toContain("never");
-    h.error = {
+    rq.error = {
       data: { code: "UNPROCESSABLE_CONTENT" },
       message: "from_name can't be used on the shared domain: pick another",
     };
     expect(fieldError(edit())).toBe(t("create.errors.nameRefused"));
-    h.error = null;
+    rq.error = null;
   });
 
   it("offers open on a shared address only while its team may start conversations", () => {
@@ -371,7 +591,7 @@ describe("addresses on the shared domain", () => {
 
   it("says in the inbox header when a shared address can't start conversations", () => {
     const header = (inbox: Partial<InboxDetail>) => {
-      h.data = {
+      rq.data = {
         id: "i1",
         kind: "agent",
         name: "Bot",
@@ -386,7 +606,7 @@ describe("addresses on the shared domain", () => {
         ...inbox,
       };
       const html = renderToStaticMarkup(createElement(InboxView));
-      h.data = undefined;
+      rq.data = undefined;
       return html.match(/<header[^>]*>.*?<\/header>/s)?.[0] ?? "";
     };
     const SHOWN = /replies only|sending paused/;

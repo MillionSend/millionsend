@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/skeleton";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { useTRPC } from "@/lib/trpc";
+import { StateCard } from "../../emails/list-parts";
 import { approvalReasonWords, type InboxDetail, TrustBadge } from "../parts";
 
 const heading: React.CSSProperties = { margin: "0 0 10px" };
@@ -47,7 +48,7 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
   const pending = (drafts.data?.items ?? []).filter((d) => d.status === "pending_approval");
   const quarantined = held.data?.items ?? [];
   if (pending.length === 0 && quarantined.length === 0) {
-    return <p style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("review.empty")}</p>;
+    return <StateCard headline={t("review.empty")} />;
   }
 
   return (
@@ -157,7 +158,7 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
                   </td>
                   {inbox.kind === "agent" ? (
                     <td className="right ms-mono" style={{ whiteSpace: "nowrap" }}>
-                      {t("detail.scores", {
+                      {t("review.scoreLine", {
                         injection: item.injection_score ?? "–",
                         phishing: item.phishing_score ?? "–",
                       })}

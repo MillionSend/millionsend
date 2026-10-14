@@ -2,22 +2,43 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useDeferredValue, useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
+import { DraftBanner } from "@/components/draft-banner";
+import { GroupedMultiSelect } from "@/components/grouped-multi-select";
+import {
+  ArchiveIcon,
+  FolderInputIcon,
+  SpamIcon,
+  TagIcon,
+  TrashIcon,
+} from "@/components/icons/mail-icons";
+import { NavGlyph, RefreshGlyph } from "@/components/icons/nav-icons";
+import { MessageEditor } from "@/components/maily-editor/lazy";
+import { ConfirmKeycap } from "@/components/modal-footer";
+import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
-import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
-import { BtnSpinner } from "@/components/spinner";
+import { BtnSpinner, Spinner } from "@/components/spinner";
+import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { toast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
 import { addrSpec, formatBytes, formatRelative, senderName } from "@/lib/format";
+import { htmlToText } from "@/lib/html";
 import { isReadOnly } from "@/lib/read-only";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useLocalDraft } from "@/lib/use-local-draft";
 import { SearchBox, StateCard } from "../../emails/list-parts";
 import {
   approvalReasonWords,
   type InboxDetail,
+  messageHref,
   QuarantinedBadge,
+  replyAllAdds,
+  replyTarget,
+  SuspiciousBadge,
   type ThreadMessage,
   type ThreadRow,
   TrustBadge,
@@ -25,10 +46,21 @@ import {
 
 const FOLDERS = ["inbox", "archive", "spam", "sent", "trash"] as const;
 const MOVE_TO = ["inbox", "archive", "spam", "trash"] as const;
-const NEW_LABEL = "new";
+const FOLDER_ICONS: Record<(typeof MOVE_TO)[number], React.ReactNode> = {
+  inbox: <NavGlyph name="inboxes" size={14} />,
+  archive: <ArchiveIcon />,
+  spam: <SpamIcon />,
+  trash: <TrashIcon />,
+};
+/** How often the folder's list looks for new mail on its own while it is on screen. */
+const LIST_POLL_MS = 60_000;
 
+// Longhands, not the border shorthand: when a card's own borderColor goes away,
+// React clears it to "", which would leave the shorthand's border in currentColor.
 const card: React.CSSProperties = {
-  border: "1px solid var(--ms-line)",
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "var(--ms-line)",
   borderRadius: 12,
   background: "var(--ms-panel)",
   padding: "14px 16px",
@@ -37,17 +69,25 @@ const muted: React.CSSProperties = { fontSize: 12, color: "var(--ms-muted)" };
 
 export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   const t = useTranslations("inboxes");
+  const tc = useTranslations("common");
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const [folderParam, setFolder] = useUrlState("folder", "inbox");
   const folder = oneOf(FOLDERS, folderParam, "inbox");
   const [threadId, setThreadId] = useUrlState("thread");
   const [search, setSearch] = useState("");
+  // Only a click shows the spinner: the poll below stays quiet.
+  const [refreshing, setRefreshing] = useState(false);
   const query = useDeferredValue(search.trim());
   const base = { inboxId: inbox.id, folders: [folder], limit: 50 };
   const listed = useInfiniteQuery(
     trpc.inboxes.threads.list.infiniteQueryOptions(base, {
       getNextPageParam: (page) => page.nextCursor,
       enabled: query === "",
+      // Not under a support view, which counts every read on its grant, nor past
+      // the first page, since each loaded page refetches in turn; "Atualizar" covers both.
+      refetchInterval: (list) =>
+        !isReadOnly() && (list.state.data?.pages.length ?? 1) <= 1 ? LIST_POLL_MS : false,
     }),
   );
   const searched = useInfiniteQuery(
@@ -58,46 +98,64 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   );
   const active = query === "" ? listed : searched;
   const rows: ThreadRow[] = active.data?.pages.flatMap((page) => page.items) ?? [];
+  // Everything on screen reloads: the list, the header's counts and an open thread.
+  const refresh = () => {
+    setRefreshing(true);
+    void queryClient
+      .invalidateQueries(trpc.inboxes.pathFilter())
+      .finally(() => setRefreshing(false));
+  };
 
   return (
-    <>
+    <div className="ms-threads">
       <div
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}
       >
-        <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+        {/* Folders filter the list under them, which is no tabpanel: pressed buttons, not tabs. */}
+        <div className="ms-tabs">
           {FOLDERS.map((key) => (
             <button
               key={key}
               type="button"
-              className="ms-chip"
               aria-pressed={folder === key}
-              style={{
-                cursor: "pointer",
-                color: folder === key ? "var(--ms-bone)" : undefined,
-                borderColor: folder === key ? "var(--ms-bone)" : undefined,
-              }}
+              className={folder === key ? "active" : undefined}
               onClick={() => setFolder(key)}
             >
               {t(`folder.${key}`)}
             </button>
           ))}
-        </span>
+        </div>
         <SearchBox value={search} onChange={setSearch} placeholder={t("search")} />
+        <Tooltip inline focusableChild text={tc("refresh")}>
+          <button
+            type="button"
+            className="ms-btn ms-btn-icon"
+            aria-label={tc("refresh")}
+            onClick={refresh}
+          >
+            {refreshing ? <Spinner size={14} /> : <RefreshGlyph />}
+          </button>
+        </Tooltip>
       </div>
-      <div className={threadId ? "ms-grid ms-grid-12" : undefined}>
+      <div className={threadId ? "ms-thread-split" : undefined}>
         <div>
           {active.isPending ? (
-            <div style={{ display: "grid", gap: 8 }}>
-              {[1, 2, 3].map((key) => (
-                <div key={key} style={card}>
-                  <Skeleton width="40%" height={13} />
-                  <div style={{ marginTop: 8 }}>
-                    <Skeleton width="70%" />
-                  </div>
-                </div>
+            <ul className="ms-thread-list" aria-hidden="true">
+              {["58%", "42%", "66%"].map((width) => (
+                <li key={width} className="ms-thread-row">
+                  <span className="ms-thread-from">
+                    <Skeleton width="70%" height={13} />
+                  </span>
+                  <span className="ms-thread-subject">
+                    <Skeleton width={width} height={13} />
+                  </span>
+                  <span className="ms-thread-time">
+                    <Skeleton width={48} />
+                  </span>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : active.isError ? (
             <StateCard
               tone="error"
@@ -106,116 +164,128 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
               onAction={() => active.refetch()}
             />
           ) : rows.length === 0 ? (
-            <p style={{ ...muted, fontSize: 13, margin: "18px 0" }}>{t("emptyFolder")}</p>
+            <StateCard headline={t("emptyFolder")} />
           ) : (
-            <div style={{ display: "grid", gap: 8 }}>
-              {rows.map((row) => (
-                <ThreadListRow
-                  key={row.id}
-                  row={row}
-                  agent={inbox.kind === "agent"}
-                  selected={row.id === threadId}
-                  onOpen={() => setThreadId(row.id)}
-                />
-              ))}
+            <>
+              <ul className="ms-thread-list">
+                {rows.map((row) => (
+                  <ThreadListRow
+                    key={row.id}
+                    row={row}
+                    agent={inbox.kind === "agent"}
+                    sent={folder === "sent"}
+                    selected={row.id === threadId}
+                    onOpen={() => setThreadId(row.id)}
+                  />
+                ))}
+              </ul>
               {active.hasNextPage ? (
-                <button
-                  type="button"
-                  className="ms-btn ms-btn-secondary"
-                  style={{ justifySelf: "end" }}
-                  disabled={active.isFetchingNextPage}
-                  onClick={() => active.fetchNextPage()}
-                >
-                  {t("loadMore")}
-                </button>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="ms-btn ms-btn-secondary"
+                    disabled={active.isFetchingNextPage}
+                    onClick={() => active.fetchNextPage()}
+                  >
+                    {t("loadMore")}
+                  </button>
+                </div>
               ) : null}
-            </div>
+            </>
           )}
         </div>
         {threadId ? (
-          <ThreadPane inbox={inbox} threadId={threadId} onClose={() => setThreadId("")} />
+          // Keyed so a request still in flight for the thread before can't close this one.
+          <ThreadPane
+            key={threadId}
+            inbox={inbox}
+            threadId={threadId}
+            onClose={() => setThreadId("")}
+          />
         ) : null}
       </div>
-    </>
+    </div>
   );
 }
 
-function ThreadListRow({
+/** One line per thread; only what asks for action gets a pill. */
+export function ThreadListRow({
   row,
   agent,
+  sent,
   selected,
   onOpen,
 }: {
   row: ThreadRow;
   agent: boolean;
+  /** The Sent folder names the recipient: there every sender is this inbox. */
+  sent: boolean;
   selected: boolean;
   onOpen: () => void;
 }) {
   const t = useTranslations("inboxes");
+  const id = useId();
+  const unreadLabel = t(agent ? "unreadAgent" : "unread");
+  const dot = row.read ? null : (
+    <StatusDot id={`${id}-dot`} color="var(--ms-bone)" label={unreadLabel} />
+  );
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      style={{
-        ...card,
-        textAlign: "left",
-        font: "inherit",
-        color: "inherit",
-        cursor: "pointer",
-        borderColor: selected ? "var(--ms-line-strong)" : undefined,
-        background: selected ? "var(--ms-panel-raised)" : card.background,
-      }}
-    >
-      <span style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-        <span
-          style={{
-            fontWeight: row.read ? 500 : 700,
-            color: "var(--ms-bone)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the row only widens its button's click; keyboard users reach the button
+    <li className={row.read ? "ms-thread-row" : "ms-thread-row unread"} onClick={onOpen}>
+      {/* An agent's unread is its queue, not the person's: the dot says so on hover. */}
+      {dot && agent ? (
+        <Tooltip inline text={unreadLabel}>
+          {dot}
+        </Tooltip>
+      ) : (
+        dot
+      )}
+      <span className="ms-thread-from">
+        <span id={`${id}-from`} className="ms-thread-name">
+          {sent
+            ? t("compose.toName", { name: senderName(row.to[0] ?? null) })
+            : senderName(row.from) || t("noSender")}
+        </span>
+        {row.message_count > 1 ? <span className="ms-count">{row.message_count}</span> : null}
+      </span>
+      <span className="ms-thread-subject">
+        {/* Boxless, so the pills stay the subject line's flex items; the button reads them out. */}
+        <span id={`${id}-pills`} style={{ display: "contents" }}>
+          {row.pending_approval ? (
+            <span className="ms-badge ms-badge-warn">{t("badge.draft")}</span>
+          ) : null}
+          {row.quarantined > 0 ? (
+            <QuarantinedBadge reason={row.quarantine_reason} />
+          ) : agent && row.suspicious ? (
+            <SuspiciousBadge injection={row.injection_score} phishing={row.phishing_score} />
+          ) : null}
+          {row.labels.map((label) => (
+            <span key={label.id} className="ms-badge ms-badge-neutral">
+              <StatusDot color={label.color} />
+              {label.name}
+            </span>
+          ))}
+        </span>
+        {/* No handler of its own: its click, Enter's included, bubbles to the row. */}
+        <button
+          type="button"
+          className="ms-thread-open"
+          aria-current={selected || undefined}
+          aria-labelledby={`${id}-from ${id}-title`}
+          aria-describedby={dot ? `${id}-dot ${id}-pills` : `${id}-pills`}
         >
-          {senderName(row.from) || t("noSender")}
-        </span>
-        <span style={{ ...muted, whiteSpace: "nowrap" }}>
-          <RelativeTime date={row.received_at} />
-        </span>
-      </span>
-      <span
-        style={{
-          display: "block",
-          marginTop: 3,
-          fontSize: 13,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {row.subject ?? t("noSubject")}
-      </span>
-      <span style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-        {row.pending_approval ? (
-          <span className="ms-badge ms-badge-warn">{t("badge.draft")}</span>
-        ) : null}
-        {row.replied ? (
-          <span className="ms-badge ms-badge-neutral">{t("badge.replied")}</span>
-        ) : null}
-        {row.quarantined > 0 ? <QuarantinedBadge reason={row.quarantine_reason} /> : null}
-        {agent && row.injection_score !== null ? (
-          <span className="ms-badge ms-badge-neutral">
-            {t("badge.injection", { score: row.injection_score })}
+          <span className="ms-thread-text">
+            <span id={`${id}-title`} className="ms-thread-title">
+              {row.subject ?? t("noSubject")}
+            </span>
+            {row.snippet ? <span className="ms-thread-snippet"> — {row.snippet}</span> : null}
           </span>
-        ) : null}
-        {row.labels.map((label) => (
-          <span key={label.id} className="ms-badge ms-badge-neutral">
-            <span className="ms-dot" style={{ background: label.color }} aria-hidden="true" />{" "}
-            {label.name}
-          </span>
-        ))}
-        <span style={muted}>{t("messageCount", { count: row.message_count })}</span>
+        </button>
       </span>
-    </button>
+      <span className="ms-thread-time">
+        <RelativeTime date={row.received_at} />
+      </span>
+    </li>
   );
 }
 
@@ -229,6 +299,8 @@ function ThreadPane({
   onClose: () => void;
 }) {
   const t = useTranslations("inboxes");
+  const tc = useTranslations("common");
+  const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const ref = { inboxId: inbox.id, threadId };
@@ -253,11 +325,9 @@ function ThreadPane({
     }),
   );
   // A label made here is applied to the open thread at once.
-  const [naming, setNaming] = useState<string | null>(null);
   const createLabel = useMutation(
     trpc.inboxes.labels.create.mutationOptions({
       onSuccess: (label) => {
-        setNaming(null);
         void queryClient.invalidateQueries({ queryKey: trpc.inboxes.labels.pathKey() });
         update.mutate({ ...ref, labelId: label.id });
       },
@@ -266,12 +336,23 @@ function ThreadPane({
   );
   const unread = thread.data?.read === false;
   const { mutate } = update;
-  // Opening a thread reads it, as a mail client does; a support view reads without writing.
+  // In a people inbox opening a thread reads it, as a mail client does. In an
+  // agent inbox unread is the agent's queue of mail to handle, so a person
+  // looking leaves it be; a support view reads without writing.
   useEffect(() => {
-    if (unread && !inbox.expired && !isReadOnly()) {
+    if (unread && inbox.kind === "human" && !inbox.expired && !isReadOnly()) {
       mutate({ inboxId: inbox.id, threadId, read: true });
     }
-  }, [unread, inbox.expired, inbox.id, threadId, mutate]);
+  }, [unread, inbox.kind, inbox.expired, inbox.id, threadId, mutate]);
+  // Stacked under the list (a phone), the opened thread would start below the fold.
+  const paneRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const pane = paneRef.current;
+    const list = pane?.previousElementSibling;
+    if (pane && list && pane.getBoundingClientRect().top >= list.getBoundingClientRect().bottom) {
+      pane.scrollIntoView({ block: "start", behavior: "auto" });
+    }
+  }, []);
 
   if (thread.isError) {
     return (
@@ -287,11 +368,14 @@ function ThreadPane({
   const pending = (drafts.data?.items ?? []).filter(
     (draft) => draft.thread_id === threadId && draft.status === "pending_approval",
   );
-  const latest = items[items.length - 1];
+  // Messages load oldest first: the newest is known once the last page is in.
+  const newest = messages.hasNextPage ? undefined : items[items.length - 1];
+  const target = messages.hasNextPage ? undefined : replyTarget(items);
   const summary = thread.data;
+  const labelIds = summary?.labels.map((label) => label.id) ?? [];
 
   return (
-    <section style={{ display: "grid", gap: 10, alignContent: "start" }}>
+    <section ref={paneRef} style={{ display: "grid", gap: 10, alignContent: "start" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <h2
           className="ms-display"
@@ -306,79 +390,100 @@ function ThreadPane({
         </h2>
         {summary ? (
           <>
-            {/* Action choosers: the empty value is the prompt, picking runs the move. */}
-            <Select
-              value=""
-              onChange={(folder) => {
-                const to = MOVE_TO.find((f) => f === folder);
-                if (to) update.mutate({ ...ref, folder: to });
-              }}
-              width={150}
-              disabled={inbox.expired || update.isPending}
-              ariaLabel={t("moveTo")}
-              options={[
-                { value: "", label: t("moveTo") },
-                ...MOVE_TO.filter((folder) => folder !== summary.folder).map((folder) => ({
-                  value: folder,
-                  label: t(`folder.${folder}`),
-                })),
-              ]}
-            />
-            <Select
-              value=""
-              onChange={(labelId) => {
-                if (labelId === NEW_LABEL) setNaming("");
-                else if (labelId) update.mutate({ ...ref, labelId });
-              }}
-              width={150}
-              disabled={inbox.expired || update.isPending}
-              ariaLabel={t("addLabel")}
-              options={[
-                { value: "", label: t("addLabel") },
-                ...(labels.data ?? [])
-                  .filter((label) => !summary.labels.some((l) => l.id === label.id))
-                  .map((label) => ({ value: label.id, label: label.name })),
-                { value: NEW_LABEL, label: t("newLabel") },
-              ]}
-            />
-            <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
+            {/* An expired inbox is read-only; each message keeps its own link. */}
+            {inbox.expired ? null : (
+              <>
+                <PopoverMenu
+                  label={t("moveTo")}
+                  ariaLabel={t("moveTo")}
+                  align="left"
+                  triggerGlyph={<FolderInputIcon />}
+                  items={MOVE_TO.filter((folder) => folder !== summary.folder).map((folder) => ({
+                    label: t(`folder.${folder}`),
+                    icon: FOLDER_ICONS[folder],
+                    onSelect: () =>
+                      update.mutate(
+                        { ...ref, folder },
+                        {
+                          // The thread has left the list beside it, so the pane goes too.
+                          onSuccess: () => {
+                            toast(t("movedTo", { folder }));
+                            onClose();
+                          },
+                        },
+                      ),
+                  }))}
+                />
+                {/* ponytail: the ✓ follows the refetch, so a second toggle of one label
+                    before it lands repeats the first; keep a pending value if that bites. */}
+                <GroupedMultiSelect
+                  button
+                  ariaLabel={t("addLabel")}
+                  summary={
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <TagIcon />
+                      {t("addLabel")}
+                    </span>
+                  }
+                  value={labelIds}
+                  options={(labels.data ?? []).map((label) => ({
+                    value: label.id,
+                    label: label.name,
+                    group: "labels",
+                    adornment: <StatusDot color={label.color} />,
+                  }))}
+                  groups={[{ key: "labels", label: "" }]}
+                  searchPlaceholder={t("labelSearch")}
+                  noResultsLabel={tc("select.noResults")}
+                  // labels.create takes 64 characters at most.
+                  maxLength={64}
+                  onCreate={(name) => createLabel.mutate({ inboxId: inbox.id, name })}
+                  createLabel={(name) => t("createLabel", { name })}
+                  onChange={(next) => {
+                    // A pick toggles one row: the id that differs says which, and how.
+                    const added = next.find((id) => !labelIds.includes(id));
+                    const removed = labelIds.find((id) => !next.includes(id));
+                    if (added) update.mutate({ ...ref, labelId: added });
+                    else if (removed) update.mutate({ ...ref, removeLabelId: removed });
+                  }}
+                />
+                <PopoverMenu
+                  boxed
+                  ariaLabel={t("more")}
+                  items={[
+                    {
+                      label: t(summary.read ? "markUnread" : "markRead"),
+                      onSelect: () =>
+                        update.mutate(
+                          { ...ref, read: !summary.read },
+                          // Back to the list, as a mail client does; left open, a
+                          // people inbox would read the thread again at once.
+                          summary.read ? { onSuccess: onClose } : undefined,
+                        ),
+                    },
+                    ...(newest
+                      ? [
+                          {
+                            label: t("openEmail"),
+                            onSelect: () => router.push(messageHref(newest)),
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              </>
+            )}
+            <button type="button" className="ms-btn ms-btn-ghost" onClick={onClose}>
               {t("close")}
             </button>
           </>
         ) : null}
       </div>
-      {naming !== null ? (
-        <form
-          style={{ display: "flex", gap: 8 }}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (naming.trim()) createLabel.mutate({ inboxId: inbox.id, name: naming.trim() });
-          }}
-        >
-          <input
-            className="ms-input"
-            style={{ flex: "1 1 auto", minWidth: 0 }}
-            value={naming}
-            maxLength={64}
-            aria-label={t("newLabel")}
-            placeholder={t("newLabelPlaceholder")}
-            disabled={createLabel.isPending}
-            onChange={(event) => setNaming(event.target.value)}
-          />
-          <button
-            type="submit"
-            className="ms-btn ms-btn-secondary"
-            disabled={!naming.trim() || createLabel.isPending}
-          >
-            {t("addLabelSubmit")}
-          </button>
-        </form>
-      ) : null}
       {summary && summary.labels.length > 0 ? (
         <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {summary.labels.map((label) => (
             <span key={label.id} className="ms-chip">
-              <span className="ms-dot" style={{ background: label.color }} aria-hidden="true" />
+              <StatusDot color={label.color} />
               {label.name}
               <button
                 type="button"
@@ -423,13 +528,8 @@ function ThreadPane({
         />
       ))}
 
-      {latest && !inbox.expired ? (
-        <ReplyComposer
-          inboxId={inbox.id}
-          threadId={threadId}
-          emailId={latest.id}
-          onSent={refresh}
-        />
+      {target && !inbox.expired ? (
+        <ReplyComposer inbox={inbox} threadId={threadId} target={target} onSent={refresh} />
       ) : null}
     </section>
   );
@@ -455,9 +555,8 @@ function MessageCard({
   const inbound = message.direction === "inbound";
   const verdict = inbound ? message.screening.verdict : null;
   const held = verdict === "quarantined";
-  const href = inbound ? `/inboxes/received/${message.id}` : `/emails/${message.id}`;
   return (
-    <article style={{ ...card, borderColor: held ? "var(--ms-danger-border)" : undefined }}>
+    <article style={held ? { ...card, borderColor: "var(--ms-danger-border)" } : card}>
       <header style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 600, color: "var(--ms-bone)" }}>{senderName(message.from)}</span>
         <span className="ms-mono" style={muted}>
@@ -467,17 +566,18 @@ function MessageCard({
           <>
             <TrustBadge trust={message.screening.sender_trust} />
             {held ? <QuarantinedBadge reason={message.screening.quarantine_reason} /> : null}
-            {inbox.kind === "agent" && message.screening.injection_score !== null ? (
-              <span className="ms-badge ms-badge-neutral">
-                {t("badge.injection", { score: message.screening.injection_score })}
-              </span>
+            {inbox.kind === "agent" && verdict === "suspicious" ? (
+              <SuspiciousBadge
+                injection={message.screening.injection_score}
+                phishing={message.screening.phishing_score}
+              />
             ) : null}
             {message.screening.hidden_text_removed ? (
               <span className="ms-badge ms-badge-warn">{t("message.hiddenText")}</span>
             ) : null}
           </>
         ) : (
-          <span className="ms-badge ms-badge-neutral">{message.status}</span>
+          <StatusBadge status={message.status} />
         )}
         <span style={{ ...muted, marginLeft: "auto" }}>
           <RelativeTime date={message.received_at} />
@@ -541,7 +641,7 @@ function MessageCard({
         </ul>
       ) : null}
       <Link
-        href={href}
+        href={messageHref(message)}
         className="ms-link"
         style={{ display: "inline-block", marginTop: 10, fontSize: 12.5 }}
       >
@@ -658,77 +758,111 @@ function DraftCard({
   );
 }
 
+/**
+ * Answers `target` (see replyTarget). One instance per thread, since the pane
+ * is keyed by thread: a half-written reply stays with the thread it was written in.
+ */
 function ReplyComposer({
-  inboxId,
+  inbox,
   threadId,
-  emailId,
+  target,
   onSent,
 }: {
-  inboxId: string;
+  inbox: InboxDetail;
   threadId: string;
-  emailId: string;
+  target: ThreadMessage;
   onSent: () => void;
 }) {
   const t = useTranslations("inboxes");
   const trpc = useTRPC();
-  const [text, setText] = useState("");
-  const [replyAll, setReplyAll] = useState(false);
+  const [html, setHtml] = useState("");
+  // The editor reads its value on mount only: a new nonce reseeds it from html.
+  const [nonce, setNonce] = useState(0);
+  const reseed = (next: string) => {
+    setHtml(next);
+    setNonce((n) => n + 1);
+  };
+  // A send remounts the editor empty; focus goes into the new one, so the
+  // keyboard keeps its place. A thread switch remounts this whole composer.
+  const [sent, setSent] = useState(false);
+  const draft = useLocalDraft({
+    storageKey: `ms-draft:inbox-reply:${threadId}`,
+    state: html,
+    initialState: "",
+  });
   const reply = useMutation(
     trpc.inboxes.reply.mutationOptions({
       onSuccess: (result) => {
         toast(result.kind === "sent" ? t("compose.sent") : t("compose.drafted"));
-        setText("");
+        draft.markSaved("");
+        setSent(true);
+        reseed("");
         onSent();
       },
       onError: (error) => toast(error.message, "danger"),
     }),
   );
-  const submit = () => {
-    if (!text.trim() || reply.isPending) return;
-    reply.mutate({ inboxId, threadId, emailId, text, replyAll });
+  const text = htmlToText(html);
+  const ready = text !== "" && !reply.isPending;
+  const others = replyAllAdds(target, inbox);
+  const send = (replyAll: boolean) => {
+    if (!ready) return;
+    reply.mutate({ inboxId: inbox.id, threadId, emailId: target.id, html, text, replyAll });
   };
   return (
-    <form
-      style={{ ...card, display: "grid", gap: 10 }}
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
-      <textarea
-        className="ms-input"
-        rows={4}
-        style={{ width: "100%", resize: "vertical" }}
-        placeholder={t("compose.replyPlaceholder")}
-        aria-label={t("detail.reply")}
-        value={text}
-        disabled={reply.isPending}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault();
-            submit();
-          }
-        }}
-      />
-      <span style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "flex-end" }}>
-        <label style={{ ...muted, display: "inline-flex", gap: 6, alignItems: "center" }}>
-          <input
-            type="checkbox"
-            checked={replyAll}
-            onChange={(event) => setReplyAll(event.target.checked)}
+    <div style={{ display: "grid", gap: 8 }}>
+      <div>
+        <MessageEditor
+          key={nonce}
+          value={{ document: null, html }}
+          compact={{
+            placeholder: t("compose.replyPlaceholder"),
+            ariaLabel: t("compose.message"),
+            onSubmit: () => send(false),
+            autoFocus: sent,
+          }}
+          onChange={(change) => setHtml(change.html ?? "")}
+        />
+        {draft.recovered ? (
+          <DraftBanner
+            savedAt={draft.recovered.savedAt}
+            onRestore={() => {
+              const recovered = draft.recovered;
+              if (!recovered) return;
+              reseed(recovered.data);
+              draft.acceptRecovered();
+            }}
+            onDiscard={draft.discardRecovered}
           />
-          {t("compose.replyAll")}
-        </label>
+        ) : null}
+      </div>
+      <span style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        {others.length > 0 ? (
+          <Tooltip
+            inline
+            focusableChild
+            text={t("compose.replyAllHint", { addresses: others.join(", ") })}
+          >
+            <button
+              type="button"
+              className="ms-btn ms-btn-secondary"
+              disabled={!ready}
+              onClick={() => send(true)}
+            >
+              {t("compose.replyAll")}
+            </button>
+          </Tooltip>
+        ) : null}
         <button
-          type="submit"
+          type="button"
           className="ms-btn ms-btn-primary"
-          disabled={!text.trim() || reply.isPending}
+          disabled={!ready}
+          onClick={() => send(false)}
         >
           <BtnSpinner on={reply.isPending} />
-          {t("detail.reply")}
+          {t("detail.reply")} <ConfirmKeycap />
         </button>
       </span>
-    </form>
+    </div>
   );
 }

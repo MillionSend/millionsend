@@ -7,14 +7,17 @@ import { useCallback, useState } from "react";
 import { BetaPill } from "@/components/beta-pill";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { LoadError } from "@/components/load-error";
+import { NoticeStrip } from "@/components/notice-strip";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { Skeleton } from "@/components/skeleton";
 import { toast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
 import { formatTimeLeft } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
+import { confirmUnsavedNavigation } from "@/lib/use-unsaved-warning";
 import { kindWord, sharedModeKey } from "../parts";
 import { ActivityTab } from "./activity-tab";
 import { EditDialog } from "./edit-dialog";
@@ -44,7 +47,8 @@ export function InboxView() {
   const remove = useMutation(
     trpc.inboxes.delete.mutationOptions({
       onSuccess: () => {
-        void queryClient.invalidateQueries({ queryKey: trpc.inboxes.list.queryKey() });
+        // Dropped, not invalidated: a stale list would paint the deleted inbox until its refetch landed.
+        queryClient.removeQueries(trpc.inboxes.list.pathFilter());
         router.push("/inboxes");
       },
       onError: () => toast(t("deleteError"), "danger"),
@@ -89,6 +93,16 @@ export function InboxView() {
     ...(sharedMode ? [t(`sharedMode.${sharedMode}`)] : []),
   ].join(" · ");
   const review = inbox.pending_approval + inbox.quarantined;
+  const sendButton = (
+    <button
+      type="button"
+      className="ms-btn ms-btn-primary"
+      disabled={inbox.expired}
+      onClick={() => setSending(true)}
+    >
+      {t("sendEmail")}
+    </button>
+  );
 
   return (
     <>
@@ -103,14 +117,13 @@ export function InboxView() {
         badges={<BetaPill />}
         subtitle={subtitle}
         actions={
-          <button
-            type="button"
-            className="ms-btn ms-btn-primary"
-            disabled={inbox.expired}
-            onClick={() => setSending(true)}
-          >
-            {t("sendEmail")}
-          </button>
+          inbox.expired ? (
+            <Tooltip inline text={t("expired")}>
+              {sendButton}
+            </Tooltip>
+          ) : (
+            sendButton
+          )
         }
         menu={
           <PopoverMenu
@@ -141,21 +154,7 @@ export function InboxView() {
         }
       />
 
-      {inbox.expired ? (
-        <p
-          role="status"
-          style={{
-            margin: "0 0 18px",
-            fontSize: 13.5,
-            color: "var(--ms-warn)",
-            border: "1px solid var(--ms-warn-border)",
-            borderRadius: 12,
-            padding: "11px 16px",
-          }}
-        >
-          {t("expired")}
-        </p>
-      ) : null}
+      {inbox.expired ? <NoticeStrip tone="warn" text={t("expired")} /> : null}
 
       <div className="ms-tabs bleed" role="tablist" style={{ marginBottom: 18 }}>
         {TABS.map((key) => (
@@ -165,16 +164,14 @@ export function InboxView() {
             role="tab"
             aria-selected={tab === key}
             className={tab === key ? "active" : undefined}
-            onClick={() => setTab(key)}
+            // A tab switch unmounts the one before it, so unsaved rules ask first, as leaving would.
+            onClick={() => {
+              if (key !== tab && confirmUnsavedNavigation()) setTab(key);
+            }}
           >
             {t(`tabs.${key}`)}
             {key === "review" && review > 0 ? (
-              <span
-                className="ms-digits"
-                style={{ marginLeft: 7, fontWeight: 500, color: "var(--ms-faint)" }}
-              >
-                {nf.format(review)}
-              </span>
+              <span className="count">{nf.format(review)}</span>
             ) : null}
           </button>
         ))}
