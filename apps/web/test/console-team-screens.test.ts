@@ -78,7 +78,7 @@ const { TeamDialog } = await import("@/components/console/teams/team-dialog");
 const { ViewDialog } = await import("@/components/console/teams/view-dialog");
 const { SuspendDialog } = await import("@/components/console/teams/hold-dialogs");
 const { teamMenuItems } = await import("@/components/console/team-actions");
-const { MonitorSettingsView } = await import("@/components/console/safety/monitor-settings");
+const { MonitorSettingsView, Field } = await import("@/components/console/safety/monitor-settings");
 const consoleEn = (await import("../messages/en/console.json")).default;
 
 let db: Db;
@@ -314,5 +314,35 @@ describe("the console's monitoring settings", () => {
     expect(html).toMatch(
       /Shared domain<.*Shared addresses send<.*Start conversations<.*Each team's SES tenant<.*Recipients per team per day</s,
     );
+    expect(html).not.toContain("not saved yet");
+  });
+
+  it("marks a changed value as not saved yet, never as set here", () => {
+    const field = (
+      stored: Pick<Parameters<typeof Field>[0]["setting"], "value" | "source">,
+      draft: boolean | null | undefined,
+    ) =>
+      renderToStaticMarkup(
+        createElement(Field, {
+          setting: { key: "sharedInboxOpen", fallback: false, kind: "bool", ...stored },
+          draft,
+          invalid: false,
+          disabled: false,
+          onChange: () => {},
+          onReset: () => {},
+        }),
+      );
+    const toggled = field({ value: false, source: "default" }, true);
+    expect(toggled).toContain(">on<");
+    expect(toggled).toContain("not saved yet");
+    expect(toggled).not.toContain("set here");
+    const untouched = field({ value: true, source: "db" }, undefined);
+    expect(untouched).toContain("set here");
+    expect(untouched).not.toContain("not saved yet");
+    // A null draft is a pending reset, which has not happened yet either.
+    const resetting = field({ value: true, source: "db" }, null);
+    expect(resetting).toContain(">off<");
+    expect(resetting).toContain("not saved yet");
+    expect(resetting).not.toContain("built-in default");
   });
 });
