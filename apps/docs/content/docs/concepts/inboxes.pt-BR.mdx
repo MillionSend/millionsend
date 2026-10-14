@@ -338,13 +338,13 @@ excluída depois de 30 dias, a não ser que saia de lá antes.
 com `read` marca a conversa inteira. Uma conversa está lida quando todas as
 mensagens dela estão, e o `unread` da caixa conta as conversas com alguma
 mensagem não lida. O que a caixa enviou sempre conta como lido. E-mail
-retido fica fora do lido e não lido até ser liberado: não deixa a conversa
-como não lida, não pode ser marcado como lido e chega como não lido quando é
-liberado. Por isso, uma conversa que só tem e-mail retido, listada com
-`include_quarantined=true`, vem com `read: true`, e o `quarantined` dela
-conta as mensagens retidas. No painel, abrir uma conversa marca como lida
-numa caixa de pessoas. Numa caixa de
-agente, quem marca é o agente: ele marca a conversa como lida quando
+retido não conta como lido nem como não lido até ser liberado: não deixa a
+conversa como não lida, não pode ser marcado como lido e chega como não lido
+quando é liberado. Por isso, uma conversa que só tem e-mail retido, listada
+com `include_quarantined=true`, vem com `read: true`, e o `quarantined` dela
+conta as mensagens em quarentena; e-mail ainda em análise não entra na conta.
+No painel, abrir uma conversa marca como lida numa caixa de pessoas. Numa
+caixa de agente, quem marca é o agente: ele marca a conversa como lida quando
 terminar, e as conversas listadas com `read=false` são o que falta. Nas
 duas, dá para marcar uma conversa como lida ou não lida pelo menu dela.
 

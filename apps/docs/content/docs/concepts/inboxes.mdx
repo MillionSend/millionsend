@@ -323,11 +323,11 @@ inbox sent is always read. Held mail stays out of read state until it's
 released: it never makes a thread unread, can't be marked read, and arrives
 unread when released. So a thread holding only held mail, listed with
 `include_quarantined=true`, has `read: true`, and its `quarantined` counts
-the held messages. In the dashboard, opening a thread marks it read in a
-people inbox. In an agent inbox, read state belongs to your agent: it
-marks a thread read once it's handled, and the threads listed with
-`read=false` are what's left. In either kind, a person can mark a thread read
-or unread from its menu.
+the messages in quarantine; mail still being screened isn't counted. In the
+dashboard, opening a thread marks it read in a people inbox. In an agent
+inbox, read state belongs to your agent: it marks a thread read once it's
+handled, and the threads listed with `read=false` are what's left. In either
+kind, a person can mark a thread read or unread from its menu.
 
 **Labels.** Up to 100 per inbox. Names take 1–64 characters and are unique
 regardless of letter case; colors are `#RRGGBB`, in uppercase, and random

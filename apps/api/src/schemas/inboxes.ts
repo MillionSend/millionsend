@@ -277,7 +277,7 @@ const threadListItemSchema = z.object({
     .int()
     .optional()
     .describe(
-      "MillionSend extension, with include_quarantined=true: held messages not yet released; they never count as unread",
+      "MillionSend extension, with include_quarantined=true: messages in quarantine, not yet released; mail still being screened isn't counted. Held mail never counts as unread",
     ),
   received_at: z.string(),
   folder: z.enum(THREAD_FOLDERS),
