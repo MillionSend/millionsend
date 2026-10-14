@@ -556,7 +556,12 @@ curl "https://api.millionsend.com/inboxes/{id}/codes/latest?from=example.org&wai
 - `from` narrows it to a sender: an address, or a domain with its
   subdomains.
 - `wait`, from 0 to 50 seconds, waits for one to arrive; `max_age`, from 60
-  to 86,400 seconds (600 by default), skips older mail.
+  to 86,400 seconds (600 by default), skips codes delivered to the inbox
+  longer ago than that; a code released from quarantine counts from its
+  release.
+- `since`, an ISO 8601 time, skips mail received at or before it. To wait for
+  the code of a second sign-in, pass the `received_at` of the code you
+  already used.
 - `status` is `found`; `none`; `ambiguous`, when two different codes or links
   are equally likely, so none is answered; or `timeout`, when `wait` ran out
   with nothing new. The answer is always `200`.

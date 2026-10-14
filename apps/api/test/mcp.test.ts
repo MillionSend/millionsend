@@ -1819,6 +1819,14 @@ describe("receiving tools", () => {
           }),
         ),
       ).toEqual({ status: "none" });
+      expect(
+        resultJson(
+          await client.callTool({
+            name: "get_verification_code",
+            arguments: { inbox_id: inboxId, received_after: code.received_at },
+          }),
+        ),
+      ).toEqual({ status: "none" });
       const neither = await client.callTool({ name: "get_verification_code", arguments: {} });
       expect(neither.isError).toBe(true);
       expect(resultJson(neither)).toMatchObject({ statusCode: 422 });

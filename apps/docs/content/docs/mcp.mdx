@@ -167,7 +167,7 @@ takes `accept_from` and no other safety setting.
 | `list_received_email_attachments` | `receiving:read` | List a received email's attachments with their download links. |
 | `get_received_email_attachment` | `receiving:read` | Get one attachment of a received email with its download link. |
 | `wait_for_received_email` | `receiving:read` | Wait up to 50 seconds (45 by default) for a new email to an inbox or address, optionally from a sender or with a subject. Answers `received` with the email, `timeout`, or `quarantined` with the id and the quarantine reason when a match was held. |
-| `get_verification_code` | `receiving:read` | The verification code or sign-in link of one email, or the newest one an inbox received, optionally from a sender and waiting up to 50 seconds. |
+| `get_verification_code` | `receiving:read` | The verification code or sign-in link of one email, or the newest one an inbox received, optionally from a sender, received after a given time (`received_after`, such as a used code's `received_at`) and waiting up to 50 seconds. |
 | `list_inboxes` | `receiving:read` | List [inboxes](/concepts/inboxes), optionally one kind. |
 | `get_inbox` | `receiving:read` | Get an inbox by id or address. |
 | `list_threads` | `receiving:read` | List an inbox's threads by folder, label or read state. |

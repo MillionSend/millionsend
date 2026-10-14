@@ -174,7 +174,7 @@ outra configuração de segurança.
 | `list_received_email_attachments` | `receiving:read` | Lista os anexos de um e-mail recebido com os links de download. |
 | `get_received_email_attachment` | `receiving:read` | Busca um anexo de um e-mail recebido com o link de download. |
 | `wait_for_received_email` | `receiving:read` | Espera até 50 segundos (45 por padrão) por um e-mail novo para uma caixa ou um endereço, opcionalmente de um remetente ou com um assunto. Responde `received` com o e-mail, `timeout`, ou `quarantined` com o id e o motivo da quarentena quando um e-mail que bateu ficou retido. |
-| `get_verification_code` | `receiving:read` | O código de verificação ou o link de acesso de um e-mail, ou o mais recente que uma caixa recebeu, opcionalmente de um remetente e esperando até 50 segundos. |
+| `get_verification_code` | `receiving:read` | O código de verificação ou o link de acesso de um e-mail, ou o mais recente que uma caixa recebeu, opcionalmente de um remetente, recebido depois de um horário (`received_after`, como o `received_at` de um código já usado) e esperando até 50 segundos. |
 | `list_inboxes` | `receiving:read` | Lista as [caixas de entrada](/pt-BR/concepts/inboxes), opcionalmente de um tipo. |
 | `get_inbox` | `receiving:read` | Busca uma caixa pelo id ou pelo endereço. |
 | `list_threads` | `receiving:read` | Lista as conversas de uma caixa por pasta, etiqueta ou se estão lidas. |

@@ -191,17 +191,23 @@ describe("GET /inboxes/{id}/codes/latest", () => {
     const res = await call(
       inboxKey,
       "GET",
-      `/inboxes/${inboxId}/codes/latest?from=acme.test&max_age=120`,
+      `/inboxes/${inboxId}/codes/latest?from=acme.test&max_age=120&since=2026-10-12T14:03:11.229Z`,
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(found);
     expect(latest).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.objectContaining({ teamId, inboxId, from: "acme.test", maxAgeMs: 120_000 }),
+      expect.objectContaining({
+        teamId,
+        inboxId,
+        from: "acme.test",
+        maxAgeMs: 120_000,
+        since: new Date("2026-10-12T14:03:11.229Z"),
+      }),
     );
     expect(slot).not.toHaveBeenCalled();
-    for (const query of ["wait=51", "max_age=59", "wait=x"]) {
+    for (const query of ["wait=51", "max_age=59", "wait=x", "since=yesterday"]) {
       expect(
         (await call(teamKey, "GET", `/inboxes/${inboxId}/codes/latest?${query}`)).status,
         query,

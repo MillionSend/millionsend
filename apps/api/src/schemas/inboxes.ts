@@ -480,7 +480,15 @@ export const searchThreadsQuerySchema = z.object({
 export const codesQuerySchema = z.object({
   from: optionalString("An exact sender address, or a domain covering itself and its subdomains"),
   wait: optionalString("Seconds to wait for a code to arrive, 0-50 (default 0)"),
-  max_age: optionalString("Oldest mail considered, in seconds, 60-86400 (default 600)"),
+  max_age: optionalString(
+    "How long ago the code may have reached the inbox, in seconds, 60-86400 (default 600); a released code counts from its release",
+  ),
+  since: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      "Only mail received after this ISO 8601 instant, such as the received_at of a code already used",
+    ),
 });
 
 /** Resend's pagination messages, shared by every /inboxes list. */

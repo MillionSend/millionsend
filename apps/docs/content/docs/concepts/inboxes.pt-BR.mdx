@@ -583,7 +583,11 @@ curl "https://api.millionsend.com/inboxes/{id}/codes/latest?from=example.org&wai
 - O `from` restringe a um remetente: um endereço, ou um domínio com os
   subdomínios dele.
 - O `wait`, de 0 a 50 segundos, espera um chegar; o `max_age`, de 60 a 86.400
-  segundos (600 por padrão), ignora e-mails mais antigos.
+  segundos (600 por padrão), ignora códigos entregues na caixa há mais tempo
+  que isso; um código liberado da quarentena conta a partir da liberação.
+- O `since`, um horário ISO 8601, ignora e-mails recebidos até esse momento.
+  Para esperar o código de um segundo login, passe o `received_at` do código
+  que você já usou.
 - O `status` é `found`; `none`; `ambiguous`, quando dois códigos ou links
   diferentes são igualmente prováveis e por isso nenhum é devolvido; ou
   `timeout`, quando o `wait` acabou sem nada novo. A resposta é sempre `200`.

@@ -941,7 +941,7 @@ export function registerInboxRoutes(
       path: "/inboxes/{inbox_id}/codes/latest",
       summary: "Retrieve the latest verification code",
       description:
-        "MillionSend extension: the newest code or sign-in link in delivered mail, never from held mail or senders that failed authentication; links are never fetched. wait > 0 long-polls until one arrives (status timeout when none did). Always 200; status none when there is nothing.",
+        "MillionSend extension: the newest code or sign-in link in delivered mail, never from held mail or senders that failed authentication; links are never fetched. max_age counts from delivery, so a code released from quarantine counts from its release; since skips mail received at or before it, so a second sign-in waits for its own code. wait > 0 long-polls until one arrives (status timeout when none did). Always 200; status none when there is nothing.",
       request: { params: inboxIdParam, query: codesQuerySchema },
       responses: {
         200: json(verificationCodeResponseSchema, "The latest code, or a status saying why none"),
@@ -965,6 +965,7 @@ export function registerInboxRoutes(
           inboxId: inbox_id,
           from: q.from || null,
           maxAgeMs: maxAge.value * 1000,
+          since: q.since ? new Date(q.since) : null,
           actor: actorOf(c),
         });
       if (wait.value === 0) return c.json(await read(), 200);

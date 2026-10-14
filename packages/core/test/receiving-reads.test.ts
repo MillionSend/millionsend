@@ -170,6 +170,25 @@ describe("latestVerificationCode (S7)", () => {
       .set({ safety: { ...defaultSafety("agent", false), accept_from: "anyone" } })
       .where(eq(schema.inboxes.id, inbox));
   });
+
+  it("counts max_age from delivery and skips mail received before since", async () => {
+    const mine = { from: "since.example" };
+    const at = new Date(NOW.getTime() - 20 * 60_000);
+    const old = await receive("Login <login@since.example>", "Your verification code is 731904", {
+      at,
+    });
+    expect((await latest(mine)).status).toBe("none");
+    await db
+      .update(schema.receivedEmailInboxes)
+      .set({ verdict: "released", deliveredAt: new Date(NOW.getTime() - 60_000) })
+      .where(eq(schema.receivedEmailInboxes.receivedEmailId, old));
+    expect(await latest(mine)).toMatchObject({ status: "found", code: "731904", email_id: old });
+    expect((await latest({ ...mine, since: at })).status).toBe("none");
+    await receive("Login <login@since.example>", "Your verification code is 552018", {
+      at: new Date(NOW.getTime() - 30_000),
+    });
+    expect(await latest({ ...mine, since: at })).toMatchObject({ code: "552018" });
+  });
 });
 
 describe("waitForReceived and wait slots (S28)", () => {
