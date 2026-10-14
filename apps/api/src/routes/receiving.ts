@@ -213,7 +213,7 @@ export function registerReceivingRoutes(
       method: "get",
       path: "/emails/receiving",
       summary: "List received emails",
-      description: `Mail received at the team's receiving domains and inboxes, newest first like Resend (\`after\` pages toward older mail), with cursor pagination. Needs a full access key; a domain-scoped key lists mail addressed to its domain only, an inbox-scoped key mail delivered into its inbox. Mail held for screening or in quarantine is left out unless a full access key asks for it (include_quarantined, quarantined). With wait, the request is held until matching mail arrives (long-poll). An inbox_id the key can't reach answers 404 at once, without waiting. ${untrusted}`,
+      description: `Mail received at the team's receiving domains and inboxes, newest first like Resend (\`after\` pages toward older mail), with cursor pagination. Needs a full access key; a domain-scoped key lists mail addressed to its domain only, an inbox-scoped key mail delivered into its inbox. Mail held for screening or in quarantine is left out unless a full access key asks for it (include_quarantined, quarantined). With wait, the request is held until matching mail arrives (long-poll). An inbox_id the key can't reach answers 404 at once, without waiting; an inbox-scoped key naming another inbox gets 403 restricted_api_key. ${untrusted}`,
       middleware,
       request: { query: listReceivedEmailsQuerySchema },
       responses: {

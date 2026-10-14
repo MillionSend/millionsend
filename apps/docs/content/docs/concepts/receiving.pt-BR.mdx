@@ -268,7 +268,7 @@ o `limit`) e um cursor `after` ou `before`, como toda
 
 | Parâmetro | Lista |
 | --- | --- |
-| `inbox_id` | Os e-mails entregues nessa caixa. Uma caixa que a chave não alcança responde `404`, sem esperar o `wait`. |
+| `inbox_id` | Os e-mails entregues nessa caixa. Uma caixa que a chave não alcança responde `404`, sem esperar o `wait`; uma chave restrita a uma caixa que pede outra recebe `403 restricted_api_key`. |
 | `to` | Os e-mails com esse endereço em `received_for`. |
 | `from` | Os e-mails desse endereço, ou de um domínio e dos subdomínios dele. |
 | `subject_contains` | Os e-mails cujo assunto contém o texto (até 200 caracteres). |
