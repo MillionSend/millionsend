@@ -225,11 +225,14 @@ function replyToTrusted(replyTo: string, from: string, senderTrust: string | nul
   return (senderTrust !== null && TRUSTED_TIERS.has(senderTrust)) || org(replyTo) === org(from);
 }
 
-/** The answered message's Reply-To entries it does not vouch for. */
-export function untrustedReplyTos(target: SendTarget): string[] {
+/**
+ * The answered message's Reply-To entries it does not vouch for. On the
+ * shared domain no sender's tier vouches, as in threadSenders.
+ */
+export function untrustedReplyTos(target: SendTarget, shared: boolean): string[] {
   if (target.direction !== "inbound") return [];
   return target.row.replyTo.filter(
-    (rt) => !replyToTrusted(rt, target.row.from, target.senderTrust),
+    (rt) => !replyToTrusted(rt, target.row.from, shared ? null : target.senderTrust),
   );
 }
 
@@ -1645,7 +1648,7 @@ function prepareReply(
     approved: directlyApproved(c.actor),
     requiresApproval: body.requires_approval === true,
     replyTarget: { automated: target.direction === "inbound" ? target.row.automated : null },
-    untrustedReplyTo: untrustedReplyTos(target),
+    untrustedReplyTo: untrustedReplyTos(target, c.inbox?.domainId === null),
     forwardedSecret: false,
     hold: { type: "reply", forward: false, targetId: target.row.id },
     now: c.now,

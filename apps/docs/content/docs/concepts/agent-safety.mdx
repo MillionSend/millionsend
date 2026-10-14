@@ -312,9 +312,9 @@ a draft instead, with a reason:
    `Auto-Submitted: auto-generated`, so two agents writing to each other stop
    after one round.
 5. **Reply-To.** A reply to a `Reply-To` on another organization's domain,
-   unless its sender is an owner, on the allowlist or a known thread
-   (`reply_to_redirect`). This stops a stranger from steering replies to
-   someone else.
+   unless its sender is an owner, on the allowlist or a known thread; on the
+   shared domain, whoever sent it (`reply_to_redirect`). This stops a
+   stranger from steering replies to someone else.
 6. **Send policy** (`send_policy`):
    - `reply_only`, the default: replies inside a thread, to people who wrote
      in it, owners and the allowlist.

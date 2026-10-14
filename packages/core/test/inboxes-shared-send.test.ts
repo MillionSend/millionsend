@@ -170,6 +170,35 @@ describe("the shared domain's mode, on every inbox send", () => {
     expect((await emailRow(out.email.id))?.firstContact).toBe(true);
   });
 
+  it("holds an agent's reply that follows a foreign Reply-To on the shared domain, even from an allowlisted sender", async () => {
+    const w = await seedWorld(db, "shared-reply-to");
+    await establish(w);
+    openSending();
+    const safety = { send_policy: "open" as const, allowlist: ["*@sender.example"] };
+    const answer = async (inbox: InboxRow) => {
+      const threadId = await addThread(w, inbox.id);
+      const received = await receive(w, {
+        inbox,
+        threadId,
+        senderTrust: "allowlisted",
+        message: { replyTo: "other@elsewhere.example" },
+      });
+      return replyInThread(db, w.deps, {
+        teamId: w.teamId,
+        billing: await billing(w),
+        actor: TEAM_KEY,
+        inboxId: inbox.id,
+        threadId,
+        emailId: received.id,
+        body: { text: "Sure" },
+      });
+    };
+    const shared = await addInbox(w, { local: "bot", shared: true, safety });
+    expect(drafted(await answer(shared)).approval_reasons).toContain("reply_to_redirect");
+    // On a team's own domain the allowlisted sender still vouches for its Reply-To.
+    sent(await answer(await addInbox(w, { local: "desk", safety })));
+  });
+
   it("keeps an inbox replying only while its display name, address or team label fails the guards", async () => {
     const w = await seedWorld(db, "brand-names");
     openSending();

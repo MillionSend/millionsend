@@ -698,7 +698,8 @@ export async function sendDraft(
           target && !row.forward
             ? { automated: target.direction === "inbound" ? target.row.automated : null }
             : null,
-        untrustedReplyTo: target && !row.forward ? untrustedReplyTos(target) : [],
+        untrustedReplyTo:
+          target && !row.forward ? untrustedReplyTos(target, inbox.domainId === null) : [],
         forwardedSecret,
         hold,
         now,
