@@ -5,7 +5,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { Resend } from "resend-inboxes";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 
 /**
@@ -19,6 +19,16 @@ let closeDb: () => Promise<void>;
 let server: ServerType;
 let resend: Resend;
 let teamId: string;
+
+const JUDGE_URL = "https://judge.example.test";
+const nouls = (noul: number) =>
+  Response.json({
+    answers: Object.fromEntries(
+      ["username", "from_name", "label"].map((field) => [field, { type: "noul", noul }]),
+    ),
+  });
+/** What the stubbed judge answers the shared domain's name review. */
+let judge = () => nouls(0);
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
@@ -39,6 +49,10 @@ beforeAll(async () => {
     keyHash: key.keyHash,
     last4: key.last4,
   });
+  // The name review is built from ABUSE_JUDGE* when the routes are registered.
+  vi.stubEnv("ABUSE_JUDGE", "typesafe");
+  vi.stubEnv("ABUSE_JUDGE_BASE_URL", JUDGE_URL);
+  vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
   const app = createApi({
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
@@ -46,7 +60,13 @@ beforeAll(async () => {
     enqueueEmailSend: async () => {},
     receiving: { mxHost: "mx.millionsend.test", ingestSecret: "c".repeat(40) },
     inboxKeys: deriveInboxKeys(randomBytes(32)),
+    sharedInboxDomain: "agents.example.test",
   });
+  vi.unstubAllEnvs();
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) =>
+    String(input).startsWith(JUDGE_URL) ? judge() : realFetch(input, init),
+  );
   await new Promise<void>((resolve) => {
     server = serve({ fetch: app.fetch, port: 0 }, () => resolve());
   });
@@ -56,6 +76,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  vi.unstubAllGlobals();
   await new Promise((resolve) => server.close(resolve));
   await closeDb();
 });
@@ -102,6 +123,37 @@ describe("resend preview SDK: inboxes", () => {
     expect(removed.data).toEqual({ object: "inbox", id, deleted: true });
     const missing = await resend.inboxes.get(id);
     expect(missing.error).toMatchObject({ name: "not_found", message: "Inbox not found." });
+  });
+
+  it("makes a permanent shared-domain inbox without an address, and hands back the name review's answers", async () => {
+    const created = await resend.inboxes.create({
+      emailAddress: undefined as unknown as string,
+      name: "Bot",
+    });
+    expect(created.error).toBeNull();
+    expect(created.data).toMatchObject({ object: "inbox", shared: true, expires_at: null });
+    const id = created.data?.id as string;
+
+    judge = () => new Response("unavailable", { status: 500 });
+    const held = await resend.inboxes.update(id, { fromName: "Desk" });
+    expect(held.error).toEqual({
+      statusCode: 503,
+      name: "name_review_unavailable",
+      message:
+        "This name couldn't be reviewed right now: try again shortly, or leave username out for a random address",
+    });
+    expect(held.headers?.["retry-after"]).toBe("60");
+    judge = () => nouls(0.9);
+    const refused = await resend.inboxes.update(id, { fromName: "Example Bank" });
+    expect(refused.error).toEqual({
+      statusCode: 422,
+      name: "validation_error",
+      message: "from_name can't be used on the shared domain: pick another",
+    });
+    judge = () => nouls(0);
+    expect((await resend.inboxes.update(id, { fromName: "Desk" })).data).toMatchObject({
+      from_name: "Desk",
+    });
   });
 
   it("works labels, threads and thread emails", async () => {

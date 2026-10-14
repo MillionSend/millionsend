@@ -4,7 +4,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   addInbox,
   addThread,
@@ -238,6 +238,30 @@ describe("drafts and rejection", () => {
     const body = { thread_id: t.threadId, reply_to_email_id: t.id, text: "x" };
     expect((await call(teamKey, "POST", `/inboxes/${inbox.id}/drafts`, body)).status).toBe(201);
     expect((await call(teamKey, "POST", `/inboxes/${inbox.id}/drafts`, body)).status).toBe(200);
+  });
+
+  it("marks a shared inbox used when a key only reads its drafts", async () => {
+    const shared = await addInbox(w, { local: "reader", kind: "human", shared: true });
+    const created = await call(teamKey, "POST", `/inboxes/${shared.id}/drafts`, { text: "x" });
+    const draft = await json<{ id: string }>(created);
+    const lastUsed = async () =>
+      (
+        await db
+          .select({ at: schema.inboxes.lastUsedAt })
+          .from(schema.inboxes)
+          .where(eq(schema.inboxes.id, shared.id))
+      )[0]?.at.getTime() ?? 0;
+    for (const path of [
+      `/inboxes/${shared.id}/drafts`,
+      `/inboxes/${shared.id}/drafts/${draft.id}`,
+    ]) {
+      await db
+        .update(schema.inboxes)
+        .set({ lastUsedAt: new Date(Date.now() - 2 * 3_600_000) })
+        .where(eq(schema.inboxes.id, shared.id));
+      expect((await call(teamKey, "GET", path)).status, path).toBe(200);
+      await vi.waitFor(async () => expect(await lastUsed()).toBeGreaterThan(Date.now() - 60_000));
+    }
   });
 });
 

@@ -39,6 +39,11 @@
     "saved": "Caixa salva."
   },
   "expiresIn": "expira em {time}",
+  "sharedMode": {
+    "plan": "só responde no plano Free",
+    "instance": "só responde por enquanto",
+    "paused": "envio pausado"
+  },
   "forwardsTo": "encaminha para {address}",
   "planUsage": "Plano: {used} de {limit} caixas",
   "tabs": {
@@ -97,7 +102,12 @@
       "taken": "Esse endereço já está em uso.",
       "notReceiving": "Ative o recebimento em {domain} primeiro.",
       "rate": "Muitas caixas criadas na última hora. Tente de novo mais tarde.",
-      "localPart": "Use letras minúsculas, números e . _ % + - (até 64), sem ponto no começo nem no fim."
+      "localPart": "Use letras minúsculas, números e . _ % + - (até 64), sem ponto no começo nem no fim.",
+      "username": "Use letras minúsculas, números e . _ - (até 64), começando e terminando com letra ou número, sem dois pontos seguidos.",
+      "nameRefused": "Esse nome não pode ser usado no domínio compartilhado. Escolha outro.",
+      "reviewUnavailable": "Não deu para conferir esse nome agora. Tente de novo daqui a pouco.",
+      "tooManyNames": "Muitos nomes foram conferidos hoje. Tente de novo amanhã.",
+      "orRandom": "Ou deixe o endereço vazio para ganhar um aleatório."
     }
   },
   "acceptFrom": {
@@ -340,6 +350,7 @@
     "privateCodesHint": "Um código ou link de acesso extraído não pode ser enviado nem encaminhado para ninguém além de você e da lista de permitidos.",
     "sendCap": "Envios por dia",
     "sendCapNone": "Sem limite diário",
+    "sendCapHintHumanShared": "Vale para envios pela API. O que você envia pelo painel não conta.",
     "retention": "Guardado por",
     "retentionValue": "{days} dias (configuração da instância)",
     "forwardTo": "Encaminhar toda mensagem para",
@@ -354,8 +365,10 @@
     "reply_only": "Responder só em conversas existentes",
     "reply_onlyHint": "Conversas novas com destinatários novos viram rascunhos que esperam uma pessoa.",
     "allowlist": "Respostas e conversas novas com a lista de permitidos",
-    "open": "Qualquer pessoa (precisa do seu domínio verificado)",
-    "sharedOnly": "Endereços do domínio compartilhado só respondem dentro das próprias conversas."
+    "open": "Qualquer pessoa",
+    "sharedOnly": "Endereços do domínio compartilhado só respondem dentro das próprias conversas.",
+    "sharedPlan": "No plano Free, endereços do domínio compartilhado só respondem dentro das próprias conversas.",
+    "sharedPaused": "O envio pelos endereços do domínio compartilhado está pausado. Os e-mails para eles continuam chegando."
   },
   "activity": {
     "empty": "Nenhuma atividade ainda.",

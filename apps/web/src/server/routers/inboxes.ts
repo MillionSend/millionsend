@@ -56,6 +56,7 @@ import {
   planUsage,
   releaseFailure,
   sendResult,
+  sharedSending,
   userActor,
 } from "../inboxes";
 import { getKeyring } from "../keyring";
@@ -72,7 +73,7 @@ const inboxRef = { inboxId: z.uuid() };
 const threadRef = { ...inboxRef, threadId: z.uuid() };
 const draftRef = { ...inboxRef, draftId: z.uuid() };
 
-/** The dashboard's lifetimes; Never is null, and the shared domain refuses it. */
+/** The dashboard's lifetimes; Never is null. */
 const EXPIRY_CHOICES = ["1h", "24h", "7d", "30d"] as const;
 
 // The correlated subqueries below alias their own table and name the outer
@@ -210,6 +211,7 @@ export const inboxesRouter = router({
       domains,
       // The team's subdomain once its first shared inbox made one; the parent domain before.
       sharedDomain: shared ? (subdomain?.name ?? shared) : null,
+      sharedSending: shared ? await sharedSending(ctx) : null,
       plan: await planUsage(ctx.db, ctx.teamId),
     };
   }),
@@ -290,6 +292,7 @@ export const inboxesRouter = router({
       safety: extra.safety,
       received_30d: extra.received30d,
       channels: { webhook: extra.webhook, key: extra.key },
+      sharedSending: inbox.shared ? await sharedSending(ctx) : null,
     };
   }),
 
@@ -298,7 +301,7 @@ export const inboxesRouter = router({
       z.object({
         kind: z.enum(INBOX_KINDS),
         name: z.string().trim().max(64).optional(),
-        // With domainId, the address's local part; neither means a random shared address.
+        // With domainId, the address's local part; without, the shared address's username.
         localPart: z.string().trim().toLowerCase().min(1).max(64).optional(),
         domainId: z.uuid().optional(),
         acceptFrom: z.enum(["anyone", "verified", "allowlist"]),
@@ -331,6 +334,7 @@ export const inboxesRouter = router({
         actor: userActor(ctx),
         input: {
           email_address: emailAddress,
+          username: input.domainId ? undefined : input.localPart,
           name: input.name || undefined,
           kind: input.kind,
           expires_in: input.expiresIn,
@@ -414,6 +418,8 @@ export const inboxesRouter = router({
         patch: Object.fromEntries(
           Object.entries(patch.data).filter(([, value]) => value !== undefined),
         ) as Partial<InboxSafety>,
+        plan: (await fetchEffectivePlan(ctx.db, ctx.teamId)) ?? "free",
+        isCloud: isCloudDeployment(),
       });
       if (!result.ok) throw inboxFailure(result.error);
       return result.safety;

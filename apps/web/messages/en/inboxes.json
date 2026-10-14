@@ -39,6 +39,11 @@
     "saved": "Inbox saved."
   },
   "expiresIn": "expires in {time}",
+  "sharedMode": {
+    "plan": "replies only on the Free plan",
+    "instance": "replies only for now",
+    "paused": "sending paused"
+  },
   "forwardsTo": "forwards to {address}",
   "planUsage": "Plan: {used} of {limit} inboxes",
   "tabs": {
@@ -97,7 +102,12 @@
       "taken": "This address is already in use.",
       "notReceiving": "Turn on receiving for {domain} first.",
       "rate": "Too many inboxes created in the last hour. Try again later.",
-      "localPart": "Use lowercase letters, digits and . _ % + - (up to 64), with no dot at either end."
+      "localPart": "Use lowercase letters, digits and . _ % + - (up to 64), with no dot at either end.",
+      "username": "Use lowercase letters, digits and . _ - (up to 64), starting and ending with a letter or digit, with no two dots in a row.",
+      "nameRefused": "This name can't be used on the shared domain. Pick another.",
+      "reviewUnavailable": "We couldn't check this name right now. Try again in a minute.",
+      "tooManyNames": "Too many names were checked today. Try again tomorrow.",
+      "orRandom": "Or leave the address empty for a random one."
     }
   },
   "acceptFrom": {
@@ -340,6 +350,7 @@
     "privateCodesHint": "An extracted code or sign-in link can't be sent or forwarded to anyone but you and the allowlist.",
     "sendCap": "Sends per day",
     "sendCapNone": "No daily cap",
+    "sendCapHintHumanShared": "Counts sends over the API. What you send from the dashboard doesn't count.",
     "retention": "Kept for",
     "retentionValue": "{days} days (instance setting)",
     "forwardTo": "Forward every message to",
@@ -354,8 +365,10 @@
     "reply_only": "Reply only inside existing threads",
     "reply_onlyHint": "New conversations to new recipients become drafts that wait for a person.",
     "allowlist": "Replies, plus new conversations with the allowlist",
-    "open": "Anyone (needs your own verified domain)",
-    "sharedOnly": "Addresses on the shared domain only reply inside their threads."
+    "open": "Anyone",
+    "sharedOnly": "Addresses on the shared domain only reply inside their threads.",
+    "sharedPlan": "On the Free plan, addresses on the shared domain only reply inside their threads.",
+    "sharedPaused": "Sending from addresses on the shared domain is paused. Mail to them still arrives."
   },
   "activity": {
     "empty": "No activity yet.",

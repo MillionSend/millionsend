@@ -1,9 +1,11 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
+import { abuseJudgeConfig } from "@millionsend/config";
 import {
   acquireWaitSlot,
   CURSOR_NOT_FOUND_MESSAGE,
   createInbox,
   createLabel,
+  createSharedNameReview,
   deleteInboxes,
   deleteLabel,
   findLiveInbox,
@@ -26,6 +28,7 @@ import {
   listThreads,
   releaseQuarantined,
   searchThreads,
+  touchInboxInBackground,
   trashThread,
   updateInbox,
   updateInboxSafety,
@@ -100,10 +103,12 @@ export function registerInboxRoutes(
   _opts: { requireFullAccess: MiddlewareHandler<Env> },
 ): void {
   const { db, keyring } = deps;
+  const judgeSharedNames = createSharedNameReview(abuseJudgeConfig());
   const inboxDeps = (): InboxDeps => ({
     sharedInboxDomain: deps.sharedInboxDomain ?? null,
     receivingEnabled: Boolean(deps.receiving),
     enqueueWebhookDeliveries: deps.enqueueWebhookDeliveries,
+    judgeSharedNames,
   });
   const actorOf = (c: Context<Env>): InboxActor => inboxActorFromAuth(c.get("auth"));
 
@@ -129,6 +134,7 @@ export function registerInboxRoutes(
     if (auth.inboxId && auth.inboxId !== inboxId.toLowerCase()) return null;
     const inbox = await findLiveInbox(db, { teamId: auth.teamId, inboxId });
     if (!inbox || (auth.domainId !== null && inbox.domainId !== auth.domainId)) return null;
+    touchInboxInBackground(db, inbox.id);
     return inbox.safety;
   };
   const inboxFound = async (c: Context<Env>, inboxId: string) =>
@@ -165,7 +171,7 @@ export function registerInboxRoutes(
       path: "/inboxes",
       summary: "Create an inbox",
       description:
-        "An address that receives into threads, on one of your verified domains (receiving on, or forwarding: true) or, with email_address omitted, a random address on the shared inbox domain that needs no DNS. Returns the full inbox. MillionSend extensions: kind (agent by default), expires_in and safety.",
+        "An address that receives into threads, on one of your verified domains (receiving on, or forwarding: true) or, with email_address omitted, an address on the shared inbox domain that needs no DNS: username names it, or it is random. It never expires unless expires_in says so. Returns the full inbox. MillionSend extensions: username, kind (agent by default), expires_in and safety.",
       request: {
         body: { content: { "application/json": { schema: createInboxRequestSchema } } },
       },
@@ -174,7 +180,12 @@ export function registerInboxRoutes(
         403: jsonErr("The plan's inbox limit, or a restricted API key"),
         409: jsonErr("The address is already used by an inbox"),
         422: jsonErr("Validation error"),
-        429: jsonErr("Too many inboxes created in the last hour"),
+        429: jsonErr(
+          "Too many inboxes created in the last hour, or too many names reviewed or refused on the shared domain today",
+        ),
+        503: jsonErr(
+          "A chosen username or from_name on the shared domain can't be reviewed right now; retry-after says when to try again",
+        ),
       },
     }),
     async (c) => {
@@ -268,7 +279,7 @@ export function registerInboxRoutes(
       path: "/inboxes/{inbox_id}",
       summary: "Update an inbox",
       description:
-        "Its name or from_name; MillionSend extension: expires_in, a new lifetime counted from now. Returns the full inbox.",
+        "Its name or from_name; MillionSend extension: expires_in, a new lifetime counted from now. On a shared-domain inbox a new from_name is reviewed first (503 while that review is unavailable). Returns the full inbox.",
       request: {
         params: inboxIdParam,
         body: { content: { "application/json": { schema: updateInboxRequestSchema } } },
@@ -277,6 +288,10 @@ export function registerInboxRoutes(
         200: json(inboxSchema, "Inbox updated"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
+        429: jsonErr("Too many names reviewed or refused on the shared domain today"),
+        503: jsonErr(
+          "A new from_name on the shared domain can't be reviewed right now; retry-after says when to try again",
+        ),
       },
     }),
     async (c) => {
@@ -434,6 +449,8 @@ export function registerInboxRoutes(
         inboxId: inbox_id,
         actor: actorOf(c),
         patch: c.req.valid("json") as Partial<InboxSafety>,
+        plan: auth.plan,
+        isCloud: deps.isCloud,
       });
       if (!result.ok) return failure(c, result.error);
       return c.json(

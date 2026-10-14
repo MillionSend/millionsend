@@ -1,10 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { EnvKeyring, generateApiKey } from "@millionsend/core";
+import { EnvKeyring, generateApiKey, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type ApiDeps, createApi } from "../src/app.js";
 
 /** /inboxes/** over one real database: Resend's shapes and errors, inbox-scoped keys, filters. */
@@ -196,15 +196,83 @@ describe("POST /inboxes and the inbox object", () => {
     });
   });
 
-  it("gives an inbox without an address a shared one that expires", async () => {
+  it("gives an inbox without an address a random, permanent one on the shared domain", async () => {
     const res = await call(teamKey, "POST", "/inboxes", { name: "Signup bot", kind: "agent" });
     expect(res.status).toBe(201);
-    const body = await json<{ email_address: string; shared: boolean; expires_at: string }>(res);
-    expect(body.email_address).toMatch(/^signup-bot-[a-z0-9]{4}@inbox-api\.agents\.example\.test$/);
+    const body = await json<{ email_address: string; shared: boolean; expires_at: string | null }>(
+      res,
+    );
+    expect(body.email_address).toMatch(/^inbox-[a-z0-9]{8}@inbox-api\.agents\.example\.test$/);
     expect(body.shared).toBe(true);
-    expect(new Date(body.expires_at).getTime() - Date.now()).toBeGreaterThan(23 * 3_600_000);
+    expect(body.expires_at).toBeNull();
     const never = await call(teamKey, "POST", "/inboxes", { expires_in: null });
-    expect(never.status).toBe(422);
+    expect(never.status).toBe(201);
+    expect((await json(never)).expires_at).toBeNull();
+    const year = await call(teamKey, "POST", "/inboxes", { expires_in: "365d" });
+    expect(year.status).toBe(201);
+  });
+
+  it("names a shared address by username: never cut, redrawn or reserved", async () => {
+    const res = await call(teamKey, "POST", "/inboxes", { username: " Leo.Bot ", name: "Leo" });
+    expect(res.status).toBe(201);
+    expect(await json(res)).toMatchObject({
+      email_address: "leo.bot@inbox-api.agents.example.test",
+      shared: true,
+      expires_at: null,
+    });
+    const taken = await call(teamKey, "POST", "/inboxes", { username: "leo.bot" });
+    expect(taken.status).toBe(409);
+    expect(await json(taken)).toEqual({
+      statusCode: 409,
+      name: "validation_error",
+      message: "This address is already used by an inbox",
+    });
+    const refused = "username can't be used on the shared domain: pick another";
+    const malformed =
+      "username must be 1-64 letters, digits and . _ - that start and end with a letter or digit, without two dots in a row";
+    const cases: [Record<string, unknown>, string][] = [
+      [{ username: "No.Reply" }, refused],
+      [{ username: "mailer.daemon" }, refused],
+      [{ username: "fwd-agent" }, refused],
+      [{ username: "paypalsupport" }, refused],
+      [{ username: "a..b" }, malformed],
+      [{ username: "-leo" }, malformed],
+      [{ username: "leo+news" }, malformed],
+      [{ username: "x".repeat(65) }, malformed],
+      [
+        { username: "leo", email_address: "leo@in.acme.test" },
+        "Send username or email_address, not both",
+      ],
+    ];
+    for (const [body, message] of cases) {
+      const answer = await call(teamKey, "POST", "/inboxes", body);
+      expect(await json(answer), JSON.stringify(body)).toEqual({
+        statusCode: 422,
+        name: "validation_error",
+        message,
+      });
+    }
+  });
+
+  it("marks an inbox used whenever a key reaches it through its routes", async () => {
+    const shared = await inbox(teamKey, {});
+    const minted = await call(teamKey, "POST", "/api-keys", { name: "use", inbox_id: shared.id });
+    const inboxKey = (await json<{ token: string }>(minted)).token;
+    const lastUsed = async () =>
+      (
+        await db
+          .select({ at: schema.inboxes.lastUsedAt })
+          .from(schema.inboxes)
+          .where(eq(schema.inboxes.id, shared.id))
+      )[0]?.at.getTime() ?? 0;
+    for (const token of [teamKey, inboxKey]) {
+      await db
+        .update(schema.inboxes)
+        .set({ lastUsedAt: new Date(Date.now() - 2 * 3_600_000) })
+        .where(eq(schema.inboxes.id, shared.id));
+      expect((await call(token, "GET", `/inboxes/${shared.id}/threads`)).status).toBe(200);
+      await vi.waitFor(async () => expect(await lastUsed()).toBeGreaterThan(Date.now() - 60_000));
+    }
   });
 
   it("reads by id or address, lists newest first with Resend's paging errors", async () => {
@@ -317,6 +385,146 @@ describe("POST /inboxes and the inbox object", () => {
     expect(refused.status).toBe(422);
     const unknown = await call(teamKey, "PATCH", `/inboxes/${created.id}/safety`, { hidden: true });
     expect(unknown.status).toBe(422);
+  });
+});
+
+describe("the shared domain's name review", () => {
+  const JUDGE_URL = "https://judge.example.test";
+  /** The judge's noul per question, or "down" for one that answers 500. */
+  let jev: Record<string, number> | "down" = {};
+  /** Each review's names, by field. */
+  const asked: Record<string, string>[] = [];
+  let judgedTeam: string;
+  let judgedKey: string;
+  let judged: ReturnType<typeof createApi>;
+
+  const review = (body: Record<string, unknown>) =>
+    call(judgedKey, "POST", "/inboxes", body, judged);
+  const unavailable = {
+    statusCode: 503,
+    name: "name_review_unavailable",
+    message:
+      "This name couldn't be reviewed right now: try again shortly, or leave username out for a random address",
+  };
+  const refusedAs = (field: string) => ({
+    statusCode: 422,
+    name: "validation_error",
+    message: `${field} can't be used on the shared domain: pick another`,
+  });
+
+  beforeAll(async () => {
+    judgedTeam = await createTeam(db, "judged-desk");
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, judgedTeam));
+    judgedKey = await key(judgedTeam);
+    // The review is built from ABUSE_JUDGE* when the routes are registered.
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    vi.stubEnv("ABUSE_JUDGE_BASE_URL", JUDGE_URL);
+    vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
+    judged = makeApp();
+    vi.unstubAllEnvs();
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      expect(url).toBe(`${JUDGE_URL}/v1/systemone`);
+      const body = JSON.parse(String(init.body)) as {
+        state: Record<string, string>;
+        questions: Record<string, unknown>;
+      };
+      const fields = Object.keys(body.questions);
+      asked.push(Object.fromEntries(fields.map((field) => [field, body.state[field] ?? ""])));
+      if (jev === "down") return new Response("unavailable", { status: 500 });
+      const nouls = jev;
+      return Response.json({
+        answers: Object.fromEntries(
+          fields.map((field) => [field, { type: "noul", noul: nouls[field] ?? 0 }]),
+        ),
+      });
+    });
+  });
+  afterAll(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("never holds a request without a chosen name: an outage gives the team a random label", async () => {
+    jev = "down";
+    const res = await review({ name: "Signups" });
+    expect(res.status).toBe(201);
+    expect((await json(res)).email_address).toMatch(
+      /^inbox-[a-z0-9]{8}@team-[a-z0-9]{6}\.agents\.example\.test$/,
+    );
+    expect(asked).toEqual([{ label: "judged-desk" }]);
+  });
+
+  it("reviews a chosen username and from_name: 422 refused, 503 with retry-after while down", async () => {
+    jev = "down";
+    for (const body of [{ username: "leo" }, { from_name: "Leo" }]) {
+      const res = await review(body);
+      expect(res.status, JSON.stringify(body)).toBe(503);
+      expect(res.headers.get("retry-after")).toBe("60");
+      expect(await json(res)).toEqual(unavailable);
+    }
+    jev = { username: 0.9 };
+    expect(await json(await review({ username: "examplebank", from_name: "Leo" }))).toEqual(
+      refusedAs("username"),
+    );
+    jev = { from_name: 0.9 };
+    expect(await json(await review({ username: "leo", from_name: "Example Bank" }))).toEqual(
+      refusedAs("from_name"),
+    );
+    jev = {};
+    asked.length = 0;
+    const created = await review({ username: "leo", from_name: "Leo" });
+    expect(created.status).toBe(201);
+    expect(await json(created)).toMatchObject({ from_name: "Leo", expires_at: null });
+    expect(asked).toEqual([{ username: "leo", from_name: "Leo" }]);
+  });
+
+  it("reviews a new from_name on PATCH, on shared inboxes only", async () => {
+    jev = {};
+    const shared = await json<{ id: string }>(await review({}));
+    const patch = (id: string, body: Record<string, unknown>, token = judgedKey) =>
+      call(token, "PATCH", `/inboxes/${id}`, body, judged);
+    jev = "down";
+    const down = await patch(shared.id, { from_name: "Desk" });
+    expect(down.status).toBe(503);
+    expect(down.headers.get("retry-after")).toBe("60");
+    expect(await json(down)).toEqual(unavailable);
+    // The name is internal and never reviewed.
+    expect((await patch(shared.id, { name: "Front desk" })).status).toBe(200);
+    jev = { from_name: 0.8 };
+    expect(await json(await patch(shared.id, { from_name: "Example Bank" }))).toEqual(
+      refusedAs("from_name"),
+    );
+    jev = {};
+    expect(
+      await json(await patch(shared.id, { from_name: "Desk", expires_in: null })),
+    ).toMatchObject({ from_name: "Desk", expires_at: null });
+    jev = "down";
+    const own = await inbox(teamKey, { email_address: "reviewless@in.acme.test" });
+    expect((await patch(own.id, { from_name: "Desk" }, teamKey)).status).toBe(200);
+  });
+
+  it("stops reviewing for the day once the team's refusals reach 20: 429 until tomorrow", async () => {
+    const c = schema.usageCounters;
+    await db
+      .insert(c)
+      .values({ teamId: judgedTeam, day: utcDay(), sharedNameRefusals: 20 })
+      .onConflictDoUpdate({ target: [c.teamId, c.day], set: { sharedNameRefusals: 20 } });
+    jev = {};
+    asked.length = 0;
+    const shared = await json<{ id: string }>(await review({}));
+    for (const res of [
+      await review({ username: "desk" }),
+      await call(judgedKey, "PATCH", `/inboxes/${shared.id}`, { from_name: "Desk" }, judged),
+    ]) {
+      expect(res.status).toBe(429);
+      expect(await json(res)).toEqual({
+        statusCode: 429,
+        name: "rate_limit_exceeded",
+        message:
+          "Too many names were refused today: try again tomorrow, or leave username out for a random address",
+      });
+      expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
+    }
+    expect(asked).toEqual([]);
   });
 });
 
@@ -751,5 +959,21 @@ describe("openapi", () => {
         "/inboxes/{inbox_id}/codes/latest",
       ]),
     );
+  });
+
+  it("documents username and the name review's 429 and 503 on create and update", async () => {
+    const doc = await json<{
+      paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
+      components: { schemas: Record<string, { properties: Record<string, unknown> }> };
+    }>(await app.request("/openapi.json"));
+    expect(doc.components.schemas.CreateInboxRequest?.properties).toHaveProperty("username");
+    for (const [path, method] of [
+      ["/inboxes", "post"],
+      ["/inboxes/{inbox_id}", "patch"],
+    ] as const) {
+      expect(Object.keys(doc.paths[path]?.[method]?.responses ?? {})).toEqual(
+        expect.arrayContaining(["429", "503"]),
+      );
+    }
   });
 });

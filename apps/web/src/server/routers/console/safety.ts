@@ -191,7 +191,7 @@ async function flaggedEmails(db: Db, teamId: string, since: Date, holdLine: numb
 const WAITING_SHOWN_PER_TEAM = 20;
 
 /** Why an email waits, as the review list words it. */
-type WaitingWhy = "held" | "verdict" | "outage" | "destination" | "media";
+type WaitingWhy = "held" | "verdict" | "outage" | "destination" | "media" | "recipient";
 
 /** A queued row without a park reason waits out a verdict's short wait. */
 function waitingWhy(parkReason: string | null): WaitingWhy {
@@ -203,7 +203,9 @@ function waitingWhy(parkReason: string | null): WaitingWhy {
         ? "destination"
         : parkReason === "media"
           ? "media"
-          : "verdict";
+          : parkReason === "recipient"
+            ? "recipient"
+            : "verdict";
 }
 
 /**

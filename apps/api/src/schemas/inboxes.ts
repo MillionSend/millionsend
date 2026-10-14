@@ -42,12 +42,18 @@ const safetyFields = {
   extract_codes: z.boolean().describe("Expose extracted codes and sign-in links"),
   send_policy: z
     .enum(["reply_only", "allowlist", "open"])
-    .describe("What the inbox may send without a person's approval"),
+    .describe(
+      'What the inbox may send without a person\'s approval. On the shared domain "allowlist" answers 422, and so does "open" unless the instance lets the team start conversations there (paid plans only)',
+    ),
   require_approval: z.boolean().describe("Every send waits for a person"),
   private_codes: z
     .boolean()
     .describe("Received codes and sign-in links can't be sent on to anyone but owners"),
-  send_cap: z.number().int().nullable().describe("Unattended recipients per UTC day; null: no cap"),
+  send_cap: z
+    .number()
+    .int()
+    .nullable()
+    .describe("Unattended recipients per UTC day; null: no cap. 1-50 on the shared domain"),
   forward_to: z
     .array(z.string())
     .max(INBOX_FORWARD_TO_MAX)
@@ -79,7 +85,13 @@ export const createInboxRequestSchema = z
       .string()
       .optional()
       .describe(
-        "An address on one of your verified domains; it needs receiving on unless forwarding is true. MillionSend extension: omitted, the inbox gets a random address on the shared inbox domain (no DNS), which only replies in its threads and expires.",
+        "An address on one of your verified domains; it needs receiving on unless forwarding is true. MillionSend extension: omitted, the inbox gets an address on the shared inbox domain (no DNS), named by username or random.",
+      ),
+    username: z
+      .string()
+      .optional()
+      .describe(
+        "MillionSend extension: with email_address omitted, the part before the @ of the shared-domain address, trimmed and lowercased: 1-64 letters, digits, dots, hyphens and underscores, starting and ending with a letter or digit, never cut short. Reserved names (postmaster, abuse, admin, security, support, noreply, no-reply, billing, hostmaster, webmaster, mailer-daemon, root, compared without dots, hyphens and underscores), the fwd- prefix and brand look-alikes answer 422, and one already in use 409. Where the instance reviews names, a chosen one is reviewed first: 503 with retry-after while that review is unavailable. Omitted: a random one.",
       ),
     name: z
       .string()
@@ -88,7 +100,9 @@ export const createInboxRequestSchema = z
     from_name: z
       .string()
       .optional()
-      .describe('The name recipients see, a plain name (not "Name <email>"); "" leaves it unset'),
+      .describe(
+        'The name recipients see, a plain name (not "Name <email>"); "" leaves it unset. On the shared domain it may not imitate a brand, and it is reviewed like username.',
+      ),
     forwarding: z
       .boolean()
       .optional()
@@ -105,7 +119,7 @@ export const createInboxRequestSchema = z
       .nullable()
       .optional()
       .describe(
-        'MillionSend extension: lifetime like "1h" or "7d"; null never expires. Shared addresses default to 24h, at most 30d, and always expire.',
+        'MillionSend extension: a lifetime counted from now, "1h" to "365d"; omitted or null, the inbox never expires. A shared-domain inbox left unused for 90 days (no mail in or out, no API calls on it) is deleted either way.',
       ),
     safety: inboxSafetyPatchBodySchema
       .optional()
@@ -116,12 +130,19 @@ export const createInboxRequestSchema = z
 export const updateInboxRequestSchema = z
   .object({
     name: z.string().optional(),
-    from_name: z.string().optional().describe('"" removes it'),
+    from_name: z
+      .string()
+      .optional()
+      .describe(
+        '"" removes it. On the shared domain a new one may not imitate a brand, and it is reviewed first where the instance reviews names (503 with retry-after while that review is unavailable).',
+      ),
     expires_in: z
       .string()
       .nullable()
       .optional()
-      .describe('MillionSend extension: a new lifetime from now, like "24h"; null never expires'),
+      .describe(
+        'MillionSend extension: a new lifetime counted from now, "1h" to "365d"; null never expires',
+      ),
   })
   .openapi("UpdateInboxRequest");
 

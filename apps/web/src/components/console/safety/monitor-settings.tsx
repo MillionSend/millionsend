@@ -38,6 +38,10 @@ const GROUPS = [
     key: "warmup",
     fields: ["warmupEnabled", "warmupCapFirstDay", "warmupCapFirstWeek", "warmupCapFirstMonth"],
   },
+  {
+    key: "sharedInbox",
+    fields: ["sharedInboxSend", "sharedInboxOpen", "sharedInboxTenants", "sharedInboxTeamDailyCap"],
+  },
 ] as const;
 
 type Draft = string | boolean | null;

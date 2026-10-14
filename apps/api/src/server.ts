@@ -17,6 +17,7 @@ import {
   deriveUnsubscribeKey,
   getInstanceSettings,
   hashRecipient,
+  monitorSettingsReader,
   pacingHorizonDays,
   scanWithClamd,
 } from "@millionsend/core";
@@ -112,6 +113,7 @@ const app = createApi({
     : {}),
   inboxKeys: deriveInboxKeys(masterKey),
   sharedInboxDomain: sharedInboxDomain(),
+  monitorSettings: monitorSettingsReader(db, env as unknown as Record<string, unknown>),
   ...(clamav
     ? {
         scanVirus: (raw: Buffer) =>

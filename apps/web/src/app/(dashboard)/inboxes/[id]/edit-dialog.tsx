@@ -9,7 +9,7 @@ import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { toast } from "@/components/toast";
 import { useTRPC } from "@/lib/trpc";
-import type { InboxDetail } from "../parts";
+import { type InboxDetail, nameReviewError } from "../parts";
 
 const KEEP = "keep";
 const EXPIRY = [KEEP, "never", "1h", "24h", "7d", "30d"] as const;
@@ -108,18 +108,15 @@ export function EditDialog({
             width="100%"
             disabled={save.isPending}
             ariaLabel={t("expires.label")}
-            // A shared address never keeps forever.
-            options={EXPIRY.filter((value) => !(inbox.shared && value === "never")).map(
-              (value) => ({
-                value,
-                label: value === KEEP ? t("edit.expiresKeep") : t(`expires.${value}`),
-              }),
-            )}
+            options={EXPIRY.map((value) => ({
+              value,
+              label: value === KEEP ? t("edit.expiresKeep") : t(`expires.${value}`),
+            }))}
           />
         </div>
         {save.error ? (
           <div className="ms-field-error" style={{ margin: 0 }}>
-            {save.error.message}
+            {nameReviewError(t, save.error) ?? save.error.message}
           </div>
         ) : null}
         <ModalFooter>

@@ -1980,14 +1980,15 @@ function buildServer(
       {
         title: "Create inbox",
         description:
-          "Create an agent inbox: an address on one of the team's verified domains with receiving on or, with email_address omitted, a random address on the instance's shared inbox domain, which needs no DNS, only replies inside its threads and expires (24h by default, at most 30d). It screens incoming mail and holds risky sends as drafts for a person; human inboxes (team mailboxes) are made in the dashboard. accept_from decides who may write in; mail that fails it is quarantined. Every other safety rule keeps the agent default and is changed by a person in the dashboard. Returns the inbox.",
+          "Create an agent inbox: an address on one of the team's verified domains with receiving on or, with email_address omitted, an address on the instance's shared inbox domain, which needs no DNS: username picks the part before the @, or it is random. On the shared domain a chosen username or from_name is reviewed first, and while that review is unavailable the answer is 503 with retry-after; without either the answer is never 503. The inbox never expires unless expires_in says so; a shared one unused for 90 days is deleted. It screens incoming mail and holds risky sends as drafts for a person; whether a shared address may start conversations depends on the team's plan and the instance. Human inboxes (team mailboxes) are made in the dashboard. accept_from decides who may write in; mail that fails it is quarantined. Every other safety rule keeps the agent default and is changed by a person in the dashboard. Returns the inbox.",
         inputSchema: z.object({
           email_address: z
             .string()
             .optional()
             .describe(
-              "An address on one of the team's verified domains with receiving on; omitted, a random address on the shared inbox domain",
+              "An address on one of the team's verified domains with receiving on; omitted, an address on the shared inbox domain (see username)",
             ),
+          username: createInboxRequestSchema.shape.username,
           name: createInboxRequestSchema.shape.name,
           from_name: createInboxRequestSchema.shape.from_name,
           kind: z.literal("agent").optional().describe("Always agent"),
@@ -2011,7 +2012,7 @@ function buildServer(
       {
         title: "Update inbox",
         description:
-          'Rename an inbox, change the name recipients see (from_name), or give it a new lifetime counted from now (expires_in, like "24h" or "7d"; null never expires, which a shared-domain address refuses). An inbox is deleted when it expires, so making it expire sooner takes the owner or admin role. Returns the inbox.',
+          'Rename an inbox, change the name recipients see (from_name), or give it a new lifetime counted from now (expires_in, like "24h" or "7d"; null never expires). On the shared domain a new from_name is reviewed first (503 with retry-after while that review is unavailable). An inbox is deleted when it expires, so making it expire sooner takes the owner or admin role. Returns the inbox.',
         inputSchema: updateInboxRequestSchema.extend({ inbox_id: inboxId }),
         destructive: true,
         idempotent: true,
