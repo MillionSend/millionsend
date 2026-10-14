@@ -44,6 +44,8 @@ import { hasForwardMarker } from "./quotes.js";
 import {
   chargeReceived,
   findReceivingDomains,
+  findRoleMailTeam,
+  isSharedRoleAddress,
   type ReceivingDomain,
   receivingRule,
 } from "./rcpt.js";
@@ -82,6 +84,8 @@ export interface IngestDeps {
     | undefined;
   /** This instance's MX host: a HELO naming it is forged. */
   mxHost?: string | undefined;
+  /** SHARED_INBOX_DOMAIN, whose postmaster@ and abuse@ go to the System team. */
+  sharedInboxDomain?: string | undefined;
 }
 
 /** A team's copy of the message: stored now, or already stored by an earlier attempt. */
@@ -184,19 +188,24 @@ export async function ingestReceivedEmail(
     const parsed = routableAddress(recipient);
     if (parsed) recipients.set(parsed.address, parsed.domain);
   }
+  const shared = deps.sharedInboxDomain;
+  const roles = new Set([...recipients.keys()].filter((a) => isSharedRoleAddress(a, shared)));
+  const roleTeam = shared && roles.size > 0 ? await findRoleMailTeam(deps.db, shared) : null;
   const domains = await findReceivingDomains(deps.db, [...new Set(recipients.values())]);
   const byName = new Map(domains.map((d) => [d.name, d]));
   const targets = await findInboxesForRecipients(deps.db, domains, [...recipients.keys()], now);
   const teams = new Map<string, TeamDelivery>();
   let suspended = false;
   for (const [address, name] of recipients) {
-    const domain = byName.get(name);
+    const role = roles.has(address);
+    const domain = role ? roleTeam : byName.get(name);
     if (!domain) continue;
     if (domain.suspendedAt) {
       suspended = true;
       continue;
     }
-    const inbox = targets.get(address);
+    // An inbox at a role address belongs to the subdomain's team, never the System team's row.
+    const inbox = role ? undefined : targets.get(address);
     // A stale RCPT answer: the address has no inbox and its domain no catch-all.
     if (!inbox && !domain.catchAll) continue;
     const delivery = teams.get(domain.teamId) ?? {

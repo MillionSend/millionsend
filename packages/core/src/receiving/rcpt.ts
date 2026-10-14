@@ -1,8 +1,10 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { firstRow, isUniqueViolation } from "../driver-result.js";
 import { INBOX_FLOOD_PER_HOUR } from "../inboxes/limits.js";
+import { SHARED_ROLE_LOCAL_PARTS } from "../inboxes/shared-domain.js";
+import { isDomainOrSubdomain } from "../org-domain.js";
 import { OVERAGE_HARD_CAP, type QuotaTeamRow, type TeamQuota, teamQuota } from "../plans.js";
 import { dailyCeiling, reserveQuota } from "../quota.js";
 import { routableAddress } from "../sender-address.js";
@@ -142,7 +144,10 @@ export async function chargeReceived(
 
 /** A receiving-enabled domain with what routing and the pricing rule need of its team. */
 export interface ReceivingDomain extends QuotaTeamRow {
-  /** Null for a team's subdomain of the shared inbox domain, which is no domains row. */
+  /**
+   * Null for a team's subdomain of the shared inbox domain and for the shared
+   * domain's role mail, which are no domains rows.
+   */
   domainId: string | null;
   sharedDomainId: string | null;
   name: string;
@@ -158,6 +163,7 @@ export interface ReceivingDomain extends QuotaTeamRow {
  * The receiving-enabled domains among `names` (already ASCII, lowercase),
  * and the teams' shared-domain subdomains among them; at most one row per
  * name. A shared subdomain is never a catch-all: only its inboxes receive.
+ * A deleted team's label (team_id null) matches nothing.
  */
 export async function findReceivingDomains(
   db: Db,
@@ -187,7 +193,7 @@ export async function findReceivingDomains(
         domainId: sql<string | null>`null`,
         sharedDomainId: s.id,
         name: s.name,
-        teamId: s.teamId,
+        teamId: schema.teams.id,
         suspendedAt: schema.teams.suspendedAt,
         catchAll: sql<boolean>`false`,
         hasInboxes: sql<boolean>`true`,
@@ -270,23 +276,86 @@ export async function inboxFlooded(
 }
 
 /**
+ * Whether `address` (routableAddress form) is a SHARED_ROLE_LOCAL_PARTS
+ * address, any case but never by its +tag, at the shared inbox domain or any
+ * name under it.
+ */
+export function isSharedRoleAddress(
+  address: string,
+  sharedDomain: string | null | undefined,
+): boolean {
+  const at = address.lastIndexOf("@");
+  return (
+    !!sharedDomain &&
+    (SHARED_ROLE_LOCAL_PARTS as readonly string[]).includes(address.slice(0, at).toLowerCase()) &&
+    isDomainOrSubdomain(address.slice(at + 1), sharedDomain)
+  );
+}
+
+/**
+ * Where the shared domain's role mail lands: the oldest System-plan team, as
+ * a catch-all with no domains row. Null on an instance without one.
+ */
+export async function findRoleMailTeam(
+  db: Db,
+  sharedDomain: string,
+): Promise<ReceivingDomain | null> {
+  // ponytail: never capped (the System plan's receiving rule is none), so only
+  // the MX's per-IP limits bound a flood of role mail; an hourly cap like
+  // INBOX_FLOOD_PER_HOUR is the upgrade if that ever bites.
+  const t = schema.teams;
+  const [team] = await db
+    .select({ teamId: t.id, suspendedAt: t.suspendedAt, ...QUOTA_COLUMNS })
+    .from(t)
+    .where(eq(t.plan, "system"))
+    .orderBy(asc(t.createdAt), asc(t.id))
+    .limit(1);
+  return team
+    ? {
+        ...team,
+        domainId: null,
+        sharedDomainId: null,
+        name: sharedDomain,
+        catchAll: true,
+        hasInboxes: false,
+      }
+    : null;
+}
+
+/**
  * The MX's question per RCPT TO: recipient → domain (lowercase, IDNA-encoded)
  * → a receiving-enabled domain or a shared subdomain → its team, the
  * address's live inbox (exact, then without its +tag) or the domain's
  * catch-all, then the inbox's hourly flood limit and the team's receiving
- * allowance. Only the envelope decides; nothing here reads a header. An
+ * allowance. The shared domain's role mail goes to the System team before
+ * any of that. Only the envelope decides; nothing here reads a header. An
  * answer that depends on the address is never cached by the MX.
  */
 export async function decideRecipient(
   db: Db,
-  params: { recipient: string; isCloud: boolean; now?: Date },
+  params: {
+    recipient: string;
+    isCloud: boolean;
+    sharedInboxDomain?: string | null | undefined;
+    now?: Date;
+  },
 ): Promise<RcptResponse> {
   const now = params.now ?? new Date();
   const recipient = routableAddress(params.recipient);
   if (!recipient) return UNKNOWN_RECIPIENT;
-  const [domain] = await findReceivingDomains(db, [recipient.domain]);
-  if (!domain) return UNKNOWN_RECIPIENT;
-  if (domain.suspendedAt) return SUSPENDED_RECIPIENT;
+  const shared = params.sharedInboxDomain;
+  // The MX caches answers per domain, and role mail makes every answer under
+  // the shared domain depend on the address: a cached refusal would shadow
+  // postmaster@ and abuse@.
+  const underShared = !!shared && isDomainOrSubdomain(recipient.domain, shared);
+  const uncached = (answer: RcptResponse): RcptResponse =>
+    underShared ? { ...answer, ttlSeconds: 0 } : answer;
+  const [domain] =
+    shared && isSharedRoleAddress(recipient.address, shared)
+      ? [await findRoleMailTeam(db, shared)]
+      : await findReceivingDomains(db, [recipient.domain]);
+  if (!domain) return underShared ? NO_SUCH_RECIPIENT : UNKNOWN_RECIPIENT;
+  if (domain.suspendedAt) return uncached(SUSPENDED_RECIPIENT);
   const perAddress = domain.hasInboxes || !domain.catchAll;
   if (perAddress) {
     const inbox = (await findInboxesForRecipients(db, [domain], [recipient.address], now)).get(
@@ -298,8 +367,8 @@ export async function decideRecipient(
     }
   }
   const rule = receivingRule(domain, params.isCloud, now);
-  if (!(await hasReceivingRoom(db, domain.teamId, rule, now))) return OVER_QUOTA;
-  return { accept: true, ttlSeconds: perAddress ? 0 : 30 };
+  if (!(await hasReceivingRoom(db, domain.teamId, rule, now))) return uncached(OVER_QUOTA);
+  return { accept: true, ttlSeconds: perAddress || underShared ? 0 : 30 };
 }
 
 export type DomainReceivingResult =

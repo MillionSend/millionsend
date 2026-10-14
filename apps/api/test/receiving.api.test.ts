@@ -245,6 +245,17 @@ describe("internal MX endpoints", () => {
     expect(deliveries.map((d) => d.eventType)).toEqual(["email.received"]);
   });
 
+  it("routes the shared domain's role mail to the System team, at RCPT and at delivery", async () => {
+    const shared = makeApp({ sharedInboxDomain: "agents.example" });
+    const system = await createTeam(db, "recv-system");
+    await db.update(schema.teams).set({ plan: "system" }).where(eq(schema.teams.id, system));
+    const answer = await rcpt("postmaster@agents.example", `Bearer ${SECRET}`, shared);
+    expect(await json(answer)).toEqual({ accept: true, ttlSeconds: 0 });
+    const raw = await message("abuse@agents.example", "Report");
+    expect((await deliver(raw, ["abuse@agents.example"], {}, shared)).status).toBe(200);
+    expect((await rowsOf(system)).map((r) => r.receivedFor)).toEqual([["abuse@agents.example"]]);
+  });
+
   it("relays the app's refusals: 422 permanent, 429 temporary, 400 for a bad envelope", async () => {
     const raw = await message("x@nowhere.test", "Nobody");
     const nobody = await deliver(raw, ["x@nowhere.test"]);

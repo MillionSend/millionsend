@@ -697,7 +697,11 @@ export function registerMxIngestRoutes(
     }
     try {
       return c.json(
-        await decideRecipient(deps.db, { recipient: parsed.data.recipient, isCloud: deps.isCloud }),
+        await decideRecipient(deps.db, {
+          recipient: parsed.data.recipient,
+          isCloud: deps.isCloud,
+          sharedInboxDomain: deps.sharedInboxDomain,
+        }),
         200,
       );
     } catch (err) {
@@ -741,6 +745,7 @@ export function registerMxIngestRoutes(
             enqueueScreening: deps.enqueueScreening,
             enqueueInboxForward: deps.enqueueInboxForward,
             mxHost: receiving.mxHost,
+            sharedInboxDomain: deps.sharedInboxDomain,
           },
           { raw, envelope },
         );
