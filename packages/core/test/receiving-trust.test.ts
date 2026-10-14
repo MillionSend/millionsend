@@ -325,14 +325,15 @@ describe("decideScreening", () => {
       });
       expect([tier, accept, d.action, d.reason]).toEqual([tier, accept, action, reason]);
     }
-    // A listed address that didn't prove itself is held as unverified, not as unlisted.
-    expect(
-      decide({
-        tier: "unauthenticated",
-        listed: true,
-        safety: agent({ accept_from: "allowlist" }),
-      }).reason,
-    ).toBe("unauthenticated_sender");
+    // A listed address that didn't prove itself is held for its own reason, never as unlisted.
+    for (const [tier, reason] of [
+      ["unauthenticated", "unauthenticated_sender"],
+      ["failed", "failed_auth"],
+    ] as const) {
+      expect(
+        decide({ tier, listed: true, safety: agent({ accept_from: "allowlist" }) }).reason,
+      ).toBe(reason);
+    }
   });
 
   it("quarantines a virus on every kind and tier (S18)", () => {

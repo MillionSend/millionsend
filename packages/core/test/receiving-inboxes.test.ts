@@ -411,6 +411,43 @@ describe("ingest into inboxes", () => {
     ).toEqual({ ok: false, reason: "not_found" });
   });
 
+  it("holds a member login or allowlisted address that didn't prove itself as unverified, not unlisted", async () => {
+    await addInbox(acme, "listed@in.acme.test", acmeDomain, {
+      safety: { accept_from: "allowlist", allowlist: ["*@partner.example"] },
+    });
+    const reasonFor = async (from: string) => {
+      const id = await ingestOne(
+        message({ from, to: "listed@in.acme.test" }),
+        ["listed@in.acme.test"],
+        {},
+        { auth: NONE, mailFrom: from },
+      );
+      return (await memberships(id))[0]?.quarantineReason;
+    };
+    expect(await reasonFor("ana@partner.example")).toBe("unauthenticated_sender");
+    expect(await reasonFor("owner@acme.test")).toBe("unauthenticated_sender");
+    expect(await reasonFor("stranger@sender.example")).toBe("not_allowlisted");
+  });
+
+  it("files mail from a sender that failed authentication under Spam in a people inbox", async () => {
+    await addInbox(acme, "people@in.acme.test", acmeDomain, { kind: "human" });
+    // SPF passed for another domain, so the spam score stays gray: only the failed tier files it.
+    const id = await ingestOne(
+      message({ to: "people@in.acme.test" }),
+      ["people@in.acme.test"],
+      {},
+      { auth: { ...NONE, spf: "pass", dmarc: "fail" }, mailFrom: "bounces@bulk.example" },
+    );
+    expect((await rowOf(id)).spamVerdict).toBe("gray");
+    const [m] = await memberships(id);
+    expect(m).toMatchObject({ senderTrust: "failed", verdict: "suspicious", deliveredAt: NOW });
+    const [thread] = await db
+      .select({ folder: schema.inboxThreads.folder })
+      .from(schema.inboxThreads)
+      .where(eq(schema.inboxThreads.id, m?.threadId as string));
+    expect(thread?.folder).toBe("spam");
+  });
+
   it("shows nothing an inbox holds through a catch-all copy or a thread subject (S4)", async () => {
     const inbox = await addInbox(acme, "guarded@in.acme.test", acmeDomain, {
       safety: { accept_from: "allowlist", allowlist: ["*@partner.example"] },
