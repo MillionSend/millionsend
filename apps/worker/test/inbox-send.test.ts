@@ -240,9 +240,11 @@ describe("shared-domain mail, the team's SES tenant and the operator's switch", 
       .set({ sesTenantRegion: "us-east-1", sesTenantConfigSet: "default-set" })
       .where(eq(schema.sharedInboxDomains.teamId, team.teamId));
     const attempts: (string | undefined)[] = [];
+    // The shapes live SES sends answered on 2026-10-14.
     const refusal = {
-      name: "BadRequestException",
-      message: "Identity is not associated with the tenant",
+      name: "AccessDeniedException",
+      message:
+        "Tenant not associated with resources [arn:aws:ses:us-east-1:111122223333:identity/agents.example.test].",
     };
     const refusing: SesSender = {
       async sendRaw(params) {
@@ -264,8 +266,8 @@ describe("shared-domain mail, the team's SES tenant and the operator's switch", 
     expect(attempts).toEqual([team.teamId, undefined]);
     expect(await marker(team.teamId)).toBeNull();
 
-    // A paused or disabled tenant is never routed around: the claim is
-    // released for the job's retry, and nothing went out without the tenant.
+    // A paused or disabled tenant is never routed around. Paused: the claim
+    // is released for the job's retry, and nothing went out without the tenant.
     attempts.length = 0;
     refusal.name = "SendingPausedException";
     refusal.message = "Sending is paused for this tenant";
@@ -274,6 +276,15 @@ describe("shared-domain mail, the team's SES tenant and the operator's switch", 
     expect(attempts).toEqual([team.teamId]);
     const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, paused));
     expect(row).toMatchObject({ latestStatus: "queued", sentAt: null });
+
+    // Disabled: SES rejects the message outright, and it is never resent without the tenant.
+    attempts.length = 0;
+    refusal.name = "MessageRejected";
+    refusal.message =
+      "Sending disabled for <arn:aws:ses:us-east-1:111122223333:tenant/t/tn-0>. For more information, please check the resource configuration and status.";
+    const disabled = await queue();
+    expect(await sendEmail(db, deps, { emailId: disabled })).toBe("failed");
+    expect(attempts).toEqual([team.teamId]);
   });
 
   it("holds queued shared-domain mail while the operator has shared sending off", async () => {

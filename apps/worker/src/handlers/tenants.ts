@@ -139,14 +139,17 @@ export async function clearSharedTenant(db: Db, teamId: string): Promise<void> {
 
 /**
  * SES refused a tenant send because a resource it names is not associated
- * with the tenant. Kept narrow: a paused or disabled tenant must never match,
- * or its mail would be resent without one.
+ * with the tenant. Live sends on 2026-10-14 answered AccessDeniedException
+ * "Tenant not associated with resources [<arn>, ...]"; a DISABLED tenant
+ * answered MessageRejected "Sending disabled for <arn>". Kept to that exact
+ * refusal: a paused or disabled tenant must never match, or its mail would be
+ * resent without one.
  */
 export function isTenantNotAssociated(error: unknown): boolean {
   const { name, message } = (error ?? {}) as { name?: unknown; message?: unknown };
   return (
-    (name === "BadRequestException" || name === "NotFoundException") &&
-    /not associated|association/i.test(String(message ?? ""))
+    name === "AccessDeniedException" &&
+    /^Tenant not associated with resources\b/.test(String(message ?? ""))
   );
 }
 
