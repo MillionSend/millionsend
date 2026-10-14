@@ -48,7 +48,7 @@ vi.mock("@/lib/trpc", () => {
 const { SafetyForm } = await import("@/app/(dashboard)/inboxes/[id]/safety-tab");
 const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
-const { approvalReasonWords, QuarantinedBadge, TrustBadge } = await import(
+const { approvalReasonWords, QuarantinedBadge, replyAllAdds, TrustBadge } = await import(
   "@/app/(dashboard)/inboxes/parts"
 );
 const { navItemsFor, Sidebar } = await import("@/components/sidebar");
@@ -377,6 +377,40 @@ describe("inbox screens", () => {
     expect(people).toContain('aria-label="Unread"');
     expect(people).not.toContain("Suspicious");
     expect(render(false, true)).toContain("To Rita Recipient");
+  });
+
+  it("offers Reply all only when it adds someone, as the server copies them", () => {
+    const inbox = {
+      email_address: "support@acme.example",
+      receiving_address: "support@mx.acme.example",
+    };
+    const inbound = {
+      direction: "inbound" as const,
+      from: "Ana Souza <ana@example.com>",
+      reply_to: [],
+      to: ["support@acme.example", "Bruno Lima <bruno@example.com>"],
+      cc: ["CARLA@example.com", "ana@example.com", "support@mx.acme.example"],
+    };
+    expect(replyAllAdds(inbound, inbox)).toEqual(["bruno@example.com", "CARLA@example.com"]);
+    // A Reply-To takes the reply, and reply all copies only To and Cc, never the sender.
+    expect(
+      replyAllAdds(
+        { ...inbound, reply_to: ["help@example.com"], to: ["support@acme.example"], cc: [] },
+        inbox,
+      ),
+    ).toEqual([]);
+    // The inbox's own send: its To gets the reply, its Cc the reply all.
+    const sent = {
+      direction: "outbound" as const,
+      from: "support@acme.example",
+      reply_to: [],
+      to: ["ana@example.com", "bruno@example.com"],
+      cc: [],
+    };
+    expect(replyAllAdds(sent, inbox)).toEqual([]);
+    expect(
+      replyAllAdds({ ...sent, cc: ["carla@example.com", "support@acme.example"] }, inbox),
+    ).toEqual(["carla@example.com"]);
   });
 
   it("shows members the rules read-only", () => {

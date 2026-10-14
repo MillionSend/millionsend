@@ -59,9 +59,12 @@ function Sep() {
 export function EditorToolbar({
   editor,
   fields,
+  compact = false,
 }: {
   editor: TiptapEditor | null;
   fields: PickerField[];
+  /** A message body's toolbar: no headings, alignment or variables. */
+  compact?: boolean;
 }) {
   const t = useTranslations("block-editor");
   const off = !editor;
@@ -114,24 +117,28 @@ export function EditorToolbar({
 
       <Sep />
 
-      <ToolButton
-        title={t("toolbar.h1")}
-        disabled={off || !(editor && can(editor).toggleHeading({ level: 1 }))}
-        active={!!editor?.isActive("heading", { level: 1 })}
-        onClick={() => editor && chain(editor).focus().toggleHeading({ level: 1 }).run()}
-      >
-        <H1Icon />
-      </ToolButton>
-      <ToolButton
-        title={t("toolbar.h2")}
-        disabled={off || !(editor && can(editor).toggleHeading({ level: 2 }))}
-        active={!!editor?.isActive("heading", { level: 2 })}
-        onClick={() => editor && chain(editor).focus().toggleHeading({ level: 2 }).run()}
-      >
-        <H2Icon />
-      </ToolButton>
+      {compact ? null : (
+        <>
+          <ToolButton
+            title={t("toolbar.h1")}
+            disabled={off || !(editor && can(editor).toggleHeading({ level: 1 }))}
+            active={!!editor?.isActive("heading", { level: 1 })}
+            onClick={() => editor && chain(editor).focus().toggleHeading({ level: 1 }).run()}
+          >
+            <H1Icon />
+          </ToolButton>
+          <ToolButton
+            title={t("toolbar.h2")}
+            disabled={off || !(editor && can(editor).toggleHeading({ level: 2 }))}
+            active={!!editor?.isActive("heading", { level: 2 })}
+            onClick={() => editor && chain(editor).focus().toggleHeading({ level: 2 }).run()}
+          >
+            <H2Icon />
+          </ToolButton>
 
-      <Sep />
+          <Sep />
+        </>
+      )}
 
       <ToolButton
         title={t("toolbar.bulletList")}
@@ -152,32 +159,36 @@ export function EditorToolbar({
 
       <Sep />
 
-      <ToolButton
-        title={t("toolbar.alignLeft")}
-        disabled={off}
-        active={!!editor?.isActive({ textAlign: "left" })}
-        onClick={() => editor && chain(editor).focus().setTextAlign("left").run()}
-      >
-        <AlignLeftIcon />
-      </ToolButton>
-      <ToolButton
-        title={t("toolbar.alignCenter")}
-        disabled={off}
-        active={!!editor?.isActive({ textAlign: "center" })}
-        onClick={() => editor && chain(editor).focus().setTextAlign("center").run()}
-      >
-        <AlignCenterIcon />
-      </ToolButton>
-      <ToolButton
-        title={t("toolbar.alignRight")}
-        disabled={off}
-        active={!!editor?.isActive({ textAlign: "right" })}
-        onClick={() => editor && chain(editor).focus().setTextAlign("right").run()}
-      >
-        <AlignRightIcon />
-      </ToolButton>
+      {compact ? null : (
+        <>
+          <ToolButton
+            title={t("toolbar.alignLeft")}
+            disabled={off}
+            active={!!editor?.isActive({ textAlign: "left" })}
+            onClick={() => editor && chain(editor).focus().setTextAlign("left").run()}
+          >
+            <AlignLeftIcon />
+          </ToolButton>
+          <ToolButton
+            title={t("toolbar.alignCenter")}
+            disabled={off}
+            active={!!editor?.isActive({ textAlign: "center" })}
+            onClick={() => editor && chain(editor).focus().setTextAlign("center").run()}
+          >
+            <AlignCenterIcon />
+          </ToolButton>
+          <ToolButton
+            title={t("toolbar.alignRight")}
+            disabled={off}
+            active={!!editor?.isActive({ textAlign: "right" })}
+            onClick={() => editor && chain(editor).focus().setTextAlign("right").run()}
+          >
+            <AlignRightIcon />
+          </ToolButton>
 
-      <Sep />
+          <Sep />
+        </>
+      )}
 
       <LinkControl editor={editor} />
       <ToolButton
@@ -188,9 +199,12 @@ export function EditorToolbar({
         <ClearFormatIcon />
       </ToolButton>
 
-      <span className="ms-maily-toolbar-spacer" />
-
-      <VariablePicker fields={fields} onInsert={insertVariable} />
+      {compact ? null : (
+        <>
+          <span className="ms-maily-toolbar-spacer" />
+          <VariablePicker fields={fields} onInsert={insertVariable} />
+        </>
+      )}
     </div>
   );
 }

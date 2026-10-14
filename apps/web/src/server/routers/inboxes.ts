@@ -744,6 +744,7 @@ export const inboxesRouter = router({
         cc: recipients.optional(),
         bcc: recipients.optional(),
         subject: z.string().trim().min(1).max(2000),
+        html: z.string().max(1_000_000).optional(),
         text: z.string().min(1).max(1_000_000),
       }),
     )
@@ -759,6 +760,7 @@ export const inboxesRouter = router({
             cc: input.cc,
             bcc: input.bcc,
             subject: input.subject,
+            html: input.html,
             text: input.text,
           },
         }),
@@ -770,6 +772,7 @@ export const inboxesRouter = router({
       z.object({
         ...threadRef,
         emailId: z.uuid(),
+        html: z.string().max(1_000_000).optional(),
         text: z.string().min(1).max(1_000_000),
         replyAll: z.boolean().optional(),
       }),
@@ -783,7 +786,7 @@ export const inboxesRouter = router({
           inboxId: input.inboxId,
           threadId: input.threadId,
           emailId: input.emailId,
-          body: { text: input.text, reply_all: input.replyAll },
+          body: { html: input.html, text: input.text, reply_all: input.replyAll },
         }),
       ),
     ),

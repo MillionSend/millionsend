@@ -1,11 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DraftBanner } from "@/components/draft-banner";
+import { MailyEditor } from "@/components/maily-editor/lazy";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -17,13 +17,6 @@ import { useLocalDraft } from "@/lib/use-local-draft";
 import { confirmUnsavedNavigation, useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ContentPreview } from "../broadcasts/parts";
 import { ConvertBlocksDialog, HtmlAuthoredBanner, HtmlCodeMode } from "./html-mode";
-
-// Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
-// must not render on the server. The ghost holds the field's height meanwhile.
-const MailyEditor = dynamic(() => import("@/components/maily-editor").then((m) => m.default), {
-  ssr: false,
-  loading: () => <Skeleton width="100%" height={340} radius="var(--ms-r-input)" />,
-});
 
 /** Everything a crash would lose — mirrored into the local draft. */
 interface TemplateDraft {

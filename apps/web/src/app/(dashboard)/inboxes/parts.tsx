@@ -5,6 +5,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslations } from "next-intl";
 import type { BadgeTone } from "@/components/status-badge";
 import { Tooltip } from "@/components/tooltip";
+import { addrSpec } from "@/lib/format";
 import type { AppRouter } from "@/server/routers";
 
 type Outputs = inferRouterOutputs<AppRouter>["inboxes"];
@@ -82,6 +83,42 @@ export function approvalReasonWords(
       return t.has(`qr.${key}`) ? t(`qr.${key}`) : reason;
     })
     .join(" · ");
+}
+
+/** A thread message's own page: received mail under Inboxes, a send in the Emails log. */
+export function messageHref(message: Pick<ThreadMessage, "id" | "direction">): string {
+  return message.direction === "inbound"
+    ? `/inboxes/received/${message.id}`
+    : `/emails/${message.id}`;
+}
+
+/**
+ * Whom "Reply all" adds to a plain reply, as core's replyRecipients copies
+ * them: the answered message's other recipients (its cc alone for a send of
+ * the inbox's), never the inbox itself or whom the reply already goes to.
+ */
+export function replyAllAdds(
+  message: Pick<ThreadMessage, "direction" | "from" | "to" | "cc" | "reply_to">,
+  inbox: Pick<InboxDetail, "email_address" | "receiving_address">,
+): string[] {
+  const inbound = message.direction === "inbound";
+  const replyTo = inbound
+    ? message.reply_to.length > 0
+      ? message.reply_to
+      : [message.from]
+    : message.to;
+  const copied = inbound ? [...message.to, ...message.cc] : message.cc;
+  const key = (mailbox: string) => addrSpec(mailbox).toLowerCase();
+  const own = inbox.receiving_address
+    ? [inbox.email_address, inbox.receiving_address]
+    : [inbox.email_address];
+  const seen = new Set([...own, ...replyTo].map(key));
+  return copied.flatMap((mailbox) => {
+    const address = key(mailbox);
+    if (seen.has(address)) return [];
+    seen.add(address);
+    return [addrSpec(mailbox)];
+  });
 }
 
 /** The inbox's kind as its tab names it. */

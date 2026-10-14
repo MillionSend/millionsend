@@ -19,7 +19,7 @@ interface GlyphProps {
   size: number;
 }
 
-function Svg({
+export function Svg({
   size,
   strokeWidth = 1.4,
   children,

@@ -299,6 +299,39 @@ describe("tiers", () => {
       message: "Daily cap reached",
     });
   });
+
+  it("replies with the editor's html beside the text the thread shows", async () => {
+    core.replyInThread.mockResolvedValue({
+      kind: "sent",
+      email: { email_id: "email-2" },
+      threadId,
+      inboxId,
+    });
+    const emailId = randomUUID();
+    const html = "<p>Thanks, <strong>Ana</strong>.</p>";
+    expect(
+      await caller(acme, "member").inboxes.reply({
+        inboxId,
+        threadId,
+        emailId,
+        html,
+        text: "Thanks, Ana.",
+        replyAll: true,
+      }),
+    ).toEqual({ kind: "sent", emailId: "email-2", threadId });
+    expect(core.replyInThread).toHaveBeenCalledWith(
+      db,
+      expect.anything(),
+      expect.objectContaining({
+        teamId: acme,
+        actor: user,
+        inboxId,
+        threadId,
+        emailId,
+        body: { html, text: "Thanks, Ana.", reply_all: true },
+      }),
+    );
+  });
 });
 
 describe("support view", () => {

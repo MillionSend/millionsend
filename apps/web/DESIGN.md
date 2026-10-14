@@ -49,8 +49,12 @@ by `motion` (≤500ms on `--ms-ease`, disabled under
 command palette and page action buttons may reuse these glyphs. Static
 button glyphs (`PlusGlyph`, `MenuGlyph`, `RefreshGlyph`) live in the same
 file; a list's refresh is a 30×30 `.ms-btn-icon` whose glyph turns into the
-spinner while a click's reload runs. Do not add other icon fonts or icon
-libraries. Logos in `public/logo/` are never redrawn.
+spinner while a click's reload runs. A thread's actions draw five static
+lucide glyphs from `icons/mail-icons.tsx` (folder-input, archive,
+octagon-alert, trash-2, tag) at 14px on the nav glyphs' exported `Svg` frame
+and stroke; the Inbox folder reuses the nav's inbox glyph. A new drawn icon
+goes on that `Svg`, never on a private copy of it. Do not add other icon fonts
+or icon libraries. Logos in `public/logo/` are never redrawn.
 
 ## Fonts
 
@@ -188,7 +192,19 @@ section of `components.css`; every rule above it holds at every width.
   bg, 1px `--ms-line-strong`, 14px radius, 6px padding; 13px item rows at
   7px 12px that raise to `--ms-panel-raised` (8px radius); `.ms-menu-sep`
   hairline separators. `<PopoverMenu>` in `src/components/popover-menu.tsx`
-  is the "…" overflow menu.
+  is the "…" overflow menu; with `label` its trigger is a secondary button
+  (glyph, label, a chevron that flips while open) for an action menu in a row
+  of buttons, like a thread's Mover, and an item's `icon` sits muted before
+  its label. Actions go in a menu, values in a `Select`. A checkable list that
+  stays open between picks (a thread's Etiquetas) is a `GroupedMultiSelect`
+  with `button`; its `onCreate` ends the list with a "Criar …" row when the
+  search names no option.
+- **Message bodies** (a thread's reply, Enviar e-mail) use the broadcasts
+  editor in compact mode (`MessageEditor`, `components/maily-editor/lazy.tsx`):
+  bold, italic, underline, strike, lists, link and clear formatting; no
+  headings, alignment, variables, "/" menu or selection bubble. The body
+  starts at 120px and scrolls past 45vh, ⌘↵ sends, and the send carries the
+  editor's html with an `htmlToText` text part.
 - **Empty and blocked states:** a page with nothing in it yet is the tiled
   `EmptyState`; an empty tab, folder or filtered list is a `StateCard` (no
   tile, at most one action), never a bare muted line. A disabled button says

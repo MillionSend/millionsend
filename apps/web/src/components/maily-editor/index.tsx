@@ -31,6 +31,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { isMailyDoc, type MailyDoc } from "@/lib/email-doc";
 import { MERGE_FIELDS_I18N_NS, type MergeFieldOption, makeMergeToken } from "@/lib/merge-fields";
+import { refusedAsReadOnly } from "@/lib/read-only";
 import { VariableIcon } from "./icons";
 import { EditorToolbar, type TiptapEditor } from "./toolbar";
 import { createVariableNodeView } from "./variable-node-view";
@@ -64,6 +65,19 @@ export interface MailyEditorValue {
 export interface MailyEditorChange {
   /** The Maily/Tiptap document; send html is re-rendered from it on save. */
   document: unknown;
+  /** Compact mode only: the editor's own html, "" while it is empty. */
+  html?: string;
+}
+
+/**
+ * A message body (a reply, a new email) rather than an email design: marks,
+ * lists and links only, "/" and "@" insert nothing, every change carries the
+ * editor's own html, and ⌘↵ / Ctrl↵ calls onSubmit.
+ */
+export interface MailyEditorCompact {
+  placeholder: string;
+  ariaLabel: string;
+  onSubmit: () => void;
 }
 
 export interface MailyEditorProps {
@@ -76,6 +90,7 @@ export interface MailyEditorProps {
    * after the user chose to convert — see the seed emit rule below.
    */
   convertHtml?: boolean;
+  compact?: MailyEditorCompact;
 }
 
 type MailyContent = NonNullable<EditorProps["contentJson"]>;
@@ -117,9 +132,14 @@ export function MailyEditor({
   onChange,
   mergeFields,
   convertHtml = false,
+  compact,
 }: MailyEditorProps) {
   const t = useTranslations("block-editor");
   const tf = useTranslations(MERGE_FIELDS_I18N_NS);
+  const isCompact = compact !== undefined;
+  // Read at event time: a call site's inline object must not re-init the editor.
+  const compactRef = useRef(compact);
+  compactRef.current = compact;
 
   const [editor, setEditor] = useState<TiptapEditor | null>(null);
   // Bumped on every editor transaction so the toolbar's active/can() states
@@ -142,9 +162,15 @@ export function MailyEditor({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  const emit = useCallback(() => {
-    onChangeRef.current({ document: liveDoc.current });
-  }, []);
+  const emit = useCallback(
+    (ed: TiptapEditor) => {
+      onChangeRef.current({
+        document: liveDoc.current,
+        ...(isCompact ? { html: ed.isEmpty ? "" : ed.getHTML() } : {}),
+      });
+    },
+    [isCompact],
+  );
 
   // Restrict variables to the merge-field list; a *function* source never
   // appends the free-typed query, so no id can break MERGE_NAME_RE.
@@ -179,8 +205,12 @@ export function MailyEditor({
     );
   }, []);
 
-  const extensions = useMemo(
-    () => [
+  const extensions = useMemo(() => {
+    // A message body has no blocks or merge fields. Maily re-adds its own
+    // slash and variable menus unless same-name extensions replace them, so
+    // compact mode passes them with suggestions that never open.
+    const never = { allow: () => false };
+    return [
       // Extended with our own node view: the in-content pill and its edit
       // popover become ours (translated Variable/Default labels, aligned rows)
       // instead of Maily's hardcoded-English VariableView. The '@' popover is
@@ -197,7 +227,9 @@ export function MailyEditor({
       }).configure({
         variables: ({ query }) =>
           variablesRef.current.filter((v) => v.name.toLowerCase().startsWith(query.toLowerCase())),
-        suggestion: getVariableSuggestions(),
+        suggestion: isCompact
+          ? { ...getVariableSuggestions(), ...never }
+          : getVariableSuggestions(),
         renderVariable,
         variableSuggestionsPopover: makeVariableSuggestionsPopover({
           header: t("suggest.header"),
@@ -208,19 +240,23 @@ export function MailyEditor({
       // Same-name extensions replace Maily's defaults — that is how the slash
       // menu and placeholder become localizable at all.
       SlashCommandExtension.configure({
-        suggestion: getSlashCommandSuggestions([
-          {
-            title: t("slash.group"),
-            commands: SLASH_BLOCKS.map(([block, key]) => ({
-              ...block,
-              title: t(`slash.${key}.title`),
-              description: t(`slash.${key}.desc`),
-            })),
-          },
-        ]),
+        suggestion: isCompact
+          ? { ...getSlashCommandSuggestions([]), ...never }
+          : getSlashCommandSuggestions([
+              {
+                title: t("slash.group"),
+                commands: SLASH_BLOCKS.map(([block, key]) => ({
+                  ...block,
+                  title: t(`slash.${key}.title`),
+                  description: t(`slash.${key}.desc`),
+                })),
+              },
+            ]),
       }),
       PlaceholderExtension.configure({
-        placeholder: ({ node }) => {
+        placeholder: ({ editor, node }) => {
+          // A message box prompts once, while empty, not on every new line.
+          if (isCompact) return editor.isEmpty ? (compactRef.current?.placeholder ?? "") : "";
           if (node.type.name === "heading") {
             return t("ph.heading", { level: node.attrs.level as number });
           }
@@ -228,9 +264,8 @@ export function MailyEditor({
         },
         includeChildren: true,
       }),
-    ],
-    [renderVariable, t],
-  );
+    ];
+  }, [renderVariable, t, isCompact]);
 
   const fields = usePickerFields(mergeFields);
 
@@ -242,8 +277,11 @@ export function MailyEditor({
       contentClassName: "ms-maily-content",
       bodyClassName: "ms-maily-body",
       spellCheck: true,
+      // A message box takes focus when clicked: on mount it would scroll an
+      // opened thread down to its reply box. It has no blocks to drag.
+      ...(isCompact ? { autofocus: false, hideContextMenu: true } : {}),
     }),
-    [],
+    [isCompact],
   );
 
   // A contentHtml seed means a pre-Maily raw-HTML document, and Tiptap's parse
@@ -259,21 +297,36 @@ export function MailyEditor({
       liveDoc.current = ed.getJSON() as MailyDoc;
       setEditor(ed);
       ed.on("transaction", () => setTick((n) => n + 1));
-      if (emitOnCreate) emit();
+      const name = compactRef.current?.ariaLabel;
+      if (name) ed.view.dom.setAttribute("aria-label", name);
+      if (emitOnCreate) emit(ed);
     },
     [emit, emitOnCreate],
   );
   const onUpdate = useCallback(
     (ed: TiptapEditor) => {
       liveDoc.current = ed.getJSON() as MailyDoc;
-      emit();
+      emit(ed);
     },
     [emit],
   );
 
+  // Captured ahead of ProseMirror, whose Mod-Enter inserts a line break;
+  // stopping it also keeps an enclosing Modal's own ⌘↵ from sending twice.
+  // Like the Modal's, it is a send no button carries, so it asks read-only.
+  const onSubmitKey = (event: React.KeyboardEvent) => {
+    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!refusedAsReadOnly()) compactRef.current?.onSubmit();
+  };
+
   return (
-    <div className="ms-maily">
-      <EditorToolbar editor={editor} fields={fields} />
+    <div
+      className={isCompact ? "ms-maily ms-maily-compact" : "ms-maily"}
+      onKeyDownCapture={isCompact ? onSubmitKey : undefined}
+    >
+      <EditorToolbar editor={editor} fields={fields} compact={isCompact} />
       <div className="ms-maily-surface">
         {/* Spread the seed so only the one set key (contentJson OR contentHtml)
             is passed — exactOptionalPropertyTypes rejects an explicit undefined. */}
