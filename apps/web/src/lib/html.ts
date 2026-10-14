@@ -101,3 +101,17 @@ export function htmlToText(html: string): string {
       .trim()
   );
 }
+
+/**
+ * The HTML with every class attribute removed: an editor's own classes mean
+ * nothing in a sent email. Parsed with the DOM, so text that merely looks
+ * like an attribute is left alone. Browser only.
+ */
+export function withoutClasses(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  for (const element of template.content.querySelectorAll("[class]")) {
+    element.removeAttribute("class");
+  }
+  return template.innerHTML;
+}

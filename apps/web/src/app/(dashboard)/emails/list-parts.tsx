@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { Table } from "@/components/table";
+import { shortcutBlocked } from "@/lib/keyboard";
 
 /** Filter-row chrome shared by the Emails-area list screens (emails + suppressions). */
 
@@ -20,15 +21,9 @@ export function SearchBox({
   // "/" focuses search from anywhere on the page.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement;
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        ref.current?.focus();
-      }
+      if (event.key !== "/" || shortcutBlocked(event.target)) return;
+      event.preventDefault();
+      ref.current?.focus();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

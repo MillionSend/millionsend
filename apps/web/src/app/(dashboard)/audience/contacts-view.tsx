@@ -29,6 +29,7 @@ import { CONTACT_STATUSES } from "@/lib/contact-status";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
 import { formatDayUtc } from "@/lib/format";
+import { shortcutBlocked } from "@/lib/keyboard";
 import { migrateCommand } from "@/lib/migrate-command";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -423,15 +424,9 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
     if (selected.size === 0) return;
     function onKey(event: KeyboardEvent) {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target as HTMLElement | null;
-      // A focused row checkbox is not "typing" — E/⌫/Esc must still work
-      // right after a click selects a row.
-      const typing =
-        (target instanceof HTMLInputElement && target.type !== "checkbox") ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement ||
-        (target?.isContentEditable ?? false);
-      if (typing || anyModalOpen) return;
+      // A focused row checkbox doesn't block the keys, so E/⌫/Esc work right
+      // after a click selects a row.
+      if (shortcutBlocked(event.target) || anyModalOpen) return;
       if (event.key === "Escape") {
         if (bulkMenuOpen) setBulkMenuOpen(false);
         else clearSelection();

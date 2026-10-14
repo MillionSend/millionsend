@@ -7,6 +7,12 @@ import { useAnchoredPanel } from "./anchored-panel";
 import { ChevronGlyph, PlusGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
 
+/**
+ * A button trigger is narrower than its panel's search placeholder; at this
+ * width the placeholder fits and typing a name doesn't widen the panel.
+ */
+const BUTTON_PANEL_MIN_WIDTH = 250;
+
 export interface GroupedOption {
   value: string;
   label: string;
@@ -312,6 +318,7 @@ export function GroupedMultiSelect({
               className="ms-menu"
               style={{
                 ...panelStyle,
+                ...(button ? { minWidth: BUTTON_PANEL_MIN_WIDTH } : {}),
                 width: "max-content",
                 maxWidth: `min(320px, ${PANEL_MAX_WIDTH})`,
                 padding: 0,

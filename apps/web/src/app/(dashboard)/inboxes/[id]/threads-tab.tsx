@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useDeferredValue, useEffect, useId, useState } from "react";
+import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
 import { DraftBanner } from "@/components/draft-banner";
 import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import {
@@ -55,8 +55,12 @@ const FOLDER_ICONS: Record<(typeof MOVE_TO)[number], React.ReactNode> = {
 /** How often the folder's list looks for new mail on its own while it is on screen. */
 const LIST_POLL_MS = 60_000;
 
+// Longhands, not the border shorthand: when a card's own borderColor goes away,
+// React clears it to "", which would leave the shorthand's border in currentColor.
 const card: React.CSSProperties = {
-  border: "1px solid var(--ms-line)",
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "var(--ms-line)",
   borderRadius: 12,
   background: "var(--ms-panel)",
   padding: "14px 16px",
@@ -103,7 +107,7 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   };
 
   return (
-    <>
+    <div className="ms-threads">
       <div
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}
@@ -134,7 +138,7 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
           </button>
         </Tooltip>
       </div>
-      <div className={threadId ? "ms-grid ms-grid-12" : undefined}>
+      <div className={threadId ? "ms-thread-split" : undefined}>
         <div>
           {active.isPending ? (
             <ul className="ms-thread-list" aria-hidden="true">
@@ -200,7 +204,7 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
           />
         ) : null}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -340,6 +344,15 @@ function ThreadPane({
       mutate({ inboxId: inbox.id, threadId, read: true });
     }
   }, [unread, inbox.kind, inbox.expired, inbox.id, threadId, mutate]);
+  // Stacked under the list (a phone), the opened thread would start below the fold.
+  const paneRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const pane = paneRef.current;
+    const list = pane?.previousElementSibling;
+    if (pane && list && pane.getBoundingClientRect().top >= list.getBoundingClientRect().bottom) {
+      pane.scrollIntoView({ block: "start", behavior: "auto" });
+    }
+  }, []);
 
   if (thread.isError) {
     return (
@@ -362,7 +375,7 @@ function ThreadPane({
   const labelIds = summary?.labels.map((label) => label.id) ?? [];
 
   return (
-    <section style={{ display: "grid", gap: 10, alignContent: "start" }}>
+    <section ref={paneRef} style={{ display: "grid", gap: 10, alignContent: "start" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <h2
           className="ms-display"
@@ -543,7 +556,7 @@ function MessageCard({
   const verdict = inbound ? message.screening.verdict : null;
   const held = verdict === "quarantined";
   return (
-    <article style={{ ...card, borderColor: held ? "var(--ms-danger-border)" : undefined }}>
+    <article style={held ? { ...card, borderColor: "var(--ms-danger-border)" } : card}>
       <header style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 600, color: "var(--ms-bone)" }}>{senderName(message.from)}</span>
         <span className="ms-mono" style={muted}>
@@ -769,6 +782,9 @@ function ReplyComposer({
     setHtml(next);
     setNonce((n) => n + 1);
   };
+  // A send remounts the editor empty; focus goes into the new one, so the
+  // keyboard keeps its place. A thread switch remounts this whole composer.
+  const [sent, setSent] = useState(false);
   const draft = useLocalDraft({
     storageKey: `ms-draft:inbox-reply:${threadId}`,
     state: html,
@@ -779,6 +795,7 @@ function ReplyComposer({
       onSuccess: (result) => {
         toast(result.kind === "sent" ? t("compose.sent") : t("compose.drafted"));
         draft.markSaved("");
+        setSent(true);
         reseed("");
         onSent();
       },
@@ -802,6 +819,7 @@ function ReplyComposer({
             placeholder: t("compose.replyPlaceholder"),
             ariaLabel: t("compose.message"),
             onSubmit: () => send(false),
+            autoFocus: sent,
           }}
           onChange={(change) => setHtml(change.html ?? "")}
         />

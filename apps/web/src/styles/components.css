@@ -563,9 +563,35 @@ table.ms-table {
     row-gap: 2px;
     padding: 8px 12px;
   }
+  /* Under the subject line's height, so a pill doesn't make its row taller. */
   .ms-thread-subject .ms-badge {
     font-size: 10.5px;
+    line-height: 1.3;
     padding: 1px 7px;
+  }
+}
+/* An open thread sits beside the list while the tab has room for both, and
+   under it below that; a container query, so the sidebar's width counts. */
+.ms-threads {
+  container-type: inline-size;
+}
+.ms-thread-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+/* Stacked, the pane is a screen tall: a thread that opens while it still
+   loads can then be scrolled to the top (ThreadPane does on open). */
+.ms-thread-split > section {
+  min-height: 100dvh;
+}
+@container (min-width: 760px) {
+  .ms-thread-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  }
+  .ms-thread-split > section {
+    min-height: 0;
   }
 }
 
@@ -1871,6 +1897,11 @@ summary:focus-visible,
 .ms-menu-search::placeholder {
   color: var(--ms-faint);
 }
+/* The panel is the focus surface; the global input ring, clipped by the
+   panel, would show as a band under the hairline. */
+.ms-menu-search:focus-visible {
+  box-shadow: none;
+}
 /* Non-interactive menu row (e.g. the Appearance row): keeps the item metrics,
    drops the hover affordance. */
 .ms-menu-item.static {
@@ -2495,9 +2526,10 @@ summary:focus-visible,
   .ms-main {
     padding: 16px !important;
   }
-  /* An in-page jump (the health pill, a DNS group) lands below the sticky
-     topbar and the support strip instead of under them. */
-  .ms-main [id] {
+  /* An in-page jump (the health pill, a DNS group, an opened thread) lands
+     below the sticky topbar and the support strip instead of under them. */
+  .ms-main [id],
+  .ms-thread-split > section {
     scroll-margin-top: calc(var(--ms-support-strip-h, 0px) + 64px);
   }
   /* A page-level tab strip runs edge to edge and scrolls under the gutter;

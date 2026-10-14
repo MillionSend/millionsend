@@ -30,6 +30,7 @@ import "./maily-theme.css";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { isMailyDoc, type MailyDoc } from "@/lib/email-doc";
+import { withoutClasses } from "@/lib/html";
 import { MERGE_FIELDS_I18N_NS, type MergeFieldOption, makeMergeToken } from "@/lib/merge-fields";
 import { refusedAsReadOnly } from "@/lib/read-only";
 import { VariableIcon } from "./icons";
@@ -65,7 +66,7 @@ export interface MailyEditorValue {
 export interface MailyEditorChange {
   /** The Maily/Tiptap document; send html is re-rendered from it on save. */
   document: unknown;
-  /** Compact mode only: the editor's own html, "" while it is empty. */
+  /** Compact mode only: the editor's html without its classes, "" while it is empty. */
   html?: string;
 }
 
@@ -78,6 +79,8 @@ export interface MailyEditorCompact {
   placeholder: string;
   ariaLabel: string;
   onSubmit: () => void;
+  /** Focus the editor once it mounts (read on mount only). */
+  autoFocus?: boolean;
 }
 
 export interface MailyEditorProps {
@@ -166,7 +169,7 @@ export function MailyEditor({
     (ed: TiptapEditor) => {
       onChangeRef.current({
         document: liveDoc.current,
-        ...(isCompact ? { html: ed.isEmpty ? "" : ed.getHTML() } : {}),
+        ...(isCompact ? { html: ed.isEmpty ? "" : withoutClasses(ed.getHTML()) } : {}),
       });
     },
     [isCompact],
@@ -269,7 +272,7 @@ export function MailyEditor({
 
   const fields = usePickerFields(mergeFields);
 
-  const config = useMemo(
+  const config = useMemo<NonNullable<EditorProps["config"]>>(
     () => ({
       hasMenuBar: false,
       immediatelyRender: false,
@@ -277,9 +280,12 @@ export function MailyEditor({
       contentClassName: "ms-maily-content",
       bodyClassName: "ms-maily-body",
       spellCheck: true,
-      // A message box takes focus when clicked: on mount it would scroll an
-      // opened thread down to its reply box. It has no blocks to drag.
-      ...(isCompact ? { autofocus: false, hideContextMenu: true } : {}),
+      // A message box takes focus when clicked, or when its caller asks: on
+      // every mount it would scroll an opened thread down to its reply box.
+      // It has no blocks to drag.
+      ...(isCompact
+        ? { autofocus: compactRef.current?.autoFocus ? "end" : false, hideContextMenu: true }
+        : {}),
     }),
     [isCompact],
   );

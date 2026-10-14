@@ -27,13 +27,18 @@
 }
 
 /* ---- container ---------------------------------------------------------- */
+/* Maily's placeholder rule (an id selector, so no class override wins) reads
+   its color from this variable. */
 .ms-maily {
+  --placeholder-color: var(--ms-faint);
   display: flex;
   flex-direction: column;
 }
 
 /* ---- toolbar ------------------------------------------------------------ */
+/* Positioned: the link box hangs from the toolbar, inside the editor's width. */
 .ms-maily-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -77,6 +82,7 @@
   gap: 6px;
   padding: 0 10px;
   font: 500 12.5px var(--ms-font-sans);
+  white-space: nowrap;
 }
 .ms-maily-sep {
   width: 1px;
@@ -133,16 +139,27 @@
 .ms-maily-compact .ms-maily-surface {
   min-height: 120px;
 }
-/* The body takes the ring a textarea would: ProseMirror drops its outline and
-   a contenteditable has no tabindex for the global rule to catch. */
+/* The body's frame takes the ring a textarea would. Tiptap gives the body
+   tabindex="0", so the global [tabindex="0"] ring would draw a second, square
+   ring inside the frame's. */
 .ms-maily-compact .ms-maily-surface:focus-within {
   border-color: var(--ms-focus-border);
   box-shadow: var(--ms-focus-ring);
+}
+.ms-maily-compact .ProseMirror:focus-visible {
+  box-shadow: none;
 }
 /* Maily's selection bubble offers headings, alignment, colors and its footer
    block, all of which a message body leaves out; the toolbar has the rest. */
 .ms-maily-compact [data-tippy-root] {
   display: none;
+}
+/* Maily mounts those bubble menus in flow for a moment, wider than a phone:
+   they would widen the thread pane, and the phone would zoom the page out to
+   fit and lose its scroll position. The body keeps its width to itself. */
+.ms-maily-compact .ms-maily-wrap {
+  contain: inline-size;
+  overflow-x: clip;
 }
 /* Maily's prose styles pin their palette via --mly-tw-prose-* custom props
    defined ON the content element (near-black headings/body) — invisible on the
@@ -173,10 +190,6 @@
 }
 .ms-maily .ProseMirror:focus {
   outline: none;
-}
-/* Placeholder text uses our faint token, not Maily's baked gray. */
-.ms-maily .ProseMirror p.is-editor-empty:first-child::before {
-  color: var(--ms-faint);
 }
 
 /* ---- in-content variable pill ------------------------------------------- */
@@ -479,6 +492,7 @@
   top: calc(100% + 6px);
   left: 0;
   z-index: var(--ms-z-popover);
+  box-sizing: border-box;
   display: flex;
   gap: 6px;
   padding: 8px;
@@ -490,6 +504,7 @@
 }
 .ms-maily-linkbox input {
   width: 240px;
+  min-width: 0;
   padding: 6px 9px;
   border: 1px solid var(--ms-line);
   border-radius: 7px;
