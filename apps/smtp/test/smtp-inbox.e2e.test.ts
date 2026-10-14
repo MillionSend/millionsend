@@ -1,11 +1,11 @@
 import type { AddressInfo } from "node:net";
-import { generateApiKey, utcDay } from "@millionsend/core";
+import { generateApiKey, SHARED_REPLY_ONLY_MESSAGE, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import nodemailer, { type SendMailOptions } from "nodemailer";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   addInbox,
   addThread,
@@ -74,6 +74,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(resolve));
   await closeDb();
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 const emailOf = async (response: string | undefined) => {
@@ -177,5 +180,16 @@ describe("smtp relay and inboxes", () => {
     );
     expect(refused).toMatchObject({ code: 452 });
     expect(refused.response).toContain("4.3.1 Daily send limit for this inbox reached");
+  });
+
+  it("refuses a shared From even where shared addresses start conversations (550 5.7.1)", async () => {
+    vi.stubEnv("SHARED_INBOX_OPEN", "true");
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    const shared = await addInbox(w, { local: "leo", kind: "human", shared: true });
+    const refused = await failure(
+      send(teamKey, { from: shared.emailAddress, to: "ana@example.org", subject: "Hi", text: "x" }),
+    );
+    expect(refused).toMatchObject({ code: 550 });
+    expect(refused.response).toContain(`5.7.1 ${SHARED_REPLY_ONLY_MESSAGE}`);
   });
 });

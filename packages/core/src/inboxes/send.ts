@@ -1,4 +1,4 @@
-import { env } from "@millionsend/config";
+import { abuseJudgeConfig, env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
@@ -20,9 +20,14 @@ import { createSemaphore } from "../concurrency.js";
 import { decryptEmailBody, type EmailAttachment, openAttachments } from "../crypto/envelope.js";
 import { firstRow } from "../driver-result.js";
 import { beginIdempotent, completeIdempotent, releaseIdempotent } from "../idempotency.js";
-import { getMonitorSettingsRow, resolveMonitorSettings } from "../monitor-settings.js";
+import { imitatedBrandIn } from "../imitated-brands.js";
+import {
+  getMonitorSettingsRow,
+  type MonitorSettings,
+  resolveMonitorSettings,
+} from "../monitor-settings.js";
 import { registrableDomain } from "../org-domain.js";
-import { monthlyQuotaMessage, type QuotaTeamRow } from "../plans.js";
+import { effectivePlan, monthlyQuotaMessage, type Plan, type QuotaTeamRow } from "../plans.js";
 import { outgoingSecretValues } from "../receiving/codes.js";
 import { inboxKey, resolveThread, teamMemberEmails } from "../receiving/inbox-routing.js";
 import {
@@ -67,11 +72,16 @@ import {
 import { findLiveInbox, RECEIVED_SECRET_WINDOW, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
 import {
   type AgentSendDecision,
+  type AgentSendInput,
   decideAgentSend,
   INBOX_KEY_FROM_MESSAGE,
   isSharedInboxSender,
   type RecipientClass,
+  SHARED_RECIPIENTS_MAX,
+  SHARED_REFUSALS,
 } from "./send-policy.js";
+import { refusedLabel } from "./shared-domain.js";
+import { type SharedSending, sharedSendMode } from "./shared-mode.js";
 import { getThread } from "./threads.js";
 import {
   type DraftWire,
@@ -154,17 +164,53 @@ export const isOutcome = (v: unknown): v is SendOutcome =>
 
 const MiB = 1024 * 1024;
 
+/** The instance's trust & safety settings: the process's reader when it has one, else a read. */
+async function instanceSettings(
+  db: Db,
+  deps: Pick<AcceptEmailDeps, "monitorSettings"> = {},
+): Promise<MonitorSettings> {
+  if (deps.monitorSettings) return deps.monitorSettings();
+  return resolveMonitorSettings(
+    await getMonitorSettingsRow(db),
+    env as unknown as Record<string, unknown>,
+  ).settings;
+}
+
 /**
  * Whether the team sits in the content monitor's new tier, where send_policy
  * "open" is unavailable: the tier as screening reads it ahead of a send, so
  * the safety check and the send rails never disagree.
  */
-export async function teamInNewTier(db: Db, teamId: string, now = new Date()): Promise<boolean> {
-  const { settings } = resolveMonitorSettings(
-    await getMonitorSettingsRow(db),
-    env as unknown as Record<string, unknown>,
+export async function teamInNewTier(
+  db: Db,
+  teamId: string,
+  now = new Date(),
+  settings?: MonitorSettings,
+): Promise<boolean> {
+  return (await screeningTier(db, settings ?? (await instanceSettings(db)), teamId, now)) === "new";
+}
+
+function sharedModeUnder(settings: MonitorSettings, plan: Plan, isCloud: boolean): SharedSending {
+  return sharedSendMode({ settings, plan, isCloud, judgeConfigured: abuseJudgeConfig() !== null });
+}
+
+/** What the team's addresses on the shared domain may send now; `plan` is the effective plan. */
+export async function teamSharedSending(
+  db: Db,
+  deps: Pick<AcceptEmailDeps, "isCloud" | "monitorSettings">,
+  plan: Plan,
+): Promise<SharedSending> {
+  return sharedModeUnder(await instanceSettings(db, deps), plan, deps.isCloud);
+}
+
+/** A shared-domain inbox's email past SHARED_RECIPIENTS_MAX distinct recipients. */
+export function sharedRecipientsExceeded(
+  inbox: Pick<InboxRow, "domainId">,
+  recipients: readonly string[],
+): boolean {
+  return (
+    inbox.domainId === null && new Set(recipients.map(addressKey)).size > SHARED_RECIPIENTS_MAX
   );
-  return (await screeningTier(db, settings, teamId, now)) === "new";
 }
 
 const TRUSTED_TIERS: ReadonlySet<string> = new Set(["owner", "allowlisted", "known_thread"]);
@@ -194,7 +240,7 @@ export function untrustedReplyTos(target: SendTarget): string[] {
  * a Reply-To only at its From's organization: an owner or allowlisted
  * sender is someone the team named, not someone who proved the address.
  */
-async function threadSenders(
+export async function threadSenders(
   db: Db,
   p: { inboxId: string; threadId: string; shared: boolean },
 ): Promise<Set<string>> {
@@ -318,12 +364,42 @@ async function receivedSecretHit(
   return hit !== undefined;
 }
 
-/** decideAgentSend over what the database knows of the inbox, its thread and its recipients. */
+/** decideAgentSend's shared-domain inputs; off the shared domain none of them is read. */
+function sharedInputs(
+  inbox: InboxRow,
+  settings: MonitorSettings | undefined,
+  p: { billing: QuotaTeamRow; isCloud: boolean; now: Date },
+): Pick<AgentSendInput, "sharedMode" | "sharedNamesOk" | "sharedTeamCap"> {
+  if (inbox.domainId !== null || !settings) {
+    return {
+      sharedMode: { mode: "open", cause: null },
+      sharedNamesOk: true,
+      sharedTeamCap: Number.POSITIVE_INFINITY,
+    };
+  }
+  // A shared address lives at <team label>.<shared domain>.
+  const label = inbox.emailAddress.slice(inbox.emailAddress.lastIndexOf("@") + 1).split(".")[0];
+  const plan = effectivePlan(p.billing.plan, p.billing.currentPeriodEnd, p.now);
+  return {
+    sharedMode: sharedModeUnder(settings, plan, p.isCloud),
+    // The same guards create applies, so a name it took is never held back
+    // here, while an address issued before them is.
+    sharedNamesOk:
+      !imitatedBrandIn(inbox.fromName ?? "", { everydayWords: false }) &&
+      !imitatedBrandIn(inbox.localPart, { everydayWords: false }) &&
+      !refusedLabel(label ?? ""),
+    sharedTeamCap: settings.sharedInboxTeamDailyCap,
+  };
+}
+
+/** decideAgentSend over what the database knows of the inbox, its thread, its recipients and its team. */
 export async function decideInboxSend(
   db: Db,
-  keys: InboxKeys,
+  deps: Pick<AcceptEmailDeps, "isCloud" | "monitorSettings"> & { inboxKeys: InboxKeys },
   p: {
     teamId: string;
+    /** The team's billing columns, raw: the plan is read as effectivePlan. */
+    billing: QuotaTeamRow;
     inbox: InboxRow;
     actor: InboxActor;
     approved: boolean;
@@ -343,9 +419,14 @@ export async function decideInboxSend(
 ): Promise<AgentSendDecision> {
   const recipients = [...new Set(p.recipients.map(addressKey))];
   const { safety } = p.inbox;
+  const shared = p.inbox.domainId === null;
   const unattended = !p.approved && p.inbox.kind === "agent";
+  const unattendedOpen = unattended && safety.send_policy === "open";
+  const settings = shared || unattendedOpen ? await instanceSettings(db, deps) : undefined;
+  const day = utcDay(p.now);
   const ud = schema.inboxUsageDaily;
-  const [classified, usage, teamTierNew] = await Promise.all([
+  const uc = schema.usageCounters;
+  const [classified, usage, teamTierNew, team] = await Promise.all([
     classifyRecipients(db, {
       teamId: p.teamId,
       inbox: p.inbox,
@@ -357,23 +438,34 @@ export async function decideInboxSend(
     db
       .select({ recipients: ud.recipients, newRecipients: ud.newRecipients })
       .from(ud)
-      .where(and(eq(ud.inboxId, p.inbox.id), eq(ud.day, utcDay(p.now)))),
-    unattended && safety.send_policy === "open" ? teamInNewTier(db, p.teamId, p.now) : false,
+      .where(and(eq(ud.inboxId, p.inbox.id), eq(ud.day, day))),
+    unattendedOpen ? teamInNewTier(db, p.teamId, p.now, settings) : false,
+    shared
+      ? db
+          .select({ recipients: uc.sharedRecipients })
+          .from(uc)
+          .where(and(eq(uc.teamId, p.teamId), eq(uc.day, day)))
+      : [],
   ]);
   const privateHit =
     unattended &&
     safety.private_codes &&
     (p.forwardedSecret ||
-      (await receivedSecretHit(db, keys, { teamId: p.teamId, content: p.content, now: p.now })));
+      (await receivedSecretHit(db, deps.inboxKeys, {
+        teamId: p.teamId,
+        content: p.content,
+        now: p.now,
+      })));
   return decideAgentSend({
     inbox: {
       id: p.inbox.id,
       kind: p.inbox.kind,
-      shared: p.inbox.domainId === null,
+      shared,
       safety,
       firstSentAt: p.inbox.firstSentAt,
     },
     teamTierNew,
+    ...sharedInputs(p.inbox, settings, { billing: p.billing, isCloud: deps.isCloud, now: p.now }),
     actor: p.actor,
     approved: p.approved,
     requiresApproval: p.requiresApproval,
@@ -385,6 +477,7 @@ export async function decideInboxSend(
     usage: {
       recipientsToday: usage[0]?.recipients ?? 0,
       newRecipientsToday: usage[0]?.newRecipients ?? 0,
+      sharedRecipientsToday: team[0]?.recipients ?? 0,
     },
     now: p.now,
   });
@@ -433,6 +526,15 @@ export function acceptFailure(result: Exclude<AcceptEmailResult, { ok: true }>):
         message: "This inbox reached its daily send limit; retry after the UTC day rolls over",
         retryAfterSec: result.retryAfterSec,
       };
+    case "shared_paused":
+    case "shared_plan":
+    case "shared_domain":
+    case "shared_recipients":
+      return { ...SHARED_REFUSALS[result.reason] };
+    case "shared_team_cap":
+      return { ...SHARED_REFUSALS.shared_team_cap, retryAfterSec: result.retryAfterSec };
+    case "shared_from":
+      return { status: 422, name: "validation_error", message: result.message };
     case "inbox_scope":
       return {
         status: 403,
@@ -485,6 +587,32 @@ async function latestInboundAutomated(
 }
 
 /**
+ * The shared domain's From rules a generic send from a shared inbox broke,
+ * as a message naming the first one, or null. Inbox endpoints write the
+ * From themselves; here the caller does, so it may carry the inbox's own
+ * address and display name only, and nothing those endpoints never send.
+ */
+function sharedFromProblem(payload: AcceptEmailPayload, inbox: InboxRow): string | null {
+  const from = parseMailbox(payload.from);
+  if (from?.address.toLowerCase() !== inbox.emailAddress) {
+    return `from must be ${inbox.emailAddress} exactly, with no +tag, on the shared domain`;
+  }
+  if (from.name !== undefined && from.name !== inbox.fromName) {
+    return "from's display name must be left out or match the inbox's from_name on the shared domain";
+  }
+  const field = payload.scheduledAt
+    ? "scheduled_at"
+    : payload.replyTo?.length
+      ? "reply_to"
+      : payload.attachments?.length
+        ? "attachments"
+        : Object.keys(payload.headers ?? {}).length > 0
+          ? "headers"
+          : null;
+  return field && `${field} is not available on the shared domain`;
+}
+
+/**
  * The acceptEmail hook for every surface that does not decide itself (POST
  * /emails, batch, the SMTP relay, MCP send_email): a From that is an inbox
  * address runs the inbox's rules, which on these surfaces send or refuse,
@@ -493,7 +621,13 @@ async function latestInboundAutomated(
 export async function gateGenericSend(
   db: Db,
   deps: AcceptEmailDeps,
-  p: { auth: AcceptEmailAuth; payload: AcceptEmailPayload; actor: InboxActor; now: Date },
+  p: {
+    auth: AcceptEmailAuth;
+    billing: QuotaTeamRow;
+    payload: AcceptEmailPayload;
+    actor: InboxActor;
+    now: Date;
+  },
 ): Promise<{ ok: true; inbox: InboxAccept | null } | Exclude<AcceptEmailResult, { ok: true }>> {
   const { auth, payload } = p;
   const address = parseSingleSender(payload.from)?.address;
@@ -504,8 +638,13 @@ export async function gateGenericSend(
   }
   if (!inbox) {
     if (auth.inboxId) return { ok: false, reason: "inbox_scope" };
+    // Only open mode lets a shared From this far: every other surface refuses it up front.
     if (isSharedInboxSender(payload.from, deps.sharedInboxDomain)) {
-      return { ok: false, reason: "inbox_send_policy", reasons: ["shared_domain"] };
+      return {
+        ok: false,
+        reason: "shared_from",
+        message: "from must be the address of one of your inboxes on the shared domain",
+      };
     }
     return { ok: true, inbox: null };
   }
@@ -515,6 +654,14 @@ export async function gateGenericSend(
     (auth.inboxId !== inbox.id || address?.toLowerCase() !== inbox.emailAddress)
   ) {
     return { ok: false, reason: "inbox_scope" };
+  }
+  const recipients = [...payload.to, ...(payload.cc ?? []), ...(payload.bcc ?? [])];
+  if (inbox.domainId === null) {
+    const problem = sharedFromProblem(payload, inbox);
+    if (problem) return { ok: false, reason: "shared_from", message: problem };
+    if (sharedRecipientsExceeded(inbox, recipients)) {
+      return { ok: false, reason: "shared_recipients" };
+    }
   }
   if (!deps.inboxKeys) throw new Error("inboxKeys is not configured");
   const inReplyTo = msgIds(headerValue(payload.headers, "In-Reply-To"))[0];
@@ -537,20 +684,29 @@ export async function gateGenericSend(
       ? parent
       : await latestInboundAutomated(db, { inboxId: inbox.id, threadId })
     : undefined;
-  const decision = await decideInboxSend(db, deps.inboxKeys, {
-    teamId: auth.teamId,
-    inbox,
-    actor: p.actor,
-    approved: false,
-    requiresApproval: false,
-    threadId,
-    recipients: [...payload.to, ...(payload.cc ?? []), ...(payload.bcc ?? [])],
-    untrustedReplyTo: [],
-    replyTarget: automated === undefined ? null : { automated },
-    content: { subject: payload.subject, html: payload.html ?? null, text: payload.text ?? null },
-    forwardedSecret: false,
-    now: p.now,
-  });
+  const decision = await decideInboxSend(
+    db,
+    { ...deps, inboxKeys: deps.inboxKeys },
+    {
+      teamId: auth.teamId,
+      billing: p.billing,
+      inbox,
+      actor: p.actor,
+      approved: false,
+      requiresApproval: false,
+      threadId,
+      recipients,
+      untrustedReplyTo: [],
+      replyTarget: automated === undefined ? null : { automated },
+      content: {
+        subject: payload.subject,
+        html: payload.html ?? null,
+        text: payload.text ?? null,
+      },
+      forwardedSecret: false,
+      now: p.now,
+    },
+  );
   if (decision.result === "send") {
     return {
       ok: true,
@@ -573,15 +729,15 @@ export async function gateGenericSend(
     decision: { result: decision.result, reasons },
   });
   if (decision.result === "draft") return { ok: false, reason: "inbox_send_policy", reasons };
-  if (decision.name === "inbox_send_cap_reached") {
-    return {
-      ok: false,
-      reason: "inbox_send_cap_reached",
-      retryAfterSec: decision.retryAfterSec ?? 1,
-    };
-  }
   if (decision.name === "restricted_api_key") return { ok: false, reason: "inbox_scope" };
-  return { ok: false, reason: "inbox_send_policy", reasons: ["shared_domain"] };
+  const retryAfterSec = decision.retryAfterSec ?? 1;
+  if (decision.reason === "shared_team_cap") {
+    return { ok: false, reason: "shared_team_cap", retryAfterSec };
+  }
+  if (decision.name === "inbox_send_cap_reached") {
+    return { ok: false, reason: "inbox_send_cap_reached", retryAfterSec };
+  }
+  return { ok: false, reason: decision.reason ?? "shared_domain" };
 }
 
 /** An inbox send inside the accept transaction, from its cap charge to its email row. */
@@ -599,9 +755,48 @@ export interface InboxAcceptState {
 }
 
 /**
+ * The team's recipients of shared-domain mail today, charged against
+ * sharedInboxTeamDailyCap by a guarded upsert; false when it has no room.
+ */
+async function chargeSharedRecipients(
+  tx: Db,
+  p: { teamId: string; day: string; recipients: number },
+): Promise<boolean> {
+  // Read through the transaction, not the process's reader: a pooled read
+  // could wait on the connection this transaction holds.
+  const cap = (await instanceSettings(tx)).sharedInboxTeamDailyCap;
+  // The day's first row inserts unguarded.
+  if (p.recipients > cap) return false;
+  const uc = schema.usageCounters;
+  const charged = firstRow(
+    await tx.execute(sql`
+      insert into ${uc} (team_id, day, shared_recipients)
+      values (${p.teamId}, ${p.day}, ${p.recipients})
+      on conflict (team_id, day) do update
+        set shared_recipients = ${uc.sharedRecipients} + ${p.recipients}
+        where ${uc.sharedRecipients} + ${p.recipients} <= ${cap}
+      returning team_id
+    `),
+  );
+  return charged !== undefined;
+}
+
+async function refundSharedRecipients(
+  tx: Db,
+  p: { teamId: string; day: string; recipients: number },
+): Promise<void> {
+  const uc = schema.usageCounters;
+  await tx
+    .update(uc)
+    .set({ sharedRecipients: sql`greatest(0, ${uc.sharedRecipients} - ${p.recipients})` })
+    .where(and(eq(uc.teamId, p.teamId), eq(uc.day, p.day)));
+}
+
+/**
  * Inside the accept transaction, before any other write: the inbox's daily
- * cap charged by a guarded upsert (a race past the cap finds no room), and
- * the thread the send joins or opens. "cap" when the charge found no room;
+ * cap charged by a guarded upsert (a race past the cap finds no room), the
+ * team's shared-domain cap the same way for a shared inbox, and the thread
+ * the send joins or opens. "cap" or "team_cap" when a charge found no room;
  * nothing was written then.
  */
 export async function beginInboxAccept(
@@ -615,7 +810,7 @@ export async function beginInboxAccept(
     headers: Record<string, string> | undefined;
     now: Date;
   },
-): Promise<InboxAcceptState | "cap"> {
+): Promise<InboxAcceptState | "cap" | "team_cap"> {
   const { accept } = p;
   const [inbox] = await tx
     .select()
@@ -625,6 +820,10 @@ export async function beginInboxAccept(
   const cap = accept.countTowardCap ? inbox.safety.send_cap : null;
   if (cap !== null && p.recipients > cap) return "cap";
   const day = utcDay(p.now);
+  const team = { teamId: p.teamId, day, recipients: p.recipients };
+  const shared = inbox.domainId === null;
+  // The team's row first: intake locks usage_counters before inbox_usage_daily too.
+  if (shared && !(await chargeSharedRecipients(tx, team))) return "team_cap";
   const ud = schema.inboxUsageDaily;
   const fresh = accept.newRecipients.length;
   const charged = firstRow(
@@ -638,7 +837,10 @@ export async function beginInboxAccept(
       returning inbox_id
     `),
   );
-  if (!charged) return "cap";
+  if (!charged) {
+    if (shared) await refundSharedRecipients(tx, team);
+    return "cap";
+  }
   let threadId = accept.threadId;
   if (threadId === null) {
     const [thread] = await tx
@@ -685,6 +887,7 @@ export async function beginInboxAccept(
 
 /** Undoes beginInboxAccept when the accept refuses later in the same transaction. */
 export async function refundInboxAccept(tx: Db, state: InboxAcceptState): Promise<void> {
+  if (state.inbox.domainId === null) await refundSharedRecipients(tx, state);
   const ud = schema.inboxUsageDaily;
   await tx
     .update(ud)
@@ -963,10 +1166,14 @@ export async function dispatchSend(
   if (new Set(recipients.map(addressKey)).size > RECIPIENTS_PER_SEND_MAX) {
     return invalid(`to, cc and bcc together cannot exceed ${RECIPIENTS_PER_SEND_MAX} recipients`);
   }
+  if (p.inbox && sharedRecipientsExceeded(p.inbox, recipients)) {
+    return { kind: "refused", error: { ...SHARED_REFUSALS.shared_recipients } };
+  }
   let accept: InboxAccept | undefined;
   if (p.inbox) {
-    const decision = await decideInboxSend(db, deps.inboxKeys, {
+    const decision = await decideInboxSend(db, deps, {
       teamId: p.teamId,
+      billing: p.billing,
       inbox: p.inbox,
       actor: p.actor,
       approved: p.approved,
@@ -1810,7 +2017,7 @@ export async function forwardReceivedEmail(
   );
 }
 
-/** A new conversation from an inbox (the dashboard's Send email); a shared address never starts one. */
+/** A new conversation from an inbox (the dashboard's Send email); a shared address starts one in open mode only. */
 export async function sendNewFromInbox(
   db: Db,
   deps: InboxSendDeps,

@@ -18,7 +18,7 @@ import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
 import { confirmUnsavedNavigation } from "@/lib/use-unsaved-warning";
-import { kindWord } from "../parts";
+import { kindWord, sharedModeKey } from "../parts";
 import { ActivityTab } from "./activity-tab";
 import { EditDialog } from "./edit-dialog";
 import { ReviewTab } from "./review-tab";
@@ -79,6 +79,7 @@ export function InboxView() {
   }
   const inbox = query.data;
   const nf = new Intl.NumberFormat(locale);
+  const sharedMode = sharedModeKey(inbox);
   const channels = [
     ...(inbox.channels.webhook ? [t("channel.webhook")] : []),
     ...(inbox.channels.key ? [t("channel.key")] : []),
@@ -89,6 +90,7 @@ export function InboxView() {
     ...(inbox.expires_at && !inbox.expired
       ? [t("expiresIn", { time: formatTimeLeft(Date.parse(inbox.expires_at) - Date.now()) })]
       : []),
+    ...(sharedMode ? [t(`sharedMode.${sharedMode}`)] : []),
   ].join(" · ");
   const review = inbox.pending_approval + inbox.quarantined;
   const sendButton = (

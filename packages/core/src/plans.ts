@@ -26,6 +26,14 @@ export function effectivePlan(
   return currentPeriodEnd.getTime() + PLAN_GRACE_DAYS * DAY_MS < now.getTime() ? "free" : plan;
 }
 
+/**
+ * Whether a team counts as paying. Pass the effective plan, so a lapsed paid
+ * plan reads as free. Self-host has no plans: every team counts.
+ */
+export function paidPlan(plan: Plan, isCloud: boolean): boolean {
+  return !isCloud || plan !== "free";
+}
+
 /** Whether a plan may drop the "Powered by MillionSend" line from the hosted unsubscribe page. */
 export function planCanHidePoweredBy(plan: Plan): boolean {
   return plan !== "free";

@@ -3,10 +3,27 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyJudgedSample, monitorRowWithHistory } from "../src/abuse-monitor.js";
+import {
+  applyJudgedSample,
+  type MonitorDeps,
+  monitorRowWithHistory,
+} from "../src/abuse-monitor.js";
 import { MONITOR_SETTING_DEFAULTS } from "../src/monitor-settings.js";
-import { releaseWaitingEmails, sendingDomainYoung } from "../src/screening.js";
+import {
+  releaseWaitingEmails,
+  SCREEN_RETRIES,
+  screenBeforeSend,
+  sendingDomainYoung,
+} from "../src/screening.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
+import {
+  addInbox,
+  addThread,
+  type InboxRow,
+  receive,
+  seedWorld,
+  type World,
+} from "./inbox-send-fixtures.js";
 
 const S = MONITOR_SETTING_DEFAULTS;
 const NOW = new Date("2026-10-11T12:00:00Z");
@@ -88,6 +105,125 @@ describe("the young sending domain", () => {
       }),
     ).toBeNull();
     expect((await team(aged))?.suspendedAt).toBeNull();
+  });
+});
+
+describe("cold shared-domain mail", () => {
+  const monitor: MonitorDeps = {
+    samplingKey: Buffer.alloc(32),
+    settings: async () => S,
+    enqueueJudge: async () => {},
+  };
+
+  /** A shared agent inbox of a team well past new. */
+  async function sharedInbox(slug: string) {
+    const w = await seedWorld(db, slug);
+    await db.insert(schema.teamMonitor).values({
+      teamId: w.teamId,
+      sentTotal: 20_000,
+      firstSendAt: new Date(Date.now() - 60 * DAY_MS),
+    });
+    return { w, inbox: await addInbox(w, { local: "agent", shared: true }) };
+  }
+
+  async function email(w: World, inbox: InboxRow, to: string, threadId?: string | null) {
+    const [row] = await db
+      .insert(schema.emails)
+      .values({
+        teamId: w.teamId,
+        from: inbox.emailAddress,
+        to: [to],
+        subject: "Monday",
+        inboxId: inbox.id,
+        threadId: threadId ?? (await addThread(w, inbox.id)),
+      })
+      .returning();
+    if (!row) throw new Error("email insert failed");
+    return row;
+  }
+
+  // No link: nothing but the recipient can screen it.
+  const gate = (w: World, row: typeof schema.emails.$inferSelect) =>
+    screenBeforeSend(db, monitor, {
+      email: row,
+      body: { html: "<p>Are you free on Monday?</p>", text: null },
+      sharedInboxDomain: w.sharedDomain,
+      now: new Date(),
+    });
+  const unscreened = { action: "send", sample: null, probation: false };
+
+  const sampleOf = async (emailId: string) =>
+    (
+      await db
+        .select()
+        .from(schema.monitorSamples)
+        .where(eq(schema.monitorSamples.emailId, emailId))
+    )[0];
+  const answer = (
+    id: string | undefined,
+    set: Partial<typeof schema.monitorSamples.$inferInsert>,
+  ) =>
+    db
+      .update(schema.monitorSamples)
+      .set({ judgedAt: new Date(), ...set })
+      .where(eq(schema.monitorSamples.id, id ?? ""));
+
+  it("judges a second send to someone who never wrote in, and none once they have", async () => {
+    const { w, inbox } = await sharedInbox("cold-again");
+    const first = await email(w, inbox, "stranger@example.com");
+    expect(await gate(w, first)).toEqual({ action: "wait", until: null });
+    const judged = await sampleOf(first.id);
+    expect(judged).toMatchObject({ screening: true, status: "pending" });
+    await answer(judged?.id, { status: "judged", score: 5, verdict: "clean" });
+    expect(await gate(w, first)).toEqual({
+      action: "send",
+      sample: { id: judged?.id, unjudged: false },
+    });
+
+    // Its accept wrote to them; they never wrote back.
+    const c = schema.inboxCorrespondents;
+    await db
+      .insert(c)
+      .values({ inboxId: inbox.id, address: "stranger@example.com", firstOutAt: new Date() });
+    const second = await email(w, inbox, "stranger@example.com", first.threadId);
+    expect(await gate(w, second)).toEqual({ action: "wait", until: null });
+    expect(await sampleOf(second.id)).toMatchObject({ screening: true, status: "pending" });
+
+    await db.update(c).set({ firstInAt: new Date() }).where(eq(c.inboxId, inbox.id));
+    expect(await gate(w, await email(w, inbox, "Stranger <Stranger@Example.com>"))).toEqual(
+      unscreened,
+    );
+  });
+
+  it("leaves mail to a member, or to a sender its thread vouches for, unscreened", async () => {
+    const { w, inbox } = await sharedInbox("cold-known");
+    expect(await gate(w, await email(w, inbox, w.owner))).toEqual(unscreened);
+    // A Reply-To at the From's organization: it never wrote in itself.
+    const threadId = await addThread(w, inbox.id);
+    await receive(w, { inbox, threadId, message: { replyTo: "desk@sender.example" } });
+    expect(await gate(w, await email(w, inbox, "desk@sender.example", threadId))).toEqual(
+      unscreened,
+    );
+  });
+
+  it("parks an established team's cold mail on a phishing verdict with no link", async () => {
+    const { w, inbox } = await sharedInbox("cold-phishing");
+    const row = await email(w, inbox, "stranger@example.com");
+    await gate(w, row);
+    await answer((await sampleOf(row.id))?.id, { status: "judged", score: 85, ...PHISHING });
+    expect(await gate(w, row)).toEqual({ action: "park", reason: "recipient" });
+  });
+
+  it("parks shared mail the judge keeps failing on, as a young domain's", async () => {
+    const { w, inbox } = await sharedInbox("cold-outage");
+    const row = await email(w, inbox, "stranger@example.com");
+    await gate(w, row);
+    const id = (await sampleOf(row.id))?.id;
+    await answer(id, { status: "unjudged", errorClass: "upstream" });
+    expect(await gate(w, row)).toEqual({ action: "wait", until: null });
+    expect(await sampleOf(row.id)).toMatchObject({ status: "pending", screenRetries: 1 });
+    await answer(id, { status: "unjudged", errorClass: "upstream", screenRetries: SCREEN_RETRIES });
+    expect(await gate(w, row)).toEqual({ action: "park", reason: "screening" });
   });
 });
 

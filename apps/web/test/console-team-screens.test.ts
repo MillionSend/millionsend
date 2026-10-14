@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createCaller } from "@/server/routers";
 
-const h = vi.hoisted(() => ({ review: undefined as unknown }));
+const h = vi.hoisted(() => ({ review: undefined as unknown, monitor: undefined as unknown }));
 
 // The real English catalogs, so the test reads what the operator reads.
 vi.mock("next-intl", async (importOriginal) => {
@@ -34,7 +34,7 @@ vi.mock("@/components/modal", () => ({
   Modal: ({ title, children }: { title?: string; children: React.ReactNode }) =>
     createElement("div", { "data-title": title }, children),
 }));
-// Each procedure's options name its path, and only the review query has data.
+// Each procedure's options name its path, and only the review and settings queries have data.
 vi.mock("@/lib/trpc", () => {
   const at = (path: string[]): unknown =>
     new Proxy(() => {}, {
@@ -47,8 +47,14 @@ vi.mock("@/lib/trpc", () => {
 });
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { path: string }) =>
-    options.path === "console.safety.review"
-      ? { data: h.review, isPending: false, isError: false, isSuccess: true, refetch: () => {} }
+    options.path === "console.safety.review" || options.path === "console.monitor.settings.get"
+      ? {
+          data: options.path === "console.safety.review" ? h.review : h.monitor,
+          isPending: false,
+          isError: false,
+          isSuccess: true,
+          refetch: () => {},
+        }
       : { data: undefined, isPending: true, isError: false, isSuccess: false, error: null },
   useMutation: () => ({
     mutate: () => {},
@@ -72,6 +78,8 @@ const { TeamDialog } = await import("@/components/console/teams/team-dialog");
 const { ViewDialog } = await import("@/components/console/teams/view-dialog");
 const { SuspendDialog } = await import("@/components/console/teams/hold-dialogs");
 const { teamMenuItems } = await import("@/components/console/team-actions");
+const { MonitorSettingsView } = await import("@/components/console/safety/monitor-settings");
+const consoleEn = (await import("../messages/en/console.json")).default;
 
 let db: Db;
 let close: () => Promise<void>;
@@ -281,5 +289,30 @@ describe("the Suspend dialog's cancel and refund", () => {
     const loading = render("phishing", undefined);
     expect(box(loading)).toBeNull();
     expect(submit(loading)).toContain('disabled=""');
+  });
+});
+
+describe("the console's monitoring settings", () => {
+  it("shows every setting, the shared domain's four in a group of their own", async () => {
+    const got = await createCaller({
+      db,
+      session: {
+        user: { id: operatorId, email: "op@example.com", name: "Operator" },
+        session: { id: crypto.randomUUID(), createdAt: new Date() },
+      },
+      teamId: null,
+      role: null,
+    }).console.monitor.settings.get();
+    h.monitor = got;
+    const html = renderToStaticMarkup(createElement(MonitorSettingsView))
+      .replaceAll("&#x27;", "'")
+      .replaceAll("&amp;", "&");
+    const { fields } = consoleEn.safety.monitor;
+    for (const { key } of got.settings) {
+      expect(html, key).toContain(`>${fields[key as keyof typeof fields]}</label>`);
+    }
+    expect(html).toMatch(
+      /Shared domain<.*Shared addresses send<.*Start conversations<.*Each team's SES tenant<.*Recipients per team per day</s,
+    );
   });
 });

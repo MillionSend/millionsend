@@ -16,7 +16,8 @@ import {
   type InboxAcceptState,
   refundInboxAccept,
 } from "./inboxes/send.js";
-import { secondsToNextUtcDay } from "./inboxes/send-policy.js";
+import { type SharedRefusalReason, secondsToNextUtcDay } from "./inboxes/send-policy.js";
+import type { MonitorSettings } from "./monitor-settings.js";
 import { monthlyCapacity, type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
 import { quotaChargeAt, releaseQuota, reserveQuota } from "./quota.js";
 import { type UndeliverableReason, undeliverableRecipients } from "./recipient-domains.js";
@@ -81,8 +82,13 @@ export interface AcceptEmailDeps {
   enqueueEmailSend: (emailId: string, opts?: { startAfter?: Date }) => Promise<void>;
   /** Thread-token keys: a send from an inbox address resolves its thread through them. */
   inboxKeys?: InboxKeys | undefined;
-  /** SHARED_INBOX_DOMAIN: its addresses send only through the inbox endpoints. */
+  /** SHARED_INBOX_DOMAIN: its addresses send only from their own inbox, under the shared domain's rules. */
   sharedInboxDomain?: string | null | undefined;
+  /**
+   * The process's trust & safety settings reader (monitorSettingsReader).
+   * Optional: without it, a send that needs the settings reads them.
+   */
+  monitorSettings?: (() => Promise<MonitorSettings>) | undefined;
   /**
    * Arms the webhook drain for the inbox events an inbox send writes.
    * Optional: without it the rows still land and the webhooks.reconcile
@@ -121,7 +127,8 @@ export interface AcceptEmailPayload {
   attachments?: EmailAttachment[] | undefined;
   scheduledAt?: Date | undefined;
   /** From verifySenderDomain — callers verify the sender before accepting;
-   * null only for the dashboard's onboarding email from ONBOARDING_EMAIL_FROM. */
+   * null only for the dashboard's onboarding email from ONBOARDING_EMAIL_FROM
+   * and for mail from a shared-domain inbox. */
   domainId: string | null;
   /** Topic-scoped send; callers validate team ownership before accepting. */
   topicId?: string | undefined;
@@ -362,6 +369,11 @@ export type AcceptEmailResult =
   /** An inbox's send rules hold it; `reasons` are rule codes, never content. */
   | { ok: false; reason: "inbox_send_policy"; reasons: string[] }
   | { ok: false; reason: "inbox_send_cap_reached"; retryAfterSec: number }
+  /** A shared-domain rule refused it; SHARED_REFUSALS holds each one's answer. */
+  | { ok: false; reason: Exclude<SharedRefusalReason, "shared_team_cap"> }
+  | { ok: false; reason: "shared_team_cap"; retryAfterSec: number }
+  /** A generic send from a shared-domain inbox broke one of its From rules; `message` names it. */
+  | { ok: false; reason: "shared_from"; message: string }
   /** An inbox-scoped key sending from another address. */
   | { ok: false; reason: "inbox_scope" }
   /** A recipient whose domain can never receive mail (undeliverableRecipients); the first one. */
@@ -453,7 +465,13 @@ export async function acceptEmail(
   const actor = opts.actor ?? inboxActorFromAuth(auth as ApiKeyAuth);
   let inboxAccept = payload.inbox;
   if (!inboxAccept && auth.billing !== "uncapped") {
-    const gate = await gateGenericSend(opts.tx ?? deps.db, deps, { auth, payload, actor, now });
+    const gate = await gateGenericSend(opts.tx ?? deps.db, deps, {
+      auth,
+      billing: auth.billing,
+      payload,
+      actor,
+      now,
+    });
     if (!gate.ok) return gate;
     inboxAccept = gate.inbox ?? undefined;
   }
@@ -625,8 +643,8 @@ export async function acceptEmail(
     }
     return { id: row.id, parked };
   };
-  // The inbox's cap is charged before anything else is written, and handed
-  // back if a later step refuses: the transaction commits on a refusal.
+  // The inbox's caps are charged before anything else is written, and
+  // handed back if a later step refuses: the transaction commits on a refusal.
   const runAccept = async (txDb: Db) => {
     if (!inboxAccept) return acceptRow(txDb, null);
     const inbox = await beginInboxAccept(txDb, deps, {
@@ -638,6 +656,7 @@ export async function acceptEmail(
       now,
     });
     if (inbox === "cap") return "inbox_send_cap_reached" as const;
+    if (inbox === "team_cap") return "shared_team_cap" as const;
     const out = await acceptRow(txDb, inbox);
     if (typeof out === "string") await refundInboxAccept(txDb, inbox);
     return out;
@@ -648,7 +667,7 @@ export async function acceptEmail(
   if (accepted === "quota_backlog_full" || accepted === "warmup_backlog_full") {
     return { ok: false, reason: accepted };
   }
-  if (accepted === "inbox_send_cap_reached") {
+  if (accepted === "inbox_send_cap_reached" || accepted === "shared_team_cap") {
     return {
       ok: false,
       reason: accepted,

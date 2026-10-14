@@ -73,11 +73,12 @@ export interface TenantStatusOutcome {
 
 /**
  * Sets the team's SES tenant to DISABLED while the team is suspended and to
- * ENABLED otherwise, in every region the team has a domain in (a domain is
- * what creates the tenant there). The team is read at call time, so a late
- * retry applies the operator's latest decision. The SES call is injected
- * (core does not depend on the SES package) and one region's failure never
- * stops the others. Null when there is nothing to update.
+ * ENABLED otherwise, in every region the team has a domain in and in the one
+ * its shared-domain mail was associated in (each is what creates the tenant
+ * there). The team is read at call time, so a late retry applies the
+ * operator's latest decision. The SES call is injected (core does not depend
+ * on the SES package) and one region's failure never stops the others. Null
+ * when there is nothing to update.
  */
 export async function syncTenantSendingStatus(
   db: Db,
@@ -93,12 +94,18 @@ export async function syncTenantSendingStatus(
   const domains = await db
     .selectDistinct({ region: schema.domains.region })
     .from(schema.domains)
-    .where(eq(schema.domains.teamId, params.teamId))
-    .orderBy(schema.domains.region);
-  if (!team || domains.length === 0) return null;
+    .where(eq(schema.domains.teamId, params.teamId));
+  const [shared] = await db
+    .select({ region: schema.sharedInboxDomains.sesTenantRegion })
+    .from(schema.sharedInboxDomains)
+    .where(eq(schema.sharedInboxDomains.teamId, params.teamId));
+  const regions = [
+    ...new Set([...domains.map((d) => d.region), ...(shared?.region ? [shared.region] : [])]),
+  ].sort();
+  if (!team || regions.length === 0) return null;
   const status: TenantSendingStatus = team.suspendedAt ? "DISABLED" : "ENABLED";
   const results = await Promise.all(
-    domains.map(async ({ region }) => {
+    regions.map(async (region) => {
       try {
         await params.setStatus(region, status);
         return { region, error: null };

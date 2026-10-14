@@ -7,8 +7,10 @@ import {
   isSharedInboxSender,
   type RecipientClass,
   rampLimit,
+  SHARED_REFUSALS,
   secondsToNextUtcDay,
 } from "../src/inboxes/send-policy.js";
+import type { SharedSending } from "../src/inboxes/shared-mode.js";
 import { allowlisted } from "../src/receiving/trust.js";
 
 const NOW = new Date("2026-10-12T10:00:00Z");
@@ -27,6 +29,10 @@ function input(over: {
   safety?: Partial<InboxSafety>;
   firstSentAt?: Date | null;
   teamTierNew?: boolean;
+  sharedMode?: SharedSending;
+  sharedNamesOk?: boolean;
+  sharedTeamCap?: number;
+  sharedRecipientsToday?: number;
   actor?: InboxActor;
   approved?: boolean;
   requiresApproval?: boolean;
@@ -49,6 +55,9 @@ function input(over: {
       firstSentAt: over.firstSentAt ?? null,
     },
     teamTierNew: over.teamTierNew ?? false,
+    sharedMode: over.sharedMode ?? { mode: "reply_only", cause: "instance" },
+    sharedNamesOk: over.sharedNamesOk ?? true,
+    sharedTeamCap: over.sharedTeamCap ?? 1000,
     actor: over.actor ?? AGENT_KEY,
     approved: over.approved ?? false,
     requiresApproval: over.requiresApproval ?? false,
@@ -60,6 +69,7 @@ function input(over: {
     usage: {
       recipientsToday: over.recipientsToday ?? 0,
       newRecipientsToday: over.newRecipientsToday ?? 0,
+      sharedRecipientsToday: over.sharedRecipientsToday ?? 0,
     },
     now: NOW,
   };
@@ -82,7 +92,7 @@ describe("decideAgentSend", () => {
     expect(own.result).toBe("send");
   });
 
-  it("never lets a shared address start a conversation or write outside its thread, approved or not", () => {
+  it("reply_only: a shared address never starts a conversation or writes outside its thread, approved or not", () => {
     for (const approved of [false, true]) {
       expect(decideAgentSend(input({ shared: true, isReply: false, approved }))).toMatchObject({
         result: "refuse",
@@ -140,7 +150,7 @@ describe("decideAgentSend", () => {
     ]);
   });
 
-  it("open: anyone on an established team's own domain; a new team or the shared domain reads it as reply_only", () => {
+  it("open: anyone, for an established team; a new team reads it as reply_only", () => {
     const safety = { send_policy: "open" as const };
     const d = decideAgentSend(
       input({ safety, isReply: false, recipients: [to("new", "x@y.example")] }),
@@ -288,6 +298,85 @@ describe("decideAgentSend", () => {
         }),
       ).result,
     ).toBe("refuse");
+  });
+});
+
+describe("decideAgentSend on the shared domain", () => {
+  const OPEN: SharedSending = { mode: "open", cause: null };
+  const PAUSED: SharedSending = { mode: "receive_only", cause: "instance" };
+  const FREE: SharedSending = { mode: "reply_only", cause: "plan" };
+  const shared = (over: Parameters<typeof input>[0]) => input({ shared: true, ...over });
+  const cold = { isReply: false, recipients: [to("new", "x@y.example")] };
+
+  it("receive_only refuses every send, a person's or an approved thread reply too", () => {
+    for (const kind of ["agent", "human"] as const) {
+      for (const approved of [false, true]) {
+        expect(decideAgentSend(shared({ kind, approved, sharedMode: PAUSED }))).toEqual({
+          result: "refuse",
+          ...SHARED_REFUSALS.shared_paused,
+          reason: "shared_paused",
+        });
+      }
+    }
+  });
+
+  it("reply_only answers with its cause, the plan or the instance, and still lets a thread reply out", () => {
+    expect(decideAgentSend(shared({ ...cold, approved: true, sharedMode: FREE }))).toEqual({
+      result: "refuse",
+      ...SHARED_REFUSALS.shared_plan,
+      reason: "shared_plan",
+    });
+    expect(decideAgentSend(shared({ ...cold, approved: true }))).toEqual({
+      result: "refuse",
+      ...SHARED_REFUSALS.shared_domain,
+      reason: "shared_domain",
+    });
+    expect(decideAgentSend(shared({ sharedMode: FREE })).result).toBe("send");
+  });
+
+  it("open lifts the reply-only rule: people and approvals send, an agent follows send_policy and the new tier", () => {
+    expect(decideAgentSend(shared({ ...cold, kind: "human", sharedMode: OPEN }))).toEqual({
+      result: "send",
+      firstContact: true,
+      newRecipients: ["x@y.example"],
+      countTowardCap: true,
+    });
+    expect(decideAgentSend(shared({ ...cold, approved: true, sharedMode: OPEN })).result).toBe(
+      "send",
+    );
+    expect(reasons(shared({ ...cold, sharedMode: OPEN }))).toEqual(["send_policy"]);
+    const open = { send_policy: "open" as const };
+    expect(decideAgentSend(shared({ ...cold, safety: open, sharedMode: OPEN })).result).toBe(
+      "send",
+    );
+    expect(reasons(shared({ ...cold, safety: open, teamTierNew: true, sharedMode: OPEN }))).toEqual(
+      ["send_policy"],
+    );
+  });
+
+  it("open still reads as reply_only while the inbox's names fail the brand guard", () => {
+    expect(
+      decideAgentSend(shared({ ...cold, approved: true, sharedMode: OPEN, sharedNamesOk: false })),
+    ).toMatchObject({ result: "refuse", reason: "shared_domain" });
+    expect(decideAgentSend(shared({ sharedMode: OPEN, sharedNamesOk: false })).result).toBe("send");
+  });
+
+  it("caps the team's recipients from the shared domain per UTC day, approved sends included", () => {
+    const two = {
+      kind: "human" as const,
+      isReply: false,
+      recipients: [to("new"), to("known")],
+      sharedMode: OPEN,
+      sharedTeamCap: 5,
+    };
+    expect(decideAgentSend(shared({ ...two, sharedRecipientsToday: 3 })).result).toBe("send");
+    expect(decideAgentSend(shared({ ...two, sharedRecipientsToday: 4, approved: true }))).toEqual({
+      result: "refuse",
+      ...SHARED_REFUSALS.shared_team_cap,
+      reason: "shared_team_cap",
+      retryAfterSec: 14 * 3600,
+    });
+    expect(decideAgentSend(input({ ...two, sharedRecipientsToday: 4 })).result).toBe("send");
   });
 });
 

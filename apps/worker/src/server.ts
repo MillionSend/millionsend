@@ -117,7 +117,12 @@ import { screenReceived } from "./handlers/screen-received.js";
 import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
-import { abandonTenantStatus, retryTenantStatus, syncTenants } from "./handlers/tenants.js";
+import {
+  abandonTenantStatus,
+  retryTenantStatus,
+  sharedTenantResolver,
+  syncTenants,
+} from "./handlers/tenants.js";
 import { mediaPool } from "./media/scan.js";
 import { createAbuseVision } from "./media/vision.js";
 import { createSesSender } from "./ses-sender.js";
@@ -163,9 +168,12 @@ const platformDomains = new Set(
     url && URL.canParse(url) ? [ownerDomain(new URL(url).hostname)] : [],
   ),
 );
-// Platform mail (no domain row) goes out in the default region, the first served.
+// Mail with no domain row (platform mail, the shared inbox domain's) goes out
+// in the default region, the first served, so the shared identity's tenant
+// associations are made there too.
 const regions = servedRegions();
-const ses = createSesSender(regions[0] ?? env.AWS_REGION);
+const defaultRegion = regions[0] ?? env.AWS_REGION;
+const ses = createSesSender(defaultRegion);
 // SESv2 identity clients (GetEmailIdentity) for domain re-verification, cached
 // per region since identities live in the domain's region. Distinct from the
 // send client above (SendEmail); credentials fall back to the provider chain.
@@ -183,6 +191,15 @@ const clientForRegion = (region: string): SesIdentityClient => {
   }
   return client;
 };
+const sharedDomain = sharedInboxDomain();
+const sharedTenant =
+  sesTenantsEnabled() && sharedDomain
+    ? sharedTenantResolver(db, {
+        client: clientForRegion(defaultRegion),
+        region: defaultRegion,
+        sharedInboxDomain: sharedDomain,
+      })
+    : undefined;
 // One GetAccount client per served region: the 24-hour quota and the send
 // rate are both per region.
 const accountClients = new Map<string, ReturnType<typeof createSesAccountClient>>();
@@ -339,6 +356,7 @@ const inboxSendDeps: InboxSendDeps = {
     enqueueSend(emailId, opts?.startAfter, EMAIL_SEND_PRIORITY.transactional),
   inboxKeys: deriveInboxKeys(masterKeyBytes),
   sharedInboxDomain: inboxDeps.sharedInboxDomain,
+  monitorSettings,
   enqueueWebhookDeliveries: enqueueWebhook,
 };
 
@@ -719,6 +737,8 @@ await queue.work(
         ses,
         defaultConfigurationSet: env.SES_CONFIGURATION_SET,
         onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+        settings: monitorSettings,
+        sharedTenant,
         throttle: (region) => sendControls.throttle(region),
         reschedule: (emailId, at, priority) => enqueueSend(emailId, at, priority),
         sesQuota: sendControls,

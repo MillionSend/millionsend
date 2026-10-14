@@ -191,4 +191,9 @@ export const monitorSettingColumns = {
   warmupCapFirstDay: integer("warmup_cap_first_day"),
   warmupCapFirstWeek: integer("warmup_cap_first_week"),
   warmupCapFirstMonth: integer("warmup_cap_first_month"),
+  // So do the shared inbox domain's sending switches and team cap.
+  sharedInboxSend: boolean("shared_inbox_send"),
+  sharedInboxOpen: boolean("shared_inbox_open"),
+  sharedInboxTenants: boolean("shared_inbox_tenants"),
+  sharedInboxTeamDailyCap: integer("shared_inbox_team_daily_cap"),
 } as const;

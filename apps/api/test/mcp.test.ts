@@ -2051,6 +2051,39 @@ describe("receiving tools", () => {
       await client.close();
     });
 
+    it("create_inbox names a shared-domain address by username; update_inbox keeps its name rules", async () => {
+      const withShared = createApi({
+        db,
+        keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+        isCloud: false,
+        appBaseUrl,
+        enqueueEmailSend: async () => {},
+        receiving: { mxHost: "mx.millionsend.test", ingestSecret: INGEST_SECRET },
+        inboxKeys: deriveInboxKeys(randomBytes(32)),
+        sharedInboxDomain: "agents.example.test",
+      });
+      const client = await connect(await mintToken(), withShared);
+      const created = resultJson(
+        await client.callTool({ name: "create_inbox", arguments: { username: "Desk.Bot" } }),
+      );
+      expect(created).toMatchObject({
+        email_address: "desk.bot@mcp.agents.example.test",
+        shared: true,
+        expires_at: null,
+      });
+      const renamed = await client.callTool({
+        name: "update_inbox",
+        arguments: { inbox_id: String(created.id), from_name: "PayPal Support" },
+      });
+      expect(renamed.isError).toBe(true);
+      expect(resultJson(renamed)).toEqual({
+        statusCode: 422,
+        name: "validation_error",
+        message: "from_name can't be used on the shared domain: pick another",
+      });
+      await client.close();
+    });
+
     it("report held mail by id alone, serve none of it, and deliver it on release", async () => {
       const client = await connect(await mintToken());
       const guarded = resultJson(

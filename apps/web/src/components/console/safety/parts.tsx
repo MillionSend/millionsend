@@ -26,6 +26,7 @@ export const WHY_DOT: Record<string, string> = {
   held: "var(--ms-warn)",
   verdict: "var(--ms-warn)",
   destination: "var(--ms-warn)",
+  recipient: "var(--ms-warn)",
   outage: "var(--ms-danger)",
   media: "var(--ms-danger)",
 };

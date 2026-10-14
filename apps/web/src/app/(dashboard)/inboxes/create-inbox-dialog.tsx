@@ -1,10 +1,11 @@
 "use client";
 
+import { SHARED_USERNAME } from "@millionsend/core/inbox-username";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
@@ -12,7 +13,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { WarnCard } from "@/components/warn-card";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
-import { ACCEPT_FROM, acceptFromHint, acceptFromWarns } from "./parts";
+import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, nameReviewError } from "./parts";
 
 type Kind = "agent" | "human";
 type AcceptFrom = InboxSafety["accept_from"];
@@ -48,11 +49,6 @@ export function CreateInboxDialog({
   const [expires, setExpires] = useState<(typeof EXPIRY)[number]>("never");
   const shared = domain === SHARED;
 
-  // The shared domain never keeps an address forever; a day is its default.
-  useEffect(() => {
-    if (shared) setExpires((value) => (value === "never" ? "24h" : value));
-  }, [shared]);
-
   const create = useMutation(
     trpc.inboxes.create.mutationOptions({
       onSuccess: (inbox) => {
@@ -70,7 +66,10 @@ export function CreateInboxDialog({
   }, [reset, onClose]);
 
   const local = localPart.trim().toLowerCase();
-  const localValid = shared || LOCAL_PART_RE.test(local);
+  // On the shared domain the address is optional: left empty, it is random.
+  const localValid = shared
+    ? local === "" || SHARED_USERNAME.test(local)
+    : LOCAL_PART_RE.test(local);
   const domainName = shared ? sharedDomain : domains.find((d) => d.id === domain)?.name;
   const submit = () => {
     if (!domain || !localValid || create.isPending) return;
@@ -79,7 +78,7 @@ export function CreateInboxDialog({
       acceptFrom,
       expiresIn: expires === "never" ? null : expires,
       ...(name.trim() ? { name: name.trim() } : {}),
-      ...(shared ? {} : { domainId: domain, localPart: local }),
+      ...(shared ? (local ? { localPart: local } : {}) : { domainId: domain, localPart: local }),
     });
   };
 
@@ -95,6 +94,7 @@ export function CreateInboxDialog({
             ? t("limit.full")
             : create.error.message
     : null;
+  const review = nameReviewError(t, create.error);
 
   return (
     <Modal open={open} onClose={close} onConfirm={submit} title={t("create.title")}>
@@ -111,23 +111,17 @@ export function CreateInboxDialog({
         <div className="ms-field">
           <label htmlFor="inbox-local">{t("create.address")}</label>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            {shared ? (
-              <span className="ms-mono" style={{ flex: "1 1 160px", color: "var(--ms-muted)" }}>
-                {t("create.random")}
-              </span>
-            ) : (
-              <input
-                id="inbox-local"
-                className="ms-input mono"
-                style={{ flex: "1 1 160px", minWidth: 0 }}
-                value={localPart}
-                disabled={create.isPending}
-                placeholder="orders-agent"
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(event) => setLocalPart(event.target.value)}
-              />
-            )}
+            <input
+              id="inbox-local"
+              className="ms-input mono"
+              style={{ flex: "1 1 160px", minWidth: 0 }}
+              value={localPart}
+              disabled={create.isPending}
+              placeholder={shared ? t("create.random") : "orders-agent"}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setLocalPart(event.target.value)}
+            />
             <Select
               value={domain}
               onChange={setDomain}
@@ -136,15 +130,13 @@ export function CreateInboxDialog({
               ariaLabel={t("create.address")}
               options={[
                 ...domains.map((d) => ({ value: d.id, label: `@${d.name}` })),
-                ...(sharedDomain
-                  ? [{ value: SHARED, label: `@${sharedDomain}`, hint: t("create.random") }]
-                  : []),
+                ...(sharedDomain ? [{ value: SHARED, label: `@${sharedDomain}` }] : []),
               ]}
             />
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
             {local && !localValid
-              ? t("create.errors.localPart")
+              ? t(shared ? "create.errors.username" : "create.errors.localPart")
               : sharedDomain
                 ? t("create.addressHint", { domain: sharedDomain })
                 : t("create.addressHintOwn")}
@@ -209,10 +201,7 @@ export function CreateInboxDialog({
               width="100%"
               disabled={create.isPending}
               ariaLabel={t("expires.label")}
-              options={EXPIRY.filter((value) => !(shared && value === "never")).map((value) => ({
-                value,
-                label: t(`expires.${value}`),
-              }))}
+              options={EXPIRY.map((value) => ({ value, label: t(`expires.${value}`) }))}
             />
           </div>
         </div>
@@ -228,7 +217,7 @@ export function CreateInboxDialog({
         )}
         {error ? (
           <div className="ms-field-error" style={{ margin: 0 }}>
-            {error}
+            {review ? `${review} ${t("create.errors.orRandom")}` : error}
           </div>
         ) : null}
         <ModalFooter>

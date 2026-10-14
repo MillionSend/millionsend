@@ -305,12 +305,20 @@ ferramenta MCP `send_email`. Na ordem:
 1. **Identidade.** Uma chave restrita a uma caixa só envia pelo endereço da
    caixa (`403 restricted_api_key`; `550 5.7.1` pelo SMTP).
 2. **Domínio compartilhado.** Um
-   [endereço compartilhado](/pt-BR/concepts/inboxes#domínio-compartilhado) só
-   responde dentro das próprias conversas, para quem está nelas e teve o
-   endereço confirmado pelo próprio domínio e para os endereços de login da
-   equipe (os `owner_addresses`, a lista de permitidos e um `Reply-To` de
-   outra organização não contam lá). Qualquer outra coisa é recusada com
-   `403 inbox_send_policy`, mesmo aprovada.
+   [endereço compartilhado](/pt-BR/concepts/inboxes#domínio-compartilhado)
+   não envia nada enquanto a instância pausa o envio pelo domínio
+   compartilhado. No plano Free, enquanto a instância limita os endereços
+   compartilhados a respostas, ou enquanto o `from_name` ou o subdomínio da
+   equipe parece o de uma marca conhecida, ele só responde dentro das
+   próprias conversas, para quem está nelas e teve o endereço confirmado
+   pelo próprio domínio e para os endereços de login da equipe (os
+   `owner_addresses`, a lista de permitidos e um `Reply-To` de outra
+   organização nunca contam lá). Qualquer outra coisa é recusada com
+   `403 inbox_send_policy`, mesmo aprovada. Todo envio por um endereço
+   compartilhado também conta no limite diário da equipe no domínio
+   compartilhado (`429 inbox_send_cap_reached`) e leva no máximo 10
+   destinatários (`422 validation_error`); o `POST /emails/batch` e o relay
+   SMTP recusam um endereço compartilhado.
 3. **Limite diário.** `send_cap` destinatários por dia UTC. Acima disso,
    `429 inbox_send_cap_reached`, com o `retry-after` contando até a
    meia-noite UTC. Envios aprovados contam, mas nunca são barrados.
@@ -337,10 +345,11 @@ retém como rascunho, com um motivo:
    - `reply_only`, o padrão: respostas dentro de uma conversa, para quem
      escreveu nela, para os responsáveis e para a lista de permitidos.
    - `allowlist`: isso, mais conversas novas com os responsáveis e com a lista
-     de permitidos.
-   - `open`: qualquer pessoa. Só no seu domínio, e não enquanto a sua equipe
-     é nova no envio (nos primeiros 1.000 envios ou 72 horas, ou com menos de
-     10.000 envios nos 7 dias depois do primeiro).
+     de permitidos. Não existe no domínio compartilhado.
+   - `open`: qualquer pessoa. No seu domínio, ou no domínio compartilhado
+     quando ele pode começar conversas, e não enquanto a sua equipe é nova no
+     envio (nos primeiros 1.000 envios ou 72 horas, ou com menos de 10.000
+     envios nos 7 dias depois do primeiro).
 7. **Códigos privados** (`private_code`), como acima. Um encaminhamento
    confere se a mensagem encaminhada traz um código ou um link.
 8. **Aumento gradual.** Os destinatários novos por dia ficam dentro do limite

@@ -295,6 +295,71 @@ describe("ingest into inboxes", () => {
     expect(refused).toMatchObject({ ok: false, code: 554 });
   });
 
+  it("stores the shared domain's postmaster@ and abuse@ as catch-all mail of the oldest System team, never the subdomain's", async () => {
+    const SHARED = "agents.example";
+    const ingest = (recipients: string[]) =>
+      ingestReceivedEmail(deps({ sharedInboxDomain: SHARED }), {
+        raw: message({}),
+        envelope: envelope(recipients),
+      });
+    expect(await ingest([`abuse@${SHARED}`])).toMatchObject({
+      ok: false,
+      code: 554,
+      enhanced: "5.1.1",
+    });
+
+    const desk = await createTeam(db, "inboxes-desk");
+    const [label] = await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId: desk, name: `desk.${SHARED}` })
+      .returning({ id: schema.sharedInboxDomains.id });
+    const shared = {
+      sharedDomainId: label?.id as string,
+      safety: { accept_from: "anyone" as const },
+    };
+    const bot = await addInbox(desk, `bot-7f3k@desk.${SHARED}`, null, shared);
+    await addInbox(desk, `postmaster@desk.${SHARED}`, null, shared);
+    const system = await createTeam(db, "inboxes-system");
+    await db
+      .update(schema.teams)
+      .set({ plan: "system", createdAt: new Date("2020-01-01T00:00:00Z") })
+      .where(eq(schema.teams.id, system));
+    const newer = await createTeam(db, "inboxes-system-2");
+    await db.update(schema.teams).set({ plan: "system" }).where(eq(schema.teams.id, newer));
+    const systemHook = await createWebhookEndpoint(db, system, null);
+
+    const result = await ingest([
+      `Postmaster@desk.${SHARED}`,
+      `bot-7f3k@desk.${SHARED}`,
+      `abuse@${SHARED}`,
+    ]);
+    if (!result.ok) throw new Error(`refused ${result.code}`);
+    const idOf = (teamId: string) => result.stored.find((s) => s.teamId === teamId)?.id ?? "";
+    expect(result.stored.map((s) => s.teamId).sort()).toEqual([desk, system].sort());
+    const role = await rowOf(idOf(system));
+    expect(role).toMatchObject({
+      catchAll: true,
+      domainIds: [],
+      receivedFor: [`Postmaster@desk.${SHARED}`, `abuse@${SHARED}`],
+      announcedAt: NOW,
+    });
+    // No membership: no inbox rules and no judge, not even the inbox at postmaster@.
+    expect(await memberships(role.id)).toEqual([]);
+    expect((await hooks(systemHook, role.id)).map((h) => h.type)).toEqual(["email.received"]);
+    expect((await rowOf(idOf(desk))).receivedFor).toEqual([`bot-7f3k@desk.${SHARED}`]);
+    expect((await memberships(idOf(desk))).map((m) => m.inboxId)).toEqual([bot]);
+
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: NOW, suspensionReason: "manual" })
+      .where(eq(schema.teams.id, system));
+    expect(await ingest([`abuse@${SHARED}`])).toMatchObject({
+      ok: false,
+      code: 554,
+      enhanced: "5.7.1",
+    });
+  });
+
   it("drops an address with no inbox where catch-all is off, and answers 554 when nothing remains (stale RCPT)", async () => {
     await addInbox(acme, "desk@strict.acme.test", strictDomain, { kind: "human" });
     const id = await ingestOne(message({ to: "x" }), [

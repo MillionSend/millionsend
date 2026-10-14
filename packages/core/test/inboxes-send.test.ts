@@ -660,7 +660,11 @@ describe("the acceptEmail hook on generic surfaces", () => {
         await auth(),
         payload(inbox, { from: `ghost@team.${w.sharedDomain}`, domainId: null }),
       ),
-    ).toMatchObject({ ok: false, reason: "inbox_send_policy" });
+    ).toEqual({
+      ok: false,
+      reason: "shared_from",
+      message: "from must be the address of one of your inboxes on the shared domain",
+    });
     const plain = await acceptEmail(
       w.deps,
       await auth(),
@@ -720,7 +724,7 @@ describe("the acceptEmail hook on generic surfaces", () => {
         headers: undefined,
         now: new Date(),
       });
-      if (begun === "cap") throw new Error("unexpected cap");
+      if (typeof begun === "string") throw new Error(`unexpected ${begun}`);
       await refundInboxAccept(tx as unknown as Db, begun);
       return begun;
     });

@@ -8,8 +8,9 @@ conversas e envia pelo mesmo endereço. Dê uma para um agente de IA, que lê
 pela API, por webhooks ou pelo [servidor MCP](/pt-BR/mcp), ou para pessoas,
 que leem pelo painel. As caixas de entrada funcionam em cima do
 [recebimento](/pt-BR/concepts/receiving): uma caixa é um endereço de um dos
-seus domínios de recebimento, ou um endereço aleatório no domínio
-compartilhado da instância, pronto sem mexer em DNS.
+seus domínios de recebimento, ou um endereço no domínio compartilhado da
+instância, com o nome que você escolher ou aleatório, pronto sem mexer em
+DNS.
 
 A API espelha as Inboxes do Resend, então o SDK de pré-lançamento do Resend
 funciona com o MillionSend. O que o MillionSend acrescenta vem como campos e
@@ -96,20 +97,22 @@ são do MillionSend.
 
 | Campo | Regras |
 | --- | --- |
-| `email_address` | Um endereço de um domínio verificado da sua equipe que recebe aqui (veja [Endereços](#endereços)). Ele é guardado sem espaços nas pontas e em minúsculas; a parte antes do `@` aceita até 64 letras, dígitos e `. _ % + -`, sem ponto nas pontas e sem `..`. Não muda depois. Deixe de fora para ganhar um endereço aleatório no [domínio compartilhado](#domínio-compartilhado). |
+| `email_address` | Um endereço de um domínio verificado da sua equipe que recebe aqui (veja [Endereços](#endereços)). Ele é guardado sem espaços nas pontas e em minúsculas; a parte antes do `@` aceita até 64 letras, dígitos e `. _ % + -`, sem ponto nas pontas e sem `..`. Não muda depois. Deixe de fora para ganhar um endereço no [domínio compartilhado](#domínio-compartilhado). |
+| `username` | Com o `email_address` de fora, a parte antes do `@` do endereço no [domínio compartilhado](#domínio-compartilhado): sem espaços nas pontas e em minúsculas, de 1 a 64 letras, dígitos e `. _ -`, começando e terminando com letra ou dígito, sem `..` e nunca cortado. Se ficar de fora, o endereço é aleatório. Não muda depois. |
 | `name` | De 1 a 64 caracteres; o próprio endereço quando fica de fora. |
-| `from_name` | O nome de exibição dos e-mails que a caixa envia, com até 78 caracteres: um nome simples, sem `@`, `:`, `<`, `>`, quebras de linha, links nem números de telefone. |
+| `from_name` | O nome de exibição dos e-mails que a caixa envia, com até 78 caracteres: um nome simples, sem `@`, `:`, `<`, `>`, quebras de linha, links nem números de telefone. No domínio compartilhado, ele passa por uma [revisão](#domínio-compartilhado) antes. |
 | `kind` | `agent` (o padrão) ou `human`. |
-| `expires_in` | Quando a caixa [expira](#validade), como `1h`, `24h` ou `7d`. |
+| `expires_in` | Quando a caixa [expira](#validade), como `1h`, `24h` ou `7d`; se ficar de fora, nunca. |
 | `safety` | Qualquer uma das [configurações de segurança](#configurações-de-segurança); as outras ficam com os padrões do tipo. |
 | `forwarding` | `true` acrescenta um `receiving_address` no domínio compartilhado, para encaminhar para a caixa uma conta de e-mail que você mantém em outro lugar (veja [Encaminhar para uma caixa](#encaminhar-para-uma-caixa)). |
 
 | Resposta | Quando |
 | --- | --- |
-| `409 validation_error` | Outra caixa já usa o endereço. |
+| `409 validation_error` | Outra caixa já usa o endereço, inclusive um `username` escolhido: nenhum outro nome é escolhido no lugar dele. |
 | `403 validation_error` | O limite de caixas do plano foi atingido: "You have reached the inbox limit of your plan. Upgrade to add more." |
-| `429 rate_limit_exceeded` | Foram criadas caixas demais na última hora; o `retry-after` diz quando tentar de novo. Excluir caixas não devolve essa folga. |
-| `422 validation_error` | O domínio não é um domínio verificado da sua equipe, não recebe aqui, a instância não tem domínio compartilhado, a instância não recebe e-mail nenhum, ou uma configuração quebra uma regra. |
+| `429 rate_limit_exceeded` | Foram criadas caixas demais na última hora, ou a revisão de nomes do domínio compartilhado chegou ao limite de hoje da sua equipe (20 nomes recusados ou 200 revisões); o `retry-after` diz quando tentar de novo. Excluir caixas não devolve essa folga. |
+| `422 validation_error` | O domínio não é um domínio verificado da sua equipe, não recebe aqui, a instância não tem domínio compartilhado, a instância não recebe e-mail nenhum, um `username` quebra uma regra, é reservado ou não pode ser usado no domínio compartilhado, o `username` vem junto com o `email_address`, ou uma configuração quebra uma regra. |
+| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado; `retry-after: 60`. Uma requisição sem nenhum dos dois nunca recebe essa resposta. |
 
 As outras chamadas:
 
@@ -117,7 +120,8 @@ As outras chamadas:
   `?kind=agent` ou `?kind=human` filtra.
 - `GET /inboxes/{id}` lê uma, pelo id ou pelo endereço.
 - `PATCH /inboxes/{id}` muda `name`, `from_name` ou `expires_in` e devolve a
-  caixa inteira.
+  caixa inteira. No domínio compartilhado, um `from_name` novo passa pela
+  revisão antes, com as mesmas respostas da criação.
 - `DELETE /inboxes/{id}` exclui a caixa com as conversas, os rascunhos e as
   etiquetas dela. As mensagens enviadas só para o endereço da caixa vão
   junto; uma mensagem que também chegou a outra caixa, ou a um endereço do
@@ -171,28 +175,98 @@ precisam de DNS nenhum (quem opera define `SHARED_INBOX_DOMAIN`; veja
 [Auto-hospedagem](/pt-BR/self-hosting#domínio-compartilhado-das-caixas)).
 Cada equipe ganha um subdomínio próprio lá, com o nome da equipe, como
 `acme.agents.example`, ou `team-` e seis caracteres aleatórios quando o nome
-parece o de uma marca conhecida. Deixe o `email_address` de fora e a caixa
-ganha um endereço aleatório nele, montado a partir do nome:
-`signup-bot-7f3k@acme.agents.example`. No painel, a criação oferece isso como
-**Endereço aleatório**.
+parece o de uma marca conhecida ou um nome reservado, ou quando não passa na
+revisão abaixo. O subdomínio de uma equipe excluída nunca vai para outra
+equipe. Deixe o `email_address` de fora e o `username` dá nome ao endereço:
 
-Os endereços compartilhados servem para tarefas curtas de agentes, como se
-cadastrar num serviço e ler o código de confirmação:
+```sh
+curl -X POST "https://api.millionsend.com/inboxes" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "username": "orders", "name": "Orders agent" }'
+```
 
-- Eles expiram: depois de 24 horas, a não ser que o `expires_in` diga outra
-  coisa, e em no máximo 30 dias; "nunca" não existe aqui.
-- Eles só respondem dentro das próprias conversas, para remetentes cujo
-  domínio confirmou o endereço e para os endereços de login das pessoas da
-  equipe. Os endereços de responsáveis, a lista de permitidos e um `Reply-To`
-  de outra organização não contam aqui, e o `forward_to` só aceita endereços
-  de login da equipe: o domínio compartilhado é de todas as equipes, então ele
-  nunca escreve para um endereço que ninguém comprovou. Começar uma conversa responde
-  `403 inbox_send_policy`, com ou sem aprovação: use o seu domínio para isso.
-  O `send_policy` fica em `reply_only`.
-- Eles enviam para no máximo 50 destinatários por dia (`send_cap` de 1 a
-  50).
-- Eles só enviam pelos endpoints das caixas: `POST /emails` a partir de um
-  endereço compartilhado responde `403`.
+Essa caixa é `orders@acme.agents.example`. Sem `username`, o endereço é
+aleatório, como `inbox-7f3k9q2m@acme.agents.example`. Na criação pelo
+painel, digite o nome de usuário, ou deixe o campo vazio para ganhar um
+endereço aleatório.
+
+Um nome de usuário escolhido responde `422` quando é reservado (postmaster,
+abuse, admin, security, support, noreply, no-reply, billing, hostmaster,
+webmaster, mailer-daemon e root, comparados sem `.`, `_` e `-`, então
+`no.reply` também conta), começa com `fwd-` (o formato dos endereços de
+encaminhamento) ou parece o de uma marca conhecida. Um que já está em uso
+responde `409`: nenhum outro nome é escolhido no lugar dele.
+
+**Revisão de nomes.** Quando a instância usa um juiz de conteúdo, um nome de
+usuário escolhido, um `from_name` (na criação e em toda mudança) e o
+subdomínio da equipe passam por uma revisão antes de serem publicados, para
+ver se eles se passam por uma marca, um banco, um órgão do governo ou um
+cargo oficial. Um nome recusado responde `422 validation_error`, como
+"username can't be used on the shared domain: pick another", sem nunca
+mostrar o raciocínio do juiz. Enquanto a revisão não responde, um nome de
+usuário ou um `from_name` responde `503 name_review_unavailable` com
+`retry-after: 60`, e o subdomínio de uma equipe nova fica com `team-` e seis
+caracteres aleatórios. Depois de 20 nomes recusados, ou 200 revisões, num dia
+UTC, a resposta é `429 rate_limit_exceeded` até a meia-noite UTC. Um
+endereço aleatório sem `from_name` nunca é recusado por causa da revisão, e
+uma instância sem juiz aplica só as regras acima.
+
+Os e-mails para `postmaster@` e `abuse@` no domínio compartilhado, ou no
+subdomínio de qualquer equipe, vão para quem opera a instância, nunca para
+uma caixa.
+
+Os endereços compartilhados têm regras próprias, porque o domínio é de todas
+as equipes:
+
+- Eles duram até serem excluídos, a não ser que o `expires_in` diga outra
+  coisa, e contam no limite de caixas do seu plano até lá. Um que ninguém usa
+  há 90 dias é excluído (veja [Validade](#validade)).
+- O que eles enviam depende do seu plano e da instância:
+  - Num plano pago, quando a instância permite, as pessoas começam conversas
+    por eles, e um agente também, quando o `send_policy` da caixa é `open` e
+    a sua equipe já passou dos primeiros envios; se não, as conversas novas
+    do agente esperam uma pessoa como rascunhos. Cada mensagem para alguém
+    de fora da equipe que nunca escreveu para a caixa passa pelo juiz de
+    conteúdo da instância antes de sair, e fica retida para revisão quando
+    parece phishing.
+  - No plano Free, eles só respondem dentro das próprias conversas ("On the
+    Free plan, addresses on the shared domain only reply inside their
+    threads"). O mesmo vale para os de todas as equipes enquanto a instância
+    limita os endereços compartilhados a respostas, e para uma caixa cujo
+    `from_name`, endereço ou subdomínio da equipe parece o de uma marca
+    conhecida, ou cujo subdomínio é um nome reservado ("Addresses on the
+    shared domain only reply inside their threads"). As
+    respostas vão para remetentes cujo domínio confirmou o endereço e para
+    os endereços de login das pessoas da equipe.
+  - Enquanto a instância pausa o envio pelo domínio compartilhado, nada sai,
+    nem respostas ("Sending from addresses on the shared domain is paused;
+    mail to them still arrives").
+
+  Cada uma dessas recusas responde `403 inbox_send_policy`, com ou sem
+  aprovação. O `send_policy` salvo nunca é reescrito: ele volta a valer
+  assim que o plano ou a instância permitem.
+- Os endereços de responsáveis, a lista de permitidos e um `Reply-To` de
+  outra organização não contam aqui (o `send_policy` não pode ser
+  `allowlist`), e o `forward_to` só aceita endereços de login da equipe: o
+  domínio compartilhado é de todas as equipes, então ele nunca escreve para
+  um endereço que ninguém comprovou.
+- Eles enviam para no máximo 10 destinatários por e-mail
+  (`422 validation_error`) e 50 por dia por caixa (`send_cap` de 1 a 50).
+  Todos os endereços compartilhados da sua equipe, somados, chegam a 1.000
+  destinatários por dia UTC, a não ser que a instância defina outro limite;
+  acima disso, mesmo com aprovação, eles respondem
+  `429 inbox_send_cap_reached` ("Your team reached today's limit for mail
+  from the shared domain").
+- Eles passam pelo `POST /emails` e pela ferramenta MCP `send_email` só
+  quando podem começar conversas, seguindo as regras da caixa. O `from`
+  precisa ser exatamente o endereço da caixa, sem `+tag`, sem nome de
+  exibição ou com o `from_name` da caixa, e o e-mail não pode ter
+  `scheduled_at`, `reply_to`, anexos nem cabeçalhos personalizados: cada um
+  responde `422 validation_error` dizendo a regra. Uma chave restrita a um
+  domínio recebe `403 restricted_api_key`. Fora disso, o `POST /emails`
+  responde `403 inbox_send_policy`, e o `POST /emails/batch` e o relay SMTP
+  sempre recusam um endereço compartilhado.
 - O `domain_id` deles é o id do subdomínio compartilhado da equipe, que o
   `GET /domains` não lista.
 
@@ -210,10 +284,11 @@ para receber aqui. Isso exige o domínio compartilhado da instância.
 
 ## Validade
 
-O `expires_in` é um número seguido de `h` ou `d`, de `1h` a `365d`, e até
-`30d` no domínio compartilhado. Um `PATCH` com um `expires_in` novo conta a
-partir daquele momento, e `null` tira a validade de uma caixa no seu domínio.
-O `expires_at` mostra quando ela termina.
+O `expires_in` é um número seguido de `h` ou `d`, de `1h` a `365d`; se ficar
+de fora, a caixa nunca expira. Um `PATCH` com um `expires_in` novo conta a
+partir daquele momento, e `null` tira a validade. O `expires_at` mostra
+quando ela termina. Uma caixa compartilhada de antes de os endereços de lá
+ficarem permanentes mantém o `expires_at` até um `PATCH` mudá-lo.
 
 No `expires_at`, a caixa para: e-mails para ela são recusados (`550 5.1.1`)
 ou, num domínio com pega-tudo ligado, ficam em Todos os recebidos como os de
@@ -223,6 +298,13 @@ num `DELETE`, com um webhook `inbox.expired` seguido de `inbox.deleted`, e as
 chaves de API dela são revogadas. Fazer uma caixa vencer antes do previsto
 exige o papel de responsável ou de admin, como excluí-la; qualquer membro
 pode estender a validade.
+
+Uma caixa do domínio compartilhado que ninguém usa há 90 dias é excluída do
+mesmo jeito, em até uma hora, seja qual for o `expires_at`. Conta como uso um
+e-mail entregue nela (spam não conta), qualquer coisa que a **Atividade**
+dela registre de uma pessoa, uma chave de API ou um app, como um envio ou a
+leitura de um código, e qualquer chamada pela API ou pelo MCP em
+`/inboxes/{id}/`.
 
 ## Conversas
 
@@ -310,7 +392,8 @@ A resposta vai para o `Reply-To` da mensagem, ou então para o remetente;
 responder a uma mensagem que a própria caixa enviou vai para os destinatários
 dela. O `reply_all` acrescenta os outros endereços de `to` e `cc` da mensagem
 como `cc`. O `bcc` nunca é copiado, e um envio leva no máximo 50
-destinatários. O assunto padrão é `Re: ` mais o assunto da conversa. A
+destinatários, 10 a partir de um endereço compartilhado. O assunto padrão é
+`Re: ` mais o assunto da conversa. A
 resposta leva `In-Reply-To`, `References` com o token da conversa e, numa
 caixa de agente, `Auto-Submitted: auto-replied`.
 
@@ -327,10 +410,10 @@ respondem:
 | --- | --- |
 | `200` | Enviado: o e-mail, com `email_id`, `thread_id` e `inbox_id`. |
 | `202` | Retido para uma pessoa: o [rascunho](#rascunhos-e-aprovação), com `status: "pending_approval"` e os motivos em `approval_reasons`. |
-| `403 inbox_send_policy` | As regras da caixa recusam o envio de vez, como um endereço compartilhado começando uma conversa. |
+| `403 inbox_send_policy` | As regras da caixa recusam o envio de vez, como um endereço compartilhado começando uma conversa quando só pode responder. |
 | `403 email_quarantined` | O e-mail está retido na quarentena, ou tem vírus (no encaminhamento). |
 | `403 restricted_api_key` | Uma chave restrita a uma caixa tentando outra caixa. |
-| `429 inbox_send_cap_reached` | O limite diário da caixa acabou; o `retry-after` conta até a meia-noite UTC. |
+| `429 inbox_send_cap_reached` | O limite diário da caixa acabou, ou o limite diário da sua equipe no domínio compartilhado; o `retry-after` conta até a meia-noite UTC. |
 
 Para responder a qualquer e-mail recebido, numa caixa ou não, use o
 [`POST /emails/receiving/{id}/reply`](/pt-BR/concepts/receiving#responder-e-encaminhar-pelo-servidor).
@@ -371,8 +454,9 @@ recusado com `422 validation_error` quando é enviado ou aprovado (veja
 está enviando. Uma pessoa no painel, ou uma chave de API da equipe com acesso
 total que não esteja restrita a uma caixa, aprova ao enviar: o envio pula as
 regras que retêm o e-mail do agente. Ele ainda conta no limite diário (sem
-ser barrado por ele), um endereço compartilhado continua respondendo só nas
-próprias conversas, e os limites de envio de sempre da sua equipe valem. Um
+ser barrado por ele), um endereço compartilhado continua seguindo as
+[regras do domínio compartilhado](#domínio-compartilhado), e os limites de
+envio de sempre da sua equipe valem. Um
 agente não aprova: uma chave restrita a uma caixa ou um cliente MCP que envia
 um rascunho pendente recebe `403 approval_required`, e um que envia um
 rascunho comum que as regras retêm recebe `202`, com o rascunho agora
@@ -414,16 +498,17 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | `owner_addresses` | Até 50 endereços a mais tratados como responsáveis pela caixa, além dos endereços de login das pessoas da sua equipe. |
 | `screening` | Dá notas de injeção de prompt e phishing aos e-mails de remetentes de fora (caixas de agente). |
 | `extract_codes` | Tira dos e-mails os códigos de verificação e links de acesso (`extracted.code`, `extracted.link`, `codes/latest`). |
-| `send_policy` | `reply_only`; `allowlist`, que acrescenta conversas novas com responsáveis e com a lista de permitidos; ou `open`, qualquer pessoa, no seu domínio e depois que a equipe passou dos primeiros envios. |
+| `send_policy` | `reply_only`; `allowlist`, que acrescenta conversas novas com responsáveis e com a lista de permitidos (fora do domínio compartilhado); ou `open`, qualquer pessoa, depois que a equipe passou dos primeiros envios, e no domínio compartilhado só quando ele pode começar conversas. |
 | `require_approval` | Todo envio da caixa espera uma pessoa. |
 | `private_codes` | Um código ou link de acesso que a caixa recebeu não pode ser enviado para ninguém além dos responsáveis e da lista de permitidos. |
 | `send_cap` | Para quantos destinatários a caixa pode enviar por dia UTC sem uma pessoa: de 1 a 100.000, ou `null` para não ter limite; de 1 a 50 no domínio compartilhado. |
 | `forward_to` | Até 5 endereços que recebem uma cópia de toda mensagem entregue, menos spam: endereços de login de pessoas da equipe ou endereços de responsáveis. |
 
-Uma configuração que quebra uma regra responde `422` com o motivo: `open` no
-domínio compartilhado ou para uma equipe ainda nova no envio, `screening`
-numa caixa `human`, ou um endereço de `forward_to` que não é de alguém da
-equipe nem de responsável. Uma chave restrita a uma caixa não muda essas
+Uma configuração que quebra uma regra responde `422` com o motivo:
+`allowlist` no domínio compartilhado, `open` num endereço compartilhado que
+só pode responder ou para uma equipe ainda nova no envio, `screening` numa
+caixa `human`, ou um endereço de `forward_to` que não é de alguém da equipe
+nem de responsável. Uma chave restrita a uma caixa não muda essas
 configurações (`403 restricted_api_key`), o servidor MCP não tem ferramenta
 para elas, e no painel só donos e admins mudam.
 [Segurança de agentes](/pt-BR/concepts/agent-safety) explica o que cada uma
@@ -569,7 +654,8 @@ para o log de auditoria da equipe.
 | Caixas criadas por hora | 10 no Free, 60 no Starter, 600 no Pro e no Scale; sem limite na auto-hospedagem. |
 | E-mails por caixa | 200 mensagens aceitas a cada hora corrida numa caixa de agente, 2.000 numa caixa de pessoas. Acima disso, quem envia recebe `452 4.2.2` e tenta de novo mais tarde. |
 | Envios | `send_cap` destinatários por dia UTC. Uma caixa nova chega a destinatários novos aos poucos: 10 no primeiro dia de envio, depois 20, 40, 80, 160 e assim por diante, até o limite. |
-| Destinatários por envio | 50: `to`, `cc` e `bcc` somados. |
+| Destinatários por envio | 50: `to`, `cc` e `bcc` somados; 10 a partir de um endereço compartilhado. |
+| Domínio compartilhado | 1.000 destinatários por dia UTC para todos os endereços compartilhados da sua equipe, a não ser que a instância defina outro limite; 20 nomes recusados e 200 revisões de nomes por dia UTC; uma caixa compartilhada sem uso há 90 dias é excluída. |
 | Etiquetas | 100 por caixa. |
 | Listas de segurança | 500 itens na lista de permitidos, 50 endereços de responsáveis, 5 endereços em `forward_to`. |
 | Chaves restritas | 5 ativas por caixa. |
@@ -619,6 +705,10 @@ Onde o Resend deixa espaço, ou o MillionSend é diferente:
 
 - Criar uma caixa ou um rascunho devolve o objeto inteiro; o
   `{ object, id }` do Resend vem dentro dele.
+- O Resend exige o `email_address`; aqui ele é opcional: se ficar de fora, a
+  caixa ganha um endereço no [domínio compartilhado](#domínio-compartilhado),
+  aleatório por um SDK do Resend, que não consegue enviar o `username`, e
+  permanente, porque ele também não envia o `expires_in`.
 - O `kind` padrão é `agent`, porque um SDK do Resend não consegue enviá-lo,
   então as caixas criadas por um deles ganham as proteções de agente. Crie
   caixas `human` no painel, com um SDK do MillionSend ou por HTTP direto.
@@ -637,13 +727,14 @@ Onde o Resend deixa espaço, ou o MillionSend é diferente:
   confira o `object`, que vem `inbox_draft`, antes de tratar o resultado como
   enviado.
 - Erros novos: `403 inbox_send_policy`, `429 inbox_send_cap_reached`,
-  `403 approval_required` e `403 email_quarantined` (veja
-  [Erros](/pt-BR/api-reference#erros)). Um endereço já em uso, ou um rascunho
+  `403 approval_required`, `403 email_quarantined` e
+  `503 name_review_unavailable` (veja [Erros](/pt-BR/api-reference#erros)). Um endereço já em uso, ou um rascunho
   editado depois de enviado ou enquanto outra requisição o mudava, responde
   `409 validation_error`.
-- O que o MillionSend acrescenta são campos extras (`kind`, `shared`,
-  `expires_at`, `screening`, `extracted_text` e outros) e endpoints extras
-  (`/safety`, `/quarantine`, `/codes/latest`, `/drafts/{id}/reject`). Os enums
+- O que o MillionSend acrescenta são campos extras (`username`, `kind`,
+  `shared`, `expires_at`, `screening`, `extracted_text` e outros) e
+  endpoints extras (`/safety`, `/quarantine`, `/codes/latest`,
+  `/drafts/{id}/reject`). Os enums
   do Resend nunca ganham valores novos: o e-mail em quarentena some da vista
   dos agentes em vez de ir para uma pasta nova, e o `source` de um webhook é
   `api`, `dashboard` ou `system`, nunca `agent`.

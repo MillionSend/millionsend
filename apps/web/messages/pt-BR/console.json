@@ -918,7 +918,8 @@
         "verdict": "Espera curta após avaliação de phishing",
         "outage": "Avaliador indisponível",
         "destination": "Destino novo",
-        "media": "Imagens ou arquivos"
+        "media": "Imagens ou arquivos",
+        "recipient": "Primeiro contato de um endereço compartilhado"
       },
       "count": "{count, plural, one {# e-mail} other {# e-mails}}",
       "heldTeam": "pausada para revisão",
@@ -980,7 +981,8 @@
         "broadcasts": "Transmissões",
         "escalation": "Reforço e tetos",
         "thresholds": "Limites e política",
-        "warmup": "Aquecimento de domínio novo"
+        "warmup": "Aquecimento de domínio novo",
+        "sharedInbox": "Domínio compartilhado"
       },
       "groupsSub": {
         "launch": "Os primeiros envios e as primeiras horas de uma equipe são avaliados por inteiro; depois vale a taxa de rampa até a contagem de envios ou o dia, o que vier primeiro.",
@@ -988,7 +990,8 @@
         "broadcasts": "Uma transmissão é avaliada pelo próprio HTML mais esta quantidade de cópias renderizadas; os destinatários nunca são amostrados por mensagem além disso.",
         "escalation": "Uma checagem crítica ou importante de conteúdo falhando multiplica a taxa; duas forçam a amostragem. Os tetos param a amostragem em silêncio, nunca o envio.",
         "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta envia um e-mail uma vez por dia por equipe; a pausa segura as transmissões de uma equipe nova quando uma mensagem amostrada também teve pontuação de 90 ou mais; a pausa para revisão suspende uma equipe nova quando uma mensagem é avaliada como phishing na pontuação de revisão, ou o número definido delas na pontuação menor durante a primeira semana, até você liberá-la.",
-        "warmup": "Um limite diário em cada domínio de envio pela idade do registro, contado por dia UTC, e um único limite diário que os domínios em aquecimento de uma equipe compartilham, o maior entre os limites deles; o que passa de qualquer um espera e sai conforme eles permitem. Nenhum plano remove esses limites. Um domínio cuja idade nenhum registro publica recebe o limite de 1 a 7 dias enquanto a equipe é nova ou está em observação. Com 50 e-mails entregues sem problemas, o domínio sobe um degrau antes."
+        "warmup": "Um limite diário em cada domínio de envio pela idade do registro, contado por dia UTC, e um único limite diário que os domínios em aquecimento de uma equipe compartilham, o maior entre os limites deles; o que passa de qualquer um espera e sai conforme eles permitem. Nenhum plano remove esses limites. Um domínio cuja idade nenhum registro publica recebe o limite de 1 a 7 dias enquanto a equipe é nova ou está em observação. Com 50 e-mails entregues sem problemas, o domínio sobe um degrau antes.",
+        "sharedInbox": "O que os endereços do domínio compartilhado das caixas podem enviar; o recebimento não é afetado. O envio aberto também precisa do avaliador configurado com a pausa para revisão ligada e, na nuvem, de um plano pago: os endereços de equipes no Free só respondem dentro das próprias conversas."
       },
       "fields": {
         "firstSends": "Primeiros envios avaliados por inteiro",
@@ -1016,7 +1019,11 @@
         "warmupEnabled": "Aquecer domínios novos",
         "warmupCapFirstDay": "Limite · menos de 24 horas",
         "warmupCapFirstWeek": "Limite · de 1 a 7 dias",
-        "warmupCapFirstMonth": "Limite · de 7 a 30 dias"
+        "warmupCapFirstMonth": "Limite · de 7 a 30 dias",
+        "sharedInboxSend": "Endereços compartilhados enviam",
+        "sharedInboxOpen": "Começar conversas",
+        "sharedInboxTenants": "Tenant do SES de cada equipe",
+        "sharedInboxTeamDailyCap": "Destinatários por equipe por dia"
       },
       "hints": {
         "firstSends": "as primeiras N mensagens aceitas de uma equipe",
@@ -1044,7 +1051,11 @@
         "warmupEnabled": "ligado por padrão na nuvem; a partir de 30 dias o domínio envia no volume do plano",
         "warmupCapFirstDay": "e-mails por dia de um domínio registrado há menos de 24 horas",
         "warmupCapFirstWeek": "e-mails por dia do dia 1 ao 7, e para idade desconhecida em uma equipe nova",
-        "warmupCapFirstMonth": "e-mails por dia do dia 7 ao 30"
+        "warmupCapFirstMonth": "e-mails por dia do dia 7 ao 30",
+        "sharedInboxSend": "desligado: não enviam nada, nem respostas; o que já está na fila espera até religar",
+        "sharedInboxOpen": "endereços de equipes pagas escrevem para qualquer pessoa dentro das regras de cada caixa, com o primeiro contato avaliado; desligado: só respostas",
+        "sharedInboxTenants": "o e-mail compartilhado sai pelo tenant da equipe que envia, para o SES poder pausar só essa equipe; desligado: sem tenant",
+        "sharedInboxTeamDailyCap": "destinatários de e-mails do domínio compartilhado por equipe por dia UTC, envios aprovados incluídos"
       },
       "kinds": {
         "count": "número inteiro",

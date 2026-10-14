@@ -4,7 +4,12 @@ import type { SesIdentityClient, SesTenantClient } from "@millionsend/ses";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq, isNotNull } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { abandonTenantStatus, retryTenantStatus, syncTenants } from "../src/handlers/tenants.js";
+import {
+  abandonTenantStatus,
+  retryTenantStatus,
+  sharedTenantResolver,
+  syncTenants,
+} from "../src/handlers/tenants.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -146,6 +151,84 @@ it("does nothing when tenants are disabled", async () => {
   expect(calls).toEqual([]);
 });
 
+async function sharedTeam(): Promise<string> {
+  const teamId = await createTeam(db, "acme");
+  await db.insert(schema.sharedInboxDomains).values({ teamId, name: "acme.agents.example" });
+  return teamId;
+}
+
+const sharedMarker = async (teamId: string) =>
+  (
+    await db
+      .select({
+        region: schema.sharedInboxDomains.sesTenantRegion,
+        configSet: schema.sharedInboxDomains.sesTenantConfigSet,
+      })
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, teamId))
+  )[0];
+
+const ASSOCIATION = [
+  "CreateTenantCommand",
+  "CreateTenantResourceAssociationCommand",
+  "CreateTenantResourceAssociationCommand",
+];
+
+it("associates the shared identity with the team's tenant once, and again when the region or set changes", async () => {
+  const teamId = await sharedTeam();
+  const { client, calls } = fakeSes();
+  const deps = { client, region: "us-east-1", sharedInboxDomain: "agents.example" };
+  const resolve = sharedTenantResolver(db, deps);
+
+  expect(await resolve(teamId, "millionsend")).toBe(teamId);
+  expect(calls.map((c) => c.name)).toEqual(ASSOCIATION);
+  expect(calls[0]?.input.TenantName).toBe(teamId);
+  expect(calls.slice(1).map((c) => c.input.ResourceArn)).toEqual([
+    "arn:aws:ses:us-east-1:123456789012:identity/agents.example",
+    "arn:aws:ses:us-east-1:123456789012:configuration-set/millionsend",
+  ]);
+  expect(await sharedMarker(teamId)).toEqual({ region: "us-east-1", configSet: "millionsend" });
+
+  calls.length = 0;
+  expect(await resolve(teamId, "millionsend")).toBe(teamId);
+  expect(calls).toEqual([]);
+
+  expect(await resolve(teamId, "other-set")).toBe(teamId);
+  expect(
+    await sharedTenantResolver(db, { ...deps, region: "sa-east-1" })(teamId, "other-set"),
+  ).toBe(teamId);
+  expect(calls.map((c) => c.name)).toEqual([...ASSOCIATION, ...ASSOCIATION]);
+  expect(await sharedMarker(teamId)).toEqual({ region: "sa-east-1", configSet: "other-set" });
+});
+
+it("a failed shared association sends without a tenant and leaves the team alone for an hour", async () => {
+  const teamId = await sharedTeam();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const failing = [teamId];
+  const { client, calls } = fakeSes(failing);
+  let now = Date.parse("2026-10-13T12:00:00Z");
+  const resolve = sharedTenantResolver(db, {
+    client,
+    region: "us-east-1",
+    sharedInboxDomain: "agents.example",
+    now: () => now,
+  });
+
+  expect(await resolve(teamId, "millionsend")).toBeUndefined();
+  expect(calls.map((c) => c.name)).toEqual(["CreateTenantCommand"]);
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(await sharedMarker(teamId)).toEqual({ region: null, configSet: null });
+
+  failing.length = 0;
+  now += 59 * 60_000;
+  expect(await resolve(teamId, "millionsend")).toBeUndefined();
+  expect(calls).toHaveLength(1);
+
+  now += 60_000;
+  expect(await resolve(teamId, "millionsend")).toBe(teamId);
+  expect(await sharedMarker(teamId)).toEqual({ region: "us-east-1", configSet: "millionsend" });
+});
+
 /** Per-region fake for the status calls; a region in `failing` refuses every call. */
 function statusSes(failing: string[] = []) {
   const updates: { region: string; status: unknown }[] = [];
@@ -209,6 +292,31 @@ it("the tenant.status retry applies the team's standing at run time in every dom
   ses.updates.length = 0;
   await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: true }, teamId);
   expect(ses.updates.map((u) => u.status)).toEqual(["ENABLED", "ENABLED"]);
+});
+
+it("the tenant.status retry also covers the region the team's shared mail was associated in", async () => {
+  const teamId = await sharedTeam();
+  await db
+    .update(schema.sharedInboxDomains)
+    .set({ sesTenantRegion: "us-east-1", sesTenantConfigSet: "millionsend" })
+    .where(eq(schema.sharedInboxDomains.teamId, teamId));
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+    .where(eq(schema.teams.id, teamId));
+  const ses = statusSes();
+
+  await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: true }, teamId);
+  expect(ses.updates).toEqual([{ region: "us-east-1", status: "DISABLED" }]);
+
+  await insertDomain(teamId, "a.acme.dev");
+  await insertDomain(teamId, "b.acme.dev", "us-east-1");
+  ses.updates.length = 0;
+  await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: true }, teamId);
+  expect(ses.updates).toEqual([
+    { region: "sa-east-1", status: "DISABLED" },
+    { region: "us-east-1", status: "DISABLED" },
+  ]);
 });
 
 it("a reinstate landing mid-retry makes the job run again instead of keeping DISABLED", async () => {

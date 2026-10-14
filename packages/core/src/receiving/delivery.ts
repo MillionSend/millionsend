@@ -3,7 +3,12 @@ import { schema } from "@millionsend/db";
 import { and, asc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { recordAudit } from "../audit.js";
 import type { Keyring } from "../crypto/keyring.js";
-import { encodeInboxActor, type InboxActor, recordInboxActivity } from "../inboxes/activity.js";
+import {
+  encodeInboxActor,
+  type InboxActor,
+  recordInboxActivity,
+  touchInbox,
+} from "../inboxes/activity.js";
 import { emailQuarantinedEvent, threadEmailEvent, threadFolderEvent } from "../inboxes/events.js";
 import { INBOX_ALLOWLIST_MAX } from "../inboxes/limits.js";
 import { threadSummaryOf } from "../inboxes/threads.js";
@@ -202,6 +207,9 @@ export async function markDelivered(
     )
     .returning();
   if (!membership) return null;
+  // Delivered mail is use, so an inbox read only through webhooks stays; spam
+  // isn't, or anyone could keep an inbox alive by mailing it.
+  if (!p.spam) await touchInbox(tx, p.key.inboxId, p.now);
   const t = schema.inboxThreads;
   const [thread] = await tx
     .select({ id: t.id, folder: t.folder })

@@ -5,6 +5,7 @@ import {
   type InboxSafety,
   type InboxWire,
   PLAN_INBOX_LIMIT,
+  resolveMonitorSettings,
   safetyProblem,
   sealReceivedExtracted,
 } from "@millionsend/core";
@@ -452,16 +453,23 @@ describe("safety rules", () => {
     expect(core.updateInboxSafety).not.toHaveBeenCalled();
   });
 
-  it("hands the inbox a normalized patch, with no key it was not given", async () => {
-    await caller(acme).inboxes.updateSafety({
-      id: inboxId,
-      patch: { allowlist: ["Ana@Example.COM", "*@Stripe.com", "ana@example.com"] },
-    });
+  it("hands the inbox a normalized patch, with no key it was not given, and the team's plan", async () => {
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, acme));
+    try {
+      await caller(acme).inboxes.updateSafety({
+        id: inboxId,
+        patch: { allowlist: ["Ana@Example.COM", "*@Stripe.com", "ana@example.com"] },
+      });
+    } finally {
+      await db.update(schema.teams).set({ plan: "free" }).where(eq(schema.teams.id, acme));
+    }
     expect(core.updateInboxSafety).toHaveBeenCalledWith(db, expect.anything(), {
       teamId: acme,
       inboxId,
       actor: user,
       patch: { allowlist: ["ana@example.com", "*@stripe.com"] },
+      plan: "pro",
+      isCloud: false,
     });
   });
 
@@ -638,6 +646,42 @@ describe("the inbox list", () => {
     expect((await caller(acme).inboxes.options()).plan.limit).toBeNull();
   });
 
+  it("says what the team's shared addresses may send, on its effective plan", async () => {
+    const sending = async (ctx: Partial<Context> = {}) =>
+      (
+        await createCaller({
+          db,
+          session: { user: OWNER },
+          teamId: acme,
+          role: "owner",
+          ...ctx,
+        }).inboxes.options()
+      ).sharedSending;
+    expect(await sending()).toBeNull();
+    vi.stubEnv("SHARED_INBOX_DOMAIN", "agents.example.net");
+    vi.stubEnv("IS_CLOUD", "true");
+    expect(await sending()).toEqual({ mode: "reply_only", cause: "instance" });
+    vi.stubEnv("SHARED_INBOX_OPEN", "true");
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    expect(await sending()).toEqual({ mode: "reply_only", cause: "plan" });
+    vi.stubEnv("IS_CLOUD", "");
+    expect(await sending()).toEqual({ mode: "open", cause: null });
+    // The process's cached settings, where the request carries them, over the stored row.
+    const paused = { ...resolveMonitorSettings(null, {}).settings, sharedInboxSend: false };
+    expect(await sending({ monitorSettings: async () => paused })).toEqual({
+      mode: "receive_only",
+      cause: "instance",
+    });
+
+    core.getInbox.mockResolvedValue(wire(inboxId));
+    expect((await caller(acme).inboxes.get({ id: inboxId })).sharedSending).toBeNull();
+    core.getInbox.mockResolvedValue(wire(inboxId, { shared: true }));
+    expect((await caller(acme).inboxes.get({ id: inboxId })).sharedSending).toEqual({
+      mode: "open",
+      cause: null,
+    });
+  });
+
   it("says when an inbox expired, and which channels reach it", async () => {
     core.getInbox.mockResolvedValue(
       wire(inboxId, { expires_at: new Date(Date.now() - 1000).toISOString() }),
@@ -714,6 +758,42 @@ describe("creating an inbox", () => {
     });
   });
 
+  it("asks for a shared address by username when a local part comes without a domain", async () => {
+    core.createInbox.mockResolvedValue({ ok: true, inbox: wire(randomUUID()) });
+    await caller(acme).inboxes.create({
+      kind: "agent",
+      localPart: " Leo.Bot ",
+      acceptFrom: "verified",
+      expiresIn: null,
+    });
+    expect(core.createInbox.mock.calls[0]?.[2].input).toEqual({
+      email_address: undefined,
+      username: "leo.bot",
+      name: undefined,
+      kind: "agent",
+      expires_in: null,
+      safety: { accept_from: "verified" },
+    });
+  });
+
+  it("hands names to the shared domain's review where a judge is configured", async () => {
+    core.createInbox.mockResolvedValue({ ok: true, inbox: wire(randomUUID()) });
+    core.updateInbox.mockResolvedValue({ ok: true, inbox: wire(inboxId) });
+    const create = () =>
+      caller(acme).inboxes.create({ kind: "agent", acceptFrom: "verified", expiresIn: null });
+    const update = () => caller(acme).inboxes.update({ id: inboxId, fromName: "Desk" });
+    await create();
+    await update();
+    expect(core.createInbox.mock.calls[0]?.[1].judgeSharedNames).toBeUndefined();
+    expect(core.updateInbox.mock.calls[0]?.[1].judgeSharedNames).toBeUndefined();
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
+    await create();
+    await update();
+    expect(core.createInbox.mock.calls[1]?.[1].judgeSharedNames).toBeTypeOf("function");
+    expect(core.updateInbox.mock.calls[1]?.[1].judgeSharedNames).toBeTypeOf("function");
+  });
+
   it("refuses a domain that does not receive, and maps the inbox's own refusals", async () => {
     const [quiet] = await db
       .select({ id: schema.domains.id })
@@ -744,6 +824,7 @@ describe("creating an inbox", () => {
       [409, "CONFLICT"],
       [403, "FORBIDDEN"],
       [429, "TOO_MANY_REQUESTS"],
+      [503, "SERVICE_UNAVAILABLE"],
     ] as const) {
       core.createInbox.mockResolvedValue({
         ok: false,
@@ -753,6 +834,45 @@ describe("creating an inbox", () => {
         caller(acme).inboxes.create({ kind: "agent", acceptFrom: "verified", expiresIn: "1h" }),
       ).rejects.toMatchObject({ code, message: `refused ${status}` });
     }
+  });
+});
+
+describe("sending from a shared address", () => {
+  it("reads the instance's switches through the request's settings reader", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", "agents.example.net");
+    const [sub] = await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId: acme, name: "acme.agents.example.net" })
+      .returning({ id: schema.sharedInboxDomains.id });
+    const [shared] = await db
+      .insert(schema.inboxes)
+      .values({
+        teamId: acme,
+        kind: "human",
+        emailAddress: "desk@acme.agents.example.net",
+        localPart: "desk",
+        sharedDomainId: sub?.id,
+        name: "Desk",
+        safety: defaultSafety("human", true),
+      })
+      .returning({ id: schema.inboxes.id });
+    const paused = { ...resolveMonitorSettings(null, {}).settings, sharedInboxSend: false };
+    const send = createCaller({
+      db,
+      session: { user: OWNER },
+      teamId: acme,
+      role: "owner",
+      monitorSettings: async () => paused,
+    }).inboxes.send({
+      inboxId: shared?.id as string,
+      to: ["ana@example.com"],
+      subject: "Hello",
+      text: "Hi",
+    });
+    await expect(send).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "Sending from addresses on the shared domain is paused; mail to them still arrives",
+    });
   });
 });
 

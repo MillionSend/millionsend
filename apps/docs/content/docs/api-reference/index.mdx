@@ -91,7 +91,8 @@ remaining deltas are deliberate and loud:
 - Inboxes are supported (beta): the 26 endpoints of Resend's Inboxes
   preview, under `/inboxes`, with the same paths and shapes, so
   `resend.inboxes.*` from `resend@6.32.1-preview-inboxes.6` works.
-  Creating an inbox or a draft answers the whole object; `kind` defaults to
+  Creating an inbox or a draft answers the whole object; `email_address` may
+  be left out for an address on the shared domain; `kind` defaults to
   `agent`; the hosted-agent settings answer an empty agent on `GET` and
   `422` on `PATCH`; thread search reads subjects, senders and recipients
   only; and a reply, forward or draft send that the inbox's rules hold
@@ -295,8 +296,9 @@ Besides Resend's names, [received mail](/concepts/receiving) and
 | Status, name | When |
 | --- | --- |
 | `403 restricted_api_key` | An inbox-scoped key outside its inbox, or sending from another address; `include_quarantined` from an inbox-scoped key or the MCP server. |
-| `403 inbox_send_policy` | An inbox's rules refuse a send: a shared-domain address starting a conversation, or a send from an agent inbox's address on `POST /emails`, `POST /emails/batch` or the SMTP relay that the rules would hold. The message lists the reasons. |
-| `429 inbox_send_cap_reached` | The inbox's daily send cap is used; `retry-after` counts to midnight UTC. |
+| `403 inbox_send_policy` | An inbox's rules refuse a send: a shared-domain address starting a conversation where it may only reply (on the Free plan, or by the instance's setting), any send from one while the instance pauses them, or a send from an agent inbox's address on `POST /emails`, `POST /emails/batch` or the SMTP relay that the rules would hold. The message names the rule, or lists the reasons a send was held. |
+| `429 inbox_send_cap_reached` | The inbox's daily send cap is used, or the team's daily limit for mail from the shared domain; `retry-after` counts to midnight UTC. |
+| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now; `retry-after: 60`. |
 | `403 approval_required` | An agent sending a draft that waits for approval. |
 | `403 email_quarantined` | An agent reading, replying to or forwarding held mail, or any forward of infected mail. |
 | `410 email_blocked` | A download of infected mail. |

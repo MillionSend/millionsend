@@ -16,9 +16,20 @@ import { WarnCard } from "@/components/warn-card";
 import { typedAllowlistEntry, typedListAddress } from "@/lib/email-input";
 import { useTRPC } from "@/lib/trpc";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
-import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, type InboxDetail } from "../parts";
+import {
+  ACCEPT_FROM,
+  acceptFromHint,
+  acceptFromWarns,
+  type InboxDetail,
+  sharedModeKey,
+} from "../parts";
 
 const POLICIES = ["reply_only", "allowlist", "open"] as const;
+const SHARED_HINT = {
+  plan: "policy.sharedPlan",
+  instance: "policy.sharedOnly",
+  paused: "policy.sharedPaused",
+} as const;
 
 const hint: React.CSSProperties = { fontSize: 12, color: "var(--ms-muted)", lineHeight: 1.5 };
 
@@ -97,6 +108,15 @@ export function SafetyForm({
   const locked = !admin || inbox.expired || save.isPending;
   const agent = inbox.kind === "agent";
   const shared = inbox.shared ? "yes" : "no";
+  const sharedMode = sharedModeKey(inbox);
+  // The shared domain never counts the allowlist, and opens only in its open
+  // mode; a stored choice stays listed so a downgraded inbox can step back.
+  const policies = inbox.shared
+    ? POLICIES.filter(
+        (p) =>
+          p === "reply_only" || p === stored.send_policy || (p === "open" && sharedMode === null),
+      )
+    : POLICIES;
   // The shared domain ignores owner addresses: it forwards to team members only.
   const forwardOptions = [
     ...new Set([...memberEmails, ...(inbox.shared ? [] : rules.owner_addresses)]),
@@ -199,15 +219,12 @@ export function SafetyForm({
                   if (policy) set("send_policy", policy);
                 }}
                 width="100%"
-                disabled={locked || inbox.shared}
+                disabled={locked || policies.length === 1}
                 ariaLabel={t("safety.sendPolicy")}
-                options={POLICIES.filter((p) => !inbox.shared || p === "reply_only").map((p) => ({
-                  value: p,
-                  label: t(`policy.${p}`),
-                }))}
+                options={policies.map((p) => ({ value: p, label: t(`policy.${p}`) }))}
               />
               <p style={{ ...hint, margin: "6px 0 0" }}>
-                {inbox.shared ? t("policy.sharedOnly") : t("policy.reply_onlyHint")}
+                {t(sharedMode ? SHARED_HINT[sharedMode] : "policy.reply_onlyHint")}
               </p>
             </div>
             <Rule label={t("safety.requireApproval")} note={t("safety.requireApprovalHint")}>
@@ -245,7 +262,9 @@ export function SafetyForm({
             }
           />
           {agent ? null : (
-            <p style={{ ...hint, margin: "6px 0 0" }}>{t("safety.sendCapHintHuman")}</p>
+            <p style={{ ...hint, margin: "6px 0 0" }}>
+              {t(inbox.shared ? "safety.sendCapHintHumanShared" : "safety.sendCapHintHuman")}
+            </p>
           )}
         </div>
       </SectionCard>

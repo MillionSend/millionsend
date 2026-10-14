@@ -918,7 +918,8 @@
         "verdict": "Short wait after a phishing-type verdict",
         "outage": "Judge unavailable",
         "destination": "New destination",
-        "media": "Images or files"
+        "media": "Images or files",
+        "recipient": "First contact from a shared address"
       },
       "count": "{count, plural, one {# email} other {# emails}}",
       "heldTeam": "held for review",
@@ -980,7 +981,8 @@
         "broadcasts": "Broadcasts",
         "escalation": "Escalation and caps",
         "thresholds": "Thresholds and policy",
-        "warmup": "New-domain warm-up"
+        "warmup": "New-domain warm-up",
+        "sharedInbox": "Shared domain"
       },
       "groupsSub": {
         "launch": "A team's first sends and hours are judged in full, then the ramp rate applies until its send count or day, whichever comes first.",
@@ -988,7 +990,8 @@
         "broadcasts": "A broadcast is judged as its own HTML plus this many rendered copies; recipients are never sampled per message on top.",
         "escalation": "A failing critical or major content check multiplies the rate; two force it. Caps stop sampling silently, never sending.",
         "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team when one message is judged phishing at the hold score, or the set number of them at the lower score in its first week, until you release it.",
-        "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day, and one daily limit a team's warming domains share, the highest of their caps; mail over either waits and goes out as they allow. No plan lifts them. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean deliveries move a domain up a step early."
+        "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day, and one daily limit a team's warming domains share, the highest of their caps; mail over either waits and goes out as they allow. No plan lifts them. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean deliveries move a domain up a step early.",
+        "sharedInbox": "What addresses on the shared inbox domain may send; receiving is never affected. Open sending also needs the judge configured with the review hold on and, on the cloud, a paid plan: Free teams' addresses only reply inside their threads."
       },
       "fields": {
         "firstSends": "First sends judged in full",
@@ -1016,7 +1019,11 @@
         "warmupEnabled": "Warm up new domains",
         "warmupCapFirstDay": "Cap · under 24 hours",
         "warmupCapFirstWeek": "Cap · 1 to 7 days",
-        "warmupCapFirstMonth": "Cap · 7 to 30 days"
+        "warmupCapFirstMonth": "Cap · 7 to 30 days",
+        "sharedInboxSend": "Shared addresses send",
+        "sharedInboxOpen": "Start conversations",
+        "sharedInboxTenants": "Each team's SES tenant",
+        "sharedInboxTeamDailyCap": "Recipients per team per day"
       },
       "hints": {
         "firstSends": "a team's first N accepted messages",
@@ -1044,7 +1051,11 @@
         "warmupEnabled": "on by default on the cloud; from 30 days a domain sends at its plan's volume",
         "warmupCapFirstDay": "emails a day from a domain registered under 24 hours ago",
         "warmupCapFirstWeek": "emails a day from day 1 to 7, and for an unknown age on a new team",
-        "warmupCapFirstMonth": "emails a day from day 7 to 30"
+        "warmupCapFirstMonth": "emails a day from day 7 to 30",
+        "sharedInboxSend": "off: they send nothing, replies included; mail already queued waits until it's back on",
+        "sharedInboxOpen": "paid teams' addresses write to anyone under each inbox's rules, first contacts judged; off: replies only",
+        "sharedInboxTenants": "shared mail goes out under the sending team's tenant, so SES can pause that team alone; off: under none",
+        "sharedInboxTeamDailyCap": "recipients of mail from the shared domain per team per UTC day, approved sends included"
       },
       "kinds": {
         "count": "whole number",

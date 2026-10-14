@@ -9,6 +9,7 @@ import {
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
 } from "./deliverability.js";
+import { OPERATOR_PARK_REASONS } from "./screening.js";
 import { unsubscribeSuspendedMembers } from "./system-contacts.js";
 
 export type SuspensionReason = (typeof schema.suspensionReasonEnum.enumValues)[number];
@@ -153,7 +154,7 @@ export async function suspendTeam(
                 eq(e.teamId, input.teamId),
                 eq(e.latestStatus, "queued_quota"),
                 isNull(e.sentAt),
-                inArray(e.parkReason, ["review", "screening", "destination", "media"]),
+                inArray(e.parkReason, ["review", ...OPERATOR_PARK_REASONS]),
               ),
             )
             .returning({ id: e.id });

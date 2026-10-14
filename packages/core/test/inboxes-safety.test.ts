@@ -6,6 +6,8 @@ import {
   inboxSafetySchema,
   safetyProblem,
 } from "../src/inboxes/safety.js";
+import { SHARED_REFUSALS, SHARED_REPLY_ONLY_MESSAGE } from "../src/inboxes/send-policy.js";
+import type { SharedSending } from "../src/inboxes/shared-mode.js";
 
 const ctx = {
   kind: "agent" as const,
@@ -89,6 +91,32 @@ describe("safetyProblem", () => {
     expect(safetyProblem({ ...agent, send_cap: 51 }, shared)).toMatch(/between 1 and 50/);
     expect(safetyProblem({ ...agent, send_cap: null }, shared)).toMatch(/between 1 and 50/);
     expect(safetyProblem({ ...agent, send_cap: 50 }, shared)).toBeNull();
+  });
+
+  it("never takes allowlist on the shared domain, and open only while the team's mode is open", () => {
+    const shared = { ...ctx, shared: true };
+    const base = defaultSafety("agent", true);
+    expect(safetyProblem({ ...base, send_policy: "allowlist" }, shared)).toBe(
+      'send_policy "allowlist" is not available on the shared domain: its allowlist never counts there',
+    );
+    const open = { ...base, send_policy: "open" as const };
+    const mode = (sharedSending: SharedSending) =>
+      safetyProblem(open, { ...shared, sharedSending });
+    expect(mode({ mode: "open", cause: null })).toBeNull();
+    expect(mode({ mode: "reply_only", cause: "plan" })).toBe(SHARED_REFUSALS.shared_plan.message);
+    expect(mode({ mode: "reply_only", cause: "instance" })).toBe(SHARED_REPLY_ONLY_MESSAGE);
+    expect(mode({ mode: "receive_only", cause: "instance" })).toBe(
+      SHARED_REFUSALS.shared_paused.message,
+    );
+    expect(safetyProblem(open, shared)).toBe(SHARED_REPLY_ONLY_MESSAGE);
+    // The allowlist advice a new team gets elsewhere would be refused here.
+    expect(
+      safetyProblem(open, {
+        ...shared,
+        teamTierNew: true,
+        sharedSending: { mode: "open", cause: null },
+      }),
+    ).toBe('send_policy "open" is not available to a new team yet');
   });
 
   it("bounds send_cap and keeps open sending from new teams", () => {

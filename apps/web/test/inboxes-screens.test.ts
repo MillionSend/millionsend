@@ -29,16 +29,46 @@ vi.mock("next-intl", async (importOriginal) => {
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => "/inboxes",
+  useParams: () => ({ id: "i1" }),
   useSearchParams: () => new URLSearchParams(),
 }));
-// What the query hooks answer: nothing unless a test sets it.
-const rq = vi.hoisted(() => ({ data: undefined as unknown, pages: undefined as unknown }));
+// What the query hooks answer (nothing unless a test sets it), and the error
+// a mutation came back with.
+const rq = vi.hoisted(() => ({
+  data: undefined as unknown,
+  pages: undefined as unknown,
+  error: null as unknown,
+}));
 // The form's save goes through the router; rendering never fires it.
 vi.mock("@tanstack/react-query", () => ({
-  useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  useMutation: () => ({ mutate: vi.fn(), isPending: false, error: rq.error }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
   useQuery: () => ({ data: rq.data }),
   useInfiniteQuery: () => ({ data: rq.pages, isPending: false }),
+}));
+// A native select lists every option a picker offers, which a closed one never renders.
+vi.mock("@/components/select", () => ({
+  Select: (p: {
+    id?: string;
+    value: string;
+    disabled?: boolean;
+    options: { value: string; label: string }[];
+  }) =>
+    createElement(
+      "select",
+      { id: p.id, value: p.value, disabled: p.disabled, onChange: () => {} },
+      p.options.map((o) => createElement("option", { key: o.value, value: o.value }, o.label)),
+    ),
+}));
+// Dialogs portal to document.body, which a server render does not have.
+vi.mock("@/components/modal", () => ({
+  Modal: (p: { open: boolean; children: React.ReactNode }) =>
+    p.open ? createElement("div", null, p.children) : null,
+}));
+// The inbox page opens on its threads, whose queries no test here answers.
+vi.mock("@/app/(dashboard)/inboxes/[id]/threads-tab", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/(dashboard)/inboxes/[id]/threads-tab")>()),
+  ThreadsTab: () => null,
 }));
 vi.mock("@/lib/trpc", () => {
   const leaf: unknown = new Proxy(() => ({}), { get: () => leaf, apply: () => ({}) });
@@ -46,6 +76,9 @@ vi.mock("@/lib/trpc", () => {
 });
 
 const { SafetyForm } = await import("@/app/(dashboard)/inboxes/[id]/safety-tab");
+const { InboxView } = await import("@/app/(dashboard)/inboxes/[id]/inbox-view");
+const { EditDialog } = await import("@/app/(dashboard)/inboxes/[id]/edit-dialog");
+const { CreateInboxDialog } = await import("@/app/(dashboard)/inboxes/create-inbox-dialog");
 const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
 const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
@@ -436,5 +469,159 @@ describe("inbox screens", () => {
     // A typed entry outside any option list still shows as its chip.
     expect(html).toContain("*@stripe.com");
     expect(html).toContain("Mail is kept for 30 days.");
+  });
+});
+
+describe("addresses on the shared domain", () => {
+  /** Rendered markup with the apostrophes React escapes put back. */
+  const text = (html: string) => html.replaceAll("&#x27;", "'");
+  /** The <select> a picker renders as, opening tag to close. */
+  const picker = (html: string, id: string) =>
+    html.match(new RegExp(`<select id="${id}"[^>]*>.*?</select>`))?.[0] ?? "";
+  const offered = (select: string) =>
+    [...select.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1]);
+  const createDialog = () =>
+    text(
+      renderToStaticMarkup(
+        createElement(CreateInboxDialog, {
+          open: true,
+          onClose: () => {},
+          domains: [],
+          sharedDomain: "acme.agents.example",
+        }),
+      ),
+    );
+  const fieldError = (html: string) => html.match(/class="ms-field-error"[^>]*>([^<]*)</)?.[1];
+
+  it("takes a username in the create dialog, random when empty, kept until told otherwise", () => {
+    rq.error = null;
+    const html = createDialog();
+    expect(html).toMatch(/<input id="inbox-local"[^>]*placeholder="Random address"/);
+    const expires = picker(html, "inbox-expires");
+    expect(offered(expires)).toEqual(["never", "1h", "24h", "7d", "30d"]);
+    expect(expires).toContain('<option value="never" selected="">Never</option>');
+  });
+
+  it("words the name review's answers, told apart from other refusals with the same code", () => {
+    const shown = (code: string, message: string) => {
+      rq.error = { data: { code }, message };
+      return fieldError(createDialog());
+    };
+    const orRandom = t("create.errors.orRandom");
+    expect(
+      shown(
+        "SERVICE_UNAVAILABLE",
+        "This name couldn't be reviewed right now: try again shortly, or leave username out for a random address",
+      ),
+    ).toBe(`${t("create.errors.reviewUnavailable")} ${orRandom}`);
+    expect(
+      shown("UNPROCESSABLE_CONTENT", "username can't be used on the shared domain: pick another"),
+    ).toBe(`${t("create.errors.nameRefused")} ${orRandom}`);
+    for (const spent of ["refused", "reviewed"]) {
+      expect(
+        shown(
+          "TOO_MANY_REQUESTS",
+          `Too many names were ${spent} today: try again tomorrow, or leave username out for a random address`,
+        ),
+      ).toBe(`${t("create.errors.tooManyNames")} ${orRandom}`);
+    }
+    expect(
+      shown("TOO_MANY_REQUESTS", "Too many inboxes created in the last hour. Try again later."),
+    ).toBe(t("create.errors.rate"));
+    expect(shown("CONFLICT", "This address is already used by an inbox")).toBe(
+      t("create.errors.taken"),
+    );
+    rq.error = null;
+  });
+
+  it("offers Never when editing a shared inbox, and words a refused sender name", () => {
+    const edit = () =>
+      text(
+        renderToStaticMarkup(
+          createElement(EditDialog, {
+            inbox: { id: "i1", name: "Bot", from_name: null, shared: true } as InboxDetail,
+            open: true,
+            onClose: () => {},
+          }),
+        ),
+      );
+    rq.error = null;
+    expect(offered(picker(edit(), "inbox-edit-expires"))).toContain("never");
+    rq.error = {
+      data: { code: "UNPROCESSABLE_CONTENT" },
+      message: "from_name can't be used on the shared domain: pick another",
+    };
+    expect(fieldError(edit())).toBe(t("create.errors.nameRefused"));
+    rq.error = null;
+  });
+
+  it("offers open on a shared address only while its team may start conversations", () => {
+    const policy = (html: string) => picker(html, "safety-policy");
+    const open = form({ shared: true, sharedSending: { mode: "open", cause: null } });
+    expect(offered(policy(open))).toEqual(["reply_only", "open"]);
+    expect(policy(open)).not.toContain("disabled");
+    expect(open).toContain(t("policy.reply_onlyHint"));
+
+    const free = form({ shared: true, sharedSending: { mode: "reply_only", cause: "plan" } });
+    expect(offered(policy(free))).toEqual(["reply_only"]);
+    expect(policy(free)).toContain('disabled=""');
+    expect(free).toContain(t("policy.sharedPlan"));
+    expect(
+      form({ shared: true, sharedSending: { mode: "receive_only", cause: "instance" } }),
+    ).toContain(t("policy.sharedPaused"));
+
+    // Open was stored before the mode closed: still listed, so it can be stepped back.
+    const stored = form(
+      { shared: true, sharedSending: { mode: "reply_only", cause: "instance" } },
+      true,
+      { ...safety, send_policy: "open" },
+    );
+    expect(offered(policy(stored))).toEqual(["reply_only", "open"]);
+    expect(policy(stored)).not.toContain("disabled");
+    expect(stored).toContain(t("policy.sharedOnly"));
+
+    expect(offered(policy(form({})))).toEqual(["reply_only", "allowlist", "open"]);
+  });
+
+  it("counts a shared people inbox's daily cap over the API alone", () => {
+    const html = text(form({ shared: true, kind: "human" }));
+    expect(html).toContain(t("safety.sendCapHintHumanShared"));
+    expect(html).not.toContain("SMTP");
+  });
+
+  it("says in the inbox header when a shared address can't start conversations", () => {
+    const header = (inbox: Partial<InboxDetail>) => {
+      rq.data = {
+        id: "i1",
+        kind: "agent",
+        name: "Bot",
+        email_address: "bot@acme.agents.example",
+        shared: true,
+        expired: false,
+        expires_at: null,
+        received_30d: 0,
+        channels: { webhook: false, key: false },
+        pending_approval: 0,
+        quarantined: 0,
+        ...inbox,
+      };
+      const html = renderToStaticMarkup(createElement(InboxView));
+      rq.data = undefined;
+      return html.match(/<header[^>]*>.*?<\/header>/s)?.[0] ?? "";
+    };
+    const SHOWN = /replies only|sending paused/;
+    expect(header({ sharedSending: { mode: "reply_only", cause: "plan" } })).toContain(
+      "replies only on the Free plan",
+    );
+    expect(
+      header({ kind: "human", sharedSending: { mode: "reply_only", cause: "instance" } }),
+    ).toContain("replies only for now");
+    expect(header({ sharedSending: { mode: "receive_only", cause: "instance" } })).toContain(
+      "sending paused",
+    );
+    const open = header({ sharedSending: { mode: "open", cause: null } });
+    expect(open).toContain("received in 30 days");
+    expect(open).not.toMatch(SHOWN);
+    expect(header({ shared: false, sharedSending: null })).not.toMatch(SHOWN);
   });
 });

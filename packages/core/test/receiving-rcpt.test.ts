@@ -514,6 +514,92 @@ describe("decideRecipient with inboxes (S1, S29, S30)", () => {
   });
 });
 
+describe("decideRecipient: the shared domain's postmaster@ and abuse@", () => {
+  const SHARED = "agents.example";
+  let system: string;
+
+  const decide = (recipient: string, isCloud = false) =>
+    decideRecipient(db, { recipient, isCloud, sharedInboxDomain: SHARED, now: NOW });
+
+  const label = async (teamId: string | null, name: string) => {
+    const [row] = await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId, name: `${name}.${SHARED}` })
+      .returning({ id: schema.sharedInboxDomains.id });
+    return row?.id ?? null;
+  };
+
+  beforeAll(async () => {
+    await label(await createTeam(db, "role-acme"), "acme");
+    const suspended = await createTeam(db, "role-suspended");
+    await setPlan(suspended, { suspendedAt: NOW, suspensionReason: "manual" });
+    await label(suspended, "susp");
+    const busy = await createTeam(db, "role-busy");
+    await addInbox(busy, {
+      emailAddress: `bot-1a2b@busy.${SHARED}`,
+      sharedDomainId: await label(busy, "busy"),
+    });
+    await db.insert(schema.usageCounters).values({ teamId: busy, day: DAY, accepted: 150 });
+    // What a deleted team leaves behind.
+    await label(null, "gone");
+    system = await createTeam(db, "role-system");
+  });
+
+  it("refuses role mail with 550 5.1.1 without a System team, and lets the MX cache nothing under the domain", async () => {
+    for (const recipient of [
+      `postmaster@${SHARED}`,
+      `abuse@acme.${SHARED}`,
+      `random@${SHARED}`,
+      `nobody@ghost.${SHARED}`,
+      `nobody@gone.${SHARED}`,
+    ]) {
+      expect(await decide(recipient)).toEqual({
+        accept: false,
+        code: 550,
+        enhanced: "5.1.1",
+        message: "No such recipient here",
+        ttlSeconds: 0,
+      });
+    }
+    expect(await decide(`x@susp.${SHARED}`)).toMatchObject({ enhanced: "5.7.1", ttlSeconds: 0 });
+    expect(await decide(`bot-1a2b@busy.${SHARED}`, true)).toMatchObject({
+      code: 452,
+      ttlSeconds: 0,
+    });
+  });
+
+  it("accepts postmaster@ and abuse@ at any name under the domain for the System team, ahead of the subdomain's team", async () => {
+    await setPlan(system, { plan: "system" });
+    for (const recipient of [
+      `postmaster@${SHARED}`,
+      "ABUSE@Agents.Example",
+      `Postmaster@acme.${SHARED}`,
+      `abuse@susp.${SHARED}`,
+      `abuse@busy.${SHARED}`,
+      `abuse@gone.${SHARED}`,
+      `abuse@ghost.${SHARED}`,
+      `abuse@a.b.${SHARED}`,
+    ]) {
+      expect(await decide(recipient, true)).toEqual({ accept: true, ttlSeconds: 0 });
+    }
+    for (const recipient of [`abuse+desk@${SHARED}`, `hostmaster@${SHARED}`, `x@gone.${SHARED}`]) {
+      expect(await decide(recipient)).toMatchObject({ code: 550, ttlSeconds: 0 });
+    }
+    expect(await decide("abuse@xagents.example")).toMatchObject({ code: 550, ttlSeconds: 10 });
+  });
+
+  it("refuses role mail with 550 5.7.1 while the System team is suspended", async () => {
+    await setPlan(system, { suspendedAt: NOW, suspensionReason: "manual" });
+    expect(await decide(`abuse@acme.${SHARED}`)).toEqual({
+      accept: false,
+      code: 550,
+      enhanced: "5.7.1",
+      message: "Recipient account is not accepting mail",
+      ttlSeconds: 0,
+    });
+  });
+});
+
 describe("receivedEmailScope: held mail", () => {
   it("shows agents delivered and catch-all mail only, owners everything, and held mail alone on request", async () => {
     const teamId = await createTeam(db, "scope-held");

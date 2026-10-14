@@ -1,5 +1,7 @@
-import { receivingEnabled } from "@millionsend/config";
+import { env, receivingEnabled } from "@millionsend/config";
 import {
+  type MonitorSettings,
+  monitorSettingsReader,
   recordSupportViewRead,
   unstorableValueMessage,
   type WebhookEnqueue,
@@ -63,7 +65,15 @@ export interface Context {
    * webhooks.reconcile sweep sends rows nobody enqueued.
    */
   enqueueWebhookDeliveries?: WebhookEnqueue;
+  /**
+   * The trust & safety settings, cached for a minute (monitorSettingsReader,
+   * one per process as in the API and the worker). Absent in tests, where
+   * each read goes to the row.
+   */
+  monitorSettings?: () => Promise<MonitorSettings>;
 }
+
+let monitorSettings: (() => Promise<MonitorSettings>) | undefined;
 
 const enqueueBroadcastSend = async (
   broadcastId: string,
@@ -83,9 +93,11 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
   if (!session) return { db, session: null, teamId: null, role: null };
   const cookieStore = await cookies();
   const secure = process.env.NODE_ENV === "production";
+  monitorSettings ??= monitorSettingsReader(db, env as unknown as Record<string, unknown>);
   const shared = {
     db,
     session,
+    monitorSettings,
     enqueueBroadcastSend,
     enqueueEmailSend,
     enqueueWebhookDeliveries,

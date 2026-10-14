@@ -52,6 +52,14 @@ export const usageCounters = pgTable(
     received: integer("received").notNull().default(0),
     // Received mail the inbound judge read, against the team's daily cap.
     inboundJudged: integer("inbound_judged").notNull().default(0),
+    // Recipients of mail from shared inbox domain addresses, against the
+    // team's daily cap for them; kept here because inbox_usage_daily rows go
+    // with each deleted inbox.
+    sharedRecipients: integer("shared_recipients").notNull().default(0),
+    // Shared-domain names the identity review refused, against a daily budget.
+    sharedNameRefusals: integer("shared_name_refusals").notNull().default(0),
+    // Identity reviews asked for the team, each a judge call, against a daily budget.
+    sharedNameReviews: integer("shared_name_reviews").notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.day] }),
@@ -66,7 +74,9 @@ export const usageCounters = pgTable(
  * days in whichever timezone the viewer is in, so two teammates each see
  * their own calendar days from one set of rows. Every writer of a daily
  * counter bumps the hour as well, except sent_no_feedback, which only the
- * platform breaker's region counts read, by day; quota, the deliverability
+ * platform breaker's region counts read, by day, and the shared inbox
+ * domain's shared_recipients, shared_name_refusals and shared_name_reviews,
+ * which only their own daily limits read; quota, the deliverability
  * guardrail and the account score keep reading the daily table. Rows before
  * the table existed were backfilled at noon UTC of their day, which is the
  * same calendar date in every timezone between UTC-11 and UTC+11.

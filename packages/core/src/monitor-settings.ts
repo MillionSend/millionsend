@@ -124,6 +124,33 @@ export const MONITOR_SETTINGS = {
     kind: "count",
     default: 2000,
   },
+  // Sending from the shared inbox domain (see shared-mode.ts), whether that
+  // mail carries the team's SES tenant, and the recipients a team may reach
+  // from it per UTC day.
+  sharedInboxSend: {
+    column: "sharedInboxSend",
+    env: "SHARED_INBOX_SEND",
+    kind: "bool",
+    default: true,
+  },
+  sharedInboxOpen: {
+    column: "sharedInboxOpen",
+    env: "SHARED_INBOX_OPEN",
+    kind: "bool",
+    default: false,
+  },
+  sharedInboxTenants: {
+    column: "sharedInboxTenants",
+    env: "SHARED_INBOX_TENANTS",
+    kind: "bool",
+    default: false,
+  },
+  sharedInboxTeamDailyCap: {
+    column: "sharedInboxTeamDailyCap",
+    env: "SHARED_INBOX_TEAM_DAILY_CAP",
+    kind: "count",
+    default: 1000,
+  },
 } as const satisfies Record<
   string,
   {

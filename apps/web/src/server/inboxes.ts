@@ -1,5 +1,12 @@
-import { env, isCloudDeployment, receivingEnabled, sharedInboxDomain } from "@millionsend/config";
 import {
+  abuseJudgeConfig,
+  env,
+  isCloudDeployment,
+  receivingEnabled,
+  sharedInboxDomain,
+} from "@millionsend/config";
+import {
+  createSharedNameReview,
   deriveInboxKeys,
   fetchEffectivePlan,
   type InboxActor,
@@ -10,6 +17,8 @@ import {
   PLAN_INBOX_LIMIT,
   parseInboxActor,
   type SendOutcome,
+  type SharedSending,
+  teamSharedSending,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
@@ -33,10 +42,13 @@ export function inboxDeps(ctx: Enqueues): InboxDeps {
     sharedInboxDomain: sharedInboxDomain() ?? null,
     receivingEnabled: receivingEnabled(),
     enqueueWebhookDeliveries: ctx.enqueueWebhookDeliveries,
+    judgeSharedNames: createSharedNameReview(abuseJudgeConfig()),
   };
 }
 
-export function inboxSendDeps(ctx: Enqueues & { db: Db }): InboxSendDeps {
+export function inboxSendDeps(
+  ctx: Enqueues & Pick<InboxSendDeps, "monitorSettings"> & { db: Db },
+): InboxSendDeps {
   return {
     db: ctx.db,
     keyring: getKeyring(),
@@ -46,6 +58,7 @@ export function inboxSendDeps(ctx: Enqueues & { db: Db }): InboxSendDeps {
     inboxKeys: deriveInboxKeys(Buffer.from(env.MASTER_ENCRYPTION_KEY ?? "", "base64")),
     sharedInboxDomain: sharedInboxDomain() ?? null,
     enqueueWebhookDeliveries: ctx.enqueueWebhookDeliveries,
+    monitorSettings: ctx.monitorSettings,
   };
 }
 
@@ -55,6 +68,7 @@ const TRPC_CODE = {
   409: "CONFLICT",
   422: "UNPROCESSABLE_CONTENT",
   429: "TOO_MANY_REQUESTS",
+  503: "SERVICE_UNAVAILABLE",
 } as const;
 
 /** A core refusal as a dashboard error: its status picks the code, the API's message rides along. */
@@ -139,6 +153,17 @@ export async function actorNames(db: Db, teamId: string, encoded: string[]) {
             : "";
     return { kind: a.kind, name: names.get(key) ?? null };
   });
+}
+
+/** What the team's addresses on the shared domain may send now, on its effective plan. */
+export async function sharedSending(
+  ctx: Pick<InboxSendDeps, "monitorSettings"> & { db: Db; teamId: string },
+): Promise<SharedSending> {
+  return teamSharedSending(
+    ctx.db,
+    { isCloud: isCloudDeployment(), monitorSettings: ctx.monitorSettings },
+    (await fetchEffectivePlan(ctx.db, ctx.teamId)) ?? "free",
+  );
 }
 
 /** Catch-all receiving is a paid feature on cloud; self-host has no plans. */

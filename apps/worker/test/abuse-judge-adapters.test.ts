@@ -1,12 +1,13 @@
 import {
   ABUSE_JUDGE_POLICY,
   ABUSE_JUDGE_QUESTIONS,
+  createTypesafeJudge,
+  type FetchLike,
   INBOUND_JUDGE_POLICY,
   INBOUND_JUDGE_QUESTIONS,
 } from "@millionsend/core";
 import { expect, it } from "vitest";
 import { createAbuseJudge } from "../src/abuse-judge/index.js";
-import { createTypesafeJudge, type FetchLike } from "../src/abuse-judge/typesafe.js";
 
 const answers = {
   is_abuse: { type: "noul", noul: 0.88 },

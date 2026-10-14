@@ -450,8 +450,16 @@ export const env = createEnv({
     MX_INGEST_SECRET: z.string().optional(),
     // Agent inboxes on a shared domain: customers get addresses on per-team
     // subdomains of it with no DNS of their own. Its own registrable domain,
-    // with a wildcard MX at RECEIVING_MX_HOST. Read through sharedInboxDomain().
+    // with an MX and a wildcard MX at RECEIVING_MX_HOST. Read through sharedInboxDomain().
     SHARED_INBOX_DOMAIN: z.string().optional(),
+    // Whether shared addresses send at all, whether paid teams' may start
+    // conversations, whether that mail carries the team's SES tenant, and the
+    // recipients a team may reach from them per UTC day. Instance settings on
+    // the console's Trust & safety page override these, like MONITOR_*.
+    SHARED_INBOX_SEND: z.enum(["true", "false", "1", "0"]).optional(),
+    SHARED_INBOX_OPEN: z.enum(["true", "false", "1", "0"]).optional(),
+    SHARED_INBOX_TENANTS: z.enum(["true", "false", "1", "0"]).optional(),
+    SHARED_INBOX_TEAM_DAILY_CAP: z.coerce.number().int().min(0).optional(),
     // clamd over TCP (host[:port], 3310 by default) scanning received mail
     // for viruses; unset, nothing is scanned. Read through clamavHost().
     CLAMAV_HOST: z.string().optional(),

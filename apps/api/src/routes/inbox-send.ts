@@ -21,6 +21,7 @@ import {
   replyToReceivedEmail,
   type SendOutcome,
   sendDraft,
+  touchInboxInBackground,
   updateDraft,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
@@ -54,11 +55,13 @@ const json = <T extends z.ZodType>(schema: T, description: string) => ({
 });
 
 const errors = {
-  403: jsonErr("Restricted API key, the inbox's rules, or held mail"),
+  403: jsonErr("Restricted API key, the inbox's or the shared domain's rules, or held mail"),
   404: jsonErr("Not found"),
   409: jsonErr("Idempotency conflict, or a draft already sent"),
   422: jsonErr("Validation error"),
-  429: jsonErr("The inbox's daily send limit"),
+  429: jsonErr(
+    "The inbox's daily send limit, or the team's daily limit for mail from the shared domain",
+  ),
 };
 
 const threadEmailParams = z.object({
@@ -91,9 +94,11 @@ export function registerInboxSendRoutes(
   const actor = (c: Context<Env>) => inboxActorFromAuth(c.get("auth"));
   const idempotencyKey = (c: Context<Env>) => c.req.header("idempotency-key") ?? null;
 
+  // The shared error shape's status union is wider than any one route's
+  // declared responses, as in the /inboxes routes.
   const refusal = (c: Context<Env>, e: InboxError) => {
     if (e.retryAfterSec !== undefined) c.header("retry-after", String(e.retryAfterSec));
-    return c.json(errorBody(e.status, e.name, e.message), e.status);
+    return c.json(errorBody(e.status, e.name, e.message), e.status) as never;
   };
 
   /**
@@ -248,6 +253,7 @@ export function registerInboxSendRoutes(
       });
       if (page === "bad_cursor")
         return c.json(errorBody(404, "not_found", CURSOR_NOT_FOUND_MESSAGE), 404);
+      touchInboxInBackground(db, inbox.id);
       return c.json({ object: "list" as const, has_more: page.hasMore, data: page.data }, 200);
     },
   );
@@ -271,6 +277,7 @@ export function registerInboxSendRoutes(
         draftId: draft_id,
       });
       if (!draft) return c.json(errorBody(404, "not_found", "Draft not found."), 404);
+      touchInboxInBackground(db, inbox_id);
       return c.json(draft, 200);
     },
   );
@@ -334,7 +341,7 @@ export function registerInboxSendRoutes(
       path: "/inboxes/{inbox_id}/drafts/{draft_id}/send",
       summary: "Send a draft",
       description:
-        "Sends the draft from the inbox address; takes no body and accepts an `Idempotency-Key`. A draft waiting for approval goes out only when a person or a team-wide full access key sends it (403 approval_required otherwise), and their send skips the inbox's rules but never the team's limits. An agent's send of a draft runs the rules and may hold it (202).",
+        "Sends the draft from the inbox address; takes no body and accepts an `Idempotency-Key`. A draft waiting for approval goes out only when a person or a team-wide full access key sends it (403 approval_required otherwise), and their send skips the inbox's rules but never the team's limits or the shared domain's rules. An agent's send of a draft runs the rules and may hold it (202).",
       request: { params: draftParams },
       responses: {
         200: json(sendDraftResponseSchema, "Sent"),

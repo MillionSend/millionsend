@@ -32,6 +32,7 @@ export {
   VISION_REPORT_JSON_SCHEMA,
   visionReportSchema,
 } from "./abuse-judge/media.js";
+export { createSharedNameReview } from "./abuse-judge/names.js";
 export {
   ABUSE_JUDGE_POLICY,
   ABUSE_JUDGE_QUESTIONS,
@@ -53,6 +54,7 @@ export {
   type JudgeVerdict,
   judgeErrorClass,
 } from "./abuse-judge/types.js";
+export { createTypesafeJudge, type FetchLike } from "./abuse-judge/typesafe.js";
 export {
   activeOverride,
   applyJudgedSample,
@@ -462,7 +464,12 @@ export {
   purgeExpiredIdempotencyKeys,
   releaseIdempotent,
 } from "./idempotency.js";
-export { IMITATED_BRAND_WORDS, IMITATED_BRANDS, imitatedBrandIn } from "./imitated-brands.js";
+export {
+  IMITATED_BRAND_AFFIXES,
+  IMITATED_BRAND_WORDS,
+  IMITATED_BRANDS,
+  imitatedBrandIn,
+} from "./imitated-brands.js";
 export { findInstanceOperator, isInstanceOperator } from "./instance-operator.js";
 export {
   isProbeKey,
@@ -565,6 +572,7 @@ export {
   type Plan,
   type PlanRung,
   type PlanRungKey,
+  paidPlan,
   planCanHidePoweredBy,
   planLabel,
   QUOTA_TOLERANCE,
@@ -922,6 +930,7 @@ export * from "./inboxes/safety.js";
 export * from "./inboxes/send.js";
 export * from "./inboxes/send-policy.js";
 export * from "./inboxes/shared-domain.js";
+export * from "./inboxes/shared-mode.js";
 export * from "./inboxes/threads.js";
 export * from "./inboxes/types.js";
 export * from "./inboxes/wire.js";

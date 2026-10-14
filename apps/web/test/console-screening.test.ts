@@ -208,6 +208,23 @@ it("lists mail parked for a new destination with it, and a release clears the de
   expect(cleared).toEqual([{ domain: "evil-pay.com" }]);
 });
 
+it("lists a shared address's parked first contact under its own reason", async () => {
+  const teamId = await createTeam(db, "shared-first-contact");
+  const [parked] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "Bot <bot@acme.agents.example>",
+      to: ["r@example.org"],
+      subject: "s",
+      latestStatus: "queued_quota",
+      parkReason: "recipient",
+    })
+    .returning({ id: schema.emails.id });
+  const { groups } = await operator().console.safety.waiting({ teamId });
+  expect(groups[0]?.emails).toMatchObject([{ id: parked?.id, why: "recipient" }]);
+});
+
 it("releases only what the list showed: named emails, or those parked by the time it was read", async () => {
   const teamId = await createTeam(db, "release-shown");
   const park = async (parkedAt: Date) => {

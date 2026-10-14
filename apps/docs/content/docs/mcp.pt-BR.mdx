@@ -245,7 +245,7 @@ outra configuração de segurança.
 | `reply_to_received_email` | `receiving:reply` | Responde a um e-mail recebido pela caixa dele. Devolve `sent` com o e-mail e a conversa, ou `draft` com os motivos quando as regras da caixa seguram a resposta para uma pessoa. |
 | `forward_received_email` | `receiving:reply` | Encaminha um e-mail recebido, citado no corpo ou anexado como `.eml`; com os mesmos resultados de `reply_to_received_email`. |
 | `update_thread` | `receiving:reply` | Marca uma conversa como lida ou não lida, muda de pasta ou coloca uma etiqueta. |
-| `create_inbox` | `receiving:manage` | Cria uma caixa de agente (as caixas de pessoas são criadas no painel); o `accept_from` é a única configuração de segurança que ela aceita. |
+| `create_inbox` | `receiving:manage` | Cria uma caixa de agente (as caixas de pessoas são criadas no painel); o `accept_from` é a única configuração de segurança que ela aceita, e o `username` dá nome a um endereço no domínio compartilhado. |
 | `update_inbox` | `receiving:manage` | Muda o nome, o nome de remetente ou a validade de uma caixa; fazer ela vencer antes exige o papel de responsável ou de admin. |
 | `delete_inbox` | `receiving:manage` | **admin** Exclui uma caixa com as conversas e os rascunhos dela; as chaves de API dela são revogadas. |
 | `release_email` | `receiving:manage` | Libera um e-mail da quarentena para a caixa; `trust_sender` também coloca o remetente na lista de permitidos. |

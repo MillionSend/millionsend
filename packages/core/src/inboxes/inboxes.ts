@@ -1,13 +1,25 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, count, eq, inArray, lte, max, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  max,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { recordAudit } from "../audit.js";
 import { isPlainName } from "../customer-text.js";
 import { imitatedBrandIn } from "../imitated-brands.js";
 import { asciiHostname } from "../org-domain.js";
 import type { Plan } from "../plans.js";
 import { teamMemberEmails } from "../receiving/inbox-routing.js";
-import { slugify } from "../slug.js";
 import { DAY_MS } from "../utc-day.js";
 import type { WebhookEnqueue } from "../webhooks.js";
 import { type InboxActor, recordInboxActivity, webhookSource } from "./activity.js";
@@ -29,12 +41,18 @@ import {
   inboxCreatesLeft,
   inboxRoom,
   liveInbox,
-  SHARED_INBOX_DEFAULT_TTL,
-  SHARED_INBOX_MAX_TTL,
+  SHARED_INBOX_IDLE_TTL,
 } from "./limits.js";
 import { defaultSafety, type InboxSafety, inboxSafetySchema, safetyProblem } from "./safety.js";
-import { teamInNewTier } from "./send.js";
-import { ensureSharedSubdomain } from "./shared-domain.js";
+import { teamInNewTier, teamSharedSending } from "./send.js";
+import { secondsToNextUtcDay } from "./send-policy.js";
+import {
+  ensureSharedSubdomain,
+  reservedSharedName,
+  reviewSharedNames,
+  type SharedNameReview,
+  type SharedNameText,
+} from "./shared-domain.js";
 import {
   INBOX_KINDS,
   type InboxError,
@@ -43,16 +61,25 @@ import {
   type InboxWire,
   type ListQuery,
 } from "./types.js";
+import { SHARED_USERNAME } from "./username.js";
 import { type InboxCounts, inboxListItemWire, inboxWire } from "./wire.js";
 
 export interface InboxDeps {
   sharedInboxDomain: string | null;
   receivingEnabled: boolean;
   enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
+  /**
+   * The identity review of names published on the shared domain; absent
+   * when no judge is configured, which leaves the deterministic guards to
+   * decide alone.
+   */
+  judgeSharedNames?: SharedNameReview | undefined;
 }
 
 export interface CreateInboxInput {
   email_address?: string | undefined;
+  /** The local part of a shared-domain address, asked for instead of email_address. */
+  username?: string | undefined;
   name?: string | undefined;
   from_name?: string | undefined;
   forwarding?: boolean | undefined;
@@ -91,7 +118,14 @@ const ADDRESS_TAKEN: InboxError = {
   message: "This address is already used by an inbox",
 };
 
-const SHARED_LOCAL_SLUG_MAX = 20;
+const NAME_REVIEW_UNAVAILABLE: InboxError = {
+  status: 503,
+  name: "name_review_unavailable",
+  message:
+    "This name couldn't be reviewed right now: try again shortly, or leave username out for a random address",
+  retryAfterSec: 60,
+};
+
 /** Generated addresses retried on collision before giving up. */
 const ADDRESS_ATTEMPTS = 5;
 const EXPIRE_BATCH = 1000;
@@ -100,52 +134,92 @@ const LOCAL_PART = /^[a-z0-9._%+-]{1,64}$/;
 /** Resend's from_name limit. */
 const FROM_NAME_MAX = 78;
 
+/** The 422 for a name the shared domain won't carry; why is never said. */
+const refusedOnShared = (field: string): InboxError =>
+  invalid(`${field} can't be used on the shared domain: pick another`);
+
 /**
  * The display name recipients see: a plain name as team and display names
  * are everywhere (no "@", links or phone numbers), and nothing that would
- * read as From header structure. "" removes it.
+ * read as From header structure. "" removes it. On the shared domain it may
+ * not imitate a brand either.
  */
-function fromNameOf(value: string): string | null | InboxError {
+function fromNameOf(value: string, shared: boolean): string | null | InboxError {
   const name = value.trim();
   if (name === "") return null;
-  return isPlainName(name, FROM_NAME_MAX) && !/[:<>]/.test(name)
-    ? name
-    : invalid(
-        `from_name must be a plain name of at most ${FROM_NAME_MAX} characters, without @ : < >, line breaks, links or phone numbers`,
-      );
-}
-
-/** When an inbox created or renewed now expires: null never. Shared addresses always expire. */
-function expiryOf(
-  value: string | null | undefined,
-  shared: boolean,
-  now: Date,
-): { expiresAt: Date | null } | InboxError {
-  if (value === undefined) {
-    return { expiresAt: shared ? new Date(now.getTime() + SHARED_INBOX_DEFAULT_TTL) : null };
-  }
-  if (value === null) {
-    return shared
-      ? invalid(
-          `Inboxes on the shared domain always expire: expires_in can be at most ${SHARED_INBOX_MAX_TTL / DAY_MS}d`,
-        )
-      : { expiresAt: null };
-  }
-  const ms = expiresInMs(value);
-  if (ms === null) return invalid('expires_in must be hours or days, like "24h" or "7d"');
-  const maxMs = shared ? SHARED_INBOX_MAX_TTL : INBOX_MAX_TTL;
-  if (ms > maxMs) {
+  if (!isPlainName(name, FROM_NAME_MAX) || /[:<>]/.test(name)) {
     return invalid(
-      `expires_in can be at most ${maxMs / DAY_MS}d${shared ? " on the shared domain" : ""}`,
+      `from_name must be a plain name of at most ${FROM_NAME_MAX} characters, without @ : < >, line breaks, links or phone numbers`,
     );
   }
+  return shared && imitatedBrandIn(name, { everydayWords: false })
+    ? refusedOnShared("from_name")
+    : name;
+}
+
+/**
+ * A chosen username on the shared domain, trimmed and lowercased, or the
+ * 422 that refuses it (SHARED_USERNAME). `fwd-` is the shape of forwarding
+ * inboxes' receiving addresses.
+ */
+function usernameOf(value: string, shared: boolean): string | InboxError {
+  if (!shared) return invalid("Send username or email_address, not both");
+  const username = value.trim().toLowerCase();
+  if (!SHARED_USERNAME.test(username)) {
+    return invalid(
+      "username must be 1-64 letters, digits and . _ - that start and end with a letter or digit, without two dots in a row",
+    );
+  }
+  return username.startsWith("fwd-") ||
+    reservedSharedName(username) ||
+    imitatedBrandIn(username, { everydayWords: false })
+    ? refusedOnShared("username")
+    : username;
+}
+
+/** When an inbox created or renewed now expires: never (null) unless expires_in says otherwise. */
+function expiryOf(
+  value: string | null | undefined,
+  now: Date,
+): { expiresAt: Date | null } | InboxError {
+  if (value === undefined || value === null) return { expiresAt: null };
+  const ms = expiresInMs(value);
+  if (ms === null) return invalid('expires_in must be hours or days, like "24h" or "7d"');
+  if (ms > INBOX_MAX_TTL) return invalid(`expires_in can be at most ${INBOX_MAX_TTL / DAY_MS}d`);
   return { expiresAt: new Date(now.getTime() + ms) };
 }
 
-/** A complete safety object for this inbox, or the 422 that refuses it. */
+/** The refusal the identity review gives names on the shared domain, or null when it passes them. */
+async function reviewRefusal(
+  db: Db,
+  deps: InboxDeps,
+  p: { teamId: string; texts: SharedNameText[]; now: Date },
+): Promise<InboxError | null> {
+  const refused = await reviewSharedNames(db, { review: deps.judgeSharedNames, ...p });
+  if (refused === "unavailable") return NAME_REVIEW_UNAVAILABLE;
+  if (refused === "refusals_spent" || refused === "reviews_spent") {
+    return {
+      status: 429,
+      name: "rate_limit_exceeded",
+      message: `Too many names were ${refused === "refusals_spent" ? "refused" : "reviewed"} today: try again tomorrow, or leave username out for a random address`,
+      retryAfterSec: secondsToNextUtcDay(p.now),
+    };
+  }
+  return refused ? refusedOnShared(refused.field) : null;
+}
+
+/** A complete safety object for this inbox, or the 422 that refuses it. `plan` is the effective plan. */
 async function checkedSafety(
   db: Db,
-  p: { teamId: string; kind: InboxKind; shared: boolean; safety: InboxSafety; now: Date },
+  p: {
+    teamId: string;
+    kind: InboxKind;
+    shared: boolean;
+    safety: InboxSafety;
+    plan: Plan;
+    isCloud: boolean;
+    now: Date;
+  },
 ): Promise<InboxSafety | InboxError> {
   const parsed = inboxSafetySchema.safeParse(p.safety);
   if (!parsed.success) {
@@ -154,11 +228,13 @@ async function checkedSafety(
     );
   }
   const safety = parsed.data;
+  const open = safety.send_policy === "open";
   const problem = safetyProblem(safety, {
     kind: p.kind,
     shared: p.shared,
-    teamTierNew: safety.send_policy === "open" && (await teamInNewTier(db, p.teamId, p.now)),
+    teamTierNew: open && (await teamInNewTier(db, p.teamId, p.now)),
     memberEmails: safety.forward_to.length > 0 ? await teamMemberEmails(db, p.teamId) : [],
+    sharedSending: p.shared && open ? await teamSharedSending(db, p, p.plan) : undefined,
   });
   return problem === null ? safety : invalid(problem);
 }
@@ -238,7 +314,7 @@ async function wireOf(db: Db, row: InboxRow): Promise<InboxWire> {
 
 /** Where a new inbox's address lives, resolved from the request. */
 type AddressPlan =
-  | { shared: true; sub: { id: string; name: string }; name: string | undefined }
+  | { shared: true; sub: { id: string; name: string }; username: string | undefined }
   | {
       shared: false;
       emailAddress: string;
@@ -251,7 +327,14 @@ type AddressPlan =
 async function addressPlan(
   db: Db,
   deps: InboxDeps,
-  p: { teamId: string; teamName: string; input: CreateInboxInput; name: string | undefined },
+  p: {
+    teamId: string;
+    teamName: string;
+    input: CreateInboxInput;
+    username: string | undefined;
+    fromName: string | null;
+    now: Date;
+  },
 ): Promise<AddressPlan | InboxError> {
   const { input } = p;
   const shared = deps.sharedInboxDomain;
@@ -262,12 +345,19 @@ async function addressPlan(
     if (!shared) {
       return invalid("email_address is required: this instance has no shared inbox domain");
     }
+    const texts: SharedNameText[] = [];
+    if (p.username !== undefined) texts.push({ field: "username", value: p.username });
+    if (p.fromName !== null) texts.push({ field: "from_name", value: p.fromName });
+    const refused = await reviewRefusal(db, deps, { teamId: p.teamId, texts, now: p.now });
+    if (refused) return refused;
     const sub = await ensureSharedSubdomain(db, {
       teamId: p.teamId,
       teamName: p.teamName,
       sharedInboxDomain: shared,
+      review: deps.judgeSharedNames,
+      now: p.now,
     });
-    return { shared: true, sub, name: p.name };
+    return { shared: true, sub, username: p.username };
   }
   const address = input.email_address.trim().toLowerCase();
   const at = address.lastIndexOf("@");
@@ -286,7 +376,7 @@ async function addressPlan(
   }
   if (shared && (domain === shared || domain.endsWith(`.${shared}`))) {
     return invalid(
-      "Addresses on the shared domain are made up for you: leave email_address out to get one",
+      "Addresses on the shared domain take a username: leave email_address out and set username",
     );
   }
   const d = schema.domains;
@@ -309,6 +399,8 @@ async function addressPlan(
       teamId: p.teamId,
       teamName: p.teamName,
       sharedInboxDomain: shared,
+      review: deps.judgeSharedNames,
+      now: p.now,
     });
   }
   return {
@@ -318,19 +410,6 @@ async function addressPlan(
     domainId: row.id,
     forwardingSub,
   };
-}
-
-/**
- * A shared address's local part: the inbox name as a slug and a random
- * suffix, or a random one when there is no usable name or the name imitates
- * a brand. Never the `fwd-` shape forwarding addresses take.
- */
-function sharedLocalPart(name: string | undefined): string {
-  const slug =
-    name && !imitatedBrandIn(name)
-      ? slugify(name).slice(0, SHARED_LOCAL_SLUG_MAX).replace(/-+$/, "")
-      : "";
-  return slug ? `${slug}-${randomAlnum(4)}` : `inbox-${randomAlnum(8)}`;
 }
 
 export async function createInbox(
@@ -355,8 +434,13 @@ export async function createInbox(
   if (!INBOX_KINDS.includes(kind)) return fail(invalid("kind must be agent or human"));
   const name = input.name === undefined ? undefined : oneLineName(input.name);
   if (isInboxError(name)) return fail(name);
-  const fromName = input.from_name === undefined ? null : fromNameOf(input.from_name);
+  const shared = input.email_address === undefined;
+  const fromName = input.from_name === undefined ? null : fromNameOf(input.from_name, shared);
   if (isInboxError(fromName)) return fail(fromName);
+  const username = input.username === undefined ? undefined : usernameOf(input.username, shared);
+  if (isInboxError(username)) return fail(username);
+  const expiry = expiryOf(input.expires_in, now);
+  if (isInboxError(expiry)) return fail(expiry);
 
   if ((await inboxRoom(db, p.teamId, p.plan, p.isCloud, now)) === 0) return fail(PLAN_LIMIT);
   const creates = await inboxCreatesLeft(db, p.teamId, p.plan, p.isCloud, now);
@@ -369,14 +453,12 @@ export async function createInbox(
     });
   }
 
-  if (p.onlyDomainId && input.email_address === undefined) return fail(OUTSIDE_KEY_DOMAIN);
-  const plan = await addressPlan(db, deps, { ...p, name });
+  if (p.onlyDomainId && shared) return fail(OUTSIDE_KEY_DOMAIN);
+  const plan = await addressPlan(db, deps, { ...p, username, fromName, now });
   if (isInboxError(plan)) return fail(plan);
   if (p.onlyDomainId && (plan.shared || plan.domainId !== p.onlyDomainId)) {
     return fail(OUTSIDE_KEY_DOMAIN);
   }
-  const expiry = expiryOf(input.expires_in, plan.shared, now);
-  if (isInboxError(expiry)) return fail(expiry);
   const defaults = defaultSafety(kind, plan.shared);
   const requested = setKeys(input.safety ?? {});
   // A new team may not send openly yet, so its default steps down to what it may use.
@@ -392,6 +474,8 @@ export async function createInbox(
     kind,
     shared: plan.shared,
     safety: { ...defaults, ...requested },
+    plan: p.plan,
+    isCloud: p.isCloud,
     now,
   });
   if (isInboxError(safety)) return fail(safety);
@@ -401,7 +485,15 @@ export async function createInbox(
   const row = await db.transaction(async (tx) => {
     const t = tx as unknown as Db;
     for (let attempt = 0; attempt < ADDRESS_ATTEMPTS; attempt += 1) {
-      const localPart = plan.shared ? sharedLocalPart(plan.name) : plan.localPart;
+      const localPart = plan.shared ? (plan.username ?? `inbox-${randomAlnum(8)}`) : plan.localPart;
+      // A random draw can spell a brand look-alike, which the send rules would hold back.
+      if (
+        plan.shared &&
+        plan.username === undefined &&
+        imitatedBrandIn(localPart, { everydayWords: false })
+      ) {
+        continue;
+      }
       const emailAddress = plan.shared ? `${localPart}@${plan.sub.name}` : plan.emailAddress;
       const [inserted] = await t
         .insert(i)
@@ -420,6 +512,7 @@ export async function createInbox(
           fromName,
           safety,
           expiresAt: expiry.expiresAt,
+          lastUsedAt: now,
           createdAt: now,
           updatedAt: now,
         })
@@ -442,11 +535,11 @@ export async function createInbox(
         return inserted;
       }
       // A chosen address collides only with its own; a generated one is drawn again.
-      if (!plan.shared) {
+      if (!plan.shared || plan.username !== undefined) {
         const [taken] = await t
           .select({ id: i.id })
           .from(i)
-          .where(eq(i.emailAddress, plan.emailAddress));
+          .where(eq(i.emailAddress, emailAddress));
         if (taken) return null;
       }
     }
@@ -569,6 +662,7 @@ export async function updateInbox(
   const now = new Date();
   const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId, now: now });
   if (!inbox) return fail(INBOX_NOT_FOUND);
+  const shared = inbox.domainId === null;
   const set: Partial<typeof schema.inboxes.$inferInsert> = { updatedAt: now };
   if (p.patch.name !== undefined) {
     const name = oneLineName(p.patch.name);
@@ -576,17 +670,26 @@ export async function updateInbox(
     set.name = name;
   }
   if (p.patch.from_name !== undefined) {
-    const fromName = fromNameOf(p.patch.from_name);
+    const fromName = fromNameOf(p.patch.from_name, shared);
     if (isInboxError(fromName)) return fail(fromName);
     set.fromName = fromName;
   }
   if (p.patch.expires_in !== undefined) {
-    const expiry = expiryOf(p.patch.expires_in, inbox.domainId === null, now);
+    const expiry = expiryOf(p.patch.expires_in, now);
     if (isInboxError(expiry)) return fail(expiry);
     const earlier =
       expiry.expiresAt !== null && (inbox.expiresAt === null || expiry.expiresAt < inbox.expiresAt);
     if (earlier && !p.mayShorten) return fail(SHORTEN_NEEDS_ADMIN);
     set.expiresAt = expiry.expiresAt;
+  }
+  // Repeating the stored from_name publishes nothing new, so it isn't reviewed again.
+  if (shared && set.fromName && set.fromName !== inbox.fromName) {
+    const refused = await reviewRefusal(db, deps, {
+      teamId: p.teamId,
+      texts: [{ field: "from_name", value: set.fromName }],
+      now,
+    });
+    if (refused) return fail(refused);
   }
   const i = schema.inboxes;
   const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
@@ -610,6 +713,15 @@ export async function updateInbox(
   return { ok: true, inbox: wire };
 }
 
+/** Inboxes past expires_at, and shared-domain ones unused for SHARED_INBOX_IDLE_TTL. */
+const sweepable = (now: Date) => {
+  const i = schema.inboxes;
+  return or(
+    lte(i.expiresAt, now),
+    and(isNull(i.domainId), lt(i.lastUsedAt, new Date(now.getTime() - SHARED_INBOX_IDLE_TTL))),
+  );
+};
+
 /**
  * Deletes inboxes with their threads, drafts, labels and memberships, and
  * the received messages only they held (catch-all mail stays in All
@@ -623,6 +735,11 @@ export async function deleteInboxes(
     inboxIds: string[];
     actor: InboxActor;
     reason: "deleted" | "expired" | "domain_deleted";
+    /**
+     * The sweep's clock. An inbox goes as expired only if it still is under
+     * its row lock, so one used since the sweep read it stays.
+     */
+    now?: Date | undefined;
   },
 ): Promise<number> {
   if (p.inboxIds.length === 0) return 0;
@@ -638,7 +755,13 @@ export async function deleteInboxes(
     const rows = await t
       .select()
       .from(i)
-      .where(and(eq(i.teamId, p.teamId), inArray(i.id, p.inboxIds)))
+      .where(
+        and(
+          eq(i.teamId, p.teamId),
+          inArray(i.id, p.inboxIds),
+          p.reason === "expired" ? sweepable(p.now ?? new Date()) : undefined,
+        ),
+      )
       .for("update");
     if (rows.length === 0) return [];
     const ids = rows.map((row) => row.id);
@@ -717,15 +840,17 @@ export async function deleteInboxes(
   return deleted.length;
 }
 
-/** The hourly sweep: inboxes past expires_at go, each announced as expired then deleted. */
+/** The hourly sweep: sweepable inboxes go, each announced as expired then deleted. */
 export async function expireInboxes(db: Db, deps: InboxDeps, now: Date): Promise<number> {
   const i = schema.inboxes;
   // ponytail: one batch per run; a larger backlog clears over the next hourly runs,
-  // and expired inboxes already read as gone everywhere.
+  // and expired inboxes already read as gone everywhere. The idle half has no
+  // index on last_used_at and scans inboxes: a partial one where domain_id is
+  // null once that table is large.
   const due = await db
     .select({ id: i.id, teamId: i.teamId })
     .from(i)
-    .where(lte(i.expiresAt, now))
+    .where(sweepable(now))
     .orderBy(asc(i.expiresAt))
     .limit(EXPIRE_BATCH);
   const byTeam = new Map<string, string[]>();
@@ -737,6 +862,7 @@ export async function expireInboxes(db: Db, deps: InboxDeps, now: Date): Promise
       inboxIds,
       actor: { kind: "system" },
       reason: "expired",
+      now,
     });
   }
   return n;
@@ -752,7 +878,15 @@ export async function getInboxSafety(
 export async function updateInboxSafety(
   db: Db,
   deps: InboxDeps,
-  p: { teamId: string; inboxId: string; actor: InboxActor; patch: Partial<InboxSafety> },
+  p: {
+    teamId: string;
+    inboxId: string;
+    actor: InboxActor;
+    patch: Partial<InboxSafety>;
+    /** The team's effective plan, which decides whether a shared inbox may be open. */
+    plan: Plan;
+    isCloud: boolean;
+  },
 ): Promise<{ ok: true; safety: InboxSafety } | { ok: false; error: InboxError }> {
   const now = new Date();
   const inbox = await findLiveInbox(db, { teamId: p.teamId, inboxId: p.inboxId, now: now });
@@ -763,6 +897,8 @@ export async function updateInboxSafety(
     kind: inbox.kind,
     shared: inbox.domainId === null,
     safety: { ...inbox.safety, ...patch },
+    plan: p.plan,
+    isCloud: p.isCloud,
     now,
   });
   if (isInboxError(safety)) return fail(safety);

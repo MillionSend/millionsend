@@ -94,8 +94,8 @@ them, never through "all events".
 | --- | --- | --- |
 | `inbox.created` | An inbox was created. | `inbox` |
 | `inbox.updated` | An inbox's name, from name, expiry or safety settings changed. | `inbox` |
-| `inbox.deleted` | An inbox was deleted, by a person, the API, an expiry or its domain's deletion. | |
-| `inbox.expired` | An inbox reached its `expires_at`; `inbox.deleted` follows. MillionSend's own. | `inbox`, as it was |
+| `inbox.deleted` | An inbox was deleted, by a person, the API, an expiry, the cleanup of a shared inbox unused for 90 days, or its domain's deletion. | |
+| `inbox.expired` | An inbox reached its `expires_at`, or a shared-domain inbox went unused for 90 days; `inbox.deleted` follows. MillionSend's own. | `inbox`, as it was |
 | `inbox.thread.created` | A thread got its first message: the first one delivered or released, or the first one the inbox sent. | `thread_id`, `email_id`, `thread`, `email` |
 | `inbox.thread.folder.updated` | A thread moved folders, by hand or when new mail brought it back to `inbox`. | `from`, `to`, `thread_id`, `thread` |
 | `inbox.thread.labels.updated` | A label was put on or taken off a thread; one label per event. | `added`, `removed`, `thread_id`, `thread` |

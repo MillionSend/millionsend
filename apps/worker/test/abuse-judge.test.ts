@@ -55,7 +55,7 @@ afterAll(() => close());
 
 async function insertEmail(
   html: string,
-  opts: { attachments?: boolean; team?: string } = {},
+  opts: { attachments?: boolean; team?: string; from?: string } = {},
 ): Promise<string> {
   const id = randomUUID();
   const team = opts.team ?? teamId;
@@ -64,7 +64,7 @@ async function insertEmail(
   await db.insert(schema.emails).values({
     id,
     teamId: team,
-    from: "Acme <hi@acme.dev>",
+    from: opts.from ?? "Acme <hi@acme.dev>",
     to: ["victim@example.org"],
     replyTo: ["reply@example.net"],
     subject: "Your account",
@@ -372,4 +372,36 @@ it("still emails the operator about a suspended team, through the system mailer"
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+it("holds a new team on one phishing verdict from 80 on its shared-domain mail, as on a young domain's", async () => {
+  const team = await createTeam(db, "shared-sender");
+  await db.insert(schema.teamMonitor).values({ teamId: team, sentTotal: 1, firstSendAt: NOW });
+  const emailId = await insertEmail("<p>Confirm your card</p>", {
+    team,
+    from: "Agent <agent@shared-sender.agents.example>",
+  });
+  const id = await insertSample({ teamId: team, emailId });
+  const phishing: AbuseJudge = {
+    provider: "typesafe",
+    model: "fake-model",
+    judge: async () => ({
+      score: 81,
+      verdict: "abuse",
+      categories: ["payment_redirect"],
+      reasons: [],
+      impersonatedBrand: null,
+      language: "en",
+    }),
+  };
+  expect(
+    await judgeSample(db, deps(phishing, { sharedInboxDomain: "agents.example" }), {
+      sampleId: id,
+    }),
+  ).toBe("judged");
+  const [held] = await db
+    .select({ reason: schema.teams.suspensionReason })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, team));
+  expect(held?.reason).toBe("review");
 });

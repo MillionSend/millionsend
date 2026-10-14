@@ -491,7 +491,7 @@ describe("console.monitor", () => {
   it("reads every setting with its source, and the judge as off by default", async () => {
     const got = await operator().console.monitor.settings.get();
     expect(got.judge).toEqual({ on: false });
-    expect(got.settings).toHaveLength(26);
+    expect(got.settings).toHaveLength(30);
     expect(got.settings.find((s) => s.key === "firstSends")).toEqual({
       key: "firstSends",
       value: 1000,

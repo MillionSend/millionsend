@@ -1,6 +1,8 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import { and, eq, lt } from "drizzle-orm";
 import type { ApiKeyAuth } from "../api-key-auth.js";
+import { INBOX_USE_STAMP_INTERVAL } from "./limits.js";
 
 /** Who acted on an inbox. An api_key with an inboxId is an inbox-scoped key. */
 export type InboxActor =
@@ -102,9 +104,36 @@ export const INBOX_ACTIVITY_ACTIONS = [
 export type InboxActivityAction = (typeof INBOX_ACTIVITY_ACTIONS)[number];
 
 /**
+ * Marks an inbox used at `now`: what keeps a shared-domain inbox from the
+ * idle sweep (SHARED_INBOX_IDLE_TTL). At most once per
+ * INBOX_USE_STAMP_INTERVAL, so concurrent sends from one inbox don't queue
+ * on its row.
+ */
+export async function touchInbox(db: Db, inboxId: string, now: Date): Promise<void> {
+  const i = schema.inboxes;
+  await db
+    .update(i)
+    .set({ lastUsedAt: now })
+    .where(
+      and(eq(i.id, inboxId), lt(i.lastUsedAt, new Date(now.getTime() - INBOX_USE_STAMP_INTERVAL))),
+    );
+}
+
+/**
+ * touchInbox for an API call that reaches the inbox, reads included: not
+ * awaited, and a failed stamp is logged, never the call's failure.
+ */
+export function touchInboxInBackground(db: Db, inboxId: string): void {
+  touchInbox(db, inboxId, new Date()).catch((err) => {
+    console.warn("inbox use stamp failed", err);
+  });
+}
+
+/**
  * One inbox_activity row. Pass the caller's transaction so the action and
  * its row commit together. `decision.reasons` carries reason codes only,
- * never content, codes or addresses.
+ * never content, codes or addresses. Anything but the system acting counts
+ * as use of the inbox.
  */
 export async function recordInboxActivity(
   db: Db,
@@ -129,4 +158,5 @@ export async function recordInboxActivity(
     draftId: entry.draftId ?? null,
     decision: entry.decision ?? null,
   });
+  if (entry.actor.kind !== "system") await touchInbox(db, entry.inboxId, new Date());
 }

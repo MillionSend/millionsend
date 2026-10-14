@@ -238,7 +238,7 @@ takes `accept_from` and no other safety setting.
 | `reply_to_received_email` | `receiving:reply` | Reply to a received email from its inbox. Answers `sent` with the email and thread, or `draft` with the reasons when the inbox's rules hold the reply for a person. |
 | `forward_received_email` | `receiving:reply` | Forward a received email, quoted inline or attached as `.eml`; same answers as the reply. |
 | `update_thread` | `receiving:reply` | Mark a thread read or unread, move it to a folder, or add a label. |
-| `create_inbox` | `receiving:manage` | Create an agent inbox (people's inboxes are made in the dashboard); `accept_from` is the only safety setting it takes. |
+| `create_inbox` | `receiving:manage` | Create an agent inbox (people's inboxes are made in the dashboard); `accept_from` is the only safety setting it takes, and `username` names an address on the shared domain. |
 | `update_inbox` | `receiving:manage` | Change an inbox's name, from name or expiry; making it expire sooner takes the owner or admin role. |
 | `delete_inbox` | `receiving:manage` | **admin** Delete an inbox with its threads and drafts; its API keys are revoked. |
 | `release_email` | `receiving:manage` | Release a quarantined email into its inbox; `trust_sender` also adds the sender to the allowlist. |
