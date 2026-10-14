@@ -655,7 +655,7 @@ function buildServer(
     {
       title: "List emails",
       description:
-        "List the team's transactional emails (sent, queued and scheduled), newest first, with cursor pagination (after pages toward older emails).",
+        "List the team's sent, queued and scheduled emails, broadcast copies included, newest first, with cursor pagination (after pages toward older emails).",
       inputSchema: listQuerySchema,
       readOnly: true,
     },
