@@ -268,7 +268,10 @@ enviado com `Content-Type` diferente de `application/json` recebe `415`.
 
 Um caminho que a API não tem, ou um método que o caminho não aceita, recebe
 `404 not_found` com a mensagem `The requested endpoint does not exist.` (o
-Resend responde `405 method_not_allowed` a um método errado).
+Resend responde `405 method_not_allowed` a um método errado). Um método errado
+num caminho que também bate com uma rota que leva um id cai nessa rota:
+`GET /emails/batch` vira `GET /emails/{id}` com o id `batch` e recebe
+`422 validation_error`.
 
 Um caractere NUL (U+0000) num texto que o banco de dados guarda, como um nome,
 uma propriedade, um filtro ou um id na URL, e uma data fora dos anos 1 a 9999

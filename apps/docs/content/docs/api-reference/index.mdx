@@ -257,7 +257,10 @@ with a `Content-Type` other than `application/json` answers `415`.
 
 A path the API doesn't have, or a method its path doesn't take, answers
 `404 not_found` with the message `The requested endpoint does not exist.`
-(Resend answers a wrong method with `405 method_not_allowed`).
+(Resend answers a wrong method with `405 method_not_allowed`). A wrong method
+on a path that also fits a route with an id goes to that route instead:
+`GET /emails/batch` is `GET /emails/{id}` with the id `batch`, and answers
+`422 validation_error`.
 
 A NUL character (U+0000) in text the database stores, such as a name, a
 property, a filter or an id in the URL, and a date outside the years 1 to 9999
