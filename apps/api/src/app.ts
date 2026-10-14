@@ -3455,8 +3455,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return next();
   });
 
-  // Uncaught throws must still speak Resend's error format — SDK clients
-  // parse the body as JSON.
+  // Uncaught throws and unmatched routes must still speak Resend's error
+  // format — SDK clients parse the body as JSON. The 404 never echoes the
+  // path: it can carry an address, and the request log keeps response bodies.
+  app.notFound((c) =>
+    c.json(errorBody(404, "not_found", "The requested endpoint does not exist."), 404),
+  );
   app.onError((err, c) => {
     // The request validators refuse a malformed JSON body (400) or one that
     // isn't JSON (415) by throwing: the caller's mistake, not ours to report.
