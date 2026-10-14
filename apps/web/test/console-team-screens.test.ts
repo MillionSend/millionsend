@@ -6,7 +6,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createCaller } from "@/server/routers";
 
-const h = vi.hoisted(() => ({ review: undefined as unknown, monitor: undefined as unknown }));
+const h = vi.hoisted(() => ({
+  review: undefined as unknown,
+  monitor: undefined as unknown,
+  guard: vi.fn(),
+}));
 
 // The real English catalogs, so the test reads what the operator reads.
 vi.mock("next-intl", async (importOriginal) => {
@@ -66,6 +70,8 @@ vi.mock("@tanstack/react-query", () => ({
   }),
   useQueryClient: () => ({ invalidateQueries: () => {} }),
 }));
+// The guard's prompts need a browser; a server render can only check it is wired.
+vi.mock("@/lib/use-unsaved-warning", () => ({ useUnsavedChangesWarning: h.guard }));
 vi.mock("@/server/queue", () => ({
   getQueue: async () => ({ runCronNow: async () => {} }),
   enqueueEmailSend: async () => {},
@@ -80,6 +86,7 @@ const { SuspendDialog } = await import("@/components/console/teams/hold-dialogs"
 const { teamMenuItems } = await import("@/components/console/team-actions");
 const { MonitorSettingsView, Field } = await import("@/components/console/safety/monitor-settings");
 const consoleEn = (await import("../messages/en/console.json")).default;
+const commonEn = (await import("../messages/en/common.json")).default;
 
 let db: Db;
 let close: () => Promise<void>;
@@ -315,6 +322,7 @@ describe("the console's monitoring settings", () => {
       /Shared domain<.*Shared addresses send<.*Start conversations<.*Each team's SES tenant<.*Recipients per team per day</s,
     );
     expect(html).not.toContain("not saved yet");
+    expect(h.guard).toHaveBeenCalledWith(false, commonEn.unsavedWarn);
   });
 
   it("marks a changed value as not saved yet, never as set here", () => {
