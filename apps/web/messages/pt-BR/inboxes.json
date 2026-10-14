@@ -75,7 +75,7 @@
   "empty": {
     "title": "Nenhuma caixa de entrada ainda",
     "body": "Crie um endereço que recebe e-mails. Agentes leem pela API, por webhooks ou pelo MCP; pessoas leem aqui.",
-    "sharedOnly": "Crie um endereço em {domain}, sem mexer no DNS. Para usar um domínio seu, ative o recebimento nele."
+    "sharedOnly": "Crie um endereço em {domain}, sem mexer no DNS. Para endereços no seu domínio, ative o recebimento nele."
   },
   "limit": {
     "reached": "Você já usa as {limit} caixas do seu plano. <link>Faça upgrade</link> para criar mais.",
