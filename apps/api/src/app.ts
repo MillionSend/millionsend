@@ -4714,6 +4714,8 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const listEmailsRoute = createRoute({
     method: "get",
     path: "/emails",
+    description:
+      "The team's emails, newest first as on Resend (`after` pages toward older emails), with cursor pagination.",
     middleware: [requireFullAccess],
     request: { query: listQuerySchema },
     responses: {
@@ -4736,6 +4738,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       query: c.req.valid("query"),
       createdAt: t.createdAt,
       id: t.id,
+      newestFirst: true,
       loadCursor: async (id) =>
         (
           await deps.db

@@ -224,6 +224,56 @@ describe("get email wire shape", () => {
   });
 });
 
+describe("GET /emails", () => {
+  it("lists newest first: after pages toward older emails, before back toward newer", async () => {
+    const listTeam = await createTeam(db, "list-order");
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId: listTeam,
+      name: "t",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    // Pinned created_at: rows inserted in one go could tie and fall back to the random id.
+    const rows = await db
+      .insert(schema.emails)
+      .values(
+        ["First", "Second", "Third"].map((subject, day) => ({
+          teamId: listTeam,
+          from: "A <a@example.com>",
+          to: ["r@example.com"],
+          subject,
+          latestStatus: "sent" as const,
+          createdAt: new Date(Date.UTC(2026, 0, day + 1)),
+        })),
+      )
+      .returning({ id: schema.emails.id, subject: schema.emails.subject });
+    const list = async (query: string) =>
+      (await (
+        await app.request(`/emails${query}`, { headers: { authorization: `Bearer ${key.token}` } })
+      ).json()) as { has_more: boolean; data: { id: string; subject: string }[] };
+    const page = await list("?limit=2");
+    expect(page).toMatchObject({
+      has_more: true,
+      data: [{ subject: "Third" }, { subject: "Second" }],
+    });
+    expect(await list(`?limit=2&after=${page.data[1]?.id}`)).toMatchObject({
+      has_more: false,
+      data: [{ subject: "First" }],
+    });
+    const oldest = rows.find((r) => r.subject === "First")?.id;
+    expect(await list(`?limit=1&before=${oldest}`)).toMatchObject({
+      has_more: true,
+      data: [{ subject: "Second" }],
+    });
+    expect(await list(`?before=${oldest}`)).toMatchObject({
+      has_more: false,
+      data: [{ subject: "Third" }, { subject: "Second" }],
+    });
+  });
+});
+
 describe("batch send", () => {
   const batch = (items: unknown[], headers: Record<string, string> = {}) =>
     app.request("/emails/batch", {
