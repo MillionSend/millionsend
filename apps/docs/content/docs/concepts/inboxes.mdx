@@ -236,7 +236,10 @@ out first.
 **Read state.** Every received message is read or unread. A `PATCH` with
 `read` marks the whole thread. A thread is read when all its messages are,
 and the inbox's `unread` counts the threads with an unread message. Mail the
-inbox sent is always read.
+inbox sent is always read. In the dashboard, opening a thread marks it read
+in a people inbox. In an agent inbox, read state belongs to your agent: it
+marks a thread read once it's handled, and the threads listed with
+`read=false` are what's left.
 
 **Labels.** Up to 100 per inbox. Names take 1–64 characters and are unique
 regardless of letter case; colors are `#RRGGBB`, in uppercase, and random
@@ -559,12 +562,12 @@ in [Receiving → Pricing](/concepts/receiving#pricing).
 
 **Inboxes** in the sidebar lists your inboxes under the **All**, **Agent**
 and **People** tabs, with what needs attention: drafts to approve, unread
-threads and messages in quarantine. A pinned **All received** row opens every
-email your domains received, in an inbox or not, and each catch-all domain
-gets a row for the mail at its other addresses. An inbox's page has four
-tabs: **Threads**, where you read, reply and approve drafts in place,
-**Needs review** (drafts to approve and quarantine), **Safety & rules** and
-**Activity**.
+threads (in people inboxes) and messages in quarantine. A pinned **All
+received** row opens every email your domains received, in an inbox or not,
+and each catch-all domain gets a row for the mail at its other addresses. An
+inbox's page has four tabs: **Threads**, where you read, reply and approve
+drafts in place, **Needs review** (drafts to approve and quarantine),
+**Safety & rules** and **Activity**.
 
 Any member can create inboxes, work their threads, approve drafts and release
 quarantine. Owners and admins can also delete inboxes, change safety rules,

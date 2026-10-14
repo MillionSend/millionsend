@@ -459,6 +459,109 @@ table.ms-table {
   background: color-mix(in srgb, var(--ms-panel-raised) 60%, var(--ms-table-ground));
 }
 
+/* Thread list (inboxes): one list-height line per thread — unread dot, sender
+   and message count, pills, subject and snippet, time — on the table's type,
+   rules and hover. Under 560px of list width (beside an open thread, phones)
+   each row takes two lines. The row widens its button's click; the button is
+   the keyboard stop, so the row draws the button's focus ring. */
+.ms-thread-list {
+  container-type: inline-size;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--ms-line);
+}
+.ms-thread-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 12rem) minmax(0, 1fr) auto;
+  /* The unread dot, the one child without an area, falls into the free "dot" cell. */
+  grid-template-areas: "dot from subject time";
+  align-items: center;
+  column-gap: 12px;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--ms-line);
+  font: 400 var(--ms-fs-label) / 1.4 var(--ms-font-sans);
+  color: var(--ms-bone);
+  cursor: pointer;
+}
+.ms-thread-row:has([aria-current="true"]) {
+  background: color-mix(in srgb, var(--ms-panel-raised) 60%, transparent);
+}
+.ms-thread-row:has(.ms-thread-open:focus-visible) {
+  position: relative;
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-thread-from {
+  grid-area: from;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+/* Pills, nowrap, keep their width; only the subject line (min-width 0) gives
+   way and ellipsizes. */
+.ms-thread-subject {
+  grid-area: subject;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ms-thread-subject > .ms-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ms-thread-open {
+  display: flex;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ms-thread-open:focus-visible {
+  box-shadow: none;
+}
+.ms-thread-name,
+.ms-thread-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-thread-snippet {
+  color: var(--ms-muted);
+}
+.ms-thread-time {
+  grid-area: time;
+  color: var(--ms-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ms-thread-row:hover .ms-thread-title {
+  text-decoration: underline dotted var(--ms-faint);
+  text-underline-offset: 3px;
+}
+.ms-thread-row.unread :is(.ms-thread-name, .ms-thread-title, .ms-thread-time) {
+  font-weight: 600;
+  color: var(--ms-bone);
+}
+@container (max-width: 559px) {
+  .ms-thread-row {
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "dot from time"
+      ". subject subject";
+    row-gap: 2px;
+    padding: 8px 12px;
+  }
+}
+
 /* Inputs. A fieldset's legend labels its group like any field's label. */
 .ms-field label,
 .ms-field legend {

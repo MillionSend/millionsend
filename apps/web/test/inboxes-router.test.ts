@@ -6,12 +6,14 @@ import {
   type InboxWire,
   PLAN_INBOX_LIMIT,
   safetyProblem,
+  sealReceivedExtracted,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { getKeyring } from "@/server/keyring";
 import type { SessionRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { createDomainsRouter } from "@/server/routers/domains";
@@ -159,7 +161,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
-/** A received row of the team; content columns stay empty, the list never reads them. */
+/** A received row of the team; content columns stay empty unless a test seals one. */
 async function received(
   teamId: string,
   over: Partial<typeof schema.receivedEmails.$inferInsert> = {},
@@ -722,7 +724,7 @@ describe("creating an inbox", () => {
 });
 
 describe("thread rows", () => {
-  it("carry the thread's held mail, the judge's score, a draft waiting and a reply", async () => {
+  it("carry the thread's held mail, the judge's score and a draft waiting", async () => {
     const mail = await received(acme, { catchAll: false });
     await db.insert(schema.receivedEmailInboxes).values({
       receivedEmailId: mail,
@@ -773,10 +775,88 @@ describe("thread rows", () => {
       quarantine_reason: "phishing",
       injection_score: 97,
       pending_approval: true,
-      replied: false,
+      snippet: null,
     });
     // A thread the team does not hold reads as having nothing.
     expect(page.items[1]).toMatchObject({ id: other, quarantined: 0, pending_approval: false });
+  });
+
+  it("show the newest delivered message's first line, never a code's, and flag a warned delivery", async () => {
+    const thread = async () => {
+      const [row] = await db
+        .insert(schema.inboxThreads)
+        .values({ teamId: acme, inboxId, subject: "Order" })
+        .returning({ id: schema.inboxThreads.id });
+      if (!row) throw new Error("no thread");
+      return row.id;
+    };
+    // A message of the thread whose sealed read is `text`, delivered at `at` unless `over` holds it.
+    const message = async (
+      thread: string,
+      text: string,
+      at: Date,
+      over: Partial<typeof schema.receivedEmailInboxes.$inferInsert> = {},
+      kinds: ("code" | "link")[] = [],
+    ) => {
+      const id = await received(acme, { catchAll: false, extractedKinds: kinds });
+      const extracted = await sealReceivedExtracted(
+        { text, quoted: "", signature: "", code: null, link: null, flags: [] },
+        getKeyring(),
+        { teamId: acme, rowId: id },
+      );
+      await db
+        .update(schema.receivedEmails)
+        .set({ extracted })
+        .where(eq(schema.receivedEmails.id, id));
+      await db.insert(schema.receivedEmailInboxes).values({
+        receivedEmailId: id,
+        inboxId,
+        teamId: acme,
+        threadId: thread,
+        address: "orders@in.acme.test",
+        senderTrust: "external",
+        verdict: "clean",
+        deliveredAt: at,
+        createdAt: at,
+        ...over,
+      });
+    };
+    const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000);
+    const plain = await thread();
+    await message(plain, "An older message", minutesAgo(30));
+    await message(plain, "Oi,\ncomprei na sexta​ e o rastreio parou.", minutesAgo(20), {
+      verdict: "suspicious",
+      injectionScore: 62,
+      phishingScore: 12,
+    });
+    await message(plain, "Held for review", minutesAgo(10), {
+      verdict: "quarantined",
+      quarantineReason: "injection",
+      deliveredAt: null,
+      quarantinedAt: minutesAgo(10),
+    });
+    const code = await thread();
+    await message(code, "Your code is 482913", minutesAgo(5), {}, ["code"]);
+    core.listThreads.mockResolvedValue({
+      data: [
+        { id: plain, labels: [] },
+        { id: code, labels: [] },
+      ],
+      hasMore: false,
+    });
+
+    const [first, second] = (await caller(acme).inboxes.threads.list({ inboxId })).items;
+    expect(first).toMatchObject({
+      snippet: "Oi, comprei na sexta e o rastreio parou.",
+      suspicious: true,
+      injection_score: 62,
+      phishing_score: 12,
+      quarantined: 1,
+    });
+    expect(second).toMatchObject({ snippet: null, suspicious: false, phishing_score: null });
+    // A support view reads rows as their envelope: no message text at all.
+    const viewed = (await caller(acme, "viewer", view()).inboxes.threads.list({ inboxId })).items;
+    expect(viewed.map((row) => row.snippet)).toEqual([null, null]);
   });
 });
 

@@ -3,7 +3,7 @@ import type { InboxSafety } from "@millionsend/db/schema";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { InboxDetail } from "@/app/(dashboard)/inboxes/parts";
+import type { InboxDetail, ThreadRow } from "@/app/(dashboard)/inboxes/parts";
 import { dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
 import { typedAllowlistEntry } from "@/lib/email-input";
 import { WEBHOOK_EVENT_META, WEBHOOK_EVENT_TYPES } from "@/lib/webhook-events";
@@ -46,6 +46,7 @@ vi.mock("@/lib/trpc", () => {
 });
 
 const { SafetyForm } = await import("@/app/(dashboard)/inboxes/[id]/safety-tab");
+const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
 const { approvalReasonWords, QuarantinedBadge, TrustBadge } = await import(
   "@/app/(dashboard)/inboxes/parts"
@@ -302,6 +303,80 @@ describe("inbox screens", () => {
     const shared = page("inboxes.example");
     expect(shared).toContain("Create an address at inboxes.example");
     expect(shared).not.toContain("disabled");
+  });
+
+  it("counts unread as needing attention in people inboxes only", () => {
+    const inbox = (kind: string, address: string, unread: number) => ({
+      id: address,
+      email_address: address,
+      name: "",
+      kind,
+      unread,
+      pending_approval: 0,
+      quarantined: 0,
+      received_30d: 0,
+      last_received: null,
+      expires_at: null,
+      forward_to: [],
+    });
+    rq.data = { domains: [], sharedDomain: "inboxes.example", plan: { used: 2, limit: 3 } };
+    rq.pages = {
+      pages: [
+        {
+          items: [inbox("agent", "bot@acme.example", 5), inbox("human", "team@acme.example", 3)],
+          counts: { agent: 1, human: 1 },
+          overview: null,
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(createElement(InboxesView));
+    rq.data = rq.pages = undefined;
+    // The agent's unread is its own queue.
+    expect(html).toContain("3 unread");
+    expect(html).not.toContain("5 unread");
+  });
+
+  it("lays a thread out on one line whose button wraps no other stop", () => {
+    const row = {
+      id: "t1",
+      subject: "Order #8841",
+      from: "Sam Sender <sam@example.com>",
+      to: ["Rita Recipient <rita@example.com>"],
+      cc: [],
+      bcc: [],
+      labels: [{ id: "l1", name: "Billing", color: "#C0A8E1" }],
+      message_count: 3,
+      has_attachment: false,
+      has_draft: false,
+      read: false,
+      received_at: new Date().toISOString(),
+      folder: "inbox",
+      quarantined: 0,
+      quarantine_reason: null,
+      injection_score: 62,
+      phishing_score: 12,
+      suspicious: true,
+      pending_approval: false,
+      snippet: "It never arrived",
+    } as ThreadRow;
+    const render = (agent: boolean, sent = false) =>
+      renderToStaticMarkup(
+        createElement(ThreadListRow, { row, agent, sent, selected: true, onOpen: () => {} }),
+      );
+    const agent = render(true);
+    const button = agent.match(/<button[^>]*class="ms-thread-open"[\s\S]*?<\/button>/)?.[0] ?? "";
+    expect(button).toContain('aria-current="true"');
+    expect(button).toContain("Order #8841");
+    expect(button).toContain("It never arrived");
+    // The time, the dot and the pills are its siblings, each its own stop.
+    expect(button).not.toMatch(/tabindex|<time/);
+    expect(agent).toContain('aria-label="Your agent hasn&#x27;t marked it read yet"');
+    expect(agent).toContain('class="ms-count">3<');
+    expect(agent).toContain(">Suspicious<");
+    const people = render(false);
+    expect(people).toContain('aria-label="Unread"');
+    expect(people).not.toContain("Suspicious");
+    expect(render(false, true)).toContain("To Rita Recipient");
   });
 
   it("shows members the rules read-only", () => {

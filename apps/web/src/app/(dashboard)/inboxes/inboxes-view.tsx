@@ -266,7 +266,10 @@ export function InboxesView() {
                   ...(inbox.pending_approval > 0
                     ? [t("attention.drafts", { count: inbox.pending_approval })]
                     : []),
-                  ...(inbox.unread > 0 ? [t("attention.unread", { count: inbox.unread })] : []),
+                  // An agent's unread mail is its own queue, not a person's to-do.
+                  ...(inbox.kind === "human" && inbox.unread > 0
+                    ? [t("attention.unread", { count: inbox.unread })]
+                    : []),
                   ...(inbox.quarantined > 0
                     ? [t("attention.quarantined", { count: nf.format(inbox.quarantined) })]
                     : []),

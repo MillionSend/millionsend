@@ -23,7 +23,8 @@
   "newLabel": "New label…",
   "newLabelPlaceholder": "Label name",
   "addLabelSubmit": "Add label",
-  "messageCount": "{count, plural, one {# message} other {# messages}}",
+  "unread": "Unread",
+  "unreadAgent": "Your agent hasn't marked it read yet",
   "newerMessages": "Newer messages",
   "openEmail": "Open email",
   "expired": "This inbox expired. It stays here, read-only, until it's removed within the hour.",
@@ -130,10 +131,10 @@
   },
   "badge": {
     "draft": "Draft to approve",
-    "replied": "Replied",
-    "quarantined": "Quarantined · {reason}",
-    "injection": "injection {score}"
+    "quarantined": "Quarantined · {reason}"
   },
+  "suspiciousTip": "Delivered to your agent with a warning: an unverified sender, spam signs, or signs of prompt injection (text trying to give your agent orders) or phishing.",
+  "riskScores": "Risk (0–100): prompt injection {injection} · phishing {phishing}. At 80 or more, the email is held in quarantine.",
   "message": {
     "screening": "Being screened…",
     "quarantined": "Held in quarantine: your agent can't see it until someone releases it.",
@@ -171,7 +172,8 @@
     "subject": "Subject",
     "reasons": "Why it waits",
     "reason": "Reason",
-    "scores": "Scores"
+    "scores": "Risk (0–100)",
+    "scoreLine": "injection {injection} · phishing {phishing}"
   },
   "release": "Release",
   "releaseTrust": "Release and trust sender",
@@ -281,7 +283,7 @@
     "code": "Code",
     "link": "Sign-in link",
     "linkElsewhere": "The link points to a domain other than the sender's.",
-    "scores": "injection {injection} · phishing {phishing}",
+    "scores": "Risk (0–100): injection {injection} · phishing {phishing}",
     "receivedFor": "Received for",
     "messageId": "Message-ID",
     "envelopeFrom": "Envelope from",
@@ -310,6 +312,7 @@
   "compose": {
     "from": "From {address}",
     "to": "To",
+    "toName": "To {name}",
     "subject": "Subject",
     "message": "Message",
     "note": "Note",

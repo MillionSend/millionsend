@@ -46,9 +46,11 @@ code (mono), `→` follow-through. The drawn icons are the 10 nav glyphs in
 stroke 1.4, currentColor, each with a semantic hover micro-animation driven
 by `motion` (≤500ms on `--ms-ease`, disabled under
 `prefers-reduced-motion`) and triggered by the parent nav item's hover. The
-command palette and page action buttons may reuse these glyphs. Do not add
-other icon fonts or icon libraries. Logos in
-`public/logo/` are never redrawn.
+command palette and page action buttons may reuse these glyphs. Static
+button glyphs (`PlusGlyph`, `MenuGlyph`, `RefreshGlyph`) live in the same
+file; a list's refresh is a 30×30 `.ms-btn-icon` whose glyph turns into the
+spinner while a click's reload runs. Do not add other icon fonts or icon
+libraries. Logos in `public/logo/` are never redrawn.
 
 ## Fonts
 
@@ -69,6 +71,12 @@ the canvas overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height
 contacts or emails fits a laptop viewport; the shared `ListFooter` holds the
 page-size chooser and then "Load more" at the right, both drawn as secondary
 buttons, and any secondary action under a table or section is right-aligned.
+The inbox thread list (`.ms-thread-*`) is a mail list on the same type,
+rules and row height: one line per thread (unread dot, sender with a
+`.ms-count`, pills, subject and a muted snippet, time). Unread is weight 600
+plus a bone dot, never a status color; a row carries only the pills that ask
+for action. Under 560px of list width (beside an open thread, phones) a row
+takes two lines, by container query.
 Modals are **centered in the viewport** (both axes), overlay
 `rgba(0,0,0,.72)`, no blur.
 
@@ -158,7 +166,9 @@ section of `components.css`; every rule above it holds at every width.
   on hover; the active one takes the `--ms-panel-raised` fill of the
   sidebar's current item. A strip stays on one line and scrolls sideways in
   its own box, never wrapping: the cut-off last tab is the cue. A count after
-  a label is a `.count` span (tabular, faint).
+  a label is a `.count` span (tabular, faint). A strip that filters a list
+  (inbox folders) has the same look with `aria-pressed` buttons, since there
+  is no tab panel.
 - **Radios** never show the browser's widget: every radio sits in a
   `.ms-radio-card`, whose radio is `.ms-checkbox` in a circle (inset ground,
   line-strong border, bone with a ground dot when chosen), and the chosen

@@ -23,7 +23,8 @@
   "newLabel": "Nova etiqueta…",
   "newLabelPlaceholder": "Nome da etiqueta",
   "addLabelSubmit": "Adicionar etiqueta",
-  "messageCount": "{count, plural, one {# mensagem} other {# mensagens}}",
+  "unread": "Não lida",
+  "unreadAgent": "O agente ainda não marcou como lida",
   "newerMessages": "Mensagens mais novas",
   "openEmail": "Abrir e-mail",
   "expired": "Esta caixa expirou. Ela fica aqui, só para leitura, até ser removida, dentro de uma hora.",
@@ -130,10 +131,10 @@
   },
   "badge": {
     "draft": "Rascunho para aprovar",
-    "replied": "Respondido",
-    "quarantined": "Em quarentena · {reason}",
-    "injection": "injeção {score}"
+    "quarantined": "Em quarentena · {reason}"
   },
+  "suspiciousTip": "Chegou ao agente com um alerta: remetente não verificado, e-mail que parece spam ou sinais de injeção de prompt (texto tentando dar ordens ao agente) ou de phishing.",
+  "riskScores": "Risco (0–100): injeção de prompt {injection} · phishing {phishing}. A partir de 80, o e-mail fica retido na quarentena.",
   "message": {
     "screening": "Em análise…",
     "quarantined": "Retido em quarentena: o agente só vê depois que alguém liberar.",
@@ -171,7 +172,8 @@
     "subject": "Assunto",
     "reasons": "Por que está esperando",
     "reason": "Motivo",
-    "scores": "Notas"
+    "scores": "Risco (0–100)",
+    "scoreLine": "injeção {injection} · phishing {phishing}"
   },
   "release": "Liberar",
   "releaseTrust": "Liberar e confiar no remetente",
@@ -281,7 +283,7 @@
     "code": "Código",
     "link": "Link de acesso",
     "linkElsewhere": "O link aponta para um domínio diferente do remetente.",
-    "scores": "injeção {injection} · phishing {phishing}",
+    "scores": "Risco (0–100): injeção {injection} · phishing {phishing}",
     "receivedFor": "Recebido por",
     "messageId": "Message-ID",
     "envelopeFrom": "Remetente do envelope",
@@ -310,6 +312,7 @@
   "compose": {
     "from": "De {address}",
     "to": "Para",
+    "toName": "Para {name}",
     "subject": "Assunto",
     "message": "Mensagem",
     "note": "Nota",

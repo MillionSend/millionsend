@@ -7,6 +7,7 @@ import {
 import {
   createInbox,
   createLabel,
+  createSemaphore,
   DAY_MS,
   deleteDraft,
   deleteInboxes,
@@ -29,6 +30,7 @@ import {
   listThreads,
   liveInbox,
   MOVE_FOLDERS,
+  openReceivedExtracted,
   rejectDraft,
   releaseQuarantined,
   replyInThread,
@@ -42,6 +44,7 @@ import {
   updateInboxSafety,
   updateLabel,
   updateThread,
+  visibleLine,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -102,12 +105,25 @@ async function listExtras(db: Db, teamId: string, ids: string[]) {
   return new Map(rows.map((row) => [row.id, row]));
 }
 
-/** What a thread row shows beyond the wire item: held mail, the judge's score, drafts, replies. */
-async function threadExtras<T extends { id: string }>(db: Db, teamId: string, items: T[]) {
+/** A thread row's snippet: this many characters of its newest delivered message, on one line. */
+const SNIPPET_CHARS = 160;
+/** Seals opened at once for snippets, per process. */
+const snippetSlot = createSemaphore(4);
+
+/**
+ * What a thread row shows beyond the wire item: held mail, a screening
+ * warning with its scores, a draft waiting, and with `snippets` the opening
+ * line of the newest delivered message.
+ */
+async function threadExtras<T extends { id: string }>(
+  db: Db,
+  teamId: string,
+  items: T[],
+  { snippets }: { snippets: boolean },
+) {
   const th = schema.inboxThreads;
   const m = schema.receivedEmailInboxes;
   const d = schema.inboxDrafts;
-  const e = schema.emails;
   const held = sql`m.thread_id = ${th}."id" and m.quarantined_at is not null and m.released_at is null`;
   const rows =
     items.length === 0
@@ -122,8 +138,15 @@ async function threadExtras<T extends { id: string }>(db: Db, teamId: string, it
             injectionScore: sql<
               number | null
             >`(select max(m.injection_score)::int from ${m} m where m.thread_id = ${th}."id")`,
+            phishingScore: sql<
+              number | null
+            >`(select max(m.phishing_score)::int from ${m} m where m.thread_id = ${th}."id")`,
+            // The stored verdict, so the warning thresholds stay with the screening worker.
+            suspicious: sql<boolean>`exists (select 1 from ${m} m where m.thread_id = ${th}."id" and m.verdict = 'suspicious')`,
             pendingApproval: sql<boolean>`exists (select 1 from ${d} d where d.thread_id = ${th}."id" and d.status = 'pending_approval')`,
-            replied: sql<boolean>`exists (select 1 from ${e} e where e.thread_id = ${th}."id")`,
+            newestDelivered: sql<
+              string | null
+            >`(select m.received_email_id from ${m} m where m.thread_id = ${th}."id" and m.delivered_at is not null order by m.created_at desc, m.received_email_id desc limit 1)`,
           })
           .from(th)
           .where(
@@ -136,6 +159,13 @@ async function threadExtras<T extends { id: string }>(db: Db, teamId: string, it
             ),
           );
   const byId = new Map(rows.map((row) => [row.id, row]));
+  const lines = snippets
+    ? await openingLines(
+        db,
+        teamId,
+        rows.flatMap((row) => row.newestDelivered ?? []),
+      )
+    : new Map<string, string>();
   return items.map((item) => {
     const extra = byId.get(item.id);
     return {
@@ -143,10 +173,52 @@ async function threadExtras<T extends { id: string }>(db: Db, teamId: string, it
       quarantined: extra?.quarantined ?? 0,
       quarantine_reason: extra?.quarantineReason ?? null,
       injection_score: extra?.injectionScore ?? null,
+      phishing_score: extra?.phishingScore ?? null,
+      suspicious: extra?.suspicious ?? false,
       pending_approval: extra?.pendingApproval ?? false,
-      replied: extra?.replied ?? false,
+      snippet: lines.get(extra?.newestDelivered ?? "") ?? null,
     };
   });
+}
+
+/**
+ * The cleaned text an agent reads of each received message, as one line.
+ * It opens a seal per row, so only the dashboard's thread rows ask for it,
+ * never the API's. Mail carrying a code or sign-in link gets none: a list
+ * shows only its kind, and reading the code is an audited read. A seal that
+ * won't open, or that the content purge emptied, gives none either.
+ */
+async function openingLines(db: Db, teamId: string, ids: string[]): Promise<Map<string, string>> {
+  const r = schema.receivedEmails;
+  const rows =
+    ids.length === 0
+      ? []
+      : await db
+          .select({
+            id: r.id,
+            teamId: r.teamId,
+            extracted: r.extracted,
+            extractedKinds: r.extractedKinds,
+          })
+          .from(r)
+          .where(and(eq(r.teamId, teamId), inArray(r.id, ids)));
+  const lines = new Map<string, string>();
+  await Promise.all(
+    rows
+      .filter((row) => row.extractedKinds.length === 0)
+      .map((row) =>
+        snippetSlot(async () => {
+          try {
+            const text = (await openReceivedExtracted(row, getKeyring()))?.text ?? "";
+            const line = visibleLine(text, SNIPPET_CHARS);
+            if (line) lines.set(row.id, line);
+          } catch {
+            // Undecryptable (corrupt ciphertext, unknown key version): the row lists without one.
+          }
+        }),
+      ),
+  );
+  return lines;
 }
 
 /** The pinned rows over the list: everything received, and each catch-all domain's share. */
@@ -438,7 +510,10 @@ export const inboxesRouter = router({
       });
       if ("error" in result) throw inboxFailure(result.error);
       const page = idPage(result);
-      return { ...page, items: await threadExtras(ctx.db, ctx.teamId, page.items) };
+      return {
+        ...page,
+        items: await threadExtras(ctx.db, ctx.teamId, page.items, { snippets: !ctx.supportView }),
+      };
     }),
 
     search: receivingProcedure
@@ -452,7 +527,10 @@ export const inboxesRouter = router({
         });
         if ("error" in result) throw inboxFailure(result.error);
         const page = idPage(result);
-        return { ...page, items: await threadExtras(ctx.db, ctx.teamId, page.items) };
+        return {
+          ...page,
+          items: await threadExtras(ctx.db, ctx.teamId, page.items, { snippets: !ctx.supportView }),
+        };
       }),
 
     get: receivingProcedure.input(z.object(threadRef)).query(async ({ ctx, input }) => {

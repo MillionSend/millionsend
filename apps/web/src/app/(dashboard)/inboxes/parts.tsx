@@ -4,6 +4,7 @@ import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslations } from "next-intl";
 import type { BadgeTone } from "@/components/status-badge";
+import { Tooltip } from "@/components/tooltip";
 import type { AppRouter } from "@/server/routers";
 
 type Outputs = inferRouterOutputs<AppRouter>["inboxes"];
@@ -42,6 +43,26 @@ export function QuarantinedBadge({ reason }: { reason: string | null }) {
     <span className="ms-badge ms-badge-danger">
       {t("badge.quarantined", { reason: reason && t.has(`qr.${reason}`) ? t(`qr.${reason}`) : "" })}
     </span>
+  );
+}
+
+/** "Suspicious": delivered to the agent with a warning; the screening's scores are in its tooltip. */
+export function SuspiciousBadge({
+  injection,
+  phishing,
+}: {
+  injection: number | null;
+  phishing: number | null;
+}) {
+  const t = useTranslations("inboxes");
+  const scores =
+    injection === null && phishing === null
+      ? []
+      : [t("riskScores", { injection: injection ?? "–", phishing: phishing ?? "–" })];
+  return (
+    <Tooltip inline text={[t("suspiciousTip"), ...scores].join("\n")}>
+      <span className="ms-badge ms-badge-warn">{t("received.verdict.suspicious")}</span>
+    </Tooltip>
   );
 }
 

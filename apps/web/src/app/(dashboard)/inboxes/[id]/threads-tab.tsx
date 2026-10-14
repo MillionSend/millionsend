@@ -3,12 +3,15 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useDeferredValue, useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useId, useState } from "react";
+import { RefreshGlyph } from "@/components/icons/nav-icons";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
-import { BtnSpinner } from "@/components/spinner";
+import { BtnSpinner, Spinner } from "@/components/spinner";
+import { StatusDot } from "@/components/status-badge";
 import { toast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
 import { addrSpec, formatBytes, formatRelative, senderName } from "@/lib/format";
 import { isReadOnly } from "@/lib/read-only";
 import { useTRPC } from "@/lib/trpc";
@@ -18,6 +21,7 @@ import {
   approvalReasonWords,
   type InboxDetail,
   QuarantinedBadge,
+  SuspiciousBadge,
   type ThreadMessage,
   type ThreadRow,
   TrustBadge,
@@ -26,6 +30,8 @@ import {
 const FOLDERS = ["inbox", "archive", "spam", "sent", "trash"] as const;
 const MOVE_TO = ["inbox", "archive", "spam", "trash"] as const;
 const NEW_LABEL = "new";
+/** How often the folder's list looks for new mail on its own while it is on screen. */
+const LIST_POLL_MS = 60_000;
 
 const card: React.CSSProperties = {
   border: "1px solid var(--ms-line)",
@@ -37,17 +43,22 @@ const muted: React.CSSProperties = { fontSize: 12, color: "var(--ms-muted)" };
 
 export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   const t = useTranslations("inboxes");
+  const tc = useTranslations("common");
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const [folderParam, setFolder] = useUrlState("folder", "inbox");
   const folder = oneOf(FOLDERS, folderParam, "inbox");
   const [threadId, setThreadId] = useUrlState("thread");
   const [search, setSearch] = useState("");
+  // Only a click shows the spinner: the poll below stays quiet.
+  const [refreshing, setRefreshing] = useState(false);
   const query = useDeferredValue(search.trim());
   const base = { inboxId: inbox.id, folders: [folder], limit: 50 };
   const listed = useInfiniteQuery(
     trpc.inboxes.threads.list.infiniteQueryOptions(base, {
       getNextPageParam: (page) => page.nextCursor,
       enabled: query === "",
+      refetchInterval: LIST_POLL_MS,
     }),
   );
   const searched = useInfiniteQuery(
@@ -58,6 +69,13 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   );
   const active = query === "" ? listed : searched;
   const rows: ThreadRow[] = active.data?.pages.flatMap((page) => page.items) ?? [];
+  // Everything on screen reloads: the list, the header's counts and an open thread.
+  const refresh = () => {
+    setRefreshing(true);
+    void queryClient
+      .invalidateQueries(trpc.inboxes.pathFilter())
+      .finally(() => setRefreshing(false));
+  };
 
   return (
     <>
@@ -65,39 +83,50 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}
       >
-        <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+        {/* Folders filter the list under them, which is no tabpanel: pressed buttons, not tabs. */}
+        <div className="ms-tabs">
           {FOLDERS.map((key) => (
             <button
               key={key}
               type="button"
-              className="ms-chip"
               aria-pressed={folder === key}
-              style={{
-                cursor: "pointer",
-                color: folder === key ? "var(--ms-bone)" : undefined,
-                borderColor: folder === key ? "var(--ms-bone)" : undefined,
-              }}
+              className={folder === key ? "active" : undefined}
               onClick={() => setFolder(key)}
             >
               {t(`folder.${key}`)}
             </button>
           ))}
-        </span>
+        </div>
         <SearchBox value={search} onChange={setSearch} placeholder={t("search")} />
+        <Tooltip inline focusableChild text={tc("refresh")}>
+          <button
+            type="button"
+            className="ms-btn ms-btn-icon"
+            aria-label={tc("refresh")}
+            onClick={refresh}
+          >
+            {refreshing ? <Spinner size={14} /> : <RefreshGlyph />}
+          </button>
+        </Tooltip>
       </div>
       <div className={threadId ? "ms-grid ms-grid-12" : undefined}>
         <div>
           {active.isPending ? (
-            <div style={{ display: "grid", gap: 8 }}>
-              {[1, 2, 3].map((key) => (
-                <div key={key} style={card}>
-                  <Skeleton width="40%" height={13} />
-                  <div style={{ marginTop: 8 }}>
-                    <Skeleton width="70%" />
-                  </div>
-                </div>
+            <ul className="ms-thread-list" aria-hidden="true">
+              {["58%", "42%", "66%"].map((width) => (
+                <li key={width} className="ms-thread-row">
+                  <span className="ms-thread-from">
+                    <Skeleton width="70%" height={13} />
+                  </span>
+                  <span className="ms-thread-subject">
+                    <Skeleton width={width} height={13} />
+                  </span>
+                  <span className="ms-thread-time">
+                    <Skeleton width={48} />
+                  </span>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : active.isError ? (
             <StateCard
               tone="error"
@@ -108,28 +137,32 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
           ) : rows.length === 0 ? (
             <StateCard headline={t("emptyFolder")} />
           ) : (
-            <div style={{ display: "grid", gap: 8 }}>
-              {rows.map((row) => (
-                <ThreadListRow
-                  key={row.id}
-                  row={row}
-                  agent={inbox.kind === "agent"}
-                  selected={row.id === threadId}
-                  onOpen={() => setThreadId(row.id)}
-                />
-              ))}
+            <>
+              <ul className="ms-thread-list">
+                {rows.map((row) => (
+                  <ThreadListRow
+                    key={row.id}
+                    row={row}
+                    agent={inbox.kind === "agent"}
+                    sent={folder === "sent"}
+                    selected={row.id === threadId}
+                    onOpen={() => setThreadId(row.id)}
+                  />
+                ))}
+              </ul>
               {active.hasNextPage ? (
-                <button
-                  type="button"
-                  className="ms-btn ms-btn-secondary"
-                  style={{ justifySelf: "end" }}
-                  disabled={active.isFetchingNextPage}
-                  onClick={() => active.fetchNextPage()}
-                >
-                  {t("loadMore")}
-                </button>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="ms-btn ms-btn-secondary"
+                    disabled={active.isFetchingNextPage}
+                    onClick={() => active.fetchNextPage()}
+                  >
+                    {t("loadMore")}
+                  </button>
+                </div>
               ) : null}
-            </div>
+            </>
           )}
         </div>
         {threadId ? (
@@ -140,82 +173,78 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   );
 }
 
-function ThreadListRow({
+/** One line per thread; only what asks for action gets a pill. */
+export function ThreadListRow({
   row,
   agent,
+  sent,
   selected,
   onOpen,
 }: {
   row: ThreadRow;
   agent: boolean;
+  /** The Sent folder names the recipient: there every sender is this inbox. */
+  sent: boolean;
   selected: boolean;
   onOpen: () => void;
 }) {
   const t = useTranslations("inboxes");
+  const id = useId();
+  const unreadLabel = t(agent ? "unreadAgent" : "unread");
+  const dot = row.read ? null : <StatusDot color="var(--ms-bone)" label={unreadLabel} />;
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      style={{
-        ...card,
-        textAlign: "left",
-        font: "inherit",
-        color: "inherit",
-        cursor: "pointer",
-        borderColor: selected ? "var(--ms-line-strong)" : undefined,
-        background: selected ? "var(--ms-panel-raised)" : card.background,
-      }}
-    >
-      <span style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-        <span
-          style={{
-            fontWeight: row.read ? 500 : 700,
-            color: "var(--ms-bone)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {senderName(row.from) || t("noSender")}
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the row only widens its button's click; keyboard users reach the button
+    <li className={row.read ? "ms-thread-row" : "ms-thread-row unread"} onClick={onOpen}>
+      {/* An agent's unread is its queue, not the person's: the dot says so on hover. */}
+      {dot && agent ? (
+        <Tooltip inline text={unreadLabel}>
+          {dot}
+        </Tooltip>
+      ) : (
+        dot
+      )}
+      <span className="ms-thread-from">
+        <span id={`${id}-from`} className="ms-thread-name">
+          {sent
+            ? t("compose.toName", { name: senderName(row.to[0] ?? null) })
+            : senderName(row.from) || t("noSender")}
         </span>
-        <span style={{ ...muted, whiteSpace: "nowrap" }}>
-          <RelativeTime date={row.received_at} />
-        </span>
+        {row.message_count > 1 ? <span className="ms-count">{row.message_count}</span> : null}
       </span>
-      <span
-        style={{
-          display: "block",
-          marginTop: 3,
-          fontSize: 13,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {row.subject ?? t("noSubject")}
-      </span>
-      <span style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+      <span className="ms-thread-subject">
         {row.pending_approval ? (
           <span className="ms-badge ms-badge-warn">{t("badge.draft")}</span>
         ) : null}
-        {row.replied ? (
-          <span className="ms-badge ms-badge-neutral">{t("badge.replied")}</span>
-        ) : null}
-        {row.quarantined > 0 ? <QuarantinedBadge reason={row.quarantine_reason} /> : null}
-        {agent && row.injection_score !== null ? (
-          <span className="ms-badge ms-badge-neutral">
-            {t("badge.injection", { score: row.injection_score })}
-          </span>
+        {row.quarantined > 0 ? (
+          <QuarantinedBadge reason={row.quarantine_reason} />
+        ) : agent && row.suspicious ? (
+          <SuspiciousBadge injection={row.injection_score} phishing={row.phishing_score} />
         ) : null}
         {row.labels.map((label) => (
           <span key={label.id} className="ms-badge ms-badge-neutral">
-            <span className="ms-dot" style={{ background: label.color }} aria-hidden="true" />{" "}
+            <StatusDot color={label.color} />
             {label.name}
           </span>
         ))}
-        <span style={muted}>{t("messageCount", { count: row.message_count })}</span>
+        {/* No handler of its own: its click, Enter's included, bubbles to the row. */}
+        <button
+          type="button"
+          className="ms-thread-open"
+          aria-current={selected || undefined}
+          aria-labelledby={`${id}-from ${id}-title`}
+        >
+          <span className="ms-thread-text">
+            <span id={`${id}-title`} className="ms-thread-title">
+              {row.subject ?? t("noSubject")}
+            </span>
+            {row.snippet ? <span className="ms-thread-snippet"> — {row.snippet}</span> : null}
+          </span>
+        </button>
       </span>
-    </button>
+      <span className="ms-thread-time">
+        <RelativeTime date={row.received_at} />
+      </span>
+    </li>
   );
 }
 
@@ -266,12 +295,14 @@ function ThreadPane({
   );
   const unread = thread.data?.read === false;
   const { mutate } = update;
-  // Opening a thread reads it, as a mail client does; a support view reads without writing.
+  // In a people inbox opening a thread reads it, as a mail client does. In an
+  // agent inbox unread is the agent's queue of mail to handle, so a person
+  // looking leaves it be; a support view reads without writing.
   useEffect(() => {
-    if (unread && !inbox.expired && !isReadOnly()) {
+    if (unread && inbox.kind === "human" && !inbox.expired && !isReadOnly()) {
       mutate({ inboxId: inbox.id, threadId, read: true });
     }
-  }, [unread, inbox.expired, inbox.id, threadId, mutate]);
+  }, [unread, inbox.kind, inbox.expired, inbox.id, threadId, mutate]);
 
   if (thread.isError) {
     return (
@@ -467,10 +498,11 @@ function MessageCard({
           <>
             <TrustBadge trust={message.screening.sender_trust} />
             {held ? <QuarantinedBadge reason={message.screening.quarantine_reason} /> : null}
-            {inbox.kind === "agent" && message.screening.injection_score !== null ? (
-              <span className="ms-badge ms-badge-neutral">
-                {t("badge.injection", { score: message.screening.injection_score })}
-              </span>
+            {inbox.kind === "agent" && verdict === "suspicious" ? (
+              <SuspiciousBadge
+                injection={message.screening.injection_score}
+                phishing={message.screening.phishing_score}
+              />
             ) : null}
             {message.screening.hidden_text_removed ? (
               <span className="ms-badge ms-badge-warn">{t("message.hiddenText")}</span>

@@ -46,13 +46,23 @@ const DOT_COLORS: Record<BadgeStatus, string> = {
 };
 
 /** 8px status dot — by email status or any CSS color; with neither it renders
- * the ring that marks an unfiltered "all" option. */
-export function StatusDot({ status, color }: { status?: BadgeStatus; color?: string }) {
+ * the ring that marks an unfiltered "all" option. A `label` makes the dot
+ * itself say what it means, where no text beside it does. */
+export function StatusDot({
+  status,
+  color,
+  label,
+}: {
+  status?: BadgeStatus;
+  color?: string;
+  label?: string;
+}) {
   const fill = status ? DOT_COLORS[status] : color;
+  const a11y = label ? { role: "img", "aria-label": label } : { "aria-hidden": true };
   return fill ? (
-    <span className="ms-dot" style={{ background: fill }} aria-hidden="true" />
+    <span className="ms-dot" style={{ background: fill }} {...a11y} />
   ) : (
-    <span className="ms-dot ring" aria-hidden="true" />
+    <span className="ms-dot ring" {...a11y} />
   );
 }
 
