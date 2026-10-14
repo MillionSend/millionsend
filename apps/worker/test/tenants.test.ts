@@ -6,6 +6,7 @@ import { eq, isNotNull } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   abandonTenantStatus,
+  isTenantNotAssociated,
   retryTenantStatus,
   sharedTenantResolver,
   syncTenants,
@@ -389,4 +390,23 @@ it("the retry does nothing when tenants are disabled", async () => {
   await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: false }, teamId);
   expect(ses.updates).toEqual([]);
   expect(await tenantRows()).toEqual([]);
+});
+
+// The refusals live SES sends answered on 2026-10-14, plus near misses.
+it.each([
+  [
+    "AccessDeniedException",
+    "Tenant not associated with resources [arn:aws:ses:us-east-1:111122223333:identity/agents.example.test].",
+    true,
+  ],
+  [
+    "MessageRejected",
+    "Sending disabled for <arn:aws:ses:us-east-1:111122223333:tenant/t/tn-0>. For more information, please check the resource configuration and status.",
+    false,
+  ],
+  ["SendingPausedException", "Sending is paused for this tenant", false],
+  ["AccessDeniedException", "User is not authorized to perform ses:SendEmail", false],
+  ["BadRequestException", "Identity is not associated with the tenant", false],
+])("isTenantNotAssociated(%s: %s) is %s", (name, message, expected) => {
+  expect(isTenantNotAssociated(Object.assign(new Error(message), { name }))).toBe(expected);
 });
