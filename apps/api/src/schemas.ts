@@ -732,7 +732,9 @@ export const listReceivedEmailsQuerySchema = oneCursor(
       .describe("MillionSend extension: case-insensitive subject substring"),
     unread: booleanQuery
       .optional()
-      .describe("MillionSend extension, with inbox_id: read state in that inbox"),
+      .describe(
+        "MillionSend extension, with an inbox in context (inbox_id, or an inbox-scoped key): read state in that inbox",
+      ),
     include_quarantined: booleanQuery
       .optional()
       .describe(
@@ -742,9 +744,7 @@ export const listReceivedEmailsQuerySchema = oneCursor(
       .optional()
       .describe("MillionSend extension, full access keys only: list held mail only"),
   }),
-).refine((q) => q.unread === undefined || q.inbox_id !== undefined, {
-  message: "unread needs inbox_id",
-});
+);
 
 export const CONTACT_INCLUDES = ["properties", "topics"] as const;
 export type ContactInclude = (typeof CONTACT_INCLUDES)[number];

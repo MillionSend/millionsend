@@ -245,6 +245,9 @@ export function registerReceivingRoutes(
         return c.json(errorBody(404, "not_found", INBOX_NOT_FOUND_MESSAGE), 404);
       }
       const inboxId = auth.inboxId ?? q.inbox_id ?? null;
+      if (q.unread && !inboxId) {
+        return c.json(errorBody(422, "validation_error", "unread needs inbox_id"), 422);
+      }
       const view = { inboxId, agent };
       const filters: SQL[] = [];
       if (q.since) filters.push(gt(t.createdAt, new Date(q.since)));
@@ -258,7 +261,7 @@ export function registerReceivingRoutes(
       const subject = q.subject_contains
         ? sql`${t.subject} ilike ${`%${escapeLike(q.subject_contains)}%`} escape '\\'`
         : undefined;
-      if (q.unread && inboxId) {
+      if (q.unread) {
         filters.push(
           sql`exists (select 1 from ${m} where ${m.receivedEmailId} = ${t.id} and ${m.inboxId} = ${inboxId} and ${m.readAt} is ${sql.raw(q.unread === "true" ? "null" : "not null")})`,
         );

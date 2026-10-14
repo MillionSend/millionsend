@@ -356,9 +356,11 @@ export function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
 }
 
-/** Wire message for a failed schema parse: `path: issue; path: issue`. */
+/** Wire message for a failed schema parse: `path: issue; path: issue`, a whole-object issue bare. */
 export function validationMessage(error: z.ZodError): string {
-  return error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+  return error.issues
+    .map((i) => (i.path.length > 0 ? `${i.path.join(".")}: ${i.message}` : i.message))
+    .join("; ");
 }
 
 /**

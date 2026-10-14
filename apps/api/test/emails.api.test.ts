@@ -699,7 +699,7 @@ describe("batch permissive validation", () => {
     };
     expect(body.data).toHaveLength(1);
     expect(body.errors).toEqual([
-      { index: 1, message: expect.stringMatching(/html or text/) },
+      { index: 1, message: "Either html or text must be provided" },
       { index: 2, message: expect.stringMatching(/not verified/) },
       { index: 3, message: expect.stringMatching(/suppressed/) },
     ]);
@@ -734,7 +734,7 @@ describe("batch permissive validation", () => {
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({
       name: "validation_error",
-      message: expect.stringMatching(/^emails\.1: /),
+      message: "emails.1: Either html or text must be provided",
     });
     expect(enqueuedSends.length).toBe(before);
   });
