@@ -483,7 +483,7 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | `require_approval` | Every send from the inbox waits for a person. |
 | `private_codes` | A code or sign-in link the inbox received can't be sent to anyone but owners and the allowlist. |
 | `send_cap` | Recipients the inbox may send to per UTC day without a person: 1–100,000, or `null` for no cap; 1–50 on the shared domain. |
-| `forward_to` | Up to 5 addresses that get a copy of every delivered message except spam: team members' sign-in addresses or owner addresses. |
+| `forward_to` | Up to 5 addresses that get a copy of every delivered message except spam: team members' sign-in addresses or owner addresses (on the shared domain, sign-in addresses only). |
 
 A setting that breaks a rule answers `422` with the reason: `send_policy`
 `allowlist` on the shared domain, `open` on a shared address that may only

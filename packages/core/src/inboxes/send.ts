@@ -2103,10 +2103,12 @@ export async function forwardToForwardTargets(
   const { teamId } = membership;
   const inbox = await findLiveInbox(db, { teamId, inboxId: job.inboxId });
   if (!inbox || inbox.safety.forward_to.length === 0) return null;
-  // Safety was valid when saved; a member may have left the team since.
+  const shared = inbox.domainId === null;
+  // Safety was valid when saved; a member may have left the team since. The
+  // shared domain forwards to members' logins only, as safetyProblem saves.
   const owners = new Set([
     ...(await teamMemberEmails(db, teamId)),
-    ...inbox.safety.owner_addresses.map(addressKey),
+    ...(shared ? [] : inbox.safety.owner_addresses.map(addressKey)),
   ]);
   const targets = inbox.safety.forward_to.filter((a) => owners.has(addressKey(a)));
   if (targets.length === 0) return null;

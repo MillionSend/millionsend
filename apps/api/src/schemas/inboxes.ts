@@ -60,7 +60,9 @@ const safetyFields = {
   forward_to: z
     .array(z.string())
     .max(INBOX_FORWARD_TO_MAX)
-    .describe("Forward every delivered message to these team member or owner addresses"),
+    .describe(
+      "Forward every delivered message to these team member or owner addresses; team members only on the shared domain",
+    ),
 };
 
 export const inboxSafetyPatchBodySchema = z
