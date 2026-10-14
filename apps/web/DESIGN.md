@@ -46,9 +46,15 @@ code (mono), `→` follow-through. The drawn icons are the 10 nav glyphs in
 stroke 1.4, currentColor, each with a semantic hover micro-animation driven
 by `motion` (≤500ms on `--ms-ease`, disabled under
 `prefers-reduced-motion`) and triggered by the parent nav item's hover. The
-command palette and page action buttons may reuse these glyphs. Do not add
-other icon fonts or icon libraries. Logos in
-`public/logo/` are never redrawn.
+command palette and page action buttons may reuse these glyphs. Static
+button glyphs (`PlusGlyph`, `MenuGlyph`, `RefreshGlyph`) live in the same
+file; a list's refresh is a 30×30 `.ms-btn-icon` whose glyph turns into the
+spinner while a click's reload runs. A thread's actions draw five static
+lucide glyphs from `icons/mail-icons.tsx` (folder-input, archive,
+octagon-alert, trash-2, tag) at 14px on the nav glyphs' exported `Svg` frame
+and stroke; the Inbox folder reuses the nav's inbox glyph. A new drawn icon
+goes on that `Svg`, never on a private copy of it. Do not add other icon fonts
+or icon libraries. Logos in `public/logo/` are never redrawn.
 
 ## Fonts
 
@@ -69,6 +75,12 @@ the canvas overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height
 contacts or emails fits a laptop viewport; the shared `ListFooter` holds the
 page-size chooser and then "Load more" at the right, both drawn as secondary
 buttons, and any secondary action under a table or section is right-aligned.
+The inbox thread list (`.ms-thread-*`) is a mail list on the same type,
+rules and row height: one line per thread (unread dot, sender with a
+`.ms-count`, pills, subject and a muted snippet, time). Unread is weight 600
+plus a bone dot, never a status color; a row carries only the pills that ask
+for action. Under 560px of list width (beside an open thread, phones) a row
+takes two lines, by container query.
 Modals are **centered in the viewport** (both axes), overlay
 `rgba(0,0,0,.72)`, no blur.
 
@@ -154,9 +166,50 @@ section of `components.css`; every rule above it holds at every width.
   than 6 options, full keyboard + ARIA combobox support, ✓ on the selected
   row. Options are `{ value, label, hint? }`; controlled `value` +
   `onChange`.
+- **Tabs** (`.ms-tabs`): inactive tabs are plain muted text that turns bone
+  on hover; the active one takes the `--ms-panel-raised` fill of the
+  sidebar's current item. A strip stays on one line and scrolls sideways in
+  its own box, never wrapping: the cut-off last tab is the cue. A count after
+  a label is a `.count` span (tabular, faint). A strip that filters a list
+  (inbox folders) has the same look with `aria-pressed` buttons, since there
+  is no tab panel.
+- **Radios** never show the browser's widget: every radio sits in a
+  `.ms-radio-card`, whose radio is `.ms-checkbox`'s box, declared with it, in
+  a circle (inset ground, line-strong border, bone with a ground dot when
+  chosen), and the chosen card lifts to `--ms-panel-raised` with a
+  line-strong border.
+- **Number fields** never show stepper arrows (one global
+  `input[type="number"]` rule), and a `textarea.ms-input` takes its height
+  from `rows`.
+- **Token inputs** (`<ChipMultiSelect>`): chips sit inside one 30px
+  `.ms-input` frame at 20px, so the first chip never grows the field; the
+  frame takes the focus ring and the bare input inside draws none. With
+  `onCreate`, Enter or leaving the field adds what was typed, so a list of
+  addresses needs no separate Add button and a save never drops an entry.
+- **A warning inside a form** is a `WarnCard` (warn border, a warn glow from
+  the left), never a warn-colored hint line. In a gap-spaced stack, such as
+  a dialog's form grid, it takes `flush` so the gap spaces it like any field.
 - **Menus/popovers** use the `.ms-menu` grammar (canvas "…" dropdowns): panel
   bg, 1px `--ms-line-strong`, 14px radius, 6px padding; 13px item rows at
   7px 12px that raise to `--ms-panel-raised` (8px radius); `.ms-menu-sep`
   hairline separators. `<PopoverMenu>` in `src/components/popover-menu.tsx`
-  is the "…" overflow menu.
+  is the "…" overflow menu; with `label` its trigger is a secondary button
+  (glyph, label, a chevron that flips while open) for an action menu in a row
+  of buttons, like a thread's Mover, and an item's `icon` sits muted before
+  its label. Actions go in a menu, values in a `Select`. A checkable list that
+  stays open between picks (a thread's Etiquetas) is a `GroupedMultiSelect`
+  with `button`; its `onCreate` ends the list with a "Criar …" row when the
+  search names no option.
+- **Message bodies** (a thread's reply, Enviar e-mail) use the broadcasts
+  editor in compact mode (`MessageEditor`, `components/maily-editor/lazy.tsx`):
+  bold, italic, underline, strike, lists, link and clear formatting; no
+  headings, alignment, variables, "/" menu or selection bubble. The body
+  starts at 120px and scrolls past 45vh, its frame takes the focus ring, ⌘↵
+  sends, and the send carries the editor's html with an `htmlToText` text
+  part.
+- **Empty and blocked states:** a page with nothing in it yet is the tiled
+  `EmptyState`; an empty tab, folder or filtered list is a `StateCard` (no
+  tile, at most one action), never a bare muted line. A disabled button says
+  why: an inline `Tooltip` around it carries the reason to hover and to
+  keyboard focus.
 - Search inputs carry no "/" keycap for now (removed in visual QA).

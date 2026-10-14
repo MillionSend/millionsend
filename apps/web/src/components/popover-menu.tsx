@@ -8,7 +8,7 @@ import {
   placePanel,
   viewportSize,
 } from "@/lib/panel-placement";
-import { EllipsisGlyph } from "./icons/nav-icons.js";
+import { ChevronGlyph, EllipsisGlyph } from "./icons/nav-icons.js";
 import { Spinner } from "./spinner";
 
 /** Closes an open popover when the pointer goes down outside `ref`. */
@@ -31,6 +31,8 @@ export function useDismiss(
 export interface PopoverMenuItem {
   label: string;
   onSelect: () => void;
+  /** Leading glyph, muted beside the label. */
+  icon?: React.ReactNode;
   danger?: boolean;
   disabled?: boolean;
   /** Native tooltip, for a disabled item to say why it is. */
@@ -57,6 +59,8 @@ const GAP = 8;
  *
  * `boxed` draws the trigger as a full icon button (matching sibling buttons in a
  * detail header); the default is the bare glyph, quieter for a table row.
+ * `label` draws it as a secondary button that names its menu, glyph first and
+ * a chevron after, for an action menu in a row of buttons.
  */
 export function PopoverMenu({
   ariaLabel,
@@ -64,12 +68,14 @@ export function PopoverMenu({
   align = "right",
   triggerGlyph,
   boxed = false,
+  label,
 }: {
   ariaLabel: string;
   items: (PopoverMenuItem | null)[];
   align?: "left" | "right";
   triggerGlyph?: React.ReactNode | ((open: boolean) => React.ReactNode);
   boxed?: boolean;
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -183,19 +189,35 @@ export function PopoverMenu({
       : { left: rect?.left ?? 0, top: (rect?.bottom ?? 0) + GAP }),
   };
 
+  const glyph = typeof triggerGlyph === "function" ? triggerGlyph(open) : triggerGlyph;
+
   return (
     <>
       <button
         ref={triggerRef}
         type="button"
-        className={boxed ? "ms-btn ms-btn-icon" : "ms-menu-trigger-bare"}
+        className={
+          label !== undefined
+            ? "ms-btn ms-btn-secondary"
+            : boxed
+              ? "ms-btn ms-btn-icon"
+              : "ms-menu-trigger-bare"
+        }
         aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        {(typeof triggerGlyph === "function" ? triggerGlyph(open) : triggerGlyph) ?? (
-          <EllipsisGlyph />
+        {label !== undefined ? (
+          <>
+            {glyph}
+            {label}
+            <span style={{ display: "flex", color: "var(--ms-faint)" }}>
+              <ChevronGlyph direction={open ? "up" : "down"} />
+            </span>
+          </>
+        ) : (
+          (glyph ?? <EllipsisGlyph />)
         )}
       </button>
       {open
@@ -226,7 +248,16 @@ export function PopoverMenu({
                       item.onSelect();
                     }}
                   >
-                    {item.label}
+                    {item.icon ? (
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ display: "flex", color: "var(--ms-muted)" }}>
+                          {item.icon}
+                        </span>
+                        {item.label}
+                      </span>
+                    ) : (
+                      item.label
+                    )}
                     {item.busy ? <Spinner size={11} /> : null}
                     {item.trailing ? (
                       <span style={{ color: "var(--ms-muted)" }} aria-hidden="true">

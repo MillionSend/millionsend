@@ -707,8 +707,11 @@ async function sendQueued(
   // Account mail (core sendSystemMail) carries live credentials — reset and
   // verification links — so its anchors are never rewritten through the
   // redirect and no pixel rides along, whatever the domain's toggles say.
-  const click = (domain?.clickTracking ?? false) && !systemMail;
-  const open = (domain?.openTracking ?? false) && !systemMail;
+  // A people inbox is a mailbox: its mail goes out untracked too, as from any
+  // mail client.
+  const inboxKind = await inboxKindOf(db, email.inboxId);
+  const click = (domain?.clickTracking ?? false) && !systemMail && inboxKind !== "human";
+  const open = (domain?.openTracking ?? false) && !systemMail && inboxKind !== "human";
   let html = body.html;
   let text = body.text;
 
@@ -1059,7 +1062,7 @@ async function sendQueued(
         if (screened.unjudged) {
           await judgeAfterSend(db, deps.monitor, { id: screened.id, teamId: email.teamId });
         }
-      } else if (email.firstContact && (await sentByAgentInbox(db, email.inboxId))) {
+      } else if (email.firstContact && inboxKind === "agent") {
         // An agent writing to someone new is always judged, and its verdict
         // folds into the team's hold policy like any outbound sample.
         const now = new Date();
@@ -1106,13 +1109,13 @@ async function sendQueued(
   return "sent";
 }
 
-async function sentByAgentInbox(db: Db, inboxId: string | null): Promise<boolean> {
-  if (!inboxId) return false;
+async function inboxKindOf(db: Db, inboxId: string | null): Promise<"agent" | "human" | null> {
+  if (!inboxId) return null;
   const [inbox] = await db
     .select({ kind: schema.inboxes.kind })
     .from(schema.inboxes)
     .where(eq(schema.inboxes.id, inboxId));
-  return inbox?.kind === "agent";
+  return inbox?.kind ?? null;
 }
 
 interface MimeInput {

@@ -38,8 +38,11 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
-async function queuedEmail(over: Partial<typeof schema.emails.$inferInsert>): Promise<string> {
-  const encrypted = await encryptEmailBody({ html: null, text: "hello" }, w.deps.keyring);
+async function queuedEmail(
+  over: Partial<typeof schema.emails.$inferInsert>,
+  html: string | null = null,
+): Promise<string> {
+  const encrypted = await encryptEmailBody({ html, text: "hello" }, w.deps.keyring);
   const [row] = await db
     .insert(schema.emails)
     .values({
@@ -122,6 +125,39 @@ describe("send-email for inbox mail", () => {
     const people = await queuedEmail({ inboxId: human.id, firstContact: true });
     expect(await sendEmail(db, deps, { emailId: people })).toBe("sent");
     expect((await samplesFor(people)).map((s) => s.kind)).not.toContain("agent_first_contact");
+  });
+
+  it("sends a people inbox's mail untracked; an agent inbox's follows the domain's toggles", async () => {
+    const setTracking = (on: boolean) =>
+      db
+        .update(schema.domains)
+        .set({ clickTracking: on, openTracking: on })
+        .where(eq(schema.domains.id, w.domainId));
+    await setTracking(true);
+    try {
+      const deps = {
+        keyring: w.deps.keyring,
+        ses,
+        tracking: { secretKey: Buffer.alloc(32, 9), defaultBaseUrl: "https://track.example.com" },
+      };
+      const agent = await addInbox(w, { local: "tracked-agent" });
+      const people = await addInbox(w, { local: "untracked-people", kind: "human" });
+      for (const [inbox, tracked] of [
+        [agent, true],
+        [people, false],
+      ] as const) {
+        const emailId = await queuedEmail(
+          { inboxId: inbox.id },
+          '<p><a href="https://example.com/order">order</a></p>',
+        );
+        expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+        const mime = sends.at(-1)?.raw.toString("utf8").replace(/=\r\n/g, "") ?? "";
+        expect(mime.includes("/t/c/")).toBe(tracked);
+        expect(mime.includes("/t/o/")).toBe(tracked);
+      }
+    } finally {
+      await setTracking(false);
+    }
   });
 });
 

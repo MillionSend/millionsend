@@ -42,7 +42,7 @@ vale:
 | `sender_trust` | O remetente |
 | --- | --- |
 | `failed` | Falhou na autenticação, e o domínio pede para colocar em quarentena ou rejeitar esse tipo de e-mail; ou o domínio não publica política DMARC e falha no SPF sem nenhuma assinatura DKIM própria. Essa linha passa na frente de todas, então um responsável falsificado nunca entra. |
-| `owner` | Um dos endereços de login das pessoas da sua equipe, ou um endereço dos `owner_addresses` da caixa, e o domínio garante. |
+| `owner` | Um dos endereços de login das pessoas da sua equipe, ou um endereço dos `owner_addresses` da caixa (nunca no domínio compartilhado), e o domínio garante. |
 | `allowlisted` | Bate com a lista de permitidos da caixa, e o domínio garante. |
 | `known_thread` | Responde numa conversa em que a caixa escreveu, a partir de um endereço para o qual a caixa escreveu, comprovado pelo token da conversa no `References` ou por um `In-Reply-To` que aponta uma mensagem enviada pela caixa. Não precisa de autenticação, então um remetente pequeno sem DKIM ainda consegue responder. |
 | `external` | Qualquer outro remetente que o próprio domínio garante, inclusive outros endereços dos seus domínios. |
@@ -77,7 +77,7 @@ O `accept_from` decide, por nível:
 | `owner`, `allowlisted` | entregue | entregue | entregue |
 | `known_thread` | entregue | entregue | entregue |
 | `external` | analisado | analisado | quarentena, `not_allowlisted` |
-| `unauthenticated` | analisado | quarentena, `unauthenticated_sender` | quarentena, `not_allowlisted` |
+| `unauthenticated` | analisado | quarentena, `unauthenticated_sender` | quarentena, `not_allowlisted`; `unauthenticated_sender` quando o From é um responsável ou está na lista de permitidos |
 | `failed` | quarentena, `failed_auth` | quarentena, `failed_auth` | quarentena, `failed_auth` |
 
 O e-mail **analisado** é entregue, a não ser que a
@@ -99,9 +99,9 @@ tabela:
   usa, nunca deixa um e-mail suspeito sozinha.
 
 Uma caixa `human` aceita `anyone` por padrão: tudo é entregue, menos vírus, e
-um remetente `failed` aparece com um selo vermelho em vez de ficar retido.
-Escolha `verified` ou `allowlist` para ela e a tabela vale, com "analisado"
-querendo dizer entregue: a análise só roda em caixas de agente.
+o e-mail de um remetente `failed` vai para a pasta `spam` em vez de ficar
+retido. Escolha `verified` ou `allowlist` para ela e a tabela vale, com
+"analisado" querendo dizer entregue: a análise só roda em caixas de agente.
 
 ## Quarentena
 
@@ -112,7 +112,7 @@ remetente.
 | `quarantine_reason` | Retido porque |
 | --- | --- |
 | `failed_auth` | O remetente falhou na autenticação. |
-| `unauthenticated_sender` | O domínio do remetente não o garante, e a caixa aceita remetentes verificados. |
+| `unauthenticated_sender` | O domínio do remetente não o garante, e a caixa aceita remetentes verificados ou tem o endereço como responsável ou na lista de permitidos. |
 | `not_allowlisted` | A caixa só aceita a lista de permitidos. |
 | `injection` | A análise deu 80 ou mais para injeção de prompt. |
 | `phishing` | A análise deu 80 ou mais para phishing. |

@@ -65,8 +65,7 @@ export function MediaPanel({
   const trpc = useTRPC();
   const query = useQuery({
     ...trpc.console.safety.media.queryOptions({ grantId, emailId }),
-    staleTime: Number.POSITIVE_INFINITY,
-    refetchOnWindowFocus: false,
+    staleTime: "static",
     gcTime: 0,
     retry: false,
   });

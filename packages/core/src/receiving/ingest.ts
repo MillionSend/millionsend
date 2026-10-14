@@ -49,7 +49,7 @@ import {
 } from "./rcpt.js";
 import { type ReceivedRead, readReceived } from "./read.js";
 import { spamVerdict } from "./spam.js";
-import { senderTrust } from "./trust.js";
+import { allowlisted, senderTrust } from "./trust.js";
 
 export interface IngestDeps {
   db: Db;
@@ -519,6 +519,12 @@ async function admit(
     inboxId: inbox.id,
     refs: [...(row.inReplyTo ? [row.inReplyTo] : []), ...row.references],
   });
+  // The shared domain is every team's: there only members' logins are owners,
+  // as classifyRecipients (inboxes/send.ts) has it on the way out.
+  const owners = [
+    ...p.memberEmails,
+    ...(inbox.domainId === null ? [] : inbox.safety.owner_addresses),
+  ];
   const tier = senderTrust({
     authentication: row.authentication,
     authDetail: row.authDetail,
@@ -526,7 +532,7 @@ async function admit(
     from: row.from,
     fromFields: row.fromFields,
     fromMailboxes: row.fromMailboxes,
-    owners: [...p.memberEmails, ...inbox.safety.owner_addresses],
+    owners,
     allowlist: inbox.safety.allowlist,
     thread: resolved
       ? { proven: resolved.proof !== null, participants: resolved.participants }
@@ -536,12 +542,18 @@ async function admit(
     kind: inbox.kind,
     safety: inbox.safety,
     tier,
+    listed:
+      owners.includes(row.from.toLowerCase()) || allowlisted(row.from, inbox.safety.allowlist),
     spam: row.spamVerdict,
     virus: row.virusVerdict,
     judgeAvailable: deps.judgeAvailable ?? false,
     forwardedContent: facts.forwardedContent,
   });
-  let threadId = resolved?.threadId;
+  // A failed sender's spam opens a thread of its own, filed under Spam: in a
+  // live thread it would sit in the inbox, and a forged reply quoting a known
+  // Message-ID is how a conversation gets hijacked.
+  const thread = decision.action === "spam" && tier === "failed" ? null : resolved;
+  let threadId = thread?.threadId;
   if (!threadId) {
     const [thread] = await tx
       .insert(schema.inboxThreads)
@@ -566,7 +578,7 @@ async function admit(
     threadId,
     address: p.target.address,
     senderTrust: tier,
-    threadProof: resolved?.proof ?? null,
+    threadProof: thread?.proof ?? null,
     verdict: "pending",
     createdAt: now,
   });

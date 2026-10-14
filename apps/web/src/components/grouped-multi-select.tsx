@@ -4,8 +4,14 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PANEL_MAX_WIDTH } from "@/lib/panel-placement";
 import { useAnchoredPanel } from "./anchored-panel";
-import { ChevronGlyph } from "./icons/nav-icons";
+import { ChevronGlyph, PlusGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
+
+/**
+ * A button trigger is narrower than its panel's search placeholder; at this
+ * width the placeholder fits and typing a name doesn't widen the panel.
+ */
+const BUTTON_PANEL_MIN_WIDTH = 250;
 
 export interface GroupedOption {
   value: string;
@@ -38,6 +44,10 @@ export interface OptionGroup {
  * "all" off and narrows to just that row. `exclusive` keeps the member rows
  * unchecked under it, for a filter where "all" means "no filter" rather than
  * "each of these". A group with an empty label draws no heading.
+ *
+ * With `onCreate`, a search that names no option exactly ends the list with a
+ * row that creates it (`createLabel` words that row); Enter reaches it like
+ * any row.
  */
 export function GroupedMultiSelect({
   value,
@@ -52,6 +62,10 @@ export function GroupedMultiSelect({
   width,
   disabled = false,
   id,
+  button = false,
+  onCreate,
+  createLabel,
+  maxLength,
 }: {
   value: string[];
   onChange: (value: string[]) => void;
@@ -73,6 +87,12 @@ export function GroupedMultiSelect({
   disabled?: boolean;
   /** Forwarded to the trigger so an ms-field <label htmlFor> can target it. */
   id?: string;
+  /** Trigger drawn as a secondary button instead of an input, as Select's. */
+  button?: boolean;
+  onCreate?: (name: string) => void;
+  createLabel?: (name: string) => string;
+  /** Caps the search text, and so the longest name the create row offers. */
+  maxLength?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -97,7 +117,13 @@ export function GroupedMultiSelect({
   }, [options, groups, query]);
 
   const allOffset = allOption ? 1 : 0;
-  const rowCount = allOffset + orderedFiltered.length;
+  const typed = query.trim();
+  const creatable =
+    onCreate !== undefined &&
+    typed !== "" &&
+    !options.some((o) => o.label.toLowerCase() === typed.toLowerCase());
+  const createIndex = allOffset + orderedFiltered.length;
+  const rowCount = createIndex + (creatable ? 1 : 0);
 
   useDismiss(dismissRefs, open, () => setOpen(false));
 
@@ -136,6 +162,12 @@ export function GroupedMultiSelect({
   function activate(index: number) {
     if (allOption && index === 0) {
       allOption.onToggle(!allOption.selected);
+      return;
+    }
+    if (creatable && index === createIndex) {
+      onCreate?.(typed);
+      setQuery("");
+      setActiveIndex(0);
       return;
     }
     const option = orderedFiltered[index - allOffset];
@@ -251,7 +283,7 @@ export function GroupedMultiSelect({
         ref={triggerRef}
         type="button"
         {...(id !== undefined ? { id } : {})}
-        className="ms-input"
+        className={button ? "ms-btn ms-btn-secondary" : "ms-input"}
         role="combobox"
         aria-label={ariaLabel}
         aria-expanded={open}
@@ -276,7 +308,7 @@ export function GroupedMultiSelect({
           {summary}
         </span>
         <span style={{ flexShrink: 0, display: "flex", color: "var(--ms-faint)" }}>
-          <ChevronGlyph />
+          <ChevronGlyph direction={open ? "up" : "down"} />
         </span>
       </button>
       {open
@@ -286,6 +318,7 @@ export function GroupedMultiSelect({
               className="ms-menu"
               style={{
                 ...panelStyle,
+                ...(button ? { minWidth: BUTTON_PANEL_MIN_WIDTH } : {}),
                 width: "max-content",
                 maxWidth: `min(320px, ${PANEL_MAX_WIDTH})`,
                 padding: 0,
@@ -300,6 +333,7 @@ export function GroupedMultiSelect({
                 // biome-ignore lint/a11y/noAutofocus: focus moves into the popover by design, Esc restores the trigger
                 autoFocus
                 value={query}
+                maxLength={maxLength}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
                 {...(activeId !== undefined ? { "aria-activedescendant": activeId } : {})}
@@ -334,7 +368,7 @@ export function GroupedMultiSelect({
                     label={allOption.label}
                   />
                 ) : null}
-                {orderedFiltered.length === 0 ? (
+                {orderedFiltered.length === 0 && !creatable ? (
                   <div style={{ padding: "7px 12px", fontSize: 13, color: "var(--ms-muted)" }}>
                     {noResultsLabel}
                   </div>
@@ -365,6 +399,23 @@ export function GroupedMultiSelect({
                     );
                   })
                 )}
+                {creatable ? (
+                  <>
+                    {/* A listbox holds only options: a div, not a separator <hr>. */}
+                    {createIndex > 0 ? <div className="ms-menu-sep" /> : null}
+                    <Row
+                      index={createIndex}
+                      checked={false}
+                      onClick={() => activate(createIndex)}
+                      adornment={
+                        <span style={{ display: "flex", color: "var(--ms-muted)" }}>
+                          <PlusGlyph size={12} />
+                        </span>
+                      }
+                      label={createLabel ? createLabel(typed) : typed}
+                    />
+                  </>
+                ) : null}
               </div>
             </div>,
             document.body,

@@ -69,9 +69,10 @@ export function formatHtml(html: string, indent = "  "): string {
 
 /**
  * Derive readable plain text from HTML: drop script/style outright, keep link
- * URLs as "text (url)", turn block boundaries into newlines, strip the rest,
- * and decode the basic entities. Merge tokens ({{{NAME}}}) are not markup, so
- * they pass through untouched.
+ * URLs as "text (url)", end a block with a blank line and a list item or table
+ * row with a newline, mark list items with "- ", strip the rest, and decode
+ * the basic entities. Merge tokens ({{{NAME}}}) are not markup, so they pass
+ * through untouched.
  */
 export function htmlToText(html: string): string {
   return (
@@ -82,7 +83,11 @@ export function htmlToText(html: string): string {
         (_m, href: string, inner: string) => `${inner.replace(/<[^>]+>/g, "")} (${href})`,
       )
       .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(p|div|h[1-6]|li|tr|table)>/gi, "\n")
+      // An editor wraps each list item's text in a paragraph: it ends with the item.
+      .replace(/<\/p>\s*<\/li>/gi, "</li>")
+      .replace(/<li\b[^>]*>/gi, "- ")
+      .replace(/<\/(li|tr)>/gi, "\n")
+      .replace(/<\/(p|div|h[1-6]|table|ul|ol|blockquote)>/gi, "\n\n")
       .replace(/<[^>]+>/g, "")
       .replace(/&nbsp;/gi, " ")
       .replace(/&lt;/gi, "<")
@@ -95,4 +100,18 @@ export function htmlToText(html: string): string {
       .replace(/\n{3,}/g, "\n\n")
       .trim()
   );
+}
+
+/**
+ * The HTML with every class attribute removed: an editor's own classes mean
+ * nothing in a sent email. Parsed with the DOM, so text that merely looks
+ * like an attribute is left alone. Browser only.
+ */
+export function withoutClasses(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  for (const element of template.content.querySelectorAll("[class]")) {
+    element.removeAttribute("class");
+  }
+  return template.innerHTML;
 }

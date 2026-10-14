@@ -95,7 +95,8 @@ Once verified, a domain's **Configuration** tab controls:
   the recipient on to the original URL. When off, your links ship untouched.
 - **Open tracking** — off by default. When on, a 1×1 pixel served from that same
   tracking subdomain records `email.opened` events. Tracking is app-layer and
-  runs on your own domain — never SES's link rewriting.
+  runs on your own domain — never SES's link rewriting. Mail from a people
+  inbox is never tracked, as from any mail client.
 - **TLS mode** — `opportunistic` (default) or `enforced`, applied via the
   domain's SES configuration set.
 

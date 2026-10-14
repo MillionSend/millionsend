@@ -405,11 +405,11 @@ function RevealedView({
   const trpc = useTRPC();
   const query = useQuery({
     ...trpc.console.safety.revealed.queryOptions({ grantId, emailId }),
-    // Every view is counted on the grant, so a focus refetch must not inflate
-    // the record — and nothing of the body outlives the closed dialog, which
-    // also makes reopening it the second view it is.
-    staleTime: Number.POSITIVE_INFINITY,
-    refetchOnWindowFocus: false,
+    // Every view is counted on the grant, so no refetch (focus, reconnect, an
+    // app-wide invalidation) may inflate the record — and nothing of the body
+    // outlives the closed dialog, which also makes reopening it the second
+    // view it is.
+    staleTime: "static",
     gcTime: 0,
     retry: false,
   });

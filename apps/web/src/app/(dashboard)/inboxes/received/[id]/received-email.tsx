@@ -145,7 +145,8 @@ export function ReceivedEmailView() {
   const remove = useMutation(
     trpc.receiving.delete.mutationOptions({
       onSuccess: () => {
-        void queryClient.invalidateQueries({ queryKey: trpc.receiving.list.queryKey() });
+        // Dropped, not invalidated: a stale list would paint the deleted email until its refetch landed.
+        queryClient.removeQueries(trpc.receiving.list.pathFilter());
         router.push(LIST_HREF);
       },
       onError: () => toast(t("detail.deleteError"), "danger"),
@@ -399,7 +400,10 @@ export function ReceivedEmailView() {
           ) : (
             <span style={{ display: "grid", gap: 4 }}>
               {email.memberships.map((m) => (
-                <span key={m.inboxId} style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <span
+                  key={m.inboxId}
+                  style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+                >
                   <Link
                     className="ms-link ms-mono"
                     href={`/inboxes/${m.inboxId}?thread=${m.threadId}`}
@@ -610,6 +614,7 @@ export function ReceivedEmailView() {
         emailId={email.id}
         inboxId={email.memberships.find((m) => m.deliveredAt !== null)?.inboxId}
         cancelLabel={common("cancel")}
+        onSent={refresh}
       />
     </>
   );
@@ -622,12 +627,14 @@ function ComposeModal({
   emailId,
   inboxId,
   cancelLabel,
+  onSent,
 }: {
   mode: "reply" | "forward" | null;
   onClose: () => void;
   emailId: string;
   inboxId: string | undefined;
   cancelLabel: string;
+  onSent: () => void;
 }) {
   const t = useTranslations("inboxes");
   const trpc = useTRPC();
@@ -638,6 +645,7 @@ function ComposeModal({
     toast(result.kind === "sent" ? t("compose.sent") : t("compose.drafted"));
     setText("");
     setTo("");
+    onSent();
     onClose();
   };
   const reply = useMutation(trpc.receiving.reply.mutationOptions({ onSuccess: done }));

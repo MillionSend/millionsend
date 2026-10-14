@@ -1,21 +1,17 @@
-"use client";
-
-import { useQuery } from "@tanstack/react-query";
+import { isCloudDeployment } from "@millionsend/config";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { getTranslations } from "next-intl/server";
 import { codeRichTags } from "@/lib/code-rich-tags";
-import { useTRPC } from "@/lib/trpc";
+import { awsCredentialsConfigured } from "@/server/system-mail";
 
 /**
  * Warn-only banner shown while no explicit AWS credentials are configured.
  * Submits stay allowed: the default provider chain may still supply
  * credentials at runtime, so this informs rather than blocks.
  */
-export function AwsCredentialsBanner() {
-  const t = useTranslations("domains");
-  const trpc = useTRPC();
-  const readiness = useQuery(trpc.system.awsReadiness.queryOptions());
-  if (readiness.data?.credentialsConfigured !== false) return null;
+export async function AwsCredentialsBanner() {
+  if (isCloudDeployment() || awsCredentialsConfigured()) return null;
+  const t = await getTranslations("domains");
   return (
     <div
       role="status"

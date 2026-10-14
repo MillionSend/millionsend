@@ -11,10 +11,13 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
 import { toast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
+import { WarnCard } from "@/components/warn-card";
+import { typedAllowlistEntry, typedListAddress } from "@/lib/email-input";
 import { useTRPC } from "@/lib/trpc";
-import type { InboxDetail } from "../parts";
+import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
+import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, type InboxDetail } from "../parts";
 
-const ACCEPT = ["anyone", "verified", "allowlist"] as const;
 const POLICIES = ["reply_only", "allowlist", "open"] as const;
 
 const hint: React.CSSProperties = { fontSize: 12, color: "var(--ms-muted)", lineHeight: 1.5 };
@@ -42,82 +45,12 @@ function Rule({
   );
 }
 
-/** Free-form addresses as removable chips, with an input that adds one. */
-function AddressList({
-  values,
-  onChange,
-  addLabel,
-  disabled,
-  id,
-}: {
-  values: string[];
-  onChange: (values: string[]) => void;
-  addLabel: string;
-  disabled: boolean;
-  id: string;
-}) {
-  const t = useTranslations("inboxes");
-  const [entry, setEntry] = useState("");
-  const add = () => {
-    const value = entry.trim().toLowerCase();
-    if (!value || values.includes(value)) return;
-    onChange([...values, value]);
-    setEntry("");
-  };
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      {values.length > 0 ? (
-        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {values.map((value) => (
-            <span key={value} className="ms-chip">
-              {value}
-              {disabled ? null : (
-                <button
-                  type="button"
-                  aria-label={t("safety.remove", { value })}
-                  onClick={() => onChange(values.filter((v) => v !== value))}
-                >
-                  ✕
-                </button>
-              )}
-            </span>
-          ))}
-        </span>
-      ) : null}
-      {disabled ? null : (
-        <span style={{ display: "flex", gap: 8 }}>
-          <input
-            id={id}
-            className="ms-input mono"
-            style={{ flex: "1 1 auto", minWidth: 0 }}
-            value={entry}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => setEntry(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                add();
-              }
-            }}
-          />
-          <button type="button" className="ms-btn ms-btn-secondary" onClick={add}>
-            {addLabel}
-          </button>
-        </span>
-      )}
-    </div>
-  );
-}
-
 export function SafetyTab({ inbox, admin }: { inbox: InboxDetail; admin: boolean }) {
   const trpc = useTRPC();
   const query = useQuery(trpc.inboxes.safety.queryOptions({ id: inbox.id }));
   if (!query.data) return <Skeleton width="60%" height={14} />;
   return (
     <SafetyForm
-      // A fresh read starts the form over from what is stored.
-      key={query.dataUpdatedAt}
       inbox={inbox}
       admin={admin}
       stored={query.data.safety}
@@ -141,28 +74,35 @@ export function SafetyForm({
   retentionDays: number;
 }) {
   const t = useTranslations("inboxes");
+  const common = useTranslations("common");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [rules, setRules] = useState<InboxSafety>(stored);
+  // Edits ride over the stored rules, so no refetch can reset them.
+  const [draft, setDraft] = useState<InboxSafety | null>(null);
+  const rules = draft ?? stored;
   const set = <K extends keyof InboxSafety>(key: K, value: InboxSafety[K]) =>
-    setRules((current) => ({ ...current, [key]: value }));
+    setDraft((current) => ({ ...(current ?? stored), [key]: value }));
   const save = useMutation(
     trpc.inboxes.updateSafety.mutationOptions({
-      onSuccess: () => {
+      onSuccess: async () => {
         toast(t("safety.saved"));
-        void queryClient.invalidateQueries({
+        // The saved rules land before the draft goes, so the old ones never flash back.
+        await queryClient.invalidateQueries({
           queryKey: trpc.inboxes.safety.queryKey({ id: inbox.id }),
         });
+        setDraft(null);
       },
     }),
   );
   const locked = !admin || inbox.expired || save.isPending;
   const agent = inbox.kind === "agent";
-  const forwardOptions = [...new Set([...memberEmails, ...rules.owner_addresses])].map((email) => ({
-    value: email,
-    label: email,
-  }));
-  const changed = JSON.stringify(rules) !== JSON.stringify(stored);
+  const shared = inbox.shared ? "yes" : "no";
+  // The shared domain ignores owner addresses: it forwards to team members only.
+  const forwardOptions = [
+    ...new Set([...memberEmails, ...(inbox.shared ? [] : rules.owner_addresses)]),
+  ].map((email) => ({ value: email, label: email }));
+  const changed = draft !== null && JSON.stringify(draft) !== JSON.stringify(stored);
+  useUnsavedChangesWarning(changed, common("unsavedWarn"));
 
   return (
     <form
@@ -175,9 +115,15 @@ export function SafetyForm({
       {admin ? null : <p style={{ ...hint, margin: 0, fontSize: 13 }}>{t("safety.adminOnly")}</p>}
 
       <SectionCard title={t("safety.whoCanWrite")}>
-        <p style={{ ...hint, margin: "0 0 12px" }}>{t("safety.whoCanWriteHint")}</p>
-        <div style={{ display: "grid", gap: 6 }}>
-          {ACCEPT.map((value) => (
+        <p style={{ ...hint, margin: "0 0 12px" }}>
+          {t(agent ? "safety.whoCanWriteHint" : "safety.whoCanWriteHintHuman")}
+        </p>
+        <div
+          role="radiogroup"
+          aria-label={t("safety.whoCanWrite")}
+          style={{ display: "grid", gap: 6 }}
+        >
+          {ACCEPT_FROM.map((value) => (
             <label key={value} className="ms-radio-card">
               <input
                 type="radio"
@@ -188,24 +134,31 @@ export function SafetyForm({
               />
               <span>
                 {t(`acceptFrom.${value}`)}
-                <div className="sub">{t(`safety.${value}Hint`)}</div>
+                <div className="sub">{acceptFromHint(t, inbox.kind, value)}</div>
               </span>
             </label>
           ))}
         </div>
+        {acceptFromWarns(inbox.kind, rules.accept_from) ? (
+          <WarnCard>{t("acceptFrom.anyoneWarn")}</WarnCard>
+        ) : null}
         <div className="ms-field" style={{ marginTop: 14 }}>
           <label htmlFor="safety-allowlist">{t("safety.allowlist")}</label>
-          <AddressList
+          <ChipMultiSelect
             id="safety-allowlist"
-            values={rules.allowlist}
+            value={rules.allowlist}
             onChange={(values) => set("allowlist", values)}
-            addLabel={t("safety.addSender")}
+            options={[]}
+            onCreate={typedAllowlistEntry}
+            placeholder={t("safety.addSender")}
+            ariaLabel={t("safety.allowlist")}
+            removeLabel={(value) => t("safety.remove", { value })}
             disabled={locked}
           />
         </div>
       </SectionCard>
 
-      <SectionCard title={t("safety.beforeRead")}>
+      <SectionCard title={t(agent ? "safety.beforeRead" : "safety.beforeReadHuman")}>
         {agent ? (
           <Rule label={t("safety.screening")} note={t("safety.screeningHint")}>
             <Switch
@@ -219,7 +172,10 @@ export function SafetyForm({
         <Rule label={t("safety.hiddenText")} note={t("safety.hiddenTextHint")}>
           <Switch checked disabled onChange={() => {}} ariaLabel={t("safety.hiddenText")} />
         </Rule>
-        <Rule label={t("safety.extractCodes")} note={t("safety.extractCodesHint")}>
+        <Rule
+          label={t("safety.extractCodes")}
+          note={t(agent ? "safety.extractCodesHint" : "safety.extractCodesHintHuman")}
+        >
           <Switch
             checked={rules.extract_codes}
             disabled={locked}
@@ -229,44 +185,49 @@ export function SafetyForm({
         </Rule>
       </SectionCard>
 
-      <SectionCard title={t("safety.maySend")}>
-        <div className="ms-field" style={{ marginBottom: 14 }}>
-          <label htmlFor="safety-policy">{t("safety.sendPolicy")}</label>
-          <Select
-            id="safety-policy"
-            value={rules.send_policy}
-            onChange={(value) => {
-              const policy = POLICIES.find((p) => p === value);
-              if (policy) set("send_policy", policy);
-            }}
-            width="100%"
-            disabled={locked || inbox.shared}
-            ariaLabel={t("safety.sendPolicy")}
-            options={POLICIES.filter((p) => !inbox.shared || p === "reply_only").map((p) => ({
-              value: p,
-              label: t(`policy.${p}`),
-            }))}
-          />
-          <p style={{ ...hint, margin: "6px 0 0" }}>
-            {inbox.shared ? t("policy.sharedOnly") : t("policy.reply_onlyHint")}
-          </p>
-        </div>
-        <Rule label={t("safety.requireApproval")} note={t("safety.requireApprovalHint")}>
-          <Switch
-            checked={rules.require_approval}
-            disabled={locked}
-            onChange={(on) => set("require_approval", on)}
-            ariaLabel={t("safety.requireApproval")}
-          />
-        </Rule>
-        <Rule label={t("safety.privateCodes")} note={t("safety.privateCodesHint")}>
-          <Switch
-            checked={rules.private_codes}
-            disabled={locked}
-            onChange={(on) => set("private_codes", on)}
-            ariaLabel={t("safety.privateCodes")}
-          />
-        </Rule>
+      <SectionCard title={t(agent ? "safety.maySend" : "safety.maySendHuman")}>
+        {/* Send rules bind only an agent's own sends: a people inbox has just the daily cap. */}
+        {agent ? (
+          <>
+            <div className="ms-field" style={{ marginBottom: 14 }}>
+              <label htmlFor="safety-policy">{t("safety.sendPolicy")}</label>
+              <Select
+                id="safety-policy"
+                value={rules.send_policy}
+                onChange={(value) => {
+                  const policy = POLICIES.find((p) => p === value);
+                  if (policy) set("send_policy", policy);
+                }}
+                width="100%"
+                disabled={locked || inbox.shared}
+                ariaLabel={t("safety.sendPolicy")}
+                options={POLICIES.filter((p) => !inbox.shared || p === "reply_only").map((p) => ({
+                  value: p,
+                  label: t(`policy.${p}`),
+                }))}
+              />
+              <p style={{ ...hint, margin: "6px 0 0" }}>
+                {inbox.shared ? t("policy.sharedOnly") : t("policy.reply_onlyHint")}
+              </p>
+            </div>
+            <Rule label={t("safety.requireApproval")} note={t("safety.requireApprovalHint")}>
+              <Switch
+                checked={rules.require_approval}
+                disabled={locked}
+                onChange={(on) => set("require_approval", on)}
+                ariaLabel={t("safety.requireApproval")}
+              />
+            </Rule>
+            <Rule label={t("safety.privateCodes")} note={t("safety.privateCodesHint")}>
+              <Switch
+                checked={rules.private_codes}
+                disabled={locked}
+                onChange={(on) => set("private_codes", on)}
+                ariaLabel={t("safety.privateCodes")}
+              />
+            </Rule>
+          </>
+        ) : null}
         <div className="ms-field">
           <label htmlFor="safety-cap">{t("safety.sendCap")}</label>
           <input
@@ -283,62 +244,90 @@ export function SafetyForm({
               set("send_cap", event.target.value === "" ? null : Number(event.target.value))
             }
           />
+          {agent ? null : (
+            <p style={{ ...hint, margin: "6px 0 0" }}>{t("safety.sendCapHintHuman")}</p>
+          )}
         </div>
       </SectionCard>
 
-      <SectionCard title={t("safety.forwardTo")}>
-        <p style={{ ...hint, margin: "0 0 10px" }}>{t("safety.forwardToHint")}</p>
-        <ChipMultiSelect
-          id="safety-forward"
-          value={rules.forward_to}
-          onChange={(values) => set("forward_to", values)}
-          options={forwardOptions}
-          placeholder={t("safety.forwardTo")}
-          ariaLabel={t("safety.forwardTo")}
-          removeLabel={(value) => t("safety.remove", { value })}
-          disabled={locked}
-        />
-        <div className="ms-field" style={{ marginTop: 14 }}>
-          <label htmlFor="safety-owners">{t("safety.owners")}</label>
-          <AddressList
-            id="safety-owners"
-            values={rules.owner_addresses}
-            onChange={(values) => {
-              set("owner_addresses", values);
-              // A forward target that stops being an owner stops being allowed.
-              const allowed = new Set([...memberEmails, ...values]);
-              set(
-                "forward_to",
-                rules.forward_to.filter((target) => allowed.has(target)),
-              );
-            }}
-            addLabel={t("safety.addOwner")}
+      <SectionCard title={t("safety.forwarding")}>
+        <div className="ms-field">
+          <div className="ms-label-row">
+            <label htmlFor="safety-forward">{t("safety.forwardTo")}</label>
+            <Tooltip text={t("safety.forwardToTip", { shared })} />
+          </div>
+          <ChipMultiSelect
+            id="safety-forward"
+            value={rules.forward_to}
+            onChange={(values) => set("forward_to", values)}
+            options={forwardOptions}
+            placeholder={t("safety.forwardPlaceholder", { shared })}
+            ariaLabel={t("safety.forwardTo")}
+            removeLabel={(value) => t("safety.remove", { value })}
             disabled={locked}
           />
         </div>
+        {inbox.shared ? null : (
+          <div className="ms-field" style={{ marginTop: 14 }}>
+            <div className="ms-label-row">
+              <label htmlFor="safety-owners">{t("safety.owners")}</label>
+              <Tooltip text={t("safety.ownersTip", { kind: inbox.kind })} />
+            </div>
+            <ChipMultiSelect
+              id="safety-owners"
+              value={rules.owner_addresses}
+              onChange={(values) => {
+                set("owner_addresses", values);
+                // A forward target that stops being an owner stops being allowed.
+                const allowed = new Set([...memberEmails, ...values]);
+                set(
+                  "forward_to",
+                  rules.forward_to.filter((target) => allowed.has(target)),
+                );
+              }}
+              options={[]}
+              onCreate={typedListAddress}
+              placeholder={t("safety.addOwner")}
+              ariaLabel={t("safety.owners")}
+              removeLabel={(value) => t("safety.remove", { value })}
+              disabled={locked}
+            />
+          </div>
+        )}
       </SectionCard>
-
-      <SectionCard title={t("safety.retention")}>
-        <p style={{ margin: 0, fontSize: 13 }}>
-          {t("safety.retentionValue", { days: retentionDays })}
-        </p>
-      </SectionCard>
-
-      <p style={{ ...hint, margin: 0 }}>{t("safety.alwaysOn")}</p>
 
       {save.error ? (
         <div className="ms-field-error" style={{ margin: 0 }}>
           {save.error.message}
         </div>
       ) : null}
-      {admin ? (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button type="submit" className="ms-btn ms-btn-primary" disabled={locked || !changed}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          gap: 16,
+        }}
+      >
+        <div style={{ display: "grid", gap: 6, maxWidth: 520 }}>
+          {agent ? <p style={{ ...hint, margin: 0 }}>{t("safety.alwaysOn")}</p> : null}
+          <p style={{ ...hint, margin: 0 }}>
+            {t("safety.retentionValue", { days: retentionDays })}
+          </p>
+        </div>
+        {admin ? (
+          <button
+            type="submit"
+            className="ms-btn ms-btn-primary"
+            style={{ marginLeft: "auto" }}
+            disabled={locked || !changed}
+          >
             <BtnSpinner on={save.isPending} />
             {t("safety.save")}
           </button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </form>
   );
 }

@@ -51,6 +51,8 @@ export default function BroadcastDetailPage() {
       onSuccess: () => {
         setCancelOpen(false);
         queryClient.invalidateQueries(trpc.broadcasts.pathFilter());
+        // Canceling flips the queued sends listed below to canceled.
+        queryClient.invalidateQueries(trpc.emails.list.pathFilter());
       },
     }),
   );

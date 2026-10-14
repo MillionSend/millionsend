@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
-import { useNavItems } from "@/components/sidebar";
+import { navItemsFor } from "@/components/sidebar";
 
 interface PaletteItem {
   id: string;
@@ -11,14 +11,13 @@ interface PaletteItem {
   href: string;
 }
 
-export function CommandPalette() {
+export function CommandPalette({ receiving }: { receiving: boolean }) {
   const tNav = useTranslations("nav");
   const t = useTranslations("common.commandPalette");
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
-  const navItems = useNavItems();
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -45,7 +44,11 @@ export function CommandPalette() {
         id: "navigate",
         label: t("navigate"),
         items: matches(
-          navItems.map((item) => ({ id: item.key, label: tNav(item.key), href: item.href })),
+          navItemsFor(receiving).map((item) => ({
+            id: item.key,
+            label: tNav(item.key),
+            href: item.href,
+          })),
         ),
       },
       {
@@ -57,7 +60,7 @@ export function CommandPalette() {
         ]),
       },
     ];
-  }, [query, t, tNav, navItems]);
+  }, [query, t, tNav, receiving]);
   const flat = groups.flatMap((group) => group.items);
 
   if (!open) return null;
