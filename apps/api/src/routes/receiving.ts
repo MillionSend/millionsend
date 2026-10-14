@@ -12,8 +12,10 @@ import {
   deleteReceivedEmail,
   EMAIL_QUARANTINED_MESSAGE,
   escapeLike,
+  findKeyInbox,
   heldFrom,
   INBOX_KEY_SCOPE_MESSAGE,
+  INBOX_NOT_FOUND_MESSAGE,
   inboxActorFromAuth,
   ingestReceivedEmail,
   isAgentActor,
@@ -211,7 +213,7 @@ export function registerReceivingRoutes(
       method: "get",
       path: "/emails/receiving",
       summary: "List received emails",
-      description: `Mail received at the team's receiving domains and inboxes, newest first like Resend (\`after\` pages toward older mail), with cursor pagination. Needs a full access key; a domain-scoped key lists mail addressed to its domain only, an inbox-scoped key mail delivered into its inbox. Mail held for screening or in quarantine is left out unless a full access key asks for it (include_quarantined, quarantined). With wait, the request is held until matching mail arrives (long-poll). ${untrusted}`,
+      description: `Mail received at the team's receiving domains and inboxes, newest first like Resend (\`after\` pages toward older mail), with cursor pagination. Needs a full access key; a domain-scoped key lists mail addressed to its domain only, an inbox-scoped key mail delivered into its inbox. Mail held for screening or in quarantine is left out unless a full access key asks for it (include_quarantined, quarantined). With wait, the request is held until matching mail arrives (long-poll). An inbox_id the key can't reach answers 404 at once, without waiting. ${untrusted}`,
       middleware,
       request: { query: listReceivedEmailsQuerySchema },
       responses: {
@@ -220,6 +222,7 @@ export function registerReceivingRoutes(
           description: "Received emails",
         },
         403: jsonErr("Restricted API key"),
+        404: jsonErr("Inbox not found"),
         422: jsonErr("Validation error"),
         429: jsonErr("Too many concurrent waits"),
       },
@@ -237,6 +240,9 @@ export function registerReceivingRoutes(
           errorBody(403, "restricted_api_key", "include_quarantined needs a full access key"),
           403,
         );
+      }
+      if (q.inbox_id && !(await findKeyInbox(db, auth, q.inbox_id))) {
+        return c.json(errorBody(404, "not_found", INBOX_NOT_FOUND_MESSAGE), 404);
       }
       const inboxId = auth.inboxId ?? q.inbox_id ?? null;
       const view = { inboxId, agent };

@@ -2169,5 +2169,18 @@ describe("receiving tools", () => {
       ).toEqual({ status: "timeout" });
       await client.close();
     });
+
+    it("refuse a wait on an inbox they can't reach at once, as not found", async () => {
+      const client = await connect(await mintToken());
+      const startedAt = Date.now();
+      const waited = await client.callTool({
+        name: "wait_for_received_email",
+        arguments: { inbox_id: randomUUID(), timeout: 30 },
+      });
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      expect(waited.isError).toBe(true);
+      expect(resultJson(waited)).toMatchObject({ statusCode: 404, message: "Inbox not found." });
+      await client.close();
+    });
   });
 });

@@ -8,7 +8,7 @@ import {
   createSharedNameReview,
   deleteInboxes,
   deleteLabel,
-  findLiveInbox,
+  findKeyInbox,
   getInbox,
   getThread,
   getThreadEmail,
@@ -124,16 +124,9 @@ export function registerInboxRoutes(
     failure(c, { status: 404, name: "not_found", message });
   const cursorNotFound = (c: Context<Env>) => notFound(c, CURSOR_NOT_FOUND_MESSAGE);
 
-  /**
-   * SECURITY: the inbox must be the team's, live, the key's own when the key
-   * is inbox-scoped, and on the key's domain when it is domain-scoped (as
-   * its received-mail reads are); anything else reads as not found.
-   */
   const ownInboxSafety = async (c: Context<Env>, inboxId: string) => {
-    const auth = c.get("auth");
-    if (auth.inboxId && auth.inboxId !== inboxId.toLowerCase()) return null;
-    const inbox = await findLiveInbox(db, { teamId: auth.teamId, inboxId });
-    if (!inbox || (auth.domainId !== null && inbox.domainId !== auth.domainId)) return null;
+    const inbox = await findKeyInbox(db, c.get("auth"), inboxId);
+    if (!inbox) return null;
     touchInboxInBackground(db, inbox.id);
     return inbox.safety;
   };

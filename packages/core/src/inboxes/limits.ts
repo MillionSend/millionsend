@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, count, eq, gt, isNull, min, or, type SQL } from "drizzle-orm";
+import type { ApiKeyAuth } from "../api-key-auth.js";
 import type { Plan } from "../plans.js";
 import { MAX_RECEIVED_MESSAGE_BYTES } from "../receiving/protocol.js";
 import { DAY_MS } from "../utc-day.js";
@@ -99,6 +100,21 @@ export async function findLiveInbox(
     .where(and(eq(i.teamId, p.teamId), match, liveInbox(p.now ?? new Date())))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * SECURITY: the inbox must be the key's team's, live, the key's own when the
+ * key is inbox-scoped, and on the key's domain when it is domain-scoped (as
+ * its received-mail reads are); anything else reads as not found (null).
+ */
+export async function findKeyInbox(
+  db: Db,
+  key: Pick<ApiKeyAuth, "teamId" | "domainId" | "inboxId">,
+  inboxId: string,
+): Promise<typeof schema.inboxes.$inferSelect | null> {
+  if (key.inboxId && key.inboxId !== inboxId.toLowerCase()) return null;
+  const inbox = await findLiveInbox(db, { teamId: key.teamId, inboxId });
+  return inbox && (key.domainId === null || inbox.domainId === key.domainId) ? inbox : null;
 }
 
 /**
