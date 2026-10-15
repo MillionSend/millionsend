@@ -332,7 +332,10 @@ of a page and pages toward older items, `before` takes the first id and
 pages back toward newer ones, and `has_more` says whether more remain that
 way. To pick up what was created since your last read, pass the newest id
 you stored as `before`, then the first id of each page while `has_more` is
-`true`. These lists run in another order:
+`true`. With `wait`, `/emails/receiving` answers the newest matches instead
+of the ones right after the cursor; see
+[Waiting for new mail](/concepts/receiving#waiting-for-new-mail). These
+lists run in another order:
 
 | List | Order |
 | --- | --- |
@@ -343,8 +346,11 @@ you stored as `before`, then the first id of each page while `has_more` is
 | `GET /topics` and `/contacts/{id}/topics` | Oldest first, all at once; `has_more` is always `false`. |
 | `GET /emails/receiving/{id}/attachments` | In the email's order, all at once unless you pass `limit`. |
 
-Under `/inboxes`, a cursor that names no item of the list answers `404`, as
-on Resend.
+A cursor that names no item of the list answers `422 validation_error`;
+under `/inboxes` it answers `404`, as on Resend. That includes a stored id
+whose item was deleted or revoked since and, on `/emails/receiving`, one
+that no longer matches your filters: to catch up, read from the top without
+a cursor and stop at the items you already have.
 
 ## Signed download links
 

@@ -340,6 +340,9 @@ curl "https://api.millionsend.com/emails/receiving?inbox_id=7eeb9517-aed7-40d7-a
 - It returns mail newer than `before`, this list's cursor toward newer mail,
   or newer than `since`. With neither, the last 60 seconds count, so a
   message that landed just before the call isn't missed.
+- With more matches than `limit`, it answers the newest `limit` and
+  `has_more: true`. To read every match, list without `wait`: pass the same
+  `before`, then the first id of each page while `has_more` is `true`.
 - The answer adds `held`: matching messages held since then, as
   `{ id, inbox_id, reason, quarantine_reason, created_at }` and nothing more,
   so an agent knows to stop waiting and tell a person. For an inbox-scoped key

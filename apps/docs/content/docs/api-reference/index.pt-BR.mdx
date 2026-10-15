@@ -347,7 +347,10 @@ antigos, o `before` recebe o primeiro id e volta para os mais novos, e o
 `has_more` diz se ainda há mais itens nessa direção. Para buscar o que foi
 criado desde a sua última leitura, passe no `before` o id mais novo que você
 guardou e, depois, o primeiro id de cada página enquanto o `has_more` for
-`true`. Estas listagens seguem outra ordem:
+`true`. Com `wait`, o `/emails/receiving` devolve os e-mails mais novos, e
+não os que vêm logo depois do cursor; veja
+[Esperar por e-mails novos](/pt-BR/concepts/receiving#esperar-por-e-mails-novos).
+Estas listagens seguem outra ordem:
 
 | Listagem | Ordem |
 | --- | --- |
@@ -358,8 +361,12 @@ guardou e, depois, o primeiro id de cada página enquanto o `has_more` for
 | `GET /topics` e `/contacts/{id}/topics` | Dos mais antigos para os mais novos, todos de uma vez; o `has_more` é sempre `false`. |
 | `GET /emails/receiving/{id}/attachments` | Na ordem em que estão no e-mail, todos de uma vez, a não ser que você passe `limit`. |
 
-Em `/inboxes`, um cursor que não aponta nenhum item da listagem responde
-`404`, como no Resend.
+Um cursor que não aponta nenhum item da listagem responde
+`422 validation_error`; em `/inboxes`, responde `404`, como no Resend. Isso
+vale também quando o item do id que você guardou foi apagado ou revogado
+depois e, em `/emails/receiving`, quando ele não bate mais com os seus
+filtros: para retomar, leia de novo do começo, sem cursor, até chegar aos
+itens que você já tem.
 
 ## Links de download assinados
 
