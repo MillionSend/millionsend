@@ -9,6 +9,7 @@ import {
   hasHeaderControlChar,
   INBOX_KEY_FROM_MESSAGE,
   isSharedInboxSender,
+  MAX_SUBJECT_LENGTH,
   monthlyQuotaMessage,
   msgIds,
   parseMailbox,
@@ -151,6 +152,9 @@ async function handleMessage(
   if (!subject) throw smtpError(553, "A non-empty Subject header is required");
   if (hasHeaderControlChar(subject)) {
     throw smtpError(554, "Subject must not contain control characters");
+  }
+  if (subject.length > MAX_SUBJECT_LENGTH) {
+    throw smtpError(554, `Subject must be at most ${MAX_SUBJECT_LENGTH} characters`);
   }
   const html = parsed.html === false ? undefined : parsed.html;
   const text = parsed.text;

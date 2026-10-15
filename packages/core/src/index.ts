@@ -126,6 +126,7 @@ export {
   type InboxAccept,
   isReservedTagName,
   MAX_ATTACHMENT_BYTES,
+  MAX_SUBJECT_LENGTH,
   QUOTA_BACKLOG_DAYS,
   RESERVED_TAG_PREFIX,
   reviewBacklogLimit,

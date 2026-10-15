@@ -161,6 +161,12 @@ remaining deltas are deliberate and loud:
 - `to`, `cc` and `bcc` together cannot exceed 50 recipients, and each address
   must be a single mailbox — a display name containing `@` is rejected, and
   accepted addresses read back in canonical `Name <user@host>` form.
+- `subject` takes up to 998 characters, the line limit of RFC 5322, on
+  `POST /emails`, `POST /emails/batch`, broadcasts and templates: a longer one
+  is refused with `422 validation_error`, and the
+  [SMTP relay](/self-hosting#smtp-relay) answers `554`. Resend documents no
+  limit for these. Inbox replies, forwards and drafts take up to 2,000, as on
+  Resend.
 - A recipient whose domain can never receive mail, such as `x@example.com`,
   `x@foo.test` or `x@gmail.con`, is refused with `422 validation_error`, in
   sends and new contacts alike; see [Errors](#errors).

@@ -6,6 +6,7 @@ import {
   EnvKeyring,
   generateApiKey,
   hashRecipient,
+  MAX_SUBJECT_LENGTH,
   OVERAGE_HARD_CAP,
   undeliverableRecipientMessage,
   utcDay,
@@ -333,6 +334,22 @@ describe("smtp relay", () => {
         response: expect.stringContaining("Subject must not contain control characters"),
       });
     }
+  });
+
+  it("refuses a Subject past MAX_SUBJECT_LENGTH characters with 554, as POST /emails does", async () => {
+    const send = (subject: string) =>
+      transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+        from: "a@acme.dev",
+        to: "r@example.com",
+        subject,
+        text: "t",
+      });
+    await expect(send("s".repeat(MAX_SUBJECT_LENGTH + 1))).rejects.toMatchObject({
+      responseCode: 554,
+      response: expect.stringContaining(`Subject must be at most ${MAX_SUBJECT_LENGTH} characters`),
+    });
+    const row = await emailRow((await send("s".repeat(MAX_SUBJECT_LENGTH))).response ?? "");
+    expect(row.subject).toHaveLength(MAX_SUBJECT_LENGTH);
   });
 
   it("delivers to the envelope only: header-only recipients are dropped, envelope extras are BCC", async () => {

@@ -171,6 +171,12 @@ deliberadas e explícitas:
   endereço precisa ser uma única caixa postal — um nome de exibição contendo
   `@` é rejeitado, e endereços aceitos voltam na forma canônica
   `Nome <usuario@host>`.
+- `subject` aceita até 998 caracteres, o limite de linha da RFC 5322, em
+  `POST /emails`, `POST /emails/batch`, transmissões e templates: um assunto
+  maior é recusado com `422 validation_error`, e o
+  [relay SMTP](/pt-BR/self-hosting#relay-smtp) responde `554`. O Resend não
+  documenta limite nesses casos. Respostas, encaminhamentos e rascunhos das
+  caixas aceitam até 2.000, como no Resend.
 - Um destinatário cujo domínio nunca recebe e-mail, como `x@example.com`,
   `x@foo.test` ou `x@gmail.con`, é recusado com `422 validation_error`, tanto
   nos envios quanto nos contatos novos; veja [Erros](#erros).
