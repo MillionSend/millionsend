@@ -2,21 +2,23 @@
 
 import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import styles from "@/components/auth/auth.module.css";
 import { AuthScreen } from "@/components/auth/auth-screen";
-import { DotParts } from "@/components/dot-parts";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { authClient } from "@/lib/auth-client";
+import { GRANT_LIFETIME_DAYS, type GrantLifetime } from "@/lib/grant-lifetime";
 import { useTRPC } from "@/lib/trpc";
 
 /** Sentinel option value for an all-teams grant (core's ALL_TEAMS_GRANT). */
 const ALL_TEAMS = "*";
 /**
- * Drives refresh-token issuance rather than a permission; declining it means
- * the app must re-authorize once the hour-long access token expires.
+ * What keeps the app connected past the hour-long access token. The server
+ * adds it to every MCP authorization, so it is granted with the rest and
+ * never offered as a checkbox: unticked, the consent would no longer cover
+ * the request and the screen would just come back.
  */
 const OFFLINE_ACCESS = "offline_access";
 /**
@@ -38,8 +40,6 @@ export function ConsentForm({
     name: string | null;
     uri: string | null;
     redirectOrigins: string[];
-    unverified: boolean;
-    registeredAt: string | null;
   } | null;
   userEmail: string;
   scopes: string[];
@@ -47,11 +47,11 @@ export function ConsentForm({
   defaultTeamId: string | null;
 }) {
   const t = useTranslations("auth.consent");
-  const locale = useLocale();
   const trpc = useTRPC();
   const grantTeam = useMutation(trpc.team.grantTeam.mutationOptions());
   const [teamId, setTeamId] = useState(defaultTeamId ?? teams[0]?.teamId ?? "");
   const [granted, setGranted] = useState(() => new Set(scopes));
+  const [lifetime, setLifetime] = useState<GrantLifetime>("never");
   const [pending, setPending] = useState<"allow" | "deny" | null>(null);
   const [failed, setFailed] = useState(false);
   const appName = app?.name || t("unknownApp");
@@ -61,10 +61,10 @@ export function ConsentForm({
     teamId === ALL_TEAMS
       ? teams.every((team) => team.role === "member")
       : (teams.find((team) => team.teamId === teamId)?.role ?? "member") === "member";
-  const visible = memberOnly
-    ? scopes.filter((scope) => !ADMIN_ONLY_SCOPES.includes(scope))
-    : scopes;
-  const nothingGranted = visible.every((scope) => scope === OFFLINE_ACCESS || !granted.has(scope));
+  const visible = scopes.filter(
+    (scope) => scope !== OFFLINE_ACCESS && !(memberOnly && ADMIN_ONLY_SCOPES.includes(scope)),
+  );
+  const nothingGranted = visible.every((scope) => !granted.has(scope));
 
   function toggle(scope: string) {
     setGranted((prev) => {
@@ -82,13 +82,19 @@ export function ConsentForm({
       // The grant binds to session.activeTeamId, so the selection must be
       // persisted (and membership-checked) before consent is recorded.
       if (accept) await grantTeam.mutateAsync({ teamId });
-      const kept = visible.filter((scope) => granted.has(scope));
-      const { data, error } = await authClient.oauth2.consent({
+      const kept = scopes.filter(
+        (scope) => scope === OFFLINE_ACCESS || (visible.includes(scope) && granted.has(scope)),
+      );
+      // `lifetime` is this app's own field (server/auth hooks), so it is
+      // missing from the provider's typed body and passed as a variable.
+      const body = {
         accept,
+        lifetime,
         // Omitted = everything requested; sent only when the user unticked
         // something, so the provider records exactly the approved subset.
         ...(accept && kept.length < scopes.length ? { scope: kept.join(" ") } : {}),
-      });
+      };
+      const { data, error } = await authClient.oauth2.consent(body);
       if (error) throw error;
       // The auth client's redirect plugin already navigates on `redirect: true`;
       // this covers a response without that flag.
@@ -98,10 +104,6 @@ export function ConsentForm({
       setPending(null);
     }
   }
-
-  const redirects = app?.redirectOrigins.length ? (
-    <span>{t("redirectsTo", { origins: app.redirectOrigins.join(", ") })}</span>
-  ) : null;
 
   return (
     <AuthScreen title={t("title", { app: appName })}>
@@ -115,42 +117,6 @@ export function ConsentForm({
         )}{" "}
         {t("subline", { email: userEmail })}
       </p>
-      {app?.unverified ? (
-        <div
-          role="note"
-          style={{
-            display: "grid",
-            gap: 4,
-            border: "1px solid var(--ms-warn-border)",
-            background: "var(--ms-warn-bg)",
-            borderRadius: "var(--ms-r-input)",
-            padding: "9px 14px",
-            fontSize: "var(--ms-fs-label)",
-            lineHeight: 1.5,
-            color: "var(--ms-warn)",
-            overflowWrap: "anywhere",
-          }}
-        >
-          <strong>
-            <DotParts
-              text={[
-                t("unverified"),
-                ...(app.registeredAt
-                  ? [
-                      t("registered", {
-                        date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
-                          new Date(app.registeredAt),
-                        ),
-                      }),
-                    ]
-                  : []),
-              ].join(" · ")}
-            />
-          </strong>
-          <span>{t("unverifiedNote")}</span>
-          {redirects}
-        </div>
-      ) : null}
       {app ? (
         <div
           style={{
@@ -161,7 +127,9 @@ export function ConsentForm({
             overflowWrap: "anywhere",
           }}
         >
-          {app.unverified ? null : redirects}
+          {app.redirectOrigins.length ? (
+            <span>{t("redirectsTo", { origins: app.redirectOrigins.join(", ") })}</span>
+          ) : null}
           <span>
             {t("clientId")} <span className="ms-mono">{app.clientId}</span>
           </span>
@@ -230,6 +198,21 @@ export function ConsentForm({
               </label>
             ))}
           </div>
+        </div>
+        <div className={`ms-field ${styles.field}`}>
+          <label htmlFor="consent-lifetime">{t("stayConnected")}</label>
+          <Select
+            id="consent-lifetime"
+            value={lifetime}
+            onChange={(value) => setLifetime(value as GrantLifetime)}
+            options={Object.keys(GRANT_LIFETIME_DAYS).map((value) => ({
+              value,
+              label: t(`lifetimes.${value}`),
+            }))}
+            ariaLabel={t("stayConnected")}
+            width="100%"
+            disabled={pending !== null}
+          />
         </div>
         {failed ? (
           <p className={styles.error} role="alert">

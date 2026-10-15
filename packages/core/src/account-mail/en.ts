@@ -23,11 +23,15 @@ export const en = {
     subject: "An app is connected to your MillionSend account",
     body: [
       "You allowed {app} to act on {team} through the MillionSend MCP server with these permissions: {scopes}.",
-      "It can do there what you can do, in your name, until you revoke it.",
+      "It can do there what you can do, in your name, {until}.",
     ],
     button: "Review connected apps",
     muted: ["Didn't authorize this? Revoke it now."],
-    extra: { allTeams: "all your teams" },
+    extra: {
+      allTeams: "all your teams",
+      untilDisconnected: "until you disconnect it",
+      untilDate: "until {date}",
+    },
   },
   "api_key.created": {
     subject: "A new API key was created",

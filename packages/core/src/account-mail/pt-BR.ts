@@ -23,11 +23,15 @@ export const ptBR = {
     subject: "Um app foi conectado à sua conta do MillionSend",
     body: [
       "Você permitiu que {app} atue em {team} pelo servidor MCP do MillionSend com estas permissões: {scopes}.",
-      "Ele pode fazer o mesmo que você, em seu nome, até você revogar o acesso.",
+      "Ele pode fazer o mesmo que você, em seu nome, {until}.",
     ],
     button: "Revisar apps conectados",
     muted: ["Não autorizou isso? Revogue agora."],
-    extra: { allTeams: "todas as suas equipes" },
+    extra: {
+      allTeams: "todas as suas equipes",
+      untilDisconnected: "até você desconectar",
+      untilDate: "até {date}",
+    },
   },
   "api_key.created": {
     subject: "Uma nova chave de API foi criada",

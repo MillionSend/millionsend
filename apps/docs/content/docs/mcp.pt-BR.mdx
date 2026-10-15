@@ -102,8 +102,9 @@ da sua instância, mostrada acima.
 
 O servidor MCP usa OAuth, não chaves de API. Na primeira conexão o cliente
 abre seu navegador: entre no MillionSend, escolha a **equipe** em que o cliente
-pode agir — uma equipe específica ou **Todas as equipes** — e desmarque as
-**permissões** que não quiser conceder. Nada é copiado ou colado — nenhum
+pode agir — uma equipe específica ou **Todas as equipes** —, desmarque as
+**permissões** que não quiser conceder e, em **Manter conectado**, escolha por
+quanto tempo o cliente fica conectado. Nada é copiado ou colado — nenhum
 segredo fica na configuração do cliente.
 
 - Uma autorização vinculada a uma equipe só age naquela equipe. Uma autorização
@@ -113,11 +114,15 @@ segredo fica na configuração do cliente.
   aparece para consultar os ids.
 - Permissões desmarcadas no consentimento simplesmente não são concedidas —
   o cliente não vê as ferramentas que elas cobrem.
+- Todo cliente recebe um refresh token, então uma sessão de trabalho não
+  termina quando o access token, que dura uma hora, expira. **Manter
+  conectado** define quanto tempo a autorização dura: até você desconectar
+  (o padrão), 1 ano, 90 dias ou 30 dias. Quando esse prazo acaba, o cliente
+  pede para você entrar de novo.
 - As autorizações ficam em **Configurações → Aplicativos conectados** no
-  painel. Você pode revogar as suas; proprietários e administradores podem revogar as de
-  qualquer pessoa. A revogação vale a partir da próxima renovação de token do
-  cliente, em até uma hora. Os clientes recebem um refresh token, então uma
-  sessão de trabalho não termina quando o access token expira.
+  painel, com a validade de cada uma. Você pode revogar as suas; proprietários
+  e administradores podem revogar as de qualquer pessoa. A revogação vale a
+  partir da próxima renovação de token do cliente, em até uma hora.
 - Um membro removido da equipe perde o acesso MCP imediatamente, mesmo antes de
   o token expirar.
 - Sua função na equipe vale aqui também, como no painel: só proprietários e administradores
