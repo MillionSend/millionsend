@@ -177,7 +177,7 @@ describe("the shared domain's mode, on every inbox send", () => {
     await establish(w);
     openSending();
     const safety = { send_policy: "open" as const, allowlist: ["*@sender.example"] };
-    const answer = async (inbox: InboxRow) => {
+    const target = async (inbox: InboxRow) => {
       const threadId = await addThread(w, inbox.id);
       const received = await receive(w, {
         inbox,
@@ -185,20 +185,48 @@ describe("the shared domain's mode, on every inbox send", () => {
         senderTrust: "allowlisted",
         message: { replyTo: "other@elsewhere.example" },
       });
-      return replyInThread(db, w.deps, {
-        teamId: w.teamId,
+      return { teamId: w.teamId, inboxId: inbox.id, threadId, emailId: received.id };
+    };
+    const reply = async (inbox: InboxRow) =>
+      replyInThread(db, w.deps, {
+        ...(await target(inbox)),
         billing: await billing(w),
         actor: TEAM_KEY,
-        inboxId: inbox.id,
-        threadId,
-        emailId: received.id,
         body: { text: "Sure" },
+      });
+    const replyByDraft = async (inbox: InboxRow) => {
+      const { threadId, emailId, ...at } = await target(inbox);
+      // A team-wide key's send approves its own draft; the inbox's own key sends unattended.
+      const actor: InboxActor = {
+        kind: "api_key",
+        apiKeyId: "00000000-0000-4000-8000-000000000002",
+        inboxId: inbox.id,
+      };
+      const draft = await createDraft(db, w.deps, {
+        ...at,
+        actor,
+        input: {
+          to: ["other@elsewhere.example"],
+          text: "Sure",
+          thread_id: threadId,
+          reply_to_email_id: emailId,
+        },
+      });
+      if (!draft.ok) throw new Error(draft.error.message);
+      return sendDraft(db, w.deps, {
+        ...at,
+        billing: await billing(w),
+        actor,
+        draftId: draft.draft.id,
       });
     };
     const shared = await addInbox(w, { local: "bot", shared: true, safety });
-    expect(drafted(await answer(shared)).approval_reasons).toContain("reply_to_redirect");
-    // On a team's own domain the allowlisted sender still vouches for its Reply-To.
-    sent(await answer(await addInbox(w, { local: "desk", safety })));
+    const desk = await addInbox(w, { local: "desk", safety });
+    for (const answer of [reply, replyByDraft]) {
+      expect(drafted(await answer(shared)).approval_reasons).toContain("reply_to_redirect");
+      // On a team's own domain the allowlisted sender still vouches for its Reply-To.
+      sent(await answer(desk));
+    }
   });
 
   it("keeps an inbox replying only while its display name, address or team label fails the guards", async () => {
