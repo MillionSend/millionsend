@@ -101,9 +101,9 @@ server URL from above.
 
 The MCP server uses OAuth, not API keys. On first connect the client opens
 your browser: sign in to MillionSend, pick the **team** the client may act
-on — a single team or **All teams** — and untick any **permissions** you
-don't want to grant. Nothing is copied or pasted — no secrets live in the
-client's config.
+on — a single team or **All teams** — untick any **permissions** you don't
+want to grant, and choose how long the client may **Stay connected**.
+Nothing is copied or pasted — no secrets live in the client's config.
 
 - A grant bound to one team only ever acts on that team. An **All teams**
   grant covers every team you belong to, including teams you join later:
@@ -111,11 +111,14 @@ client's config.
   team) and a `list_teams` tool appears to look the ids up.
 - Permissions unticked at consent are simply never granted — the client
   doesn't see the tools they cover.
-- Grants are listed under **Settings → Connected apps** in the dashboard.
-  You can revoke your own grants; owners and admins can revoke anyone's.
-  Revocation takes effect at the client's next token refresh, within an
-  hour. Clients receive a refresh token, so a working session does not end
-  when the access token does.
+- Every client gets a refresh token, so a working session does not end
+  when the hour-long access token does. **Stay connected** sets how long
+  the grant lasts: until you disconnect it (the default), 1 year, 90 days
+  or 30 days. When that time is up, the client asks you to sign in again.
+- Grants are listed under **Settings → Connected apps** in the dashboard,
+  with when each one expires. You can revoke your own grants; owners and
+  admins can revoke anyone's. Revocation takes effect at the client's next
+  token refresh, within an hour.
 - A member removed from the team loses MCP access immediately, even before
   their token expires.
 - Your team role applies, matching the dashboard: only owners and admins
