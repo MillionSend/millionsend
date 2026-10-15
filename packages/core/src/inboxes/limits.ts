@@ -50,6 +50,15 @@ export const INBOX_USE_STAMP_INTERVAL = HOUR_MS;
 export const SHARED_NAME_REFUSALS_PER_DAY = 20;
 /** Reviews of shared-domain names per team per UTC day, each a judge call, refused or not. */
 export const SHARED_NAME_REVIEWS_PER_DAY = 200;
+/**
+ * Milliseconds before a team's subdomain label is asked for again after its
+ * name review couldn't answer; also the retry-after of a create waiting on it.
+ */
+export const SHARED_SUBDOMAIN_FIRST_RETRY_MS = 5 * 60_000;
+/** Milliseconds between the later asks for a team's subdomain label. */
+export const SHARED_SUBDOMAIN_RETRY_MS = HOUR_MS;
+/** Milliseconds a team without a subdomain label waits on its name review before it takes a random one. */
+export const SHARED_SUBDOMAIN_FALLBACK_MS = DAY_MS;
 /** Milliseconds a pending_approval draft waits before it expires. */
 export const DRAFT_APPROVAL_TTL = 7 * DAY_MS;
 /** Milliseconds a trashed thread is kept. */
