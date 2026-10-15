@@ -716,8 +716,12 @@ export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
-  /** Resolves a cursor id to its sort key, scoped to the caller's team. */
-  loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
+  /**
+   * Resolves a cursor id to its sort key, scoped to the caller's team. "end"
+   * is a cursor below every row: after it the page is empty, and before it
+   * the page starts at the oldest row.
+   */
+  loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | "end" | undefined>;
   loadRows: (cond: SQL | undefined, orderBy: SQL[], take: number) => Promise<R[]>;
 }): Promise<{ rows: R[]; hasMore: boolean } | "bad_cursor"> {
   const { query } = opts;
@@ -728,7 +732,11 @@ export async function keysetPage<R>(opts: {
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
     if (!cur) return "bad_cursor";
-    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
+    if (cur !== "end") {
+      cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
+    } else if (!towardNewer) {
+      return { rows: [], hasMore: false };
+    }
   }
   const dir = towardNewer ? asc : desc;
   // One extra row decides has_more without a count query.

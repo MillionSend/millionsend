@@ -24,18 +24,20 @@ describe("keysetPage", () => {
   let teamId: string;
   let rows: { id: string; name: string }[];
   const id = (name: string) => rows.find((r) => r.name === name)?.id;
-  const page = async (query: ListQuery) => {
+  type LoadCursor = Parameters<typeof keysetPage>[0]["loadCursor"];
+  const ownCursor: LoadCursor = async (cursor) =>
+    (
+      await db
+        .select({ createdAt: s.createdAt, id: s.id })
+        .from(s)
+        .where(and(eq(s.id, cursor), eq(s.teamId, teamId)))
+    )[0];
+  const page = async (query: ListQuery, loadCursor = ownCursor) => {
     const out = await keysetPage({
       query,
       createdAt: s.createdAt,
       id: s.id,
-      loadCursor: async (cursor) =>
-        (
-          await db
-            .select({ createdAt: s.createdAt, id: s.id })
-            .from(s)
-            .where(and(eq(s.id, cursor), eq(s.teamId, teamId)))
-        )[0],
+      loadCursor,
       loadRows: (cond, orderBy, take) =>
         db
           .select({ name: s.name })
@@ -78,6 +80,18 @@ describe("keysetPage", () => {
   it("refuses a cursor that is not an item of the list", async () => {
     expect(await page({ after: randomUUID() })).toBe("bad_cursor");
     expect(await page({ before: randomUUID() })).toBe("bad_cursor");
+  });
+
+  it('reads a cursor answered "end" as below every row: nothing after it, the oldest before it', async () => {
+    const end = randomUUID();
+    const atEnd = (query: ListQuery) =>
+      page(query, async (cursor) => (cursor === end ? "end" : undefined));
+    expect(await atEnd({ after: end })).toEqual({ names: [], more: false });
+    expect(await atEnd({ limit: 2, before: end })).toEqual({ names: ["d2", "d1"], more: true });
+    expect(await atEnd({ before: end })).toEqual({
+      names: ["d5", "d4", "d3", "d2", "d1"],
+      more: false,
+    });
   });
 });
 
