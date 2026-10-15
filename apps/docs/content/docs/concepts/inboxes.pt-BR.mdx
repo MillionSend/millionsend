@@ -288,8 +288,8 @@ as equipes:
   `scheduled_at`, `reply_to`, anexos nem cabeçalhos personalizados: cada um
   responde `422 validation_error` dizendo a regra. Uma chave restrita a um
   domínio recebe `403 restricted_api_key`. Fora disso, o `POST /emails`
-  responde `403 inbox_send_policy`, e o `POST /emails/batch` e o relay SMTP
-  sempre recusam um endereço compartilhado.
+  responde `403 inbox_send_policy`, e o `POST /emails/batch`, as transmissões
+  e o relay SMTP sempre recusam um endereço compartilhado.
 
 Numa instância sem domínio compartilhado, `POST /inboxes` sem
 `email_address` responde `422`.

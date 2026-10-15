@@ -270,7 +270,8 @@ team's:
   attachments or custom headers: each answers `422 validation_error` naming
   the rule. A key restricted to a domain gets `403 restricted_api_key`.
   Elsewhere `POST /emails` answers `403 inbox_send_policy`, and
-  `POST /emails/batch` and the SMTP relay always refuse a shared address.
+  `POST /emails/batch`, broadcasts and the SMTP relay always refuse a shared
+  address.
 
 On an instance without a shared domain, `POST /inboxes` without
 `email_address` answers `422`.

@@ -324,7 +324,7 @@ Besides Resend's names, [received mail](/concepts/receiving),
 | Status, name | When |
 | --- | --- |
 | `403 restricted_api_key` | An inbox-scoped key outside its inbox, or sending from another address; `include_quarantined` from an inbox-scoped key or the MCP server. |
-| `403 inbox_send_policy` | An inbox's rules refuse a send: a shared-domain address starting a conversation where it may only reply (on the Free plan, or by the instance's setting), any send from one while the instance pauses them, or a send from an agent inbox's address on `POST /emails`, `POST /emails/batch` or the SMTP relay that the rules would hold. The message names the rule, or lists the reasons a send was held. |
+| `403 inbox_send_policy` | An inbox's rules refuse a send: a shared-domain address starting a conversation where it may only reply (on the Free plan, or by the instance's setting), any send from one while the instance pauses them, a send from an agent inbox's address on `POST /emails`, `POST /emails/batch` or the SMTP relay that the rules would hold, or a broadcast from an address on the shared domain. The message names the rule, or lists the reasons a send was held. |
 | `429 inbox_send_cap_reached` | The inbox's daily send cap is used, or the team's daily limit for mail from the shared domain; `retry-after` counts to midnight UTC. |
 | `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now (`retry-after: 60`), or your team's subdomain of the shared domain still waits for its name review, which holds every address on it (`retry-after: 300`). |
 | `403 approval_required` | An agent sending a draft that waits for approval. |

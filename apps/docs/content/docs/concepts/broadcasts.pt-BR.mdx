@@ -99,7 +99,10 @@ O envio avisa de antemão:
 
 ## Proteções
 
-- Somente um **domínio verificado** da sua equipe pode aparecer em `from`.
+- Somente um **domínio verificado** da sua equipe pode aparecer em `from`. O
+  [subdomínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado)
+  da sua equipe também aparece como `verified`, mas enviar uma transmissão por
+  ele responde `403 inbox_send_policy`.
 - Se sua taxa recente de bounce ou reclamação cruzou o limite de pausa do
   SES, novos envios de transmissão são bloqueados com um erro
   `403 sending_paused` — contendo o estrago antes que o SES pause o envio por
