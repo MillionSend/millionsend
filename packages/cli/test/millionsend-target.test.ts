@@ -436,10 +436,10 @@ describe("readState", () => {
         ]),
       },
     ]);
-    // The target lists newest first, as on Resend; topics are the exception.
+    // Oldest first, although the API lists newest first.
     expect(state.properties).toEqual([
-      { id: ids.numberProperty, key: "seats", type: "number" },
       { id: ids.property, key: "plan", type: "string" },
+      { id: ids.numberProperty, key: "seats", type: "number" },
     ]);
     expect(state.topics).toEqual([
       {
@@ -451,23 +451,23 @@ describe("readState", () => {
       { id: ids.privateTopic, name: "Ops", description: null, defaultSubscription: "opt_out" },
     ]);
     expect(state.segments).toHaveLength(103);
-    expect(state.segments.slice(-2)).toEqual([
-      expect.objectContaining({ id: ids.filteredSegment, name: "Pro" }),
+    expect(state.segments.slice(0, 2)).toEqual([
       { id: ids.segment, name: "Paying customers", filter: null },
+      expect.objectContaining({ id: ids.filteredSegment, name: "Pro" }),
     ]);
     expect(new Set(state.segments.map((s) => s.id)).size).toBe(103);
     expect(state.webhooks).toEqual([
-      {
-        id: ids.webhook2,
-        endpoint: "https://hooks.example.test/b",
-        events: [...TARGET_ALL_EVENTS],
-        status: "enabled",
-      },
       {
         id: ids.webhook,
         endpoint: "https://hooks.example.test/a",
         events: ["email.opened"],
         status: "disabled",
+      },
+      {
+        id: ids.webhook2,
+        endpoint: "https://hooks.example.test/b",
+        events: [...TARGET_ALL_EVENTS],
+        status: "enabled",
       },
     ]);
     expect(state.templates).toEqual([
