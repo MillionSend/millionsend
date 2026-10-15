@@ -1,6 +1,10 @@
-import { createElement } from "react";
+// @vitest-environment jsdom
+
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { EditorInitial } from "@/app/(dashboard)/templates/editor";
 import {
   blocksCopyName,
   bodyEditorMode,
@@ -30,17 +34,22 @@ vi.mock("next/dynamic", () => ({
 }));
 const rq = vi.hoisted(() => ({
   infinite: { data: undefined as unknown, isPending: false, isError: false, hasNextPage: false },
+  save: vi.fn(),
+  render: vi.fn(),
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: undefined }),
   useInfiniteQuery: () => rq.infinite,
-  useMutation: () => ({ mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false, isError: false }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useMutation: () => ({ mutateAsync: rq.save, mutate: vi.fn(), isPending: false, isError: false }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), fetchQuery: rq.render }),
 }));
-// Any trpc.<path>.<helper>(...) call resolves to an inert options object.
+// The router stub keeps inputs available for request assertions.
 vi.mock("@/lib/trpc", () => {
   // biome-ignore lint/suspicious/noExplicitAny: stand-in for the whole router proxy
-  const proxy: any = new Proxy(() => ({}), { get: () => proxy, apply: () => ({}) });
+  const proxy: any = new Proxy(() => ({}), {
+    get: () => proxy,
+    apply: (_target, _receiver, args) => ({ input: args[0] }),
+  });
   return { useTRPC: () => proxy };
 });
 // Portals cannot render statically; the dialog's frame is inlined instead.
@@ -64,6 +73,128 @@ const HTML_ROW = {
   text: null,
   document: null,
 };
+
+describe("template mode recovery", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  const storageKey = `ms-draft:template:${HTML_ROW.id}`;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    localStorage.clear();
+    rq.save.mockReset().mockResolvedValue({ id: HTML_ROW.id });
+    rq.render.mockReset().mockResolvedValue({ html: "<p>Current</p>", text: "Current" });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    localStorage.clear();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  async function click(label: string) {
+    const button = Array.from(container.querySelectorAll("button")).find((element) =>
+      element.textContent?.trim().startsWith(label),
+    );
+    expect(button, label).toBeDefined();
+    await act(async () => button?.click());
+  }
+
+  async function recover(data: object, initial: EditorInitial = HTML_ROW) {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ savedAt: Date.now(), data: { ...data, subject: "", text: "" } }),
+    );
+    await act(async () => root.render(createElement(TemplateEditor, { initial })));
+    await click("common.draftRestore");
+  }
+
+  it("restores an older block draft over an HTML row and preserves its document on save", async () => {
+    await recover({ ...HTML_ROW, name: "Recovered", document: MAILY_DOC });
+    expect(container.querySelector("[data-block-editor]")).not.toBeNull();
+    expect(container.querySelector("textarea#tpl-html")).toBeNull();
+    await click("templates.editor.save");
+    expect(rq.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: HTML_ROW.id, name: "Recovered", document: MAILY_DOC }),
+    );
+  });
+
+  it("restores an older HTML draft over a block row and saves it without a document", async () => {
+    await recover(
+      { ...HTML_ROW, html: "<p>Recovered HTML</p>" },
+      { ...HTML_ROW, document: MAILY_DOC },
+    );
+    expect(container.querySelector<HTMLTextAreaElement>("#tpl-html")?.value).toBe(
+      "<p>Recovered HTML</p>",
+    );
+    await click("templates.editor.save");
+    expect(rq.save).toHaveBeenCalledWith(
+      expect.objectContaining({ html: "<p>Recovered HTML</p>", document: null }),
+    );
+  });
+
+  it("keeps an empty HTML draft in code mode after recovery", async () => {
+    await recover(
+      { ...HTML_ROW, html: "", text: "", asCode: true },
+      { ...HTML_ROW, document: MAILY_DOC },
+    );
+    expect(container.querySelector<HTMLTextAreaElement>("#tpl-html")?.value).toBe("");
+    expect(container.querySelector("[data-block-editor]")).toBeNull();
+  });
+
+  it("records the code mode choice for an empty new template", async () => {
+    await act(async () => root.render(createElement(TemplateEditor)));
+    await click("templates.html.editAsHtml");
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => vi.advanceTimersByTime(800));
+    const stored = JSON.parse(localStorage.getItem("ms-draft:template:new") ?? "null");
+    expect(stored?.data).toMatchObject({ html: "", document: null, asCode: true });
+  });
+
+  it("renders a block body through the dialog and saves the resulting HTML", async () => {
+    const content = { type: "doc", content: [{ type: "image" }] };
+    await act(async () =>
+      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: content } })),
+    );
+    await click("templates.html.editAsHtml");
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(rq.render).not.toHaveBeenCalled();
+    await click("templates.html.switchInPlace");
+    expect(rq.render).toHaveBeenCalledExactlyOnceWith({ input: { document: content } });
+    expect(container.querySelector<HTMLTextAreaElement>("#tpl-html")?.value).toBe("<p>Current</p>");
+    expect(rq.save).not.toHaveBeenCalled();
+    await click("templates.editor.save");
+    expect(rq.save).toHaveBeenCalledWith(
+      expect.objectContaining({ html: "<p>Current</p>", text: "Current", document: null }),
+    );
+  });
+
+  it("duplicates a block body as HTML without updating the original row", async () => {
+    const content = { type: "doc", content: [{ type: "image" }] };
+    await act(async () =>
+      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: content } })),
+    );
+    await click("templates.html.editAsHtml");
+    await click("templates.html.switchCopy");
+    expect(rq.render).toHaveBeenCalledExactlyOnceWith({ input: { document: content } });
+    expect(rq.save).toHaveBeenCalledExactlyOnceWith({
+      name: "Legacy (HTML)",
+      subject: "",
+      html: "<p>Current</p>",
+      text: "Current",
+      document: null,
+    });
+    expect(container.querySelector("[data-block-editor]")).not.toBeNull();
+  });
+});
 
 describe("template editor mode", () => {
   it("opens an html-authored row on the preview with the banner and no block editor", () => {

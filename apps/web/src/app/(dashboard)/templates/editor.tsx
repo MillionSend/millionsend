@@ -36,6 +36,8 @@ interface TemplateDraft {
   html: string;
   text: string;
   document: unknown;
+  /** Older drafts infer the mode from their content. */
+  asCode?: boolean;
 }
 
 export interface EditorInitial {
@@ -122,8 +124,8 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   // Local crash-recovery draft (browser-only, one key per template).
   const [editorNonce, setEditorNonce] = useState(0);
   const draftState = useMemo<TemplateDraft>(
-    () => ({ name, subject, html, text, document }),
-    [name, subject, html, text, document],
+    () => ({ name, subject, html, text, document, asCode: mode === "code" }),
+    [name, subject, html, text, document, mode],
   );
   const draft = useLocalDraft<TemplateDraft>({
     storageKey: `ms-draft:template:${initial?.id ?? "new"}`,
@@ -134,6 +136,9 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
       html: initial?.html ?? "",
       text: initial?.text ?? "",
       document: initial?.document ?? null,
+      asCode:
+        bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) ===
+        "code",
     },
   });
 
@@ -143,11 +148,15 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
     setHtml(data.html);
     setText(data.text);
     setDocument(data.document);
+    setAsCode(bodyEditorMode(data) === "code");
+    setConverting(false);
+    setTab("edit");
     // The editor seeds once from its mount value — remount it.
     setEditorNonce((n) => n + 1);
     // A restored draft is unsaved by definition: poison the baseline so the
     // editor's next emit differs and the leave-guard arms immediately.
     savedDoc.current = "__restored__";
+    savedHtml.current = "__restored__";
     setDirty(true);
     draft.acceptRecovered();
   }

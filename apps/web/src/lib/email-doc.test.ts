@@ -31,9 +31,9 @@ describe("isEmptyMailyDoc", () => {
         content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }],
       }),
     ).toBe(false);
-    expect(isEmptyMailyDoc({ type: "doc", content: [{ type: "paragraph" }, { type: "image" }] })).toBe(
-      false,
-    );
+    expect(
+      isEmptyMailyDoc({ type: "doc", content: [{ type: "paragraph" }, { type: "image" }] }),
+    ).toBe(false);
     expect(isEmptyMailyDoc({ type: "doc", content: [{ type: "horizontalRule" }] })).toBe(false);
     // Not a Maily document at all: nothing to call empty.
     expect(isEmptyMailyDoc(null)).toBe(false);
