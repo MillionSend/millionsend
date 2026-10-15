@@ -2,11 +2,10 @@
 
 import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import styles from "@/components/auth/auth.module.css";
 import { AuthScreen } from "@/components/auth/auth-screen";
-import { DotParts } from "@/components/dot-parts";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { authClient } from "@/lib/auth-client";
@@ -38,8 +37,6 @@ export function ConsentForm({
     name: string | null;
     uri: string | null;
     redirectOrigins: string[];
-    unverified: boolean;
-    registeredAt: string | null;
   } | null;
   userEmail: string;
   scopes: string[];
@@ -47,7 +44,6 @@ export function ConsentForm({
   defaultTeamId: string | null;
 }) {
   const t = useTranslations("auth.consent");
-  const locale = useLocale();
   const trpc = useTRPC();
   const grantTeam = useMutation(trpc.team.grantTeam.mutationOptions());
   const [teamId, setTeamId] = useState(defaultTeamId ?? teams[0]?.teamId ?? "");
@@ -99,10 +95,6 @@ export function ConsentForm({
     }
   }
 
-  const redirects = app?.redirectOrigins.length ? (
-    <span>{t("redirectsTo", { origins: app.redirectOrigins.join(", ") })}</span>
-  ) : null;
-
   return (
     <AuthScreen title={t("title", { app: appName })}>
       <p className={styles.subline}>
@@ -115,42 +107,6 @@ export function ConsentForm({
         )}{" "}
         {t("subline", { email: userEmail })}
       </p>
-      {app?.unverified ? (
-        <div
-          role="note"
-          style={{
-            display: "grid",
-            gap: 4,
-            border: "1px solid var(--ms-warn-border)",
-            background: "var(--ms-warn-bg)",
-            borderRadius: "var(--ms-r-input)",
-            padding: "9px 14px",
-            fontSize: "var(--ms-fs-label)",
-            lineHeight: 1.5,
-            color: "var(--ms-warn)",
-            overflowWrap: "anywhere",
-          }}
-        >
-          <strong>
-            <DotParts
-              text={[
-                t("unverified"),
-                ...(app.registeredAt
-                  ? [
-                      t("registered", {
-                        date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
-                          new Date(app.registeredAt),
-                        ),
-                      }),
-                    ]
-                  : []),
-              ].join(" · ")}
-            />
-          </strong>
-          <span>{t("unverifiedNote")}</span>
-          {redirects}
-        </div>
-      ) : null}
       {app ? (
         <div
           style={{
@@ -161,7 +117,9 @@ export function ConsentForm({
             overflowWrap: "anywhere",
           }}
         >
-          {app.unverified ? null : redirects}
+          {app.redirectOrigins.length ? (
+            <span>{t("redirectsTo", { origins: app.redirectOrigins.join(", ") })}</span>
+          ) : null}
           <span>
             {t("clientId")} <span className="ms-mono">{app.clientId}</span>
           </span>

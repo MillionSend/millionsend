@@ -36,8 +36,6 @@ export default async function ConsentPage({
           name: schema.oauthClient.name,
           uri: schema.oauthClient.uri,
           redirectUris: schema.oauthClient.redirectUris,
-          createdAt: schema.oauthClient.createdAt,
-          skipConsent: schema.oauthClient.skipConsent,
         })
         .from(schema.oauthClient)
         .where(eq(schema.oauthClient.clientId, clientId))
@@ -67,10 +65,6 @@ export default async function ConsentPage({
               redirectOrigins: [
                 ...new Set(client.redirectUris.map((uri) => httpOrigin(uri) ?? uri)),
               ],
-              // Only operator-trusted clients skip consent; everything else
-              // self-registered and is shown as such.
-              unverified: !client.skipConsent,
-              registeredAt: client.createdAt?.toISOString() ?? null,
             }
           : null
       }
