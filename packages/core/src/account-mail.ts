@@ -220,6 +220,30 @@ export function accountMailPhrase(input: {
   return fillMailTemplate(phrase, input.values ?? {});
 }
 
+/**
+ * Counts as one list for a sentence, zeros left out: "1 email in quarantine and
+ * 2 sends refused…", each from the entry's `<name>.one` or `<name>.other` phrase.
+ */
+export function mailCountList(
+  locale: MailLocale,
+  kind: AccountMailKind,
+  counts: Record<string, number>,
+): string {
+  const items = Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .map(([name, n]) =>
+      accountMailPhrase({
+        locale,
+        kind,
+        // Not Intl.PluralRules: it answers "many" for pt-BR millions. With zeros
+        // left out, 1 is the only singular in both languages.
+        key: `${name}.${n === 1 ? "one" : "other"}`,
+        values: { n: n.toLocaleString(locale) },
+      }),
+    );
+  return new Intl.ListFormat(locale, { type: "conjunction" }).format(items);
+}
+
 /** Renders one kind in one language on the shared card; `url` is the button's target. */
 export function buildAccountMail(input: {
   kind: AccountMailKind;

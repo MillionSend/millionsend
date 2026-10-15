@@ -1010,7 +1010,7 @@ it("mails a team's owners once a day about held inbox mail, drafts to approve an
   expect(sends).toHaveLength(1);
   expect(sends[0]).toMatchObject({ to: "owner@example.com", subject: "Your inboxes need a look" });
   expect(sends[0]?.text).toContain(
-    "1 emails in quarantine, 1 drafts waiting for approval and 2 sends held",
+    "Today so far: 1 email in quarantine, 1 draft waiting for approval, and 2 sends refused by your inbox rules.",
   );
   expect(sends[0]?.text).toContain("https://app.example.test/inboxes");
   // A stranger's address and subject never reach the mail.
