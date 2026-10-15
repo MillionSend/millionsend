@@ -281,13 +281,15 @@ export async function settleSharedSubdomain(
 
 /**
  * Frees the team's label unless it is locked, in the transaction that
- * deletes the team, right before its DELETE. The team row is locked first,
- * so a settle writing after this waits for the deletion and fails its
- * foreign key; without that lock its write could land in between, and
- * ON DELETE SET NULL would keep an unused name for good.
+ * deletes the team, right before its DELETE. The team row is locked before
+ * the label is deleted, so a settle writing after this waits for the
+ * deletion and fails its foreign key; without that lock its write could land
+ * in between, and ON DELETE SET NULL would keep an unused name for good.
  */
 export async function releaseSharedSubdomain(tx: Db, teamId: string): Promise<void> {
   const t = schema.teams;
+  // Label row before team row, the order createInbox locks them in: the reverse deadlocks with it.
+  await tx.select({ id: s.id }).from(s).where(eq(s.teamId, teamId)).for("update");
   await tx.select({ id: t.id }).from(t).where(eq(t.id, teamId)).for("update");
   await tx.delete(s).where(and(eq(s.teamId, teamId), isNull(s.lockedAt), not(inboxOnLabel)));
 }
