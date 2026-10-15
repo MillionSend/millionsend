@@ -76,8 +76,10 @@ deliberadas e explícitas:
   links de download assinados de uma hora, o webhook `email.received` e
   `capabilities.receiving` com um registro `Receiving` nos domínios — então
   `resend.emails.receiving.*`, `forward()` incluído, funciona sem mudanças.
-  O `capabilities.sending` de um domínio é sempre `enabled` (pedir para
-  desligá-lo dá `422`). O recebimento exige um domínio verificado, então
+  O `capabilities.sending` de um domínio é `enabled` (pedir para
+  desligá-lo dá `422`), menos no subdomínio compartilhado abaixo enquanto a
+  instância pausa o envio pelo domínio compartilhado. O recebimento exige um
+  domínio verificado, então
   `POST /domains` com `capabilities.receiving: "enabled"` dá `422`: verifique
   o domínio e depois ligue o recebimento com `PATCH /domains/{id}`.
   `GET /emails/receiving` sem `limit` devolve 20 e-mails, não todos, e um HTML
@@ -106,6 +108,20 @@ deliberadas e explícitas:
   `202` com o rascunho em vez de `200` com o e-mail. As extensões são só campos e endpoints extras, nunca
   valores novos nos enums do Resend. Veja
   [Caixas de entrada → Compatibilidade com o Resend](/pt-BR/concepts/inboxes#compatibilidade-com-o-resend).
+- Numa instância com domínio compartilhado das caixas, o `GET /domains`
+  termina com o subdomínio da sua equipe nele. Todo domínio traz o `shared`,
+  e essa linha vem com `shared: true`, mais o `sending_mode` (`open`,
+  `reply_only` ou `receive_only`) e o `sending_mode_reason` (`plan`,
+  `instance` ou `null`); o `capabilities.sending` dela vem `disabled`
+  enquanto a instância pausa o envio pelo domínio compartilhado. Ela é só de
+  leitura: `PATCH`, verificação e `DELETE` respondem `403 forbidden`. Como
+  ela vem por último, um cliente que pega o primeiro domínio verificado para
+  o `from` continua pegando um domínio da própria equipe sempre que a equipe
+  tem um verificado. Para uma equipe sem nenhum domínio próprio verificado,
+  ela é o primeiro domínio verificado da lista, e só o endereço de uma caixa
+  envia por ela, então um cliente assim deve pular as linhas com
+  `shared: true`. O `POST /inboxes` aceita o id dela como `domain_id`. Veja
+  [Domínios → Subdomínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado).
 - Contatos são globais à equipe — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
@@ -318,21 +334,24 @@ está salvo muda: contatos e e-mails na fila ou agendados continuam como
 estão. Uma transmissão vai para os contatos salvos sem checar os endereços
 deles.
 
-Além dos nomes do Resend, os [e-mails recebidos](/pt-BR/concepts/receiving) e
-as [caixas de entrada](/pt-BR/concepts/inboxes) respondem estes:
+Além dos nomes do Resend, os [e-mails recebidos](/pt-BR/concepts/receiving),
+as [caixas de entrada](/pt-BR/concepts/inboxes) e o
+[subdomínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado)
+respondem estes:
 
 | Status, nome | Quando |
 | --- | --- |
 | `403 restricted_api_key` | Uma chave restrita a uma caixa fora da caixa dela, ou enviando de outro endereço; `include_quarantined` vindo de uma chave restrita ou do servidor MCP. |
-| `403 inbox_send_policy` | As regras de uma caixa recusam um envio: um endereço do domínio compartilhado começando uma conversa quando só pode responder (no plano Free, ou pela configuração da instância), qualquer envio por um deles enquanto a instância os pausa, ou um envio pelo endereço de uma caixa de agente no `POST /emails`, no `POST /emails/batch` ou no relay SMTP que as regras reteriam. A mensagem diz a regra, ou lista os motivos de um envio retido. |
+| `403 inbox_send_policy` | As regras de uma caixa recusam um envio: um endereço do domínio compartilhado começando uma conversa quando só pode responder (no plano Free, ou pela configuração da instância), qualquer envio por um deles enquanto a instância os pausa, um envio pelo endereço de uma caixa de agente no `POST /emails`, no `POST /emails/batch` ou no relay SMTP que as regras reteriam, ou uma transmissão por um endereço do domínio compartilhado. A mensagem diz a regra, ou lista os motivos de um envio retido. |
 | `429 inbox_send_cap_reached` | O limite diário de envios da caixa acabou, ou o limite diário da equipe para e-mails do domínio compartilhado; o `retry-after` conta até a meia-noite UTC. |
-| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado; `retry-after: 60`. |
+| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado (`retry-after: 60`), ou o subdomínio da sua equipe no domínio compartilhado ainda espera a revisão de nomes e, até lá, nenhum endereço pode ser criado nele (`retry-after: 300`). |
 | `403 approval_required` | Um agente enviando um rascunho que espera aprovação. |
 | `403 email_quarantined` | Um agente lendo, respondendo ou encaminhando um e-mail retido, ou qualquer encaminhamento de e-mail infectado. |
 | `410 email_blocked` | Um download de e-mail infectado. |
 | `429 too_many_waits` | Long-polls demais ao mesmo tempo de uma equipe; `retry-after: 1`. |
 | `403 validation_error` | O limite de caixas do plano, com a mensagem do Resend. |
 | `403 plan_limit_reached` | Pega-tudo no plano Free. |
+| `403 forbidden` | Uma mudança, verificação ou exclusão do subdomínio compartilhado da sua equipe, que é só de leitura. |
 | `404 not_found` | Uma caixa, conversa, etiqueta, rascunho ou cursor de paginação desconhecido, com as mensagens do Resend (`Inbox not found.`). |
 
 ## Idempotência
@@ -368,6 +387,14 @@ Estas listagens seguem outra ordem:
 | `GET /inboxes/{id}/labels` | Das mais antigas para as mais novas, todas de uma vez, sem `has_more`. |
 | `GET /topics` e `/contacts/{id}/topics` | Dos mais antigos para os mais novos, todos de uma vez; o `has_more` é sempre `false`. |
 | `GET /emails/receiving/{id}/attachments` | Na ordem em que estão no e-mail, todos de uma vez, a não ser que você passe `limit`. |
+
+O `GET /domains` coloca o
+[subdomínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado)
+da sua equipe depois de todos os seus domínios, como se ele fosse o mais
+antigo, e o id dele é um cursor como qualquer outro: um `after` com ele
+devolve uma página vazia, e um `before` com ele devolve os seus domínios
+mais antigos, a página logo acima dele. Buscar o que é novo funciona do
+mesmo jeito.
 
 Um cursor que não aponta nenhum item da listagem responde
 `422 validation_error`; em `/inboxes`, responde `404`, como no Resend. Isso

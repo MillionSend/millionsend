@@ -735,7 +735,6 @@ describe("creating an inbox", () => {
       expect.anything(),
       expect.objectContaining({
         teamId: acme,
-        teamName: "inbox-acme",
         plan: "free",
         actor: user,
         input: {
@@ -857,31 +856,28 @@ describe("creating an inbox", () => {
     }
   });
 
-  it("claims the team's shared subdomain from its name before its first shared inbox, once the review answers", async () => {
+  it("offers the team's shared subdomain, or the parent domain while its name review is pending, claiming nothing", async () => {
     const [team] = await db
       .insert(schema.teams)
       .values({ name: "Orbit Desk", slug: "inbox-orbit" })
       .returning({ id: schema.teams.id });
     const teamId = team?.id as string;
-    await expect(caller(teamId).inboxes.reserveSharedSubdomain()).resolves.toBeNull();
+    expect(await caller(teamId).inboxes.options()).toMatchObject({ sharedDomain: null });
     vi.stubEnv("SHARED_INBOX_DOMAIN", "agents.example.net");
     expect(await caller(teamId).inboxes.options()).toMatchObject({
       sharedDomain: "agents.example.net",
-      sharedSubdomainReady: false,
     });
-    // A review that can't answer claims nothing: the label would be the team's for good.
-    vi.stubEnv("ABUSE_JUDGE", "typesafe");
-    vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
-    vi.stubGlobal("fetch", () => Promise.reject(new Error("judge down")));
-    await expect(caller(teamId).inboxes.reserveSharedSubdomain()).resolves.toBeNull();
-    expect(await caller(teamId).inboxes.options()).toMatchObject({ sharedSubdomainReady: false });
-    vi.stubEnv("ABUSE_JUDGE", "off");
-    const claimed = { name: "orbit-desk.agents.example.net" };
-    expect(await caller(teamId, "member").inboxes.reserveSharedSubdomain()).toEqual(claimed);
-    expect(await caller(teamId).inboxes.reserveSharedSubdomain()).toEqual(claimed);
-    expect(await caller(teamId).inboxes.options()).toMatchObject({
-      sharedDomain: claimed.name,
-      sharedSubdomainReady: true,
+    const labels = () =>
+      db
+        .select({ name: schema.sharedInboxDomains.name })
+        .from(schema.sharedInboxDomains)
+        .where(eq(schema.sharedInboxDomains.teamId, teamId));
+    expect(await labels()).toEqual([]);
+    await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId, name: "orbit-desk.agents.example.net" });
+    expect(await caller(teamId, "member").inboxes.options()).toMatchObject({
+      sharedDomain: "orbit-desk.agents.example.net",
     });
   });
 });

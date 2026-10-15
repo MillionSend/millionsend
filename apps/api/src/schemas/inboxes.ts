@@ -91,13 +91,19 @@ export const createInboxRequestSchema = z
       .string()
       .optional()
       .describe(
-        "An address on one of your verified domains; it needs receiving on unless forwarding is true. MillionSend extension: omitted, the inbox gets an address on the shared inbox domain (no DNS), named by username or random.",
+        "An address on one of your verified domains; it needs receiving on unless forwarding is true. MillionSend extension: omitted, the inbox gets an address on the shared inbox domain (no DNS), named by username or random, unless domain_id names one of your domains.",
+      ),
+    domain_id: z
+      .uuid()
+      .optional()
+      .describe(
+        "MillionSend extension: the id of a GET /domains row, instead of email_address. The team's subdomain of the shared domain (the row with shared: true) is the same as leaving email_address out; one of your verified domains needs username, the part before the @.",
       ),
     username: z
       .string()
       .optional()
       .describe(
-        "MillionSend extension: with email_address omitted, the part before the @ of the shared-domain address, trimmed and lowercased: 1-64 letters, digits, dots, hyphens and underscores, starting and ending with a letter or digit, never cut short. Reserved names (postmaster, abuse, admin, security, support, noreply, no-reply, billing, hostmaster, webmaster, mailer-daemon, root, compared without dots, hyphens and underscores), the fwd- prefix and brand look-alikes answer 422, and one already in use 409. Where the instance reviews names, a chosen one is reviewed first: 503 with retry-after while that review is unavailable. Omitted: a random one.",
+        "MillionSend extension: with email_address omitted, the part before the @ of the shared-domain address, trimmed and lowercased: 1-64 letters, digits, dots, hyphens and underscores, starting and ending with a letter or digit, never cut short. Reserved names (postmaster, abuse, admin, security, support, noreply, no-reply, billing, hostmaster, webmaster, mailer-daemon, root, compared without dots, hyphens and underscores), the fwd- prefix and brand look-alikes answer 422, and one already in use 409. Where the instance reviews names, a chosen one is reviewed first: 503 with retry-after while that review is unavailable. Omitted: a random one. With a domain_id of one of your domains, it is the part before the @ there, required, under email_address's rule.",
       ),
     name: z
       .string()
@@ -162,7 +168,9 @@ export const inboxSchema = z
     email_address: z.string(),
     domain_id: z
       .uuid()
-      .describe("A shared address's is its shared subdomain's id, which /domains does not list"),
+      .describe(
+        "A shared address's is its team's shared subdomain: the GET /domains row with shared: true",
+      ),
     receiving_address: z.string().nullable(),
     from_name: z.string().nullable(),
     unread: z.number().int().describe("Threads with an unread message"),

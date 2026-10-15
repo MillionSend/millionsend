@@ -37,8 +37,6 @@ import {
   type VerificationCodeWire,
   waitForReceived,
 } from "@millionsend/core";
-import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { type ApiDeps, type Env, errorBody } from "../app.js";
 import {
@@ -164,7 +162,7 @@ export function registerInboxRoutes(
       path: "/inboxes",
       summary: "Create an inbox",
       description:
-        "An address that receives into threads, on one of your verified domains (receiving on, or forwarding: true) or, with email_address omitted, an address on the shared inbox domain that needs no DNS: username names it, or it is random. It never expires unless expires_in says so. Returns the full inbox. MillionSend extensions: username, kind (agent by default), expires_in and safety.",
+        "An address that receives into threads, on one of your verified domains (receiving on, or forwarding: true) or, with email_address omitted, an address on the shared inbox domain that needs no DNS: username names it, or it is random. domain_id takes a row of GET /domains instead of email_address: the team's shared subdomain, or one of your domains with username. It never expires unless expires_in says so. Returns the full inbox. MillionSend extensions: username, domain_id, kind (agent by default), expires_in and safety.",
       request: {
         body: { content: { "application/json": { schema: createInboxRequestSchema } } },
       },
@@ -177,20 +175,15 @@ export function registerInboxRoutes(
           "Too many inboxes created in the last hour, or too many names reviewed or refused on the shared domain today",
         ),
         503: jsonErr(
-          "A chosen username or from_name on the shared domain can't be reviewed right now; retry-after says when to try again",
+          "A chosen username or from_name on the shared domain can't be reviewed right now, or the team's subdomain on the shared domain is still waiting for its name review; retry-after says when to try again",
         ),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const [team] = await db
-        .select({ name: schema.teams.name })
-        .from(schema.teams)
-        .where(eq(schema.teams.id, auth.teamId));
       const result = await createInbox(db, inboxDeps(), {
         teamId: auth.teamId,
-        teamName: team?.name ?? "",
         plan: auth.plan,
         isCloud: deps.isCloud,
         actor: actorOf(c),

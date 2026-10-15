@@ -704,6 +704,9 @@ function clientIp(c: Context, isCloud: boolean): string | null {
   }
 }
 
+/** Page size of a Resend list when the request has no limit. */
+export const DEFAULT_PAGE_LIMIT = 20;
+
 export const KEYSET_LIST_DESCRIPTION =
   "Newest first, as on Resend, with cursor pagination: `after` takes the last id of a page and pages toward older items, `before` takes the first id and pages back toward newer ones.";
 
@@ -716,19 +719,27 @@ export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
-  /** Resolves a cursor id to its sort key, scoped to the caller's team. */
-  loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
+  /**
+   * Resolves a cursor id to its sort key, scoped to the caller's team. "end"
+   * is a cursor below every row: after it the page is empty, and before it
+   * the page starts at the oldest row.
+   */
+  loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | "end" | undefined>;
   loadRows: (cond: SQL | undefined, orderBy: SQL[], take: number) => Promise<R[]>;
 }): Promise<{ rows: R[]; hasMore: boolean } | "bad_cursor"> {
   const { query } = opts;
-  const limit = query.limit ?? 20;
+  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
   const cursorId = query.before ?? query.after;
   const towardNewer = Boolean(query.before);
   let cond: SQL | undefined;
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
     if (!cur) return "bad_cursor";
-    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
+    if (cur !== "end") {
+      cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
+    } else if (!towardNewer) {
+      return { rows: [], hasMore: false };
+    }
   }
   const dir = towardNewer ? asc : desc;
   // One extra row decides has_more without a count query.
@@ -745,7 +756,7 @@ export function arrayPage<T extends { id: string }>(
   items: readonly T[],
   query: ListQuery,
 ): { rows: T[]; hasMore: boolean } | "bad_cursor" {
-  const limit = query.limit ?? 20;
+  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
   const cursorId = query.before ?? query.after;
   let start = 0;
   let end = items.length;
@@ -2846,6 +2857,12 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     // the sender.
     const reserved = reservedSenderRefusal(broadcast.from, deps.onboardingEmailFrom);
     if (reserved) return fail(422, reserved.name, reserved.message);
+    // As batch and SMTP answer it, before a "not verified" 422 that the
+    // shared row's verified status in GET /domains would contradict.
+    if (isSharedInboxSender(broadcast.from, deps.sharedInboxDomain)) {
+      const { name, message } = sharedSenderRefusal.body;
+      return fail(403, name, message);
+    }
     const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
     if (!domain.ok) {
       return fail(
@@ -3043,7 +3060,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast created (and scheduled when send: true)",
         },
         400: jsonErr("Broadcast state conflict"),
-        403: jsonErr("Restricted API key or sending paused"),
+        403: jsonErr("Restricted API key, sending paused, or a From on the shared inbox domain"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },
@@ -3339,7 +3356,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast scheduled; finishes_at and warning say when it goes out",
         },
         400: jsonErr("Not a draft"),
-        403: jsonErr("Sending paused"),
+        403: jsonErr("Sending paused, or a From on the shared inbox domain"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },

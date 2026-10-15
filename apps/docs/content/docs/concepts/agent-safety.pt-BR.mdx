@@ -82,8 +82,8 @@ O `accept_from` decide, por nível:
 
 O e-mail **analisado** é entregue, a não ser que a
 [análise](#análise-de-injeção-de-prompt) o mande para a quarentena; com o
-`screening` desligado, ou numa instância sem juiz, ele é entregue. Além da
-tabela:
+`screening` desligado, ou numa instância sem avaliador, ele é entregue. Além
+da tabela:
 
 - Um vírus manda a mensagem para a quarentena em qualquer caixa, seja qual
   for o remetente (`virus`).
@@ -117,7 +117,7 @@ remetente.
 | `injection` | A análise deu 80 ou mais para injeção de prompt. |
 | `phishing` | A análise deu 80 ou mais para phishing. |
 | `virus` | O antivírus achou malware. |
-| `unscreened` | A mensagem precisava de análise e o juiz não respondeu. |
+| `unscreened` | A mensagem precisava de análise e o avaliador não respondeu. |
 | `screening_cap` | A mensagem precisava de análise depois do limite diário de análises. |
 
 **Os agentes nunca veem e-mail retido.** Chaves restritas a uma caixa e toda
@@ -156,8 +156,8 @@ Notificações**.
 Numa caixa de agente com o `screening` ligado, o e-mail de remetentes
 `external` e `unauthenticated` que as regras entregariam é analisado antes de
 o agente poder vê-lo, e o conteúdo encaminhado por responsáveis e pela lista
-de permitidos também. O juiz lê a mensagem do jeito que ela aparece, com o
-texto oculto que foi removido separado:
+de permitidos também. O avaliador lê a mensagem do jeito que ela aparece,
+com o texto oculto que foi removido separado:
 
 - o remetente, a autenticação dele e o Reply-To;
 - o assunto e o texto visível, primeiro a resposta e depois a parte citada;
@@ -182,12 +182,12 @@ e os `reasons` que se aplicaram:
 
 Uma nota de injeção de 80 ou mais manda a mensagem para a quarentena como
 `injection`; senão, uma nota de phishing de 80 ou mais, como `phishing`. O
-que o juiz lê como spam vai para a pasta `spam`. O resto é entregue, como
+que o avaliador lê como spam vai para a pasta `spam`. O resto é entregue, como
 `suspicious` quando uma nota fica entre 50 e 79 ou as instruções estavam
 escondidas. As notas sempre aparecem: nas leituras, em `screening`, e no
 painel, ao lado de cada mensagem.
 
-- **Na dúvida, retém.** Um juiz que estoura o tempo ou dá erro manda a
+- **Na dúvida, retém.** Um avaliador que estoura o tempo ou dá erro manda a
   mensagem para a quarentena como `unscreened`; limitação de uso (throttling)
   é tentada de novo antes. Depois de 200 mensagens analisadas numa caixa no
   mesmo dia, ou depois da cota diária de análises da equipe ou da instância,
@@ -197,8 +197,9 @@ painel, ao lado de cada mensagem.
 - **Nunca afeta os seus envios.** Os resultados sobre e-mails que você
   recebeu nunca contam para a reputação de envio da sua equipe nem para a
   análise de abuso dela.
-- **Sem juiz**, numa instância que não roda um, as regras decidem sozinhas e
-  as notas vêm `null`. Numa instância auto-hospedada, a análise usa o juiz do
+- **Sem avaliador**, numa instância que não roda um, as regras decidem
+  sozinhas e as notas vêm `null`. Numa instância auto-hospedada, a análise
+  usa o avaliador do
   [monitoramento de conteúdo](/pt-BR/self-hosting#monitoramento-de-conteúdo-opcional).
 
 As linhas de corte são pontos de partida: a análise é um sinal a mais em cima
@@ -240,8 +241,8 @@ O que o agente lê:
   uma linha de prévia, ou caracteres invisíveis.
 
 O `html` fica exatamente como chegou, e a mensagem original guarda tudo. A
-mesma limpeza vale para as ferramentas MCP, para o texto visível que o juiz
-lê e para a extração de códigos.
+mesma limpeza vale para as ferramentas MCP, para o texto visível que o
+avaliador lê e para a extração de códigos.
 
 **Delimitação.** Os resultados do MCP colocam o texto de cada mensagem entre duas
 linhas de marcação com um valor aleatório a cada chamada:

@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
+import { settleTeamSubdomain } from "../inboxes";
 import { listMemberships } from "../membership";
 import { belongsToSilentlySuspendedTeam, suspensionLockError } from "../suspension-lock";
 import { teamNameSchema } from "../team-name";
@@ -162,10 +163,12 @@ export const teamBootstrapRouter = router({
         }
       }
       const base = slugify(input.name) || "team";
-      for (let attempt = 0; attempt < 3; attempt++) {
+      let created: { teamId: string } | undefined;
+      // Only the insert retries: a unique violation after it would add a second team.
+      for (let attempt = 0; attempt < 3 && !created; attempt++) {
         const slug = attempt === 0 ? base : `${base}-${randomBytes(3).toString("hex")}`;
         try {
-          const created = await ctx.db.transaction(async (tx) => {
+          created = await ctx.db.transaction(async (tx) => {
             const [team] = await tx
               .insert(schema.teams)
               .values({ name: input.name.trim(), slug })
@@ -178,23 +181,26 @@ export const teamBootstrapRouter = router({
             });
             return { teamId: team.id };
           });
-          // A freshly created team becomes the active one.
-          await selectTeam(ctx, created.teamId);
-          await recordAudit(
-            { ...ctx, teamId: created.teamId },
-            {
-              action: "team.created",
-              target: { type: "team", id: created.teamId },
-              metadata: { name: input.name.trim() },
-            },
-          );
-          await linkTeam(ctx.db, { teamId: created.teamId, trigger: "team" });
-          await flagImitatedBrand(ctx.db, created.teamId, input.name.trim());
-          return created;
         } catch (error) {
           if (!isUniqueViolation(error)) throw error;
         }
       }
-      throw new TRPCError({ code: "CONFLICT", message: "could not allocate a unique team slug" });
+      if (!created) {
+        throw new TRPCError({ code: "CONFLICT", message: "could not allocate a unique team slug" });
+      }
+      // A freshly created team becomes the active one.
+      await selectTeam(ctx, created.teamId);
+      await recordAudit(
+        { ...ctx, teamId: created.teamId },
+        {
+          action: "team.created",
+          target: { type: "team", id: created.teamId },
+          metadata: { name: input.name.trim() },
+        },
+      );
+      await linkTeam(ctx.db, { teamId: created.teamId, trigger: "team" });
+      await flagImitatedBrand(ctx.db, created.teamId, input.name.trim());
+      await settleTeamSubdomain(ctx.db, created.teamId);
+      return created;
     }),
 });

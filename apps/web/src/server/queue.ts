@@ -67,3 +67,22 @@ export async function enqueueDomainAge(domainId: string): Promise<void> {
     console.warn("domain.age enqueue failed; the worker's sweep asks later", err);
   }
 }
+
+/**
+ * Settle a team's shared subdomain label in the worker, best-effort: the
+ * worker's sweep queues any team still without one.
+ */
+export async function enqueueSharedSubdomain(
+  teamId: string,
+  since: Date,
+  startAfter?: Date,
+): Promise<void> {
+  try {
+    await (await getQueue()).enqueueSharedSubdomains(
+      [{ teamId, since: since.toISOString() }],
+      startAfter,
+    );
+  } catch (err) {
+    console.warn("shared.subdomain enqueue failed; the worker's sweep asks later", err);
+  }
+}

@@ -144,7 +144,11 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
           );
         if (!domain) {
           return c.json(
-            errorBody(422, "validation_error", "domain_id must be a verified domain of this team"),
+            errorBody(
+              422,
+              "validation_error",
+              "domain_id must be a verified domain of this team: a GET /domains row with shared: false",
+            ),
             422,
           );
         }

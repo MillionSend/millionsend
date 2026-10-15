@@ -13,7 +13,7 @@ import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type ApiDeps, createApi } from "../src/app.js";
 
 // Inbox deletion is the inbox module's; here only that the domain delete asks for it.
@@ -91,6 +91,7 @@ function makeApp(opts: {
   tenants?: { configurationSet?: string | undefined };
   regions?: string[];
   receiving?: ApiDeps["receiving"];
+  sharedInboxDomain?: string;
 }) {
   const deps: ApiDeps = {
     db,
@@ -100,6 +101,7 @@ function makeApp(opts: {
     appBaseUrl: opts.appBaseUrl,
     trackingSubdomains: opts.trackingSubdomains,
     receiving: opts.receiving,
+    sharedInboxDomain: opts.sharedInboxDomain,
     ses: {
       clientForRegion: () => opts.client,
       dns: opts.dns ?? fakeDns(),
@@ -1546,5 +1548,285 @@ describe("receiving_catch_all", () => {
       .where(eq(schema.apiKeys.keyHash, key.keyHash));
     expect(revoked).toMatchObject({ inboxId: null });
     expect(revoked?.revokedAt).not.toBeNull();
+  });
+});
+
+describe("the team's subdomain of the shared domain", () => {
+  const SHARED = "agents.example.test";
+  // Pinned created_at, so own domains list in a known order.
+  const day = (n: number) => new Date(Date.UTC(2026, 0, n));
+  type Team = Awaited<ReturnType<typeof sharedTeam>>;
+  type WireRow = { id: string; shared: boolean } & Record<string, unknown>;
+
+  /** A team with its subdomain label, a full-access key and `own` verified domains, oldest first. */
+  async function sharedTeam(slug: string, own: number, plan: "free" | "pro" = "pro") {
+    const id = await createTeam(db, slug, { sharedInboxDomain: SHARED });
+    await db.update(schema.teams).set({ plan }).where(eq(schema.teams.id, id));
+    const domains = [];
+    for (let n = 1; n <= own; n++) {
+      const [row] = await db
+        .insert(schema.domains)
+        .values({
+          teamId: id,
+          name: `d${n}.${slug}.example.com`,
+          region: "sa-east-1",
+          status: "verified",
+          createdAt: day(n),
+        })
+        .returning({ id: schema.domains.id });
+      domains.push(row?.id as string);
+    }
+    const [label] = await db
+      .select()
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, id));
+    return {
+      id,
+      key: await insertKey(id),
+      own: domains,
+      sharedId: label?.id as string,
+      sharedName: label?.name as string,
+    };
+  }
+
+  const sharedApp = (extra: { isCloud?: boolean } = {}) =>
+    makeApp({ ...fakeSes(), ...extra, sharedInboxDomain: SHARED });
+  async function list(app: ReturnType<typeof createApi>, team: Team, query = "") {
+    const res = await call(app, team.key, "GET", `/domains${query}`);
+    expect(res.status, query).toBe(200);
+    return (await res.json()) as { data: WireRow[]; has_more: boolean };
+  }
+  const page = async (app: ReturnType<typeof createApi>, team: Team, query = "") => {
+    const body = await list(app, team, query);
+    return { ids: body.data.map((row) => row.id), more: body.has_more };
+  };
+
+  let t: Team;
+  beforeAll(async () => {
+    t = await sharedTeam("shared-rows", 3);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("is the last row, read-only and verified, after the team's own rows with shared: false", async () => {
+    const body = await list(sharedApp(), t);
+    const [d1, d2, d3] = t.own;
+    expect(body.data.map((row) => row.id)).toEqual([d3, d2, d1, t.sharedId]);
+    expect(body.has_more).toBe(false);
+    for (const row of body.data.slice(0, 3)) {
+      expect(row.shared).toBe(false);
+      expect(row).not.toHaveProperty("sending_mode");
+    }
+    expect(body.data[3]).toEqual({
+      id: t.sharedId,
+      name: "shared-rows.agents.example.test",
+      status: "verified",
+      created_at: expect.any(String),
+      region: "sa-east-1",
+      open_tracking: false,
+      click_tracking: false,
+      tracking_subdomain: null,
+      capabilities: { sending: "enabled", receiving: "enabled" },
+      receiving_catch_all: false,
+      shared: true,
+      sending_mode: "reply_only",
+      sending_mode_reason: "instance",
+    });
+  });
+
+  it("carries the team's sending mode, and reads sending disabled while the instance pauses it", async () => {
+    const shared = async (app: ReturnType<typeof createApi>, team = t) =>
+      (await list(app, team)).data.at(-1);
+    vi.stubEnv("SHARED_INBOX_OPEN", "true");
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    expect(await shared(sharedApp())).toMatchObject({
+      sending_mode: "open",
+      sending_mode_reason: null,
+      capabilities: { sending: "enabled", receiving: "enabled" },
+    });
+    const free = await sharedTeam("shared-mode-free", 0, "free");
+    expect(await shared(sharedApp({ isCloud: true }), free)).toMatchObject({
+      sending_mode: "reply_only",
+      sending_mode_reason: "plan",
+      capabilities: { sending: "enabled" },
+    });
+    vi.stubEnv("SHARED_INBOX_SEND", "false");
+    expect(await shared(sharedApp())).toMatchObject({
+      sending_mode: "receive_only",
+      sending_mode_reason: "instance",
+      capabilities: { sending: "disabled", receiving: "enabled" },
+    });
+  });
+
+  describe("paging", () => {
+    it("lists own domains first, newest first, then the shared row", async () => {
+      const [d1, d2, d3] = t.own;
+      const app = sharedApp();
+      expect(await page(app, t, "?limit=2")).toEqual({ ids: [d3, d2], more: true });
+      expect(await page(app, t, `?limit=2&after=${d2}`)).toEqual({
+        ids: [d1, t.sharedId],
+        more: false,
+      });
+    });
+
+    it("answers has_more when own domains fill the page, and the next page holds only the shared row", async () => {
+      const [d1, d2, d3] = t.own;
+      const app = sharedApp();
+      expect(await page(app, t, "?limit=3")).toEqual({ ids: [d3, d2, d1], more: true });
+      expect(await page(app, t, `?limit=3&after=${d1}`)).toEqual({
+        ids: [t.sharedId],
+        more: false,
+      });
+    });
+
+    it("answers an empty page after the shared id, in either case", async () => {
+      for (const id of [t.sharedId, t.sharedId.toUpperCase()]) {
+        expect(await page(sharedApp(), t, `?after=${id}`)).toEqual({ ids: [], more: false });
+      }
+    });
+
+    it("gives the oldest own domains before the shared id, with has_more while newer ones remain", async () => {
+      const [d1, d2, d3] = t.own;
+      const app = sharedApp();
+      expect(await page(app, t, `?limit=2&before=${t.sharedId}`)).toEqual({
+        ids: [d2, d1],
+        more: true,
+      });
+      expect(await page(app, t, `?before=${t.sharedId.toUpperCase()}`)).toEqual({
+        ids: [d3, d2, d1],
+        more: false,
+      });
+    });
+
+    it("never includes the shared row before an own id", async () => {
+      const [d1, d2, d3] = t.own;
+      const app = sharedApp();
+      expect(await page(app, t, `?before=${d1}`)).toEqual({ ids: [d3, d2], more: false });
+      expect(await page(app, t, `?limit=1&before=${d3}`)).toEqual({ ids: [], more: false });
+    });
+
+    it("lets the catch-up (before= the first id of page 1) see a domain added later, also with no own domains", async () => {
+      const app = sharedApp();
+      for (const own of [2, 0]) {
+        const team = await sharedTeam(`shared-catch-up-${own}`, own);
+        const [first] = (await page(app, team)).ids;
+        expect(first).toBe(own > 0 ? team.own.at(-1) : team.sharedId);
+        const [added] = await db
+          .insert(schema.domains)
+          .values({
+            teamId: team.id,
+            name: `added.shared-catch-up-${own}.example.com`,
+            region: "sa-east-1",
+            createdAt: day(10),
+          })
+          .returning({ id: schema.domains.id });
+        expect(await page(app, team, `?before=${first}`)).toEqual({
+          ids: [added?.id],
+          more: false,
+        });
+      }
+    });
+  });
+
+  it("reads by id, in either case, with no records and no SES call", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, sharedInboxDomain: SHARED });
+    for (const id of [t.sharedId, t.sharedId.toUpperCase()]) {
+      const res = await call(app, t.key, "GET", `/domains/${id}`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        object: "domain",
+        id: t.sharedId,
+        name: t.sharedName,
+        status: "verified",
+        shared: true,
+        sending_mode: "reply_only",
+        records: [],
+      });
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses PATCH, verify and DELETE with 403, in either case, before any other check or SES call", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, sharedInboxDomain: SHARED });
+    for (const id of [t.sharedId, t.sharedId.toUpperCase()]) {
+      for (const [method, path, body] of [
+        // tls answers 422 on an own domain: the 403 comes first.
+        ["PATCH", `/domains/${id}`, { tls: "enforced" }],
+        ["PATCH", `/domains/${id}`, { open_tracking: true }],
+        ["POST", `/domains/${id}/verify`],
+        ["DELETE", `/domains/${id}`],
+      ] as [string, string, unknown?][]) {
+        const res = await call(app, t.key, method, path, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await res.json()).toEqual({
+          statusCode: 403,
+          name: "forbidden",
+          message: `${t.sharedName} is your team's subdomain of the shared domain: it can't be changed or deleted`,
+        });
+      }
+    }
+    expect(calls).toEqual([]);
+    expect((await list(app, t)).data.at(-1)?.id).toBe(t.sharedId);
+  });
+
+  it("is no API key scope: POST /api-keys domain_id takes the team's own domains only", async () => {
+    const res = await call(sharedApp(), t.key, "POST", "/api-keys", {
+      name: "scoped",
+      domain_id: t.sharedId,
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      statusCode: 422,
+      name: "validation_error",
+      message:
+        "domain_id must be a verified domain of this team: a GET /domains row with shared: false",
+    });
+  });
+
+  it("is left out without a shared inbox domain: every row has shared: false", async () => {
+    const app = makeApp(fakeSes());
+    const body = await list(app, t);
+    expect(body.data.map((row) => row.id)).toEqual([...t.own].reverse());
+    for (const row of body.data) {
+      expect(row.shared).toBe(false);
+      expect(row).not.toHaveProperty("sending_mode");
+    }
+    expect((await call(app, t.key, "GET", `/domains/${t.sharedId}`)).status).toBe(404);
+  });
+
+  it("leaves the plan's domain limit to own domains: a Free team with two may add a third", async () => {
+    expect(PLAN_DOMAIN_LIMIT.free).toBe(3);
+    const free = await sharedTeam("shared-limit", 2, "free");
+    const res = await call(sharedApp({ isCloud: true }), free.key, "POST", "/domains", {
+      name: "third.shared-limit.example.com",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("documents shared and the sending mode fields, generated without a shared domain", async () => {
+    const doc = (await (await makeApp(fakeSes()).request("/openapi.json")).json()) as {
+      components: {
+        schemas: Record<
+          string,
+          {
+            properties: Record<string, unknown> & {
+              data?: { items: { properties: Record<string, unknown> } };
+            };
+          }
+        >;
+      };
+    };
+    const { GetDomainResponse, ListDomainsResponse } = doc.components.schemas;
+    for (const properties of [
+      GetDomainResponse?.properties,
+      ListDomainsResponse?.properties.data?.items.properties,
+    ]) {
+      expect(Object.keys(properties ?? {})).toEqual(
+        expect.arrayContaining(["shared", "sending_mode", "sending_mode_reason"]),
+      );
+    }
   });
 });

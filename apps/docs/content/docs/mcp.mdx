@@ -192,8 +192,8 @@ takes `accept_from` and no other safety setting.
 | `list_webhooks` | `webhooks:write` | List webhook endpoints (list rows never carry signing secrets). |
 | `get_webhook` | `webhooks:write` | Get one webhook: URL, events and status. |
 | `list_api_keys` | `api-keys:write` | List active API keys (never their tokens). |
-| `list_domains` | `domains:read` | List sending domains with verification status. |
-| `get_domain` | `domains:read` | Get one domain with its DNS records. |
+| `list_domains` | `domains:read` | List up to 100 of the team's domains with verification status. The team's subdomain of the [shared domain](/concepts/domains#shared-subdomain) is the last row (`shared: true`): read-only, with its `sending_mode`, and only its inboxes' own addresses send from it. |
+| `get_domain` | `domains:read` | Get one domain with its DNS records; the shared subdomain has none. |
 | `send_email` | `emails:send` | Send or schedule a transactional email. |
 | `send_email_batch` | `emails:send` | Send up to 100 emails in one call. |
 | `update_email` | `emails:send` | Reschedule a scheduled email. |
@@ -232,13 +232,13 @@ takes `accept_from` and no other safety setting.
 | `delete_webhook` | `webhooks:write` | **admin** Delete a webhook endpoint. |
 | `revoke_api_key` | `api-keys:write` | **admin** Revoke an API key. |
 | `create_domain` | `domains:write` | **admin** Add a sending domain and get its DNS records; optional tracking settings apply at creation. |
-| `update_domain` | `domains:write` | **admin** Change a domain's tracking settings, switch [receiving](/concepts/receiving) with `capabilities.receiving`, or switch catch-all with `receiving_catch_all`; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |
-| `verify_domain` | `domains:write` | **admin** Re-check a domain's DNS and SES verification. |
-| `delete_domain` | `domains:write` | **admin** Remove a domain and its SES identity. |
+| `update_domain` | `domains:write` | **admin** Change a domain's tracking settings, switch [receiving](/concepts/receiving) with `capabilities.receiving`, or switch catch-all with `receiving_catch_all`; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). The shared subdomain answers `403`. |
+| `verify_domain` | `domains:write` | **admin** Re-check a domain's DNS and SES verification; the shared subdomain answers `403`. |
+| `delete_domain` | `domains:write` | **admin** Remove a domain and its SES identity; the shared subdomain answers `403`. |
 | `reply_to_received_email` | `receiving:reply` | Reply to a received email from its inbox. Answers `sent` with the email and thread, or `draft` with the reasons when the inbox's rules hold the reply for a person. |
 | `forward_received_email` | `receiving:reply` | Forward a received email, quoted inline or attached as `.eml`; same answers as the reply. |
 | `update_thread` | `receiving:reply` | Mark a thread read or unread, move it to a folder, or add a label. |
-| `create_inbox` | `receiving:manage` | Create an agent inbox (people's inboxes are made in the dashboard); `accept_from` is the only safety setting it takes, and `username` names an address on the shared domain. |
+| `create_inbox` | `receiving:manage` | Create an agent inbox (people's inboxes are made in the dashboard); `accept_from` is the only safety setting it takes, and `username` names an address on the shared domain. `domain_id` takes a `list_domains` row: the team's shared subdomain (`shared: true`), or one of its own domains with `username` as the part before the @. While the team's subdomain waits for its name review, it answers `503`. |
 | `update_inbox` | `receiving:manage` | Change an inbox's name, from name or expiry; making it expire sooner takes the owner or admin role. |
 | `delete_inbox` | `receiving:manage` | **admin** Delete an inbox with its threads and drafts; its API keys are revoked. |
 | `release_email` | `receiving:manage` | Release a quarantined email into its inbox; `trust_sender` also adds the sender to the allowlist. |

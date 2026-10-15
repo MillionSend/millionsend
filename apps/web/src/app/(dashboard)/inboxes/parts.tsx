@@ -141,38 +141,30 @@ export function kindWord(t: ReturnType<typeof useTranslations>, kind: string): s
 }
 
 /**
- * What holds a shared-domain inbox back from starting conversations: its
- * team's plan, the instance, or sending paused outright; null when nothing
- * does or the inbox is on a team's own domain. No mode reads as replies only,
- * as core's safety rules read it.
- */
-export function sharedModeKey(inbox: {
-  shared: boolean;
-  sharedSending?: { mode: string; cause: string | null } | null | undefined;
-}): "plan" | "instance" | "paused" | null {
-  const s = inbox.sharedSending;
-  if (!inbox.shared || s?.mode === "open") return null;
-  return s?.mode === "receive_only" ? "paused" : s?.cause === "plan" ? "plan" : "instance";
-}
-
-/**
  * The shared domain's name review answering a create or an edit, in words,
  * or null for any other error. Its 422 and 429 share their codes with other
- * refusals, so the API's message tells them apart.
+ * refusals, and its two 503s share one, so the API's message tells them
+ * apart. orRandom: whether an address left empty, random and so never
+ * reviewed, gets past it.
  */
 export function nameReviewError(
   t: ReturnType<typeof useTranslations>,
   error: unknown,
-): string | null {
+): { text: string; orRandom: boolean } | null {
   const code = trpcErrorCode(error);
   const message = (error as { message?: string } | null)?.message ?? "";
-  if (code === "SERVICE_UNAVAILABLE") return t("create.errors.reviewUnavailable");
+  if (code === "SERVICE_UNAVAILABLE") {
+    // The team's subdomain itself waits for its name review: a random address waits too.
+    return message.startsWith("Your team's subdomain")
+      ? { text: t("create.errors.sharedPending"), orRandom: false }
+      : { text: t("create.errors.reviewUnavailable"), orRandom: true };
+  }
   // The name review's daily budgets, of refused names and of reviews.
   if (code === "TOO_MANY_REQUESTS" && message.startsWith("Too many names were")) {
-    return t("create.errors.tooManyNames");
+    return { text: t("create.errors.tooManyNames"), orRandom: true };
   }
   if (code === "UNPROCESSABLE_CONTENT" && message.includes("can't be used on the shared domain")) {
-    return t("create.errors.nameRefused");
+    return { text: t("create.errors.nameRefused"), orRandom: true };
   }
   return null;
 }

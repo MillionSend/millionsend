@@ -97,8 +97,9 @@ são do MillionSend.
 
 | Campo | Regras |
 | --- | --- |
-| `email_address` | Um endereço de um domínio verificado da sua equipe que recebe aqui (veja [Endereços](#endereços)). Ele é guardado sem espaços nas pontas e em minúsculas; a parte antes do `@` aceita até 64 letras, dígitos e `. _ % + -`, sem ponto nas pontas e sem `..`. Não muda depois. Deixe de fora para ganhar um endereço no [domínio compartilhado](#domínio-compartilhado). |
-| `username` | Com o `email_address` de fora, a parte antes do `@` do endereço no [domínio compartilhado](#domínio-compartilhado): sem espaços nas pontas e em minúsculas, de 1 a 64 letras, dígitos e `. _ -`, começando e terminando com letra ou dígito, sem `..` e nunca cortado. Se ficar de fora, o endereço é aleatório. Não muda depois. |
+| `email_address` | Um endereço de um domínio verificado da sua equipe que recebe aqui (veja [Endereços](#endereços)). Ele é guardado sem espaços nas pontas e em minúsculas; a parte antes do `@` aceita até 64 letras, dígitos e `. _ % + -`, sem ponto nas pontas e sem `..`. Não muda depois. Deixe de fora para ganhar um endereço no [domínio compartilhado](#domínio-compartilhado), ou no domínio que o `domain_id` indicar. |
+| `username` | Com o `email_address` de fora, a parte antes do `@` do endereço no [domínio compartilhado](#domínio-compartilhado): sem espaços nas pontas e em minúsculas, de 1 a 64 letras, dígitos e `. _ -`, começando e terminando com letra ou dígito, sem `..` e nunca cortado. Se ficar de fora, o endereço é aleatório. Com o `domain_id` de um domínio seu, é a parte antes do `@` nele, obrigatória e com as regras do `email_address`. Não muda depois. |
+| `domain_id` | O id de uma linha do `GET /domains`, no lugar do `email_address`: o subdomínio da sua equipe no domínio compartilhado (a linha com `shared: true`), que funciona como deixar o `email_address` de fora, ou um dos seus domínios verificados, em que o `username` dá nome ao endereço e valem as regras do `email_address`. |
 | `name` | De 1 a 320 caracteres, então cabe qualquer endereço; o próprio endereço quando fica de fora. |
 | `from_name` | O nome de exibição dos e-mails que a caixa envia, com até 78 caracteres: um nome simples, sem `@`, `:`, `<`, `>`, quebras de linha, links nem números de telefone. No domínio compartilhado, ele passa por uma [revisão](#domínio-compartilhado) antes. |
 | `kind` | `agent` (o padrão) ou `human`. |
@@ -111,8 +112,8 @@ são do MillionSend.
 | `409 validation_error` | Outra caixa já usa o endereço, inclusive um `username` escolhido: nenhum outro nome é escolhido no lugar dele. |
 | `403 validation_error` | O limite de caixas do plano foi atingido: "You have reached the inbox limit of your plan. Upgrade to add more." |
 | `429 rate_limit_exceeded` | Foram criadas caixas demais na última hora, ou a revisão de nomes do domínio compartilhado chegou ao limite de hoje da sua equipe (20 nomes recusados ou 200 revisões); o `retry-after` diz quando tentar de novo. Excluir caixas não devolve essa folga. |
-| `422 validation_error` | O domínio não é um domínio verificado da sua equipe, não recebe aqui, a instância não tem domínio compartilhado, a instância não recebe e-mail nenhum, um `username` quebra uma regra, é reservado ou não pode ser usado no domínio compartilhado, o `username` vem junto com o `email_address`, ou uma configuração quebra uma regra. |
-| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado; `retry-after: 60`. Uma requisição sem nenhum dos dois nunca recebe essa resposta. |
+| `422 validation_error` | O domínio não é um domínio verificado da sua equipe, não recebe aqui, a instância não tem domínio compartilhado, a instância não recebe e-mail nenhum, um `username` quebra uma regra, é reservado ou não pode ser usado no domínio compartilhado, o `username` ou o `domain_id` vem junto com o `email_address`, o `domain_id` não é um domínio verificado da sua equipe ou aponta um domínio seu sem `username`, ou uma configuração quebra uma regra. |
+| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado (`retry-after: 60`), ou o subdomínio da sua equipe ainda espera a [revisão de nomes](#domínio-compartilhado) e, até lá, nenhum endereço pode ser criado nele, nem aleatório nem de encaminhamento (`retry-after: 300`). Tente de novo daqui a pouco. |
 
 As outras chamadas:
 
@@ -173,11 +174,21 @@ seu app ainda não usa para enviar.
 Uma instância pode oferecer um domínio compartilhado para caixas que não
 precisam de DNS nenhum (quem opera define `SHARED_INBOX_DOMAIN`; veja
 [Auto-hospedagem](/pt-BR/self-hosting#domínio-compartilhado-das-caixas)).
-Cada equipe ganha um subdomínio próprio lá, com o nome da equipe, como
-`acme.agents.example`, ou `team-` e seis caracteres aleatórios quando o nome
-parece o de uma marca conhecida ou um nome reservado, ou quando não passa na
-revisão abaixo. O subdomínio de uma equipe excluída nunca vai para outra
-equipe. Deixe o `email_address` de fora e o `username` dá nome ao endereço:
+Cada equipe ganha um subdomínio próprio lá assim que é criada, com o nome da
+equipe, como `acme.agents.example`, ou `team-` e seis caracteres aleatórios
+quando o nome parece o de uma marca conhecida ou um nome reservado, ou
+quando não passa na revisão abaixo. Enquanto não tiver nenhum endereço, o
+subdomínio acompanha as mudanças de nome da equipe. Depois que ganha o
+primeiro endereço, ele nunca mais muda e nunca vai para outra equipe, mesmo
+se a equipe for excluída; um subdomínio que nunca teve endereço é liberado
+quando a equipe muda de nome ou é excluída. Um subdomínio que já existia
+antes da v0.14.0 também nunca muda, tenha tido endereço ou não.
+
+O `GET /domains` lista o subdomínio como a última linha, com `shared: true` e
+o `sending_mode` dele (veja
+[Domínios](/pt-BR/concepts/domains#subdomínio-compartilhado)); o id dele é o
+`domain_id` das suas caixas compartilhadas. Deixe o `email_address` de fora,
+ou mande esse id como `domain_id`, e o `username` dá nome ao endereço:
 
 ```sh
 curl -X POST "https://api.millionsend.com/inboxes" \
@@ -198,19 +209,26 @@ webmaster, mailer-daemon e root, comparados sem `.`, `_` e `-`, então
 encaminhamento) ou parece o de uma marca conhecida. Um que já está em uso
 responde `409`: nenhum outro nome é escolhido no lugar dele.
 
-**Revisão de nomes.** Quando a instância usa um juiz de conteúdo, um nome de
-usuário escolhido, um `from_name` (na criação e em toda mudança) e o
+**Revisão de nomes.** Quando a instância usa um avaliador de conteúdo, um
+nome de usuário escolhido, um `from_name` (na criação e em toda mudança) e o
 subdomínio da equipe passam por uma revisão antes de serem publicados, para
 ver se eles se passam por uma marca, um banco, um órgão do governo ou um
 cargo oficial. Um nome recusado responde `422 validation_error`, como
 "username can't be used on the shared domain: pick another", sem nunca
-mostrar o raciocínio do juiz. Enquanto a revisão não responde, um nome de
-usuário ou um `from_name` responde `503 name_review_unavailable` com
-`retry-after: 60`, e o subdomínio de uma equipe nova fica com `team-` e seis
-caracteres aleatórios. Depois de 20 nomes recusados, ou 200 revisões, num dia
-UTC, a resposta é `429 rate_limit_exceeded` até a meia-noite UTC. Um
-endereço aleatório sem `from_name` nunca é recusado por causa da revisão, e
-uma instância sem juiz aplica só as regras acima.
+mostrar o raciocínio do avaliador. Enquanto a revisão não responde, um nome
+de usuário ou um `from_name` responde `503 name_review_unavailable` com
+`retry-after: 60`. Uma equipe nova espera o subdomínio em vez de ganhar um
+aleatório na hora: a revisão é tentada de novo depois de 5 minutos e, a
+partir daí, a cada hora, e depois de 24 horas a equipe fica com `team-` e
+seis caracteres aleatórios. Até lá, criar um endereço no domínio
+compartilhado responde `503 name_review_unavailable` com `retry-after: 300`:
+tente de novo daqui a pouco. Uma equipe que mudou de nome continua com o
+subdomínio que já tem até a revisão responder. Depois de 20 nomes
+recusados, ou 200 revisões, num dia UTC, a resposta é
+`429 rate_limit_exceeded` até a meia-noite UTC. Um endereço aleatório sem
+`from_name` nunca é recusado por causa da revisão, mas espera com o `503`
+acima enquanto o subdomínio da equipe espera; uma instância sem avaliador
+aplica só as regras acima.
 
 Os e-mails para `postmaster@` e `abuse@` no domínio compartilhado, ou no
 subdomínio de qualquer equipe, vão para quem opera a instância, nunca para
@@ -227,7 +245,7 @@ as equipes:
     por eles, e um agente também, quando o `send_policy` da caixa é `open` e
     a sua equipe já passou dos primeiros envios; se não, as conversas novas
     do agente esperam uma pessoa como rascunhos. Cada mensagem para alguém
-    de fora da equipe que nunca escreveu para a caixa passa pelo juiz de
+    de fora da equipe que nunca escreveu para a caixa passa pelo avaliador de
     conteúdo da instância antes de sair, e fica retida para revisão quando
     parece phishing.
   - No plano Free, eles só respondem dentro das próprias conversas ("On the
@@ -272,10 +290,8 @@ as equipes:
   `scheduled_at`, `reply_to`, anexos nem cabeçalhos personalizados: cada um
   responde `422 validation_error` dizendo a regra. Uma chave restrita a um
   domínio recebe `403 restricted_api_key`. Fora disso, o `POST /emails`
-  responde `403 inbox_send_policy`, e o `POST /emails/batch` e o relay SMTP
-  sempre recusam um endereço compartilhado.
-- O `domain_id` deles é o id do subdomínio compartilhado da equipe, que o
-  `GET /domains` não lista.
+  responde `403 inbox_send_policy`, e o `POST /emails/batch`, as transmissões
+  e o relay SMTP sempre recusam um endereço compartilhado.
 
 Numa instância sem domínio compartilhado, `POST /inboxes` sem
 `email_address` responde `422`.
@@ -721,8 +737,9 @@ Onde o Resend deixa espaço, ou o MillionSend é diferente:
 
 - Criar uma caixa ou um rascunho devolve o objeto inteiro; o
   `{ object, id }` do Resend vem dentro dele.
-- O Resend exige o `email_address`; aqui ele é opcional: se ficar de fora, a
-  caixa ganha um endereço no [domínio compartilhado](#domínio-compartilhado),
+- O Resend exige o `email_address`; aqui ele é opcional: se ficar de fora,
+  sem `domain_id`, a caixa ganha um endereço no
+  [domínio compartilhado](#domínio-compartilhado),
   aleatório por um SDK do Resend, que não consegue enviar o `username`, e
   permanente, porque ele também não envia o `expires_in`.
 - O `kind` padrão é `agent`, porque um SDK do Resend não consegue enviá-lo,
@@ -747,8 +764,9 @@ Onde o Resend deixa espaço, ou o MillionSend é diferente:
   `503 name_review_unavailable` (veja [Erros](/pt-BR/api-reference#erros)). Um endereço já em uso, ou um rascunho
   editado depois de enviado ou enquanto outra requisição o mudava, responde
   `409 validation_error`.
-- O que o MillionSend acrescenta são campos extras (`username`, `kind`,
-  `shared`, `expires_at`, `screening`, `extracted_text` e outros) e
+- O que o MillionSend acrescenta são campos extras (`username` e
+  `domain_id` na criação, `kind`, `shared`, `expires_at`, `screening`,
+  `extracted_text` e outros) e
   endpoints extras (`/safety`, `/quarantine`, `/codes/latest`,
   `/drafts/{id}/reject`). Os enums
   do Resend nunca ganham valores novos: o e-mail em quarentena some da vista

@@ -850,10 +850,15 @@ try {
 
   // Seeded as a customer would have them after verifying their domains; the
   // receiving switch itself goes through the API below.
-  const team = async (name: string, plan: string) =>
-    (
-      await sql`insert into teams (name, slug, plan) values (${name}, ${`${name}-${run}`}, ${plan}) returning id`
+  const team = async (name: string, plan: string) => {
+    const slug = `${name}-${run}`;
+    const id = (
+      await sql`insert into teams (name, slug, plan) values (${name}, ${slug}, ${plan}) returning id`
     )[0].id as string;
+    // The label on the shared domain a team gets when it is created.
+    await sql`insert into shared_inbox_domains (team_id, name) values (${id}, ${`${slug}.${SHARED_INBOX_DOMAIN}`})`;
+    return id;
+  };
   const domain = async (teamId: string, name: string) =>
     (
       await sql`insert into domains (team_id, name, region, status, verified_at, last_checked_at)

@@ -379,6 +379,13 @@
       "when": 1791934730947,
       "tag": "0053_shared_inbox_sending",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1792089898875,
+      "tag": "0054_shared_subdomain_lock",
+      "breakpoints": true
     }
   ]
 }

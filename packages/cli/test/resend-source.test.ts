@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AuthError, createHttp } from "../src/http.js";
 import { createLogger } from "../src/log.js";
 import { USER_AGENT } from "../src/meta.js";
-import { RESOURCES, type Snapshot } from "../src/model.js";
+import { RESOURCES, type Snapshot, type TargetState } from "../src/model.js";
+import { buildPlan } from "../src/plan.js";
 import { providers } from "../src/providers/index.js";
 import {
   createResendSource,
@@ -211,6 +212,55 @@ describe("createResendSource", () => {
     ).toBe(true);
     expect(src.requests).toBe(fake.requests.length);
     expect(fake.writes).toBe(0);
+  });
+
+  it("skips a MillionSend source's shared subdomain: never read in detail, no create planned", async () => {
+    const sharedId = "5f0c2a8e-3b1d-4e6f-9a7b-1c2d3e4f5a6b";
+    const original = fake.data.domains;
+    fake.data.domains = [
+      ...original,
+      { id: sharedId, name: "acme.agents.example.test", status: "verified", shared: true },
+    ];
+    try {
+      const { src } = source();
+      const snapshot = await src.readShallow({ include: new Set(["domains"]) });
+      expect(snapshot.domains.map((d) => d.name)).toEqual(["example.com", "news.example.com"]);
+      expect(fake.requests.map((r) => r.path)).not.toContain(`/domains/${sharedId}`);
+      const target: TargetState = {
+        usage: {
+          cloud: false,
+          plan: null,
+          limits: { emailsPerDay: null, emailsPerMonth: null, domains: null, contacts: null },
+          today: { emailsSent: 0 },
+          period: null,
+          appUrl: null,
+        },
+        domains: [],
+        properties: [],
+        topics: [],
+        segments: [],
+        webhooks: [],
+        templates: [],
+        broadcasts: [],
+      };
+      const plan = buildPlan({
+        snapshot,
+        target,
+        options: {
+          include: new Set(["domains"]),
+          includeSent: false,
+          freshWebhookSecrets: false,
+          rps: 8,
+          sourceRequestsSpent: 0,
+          baseUrl: "http://127.0.0.1:9",
+        },
+      });
+      expect(plan.items.filter((item) => item.action === "create").map((item) => item.key)).toEqual(
+        ["example.com", "news.example.com"],
+      );
+    } finally {
+      fake.data.domains = original;
+    }
   });
 
   it("includeSent fetches sent broadcast bodies; include limits what is read", async () => {
