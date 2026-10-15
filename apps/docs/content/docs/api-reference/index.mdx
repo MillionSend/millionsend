@@ -109,8 +109,9 @@ remaining deltas are deliberate and loud:
   sending from the shared domain. It is read-only: `PATCH`, verify and
   `DELETE` answer `403 forbidden`. Since it comes last, a client that takes
   the first verified domain for its `from` keeps getting one of the team's
-  own. Only for a team without domains of its own is it the first row, and
-  only an inbox's own address sends from it, so such a client should skip
+  own whenever the team has one verified. For a team without a verified
+  domain of its own, the shared row is the first verified one, and only an
+  inbox's own address sends from it, so such a client should skip
   `shared: true` rows. `POST /inboxes` takes its id as `domain_id`. See
   [Domains → Shared subdomain](/concepts/domains#shared-subdomain).
 - Contacts are team-global — audience endpoints are served as aliases of

@@ -230,20 +230,22 @@ dois campos só dela:
   (começar conversas), `reply_only` (responder dentro das próprias
   conversas) ou `receive_only` (nada sai, e o `capabilities.sending` vem
   `disabled`). Uma caixa cujo endereço ou `from_name` parece o de uma
-  marca conhecida continua só respondendo, seja qual for o modo (veja
+  marca conhecida só responde, mesmo com o modo `open` (veja
   [Domínio compartilhado](/pt-BR/concepts/inboxes#domínio-compartilhado)).
-- `sending_mode_reason`: o que segura o envio abaixo de `open`, `plan` ou
-  `instance`; `null` quando é `open`.
+- `sending_mode_reason`: por que o envio não está `open`: `plan` (o plano
+  da equipe) ou `instance` (a configuração da instância); `null` quando
+  está `open`.
 
 A linha é só de leitura: o `GET /domains/{id}` devolve essa linha com
 `records: []`, porque não há nada para configurar, e `PATCH`,
 `POST /domains/{id}/verify` e `DELETE` respondem `403 forbidden`. Ela não
 conta no limite de domínios do seu plano, e o id dela continua o mesmo
 quando uma mudança de nome da equipe muda o nome dela. Mesmo verificada, ela
-só envia pelos endereços das suas próprias caixas, e o `POST /api-keys` não
-aceita o id dela como `domain_id`. Para criar uma caixa nela, mande o id
-dela como `domain_id` no `POST /inboxes`. A página **Domínios** do painel
-mostra essa linha primeiro, marcada como **Compartilhado**.
+só envia pelo próprio endereço de cada caixa nela, e o `POST /api-keys`
+recusa o id dela como `domain_id` com `422 validation_error`. Para criar uma
+caixa nela, mande o id dela como `domain_id` no `POST /inboxes`. A página
+**Domínios** do painel mostra essa linha primeiro, marcada como
+**Compartilhado**.
 
 ## Chaves de API e domínios
 

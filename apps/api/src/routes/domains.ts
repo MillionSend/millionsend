@@ -739,7 +739,8 @@ export function registerDomainRoutes(
       responses: {
         200: {
           content: { "application/json": { schema: getDomainResponseSchema } },
-          description: "Domain with its DNS records",
+          description:
+            "Domain with its DNS records; the team's shared subdomain has none (records: [])",
         },
         404: jsonErr("Not found"),
       },

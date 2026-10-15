@@ -116,9 +116,10 @@ deliberadas e explícitas:
   enquanto a instância pausa o envio pelo domínio compartilhado. Ela é só de
   leitura: `PATCH`, verificação e `DELETE` respondem `403 forbidden`. Como
   ela vem por último, um cliente que pega o primeiro domínio verificado para
-  o `from` continua pegando um domínio da própria equipe. Ela só é a
-  primeira linha para uma equipe sem domínios próprios, e só o endereço de
-  uma caixa envia por ela, então um cliente assim deve pular as linhas com
+  o `from` continua pegando um domínio da própria equipe sempre que a equipe
+  tem um verificado. Para uma equipe sem nenhum domínio próprio verificado,
+  ela é o primeiro domínio verificado da lista, e só o endereço de uma caixa
+  envia por ela, então um cliente assim deve pular as linhas com
   `shared: true`. O `POST /inboxes` aceita o id dela como `domain_id`. Veja
   [Domínios → Subdomínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado).
 - Contatos são globais à equipe — os endpoints de audience são servidos como

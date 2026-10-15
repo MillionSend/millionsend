@@ -1430,7 +1430,9 @@ const domainCapabilitiesRequestSchema = z
   .object({
     sending: capabilityStatusSchema
       .optional()
-      .describe("Always enabled: receive-only domains are not supported, so disabled is a 422."),
+      .describe(
+        "Only enabled is accepted: a domain of your own can't be receive-only, so disabled is a 422.",
+      ),
     receiving: capabilityStatusSchema
       .optional()
       .describe(
@@ -1581,14 +1583,14 @@ const domainSchema = z.object({
     .enum(["open", "reply_only", "receive_only"])
     .optional()
     .describe(
-      "MillionSend extension, on the shared row only: what its inboxes' addresses may send. open starts conversations, reply_only replies inside their threads, receive_only sends nothing. Holds on names still apply per send: an address whose username or from_name imitates a brand, or one on an older label that does, replies only, whatever the mode says.",
+      "MillionSend extension, on the shared row only: what its inboxes' addresses may send. open starts conversations, reply_only replies inside their threads, receive_only sends nothing. Holds on names still apply per send: an address whose username or from_name imitates a brand, or one on an older label that does, replies only, even when the mode is open.",
     ),
   sending_mode_reason: z
     .enum(["plan", "instance"])
     .nullable()
     .optional()
     .describe(
-      "MillionSend extension, on the shared row only: what holds sending below open, the team's plan or the instance; null when open",
+      "MillionSend extension, on the shared row only: what holds sending below open: the team's plan or the instance; null when open",
     ),
 });
 

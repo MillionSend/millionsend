@@ -216,19 +216,19 @@ and tracking off, and two fields of its own:
   conversations), `reply_only` (reply inside their threads) or
   `receive_only` (nothing goes out, and `capabilities.sending` reads
   `disabled`). An inbox whose address or `from_name` looks like a
-  well-known brand still replies only, whatever the mode (see
+  well-known brand only replies, even when the mode is `open` (see
   [Shared domain](/concepts/inboxes#shared-domain)).
-- `sending_mode_reason`: what holds it below `open`, `plan` or `instance`;
-  `null` when open.
+- `sending_mode_reason`: why it is below `open`: `plan` (the team's plan)
+  or `instance` (the instance's settings); `null` when open.
 
 The row is read-only: `GET /domains/{id}` answers it with `records: []`,
 since there is nothing to set up, and `PATCH`, `POST /domains/{id}/verify`
 and `DELETE` answer `403 forbidden`. It doesn't count toward your plan's
 domain limit, and its id stays the same when a rename changes its name.
 Though verified, it sends only from your inboxes' own addresses, and
-`POST /api-keys` doesn't take its id as `domain_id`. To create an inbox on
-it, send its id as `domain_id` to `POST /inboxes`. The dashboard's
-**Domains** page shows it first, marked **Shared**.
+`POST /api-keys` refuses its id as `domain_id` with `422 validation_error`.
+To create an inbox on it, send its id as `domain_id` to `POST /inboxes`.
+The dashboard's **Domains** page shows it first, marked **Shared**.
 
 ## API keys and domains
 

@@ -192,7 +192,7 @@ takes `accept_from` and no other safety setting.
 | `list_webhooks` | `webhooks:write` | List webhook endpoints (list rows never carry signing secrets). |
 | `get_webhook` | `webhooks:write` | Get one webhook: URL, events and status. |
 | `list_api_keys` | `api-keys:write` | List active API keys (never their tokens). |
-| `list_domains` | `domains:read` | List sending domains with verification status. The team's subdomain of the [shared domain](/concepts/domains#shared-subdomain) is the last row (`shared: true`): read-only, with its `sending_mode`, and only its inboxes' own addresses send from it. |
+| `list_domains` | `domains:read` | List up to 100 of the team's domains with verification status. The team's subdomain of the [shared domain](/concepts/domains#shared-subdomain) is the last row (`shared: true`): read-only, with its `sending_mode`, and only its inboxes' own addresses send from it. |
 | `get_domain` | `domains:read` | Get one domain with its DNS records; the shared subdomain has none. |
 | `send_email` | `emails:send` | Send or schedule a transactional email. |
 | `send_email_batch` | `emails:send` | Send up to 100 emails in one call. |

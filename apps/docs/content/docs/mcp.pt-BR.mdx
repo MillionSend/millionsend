@@ -199,7 +199,7 @@ outra configuração de segurança.
 | `list_webhooks` | `webhooks:write` | Lista os webhooks (linhas de lista nunca trazem o segredo de assinatura). |
 | `get_webhook` | `webhooks:write` | Busca um webhook: URL, eventos e status. |
 | `list_api_keys` | `api-keys:write` | Lista as chaves de API ativas (nunca os tokens). |
-| `list_domains` | `domains:read` | Lista domínios de envio com o status de verificação. O subdomínio da equipe no [domínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado) é a última linha (`shared: true`): só de leitura, com o `sending_mode` dele, e só os endereços das caixas dele enviam por ele. |
+| `list_domains` | `domains:read` | Lista até 100 domínios da equipe com o status de verificação. O subdomínio da equipe no [domínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado) é a última linha (`shared: true`): só de leitura, com o `sending_mode` dele, e só os endereços das caixas dele enviam por ele. |
 | `get_domain` | `domains:read` | Busca um domínio com os registros DNS; o subdomínio compartilhado não tem nenhum. |
 | `send_email` | `emails:send` | Envia ou agenda um e-mail transacional. |
 | `send_email_batch` | `emails:send` | Envia até 100 e-mails em uma chamada. |
