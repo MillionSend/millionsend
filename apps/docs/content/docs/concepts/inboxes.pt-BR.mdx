@@ -209,14 +209,14 @@ webmaster, mailer-daemon e root, comparados sem `.`, `_` e `-`, então
 encaminhamento) ou parece o de uma marca conhecida. Um que já está em uso
 responde `409`: nenhum outro nome é escolhido no lugar dele.
 
-**Revisão de nomes.** Quando a instância usa um juiz de conteúdo, um nome de
-usuário escolhido, um `from_name` (na criação e em toda mudança) e o
+**Revisão de nomes.** Quando a instância usa um avaliador de conteúdo, um
+nome de usuário escolhido, um `from_name` (na criação e em toda mudança) e o
 subdomínio da equipe passam por uma revisão antes de serem publicados, para
 ver se eles se passam por uma marca, um banco, um órgão do governo ou um
 cargo oficial. Um nome recusado responde `422 validation_error`, como
 "username can't be used on the shared domain: pick another", sem nunca
-mostrar o raciocínio do juiz. Enquanto a revisão não responde, um nome de
-usuário ou um `from_name` responde `503 name_review_unavailable` com
+mostrar o raciocínio do avaliador. Enquanto a revisão não responde, um nome
+de usuário ou um `from_name` responde `503 name_review_unavailable` com
 `retry-after: 60`. Uma equipe nova espera o subdomínio em vez de ganhar um
 aleatório na hora: a revisão é tentada de novo depois de 5 minutos e, a
 partir daí, a cada hora, e depois de 24 horas a equipe fica com `team-` e
@@ -245,7 +245,7 @@ as equipes:
     por eles, e um agente também, quando o `send_policy` da caixa é `open` e
     a sua equipe já passou dos primeiros envios; se não, as conversas novas
     do agente esperam uma pessoa como rascunhos. Cada mensagem para alguém
-    de fora da equipe que nunca escreveu para a caixa passa pelo juiz de
+    de fora da equipe que nunca escreveu para a caixa passa pelo avaliador de
     conteúdo da instância antes de sair, e fica retida para revisão quando
     parece phishing.
   - No plano Free, eles só respondem dentro das próprias conversas ("On the

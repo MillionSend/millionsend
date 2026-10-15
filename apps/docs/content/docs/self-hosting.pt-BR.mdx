@@ -644,7 +644,7 @@ prevalece:
 | Configuração | Padrão | Significado |
 | --- | --- | --- |
 | `SHARED_INBOX_SEND` | `true` | Se os endereços compartilhados enviam alguma coisa. Desligada, nada sai deles, nem respostas, e o que já está na fila espera até ela voltar (as cópias do `forward_to`, por até 2 dias); os e-mails para eles continuam chegando |
-| `SHARED_INBOX_OPEN` | `false` | Se os endereços compartilhados das equipes pagas (de todas, na auto-hospedagem) podem começar conversas. Desligada, sem juiz (`ABUSE_JUDGE`) ou com o `MONITOR_AUTO_HOLD` desligado, eles só respondem dentro das próprias conversas |
+| `SHARED_INBOX_OPEN` | `false` | Se os endereços compartilhados das equipes pagas (de todas, na auto-hospedagem) podem começar conversas. Desligada, sem avaliador (`ABUSE_JUDGE`) ou com o `MONITOR_AUTO_HOLD` desligado, eles só respondem dentro das próprias conversas |
 | `SHARED_INBOX_TENANTS` | `false` | Se o e-mail compartilhado sai com o tenant do SES da equipe que envia, com `SES_TENANTS` ligado |
 | `SHARED_INBOX_TEAM_DAILY_CAP` | 1000 | Para quantos destinatários uma equipe pode enviar por dia UTC, somando todos os endereços compartilhados dela, envios aprovados incluídos |
 
@@ -654,8 +654,8 @@ de fora da equipe que nunca escreveu para a caixa é avaliada antes do SES,
 em todo nível menos o da equipe de sistema: uma avaliação do tipo phishing
 a partir de `MONITOR_HOLD_REPEAT_SCORE` deixa a mensagem em espera na lista
 de revisão, uma avaliação dessas pausa para revisão uma equipe no nível
-Nova, e quando o juiz não responde, o e-mail espera e depois fica em espera
-como o de um domínio novo.
+Nova, e quando o avaliador não responde, o e-mail espera e depois fica em
+espera como o de um domínio novo.
 
 Para abrir o envio compartilhado numa instância com `SES_TENANTS` ligado
 (sem ele, pule para o passo 4):
@@ -695,7 +695,7 @@ Para abrir o envio compartilhado numa instância com `SES_TENANTS` ligado
    enviado de novo sem o tenant. Se algum dos dois for diferente, deixe o
    `SHARED_INBOX_TENANTS` desligado.
 3. Ligue o `SHARED_INBOX_TENANTS`.
-4. Confira se o juiz revisa os nomes: com o `ABUSE_JUDGE` definido, criar
+4. Confira se o avaliador revisa os nomes: com o `ABUSE_JUDGE` definido, criar
    uma caixa compartilhada com um nome de usuário responde `201`, não
    `503 name_review_unavailable`.
 5. Ligue o `SHARED_INBOX_OPEN`.
@@ -738,9 +738,9 @@ antivírus nunca segura e-mails.
 
 As caixas de agente
 [analisam](/pt-BR/concepts/agent-safety#análise-de-injeção-de-prompt) os
-e-mails de remetentes de fora em busca de injeção de prompt com o juiz do
+e-mails de remetentes de fora em busca de injeção de prompt com o avaliador do
 [monitoramento de conteúdo](#monitoramento-de-conteúdo-opcional): com
-`ABUSE_JUDGE=typesafe` a análise roda, e com o juiz desligado as caixas
+`ABUSE_JUDGE=typesafe` a análise roda, e com o avaliador desligado as caixas
 decidem só pelas próprias regras. Ela conta à parte do monitoramento de
 conteúdo, com os mesmos valores de `MONITOR_TEAM_DAILY_CAP` e
 `MONITOR_INSTANCE_DAILY_CAP`, mais 200 mensagens por caixa por dia; acima de
@@ -753,7 +753,7 @@ autenticação dele, o assunto e o texto visível com os códigos mascarados e o
 endereços reduzidos ao domínio, o texto oculto que foi removido, o texto e o
 domínio dos links (nunca acessados) e os nomes dos anexos. São e-mails de
 terceiros para os seus usuários: inclua isso no seu aviso de privacidade
-antes de ligar o juiz.
+antes de ligar o avaliador.
 
 ## Site de documentação
 
