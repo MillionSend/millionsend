@@ -22,6 +22,8 @@
     "pageOf": "Página 1 – {pages} de {total} domínios",
     "noMatch": "Nenhum domínio corresponde aos filtros.",
     "clearFilters": "Limpar filtros",
+    "shared": "Compartilhado",
+    "sharedOpen": "pode iniciar conversas",
     "columns": {
       "domain": "Domínio",
       "status": "Status",

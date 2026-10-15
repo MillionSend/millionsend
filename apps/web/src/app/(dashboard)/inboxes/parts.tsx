@@ -141,21 +141,6 @@ export function kindWord(t: ReturnType<typeof useTranslations>, kind: string): s
 }
 
 /**
- * What holds a shared-domain inbox back from starting conversations: its
- * team's plan, the instance, or sending paused outright; null when nothing
- * does or the inbox is on a team's own domain. No mode reads as replies only,
- * as core's safety rules read it.
- */
-export function sharedModeKey(inbox: {
-  shared: boolean;
-  sharedSending?: { mode: string; cause: string | null } | null | undefined;
-}): "plan" | "instance" | "paused" | null {
-  const s = inbox.sharedSending;
-  if (!inbox.shared || s?.mode === "open") return null;
-  return s?.mode === "receive_only" ? "paused" : s?.cause === "plan" ? "plan" : "instance";
-}
-
-/**
  * The shared domain's name review answering a create or an edit, in words,
  * or null for any other error. Its 422 and 429 share their codes with other
  * refusals, and its two 503s share one, so the API's message tells them

@@ -14,15 +14,10 @@ import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { WarnCard } from "@/components/warn-card";
 import { typedAllowlistEntry, typedListAddress } from "@/lib/email-input";
+import { sharedModeKey } from "@/lib/shared-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
-import {
-  ACCEPT_FROM,
-  acceptFromHint,
-  acceptFromWarns,
-  type InboxDetail,
-  sharedModeKey,
-} from "../parts";
+import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, type InboxDetail } from "../parts";
 
 const POLICIES = ["reply_only", "allowlist", "open"] as const;
 const SHARED_HINT = {
