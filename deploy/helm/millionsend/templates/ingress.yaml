@@ -1,0 +1,42 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "millionsend.fullname" . }}
+  labels:
+    {{- include "millionsend.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          {{- if not (has .component (list "web" "api" "docs")) }}
+          {{- fail (printf "ingress path component must be web, api or docs (got %q)" .component) }}
+          {{- end }}
+          {{- $svc := index $.Values .component }}
+          {{- if not $svc.enabled }}
+          {{- fail (printf "ingress routes to %q, which is not enabled" .component) }}
+          {{- end }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "millionsend.fullname" $ }}-{{ .component }}
+                port:
+                  name: {{ .component }}
+          {{- end }}
+    {{- end }}
+{{- end }}

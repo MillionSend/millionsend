@@ -108,6 +108,25 @@ then run `pnpm --filter @millionsend/api dev`,
 `pnpm --filter @millionsend/worker dev`, and
 `pnpm --filter @millionsend/web dev` in separate terminals.
 
+## Kubernetes (Helm)
+
+The chart in
+[`deploy/helm/millionsend`](https://github.com/MillionSend/millionsend/tree/main/deploy/helm/millionsend)
+runs the same image with one Deployment per process (web, api, worker, plus the
+optional smtp relay and docs). Postgres stays outside the chart. Secrets come
+from an existing Secret (kubectl, SealedSecrets, SOPS), an External Secrets
+Operator `ExternalSecret`, or, for tests only, the values file:
+
+```sh
+helm upgrade --install millionsend deploy/helm/millionsend \
+  -n millionsend --create-namespace -f my-values.yaml
+```
+
+The chart README has a k3s example (Traefik, CloudNativePG, an IAM role over OIDC web identity
+instead of access keys) and an EKS example
+(ALB, RDS, External Secrets with AWS Secrets Manager, IRSA). Every variable on
+this page goes in either `config` or the Secret.
+
 ## Environment reference
 
 From `.env.example`. Only the two secrets are required; everything else has

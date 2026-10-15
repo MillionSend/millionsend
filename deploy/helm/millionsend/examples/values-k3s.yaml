@@ -1,0 +1,74 @@
+# k3s: Traefik ingress, CloudNativePG database, secrets from a SealedSecret
+# (or any Secret created out of band) named millionsend-secrets, and AWS
+# access through OIDC web identity (no access keys).
+#   helm upgrade --install millionsend deploy/helm/millionsend \
+#     -n millionsend --create-namespace -f deploy/helm/millionsend/examples/values-k3s.yaml
+image:
+  tag: "latest" # pin a release for production
+
+config:
+  APP_BASE_URL: "https://mail.example.com"
+  PUBLIC_API_URL: "https://api.mail.example.com"
+  AWS_REGION: "us-east-1"
+  SNS_TOPIC_ARNS: "arn:aws:sns:us-east-1:123456789012:millionsend-events"
+  SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events"
+  SES_CONFIGURATION_SET: "millionsend"
+  # The pod CIDR Traefik runs in: 10.42.0.0/16 is the k3s default, but a
+  # custom --cluster-cidr changes it, so check
+  #   kubectl get nodes -o custom-columns=NAME:.metadata.name,CIDR:.spec.podCIDR
+  # A cloudflared tunnel in front connects from its own pod, inside the same CIDR.
+  TRUSTED_PROXIES: "10.42.0.0/16"
+
+# The role trusts this cluster's service-account issuer for
+# system:serviceaccount:<namespace>:millionsend (the name pinned below, so
+# the trust policy does not depend on the release name) and carries the millionsend-ses permissions
+# (infra/millionsend-ses.cfn.yaml). The issuer's discovery document and JWKS
+# must be reachable by AWS: k3s needs --kube-apiserver-arg
+# service-account-issuer=https://<public issuer URL>.
+aws:
+  webIdentity:
+    enabled: true
+    roleArn: arn:aws:iam::123456789012:role/millionsend
+
+serviceAccount:
+  name: millionsend
+
+# Keys: DATABASE_URL, MASTER_ENCRYPTION_KEY, BETTER_AUTH_SECRET. No AWS keys:
+# the web identity role provides them. DATABASE_URL points at the
+# CloudNativePG read-write service, e.g.
+#   postgres://millionsend:<password>@<cluster>-rw.<namespace>.svc:5432/millionsend
+secrets:
+  mode: existingSecret
+  existingSecret:
+    name: millionsend-secrets
+
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: mail.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          component: web
+    - host: api.mail.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          component: api
+  tls:
+    - secretName: millionsend-tls
+      hosts: [mail.example.com, api.mail.example.com]
+
+web:
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { memory: 1Gi }
+api:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+worker:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }

@@ -1,0 +1,253 @@
+# MillionSend Helm chart. One image, one Deployment per process (PROCESS=
+# web | api | worker | smtp | docs, see scripts/start.mjs). Postgres is
+# external: point DATABASE_URL at CloudNativePG, RDS, or any Postgres 17
+# with max_connections >= 200 (each app process pools up to 24).
+# Variable reference: .env.example and SELF_HOSTING.md.
+
+image:
+  repository: ghcr.io/millionsend/millionsend
+  # Defaults to the chart's appVersion. Pin a version or use `digest` in production.
+  tag: ""
+  # sha256:... — when set, wins over tag.
+  digest: ""
+  # Empty = the Kubernetes default: Always for :latest (so a restarted pod
+  # gets the newest release), IfNotPresent for a pinned tag or digest.
+  pullPolicy: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Non-secret configuration, rendered into a ConfigMap and loaded by every
+# pod with envFrom. Keys are .env.example names. APP_BASE_URL must match
+# the public origin exactly or login fails.
+config:
+  APP_BASE_URL: "https://mail.example.com"
+  # PUBLIC_API_URL: "https://api.mail.example.com"
+  AWS_REGION: "us-east-1"
+  # SNS_TOPIC_ARNS: ""
+  # SQS_QUEUE_URL: ""
+  # SES_CONFIGURATION_SET: ""
+  # Forwarded-client-IP headers are trusted only from these sources. Add
+  # the ingress controller's pod CIDR (or the load balancer's addresses),
+  # or every request is recorded as coming from the proxy.
+  # TRUSTED_PROXIES: "10.42.0.0/16"
+  ALLOW_SIGNUP: "false"
+
+# Secret values (DATABASE_URL, MASTER_ENCRYPTION_KEY, BETTER_AUTH_SECRET,
+# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, S3_*, ...). Every mode ends in
+# one Secret that every pod loads with envFrom.
+secrets:
+  # existingSecret — a Secret you manage (kubectl, SealedSecrets, SOPS, ...)
+  # externalSecret — an External Secrets Operator ExternalSecret this chart renders
+  # create         — a Secret rendered from secrets.create.data (dev/test only:
+  #                  the values land in the Helm release)
+  mode: existingSecret
+  existingSecret:
+    name: millionsend-secrets
+  externalSecret:
+    # external-secrets.io/v1 needs ESO >= 0.17; set v1beta1 for older operators.
+    apiVersion: external-secrets.io/v1
+    refreshInterval: 1h
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: ""
+    # Pull every key of one JSON secret from the store (e.g. one AWS
+    # Secrets Manager secret holding all the variables) ...
+    dataFrom: []
+    #  - extract:
+    #      key: millionsend/production
+    # ... and/or map keys one by one.
+    data: []
+    #  - secretKey: DATABASE_URL
+    #    remoteRef:
+    #      key: millionsend/production
+    #      property: DATABASE_URL
+  create:
+    data: {}
+    #  DATABASE_URL: postgres://millionsend:...@postgres:5432/millionsend
+    #  MASTER_ENCRYPTION_KEY: ...   # openssl rand -base64 32
+    #  BETTER_AUTH_SECRET: ...      # openssl rand -base64 32
+
+serviceAccount:
+  create: true
+  name: ""
+  # EKS: eks.amazonaws.com/role-arn for IRSA. With no AWS keys in the
+  # Secret the SES/SQS/SNS clients use the SDK default provider chain; also
+  # set AWS_DEFAULT_CHAIN: "true" in config so account mail (password
+  # resets, verification) is enabled without static keys.
+  annotations: {}
+  automountServiceAccountToken: false
+
+# AWS credentials through OIDC web identity, for clusters without the EKS
+# pod identity webhook (k3s, kubeadm, ...): the chart projects a token of
+# the pod's ServiceAccount and points the SDK at it (AWS_ROLE_ARN +
+# AWS_WEB_IDENTITY_TOKEN_FILE); the SDK default chain exchanges it for
+# temporary credentials with sts:AssumeRoleWithWebIdentity. The role's
+# trust policy must name the cluster's service-account issuer (published
+# where AWS can reach its JWKS) and system:serviceaccount:<namespace>:<sa>.
+# Leave AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY out of the Secret: explicit
+# keys win over the chain. On EKS use serviceAccount.annotations (IRSA) or
+# Pod Identity instead; the webhook injects the same thing.
+aws:
+  webIdentity:
+    enabled: false
+    roleArn: ""
+    audience: sts.amazonaws.com
+    expirationSeconds: 3600
+    mountPath: /var/run/secrets/aws
+
+podAnnotations: {}
+podLabels: {}
+
+# uid/gid 999 is the image's `millionsend` user (useradd --system). The
+# image sets USER by name, so runAsNonRoot needs the numeric id here.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Above the supervisor's 35 s child-exit budget (the worker drains
+# in-flight sends for up to 30 s).
+terminationGracePeriodSeconds: 45
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# Extra env for every app container (list form, e.g. valueFrom).
+extraEnv: []
+extraEnvFrom: []
+
+web:
+  enabled: true
+  replicas: 1
+  resources: {}
+  extraEnv: []
+  service:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+
+api:
+  enabled: true
+  replicas: 1
+  resources: {}
+  extraEnv: []
+  service:
+    type: ClusterIP
+    port: 3001
+    annotations: {}
+
+worker:
+  enabled: true
+  # Rendered into WORKER_REPLICAS: each worker takes 1/N of the SES send
+  # rate. Do not scale it with an HPA or `kubectl scale`, which would leave
+  # WORKER_REPLICAS stale and overshoot the account quota.
+  replicas: 1
+  resources: {}
+  extraEnv: []
+
+smtp:
+  # The relay refuses to start without a STARTTLS keypair: provide a
+  # kubernetes.io/tls Secret (cert-manager Certificate, or kubectl create
+  # secret tls) and name it below.
+  enabled: false
+  replicas: 1
+  port: 2587
+  tlsSecretName: ""
+  resources: {}
+  extraEnv: []
+  service:
+    # SMTP is not HTTP: expose it with a LoadBalancer/NodePort (or a TCP
+    # route on your ingress controller), not the Ingress below.
+    type: ClusterIP
+    port: 2587
+    annotations: {}
+    loadBalancerSourceRanges: []
+
+docs:
+  enabled: false
+  replicas: 1
+  resources: {}
+  extraEnv: []
+  service:
+    type: ClusterIP
+    port: 3002
+    annotations: {}
+
+ingress:
+  enabled: false
+  # traefik (k3s), alb (EKS AWS Load Balancer Controller), nginx, ...
+  className: ""
+  annotations: {}
+  # component: web | api | docs
+  hosts:
+    - host: mail.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          component: web
+  #  - host: api.mail.example.com
+  #    paths:
+  #      - path: /
+  #        pathType: Prefix
+  #        component: api
+  tls: []
+  #  - secretName: millionsend-tls
+  #    hosts: [mail.example.com]
+
+# Every app pod already runs pending migrations at boot under a Postgres
+# advisory lock, so this Job is optional. Enabled, it runs `migrate` as a
+# pre-install/pre-upgrade hook: a failing migration stops the upgrade
+# while the old pods keep serving. The hook runs before the chart's other
+# resources, so the Secret must already exist — use it with
+# secrets.mode=existingSecret whose Secret is created out of band.
+migrations:
+  job:
+    enabled: false
+    backoffLimit: 0
+    activeDeadlineSeconds: 1800
+    resources: {}
+
+# Scheduled pg_dump to S3-compatible storage (scripts/backup). Needs
+# S3_BACKUP_BUCKET in config and S3_ENDPOINT/S3_ACCESS_KEY_ID/
+# S3_SECRET_ACCESS_KEY in the Secret. Skip it when the database already has
+# its own backups (CloudNativePG ScheduledBackup, RDS snapshots).
+backup:
+  enabled: false
+  image:
+    repository: ghcr.io/millionsend/backup
+    tag: ""
+    digest: ""
+    pullPolicy: ""
+  # Any cron expression (UTC by default); the CronJob replaces the
+  # container's daily-only sleep loop.
+  schedule: "0 3 * * *"
+  timeZone: ""
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 1
+  # pg_dump stages the dump here before upload; size it above the dump.
+  scratch:
+    sizeLimit: 10Gi
+  # uid 70 is `postgres` in the postgres:17-alpine base image.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+  resources: {}

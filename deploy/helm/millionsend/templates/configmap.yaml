@@ -1,0 +1,15 @@
+{{- if .Values.aws.webIdentity.enabled }}
+{{- if or (hasKey .Values.config "AWS_ACCESS_KEY_ID") (and (eq .Values.secrets.mode "create") (hasKey .Values.secrets.create.data "AWS_ACCESS_KEY_ID")) }}
+{{- fail "aws.webIdentity.enabled: remove AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY; explicit keys win over the web identity role" }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "millionsend.fullname" . }}
+  labels:
+    {{- include "millionsend.labels" . | nindent 4 }}
+data:
+  {{- range $k, $v := .Values.config }}
+  {{ $k }}: {{ toString $v | quote }}
+  {{- end }}
