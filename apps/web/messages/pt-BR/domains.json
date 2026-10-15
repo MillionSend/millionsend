@@ -11,7 +11,7 @@
   "list": {
     "title": "Domínios",
     "addDomain": "Adicionar domínio",
-    "empty": "Nenhum domínio ainda.",
+    "empty": "Nenhum domínio próprio ainda.",
     "emptyBody": "Adicione um domínio para começar a enviar.",
     "error": "Não foi possível carregar os domínios.",
     "retry": "Tentar novamente",
@@ -20,10 +20,10 @@
     "allRegions": "Todas as regiões",
     "rowDetails": "Detalhes do domínio",
     "pageOf": "Página 1 – {pages} de {total} domínios",
-    "noMatch": "Nenhum domínio corresponde aos filtros.",
+    "noMatch": "Nenhum dos seus domínios corresponde aos filtros.",
     "clearFilters": "Limpar filtros",
     "shared": "Compartilhado",
-    "sharedOpen": "pode iniciar conversas",
+    "sharedOpen": "pode começar conversas",
     "columns": {
       "domain": "Domínio",
       "status": "Status",

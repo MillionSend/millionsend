@@ -117,7 +117,9 @@ describe("the Domains page's shared subdomain", () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toContain("acme.agents.example");
-    expect(html.indexOf("No domains match the filters.")).toBeGreaterThan(html.indexOf("</table>"));
+    expect(html.indexOf("None of your domains match the filters.")).toBeGreaterThan(
+      html.indexOf("</table>"),
+    );
     expect(html).not.toContain("Page 1 –");
   });
 
@@ -128,7 +130,7 @@ describe("the Domains page's shared subdomain", () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toContain(">sending paused<");
-    expect(html.indexOf("No domains yet.")).toBeGreaterThan(html.indexOf("</table>"));
+    expect(html.indexOf("No domains of your own yet.")).toBeGreaterThan(html.indexOf("</table>"));
     expect(html).toContain('href="/domains/new"');
     // Nothing to filter.
     expect(html).not.toContain('class="ms-filter-row"');
@@ -136,6 +138,6 @@ describe("the Domains page's shared subdomain", () => {
     // Without the row (no shared domain, or its name review pending), the empty state alone.
     const alone = page({ list: [], shared: null });
     expect(alone.html).not.toContain("<table");
-    expect(alone.html).toContain("No domains yet.");
+    expect(alone.html).toContain("No domains of your own yet.");
   });
 });
