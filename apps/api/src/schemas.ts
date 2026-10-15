@@ -1125,7 +1125,7 @@ export const createBroadcastRequestSchema = z
       .optional()
       .describe("Segment to send to; omitted means every contact of the team"),
     from: fromAddress.describe(
-      'Sender, "Name <user@domain>"; the domain must be verified for the team',
+      'Sender, "Name <user@domain>"; the domain must be one of the team\'s own verified domains: an address on the shared inbox domain answers 403',
     ),
     subject: z
       .string()

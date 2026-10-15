@@ -2857,6 +2857,12 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     // the sender.
     const reserved = reservedSenderRefusal(broadcast.from, deps.onboardingEmailFrom);
     if (reserved) return fail(422, reserved.name, reserved.message);
+    // As batch and SMTP answer it, before a "not verified" 422 that the
+    // shared row's verified status in GET /domains would contradict.
+    if (isSharedInboxSender(broadcast.from, deps.sharedInboxDomain)) {
+      const { name, message } = sharedSenderRefusal.body;
+      return fail(403, name, message);
+    }
     const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
     if (!domain.ok) {
       return fail(
@@ -3054,7 +3060,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast created (and scheduled when send: true)",
         },
         400: jsonErr("Broadcast state conflict"),
-        403: jsonErr("Restricted API key or sending paused"),
+        403: jsonErr("Restricted API key, sending paused, or a From on the shared inbox domain"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },
@@ -3350,7 +3356,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast scheduled; finishes_at and warning say when it goes out",
         },
         400: jsonErr("Not a draft"),
-        403: jsonErr("Sending paused"),
+        403: jsonErr("Sending paused, or a From on the shared inbox domain"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },

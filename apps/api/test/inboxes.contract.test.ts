@@ -20,6 +20,7 @@ let server: ServerType;
 let resend: Resend;
 let teamId: string;
 
+const SHARED = "agents.example.test";
 const JUDGE_URL = "https://judge.example.test";
 const nouls = (noul: number) =>
   Response.json({
@@ -32,7 +33,7 @@ let judge = () => nouls(0);
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
-  teamId = await createTeam(db, "inbox-contract");
+  teamId = await createTeam(db, "inbox-contract", { sharedInboxDomain: SHARED });
   await db.update(schema.teams).set({ plan: "pro" });
   await db.insert(schema.domains).values({
     teamId,
@@ -60,7 +61,7 @@ beforeAll(async () => {
     enqueueEmailSend: async () => {},
     receiving: { mxHost: "mx.millionsend.test", ingestSecret: "c".repeat(40) },
     inboxKeys: deriveInboxKeys(randomBytes(32)),
-    sharedInboxDomain: "agents.example.test",
+    sharedInboxDomain: SHARED,
   });
   vi.unstubAllEnvs();
   const realFetch = globalThis.fetch;
