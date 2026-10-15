@@ -302,6 +302,8 @@ export function EmailContentPanel({
     bodyPurgedAt?: Date | null | undefined;
     /** The body was never decrypted: the request ran under a support view. */
     hiddenBySupportView?: boolean | undefined;
+    /** Refused at accept with every recipient suppressed: there never was a body. */
+    suppressedAtAccept?: boolean | undefined;
   };
   /** A received message: written by a stranger, so its preview loads nothing from the network. */
   received?: { headers: Record<string, string> | null };
@@ -436,7 +438,7 @@ export function EmailContentPanel({
             </p>
           </div>
         )
-      ) : email.hiddenBySupportView || email.bodyPurgedAt ? (
+      ) : email.suppressedAtAccept || email.hiddenBySupportView || email.bodyPurgedAt ? (
         <p
           style={{
             margin: 0,
@@ -445,7 +447,13 @@ export function EmailContentPanel({
             fontSize: "var(--ms-fs-ui)",
           }}
         >
-          {t(email.hiddenBySupportView ? "detail.hiddenBySupportView" : "detail.bodyPurged")}
+          {t(
+            email.suppressedAtAccept
+              ? "detail.bodyNotStored"
+              : email.hiddenBySupportView
+                ? "detail.hiddenBySupportView"
+                : "detail.bodyPurged",
+          )}
         </p>
       ) : (
         <>

@@ -767,6 +767,7 @@ export {
   clearUnsubscribeSuppression,
   extractAddrSpec,
   findSuppressed,
+  findSuppressionsFor,
   hashRecipient,
   normalizeAddress,
   SUPPRESSION_ORIGIN_BY_REASON,
