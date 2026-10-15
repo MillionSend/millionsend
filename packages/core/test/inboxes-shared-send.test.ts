@@ -567,7 +567,7 @@ describe("forward_to copies from the shared domain", () => {
       await db.select().from(schema.emails).where(eq(schema.emails.inboxId, inbox.id)),
     ).toEqual([]);
     expect(await refusals()).toBe(0);
-    // Past the bound the pause refuses the copy for good, as it always did.
+    // Past FORWARD_WAIT_MAX the pause refuses the copy for good.
     await deliveredAt(Date.now() - FORWARD_WAIT_MAX);
     expect(await forward()).toMatchObject(refusedFor("shared_paused"));
     expect(await refusals()).toBe(1);
@@ -583,5 +583,16 @@ describe("forward_to copies from the shared domain", () => {
 
     vi.stubEnv("SHARED_INBOX_TEAM_DAILY_CAP", "2");
     expect(await forward()).toMatchObject({ kind: "sent" });
+
+    // The pause holds the shared domain only: a team's own domain forwards at once.
+    vi.stubEnv("SHARED_INBOX_SEND", "false");
+    const own = await addInbox(w, { local: "relay-own", safety: { forward_to: [w.owner] } });
+    const ownReceived = await receive(w, { inbox: own, threadId: await addThread(w, own.id) });
+    expect(
+      await forwardToForwardTargets(db, w.deps, {
+        receivedEmailId: ownReceived.id,
+        inboxId: own.id,
+      }),
+    ).toMatchObject({ kind: "sent" });
   });
 });
