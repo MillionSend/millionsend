@@ -14,11 +14,15 @@ import {
   isLoopbackUrl,
   isOperatorTeam,
   isReservedSenderDomain,
+  isSharedDomainId,
   linkTeam,
   PLAN_DOMAIN_LIMIT,
   recordAudit,
+  type SharedSending,
   SILENT_SUSPENSIONS,
   setDomainReceiving,
+  teamSharedDomain,
+  teamSharedSending,
 } from "@millionsend/core";
 import {
   combineRecordStatus,
@@ -49,8 +53,10 @@ import {
   verificationDbPatch,
 } from "@millionsend/ses";
 import { and, count, eq, inArray } from "drizzle-orm";
+import type { Context } from "hono";
 import {
   type ApiDeps,
+  DEFAULT_PAGE_LIMIT,
   type Env,
   errorBody,
   isUniqueViolation,
@@ -248,6 +254,7 @@ const toWire = (row: DomainRow, receives: boolean) => ({
     receiving: receives && row.receivingEnabled ? "enabled" : "disabled",
   },
   receiving_catch_all: row.receivingCatchAll,
+  shared: false,
 });
 
 /**
@@ -362,6 +369,56 @@ export function registerDomainRoutes(
         .from(d)
         .where(and(eq(d.id, id), eq(d.teamId, teamId)))
     )[0];
+
+  /** The team's subdomain of the shared inbox domain, listed read-only after its own domains. */
+  const sharedRow = (teamId: string) =>
+    deps.sharedInboxDomain ? teamSharedDomain(db, teamId) : Promise.resolve(null);
+  const sharedRowById = async (teamId: string, id: string) => {
+    const row = await sharedRow(teamId);
+    return isSharedDomainId(row, id) ? row : null;
+  };
+
+  /** The shared row on the wire; the shared identity lives in the default region. */
+  const sharedWire = (
+    row: { id: string; name: string; createdAt: Date },
+    sending: SharedSending,
+  ) => ({
+    id: row.id,
+    name: row.name,
+    status: "verified",
+    created_at: row.createdAt.toISOString(),
+    region: regions[0],
+    open_tracking: false,
+    click_tracking: false,
+    tracking_subdomain: null,
+    capabilities: {
+      sending: sending.mode === "receive_only" ? "disabled" : "enabled",
+      receiving: "enabled",
+    },
+    receiving_catch_all: false,
+    shared: true,
+    sending_mode: sending.mode,
+    sending_mode_reason: sending.cause,
+  });
+
+  /**
+   * The 403 for a change to the team's shared row, or null for any other id.
+   * Its handlers ask first, so the row never reaches a body check, the
+   * suspension lock or SES, where it has no identity of its own.
+   */
+  const refuseShared = async (c: Context<Env>, id: string) => {
+    const row = await sharedRowById(c.get("auth").teamId, id);
+    return row
+      ? c.json(
+          errorBody(
+            403,
+            "forbidden",
+            `${row.name} is your team's subdomain of the shared domain: it can't be changed or deleted`,
+          ),
+          403,
+        )
+      : null;
+  };
 
   // Identity creation is the one route that provisions a shared AWS resource;
   // cloud caps it per team so one tenant cannot burn the account's
@@ -609,7 +666,7 @@ export function registerDomainRoutes(
     createRoute({
       method: "get",
       path: "/domains",
-      description: KEYSET_LIST_DESCRIPTION,
+      description: `${KEYSET_LIST_DESCRIPTION} The team's subdomain of the shared domain, when it has one, is the last row (\`shared: true\`).`,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -621,17 +678,22 @@ export function registerDomainRoutes(
     }),
     async (c) => {
       const auth = c.get("auth");
+      const query = c.req.valid("query");
+      const shared = await sharedRow(auth.teamId);
       const page = await keysetPage({
-        query: c.req.valid("query"),
+        query,
         createdAt: d.createdAt,
         id: d.id,
+        // The shared row sorts below every own domain.
         loadCursor: async (id) =>
-          (
-            await db
-              .select({ createdAt: d.createdAt, id: d.id })
-              .from(d)
-              .where(and(eq(d.id, id), eq(d.teamId, auth.teamId)))
-          )[0],
+          isSharedDomainId(shared, id)
+            ? "end"
+            : (
+                await db
+                  .select({ createdAt: d.createdAt, id: d.id })
+                  .from(d)
+                  .where(and(eq(d.id, id), eq(d.teamId, auth.teamId)))
+              )[0],
         loadRows: (cond, orderBy, take) =>
           db
             .select()
@@ -650,14 +712,22 @@ export function registerDomainRoutes(
           422,
         );
       }
-      return c.json(
-        {
-          object: "list" as const,
-          data: page.rows.map((row) => toWire(row, receives)),
-          has_more: page.hasMore,
-        },
-        200,
+      const data: (ReturnType<typeof toWire> | ReturnType<typeof sharedWire>)[] = page.rows.map(
+        (row) => toWire(row, receives),
       );
+      let hasMore = page.hasMore;
+      // Own domains ran out on a page that follows them: the shared row comes
+      // next, on this page when it has room, else alone on the next one.
+      const ranOut =
+        !page.hasMore && !query.before && !(query.after && isSharedDomainId(shared, query.after));
+      if (shared && ranOut) {
+        if (data.length < (query.limit ?? DEFAULT_PAGE_LIMIT)) {
+          data.push(sharedWire(shared, await teamSharedSending(db, deps, auth.plan)));
+        } else {
+          hasMore = true;
+        }
+      }
+      return c.json({ object: "list" as const, data, has_more: hasMore }, 200);
     },
   );
 
@@ -676,7 +746,17 @@ export function registerDomainRoutes(
     }),
     async (c) => {
       const auth = c.get("auth");
-      const domain = await findDomain(auth.teamId, c.req.valid("param").id);
+      const { id } = c.req.valid("param");
+      const shared = await sharedRowById(auth.teamId, id);
+      if (shared) {
+        // Nothing to set up, and no SES identity of its own to ask.
+        const sending = await teamSharedSending(db, deps, auth.plan);
+        return c.json(
+          { object: "domain" as const, ...sharedWire(shared, sending), records: [] },
+          200,
+        );
+      }
+      const domain = await findDomain(auth.teamId, id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
       // A read reports the fresh verdict without persisting the domain status —
       // verify and the reverify sweep own that. The tracking clock is the one
@@ -698,11 +778,14 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: getDomainResponseSchema } },
           description: "Verification result: the domain with per-record status",
         },
+        403: jsonErr("The team's subdomain of the shared domain, which is read-only"),
         404: jsonErr("Not found"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
+      const refused = await refuseShared(c, c.req.valid("param").id);
+      if (refused) return refused;
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
       const { result, records, trackingFound } = await liveChecklist(domain);
@@ -750,7 +833,9 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: getDomainResponseSchema } },
           description: "Domain updated; full object with records",
         },
-        403: jsonErr("Catch-all receiving needs a paid plan"),
+        403: jsonErr(
+          "Catch-all receiving needs a paid plan, or the team's subdomain of the shared domain, which is read-only",
+        ),
         404: jsonErr("Not found"),
         409: jsonErr("Another team receives mail for this domain"),
         422: jsonErr("Validation error"),
@@ -758,6 +843,8 @@ export function registerDomainRoutes(
     }),
     async (c) => {
       const auth = c.get("auth");
+      const refused = await refuseShared(c, c.req.valid("param").id);
+      if (refused) return refused;
       const body = c.req.valid("json");
       if (body.tls !== undefined) {
         return c.json(errorBody(422, "validation_error", "tls is not supported"), 422);
@@ -919,12 +1006,16 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: removeDomainResponseSchema } },
           description: "Domain deleted",
         },
-        403: jsonErr("Team suspended, or not available for this team"),
+        403: jsonErr(
+          "Team suspended, not available for this team, or the team's subdomain of the shared domain, which is read-only",
+        ),
         404: jsonErr("Not found"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
+      const refused = await refuseShared(c, c.req.valid("param").id);
+      if (refused) return refused;
       // Same lock as the dashboard delete: a suspended team keeps its domains.
       const suspended = (await fetchTeamStanding(db, auth.teamId))?.suspended;
       if (suspended) {

@@ -1556,7 +1556,11 @@ const domainSchema = z.object({
   click_tracking: z.boolean(),
   tracking_subdomain: z.string().nullable(),
   capabilities: z.object({
-    sending: z.string().describe("Always enabled"),
+    sending: z
+      .string()
+      .describe(
+        "enabled; on the shared row, disabled while the instance pauses sending from the shared domain",
+      ),
     receiving: z
       .string()
       .describe(
@@ -1567,6 +1571,24 @@ const domainSchema = z.object({
     .boolean()
     .describe(
       "MillionSend extension: whether mail to an address without an inbox is stored (true) or refused at RCPT (false)",
+    ),
+  shared: z
+    .boolean()
+    .describe(
+      "MillionSend extension: true on the team's subdomain of the shared inbox domain, a read-only row listed after the team's own domains (403 on changes) that POST /inboxes domain_id takes; false on the team's own domains",
+    ),
+  sending_mode: z
+    .enum(["open", "reply_only", "receive_only"])
+    .optional()
+    .describe(
+      "MillionSend extension, on the shared row only: what its inboxes' addresses may send. open starts conversations, reply_only replies inside their threads, receive_only sends nothing. Holds on names still apply per send: an address whose username or from_name imitates a brand, or one on an older label that does, replies only, whatever the mode says.",
+    ),
+  sending_mode_reason: z
+    .enum(["plan", "instance"])
+    .nullable()
+    .optional()
+    .describe(
+      "MillionSend extension, on the shared row only: what holds sending below open, the team's plan or the instance; null when open",
     ),
 });
 
@@ -1728,7 +1750,8 @@ export const createApiKeyRequestSchema = z
       .uuid()
       .nullish()
       .describe(
-        "Restricts the key to sending from this one verified domain. Omitted or null, the key " +
+        "Restricts the key to sending from this one verified domain of the team: a GET /domains " +
+          "row with shared: false. Omitted or null, the key " +
           "inherits the calling key's scope: all domains, or the calling key's domain if it is " +
           "domain-scoped. A domain-scoped calling key cannot name any other domain " +
           "(403 restricted_api_key).",

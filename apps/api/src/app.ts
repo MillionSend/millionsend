@@ -704,6 +704,9 @@ function clientIp(c: Context, isCloud: boolean): string | null {
   }
 }
 
+/** Page size of a Resend list when the request has no limit. */
+export const DEFAULT_PAGE_LIMIT = 20;
+
 export const KEYSET_LIST_DESCRIPTION =
   "Newest first, as on Resend, with cursor pagination: `after` takes the last id of a page and pages toward older items, `before` takes the first id and pages back toward newer ones.";
 
@@ -725,7 +728,7 @@ export async function keysetPage<R>(opts: {
   loadRows: (cond: SQL | undefined, orderBy: SQL[], take: number) => Promise<R[]>;
 }): Promise<{ rows: R[]; hasMore: boolean } | "bad_cursor"> {
   const { query } = opts;
-  const limit = query.limit ?? 20;
+  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
   const cursorId = query.before ?? query.after;
   const towardNewer = Boolean(query.before);
   let cond: SQL | undefined;
@@ -753,7 +756,7 @@ export function arrayPage<T extends { id: string }>(
   items: readonly T[],
   query: ListQuery,
 ): { rows: T[]; hasMore: boolean } | "bad_cursor" {
-  const limit = query.limit ?? 20;
+  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
   const cursorId = query.before ?? query.after;
   let start = 0;
   let end = items.length;
