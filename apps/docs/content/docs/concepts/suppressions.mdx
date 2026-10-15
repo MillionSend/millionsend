@@ -68,8 +68,8 @@ Resend SDK's `suppressions.*` methods work as-is. Each entry reads as
 `complaint`, `manual` or `unsubscribe` and `source_id` is the email whose
 bounce or complaint created it.
 
-- `GET /suppressions?origin=bounce` — keyset-paginated list, optionally
-  filtered by origin.
+- `GET /suppressions?origin=bounce` — keyset-paginated list, newest first,
+  optionally filtered by origin.
 - `GET /suppressions/{id}` and `DELETE /suppressions/{id}` — the path
   segment is the suppression id or the email address.
 - `POST /suppressions` with `{ "email": "...", "origin": "manual" }` — blocks

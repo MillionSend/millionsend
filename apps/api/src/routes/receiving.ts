@@ -283,7 +283,6 @@ export function registerReceivingRoutes(
           query: q,
           createdAt: t.createdAt,
           id: t.id,
-          newestFirst: true,
           loadCursor: async (id) =>
             (
               await db

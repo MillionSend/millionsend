@@ -720,7 +720,7 @@ function buildServer(
     {
       title: "List contacts",
       description:
-        "List contacts of the team, oldest first, with cursor pagination. segment_id limits the list to that segment's members; include=properties,topics attaches the typed property map and the topic subscriptions to every item.",
+        "List contacts of the team, newest first, with cursor pagination (after pages toward older contacts). segment_id limits the list to that segment's members; include=properties,topics attaches the typed property map and the topic subscriptions to every item.",
       inputSchema: listContactsQuerySchema.extend({
         segment_id: z.uuid().optional().describe("Only contacts in this segment"),
       }),
@@ -818,7 +818,7 @@ function buildServer(
     {
       title: "List suppressions",
       description:
-        "List suppressed addresses — bounces, complaints and manual blocks that every send skips, plus unsubscribes that block topic sends and broadcasts only — oldest first, with cursor pagination. origin filters to one kind. Addresses erased for GDPR/LGPD are hidden here and reachable by id only.",
+        "List suppressed addresses — bounces, complaints and manual blocks that every send skips, plus unsubscribes that block topic sends and broadcasts only — newest first, with cursor pagination (after pages toward older entries). origin filters to one kind. Addresses erased for GDPR/LGPD are hidden here and reachable by id only.",
       inputSchema: listSuppressionsQuerySchema,
       readOnly: true,
     },
@@ -866,7 +866,7 @@ function buildServer(
     {
       title: "List templates",
       description:
-        "List email templates (name, alias, timestamps), oldest first, with cursor pagination.",
+        "List email templates (name, alias, timestamps), newest first, with cursor pagination (after pages toward older templates).",
       inputSchema: listQuerySchema,
       readOnly: true,
     },

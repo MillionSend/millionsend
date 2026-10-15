@@ -2,7 +2,13 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, desc, eq } from "drizzle-orm";
-import { type Env, errorBody, keysetPage, numericPropertyValue } from "../app.js";
+import {
+  type Env,
+  errorBody,
+  KEYSET_LIST_DESCRIPTION,
+  keysetPage,
+  numericPropertyValue,
+} from "../app.js";
 import {
   contactPropertyIdResponseSchema,
   createContactPropertyRequestSchema,
@@ -98,6 +104,7 @@ export function registerContactPropertyRoutes(app: OpenAPIHono<Env>, db: Db): vo
     createRoute({
       method: "get",
       path: "/contact-properties",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {

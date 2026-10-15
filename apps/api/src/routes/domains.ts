@@ -49,7 +49,14 @@ import {
   verificationDbPatch,
 } from "@millionsend/ses";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
-import { type ApiDeps, type Env, errorBody, isUniqueViolation, keysetPage } from "../app.js";
+import {
+  type ApiDeps,
+  type Env,
+  errorBody,
+  isUniqueViolation,
+  KEYSET_LIST_DESCRIPTION,
+  keysetPage,
+} from "../app.js";
 import {
   createDomainRequestSchema,
   createDomainResponseSchema,
@@ -602,6 +609,7 @@ export function registerDomainRoutes(
     createRoute({
       method: "get",
       path: "/domains",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {

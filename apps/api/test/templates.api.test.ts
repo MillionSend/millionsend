@@ -213,9 +213,9 @@ describe("GET /templates", () => {
       expect(row.status).toBe("published");
       expect(row.published_at).toBe(row.created_at);
     }
-    // Oldest first, like the other lists.
+    // Newest first, like the other lists.
     const times = body.data.map((r) => String(r.created_at));
-    expect([...times].sort()).toEqual(times);
+    expect([...times].sort().reverse()).toEqual(times);
 
     const first = await call(fullKey, "GET", "/templates?limit=1");
     const firstBody = (await first.json()) as { data: { id: string }[]; has_more: boolean };

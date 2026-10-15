@@ -15,7 +15,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { type Env, errorBody, keysetPage } from "../app.js";
+import { type Env, errorBody, KEYSET_LIST_DESCRIPTION, keysetPage } from "../app.js";
 import {
   createWebhookRequestSchema,
   createWebhookResponseSchema,
@@ -139,6 +139,7 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
     createRoute({
       method: "get",
       path: "/webhooks",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {

@@ -725,17 +725,18 @@ function clientIp(c: Context, isCloud: boolean): string | null {
   }
 }
 
+export const KEYSET_LIST_DESCRIPTION =
+  "Newest first, as on Resend, with cursor pagination: `after` takes the last id of a page and pages toward older items, `before` takes the first id and pages back toward newer ones.";
+
 /**
  * Keyset pagination for the Resend list endpoints: limit 1-100 (default 20),
- * `after`/`before` cursors are item ids, rows ordered by (created_at, id),
- * oldest first unless `newestFirst` (Resend's order, `after` paging toward
- * older items).
+ * `after`/`before` cursors are item ids, rows newest first by (created_at, id)
+ * as on Resend: `after` pages toward older items, `before` back toward newer.
  */
 export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
-  newestFirst?: boolean;
   /** Resolves a cursor id to its sort key, scoped to the caller's team. */
   loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
   loadRows: (cond: SQL | undefined, descending: boolean, take: number) => Promise<R[]>;
@@ -743,7 +744,7 @@ export async function keysetPage<R>(opts: {
   const { query } = opts;
   const limit = query.limit ?? 20;
   const cursorId = query.before ?? query.after;
-  const towardNewer = opts.newestFirst ? Boolean(query.before) : !query.before;
+  const towardNewer = Boolean(query.before);
   let cond: SQL | undefined;
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
@@ -1781,6 +1782,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/contacts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listContactsQuerySchema },
       responses: {
         200: {
@@ -2540,6 +2542,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -2617,6 +2620,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments/{id}/contacts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { params: idParam, query: listContactsQuerySchema },
       responses: {
         200: {
@@ -3129,6 +3133,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/broadcasts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -4720,8 +4725,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const listEmailsRoute = createRoute({
     method: "get",
     path: "/emails",
-    description:
-      "The team's emails, newest first as on Resend (`after` pages toward older emails), with cursor pagination.",
+    description: KEYSET_LIST_DESCRIPTION,
     middleware: [requireFullAccess],
     request: { query: listQuerySchema },
     responses: {
@@ -4744,7 +4748,6 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       query: c.req.valid("query"),
       createdAt: t.createdAt,
       id: t.id,
-      newestFirst: true,
       loadCursor: async (id) =>
         (
           await deps.db

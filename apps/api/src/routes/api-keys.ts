@@ -13,7 +13,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, count, desc, eq, isNull } from "drizzle-orm";
-import { type Env, errorBody, keysetPage } from "../app.js";
+import { type Env, errorBody, KEYSET_LIST_DESCRIPTION, keysetPage } from "../app.js";
 import {
   createApiKeyRequestSchema,
   createApiKeyResponseSchema,
@@ -195,6 +195,7 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/api-keys",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {

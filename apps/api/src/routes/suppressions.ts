@@ -12,7 +12,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
-import { type Env, errorBody, keysetPage } from "../app.js";
+import { type Env, errorBody, KEYSET_LIST_DESCRIPTION, keysetPage } from "../app.js";
 import {
   batchAddSuppressionsRequestSchema,
   batchAddSuppressionsResponseSchema,
@@ -266,6 +266,7 @@ export function registerSuppressionRoutes(
     createRoute({
       method: "get",
       path: "/suppressions",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listSuppressionsQuerySchema },
       responses: {
         200: {

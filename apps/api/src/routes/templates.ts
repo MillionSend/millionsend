@@ -2,7 +2,13 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, desc, eq } from "drizzle-orm";
-import { type Env, errorBody, isUniqueViolation, keysetPage } from "../app.js";
+import {
+  type Env,
+  errorBody,
+  isUniqueViolation,
+  KEYSET_LIST_DESCRIPTION,
+  keysetPage,
+} from "../app.js";
 import {
   createTemplateRequestSchema,
   errorSchema,
@@ -128,6 +134,7 @@ export function registerTemplateRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/templates",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
