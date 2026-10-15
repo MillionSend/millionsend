@@ -333,17 +333,92 @@ export function ConvertBlocksDialog({
   inPlaceLabel: string;
 }) {
   const t = useTranslations("templates");
+  return (
+    <EditorModeDialog
+      open={open}
+      busy={busy}
+      title={t("html.convertTitle")}
+      body={t("html.convertBody")}
+      copyLabel={t("html.convertCopy")}
+      inPlaceLabel={inPlaceLabel}
+      onClose={onClose}
+      onDuplicate={onDuplicate}
+      onInPlace={onConvertInPlace}
+    />
+  );
+}
+
+/**
+ * The guarded blocks→html switch of a template with content. The block
+ * document is replaced by its rendered html; the way back flattens, so the
+ * dialog offers the copy first, like the conversion does.
+ */
+export function SwitchHtmlDialog({
+  open,
+  busy = false,
+  onClose,
+  onDuplicate,
+  onSwitchInPlace,
+}: {
+  open: boolean;
+  /** The render of the current document is in flight, or the copy is being created. */
+  busy?: boolean;
+  onClose: () => void;
+  /** Absent on a template that is not saved yet: there is nothing to copy from. */
+  onDuplicate?: (() => void) | undefined;
+  onSwitchInPlace: () => void;
+}) {
+  const t = useTranslations("templates");
+  return (
+    <EditorModeDialog
+      open={open}
+      busy={busy}
+      title={t("html.switchTitle")}
+      body={t("html.switchBody")}
+      copyLabel={t("html.switchCopy")}
+      inPlaceLabel={t("html.switchInPlace")}
+      onClose={onClose}
+      onDuplicate={onDuplicate}
+      onInPlace={onSwitchInPlace}
+    />
+  );
+}
+
+/**
+ * One body-editor change dialog for both directions. With `onDuplicate` the
+ * copy is the primary path (⌘↵) and the in-place button is destructive in
+ * tone; without it, in place is the only — and primary — way forward.
+ */
+function EditorModeDialog({
+  open,
+  busy,
+  title,
+  body,
+  copyLabel,
+  inPlaceLabel,
+  onClose,
+  onDuplicate,
+  onInPlace,
+}: {
+  open: boolean;
+  busy: boolean;
+  title: string;
+  body: string;
+  copyLabel: string;
+  inPlaceLabel: string;
+  onClose: () => void;
+  onDuplicate?: (() => void) | undefined;
+  onInPlace: () => void;
+}) {
   const common = useTranslations("common");
   // Same guard as the primary button — Modal's ⌘↵ path routes through here too.
-  const primary = onDuplicate ?? onConvertInPlace;
+  const primary = onDuplicate ?? onInPlace;
   const confirm = () => {
     if (!busy) primary();
   };
   return (
-    <Modal open={open} onClose={onClose} onConfirm={confirm} title={t("html.convertTitle")}>
-      <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-        {t("html.convertBody")}
-      </p>
+    <Modal open={open} onClose={onClose} onConfirm={confirm} title={title}>
+      <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{body}</p>
       <ModalFooter>
         <span className="ms-tpl-convert-actions">
           <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
@@ -353,7 +428,7 @@ export function ConvertBlocksDialog({
             type="button"
             className="ms-btn ms-btn-destructive"
             disabled={busy}
-            onClick={onConvertInPlace}
+            onClick={onInPlace}
           >
             {onDuplicate ? (
               inPlaceLabel
@@ -371,7 +446,7 @@ export function ConvertBlocksDialog({
               onClick={confirm}
             >
               <BtnSpinner on={busy} />
-              {t("html.convertCopy")} <ConfirmKeycap />
+              {copyLabel} <ConfirmKeycap />
             </button>
           ) : null}
         </span>

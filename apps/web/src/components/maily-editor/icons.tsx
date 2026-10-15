@@ -140,3 +140,10 @@ export function SearchIcon(p: IconProps) {
     </Svg>
   );
 }
+export function CodeIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5" />
+    </Svg>
+  );
+}

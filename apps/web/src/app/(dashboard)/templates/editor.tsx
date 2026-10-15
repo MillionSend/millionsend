@@ -5,18 +5,29 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DraftBanner } from "@/components/draft-banner";
+import { CodeIcon } from "@/components/maily-editor/icons";
 import { MailyEditor } from "@/components/maily-editor/lazy";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { isMailyDoc } from "@/lib/email-doc";
+import { isEmptyMailyDoc, isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
-import { blocksCopyName, bodyEditorMode, templateSaveInput } from "@/lib/template-mode";
+import {
+  blocksCopyName,
+  bodyEditorMode,
+  htmlCopyName,
+  templateSaveInput,
+} from "@/lib/template-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { confirmUnsavedNavigation, useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ContentPreview } from "../broadcasts/parts";
-import { ConvertBlocksDialog, HtmlAuthoredBanner, HtmlCodeMode } from "./html-mode";
+import {
+  ConvertBlocksDialog,
+  HtmlAuthoredBanner,
+  HtmlCodeMode,
+  SwitchHtmlDialog,
+} from "./html-mode";
 
 /** Everything a crash would lose — mirrored into the local draft. */
 interface TemplateDraft {
@@ -84,14 +95,18 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   // html seed and emits its parse. Until then a document-less row never
   // reaches the block editor — its html would be flattened on the first edit.
   const [converting, setConverting] = useState(false);
-  const mode = bodyEditorMode({ document, html, converting });
-  // Html-authored rows open on their faithful preview, not on an editor.
-  const [tab, setTab] = useState<"edit" | "preview">(() =>
-    bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) === "code"
-      ? "preview"
-      : "edit",
+  // Set by "Edit as HTML" (and for a row that opened html-authored): the body
+  // edits as source even while its html is empty, so clearing the textarea
+  // never drops the user into the block editor. "Convert to blocks" clears it.
+  const [asCode, setAsCode] = useState(
+    () =>
+      bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) === "code",
   );
+  const mode = bodyEditorMode({ document, html, converting, asCode });
+  // Html-authored rows open on their faithful preview, not on an editor.
+  const [tab, setTab] = useState<"edit" | "preview">(() => (asCode ? "preview" : "edit"));
   const [convertOpen, setConvertOpen] = useState(false);
+  const [switchOpen, setSwitchOpen] = useState(false);
 
   // Unsaved-body tracking for the native leave warning: the baseline is the
   // last-persisted document (or the editor's very first emit for a new one);
@@ -171,10 +186,11 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
     ),
   );
   useEffect(() => {
-    if (!rendered.data) return;
+    // A render that lands after a switch to code must not overwrite the source.
+    if (!rendered.data || mode !== "blocks") return;
     setHtml(rendered.data.html);
     setText(rendered.data.text);
-  }, [rendered.data]);
+  }, [rendered.data, mode]);
 
   const createMutation = useMutation(trpc.templates.create.mutationOptions());
   const updateMutation = useMutation(trpc.templates.update.mutationOptions());
@@ -251,6 +267,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   const closeConvert = useCallback(() => setConvertOpen(false), []);
   const convertInPlace = useCallback(() => {
     setConvertOpen(false);
+    setAsCode(false);
     setConverting(true);
     setTab("edit");
   }, []);
@@ -280,6 +297,82 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
       // Shown via the create mutation's error state.
     }
   }
+
+  // Blocks→html. The source is the server render of the current document,
+  // fetched now rather than read from `html`, which lags a debounce and a
+  // round trip behind the editor. An empty document switches on the spot —
+  // there is nothing to lose and nothing to render; anything else goes
+  // through the dialog, since the block document is dropped on the next save.
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState(false);
+  // No block document yet (the editor has not emitted, or a conversion is
+  // still parsing): the html on hand is the source already.
+  const bodyEmpty = isMailyDoc(document) ? isEmptyMailyDoc(document) : html.trim() === "";
+  async function renderCurrent(): Promise<{ html: string; text: string }> {
+    if (!isMailyDoc(document)) return { html, text };
+    if (isEmptyMailyDoc(document)) return { html: "", text: "" };
+    return queryClient.fetchQuery(trpc.email.render.queryOptions({ document }));
+  }
+  function enterCode(source: { html: string; text: string }) {
+    setHtml(source.html);
+    setText(source.text);
+    setDocument(null);
+    setConverting(false);
+    setAsCode(true);
+    setTab("edit");
+    // Until the next save the row still holds a block document, so no html
+    // can match it: poison the baseline, as a restored draft does.
+    if (initial) {
+      savedHtml.current = "__switched__";
+      setDirty(true);
+    }
+  }
+  function requestCode() {
+    setSwitchError(false);
+    if (bodyEmpty) enterCode({ html: "", text: "" });
+    else setSwitchOpen(true);
+  }
+  async function switchInPlace() {
+    setSwitching(true);
+    try {
+      const source = await renderCurrent();
+      setSwitchOpen(false);
+      enterCode(source);
+    } catch {
+      setSwitchError(true);
+    } finally {
+      setSwitching(false);
+    }
+  }
+  async function duplicateAsHtml() {
+    // Same leave rule as the converted copy: we navigate to the new row.
+    if (!confirmUnsavedNavigation()) return;
+    setSwitching(true);
+    try {
+      const source = await renderCurrent().catch(() => null);
+      if (source === null) {
+        setSwitchError(true);
+        return;
+      }
+      const { id } = await createMutation.mutateAsync(
+        templateSaveInput("code", {
+          name: htmlCopyName(name),
+          subject,
+          html: source.html,
+          text: source.text,
+          document: null,
+        }),
+      );
+      setSwitchOpen(false);
+      queryClient.invalidateQueries(trpc.templates.pathFilter());
+      router.push(`/templates/${id}/edit`);
+    } catch {
+      // Shown via the create mutation's error state.
+    } finally {
+      setSwitching(false);
+    }
+  }
+  const shownError = errorText ?? (switchError ? t("html.switchError") : null);
 
   const wideBody = mode === "code" && tab === "edit";
 
@@ -373,7 +466,18 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
             <label htmlFor="tpl-html" style={{ marginBottom: 0 }}>
               {t("editor.htmlLabel")}
             </label>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {mode === "blocks" ? (
+                <button
+                  type="button"
+                  className="ms-maily-tool ms-maily-tool-labeled"
+                  style={{ marginRight: 6 }}
+                  onClick={requestCode}
+                >
+                  <CodeIcon size={14} />
+                  {t("html.editAsHtml")}
+                </button>
+              ) : null}
               {(["edit", "preview"] as const).map((key) => (
                 <button
                   key={key}
@@ -468,12 +572,20 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
           ) : null}
         </div>
 
-        {errorText ? (
+        {shownError ? (
           <p className="ms-field-error" style={{ margin: 0 }}>
-            {errorText}
+            {shownError}
           </p>
         ) : null}
       </div>
+
+      <SwitchHtmlDialog
+        open={switchOpen}
+        busy={switching}
+        onClose={() => setSwitchOpen(false)}
+        onDuplicate={initial ? duplicateAsHtml : undefined}
+        onSwitchInPlace={switchInPlace}
+      />
 
       <ConvertBlocksDialog
         open={convertOpen}

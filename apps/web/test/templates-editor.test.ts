@@ -1,7 +1,12 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { blocksCopyName, bodyEditorMode, templateSaveInput } from "@/lib/template-mode";
+import {
+  blocksCopyName,
+  bodyEditorMode,
+  htmlCopyName,
+  templateSaveInput,
+} from "@/lib/template-mode";
 
 // The editor pages are client components; a static render with the data hooks
 // stubbed is enough to see which editor mounts and what the row shows.
@@ -45,7 +50,9 @@ vi.mock("@/components/modal", () => ({
 }));
 
 const { TemplateEditor } = await import("@/app/(dashboard)/templates/editor");
-const { ConvertBlocksDialog, HtmlCodeMode } = await import("@/app/(dashboard)/templates/html-mode");
+const { ConvertBlocksDialog, HtmlCodeMode, SwitchHtmlDialog } = await import(
+  "@/app/(dashboard)/templates/html-mode"
+);
 const { default: TemplatesPage } = await import("@/app/(dashboard)/templates/page");
 
 const MAILY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
@@ -84,6 +91,19 @@ describe("template editor mode", () => {
     expect(out).not.toContain("templates.html.banner");
   });
 
+  it("offers Edit as HTML beside the tabs of a block body only", () => {
+    const blocks = renderToStaticMarkup(
+      createElement(TemplateEditor, { initial: { ...HTML_ROW, document: MAILY_DOC } }),
+    );
+    expect(blocks).toMatch(/templates\.html\.editAsHtml<\/button>.*templates\.editor\.editTab/);
+    expect(renderToStaticMarkup(createElement(TemplateEditor, {}))).toContain(
+      "templates.html.editAsHtml",
+    );
+    // An html-authored row is already source; its preview banner has Edit HTML.
+    const html = renderToStaticMarkup(createElement(TemplateEditor, { initial: HTML_ROW }));
+    expect(html).not.toContain("templates.html.editAsHtml");
+  });
+
   it("lays name and subject out as one row", () => {
     const out = renderToStaticMarkup(createElement(TemplateEditor, { initial: HTML_ROW }));
     expect(out).toMatch(/class="ms-tpl-meta"[^>]*>.*id="tpl-name".*id="tpl-subject"/);
@@ -96,6 +116,16 @@ describe("template editor mode", () => {
     expect(bodyEditorMode({ document: MAILY_DOC, html })).toBe("blocks");
     expect(bodyEditorMode({ document: null, html: "  " })).toBe("blocks");
     expect(bodyEditorMode({ document: null, html, converting: true })).toBe("blocks");
+  });
+
+  it("keeps code mode once chosen, even while the html is empty", () => {
+    // Edit as HTML on a new template, or an html-authored row cleared out.
+    expect(bodyEditorMode({ document: null, html: "", asCode: true })).toBe("code");
+    expect(bodyEditorMode({ document: MAILY_DOC, html: "<p>x</p>", asCode: true })).toBe("code");
+    // Convert to blocks clears the choice; the editor never arms both.
+    expect(bodyEditorMode({ document: null, html: "", converting: true, asCode: true })).toBe(
+      "blocks",
+    );
   });
 });
 
@@ -159,6 +189,7 @@ describe("code-mode save", () => {
 
   it("names the converted copy after the original", () => {
     expect(blocksCopyName(" Welcome ")).toBe("Welcome (blocks)");
+    expect(htmlCopyName(" Welcome ")).toBe("Welcome (HTML)");
   });
 });
 
@@ -209,6 +240,39 @@ describe("convert-to-blocks dialog", () => {
       }),
     );
     expect(out).toBe("");
+  });
+});
+
+describe("edit-as-html dialog", () => {
+  it("offers the duplicate (primary) and in-place (destructive) actions on a saved template", () => {
+    const out = renderToStaticMarkup(
+      createElement(SwitchHtmlDialog, {
+        open: true,
+        busy: false,
+        onClose: () => {},
+        onDuplicate: () => {},
+        onSwitchInPlace: () => {},
+      }),
+    );
+    expect(out).toContain("templates.html.switchTitle");
+    expect(out).toContain("templates.html.switchBody");
+    expect(out).toMatch(/ms-btn-destructive"[^>]*>templates\.html\.switchInPlace</);
+    expect(out).toMatch(/ms-btn-primary"[^>]*>(<[^>]*>)*templates\.html\.switchCopy /);
+    expect(out.indexOf("ms-btn-destructive")).toBeLessThan(out.indexOf("ms-btn-primary"));
+  });
+
+  it("on an unsaved template, switching in place is the only, confirmable action", () => {
+    const out = renderToStaticMarkup(
+      createElement(SwitchHtmlDialog, {
+        open: true,
+        onClose: () => {},
+        onDuplicate: undefined,
+        onSwitchInPlace: () => {},
+      }),
+    );
+    expect(out).not.toContain("ms-btn-primary");
+    expect(out).not.toContain("templates.html.switchCopy");
+    expect(out).toMatch(/ms-btn-destructive"[^>]*>templates\.html\.switchInPlace /);
   });
 });
 
