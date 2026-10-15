@@ -546,7 +546,7 @@
       },
       "inbox_attention": {
         "label": "Inbox alerts",
-        "note": "Quarantine, drafts to approve and held sends, at most once a day."
+        "note": "Quarantine, drafts to approve and refused sends, at most once a day."
       },
       "billing_payment_failed": {
         "label": "Payment failed",

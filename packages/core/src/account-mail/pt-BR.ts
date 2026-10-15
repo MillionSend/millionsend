@@ -254,11 +254,16 @@ export const ptBR = {
   },
   "inbox.attention": {
     subject: "Suas caixas de entrada precisam de atenção",
-    body: [
-      "Até agora hoje: {quarantined} e-mails em quarentena, {drafts} rascunhos aguardando aprovação e {refused} envios barrados pelas regras das suas caixas.",
-      "Revise no painel.",
-    ],
+    body: ["Até agora hoje: {counts}.", "Revise no painel."],
     button: "Revisar caixas",
+    extra: {
+      "quarantined.one": "{n} e-mail em quarentena",
+      "quarantined.other": "{n} e-mails em quarentena",
+      "drafts.one": "{n} rascunho aguardando aprovação",
+      "drafts.other": "{n} rascunhos aguardando aprovação",
+      "refused.one": "{n} envio barrado pelas regras das suas caixas",
+      "refused.other": "{n} envios barrados pelas regras das suas caixas",
+    },
   },
   "billing.payment_failed": {
     subject: "Pagamento recusado no seu plano {plan}",

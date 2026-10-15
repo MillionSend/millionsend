@@ -20,6 +20,7 @@ import {
   freeCapText,
   type MailContent,
   type MailLocale,
+  mailCountList,
   nextUtcDayStart,
   OVERAGE_HARD_CAP,
   PAUSE_BOUNCE_RATE,
@@ -639,9 +640,11 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
         row.team_id,
         "inbox.attention",
         account("inbox.attention", "/inboxes", (locale) => ({
-          quarantined: row.quarantined.toLocaleString(locale),
-          drafts: row.drafts.toLocaleString(locale),
-          refused: row.refused.toLocaleString(locale),
+          counts: mailCountList(locale, "inbox.attention", {
+            quarantined: row.quarantined,
+            drafts: row.drafts,
+            refused: row.refused,
+          }),
         })),
       ),
     );

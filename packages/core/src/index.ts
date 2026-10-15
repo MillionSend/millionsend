@@ -153,6 +153,7 @@ export {
   type MailContent,
   type MailLocale,
   type MailPhraseKey,
+  mailCountList,
   type PlanMove,
   type PlanSnapshot,
   planCapPhrase,

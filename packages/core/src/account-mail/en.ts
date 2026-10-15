@@ -244,11 +244,16 @@ export const en = {
   },
   "inbox.attention": {
     subject: "Your inboxes need a look",
-    body: [
-      "Today so far: {quarantined} emails in quarantine, {drafts} drafts waiting for approval and {refused} sends held by your inbox rules.",
-      "Review them in the dashboard.",
-    ],
+    body: ["Today so far: {counts}.", "Review them in the dashboard."],
     button: "Review inboxes",
+    extra: {
+      "quarantined.one": "{n} email in quarantine",
+      "quarantined.other": "{n} emails in quarantine",
+      "drafts.one": "{n} draft waiting for approval",
+      "drafts.other": "{n} drafts waiting for approval",
+      "refused.one": "{n} send refused by your inbox rules",
+      "refused.other": "{n} sends refused by your inbox rules",
+    },
   },
   "billing.payment_failed": {
     subject: "Payment failed for your {plan} plan",
