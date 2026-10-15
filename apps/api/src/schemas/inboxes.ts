@@ -13,6 +13,7 @@ import {
   type ThreadFolder,
 } from "@millionsend/core";
 import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
+import { AFTER_CURSOR_DESCRIPTION, BEFORE_CURSOR_DESCRIPTION } from "../schemas.js";
 
 /**
  * Resend's Inboxes beta (/inboxes/**), plus MillionSend's extension keys.
@@ -438,8 +439,8 @@ const optionalString = (description: string) => z.string().optional().describe(d
 
 const pagingFields = {
   limit: optionalString("Page size, 1-100 (default 20)"),
-  after: optionalString("The id of the last item of the current page; returns the next page"),
-  before: optionalString("The id of the first item of the current page; returns the previous page"),
+  after: optionalString(AFTER_CURSOR_DESCRIPTION),
+  before: optionalString(BEFORE_CURSOR_DESCRIPTION),
 };
 
 export const pagingQuerySchema = z.object(pagingFields);

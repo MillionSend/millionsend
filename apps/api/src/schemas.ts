@@ -658,6 +658,12 @@ export const usageResponseSchema = z
   })
   .openapi("UsageResponse");
 
+// Order-neutral: lists that don't run newest first share these fields too.
+export const AFTER_CURSOR_DESCRIPTION =
+  "Cursor: id of the last item of the current page; returns the next page. Must be an id this list returned; there is no sentinel value.";
+export const BEFORE_CURSOR_DESCRIPTION =
+  "Cursor: id of the first item of the current page; returns the previous page; same rule as after.";
+
 /**
  * Resend SDK pagination (buildPaginationQuery): ?limit=&after= / ?before=,
  * limit 1-100 (default 20), cursors are item ids, after and before are
@@ -671,18 +677,8 @@ const listQueryFields = z.object({
     .max(100)
     .optional()
     .describe("Page size, 1-100 (default 20)"),
-  after: z
-    .uuid()
-    .optional()
-    .describe(
-      "Cursor: id of the last item of the previous page. Must be an id this list returned; there is no sentinel value.",
-    ),
-  before: z
-    .uuid()
-    .optional()
-    .describe(
-      "Cursor: id of the first item of the next page (page backwards); same rule as after.",
-    ),
+  after: z.uuid().optional().describe(AFTER_CURSOR_DESCRIPTION),
+  before: z.uuid().optional().describe(BEFORE_CURSOR_DESCRIPTION),
 });
 const oneCursor = <T extends z.ZodObject>(fields: T) =>
   fields.refine((q) => !(q.after && q.before), {
