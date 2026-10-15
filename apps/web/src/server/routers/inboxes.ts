@@ -47,6 +47,7 @@ import {
   updateThread,
   visibleLine,
 } from "@millionsend/core";
+import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, gt, inArray, max, sql } from "drizzle-orm";
@@ -405,7 +406,7 @@ export const inboxesRouter = router({
     .input(
       z.object({
         kind: z.enum(INBOX_KINDS),
-        name: z.string().trim().max(64).optional(),
+        name: z.string().trim().max(INBOX_NAME_MAX).optional(),
         // With domainId, the address's local part; without, the shared address's username.
         localPart: z.string().trim().toLowerCase().min(1).max(64).optional(),
         domainId: z.uuid().optional(),
@@ -450,7 +451,7 @@ export const inboxesRouter = router({
     .input(
       z.object({
         id: z.uuid(),
-        name: z.string().trim().min(1).max(64).optional(),
+        name: z.string().trim().min(1).max(INBOX_NAME_MAX).optional(),
         fromName: z.string().trim().max(78).optional(),
         expiresIn: z.enum(EXPIRY_CHOICES).nullable().optional(),
       }),

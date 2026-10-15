@@ -255,6 +255,13 @@ Errors use Resend's format:
 A body that isn't valid JSON answers `400 invalid_parameter`, and a body sent
 with a `Content-Type` other than `application/json` answers `415`.
 
+A path the API doesn't have, or a method its path doesn't take, answers
+`404 not_found` with the message `The requested endpoint does not exist.`
+(Resend answers a wrong method with `405 method_not_allowed`). A wrong method
+on a path that also fits a route with an id goes to that route instead:
+`GET /emails/batch` is `GET /emails/{id}` with the id `batch`, and answers
+`422 validation_error`.
+
 A NUL character (U+0000) in text the database stores, such as a name, a
 property, a filter or an id in the URL, and a date outside the years 1 to 9999
 answer `422 validation_error`: the database can't store them. An email's `html`
@@ -320,22 +327,30 @@ that was held for approval answers the retry with the same draft, as `202`.
 
 List endpoints accept `limit` (1–100, default 20) plus `after` / `before`
 cursors carrying an item id from a previous page. Responses include
-`has_more`. Lists run oldest first, except where Resend orders them
-otherwise, and there `after` pages toward the end of that order:
+`has_more`. Lists run newest first, as on Resend: `after` takes the last id
+of a page and pages toward older items, `before` takes the first id and
+pages back toward newer ones, and `has_more` says whether more remain that
+way. To pick up what was created since your last read, pass the newest id
+you stored as `before`, then the first id of each page while `has_more` is
+`true`. With `wait`, `/emails/receiving` answers the newest matches instead
+of the ones right after the cursor; see
+[Waiting for new mail](/concepts/receiving#waiting-for-new-mail). These
+lists run in another order:
 
 | List | Order |
 | --- | --- |
-| `GET /emails/receiving` | Newest first: `after` pages toward older mail. |
-| `GET /inboxes` | Newest first. |
 | `GET /inboxes/{id}/threads` and `/threads/search` | Latest activity first. |
 | `GET /inboxes/{id}/threads/{thread_id}/emails` | Oldest first: `after` pages toward newer emails. |
 | `GET /inboxes/{id}/drafts` | Most recently updated first. |
 | `GET /inboxes/{id}/labels` | Oldest first, all at once, without `has_more`. |
-| `GET /inboxes/{id}/quarantine` | Newest first. |
+| `GET /topics` and `/contacts/{id}/topics` | Oldest first, all at once; `has_more` is always `false`. |
+| `GET /emails/receiving/{id}/attachments` | In the email's order, all at once unless you pass `limit`. |
 
-The attachments of a received email come back all at once unless you pass
-`limit`. Under `/inboxes`, a cursor that names no item of the list answers
-`404`, as on Resend.
+A cursor that names no item of the list answers `422 validation_error`;
+under `/inboxes` it answers `404`, as on Resend. That includes a stored id
+whose item was deleted or revoked since and, on `/emails/receiving`, one
+that no longer matches your filters: to catch up, read from the top without
+a cursor and stop at the items you already have.
 
 ## Signed download links
 

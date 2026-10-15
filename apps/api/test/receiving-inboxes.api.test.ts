@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   acquireWaitSlot,
   type DeliverEnvelope,
@@ -142,11 +142,16 @@ async function addKey(values: Partial<typeof schema.apiKeys.$inferInsert> = {}) 
   return key.token;
 }
 
-async function addInbox(emailAddress: string, domainId: string, safety: Record<string, unknown>) {
+async function addInbox(
+  emailAddress: string,
+  domainId: string,
+  safety: Record<string, unknown>,
+  teamId = team,
+) {
   const [row] = await db
     .insert(schema.inboxes)
     .values({
-      teamId: team,
+      teamId,
       kind: "agent",
       emailAddress,
       localPart: emailAddress.split("@")[0] as string,
@@ -243,6 +248,8 @@ describe("GET /emails/receiving with inboxes (S4)", () => {
     expect(list.data.map((d) => d.id)).toEqual([delivered]);
     expect(list.data[0]).not.toHaveProperty("inboxes");
     expect(list.data[0]).toMatchObject({ inbox_id: bot, read: false });
+    const unread = await json<List>(await get(botKey, "/emails/receiving?unread=true"));
+    expect(unread.data.map((d) => d.id)).toEqual([delivered]);
     const wantsHeld = await get(botKey, "/emails/receiving?include_quarantined=true");
     expect(wantsHeld.status).toBe(403);
     expect(await wantsHeld.json()).toMatchObject({
@@ -262,7 +269,28 @@ describe("GET /emails/receiving with inboxes (S4)", () => {
     expect(await ids("subject_contains=VERIFICATION")).toEqual([delivered]);
     expect(await ids(`inbox_id=${bot}&unread=true`)).toEqual([delivered]);
     expect(await ids(`inbox_id=${bot}&unread=false`)).toEqual([]);
-    expect((await get(teamKey, "/emails/receiving?unread=true")).status).toBe(422);
+    const noInbox = await get(teamKey, "/emails/receiving?unread=true");
+    expect(noInbox.status).toBe(422);
+    expect(await noInbox.json()).toMatchObject({
+      name: "validation_error",
+      message: "unread needs inbox_id",
+    });
+  });
+
+  it("answers 404 at once for an inbox the key can't reach, waiting or not", async () => {
+    const other = await createTeam(db, "recv-other");
+    const [otherDomain] = await db
+      .insert(schema.domains)
+      .values({ teamId: other, name: "in.other.test", region: "us-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    const foreign = await addInbox("bot@in.other.test", otherDomain?.id as string, {}, other);
+    const startedAt = Date.now();
+    for (const query of [`inbox_id=${randomUUID()}`, `inbox_id=${foreign}&wait=10`]) {
+      const res = await get(teamKey, `/emails/receiving?${query}`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ name: "not_found", message: "Inbox not found." });
+    }
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
   });
 });
 

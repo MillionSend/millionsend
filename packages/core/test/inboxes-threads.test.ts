@@ -339,7 +339,10 @@ describe("listThreads", () => {
       id: held,
       message_count: 1,
       from: "ana@sender.test",
+      read: true,
+      quarantined: 1,
     });
+    expect("data" in withHeld && withHeld.data.slice(1).map((t) => t.quarantined)).toEqual([0, 0]);
   });
 
   it("filters by read state and labels, and pages with Resend's cursor rules", async () => {
@@ -688,6 +691,14 @@ describe("labels", () => {
       color: "red",
     });
     expect(badColor.ok ? null : badColor.error.status).toBe(422);
+    // Inbox names take up to 320; labels stay at 64.
+    const long = await createLabel(db, deps, {
+      teamId: s.teamId,
+      inboxId: s.inboxId,
+      actor: owner,
+      name: "x".repeat(65),
+    });
+    expect(long.ok ? null : long.error.message).toBe("name must be 1-64 characters on one line");
     if (!red.ok) return;
     const clash = await updateLabel(db, deps, {
       teamId: s.teamId,

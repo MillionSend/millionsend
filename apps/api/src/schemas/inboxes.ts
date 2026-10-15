@@ -12,6 +12,8 @@ import {
   THREAD_FOLDERS,
   type ThreadFolder,
 } from "@millionsend/core";
+import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
+import { AFTER_CURSOR_DESCRIPTION, BEFORE_CURSOR_DESCRIPTION } from "../schemas.js";
 
 /**
  * Resend's Inboxes beta (/inboxes/**), plus MillionSend's extension keys.
@@ -33,11 +35,13 @@ const safetyFields = {
   allowlist: z
     .array(z.string())
     .max(INBOX_ALLOWLIST_MAX)
-    .describe('"local@domain" (exact) or "*@domain" (the domain and its subdomains)'),
+    .describe(
+      '"local@domain" (exact) or "*@domain" (the domain and its subdomains). On the shared domain it only lets mail in',
+    ),
   owner_addresses: z
     .array(z.string())
     .max(INBOX_OWNER_ADDRESSES_MAX)
-    .describe("Owners besides the team members' login addresses"),
+    .describe("Owners besides the team members' login addresses; ignored on the shared domain"),
   screening: z.boolean().describe("Score external mail for prompt injection (agent inboxes only)"),
   extract_codes: z.boolean().describe("Expose extracted codes and sign-in links"),
   send_policy: z
@@ -57,7 +61,9 @@ const safetyFields = {
   forward_to: z
     .array(z.string())
     .max(INBOX_FORWARD_TO_MAX)
-    .describe("Forward every delivered message to these team member or owner addresses"),
+    .describe(
+      "Forward every delivered message to these team member or owner addresses; team members only on the shared domain",
+    ),
 };
 
 export const inboxSafetyPatchBodySchema = z
@@ -96,7 +102,9 @@ export const createInboxRequestSchema = z
     name: z
       .string()
       .optional()
-      .describe("Internal name, 1-64 characters. Defaults to email_address."),
+      .describe(
+        `Internal name, 1-${INBOX_NAME_MAX} characters, so any address fits. Defaults to email_address.`,
+      ),
     from_name: z
       .string()
       .optional()
@@ -265,6 +273,13 @@ const threadListItemSchema = z.object({
   has_attachment: z.boolean(),
   has_draft: z.boolean(),
   read: z.boolean(),
+  quarantined: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "MillionSend extension, with include_quarantined=true: messages in quarantine, not yet released; mail still being screened isn't counted. Held mail never counts as unread",
+    ),
   received_at: z.string(),
   folder: z.enum(THREAD_FOLDERS),
 });
@@ -424,8 +439,8 @@ const optionalString = (description: string) => z.string().optional().describe(d
 
 const pagingFields = {
   limit: optionalString("Page size, 1-100 (default 20)"),
-  after: optionalString("The id of the last item of the current page; returns the next page"),
-  before: optionalString("The id of the first item of the current page; returns the previous page"),
+  after: optionalString(AFTER_CURSOR_DESCRIPTION),
+  before: optionalString(BEFORE_CURSOR_DESCRIPTION),
 };
 
 export const pagingQuerySchema = z.object(pagingFields);
@@ -473,7 +488,15 @@ export const searchThreadsQuerySchema = z.object({
 export const codesQuerySchema = z.object({
   from: optionalString("An exact sender address, or a domain covering itself and its subdomains"),
   wait: optionalString("Seconds to wait for a code to arrive, 0-50 (default 0)"),
-  max_age: optionalString("Oldest mail considered, in seconds, 60-86400 (default 600)"),
+  max_age: optionalString(
+    "How long ago the code may have reached the inbox, in seconds, 60-86400 (default 600); a released code counts from its release",
+  ),
+  since: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      "Only mail received after this ISO 8601 instant, such as the received_at of a code already used",
+    ),
 });
 
 /** Resend's pagination messages, shared by every /inboxes list. */

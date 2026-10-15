@@ -61,7 +61,7 @@ import {
   type InboxWire,
   type ListQuery,
 } from "./types.js";
-import { SHARED_USERNAME } from "./username.js";
+import { INBOX_NAME_MAX, SHARED_USERNAME } from "./username.js";
 import { type InboxCounts, inboxListItemWire, inboxWire } from "./wire.js";
 
 export interface InboxDeps {
@@ -432,7 +432,7 @@ export async function createInbox(
   if (!deps.receivingEnabled) return fail(invalid("This instance does not receive mail"));
   const kind = input.kind ?? "agent";
   if (!INBOX_KINDS.includes(kind)) return fail(invalid("kind must be agent or human"));
-  const name = input.name === undefined ? undefined : oneLineName(input.name);
+  const name = input.name === undefined ? undefined : oneLineName(input.name, INBOX_NAME_MAX);
   if (isInboxError(name)) return fail(name);
   const shared = input.email_address === undefined;
   const fromName = input.from_name === undefined ? null : fromNameOf(input.from_name, shared);
@@ -665,7 +665,7 @@ export async function updateInbox(
   const shared = inbox.domainId === null;
   const set: Partial<typeof schema.inboxes.$inferInsert> = { updatedAt: now };
   if (p.patch.name !== undefined) {
-    const name = oneLineName(p.patch.name);
+    const name = oneLineName(p.patch.name, INBOX_NAME_MAX);
     if (isInboxError(name)) return fail(name);
     set.name = name;
   }

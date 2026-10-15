@@ -268,12 +268,12 @@ o `limit`) e um cursor `after` ou `before`, como toda
 
 | Parâmetro | Lista |
 | --- | --- |
-| `inbox_id` | Os e-mails entregues nessa caixa. |
+| `inbox_id` | Os e-mails entregues nessa caixa. Uma caixa que a chave não alcança responde `404`, sem esperar o `wait`; uma chave restrita a uma caixa que pede outra recebe `403 restricted_api_key`. |
 | `to` | Os e-mails com esse endereço em `received_for`. |
 | `from` | Os e-mails desse endereço, ou de um domínio e dos subdomínios dele. |
 | `subject_contains` | Os e-mails cujo assunto contém o texto (até 200 caracteres). |
 | `since` | Os e-mails recebidos depois desse momento (ISO 8601). |
-| `unread` | `true` ou `false`, junto com `inbox_id`. |
+| `unread` | `true` ou `false`, junto com `inbox_id` (uma chave restrita a uma caixa não precisa dele). |
 | `wait` | Veja [Esperar por e-mails novos](#esperar-por-e-mails-novos). |
 | `include_quarantined=true` | Os retidos também. |
 | `quarantined=true` | Só os retidos. |
@@ -359,6 +359,10 @@ curl "https://api.millionsend.com/emails/receiving?inbox_id=7eeb9517-aed7-40d7-a
   direção aos mais novos, ou mais novos que o `since`. Sem nenhum dos dois,
   contam os últimos 60 segundos, então uma mensagem que chegou logo antes da
   chamada não se perde.
+- Se houver mais e-mails do que o `limit`, ele devolve os mais novos, até o
+  `limit`, com `has_more: true`. Para ler todos, liste sem o `wait`: passe o
+  mesmo `before` e, depois, o primeiro id de cada página enquanto o
+  `has_more` for `true`.
 - A resposta traz também `held`: as mensagens que bateram e ficaram retidas
   desde então, como `{ id, inbox_id, reason, quarantine_reason, created_at }`
   e nada mais, para o agente saber que deve parar de esperar e avisar uma

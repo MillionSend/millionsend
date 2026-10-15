@@ -184,13 +184,19 @@ export const ACCEPT_FROM = [
   "allowlist",
 ] as const satisfies readonly InboxSafety["accept_from"][];
 
-/** What an accept_from choice lets in; "anyone" on a people inbox works like a plain mailbox. */
+/**
+ * What an accept_from choice lets in; "anyone" on a people inbox works like a
+ * plain mailbox, and the shared domain ignores owner addresses.
+ */
 export function acceptFromHint(
   t: ReturnType<typeof useTranslations>,
   kind: string,
+  shared: boolean,
   value: InboxSafety["accept_from"],
 ): string {
-  return t(`acceptFrom.${value === "anyone" && kind === "human" ? "anyoneHuman" : value}Hint`);
+  return t(`acceptFrom.${value === "anyone" && kind === "human" ? "anyoneHuman" : value}Hint`, {
+    shared: shared ? "yes" : "no",
+  });
 }
 
 /**

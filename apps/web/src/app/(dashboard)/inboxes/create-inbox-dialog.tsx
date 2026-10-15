@@ -1,6 +1,6 @@
 "use client";
 
-import { SHARED_USERNAME } from "@millionsend/core/inbox-username";
+import { INBOX_NAME_MAX, SHARED_USERNAME } from "@millionsend/core/inbox-username";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -154,7 +154,7 @@ export function CreateInboxDialog({
             className="ms-input"
             style={{ width: "100%" }}
             value={name}
-            maxLength={64}
+            maxLength={INBOX_NAME_MAX}
             disabled={create.isPending}
             placeholder={t("create.namePlaceholder")}
             onChange={(event) => setName(event.target.value)}
@@ -217,7 +217,7 @@ export function CreateInboxDialog({
           <p
             style={{ margin: "-8px 0 0", fontSize: 12, lineHeight: 1.5, color: "var(--ms-muted)" }}
           >
-            {acceptFromHint(t, kind, acceptFrom)}
+            {acceptFromHint(t, kind, shared, acceptFrom)}
           </p>
         )}
         {error ? (

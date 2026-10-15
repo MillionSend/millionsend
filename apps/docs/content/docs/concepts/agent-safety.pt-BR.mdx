@@ -43,7 +43,7 @@ vale:
 | --- | --- |
 | `failed` | Falhou na autenticação, e o domínio pede para colocar em quarentena ou rejeitar esse tipo de e-mail; ou o domínio não publica política DMARC e falha no SPF sem nenhuma assinatura DKIM própria. Essa linha passa na frente de todas, então um responsável falsificado nunca entra. |
 | `owner` | Um dos endereços de login das pessoas da sua equipe, ou um endereço dos `owner_addresses` da caixa (nunca no domínio compartilhado), e o domínio garante. |
-| `allowlisted` | Bate com a lista de permitidos da caixa, e o domínio garante. |
+| `allowlisted` | Bate com a lista de permitidos da caixa, também no domínio compartilhado, e o domínio garante. |
 | `known_thread` | Responde numa conversa em que a caixa escreveu, a partir de um endereço para o qual a caixa escreveu, comprovado pelo token da conversa no `References` ou por um `In-Reply-To` que aponta uma mensagem enviada pela caixa. Não precisa de autenticação, então um remetente pequeno sem DKIM ainda consegue responder. |
 | `external` | Qualquer outro remetente que o próprio domínio garante, inclusive outros endereços dos seus domínios. |
 | `unauthenticated` | Todo o resto: o domínio não garante o endereço do From, ou a mensagem aponta mais de um remetente. |
@@ -339,8 +339,9 @@ retém como rascunho, com um motivo:
    param depois de uma rodada.
 5. **Reply-To.** Uma resposta a um `Reply-To` no domínio de outra
    organização, a não ser que o remetente seja responsável, esteja na lista
-   de permitidos ou seja uma conversa conhecida (`reply_to_redirect`). Isso
-   impede que um estranho desvie as respostas para outra pessoa.
+   de permitidos ou seja uma conversa conhecida; no domínio compartilhado,
+   seja quem for o remetente (`reply_to_redirect`). Isso impede que um
+   estranho desvie as respostas para outra pessoa.
 6. **Regra de envio** (`send_policy`):
    - `reply_only`, o padrão: respostas dentro de uma conversa, para quem
      escreveu nela, para os responsáveis e para a lista de permitidos.

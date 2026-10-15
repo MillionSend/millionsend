@@ -69,7 +69,13 @@ import {
   threadTokenId,
   verifyForwardMarker,
 } from "./keys.js";
-import { findLiveInbox, RECEIVED_SECRET_WINDOW, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
+import {
+  FORWARD_WAIT_MAX,
+  findLiveInbox,
+  RECEIVED_SECRET_WINDOW,
+  RECIPIENTS_PER_SEND_MAX,
+  SHARED_PAUSED_RETRY_MS,
+} from "./limits.js";
 import {
   type AgentSendDecision,
   type AgentSendInput,
@@ -225,11 +231,14 @@ function replyToTrusted(replyTo: string, from: string, senderTrust: string | nul
   return (senderTrust !== null && TRUSTED_TIERS.has(senderTrust)) || org(replyTo) === org(from);
 }
 
-/** The answered message's Reply-To entries it does not vouch for. */
-export function untrustedReplyTos(target: SendTarget): string[] {
+/**
+ * The answered message's Reply-To entries it does not vouch for. On the
+ * shared domain no sender's tier vouches, as in threadSenders.
+ */
+export function untrustedReplyTos(target: SendTarget, shared: boolean): string[] {
   if (target.direction !== "inbound") return [];
   return target.row.replyTo.filter(
-    (rt) => !replyToTrusted(rt, target.row.from, target.senderTrust),
+    (rt) => !replyToTrusted(rt, target.row.from, shared ? null : target.senderTrust),
   );
 }
 
@@ -1645,7 +1654,7 @@ function prepareReply(
     approved: directlyApproved(c.actor),
     requiresApproval: body.requires_approval === true,
     replyTarget: { automated: target.direction === "inbound" ? target.row.automated : null },
-    untrustedReplyTo: untrustedReplyTos(target),
+    untrustedReplyTo: untrustedReplyTos(target, c.inbox?.domainId === null),
     forwardedSecret: false,
     hold: { type: "reply", forward: false, targetId: target.row.id },
     now: c.now,
@@ -2079,18 +2088,24 @@ export async function sendNewFromInbox(
   });
 }
 
+/** A forward_to copy the shared domain holds back for now: the job runs again at `until`. */
+export type ForwardWait = { kind: "wait"; until: Date };
+
 /**
  * The inbox.forward job: a delivered message passed on, inline, to the
  * inbox's forward_to owners, approved (the owners chose them). Null when
  * there is nothing to forward: not delivered, no live target, malware, the
  * content purged, or a message that is already one of our forwards, which
- * stops two inboxes forwarding to each other after one hop.
+ * stops two inboxes forwarding to each other after one hop. A copy the
+ * shared domain holds back (sending paused, or the team past today's cap)
+ * waits until FORWARD_WAIT_MAX after delivery; past that, the refusal is final.
  */
 export async function forwardToForwardTargets(
   db: Db,
   deps: InboxSendDeps,
   job: { receivedEmailId: string; inboxId: string },
-): Promise<SendOutcome | null> {
+): Promise<SendOutcome | ForwardWait | null> {
+  const now = new Date();
   const m = schema.receivedEmailInboxes;
   const [membership] = await db
     .select()
@@ -2100,10 +2115,12 @@ export async function forwardToForwardTargets(
   const { teamId } = membership;
   const inbox = await findLiveInbox(db, { teamId, inboxId: job.inboxId });
   if (!inbox || inbox.safety.forward_to.length === 0) return null;
-  // Safety was valid when saved; a member may have left the team since.
+  const shared = inbox.domainId === null;
+  // Safety was valid when saved; a member may have left the team since. The
+  // shared domain forwards to members' logins only, as safetyProblem saves.
   const owners = new Set([
     ...(await teamMemberEmails(db, teamId)),
-    ...inbox.safety.owner_addresses.map(addressKey),
+    ...(shared ? [] : inbox.safety.owner_addresses.map(addressKey)),
   ]);
   const targets = inbox.safety.forward_to.filter((a) => owners.has(addressKey(a)));
   if (targets.length === 0) return null;
@@ -2113,6 +2130,17 @@ export async function forwardToForwardTargets(
     .from(r)
     .where(and(eq(r.id, job.receivedEmailId), eq(r.teamId, teamId)));
   if (!row || row.virusVerdict === "fail") return null;
+  const deadline = membership.deliveredAt.getTime() + FORWARD_WAIT_MAX;
+  const waitFor = (ms: number): ForwardWait | null =>
+    now.getTime() + ms <= deadline ? { kind: "wait", until: new Date(now.getTime() + ms) } : null;
+  // Read ahead of the content, so a held copy costs no decrypt and leaves no
+  // refusal row each time it looks; past the deadline the send below refuses it.
+  // ponytail: each held copy polls every SHARED_PAUSED_RETRY_MS until the
+  // deadline; re-arm held copies when the switch turns on if long pauses make that count.
+  if (shared && !(await instanceSettings(db, deps)).sharedInboxSend) {
+    const wait = waitFor(SHARED_PAUSED_RETRY_MS);
+    if (wait) return wait;
+  }
   const opened = await openReceivedForForward(db, deps, { teamId, id: row.id });
   if (
     !opened ||
@@ -2139,7 +2167,7 @@ export async function forwardToForwardTargets(
     },
   );
   const system: InboxActor = { kind: "system" };
-  return dispatchSend(db, deps, {
+  const out = await dispatchSend(db, deps, {
     teamId,
     billing,
     actor: system,
@@ -2166,8 +2194,13 @@ export async function forwardToForwardTargets(
     untrustedReplyTo: [],
     forwardedSecret: false,
     hold: { type: "reply", forward: true, targetId: row.id },
-    now: new Date(),
+    now,
   });
+  // A refusal with a retry-after (the team's daily shared-domain cap) clears with the day.
+  if (out.kind === "refused" && out.error.retryAfterSec !== undefined) {
+    return waitFor(out.error.retryAfterSec * 1000) ?? out;
+  }
+  return out;
 }
 
 /**

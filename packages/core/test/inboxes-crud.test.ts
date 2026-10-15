@@ -630,9 +630,11 @@ describe("createInbox", () => {
     expect(resend.from_name).toBe(long.trim());
     const longName = await create(t.teamId, {
       email_address: `n@${t.receiving}`,
-      name: "x".repeat(65),
+      name: "x".repeat(321),
     });
-    expect(longName.ok).toBe(false);
+    expect(longName.ok ? null : longName.error.message).toBe(
+      "name must be 1-320 characters on one line",
+    );
     const tooLong = await create(t.teamId, {
       email_address: `l@${t.receiving}`,
       expires_in: "366d",
@@ -860,6 +862,25 @@ describe("updateInbox and updateInboxSafety", () => {
       name: "not_found",
       message: "Inbox not found.",
     });
+  });
+
+  it("takes back a name defaulted to a long address, unchanged or set again after a rename", async () => {
+    const t = await team("update-long-name");
+    const inbox = await created(t.teamId, { username: "x".repeat(64) });
+    expect(inbox.name).toBe(inbox.email_address);
+    expect(inbox.name.length).toBeGreaterThan(64);
+    const rename = (name: string) =>
+      updateInbox(db, deps, {
+        teamId: t.teamId,
+        inboxId: inbox.id,
+        actor: api,
+        patch: { name },
+        mayShorten: false,
+      });
+    expect((await rename(inbox.name)).ok).toBe(true);
+    expect((await rename("Desk")).ok).toBe(true);
+    const back = await rename(inbox.email_address);
+    expect(back.ok && back.inbox.name).toBe(inbox.email_address);
   });
 
   it("lets a shared inbox live forever, and reviews a new shared from_name, never a custom one", async () => {

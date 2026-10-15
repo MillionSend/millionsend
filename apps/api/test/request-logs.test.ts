@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 import { INTERNAL_AUTH } from "../src/mcp.js";
-import { LOGGED_JSON_MAX_BYTES, redactLoggedBody } from "../src/request-log.js";
+import { LOGGED_JSON_MAX_BYTES, loggedBody, redactLoggedBody } from "../src/request-log.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -430,15 +430,23 @@ describe("api request logging", () => {
     });
   });
 
-  it("stores null for a non-JSON response", async () => {
+  it("logs an unrouted request with its not_found body", async () => {
     await db.delete(schema.apiRequests);
-    // Authenticated but unrouted: Hono answers with a text/plain 404.
     const res = await call("GET", "/emails/x/y");
     expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")).not.toContain("json");
 
     const [row] = await waitForRows(1);
-    expect(row).toMatchObject({ statusCode: 404, requestBody: null, responseBody: null });
+    expect(row).toMatchObject({
+      statusCode: 404,
+      requestBody: null,
+      responseBody: { statusCode: 404, name: "not_found" },
+    });
+  });
+
+  it("stores null for a non-JSON body", async () => {
+    expect(
+      await loggedBody("/emails/x", "text/plain; charset=UTF-8", null, async () => "plain"),
+    ).toBeNull();
   });
 
   // Kept last: it destroys the api_requests table for this suite's db.

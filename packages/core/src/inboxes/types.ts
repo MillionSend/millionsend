@@ -126,6 +126,8 @@ export interface ThreadListItemWire {
   has_attachment: boolean;
   has_draft: boolean;
   read: boolean;
+  /** Held messages not yet released; present only when held mail is listed. */
+  quarantined?: number;
   /** The thread's last_message_at. */
   received_at: string;
   folder: ThreadFolder;

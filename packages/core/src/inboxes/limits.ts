@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, count, eq, gt, isNull, min, or, type SQL } from "drizzle-orm";
+import type { ApiKeyAuth } from "../api-key-auth.js";
 import type { Plan } from "../plans.js";
 import { MAX_RECEIVED_MESSAGE_BYTES } from "../receiving/protocol.js";
 import { DAY_MS } from "../utc-day.js";
@@ -55,6 +56,10 @@ export const DRAFT_APPROVAL_TTL = 7 * DAY_MS;
 export const TRASH_RETENTION = 30 * DAY_MS;
 /** Milliseconds a received code or link counts as private for outgoing mail. */
 export const RECEIVED_SECRET_WINDOW = 24 * HOUR_MS;
+/** Milliseconds between two looks at the shared-domain switch by mail it holds. */
+export const SHARED_PAUSED_RETRY_MS = 5 * 60_000;
+/** Milliseconds after delivery a forward_to copy may wait for the shared domain to let it out. */
+export const FORWARD_WAIT_MAX = 2 * DAY_MS;
 
 export const LONG_POLL_MAX_SECONDS = 50;
 export const WAITS_PER_TEAM_PER_PROCESS = 20;
@@ -95,6 +100,21 @@ export async function findLiveInbox(
     .where(and(eq(i.teamId, p.teamId), match, liveInbox(p.now ?? new Date())))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * SECURITY: the inbox must be the key's team's, live, the key's own when the
+ * key is inbox-scoped, and on the key's domain when it is domain-scoped (as
+ * its received-mail reads are); anything else reads as not found (null).
+ */
+export async function findKeyInbox(
+  db: Db,
+  key: Pick<ApiKeyAuth, "teamId" | "domainId" | "inboxId">,
+  inboxId: string,
+): Promise<typeof schema.inboxes.$inferSelect | null> {
+  if (key.inboxId && key.inboxId !== inboxId.toLowerCase()) return null;
+  const inbox = await findLiveInbox(db, { teamId: key.teamId, inboxId });
+  return inbox && (key.domainId === null || inbox.domainId === key.domainId) ? inbox : null;
 }
 
 /**

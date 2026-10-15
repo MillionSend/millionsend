@@ -48,8 +48,8 @@ que UUIDs são resolvidos por id primeiro).
 
 - `POST /templates` com `{ name, html, subject?, text?, alias? }` →
   `{ "object": "template", "id": "..." }`.
-- `GET /templates` — listagem com paginação por cursor;
-  `GET /templates/{id-ou-alias}` — o corpo completo.
+- `GET /templates` — listagem com paginação por cursor, do mais novo para o
+  mais antigo; `GET /templates/{id-ou-alias}` — o corpo completo.
 - `PATCH /templates/{id-ou-alias}` — qualquer um dos campos acima; `""` ou
   `null` limpa `subject` ou `text`. Escrever `html` ou `text` transforma um
   template criado no editor de blocos do painel em um de HTML puro (o

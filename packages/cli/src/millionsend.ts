@@ -168,16 +168,25 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
     return { id: body.id, records: body.records };
   };
 
+  /**
+   * Oldest first, whatever order the instance lists in: the plan takes the
+   * first row matching a name or endpoint, and a re-run must pick the same one.
+   */
   async function listAll<T extends { id: string }>(path: string): Promise<T[]> {
-    const rows: T[] = [];
+    type Row = T & { created_at: string };
+    const rows: Row[] = [];
     let after: string | undefined;
     const guard = cursorGuard(path);
     for (;;) {
-      const { body } = await api.get<ListPage<T>>(path, { query: { limit: 100, after } });
+      const { body } = await api.get<ListPage<Row>>(path, { query: { limit: 100, after } });
       guard(body.data, after);
       rows.push(...body.data);
       const last = body.data.at(-1);
-      if (!body.has_more || !last) return rows;
+      if (!body.has_more || !last) {
+        return rows.sort(
+          (a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),
+        );
+      }
       after = last.id;
     }
   }

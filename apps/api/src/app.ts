@@ -356,9 +356,11 @@ export function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
 }
 
-/** Wire message for a failed schema parse: `path: issue; path: issue`. */
+/** Wire message for a failed schema parse: `path: issue; path: issue`, a whole-object issue bare. */
 export function validationMessage(error: z.ZodError): string {
-  return error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+  return error.issues
+    .map((i) => (i.path.length > 0 ? `${i.path.join(".")}: ${i.message}` : i.message))
+    .join("; ");
 }
 
 /**
@@ -723,33 +725,35 @@ function clientIp(c: Context, isCloud: boolean): string | null {
   }
 }
 
+export const KEYSET_LIST_DESCRIPTION =
+  "Newest first, as on Resend, with cursor pagination: `after` takes the last id of a page and pages toward older items, `before` takes the first id and pages back toward newer ones.";
+
 /**
  * Keyset pagination for the Resend list endpoints: limit 1-100 (default 20),
- * `after`/`before` cursors are item ids, rows ordered by (created_at, id),
- * oldest first unless `newestFirst` (Resend's order, `after` paging toward
- * older items).
+ * `after`/`before` cursors are item ids, rows newest first by (created_at, id)
+ * as on Resend: `after` pages toward older items, `before` back toward newer.
  */
 export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
-  newestFirst?: boolean;
   /** Resolves a cursor id to its sort key, scoped to the caller's team. */
   loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
-  loadRows: (cond: SQL | undefined, descending: boolean, take: number) => Promise<R[]>;
+  loadRows: (cond: SQL | undefined, orderBy: SQL[], take: number) => Promise<R[]>;
 }): Promise<{ rows: R[]; hasMore: boolean } | "bad_cursor"> {
   const { query } = opts;
   const limit = query.limit ?? 20;
   const cursorId = query.before ?? query.after;
-  const towardNewer = opts.newestFirst ? Boolean(query.before) : !query.before;
+  const towardNewer = Boolean(query.before);
   let cond: SQL | undefined;
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
     if (!cur) return "bad_cursor";
     cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
   }
+  const dir = towardNewer ? asc : desc;
   // One extra row decides has_more without a count query.
-  const fetched = await opts.loadRows(cond, !towardNewer, limit + 1);
+  const fetched = await opts.loadRows(cond, [dir(opts.createdAt), dir(opts.id)], limit + 1);
   const hasMore = fetched.length > limit;
   const rows = fetched.slice(0, limit);
   // `before` pages are fetched outward from the cursor; responses keep the list's order.
@@ -1779,6 +1783,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/contacts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listContactsQuerySchema },
       responses: {
         200: {
@@ -1802,14 +1807,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .from(t)
               .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(t)
             .where(and(eq(t.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2538,6 +2541,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -2560,14 +2564,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(s)
               .where(and(eq(s.id, id), eq(s.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(s)
             .where(and(eq(s.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(s.createdAt), desc(s.id)] : [asc(s.createdAt), asc(s.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2615,6 +2617,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments/{id}/contacts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { params: idParam, query: listContactsQuerySchema },
       responses: {
         200: {
@@ -2646,14 +2649,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(ct)
               .where(and(eq(ct.id, id), eq(ct.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(ct)
             .where(and(eq(ct.teamId, auth.teamId), inSegment, cond))
-            .orderBy(
-              ...(descending ? [desc(ct.createdAt), desc(ct.id)] : [asc(ct.createdAt), asc(ct.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -3127,6 +3128,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/broadcasts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -3150,14 +3152,12 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .from(b)
               .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(b)
             .where(and(eq(b.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(b.createdAt), desc(b.id)] : [asc(b.createdAt), asc(b.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -3455,8 +3455,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return next();
   });
 
-  // Uncaught throws must still speak Resend's error format — SDK clients
-  // parse the body as JSON.
+  // Uncaught throws and unmatched routes must still speak Resend's error
+  // format — SDK clients parse the body as JSON. The 404 never echoes the
+  // path: it can carry an address, and the request log keeps response bodies.
+  app.notFound((c) =>
+    c.json(errorBody(404, "not_found", "The requested endpoint does not exist."), 404),
+  );
   app.onError((err, c) => {
     // The request validators refuse a malformed JSON body (400) or one that
     // isn't JSON (415) by throwing: the caller's mistake, not ours to report.
@@ -4714,6 +4718,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const listEmailsRoute = createRoute({
     method: "get",
     path: "/emails",
+    description: KEYSET_LIST_DESCRIPTION,
     middleware: [requireFullAccess],
     request: { query: listQuerySchema },
     responses: {
@@ -4743,14 +4748,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             .from(t)
             .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
         )[0],
-      loadRows: (cond, descending, take) =>
+      loadRows: (cond, orderBy, take) =>
         deps.db
           .select()
           .from(t)
           .where(and(eq(t.teamId, auth.teamId), cond))
-          .orderBy(
-            ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-          )
+          .orderBy(...orderBy)
           .limit(take),
     });
     if (page === "bad_cursor") {

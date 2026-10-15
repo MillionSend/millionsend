@@ -91,16 +91,16 @@ describe("official resend SDK: suppressions", () => {
     expect(listed.data?.has_more).toBe(false);
     expect(listed.data?.data).toEqual([
       {
-        id: suppressionId,
-        email: "contract@example.com",
-        origin: "manual",
+        id: expect.any(String),
+        email: "bounced@example.com",
+        origin: "bounce",
         source_id: null,
         created_at: expect.any(String),
       },
       {
-        id: expect.any(String),
-        email: "bounced@example.com",
-        origin: "bounce",
+        id: suppressionId,
+        email: "contract@example.com",
+        origin: "manual",
         source_id: null,
         created_at: expect.any(String),
       },

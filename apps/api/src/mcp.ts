@@ -655,7 +655,7 @@ function buildServer(
     {
       title: "List emails",
       description:
-        "List the team's transactional emails (sent, queued and scheduled), oldest first, with cursor pagination.",
+        "List the team's sent, queued and scheduled emails, broadcast copies included, newest first, with cursor pagination (after pages toward older emails).",
       inputSchema: listQuerySchema,
       readOnly: true,
     },
@@ -720,7 +720,7 @@ function buildServer(
     {
       title: "List contacts",
       description:
-        "List contacts of the team, oldest first, with cursor pagination. segment_id limits the list to that segment's members; include=properties,topics attaches the typed property map and the topic subscriptions to every item.",
+        "List contacts of the team, newest first, with cursor pagination (after pages toward older contacts). segment_id limits the list to that segment's members; include=properties,topics attaches the typed property map and the topic subscriptions to every item.",
       inputSchema: listContactsQuerySchema.extend({
         segment_id: z.uuid().optional().describe("Only contacts in this segment"),
       }),
@@ -818,7 +818,7 @@ function buildServer(
     {
       title: "List suppressions",
       description:
-        "List suppressed addresses — bounces, complaints and manual blocks that every send skips, plus unsubscribes that block topic sends and broadcasts only — oldest first, with cursor pagination. origin filters to one kind. Addresses erased for GDPR/LGPD are hidden here and reachable by id only.",
+        "List suppressed addresses — bounces, complaints and manual blocks that every send skips, plus unsubscribes that block topic sends and broadcasts only — newest first, with cursor pagination (after pages toward older entries). origin filters to one kind. Addresses erased for GDPR/LGPD are hidden here and reachable by id only.",
       inputSchema: listSuppressionsQuerySchema,
       readOnly: true,
     },
@@ -866,7 +866,7 @@ function buildServer(
     {
       title: "List templates",
       description:
-        "List email templates (name, alias, timestamps), oldest first, with cursor pagination.",
+        "List email templates (name, alias, timestamps), newest first, with cursor pagination (after pages toward older templates).",
       inputSchema: listQuerySchema,
       readOnly: true,
     },
@@ -1127,7 +1127,7 @@ function buildServer(
       {
         title: "Get verification code",
         description:
-          "Get a verification code or sign-in link from received mail: one email's (email_id), or the newest in an inbox (inbox_id) within max_age_minutes, waiting up to wait seconds for one to arrive. status found carries kind otp with the code, or kind link with the url and whether its domain matches the sender's; none, ambiguous (no single clear candidate) and timeout carry no value. Codes come only from delivered mail of senders that did not fail authentication, in inboxes that extract codes; links are never fetched.",
+          "Get a verification code or sign-in link from received mail: one email's (email_id), or the newest in an inbox (inbox_id) within max_age_minutes and received after received_after (such as a used code's received_at), waiting up to wait seconds for one to arrive. status found carries kind otp with the code, or kind link with the url and whether its domain matches the sender's; none, ambiguous (no single clear candidate) and timeout carry no value. Codes come only from delivered mail of senders that did not fail authentication, in inboxes that extract codes; links are never fetched.",
         inputSchema: z.object({
           email_id: receivedEmailId.optional().describe("This email's code; wins over inbox_id"),
           inbox_id: inboxId.optional(),
@@ -1145,11 +1145,19 @@ function buildServer(
             .min(1)
             .max(1440)
             .default(10)
-            .describe("With inbox_id: how old the mail may be, 1-1440 minutes (default 10)"),
+            .describe(
+              "With inbox_id: how long ago the code may have reached the inbox, 1-1440 minutes (default 10); a released code counts from its release",
+            ),
+          received_after: z.iso
+            .datetime({ offset: true })
+            .optional()
+            .describe(
+              "With inbox_id: only mail received after this ISO 8601 instant, such as the received_at of a code already used",
+            ),
         }),
         readOnly: true,
       },
-      ({ email_id, inbox_id, from, wait, max_age_minutes }, signal) => {
+      ({ email_id, inbox_id, from, wait, max_age_minutes, received_after }, signal) => {
         if (email_id) {
           return mapped(
             rest("GET", withQuery(`/emails/receiving/${enc(email_id)}`, { html_format: "cid" })),
@@ -1161,7 +1169,7 @@ function buildServer(
             toolResult(errorBody(422, "validation_error", "Pass email_id or inbox_id"), false),
           );
         }
-        const query = { from, wait, max_age: max_age_minutes * 60 };
+        const query = { from, wait, max_age: max_age_minutes * 60, since: received_after };
         return mapped(
           rest(
             "GET",

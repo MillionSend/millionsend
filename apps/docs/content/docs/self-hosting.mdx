@@ -608,7 +608,7 @@ until they are; the console wins:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `SHARED_INBOX_SEND` | `true` | Whether shared addresses send at all. Off, nothing goes out from them, replies included, and mail already queued waits until it's back on; mail to them still arrives |
+| `SHARED_INBOX_SEND` | `true` | Whether shared addresses send at all. Off, nothing goes out from them, replies included, and mail already queued waits until it's back on (`forward_to` copies for up to 2 days); mail to them still arrives |
 | `SHARED_INBOX_OPEN` | `false` | Whether paid teams' shared addresses (every team's, self-hosted) may start conversations. Off, without a judge (`ABUSE_JUDGE`) or with `MONITOR_AUTO_HOLD` off, they only reply inside their threads |
 | `SHARED_INBOX_TENANTS` | `false` | Whether shared mail goes out under the sending team's SES tenant, with `SES_TENANTS` on |
 | `SHARED_INBOX_TEAM_DAILY_CAP` | 1000 | Recipients one team may reach per UTC day from all its shared addresses, approved sends included |

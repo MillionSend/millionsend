@@ -275,6 +275,7 @@ async function listItems(
         n: sql<number>`(count(*) filter (where ${inCounted}))::int`,
         attachment: sql<boolean>`coalesce(bool_or(${r.attachmentCount} > 0) filter (where ${inCounted}), false)`,
         unread: sql<boolean>`coalesce(bool_or(${m.readAt} is null and ${m.deliveredAt} is not null), false)`,
+        quarantined: sql<number>`(count(*) filter (where ${m.quarantinedAt} is not null and ${m.releasedAt} is null))::int`,
       })
       .from(m)
       .innerJoin(r, eq(r.id, m.receivedEmailId))
@@ -360,6 +361,7 @@ async function listItems(
       has_attachment: Boolean(received?.attachment) || Boolean(sent?.attachment),
       has_draft: withDraft.has(row.id),
       read: !received?.unread,
+      ...(p.includeHeld ? { quarantined: received?.quarantined ?? 0 } : {}),
       received_at: row.lastMessageAt.toISOString(),
       folder: row.folder,
     };

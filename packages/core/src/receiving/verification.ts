@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, desc, eq, gt, isNotNull, ne, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ne, type SQL, sql } from "drizzle-orm";
 import type { Keyring } from "../crypto/keyring.js";
 import { type InboxActor, recordInboxActivity } from "../inboxes/activity.js";
 import type { VerificationCodeWire } from "../inboxes/types.js";
@@ -35,10 +35,11 @@ export function receivedFromMatches(
 }
 
 /**
- * The newest delivered code or sign-in link of an inbox, within maxAgeMs:
- * never from held mail, from a sender that failed authentication, or from
- * an inbox with extract_codes off. A served value writes code.read; the
- * activity row names the email, never the value.
+ * The newest code or sign-in link delivered into an inbox within maxAgeMs (a
+ * released code counts from its release) and, with since, received after it:
+ * never from held mail, from a sender that failed authentication, or from an
+ * inbox with extract_codes off. A served value writes code.read; the activity
+ * row names the email, never the value.
  */
 export async function latestVerificationCode(
   db: Db,
@@ -48,6 +49,7 @@ export async function latestVerificationCode(
     inboxId: string;
     from: string | null;
     maxAgeMs: number;
+    since?: Date | null | undefined;
     actor: InboxActor;
     now?: Date | undefined;
   },
@@ -77,13 +79,15 @@ export async function latestVerificationCode(
       and(
         eq(m.inboxId, p.inboxId),
         eq(m.teamId, p.teamId),
-        isNotNull(m.deliveredAt),
+        // Held mail has no delivered_at, so it never compares true here.
+        gt(m.deliveredAt, new Date(now.getTime() - p.maxAgeMs)),
         ne(m.senderTrust, "failed"),
-        gt(r.createdAt, new Date(now.getTime() - p.maxAgeMs)),
+        ...(p.since ? [gt(r.createdAt, p.since)] : []),
         sql`cardinality(${r.extractedKinds}) > 0`,
         ...(p.from ? [receivedFromMatches(r.from, p.from)] : []),
       ),
     )
+    // Newest by arrival: a code released late is usually superseded by one sent after it.
     .orderBy(desc(r.createdAt), desc(r.id))
     .limit(1);
   const extracted = row ? await openReceivedExtracted(row, keyring) : null;

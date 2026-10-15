@@ -266,6 +266,13 @@ Erros usam o formato do Resend:
 Um corpo que não é JSON válido recebe `400 invalid_parameter`, e um corpo
 enviado com `Content-Type` diferente de `application/json` recebe `415`.
 
+Um caminho que a API não tem, ou um método que o caminho não aceita, recebe
+`404 not_found` com a mensagem `The requested endpoint does not exist.` (o
+Resend responde `405 method_not_allowed` a um método errado). Um método errado
+num caminho que também bate com uma rota que leva um id cai nessa rota:
+`GET /emails/batch` vira `GET /emails/{id}` com o id `batch` e recebe
+`422 validation_error`.
+
 Um caractere NUL (U+0000) num texto que o banco de dados guarda, como um nome,
 uma propriedade, um filtro ou um id na URL, e uma data fora dos anos 1 a 9999
 recebem `422 validation_error`: o banco de dados não consegue guardar esses
@@ -334,23 +341,32 @@ aprovação responde à repetição com o mesmo rascunho, como `202`.
 
 Endpoints de listagem aceitam `limit` (1–100, padrão 20) e cursores `after` /
 `before` carregando o id de um item de uma página anterior. As respostas
-incluem `has_more`. As listagens vêm do mais antigo para o mais novo, menos
-onde o Resend ordena de outro jeito, e ali o `after` avança na direção dessa
-ordem:
+incluem `has_more`. As listagens vêm do mais novo para o mais antigo, como no
+Resend: o `after` recebe o último id de uma página e avança para itens mais
+antigos, o `before` recebe o primeiro id e volta para os mais novos, e o
+`has_more` diz se ainda há mais itens nessa direção. Para buscar o que foi
+criado desde a sua última leitura, passe no `before` o id mais novo que você
+guardou e, depois, o primeiro id de cada página enquanto o `has_more` for
+`true`. Com `wait`, o `/emails/receiving` devolve os e-mails mais novos, e
+não os que vêm logo depois do cursor; veja
+[Esperar por e-mails novos](/pt-BR/concepts/receiving#esperar-por-e-mails-novos).
+Estas listagens seguem outra ordem:
 
 | Listagem | Ordem |
 | --- | --- |
-| `GET /emails/receiving` | Do mais novo para o mais antigo: o `after` avança para e-mails mais antigos. |
-| `GET /inboxes` | Das mais novas para as mais antigas. |
 | `GET /inboxes/{id}/threads` e `/threads/search` | Da atividade mais recente para a mais antiga. |
 | `GET /inboxes/{id}/threads/{thread_id}/emails` | Do mais antigo para o mais novo: o `after` avança para e-mails mais novos. |
 | `GET /inboxes/{id}/drafts` | Dos atualizados mais recentemente para os mais antigos. |
 | `GET /inboxes/{id}/labels` | Das mais antigas para as mais novas, todas de uma vez, sem `has_more`. |
-| `GET /inboxes/{id}/quarantine` | Do mais novo para o mais antigo. |
+| `GET /topics` e `/contacts/{id}/topics` | Dos mais antigos para os mais novos, todos de uma vez; o `has_more` é sempre `false`. |
+| `GET /emails/receiving/{id}/attachments` | Na ordem em que estão no e-mail, todos de uma vez, a não ser que você passe `limit`. |
 
-Os anexos de um e-mail recebido vêm todos de uma vez, a não ser que você
-passe `limit`. Em `/inboxes`, um cursor que não aponta nenhum item da
-listagem responde `404`, como no Resend.
+Um cursor que não aponta nenhum item da listagem responde
+`422 validation_error`; em `/inboxes`, responde `404`, como no Resend. Isso
+vale também quando o item do id que você guardou foi apagado ou revogado
+depois e, em `/emails/receiving`, quando ele não bate mais com os seus
+filtros: para retomar, leia de novo do começo, sem cursor, até chegar aos
+itens que você já tem.
 
 ## Links de download assinados
 

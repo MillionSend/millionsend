@@ -768,6 +768,25 @@ describe("the forward_to pass", () => {
     ]);
   });
 
+  it("forwards from the shared domain to members' sign-in addresses only, never owner_addresses", async () => {
+    const safety = {
+      owner_addresses: ["former-member@example.org"],
+      forward_to: [w.owner, "former-member@example.org"],
+    };
+    const forwardedTo = async (inbox: InboxRow) => {
+      const t = await thread(inbox);
+      const out = await forwardToForwardTargets(db, w.deps, {
+        receivedEmailId: t.id,
+        inboxId: inbox.id,
+      });
+      return sent(out as SendOutcome).email.to;
+    };
+    const shared = await addInbox(w, { local: "forwarding-shared", shared: true, safety });
+    expect(await forwardedTo(shared)).toEqual([w.owner]);
+    const own = await addInbox(w, { local: "forwarding-owners", safety });
+    expect(await forwardedTo(own)).toEqual([w.owner, "former-member@example.org"]);
+  });
+
   it("stops at one hop, never for a marker a sender wrote, and skips held mail", async () => {
     const inbox = await addInbox(w, {
       local: "forwarding-guard",

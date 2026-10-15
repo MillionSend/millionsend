@@ -40,7 +40,7 @@ and as **Trust** in the dashboard. The first row that matches wins:
 | --- | --- |
 | `failed` | Failed authentication, and the domain asks receivers to quarantine or reject such mail; or the domain publishes no DMARC policy and fails SPF with no DKIM signature of its own. This beats every other row, so a forged owner never passes. |
 | `owner` | One of your team members' sign-in addresses, or an address in the inbox's `owner_addresses` (never on the shared domain), and the domain vouches for it. |
-| `allowlisted` | Matches the inbox's allowlist, and the domain vouches for it. |
+| `allowlisted` | Matches the inbox's allowlist, on the shared domain too, and the domain vouches for it. |
 | `known_thread` | Replies in a thread the inbox wrote in, from an address the inbox wrote to, proven by the thread token in `References` or by an `In-Reply-To` that names a message the inbox sent. No authentication needed, so a small correspondent without DKIM can still answer. |
 | `external` | Any other sender whose domain vouches for it, other addresses at your own domains included. |
 | `unauthenticated` | Everyone else: the domain doesn't vouch for the From address, or the message names more than one sender. |
@@ -312,9 +312,9 @@ a draft instead, with a reason:
    `Auto-Submitted: auto-generated`, so two agents writing to each other stop
    after one round.
 5. **Reply-To.** A reply to a `Reply-To` on another organization's domain,
-   unless its sender is an owner, on the allowlist or a known thread
-   (`reply_to_redirect`). This stops a stranger from steering replies to
-   someone else.
+   unless its sender is an owner, on the allowlist or a known thread; on the
+   shared domain, whoever sent it (`reply_to_redirect`). This stops a
+   stranger from steering replies to someone else.
 6. **Send policy** (`send_policy`):
    - `reply_only`, the default: replies inside a thread, to people who wrote
      in it, owners and the allowlist.

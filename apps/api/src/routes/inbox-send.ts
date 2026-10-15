@@ -3,6 +3,7 @@ import {
   CURSOR_NOT_FOUND_MESSAGE,
   createDraft,
   deleteDraft,
+  findKeyInbox,
   findLiveInbox,
   forwardInThread,
   forwardReceivedEmail,
@@ -243,9 +244,8 @@ export function registerInboxSendRoutes(
     async (c) => {
       const { inbox_id } = c.req.valid("param");
       const auth = c.get("auth");
-      const inbox = await findLiveInbox(db, { teamId: auth.teamId, inboxId: inbox_id });
+      const inbox = await findKeyInbox(db, auth, inbox_id);
       if (!inbox) return inboxNotFound(c);
-      if (auth.domainId !== null && inbox.domainId !== auth.domainId) return inboxNotFound(c);
       const page = await listDrafts(db, {
         teamId: auth.teamId,
         inboxId: inbox_id,

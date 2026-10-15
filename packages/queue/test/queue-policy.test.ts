@@ -422,6 +422,16 @@ it("a batch of sends carries the same options as a single send: key, priority, d
   expect(inserted[0]?.job).not.toHaveProperty("startAfter");
 });
 
+it("defers a forward_to pass it runs again, under the same key", async () => {
+  const queue = await Queue.start("postgres://unused");
+  const at = new Date(1_000);
+  await queue.enqueueInboxForward({ receivedEmailId: "r1", inboxId: "i1" });
+  await queue.enqueueInboxForward({ receivedEmailId: "r1", inboxId: "i1" }, at);
+  expect(sent.map((s) => s.name)).toEqual(["inbox.forward", "inbox.forward"]);
+  expect(sent[0]?.opts).not.toHaveProperty("startAfter");
+  expect(sent[1]?.opts).toMatchObject({ singletonKey: "r1:i1", startAfter: at });
+});
+
 it("arms one drain per distinct endpoint, keyed and grouped by the endpoint so a created one absorbs the rest and passes run one at a time", async () => {
   const queue = await Queue.start("postgres://unused");
   const at = new Date(0);

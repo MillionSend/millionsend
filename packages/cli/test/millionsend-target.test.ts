@@ -436,6 +436,7 @@ describe("readState", () => {
         ]),
       },
     ]);
+    // Oldest first, although the API lists newest first.
     expect(state.properties).toEqual([
       { id: ids.property, key: "plan", type: "string" },
       { id: ids.numberProperty, key: "seats", type: "number" },

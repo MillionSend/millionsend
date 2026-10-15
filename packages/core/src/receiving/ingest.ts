@@ -529,7 +529,9 @@ async function admit(
     refs: [...(row.inReplyTo ? [row.inReplyTo] : []), ...row.references],
   });
   // The shared domain is every team's: there only members' logins are owners,
-  // as classifyRecipients (inboxes/send.ts) has it on the way out.
+  // as classifyRecipients (inboxes/send.ts) has it on the way out. Its
+  // allowlist still counts here: it only lets mail into this team's inbox,
+  // and never vouches for a recipient on the way out.
   const owners = [
     ...p.memberEmails,
     ...(inbox.domainId === null ? [] : inbox.safety.owner_addresses),

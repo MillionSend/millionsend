@@ -797,6 +797,24 @@ describe("creating an inbox", () => {
     expect(core.updateInbox.mock.calls[1]?.[1].judgeSharedNames).toBeTypeOf("function");
   });
 
+  it("takes any address as a name, the one an unnamed inbox gets, and refuses longer before the inbox sees it", async () => {
+    core.createInbox.mockResolvedValue({ ok: true, inbox: wire(randomUUID()) });
+    core.updateInbox.mockResolvedValue({ ok: true, inbox: wire(inboxId) });
+    const create = (name: string) =>
+      caller(acme).inboxes.create({ kind: "agent", name, acceptFrom: "verified", expiresIn: null });
+    const update = (name: string) => caller(acme).inboxes.update({ id: inboxId, name });
+    const address = `${"x".repeat(64)}@acme.agents.example.net`;
+    await create(address);
+    await update(address);
+    expect(core.createInbox.mock.calls[0]?.[2].input.name).toBe(address);
+    expect(core.updateInbox.mock.calls[0]?.[2].patch.name).toBe(address);
+    const tooLong = "x".repeat(321);
+    await expect(create(tooLong)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(update(tooLong)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(core.createInbox).toHaveBeenCalledTimes(1);
+    expect(core.updateInbox).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a domain that does not receive, and maps the inbox's own refusals", async () => {
     const [quiet] = await db
       .select({ id: schema.domains.id })

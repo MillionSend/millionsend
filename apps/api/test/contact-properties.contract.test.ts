@@ -84,17 +84,17 @@ describe("official resend SDK: contactProperties", () => {
     expect(listed.data?.has_more).toBe(false);
     expect(listed.data?.data).toEqual([
       {
-        id: planId,
-        key: "plan",
-        type: "string",
-        fallbackValue: "free",
-        createdAt: expect.any(String),
-      },
-      {
         id: seatsId,
         key: "seats",
         type: "number",
         fallbackValue: 1,
+        createdAt: expect.any(String),
+      },
+      {
+        id: planId,
+        key: "plan",
+        type: "string",
+        fallbackValue: "free",
         createdAt: expect.any(String),
       },
     ]);

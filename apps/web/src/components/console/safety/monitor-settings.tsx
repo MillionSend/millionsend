@@ -12,6 +12,7 @@ import { toast } from "@/components/toast";
 import { CONTENT_MONITORING_DOCS_URL } from "@/lib/docs-links";
 import { type MonitorSettingKind, validMonitorValue } from "@/lib/monitor-settings";
 import { useTRPC } from "@/lib/trpc";
+import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { CardHead, LoadErrorCard } from "./parts";
 
 /** The form's groups, in the order the operator reads them. */
@@ -49,6 +50,7 @@ type Draft = string | boolean | null;
 export function MonitorSettingsView() {
   const t = useTranslations("console.safety.monitor");
   const safety = useTranslations("console.safety");
+  const common = useTranslations("common");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const query = useQuery(trpc.console.monitor.settings.get.queryOptions());
@@ -57,11 +59,12 @@ export function MonitorSettingsView() {
   const save = useMutation(
     trpc.console.monitor.settings.update.mutationOptions({
       onSuccess: async () => {
-        setDrafts({});
         toast(t("saved"));
+        // The saved values land before the drafts go, so the old ones never flash back.
         await queryClient.invalidateQueries({
           queryKey: trpc.console.monitor.settings.get.queryKey(),
         });
+        setDrafts({});
       },
       onError: (error) => {
         toast(
@@ -73,6 +76,8 @@ export function MonitorSettingsView() {
       },
     }),
   );
+  const touched = Object.keys(drafts).filter((key) => drafts[key] !== undefined);
+  useUnsavedChangesWarning(touched.length > 0, common("unsavedWarn"));
 
   if (query.isError) return <LoadErrorCard onRetry={() => query.refetch()} />;
   if (query.isPending) return <SettingsSkeleton />;
@@ -104,7 +109,6 @@ export function MonitorSettingsView() {
   const ordered =
     Number(effective("flagRisk")) < Number(effective("alertRisk")) &&
     Number(effective("alertRisk")) < Number(effective("pauseRisk"));
-  const touched = Object.keys(drafts).filter((key) => drafts[key] !== undefined);
   const canSave = touched.length > 0 && invalid.size === 0 && ordered && !save.isPending;
 
   const submit = () => {
@@ -206,7 +210,7 @@ export function MonitorSettingsView() {
   );
 }
 
-function Field({
+export function Field({
   setting,
   draft,
   invalid,
@@ -218,7 +222,6 @@ function Field({
     key: string;
     value: number | boolean;
     source: "db" | "env" | "default";
-    default: number | boolean;
     /** What applies once the stored value is cleared: the env value, else the default. */
     fallback: number | boolean;
     kind: MonitorSettingKind;
@@ -226,17 +229,18 @@ function Field({
   draft: Draft | undefined;
   invalid: boolean;
   disabled: boolean;
-  onChange: (draft: Draft) => void;
+  onChange: (draft: Draft | undefined) => void;
   onReset: () => void;
 }) {
   const t = useTranslations("console.safety.monitor");
   const id = useId();
-  const fallbackSource = setting.fallback === setting.default ? "default" : "env";
-  const shownSource = draft === undefined ? setting.source : draft === null ? fallbackSource : "db";
+  const shownSource = draft === undefined ? setting.source : "unsaved";
   const resettable = draft === undefined ? setting.source === "db" : draft !== null;
   const meta = (
     <div style={{ display: "flex", gap: 10, fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}>
-      <span>{t(`source.${shownSource}`, { value: String(setting.fallback) })}</span>
+      <span style={draft === undefined ? undefined : { color: "var(--ms-warn)" }}>
+        {t(`source.${shownSource}`, { value: String(setting.fallback) })}
+      </span>
       {resettable ? (
         <button
           type="button"
@@ -263,7 +267,7 @@ function Field({
             checked={checked}
             disabled={disabled}
             ariaLabel={t(`fields.${setting.key}`)}
-            onChange={(next) => onChange(next)}
+            onChange={(next) => onChange(next === setting.value ? undefined : next)}
           />
           <span style={{ fontSize: 13 }}>{t(checked ? "on" : "off")}</span>
         </div>
