@@ -14,6 +14,7 @@ import {
 } from "../src/campaign-linkage.js";
 import { encryptEmailBody } from "../src/crypto/envelope.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
+import { purgedEmailBodyColumns } from "../src/email-retention.js";
 import { storeReferenceData } from "../src/reference-data.js";
 import { sendRefusal, suspendTeam } from "../src/team-standing.js";
 import { DAY_MS } from "../src/utc-day.js";
@@ -200,6 +201,34 @@ describe("recordPhishingFingerprints", () => {
     expect(by("card")).toEqual(["card_fp_stolen"]);
     expect(by("subject").map((subject) => Array.from(subject).length)).toEqual([43, 256]);
     expect(by("address")).toEqual(["facturevexto@gmail.com"]);
+  });
+
+  it("reads each sender and subject from its newest email that still has a body, if any", async () => {
+    // Later sends without a body: one of the stored campaign, one of a campaign with none left.
+    const later = new Date(Date.now() + 60_000);
+    for (const subject of [
+      "Votre facture Vexto du 02/10 est disponible",
+      "Votre facture Vexto du 03/10 est disponible",
+    ]) {
+      await db.insert(schema.emails).values({
+        teamId: phisher,
+        from: "Facture Vexto <factures@vexto-cadeaux.example>",
+        to: ["victime@example.org"],
+        subject,
+        latestStatus: "suppressed",
+        ...purgedEmailBodyColumns(later),
+        createdAt: later,
+      });
+    }
+    await suspendForPhishing(phisher);
+    const by = await printsOf(phisher);
+    expect(by("link_domain")).toEqual(["vextos-cadeaux.example"]);
+    expect(by("phone")).toEqual(["123456789"]);
+    expect(by("text_hash")).toHaveLength(1);
+    expect(by("subject")).toEqual([
+      "Votre facture Vexto du 02/10 est disponible",
+      "Votre facture Vexto du 03/10 est disponible",
+    ]);
   });
 });
 
