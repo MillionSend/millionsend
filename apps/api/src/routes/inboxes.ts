@@ -37,8 +37,6 @@ import {
   type VerificationCodeWire,
   waitForReceived,
 } from "@millionsend/core";
-import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { type ApiDeps, type Env, errorBody } from "../app.js";
 import {
@@ -184,13 +182,8 @@ export function registerInboxRoutes(
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const [team] = await db
-        .select({ name: schema.teams.name })
-        .from(schema.teams)
-        .where(eq(schema.teams.id, auth.teamId));
       const result = await createInbox(db, inboxDeps(), {
         teamId: auth.teamId,
-        teamName: team?.name ?? "",
         plan: auth.plan,
         isCloud: deps.isCloud,
         actor: actorOf(c),

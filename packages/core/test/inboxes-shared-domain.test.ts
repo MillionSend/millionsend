@@ -66,7 +66,6 @@ describe("random names on the shared domain", () => {
       { sharedInboxDomain: SHARED, receivingEnabled: true },
       {
         teamId,
-        teamName: "Draw Address",
         plan: "pro",
         isCloud: true,
         actor: { kind: "user", userId: "user-1" },

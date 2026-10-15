@@ -735,7 +735,6 @@ describe("creating an inbox", () => {
       expect.anything(),
       expect.objectContaining({
         teamId: acme,
-        teamName: "inbox-acme",
         plan: "free",
         actor: user,
         input: {

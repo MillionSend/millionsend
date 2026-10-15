@@ -430,7 +430,6 @@ export const inboxesRouter = router({
       }
       const result = await createInbox(ctx.db, inboxDeps(ctx), {
         teamId: ctx.teamId,
-        teamName: await teamName(ctx.db, ctx.teamId),
         plan: (await fetchEffectivePlan(ctx.db, ctx.teamId)) ?? "free",
         isCloud: isCloudDeployment(),
         actor: userActor(ctx),

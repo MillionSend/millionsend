@@ -60,7 +60,7 @@ export interface InboxWire {
   id: string;
   name: string;
   email_address: string;
-  /** A shared inbox's is its shared_inbox_domains id, which /domains never lists. */
+  /** A shared inbox's is its team's shared subdomain: the GET /domains row with shared: true. */
   domain_id: string;
   receiving_address: string | null;
   from_name: string | null;

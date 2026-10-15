@@ -50,10 +50,9 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
-/** A team with a verified receiving domain and a verified sending-only one. */
+/** A team with its shared subdomain, a verified receiving domain and a verified sending-only one. */
 async function team(slug: string) {
-  const teamId = await createTeam(db, slug);
-  teamNames.set(teamId, slug);
+  const teamId = await createTeam(db, slug, { sharedInboxDomain: SHARED });
   const [receiving] = await db
     .insert(schema.domains)
     .values({
@@ -70,9 +69,6 @@ async function team(slug: string) {
   return { teamId, domainId: receiving?.id as string, receiving: `in.${slug}.test` };
 }
 
-/** Each team's name, which its shared subdomain is named after. */
-const teamNames = new Map<string, string>();
-
 const create = (
   teamId: string,
   input: Parameters<typeof createInbox>[2]["input"],
@@ -81,7 +77,6 @@ const create = (
 ) =>
   createInbox(db, inboxDeps, {
     teamId,
-    teamName: teamNames.get(teamId) ?? "Acme Robots",
     plan: "pro",
     isCloud: true,
     actor: api,
@@ -330,7 +325,6 @@ describe("createInbox", () => {
       { ...deps, receivingEnabled: false },
       {
         teamId: t.teamId,
-        teamName: "x",
         plan: "pro",
         isCloud: true,
         actor: api,
@@ -355,7 +349,6 @@ describe("createInbox", () => {
       { ...deps, sharedInboxDomain: null },
       {
         teamId: t.teamId,
-        teamName: "x",
         plan: "pro",
         isCloud: true,
         actor: api,
@@ -394,7 +387,7 @@ describe("createInbox", () => {
     const noShared = await createInbox(
       db,
       { ...deps, sharedInboxDomain: null },
-      { teamId: t.teamId, teamName: "x", plan: "pro", isCloud: true, actor: api, input: {} },
+      { teamId: t.teamId, plan: "pro", isCloud: true, actor: api, input: {} },
     );
     expect(noShared.ok ? null : noShared.error.message).toMatch(/email_address is required/);
   });
@@ -460,10 +453,10 @@ describe("createInbox", () => {
     const late = await create(t.teamId, { username: "fine", expires_in: "366d" });
     expect(late.ok ? null : late.error.status).toBe(422);
     const subs = await db
-      .select()
+      .select({ lockedAt: schema.sharedInboxDomains.lockedAt })
       .from(schema.sharedInboxDomains)
       .where(eq(schema.sharedInboxDomains.teamId, t.teamId));
-    expect(subs).toEqual([]);
+    expect(subs).toEqual([{ lockedAt: null }]);
   });
 
   it("refuses a brand in from_name on the shared domain only", async () => {
@@ -487,11 +480,6 @@ describe("createInbox", () => {
   it("asks the review about a chosen username and a shared from_name, never about a random address", async () => {
     const t = await team("create-review");
     const asked: SharedNameText[][] = [];
-    const first = await create(t.teamId, { name: "Bot" }, {}, reviewing([], asked));
-    expect(first.ok).toBe(true);
-    // Only the team's label, derived once.
-    expect(asked).toEqual([[{ field: "label", value: "create-review" }]]);
-    asked.length = 0;
     const chosen = await create(
       t.teamId,
       { username: "Leo", from_name: "Leo Bot", name: "Leo" },
@@ -564,7 +552,7 @@ describe("createInbox", () => {
     expect(spent.ok ? 0 : (spent.error.retryAfterSec ?? 0)).toBeGreaterThan(0);
     expect(asked).toEqual([]);
     const random = await create(t.teamId, {}, { now }, reviewing([], asked));
-    expect(random.ok && random.inbox.email_address).toMatch(/@team-[a-z0-9]{6}\./);
+    expect(random.ok && random.inbox.email_address).toMatch(/^inbox-[a-z0-9]{8}@create-budget\./);
     const [counter] = await db
       .select({ refusals: schema.usageCounters.sharedNameRefusals })
       .from(schema.usageCounters)
@@ -590,9 +578,9 @@ describe("createInbox", () => {
       message:
         "Too many names were reviewed today: try again tomorrow, or leave username out for a random address",
     });
-    // The label isn't reviewed either: the team gets a random one.
+    // A random address needs no review.
     const random = await create(t.teamId, {}, { now }, reviewing([], asked));
-    expect(random.ok && random.inbox.email_address).toMatch(/@team-[a-z0-9]{6}\./);
+    expect(random.ok && random.inbox.email_address).toMatch(/^inbox-[a-z0-9]{8}@create-reviews\./);
     expect(asked).toEqual([]);
     const [counter] = await db
       .select({ reviews: schema.usageCounters.sharedNameReviews })
