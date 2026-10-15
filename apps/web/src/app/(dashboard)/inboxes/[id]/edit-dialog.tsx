@@ -118,7 +118,7 @@ export function EditDialog({
         </div>
         {save.error ? (
           <div className="ms-field-error" style={{ margin: 0 }}>
-            {nameReviewError(t, save.error) ?? save.error.message}
+            {nameReviewError(t, save.error)?.text ?? save.error.message}
           </div>
         ) : null}
         <ModalFooter>

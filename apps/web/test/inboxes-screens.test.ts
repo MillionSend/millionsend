@@ -571,6 +571,13 @@ describe("addresses on the shared domain", () => {
         "This name couldn't be reviewed right now: try again shortly, or leave username out for a random address",
       ),
     ).toBe(`${t("create.errors.reviewUnavailable")} ${orRandom}`);
+    // The team's subdomain waits for its name review: a random address waits with it.
+    expect(
+      shown(
+        "SERVICE_UNAVAILABLE",
+        "Your team's subdomain on the shared domain is waiting for its name review: try again shortly",
+      ),
+    ).toBe(t("create.errors.sharedPending"));
     expect(
       shown("UNPROCESSABLE_CONTENT", "username can't be used on the shared domain: pick another"),
     ).toBe(`${t("create.errors.nameRefused")} ${orRandom}`);

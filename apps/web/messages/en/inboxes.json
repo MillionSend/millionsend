@@ -111,6 +111,7 @@
       "username": "Use lowercase letters, digits and . _ - (up to 64), starting and ending with a letter or digit, with no two dots in a row.",
       "nameRefused": "This name can't be used on the shared domain. Pick another.",
       "reviewUnavailable": "We couldn't check this name right now. Try again in a minute.",
+      "sharedPending": "The shared domain isn't ready for your team yet. Try again in a few minutes.",
       "tooManyNames": "Too many names were checked today. Try again tomorrow.",
       "orRandom": "Or leave the address empty for a random one."
     }

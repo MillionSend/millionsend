@@ -111,6 +111,7 @@
       "username": "Use letras minúsculas, números e . _ - (até 64), começando e terminando com letra ou número, sem dois pontos seguidos.",
       "nameRefused": "Esse nome não pode ser usado no domínio compartilhado. Escolha outro.",
       "reviewUnavailable": "Não deu para conferir esse nome agora. Tente de novo daqui a pouco.",
+      "sharedPending": "O domínio compartilhado ainda não está pronto para a sua equipe. Tente de novo em alguns minutos.",
       "tooManyNames": "Muitos nomes foram conferidos hoje. Tente de novo amanhã.",
       "orRandom": "Ou deixe o endereço vazio para ganhar um aleatório."
     }

@@ -218,7 +218,11 @@ export function CreateInboxDialog({
         )}
         {error ? (
           <div className="ms-field-error" style={{ margin: 0 }}>
-            {review ? `${review} ${t("create.errors.orRandom")}` : error}
+            {review
+              ? review.orRandom
+                ? `${review.text} ${t("create.errors.orRandom")}`
+                : review.text
+              : error}
           </div>
         ) : null}
         <ModalFooter>
