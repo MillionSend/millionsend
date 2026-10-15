@@ -200,6 +200,24 @@ export function enabledSocialProviders(): { google: boolean; github: boolean } {
 export const OAUTH_SCOPES = ["offline_access", ...MCP_SCOPES];
 
 /**
+ * Authorization parameters with offline_access added to the scope, or
+ * undefined when the request is not for the MCP resource or already asks
+ * for it (or names no scope, which the provider fills with every scope).
+ * MCP clients often ask only for the scopes their tools need, and without
+ * offline_access the provider issues no refresh token, so the connection
+ * would end with the first access token. PKCE is untouched: public clients
+ * need it whatever the scope, and offline_access only widens where it is
+ * required.
+ */
+function withOfflineAccess(params: unknown, mcpResource: string): object | undefined {
+  if (!params || typeof params !== "object") return;
+  const { scope, resource } = params as { scope?: unknown; resource?: unknown };
+  if (typeof scope !== "string" || scope.split(" ").includes("offline_access")) return;
+  if (![resource].flat().includes(mcpResource)) return;
+  return { ...params, scope: `${scope} offline_access` };
+}
+
+/**
  * Team an OAuth grant is bound to. The consent page persists the picked team
  * (or ALL_TEAMS_GRANT) on the session row (team.grantTeam), and this
  * resolves it with the same rule as the dashboard cookie: a membership of
@@ -265,6 +283,7 @@ export function createAuth(
     throw new Error("BETTER_AUTH_SECRET is required to run the web app");
   }
   const baseURL = resolveBaseUrl(env.APP_BASE_URL);
+  const mcpResource = mcpResourceUrl();
   const erase = deps.eraseRecipient ?? enqueueRecipientErase;
   /**
    * A proven account becomes a contact of the account-mail team. Proven:
@@ -432,13 +451,13 @@ export function createAuth(
         loginPage: "/login",
         consentPage: "/oauth/consent",
         scopes: OAUTH_SCOPES,
-        resources: [{ identifier: mcpResourceUrl(), allowedScopes: [...MCP_SCOPES] }],
+        resources: [{ identifier: mcpResource, allowedScopes: [...MCP_SCOPES] }],
         // The seeded oauthResource row must track this config: token issuance
         // intersects requested scopes with the row's allowedScopes, so the
         // default insertOnly mode would freeze the scope list at first-boot —
         // every scope shipped later would be silently dropped from tokens.
         resourceSeedMode: "merge",
-        clientRegistrationDefaultResources: [mcpResourceUrl()],
+        clientRegistrationDefaultResources: [mcpResource],
         // MCP clients (Claude Code, Cursor) still self-register via RFC 7591.
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
@@ -648,6 +667,14 @@ export function createAuth(
         if (ctx.path === "/update-user") {
           assertPlainName(ctx.body, ctx.headers);
           return;
+        }
+        // Every MCP connection gets a refresh token. A GET request carries
+        // its parameters in the query, a form POST in the body.
+        if (ctx.path === "/oauth2/authorize") {
+          const query = withOfflineAccess(ctx.query, mcpResource);
+          const body = withOfflineAccess(ctx.body, mcpResource);
+          if (!query && !body) return;
+          return { context: { ...(query ? { query } : {}), ...(body ? { body } : {}) } };
         }
         if (ctx.path !== "/oauth2/register") return;
         const body = ctx.body as Record<string, unknown> | undefined;

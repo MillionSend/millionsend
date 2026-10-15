@@ -121,8 +121,11 @@ async function clientRow(clientId: string) {
 async function authorize(
   clientId: string,
   cookie: string,
-  consentScope?: string,
-  prompt?: "consent",
+  {
+    scope = SCOPE,
+    consentScope,
+    prompt,
+  }: { scope?: string; consentScope?: string; prompt?: "consent" } = {},
 ) {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -130,7 +133,7 @@ async function authorize(
     response_type: "code",
     client_id: clientId,
     redirect_uri: REDIRECT_URI,
-    scope: SCOPE,
+    scope,
     state: "xyz",
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -232,6 +235,45 @@ describe("OAuth authorization server", () => {
     const consents = await db.select().from(schema.oauthConsent);
     expect(consents).toHaveLength(1);
     expect(consents[0]?.referenceId).toBe(teamId);
+  });
+
+  it("issues a refresh token to an MCP client that did not ask for offline_access", async () => {
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+
+    const { status, body } = await authorize(clientId, cookie, { scope: RESOURCE_SCOPE });
+    expect(status).toBe(200);
+    expect(body.scope).toBe(RESOURCE_SCOPE);
+    expect(typeof body.refresh_token).toBe("string");
+    const refreshed = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token as string,
+      client_id: clientId,
+    });
+    expect(refreshed.status).toBe(200);
+    expect(decodeJwt(refreshed.body.access_token as string).team_id).toBe(teamId);
+  });
+
+  it("still requires PKCE once offline_access is added", async () => {
+    const { cookie } = await signUp("ada@example.com");
+    const clientId = await registerClient();
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: REDIRECT_URI,
+      scope: RESOURCE_SCOPE,
+      state: "xyz",
+      resource: RESOURCE,
+    });
+    const refused = new URL(
+      await redirectTarget(await call(`/oauth2/authorize?${query}`, { cookie })),
+      BASE,
+    );
+    expect(refused.origin + refused.pathname).toBe(REDIRECT_URI);
+    expect(refused.searchParams.get("error")).toBe("invalid_request");
+    expect(refused.searchParams.get("code")).toBeNull();
   });
 
   it("binds the grant to the team chosen on the consent screen", async () => {
@@ -476,7 +518,9 @@ describe("OAuth authorization server", () => {
     await addMember(userId, teamId);
     const clientId = await registerClient();
 
-    const { status, body } = await authorize(clientId, cookie, "offline_access emails:send");
+    const { status, body } = await authorize(clientId, cookie, {
+      consentScope: "offline_access emails:send",
+    });
     expect(status).toBe(200);
     expect(body.scope).toBe("emails:send");
     expect(decodeJwt(body.access_token as string).scope).toBe("emails:send");
@@ -498,7 +542,9 @@ describe("OAuth authorization server", () => {
     const { userId, cookie } = await signUp("ada@example.com");
     await addMember(userId, teamId);
     const clientId = await registerClient();
-    await expect(authorize(clientId, cookie, "offline_access domains:write")).rejects.toThrow();
+    await expect(
+      authorize(clientId, cookie, { consentScope: "offline_access domains:write" }),
+    ).rejects.toThrow();
   });
 
   it("binds an all-teams grant and resolves membership per refresh", async () => {
@@ -748,7 +794,7 @@ describe("connected-app receipt", () => {
       .update(schema.oauthConsent)
       .set({ createdAt: new Date(Date.now() - 5_000) })
       .where(eq(schema.oauthConsent.clientId, clientId));
-    await authorize(clientId, cookie, undefined, "consent");
+    await authorize(clientId, cookie, { prompt: "consent" });
     expect(sent).toHaveLength(1);
   });
 

@@ -14,8 +14,10 @@ import { useTRPC } from "@/lib/trpc";
 /** Sentinel option value for an all-teams grant (core's ALL_TEAMS_GRANT). */
 const ALL_TEAMS = "*";
 /**
- * Drives refresh-token issuance rather than a permission; declining it means
- * the app must re-authorize once the hour-long access token expires.
+ * What keeps the app connected past the hour-long access token. The server
+ * adds it to every MCP authorization, so it is granted with the rest and
+ * never offered as a checkbox: unticked, the consent would no longer cover
+ * the request and the screen would just come back.
  */
 const OFFLINE_ACCESS = "offline_access";
 /**
@@ -57,10 +59,10 @@ export function ConsentForm({
     teamId === ALL_TEAMS
       ? teams.every((team) => team.role === "member")
       : (teams.find((team) => team.teamId === teamId)?.role ?? "member") === "member";
-  const visible = memberOnly
-    ? scopes.filter((scope) => !ADMIN_ONLY_SCOPES.includes(scope))
-    : scopes;
-  const nothingGranted = visible.every((scope) => scope === OFFLINE_ACCESS || !granted.has(scope));
+  const visible = scopes.filter(
+    (scope) => scope !== OFFLINE_ACCESS && !(memberOnly && ADMIN_ONLY_SCOPES.includes(scope)),
+  );
+  const nothingGranted = visible.every((scope) => !granted.has(scope));
 
   function toggle(scope: string) {
     setGranted((prev) => {
@@ -78,7 +80,9 @@ export function ConsentForm({
       // The grant binds to session.activeTeamId, so the selection must be
       // persisted (and membership-checked) before consent is recorded.
       if (accept) await grantTeam.mutateAsync({ teamId });
-      const kept = visible.filter((scope) => granted.has(scope));
+      const kept = scopes.filter(
+        (scope) => scope === OFFLINE_ACCESS || (visible.includes(scope) && granted.has(scope)),
+      );
       const { data, error } = await authClient.oauth2.consent({
         accept,
         // Omitted = everything requested; sent only when the user unticked
