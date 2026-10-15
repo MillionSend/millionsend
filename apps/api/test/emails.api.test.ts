@@ -152,6 +152,83 @@ describe("send edge cases", () => {
     });
   });
 
+  it("records each refused all-suppressed send as a metadata-only suppressed email", async () => {
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email: "gone@example.com",
+      emailHash: hashRecipient("gone@example.com"),
+      reason: "hard_bounce",
+    });
+    const rowsFor = () =>
+      db.select().from(schema.emails).where(eq(schema.emails.subject, "refused-once"));
+    const [usageBefore] = await db
+      .select({ accepted: schema.usageCounters.accepted })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, teamId));
+    const sendsBefore = enqueuedSends.length;
+
+    const body = {
+      ...validBody,
+      to: ["gone@example.com"],
+      subject: "refused-once",
+      html: "<p>do not keep</p>",
+    };
+    expect((await post(body)).status).toBe(422);
+    expect((await post(body)).status).toBe(422);
+
+    // One row per attempt, status suppressed, no body kept, no SES send.
+    const rows = await rowsFor();
+    expect(rows).toHaveLength(2);
+    const [row] = rows;
+    expect(row).toMatchObject({
+      teamId,
+      to: ["gone@example.com"],
+      latestStatus: "suppressed",
+      bodyCiphertext: null,
+      sesMessageId: null,
+    });
+    expect(row?.bodyPurgedAt).toBeInstanceOf(Date);
+    expect(row?.apiKeyId).not.toBeNull();
+    expect(enqueuedSends).toHaveLength(sendsBefore);
+
+    // The refused attempt is not charged to the quota.
+    const [usageAfter] = await db
+      .select({ accepted: schema.usageCounters.accepted })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, teamId));
+    expect(usageAfter?.accepted).toBe(usageBefore?.accepted);
+
+    // It carries a suppressed event and reads back through GET /emails/{id}.
+    const events = await db
+      .select()
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, row?.id ?? ""));
+    expect(events.map((e) => e.type)).toEqual(["suppressed"]);
+    const got = await app.request(`/emails/${row?.id}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(got.status).toBe(200);
+    expect(await got.json()).toMatchObject({ last_event: "suppressed" });
+  });
+
+  it("does not record a suppressed email when a send is only partly suppressed", async () => {
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email: "half-dead@example.com",
+      emailHash: hashRecipient("half-dead@example.com"),
+      reason: "hard_bounce",
+    });
+    const res = await post({
+      ...validBody,
+      to: ["half-dead@example.com", "half-ok@example.com"],
+      subject: "partly",
+    });
+    expect(res.status).toBe(200);
+    const rows = await db.select().from(schema.emails).where(eq(schema.emails.subject, "partly"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.latestStatus).not.toBe("suppressed");
+  });
+
   it("replays an idempotent send and conflicts on payload drift", async () => {
     const first = await post(validBody, { "idempotency-key": "same-key" });
     const { id } = (await first.json()) as { id: string };
@@ -251,6 +328,19 @@ describe("batch send", () => {
     for (const { id } of body.data) {
       expect(enqueuedSends.some((e) => e.emailId === id)).toBe(true);
     }
+  });
+
+  it("keeps no suppressed email for an all-suppressed batch item (single sends only)", async () => {
+    const res = await batch([
+      { ...validBody, to: ["gone@example.com"], subject: "batch-refused" },
+      { ...validBody, to: ["fine@example.com"], subject: "batch-refused" },
+    ]);
+    expect(res.status).toBe(422);
+    const rows = await db
+      .select()
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "batch-refused"));
+    expect(rows).toHaveLength(0);
   });
 
   it("fails the whole batch up front when any item is invalid (nothing accepted)", async () => {

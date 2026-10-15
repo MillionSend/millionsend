@@ -380,6 +380,47 @@ export type AcceptEmailResult =
   | { ok: false; reason: "undeliverable_recipient"; address: string; why: UndeliverableReason };
 
 /**
+ * A send refused because every `to` recipient is suppressed still leaves a
+ * metadata-only row (status "suppressed", with its event) so the attempt shows
+ * in the dashboard and `GET /emails`, as it does at Resend. No body is kept
+ * (bodyPurgedAt marks it as already purged), nothing is charged to the quota,
+ * and nothing is sent; the caller still answers 422 all_recipients_suppressed.
+ */
+async function recordSuppressedAttempt(
+  db: Db,
+  auth: AcceptEmailAuth,
+  payload: AcceptEmailPayload,
+): Promise<void> {
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(schema.emails)
+      .values({
+        teamId: auth.teamId,
+        domainId: payload.domainId,
+        apiKeyId: auth.apiKeyId,
+        from: payload.from,
+        to: payload.to,
+        cc: payload.cc && payload.cc.length > 0 ? payload.cc : null,
+        bcc: payload.bcc && payload.bcc.length > 0 ? payload.bcc : null,
+        replyTo: payload.replyTo ?? null,
+        subject: payload.subject,
+        topicId: payload.topicId ?? null,
+        latestStatus: "suppressed",
+        bodyPurgedAt: now,
+      })
+      .returning({ id: schema.emails.id });
+    if (!row) throw new Error("suppressed email insert returned no row");
+    await tx.insert(schema.emailEvents).values({
+      emailId: row.id,
+      type: "suppressed",
+      occurredAt: now,
+      data: { source: "api", reason: "all_recipients_suppressed" },
+    });
+  });
+}
+
+/**
  * The single accept pipeline behind every send surface: the team's send
  * admission (sendRefusal), suppression strip, body encryption, atomic quota
  * reservation + email insert, and the send enqueue. Callers own transport
@@ -499,7 +540,14 @@ export async function acceptEmail(
   }
   const keep = (list: string[] | undefined) => list?.filter((r) => !suppressed.has(r));
   const to = keep(payload.to) ?? [];
-  if (to.length === 0) return { ok: false, reason: "all_suppressed" };
+  if (to.length === 0) {
+    // A batch (opts.tx) fails the whole item at validation and keeps nothing;
+    // the platform's own account mail (uncapped) never lists in a team's emails.
+    if (!opts.tx && auth.billing !== "uncapped") {
+      await recordSuppressedAttempt(deps.db, auth, payload);
+    }
+    return { ok: false, reason: "all_suppressed" };
+  }
   const cc = keep(payload.cc);
   const bcc = keep(payload.bcc);
   // Quota is charged per distinct mailbox, not per email: every recipient is
