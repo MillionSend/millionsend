@@ -418,6 +418,14 @@ pela taxa de bounce ou de reclamação, o relay responde `451 4.7.1` após o
 DATA, e o cliente guarda a mensagem e tenta de novo; uma equipe suspensa
 recebe `550`.
 
+Cada mensagem conta no limite por minuto da sua chave de API, o mesmo usado
+pelas requisições dessa chave à API (`API_RATE_LIMIT_PER_MINUTE`, padrão 600),
+e, como a API, o relay limita cada equipe a 3.000 mensagens por minuto,
+somando todas as suas chaves. A contagem acontece no `MAIL FROM`, antes de a
+mensagem ser enviada: se passar de qualquer um dos limites, o relay responde
+`451 4.7.1` com os segundos que faltam para o próximo minuto, e o cliente
+guarda a mensagem e tenta de novo.
+
 Um destinatário cujo domínio nunca recebe e-mail (veja
 [Erros](/pt-BR/api-reference#erros)) recebe `550 5.1.2` no `RCPT TO`, com a
 mesma mensagem da API, e o relay continua aceitando os outros

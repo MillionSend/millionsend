@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { type OpenAPIHono, z } from "@hono/zod-openapi";
+import { API_RATE_LIMIT_PER_MINUTE_DEFAULT } from "@millionsend/config";
 import {
   ADMIN_MCP_SCOPES,
   ALL_TEAMS_GRANT,
@@ -2076,7 +2077,7 @@ export function registerMcp(app: OpenAPIHono<Env>, deps: ApiDeps, appBaseUrl: st
       appBaseUrl,
       resource,
       createRemoteJWKSet(new URL(`${appBaseUrl}/api/auth/jwks`)),
-      deps.rateLimitPerMinute ?? 600,
+      deps.rateLimitPerMinute ?? API_RATE_LIMIT_PER_MINUTE_DEFAULT,
     ),
     resourceMetadataUrl,
   };

@@ -404,6 +404,14 @@ sending is paused for its bounce or complaint rate, the relay answers
 `451 4.7.1` after DATA, so the client keeps the message and retries; a
 suspended team gets `550`.
 
+Every message counts against its API key's per-minute rate limit, the same
+budget the key's API requests spend (`API_RATE_LIMIT_PER_MINUTE`, default
+600), and, like the API, the relay caps each team at 3,000 messages a minute
+across all of its keys. The count happens at `MAIL FROM`, before any of the
+message is sent: past either limit the relay answers `451 4.7.1` with the
+seconds left until the next minute, so the client keeps the message and
+retries.
+
 A recipient whose domain can never receive mail (see
 [Errors](/api-reference#errors)) gets `550 5.1.2` at `RCPT TO`, with the
 API's message, and the relay still accepts the other recipients. If it was
