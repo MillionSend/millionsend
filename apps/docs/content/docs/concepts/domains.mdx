@@ -155,11 +155,13 @@ you can't fully trust anyway.
 ## Receiving
 
 A verified domain can also [receive mail](/concepts/receiving) (beta). Every
-domain response carries Resend's `capabilities` object: `sending` is always
-`enabled` (asking to disable it is a `422`), and `receiving` is `enabled` or
-`disabled`. Switch receiving with **Enable receiving** on the domain page, or
-send `{ "capabilities": { "receiving": "enabled" } }` (or `"disabled"`) to
-`PATCH /domains/{id}`. Only a verified domain can turn it on, which is why
+domain response carries Resend's `capabilities` object: `sending` is
+`enabled` (asking to disable it is a `422`; only the
+[shared subdomain](#shared-subdomain) can read `disabled`), and `receiving`
+is `enabled` or `disabled`. Switch receiving with **Enable receiving** on
+the domain page, or send `{ "capabilities": { "receiving": "enabled" } }`
+(or `"disabled"`) to `PATCH /domains/{id}`. Only a verified domain can turn
+it on, which is why
 `POST /domains` refuses `"receiving": "enabled"` with a `422`: add the domain,
 verify it, then switch receiving on. A domain name receives in one team only:
 a name another team already receives on answers `409`. On an instance that
@@ -199,6 +201,34 @@ the default; other addresses are refused). Owners and admins switch it with
 See [Which addresses receive](/concepts/receiving#which-addresses-receive).
 Deleting a domain deletes its inboxes, with their threads and drafts, and
 revokes their API keys.
+
+## Shared subdomain
+
+On an instance with a [shared inbox domain](/concepts/inboxes#shared-domain),
+`GET /domains` ends with one more row: your team's subdomain of it, such as
+`acme.agents.example`, where your shared inboxes get their addresses; a
+team whose subdomain still waits for its name review has none yet. Every
+row carries `shared`, and this is the one with `shared: true`. It reads
+`verified`, in the instance's default region, with receiving on, catch-all
+and tracking off, and two fields of its own:
+
+- `sending_mode`: what addresses on it may send now: `open` (start
+  conversations), `reply_only` (reply inside their threads) or
+  `receive_only` (nothing goes out, and `capabilities.sending` reads
+  `disabled`). An inbox whose address or `from_name` looks like a
+  well-known brand still replies only, whatever the mode (see
+  [Shared domain](/concepts/inboxes#shared-domain)).
+- `sending_mode_reason`: what holds it below `open`, `plan` or `instance`;
+  `null` when open.
+
+The row is read-only: `GET /domains/{id}` answers it with `records: []`,
+since there is nothing to set up, and `PATCH`, `POST /domains/{id}/verify`
+and `DELETE` answer `403 forbidden`. It doesn't count toward your plan's
+domain limit, and its id stays the same when a rename changes its name.
+Though verified, it sends only from your inboxes' own addresses, and
+`POST /api-keys` doesn't take its id as `domain_id`. To create an inbox on
+it, send its id as `domain_id` to `POST /inboxes`. The dashboard's
+**Domains** page shows it first, marked **Shared**.
 
 ## API keys and domains
 

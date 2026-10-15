@@ -611,7 +611,11 @@ dele, como domínio de envio.
    ([AWS: Creating and verifying identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html)).
 3. **Ligue.** Defina `SHARED_INBOX_DOMAIN=agents.example` no `.env` e rode
    `docker compose up -d`. O app se recusa a subir quando o valor não é um
-   hostname em minúsculas, ou quando falta o `RECEIVING_MX_HOST`.
+   hostname em minúsculas, ou quando falta o `RECEIVING_MX_HOST`. A partir
+   daí, cada equipe ganha o subdomínio dela quando é criada, e as equipes que
+   já existem ganham o delas quando o worker subir de novo, com uma revisão
+   de nomes para cada uma quando há um
+   [avaliador](#monitoramento-de-conteúdo-opcional) configurado.
 4. **Receba o postmaster@ e o abuse@.** Os e-mails para `postmaster@` e
    `abuse@` no domínio, ou no subdomínio de qualquer equipe, vão para a sua
    própria equipe, nunca para a equipe dona do subdomínio: a equipe mais
@@ -1493,13 +1497,18 @@ a classe de erro; a página de revisão mostra isso e nunca um assunto ou um
 corpo. As linhas de amostra são removidas após 90 dias.
 
 **Nomes no domínio compartilhado.** Com um
-[domínio compartilhado das caixas](#domínio-compartilhado-das-caixas), a API
-e o painel também mandam para a TypeSafe os nomes que uma equipe publica
-nele, para revisão antes de serem usados: um nome de usuário escolhido, o
-nome de exibição (`from_name`) de uma caixa compartilhada e o subdomínio da
-equipe, como foram escritos, sem mais nada sobre a equipe ou a caixa. Só
-fica guardada uma contagem dos nomes revisados e recusados por equipe e
-dia. Inclua isso também no aviso de privacidade.
+[domínio compartilhado das caixas](#domínio-compartilhado-das-caixas), a
+API, o painel e o worker também mandam para a TypeSafe os nomes que uma
+equipe publica nele, para revisão antes de serem usados: um nome de usuário
+escolhido, o nome de exibição (`from_name`) de uma caixa compartilhada e o
+subdomínio de cada equipe, tirado do nome da equipe, como foram escritos,
+sem mais nada sobre a equipe ou a caixa. O subdomínio é enviado quando a
+equipe é criada, quando uma mudança de nome muda o subdomínio, e uma vez
+para cada equipe que já existe e ainda não tem um, na primeira vez que o
+worker sobe na v0.14.0 ou depois que o domínio compartilhado é definido,
+mesmo que a equipe não use o domínio compartilhado. Só fica guardada uma
+contagem dos nomes revisados e recusados por equipe e dia. Inclua isso
+também no aviso de privacidade.
 
 **Imagens e anexos.** A triagem abre o que o e-mail traz, dentro do
 worker: o texto e os links de anexos PDF (até 50 páginas), Word, Excel,

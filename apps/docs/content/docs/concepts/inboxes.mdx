@@ -90,8 +90,9 @@ person. The last five fields are MillionSend's.
 
 | Field | Rules |
 | --- | --- |
-| `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for an address on the [shared domain](#shared-domain). |
-| `username` | With `email_address` left out, the part before `@` of the [shared-domain](#shared-domain) address: trimmed and lowercased, 1–64 letters, digits and `. _ -`, starting and ending with a letter or digit, without `..`, never cut short. Left out, the address is random. It can't change later. |
+| `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for an address on the [shared domain](#shared-domain), or on the domain `domain_id` names. |
+| `username` | With `email_address` left out, the part before `@` of the [shared-domain](#shared-domain) address: trimmed and lowercased, 1–64 letters, digits and `. _ -`, starting and ending with a letter or digit, without `..`, never cut short. Left out, the address is random. With a `domain_id` of one of your own domains, it is the part before `@` there, required, under `email_address`'s rules. It can't change later. |
+| `domain_id` | The id of a `GET /domains` row, instead of `email_address`: your team's subdomain of the shared domain (the row with `shared: true`), which works like leaving `email_address` out, or one of your verified domains, where `username` names the address and `email_address`'s rules apply. |
 | `name` | 1–320 characters, so any address fits; the address when left out. |
 | `from_name` | The display name of the mail the inbox sends, up to 78 characters: a plain name, without `@`, `:`, `<`, `>`, line breaks, links or phone numbers. On the shared domain it is [reviewed](#shared-domain) first. |
 | `kind` | `agent` (the default) or `human`. |
@@ -104,8 +105,8 @@ person. The last five fields are MillionSend's.
 | `409 validation_error` | Another inbox already uses the address, a chosen `username` included: no other name is picked for you. |
 | `403 validation_error` | The plan's inbox limit is reached: "You have reached the inbox limit of your plan. Upgrade to add more." |
 | `429 rate_limit_exceeded` | Too many inboxes were created in the last hour, or the shared domain's name review reached today's limit for your team (20 refused names or 200 reviews); `retry-after` says when to try again. Deleting inboxes doesn't give that room back. |
-| `422 validation_error` | The domain isn't a verified domain of your team, it doesn't receive here, the instance has no shared domain, the instance doesn't receive mail at all, a `username` breaks a rule, is reserved or can't be used on the shared domain, `username` comes with `email_address`, or a setting breaks a rule. |
-| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now; `retry-after: 60`. A request with neither never gets this answer. |
+| `422 validation_error` | The domain isn't a verified domain of your team, it doesn't receive here, the instance has no shared domain, the instance doesn't receive mail at all, a `username` breaks a rule, is reserved or can't be used on the shared domain, `username` or `domain_id` comes with `email_address`, `domain_id` isn't a verified domain of your team or names one of your own domains without `username`, or a setting breaks a rule. |
+| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now (`retry-after: 60`), or your team's subdomain still waits for its [name review](#shared-domain), which holds every address on it, random and forwarding ones included (`retry-after: 300`). Try again shortly. |
 
 The other calls:
 
@@ -165,11 +166,18 @@ address your app doesn't already send from.
 An instance can offer a shared domain for inboxes that need no DNS at all
 (its operator sets `SHARED_INBOX_DOMAIN`; see
 [Self-hosting](/self-hosting#shared-inbox-domain)). Each team gets its own
-subdomain there, named after the team, such as `acme.agents.example`, or
-`team-` and six random characters when the name looks like a well-known
-brand or a reserved name, or the review below doesn't pass it. A deleted
-team's subdomain is never given to another team. Leave `email_address` out
-and `username` names the address:
+subdomain there when the team is created, named after it, such as
+`acme.agents.example`, or `team-` and six random characters when the name
+looks like a well-known brand or a reserved name, or the review below
+doesn't pass it. Until its first address, the subdomain follows the team's
+renames. Once an address has been on it, it never changes and is never
+given to another team, even after its team is deleted; one that never had
+an address is freed by a rename or by the team's deletion.
+
+`GET /domains` lists the subdomain as its last row, with `shared: true` and
+its `sending_mode` (see [Domains](/concepts/domains#shared-subdomain)); its
+id is the `domain_id` of your shared inboxes. Leave `email_address` out, or
+send that id as `domain_id`, and `username` names the address:
 
 ```sh
 curl -X POST "https://api.millionsend.com/inboxes" \
@@ -197,12 +205,16 @@ government or an official role. A refused name answers
 `422 validation_error`, such as "username can't be used on the shared
 domain: pick another", never with the judge's reasoning. While the review
 can't answer, a username or `from_name` answers
-`503 name_review_unavailable` with `retry-after: 60`, and a new team
-subdomain falls back to `team-` and six random characters. After 20 refused
-names, or 200 reviews, in a UTC day, the answer is `429 rate_limit_exceeded`
-until midnight UTC. A random address with no `from_name` is never refused
-over the review, and an instance without a judge applies only the rules
-above.
+`503 name_review_unavailable` with `retry-after: 60`. A new team waits for
+its subdomain instead of taking a random one at once: the review is tried
+again after 5 minutes, then hourly, and after 24 hours the team takes
+`team-` and six random characters. Until then, creating an address on the
+shared domain answers `503 name_review_unavailable` with `retry-after: 300`:
+try again shortly. A renamed team keeps its subdomain until the review
+answers. After 20 refused names, or 200 reviews, in a UTC day, the answer is
+`429 rate_limit_exceeded` until midnight UTC. A random address with no
+`from_name` is never refused over the review, and an instance without a
+judge applies only the rules above.
 
 Mail to `postmaster@` and `abuse@` at the shared domain, or at any team's
 subdomain, goes to the instance's operator, never to an inbox.
@@ -259,8 +271,6 @@ team's:
   the rule. A key restricted to a domain gets `403 restricted_api_key`.
   Elsewhere `POST /emails` answers `403 inbox_send_policy`, and
   `POST /emails/batch` and the SMTP relay always refuse a shared address.
-- Their `domain_id` is the id of the team's shared subdomain, which
-  `GET /domains` doesn't list.
 
 On an instance without a shared domain, `POST /inboxes` without
 `email_address` answers `422`.
@@ -690,8 +700,9 @@ leaves room, or MillionSend differs:
 
 - Creating an inbox or a draft answers the whole object; Resend's
   `{ object, id }` is part of it.
-- Resend requires `email_address`; here it is optional: left out, the inbox
-  gets an address on the [shared domain](#shared-domain), random through a
+- Resend requires `email_address`; here it is optional: left out, with no
+  `domain_id`, the inbox gets an address on the
+  [shared domain](#shared-domain), random through a
   Resend SDK, which can't send `username`, and permanent, since it can't
   send `expires_in` either.
 - `kind` defaults to `agent`, since a Resend SDK can't send it, so inboxes
@@ -713,8 +724,9 @@ leaves room, or MillionSend differs:
   `503 name_review_unavailable` (see [Errors](/api-reference#errors)). An address already in use, or a draft
   edited after it was sent or while another request changed it, answers
   `409 validation_error`.
-- MillionSend's additions are extra fields (`username`, `kind`, `shared`,
-  `expires_at`, `screening`, `extracted_text` and others) and extra
+- MillionSend's additions are extra fields (`username` and `domain_id` on
+  create, `kind`, `shared`, `expires_at`, `screening`, `extracted_text` and
+  others) and extra
   endpoints (`/safety`, `/quarantine`, `/codes/latest`,
   `/drafts/{id}/reject`). Resend's enums
   never gain a value: quarantined mail is hidden from agents rather than put

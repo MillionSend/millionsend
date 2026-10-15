@@ -199,8 +199,8 @@ outra configuração de segurança.
 | `list_webhooks` | `webhooks:write` | Lista os webhooks (linhas de lista nunca trazem o segredo de assinatura). |
 | `get_webhook` | `webhooks:write` | Busca um webhook: URL, eventos e status. |
 | `list_api_keys` | `api-keys:write` | Lista as chaves de API ativas (nunca os tokens). |
-| `list_domains` | `domains:read` | Lista domínios de envio com o status de verificação. |
-| `get_domain` | `domains:read` | Busca um domínio com os registros DNS. |
+| `list_domains` | `domains:read` | Lista domínios de envio com o status de verificação. O subdomínio da equipe no [domínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado) é a última linha (`shared: true`): só de leitura, com o `sending_mode` dele, e só os endereços das caixas dele enviam por ele. |
+| `get_domain` | `domains:read` | Busca um domínio com os registros DNS; o subdomínio compartilhado não tem nenhum. |
 | `send_email` | `emails:send` | Envia ou agenda um e-mail transacional. |
 | `send_email_batch` | `emails:send` | Envia até 100 e-mails em uma chamada. |
 | `update_email` | `emails:send` | Reagenda um e-mail agendado. |
@@ -239,13 +239,13 @@ outra configuração de segurança.
 | `delete_webhook` | `webhooks:write` | **admin** Exclui um webhook. |
 | `revoke_api_key` | `api-keys:write` | **admin** Revoga uma chave de API. |
 | `create_domain` | `domains:write` | **admin** Adiciona um domínio de envio e retorna os registros DNS; configurações de rastreamento opcionais valem já na criação. |
-| `update_domain` | `domains:write` | **admin** Muda as configurações de rastreamento de um domínio, liga e desliga o [recebimento](/pt-BR/concepts/receiving) com `capabilities.receiving` ou o pega-tudo com `receiving_catch_all`; o `tracking_subdomain` é o que gera o CNAME de rastreamento (obrigatório no MillionSend Cloud). |
-| `verify_domain` | `domains:write` | **admin** Reverifica o DNS e a verificação SES de um domínio. |
-| `delete_domain` | `domains:write` | **admin** Remove um domínio e a identidade SES dele. |
+| `update_domain` | `domains:write` | **admin** Muda as configurações de rastreamento de um domínio, liga e desliga o [recebimento](/pt-BR/concepts/receiving) com `capabilities.receiving` ou o pega-tudo com `receiving_catch_all`; o `tracking_subdomain` é o que gera o CNAME de rastreamento (obrigatório no MillionSend Cloud). O subdomínio compartilhado responde `403`. |
+| `verify_domain` | `domains:write` | **admin** Reverifica o DNS e a verificação SES de um domínio; o subdomínio compartilhado responde `403`. |
+| `delete_domain` | `domains:write` | **admin** Remove um domínio e a identidade SES dele; o subdomínio compartilhado responde `403`. |
 | `reply_to_received_email` | `receiving:reply` | Responde a um e-mail recebido pela caixa dele. Devolve `sent` com o e-mail e a conversa, ou `draft` com os motivos quando as regras da caixa seguram a resposta para uma pessoa. |
 | `forward_received_email` | `receiving:reply` | Encaminha um e-mail recebido, citado no corpo ou anexado como `.eml`; com os mesmos resultados de `reply_to_received_email`. |
 | `update_thread` | `receiving:reply` | Marca uma conversa como lida ou não lida, muda de pasta ou coloca uma etiqueta. |
-| `create_inbox` | `receiving:manage` | Cria uma caixa de agente (as caixas de pessoas são criadas no painel); o `accept_from` é a única configuração de segurança que ela aceita, e o `username` dá nome a um endereço no domínio compartilhado. |
+| `create_inbox` | `receiving:manage` | Cria uma caixa de agente (as caixas de pessoas são criadas no painel); o `accept_from` é a única configuração de segurança que ela aceita, e o `username` dá nome a um endereço no domínio compartilhado. O `domain_id` aceita uma linha do `list_domains`: o subdomínio compartilhado da equipe (`shared: true`), ou um dos domínios dela, com o `username` como a parte antes do @. Enquanto o subdomínio da equipe espera a revisão de nomes, ela responde `503`. |
 | `update_inbox` | `receiving:manage` | Muda o nome, o nome de remetente ou a validade de uma caixa; fazer ela vencer antes exige o papel de responsável ou de admin. |
 | `delete_inbox` | `receiving:manage` | **admin** Exclui uma caixa com as conversas e os rascunhos dela; as chaves de API dela são revogadas. |
 | `release_email` | `receiving:manage` | Libera um e-mail da quarentena para a caixa; `trust_sender` também coloca o remetente na lista de permitidos. |

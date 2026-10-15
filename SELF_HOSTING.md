@@ -466,7 +466,10 @@ sending domain.
    sends without a tenant and is tried again an hour later, and a suspension
    disables that tenant too.
 3. `.env`: `SHARED_INBOX_DOMAIN=agents.example`, then `docker compose up -d`.
-   The app refuses to boot without `RECEIVING_MX_HOST`.
+   The app refuses to boot without `RECEIVING_MX_HOST`. From then on a team
+   gets its subdomain when it's created, and teams that already exist get
+   theirs at the worker's next boot, with one name review each where a judge
+   is configured.
 4. Make your own team System (Console → Teams → Change plan → System): mail
    to `postmaster@` and `abuse@` at the domain or any team's subdomain goes
    to the oldest System team's All received, with the virus scan and spam
@@ -1184,12 +1187,16 @@ codes, language, model version, latency and error class; the review page
 shows those and never a subject or a body. Sample rows are metadata and are
 pruned after 90 days.
 
-**Names on the shared domain.** With a shared inbox domain, the API and the
-dashboard also send TypeSafe the names a team publishes there, for review
-before they're used: a chosen username, a shared inbox's display name
-(`from_name`) and the team's subdomain label, as written, with nothing else
-about the team or the inbox. Only a count of the names reviewed and refused
-per team and day is kept. List these in the privacy notice too.
+**Names on the shared domain.** With a shared inbox domain, the API, the
+dashboard and the worker also send TypeSafe the names a team publishes
+there, for review before they're used: a chosen username, a shared inbox's
+display name (`from_name`) and every team's subdomain label, drawn from the
+team name, as written, with nothing else about the team or the inbox. A
+label is sent when its team is created, on a rename that changes it, and
+once for every existing team that has none, at the worker's first boot on
+v0.14.0 or after the shared domain is set, whether or not the team uses the
+shared domain. Only a count of the names reviewed and refused per team and
+day is kept. List these in the privacy notice too.
 
 **Images and attachments.** Screening opens what an email carries, inside
 the worker: the text and links of PDF (up to 50 pages), Word, Excel,

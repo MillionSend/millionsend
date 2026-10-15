@@ -72,8 +72,10 @@ remaining deltas are deliberate and loud:
   signed one-hour download links, the `email.received` webhook, and
   `capabilities.receiving` with a `Receiving` record on domains — so
   `resend.emails.receiving.*`, `forward()` included, works unchanged. A
-  domain's `capabilities.sending` is always `enabled` (asking to disable it
-  is a `422`). Receiving needs a verified domain, so `POST /domains` with
+  domain's `capabilities.sending` is `enabled` (asking to disable it is a
+  `422`), except on the shared subdomain below while the instance pauses
+  sending from the shared domain. Receiving needs a verified domain, so
+  `POST /domains` with
   `capabilities.receiving: "enabled"` is a `422`: verify the domain, then
   enable it with `PATCH /domains/{id}`. `GET /emails/receiving` without
   `limit` returns 20 emails rather than all of them, and HTML whose inline
@@ -99,6 +101,18 @@ remaining deltas are deliberate and loud:
   answers `202` with the draft instead of `200` with the email. Extensions
   are extra fields and endpoints only, never new values in Resend's enums.
   See [Inboxes → Resend compatibility](/concepts/inboxes#resend-compatibility).
+- On an instance with a shared inbox domain, `GET /domains` ends with your
+  team's subdomain of it. Every domain carries `shared`, and that row has
+  `shared: true`, plus `sending_mode` (`open`, `reply_only` or
+  `receive_only`) and `sending_mode_reason` (`plan`, `instance` or `null`);
+  its `capabilities.sending` reads `disabled` while the instance pauses
+  sending from the shared domain. It is read-only: `PATCH`, verify and
+  `DELETE` answer `403 forbidden`. Since it comes last, a client that takes
+  the first verified domain for its `from` keeps getting one of the team's
+  own. Only for a team without domains of its own is it the first row, and
+  only an inbox's own address sends from it, so such a client should skip
+  `shared: true` rows. `POST /inboxes` takes its id as `domain_id`. See
+  [Domains → Shared subdomain](/concepts/domains#shared-subdomain).
 - Contacts are team-global — audience endpoints are served as aliases of
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
@@ -303,21 +317,23 @@ same addresses for a new contact. Nothing already stored changes: contacts,
 and queued or scheduled emails, stay as they are. A broadcast goes to stored
 contacts without checking their addresses.
 
-Besides Resend's names, [received mail](/concepts/receiving) and
-[inboxes](/concepts/inboxes) answer these:
+Besides Resend's names, [received mail](/concepts/receiving),
+[inboxes](/concepts/inboxes) and the
+[shared subdomain](/concepts/domains#shared-subdomain) answer these:
 
 | Status, name | When |
 | --- | --- |
 | `403 restricted_api_key` | An inbox-scoped key outside its inbox, or sending from another address; `include_quarantined` from an inbox-scoped key or the MCP server. |
 | `403 inbox_send_policy` | An inbox's rules refuse a send: a shared-domain address starting a conversation where it may only reply (on the Free plan, or by the instance's setting), any send from one while the instance pauses them, or a send from an agent inbox's address on `POST /emails`, `POST /emails/batch` or the SMTP relay that the rules would hold. The message names the rule, or lists the reasons a send was held. |
 | `429 inbox_send_cap_reached` | The inbox's daily send cap is used, or the team's daily limit for mail from the shared domain; `retry-after` counts to midnight UTC. |
-| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now; `retry-after: 60`. |
+| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now (`retry-after: 60`), or your team's subdomain of the shared domain still waits for its name review, which holds every address on it (`retry-after: 300`). |
 | `403 approval_required` | An agent sending a draft that waits for approval. |
 | `403 email_quarantined` | An agent reading, replying to or forwarding held mail, or any forward of infected mail. |
 | `410 email_blocked` | A download of infected mail. |
 | `429 too_many_waits` | Too many long-polls at once from one team; `retry-after: 1`. |
 | `403 validation_error` | The plan's inbox limit, with Resend's message. |
 | `403 plan_limit_reached` | Catch-all on the Free plan. |
+| `403 forbidden` | A change, verification or deletion of your team's shared subdomain, which is read-only. |
 | `404 not_found` | An unknown inbox, thread, label, draft or pagination cursor, with Resend's messages (`Inbox not found.`). |
 
 ## Idempotency
@@ -351,6 +367,12 @@ lists run in another order:
 | `GET /inboxes/{id}/labels` | Oldest first, all at once, without `has_more`. |
 | `GET /topics` and `/contacts/{id}/topics` | Oldest first, all at once; `has_more` is always `false`. |
 | `GET /emails/receiving/{id}/attachments` | In the email's order, all at once unless you pass `limit`. |
+
+`GET /domains` puts your team's
+[shared subdomain](/concepts/domains#shared-subdomain) after every domain of
+your own, as if it were the oldest, and its id is a cursor like any other:
+`after` it is an empty page, and `before` it reads your oldest domains, the
+page right above it. Catching up works as above.
 
 A cursor that names no item of the list answers `422 validation_error`;
 under `/inboxes` it answers `404`, as on Resend. That includes a stored id
