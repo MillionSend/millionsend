@@ -375,10 +375,12 @@
       "user": "Authorized by",
       "scopes": "Permissions",
       "granted": "Granted",
+      "expires": "Expires",
       "menu": "Grant actions"
     },
     "you": "you",
     "allTeams": "All teams",
+    "untilDisconnected": "Until you disconnect it",
     "scopesCount": "{count, plural, one {# permission} other {# permissions}}",
     "revoke": "Revoke access",
     "revokeAllTeamsForbidden": "This grant also covers teams you do not administer. Only its holder can revoke it.",

@@ -9,6 +9,7 @@ import { AuthScreen } from "@/components/auth/auth-screen";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { authClient } from "@/lib/auth-client";
+import { GRANT_LIFETIME_DAYS, type GrantLifetime } from "@/lib/grant-lifetime";
 import { useTRPC } from "@/lib/trpc";
 
 /** Sentinel option value for an all-teams grant (core's ALL_TEAMS_GRANT). */
@@ -50,6 +51,7 @@ export function ConsentForm({
   const grantTeam = useMutation(trpc.team.grantTeam.mutationOptions());
   const [teamId, setTeamId] = useState(defaultTeamId ?? teams[0]?.teamId ?? "");
   const [granted, setGranted] = useState(() => new Set(scopes));
+  const [lifetime, setLifetime] = useState<GrantLifetime>("never");
   const [pending, setPending] = useState<"allow" | "deny" | null>(null);
   const [failed, setFailed] = useState(false);
   const appName = app?.name || t("unknownApp");
@@ -83,12 +85,16 @@ export function ConsentForm({
       const kept = scopes.filter(
         (scope) => scope === OFFLINE_ACCESS || (visible.includes(scope) && granted.has(scope)),
       );
-      const { data, error } = await authClient.oauth2.consent({
+      // `lifetime` is this app's own field (server/auth hooks), so it is
+      // missing from the provider's typed body and passed as a variable.
+      const body = {
         accept,
+        lifetime,
         // Omitted = everything requested; sent only when the user unticked
         // something, so the provider records exactly the approved subset.
         ...(accept && kept.length < scopes.length ? { scope: kept.join(" ") } : {}),
-      });
+      };
+      const { data, error } = await authClient.oauth2.consent(body);
       if (error) throw error;
       // The auth client's redirect plugin already navigates on `redirect: true`;
       // this covers a response without that flag.
@@ -192,6 +198,21 @@ export function ConsentForm({
               </label>
             ))}
           </div>
+        </div>
+        <div className={`ms-field ${styles.field}`}>
+          <label htmlFor="consent-lifetime">{t("stayConnected")}</label>
+          <Select
+            id="consent-lifetime"
+            value={lifetime}
+            onChange={(value) => setLifetime(value as GrantLifetime)}
+            options={Object.keys(GRANT_LIFETIME_DAYS).map((value) => ({
+              value,
+              label: t(`lifetimes.${value}`),
+            }))}
+            ariaLabel={t("stayConnected")}
+            width="100%"
+            disabled={pending !== null}
+          />
         </div>
         {failed ? (
           <p className={styles.error} role="alert">

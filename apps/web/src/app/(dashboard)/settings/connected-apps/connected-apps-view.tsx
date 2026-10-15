@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -11,11 +11,13 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { formatDate } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
 export function ConnectedAppsView() {
   const t = useTranslations("settings.connectedApps");
   const common = useTranslations("common");
+  const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listQuery = useQuery(trpc.connectedApps.list.queryOptions());
@@ -59,6 +61,7 @@ export function ConnectedAppsView() {
               <th>{t("table.user")}</th>
               <th>{t("table.scopes")}</th>
               <th>{t("table.granted")}</th>
+              <th>{t("table.expires")}</th>
               <th className="right" aria-label={t("table.menu")} />
             </tr>
           </thead>
@@ -97,6 +100,9 @@ export function ConnectedAppsView() {
                     </span>
                   </td>
                   <td>{grant.grantedAt ? <RelativeTime date={grant.grantedAt} /> : "—"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {grant.expiresAt ? formatDate(grant.expiresAt, locale) : t("untilDisconnected")}
+                  </td>
                   <td className="right">
                     <PopoverMenu
                       ariaLabel={t("table.menu")}

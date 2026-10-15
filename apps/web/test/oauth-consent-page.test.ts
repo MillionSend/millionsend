@@ -92,4 +92,14 @@ describe("the OAuth consent page", () => {
     expect(html).not.toContain("reviewed");
     expect(html).not.toContain('role="note"');
   });
+
+  it("offers how long to stay connected, until disconnected by default", async () => {
+    const html = await renderConsent();
+    expect(html).toContain('<label for="consent-lifetime">Stay connected</label>');
+    const trigger = html.match(/<button[^>]*id="consent-lifetime"[^>]*>(.*?)<\/button>/)?.[1];
+    expect(trigger).toContain("Until I disconnect it");
+    // offline_access is always granted, so the one box is for emails:send.
+    expect(html.match(/type="checkbox"/g)).toHaveLength(1);
+    expect(html).toContain("Send emails");
+  });
 });

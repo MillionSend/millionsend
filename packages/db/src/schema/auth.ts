@@ -264,6 +264,10 @@ export const oauthConsent = pgTable(
     scopes: text("scopes").array().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }),
+    // When the grant ends, from the lifetime picked on the consent screen;
+    // null lasts until the user disconnects it. Set and enforced by the web
+    // app's auth config, not by the OAuth provider.
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
   },
   (t) => [
     index("oauth_consent_client_id_idx").on(t.clientId),

@@ -1,8 +1,9 @@
 import { ALL_TEAMS_GRANT } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, exists, or } from "drizzle-orm";
+import { and, desc, eq, exists, gt, isNull, or } from "drizzle-orm";
 import { z } from "zod";
+import { endGrant } from "../auth";
 import { listMemberships } from "../membership";
 import { router, teamProcedure } from "../trpc";
 
@@ -37,7 +38,9 @@ function grantVisibleFromTeam(db: Db, teamId: string) {
  * row; revoking it deletes the consent and the refresh tokens behind it, so
  * the client is back to the consent screen at its next refresh.
  * Already-issued access tokens are JWTs the API verifies offline and expire
- * on their own (accessTokenExpiresIn).
+ * on their own (accessTokenExpiresIn). A grant past the lifetime picked at
+ * consent is over and not listed; its row goes at the client's next
+ * authorization.
  */
 export const connectedAppsRouter = router({
   list: teamProcedure.query(async ({ ctx }) => {
@@ -52,11 +55,17 @@ export const connectedAppsRouter = router({
         scopes: schema.oauthConsent.scopes,
         referenceId: schema.oauthConsent.referenceId,
         grantedAt: schema.oauthConsent.createdAt,
+        expiresAt: schema.oauthConsent.expiresAt,
       })
       .from(schema.oauthConsent)
       .innerJoin(schema.oauthClient, eq(schema.oauthClient.clientId, schema.oauthConsent.clientId))
       .leftJoin(schema.user, eq(schema.user.id, schema.oauthConsent.userId))
-      .where(grantVisibleFromTeam(ctx.db, ctx.teamId))
+      .where(
+        and(
+          grantVisibleFromTeam(ctx.db, ctx.teamId),
+          or(isNull(schema.oauthConsent.expiresAt), gt(schema.oauthConsent.expiresAt, new Date())),
+        ),
+      )
       .orderBy(desc(schema.oauthConsent.createdAt));
     return rows.map(({ referenceId, ...row }) => ({
       ...row,
@@ -101,21 +110,14 @@ export const connectedAppsRouter = router({
           }
         }
       }
-      await ctx.db.transaction(async (tx) => {
-        // Tokens carry the grant's own referenceId — ctx.teamId for a
-        // team-bound grant, ALL_TEAMS_GRANT for an all-teams one (revoking
-        // that cuts the client off everywhere, which is the safe direction).
-        const tokenScope = (
-          table: typeof schema.oauthRefreshToken | typeof schema.oauthAccessToken,
-        ) =>
-          and(
-            eq(table.clientId, consent.clientId),
-            eq(table.userId, consent.userId ?? ""),
-            eq(table.referenceId, consent.referenceId ?? ctx.teamId),
-          );
-        await tx.delete(schema.oauthAccessToken).where(tokenScope(schema.oauthAccessToken));
-        await tx.delete(schema.oauthRefreshToken).where(tokenScope(schema.oauthRefreshToken));
-        await tx.delete(schema.oauthConsent).where(eq(schema.oauthConsent.id, consent.id));
+      // Tokens carry the grant's own referenceId — ctx.teamId for a
+      // team-bound grant, ALL_TEAMS_GRANT for an all-teams one (revoking
+      // that cuts the client off everywhere, which is the safe direction).
+      await endGrant(ctx.db, {
+        id: consent.id,
+        clientId: consent.clientId,
+        userId: consent.userId ?? "",
+        referenceId: consent.referenceId ?? ctx.teamId,
       });
       return { id: consent.id };
     }),
