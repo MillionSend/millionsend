@@ -1190,13 +1190,15 @@ pruned after 90 days.
 **Names on the shared domain.** With a shared inbox domain, the API, the
 dashboard and the worker also send TypeSafe the names a team publishes
 there, for review before they're used: a chosen username, a shared inbox's
-display name (`from_name`) and every team's subdomain label, drawn from the
-team name, as written, with nothing else about the team or the inbox. A
-label is sent when its team is created, on a rename that changes it, and
-once for every existing team that has none, at the worker's first boot on
-v0.14.0 or after the shared domain is set, whether or not the team uses the
-shared domain. Only a count of the names reviewed and refused per team and
-day is kept. List these in the privacy notice too.
+display name (`from_name`) and every team's subdomain label, made from the
+team name (lowercased, accents dropped, each run of other characters turned
+into a hyphen, up to 30 characters), each as it would be published, with
+nothing else about the team or the inbox. A label is sent when its team is
+created, on a rename that changes it, and once for every existing team that
+has none, at the worker's first boot on v0.14.0 or after the shared domain
+is set, whether or not the team uses the shared domain. Only a count of the
+names reviewed and refused per team and day is kept. List these in the
+privacy notice too.
 
 **Images and attachments.** Screening opens what an email carries, inside
 the worker: the text and links of PDF (up to 50 pages), Word, Excel,

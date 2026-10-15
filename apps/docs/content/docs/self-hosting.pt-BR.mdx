@@ -1501,14 +1501,15 @@ corpo. As linhas de amostra são removidas após 90 dias.
 API, o painel e o worker também mandam para a TypeSafe os nomes que uma
 equipe publica nele, para revisão antes de serem usados: um nome de usuário
 escolhido, o nome de exibição (`from_name`) de uma caixa compartilhada e o
-subdomínio de cada equipe, tirado do nome da equipe, como foram escritos,
-sem mais nada sobre a equipe ou a caixa. O subdomínio é enviado quando a
-equipe é criada, quando uma mudança de nome muda o subdomínio, e uma vez
-para cada equipe que já existe e ainda não tem um, na primeira vez que o
-worker sobe na v0.14.0 ou depois que o domínio compartilhado é definido,
-mesmo que a equipe não use o domínio compartilhado. Só fica guardada uma
-contagem dos nomes revisados e recusados por equipe e dia. Inclua isso
-também no aviso de privacidade.
+subdomínio de cada equipe, feito a partir do nome dela (em minúsculas, sem
+acentos, com um hífen no lugar de cada sequência de outros caracteres e até
+30 caracteres), cada um como seria publicado, sem mais nada sobre a equipe
+ou a caixa. O subdomínio é enviado quando a equipe é criada, quando uma
+mudança de nome muda o subdomínio, e uma vez para cada equipe que já existe
+e ainda não tem um, na primeira vez que o worker sobe na v0.14.0 ou depois
+que o domínio compartilhado é definido, mesmo que a equipe não use o
+domínio compartilhado. Só fica guardada uma contagem dos nomes revisados e
+recusados por equipe e dia. Inclua isso também no aviso de privacidade.
 
 **Imagens e anexos.** A triagem abre o que o e-mail traz, dentro do
 worker: o texto e os links de anexos PDF (até 50 páginas), Word, Excel,
