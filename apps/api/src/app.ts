@@ -739,7 +739,7 @@ export async function keysetPage<R>(opts: {
   id: AnyPgColumn;
   /** Resolves a cursor id to its sort key, scoped to the caller's team. */
   loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
-  loadRows: (cond: SQL | undefined, descending: boolean, take: number) => Promise<R[]>;
+  loadRows: (cond: SQL | undefined, orderBy: SQL[], take: number) => Promise<R[]>;
 }): Promise<{ rows: R[]; hasMore: boolean } | "bad_cursor"> {
   const { query } = opts;
   const limit = query.limit ?? 20;
@@ -751,8 +751,9 @@ export async function keysetPage<R>(opts: {
     if (!cur) return "bad_cursor";
     cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
   }
+  const dir = towardNewer ? asc : desc;
   // One extra row decides has_more without a count query.
-  const fetched = await opts.loadRows(cond, !towardNewer, limit + 1);
+  const fetched = await opts.loadRows(cond, [dir(opts.createdAt), dir(opts.id)], limit + 1);
   const hasMore = fetched.length > limit;
   const rows = fetched.slice(0, limit);
   // `before` pages are fetched outward from the cursor; responses keep the list's order.
@@ -1806,14 +1807,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .from(t)
               .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(t)
             .where(and(eq(t.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2565,14 +2564,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(s)
               .where(and(eq(s.id, id), eq(s.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(s)
             .where(and(eq(s.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(s.createdAt), desc(s.id)] : [asc(s.createdAt), asc(s.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2652,14 +2649,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(ct)
               .where(and(eq(ct.id, id), eq(ct.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(ct)
             .where(and(eq(ct.teamId, auth.teamId), inSegment, cond))
-            .orderBy(
-              ...(descending ? [desc(ct.createdAt), desc(ct.id)] : [asc(ct.createdAt), asc(ct.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -3157,14 +3152,12 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .from(b)
               .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(b)
             .where(and(eq(b.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(b.createdAt), desc(b.id)] : [asc(b.createdAt), asc(b.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -4755,14 +4748,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             .from(t)
             .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
         )[0],
-      loadRows: (cond, descending, take) =>
+      loadRows: (cond, orderBy, take) =>
         deps.db
           .select()
           .from(t)
           .where(and(eq(t.teamId, auth.teamId), cond))
-          .orderBy(
-            ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-          )
+          .orderBy(...orderBy)
           .limit(take),
     });
     if (page === "bad_cursor") {

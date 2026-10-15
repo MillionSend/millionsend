@@ -12,7 +12,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import { type Env, errorBody, KEYSET_LIST_DESCRIPTION, keysetPage } from "../app.js";
 import {
   createApiKeyRequestSchema,
@@ -218,14 +218,12 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(k)
               .where(and(eq(k.id, id), eq(k.teamId, auth.teamId), isNull(k.revokedAt)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(k)
             .where(and(eq(k.teamId, auth.teamId), isNull(k.revokedAt), cond))
-            .orderBy(
-              ...(descending ? [desc(k.createdAt), desc(k.id)] : [asc(k.createdAt), asc(k.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {

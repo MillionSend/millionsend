@@ -51,7 +51,7 @@ import {
 } from "@millionsend/core";
 import { captureError } from "@millionsend/core/error-tracking-node";
 import { keysetCursorWhere, schema } from "@millionsend/db";
-import { and, asc, desc, eq, gt, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
@@ -290,14 +290,12 @@ export function registerReceivingRoutes(
                 .from(t)
                 .where(and(eq(t.id, id), where(held)))
             )[0],
-          loadRows: (cond, descending, take) =>
+          loadRows: (cond, orderBy, take) =>
             db
               .select(RECEIVED_EMAIL_META_COLUMNS)
               .from(t)
               .where(and(where(held), cond))
-              .orderBy(
-                ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-              )
+              .orderBy(...orderBy)
               .limit(take),
         });
         if (page === "bad_cursor") {

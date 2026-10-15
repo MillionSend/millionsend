@@ -3,7 +3,7 @@ import { EnvKeyring, generateApiKey, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi, keysetPage } from "../src/app.js";
 import type { ListQuery } from "../src/schemas.js";
@@ -36,14 +36,12 @@ describe("keysetPage", () => {
             .from(s)
             .where(and(eq(s.id, cursor), eq(s.teamId, teamId)))
         )[0],
-      loadRows: (cond, descending, take) =>
+      loadRows: (cond, orderBy, take) =>
         db
           .select({ name: s.name })
           .from(s)
           .where(and(eq(s.teamId, teamId), cond))
-          .orderBy(
-            ...(descending ? [desc(s.createdAt), desc(s.id)] : [asc(s.createdAt), asc(s.id)]),
-          )
+          .orderBy(...orderBy)
           .limit(take),
     });
     return out === "bad_cursor" ? out : { names: out.rows.map((r) => r.name), more: out.hasMore };

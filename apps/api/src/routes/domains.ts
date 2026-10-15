@@ -48,7 +48,7 @@ import {
   type SesIdentityClient,
   verificationDbPatch,
 } from "@millionsend/ses";
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import {
   type ApiDeps,
   type Env,
@@ -632,14 +632,12 @@ export function registerDomainRoutes(
               .from(d)
               .where(and(eq(d.id, id), eq(d.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(d)
             .where(and(eq(d.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(d.createdAt), desc(d.id)] : [asc(d.createdAt), asc(d.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {

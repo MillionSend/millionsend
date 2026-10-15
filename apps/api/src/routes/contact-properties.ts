@@ -1,7 +1,7 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   type Env,
   errorBody,
@@ -127,14 +127,12 @@ export function registerContactPropertyRoutes(app: OpenAPIHono<Env>, db: Db): vo
               .from(p)
               .where(and(eq(p.id, id), eq(p.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(p)
             .where(and(eq(p.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(p.createdAt), desc(p.id)] : [asc(p.createdAt), asc(p.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {

@@ -14,7 +14,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { type Env, errorBody, KEYSET_LIST_DESCRIPTION, keysetPage } from "../app.js";
 import {
   createWebhookRequestSchema,
@@ -162,14 +162,12 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
               .from(w)
               .where(and(eq(w.id, id), eq(w.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(w)
             .where(and(eq(w.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(w.createdAt), desc(w.id)] : [asc(w.createdAt), asc(w.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
