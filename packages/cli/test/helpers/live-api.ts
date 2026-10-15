@@ -37,10 +37,17 @@ export async function createApiKey(
  * local port, with one team and one full-access key.
  */
 export async function startLiveApi(
-  options: { isCloud?: boolean; appBaseUrl?: string | undefined; slug?: string } = {},
+  options: {
+    isCloud?: boolean;
+    appBaseUrl?: string | undefined;
+    slug?: string;
+    sharedInboxDomain?: string;
+  } = {},
 ): Promise<LiveApi> {
   const { db, close } = await createTestDb();
-  const teamId = await createTeam(db, options.slug ?? "migrate");
+  const teamId = await createTeam(db, options.slug ?? "migrate", {
+    sharedInboxDomain: options.sharedInboxDomain,
+  });
   const apiKey = await createApiKey(db, teamId);
   const app = createApi({
     db,
@@ -48,6 +55,7 @@ export async function startLiveApi(
     isCloud: options.isCloud ?? true,
     enqueueEmailSend: async () => {},
     appBaseUrl: options.appBaseUrl,
+    sharedInboxDomain: options.sharedInboxDomain,
     ses: {
       clientForRegion: () => ({ send: async () => ({}) }),
       dns: {

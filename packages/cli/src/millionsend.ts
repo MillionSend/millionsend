@@ -243,7 +243,7 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       broadcasts,
       firstContact,
     ] = await Promise.all([
-      listAll<{ id: string }>("/domains"),
+      listAll<{ id: string; shared?: boolean }>("/domains"),
       listAll<TargetProperty>("/contact-properties"),
       listAll<TopicWire>("/topics"),
       listAll<TargetSegment>("/segments"),
@@ -253,7 +253,9 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       api.get<ListPage<{ id: string }>>("/contacts", { query: { limit: 1 } }),
     ]);
     const domains: TargetDomain[] = [];
-    for (const { id } of domainRows) {
+    // The team's subdomain of the shared inbox domain is no domain of its own:
+    // it takes no slot of limits.domains.
+    for (const { id } of domainRows.filter((row) => row.shared !== true)) {
       const { body } = await api.get<DomainWire>(`/domains/${id}`);
       domains.push({
         id: body.id,

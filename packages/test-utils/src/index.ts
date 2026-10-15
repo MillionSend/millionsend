@@ -41,7 +41,7 @@ export async function createTestDb(): Promise<{ db: Db; close: () => Promise<voi
 export async function createTeam(
   db: Db,
   slug = "acme",
-  opts: { sharedInboxDomain?: string } = {},
+  opts: { sharedInboxDomain?: string | undefined } = {},
 ): Promise<string> {
   const [team] = await db
     .insert(schema.teams)
