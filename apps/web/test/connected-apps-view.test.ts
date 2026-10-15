@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
+import enSettings from "../messages/en/settings.json";
+import ptBRSettings from "../messages/pt-BR/settings.json";
 
 const h = vi.hoisted(() => ({ grants: [] as unknown[] }));
 
@@ -54,4 +56,15 @@ it("shows when each grant expires, or that it lasts until disconnected", () => {
   expect(html).toContain("<th>Expires</th>");
   expect(html).toContain("Until you disconnect it");
   expect(html).toContain("Nov 14, 2026");
+});
+
+// Revocation bites at the next refresh, so an access token already issued
+// keeps working for up to its hour (accessTokenExpiresIn).
+it("tells whoever revokes that access ends within the hour an access token lasts", () => {
+  expect(enSettings.connectedApps.revokeConfirm.body).toBe(
+    "{name} loses access to this team at its next token refresh, within an hour.",
+  );
+  expect(ptBRSettings.connectedApps.revokeConfirm.body).toBe(
+    "{name} perde o acesso a esta equipe na próxima renovação de token, em até uma hora.",
+  );
 });

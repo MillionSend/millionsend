@@ -420,7 +420,7 @@ export function createAuth(
   };
   /**
    * A consent just granted to an MCP client is a receipt to its user: the
-   * app can act in their name until revoked. The provider stamps a new
+   * app can act in their name until the grant ends. The provider stamps a new
    * consent row with one instant for both dates and moves only updatedAt on
    * a re-consent, so a row whose dates differ is a repeat and stays silent.
    */
@@ -442,6 +442,7 @@ export function createAuth(
           referenceId: schema.oauthConsent.referenceId,
           createdAt: schema.oauthConsent.createdAt,
           updatedAt: schema.oauthConsent.updatedAt,
+          expiresAt: schema.oauthConsent.expiresAt,
         })
         .from(schema.oauthConsent)
         .innerJoin(
@@ -467,6 +468,7 @@ export function createAuth(
           app: consent.app ?? "An app",
           team,
           scopes: consent.scopes,
+          expiresAt: consent.expiresAt,
           locale: await accountMailLocale(db, user.email, ctx.headers),
         }),
         mail,
@@ -863,6 +865,7 @@ export function createAuth(
           });
         }
         if (ctx.path === "/oauth2/consent") {
+          // In this order: the receipt reads the grant's end off the row.
           await recordGrantLifetime(ctx);
           await mailConsent(ctx);
           return;

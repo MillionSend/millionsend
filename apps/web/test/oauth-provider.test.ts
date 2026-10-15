@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, type JsonWebKey, randomBytes, verify } from "node:crypto";
-import { DAY_MS, type SystemMailMessage } from "@millionsend/core";
+import { DAY_MS, formatMailDate, type SystemMailMessage } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -929,6 +929,7 @@ describe("connected-app receipt", () => {
     expect(sent[0]?.subject).toBe("An app is connected to your MillionSend account");
     expect(sent[0]?.text).toContain("You allowed Claude Code to act on acme");
     expect(sent[0]?.text).toContain("emails:send");
+    expect(sent[0]?.text).toContain("in your name, until you disconnect it.");
     expect(sent[0]?.text).toContain("/settings/connected-apps");
     // Granting the same app again later (prompt=consent brings the screen
     // back) updates the stored consent: a repeat, not news. The provider
@@ -957,5 +958,23 @@ describe("connected-app receipt", () => {
       .join("; ");
     await authorize(clientId, bare);
     expect(sent[0]?.subject).toBe("Um app foi conectado à sua conta do MillionSend");
+    expect(sent[0]?.text).toContain("em seu nome, até você desconectar.");
+  });
+
+  it("names the day a grant made for a set time ends", async () => {
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@mail.example.com>");
+    const { userId, cookie } = await signUp("ada@example.com");
+    const teamId = await createTeam(db, "acme");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    sent.length = 0;
+    await authorize(clientId, cookie, { lifetime: "30d" });
+    const [consent] = await db
+      .select({ expiresAt: schema.oauthConsent.expiresAt })
+      .from(schema.oauthConsent);
+    if (!consent?.expiresAt) throw new Error("grant not stamped");
+    expect(sent[0]?.text).toContain(
+      `in your name, until ${formatMailDate("en", consent.expiresAt)}.`,
+    );
   });
 });

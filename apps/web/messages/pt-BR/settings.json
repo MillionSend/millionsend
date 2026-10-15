@@ -386,7 +386,7 @@
     "revokeAllTeamsForbidden": "Esta autorização também cobre equipes que você não administra. Só quem a concedeu pode revogá-la.",
     "revokeConfirm": {
       "title": "Revogar acesso",
-      "body": "{name} perde o acesso a esta equipe na próxima renovação de token, em até 15 minutos.",
+      "body": "{name} perde o acesso a esta equipe na próxima renovação de token, em até uma hora.",
       "confirm": "Revogar acesso"
     }
   },

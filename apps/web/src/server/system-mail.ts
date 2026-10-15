@@ -12,6 +12,7 @@ import {
   accountMailPhrase,
   buildAccountMail,
   fillMailTemplate as fill,
+  formatMailDate,
   type MailLocale,
   type SystemMailMessage,
   type SystemMailOptions,
@@ -291,24 +292,38 @@ export function buildPasswordChangedEmail(input: {
   });
 }
 
-/** Exported for tests. `team` is the team's name, or every team when the grant was for all. */
+/**
+ * Exported for tests. `team` is the team's name, or every team when the grant
+ * was for all; `expiresAt` is when the grant ends, null until disconnected.
+ */
 export function buildMcpConnectedEmail(input: {
   to: string;
   app: string;
   team: string | "*";
   scopes: string[];
+  expiresAt: Date | null;
   locale: MailLocale;
 }): SystemMailMessage {
-  const team =
-    input.team === "*"
-      ? accountMailPhrase({ locale: input.locale, kind: "mcp.connected", key: "allTeams" })
-      : input.team;
+  const phrase = (key: string, values?: Record<string, string>) =>
+    accountMailPhrase({
+      locale: input.locale,
+      kind: "mcp.connected",
+      key,
+      ...(values && { values }),
+    });
   return buildAccountEmail({
     to: input.to,
     kind: "mcp.connected",
     locale: input.locale,
     path: "/settings/connected-apps",
-    values: { app: input.app, team, scopes: input.scopes.join(", ") },
+    values: {
+      app: input.app,
+      team: input.team === "*" ? phrase("allTeams") : input.team,
+      scopes: input.scopes.join(", "),
+      until: input.expiresAt
+        ? phrase("untilDate", { date: formatMailDate(input.locale, input.expiresAt) })
+        : phrase("untilDisconnected"),
+    },
   });
 }
 
