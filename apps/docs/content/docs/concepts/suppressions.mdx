@@ -28,10 +28,11 @@ automatically. Suppressions are per team.
   `topic_id`): recipients suppressed for a bounce, a complaint or a manual
   entry are stripped from `to`/`cc`/`bcc`. If *every* `to` recipient is
   suppressed, the send is rejected with `422 all_recipients_suppressed`
-  (message `All recipients are suppressed`). An **unsubscribe** entry does not
-  apply here: someone who opted out of marketing still receives password
-  resets, receipts and other account mail — the same meaning Resend gives
-  `unsubscribed` ("unsubscribed from all Broadcasts").
+  (message `All recipients are suppressed`; the SMTP relay answers `550` with
+  that message). An **unsubscribe** entry does not apply here: someone who
+  opted out of marketing still receives password resets, receipts and other
+  account mail — the same meaning Resend gives `unsubscribed` ("unsubscribed
+  from all Broadcasts").
 - **Topic sends** (`POST /emails` with a `topic_id`) and **broadcasts**: every
   entry applies, unsubscribes included, plus the recipient's opt-out of that
   topic; broadcasts skip such contacts during fan-out.

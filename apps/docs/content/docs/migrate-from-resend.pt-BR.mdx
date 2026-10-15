@@ -131,7 +131,7 @@ RESEND_BASE_URL=https://api.millionsend.com
 
 Auto-hospedado, use a origem da API da sua instância.
 
-Quatro detalhes que diferem do que uma integração com o Resend pode assumir:
+Cinco detalhes que diferem do que uma integração com o Resend pode assumir:
 
 - Os campos de remetente e destinatário aceitam exatamente uma caixa postal
   cada, nas formas da RFC 5322 `ada@example.com`, `Ada <ada@example.com>` ou
@@ -152,6 +152,16 @@ Quatro detalhes que diferem do que uma integração com o Resend pode assumir:
   contato novo num endereço assim também: a migração lista esses contatos
   entre as falhas em vez de trazê-los. Veja
   [Erros](/pt-BR/api-reference#erros).
+- Um envio em que todos os destinatários de `to` estão suprimidos é recusado
+  com `422 all_recipients_suppressed`; o Resend aceita esse envio, registra o
+  e-mail como `suppressed` e envia o evento `email.suppressed`. A migração
+  copia os bounces, as reclamações e as entradas manuais do Resend, então o
+  seu código pode estar enviando para endereços que já estão na lista: trate
+  esse erro como "não enviado", e não como uma falha para tentar de novo. No
+  `POST /emails/batch`, um item assim rejeita o lote inteiro; com
+  `x-batch-validation: permissive`, os outros itens são aceitos e esse item
+  aparece em `errors`. Veja
+  [Supressões](/pt-BR/concepts/suppressions#o-que-a-supressão-faz).
 
 Prefere usar um SDK oficial? Os [SDKs do MillionSend](/pt-BR/sdks)
 cobrem nove linguagens com a mesma superfície:

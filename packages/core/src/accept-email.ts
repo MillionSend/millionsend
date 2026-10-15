@@ -174,6 +174,13 @@ export const SYSTEM_MAIL_TAG = `${RESERVED_TAG_PREFIX}system`;
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 /**
+ * Longest subject a send, broadcast or template takes: the RFC 5322 section
+ * 2.1.1 line limit. What subjectProblem checks (inbox replies, forwards,
+ * drafts and composer sends) keeps Resend's documented 2000 instead.
+ */
+export const MAX_SUBJECT_LENGTH = 998;
+
+/**
  * The largest message SES v2 sends, encoded as it goes out: "40 MB", which
  * SES counts in MiB. Resend caps an email the same way, base64 included.
  */

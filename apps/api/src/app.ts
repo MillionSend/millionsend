@@ -1,5 +1,6 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { API_RATE_LIMIT_PER_MINUTE_DEFAULT } from "@millionsend/config";
 import {
   type AcceptEmailPayload,
   type AcceptEmailResult,
@@ -21,6 +22,7 @@ import {
   contactPropertiesChange,
   contactRoom,
   contactSnapshotColumns,
+  countApiKeyRequest,
   countDistinctRecipients,
   countParked,
   DAY_MS,
@@ -39,6 +41,7 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
+  fixedWindowCounter,
   INBOX_KEY_FROM_MESSAGE,
   INBOX_KEY_SCOPE_MESSAGE,
   type InboxKeys,
@@ -83,6 +86,7 @@ import {
   sendRefusalError,
   sesMessageIdHeader,
   sharedModeReason,
+  TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT,
   teamQuota,
   teamSharedSending,
   transitionQueueState,
@@ -676,8 +680,6 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
   if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
 }
 
-const RATE_WINDOW_MS = 60_000;
-const RATE_COUNTER_SWEEP_SIZE = 10_000;
 const AUTH_FAILURES_PER_MINUTE = 20;
 
 const MiB = 1024 * 1024;
@@ -686,29 +688,6 @@ const MX_DELIVER_URL_PATH = `${MX_INGEST_PATH}${MX_DELIVER_PATH}`;
 
 const bodyTooLarge = (maxBytes: number) => (c: Context) =>
   c.json(errorBody(413, "payload_too_large", `Request body exceeds ${maxBytes / MiB} MiB`), 413);
-
-/**
- * Fixed-window hit counter. Returns the count for `key` in the current
- * window after this hit, plus the seconds until the window rolls over.
- * ponytail: per-process; the DB bucket table is keyed by api_key uuid, so
- * move these there (text key) if the API ever runs more than one replica.
- */
-function fixedWindowCounter() {
-  const hits = new Map<string, { windowStart: number; count: number }>();
-  return (key: string, now = Date.now()): { count: number; retryAfterSec: number } => {
-    const windowStart = now - (now % RATE_WINDOW_MS);
-    if (hits.size > RATE_COUNTER_SWEEP_SIZE) {
-      for (const [k, v] of hits) if (v.windowStart !== windowStart) hits.delete(k);
-    }
-    const current = hits.get(key);
-    const count = current?.windowStart === windowStart ? current.count + 1 : 1;
-    hits.set(key, { windowStart, count });
-    return {
-      count,
-      retryAfterSec: Math.max(1, Math.ceil((windowStart + RATE_WINDOW_MS - now) / 1000)),
-    };
-  };
-}
 
 /**
  * Cloud sits behind Cloudflare only (the origin firewall admits nothing
@@ -3660,30 +3639,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // OAuth (MCP) callers have no api_keys row to bucket on; the /mcp gate
     // rate-limits them per user instead.
     if (!auth || auth.apiKeyId === null) return next();
-    const bucket = schema.apiRateLimits;
-    const windowStart = sql<Date>`date_trunc('minute', now())`;
-    const [row] = await deps.db
-      .insert(bucket)
-      .values({ apiKeyId: auth.apiKeyId, windowStart, count: 1 })
-      .onConflictDoUpdate({
-        target: bucket.apiKeyId,
-        set: {
-          windowStart,
-          count: sql`case when ${bucket.windowStart} = ${windowStart} then ${bucket.count} + 1 else 1 end`,
-        },
-      })
-      .returning({
-        count: bucket.count,
-        retryAfter: sql<number>`greatest(1, ceil(extract(epoch from (${bucket.windowStart} + interval '1 minute' - now()))))::int`,
-      });
-    const limit = deps.rateLimitPerMinute ?? 600;
-    if ((row?.count ?? 0) > limit) {
-      c.header("retry-after", String(row?.retryAfter ?? 60));
+    const key = await countApiKeyRequest(deps.db, auth.apiKeyId);
+    if (key.count > (deps.rateLimitPerMinute ?? API_RATE_LIMIT_PER_MINUTE_DEFAULT)) {
+      c.header("retry-after", String(key.retryAfterSec));
       return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
     }
     // The team bucket spans every key, so minting keys cannot multiply the cap.
     const team = countTeamRequest(`team:${auth.teamId}`);
-    if (team.count > (deps.teamRateLimitPerMinute ?? 3000)) {
+    if (team.count > (deps.teamRateLimitPerMinute ?? TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT)) {
       c.header("retry-after", String(team.retryAfterSec));
       return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
     }

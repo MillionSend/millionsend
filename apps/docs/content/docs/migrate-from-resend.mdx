@@ -128,7 +128,7 @@ RESEND_BASE_URL=https://api.millionsend.com
 
 Self-hosted, use your instance's API origin instead.
 
-Four details that differ from what a Resend integration may assume:
+Five details that differ from what a Resend integration may assume:
 
 - Sender and recipient fields take exactly one mailbox each, in the RFC 5322
   shapes `ada@example.com`, `Ada <ada@example.com>` or
@@ -147,6 +147,15 @@ Four details that differ from what a Resend integration may assume:
   `x@foo.test` or `x@gmail.con`, is refused with `422 validation_error`, and
   so is a new contact at one: the migration lists such contacts as failed
   instead of moving them. See [Errors](/api-reference#errors).
+- A send whose every `to` recipient is suppressed is refused with
+  `422 all_recipients_suppressed`; Resend accepts it, records the email as
+  `suppressed` and fires `email.suppressed`. The migration copies Resend's
+  bounces, complaints and manual entries, so your code may already be mailing
+  addresses on the list: treat this error as "not sent" rather than as a
+  failure worth retrying. In `POST /emails/batch` one such item rejects the
+  whole batch; with `x-batch-validation: permissive` the other items are
+  accepted and that one is listed in `errors`. See
+  [Suppressions](/concepts/suppressions#what-suppression-does).
 
 Prefer first-party clients? The [MillionSend SDKs](/sdks) cover nine
 languages with the same surface:

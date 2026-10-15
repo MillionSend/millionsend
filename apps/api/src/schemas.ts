@@ -10,6 +10,7 @@ import {
   hasHeaderControlChar,
   isReservedTagName,
   LONG_POLL_MAX_SECONDS,
+  MAX_SUBJECT_LENGTH,
   MEDIA_TYPE_TOKEN,
   parseMailbox,
   parseScheduledAt,
@@ -200,6 +201,7 @@ export const sendEmailRequestSchema = z
     subject: z
       .string()
       .min(1)
+      .max(MAX_SUBJECT_LENGTH)
       .refine((v) => !hasHeaderControlChar(v), {
         message: "subject must not contain control characters",
       })
@@ -1128,6 +1130,7 @@ export const createBroadcastRequestSchema = z
     subject: z
       .string()
       .min(1)
+      .max(MAX_SUBJECT_LENGTH)
       .describe("Subject line; supports {{{FIRST_NAME|there}}} merge fields"),
     html: z
       .string()
@@ -1166,7 +1169,7 @@ export const updateBroadcastRequestSchema = z
     name: z.string().optional(),
     segment_id: z.uuid().optional(),
     from: fromAddress.optional(),
-    subject: z.string().min(1).optional(),
+    subject: z.string().min(1).max(MAX_SUBJECT_LENGTH).optional(),
     html: z.string().optional(),
     text: z.string().optional(),
     reply_to: replyToList.optional(),
@@ -1934,7 +1937,7 @@ const templateNameSchema = z.string().trim().min(1).max(200);
 const templateSubjectSchema = z
   .string()
   .trim()
-  .max(998)
+  .max(MAX_SUBJECT_LENGTH)
   .nullable()
   .describe('"" or null clears the subject');
 const templateBodySchema = z.string().max(500_000);

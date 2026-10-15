@@ -664,4 +664,70 @@ describe("emails.suppressions", () => {
     const list = await caller(teamA).emails.suppressions.list({});
     expect(list.items).toHaveLength(1);
   });
+
+  describe("forEmail", () => {
+    async function insertSuppression(
+      teamId: string,
+      address: string,
+      values: Partial<typeof schema.suppressions.$inferInsert> = {},
+    ): Promise<string> {
+      const [row] = await db
+        .insert(schema.suppressions)
+        .values({
+          teamId,
+          email: address,
+          emailHash: hashRecipient(address),
+          reason: "manual",
+          ...values,
+        })
+        .returning({ id: schema.suppressions.id });
+      if (!row) throw new Error("suppression insert failed");
+      return row.id;
+    }
+
+    it("matches every recipient the way sends do, display names and case aside", async () => {
+      const teamA = await createTeam(db, "team-a");
+      const emailId = await insertEmail({
+        ...baseEmail(teamA),
+        to: ["Ada <Ada@Example.com>", "fine@example.com"],
+        cc: ["GRACE@example.com"],
+        bcc: ["Erased <erased@example.com>"],
+        latestStatus: "suppressed",
+      });
+      const ada = await insertSuppression(teamA, "ada@example.com", {
+        reason: "hard_bounce",
+        createdAt: new Date("2026-08-01T10:00:00Z"),
+      });
+      const grace = await insertSuppression(teamA, "grace@example.com", {
+        reason: "one_click_unsubscribe",
+        createdAt: new Date("2026-08-02T10:00:00Z"),
+      });
+      // Erasure nulls the address and keeps the hash, which still matches.
+      const erased = await insertSuppression(teamA, "erased@example.com", {
+        email: null,
+        reason: "complaint",
+        createdAt: new Date("2026-08-03T10:00:00Z"),
+      });
+      await insertSuppression(teamA, "unrelated@example.com");
+
+      const rows = await caller(teamA, "member").emails.suppressions.forEmail({ emailId });
+      expect(rows.map(({ id, email, reason }) => ({ id, email, reason }))).toEqual([
+        { id: erased, email: null, reason: "complaint" },
+        { id: grace, email: "grace@example.com", reason: "one_click_unsubscribe" },
+        { id: ada, email: "ada@example.com", reason: "hard_bounce" },
+      ]);
+    });
+
+    it("never matches another team's suppression or reads another team's email", async () => {
+      const teamA = await createTeam(db, "team-a");
+      const teamB = await createTeam(db, "team-b");
+      const emailId = await insertEmail({ ...baseEmail(teamA), latestStatus: "suppressed" });
+      await insertSuppression(teamB, "ada@example.com");
+
+      expect(await caller(teamA).emails.suppressions.forEmail({ emailId })).toEqual([]);
+      await expect(caller(teamB).emails.suppressions.forEmail({ emailId })).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+    });
+  });
 });

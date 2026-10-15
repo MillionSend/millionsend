@@ -5,6 +5,7 @@ import {
   EnvKeyring,
   generateApiKey,
   hashRecipient,
+  MAX_SUBJECT_LENGTH,
   openAttachments,
   teamRung,
   utcDay,
@@ -1099,6 +1100,35 @@ describe("attachments and custom headers", () => {
       .where(eq(schema.emails.id, data[0]?.id ?? ""));
     expect(row?.headers).toEqual({ "X-Entity-Ref-ID": "batch-1" });
     expect(row?.attachments).toBeTruthy();
+  });
+});
+
+describe("subject length", () => {
+  const batch = (items: unknown[]) =>
+    app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(items),
+    });
+
+  it("422s a subject past MAX_SUBJECT_LENGTH characters, single and batch alike", async () => {
+    const tooLong = { ...validBody, subject: "s".repeat(MAX_SUBJECT_LENGTH + 1) };
+    const single = await post(tooLong);
+    expect(single.status).toBe(422);
+    expect(await single.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/^subject: /),
+    });
+    const items = await batch([{ ...validBody, to: ["subject-ok@example.com"] }, tooLong]);
+    expect(items.status).toBe(422);
+    expect(await items.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/^emails\.1: subject: /),
+    });
+
+    const atCap = { ...validBody, subject: "s".repeat(MAX_SUBJECT_LENGTH) };
+    expect((await post({ ...atCap, to: ["subject-cap@example.com"] })).status).toBe(200);
+    expect((await batch([{ ...atCap, to: ["subject-cap-batch@example.com"] }])).status).toBe(200);
   });
 });
 

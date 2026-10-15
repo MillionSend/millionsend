@@ -10,6 +10,7 @@ export {
   type AbuseJudgeProvider,
   type AbuseVisionConfig,
   type AbuseVisionProvider,
+  API_RATE_LIMIT_PER_MINUTE_DEFAULT,
   AWS_REGION_DEFAULT,
   abuseJudgeConfig,
   abuseVisionConfig,
