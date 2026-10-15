@@ -106,7 +106,7 @@ person. The last five fields are MillionSend's.
 | `403 validation_error` | The plan's inbox limit is reached: "You have reached the inbox limit of your plan. Upgrade to add more." |
 | `429 rate_limit_exceeded` | Too many inboxes were created in the last hour, or the shared domain's name review reached today's limit for your team (20 refused names or 200 reviews); `retry-after` says when to try again. Deleting inboxes doesn't give that room back. |
 | `422 validation_error` | The domain isn't a verified domain of your team, it doesn't receive here, the instance has no shared domain, the instance doesn't receive mail at all, a `username` breaks a rule, is reserved or can't be used on the shared domain, `username` or `domain_id` comes with `email_address`, `domain_id` isn't a verified domain of your team or names one of your own domains without `username`, or a setting breaks a rule. |
-| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now (`retry-after: 60`), or your team's subdomain still waits for its [name review](#shared-domain), which holds every address on it, random and forwarding ones included (`retry-after: 300`). Try again shortly. |
+| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now (`retry-after: 60`), or your team's subdomain still waits for its [name review](#shared-domain), and until then no address can be created on it, random and forwarding ones included (`retry-after: 300`). Try again shortly. |
 
 The other calls:
 
@@ -172,7 +172,8 @@ looks like a well-known brand or a reserved name, or the review below
 doesn't pass it. Until its first address, the subdomain follows the team's
 renames. Once an address has been on it, it never changes and is never
 given to another team, even after its team is deleted; one that never had
-an address is freed by a rename or by the team's deletion.
+an address is freed by a rename or by the team's deletion. A subdomain that
+already existed before v0.14.0 never changes either, address or not.
 
 `GET /domains` lists the subdomain as its last row, with `shared: true` and
 its `sending_mode` (see [Domains](/concepts/domains#shared-subdomain)); its
@@ -213,8 +214,9 @@ shared domain answers `503 name_review_unavailable` with `retry-after: 300`:
 try again shortly. A renamed team keeps its subdomain until the review
 answers. After 20 refused names, or 200 reviews, in a UTC day, the answer is
 `429 rate_limit_exceeded` until midnight UTC. A random address with no
-`from_name` is never refused over the review, and an instance without a
-judge applies only the rules above.
+`from_name` is never refused over the review, though it waits with the
+`503` above while the team's subdomain does; an instance without a judge
+applies only the rules above.
 
 Mail to `postmaster@` and `abuse@` at the shared domain, or at any team's
 subdomain, goes to the instance's operator, never to an inbox.

@@ -113,7 +113,7 @@ são do MillionSend.
 | `403 validation_error` | O limite de caixas do plano foi atingido: "You have reached the inbox limit of your plan. Upgrade to add more." |
 | `429 rate_limit_exceeded` | Foram criadas caixas demais na última hora, ou a revisão de nomes do domínio compartilhado chegou ao limite de hoje da sua equipe (20 nomes recusados ou 200 revisões); o `retry-after` diz quando tentar de novo. Excluir caixas não devolve essa folga. |
 | `422 validation_error` | O domínio não é um domínio verificado da sua equipe, não recebe aqui, a instância não tem domínio compartilhado, a instância não recebe e-mail nenhum, um `username` quebra uma regra, é reservado ou não pode ser usado no domínio compartilhado, o `username` ou o `domain_id` vem junto com o `email_address`, o `domain_id` não é um domínio verificado da sua equipe ou aponta um domínio seu sem `username`, ou uma configuração quebra uma regra. |
-| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado (`retry-after: 60`), ou o subdomínio da sua equipe ainda espera a [revisão de nomes](#domínio-compartilhado), o que segura todo endereço nele, inclusive os aleatórios e os de encaminhamento (`retry-after: 300`). Tente de novo daqui a pouco. |
+| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado (`retry-after: 60`), ou o subdomínio da sua equipe ainda espera a [revisão de nomes](#domínio-compartilhado) e, até lá, nenhum endereço pode ser criado nele, nem aleatório nem de encaminhamento (`retry-after: 300`). Tente de novo daqui a pouco. |
 
 As outras chamadas:
 
@@ -181,7 +181,8 @@ quando não passa na revisão abaixo. Enquanto não tiver nenhum endereço, o
 subdomínio acompanha as mudanças de nome da equipe. Depois que ganha o
 primeiro endereço, ele nunca mais muda e nunca vai para outra equipe, mesmo
 se a equipe for excluída; um subdomínio que nunca teve endereço é liberado
-quando a equipe muda de nome ou é excluída.
+quando a equipe muda de nome ou é excluída. Um subdomínio que já existia
+antes da v0.14.0 também nunca muda, tenha tido endereço ou não.
 
 O `GET /domains` lista o subdomínio como a última linha, com `shared: true` e
 o `sending_mode` dele (veja
@@ -225,7 +226,8 @@ tente de novo daqui a pouco. Uma equipe que mudou de nome continua com o
 subdomínio que já tem até a revisão responder. Depois de 20 nomes
 recusados, ou 200 revisões, num dia UTC, a resposta é
 `429 rate_limit_exceeded` até a meia-noite UTC. Um endereço aleatório sem
-`from_name` nunca é recusado por causa da revisão, e uma instância sem juiz
+`from_name` nunca é recusado por causa da revisão, mas espera com o `503`
+acima enquanto o subdomínio da equipe espera; uma instância sem avaliador
 aplica só as regras acima.
 
 Os e-mails para `postmaster@` e `abuse@` no domínio compartilhado, ou no
