@@ -1,4 +1,4 @@
-import { DAY_MS, SUSPENSION_REASONS, utcDay } from "@millionsend/core";
+import { DAY_MS, SUSPENSION_REASONS, settleSharedSubdomain, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { SES_REGIONS } from "@millionsend/ses";
@@ -9,6 +9,37 @@ import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { createSettingsRouter, type TeamDeletionDeps } from "@/server/routers/settings";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
+
+const enqueueSharedSubdomain = vi.hoisted(() =>
+  vi.fn(async (_teamId: string, _since: Date, _startAfter?: Date) => {}),
+);
+vi.mock("@/server/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/queue")>()),
+  enqueueSharedSubdomain,
+}));
+
+const SHARED = "agents.example.com";
+
+/** The team's label and whether it is locked; undefined without one. */
+const labelOf = async (teamId: string) =>
+  (
+    await db
+      .select({
+        name: schema.sharedInboxDomains.name,
+        lockedAt: schema.sharedInboxDomains.lockedAt,
+      })
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, teamId))
+  )[0];
+
+/** A configured name review that can't answer, as fetch sees it. */
+function judgeDown() {
+  vi.stubEnv("ABUSE_JUDGE", "typesafe");
+  vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
+  const judge = vi.fn(() => Promise.reject(new Error("judge down")));
+  vi.stubGlobal("fetch", judge);
+  return judge;
+}
 
 // SKIP_ENV_VALIDATION leaves env reads live, so stubbing IS_CLOUD here
 // switches the routers between cloud and self-host behavior per test.
@@ -29,6 +60,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  enqueueSharedSubdomain.mockClear();
   await close();
 });
 
@@ -116,6 +149,56 @@ describe("settings.team", () => {
     expect((await flags()).filter((f) => f.status === "open")).toMatchObject([
       { reason: "brand", detail: { brand: "Mercado Pago" } },
     ]);
+  });
+});
+
+describe("settings.team.rename and the team's shared subdomain", () => {
+  async function owned(slug: string) {
+    const teamId = await createTeam(db, slug, { sharedInboxDomain: SHARED });
+    await addMember(teamId, `${slug}-owner`, "owner");
+    return {
+      teamId,
+      rename: (name: string) =>
+        callerFor(`${slug}-owner`, teamId, "owner").settings.team.rename({ name }),
+    };
+  }
+
+  it("moves an unlocked label to the new name, and leaves a locked one", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    const { teamId, rename } = await owned("acme");
+    await rename("Acme Corp");
+    expect(await labelOf(teamId)).toEqual({ name: `acme-corp.${SHARED}`, lockedAt: null });
+    await db
+      .update(schema.sharedInboxDomains)
+      .set({ lockedAt: new Date() })
+      .where(eq(schema.sharedInboxDomains.teamId, teamId));
+    await rename("Other Name");
+    expect((await labelOf(teamId))?.name).toBe(`acme-corp.${SHARED}`);
+  });
+
+  it("spends no review on a rename to the same slug, which would only redraw a suffixed label", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    const judge = judgeDown();
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.sharedInboxDomains).values({ teamId, name: `acme-1a2b.${SHARED}` });
+    await addMember(teamId, "u1", "owner");
+    await callerFor("u1", teamId, "owner").settings.team.rename({ name: "ACME" });
+    expect(judge).not.toHaveBeenCalled();
+    expect(enqueueSharedSubdomain).not.toHaveBeenCalled();
+    expect((await labelOf(teamId))?.name).toBe(`acme-1a2b.${SHARED}`);
+  });
+
+  it("keeps the old label while the review can't answer, and has the worker retry from 5 minutes on", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    const judge = judgeDown();
+    const { teamId, rename } = await owned("acme");
+    await expect(rename("Acme Corp")).resolves.toEqual({ name: "Acme Corp" });
+    expect(judge).toHaveBeenCalled();
+    expect((await labelOf(teamId))?.name).toBe(`acme.${SHARED}`);
+    expect(enqueueSharedSubdomain).toHaveBeenCalledTimes(1);
+    const [queuedFor, since, startAfter] = enqueueSharedSubdomain.mock.calls[0] ?? [];
+    expect(queuedFor).toBe(teamId);
+    expect((startAfter?.getTime() ?? 0) - (since?.getTime() ?? 0)).toBe(5 * 60_000);
   });
 });
 
@@ -331,6 +414,43 @@ describe("settings.team.delete", () => {
     expect(await db.select().from(schema.apiKeys)).toEqual([]);
     expect(await db.select().from(schema.broadcasts)).toEqual([]);
     expect((await db.select().from(schema.oauthConsent)).map((c) => c.id)).toEqual(["there"]);
+  });
+
+  it("frees an unlocked label for another team, and keeps a locked one as a tombstone", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    const quiet: TeamDeletionDeps = {
+      cancelSubscription: async () => {},
+      deleteSesIdentity: async () => {},
+      deleteSesTenant: async () => {},
+      deleteLogo: async () => {},
+    };
+    const unused = await createTeam(db, "unused", { sharedInboxDomain: SHARED });
+    const used = await createTeam(db, "used", { sharedInboxDomain: SHARED });
+    await db
+      .update(schema.sharedInboxDomains)
+      .set({ lockedAt: new Date() })
+      .where(eq(schema.sharedInboxDomains.teamId, used));
+    await addMember(unused, "alice", "owner");
+    await addMember(used, "bob", "owner");
+    await deletionCaller("alice", unused, "owner", quiet).settings.team.delete();
+    await deletionCaller("bob", used, "owner", quiet).settings.team.delete();
+    const byName = async (name: string) =>
+      (
+        await db
+          .select({ teamId: schema.sharedInboxDomains.teamId })
+          .from(schema.sharedInboxDomains)
+          .where(eq(schema.sharedInboxDomains.name, `${name}.${SHARED}`))
+      )[0];
+    expect(await byName("unused")).toBeUndefined();
+    expect(await byName("used")).toEqual({ teamId: null });
+    const teamId = await createTeam(db, "unused");
+    await settleSharedSubdomain(db, {
+      teamId,
+      sharedInboxDomain: SHARED,
+      review: undefined,
+      now: new Date(),
+    });
+    expect((await labelOf(teamId))?.name).toBe(`unused.${SHARED}`);
   });
 
   it.each(SUSPENSION_REASONS)(

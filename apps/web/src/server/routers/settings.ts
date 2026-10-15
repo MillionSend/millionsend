@@ -30,8 +30,11 @@ import {
   RECEIVED_PER_BILLED_EMAIL,
   readPeriodUsage,
   receivingRule,
+  releaseSharedSubdomain,
   resolveMonitorSettings,
+  SHARED_LABEL_MAX,
   SystemMailRefused,
+  sharedSlug,
   signInviteToken,
   teamMonitorRow,
   teamQuota,
@@ -73,6 +76,7 @@ import { resolveBaseUrl } from "../auth";
 import { requireAuthSecret } from "../auth-secret";
 import { getStripe } from "../billing";
 import { disposableAddressTest } from "../disposable-email";
+import { settleTeamSubdomain } from "../inboxes";
 import { activeLocale } from "../locale";
 import { poweredByLocked } from "../powered-by";
 import { smtpRelayOffered } from "../smtp";
@@ -385,14 +389,29 @@ export function createSettingsRouter(
         .input(z.object({ name: teamNameSchema }))
         .mutation(async ({ ctx, input }) => {
           if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
-          // Saving the name it already has is no rename: an operator's clear of
-          // its brand flag stands.
-          const [renamed] = await ctx.db
-            .update(schema.teams)
-            .set({ name: input.name })
-            .where(and(eq(schema.teams.id, ctx.teamId), ne(schema.teams.name, input.name)))
-            .returning({ id: schema.teams.id });
-          if (renamed) await flagImitatedBrand(ctx.db, ctx.teamId, input.name);
+          const old = await ctx.db.transaction(async (tx) => {
+            const [team] = await tx
+              .select({ name: schema.teams.name })
+              .from(schema.teams)
+              .where(eq(schema.teams.id, ctx.teamId))
+              .for("update");
+            // Saving the name it already has is no rename: an operator's clear of
+            // its brand flag stands.
+            if (!team || team.name === input.name) return null;
+            await tx
+              .update(schema.teams)
+              .set({ name: input.name })
+              .where(eq(schema.teams.id, ctx.teamId));
+            return team.name;
+          });
+          if (old !== null) {
+            await flagImitatedBrand(ctx.db, ctx.teamId, input.name);
+            // A rename to the same slug (Acme to ACME) would only redraw a suffixed
+            // or random label, spending a review.
+            if (sharedSlug(old, SHARED_LABEL_MAX) !== sharedSlug(input.name, SHARED_LABEL_MAX)) {
+              await settleTeamSubdomain(ctx.db, ctx.teamId);
+            }
+          }
           return { name: input.name };
         }),
 
@@ -424,6 +443,7 @@ export function createSettingsRouter(
           await revokeTeamGrants(tx, ctx.teamId);
           await tx.delete(schema.broadcasts).where(eq(schema.broadcasts.teamId, ctx.teamId));
           await tx.delete(schema.apiKeys).where(eq(schema.apiKeys.teamId, ctx.teamId));
+          await releaseSharedSubdomain(tx as unknown as Db, ctx.teamId);
           await tx.delete(schema.teams).where(eq(schema.teams.id, ctx.teamId));
           return { domains, logoUrl: team.logoUrl, name: team.name };
         });

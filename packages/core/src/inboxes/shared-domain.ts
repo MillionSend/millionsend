@@ -9,7 +9,8 @@ import { utcDay } from "../utc-day.js";
 import { randomAlnum } from "./inbox-common.js";
 import { SHARED_NAME_REFUSALS_PER_DAY, SHARED_NAME_REVIEWS_PER_DAY } from "./limits.js";
 
-const LABEL_MAX = 30;
+/** Characters a team name's slug keeps as its subdomain label. */
+export const SHARED_LABEL_MAX = 30;
 const ATTEMPTS = 5;
 const RANDOM_LABEL = /^team-[a-z0-9]{6}$/;
 
@@ -235,7 +236,7 @@ export async function settleSharedSubdomain(
   };
   let read = await readTeamLabel(db, p.teamId);
   if (!read || read.locked) return "settled";
-  const slug = sharedSlug(read.name, LABEL_MAX);
+  const slug = sharedSlug(read.name, SHARED_LABEL_MAX);
   let base = slug;
   if (keeps(read.label, base)) return "settled";
   if (base) {
@@ -272,7 +273,7 @@ export async function settleSharedSubdomain(
     // settles its own name; one to the same slug (Acme to ACME) settles
     // nothing, so this write goes on under the new name with the same verdict.
     read = await readTeamLabel(db, p.teamId);
-    if (!read || read.locked || sharedSlug(read.name, LABEL_MAX) !== slug) return "settled";
+    if (!read || read.locked || sharedSlug(read.name, SHARED_LABEL_MAX) !== slug) return "settled";
     if (keeps(read.label, base)) return "settled";
   }
   throw new Error("no free shared inbox subdomain label");
@@ -309,75 +310,4 @@ export async function lockUsedSharedSubdomains(db: Db): Promise<number> {
     .where(and(isNull(s.lockedAt), inboxOnLabel))
     .returning({ id: s.id });
   return rows.length;
-}
-
-interface SharedSubdomainRequest {
-  teamId: string;
-  teamName: string;
-  sharedInboxDomain: string;
-  review?: SharedNameReview | undefined;
-  now?: Date | undefined;
-}
-
-/**
- * The team's subdomain of the shared inbox domain, created on first use:
- * the team name as a slug once the identity review passes it, else
- * `team-<random>`: a look-alike subdomain would lend a phisher the brand.
- * The review never holds creation up: a refusal, an outage or a spent
- * budget all mean the random label. A label another team holds, or held
- * until it was deleted, gets a random suffix, so no label is ever issued
- * twice: a new owner would receive mail meant for the old one.
- *
- * With `onTransient: "skip"`, for a claim that can wait, an outage or a
- * spent budget claims nothing and answers null instead: the label is the
- * team's for good, and a later claim may still get its name.
- */
-export function ensureSharedSubdomain(
-  db: Db,
-  p: SharedSubdomainRequest & { onTransient: "skip" },
-): Promise<{ id: string; name: string } | null>;
-export function ensureSharedSubdomain(
-  db: Db,
-  p: SharedSubdomainRequest,
-): Promise<{ id: string; name: string }>;
-export async function ensureSharedSubdomain(
-  db: Db,
-  p: SharedSubdomainRequest & { onTransient?: "skip" },
-): Promise<{ id: string; name: string } | null> {
-  const s = schema.sharedInboxDomains;
-  const existing = async () =>
-    (await db.select({ id: s.id, name: s.name }).from(s).where(eq(s.teamId, p.teamId)))[0];
-  const found = await existing();
-  if (found) return found;
-  let base = sharedSlug(p.teamName, LABEL_MAX);
-  if (base) {
-    const refused = await reviewSharedNames(db, {
-      review: p.review,
-      teamId: p.teamId,
-      texts: [{ field: "label", value: base }],
-      now: p.now ?? new Date(),
-    });
-    // The string answers are the review's outage and spent budgets; a refusal is the text refused.
-    if (typeof refused === "string" && p.onTransient === "skip") return null;
-    if (refused !== null) base = "";
-  }
-  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
-    // A random base is drawn whole each time: a suffix keeps whatever the guard refused in it.
-    const label = !base
-      ? `team-${randomAlnum(6)}`
-      : attempt === 0
-        ? base
-        : `${base}-${randomAlnum(4)}`;
-    if (refusedLabel(label)) continue;
-    const [row] = await db
-      .insert(s)
-      .values({ teamId: p.teamId, name: `${label}.${p.sharedInboxDomain}` })
-      .onConflictDoNothing()
-      .returning({ id: s.id, name: s.name });
-    if (row) return row;
-    // The conflict was this team's own row, written by a concurrent call.
-    const raced = await existing();
-    if (raced) return raced;
-  }
-  throw new Error("no free shared inbox subdomain label");
 }
