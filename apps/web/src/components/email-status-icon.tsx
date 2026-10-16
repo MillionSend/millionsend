@@ -1,8 +1,12 @@
 /**
  * Status-tinted email visuals: the envelope tile that marks email rows and the
- * detail header (color follows the email's latest status), and the per-event
- * glyphs the delivery timeline uses. All pure SVG on design tokens.
+ * detail header (color follows the email's latest status), and the "Email
+ * events" strip the sent and received email pages share: per-event glyphs and
+ * tones, the node, the connector and the loading placeholder.
  */
+import { useLocale } from "next-intl";
+import { formatDayTime, formatDurationShort, formatUtcTimestampMs } from "@/lib/format";
+import { Skeleton, SkeletonBadge } from "./skeleton";
 import { StatusTile } from "./status-tile";
 
 /** Tone per email/event status — mirrors the ledger colors used elsewhere. */
@@ -150,18 +154,24 @@ export function EventGlyph({ type, size = 15 }: { type: string; size?: number })
   }
 }
 
-/** Timeline node tile: rounded square carrying the event glyph in its tone. */
+/**
+ * Timeline node tile: rounded square carrying the event glyph in its tone.
+ * The tone and glyph default to the sent event type's.
+ */
 export function EventIconTile({
   type,
   size = 34,
   dashed = false,
+  color = emailStatusColor(type),
+  children = <EventGlyph type={type} />,
 }: {
   type: string;
   size?: number;
   /** An estimate rather than a recorded event. */
   dashed?: boolean;
+  color?: string | undefined;
+  children?: React.ReactNode;
 }) {
-  const color = emailStatusColor(type);
   return (
     <span
       aria-hidden="true"
@@ -179,7 +189,166 @@ export function EventIconTile({
         color,
       }}
     >
-      <EventGlyph type={type} />
+      {children}
     </span>
+  );
+}
+
+/**
+ * A node on the events strip: its tile (pulsing on the newest node), the
+ * label pill, the time with the UTC stamp on hover, and a mono detail line.
+ * A node that opens a drawer is a button.
+ */
+export function EventNode({
+  type,
+  color = emailStatusColor(type),
+  glyph,
+  label,
+  hint,
+  at,
+  detail,
+  wrapDetail = false,
+  latest = false,
+  onClick,
+}: {
+  type: string;
+  color?: string | undefined;
+  glyph?: React.ReactNode;
+  label: React.ReactNode;
+  /** The pill's hover text. */
+  hint?: string | undefined;
+  at?: Date | string | undefined;
+  detail?: React.ReactNode;
+  /** Wraps the detail within its 220px instead of clipping it. */
+  wrapDetail?: boolean;
+  latest?: boolean;
+  onClick?: (() => void) | undefined;
+}) {
+  const locale = useLocale();
+  // Dashed for a prefetch: it happened, and it does not count.
+  const prefetch = type === "prefetched";
+  const body = (
+    <>
+      <span style={{ position: "relative", display: "inline-flex" }}>
+        <EventIconTile type={type} color={color}>
+          {glyph}
+        </EventIconTile>
+        {latest && !prefetch ? (
+          <span
+            style={{
+              position: "absolute",
+              top: -3,
+              right: -3,
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: color,
+              animation: "ms-pulse 2s infinite",
+            }}
+          />
+        ) : null}
+      </span>
+      <span
+        title={hint}
+        style={{
+          marginTop: 10,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          padding: "3px 9px",
+          borderRadius: "var(--ms-r-chip)",
+          border: `1px ${prefetch ? "dashed" : "solid"} color-mix(in srgb, ${color} 35%, var(--ms-line))`,
+          background: `color-mix(in srgb, ${color} ${prefetch ? 4 : 10}%, var(--ms-panel))`,
+          fontSize: 12,
+          fontWeight: 600,
+          color,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+      {at ? (
+        <span
+          title={formatUtcTimestampMs(at)}
+          style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 7 }}
+        >
+          {formatDayTime(at, locale)}
+        </span>
+      ) : null}
+      {detail ? (
+        <span
+          className="ms-mono"
+          style={{
+            fontSize: 11,
+            color: "var(--ms-muted)",
+            marginTop: 3,
+            maxWidth: 220,
+            whiteSpace: wrapDetail ? "normal" : "nowrap",
+            ...(wrapDetail ? { overflowWrap: "anywhere" as const } : {}),
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {detail}
+        </span>
+      ) : null}
+    </>
+  );
+  return onClick ? (
+    <button
+      type="button"
+      className="ms-events-node"
+      style={{ color: "inherit", font: "inherit", cursor: "pointer" }}
+      onClick={onClick}
+    >
+      {body}
+    </button>
+  ) : (
+    <div className="ms-events-node">{body}</div>
+  );
+}
+
+/**
+ * The connector into a node: the time since the last timed node, over a line.
+ * With no time to tell (an untimed node, or one listed after a later step)
+ * the label stays blank, so the line keeps its height.
+ */
+export function EventGap({ ms, dashed = false }: { ms: number | null; dashed?: boolean }) {
+  return (
+    <div className="ms-events-gap">
+      <span className="ms-mono" style={{ fontSize: 10.5, color: "var(--ms-muted)" }}>
+        {ms !== null && ms >= 0 ? `+${formatDurationShort(ms)}` : "\u00a0"}
+      </span>
+      <span className={dashed ? "ms-events-line dashed" : "ms-events-line"} />
+    </div>
+  );
+}
+
+/** The strip while its email loads: three nodes of tile, pill and time. */
+export function EventStripSkeleton() {
+  return (
+    <div className="ms-events">
+      {[0, 1, 2].map((index) => (
+        <div key={index} style={{ display: "contents" }}>
+          {index > 0 ? (
+            <div className="ms-events-gap">
+              <span className="ms-mono" style={{ fontSize: 10.5, display: "flex" }}>
+                <Skeleton width={32} height="1lh" />
+              </span>
+              <span className="ms-events-line" />
+            </div>
+          ) : null}
+          <div className="ms-events-node">
+            <Skeleton width={34} height={34} radius={10} />
+            <span style={{ marginTop: 10, display: "flex" }}>
+              <SkeletonBadge width={74} />
+            </span>
+            <span style={{ fontSize: 12, marginTop: 7, display: "flex" }}>
+              <Skeleton width={96} height="1lh" />
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
