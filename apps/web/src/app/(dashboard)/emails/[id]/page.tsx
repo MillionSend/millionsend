@@ -12,10 +12,16 @@ import { Breakable } from "@/components/breakable";
 import { CopyBlock, CopyChip } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { EmailContentPanel } from "@/components/email-content-panel";
-import { EmailStatusIcon, EventIconTile } from "@/components/email-status-icon";
+import {
+  EmailStatusIcon,
+  EventGap,
+  EventIconTile,
+  EventNode,
+  EventStripSkeleton,
+} from "@/components/email-status-icon";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
-import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
+import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import { suppressedAtAccept } from "@/lib/email-events";
@@ -46,30 +52,6 @@ type EventType =
   | "failed"
   | "prefetched"
   | "unsubscribed";
-
-/**
- * Ledger word color per the canvas: sent stays muted (it's the baseline,
- * not an outcome), delivered succeeds, opens/clicks inform, bounce and
- * suppression are dangers, complaints warn.
- */
-const EVENT_COLOR: Record<EventType, string> = {
-  queued: "var(--ms-muted)",
-  queued_quota: "var(--ms-muted)",
-  sent: "var(--ms-muted)",
-  delivery_delayed: "var(--ms-neutral)",
-  delivered: "var(--ms-success)",
-  opened: "var(--ms-info)",
-  clicked: "var(--ms-info)",
-  bounced: "var(--ms-danger)",
-  complained: "var(--ms-warn)",
-  suppressed: "var(--ms-danger)",
-  rendering_failure: "var(--ms-danger)",
-  failed: "var(--ms-danger)",
-  // A machine's fetch, not an outcome: the same muted tone as sent.
-  prefetched: "var(--ms-muted)",
-  // An opt-out through this email's link: a warning-tone outcome, like a complaint.
-  unsubscribed: "var(--ms-warn)",
-};
 
 function isPrefetchReason(value: unknown): value is PrefetchReason {
   return typeof value === "string" && (PREFETCH_REASONS as readonly string[]).includes(value);
@@ -314,29 +296,7 @@ function EmailDetailSkeleton() {
 
       <div style={{ marginTop: 26 }}>
         <div className="ms-microlabel">{t("detail.events")}</div>
-        <div className="ms-events">
-          {[0, 1, 2].map((index) => (
-            <div key={index} style={{ display: "contents" }}>
-              {index > 0 ? (
-                <div className="ms-events-gap">
-                  <span className="ms-mono" style={{ fontSize: 10.5, display: "flex" }}>
-                    <Skeleton width={32} height="1lh" />
-                  </span>
-                  <span className="ms-events-line" />
-                </div>
-              ) : null}
-              <div className="ms-events-node">
-                <Skeleton width={34} height={34} radius={10} />
-                <span style={{ marginTop: 10, display: "flex" }}>
-                  <SkeletonBadge width={74} />
-                </span>
-                <span style={{ fontSize: 12, marginTop: 7, display: "flex" }}>
-                  <Skeleton width={96} height="1lh" />
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+        <EventStripSkeleton />
       </div>
 
       <div
@@ -881,7 +841,6 @@ export default function EmailDetailPage() {
             {groups.map((group, index) => {
               const { type, first } = group;
               const count = group.occurrences.length;
-              const latest = index === groups.length - 1;
               const previous = index > 0 ? groups[index - 1] : undefined;
               // Connector deltas run between first occurrences — the group's
               // anchor — so the strip stays chronological even when a later
@@ -912,116 +871,40 @@ export default function EmailDetailPage() {
                       : count > 1
                         ? ("group" as const)
                         : null;
-              // Icon-tile node: glyph tile, status pill, timestamp, detail —
-              // the connector line meets the tiles at their vertical center.
-              const card = (
-                <>
-                  <span style={{ position: "relative", display: "inline-flex" }}>
-                    <EventIconTile type={type} />
-                    {latest && type !== "prefetched" ? (
-                      <span
-                        style={{
-                          position: "absolute",
-                          top: -3,
-                          right: -3,
-                          width: 7,
-                          height: 7,
-                          borderRadius: "50%",
-                          background: EVENT_COLOR[type],
-                          animation: "ms-pulse 2s infinite",
-                        }}
-                      />
-                    ) : null}
-                  </span>
-                  <span
-                    title={type === "prefetched" ? t("detail.prefetchedHint") : undefined}
-                    style={{
-                      marginTop: 10,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 5,
-                      padding: "3px 9px",
-                      borderRadius: "var(--ms-r-chip)",
-                      // Dashed: it happened, and it does not count.
-                      border: `1px ${type === "prefetched" ? "dashed" : "solid"} color-mix(in srgb, ${EVENT_COLOR[type]} 35%, var(--ms-line))`,
-                      background: `color-mix(in srgb, ${EVENT_COLOR[type]} ${type === "prefetched" ? 4 : 10}%, var(--ms-panel))`,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: EVENT_COLOR[type],
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {eventLabel(type)}
-                    {count > 1 ? (
-                      <span className="ms-mono" style={{ fontSize: 10, fontWeight: 500 }}>
-                        ×{count}
-                      </span>
-                    ) : null}
-                    {opens ? <span aria-hidden="true">›</span> : null}
-                  </span>
-                  <span
-                    title={formatUtcTimestampMs(stamped.occurredAt)}
-                    style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 7 }}
-                  >
-                    {formatDayTime(stamped.occurredAt, locale)}
-                  </span>
-                  {detail ? (
-                    <span
-                      className="ms-mono"
-                      style={{
-                        fontSize: 11,
-                        color: "var(--ms-muted)",
-                        marginTop: 3,
-                        maxWidth: 220,
-                        // Wraps instead of clipping: its last part is when SES stops retrying.
-                        whiteSpace: type === "delivery_delayed" ? "normal" : "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {detail}
-                    </span>
-                  ) : null}
-                </>
-              );
               return (
                 <div key={first.id} style={{ display: "contents" }}>
-                  {delta != null ? (
-                    <div className="ms-events-gap">
-                      <span
-                        className="ms-mono"
-                        style={{ fontSize: 10.5, color: "var(--ms-muted)" }}
-                      >
-                        +{formatDurationShort(delta)}
-                      </span>
-                      <span className="ms-events-line" />
-                    </div>
-                  ) : null}
-                  {opens ? (
-                    <button
-                      type="button"
-                      className="ms-events-node"
-                      style={{ color: "inherit", font: "inherit", cursor: "pointer" }}
-                      onClick={() =>
-                        opens === "group" ? setGroupDrawer(first.id) : setDrawer(opens)
-                      }
-                    >
-                      {card}
-                    </button>
-                  ) : (
-                    <div className="ms-events-node">{card}</div>
-                  )}
+                  {delta != null ? <EventGap ms={delta} /> : null}
+                  <EventNode
+                    type={type}
+                    label={
+                      <>
+                        {eventLabel(type)}
+                        {count > 1 ? (
+                          <span className="ms-mono" style={{ fontSize: 10, fontWeight: 500 }}>
+                            ×{count}
+                          </span>
+                        ) : null}
+                        {opens ? <span aria-hidden="true">›</span> : null}
+                      </>
+                    }
+                    hint={type === "prefetched" ? t("detail.prefetchedHint") : undefined}
+                    at={stamped.occurredAt}
+                    detail={detail}
+                    // Wraps instead of clipping: its last part is when SES stops retrying.
+                    wrapDetail={type === "delivery_delayed"}
+                    latest={index === groups.length - 1}
+                    onClick={
+                      opens
+                        ? () => (opens === "group" ? setGroupDrawer(first.id) : setDrawer(opens))
+                        : undefined
+                    }
+                  />
                 </div>
               );
             })}
             {eventsStalled ? (
               <>
-                <div className="ms-events-gap">
-                  <span className="ms-mono" style={{ fontSize: 10.5 }}>
-                    &nbsp;
-                  </span>
-                  <span className="ms-events-line dashed" />
-                </div>
+                <EventGap ms={null} dashed />
                 <div className="ms-events-node">
                   <Tooltip text={t("detail.eventsStalled")}>
                     <span
