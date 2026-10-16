@@ -11,7 +11,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type ApiDeps, createApi } from "../src/app.js";
@@ -92,6 +92,7 @@ function makeApp(opts: {
   regions?: string[];
   receiving?: ApiDeps["receiving"];
   sharedInboxDomain?: string;
+  enqueueWebhookDeliveries?: ApiDeps["enqueueWebhookDeliveries"];
 }) {
   const deps: ApiDeps = {
     db,
@@ -102,6 +103,7 @@ function makeApp(opts: {
     trackingSubdomains: opts.trackingSubdomains,
     receiving: opts.receiving,
     sharedInboxDomain: opts.sharedInboxDomain,
+    enqueueWebhookDeliveries: opts.enqueueWebhookDeliveries,
     ses: {
       clientForRegion: () => opts.client,
       dns: opts.dns ?? fakeDns(),
@@ -1148,6 +1150,42 @@ describe("DELETE /domains/{id}", () => {
       .from(schema.emailEvents)
       .where(eq(schema.emailEvents.emailId, queued?.id ?? ""));
     expect(events).toEqual([{ type: "failed" }]);
+  });
+
+  it("fires email.failed for the emails the delete fails, handed to the queue after it commits", async () => {
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.failed"]);
+    const domainLeft: boolean[] = [];
+    const enqueued: string[] = [];
+    const app = makeApp({
+      client: fakeSes().client,
+      enqueueWebhookDeliveries: async (rows) => {
+        enqueued.push(...rows.map((r) => r.id));
+        const rowsLeft = await db
+          .select({ id: schema.domains.id })
+          .from(schema.domains)
+          .where(eq(schema.domains.name, "hooks.example.com"));
+        domainLeft.push(rowsLeft.length > 0);
+      },
+    });
+    const { id } = await createDomain(app, "hooks.example.com");
+    const [queued] = await db
+      .insert(schema.emails)
+      .values({ teamId, domainId: id, from: "a@hooks.example.com", to: ["r@x.com"], subject: "s" })
+      .returning({ id: schema.emails.id });
+
+    expect((await call(app, fullKey, "DELETE", `/domains/${id}`)).status).toBe(200);
+
+    const deliveries = await db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+    expect(deliveries.map((d) => d.emailId)).toEqual([queued?.id]);
+    expect(deliveries[0]?.payload).toMatchObject({
+      type: "email.failed",
+      data: { email_id: queued?.id, failed: { reason: "domain_deleted" } },
+    });
+    expect(enqueued).toEqual([deliveries[0]?.id]);
+    expect(domainLeft).toEqual([false]);
   });
 
   it("tolerates an identity already gone from SES", async () => {

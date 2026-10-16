@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SesIdentityClient } from "@millionsend/ses";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { reapUnverifiedDomains } from "../src/handlers/cron.js";
@@ -169,6 +169,65 @@ it("terminally fails the domain's queued emails so the worker never retries a go
     .from(schema.emailEvents)
     .where(eq(schema.emailEvents.emailId, email.id));
   expect(events.map((e) => e.type)).toEqual(["failed"]);
+});
+
+it("fires email.failed for the emails a reap fails once it commits, and nothing for a raced one", async () => {
+  const endpointId = await createWebhookEndpoint(db, teamId, null);
+  const reaped = await insertDomain({ name: "hooks.dev", createdAt: oldEnough });
+  // Verified while the reap ran: its delete finds verifiedAt set and rolls back.
+  const raced = await insertDomain({ name: "raced.dev", createdAt: oldEnough });
+  const [reapedEmail, racedEmail] = await db
+    .insert(schema.emails)
+    .values(
+      [reaped, raced].map((domainId) => ({
+        teamId,
+        domainId,
+        from: "a@hooks.dev",
+        to: ["r@example.com"],
+        subject: "stuck",
+        latestStatus: "queued" as const,
+      })),
+    )
+    .returning({ id: schema.emails.id });
+  const ses = fakeSes();
+  const clientForRegion = (): SesIdentityClient => ({
+    async send(command) {
+      const identity = (command as { input?: { EmailIdentity?: string } }).input?.EmailIdentity;
+      if (command.constructor.name === "DeleteEmailIdentityCommand" && identity === "raced.dev") {
+        await db
+          .update(schema.domains)
+          .set({ verifiedAt: new Date() })
+          .where(eq(schema.domains.id, raced));
+      }
+      return ses.clientForRegion().send(command);
+    },
+  });
+  const enqueued: string[] = [];
+
+  expect(
+    await reapUnverifiedDomains(db, {
+      clientForRegion,
+      enqueueWebhookDelivery: async (rows) => {
+        enqueued.push(...rows.map((r) => r.id));
+      },
+    }),
+  ).toBe(1);
+
+  const deliveries = await db
+    .select()
+    .from(schema.webhookDeliveries)
+    .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+  expect(deliveries.map((d) => d.emailId)).toEqual([reapedEmail?.id]);
+  expect(deliveries[0]?.payload).toMatchObject({
+    type: "email.failed",
+    data: { failed: { reason: "domain_deleted" } },
+  });
+  expect(enqueued).toEqual([deliveries[0]?.id]);
+  const [racedRow] = await db
+    .select({ status: schema.emails.latestStatus })
+    .from(schema.emails)
+    .where(eq(schema.emails.id, racedEmail?.id ?? ""));
+  expect(racedRow?.status).toBe("queued");
 });
 
 it("an SES error keeps the row for the next run and never blocks the batch", async () => {

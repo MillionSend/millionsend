@@ -1004,6 +1004,8 @@ class ReapRaced extends Error {}
 
 export interface ReapUnverifiedDomainsDeps {
   clientForRegion: (region: string) => SesIdentityClient;
+  /** Arms the webhook drain for the failed emails' rows; absent, the reconcile sweep sends them. */
+  enqueueWebhookDelivery?: WebhookEnqueue | undefined;
   now?: Date;
 }
 
@@ -1074,10 +1076,15 @@ export async function reapUnverifiedDomains(
           if ((err as { name?: string }).name !== "NotFoundException") throw err;
         }
       }
+      const hooks = webhookBatch(deps.enqueueWebhookDelivery);
       const deleted = await db
         .transaction(async (tx) => {
           const txDb = tx as unknown as Db;
-          await failQueuedEmailsForDomain(txDb, { teamId: domain.teamId, domainId: domain.id });
+          await failQueuedEmailsForDomain(txDb, {
+            teamId: domain.teamId,
+            domainId: domain.id,
+            enqueue: hooks.collect,
+          });
           await txDb
             .update(schema.apiKeys)
             .set({ revokedAt: now, domainId: null })
@@ -1096,6 +1103,7 @@ export async function reapUnverifiedDomains(
           throw err;
         });
       if (!deleted) continue;
+      await hooks.flush();
       await recordAudit(db, {
         teamId: domain.teamId,
         actor: "system",

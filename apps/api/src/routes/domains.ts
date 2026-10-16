@@ -23,6 +23,7 @@ import {
   setDomainReceiving,
   teamSharedDomain,
   teamSharedSending,
+  webhookBatch,
 } from "@millionsend/core";
 import {
   combineRecordStatus,
@@ -1084,9 +1085,14 @@ export function registerDomainRoutes(
           },
         );
       }
+      const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
       await db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
-        await failQueuedEmailsForDomain(txDb, { teamId: auth.teamId, domainId: domain.id });
+        await failQueuedEmailsForDomain(txDb, {
+          teamId: auth.teamId,
+          domainId: domain.id,
+          enqueue: hooks.collect,
+        });
         // An inbox created since the step above: its keys must not block the cascade.
         await txDb
           .update(schema.apiKeys)
@@ -1112,6 +1118,7 @@ export function registerDomainRoutes(
           );
         await txDb.delete(d).where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
       });
+      await hooks.flush();
       await recordAudit(db, {
         teamId: auth.teamId,
         actor: apiRequestActor(auth),

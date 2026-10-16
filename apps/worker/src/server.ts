@@ -682,7 +682,10 @@ await queue.scheduleCrons({
     // operator's own teams and adopts existing SES identities on create, so
     // an unverified row blocks nobody there.
     if (!env.IS_CLOUD) return;
-    const reaped = await reapUnverifiedDomains(db, { clientForRegion });
+    const reaped = await reapUnverifiedDomains(db, {
+      clientForRegion,
+      enqueueWebhookDelivery: enqueueWebhook,
+    });
     if (reaped > 0) console.log(`domains.reap: reaped=${reaped}`);
   },
 });
