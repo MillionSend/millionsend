@@ -722,9 +722,6 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3
     devDependencies:
-      '@types/linkify-it':
-        specifier: ^5.0.0
-        version: 5.0.0
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5

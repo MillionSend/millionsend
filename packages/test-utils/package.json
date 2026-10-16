@@ -20,7 +20,6 @@
     "linkifyjs": "^4.3.3"
   },
   "devDependencies": {
-    "@types/linkify-it": "^5.0.0",
     "@types/node": "^22.20.5",
     "typescript": "^7.0.2"
   }
