@@ -18,3 +18,14 @@ export function shortcutBlocked(target: EventTarget | null): boolean {
   }
   return target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
 }
+
+/** Open layers that close on Esc themselves: menus and listboxes, tooltips, dialogs, the phone nav drawer. */
+const ESC_LAYERS = '.ms-menu, .ms-tooltip, [role="dialog"], .ms-drawer-scrim';
+
+/**
+ * Whether an Esc belongs to something before the page: a field, where it must
+ * never throw away what was typed, or an open layer that closes on it.
+ */
+export function escapeTaken(target: EventTarget | null): boolean {
+  return shortcutBlocked(target) || document.querySelector(ESC_LAYERS) !== null;
+}

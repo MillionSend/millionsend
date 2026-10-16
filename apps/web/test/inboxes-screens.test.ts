@@ -26,18 +26,21 @@ vi.mock("next-intl", async (importOriginal) => {
       actual.createTranslator({ locale: "en", messages: en, namespace }),
   };
 });
+// The page's query string, which a test may set.
+const nav = vi.hoisted(() => ({ search: "" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => "/inboxes",
   useParams: () => ({ id: "i1" }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
-// What the query hooks answer (nothing unless a test sets it), the error
-// a mutation came back with, the options and calls mutations got, and the
-// queries invalidated.
+// What the query hooks answer (nothing unless a test sets it, by procedure
+// path where a screen asks for several), the error a mutation came back with,
+// the options and calls mutations got, and the queries invalidated.
 const rq = vi.hoisted(() => ({
   data: undefined as unknown,
   pages: undefined as unknown,
+  byPath: {} as Record<string, unknown>,
   error: null as unknown,
   mutate: vi.fn(),
   mutations: [] as { path?: string; onSuccess?: () => unknown }[],
@@ -62,8 +65,13 @@ vi.mock("@tanstack/react-query", () => ({
     return { mutate: rq.mutate, isPending: false, error: rq.error };
   },
   useQueryClient: () => ({ invalidateQueries: rq.invalidate }),
-  useQuery: () => ({ data: rq.data }),
-  useInfiniteQuery: () => ({ data: rq.pages, isPending: false }),
+  useQuery: (options?: { path?: string }) => ({
+    data: options?.path && options.path in rq.byPath ? rq.byPath[options.path] : rq.data,
+  }),
+  useInfiniteQuery: (options?: { path?: string }) => ({
+    data: options?.path && options.path in rq.byPath ? rq.byPath[options.path] : rq.pages,
+    isPending: false,
+  }),
 }));
 // A native select lists every option a picker offers, which a closed one never renders.
 vi.mock("@/components/select", () => ({
@@ -105,6 +113,10 @@ const { InboxView } = await import("@/app/(dashboard)/inboxes/[id]/inbox-view");
 const { EditDialog } = await import("@/app/(dashboard)/inboxes/[id]/edit-dialog");
 const { CreateInboxDialog } = await import("@/app/(dashboard)/inboxes/create-inbox-dialog");
 const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
+// The real tab, past the mock above that keeps it off the inbox page.
+const { ThreadsTab } = await vi.importActual<
+  typeof import("@/app/(dashboard)/inboxes/[id]/threads-tab")
+>("@/app/(dashboard)/inboxes/[id]/threads-tab");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
 const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
   await import("@/app/(dashboard)/inboxes/parts");
@@ -265,6 +277,118 @@ describe("webhook picker", () => {
     expect(WEBHOOK_EVENT_META["email.received"]).toEqual(
       expect.not.objectContaining({ optIn: true }),
     );
+  });
+});
+
+describe("threads", () => {
+  const billing = { id: "l1", name: "Billing", color: "#46A758" };
+  const row = {
+    id: "t1",
+    subject: "Verify your mailbox now",
+    from: "Account Security <security@mailbox-verify.example>",
+    to: ["orders@acme.example"],
+    cc: [],
+    bcc: [],
+    labels: [billing],
+    message_count: 1,
+    has_attachment: false,
+    has_draft: false,
+    read: true,
+    received_at: new Date().toISOString(),
+    folder: "inbox",
+    quarantined: 0,
+    quarantine_reason: null,
+    injection_score: null,
+    phishing_score: null,
+    suspicious: false,
+    pending_approval: false,
+    snippet: "Your mailbox will be suspended",
+  } as ThreadRow;
+  /** The threads tab in a folder, the thread above open beside the list. */
+  const tab = (folder: string, inbox: Partial<InboxDetail> = {}) => {
+    nav.search = `folder=${folder}&thread=t1`;
+    rq.byPath = {
+      "inboxes.threads.list.infiniteQueryOptions": { pages: [{ items: [{ ...row, folder }] }] },
+      "inboxes.threads.get.queryOptions": { ...row, folder },
+      "inboxes.threads.emails.infiniteQueryOptions": { pages: [{ items: [] }] },
+      "inboxes.drafts.list.queryOptions": { items: [] },
+      "inboxes.labels.list.queryOptions": [billing],
+    };
+    try {
+      return renderToStaticMarkup(
+        createElement(ThreadsTab, {
+          inbox: { id: "i1", kind: "human", expired: false, ...inbox } as InboxDetail,
+        }),
+      ).replaceAll("&#x27;", "'");
+    } finally {
+      nav.search = "";
+      rq.byPath = {};
+    }
+  };
+  /** The open thread's header row, title to its last control. */
+  const header = (html: string) => html.match(/<section[^>]*>(<div.*?)<\/div><span/s)?.[1] ?? "";
+
+  it("marks a read thread with a hollow ring where an unread one has its dot, each named", () => {
+    const render = (read: boolean, agent = false) =>
+      renderToStaticMarkup(
+        createElement(ThreadListRow, {
+          row: { ...row, read },
+          agent,
+          sent: false,
+          selected: false,
+          onOpen: () => {},
+        }),
+      );
+    const read = render(true);
+    expect(read).toMatch(
+      /<span class="ms-tooltip-trigger inline" tabindex="0"><span id="[^"]+-dot" class="ms-dot ring" role="img" aria-label="Read"><\/span><\/span>/,
+    );
+    // Every row's button reads its mark out, read or not.
+    expect(read).toMatch(/aria-describedby="(\S+)-dot \1-pills"/);
+    expect(render(true, true)).toContain('class="ms-dot ring" role="img" aria-label="Read"');
+    expect(render(false)).toMatch(
+      /class="ms-tooltip-trigger inline" tabindex="0"><span id="[^"]+-dot" class="ms-dot" style="background:var\(--ms-bone\)" role="img" aria-label="Unread">/,
+    );
+    expect(render(false, true)).toContain('aria-label="Your agent hasn&#x27;t marked it read yet"');
+  });
+
+  it("closes the open thread with an icon button named Close, the last control in its header", () => {
+    const html = header(tab("inbox"));
+    expect(html).toMatch(
+      /<span class="ms-tooltip-trigger inline"><button type="button" class="ms-btn ms-btn-icon" aria-label="Close"><svg[^>]*>(<path[^>]*><\/path>){2}<\/svg><\/button><\/span>$/,
+    );
+    expect(html).not.toContain("ms-btn-ghost");
+  });
+
+  it("puts Not spam before Move in Spam, Restore in Trash, and neither elsewhere", () => {
+    const button = (label: string) =>
+      new RegExp(
+        `<button type="button" class="ms-btn ms-btn-secondary"><svg[^>]*>.*?</svg>${label}</button>`,
+      );
+    const spam = header(tab("spam"));
+    expect(spam).toMatch(button("Not spam"));
+    expect(spam.indexOf("Not spam")).toBeLessThan(spam.indexOf('aria-label="Move"'));
+    expect(spam).not.toContain("Restore");
+    const trash = header(tab("trash"));
+    expect(trash).toMatch(button("Restore"));
+    expect(trash).not.toContain("Not spam");
+    for (const folder of ["inbox", "archive", "sent"]) {
+      expect(header(tab(folder))).not.toMatch(/Not spam|Restore/);
+    }
+  });
+
+  it("leaves an expired inbox's open thread only its Close", () => {
+    const html = tab("spam", { expired: true });
+    expect(header(html)).toContain('aria-label="Close"');
+    expect(header(html)).not.toMatch(/Not spam|aria-label="Move"|aria-label="Labels"|More actions/);
+  });
+
+  it("says over Trash how long it keeps a thread, from core's own number", () => {
+    const line = "Threads in Trash are deleted 30 days after they're moved here.";
+    expect(tab("trash")).toContain(
+      `<p style="margin:-4px 0 12px;font-size:12.5px;color:var(--ms-muted)">${line}</p>`,
+    );
+    expect(tab("spam")).not.toContain(line);
   });
 });
 
