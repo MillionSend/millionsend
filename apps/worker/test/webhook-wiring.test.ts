@@ -200,10 +200,11 @@ it("bounce events carry bounce extras and reach type-subscribed endpoints", asyn
   });
 });
 
-it("a hard bounce's suppression.added names the bounced email as source_id", async () => {
+it("a hard bounce's suppression.added lands with no queue hand-off wired and names the bounced email as source_id", async () => {
   const bounceTeamId = await createTeam(db, "bounce-source-team");
   const endpointId = await insertEndpoint(bounceTeamId, ["suppression.added"]);
   const emailId = await insertSentEmail("wh-mid-source", bounceTeamId);
+  // No enqueue wired: the row still lands, for the reconcile sweep.
   await processSesEvent(
     db,
     {
@@ -213,7 +214,7 @@ it("a hard bounce's suppression.added names the bounced email as source_id", asy
       bounce: { bounceType: "Permanent", bounceSubType: "General", recipients: ["r@example.com"] },
       data: { eventType: "Bounce" },
     },
-    { snsMessageId: "sns-wh-source", enqueueWebhookDelivery: async () => {} },
+    { snsMessageId: "sns-wh-source" },
   );
 
   const rows = await deliveriesFor([endpointId]);
