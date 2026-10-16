@@ -39,9 +39,11 @@ Audience events fire when a contact or the suppression list changes, whoever
 changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 `first_name`, `last_name`, `unsubscribed`, `created_at`, `updated_at` — plus
 `source`: `api`, `dashboard`, `hosted_page` (the preference center) or
-`one_click` (an RFC 8058 header post). Resend emits only `contact.created`,
-`contact.updated`, `contact.deleted`, `suppression.added` and
-`suppression.removed`; the rest are MillionSend extensions.
+`one_click` (an RFC 8058 header post). Of the events below, Resend emits
+`contact.created`, `contact.updated`, `contact.deleted`, `suppression.added`
+and `suppression.removed`; the rest are MillionSend extensions. MillionSend
+doesn't send Resend's `contact.topics.updated`: subscribe to
+`contact.topic_opt_in` and `contact.topic_opt_out` instead.
 
 | Event | Fired when | Extra `data` |
 | --- | --- | --- |

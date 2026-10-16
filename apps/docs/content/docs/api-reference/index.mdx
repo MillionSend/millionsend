@@ -350,8 +350,9 @@ draft sends, and `POST /emails/receiving/{id}/reply` and `/forward`.
 Retrying with the same key and payload returns the original response instead
 of sending again; the same key with a different payload returns `409`. A send
 that was held for approval answers the retry with the same draft, as `202`.
-A refused `POST /emails` doesn't hold its key: the retry runs again, and an
-all-suppressed one keeps another `suppressed` email.
+A refused `POST /emails` doesn't hold its key: the retry runs again, and
+when the suppression list alone empties `to`, it keeps another `suppressed`
+email.
 
 ## Pagination
 

@@ -368,9 +368,9 @@ encaminhamentos e envios de rascunho das caixas, e
 o mesmo payload retorna a resposta original em vez de enviar de novo; a mesma
 chave com payload diferente retorna `409`. Um envio que ficou retido para
 aprovação responde à repetição com o mesmo rascunho, como `202`. Um
-`POST /emails` recusado não prende a chave: a repetição roda de novo, e se
-todos os destinatários estiverem suprimidos fica guardado mais um e-mail
-`suppressed`.
+`POST /emails` recusado não prende a chave: a repetição roda de novo e,
+quando a lista de supressão sozinha deixa `to` vazio, fica guardado mais um
+e-mail `suppressed`.
 
 ## Paginação
 
