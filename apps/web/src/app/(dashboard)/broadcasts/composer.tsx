@@ -18,7 +18,7 @@ import { MarkerRail, MobileStepBar, StepRail } from "@/components/stepper";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { statusGlow } from "@/lib/status-glow";
-import { bodyEditorMode } from "@/lib/template-mode";
+import { bodyEditorMode, followingText } from "@/lib/template-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
@@ -777,12 +777,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                     id="bc-html"
                     html={html}
                     onChange={(next) => {
+                      setText(followingText(text, html, next));
                       setHtml(next);
                       setDirty(next !== savedHtml.current);
                     }}
                     mergeFields={mergeFields}
                     previewSamples={previewSamples}
-                    hasText={text !== ""}
+                    text={text}
                   />
                 ) : (
                   <>

@@ -14,10 +14,17 @@ import { BtnSpinner } from "@/components/spinner";
 import { findMatches, nearestMatch, stepMatch } from "@/lib/code-find";
 import { emulateEmailScheme } from "@/lib/email-preview";
 import { type MergeFieldOption, makeMergeToken } from "@/lib/merge-fields";
+import { plainTextSource } from "@/lib/template-mode";
 import { usePreviewScheme } from "@/lib/use-preview-scheme";
 import { fillMergeSamples } from "../broadcasts/parts";
 
 const PREVIEW_DEBOUNCE_MS = 350;
+
+const TEXT_HINT = {
+  derived: "html.textDerived",
+  stored: "html.textStored",
+  none: "html.textNone",
+} as const;
 
 const emptyStyle = {
   margin: 0,
@@ -38,7 +45,7 @@ export function HtmlCodeMode({
   onChange,
   mergeFields,
   previewSamples,
-  hasText,
+  text,
 }: {
   /** The source textarea's id, for the field label. */
   id?: string;
@@ -46,8 +53,8 @@ export function HtmlCodeMode({
   onChange: (html: string) => void;
   mergeFields: MergeFieldOption[];
   previewSamples: Record<string, string>;
-  /** Whether the row stores a plain-text part; code mode never rewrites it. */
-  hasText: boolean;
+  /** The body's plain-text part, which the hint under the panes describes. */
+  text: string;
 }) {
   const t = useTranslations("templates");
   const common = useTranslations("common");
@@ -59,6 +66,7 @@ export function HtmlCodeMode({
   }, [html]);
   const editor = useRef<CodeEditorHandle>(null);
   const fields = usePickerFields(mergeFields);
+  const textSource = useMemo(() => plainTextSource(text, html), [text, html]);
 
   // Find: matches follow the text live; the textarea selection only moves on
   // an explicit jump (query change, Enter, arrows), never on an edit.
@@ -225,7 +233,7 @@ export function HtmlCodeMode({
           />
         </div>
       </div>
-      <p className="ms-tpl-code-hint">{t(hasText ? "html.textStored" : "html.textNone")}</p>
+      <p className="ms-tpl-code-hint">{t(TEXT_HINT[textSource])}</p>
     </div>
   );
 }
@@ -327,34 +335,153 @@ export function ConvertBlocksDialog({
   open: boolean;
   busy?: boolean;
   onClose: () => void;
-  onDuplicate?: () => void;
+  /** Absent on a body with no saved row to copy: a broadcast, a new template. */
+  onDuplicate?: (() => void) | undefined;
   onConvertInPlace: () => void;
   /** Names what converts in place: this template, this broadcast. */
   inPlaceLabel: string;
 }) {
   const t = useTranslations("templates");
+  return (
+    <EditorModeDialog
+      open={open}
+      pending={busy ? "copy" : null}
+      title={t("html.convertTitle")}
+      body={t("html.convertBody")}
+      copyLabel={t("html.convertCopy")}
+      inPlaceLabel={inPlaceLabel}
+      onClose={onClose}
+      onDuplicate={onDuplicate}
+      onInPlace={onConvertInPlace}
+    />
+  );
+}
+
+/**
+ * The guarded blocks→html switch of a template with content. The block
+ * document is replaced by its rendered html; the way back flattens, so the
+ * dialog offers the copy first, like the conversion does.
+ */
+export function SwitchHtmlDialog({
+  open,
+  pending = null,
+  error = null,
+  onClose,
+  onDuplicate,
+  onSwitchInPlace,
+}: {
+  open: boolean;
+  /** What is in flight: the render for the switch, or creating the copy. */
+  pending?: DialogAction | null;
+  /** Why the last attempt failed, shown in the dialog that stays open. */
+  error?: string | null;
+  onClose: () => void;
+  /** Absent on a template that is not saved yet: there is nothing to copy from. */
+  onDuplicate?: (() => void) | undefined;
+  onSwitchInPlace: () => void;
+}) {
+  const t = useTranslations("templates");
+  return (
+    <EditorModeDialog
+      open={open}
+      pending={pending}
+      error={error}
+      title={t("html.switchTitle")}
+      body={t("html.switchBody")}
+      copyLabel={t("html.switchCopy")}
+      inPlaceLabel={t("html.convertInPlace")}
+      onClose={onClose}
+      onDuplicate={onDuplicate}
+      onInPlace={onSwitchInPlace}
+    />
+  );
+}
+
+/** Undoing an unsaved switch after the html was edited: those edits are discarded. */
+export function BackToBlocksDialog({
+  open,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const t = useTranslations("templates");
+  return (
+    <EditorModeDialog
+      open={open}
+      title={t("html.backTitle")}
+      body={t("html.backBody")}
+      inPlaceLabel={t("html.backDiscard")}
+      onClose={onClose}
+      onInPlace={onConfirm}
+    />
+  );
+}
+
+type DialogAction = "copy" | "inPlace";
+
+/**
+ * One body-editor change dialog for every direction. With `onDuplicate` the
+ * copy is the primary path (⌘↵) and the in-place button is destructive in
+ * tone; without it, in place is the only — and primary — way forward. While
+ * an action is in flight the dialog can't be dismissed, so its result never
+ * lands after the user moved on.
+ */
+function EditorModeDialog({
+  open,
+  pending = null,
+  error = null,
+  title,
+  body,
+  copyLabel,
+  inPlaceLabel,
+  onClose,
+  onDuplicate,
+  onInPlace,
+}: {
+  open: boolean;
+  pending?: DialogAction | null;
+  error?: string | null;
+  title: string;
+  body: string;
+  copyLabel?: string;
+  inPlaceLabel: string;
+  onClose: () => void;
+  onDuplicate?: (() => void) | undefined;
+  onInPlace: () => void;
+}) {
   const common = useTranslations("common");
+  const busy = pending !== null;
   // Same guard as the primary button — Modal's ⌘↵ path routes through here too.
-  const primary = onDuplicate ?? onConvertInPlace;
+  const primary = onDuplicate ?? onInPlace;
   const confirm = () => {
     if (!busy) primary();
   };
+  const close = () => {
+    if (!busy) onClose();
+  };
   return (
-    <Modal open={open} onClose={onClose} onConfirm={confirm} title={t("html.convertTitle")}>
-      <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-        {t("html.convertBody")}
-      </p>
+    <Modal open={open} onClose={close} onConfirm={confirm} title={title}>
+      <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{body}</p>
+      {error ? (
+        <p className="ms-field-error" role="alert" style={{ margin: "12px 0 0" }}>
+          {error}
+        </p>
+      ) : null}
       <ModalFooter>
         <span className="ms-tpl-convert-actions">
-          <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
+          <button type="button" className="ms-btn ms-btn-secondary" disabled={busy} onClick={close}>
             {common("cancel")} <span className="ms-keycap">Esc</span>
           </button>
           <button
             type="button"
             className="ms-btn ms-btn-destructive"
             disabled={busy}
-            onClick={onConvertInPlace}
+            onClick={onInPlace}
           >
+            <BtnSpinner on={pending === "inPlace"} />
             {onDuplicate ? (
               inPlaceLabel
             ) : (
@@ -370,8 +497,8 @@ export function ConvertBlocksDialog({
               disabled={busy}
               onClick={confirm}
             >
-              <BtnSpinner on={busy} />
-              {t("html.convertCopy")} <ConfirmKeycap />
+              <BtnSpinner on={pending === "copy"} />
+              {copyLabel} <ConfirmKeycap />
             </button>
           ) : null}
         </span>

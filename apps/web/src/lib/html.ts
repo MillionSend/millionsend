@@ -68,19 +68,23 @@ export function formatHtml(html: string, indent = "  "): string {
 }
 
 /**
- * Derive readable plain text from HTML: drop script/style outright, keep link
- * URLs as "text (url)", end a block with a blank line and a list item or table
- * row with a newline, mark list items with "- ", strip the rest, and decode
- * the basic entities. Merge tokens ({{{NAME}}}) are not markup, so they pass
- * through untouched.
+ * Derive readable plain text from HTML: drop comments (Outlook's conditional
+ * blocks included), the head, script and style outright, read the source's own
+ * line breaks and indentation as plain spaces, keep link URLs as "text (url)",
+ * end a block with a blank line and a list item or table row with a newline,
+ * mark list items with "- ", strip the rest, decode entities and drop the
+ * invisible padding exported emails carry. Merge tokens ({{{NAME}}}) are not
+ * markup, so they pass through untouched.
  */
 export function htmlToText(html: string): string {
   return (
     html
-      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<(head|script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+      .replace(/\s+/g, " ")
       .replace(
         /<a\b[^>]*\bhref=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
-        (_m, href: string, inner: string) => `${inner.replace(/<[^>]+>/g, "")} (${href})`,
+        (_m, href: string, inner: string) => linkText(inner.replace(/<[^>]+>/g, ""), href),
       )
       .replace(/<br\s*\/?>/gi, "\n")
       // An editor wraps each list item's text in a paragraph: it ends with the item.
@@ -93,13 +97,31 @@ export function htmlToText(html: string): string {
       .replace(/&lt;/gi, "<")
       .replace(/&gt;/gi, ">")
       .replace(/&quot;/gi, '"')
-      .replace(/&#39;/gi, "'")
+      .replace(/&#(\d+);|&#x([0-9a-f]+);/gi, (raw, dec?: string, hex?: string) =>
+        numericEntity(dec === undefined ? Number.parseInt(hex ?? "", 16) : Number(dec), raw),
+      )
+      .replace(/&(zwnj|zwj|shy|lrm|rlm);/gi, "")
       // Ampersand last so `&amp;lt;` decodes to the literal `&lt;`, not `<`.
       .replace(/&amp;/gi, "&")
-      .replace(/[ \t]+\n/g, "\n")
+      // Soft hyphens, zero-width characters and the like: preheader padding.
+      .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]|\u034f/g, "")
+      // Non-breaking and typographic spaces: button padding, for one.
+      .replace(/[\u00a0\u2000-\u200a\u202f\u205f]/g, " ")
+      .replace(/ {2,}/g, " ")
+      .replace(/ ?\n ?/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim()
   );
+}
+
+/** A link as text: its label, then its URL unless that adds nothing. */
+function linkText(label: string, href: string): string {
+  return href === "" || href === "#" || label.trim() === href ? label : `${label} (${href})`;
+}
+
+/** The character a numeric entity names, or the entity as written when it names none. */
+function numericEntity(code: number, raw: string): string {
+  return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : raw;
 }
 
 /**

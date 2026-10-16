@@ -1,4 +1,5 @@
 import { isMailyDoc } from "./email-doc";
+import { htmlToText } from "./html";
 
 /**
  * Which editor a body opens in. A row whose `document` is renderable Maily
@@ -7,6 +8,12 @@ import { isMailyDoc } from "./email-doc";
  * an html template applied to a broadcast — which Tiptap's parse would
  * flatten, so it edits as source until the user explicitly converts. An
  * empty body starts in the block editor.
+ *
+ * Two flags carry the user's explicit choice across the moment the stored
+ * shape would say otherwise: `converting` keeps the block editor mounted on
+ * an html seed until it emits its parse, and `asCode` keeps the source editor
+ * while its html is still empty (a body that opened html-authored and was
+ * cleared, or a new template the user chose to write as HTML).
  */
 export type BodyEditorMode = "blocks" | "code";
 
@@ -14,10 +21,11 @@ export function bodyEditorMode(opts: {
   document: unknown;
   html: string;
   converting?: boolean;
+  asCode?: boolean;
 }): BodyEditorMode {
-  return opts.converting || isMailyDoc(opts.document) || opts.html.trim() === ""
-    ? "blocks"
-    : "code";
+  if (opts.converting) return "blocks";
+  if (opts.asCode) return "code";
+  return isMailyDoc(opts.document) || opts.html.trim() === "" ? "blocks" : "code";
 }
 
 export interface TemplateSaveInput {
@@ -46,7 +54,31 @@ export function templateSaveInput(
   };
 }
 
+/**
+ * Where a code-mode body's plain-text part comes from. Text equal to the
+ * html's own derivation was generated from it (a block render, a body written
+ * as HTML in the dashboard); any other text was supplied through the API.
+ */
+export function plainTextSource(text: string, html: string): "derived" | "stored" | "none" {
+  if (text === "") return "none";
+  return text === htmlToText(html) ? "derived" : "stored";
+}
+
+/**
+ * The plain-text part after a code-mode edit: derived text follows the new
+ * html, so it never describes content that is gone; supplied text, or none,
+ * is sent as stored.
+ */
+export function followingText(text: string, html: string, nextHtml: string): string {
+  return text === htmlToText(html) ? htmlToText(nextHtml) : text;
+}
+
 /** Name of the block-converted copy of an html-authored template. */
 export function blocksCopyName(name: string): string {
   return `${name.trim()} (blocks)`;
+}
+
+/** Name of the html copy of a block-authored template. */
+export function htmlCopyName(name: string): string {
+  return `${name.trim()} (HTML)`;
 }
