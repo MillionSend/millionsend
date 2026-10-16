@@ -5,7 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { InboxDetail, ThreadMessage, ThreadRow } from "@/app/(dashboard)/inboxes/parts";
-import { dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
+import { authenticatedSender, dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
 import { typedAllowlistEntry } from "@/lib/email-input";
 import { WEBHOOK_EVENT_META, WEBHOOK_EVENT_TYPES } from "@/lib/webhook-events";
 
@@ -941,5 +941,78 @@ describe("addresses on the shared domain", () => {
     expect(open).toContain("received in 30 days");
     expect(open).not.toMatch(SHOWN);
     expect(header({ shared: false, sharedSending: null })).not.toMatch(SHOWN);
+  });
+});
+
+const { MessageCard } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
+
+describe("a message in the thread pane", () => {
+  const screening = {
+    verdict: "clean",
+    sender_trust: "external",
+    quarantine_reason: null,
+    reasons: [],
+    injection_score: null,
+    phishing_score: null,
+    hidden_text_removed: false,
+  };
+  const message = {
+    id: "m1",
+    direction: "inbound",
+    from: "Ana Souza <ana@sender.example>",
+    to: ["help@inbound.acme.test"],
+    cc: [],
+    bcc: [],
+    reply_to: [],
+    subject: "Re: Order #8841",
+    message_id: "<m1@sender.example>",
+    html: "<p>Found it, thanks!</p>",
+    text: "Found it, thanks!\n\nOn Thu, Oct 16, 2026 at 10:00 AM Rita <rita@acme.test> wrote:\n> Did it arrive?",
+    attachments: [],
+    read: true,
+    received_at: new Date().toISOString(),
+    extracted_text: null,
+    screening,
+    spam_verdict: null,
+    virus_verdict: null,
+  };
+  const render = (fields: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      createElement(MessageCard, {
+        message: { ...message, ...fields } as ThreadMessage,
+        inbox: { id: "i1", kind: "human", expired: false } as InboxDetail,
+        onChange: () => {},
+      }),
+    );
+
+  it("shows the HTML in a frame that never runs the sender's code", () => {
+    const frame = /<iframe[^>]*>/.exec(render({}))?.[0] ?? "";
+    expect(frame).toContain(
+      'sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"',
+    );
+    expect(frame).not.toMatch(/allow-scripts|allow-forms|allow-top-navigation/);
+    expect(frame).toContain('title="Message from Ana Souza"');
+    expect(frame).toContain("img-src data:;");
+  });
+
+  it("falls back to the text with its quoted tail folded, and leaves held mail whole", () => {
+    const text = render({ html: null });
+    expect(text).not.toContain("<iframe");
+    expect(text).toContain("Found it, thanks!");
+    expect(text).not.toContain("Did it arrive?");
+    expect(text).toContain('aria-label="Show quoted text"');
+    // Held mail is read to decide on a release: its text, whole, never its HTML.
+    const held = render({ screening: { ...screening, verdict: "quarantined" } });
+    expect(held).not.toContain("<iframe");
+    expect(held).toContain("Did it arrive?");
+    expect(held).not.toContain("Show quoted text");
+  });
+
+  it("loads images unasked only for a sender authentication proved", () => {
+    expect(["owner", "allowlisted", "external"].every(authenticatedSender)).toBe(true);
+    // A known thread proves the thread, not the From domain.
+    expect(["known_thread", "unauthenticated", "failed", null].some(authenticatedSender)).toBe(
+      false,
+    );
   });
 });

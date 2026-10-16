@@ -184,6 +184,15 @@
     "quarantined": "Held in quarantine: your agent can't see it until someone releases it.",
     "hiddenText": "Hidden text removed"
   },
+  "mail": {
+    "title": "Message from {name}",
+    "imagesHidden": "Remote images are hidden to protect your privacy.",
+    "showImages": "Show images",
+    "alwaysFor": "Always for {domain}",
+    "opensInNewTab": "Opens in a new tab",
+    "showQuoted": "Show quoted text",
+    "hideQuoted": "Hide quoted text"
+  },
   "draft": {
     "title": "Draft · waiting for approval",
     "created": "created {time}",

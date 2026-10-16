@@ -28,7 +28,12 @@ import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
-import { AUTH_CHECKS, dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
+import {
+  AUTH_CHECKS,
+  authenticatedSender,
+  dkimSignerDomains,
+  grayExplanation,
+} from "@/lib/auth-result";
 import { formatBytes, formatRelative, mailDomain } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamRole } from "@/lib/use-team-role";
@@ -653,7 +658,11 @@ export function ReceivedEmailView() {
             bodyPurgedAt: email.contentPurgedAt,
             hiddenBySupportView: email.hiddenBySupportView,
           }}
-          received={{ headers: email.headers }}
+          received={{
+            headers: email.headers,
+            domain: mailDomain(email.from),
+            authenticated: authenticatedSender(email.senderTrust),
+          }}
         />
       </div>
 

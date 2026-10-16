@@ -6,9 +6,10 @@ import { useMemo, useState } from "react";
 import { CodeHighlight } from "@/components/code-highlight";
 import { CopyButton, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
+import { MailFrame } from "@/components/mail-frame";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import { Switch } from "@/components/switch";
-import { emulateEmailScheme, lockDownReceivedHtml } from "@/lib/email-preview";
+import { emulateEmailScheme, PREVIEW_CANVAS } from "@/lib/email-preview";
 import { formatDayTime } from "@/lib/format";
 import { formatHtml } from "@/lib/html";
 import { BAND_TONE, checkGlyph, formatScoreTenths } from "@/lib/score-band";
@@ -305,8 +306,16 @@ export function EmailContentPanel({
     /** Refused at accept with every recipient suppressed: there never was a body. */
     suppressedAtAccept?: boolean | undefined;
   };
-  /** A received message: written by a stranger, so its preview loads nothing from the network. */
-  received?: { headers: Record<string, string> | null };
+  /**
+   * A received message: written by a stranger, so its preview loads nothing
+   * from the network unasked.
+   */
+  received?: {
+    headers: Record<string, string> | null;
+    /** The From address's domain, and whether authentication ties the message to it. */
+    domain: string;
+    authenticated: boolean;
+  };
 }) {
   const t = useTranslations("emails");
   const [tab, setTab] = useState<Tab>("preview");
@@ -458,24 +467,29 @@ export function EmailContentPanel({
       ) : (
         <>
           {tab === "preview" &&
-            (email.html ? (
+            (email.html && received ? (
+              <MailFrame
+                panel
+                html={email.html}
+                title={t("detail.preview")}
+                scheme={scheme}
+                domain={received.domain}
+                authenticated={received.authenticated}
+              />
+            ) : email.html ? (
               // Edge to edge: the message lays itself out inside the frame,
               // as it would in a mail client.
               <iframe
                 title={t("detail.preview")}
                 sandbox="allow-popups allow-popups-to-escape-sandbox"
-                srcDoc={
-                  received
-                    ? lockDownReceivedHtml(emulateEmailScheme(email.html, scheme))
-                    : emulateEmailScheme(email.html, scheme)
-                }
+                srcDoc={emulateEmailScheme(email.html, scheme)}
                 style={{
                   display: "block",
                   width: "100%",
                   height: 640,
                   border: 0,
                   borderRadius: "0 0 12px 12px",
-                  background: scheme === "dark" ? "#111113" : "#ffffff",
+                  background: PREVIEW_CANVAS[scheme],
                 }}
               />
             ) : (
