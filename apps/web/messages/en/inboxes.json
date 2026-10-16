@@ -117,8 +117,9 @@
     "full": "You've reached the inbox limit of your plan. Upgrade to create more."
   },
   "catchAll": {
-    "row": "Addresses with no inbox · <link>turn off</link>",
-    "turnOff": "Turn off on the domain"
+    "row": "Addresses with no inbox",
+    "turnOff": "Turn off on the domain",
+    "turnOffLink": "turn off"
   },
   "create": {
     "title": "Create inbox",

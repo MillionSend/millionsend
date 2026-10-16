@@ -629,11 +629,19 @@ describe("inbox screens", () => {
     expect(html).toContain(tail("Every email your domains received"));
     expect(html).toContain(tail("Orders agent"));
     expect(html).toContain(tail("Support · forwards to ops@example.com"));
-    // The catch-all's turn-off link stays in its tail, the where in its tooltip.
+    // The catch-all's turn-off link follows its tail, kept whole as the tail
+    // gives way; the where is in its tooltip.
+    expect(html).toContain(tail("Addresses with no inbox"));
     expect(html).toMatch(
-      /class="ms-lead-tail">Addresses with no inbox · <span class="ms-tooltip-trigger inline"><a href="\/domains\/d1">turn off<\/a><\/span><\/span>/,
+      /class="ms-lead-action">· <span class="ms-tooltip-trigger inline"><a href="\/domains\/d1">turn off<\/a><\/span><\/span>/,
     );
     expect(t("catchAll.turnOff")).toBe("Turn off on the domain");
+    // What needs attention ends in an ellipsis inside its own column, which
+    // never takes the addresses' room.
+    expect(html).toContain(
+      '<td class="ms-cell-fill" style="color:var(--ms-bone)"><span class="ms-truncate">1 in quarantine</span></td>',
+    );
+    expect(html).toContain('<th style="min-width:160px">Inbox</th>');
     expect(html).toContain('<th style="width:90px">Type</th>');
     expect(html).toContain('<th style="width:22%">Needs attention</th>');
   });

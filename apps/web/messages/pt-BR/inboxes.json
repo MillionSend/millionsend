@@ -117,8 +117,9 @@
     "full": "Você chegou ao limite de caixas do seu plano. Faça upgrade para criar mais."
   },
   "catchAll": {
-    "row": "Endereços sem caixa · <link>desligar</link>",
-    "turnOff": "Desligar no domínio"
+    "row": "Endereços sem caixa",
+    "turnOff": "Desligar no domínio",
+    "turnOffLink": "desligar"
   },
   "create": {
     "title": "Criar caixa de entrada",

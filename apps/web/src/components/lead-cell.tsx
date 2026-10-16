@@ -12,8 +12,9 @@ export const LEAD_GLYPH = { size: 14, strokeWidth: 2 } as const;
  * A list row's first cell, on one line: an optional status tile, the row's
  * value (an address or a title) ending in an ellipsis where the column runs
  * out and whole in a tooltip, "+N" for the addresses behind the first, and
- * an optional muted tail that gives way before the value does. Phones keep
- * the whole line and scroll the list sideways.
+ * an optional muted tail that gives way before the value does, then an
+ * optional action that never does. Phones keep the whole line and scroll the
+ * list sideways.
  */
 export function LeadCell({
   tile,
@@ -22,6 +23,7 @@ export function LeadCell({
   mono = false,
   more = [],
   tail,
+  action,
 }: {
   tile?: React.ReactNode;
   value: string;
@@ -33,6 +35,8 @@ export function LeadCell({
   more?: readonly string[];
   /** A string tail shows whole in a tooltip once cut. */
   tail?: React.ReactNode;
+  /** A link after the tail, kept whole. */
+  action?: React.ReactNode;
 }) {
   const line = <Truncated text={value} />;
   return (
@@ -56,6 +60,7 @@ export function LeadCell({
             {typeof tail === "string" ? <Truncated text={tail} /> : tail}
           </span>
         ) : null}
+        {action ? <span className="ms-lead-action">{action}</span> : null}
       </span>
     </td>
   );

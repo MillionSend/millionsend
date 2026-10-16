@@ -2041,15 +2041,27 @@ summary:focus-visible,
 .ms-lead-more {
   color: var(--ms-muted);
 }
+.ms-lead-tail,
+.ms-lead-action {
+  font-family: var(--ms-font-sans);
+  font-size: 12.5px;
+  color: var(--ms-muted);
+  white-space: nowrap;
+}
 .ms-lead-tail {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--ms-font-sans);
-  font-size: 12.5px;
-  color: var(--ms-muted);
+}
+/* An action after the tail (the catch-all row's "turn off") stays whole and
+   right after the tail's words, which grow no wider than they are. */
+.ms-lead-tail:has(+ .ms-lead-action) {
+  max-width: max-content;
+}
+.ms-lead-action {
+  flex: none;
+  margin-left: -6px;
 }
 
 .ms-theme-toggle {

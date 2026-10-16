@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/skeleton";
 import { StatusTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { formatTimeLeft } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -35,7 +36,8 @@ function InboxesHead() {
   return (
     <thead>
       <tr>
-        <th>{t("col.inbox")}</th>
+        {/* Room for an address however narrow the window: the other columns give theirs first. */}
+        <th style={{ minWidth: 160 }}>{t("col.inbox")}</th>
         <th style={{ width: 90 }}>{t("col.type")}</th>
         <th style={{ width: "22%" }}>{t("col.attention")}</th>
         <th className="right" style={{ width: 130 }}>
@@ -244,18 +246,20 @@ export function InboxesView() {
                       value={`*@${domain.name}`}
                       href={href}
                       mono
-                      tail={t.rich("catchAll.row", {
-                        link: (chunks) => (
+                      tail={t("catchAll.row")}
+                      action={
+                        <>
+                          {"· "}
                           <Tooltip inline focusableChild text={t("catchAll.turnOff")}>
                             <Link
                               href={`/domains/${domain.domainId}`}
                               onClick={(event) => event.stopPropagation()}
                             >
-                              {chunks}
+                              {t("catchAll.turnOffLink")}
                             </Link>
                           </Tooltip>
-                        ),
-                      })}
+                        </>
+                      }
                     />
                     <td>{t("type.catchAll")}</td>
                     <td>{none}</td>
@@ -314,14 +318,12 @@ export function InboxesView() {
                       tail={detail.join(" · ")}
                     />
                     <td>{kindWord(t, inbox.kind)}</td>
-                    {/* One line: the inbox column gives up the width instead. */}
+                    {/* One line that ends in an ellipsis inside its own share of the row. */}
                     <td
-                      style={{
-                        whiteSpace: "nowrap",
-                        color: attention.length > 0 ? "var(--ms-bone)" : undefined,
-                      }}
+                      className="ms-cell-fill"
+                      style={attention.length > 0 ? { color: "var(--ms-bone)" } : undefined}
                     >
-                      {attention.length > 0 ? attention.join(" · ") : none}
+                      {attention.length > 0 ? <Truncated text={attention.join(" · ")} /> : none}
                     </td>
                     <td className="right ms-digits">{nf.format(inbox.received_30d)}</td>
                     <td className="right" style={{ whiteSpace: "nowrap" }}>
