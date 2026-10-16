@@ -15,6 +15,7 @@ import {
   TrashIcon,
 } from "@/components/icons/mail-icons";
 import { NavGlyph, RefreshGlyph } from "@/components/icons/nav-icons";
+import { MailFrame, MailText } from "@/components/mail-frame";
 import { MessageEditor } from "@/components/maily-editor/lazy";
 import { ConfirmKeycap } from "@/components/modal-footer";
 import { PopoverMenu } from "@/components/popover-menu";
@@ -24,7 +25,8 @@ import { BtnSpinner, Spinner } from "@/components/spinner";
 import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
-import { addrSpec, formatBytes, formatRelative, senderName } from "@/lib/format";
+import { authenticatedSender } from "@/lib/auth-result";
+import { addrSpec, formatBytes, formatRelative, mailDomain, senderName } from "@/lib/format";
 import { htmlToText } from "@/lib/html";
 import { isReadOnly } from "@/lib/read-only";
 import { useTRPC } from "@/lib/trpc";
@@ -535,7 +537,7 @@ function ThreadPane({
   );
 }
 
-function MessageCard({
+export function MessageCard({
   message,
   inbox,
   onChange,
@@ -617,18 +619,16 @@ function MessageCard({
           {t("message.screening")}
         </p>
       ) : null}
-      {message.text ? (
-        <p
-          style={{
-            margin: "10px 0 0",
-            fontSize: 13.5,
-            lineHeight: 1.55,
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-          }}
-        >
-          {message.text}
-        </p>
+      {/* Held mail keeps its text, whole: it is read to decide on a release. */}
+      {message.html && !held ? (
+        <MailFrame
+          html={message.html}
+          title={t("mail.title", { name: senderName(message.from) })}
+          domain={mailDomain(addrSpec(message.from))}
+          authenticated={inbound && authenticatedSender(message.screening.sender_trust)}
+        />
+      ) : message.text ? (
+        <MailText text={message.text} foldQuote={!held} />
       ) : null}
       {message.attachments.length > 0 ? (
         <ul style={{ margin: "10px 0 0", padding: 0, listStyle: "none", ...muted }}>

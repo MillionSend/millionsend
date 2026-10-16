@@ -33,14 +33,22 @@ describe("a received email's content panel", () => {
         text: "Hi",
         insights: null,
       },
-      received: { headers: { from: "Ana <ana@sender.example>", received: "from a\nfrom b" } },
+      received: {
+        headers: { from: "Ana <ana@sender.example>", received: "from a\nfrom b" },
+        domain: "sender.example",
+        authenticated: true,
+      },
     }),
   );
 
-  it("renders the stranger's HTML in a frame that runs nothing and loads nothing", () => {
+  it("renders the stranger's HTML in a frame that runs nothing and loads nothing unasked", () => {
     const frame = /<iframe[^>]*>/.exec(html)?.[0] ?? "";
-    // No allow-scripts, no allow-same-origin, no allow-forms: an opaque, inert origin.
-    expect(frame).toContain('sandbox="allow-popups allow-popups-to-escape-sandbox"');
+    // Same origin only so the dashboard can size the frame and read its links:
+    // without allow-scripts the message runs nothing, and it never submits or navigates the page.
+    expect(frame).toContain(
+      'sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"',
+    );
+    expect(frame).not.toMatch(/allow-scripts|allow-forms|allow-top-navigation/);
     expect(frame).toMatch(
       /srcdoc="&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; img-src data:;/i,
     );

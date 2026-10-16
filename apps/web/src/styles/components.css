@@ -2232,6 +2232,95 @@ summary:focus-visible,
   height: 12px;
 }
 
+/* Received mail (mail-frame.tsx): the message's frame, boxed inside a thread
+   card; the remote-images bar above it; the "•••" quoted-text toggle under
+   it; and a link's destination in the tooltip panel. In a panel
+   (.ms-mail-panel) the frame runs edge to edge and the bar is a strip. */
+.ms-mail-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: 10px;
+  background: var(--ms-ground);
+  font-size: 12.5px;
+  color: var(--ms-muted);
+}
+/* Narrow, the actions wrap under the words rather than the words under the icon. */
+.ms-mail-bar-text {
+  flex: 1 1 240px;
+}
+.ms-mail-bar > .ms-btn {
+  height: 26px;
+  padding: 3px 9px;
+  font-size: 12.5px;
+}
+.ms-mail-bar > .ms-link {
+  margin-right: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+.ms-mail-frame {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--ms-line);
+  border-radius: 10px;
+}
+.ms-mail-panel > .ms-mail-bar {
+  margin: 0;
+  padding-left: 18px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+.ms-mail-panel > .ms-mail-frame {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.ms-mail-quote {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-top: 8px;
+  padding: 0 7px;
+  border: 1px solid var(--ms-line-strong);
+  border-radius: var(--ms-r-chip);
+  background: var(--ms-panel-raised);
+  color: var(--ms-muted);
+  font: 700 10px / 1 var(--ms-font-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-mail-quote:hover,
+.ms-mail-quote[aria-expanded="true"] {
+  color: var(--ms-bone);
+}
+.ms-mail-panel .ms-mail-quote {
+  margin: 10px 18px 12px;
+}
+/* Tracking links run to hundreds of characters: the start, which names the
+   host, is what the reader needs. */
+.ms-mail-href {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.ms-mail-href-note {
+  display: block;
+  color: var(--ms-muted);
+}
+
 /* Busy spinner (spinner.tsx) — currentColor stroke ring, composed inside
    buttons left of the label. Distinct from .ms-spinner (the warn-tinted
    DNS-check ring). Reduced motion: a static muted ring, no rotation. */

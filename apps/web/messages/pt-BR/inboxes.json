@@ -153,6 +153,15 @@
     "quarantined": "Retido em quarentena: o agente só vê depois que alguém liberar.",
     "hiddenText": "Texto oculto removido"
   },
+  "mail": {
+    "title": "Mensagem de {name}",
+    "imagesHidden": "Imagens externas ficam ocultas para proteger sua privacidade.",
+    "showImages": "Mostrar imagens",
+    "alwaysFor": "Sempre mostrar de {domain}",
+    "opensInNewTab": "Abre em uma nova aba",
+    "showQuoted": "Mostrar texto citado",
+    "hideQuoted": "Ocultar texto citado"
+  },
   "draft": {
     "title": "Rascunho · aguardando aprovação",
     "created": "criado {time}",
