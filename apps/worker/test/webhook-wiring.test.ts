@@ -375,6 +375,56 @@ it("the send path fires email.suppressed and email.failed once per row, with pub
   expect(events).toEqual([{ data: { source: "worker", reason: "ses_AccountSuspendedException" } }]);
 });
 
+it("a delivery row that can't be written rolls the send path's suppress and fail back whole", async () => {
+  const team = await sendingTeam("atomic-hooks");
+  await db.insert(schema.suppressions).values({
+    teamId: team.teamId,
+    email: "atomic-gone@example.com",
+    emailHash: hashRecipient("atomic-gone@example.com"),
+    reason: "hard_bounce",
+  });
+  const suppressed = await team.queued({ to: ["atomic-gone@example.com"] });
+  const missing = await team.queued({ bodyCiphertext: null });
+  const ids = [suppressed, missing];
+  const deps = { keyring, ses: refusingSes("unused"), enqueueWebhookDelivery: async () => {} };
+  const statuses = async () =>
+    (
+      await db
+        .select({ id: schema.emails.id, status: schema.emails.latestStatus })
+        .from(schema.emails)
+        .where(inArray(schema.emails.id, ids))
+    )
+      .map((row) => [row.id, row.status])
+      .sort();
+  const events = () =>
+    db.select().from(schema.emailEvents).where(inArray(schema.emailEvents.emailId, ids));
+
+  await db.execute(sql`
+    create function refuse_delivery() returns trigger language plpgsql as $$
+    begin raise exception 'deliveries unavailable'; end $$`);
+  await db.execute(
+    sql`create trigger refuse_delivery before insert on webhook_deliveries for each row execute function refuse_delivery()`,
+  );
+  try {
+    await expect(sendEmail(db, deps, { emailId: suppressed })).rejects.toThrow();
+    await expect(sendEmail(db, deps, { emailId: missing })).rejects.toThrow();
+  } finally {
+    await db.execute(sql`drop trigger refuse_delivery on webhook_deliveries`);
+    await db.execute(sql`drop function refuse_delivery()`);
+  }
+
+  expect(await statuses()).toEqual(ids.map((id) => [id, "queued"]).sort());
+  expect(await events()).toEqual([]);
+  expect(await deliveriesFor([team.endpointId])).toEqual([]);
+
+  // The job's retry then ends each row once.
+  expect(await sendEmail(db, deps, { emailId: suppressed })).toBe("suppressed");
+  expect(await sendEmail(db, deps, { emailId: missing })).toBe("failed");
+  expect((await deliveriesFor([team.endpointId])).map((r) => r.emailId).sort()).toEqual(
+    [...ids].sort(),
+  );
+});
+
 it("never fails a row SES already took, however a retry or the dead-letter reaches it", async () => {
   const team = await sendingTeam("taken-hooks");
   const claimedAt = new Date();

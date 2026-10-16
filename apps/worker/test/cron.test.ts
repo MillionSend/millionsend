@@ -569,6 +569,51 @@ it("the stalled-claim sweep fires email.failed once per interrupted row, to each
   expect(await statusOf(taken.id)).toBe("queued");
 });
 
+it("a delivery row that can't be written rolls the stalled-claim sweep back whole", async () => {
+  const now = new Date();
+  const old = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const endpointId = await createWebhookEndpoint(db, teamId, null);
+  const [interrupted] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued",
+      createdAt: old(60),
+      sentAt: old(30),
+    })
+    .returning({ id: schema.emails.id });
+  if (!interrupted) throw new Error("insert failed");
+  const sweep = () => reconcileStalledSends(db, { enqueueSends: async () => {}, now });
+  const events = () =>
+    db.select().from(schema.emailEvents).where(eq(schema.emailEvents.emailId, interrupted.id));
+  const deliveries = () =>
+    db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+  await db.execute(sql`
+    create function refuse_delivery() returns trigger language plpgsql as $$
+    begin raise exception 'deliveries unavailable'; end $$`);
+  await db.execute(
+    sql`create trigger refuse_delivery before insert on webhook_deliveries for each row execute function refuse_delivery()`,
+  );
+
+  await expect(sweep()).rejects.toThrow();
+
+  expect(await statusOf(interrupted.id)).toBe("queued");
+  expect(await events()).toEqual([]);
+  expect(await deliveries()).toEqual([]);
+
+  // The next sweep ends it once.
+  await db.execute(sql`drop trigger refuse_delivery on webhook_deliveries`);
+  await sweep();
+  expect(await statusOf(interrupted.id)).toBe("failed");
+  expect(await deliveries()).toHaveLength(1);
+});
+
 it("metadata purge deletes whole expired rows (events cascade) and old deliveries, keeping fresh and future-scheduled ones", async () => {
   const now = new Date("2026-08-14T00:00:00Z");
   const base = { teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" };
