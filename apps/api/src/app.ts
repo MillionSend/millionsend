@@ -31,6 +31,7 @@ import {
   emitSuppressionEvents,
   enforceDomainWarmup,
   eraseRecipient,
+  errorClassAndCode,
   exceededSendSize,
   extractTokenPrefix,
   fetchAccountScore,
@@ -3557,12 +3558,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     })().catch((err: unknown) => {
       // A failed insert's message quotes the row, request and response bodies
       // included, so only its class and SQLSTATE reach the process log.
-      const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
-      console.error(
-        "api request log failed",
-        err instanceof Error ? err.name : "error",
-        typeof code === "string" ? code : "",
-      );
+      console.error("api request log failed", ...errorClassAndCode(err));
     });
   });
 

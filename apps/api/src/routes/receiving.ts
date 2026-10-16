@@ -11,6 +11,7 @@ import {
   decodeEnvelopeHeader,
   deleteReceivedEmail,
   EMAIL_QUARANTINED_MESSAGE,
+  errorClassAndCode,
   escapeLike,
   findKeyInbox,
   heldFrom,
@@ -664,10 +665,8 @@ export function registerReceivingRoutes(
  * message's bytes and the addresses it names.
  */
 function mxFailure(c: Context, err: unknown): Response {
-  const code =
-    (err as { code?: unknown }).code ??
-    (err instanceof Error ? (err.cause as { code?: unknown } | undefined)?.code : undefined);
-  const summary = `receiving: ${c.req.path} failed (${err instanceof Error ? err.name : typeof err}${typeof code === "string" ? ` ${code}` : ""})`;
+  const [errorClass, code] = errorClassAndCode(err);
+  const summary = `receiving: ${c.req.path} failed (${errorClass}${code ? ` ${code}` : ""})`;
   console.error(summary);
   void captureError(new Error(summary), { tags: { route: c.req.path } });
   return c.json(errorBody(500, "internal_server_error", "An unexpected error occurred"), 500);

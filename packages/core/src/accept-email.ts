@@ -7,6 +7,7 @@ import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypt
 import type { Keyring } from "./crypto/keyring.js";
 import { admitWarmup } from "./domain-warmup.js";
 import { purgedEmailBodyColumns } from "./email-retention.js";
+import { errorClassAndCode } from "./error-summary.js";
 import { type InboxActor, inboxActorFromAuth } from "./inboxes/activity.js";
 import type { InboxKeys } from "./inboxes/keys.js";
 import {
@@ -561,12 +562,7 @@ export async function acceptEmail(
   if (to.length === 0) {
     if (opts.recordSuppressed && payload.to.every((r) => listSuppressed.has(r))) {
       await recordSuppressedAttempt(deps.db, auth, payload, now).catch((err: unknown) => {
-        const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
-        console.error(
-          "suppressed email record failed",
-          err instanceof Error ? err.name : "error",
-          typeof code === "string" ? code : "",
-        );
+        console.error("suppressed email record failed", ...errorClassAndCode(err));
       });
     }
     return { ok: false, reason: "all_suppressed" };

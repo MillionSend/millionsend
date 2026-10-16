@@ -224,12 +224,26 @@ describe("send edge cases", () => {
       })
       .onConflictDoNothing();
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const tx = vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("gone@example.com"));
+    // As a driver error reaches it: the query and its parameters in the
+    // message, the SQLSTATE on the cause.
+    const failure = new Error(
+      'Failed query: insert into "emails" ("to") values ($1)\nparams: ["gone@example.com"]',
+      {
+        cause: Object.assign(new Error('duplicate key value violates unique constraint "x"'), {
+          code: "23505",
+        }),
+      },
+    );
+    const tx = vi.spyOn(db, "transaction").mockRejectedValueOnce(failure);
     try {
       const res = await post({ ...validBody, to: ["gone@example.com"], subject: "record-fails" });
       expect(res.status).toBe(422);
       expect(await res.json()).toMatchObject({ name: "all_recipients_suppressed" });
-      expect(logged).toHaveBeenCalledWith("suppressed email record failed", "Error", "");
+      expect(logged).toHaveBeenCalledWith("suppressed email record failed", "Error", "23505");
+      for (const arg of logged.mock.calls.flat()) {
+        expect(typeof arg).toBe("string");
+        expect(arg).not.toContain("gone@example.com");
+      }
     } finally {
       tx.mockRestore();
       logged.mockRestore();
