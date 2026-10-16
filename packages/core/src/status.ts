@@ -115,8 +115,6 @@ export async function endQueuedEmails(
       select id, team_id as "teamId", "from", "to", subject from ended
     `),
   );
-  // Stopping a broadcast is the customer's own act; Resend has no event for it.
-  if (params.data.reason === "broadcast_canceled") return ended.length;
   const extras =
     params.status === "failed"
       ? failedEmailExtras(params.data.reason)

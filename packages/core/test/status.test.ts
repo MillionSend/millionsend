@@ -195,28 +195,6 @@ describe("endQueuedEmails", () => {
     });
   });
 
-  it("fires nothing for a canceled broadcast's rows", async () => {
-    const team = await createTeam(db, "end-canceled");
-    await createWebhookEndpoint(db, team, null);
-    const ids = await insertEmails([{ teamId: team, latestStatus: "queued" }]);
-    const collected: QueuedWebhookDelivery[] = [];
-
-    await endQueuedEmails(db, {
-      status: "suppressed",
-      where: inArray(e.id, ids),
-      data: { source: "worker", reason: "broadcast_canceled" },
-      now,
-      enqueue: async (rows) => {
-        collected.push(...rows);
-      },
-    });
-
-    expect((await rowsOf(ids))[0]?.status).toBe("suppressed");
-    expect(await eventsOf(ids)).toHaveLength(1);
-    expect(await deliveriesOf(ids)).toEqual([]);
-    expect(collected).toEqual([]);
-  });
-
   it("writes nothing that outlives the caller's transaction", async () => {
     const team = await createTeam(db, "end-rollback");
     await createWebhookEndpoint(db, team, null);
