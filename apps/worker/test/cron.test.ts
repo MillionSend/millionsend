@@ -1,7 +1,7 @@
 import { DAY_MS, dailyCeiling, SYSTEM_MAIL_TAG, teamRung, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
@@ -513,6 +513,60 @@ it("reconcile fails a claim that never reached SES (worker killed mid-send) with
     .from(schema.emailEvents)
     .where(eq(schema.emailEvents.emailId, interrupted.id));
   expect(events.map((e) => [e.type, e.data?.reason])).toEqual([["failed", "send_interrupted"]]);
+});
+
+it("the stalled-claim sweep fires email.failed once per interrupted row, to each row's own team", async () => {
+  const now = new Date();
+  const old = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const otherTeam = await createTeam(db, "cron-other");
+  const mine = await createWebhookEndpoint(db, teamId, null);
+  const theirs = await createWebhookEndpoint(db, otherTeam, ["email.failed"]);
+  const base = {
+    from: "a@acme.dev",
+    to: ["r@example.com"],
+    subject: "s",
+    latestStatus: "queued" as const,
+    createdAt: old(60),
+    sentAt: old(30),
+  };
+  const [ours, other, taken] = await db
+    .insert(schema.emails)
+    .values([
+      { ...base, teamId },
+      { ...base, teamId: otherTeam },
+      // SES took it and no event joined yet: its events own its fate.
+      { ...base, teamId, sesMessageId: "cron-mid-taken" },
+    ])
+    .returning({ id: schema.emails.id });
+  if (!ours || !other || !taken) throw new Error("insert failed");
+  const enqueued: string[] = [];
+  const sweep = () =>
+    reconcileStalledSends(db, {
+      enqueueSends: async () => {},
+      enqueueWebhookDelivery: async (rows) => {
+        enqueued.push(...rows.map((r) => r.id));
+      },
+      now,
+    });
+
+  await sweep();
+  await sweep();
+
+  const deliveries = await db.select().from(schema.webhookDeliveries);
+  expect(deliveries.map((d) => [d.endpointId, d.emailId]).sort()).toEqual(
+    [
+      [mine, ours.id],
+      [theirs, other.id],
+    ].sort(),
+  );
+  for (const d of deliveries) {
+    expect(d.payload).toMatchObject({
+      type: "email.failed",
+      data: { failed: { reason: "send_interrupted" } },
+    });
+  }
+  expect(enqueued.sort()).toEqual(deliveries.map((d) => d.id).sort());
+  expect(await statusOf(taken.id)).toBe("queued");
 });
 
 it("metadata purge deletes whole expired rows (events cascade) and old deliveries, keeping fresh and future-scheduled ones", async () => {

@@ -412,7 +412,10 @@ await queue.scheduleCrons({
     console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
   },
   "sends.reconcile": async () => {
-    const requeued = await reconcileStalledSends(db, { enqueueSends });
+    const requeued = await reconcileStalledSends(db, {
+      enqueueSends,
+      enqueueWebhookDelivery: enqueueWebhook,
+    });
     if (requeued > 0) console.log(`sends.reconcile: requeued=${requeued}`);
     const screens = await reconcilePendingScreens(db, (p) => queue.enqueueScreening(p));
     if (screens > 0) console.log(`sends.reconcile: screens=${screens}`);

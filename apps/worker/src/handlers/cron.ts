@@ -4,6 +4,7 @@ import {
   DAY_MS,
   DRAIN_MAX_PER_RUN,
   deliverabilityHold,
+  endQueuedEmails,
   failQueuedEmailsForDomain,
   fetchDeliverabilityHealth,
   getInstanceSettings,
@@ -30,6 +31,7 @@ import {
   WEBHOOK_MAX_AGE_MS,
   type WebhookEnqueue,
   warmupCap,
+  webhookBatch,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { affectedRows, keysetCursorWhere, schema } from "@millionsend/db";
@@ -653,37 +655,30 @@ const RECONCILE_MAX_PER_RUN = 20_000;
  * A claim (sentAt set) that never recorded an SES MessageId is a send
  * interrupted between claim and accept (worker killed mid-flight). Nothing
  * else ever picks such a row up, so after a generous window it is failed
- * with an event rather than left queued forever.
+ * with an event and email.failed rather than left queued forever.
  */
 export async function reconcileStalledSends(
   db: Db,
-  deps: { enqueueSends: EnqueueEmailSends; now?: Date },
+  deps: {
+    enqueueSends: EnqueueEmailSends;
+    enqueueWebhookDelivery?: WebhookEnqueue | undefined;
+    now?: Date;
+  },
 ): Promise<number> {
   const now = deps.now ?? new Date();
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
-  const interrupted = await db
-    .update(schema.emails)
-    .set({ latestStatus: "failed", sentAt: null })
-    .where(
-      and(
-        eq(schema.emails.latestStatus, "queued"),
-        isNotNull(schema.emails.sentAt),
-        isNull(schema.emails.sesMessageId),
-        lt(schema.emails.sentAt, staleBefore),
-      ),
-    )
-    .returning({ id: schema.emails.id });
-  if (interrupted.length > 0) {
-    await db.insert(schema.emailEvents).values(
-      interrupted.map((email) => ({
-        emailId: email.id,
-        type: "failed" as const,
-        occurredAt: now,
-        data: { source: "worker", reason: "send_interrupted" },
-      })),
-    );
-  }
   const e = schema.emails;
+  const hooks = webhookBatch(deps.enqueueWebhookDelivery);
+  await db.transaction((tx) =>
+    endQueuedEmails(tx as unknown as Db, {
+      status: "failed",
+      where: and(eq(e.latestStatus, "queued"), isNotNull(e.sentAt), lt(e.sentAt, staleBefore)),
+      data: { source: "worker", reason: "send_interrupted" },
+      now,
+      enqueue: hooks.collect,
+    }),
+  );
+  await hooks.flush();
   // A row scheduled for later is waiting by design, not lost; its job is due
   // with it and would only be re-enqueued every sweep until then.
   const stalled = and(
