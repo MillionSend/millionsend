@@ -4,6 +4,7 @@ import {
   encryptEmailBody,
   encryptWebhookSecret,
   generateWebhookSecret,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -151,6 +152,43 @@ it("bounce events carry bounce extras and reach type-subscribed endpoints", asyn
     type: "email.bounced",
     data: { bounce: { type: "Permanent", sub_type: "General", diagnostic_code: "550" } },
   });
+});
+
+it("an SES Reject fires email.failed once, as message_rejected, even when SES repeats it", async () => {
+  // Fresh team: endpoints created by other tests must not receive this event.
+  const rejectTeamId = await createTeam(db, "reject-hooks-team");
+  const endpointId = await insertEndpoint(rejectTeamId, null);
+  const emailId = await insertSentEmail("wh-mid-reject", rejectTeamId);
+  const reject = (snsMessageId: string, enqueue?: WebhookEnqueue) =>
+    processSesEvent(
+      db,
+      {
+        eventType: "Reject",
+        sesMessageId: "wh-mid-reject",
+        occurredAt: "2026-10-16T12:00:00.000Z",
+        data: { eventType: "Reject" },
+      },
+      { snsMessageId, ...(enqueue ? { enqueueWebhookDelivery: enqueue } : {}) },
+    );
+  // No enqueue wired: the row still lands, for the reconcile sweep.
+  await reject("sns-wh-reject-1");
+  const enqueued: string[] = [];
+  await reject("sns-wh-reject-2", async (rows) => {
+    enqueued.push(...rows.map((r) => r.id));
+  });
+
+  const rows = await deliveriesFor([endpointId]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.payload).toMatchObject({
+    type: "email.failed",
+    data: { email_id: emailId, failed: { reason: "message_rejected" } },
+  });
+  expect(enqueued).toEqual([]);
+  const [email] = await db
+    .select({ status: schema.emails.latestStatus })
+    .from(schema.emails)
+    .where(eq(schema.emails.id, emailId));
+  expect(email?.status).toBe("failed");
 });
 
 it("send path fans out email.sent after the claim", async () => {
