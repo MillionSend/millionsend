@@ -13,6 +13,7 @@ import { EmailContentPanel } from "@/components/email-content-panel";
 import {
   EventGap,
   EventNode,
+  EventStripSkeleton,
   type ReceivedEventStep,
   receivedEventLook,
 } from "@/components/email-status-icon";
@@ -79,7 +80,7 @@ function Banner({ tone, children }: { tone: "danger" | "warn"; children: React.R
   );
 }
 
-/** Mirrors the loaded page's boxes (header, meta grid, content panel). */
+/** Mirrors the loaded page's boxes (header, meta grid, events strip, content panel). */
 function ReceivedEmailSkeleton() {
   const t = useTranslations("emails");
   const ti = useTranslations("inboxes");
@@ -107,11 +108,19 @@ function ReceivedEmailSkeleton() {
           <SkeletonChip width={190} />
         </MetaItem>
         <MetaItem label={ti("detail.auth")}>
-          <SkeletonBadge width={70} />
-          <SkeletonBadge width={76} />
-          <SkeletonBadge width={84} />
+          <span style={{ display: "grid", gap: 6 }}>
+            {AUTH_CHECKS.map((check) => (
+              <span key={check}>
+                <SkeletonBadge width={{ spf: 70, dkim: 76, dmarc: 84, arc: 72 }[check]} />
+              </span>
+            ))}
+          </span>
         </MetaItem>
       </div>
+      <section style={{ marginTop: 26 }}>
+        <div className="ms-microlabel">{t("detail.events")}</div>
+        <EventStripSkeleton />
+      </section>
       <div
         style={{
           marginTop: 26,
