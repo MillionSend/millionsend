@@ -5,7 +5,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
@@ -251,10 +251,18 @@ export function ReceivedEvents({
     times.at(-1) === null
       ? times.length - 1
       : times.lastIndexOf(Math.max(...times.map((time) => time ?? Number.NEGATIVE_INFINITY)));
+  // Wider than the page (a message held, released and delivered), the strip
+  // opens on its end: the latest step is what the page was opened for.
+  const strip = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies(timeline.length): only a new step moves it; a refetch leaves the reader's scroll be
+  useLayoutEffect(() => {
+    const el = strip.current;
+    if (el && el.scrollWidth > el.clientWidth) el.scrollLeft = el.scrollWidth;
+  }, [timeline.length]);
   return (
     <section style={{ marginTop: 26 }}>
       <div className="ms-microlabel">{te("detail.events")}</div>
-      <div className="ms-events">
+      <div ref={strip} className="ms-events">
         {timeline.map((entry, index) => {
           const { color, glyph } = receivedEventLook(entry.step);
           const at = times[index] ?? null;
