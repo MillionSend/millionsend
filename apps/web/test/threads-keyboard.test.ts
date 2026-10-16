@@ -254,6 +254,11 @@ describe("Esc on the page", () => {
       null,
       createElement("button", { id: "probe-button", type: "button" }),
       createElement("input", { id: "probe-field" }),
+      createElement(
+        "div",
+        { className: "ms-maily" },
+        createElement("button", { id: "probe-bold", type: "button" }),
+      ),
     );
   }
 
@@ -265,8 +270,9 @@ describe("Esc on the page", () => {
 
     await esc(button);
     expect(onEscape).toHaveBeenCalledTimes(1);
-    // Typed in a field: never.
+    // Typed in a field, or anywhere in the message editor: never.
     await esc($("#probe-field") as HTMLElement);
+    await esc($("#probe-bold") as HTMLElement);
     expect(onEscape).toHaveBeenCalledTimes(1);
     // A tooltip that closes on the same Esc, gone before the key reaches window.
     const tip = document.createElement("div");

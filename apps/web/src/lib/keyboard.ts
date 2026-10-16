@@ -23,11 +23,16 @@ export function shortcutBlocked(target: EventTarget | null): boolean {
 const ESC_LAYERS = '.ms-menu, .ms-tooltip, [role="dialog"], .ms-drawer-scrim';
 
 /**
- * Whether an Esc belongs to something before the page: a field, where it must
- * never throw away what was typed, or an open layer that closes on it.
+ * Whether an Esc belongs to something before the page: a field, or anywhere in
+ * the message editor (its toolbar included), where it must never throw away
+ * what was typed; or an open layer that closes on it.
  */
 export function escapeTaken(target: EventTarget | null): boolean {
-  return shortcutBlocked(target) || document.querySelector(ESC_LAYERS) !== null;
+  return (
+    shortcutBlocked(target) ||
+    (target instanceof Element && target.closest(".ms-maily") !== null) ||
+    document.querySelector(ESC_LAYERS) !== null
+  );
 }
 
 /** Tab stops inside a panel that runs its own focus loop (dialogs, anchored editors). */
