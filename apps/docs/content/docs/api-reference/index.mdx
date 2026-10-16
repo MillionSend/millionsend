@@ -170,12 +170,14 @@ remaining deltas are deliberate and loud:
   MillionSend's page.
 - A send whose every `to` recipient is on the suppression list or opted out of
   the `topic_id` is refused with `422 all_recipients_suppressed` (message
-  `All recipients are suppressed`); recipients dropped from a send that still
-  has someone left are simply omitted. When the suppression list alone empties
-  `to`, `POST /emails` keeps a metadata-only `suppressed` email, and each retry
-  with the same `Idempotency-Key` adds another; a topic opt-out, a batch item
-  and the SMTP relay keep nothing. Unsubscribe-origin entries count only
-  when the send has a `topic_id`; bounce, complaint and manual entries always.
+  `All recipients are suppressed`) instead of Resend's `200`; recipients
+  dropped from a send that still has someone left are simply omitted. When
+  the suppression list alone empties `to`, `POST /emails` keeps a
+  metadata-only `suppressed` email and, as Resend does, fires
+  `email.suppressed`; each retry with the same `Idempotency-Key` keeps
+  another. A topic opt-out, a batch item and the SMTP relay keep nothing.
+  Unsubscribe-origin entries count only when the send has a `topic_id`;
+  bounce, complaint and manual entries always.
 - `to`, `cc` and `bcc` together cannot exceed 50 recipients, and each address
   must be a single mailbox — a display name containing `@` is rejected, and
   accepted addresses read back in canonical `Name <user@host>` form.
@@ -348,6 +350,8 @@ draft sends, and `POST /emails/receiving/{id}/reply` and `/forward`.
 Retrying with the same key and payload returns the original response instead
 of sending again; the same key with a different payload returns `409`. A send
 that was held for approval answers the retry with the same draft, as `202`.
+A refused `POST /emails` doesn't hold its key: the retry runs again, and an
+all-suppressed one keeps another `suppressed` email.
 
 ## Pagination
 
