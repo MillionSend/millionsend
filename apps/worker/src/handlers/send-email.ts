@@ -274,7 +274,8 @@ async function checkSendEligibility(
  * Ends a still-queued email as failed or suppressed with its event and
  * webhook, in one transaction, and hands the delivery rows to the queue
  * once that commits. False when the row already left "queued" (sent,
- * canceled, ended) or SES already took it: nothing to end then.
+ * canceled, ended), SES already took it, or a send claim it does not hold
+ * is on it: nothing to end then.
  */
 async function endQueuedEmail(
   db: Db,
@@ -282,17 +283,20 @@ async function endQueuedEmail(
   status: "failed" | "suppressed",
   reason: string,
   enqueue: WebhookEnqueue | undefined,
+  claimHeld = false,
 ): Promise<boolean> {
   const e = schema.emails;
   const hooks = webhookBatch(enqueue);
   const ended = await db.transaction((tx) =>
     endQueuedEmails(tx as unknown as Db, {
       status,
-      // A failure releases the send claim; a suppression never takes a claimed row.
+      // A claimed row may already be with SES, its message id not yet
+      // written: only the lane holding the claim, which SES refused, ends
+      // it. Anyone else leaves it to SES's events or the stalled-claim sweep.
       where: and(
         eq(e.id, emailId),
         eq(e.latestStatus, "queued"),
-        status === "suppressed" ? isNull(e.sentAt) : undefined,
+        claimHeld ? undefined : isNull(e.sentAt),
       ),
       data: { source: "worker", reason },
       now: new Date(),
@@ -323,18 +327,20 @@ async function stripRecipients(
 }
 
 /**
- * Terminal failure for a still-queued email: releases any send claim, moves
- * the row to "failed", records why and fires email.failed. Returns false
- * when the row already left "queued" (sent, canceled, suppressed) or SES
- * took it — nothing to fail then.
+ * Terminal failure for a still-queued email: moves the row to "failed",
+ * records why and fires email.failed. Only the send lane holding the claim
+ * passes `claimHeld`, and the claim is released with the row. Returns false
+ * when the row already left "queued" (sent, canceled, suppressed), SES took
+ * it, or it is claimed and `claimHeld` is not set — nothing to fail then.
  */
 export async function failQueuedEmail(
   db: Db,
   emailId: string,
   reason: string,
   enqueue?: WebhookEnqueue,
+  claimHeld = false,
 ): Promise<boolean> {
-  return endQueuedEmail(db, emailId, "failed", reason, enqueue);
+  return endQueuedEmail(db, emailId, "failed", reason, enqueue, claimHeld);
 }
 
 /**
@@ -612,8 +618,8 @@ async function sendQueued(
   }
 
   // Terminal: "skipped" when the row was no longer this attempt's to fail.
-  const fail = async (reason: string): Promise<SendOutcome> =>
-    (await failQueuedEmail(db, email.id, reason, deps.enqueueWebhookDelivery))
+  const fail = async (reason: string, claimHeld = false): Promise<SendOutcome> =>
+    (await failQueuedEmail(db, email.id, reason, deps.enqueueWebhookDelivery, claimHeld))
       ? "failed"
       : "skipped";
 
@@ -988,7 +994,7 @@ async function sendQueued(
     // rather than risking a duplicate delivery.)
     const name = (err as { name?: string }).name ?? "";
     if (TERMINAL_SES_ERRORS.has(name)) {
-      return fail(`ses_${name}`);
+      return fail(`ses_${name}`, true);
     }
     await db
       .update(schema.emails)

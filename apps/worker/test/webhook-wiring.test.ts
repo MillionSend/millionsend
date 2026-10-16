@@ -13,7 +13,7 @@ import type { SerializedSesEvent } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { reconcileWebhookDeliveries } from "../src/handlers/cron.js";
+import { reconcileStalledSends, reconcileWebhookDeliveries } from "../src/handlers/cron.js";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
 import { failQueuedEmail, type SesSender, sendEmail } from "../src/handlers/send-email.js";
 
@@ -400,6 +400,49 @@ it("never fails a row SES already took, however a retry or the dead-letter reach
     .where(eq(schema.emailEvents.emailId, taken));
   expect(events).toEqual([]);
   expect(await deliveriesFor([team.endpointId])).toEqual([]);
+});
+
+it("leaves a claim it doesn't hold to the stalled-claim sweep, however a retry or the dead-letter reaches it", async () => {
+  const team = await sendingTeam("claimed-hooks");
+  // Claimed, no message id yet: SES may be taking it right now.
+  const claimedAt = new Date(Date.now() - 20 * 60 * 1000);
+  const emailId = await team.queued({ sentAt: claimedAt });
+  // The domain lost verification meanwhile: a retry reaches the domain gate.
+  await db
+    .update(schema.domains)
+    .set({ status: "failed" })
+    .where(eq(schema.domains.id, team.domainId));
+  const deps = { keyring, ses: refusingSes("unused"), enqueueWebhookDelivery: async () => {} };
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("skipped");
+  expect(await failQueuedEmail(db, emailId, "retries_exhausted", async () => {})).toBe(false);
+
+  const rowOf = async () =>
+    (
+      await db
+        .select({ status: schema.emails.latestStatus, sentAt: schema.emails.sentAt })
+        .from(schema.emails)
+        .where(eq(schema.emails.id, emailId))
+    )[0];
+  const eventsOf = () =>
+    db
+      .select({ type: schema.emailEvents.type, data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, emailId));
+  expect(await rowOf()).toEqual({ status: "queued", sentAt: claimedAt });
+  expect(await eventsOf()).toEqual([]);
+  expect(await deliveriesFor([team.endpointId])).toEqual([]);
+
+  await reconcileStalledSends(db, { enqueueSends: async () => {} });
+
+  expect(await rowOf()).toEqual({ status: "failed", sentAt: null });
+  expect(await eventsOf()).toEqual([
+    { type: "failed", data: { source: "worker", reason: "send_interrupted" } },
+  ]);
+  const rows = await deliveriesFor([team.endpointId]);
+  expect(rows.map((r) => r.payload)).toMatchObject([
+    { type: "email.failed", data: { email_id: emailId, failed: { reason: "send_interrupted" } } },
+  ]);
 });
 
 it("the dead-letter fails a row once and fires email.failed as retries_exhausted", async () => {
