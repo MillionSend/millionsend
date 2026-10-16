@@ -67,6 +67,7 @@ vi.mock("@/lib/trpc", () => {
 const { LabelsMenu } = await import("@/app/(dashboard)/inboxes/[id]/labels");
 const { ThreadsTab } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
 const { useEscape } = await import("@/lib/use-escape");
+const { useLocalDraft } = await import("@/lib/use-local-draft");
 
 const billing = { id: "l1", name: "Billing", color: "#46A758" };
 const followUp = { id: "l2", name: "Follow-up", color: "#F76B15" };
@@ -308,7 +309,7 @@ describe("the open thread", () => {
     subject: "Can't log in after the update",
     from: "Ana Souza <ana@example.com>",
     to: ["support@acme.example"],
-    labels: [],
+    labels: [] as (typeof billing)[],
     message_count: 1,
     read: true,
     received_at: new Date().toISOString(),
@@ -316,14 +317,19 @@ describe("the open thread", () => {
     quarantined: 0,
     snippet: "",
   };
-  async function openThread() {
+  const next = { ...row, id: "t2", subject: "Invoice for October" };
+  async function openThread(
+    thread: Partial<typeof row> = {},
+    answers: Record<string, unknown> = {},
+  ) {
     page.search = "thread=t1";
     page.answers = {
-      "inboxes.threads.list.infiniteQueryOptions": { pages: [{ items: [row] }] },
-      "inboxes.threads.get.queryOptions": row,
+      "inboxes.threads.list.infiniteQueryOptions": { pages: [{ items: [row, next] }] },
+      "inboxes.threads.get.queryOptions": { ...row, ...thread },
       "inboxes.threads.emails.infiniteQueryOptions": { pages: [{ items: [] }] },
       "inboxes.drafts.list.queryOptions": { items: [] },
       "inboxes.labels.list.queryOptions": [],
+      ...answers,
     };
     await act(async () =>
       root.render(
@@ -345,6 +351,58 @@ describe("the open thread", () => {
     expect(document.activeElement?.textContent).toContain(row.subject);
   });
 
+  it("hands focus to the row beside a thread that leaves the list", async () => {
+    await openThread({ folder: "spam" });
+    const notSpam = [...document.querySelectorAll<HTMLElement>("section button")].find(
+      (button) => button.textContent === "Not spam",
+    ) as HTMLElement;
+    await act(async () => notSpam.focus());
+    await click(notSpam);
+    const [variables, options] = sent.update.mock.calls[0] as [object, { onSuccess: () => void }];
+    expect(variables).toMatchObject({ threadId: "t1", folder: "inbox" });
+    await act(async () => options.onSuccess());
+    expect($("section")).toBeNull();
+    expect(document.activeElement?.textContent).toContain(next.subject);
+  });
+
+  it("moves focus off a label's ✕ before its badge goes", async () => {
+    await openThread({ labels: [billing, followUp] });
+    const remove = $('section button[aria-label="Remove Billing"]') as HTMLElement;
+    await act(async () => remove.focus());
+    await click(remove);
+    expect(sent.update).toHaveBeenCalledWith({
+      inboxId: "i1",
+      threadId: "t1",
+      removeLabelId: "l1",
+    });
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Remove Follow-up");
+  });
+
+  it("stays open on Esc while a draft is being edited, which is kept nowhere else", async () => {
+    await openThread(
+      {},
+      {
+        "inboxes.drafts.list.queryOptions": {
+          items: [{ id: "d1", thread_id: "t1", status: "pending_approval", approval_reasons: [] }],
+        },
+        "inboxes.drafts.get.queryOptions": {
+          text: "Hi Ana, it's fixed.",
+          created_at: new Date().toISOString(),
+        },
+      },
+    );
+    const button = (label: string) =>
+      [...document.querySelectorAll<HTMLElement>("section button")].find(
+        (el) => el.textContent === label,
+      ) as HTMLElement;
+    await click(button("Edit"));
+    const save = button("Save draft");
+    await act(async () => save.focus());
+    await press(save, "Escape");
+    expect($("section textarea")).not.toBeNull();
+    expect($("section h2")).not.toBeNull();
+  });
+
   it("stays open for an Esc typed in a field", async () => {
     await openThread();
     const search = $('input[placeholder="Search threads…"]') as HTMLInputElement;
@@ -353,5 +411,24 @@ describe("the open thread", () => {
     expect($("section h2")).not.toBeNull();
     await click($('section button[aria-label="Close"]'));
     expect($("section")).toBeNull();
+  });
+});
+
+describe("a local draft", () => {
+  function Probe({ text }: { text: string }) {
+    useLocalDraft({ storageKey: "ms-draft:probe", state: text, initialState: "" });
+    return null;
+  }
+
+  it("is written when its editor goes before the debounce does", async () => {
+    localStorage.removeItem("ms-draft:probe");
+    await act(async () => root.render(createElement(Probe, { text: "" })));
+    await act(async () => root.render(createElement(Probe, { text: "Thanks, I'll check" })));
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    expect(JSON.parse(localStorage.getItem("ms-draft:probe") ?? "{}").data).toBe(
+      "Thanks, I'll check",
+    );
+    localStorage.removeItem("ms-draft:probe");
   });
 });

@@ -24,8 +24,17 @@ const NAME_MAX = 64;
 const menuText = { contain: "inline-size" } as const;
 const menuError = { ...menuText, margin: "0 12px 8px", fontSize: 12 };
 
-/** A label as a neutral pill led by its color; with `onRemove`, its ✕ takes it off the thread. */
-export function LabelBadge({ label, onRemove }: { label: Label; onRemove?: () => void }) {
+/**
+ * A label as a neutral pill led by its color; with `onRemove`, its ✕ takes it
+ * off the thread, and is handed over so focus can leave it first.
+ */
+export function LabelBadge({
+  label,
+  onRemove,
+}: {
+  label: Label;
+  onRemove?: (button: HTMLButtonElement) => void;
+}) {
   const t = useTranslations("inboxes");
   return (
     <span className="ms-badge ms-badge-neutral ms-label-badge">
@@ -35,7 +44,7 @@ export function LabelBadge({ label, onRemove }: { label: Label; onRemove?: () =>
         <button
           type="button"
           aria-label={t("removeLabel", { label: label.name })}
-          onClick={onRemove}
+          onClick={(event) => onRemove(event.currentTarget)}
         >
           ✕
         </button>

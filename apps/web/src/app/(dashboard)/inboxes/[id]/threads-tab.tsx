@@ -349,15 +349,42 @@ function ThreadPane({
       pane.scrollIntoView({ block: "start", behavior: "auto" });
     }
   }, []);
-  // Focus inside the pane would fall to the page as it goes: it moves to the thread's row.
-  const close = () => {
+  // Focus inside the pane would fall to the page as it goes: it moves to the
+  // thread's row, or to the row beside it when the thread is leaving the list,
+  // or to the folder's button when there is no row.
+  const closePane = (leaving: boolean) => {
     const pane = paneRef.current;
     if (pane?.contains(document.activeElement)) {
-      pane.previousElementSibling?.querySelector<HTMLElement>('[aria-current="true"]')?.focus();
+      const row = pane.previousElementSibling?.querySelector('[aria-current="true"]');
+      const item = row?.closest("li");
+      const next = leaving
+        ? (item?.nextElementSibling ?? item?.previousElementSibling)?.querySelector(
+            ".ms-thread-open",
+          )
+        : row;
+      const folder = pane.closest(".ms-threads")?.querySelector('.ms-tabs [aria-pressed="true"]');
+      ((next ?? folder) as HTMLElement | null | undefined)?.focus();
     }
     onClose();
   };
-  useEscape(close);
+  const close = () => closePane(false);
+  // The ✕ goes with its badge: focus on it moves to a neighbour's ✕, else to the Labels menu.
+  const removeLabel = (labelId: string, button: HTMLElement) => {
+    if (document.activeElement === button) {
+      const all = [...(button.parentElement?.parentElement?.querySelectorAll("button") ?? [])];
+      const at = all.indexOf(button as HTMLButtonElement);
+      (
+        all[at + 1] ??
+        all[at - 1] ??
+        paneRef.current?.querySelector<HTMLElement>('[role="combobox"]')
+      )?.focus();
+    }
+    update.mutate({ ...ref, removeLabelId: labelId });
+  };
+  // A draft being edited is held nowhere else: Esc leaves the pane open with it.
+  useEscape(() => {
+    if (!paneRef.current?.querySelector("textarea")) close();
+  });
   const moveTo = (folder: (typeof MOVE_TO)[number]) =>
     update.mutate(
       { ...ref, folder },
@@ -365,7 +392,7 @@ function ThreadPane({
         // The thread has left the list beside it, so the pane goes too.
         onSuccess: () => {
           toast(t("movedTo", { folder }));
-          onClose();
+          closePane(true);
         },
       },
     );
@@ -494,7 +521,7 @@ function ThreadPane({
               label={label}
               {...(inbox.expired
                 ? {}
-                : { onRemove: () => update.mutate({ ...ref, removeLabelId: label.id }) })}
+                : { onRemove: (button: HTMLElement) => removeLabel(label.id, button) })}
             />
           ))}
         </span>
