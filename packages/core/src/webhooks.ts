@@ -19,11 +19,17 @@ import type { Keyring } from "./crypto/keyring.js";
  */
 
 export const WEBHOOK_EVENT_TYPES = [
+  "email.scheduled",
   "email.sent",
   "email.delivered",
   "email.delivery_delayed",
   "email.bounced",
   "email.complained",
+  // An email that will not go out, or that SES refused after it did:
+  // data.failed or data.suppressed says why (failedEmailExtras,
+  // suppressedEmailExtras). Not opt-in: Resend's SDKs know both names.
+  "email.failed",
+  "email.suppressed",
   "email.opened",
   "email.clicked",
   // Opt-in: a tracking-image fetch classified as automated (see
@@ -222,6 +228,82 @@ export function buildWebhookPayload(
       ...extras,
     },
   };
+}
+
+const PUBLIC_FAILURE_REASONS: ReadonlyMap<string, string> = new Map([
+  ["domain_not_verified", "domain_not_verified"],
+  ["domain_deleted", "domain_deleted"],
+  ["body_missing", "body_missing"],
+  ["body_unreadable", "body_unreadable"],
+  ["retries_exhausted", "retries_exhausted"],
+  ["send_interrupted", "send_interrupted"],
+  ["ses_MessageRejected", "message_rejected"],
+  ["ses_BadRequestException", "message_rejected"],
+  // SES's Reject event: it took the message, then refused to deliver it.
+  ["ses_Reject", "message_rejected"],
+  ["ses_MailFromDomainNotVerifiedException", "domain_not_verified"],
+]);
+
+/**
+ * The code an email.failed payload carries for an internal failure reason.
+ * Any other code, today's or a future one, reads provider_error: platform
+ * state such as the SES account's own standing never reaches a customer.
+ */
+export function publicFailureReason(internal: string): string {
+  return PUBLIC_FAILURE_REASONS.get(internal) ?? "provider_error";
+}
+
+/**
+ * Resend's data.suppressed `type` and `message` for each reason an email
+ * ends suppressed; any other reason, "ineligible" included, reads as the
+ * fallback below.
+ */
+export const SUPPRESSED_EMAIL_DETAILS: ReadonlyMap<string, { type: string; message: string }> =
+  new Map([
+    [
+      "recipient_suppressed",
+      { type: "OnAccountSuppressionList", message: "The recipient is on your suppression list." },
+    ],
+    [
+      "contact_unsubscribed",
+      { type: "Unsubscribed", message: "The contact unsubscribed from your emails." },
+    ],
+    [
+      "topic_unsubscribed",
+      { type: "Unsubscribed", message: "The recipient opted out of this email's topic." },
+    ],
+    [
+      "contact_missing",
+      { type: "Ineligible", message: "The contact was deleted before the email was sent." },
+    ],
+    [
+      "contact_recipient_mismatch",
+      { type: "Ineligible", message: "The contact's address changed before the email was sent." },
+    ],
+    [
+      "broadcast_missing",
+      { type: "Ineligible", message: "The broadcast was deleted before the email was sent." },
+    ],
+    [
+      "topic_missing",
+      { type: "Ineligible", message: "The email's topic was deleted before it was sent." },
+    ],
+  ]);
+
+const SUPPRESSED_EMAIL_FALLBACK = {
+  type: "Ineligible",
+  message: "The email was no longer eligible to send.",
+} as const;
+
+/** email.failed's extras: `data.failed.reason`, always a public code. */
+export function failedEmailExtras(internalReason: string): Record<string, unknown> {
+  return { failed: { reason: publicFailureReason(internalReason) } };
+}
+
+/** email.suppressed's extras: `data.suppressed`, three strings, as Resend's SDKs require. */
+export function suppressedEmailExtras(reason: string): Record<string, unknown> {
+  const { type, message } = SUPPRESSED_EMAIL_DETAILS.get(reason) ?? SUPPRESSED_EMAIL_FALLBACK;
+  return { suppressed: { type, message, reason } };
 }
 
 /** Svix-style backoff between attempts; length is the attempt cap. */

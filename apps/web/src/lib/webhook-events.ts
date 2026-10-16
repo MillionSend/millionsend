@@ -5,11 +5,14 @@
  * apps/web/test/webhooks-router.test.ts.
  */
 export const WEBHOOK_EVENT_TYPES = [
+  "email.scheduled",
   "email.sent",
   "email.delivered",
   "email.delivery_delayed",
   "email.bounced",
   "email.complained",
+  "email.failed",
+  "email.suppressed",
   "email.opened",
   "email.clicked",
   "email.prefetched",
@@ -70,6 +73,7 @@ export const WEBHOOK_EVENT_META: Record<
   // picker leaves it unchecked under "All" because "all events" never carries it.
   { group: WebhookEventGroup; dot: string; optIn?: true }
 > = {
+  "email.scheduled": { group: "delivery", dot: "var(--ms-dot-queued)" },
   "email.sent": { group: "delivery", dot: "var(--ms-dot-sent)" },
   "email.delivered": { group: "delivery", dot: "var(--ms-dot-delivered)" },
   "email.delivery_delayed": { group: "delivery", dot: "var(--ms-dot-delivery-delayed)" },
@@ -79,6 +83,8 @@ export const WEBHOOK_EVENT_META: Record<
   "email.received": { group: "receiving", dot: "var(--ms-dot-delivered)" },
   "email.bounced": { group: "problems", dot: "var(--ms-dot-bounced)" },
   "email.complained": { group: "problems", dot: "var(--ms-dot-complained)" },
+  "email.failed": { group: "problems", dot: "var(--ms-dot-failed)" },
+  "email.suppressed": { group: "problems", dot: "var(--ms-dot-suppressed)" },
   "deliverability.warning": { group: "account", dot: "var(--ms-dot-account)" },
   "deliverability.paused": { group: "account", dot: "var(--ms-dot-account)" },
   "quota.warning": { group: "account", dot: "var(--ms-dot-account)" },

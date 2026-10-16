@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { WEBHOOK_EVENT_TYPES as CORE_WEBHOOK_EVENT_TYPES } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -74,6 +75,23 @@ it("annotates every event type in WEBHOOK_EVENT_META with a known group and no o
   for (const meta of Object.values(WEBHOOK_EVENT_META)) {
     expect(WEBHOOK_EVENT_GROUPS).toContain(meta.group);
     expect(meta.dot).toMatch(/^var\(--ms-dot-/);
+  }
+});
+
+it("labels every event type in both locales", () => {
+  for (const locale of ["en", "pt-BR"]) {
+    const { eventLabel } = JSON.parse(
+      readFileSync(new URL(`../messages/${locale}/webhooks.json`, import.meta.url), "utf8"),
+    ) as { eventLabel: unknown };
+    for (const type of WEB_WEBHOOK_EVENT_TYPES) {
+      const label = type
+        .split(".")
+        .reduce<unknown>(
+          (node, key) => (node as Record<string, unknown> | undefined)?.[key],
+          eventLabel,
+        );
+      expect(typeof label, `${locale}: ${type}`).toBe("string");
+    }
   }
 });
 

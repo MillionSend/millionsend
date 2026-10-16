@@ -5,9 +5,13 @@ import {
   buildWebhookPayload,
   decryptWebhookSecret,
   encryptWebhookSecret,
+  failedEmailExtras,
   generateWebhookSecret,
   parseWebhookSecret,
+  publicFailureReason,
+  SUPPRESSED_EMAIL_DETAILS,
   signWebhook,
+  suppressedEmailExtras,
   verifyWebhookSignature,
 } from "../src/webhooks.js";
 
@@ -124,6 +128,62 @@ describe("payload shape", () => {
     });
     expect(p.data.bounce).toEqual({ type: "Permanent", sub_type: "General" });
     expect(p.data.email_id).toBe("e-1");
+  });
+
+  it("names a failure by its public code, never the platform's own state", () => {
+    for (const code of [
+      "domain_not_verified",
+      "domain_deleted",
+      "body_missing",
+      "body_unreadable",
+      "retries_exhausted",
+      "send_interrupted",
+    ]) {
+      expect(publicFailureReason(code)).toBe(code);
+    }
+    expect(publicFailureReason("ses_MessageRejected")).toBe("message_rejected");
+    expect(publicFailureReason("ses_BadRequestException")).toBe("message_rejected");
+    expect(publicFailureReason("ses_Reject")).toBe("message_rejected");
+    expect(publicFailureReason("ses_MailFromDomainNotVerifiedException")).toBe(
+      "domain_not_verified",
+    );
+    for (const code of ["ses_AccountSuspendedException", "ses_SomethingNew", "toString", ""]) {
+      expect(publicFailureReason(code), code).toBe("provider_error");
+    }
+    expect(
+      buildWebhookPayload(
+        "email.failed",
+        email,
+        at,
+        failedEmailExtras("ses_AccountSuspendedException"),
+      ).data.failed,
+    ).toEqual({ reason: "provider_error" });
+  });
+
+  it("describes every suppression with three strings, Resend's type and message plus the reason", () => {
+    expect(suppressedEmailExtras("recipient_suppressed")).toEqual({
+      suppressed: {
+        type: "OnAccountSuppressionList",
+        message: "The recipient is on your suppression list.",
+        reason: "recipient_suppressed",
+      },
+    });
+    expect(suppressedEmailExtras("ineligible")).toEqual({
+      suppressed: {
+        type: "Ineligible",
+        message: "The email was no longer eligible to send.",
+        reason: "ineligible",
+      },
+    });
+    for (const reason of [...SUPPRESSED_EMAIL_DETAILS.keys(), "constructor", "something_new"]) {
+      const { suppressed } = suppressedEmailExtras(reason) as {
+        suppressed: Record<string, unknown>;
+      };
+      expect(Object.keys(suppressed), reason).toEqual(["type", "message", "reason"]);
+      for (const value of Object.values(suppressed)) expect(typeof value, reason).toBe("string");
+    }
+    expect(SUPPRESSED_EMAIL_DETAILS.get("topic_unsubscribed")?.type).toBe("Unsubscribed");
+    expect(SUPPRESSED_EMAIL_DETAILS.get("contact_missing")?.type).toBe("Ineligible");
   });
 });
 
