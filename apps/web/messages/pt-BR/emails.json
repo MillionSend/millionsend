@@ -113,7 +113,7 @@
     "formatted": "Formatado",
     "insights": "Insights",
     "bodyPurged": "Corpo removido após a janela de retenção.",
-    "bodyNotStored": "Não enviado: todos os destinatários estão suprimidos, então nenhum conteúdo foi salvo.",
+    "bodyNotStored": "Não enviado: todos os destinatários do campo Para estão suprimidos, então nenhum conteúdo foi salvo.",
     "noHtml": "Sem corpo HTML.",
     "noText": "Sem corpo em texto simples.",
     "previewLight": "Claro",

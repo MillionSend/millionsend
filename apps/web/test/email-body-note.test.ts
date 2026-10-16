@@ -56,7 +56,9 @@ describe("the body line of an email without a body", () => {
       bodyNote(refused, { hiddenBySupportView: true }),
       bodyNote(refused, { bodyPurgedAt: null }),
     ]) {
-      expect(html).toContain("Not sent: every recipient is suppressed, so no content was stored.");
+      expect(html).toContain(
+        "Not sent: every To recipient is suppressed, so no content was stored.",
+      );
       expect(html).not.toContain("Body purged");
     }
   });
