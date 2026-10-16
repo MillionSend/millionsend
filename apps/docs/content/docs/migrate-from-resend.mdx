@@ -149,7 +149,9 @@ Five details that differ from what a Resend integration may assume:
   instead of moving them. See [Errors](/api-reference#errors).
 - A send whose every `to` recipient is suppressed is refused with
   `422 all_recipients_suppressed`; Resend accepts it, records the email as
-  `suppressed` and fires `email.suppressed`. The migration copies Resend's
+  `suppressed` and fires `email.suppressed`. `POST /emails` also keeps a
+  metadata-only `suppressed` email, but answers 422 and sends no
+  `email.suppressed`. The migration copies Resend's
   bounces, complaints and manual entries, so your code may already be mailing
   addresses on the list: treat this error as "not sent" rather than as a
   failure worth retrying. In `POST /emails/batch` one such item rejects the

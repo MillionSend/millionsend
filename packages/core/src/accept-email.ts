@@ -6,6 +6,7 @@ import type { ApiKeyAuth } from "./api-key-auth.js";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 import { admitWarmup } from "./domain-warmup.js";
+import { purgedEmailBodyColumns } from "./email-retention.js";
 import { type InboxActor, inboxActorFromAuth } from "./inboxes/activity.js";
 import type { InboxKeys } from "./inboxes/keys.js";
 import {
@@ -387,18 +388,21 @@ export type AcceptEmailResult =
   | { ok: false; reason: "undeliverable_recipient"; address: string; why: UndeliverableReason };
 
 /**
- * A send refused because every `to` recipient is suppressed still leaves a
+ * A send refused because the suppression list empties `to` still leaves a
  * metadata-only row (status "suppressed", with its event) so the attempt shows
  * in the dashboard and `GET /emails`, as it does at Resend. No body is kept
  * (bodyPurgedAt marks it as already purged), nothing is charged to the quota,
  * and nothing is sent; the caller still answers 422 all_recipients_suppressed.
+ * Best-effort: the row is only for visibility, so a failed insert is logged
+ * (class and SQLSTATE only, since the message quotes the recipients) and the
+ * refusal stands.
  */
 async function recordSuppressedAttempt(
   db: Db,
   auth: AcceptEmailAuth,
   payload: AcceptEmailPayload,
+  now: Date,
 ): Promise<void> {
-  const now = new Date();
   await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(schema.emails)
@@ -414,7 +418,7 @@ async function recordSuppressedAttempt(
         subject: payload.subject,
         topicId: payload.topicId ?? null,
         latestStatus: "suppressed",
-        bodyPurgedAt: now,
+        ...purgedEmailBodyColumns(now),
       })
       .returning({ id: schema.emails.id });
     if (!row) throw new Error("suppressed email insert returned no row");
@@ -422,7 +426,7 @@ async function recordSuppressedAttempt(
       emailId: row.id,
       type: "suppressed",
       occurredAt: now,
-      data: { source: "api", reason: "all_recipients_suppressed" },
+      data: { source: "api", reason: "recipient_suppressed" },
     });
   });
 }
@@ -464,6 +468,12 @@ export async function acceptEmail(
      * was caught. Releasing the hold sends it. Every other check still runs.
      */
     parkUnderReview?: boolean | undefined;
+    /**
+     * Keep a metadata-only "suppressed" email when the suppression list alone
+     * empties `to`. Only the surface that asks for it records: POST /emails
+     * today. Topic opt-outs, batches (`tx`) and the other callers keep nothing.
+     */
+    recordSuppressed?: boolean | undefined;
     /** Who an inbox send's activity names; read from `auth` when absent. */
     actor?: InboxActor | undefined;
     /**
@@ -534,6 +544,8 @@ export async function acceptEmail(
   const suppressed = await findSuppressed(opts.tx ?? deps.db, auth.teamId, allRecipients, {
     transactional: !payload.topicId,
   });
+  // The list alone, before topic opt-outs join the set: only it is recorded.
+  const listSuppressed = new Set(suppressed);
   // Topic opt-outs drop exactly like suppression hits: strip the recipient,
   // keep sending to the rest, refuse only when no `to` remains.
   if (payload.topicId) {
@@ -548,10 +560,15 @@ export async function acceptEmail(
   const keep = (list: string[] | undefined) => list?.filter((r) => !suppressed.has(r));
   const to = keep(payload.to) ?? [];
   if (to.length === 0) {
-    // A batch (opts.tx) fails the whole item at validation and keeps nothing;
-    // the platform's own account mail (uncapped) never lists in a team's emails.
-    if (!opts.tx && auth.billing !== "uncapped") {
-      await recordSuppressedAttempt(deps.db, auth, payload);
+    if (opts.recordSuppressed && payload.to.every((r) => listSuppressed.has(r))) {
+      await recordSuppressedAttempt(deps.db, auth, payload, now).catch((err: unknown) => {
+        const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
+        console.error(
+          "suppressed email record failed",
+          err instanceof Error ? err.name : "error",
+          typeof code === "string" ? code : "",
+        );
+      });
     }
     return { ok: false, reason: "all_suppressed" };
   }

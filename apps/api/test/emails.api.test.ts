@@ -14,7 +14,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 
 let db: Db;
@@ -205,11 +205,40 @@ describe("send edge cases", () => {
       .from(schema.emailEvents)
       .where(eq(schema.emailEvents.emailId, row?.id ?? ""));
     expect(events.map((e) => e.type)).toEqual(["suppressed"]);
+    expect(events[0]?.data).toEqual({ source: "api", reason: "recipient_suppressed" });
     const got = await app.request(`/emails/${row?.id}`, {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(got.status).toBe(200);
     expect(await got.json()).toMatchObject({ last_event: "suppressed" });
+  });
+
+  it("still answers 422 and logs no recipient when recording the suppressed email fails", async () => {
+    await db
+      .insert(schema.suppressions)
+      .values({
+        teamId,
+        email: "gone@example.com",
+        emailHash: hashRecipient("gone@example.com"),
+        reason: "hard_bounce",
+      })
+      .onConflictDoNothing();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const tx = vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("gone@example.com"));
+    try {
+      const res = await post({ ...validBody, to: ["gone@example.com"], subject: "record-fails" });
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({ name: "all_recipients_suppressed" });
+      expect(logged).toHaveBeenCalledWith("suppressed email record failed", "Error", "");
+    } finally {
+      tx.mockRestore();
+      logged.mockRestore();
+    }
+    const rows = await db
+      .select()
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "record-fails"));
+    expect(rows).toHaveLength(0);
   });
 
   it("does not record a suppressed email when a send is only partly suppressed", async () => {
@@ -382,6 +411,15 @@ describe("batch send", () => {
   });
 
   it("keeps no suppressed email for an all-suppressed batch item (single sends only)", async () => {
+    await db
+      .insert(schema.suppressions)
+      .values({
+        teamId,
+        email: "gone@example.com",
+        emailHash: hashRecipient("gone@example.com"),
+        reason: "hard_bounce",
+      })
+      .onConflictDoNothing();
     const res = await batch([
       { ...validBody, to: ["gone@example.com"], subject: "batch-refused" },
       { ...validBody, to: ["fine@example.com"], subject: "batch-refused" },

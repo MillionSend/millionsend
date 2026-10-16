@@ -3838,6 +3838,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     try {
       const result = await acceptEmail(deps, auth, toAcceptPayload(body, domainId), {
         parkUnderReview: true,
+        recordSuppressed: true,
         completeInTx: idemKey
           ? async (tx, emailId) => {
               const recorded = await completeIdempotent(tx, {

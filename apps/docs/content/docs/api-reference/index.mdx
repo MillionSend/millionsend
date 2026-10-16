@@ -171,7 +171,10 @@ remaining deltas are deliberate and loud:
 - A send whose every `to` recipient is on the suppression list or opted out of
   the `topic_id` is refused with `422 all_recipients_suppressed` (message
   `All recipients are suppressed`); recipients dropped from a send that still
-  has someone left are simply omitted. Unsubscribe-origin entries count only
+  has someone left are simply omitted. When the suppression list alone empties
+  `to`, `POST /emails` keeps a metadata-only `suppressed` email, and each retry
+  with the same `Idempotency-Key` adds another; a topic opt-out, a batch item
+  and the SMTP relay keep nothing. Unsubscribe-origin entries count only
   when the send has a `topic_id`; bounce, complaint and manual entries always.
 - `to`, `cc` and `bcc` together cannot exceed 50 recipients, and each address
   must be a single mailbox — a display name containing `@` is rejected, and

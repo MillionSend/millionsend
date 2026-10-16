@@ -29,7 +29,10 @@ automatically. Suppressions are per team.
   entry are stripped from `to`/`cc`/`bcc`. If *every* `to` recipient is
   suppressed, the send is rejected with `422 all_recipients_suppressed`
   (message `All recipients are suppressed`; the SMTP relay answers `550` with
-  that message). An **unsubscribe** entry does not apply here: someone who
+  that message). A `POST /emails` refused this way keeps a metadata-only email
+  with status `suppressed` (no content, not counted toward your quota), and each
+  retry with the same `Idempotency-Key` adds another; the SMTP relay and batch
+  items keep nothing. An **unsubscribe** entry does not apply here: someone who
   opted out of marketing still receives password resets, receipts and other
   account mail — the same meaning Resend gives `unsubscribed` ("unsubscribed
   from all Broadcasts").
