@@ -415,7 +415,11 @@ describe("threads", () => {
       expect.stringContaining('aria-label="Purple"'),
     ]);
     expect(purple).toContain('role="radiogroup"');
-    expect(purple).toMatch(/<label class="ms-swatch custom" title="Custom color"><svg/);
+    // Named in the app's own tooltip, which shows on keyboard focus too.
+    expect(purple).toMatch(
+      /<span class="ms-tooltip-trigger inline"><label class="ms-swatch custom"><svg/,
+    );
+    expect(purple).not.toContain("title=");
     expect(purple).toContain(
       '<input type="color" class="ms-swatch-picker" aria-label="Custom color" value="#ab4aba"/>',
     );
@@ -437,7 +441,7 @@ describe("threads", () => {
       }),
     );
     expect(html).toMatch(
-      /<button type="button" class="ms-menu-trigger-bare"[^>]*aria-label="Back"/,
+      /<span class="ms-tooltip-trigger inline"><button type="button" class="ms-menu-trigger-bare"[^>]*aria-label="Back"/,
     );
     expect(html).toContain(">Edit label<");
     expect(html).toMatch(

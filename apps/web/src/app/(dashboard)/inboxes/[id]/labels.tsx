@@ -9,6 +9,7 @@ import { ChevronLeftIcon, TagIcon } from "@/components/icons/mail-icons";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { BtnSpinner } from "@/components/spinner";
 import { StatusDot } from "@/components/status-badge";
+import { Tooltip } from "@/components/tooltip";
 import { inLabelPalette, randomLabelColor } from "@/lib/label-colors";
 import { useTRPC } from "@/lib/trpc";
 import type { ThreadRow } from "../parts";
@@ -133,6 +134,7 @@ export function LabelsMenu({
         )
       }
       editLabel={t("labels.edit")}
+      editHint={t("labels.editHint")}
       renderEdit={(option, back) => {
         const label = labels.find((l) => l.id === option.value);
         return label ? (
@@ -195,20 +197,21 @@ export function LabelColorField({
             />
           ))}
         </div>
-        <label
-          className={custom ? "ms-swatch custom on" : "ms-swatch custom"}
-          style={custom ? { background: value } : undefined}
-          title={t("labels.custom")}
-        >
-          {custom ? null : <PlusGlyph size={10} />}
-          <input
-            type="color"
-            className="ms-swatch-picker"
-            aria-label={t("labels.custom")}
-            value={value.toLowerCase()}
-            onChange={(event) => onChange(event.target.value.toUpperCase())}
-          />
-        </label>
+        <Tooltip inline focusableChild text={t("labels.custom")}>
+          <label
+            className={custom ? "ms-swatch custom on" : "ms-swatch custom"}
+            style={custom ? { background: value } : undefined}
+          >
+            {custom ? null : <PlusGlyph size={10} />}
+            <input
+              type="color"
+              className="ms-swatch-picker"
+              aria-label={t("labels.custom")}
+              value={value.toLowerCase()}
+              onChange={(event) => onChange(event.target.value.toUpperCase())}
+            />
+          </label>
+        </Tooltip>
       </div>
     </div>
   );
@@ -266,16 +269,17 @@ export function LabelEditor({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 4px 8px" }}>
-        <button
-          type="button"
-          className="ms-menu-trigger-bare"
-          style={{ width: 24, height: 24 }}
-          aria-label={t("labels.back")}
-          title={t("labels.back")}
-          onClick={onDone}
-        >
-          <ChevronLeftIcon />
-        </button>
+        <Tooltip inline focusableChild text={t("labels.back")}>
+          <button
+            type="button"
+            className="ms-menu-trigger-bare"
+            style={{ width: 24, height: 24 }}
+            aria-label={t("labels.back")}
+            onClick={onDone}
+          >
+            <ChevronLeftIcon />
+          </button>
+        </Tooltip>
         <span style={{ font: "600 13px var(--ms-font-sans)", color: "var(--ms-bone)" }}>
           {t("labels.edit")}
         </span>

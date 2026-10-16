@@ -29,6 +29,7 @@
   "trashRetention": "Threads in Trash are deleted {days, plural, one {# day} other {# days}} after they're moved here.",
   "labels": {
     "edit": "Edit label",
+    "editHint": "Press the right arrow to edit this label",
     "back": "Back",
     "name": "Name",
     "color": "Color",

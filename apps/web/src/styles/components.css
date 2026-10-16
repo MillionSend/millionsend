@@ -2316,9 +2316,9 @@ summary:focus-visible,
 }
 .ms-tooltip {
   position: fixed;
-  /* Modal-level so a tooltip inside a modal wins; ties with the overlay
-     resolve by DOM order — the tooltip portal mounts after the modal's. */
-  z-index: var(--ms-z-modal);
+  /* The top layer: a tooltip names something in the modal or the portaled
+     menu it opened from, so it clears both. */
+  z-index: calc(var(--ms-z-menu) + 1);
   /* The max-width below is the whole panel, padding and border included,
      which is what tooltip.tsx clamps into the viewport. */
   box-sizing: border-box;

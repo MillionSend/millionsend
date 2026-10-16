@@ -55,7 +55,8 @@ export interface OptionGroup {
  *
  * With `renderEdit`, the hovered or arrowed-to row shows a pencil, and → on
  * it (past the end of the typed text) does the same: the panel swaps to the
- * row's edit view until it calls `back`, or Esc.
+ * row's edit view until it calls `back`, or Esc. Each row tells assistive
+ * tech about → with `editHint`, since the pencil is hidden from it.
  */
 export function GroupedMultiSelect({
   value,
@@ -75,6 +76,7 @@ export function GroupedMultiSelect({
   createLabel,
   createExtra,
   editLabel,
+  editHint,
   renderEdit,
   panelMinWidth,
   maxLength,
@@ -106,8 +108,10 @@ export function GroupedMultiSelect({
   createLabel?: (name: string) => string;
   /** Controls under the create row; `create` runs the row, as Enter on it does. */
   createExtra?: (name: string, create: () => void) => React.ReactNode;
-  /** The pencil's title. */
+  /** The pencil's title, and the edit view's name. */
   editLabel?: string;
+  /** How → opens a row's edit view, as each row's description. */
+  editHint?: string;
   renderEdit?: (option: GroupedOption, back: () => void) => React.ReactNode;
   /** Overrides the button trigger's panel width floor, for rows or controls wider than a name. */
   panelMinWidth?: number;
@@ -316,6 +320,9 @@ export function GroupedMultiSelect({
         type="button"
         role="option"
         aria-selected={checked}
+        {...(edit
+          ? { "aria-keyshortcuts": "ArrowRight", "aria-describedby": `${listboxId}-edit` }
+          : {})}
         tabIndex={-1}
         className={index === activeIndex ? "ms-menu-item active" : "ms-menu-item"}
         onMouseEnter={() => setActiveIndex(index)}
@@ -411,10 +418,20 @@ export function GroupedMultiSelect({
               }}
             >
               {editingOption && renderEdit ? (
-                // biome-ignore lint/a11y/noStaticElementInteractions: keydown only keeps Tab in the view and takes Esc back to the list
-                <div style={{ minHeight: 0, overflowY: "auto" }} onKeyDown={onControlsKeyDown}>
+                <fieldset
+                  aria-label={editLabel}
+                  style={{
+                    minWidth: 0,
+                    minHeight: 0,
+                    margin: 0,
+                    padding: 0,
+                    border: 0,
+                    overflowY: "auto",
+                  }}
+                  onKeyDown={onControlsKeyDown}
+                >
                   {renderEdit(editingOption, () => setEditing(null))}
-                </div>
+                </fieldset>
               ) : (
                 <>
                   <input
@@ -512,6 +529,11 @@ export function GroupedMultiSelect({
                       </>
                     ) : null}
                   </div>
+                  {renderEdit && editHint ? (
+                    <span id={`${listboxId}-edit`} hidden>
+                      {editHint}
+                    </span>
+                  ) : null}
                   {creatable && createExtra ? (
                     // biome-ignore lint/a11y/noStaticElementInteractions: keydown only keeps Tab in the panel and Esc closing it
                     <div onKeyDown={onControlsKeyDown}>

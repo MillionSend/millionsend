@@ -162,12 +162,20 @@ describe("the labels picker", () => {
   it("opens a label's edit view with → or the pencil, without picking it", async () => {
     const onChange = vi.fn();
     const search = await openMenu(onChange);
-    // The active row carries the pencil.
+    // The active row carries the pencil; assistive tech, which the pencil
+    // is hidden from, hears about → on every row.
     const pencil = $('.ms-menu [role="option"].active .ms-menu-edit');
     expect(pencil?.getAttribute("title")).toBe("Edit label");
+    for (const option of document.querySelectorAll('.ms-menu [role="option"]')) {
+      expect(option.getAttribute("aria-keyshortcuts")).toBe("ArrowRight");
+      const hint = document.getElementById(option.getAttribute("aria-describedby") ?? "");
+      expect(hint?.textContent).toBe("Press the right arrow to edit this label");
+    }
     await click(pencil);
     expect(onChange).not.toHaveBeenCalled();
     expect($<HTMLInputElement>('.ms-menu input[aria-label="Name"]')?.value).toBe("Billing");
+    // The view names itself as focus lands in it.
+    expect($('.ms-menu fieldset[aria-label="Edit label"] input[aria-label="Name"]')).not.toBeNull();
     expect($<HTMLInputElement>('.ms-menu .ms-swatch[aria-label="Green"]')?.checked).toBe(true);
 
     await click($('.ms-menu button[aria-label="Back"]'));

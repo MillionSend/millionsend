@@ -29,6 +29,7 @@
   "trashRetention": "As conversas na Lixeira são excluídas {days, plural, one {# dia} other {# dias}} depois de chegarem aqui.",
   "labels": {
     "edit": "Editar etiqueta",
+    "editHint": "Aperte a seta para a direita para editar esta etiqueta",
     "back": "Voltar",
     "name": "Nome",
     "color": "Cor",
