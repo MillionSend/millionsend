@@ -154,12 +154,15 @@ describe("send edge cases", () => {
   });
 
   it("records each refused all-suppressed send as a metadata-only suppressed email", async () => {
-    await db.insert(schema.suppressions).values({
-      teamId,
-      email: "gone@example.com",
-      emailHash: hashRecipient("gone@example.com"),
-      reason: "hard_bounce",
-    });
+    await db
+      .insert(schema.suppressions)
+      .values({
+        teamId,
+        email: "gone@example.com",
+        emailHash: hashRecipient("gone@example.com"),
+        reason: "hard_bounce",
+      })
+      .onConflictDoNothing();
     const rowsFor = () =>
       db.select().from(schema.emails).where(eq(schema.emails.subject, "refused-once"));
     const [usageBefore] = await db
@@ -173,6 +176,7 @@ describe("send edge cases", () => {
       to: ["gone@example.com"],
       subject: "refused-once",
       html: "<p>do not keep</p>",
+      tags: [{ name: "campaign", value: "spring" }],
     };
     expect((await post(body)).status).toBe(422);
     expect((await post(body)).status).toBe(422);
@@ -184,6 +188,7 @@ describe("send edge cases", () => {
     expect(row).toMatchObject({
       teamId,
       to: ["gone@example.com"],
+      tags: { campaign: "spring" },
       latestStatus: "suppressed",
       bodyCiphertext: null,
       sesMessageId: null,
@@ -253,6 +258,28 @@ describe("send edge cases", () => {
       .from(schema.emails)
       .where(eq(schema.emails.subject, "record-fails"));
     expect(rows).toHaveLength(0);
+  });
+
+  it("records another suppressed email for each retry under the same Idempotency-Key", async () => {
+    await db
+      .insert(schema.suppressions)
+      .values({
+        teamId,
+        email: "gone@example.com",
+        emailHash: hashRecipient("gone@example.com"),
+        reason: "hard_bounce",
+      })
+      .onConflictDoNothing();
+    const body = { ...validBody, to: ["gone@example.com"], subject: "refused-retried" };
+    // A refusal releases its key, so the retry runs again rather than replaying.
+    for (let i = 0; i < 2; i++) {
+      expect((await post(body, { "idempotency-key": "refused-retry" })).status).toBe(422);
+    }
+    const rows = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "refused-retried"));
+    expect(rows).toEqual([{ status: "suppressed" }, { status: "suppressed" }]);
   });
 
   it("does not record a suppressed email when a send is only partly suppressed", async () => {
@@ -1831,7 +1858,7 @@ describe("quota day of a scheduled send", () => {
   });
 });
 
-describe("email.scheduled webhook", () => {
+describe("webhooks fired at accept", () => {
   let hookApp: ReturnType<typeof createApi>;
   let hookToken: string;
   let endpointId: string;
@@ -1875,7 +1902,7 @@ describe("email.scheduled webhook", () => {
     });
   const body = { ...validBody, from: "A <a@scheduled-hooks.dev>" };
   const idOf = async (res: Response) => ((await res.json()) as { id: string }).id;
-  const scheduledFor = async (emailId: string) =>
+  const deliveriesFor = async (emailId: string) =>
     db.select().from(schema.webhookDeliveries).where(eq(schema.webhookDeliveries.emailId, emailId));
 
   it("fires for a send scheduled ahead, not for an immediate or backdated one", async () => {
@@ -1894,7 +1921,7 @@ describe("email.scheduled webhook", () => {
       }),
     );
 
-    const [delivery, ...more] = await scheduledFor(ahead);
+    const [delivery, ...more] = await deliveriesFor(ahead);
     expect(more).toEqual([]);
     expect(delivery).toMatchObject({ endpointId, eventType: "email.scheduled" });
     const payload = delivery?.payload as { data: Record<string, unknown> };
@@ -1907,8 +1934,8 @@ describe("email.scheduled webhook", () => {
       to: ["r@example.com"],
     });
     expect(handedOff).toContain(delivery?.id);
-    expect(await scheduledFor(now)).toEqual([]);
-    expect(await scheduledFor(backdated)).toEqual([]);
+    expect(await deliveriesFor(now)).toEqual([]);
+    expect(await deliveriesFor(backdated)).toEqual([]);
   });
 
   it("fires for a batch's scheduled items once the batch commits", async () => {
@@ -1920,10 +1947,51 @@ describe("email.scheduled webhook", () => {
     const { data } = (await res.json()) as { data: { id: string }[] };
     const [later, now] = data.map((item) => item.id);
 
-    const deliveries = await scheduledFor(later ?? "");
+    const deliveries = await deliveriesFor(later ?? "");
     expect(deliveries.map((d) => d.eventType)).toEqual(["email.scheduled"]);
     expect(handedOff).toContain(deliveries[0]?.id);
-    expect(await scheduledFor(now ?? "")).toEqual([]);
+    expect(await deliveriesFor(now ?? "")).toEqual([]);
+  });
+
+  it("fires email.suppressed for a refused send's record, handed to the queue after commit", async () => {
+    const [team] = await db
+      .select({ id: schema.domains.teamId })
+      .from(schema.domains)
+      .where(eq(schema.domains.name, "scheduled-hooks.dev"));
+    await db.insert(schema.suppressions).values({
+      teamId: team?.id ?? "",
+      email: "listed@example.com",
+      emailHash: hashRecipient("listed@example.com"),
+      reason: "complaint",
+    });
+    const res = await call("POST", "/emails", {
+      ...body,
+      to: ["listed@example.com"],
+      subject: "refused-hooked",
+    });
+    expect(res.status).toBe(422);
+    const [record] = await db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "refused-hooked"));
+
+    const deliveries = await deliveriesFor(record?.id ?? "");
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toMatchObject({ endpointId, eventType: "email.suppressed" });
+    expect(deliveries[0]?.payload).toMatchObject({
+      type: "email.suppressed",
+      data: {
+        email_id: record?.id,
+        to: ["listed@example.com"],
+        subject: "refused-hooked",
+        suppressed: {
+          type: "OnAccountSuppressionList",
+          message: "The recipient is on your suppression list.",
+          reason: "recipient_suppressed",
+        },
+      },
+    });
+    expect(handedOff).toContain(deliveries[0]?.id);
   });
 
   it("fires nothing more when the email is rescheduled", async () => {
@@ -1937,6 +2005,6 @@ describe("email.scheduled webhook", () => {
       scheduled_at: new Date(Date.now() + 7_200_000).toISOString(),
     });
     expect(res.status).toBe(200);
-    expect((await scheduledFor(id)).map((d) => d.eventType)).toEqual(["email.scheduled"]);
+    expect((await deliveriesFor(id)).map((d) => d.eventType)).toEqual(["email.scheduled"]);
   });
 });
