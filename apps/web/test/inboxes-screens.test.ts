@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { LABEL_COLORS } from "@millionsend/core/inbox-organize";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -117,6 +118,7 @@ const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-t
 const { ThreadsTab } = await vi.importActual<
   typeof import("@/app/(dashboard)/inboxes/[id]/threads-tab")
 >("@/app/(dashboard)/inboxes/[id]/threads-tab");
+const { LabelColorField, LabelEditor } = await import("@/app/(dashboard)/inboxes/[id]/labels");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
 const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
   await import("@/app/(dashboard)/inboxes/parts");
@@ -350,6 +352,10 @@ describe("threads", () => {
       /class="ms-tooltip-trigger inline" tabindex="0"><span id="[^"]+-dot" class="ms-dot" style="background:var\(--ms-bone\)" role="img" aria-label="Unread">/,
     );
     expect(render(false, true)).toContain('aria-label="Your agent hasn&#x27;t marked it read yet"');
+    // The row's label is the sans pill, without the header's ✕.
+    expect(read).toContain(
+      '<span class="ms-badge ms-badge-neutral ms-label-badge"><span class="ms-dot" style="background:#46A758" aria-hidden="true"></span>Billing</span>',
+    );
   });
 
   it("closes the open thread with an icon button named Close, the last control in its header", () => {
@@ -358,6 +364,10 @@ describe("threads", () => {
       /<span class="ms-tooltip-trigger inline"><button type="button" class="ms-btn ms-btn-icon" aria-label="Close"><svg[^>]*>(<path[^>]*><\/path>){2}<\/svg><\/button><\/span>$/,
     );
     expect(html).not.toContain("ms-btn-ghost");
+    // The same pill as the rows, keeping its ✕.
+    expect(tab("inbox")).toContain(
+      '<span class="ms-badge ms-badge-neutral ms-label-badge"><span class="ms-dot" style="background:#46A758" aria-hidden="true"></span>Billing<button type="button" aria-label="Remove Billing">✕</button></span>',
+    );
   });
 
   it("puts Not spam before Move in Spam, Restore in Trash, and neither elsewhere", () => {
@@ -381,6 +391,9 @@ describe("threads", () => {
     const html = tab("spam", { expired: true });
     expect(header(html)).toContain('aria-label="Close"');
     expect(header(html)).not.toMatch(/Not spam|aria-label="Move"|aria-label="Labels"|More actions/);
+    // Its labels show, with no ✕ to take them off.
+    expect(html).toContain("ms-label-badge");
+    expect(html).not.toContain("Remove Billing");
   });
 
   it("says over Trash how long it keeps a thread, from core's own number", () => {
@@ -389,6 +402,54 @@ describe("threads", () => {
       `<p style="margin:-4px 0 12px;font-size:12.5px;color:var(--ms-muted)">${line}</p>`,
     );
     expect(tab("spam")).not.toContain(line);
+  });
+
+  it("offers the palette as swatches, the pick checked, and a dashed custom one", () => {
+    const field = (value: string) =>
+      renderToStaticMarkup(createElement(LabelColorField, { value, onChange: () => {} }));
+    const swatches = (html: string) =>
+      [...html.matchAll(/<input type="radio"[^>]*>/g)].map((match) => match[0]);
+    const purple = field("#AB4ABA");
+    expect(swatches(purple)).toHaveLength(Object.keys(LABEL_COLORS).length);
+    expect(swatches(purple).filter((swatch) => swatch.includes('checked=""'))).toEqual([
+      expect.stringContaining('aria-label="Purple"'),
+    ]);
+    expect(purple).toContain('role="radiogroup"');
+    expect(purple).toMatch(/<label class="ms-swatch custom" title="Custom color"><svg/);
+    expect(purple).toContain(
+      '<input type="color" class="ms-swatch-picker" aria-label="Custom color" value="#ab4aba"/>',
+    );
+    // A color off the palette fills the custom swatch, and checks none of the others.
+    const custom = field("#123456");
+    expect(swatches(custom).some((swatch) => swatch.includes("checked"))).toBe(false);
+    expect(custom).toContain('<label class="ms-swatch custom on" style="background:#123456"');
+    // Every swatch has a name to read out, in both languages.
+    expect(Object.keys(en.inboxes.labels.colors)).toEqual(Object.keys(LABEL_COLORS));
+  });
+
+  it("edits a label in the picker: back, name, the same swatches, delete and save", () => {
+    const html = renderToStaticMarkup(
+      createElement(LabelEditor, {
+        inboxId: "i1",
+        label: billing,
+        labels: [billing, { id: "l2", name: "Follow-up", color: "#F76B15" }],
+        onDone: () => {},
+      }),
+    );
+    expect(html).toMatch(
+      /<button type="button" class="ms-menu-trigger-bare"[^>]*aria-label="Back"/,
+    );
+    expect(html).toContain(">Edit label<");
+    expect(html).toMatch(
+      /<input class="ms-input"[^>]*aria-label="Name" maxLength="64" value="Billing"/,
+    );
+    expect(html).toMatch(/aria-label="Green" name="[^"]+" checked=""/);
+    expect(html).toContain(
+      '<button type="button" class="ms-menu-item danger" style="width:auto">Delete label</button>',
+    );
+    expect(html).toMatch(
+      /<button type="submit" class="ms-btn ms-btn-primary ms-btn-sm">.*Save<\/button>/,
+    );
   });
 });
 

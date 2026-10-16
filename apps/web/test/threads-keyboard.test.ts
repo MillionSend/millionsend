@@ -64,8 +64,12 @@ vi.mock("@/lib/trpc", () => {
   return { useTRPC: () => root };
 });
 
+const { LabelsMenu } = await import("@/app/(dashboard)/inboxes/[id]/labels");
 const { ThreadsTab } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
 const { useEscape } = await import("@/lib/use-escape");
+
+const billing = { id: "l1", name: "Billing", color: "#46A758" };
+const followUp = { id: "l2", name: "Follow-up", color: "#F76B15" };
 
 let container: HTMLDivElement;
 let root: Root;
@@ -88,6 +92,14 @@ afterEach(async () => {
 
 const $ = <T extends Element = HTMLElement>(selector: string) =>
   document.querySelector<T & Element>(selector);
+/** Types into a controlled field the way React hears it. */
+async function type(field: HTMLInputElement, text: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(field, text);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
 async function press(target: Element, key: string) {
   await act(async () => {
     target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
@@ -96,6 +108,143 @@ async function press(target: Element, key: string) {
 async function click(target: Element | null) {
   await act(async () => (target as HTMLElement).click());
 }
+
+async function openMenu(onChange = vi.fn(), onCreated = vi.fn()) {
+  await act(async () =>
+    root.render(
+      createElement(LabelsMenu, {
+        inboxId: "i1",
+        labels: [billing, followUp],
+        value: [billing.id],
+        onChange,
+        onCreated,
+      }),
+    ),
+  );
+  await click($('[role="combobox"]'));
+  return $<HTMLInputElement>(".ms-menu-search") as HTMLInputElement;
+}
+
+describe("the labels picker", () => {
+  it("creates a new name in the swatch picked under it, or the random one Enter alone keeps", async () => {
+    const onCreated = vi.fn();
+    const search = await openMenu(vi.fn(), onCreated);
+    expect($(".ms-swatches")).toBeNull();
+    await type(search, "Refund");
+    const radios = [
+      ...document.querySelectorAll<HTMLInputElement>(".ms-menu .ms-swatch[type=radio]"),
+    ];
+    expect(radios).toHaveLength(11);
+    const random = radios.filter((radio) => radio.checked);
+    expect(random).toHaveLength(1);
+    expect($('.ms-menu input[type="color"]')?.getAttribute("aria-label")).toBe("Custom color");
+    await press(search, "Enter");
+    expect(sent.create).toHaveBeenLastCalledWith({
+      inboxId: "i1",
+      name: "Refund",
+      color: random[0]?.value,
+    });
+    // Made, it goes on the thread, and the search clears for the next pick.
+    expect(onCreated).toHaveBeenCalledWith({ id: "l9", name: "Refund", color: random[0]?.value });
+    expect(search.value).toBe("");
+
+    await type(search, "Refund later");
+    await click($('.ms-menu .ms-swatch[aria-label="Purple"]'));
+    await press(search, "Enter");
+    expect(sent.create).toHaveBeenLastCalledWith({
+      inboxId: "i1",
+      name: "Refund later",
+      color: "#AB4ABA",
+    });
+  });
+
+  it("opens a label's edit view with → or the pencil, without picking it", async () => {
+    const onChange = vi.fn();
+    const search = await openMenu(onChange);
+    // The active row carries the pencil.
+    const pencil = $('.ms-menu [role="option"].active .ms-menu-edit');
+    expect(pencil?.getAttribute("title")).toBe("Edit label");
+    await click(pencil);
+    expect(onChange).not.toHaveBeenCalled();
+    expect($<HTMLInputElement>('.ms-menu input[aria-label="Name"]')?.value).toBe("Billing");
+    expect($<HTMLInputElement>('.ms-menu .ms-swatch[aria-label="Green"]')?.checked).toBe(true);
+
+    await click($('.ms-menu button[aria-label="Back"]'));
+    const back = $<HTMLInputElement>(".ms-menu-search");
+    expect(back).not.toBeNull();
+    // Inside the typed text → moves the caret; past its end it opens the row.
+    await type(back as HTMLInputElement, "foll");
+    (back as HTMLInputElement).setSelectionRange(1, 1);
+    await press(back as HTMLInputElement, "ArrowRight");
+    expect($(".ms-menu-search")).not.toBeNull();
+    (back as HTMLInputElement).setSelectionRange(4, 4);
+    await press(back as HTMLInputElement, "ArrowRight");
+    expect($<HTMLInputElement>('.ms-menu input[aria-label="Name"]')?.value).toBe("Follow-up");
+    expect(search.isConnected).toBe(false);
+  });
+
+  it("saves only what changed, and refuses a name another label has before sending it", async () => {
+    const search = await openMenu();
+    await press(search, "ArrowRight");
+    const name = $<HTMLInputElement>('.ms-menu input[aria-label="Name"]') as HTMLInputElement;
+    await type(name, "follow-UP");
+    expect($(".ms-menu .ms-field-error")?.textContent).toBe(
+      "A label with this name already exists.",
+    );
+    expect($<HTMLButtonElement>('.ms-menu button[type="submit"]')?.disabled).toBe(true);
+
+    await type(name, " Invoices ");
+    expect($(".ms-menu .ms-field-error")).toBeNull();
+    await click($('.ms-menu button[type="submit"]'));
+    expect(sent.update).toHaveBeenLastCalledWith({
+      inboxId: "i1",
+      labelId: "l1",
+      name: "Invoices",
+    });
+
+    await click($('.ms-menu .ms-swatch[aria-label="Cyan"]'));
+    await type(name, "Billing");
+    await click($('.ms-menu button[type="submit"]'));
+    expect(sent.update).toHaveBeenLastCalledWith({
+      inboxId: "i1",
+      labelId: "l1",
+      color: "#00A2C7",
+    });
+  });
+
+  it("deletes a label only once its confirm, in place, says yes", async () => {
+    const search = await openMenu();
+    await press(search, "ArrowRight");
+    const ask = () => $(".ms-menu button.ms-menu-item.danger");
+    await click(ask());
+    expect($(".ms-menu p")?.textContent).toBe("Delete “Billing”? It's removed from every thread.");
+    // The safe answer takes focus; backing out returns it to the button that asked.
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    await click(document.activeElement);
+    expect(document.activeElement).toBe(ask());
+    expect(sent.delete).not.toHaveBeenCalled();
+
+    await click(ask());
+    await click($(".ms-menu .ms-btn-destructive"));
+    expect(sent.delete).toHaveBeenCalledWith({ inboxId: "i1", labelId: "l1" });
+  });
+
+  it("keeps Tab inside the panel while it holds more than its search, and Esc steps back", async () => {
+    const search = await openMenu();
+    await press(search, "ArrowRight");
+    const back = $('.ms-menu button[aria-label="Back"]') as HTMLElement;
+    const save = $('.ms-menu button[type="submit"]') as HTMLElement;
+    await act(async () => save.focus());
+    await press(save, "Tab");
+    expect(document.activeElement).toBe(back);
+    await press(document.activeElement as Element, "Escape");
+    // Out of the edit view, back to the list; one more Esc closes the menu.
+    const list = $(".ms-menu-search") as HTMLElement;
+    expect(list).not.toBeNull();
+    await press(list, "Escape");
+    expect($(".ms-menu")).toBeNull();
+  });
+});
 
 describe("Esc on the page", () => {
   function Probe({ onEscape }: { onEscape: () => void }) {

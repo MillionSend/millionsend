@@ -29,3 +29,33 @@ const ESC_LAYERS = '.ms-menu, .ms-tooltip, [role="dialog"], .ms-drawer-scrim';
 export function escapeTaken(target: EventTarget | null): boolean {
   return shortcutBlocked(target) || document.querySelector(ESC_LAYERS) !== null;
 }
+
+/** Tab stops inside a panel that runs its own focus loop (dialogs, anchored editors). */
+export const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Keeps Tab inside `panel` while focus is in it: past the last stop it wraps
+ * to the first, and Shift+Tab the other way. False when focus is outside the
+ * panel or the panel has no other stop, so Tab may leave.
+ */
+export function loopTab(
+  event: Pick<KeyboardEvent, "shiftKey" | "preventDefault">,
+  panel: HTMLElement | null,
+): boolean {
+  if (!panel?.contains(document.activeElement)) return false;
+  const stops = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => el.tabIndex >= 0,
+  );
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if (!first || !last || first === last) return false;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+  return true;
+}

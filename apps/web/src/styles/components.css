@@ -594,6 +594,90 @@ table.ms-table {
     min-height: 0;
   }
 }
+/* A label's pill, in thread rows and under the open thread's title: the
+   neutral badge led by the label's color dot (inboxes/[id]/labels.tsx). */
+.ms-label-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The labels picker: the pencil on its active row, and the color swatches its
+   create row and edit view share. A palette swatch is a radio drawn as its
+   color, ringed in bone once picked; the dashed one opens the native picker
+   through the color input laid over it, and fills with a custom pick. */
+.ms-menu-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px -3px 2px;
+  border-radius: 6px;
+  color: var(--ms-muted);
+  cursor: pointer;
+}
+.ms-menu-edit:hover {
+  background: var(--ms-line);
+  color: var(--ms-bone);
+}
+.ms-swatches,
+.ms-swatches > [role="radiogroup"] {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ms-swatches {
+  padding: 4px 8px 8px;
+}
+.ms-swatch {
+  appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.ms-swatch:checked,
+.ms-swatch.on {
+  outline: 1.5px solid var(--ms-bone);
+  outline-offset: 2px;
+}
+.ms-swatch.custom {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--ms-faint);
+  color: var(--ms-muted);
+  transition:
+    color var(--ms-dur-fast) var(--ms-ease),
+    border-color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-swatch.custom:hover {
+  border-color: var(--ms-muted);
+  color: var(--ms-bone);
+}
+.ms-swatch.custom.on {
+  border-color: transparent;
+}
+.ms-swatch.custom:has(:focus-visible) {
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-swatch-picker {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
 
 /* Inputs. A fieldset's legend labels its group like any field's label. */
 .ms-field label,
@@ -750,7 +834,8 @@ table.ms-table {
     animation: none;
   }
 }
-.ms-chip button {
+.ms-chip button,
+.ms-label-badge button {
   background: none;
   border: 0;
   color: var(--ms-muted);
@@ -764,7 +849,8 @@ table.ms-table {
   flex-shrink: 0;
   transition: color var(--ms-dur-fast) var(--ms-ease);
 }
-.ms-chip button:hover {
+.ms-chip button:hover,
+.ms-label-badge button:hover {
   color: var(--ms-bone);
 }
 /* Chips inside the token input (chip-multi-select.tsx) are 20px, so one never
@@ -2963,6 +3049,7 @@ summary:focus-visible,
   .ms-modal-close,
   .ms-tooltip-trigger:not(.inline),
   .ms-chip button,
+  .ms-label-badge button,
   button.ms-notice-strip-action,
   .ms-crumb {
     position: relative;
@@ -2970,6 +3057,7 @@ summary:focus-visible,
   .ms-modal-close::after,
   .ms-tooltip-trigger:not(.inline)::after,
   .ms-chip button::after,
+  .ms-label-badge button::after,
   button.ms-notice-strip-action::after {
     content: "";
     position: absolute;

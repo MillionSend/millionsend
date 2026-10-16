@@ -7,14 +7,12 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
 import { DraftBanner } from "@/components/draft-banner";
-import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import {
   ArchiveIcon,
   FolderInputIcon,
   InboxIcon,
   RestoreIcon,
   SpamIcon,
-  TagIcon,
   TrashIcon,
   XIcon,
 } from "@/components/icons/mail-icons";
@@ -48,6 +46,7 @@ import {
   type ThreadRow,
   TrustBadge,
 } from "../parts";
+import { LabelBadge, LabelsMenu } from "./labels";
 
 const FOLDERS = ["inbox", "archive", "spam", "sent", "trash"] as const;
 const MOVE_TO = ["inbox", "archive", "spam", "trash"] as const;
@@ -268,10 +267,7 @@ export function ThreadListRow({
             <SuspiciousBadge injection={row.injection_score} phishing={row.phishing_score} />
           ) : null}
           {row.labels.map((label) => (
-            <span key={label.id} className="ms-badge ms-badge-neutral">
-              <StatusDot color={label.color} />
-              {label.name}
-            </span>
+            <LabelBadge key={label.id} label={label} />
           ))}
         </span>
         {/* No handler of its own: its click, Enter's included, bubbles to the row. */}
@@ -307,7 +303,6 @@ function ThreadPane({
   onClose: () => void;
 }) {
   const t = useTranslations("inboxes");
-  const tc = useTranslations("common");
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -329,16 +324,6 @@ function ThreadPane({
   const update = useMutation(
     trpc.inboxes.threads.update.mutationOptions({
       onSuccess: refresh,
-      onError: (error) => toast(error.message, "danger"),
-    }),
-  );
-  // A label made here is applied to the open thread at once.
-  const createLabel = useMutation(
-    trpc.inboxes.labels.create.mutationOptions({
-      onSuccess: (label) => {
-        void queryClient.invalidateQueries({ queryKey: trpc.inboxes.labels.pathKey() });
-        update.mutate({ ...ref, labelId: label.id });
-      },
       onError: (error) => toast(error.message, "danger"),
     }),
   );
@@ -445,29 +430,10 @@ function ThreadPane({
                 />
                 {/* ponytail: the ✓ follows the refetch, so a second toggle of one label
                     before it lands repeats the first; keep a pending value if that bites. */}
-                <GroupedMultiSelect
-                  button
-                  ariaLabel={t("addLabel")}
-                  summary={
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                      <TagIcon />
-                      {t("addLabel")}
-                    </span>
-                  }
+                <LabelsMenu
+                  inboxId={inbox.id}
+                  labels={labels.data ?? []}
                   value={labelIds}
-                  options={(labels.data ?? []).map((label) => ({
-                    value: label.id,
-                    label: label.name,
-                    group: "labels",
-                    adornment: <StatusDot color={label.color} />,
-                  }))}
-                  groups={[{ key: "labels", label: "" }]}
-                  searchPlaceholder={t("labelSearch")}
-                  noResultsLabel={tc("select.noResults")}
-                  // labels.create takes 64 characters at most.
-                  maxLength={64}
-                  onCreate={(name) => createLabel.mutate({ inboxId: inbox.id, name })}
-                  createLabel={(name) => t("createLabel", { name })}
                   onChange={(next) => {
                     // A pick toggles one row: the id that differs says which, and how.
                     const added = next.find((id) => !labelIds.includes(id));
@@ -475,6 +441,8 @@ function ThreadPane({
                     if (added) update.mutate({ ...ref, labelId: added });
                     else if (removed) update.mutate({ ...ref, removeLabelId: removed });
                   }}
+                  // A label made here goes on the open thread at once.
+                  onCreated={(label) => update.mutate({ ...ref, labelId: label.id })}
                 />
                 <PopoverMenu
                   boxed
@@ -518,18 +486,13 @@ function ThreadPane({
       {summary && summary.labels.length > 0 ? (
         <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {summary.labels.map((label) => (
-            <span key={label.id} className="ms-chip">
-              <StatusDot color={label.color} />
-              {label.name}
-              <button
-                type="button"
-                aria-label={t("removeLabel", { label: label.name })}
-                disabled={inbox.expired}
-                onClick={() => update.mutate({ ...ref, removeLabelId: label.id })}
-              >
-                ✕
-              </button>
-            </span>
+            <LabelBadge
+              key={label.id}
+              label={label}
+              {...(inbox.expired
+                ? {}
+                : { onRemove: () => update.mutate({ ...ref, removeLabelId: label.id }) })}
+            />
           ))}
         </span>
       ) : null}
