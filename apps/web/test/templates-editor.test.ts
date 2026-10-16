@@ -8,7 +8,9 @@ import type { EditorInitial } from "@/app/(dashboard)/templates/editor";
 import {
   blocksCopyName,
   bodyEditorMode,
+  followingText,
   htmlCopyName,
+  plainTextSource,
   templateSaveInput,
 } from "@/lib/template-mode";
 
@@ -28,17 +30,25 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/templates",
   useSearchParams: () => new URLSearchParams(),
 }));
-// The block editor never loads in tests: its loader is replaced by a marker.
-vi.mock("next/dynamic", () => ({
-  default: () => () => createElement("div", { "data-block-editor": "" }),
-}));
 const rq = vi.hoisted(() => ({
   infinite: { data: undefined as unknown, isPending: false, isError: false, hasNextPage: false },
   save: vi.fn(),
   render: vi.fn(),
+  /** What the debounced email.render query holds; every other query is empty. */
+  rendered: { data: undefined as unknown },
+  /** The props the block editor last mounted with. */
+  blockEditor: null as null | { value: { document: unknown; html: string }; convertHtml?: boolean },
+}));
+// The block editor never loads in tests: its loader is replaced by a marker.
+vi.mock("next/dynamic", () => ({
+  default: () => (props: NonNullable<typeof rq.blockEditor>) => {
+    rq.blockEditor = props;
+    return createElement("div", { "data-block-editor": "" });
+  },
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: undefined }),
+  useQuery: (options?: { input?: object }) =>
+    options?.input && "document" in options.input ? rq.rendered : { data: undefined },
   useInfiniteQuery: () => rq.infinite,
   useMutation: () => ({ mutateAsync: rq.save, mutate: vi.fn(), isPending: false, isError: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn(), fetchQuery: rq.render }),
@@ -53,9 +63,33 @@ vi.mock("@/lib/trpc", () => {
   return { useTRPC: () => proxy };
 });
 // Portals cannot render statically; the dialog's frame is inlined instead.
+// Its hidden button stands in for Esc and the overlay click, which call onClose.
 vi.mock("@/components/modal", () => ({
-  Modal: ({ open, title, children }: { open: boolean; title?: string; children: unknown }) =>
-    open ? createElement("div", { role: "dialog" }, title, children as never) : null,
+  Modal: ({
+    open,
+    title,
+    children,
+    onClose,
+  }: {
+    open: boolean;
+    title?: string;
+    children: unknown;
+    onClose: () => void;
+  }) =>
+    open
+      ? createElement(
+          "div",
+          { role: "dialog", "aria-modal": "true" },
+          createElement("button", {
+            type: "button",
+            hidden: true,
+            "data-escape": "",
+            onClick: onClose,
+          }),
+          title,
+          children as never,
+        )
+      : null,
 }));
 
 const { TemplateEditor } = await import("@/app/(dashboard)/templates/editor");
@@ -82,10 +116,11 @@ describe("template mode recovery", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
     localStorage.clear();
     rq.save.mockReset().mockResolvedValue({ id: HTML_ROW.id });
     rq.render.mockReset().mockResolvedValue({ html: "<p>Current</p>", text: "Current" });
+    rq.rendered = { data: undefined };
+    rq.blockEditor = null;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -106,6 +141,28 @@ describe("template mode recovery", () => {
     );
     expect(button, label).toBeDefined();
     await act(async () => button?.click());
+  }
+
+  /** Types into a field the way the browser does: set the value, fire input. */
+  async function type(selector: string, value: string) {
+    const field = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
+    expect(field, selector).not.toBeNull();
+    const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement : HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(proto.prototype, "value")?.set?.call(field, value);
+      field?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  const BLOCKS = { type: "doc", content: [{ type: "image" }] };
+
+  /** A saved block template, switched to HTML in place. */
+  async function switchedRow() {
+    await act(async () =>
+      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: BLOCKS } })),
+    );
+    await click("templates.html.editAsHtml");
+    await click("templates.html.convertInPlace");
   }
 
   async function recover(data: object, initial: EditorInitial = HTML_ROW) {
@@ -160,15 +217,17 @@ describe("template mode recovery", () => {
   });
 
   it("renders a block body through the dialog and saves the resulting HTML", async () => {
-    const content = { type: "doc", content: [{ type: "image" }] };
     await act(async () =>
-      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: content } })),
+      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: BLOCKS } })),
     );
     await click("templates.html.editAsHtml");
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     expect(rq.render).not.toHaveBeenCalled();
-    await click("templates.html.switchInPlace");
-    expect(rq.render).toHaveBeenCalledExactlyOnceWith({ input: { document: content } });
+    await click("templates.html.convertInPlace");
+    expect(rq.render).toHaveBeenCalledExactlyOnceWith({
+      input: { document: BLOCKS },
+      retry: false,
+    });
     expect(container.querySelector<HTMLTextAreaElement>("#tpl-html")?.value).toBe("<p>Current</p>");
     expect(rq.save).not.toHaveBeenCalled();
     await click("templates.editor.save");
@@ -178,13 +237,15 @@ describe("template mode recovery", () => {
   });
 
   it("duplicates a block body as HTML without updating the original row", async () => {
-    const content = { type: "doc", content: [{ type: "image" }] };
     await act(async () =>
-      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: content } })),
+      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: BLOCKS } })),
     );
     await click("templates.html.editAsHtml");
     await click("templates.html.switchCopy");
-    expect(rq.render).toHaveBeenCalledExactlyOnceWith({ input: { document: content } });
+    expect(rq.render).toHaveBeenCalledExactlyOnceWith({
+      input: { document: BLOCKS },
+      retry: false,
+    });
     expect(rq.save).toHaveBeenCalledExactlyOnceWith({
       name: "Legacy (HTML)",
       subject: "",
@@ -193,6 +254,128 @@ describe("template mode recovery", () => {
       document: null,
     });
     expect(container.querySelector("[data-block-editor]")).not.toBeNull();
+  });
+
+  it("keeps a switched body's plain text following its HTML", async () => {
+    await switchedRow();
+    await type("textarea#tpl-html", "<p>Rewritten</p>");
+    await click("templates.editor.save");
+    expect(rq.save).toHaveBeenCalledWith(
+      expect.objectContaining({ html: "<p>Rewritten</p>", text: "Rewritten", document: null }),
+    );
+  });
+
+  it("sends plain text an API caller wrote as stored", async () => {
+    const initial = { ...HTML_ROW, html: "<p>A</p>", text: "Written by hand" };
+    await act(async () => root.render(createElement(TemplateEditor, { initial })));
+    await click("templates.html.editHtml");
+    await type("textarea#tpl-html", "<p>B</p>");
+    await click("templates.editor.save");
+    expect(rq.save).toHaveBeenCalledWith(
+      expect.objectContaining({ html: "<p>B</p>", text: "Written by hand" }),
+    );
+  });
+
+  it("gives a new template written as HTML a plain-text part from that HTML", async () => {
+    await act(async () => root.render(createElement(TemplateEditor)));
+    await click("templates.html.editAsHtml");
+    await type("#tpl-name", "Welcome");
+    await type("textarea#tpl-html", "<h1>Hi</h1><p>There</p>");
+    await click("templates.editor.save");
+    expect(rq.save).toHaveBeenCalledWith(
+      expect.objectContaining({ html: "<h1>Hi</h1><p>There</p>", text: "Hi\n\nThere" }),
+    );
+  });
+
+  it("puts the blocks back exactly while the switch is unsaved", async () => {
+    await switchedRow();
+    expect(document.activeElement?.id).toBe("tpl-html");
+    await click("templates.html.backToBlocks");
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(rq.blockEditor?.value.document).toBe(BLOCKS);
+    await click("templates.editor.save");
+    expect(rq.save).toHaveBeenCalledWith(expect.objectContaining({ document: BLOCKS }));
+  });
+
+  it("asks before Back to blocks discards HTML edits", async () => {
+    await switchedRow();
+    await type("textarea#tpl-html", "<p>Edited</p>");
+    await click("templates.html.backToBlocks");
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain(
+      "templates.html.backTitle",
+    );
+    expect(container.querySelector("[data-block-editor]")).toBeNull();
+    await click("templates.html.backDiscard");
+    expect(rq.blockEditor?.value.document).toBe(BLOCKS);
+  });
+
+  it("converts back from the saved HTML, not the old blocks, once the switch is saved", async () => {
+    await switchedRow();
+    await click("templates.editor.save");
+    expect(container.textContent).not.toContain("templates.html.backToBlocks");
+    await click("templates.editor.previewTab");
+    await click("templates.html.convert");
+    await click("templates.html.convertInPlace");
+    expect(rq.blockEditor?.value).toEqual({ document: null, html: "<p>Current</p>" });
+    expect(rq.blockEditor?.convertHtml).toBe(true);
+  });
+
+  it("leaves the page's save shortcuts alone while a dialog is open", async () => {
+    await act(async () =>
+      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: BLOCKS } })),
+    );
+    await click("templates.html.editAsHtml");
+    const press = (key: string) =>
+      act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: true })));
+    await press("Enter");
+    await press("s");
+    expect(rq.save).not.toHaveBeenCalled();
+    await click("common.cancel");
+    await press("s");
+    expect(rq.save).toHaveBeenCalledOnce();
+  });
+
+  it("offers no duplicate when a template that was never saved converts to blocks", async () => {
+    await act(async () => root.render(createElement(TemplateEditor)));
+    await click("templates.html.editAsHtml");
+    await type("textarea#tpl-html", "<p>Hand-written</p>");
+    await click("templates.editor.previewTab");
+    await click("templates.html.convert");
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain("templates.html.convertInPlace");
+    expect(dialog?.textContent).not.toContain("templates.html.convertCopy");
+  });
+
+  it("reports a failed render inside the dialog, which can't be dismissed while it runs", async () => {
+    let fail: (reason: Error) => void = () => {};
+    rq.render.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    await act(async () =>
+      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: BLOCKS } })),
+    );
+    await click("templates.html.editAsHtml");
+    await click("templates.html.convertInPlace");
+    const cancel = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.startsWith("common.cancel"),
+    );
+    expect(cancel?.disabled).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>("[data-escape]")?.click());
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => fail(new Error("render failed")));
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain(
+      "templates.html.switchError",
+    );
+    expect(cancel?.disabled).toBe(false);
+    expect(container.querySelector("[data-block-editor]")).not.toBeNull();
+  });
+
+  it("never lets a render that lands after the switch overwrite the source", async () => {
+    rq.rendered = { data: { html: "<p>Stale</p>", text: "Stale" } };
+    await switchedRow();
+    expect(container.querySelector<HTMLTextAreaElement>("#tpl-html")?.value).toBe("<p>Current</p>");
   });
 });
 
@@ -267,7 +450,7 @@ describe("code mode panes", () => {
       onChange: () => {},
       mergeFields: [],
       previewSamples: {},
-      hasText: false,
+      text: "",
     }),
   );
   const source = out.indexOf('class="ms-tpl-code-source"');
@@ -289,6 +472,22 @@ describe("code mode panes", () => {
     expect(out.slice(0, source)).not.toContain("toolbar.variables");
     // The pane switch for narrow widths is all that sits above the panes.
     expect(out.slice(0, source)).toContain("ms-tpl-code-tabs");
+  });
+
+  it("says where the plain-text part comes from", () => {
+    const hint = (html: string, text: string) =>
+      renderToStaticMarkup(
+        createElement(HtmlCodeMode, {
+          html,
+          onChange: () => {},
+          mergeFields: [],
+          previewSamples: {},
+          text,
+        }),
+      );
+    expect(out).toContain("templates.html.textNone");
+    expect(hint("<p>Hi</p>", "Hi")).toContain("templates.html.textDerived");
+    expect(hint("<p>Hi</p>", "Written by hand")).toContain("templates.html.textStored");
   });
 
   it("previews in a same-origin, script-less frame so the scroll survives updates, with links let out", () => {
@@ -324,6 +523,25 @@ describe("code-mode save", () => {
   });
 });
 
+describe("code-mode plain text", () => {
+  it("follows the html while it was derived from it", () => {
+    expect(followingText("Old", "<p>Old</p>", "<p>New</p>")).toBe("New");
+    // A body started as HTML: nothing yet, so the first source decides.
+    expect(followingText("", "", "<p>Hi</p>")).toBe("Hi");
+  });
+
+  it("keeps text an API caller supplied, or left out, as stored", () => {
+    expect(followingText("Written by hand", "<p>Old</p>", "<p>New</p>")).toBe("Written by hand");
+    expect(followingText("", "<p>Old</p>", "<p>New</p>")).toBe("");
+  });
+
+  it("names where the text comes from", () => {
+    expect(plainTextSource("Old", "<p>Old</p>")).toBe("derived");
+    expect(plainTextSource("Written by hand", "<p>Old</p>")).toBe("stored");
+    expect(plainTextSource("", "<p>Old</p>")).toBe("none");
+  });
+});
+
 describe("convert-to-blocks dialog", () => {
   it("offers the duplicate (primary) and in-place (destructive) actions", () => {
     const out = renderToStaticMarkup(
@@ -338,7 +556,7 @@ describe("convert-to-blocks dialog", () => {
     );
     expect(out).toContain("templates.html.convertTitle");
     expect(out).toContain("templates.html.convertBody");
-    expect(out).toMatch(/ms-btn-destructive"[^>]*>templates\.html\.convertInPlace</);
+    expect(out).toMatch(/ms-btn-destructive"[^>]*>(<[^>]*>)*templates\.html\.convertInPlace</);
     expect(out).toMatch(/ms-btn-primary"[^>]*>(<[^>]*>)*templates\.html\.convertCopy /);
     // Flow order: Cancel, then the in-place (destructive) choice, then the primary.
     expect(out.indexOf("common.cancel")).toBeLessThan(out.indexOf("ms-btn-destructive"));
@@ -356,7 +574,7 @@ describe("convert-to-blocks dialog", () => {
     );
     expect(out).not.toContain("ms-btn-primary");
     expect(out).not.toContain("templates.html.convertCopy");
-    expect(out).toMatch(/ms-btn-destructive"[^>]*>broadcasts\.composer\.convertInPlace /);
+    expect(out).toMatch(/ms-btn-destructive"[^>]*>(<[^>]*>)*broadcasts\.composer\.convertInPlace /);
   });
 
   it("renders nothing while closed", () => {
@@ -379,15 +597,15 @@ describe("edit-as-html dialog", () => {
     const out = renderToStaticMarkup(
       createElement(SwitchHtmlDialog, {
         open: true,
-        busy: false,
         onClose: () => {},
         onDuplicate: () => {},
         onSwitchInPlace: () => {},
+        inPlaceLabel: "templates.html.convertInPlace",
       }),
     );
     expect(out).toContain("templates.html.switchTitle");
     expect(out).toContain("templates.html.switchBody");
-    expect(out).toMatch(/ms-btn-destructive"[^>]*>templates\.html\.switchInPlace</);
+    expect(out).toMatch(/ms-btn-destructive"[^>]*>(<[^>]*>)*templates\.html\.convertInPlace</);
     expect(out).toMatch(/ms-btn-primary"[^>]*>(<[^>]*>)*templates\.html\.switchCopy /);
     expect(out.indexOf("ms-btn-destructive")).toBeLessThan(out.indexOf("ms-btn-primary"));
   });
@@ -399,11 +617,36 @@ describe("edit-as-html dialog", () => {
         onClose: () => {},
         onDuplicate: undefined,
         onSwitchInPlace: () => {},
+        inPlaceLabel: "templates.html.convertInPlace",
       }),
     );
     expect(out).not.toContain("ms-btn-primary");
     expect(out).not.toContain("templates.html.switchCopy");
-    expect(out).toMatch(/ms-btn-destructive"[^>]*>templates\.html\.switchInPlace /);
+    expect(out).toMatch(/ms-btn-destructive"[^>]*>(<[^>]*>)*templates\.html\.convertInPlace /);
+  });
+
+  it("shows a failure inside the dialog, and locks every button while an action runs", () => {
+    const failed = renderToStaticMarkup(
+      createElement(SwitchHtmlDialog, {
+        open: true,
+        error: "templates.html.switchError",
+        onClose: () => {},
+        onSwitchInPlace: () => {},
+        inPlaceLabel: "templates.html.convertInPlace",
+      }),
+    );
+    expect(failed).toMatch(/role="alert"[^>]*>templates\.html\.switchError</);
+    const running = renderToStaticMarkup(
+      createElement(SwitchHtmlDialog, {
+        open: true,
+        pending: "inPlace",
+        onClose: () => {},
+        onDuplicate: () => {},
+        onSwitchInPlace: () => {},
+        inPlaceLabel: "templates.html.convertInPlace",
+      }),
+    );
+    expect(running.match(/<button[^>]*disabled=""/g)).toHaveLength(3);
   });
 });
 

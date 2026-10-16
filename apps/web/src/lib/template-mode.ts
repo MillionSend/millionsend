@@ -1,4 +1,5 @@
 import { isMailyDoc } from "./email-doc";
+import { htmlToText } from "./html";
 
 /**
  * Which editor a body opens in. A row whose `document` is renderable Maily
@@ -51,6 +52,25 @@ export function templateSaveInput(
     text: fields.text,
     document: mode === "code" ? null : fields.document,
   };
+}
+
+/**
+ * Where a code-mode body's plain-text part comes from. Text equal to the
+ * html's own derivation was generated from it (a block render, a body written
+ * as HTML in the dashboard); any other text was supplied through the API.
+ */
+export function plainTextSource(text: string, html: string): "derived" | "stored" | "none" {
+  if (text === "") return "none";
+  return text === htmlToText(html) ? "derived" : "stored";
+}
+
+/**
+ * The plain-text part after a code-mode edit: derived text follows the new
+ * html, so it never describes content that is gone; supplied text, or none,
+ * is sent as stored.
+ */
+export function followingText(text: string, html: string, nextHtml: string): string {
+  return text === htmlToText(html) ? htmlToText(nextHtml) : text;
 }
 
 /** Name of the block-converted copy of an html-authored template. */
