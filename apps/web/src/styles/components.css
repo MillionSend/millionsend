@@ -1939,6 +1939,32 @@ summary:focus-visible,
   display: block;
   min-width: 0;
 }
+/* A list row's lead cell (lead-cell.tsx): tile, value, "+N" and a muted
+   tail on one line. The tail's basis is 0, so it gets only the width the
+   others leave: it gives way first, and only then does the value shrink. */
+.ms-lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ms-lead-value {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.ms-lead-more {
+  color: var(--ms-muted);
+}
+.ms-lead-tail {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ms-font-sans);
+  font-size: 12.5px;
+  color: var(--ms-muted);
+}
 
 .ms-theme-toggle {
   display: inline-flex;

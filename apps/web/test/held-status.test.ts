@@ -58,5 +58,8 @@ describe("a send waiting out a region hold", () => {
     );
     expect(html.match(/>Delayed</g)).toHaveLength(1);
     expect(html).toContain(">Queued in broadcast<");
+    // The row's tile names it in the same words.
+    expect(html).toContain('aria-label="Delayed"');
+    expect(html).toContain('aria-label="Queued in broadcast"');
   });
 });
