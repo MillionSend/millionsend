@@ -47,6 +47,7 @@ import {
   updateThread,
   visibleLine,
 } from "@millionsend/core";
+import { LABEL_NAME_MAX } from "@millionsend/core/inbox-organize";
 import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -600,7 +601,7 @@ export const inboxesRouter = router({
       .input(
         z.object({
           ...inboxRef,
-          name: z.string().trim().min(1).max(64),
+          name: z.string().trim().min(1).max(LABEL_NAME_MAX),
           color: z.string().regex(HEX_COLOR_RE).optional(),
         }),
       )
@@ -621,7 +622,7 @@ export const inboxesRouter = router({
         z.object({
           ...inboxRef,
           labelId: z.uuid(),
-          name: z.string().trim().min(1).max(64).optional(),
+          name: z.string().trim().min(1).max(LABEL_NAME_MAX).optional(),
           color: z.string().regex(HEX_COLOR_RE).optional(),
         }),
       )

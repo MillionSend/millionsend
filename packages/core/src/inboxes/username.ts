@@ -10,6 +10,6 @@ export const SHARED_USERNAME = /^(?!.*\.\.)[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])
 /**
  * The longest inbox name: room for any address, which is the name an inbox
  * gets when none is given (a 64-character local part, @ and a domain of up
- * to 255). Label names keep oneLineName's default of 64.
+ * to 255). Label names keep oneLineName's default, LABEL_NAME_MAX.
  */
 export const INBOX_NAME_MAX = 320;

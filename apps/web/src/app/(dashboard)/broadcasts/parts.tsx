@@ -6,7 +6,7 @@ import { useMemo } from "react";
 import { DotParts } from "@/components/dot-parts";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import type { TONE_COLOR } from "@/components/status-tile";
-import { emulateEmailScheme } from "@/lib/email-preview";
+import { emulateEmailScheme, PREVIEW_CANVAS } from "@/lib/email-preview";
 import {
   formatDayTime,
   formatFinishAbout,
@@ -470,7 +470,7 @@ export function ContentPreview({
           width: "100%",
           height: 560,
           border: 0,
-          background: scheme === "dark" ? "#111113" : "#ffffff",
+          background: PREVIEW_CANVAS[scheme],
         }}
       />
     </div>

@@ -3,6 +3,7 @@ import { type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { AuditActor } from "../audit.js";
 import type { InboxActor } from "./activity.js";
+import { LABEL_NAME_MAX } from "./organize.js";
 import {
   CURSOR_NOT_FOUND_MESSAGE,
   INBOX_NOT_FOUND_MESSAGE,
@@ -42,10 +43,8 @@ export const labelNotFound = (id: string): InboxError => notFound(`Label "${id}"
 export const isInboxError = (v: unknown): v is InboxError =>
   typeof v === "object" && v !== null && "status" in v && "name" in v && "message" in v;
 
-const NAME_MAX = 64;
-
 /** A label name, or an inbox name given `max`: 1 to `max` characters after trimming, on one line. */
-export function oneLineName(value: string, max = NAME_MAX): string | InboxError {
+export function oneLineName(value: string, max = LABEL_NAME_MAX): string | InboxError {
   const name = value.trim();
   return name.length === 0 || name.length > max || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(name)
     ? invalid(`name must be 1-${max} characters on one line`)

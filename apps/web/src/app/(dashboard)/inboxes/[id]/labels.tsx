@@ -1,6 +1,6 @@
 "use client";
 
-import { INBOX_LABELS_MAX, LABEL_COLORS } from "@millionsend/core/inbox-organize";
+import { INBOX_LABELS_MAX, LABEL_COLORS, LABEL_NAME_MAX } from "@millionsend/core/inbox-organize";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
@@ -19,8 +19,6 @@ type Label = ThreadRow["labels"][number];
 const GROUPS = [{ key: "labels", label: "" }];
 /** Room for the color swatches on one line, so the panel keeps its width as they appear. */
 const PANEL_WIDTH = 280;
-/** labels.create and labels.update take 64 characters at most. */
-const NAME_MAX = 64;
 // Text in the picker wraps at its width instead of widening it.
 const menuText = { contain: "inline-size" } as const;
 const menuError = { ...menuText, margin: "0 12px 8px", fontSize: 12 };
@@ -107,7 +105,7 @@ export function LabelsMenu({
       groups={GROUPS}
       searchPlaceholder={t("labelSearch")}
       noResultsLabel={tc("select.noResults")}
-      maxLength={NAME_MAX}
+      maxLength={LABEL_NAME_MAX}
       panelMinWidth={PANEL_WIDTH}
       onCreate={(name) => create.mutateAsync({ inboxId, name, color })}
       createLabel={(name) => t("createLabel", { name })}
@@ -292,7 +290,7 @@ export function LabelEditor({
           autoFocus
           aria-label={t("labels.name")}
           value={name}
-          maxLength={NAME_MAX}
+          maxLength={LABEL_NAME_MAX}
           onChange={(event) => setName(event.target.value)}
         />
         {error ? (

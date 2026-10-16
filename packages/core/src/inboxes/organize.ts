@@ -23,5 +23,8 @@ export const LABEL_COLORS = {
 
 export const INBOX_LABELS_MAX = 100;
 
+/** The longest label name, in characters after trimming. */
+export const LABEL_NAME_MAX = 64;
+
 /** Days a thread stays in Trash before it is deleted. */
 export const TRASH_RETENTION_DAYS = 30;
