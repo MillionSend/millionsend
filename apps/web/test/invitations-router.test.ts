@@ -510,7 +510,7 @@ describe("settings.invitations send accounting", () => {
     const failing = mailCaller("owner1", teamId, "owner", { failing: true });
     await expect(
       failing.caller.settings.invitations.resend({ id: created.id }),
-    ).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     const [row] = await db
       .select()
       .from(schema.teamInvitations)
