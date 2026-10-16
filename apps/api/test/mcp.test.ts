@@ -180,6 +180,18 @@ describe("auth middleware", () => {
     expect(((await res.json()) as { error: string }).error).toBe("invalid_token");
   });
 
+  it("reads a body as large as the REST API takes, past the SDK's 4 MiB default", async () => {
+    const token = await mintToken();
+    const pad = "x".repeat(5 * 1024 * 1024);
+    const res = await app.request("/mcp", {
+      method: "POST",
+      headers: { ...JSONRPC_HEADERS, authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: { _meta: { pad } } }),
+    });
+    expect(res.status).not.toBe(413);
+    expect(res.status).toBe(200);
+  });
+
   it("serves the RFC 9728 protected resource metadata", async () => {
     for (const path of [
       "/.well-known/oauth-protected-resource/mcp",

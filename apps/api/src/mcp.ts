@@ -38,7 +38,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { and, asc, eq } from "drizzle-orm";
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose";
-import { type ApiDeps, type Env, errorBody } from "./app.js";
+import { type ApiDeps, DEFAULT_BODY_LIMIT_BYTES, type Env, errorBody } from "./app.js";
 import { servedRegions } from "./routes/domains.js";
 import {
   receivingForwardRequestSchema,
@@ -2094,7 +2094,12 @@ export function registerMcp(app: OpenAPIHono<Env>, deps: ApiDeps, appBaseUrl: st
       if (!authInfo) throw new Error("mcp handler invoked without authInfo");
       return buildServer(app, deps, authInfo, appBaseUrl);
     },
-    { onerror: (err) => console.error("mcp error", err) },
+    {
+      onerror: (err) => console.error("mcp error", err),
+      // The REST API's limit, not the SDK's 4 MiB default: send_email takes
+      // base64 attachments as large as POST /emails does.
+      maxRequestBodySize: DEFAULT_BODY_LIMIT_BYTES,
+    },
   );
   // Clients request the scopes the resource advertises. offline_access is what
   // makes the authorization server issue a refresh token; without it here, a
