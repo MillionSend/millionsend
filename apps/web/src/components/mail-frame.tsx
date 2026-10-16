@@ -192,6 +192,18 @@ export function MailFrame({
       event.preventDefault();
       hide();
     };
+    // Keys pressed in the message never reach the dashboard's window: an Esc
+    // the tip didn't take goes on from the frame, so the page's own Esc
+    // (closing the thread) still hears it. Not one typed in a field.
+    const forward = (event: Event) => {
+      dismiss(event);
+      const target = event.target as HTMLElement;
+      if ((event as KeyboardEvent).key !== "Escape" || event.defaultPrevented) return;
+      if (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      frame.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      );
+    };
     const listeners: [string, (event: Event) => void][] = [
       ["load", measure],
       ["error", measure],
@@ -207,7 +219,7 @@ export function MailFrame({
         },
       ],
       ["focusout", (event) => follow((event as FocusEvent).relatedTarget)],
-      ["keydown", dismiss],
+      ["keydown", forward],
       ["scroll", hide],
     ];
     const attach = () => {
