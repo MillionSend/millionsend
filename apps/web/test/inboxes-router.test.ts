@@ -376,7 +376,13 @@ describe("support view", () => {
     expect(core.listThreadEmails).toHaveBeenCalledWith(
       db,
       expect.anything(),
-      expect.objectContaining({ envelopeOnly: true, agentView: false, includeHeld: true }),
+      // The pane renders the HTML: its cid: images come inlined.
+      expect.objectContaining({
+        envelopeOnly: true,
+        agentView: false,
+        includeHeld: true,
+        inlineImages: true,
+      }),
     );
     expect(page.items).toEqual([
       {

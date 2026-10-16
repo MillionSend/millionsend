@@ -617,10 +617,10 @@ function withReturnPath(headers: Record<string, string>, row: ReceivedEmailMeta)
  * URL, as mailparser inlines them, or null when the result would pass
  * `maxChars`; measured before any data URL is built.
  */
-function inlineCidImages(
+export function inlineCidImages(
   html: string,
   attachments: readonly Attachment[],
-  maxChars: number,
+  maxChars = MAX_INLINED_HTML_CHARS,
 ): string | null {
   const images = new Map<string, Attachment | undefined>();
   const imageFor = (cid: string) => {
@@ -682,7 +682,7 @@ export async function receivedEmailDetail(
         let html = parsed.html || null;
         let htmlFormat = options.htmlFormat;
         if (html && htmlFormat === "data_uri") {
-          const inlined = inlineCidImages(html, parsed.attachments, MAX_INLINED_HTML_CHARS);
+          const inlined = inlineCidImages(html, parsed.attachments);
           if (inlined === null) htmlFormat = "cid";
           else html = inlined;
         }

@@ -555,6 +555,8 @@ export const inboxesRouter = router({
           agentView: false,
           includeHeld: true,
           envelopeOnly,
+          // The pane renders the HTML, where a cid: reference could never load.
+          inlineImages: true,
         });
         if ("error" in result) throw inboxFailure(result.error);
         const page = idPage(result);
