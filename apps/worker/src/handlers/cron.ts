@@ -1299,28 +1299,40 @@ export async function stripExpiredEventPayloads(
   const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
   const ev = schema.emailEvents;
   let events = 0;
+  // Each batch resumes after the last row the batch before took, so a kept
+  // suppressed row is read once a run rather than once a batch.
+  // ponytail: kept rows stay in the unstripped index, so every run still
+  // walks them once; a partial index that leaves them out is the upgrade.
+  let cursorId: string | undefined;
   for (;;) {
-    const batch = affectedRows(
+    const page = await db
+      .select({ id: ev.id })
+      .from(ev)
+      .where(
+        and(
+          lt(ev.occurredAt, cutoff),
+          isNotNull(ev.data),
+          ne(ev.type, "suppressed"),
+          cursorId ? keysetCursorWhere(ev.occurredAt, ev.id, cursorId) : undefined,
+        ),
+      )
+      .orderBy(asc(ev.occurredAt), asc(ev.id))
+      .limit(PURGE_BATCH);
+    const last = page.at(-1);
+    if (!last) break;
+    cursorId = last.id;
+    events += affectedRows(
       await db
         .update(ev)
         .set({ data: null })
         .where(
           inArray(
             ev.id,
-            db
-              .select({ id: ev.id })
-              .from(ev)
-              // ponytail: kept suppressed rows stay in the unstripped index the
-              // scan walks; a partial index excluding them is the upgrade if
-              // they ever slow the strip.
-              .where(and(lt(ev.occurredAt, cutoff), isNotNull(ev.data), ne(ev.type, "suppressed")))
-              .orderBy(asc(ev.occurredAt))
-              .limit(PURGE_BATCH),
+            page.map((row) => row.id),
           ),
         ),
     );
-    events += batch;
-    if (batch < PURGE_BATCH) break;
+    if (page.length < PURGE_BATCH) break;
   }
   const d = schema.webhookDeliveries;
   let deliveries = 0;

@@ -2,7 +2,7 @@ import { DAY_MS, dailyCeiling, SYSTEM_MAIL_TAG, teamRung, utcDay } from "@millio
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
-import { eq, sql } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   drainQuotaParked,
@@ -735,6 +735,48 @@ it("payload strip keeps a suppressed event's source and reason, which name no on
       { type: "failed", data: null },
     ]),
   );
+});
+
+it("payload strip walks past more kept suppressed events than one batch and strips every eligible one", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" })
+    .returning({ id: schema.emails.id });
+  if (!email) throw new Error("insert failed");
+  const kept = '{"source":"worker","reason":"recipient_suppressed"}';
+  // 1,500 kept rows older than every eligible one, then 2,500 eligible rows
+  // and 10 more kept ones at one instant: the batches split that tie by id
+  // alone.
+  await db.execute(sql`
+    insert into ${schema.emailEvents} (email_id, type, occurred_at, data)
+    select ${email.id}::uuid, 'suppressed', timestamptz '2026-06-01 00:00:00+00' + g * interval '1 second', ${kept}::jsonb
+    from generate_series(1, 1500) g
+  `);
+  await db.execute(sql`
+    insert into ${schema.emailEvents} (email_id, type, occurred_at, data)
+    select ${email.id}::uuid, case when g <= 10 then 'suppressed'::email_event_type else 'delivered' end,
+      timestamptz '2026-07-01 00:00:00+00',
+      case when g <= 10 then ${kept}::jsonb else '{"eventType":"Delivery"}'::jsonb end
+    from generate_series(1, 2510) g
+  `);
+  const left = () =>
+    db
+      .select({ type: schema.emailEvents.type, n: sql<number>`count(*)::int` })
+      .from(schema.emailEvents)
+      .where(isNotNull(schema.emailEvents.data))
+      .groupBy(schema.emailEvents.type)
+      .orderBy(schema.emailEvents.type);
+
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 2500,
+    deliveries: 0,
+  });
+  expect(await left()).toEqual([{ type: "suppressed", n: 1510 }]);
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 0,
+    deliveries: 0,
+  });
 });
 
 it("session purge drops only expired sessions", async () => {
