@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
+import { LABEL_COLORS } from "@millionsend/core/inbox-organize";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { InboxDetail, ThreadMessage, ThreadRow } from "@/app/(dashboard)/inboxes/parts";
-import { dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
+import { authenticatedSender, dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
 import { typedAllowlistEntry } from "@/lib/email-input";
 import { WEBHOOK_EVENT_META, WEBHOOK_EVENT_TYPES } from "@/lib/webhook-events";
 
@@ -26,18 +27,21 @@ vi.mock("next-intl", async (importOriginal) => {
       actual.createTranslator({ locale: "en", messages: en, namespace }),
   };
 });
+// The page's query string, which a test may set.
+const nav = vi.hoisted(() => ({ search: "" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => "/inboxes",
   useParams: () => ({ id: "i1" }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
-// What the query hooks answer (nothing unless a test sets it), the error
-// a mutation came back with, the options and calls mutations got, and the
-// queries invalidated.
+// What the query hooks answer (nothing unless a test sets it, by procedure
+// path where a screen asks for several), the error a mutation came back with,
+// the options and calls mutations got, and the queries invalidated.
 const rq = vi.hoisted(() => ({
   data: undefined as unknown,
   pages: undefined as unknown,
+  byPath: {} as Record<string, unknown>,
   error: null as unknown,
   mutate: vi.fn(),
   mutations: [] as { path?: string; onSuccess?: () => unknown }[],
@@ -62,8 +66,13 @@ vi.mock("@tanstack/react-query", () => ({
     return { mutate: rq.mutate, isPending: false, error: rq.error };
   },
   useQueryClient: () => ({ invalidateQueries: rq.invalidate }),
-  useQuery: () => ({ data: rq.data }),
-  useInfiniteQuery: () => ({ data: rq.pages, isPending: false }),
+  useQuery: (options?: { path?: string }) => ({
+    data: options?.path && options.path in rq.byPath ? rq.byPath[options.path] : rq.data,
+  }),
+  useInfiniteQuery: (options?: { path?: string }) => ({
+    data: options?.path && options.path in rq.byPath ? rq.byPath[options.path] : rq.pages,
+    isPending: false,
+  }),
 }));
 // A native select lists every option a picker offers, which a closed one never renders.
 vi.mock("@/components/select", () => ({
@@ -105,6 +114,11 @@ const { InboxView } = await import("@/app/(dashboard)/inboxes/[id]/inbox-view");
 const { EditDialog } = await import("@/app/(dashboard)/inboxes/[id]/edit-dialog");
 const { CreateInboxDialog } = await import("@/app/(dashboard)/inboxes/create-inbox-dialog");
 const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
+// The real tab, past the mock above that keeps it off the inbox page.
+const { ThreadsTab } = await vi.importActual<
+  typeof import("@/app/(dashboard)/inboxes/[id]/threads-tab")
+>("@/app/(dashboard)/inboxes/[id]/threads-tab");
+const { LabelColorField, LabelEditor } = await import("@/app/(dashboard)/inboxes/[id]/labels");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
 const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
   await import("@/app/(dashboard)/inboxes/parts");
@@ -268,6 +282,181 @@ describe("webhook picker", () => {
   });
 });
 
+describe("threads", () => {
+  const billing = { id: "l1", name: "Billing", color: "#46A758" };
+  const row = {
+    id: "t1",
+    subject: "Verify your mailbox now",
+    from: "Account Security <security@mailbox-verify.example>",
+    to: ["orders@acme.example"],
+    cc: [],
+    bcc: [],
+    labels: [billing],
+    message_count: 1,
+    has_attachment: false,
+    has_draft: false,
+    read: true,
+    received_at: new Date().toISOString(),
+    folder: "inbox",
+    quarantined: 0,
+    quarantine_reason: null,
+    injection_score: null,
+    phishing_score: null,
+    suspicious: false,
+    pending_approval: false,
+    snippet: "Your mailbox will be suspended",
+  } as ThreadRow;
+  /** The threads tab in a folder, the thread above open beside the list. */
+  const tab = (folder: string, inbox: Partial<InboxDetail> = {}) => {
+    nav.search = `folder=${folder}&thread=t1`;
+    rq.byPath = {
+      "inboxes.threads.list.infiniteQueryOptions": { pages: [{ items: [{ ...row, folder }] }] },
+      "inboxes.threads.get.queryOptions": { ...row, folder },
+      "inboxes.threads.emails.infiniteQueryOptions": { pages: [{ items: [] }] },
+      "inboxes.drafts.list.queryOptions": { items: [] },
+      "inboxes.labels.list.queryOptions": [billing],
+    };
+    try {
+      return renderToStaticMarkup(
+        createElement(ThreadsTab, {
+          inbox: { id: "i1", kind: "human", expired: false, ...inbox } as InboxDetail,
+        }),
+      ).replaceAll("&#x27;", "'");
+    } finally {
+      nav.search = "";
+      rq.byPath = {};
+    }
+  };
+  /** The open thread's header row, title to its last control. */
+  const header = (html: string) => html.match(/<section[^>]*>(<div.*?)<\/div><span/s)?.[1] ?? "";
+
+  it("marks a read thread with a hollow ring where an unread one has its dot, each named", () => {
+    const render = (read: boolean, agent = false) =>
+      renderToStaticMarkup(
+        createElement(ThreadListRow, {
+          row: { ...row, read },
+          agent,
+          sent: false,
+          selected: false,
+          onOpen: () => {},
+        }),
+      );
+    const read = render(true);
+    expect(read).toMatch(
+      /<span class="ms-tooltip-trigger inline" tabindex="0"><span id="[^"]+-dot" class="ms-dot ring" role="img" aria-label="Read"><\/span><\/span>/,
+    );
+    // Every row's button reads its mark out, read or not.
+    expect(read).toMatch(/aria-describedby="(\S+)-dot \1-pills"/);
+    expect(render(true, true)).toContain('class="ms-dot ring" role="img" aria-label="Read"');
+    expect(render(false)).toMatch(
+      /class="ms-tooltip-trigger inline" tabindex="0"><span id="[^"]+-dot" class="ms-dot" style="background:var\(--ms-bone\)" role="img" aria-label="Unread">/,
+    );
+    expect(render(false, true)).toContain('aria-label="Your agent hasn&#x27;t marked it read yet"');
+    // The row's label is the sans pill, without the header's ✕.
+    expect(read).toContain(
+      '<span class="ms-badge ms-badge-neutral ms-label-badge"><span class="ms-dot" style="background:#46A758" aria-hidden="true"></span>Billing</span>',
+    );
+  });
+
+  it("closes the open thread with an icon button named Close, the last control in its header", () => {
+    const html = header(tab("inbox"));
+    expect(html).toMatch(
+      /<span class="ms-tooltip-trigger inline"><button type="button" class="ms-btn ms-btn-icon" aria-label="Close"><svg[^>]*>(<path[^>]*><\/path>){2}<\/svg><\/button><\/span>$/,
+    );
+    expect(html).not.toContain("ms-btn-ghost");
+    // The same pill as the rows, keeping its ✕.
+    expect(tab("inbox")).toContain(
+      '<span class="ms-badge ms-badge-neutral ms-label-badge"><span class="ms-dot" style="background:#46A758" aria-hidden="true"></span>Billing<button type="button" aria-label="Remove Billing">✕</button></span>',
+    );
+  });
+
+  it("puts Not spam before Move in Spam, Restore in Trash, and neither elsewhere", () => {
+    const button = (label: string) =>
+      new RegExp(
+        `<button type="button" class="ms-btn ms-btn-secondary"><svg[^>]*>.*?</svg>${label}</button>`,
+      );
+    const spam = header(tab("spam"));
+    expect(spam).toMatch(button("Not spam"));
+    expect(spam.indexOf("Not spam")).toBeLessThan(spam.indexOf('aria-label="Move"'));
+    expect(spam).not.toContain("Restore");
+    const trash = header(tab("trash"));
+    expect(trash).toMatch(button("Restore"));
+    expect(trash).not.toContain("Not spam");
+    for (const folder of ["inbox", "archive", "sent"]) {
+      expect(header(tab(folder))).not.toMatch(/Not spam|Restore/);
+    }
+  });
+
+  it("leaves an expired inbox's open thread only its Close", () => {
+    const html = tab("spam", { expired: true });
+    expect(header(html)).toContain('aria-label="Close"');
+    expect(header(html)).not.toMatch(/Not spam|aria-label="Move"|aria-label="Labels"|More actions/);
+    // Its labels show, with no ✕ to take them off.
+    expect(html).toContain("ms-label-badge");
+    expect(html).not.toContain("Remove Billing");
+  });
+
+  it("says over Trash how long it keeps a thread, from core's own number", () => {
+    const line = "Threads in Trash are deleted 30 days after they're moved here.";
+    expect(tab("trash")).toContain(
+      `<p style="margin:-4px 0 12px;font-size:12.5px;color:var(--ms-muted)">${line}</p>`,
+    );
+    expect(tab("spam")).not.toContain(line);
+  });
+
+  it("offers the palette as swatches, the pick checked, and a dashed custom one", () => {
+    const field = (value: string) =>
+      renderToStaticMarkup(createElement(LabelColorField, { value, onChange: () => {} }));
+    const swatches = (html: string) =>
+      [...html.matchAll(/<input type="radio"[^>]*>/g)].map((match) => match[0]);
+    const purple = field("#AB4ABA");
+    expect(swatches(purple)).toHaveLength(Object.keys(LABEL_COLORS).length);
+    expect(swatches(purple).filter((swatch) => swatch.includes('checked=""'))).toEqual([
+      expect.stringContaining('aria-label="Purple"'),
+    ]);
+    expect(purple).toContain('role="radiogroup"');
+    // Named in the app's own tooltip, which shows on keyboard focus too.
+    expect(purple).toMatch(
+      /<span class="ms-tooltip-trigger inline"><label class="ms-swatch custom"><svg/,
+    );
+    expect(purple).not.toContain("title=");
+    expect(purple).toContain(
+      '<input type="color" class="ms-swatch-picker" aria-label="Custom color" value="#ab4aba"/>',
+    );
+    // A color off the palette fills the custom swatch, and checks none of the others.
+    const custom = field("#123456");
+    expect(swatches(custom).some((swatch) => swatch.includes("checked"))).toBe(false);
+    expect(custom).toContain('<label class="ms-swatch custom on" style="background:#123456"');
+    // Every swatch has a name to read out, in both languages.
+    expect(Object.keys(en.inboxes.labels.colors)).toEqual(Object.keys(LABEL_COLORS));
+  });
+
+  it("edits a label in the picker: back, name, the same swatches, delete and save", () => {
+    const html = renderToStaticMarkup(
+      createElement(LabelEditor, {
+        inboxId: "i1",
+        label: billing,
+        labels: [billing, { id: "l2", name: "Follow-up", color: "#F76B15" }],
+        onDone: () => {},
+      }),
+    );
+    expect(html).toMatch(
+      /<span class="ms-tooltip-trigger inline"><button type="button" class="ms-menu-trigger-bare"[^>]*aria-label="Back"/,
+    );
+    expect(html).toContain(">Edit label<");
+    expect(html).toMatch(
+      /<input class="ms-input"[^>]*aria-label="Name" maxLength="64" value="Billing"/,
+    );
+    expect(html).toMatch(/aria-label="Green" name="[^"]+" checked=""/);
+    expect(html).toContain(
+      '<button type="button" class="ms-menu-item danger" style="width:auto">Delete label</button>',
+    );
+    expect(html).toMatch(
+      /<button type="submit" class="ms-btn ms-btn-primary ms-btn-sm">.*Save<\/button>/,
+    );
+  });
+});
+
 describe("inbox screens", () => {
   it("says who a sender is and why mail is held, in words", () => {
     const html = renderToStaticMarkup(
@@ -391,6 +580,74 @@ describe("inbox screens", () => {
     // The agent's unread is its own queue.
     expect(html).toContain("3 unread");
     expect(html).not.toContain("5 unread");
+  });
+
+  it("lays every inboxes row on one line, behind a muted tile naming the row's kind", () => {
+    const inbox = (kind: string, address: string, extra: object) => ({
+      id: address,
+      email_address: address,
+      name: "",
+      kind,
+      unread: 0,
+      pending_approval: 0,
+      quarantined: 0,
+      received_30d: 0,
+      last_received: null,
+      expires_at: null,
+      forward_to: [],
+      ...extra,
+    });
+    rq.data = { domains: [], sharedDomain: "inboxes.example", plan: { used: 2, limit: 3 } };
+    rq.pages = {
+      pages: [
+        {
+          items: [
+            inbox("agent", "orders@acme.example", { name: "Orders agent", quarantined: 1 }),
+            inbox("human", "support@acme.example", {
+              name: "Support",
+              forward_to: ["ops@example.com"],
+            }),
+          ],
+          counts: { agent: 1, human: 1 },
+          overview: {
+            allReceived: { received30d: 12, lastReceived: null },
+            catchAll: [
+              { domainId: "d1", name: "acme.example", received30d: 3, lastReceived: null },
+            ],
+          },
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(createElement(InboxesView));
+    rq.data = rq.pages = undefined;
+    expect(html).not.toContain("ms-cell-wrap");
+    expect(html).not.toContain("<wbr");
+    // Muted even where the row needs attention: that column says so.
+    for (const label of ["All received", "Catch-all", "Agent inbox", "People inbox"]) {
+      expect(html, label).toMatch(
+        new RegExp(`role="img" aria-label="${label}" style="[^"]*color:var\\(--ms-muted\\)"`),
+      );
+    }
+    // What took a second line rides after the value, muted, cut first.
+    const tail = (text: string) => `class="ms-lead-tail"><span class="ms-truncate">${text}<`;
+    expect(html).toContain(tail("Every email your domains received"));
+    expect(html).toContain(tail("Orders agent"));
+    expect(html).toContain(tail("Support · forwards to ops@example.com"));
+    // The catch-all's turn-off link follows its tail, kept whole as the tail
+    // gives way; the where is in its tooltip.
+    expect(html).toContain(tail("Addresses with no inbox"));
+    expect(html).toMatch(
+      /class="ms-lead-action">· <span class="ms-tooltip-trigger inline"><a href="\/domains\/d1">turn off<\/a><\/span><\/span>/,
+    );
+    expect(t("catchAll.turnOff")).toBe("Turn off on the domain");
+    // What needs attention ends in an ellipsis inside its own column, which
+    // never takes the addresses' room.
+    expect(html).toContain(
+      '<td class="ms-cell-fill" style="color:var(--ms-bone)"><span class="ms-truncate">1 in quarantine</span></td>',
+    );
+    expect(html).toContain('<th style="min-width:160px">Inbox</th>');
+    expect(html).toContain('<th style="width:90px">Type</th>');
+    expect(html).toContain('<th style="width:22%">Needs attention</th>');
   });
 
   it("lays a thread out on one line whose button wraps no other stop", () => {
@@ -696,5 +953,85 @@ describe("addresses on the shared domain", () => {
     expect(open).toContain("received in 30 days");
     expect(open).not.toMatch(SHOWN);
     expect(header({ shared: false, sharedSending: null })).not.toMatch(SHOWN);
+  });
+});
+
+const { MessageCard } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
+
+describe("a message in the thread pane", () => {
+  const screening = {
+    verdict: "clean",
+    sender_trust: "external",
+    quarantine_reason: null,
+    reasons: [],
+    injection_score: null,
+    phishing_score: null,
+    hidden_text_removed: false,
+  };
+  const message = {
+    id: "m1",
+    direction: "inbound",
+    from: "Ana Souza <ana@sender.example>",
+    to: ["help@inbound.acme.test"],
+    cc: [],
+    bcc: [],
+    reply_to: [],
+    subject: "Re: Order #8841",
+    message_id: "<m1@sender.example>",
+    html: "<p>Found it, thanks!</p>",
+    text: "Found it, thanks!\n\nOn Thu, Oct 16, 2026 at 10:00 AM Rita <rita@acme.test> wrote:\n> Did it arrive?",
+    attachments: [],
+    read: true,
+    received_at: new Date().toISOString(),
+    extracted_text: null,
+    screening,
+    spam_verdict: null,
+    virus_verdict: null,
+  };
+  const render = (fields: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      createElement(MessageCard, {
+        message: { ...message, ...fields } as ThreadMessage,
+        inbox: { id: "i1", kind: "human", expired: false } as InboxDetail,
+        onChange: () => {},
+      }),
+    );
+
+  it("shows the HTML in a frame that never runs the sender's code", () => {
+    const frame = /<iframe[^>]*>/.exec(render({}))?.[0] ?? "";
+    expect(frame).toContain(
+      'sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"',
+    );
+    expect(frame).not.toMatch(/allow-scripts|allow-forms|allow-top-navigation/);
+    expect(frame).toContain('title="Message from Ana Souza"');
+    expect(frame).toContain("img-src data:;");
+  });
+
+  it("falls back to the text with its quoted tail folded, and leaves held mail whole", () => {
+    const text = render({ html: null });
+    expect(text).not.toContain("<iframe");
+    expect(text).toContain("Found it, thanks!");
+    expect(text).not.toContain("Did it arrive?");
+    expect(text).toContain('aria-label="Show quoted text"');
+    // Held mail is read to decide on a release: its text, whole, never its HTML.
+    const held = render({ screening: { ...screening, verdict: "quarantined" } });
+    expect(held).not.toContain("<iframe");
+    expect(held).toContain("Did it arrive?");
+    expect(held).not.toContain("Show quoted text");
+  });
+
+  it("reads the sender's address, and so its domain, from where From ends", () => {
+    // Authentication vouched for promo@attacker.example; the name is the sender's own words.
+    const html = render({ from: '"Bank <alerts@bank.example>" <promo@attacker.example>' });
+    expect(html).toContain('color:var(--ms-muted)">promo@attacker.example</span>');
+    expect(html).not.toContain(">alerts@bank.example<");
+  });
+
+  it("loads images unasked only for a sender authentication proved", () => {
+    expect(["owner", "allowlisted", "external"].every(authenticatedSender)).toBe(true);
+    // A known thread proves the thread, not the From domain.
+    expect(["known_thread", "unauthenticated", "failed", null].some(authenticatedSender)).toBe(
+      false,
+    );
   });
 });

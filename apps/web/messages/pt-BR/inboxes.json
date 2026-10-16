@@ -23,6 +23,35 @@
   "labelSearch": "Buscar ou criar etiqueta…",
   "createLabel": "Criar etiqueta “{name}”",
   "removeLabel": "Remover {label}",
+  "read": "Lida",
+  "notSpam": "Não é spam",
+  "restore": "Restaurar",
+  "trashRetention": "As conversas na Lixeira são excluídas {days, plural, one {# dia} other {# dias}} depois de chegarem aqui.",
+  "labels": {
+    "edit": "Editar etiqueta",
+    "editHint": "Aperte a seta para a direita para editar esta etiqueta",
+    "back": "Voltar",
+    "name": "Nome",
+    "color": "Cor",
+    "custom": "Cor personalizada",
+    "delete": "Excluir etiqueta",
+    "deleteConfirm": "Excluir “{name}”? Ela sai de todas as conversas.",
+    "taken": "Já existe uma etiqueta com esse nome.",
+    "limit": "Uma caixa pode ter até {max} etiquetas. Exclua uma para criar outra.",
+    "colors": {
+      "cyan": "Ciano",
+      "teal": "Verde-água",
+      "green": "Verde",
+      "lime": "Verde-limão",
+      "yellow": "Amarelo",
+      "orange": "Laranja",
+      "indigo": "Índigo",
+      "purple": "Roxo",
+      "pink": "Rosa",
+      "brown": "Marrom",
+      "gray": "Cinza"
+    }
+  },
   "unread": "Não lida",
   "unreadAgent": "O agente ainda não marcou como lida",
   "markRead": "Marcar como lida",
@@ -59,7 +88,9 @@
     "activity": "Atividade"
   },
   "type": {
-    "catchAll": "Pega-tudo"
+    "catchAll": "Pega-tudo",
+    "agent": "Caixa de agente",
+    "human": "Caixa de pessoas"
   },
   "col": {
     "inbox": "Caixa",
@@ -87,7 +118,9 @@
     "full": "Você chegou ao limite de caixas do seu plano. Faça upgrade para criar mais."
   },
   "catchAll": {
-    "row": "Endereços sem caixa de entrada · <link>desligar no domínio</link>"
+    "row": "Endereços sem caixa",
+    "turnOff": "Desligar no domínio",
+    "turnOffLink": "desligar"
   },
   "create": {
     "title": "Criar caixa de entrada",
@@ -152,6 +185,15 @@
     "screening": "Em análise…",
     "quarantined": "Retido em quarentena: o agente só vê depois que alguém liberar.",
     "hiddenText": "Texto oculto removido"
+  },
+  "mail": {
+    "title": "Mensagem de {name}",
+    "imagesHidden": "Imagens externas ficam ocultas para proteger sua privacidade.",
+    "showImages": "Mostrar imagens",
+    "alwaysFor": "Sempre mostrar de {domain}",
+    "opensInNewTab": "Abre em uma nova aba",
+    "showQuoted": "Mostrar texto citado",
+    "hideQuoted": "Ocultar texto citado"
   },
   "draft": {
     "title": "Rascunho · aguardando aprovação",
@@ -222,7 +264,9 @@
   "downloadsBlocked": "Downloads bloqueados: este e-mail tem malware.",
   "chip": {
     "code": "código",
-    "link": "link"
+    "link": "link",
+    "codeTip": "Contém um código de verificação",
+    "linkTip": "Contém um link de acesso"
   },
   "gray": {
     "dmarcPassNone": "DMARC cinza: a mensagem passou no DMARC, mas o domínio do remetente usa p=none, então os servidores não são orientados a bloquear e-mails que falham.",
@@ -238,6 +282,7 @@
   "received": {
     "title": "Todos os recebidos",
     "hint": "Todos os e-mails que seus domínios receberam, inclusive em endereços sem caixa de entrada.",
+    "hintShort": "Tudo o que chegou nos seus domínios",
     "search": "Buscar remetente, caixa ou assunto…",
     "loadError": "Não foi possível carregar os e-mails recebidos.",
     "empty": "Nenhum e-mail recebido ainda.",
@@ -252,6 +297,7 @@
     },
     "badge": {
       "quarantined": "Em quarentena",
+      "screening": "Em análise",
       "spam": "Spam",
       "virus": "Vírus"
     },
@@ -265,7 +311,8 @@
       "suspicious": "Suspeito",
       "quarantined": "Em quarentena",
       "spam": "Spam",
-      "virus": "Vírus"
+      "virus": "Vírus",
+      "screening": "Em análise"
     },
     "range": {
       "h24": "Últimas 24 horas",
@@ -296,7 +343,6 @@
     "code": "Código",
     "link": "Link de acesso",
     "linkElsewhere": "O link aponta para um domínio diferente do remetente.",
-    "scores": "Risco (0–100): injeção {injection} · phishing {phishing}",
     "receivedFor": "Recebido por",
     "messageId": "Message-ID",
     "envelopeFrom": "Remetente do envelope",
@@ -315,9 +361,9 @@
     "received": "Recebido",
     "scanned": "Verificado",
     "screened": "Analisado",
-    "delivered": "Entregue em {inbox}",
     "quarantined": "Em quarentena",
-    "released": "Liberado por {who}",
+    "released": "Liberado",
+    "releasedBy": "por {who}",
     "replied": "Respondido",
     "forwarded": "Encaminhado",
     "webhook": "Webhook"

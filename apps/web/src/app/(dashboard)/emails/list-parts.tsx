@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { SkeletonLead } from "@/components/lead-cell";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { Table } from "@/components/table";
 import { shortcutBlocked } from "@/lib/keyboard";
@@ -59,7 +60,8 @@ export function ListSkeleton({
    * Last column holds the 28px bare overflow trigger instead of a relative
    * time (suppressions); the trigger is the row's tallest content, so its
    * stand-in must keep that height. Also switches the header widths to the
-   * suppressions table's (40/18% vs the emails table's 34/15%).
+   * suppressions table's (40/18% vs the emails table's 35/14%), and drops
+   * the emails table's status tile.
    */
   action?: boolean;
 }) {
@@ -68,8 +70,8 @@ export function ListSkeleton({
     <Table>
       <thead>
         <tr>
-          <th style={{ width: action ? "40%" : "34%" }}>{headers[0]}</th>
-          <th style={{ width: action ? "18%" : "15%" }}>{headers[1]}</th>
+          <th style={{ width: action ? "40%" : "35%" }}>{headers[0]}</th>
+          <th style={{ width: action ? "18%" : "14%" }}>{headers[1]}</th>
           <th>{headers[2]}</th>
           {action ? (
             <th className="right" />
@@ -85,7 +87,7 @@ export function ListSkeleton({
           // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows, position is identity
           <tr key={row}>
             <td>
-              <Skeleton width={width} height={13} />
+              {action ? <Skeleton width={width} height={13} /> : <SkeletonLead width={width} />}
             </td>
             <td>
               <SkeletonBadge />

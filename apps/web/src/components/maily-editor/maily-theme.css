@@ -148,13 +148,8 @@ body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
 .ms-maily-compact .ms-maily-surface {
   min-height: 120px;
 }
-/* The body's frame takes the ring a textarea would. Tiptap gives the body
-   tabindex="0", so the global [tabindex="0"] ring would draw a second, square
-   ring inside the frame's, its corners past the frame's rounded ones. */
-.ms-maily .ms-maily-surface:focus-within {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
-}
+/* A text field marks focus with its caret alone. Tiptap gives the body
+   tabindex="0", which the global [tabindex="0"] ring would otherwise box. */
 .ms-maily .ProseMirror:focus-visible {
   box-shadow: none;
 }
@@ -265,9 +260,6 @@ body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
   border-radius: 7px;
   padding: 5px 8px;
   outline: none;
-}
-.ms-varpop-input:focus {
-  border-color: var(--ms-line-strong);
 }
 .ms-varpop-input::placeholder {
   color: var(--ms-faint);
@@ -415,10 +407,6 @@ body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
 .ms-maily-picker-search input::placeholder {
   color: var(--ms-faint);
 }
-/* The popover is the focus surface; the global input ring would draw a box inside it. */
-.ms-maily-picker-search input:focus-visible {
-  box-shadow: none;
-}
 .ms-maily-picker-list {
   max-height: 320px;
   overflow-y: auto;
@@ -488,9 +476,6 @@ body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
   font-size: 12px;
   outline: none;
 }
-.ms-maily-picker-fallback:focus {
-  border-color: var(--ms-line-strong);
-}
 .ms-maily-picker-fallback::placeholder {
   color: var(--ms-faint);
 }
@@ -521,9 +506,6 @@ body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
   color: var(--ms-bone);
   font-size: 12.5px;
   outline: none;
-}
-.ms-maily-linkbox input:focus {
-  border-color: var(--ms-line-strong);
 }
 
 /* ---- Maily's tippy popups (slash + variable suggestions) --------------- */

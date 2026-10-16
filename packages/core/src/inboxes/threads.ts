@@ -21,6 +21,7 @@ import { dropControls, dropInvisible } from "../customer-text.js";
 import { resultRows } from "../driver-result.js";
 import { escapeRegex } from "../erase-recipient.js";
 import {
+  inlineCidImages,
   openReceivedAttachments,
   openReceivedExtracted,
   openReceivedRaw,
@@ -809,10 +810,15 @@ const PARSE = {
   keepCidLinks: true,
 } as const;
 
-/** HTML byte-for-byte, text with invisible characters out, the sanitized read, attachment facts. */
+/**
+ * HTML byte-for-byte (or with its `cid:` images inlined, for a viewer that
+ * renders it), text with invisible characters out, the sanitized read,
+ * attachment facts.
+ */
 async function inboundContent(
   row: ReceivedEmailRow,
   keyring: Keyring,
+  inlineImages: boolean,
 ): Promise<MessageContent & { extractedText: string | null }> {
   const empty = { html: null, text: null, attachments: [], extractedText: null };
   try {
@@ -828,6 +834,8 @@ async function inboundContent(
         const parsed = await simpleParser(raw, PARSE);
         html = parsed.html || null;
         text = parsed.text || null;
+        // Past the inlining cap the references stay, as a received email's read serves them.
+        if (html && inlineImages) html = inlineCidImages(html, parsed.attachments) ?? html;
       } catch {
         // Malformed MIME reads as no body; the metadata still answers.
       }
@@ -894,6 +902,7 @@ async function threadEmail(
     agentView: boolean;
     includeHeld: boolean;
     envelopeOnly: boolean;
+    inlineImages: boolean;
   },
 ): Promise<ThreadEmailWire | InboxError> {
   if (p.ref.dir === "out") {
@@ -932,7 +941,11 @@ async function threadEmail(
   return contentSlot(async () => {
     const [row] = await db.select().from(r).where(eq(r.id, p.ref.id));
     if (!row) return EMAIL_NOT_FOUND;
-    return inboundThreadEmailWire(row, membership, await inboundContent(row, keyring));
+    return inboundThreadEmailWire(
+      row,
+      membership,
+      await inboundContent(row, keyring, p.inlineImages),
+    );
   });
 }
 
@@ -958,6 +971,8 @@ export async function listThreadEmails(
     includeHeld: boolean;
     /** Support view: metadata only, never content. */
     envelopeOnly?: boolean | undefined;
+    /** `cid:` images inlined as data URLs, for a viewer that renders the HTML. */
+    inlineImages?: boolean | undefined;
   },
 ): Promise<{ data: ThreadEmailWire[]; hasMore: boolean } | { error: InboxError }> {
   const missing = await threadFor(db, p);
@@ -999,6 +1014,7 @@ export async function listThreadEmails(
       ref,
       includeHeld,
       envelopeOnly: Boolean(p.envelopeOnly),
+      inlineImages: Boolean(p.inlineImages),
     });
     if (!isInboxError(email)) data.push(email);
   }
@@ -1030,6 +1046,7 @@ export async function getThreadEmail(
     ref: { id, dir: outbound ? "out" : "in" },
     includeHeld: !p.agentView && p.includeHeld,
     envelopeOnly: Boolean(p.envelopeOnly),
+    inlineImages: false,
   });
   return isInboxError(email) ? { error: email } : email;
 }

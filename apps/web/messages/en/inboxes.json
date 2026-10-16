@@ -23,6 +23,35 @@
   "labelSearch": "Search or create a label…",
   "createLabel": "Create label “{name}”",
   "removeLabel": "Remove {label}",
+  "read": "Read",
+  "notSpam": "Not spam",
+  "restore": "Restore",
+  "trashRetention": "Threads in Trash are deleted {days, plural, one {# day} other {# days}} after they're moved here.",
+  "labels": {
+    "edit": "Edit label",
+    "editHint": "Press the right arrow to edit this label",
+    "back": "Back",
+    "name": "Name",
+    "color": "Color",
+    "custom": "Custom color",
+    "delete": "Delete label",
+    "deleteConfirm": "Delete “{name}”? It's removed from every thread.",
+    "taken": "A label with this name already exists.",
+    "limit": "An inbox can have up to {max} labels. Delete one to add another.",
+    "colors": {
+      "cyan": "Cyan",
+      "teal": "Teal",
+      "green": "Green",
+      "lime": "Lime",
+      "yellow": "Yellow",
+      "orange": "Orange",
+      "indigo": "Indigo",
+      "purple": "Purple",
+      "pink": "Pink",
+      "brown": "Brown",
+      "gray": "Gray"
+    }
+  },
   "unread": "Unread",
   "unreadAgent": "Your agent hasn't marked it read yet",
   "markRead": "Mark as read",
@@ -59,7 +88,9 @@
     "activity": "Activity"
   },
   "type": {
-    "catchAll": "Catch-all"
+    "catchAll": "Catch-all",
+    "agent": "Agent inbox",
+    "human": "People inbox"
   },
   "col": {
     "inbox": "Inbox",
@@ -87,7 +118,9 @@
     "full": "You've reached the inbox limit of your plan. Upgrade to create more."
   },
   "catchAll": {
-    "row": "Addresses without an inbox · <link>turn off on the domain</link>"
+    "row": "Addresses with no inbox",
+    "turnOff": "Turn off on the domain",
+    "turnOffLink": "turn off"
   },
   "create": {
     "title": "Create inbox",
@@ -152,6 +185,15 @@
     "screening": "Being screened…",
     "quarantined": "Held in quarantine: your agent can't see it until someone releases it.",
     "hiddenText": "Hidden text removed"
+  },
+  "mail": {
+    "title": "Message from {name}",
+    "imagesHidden": "Remote images are hidden to protect your privacy.",
+    "showImages": "Show images",
+    "alwaysFor": "Always for {domain}",
+    "opensInNewTab": "Opens in a new tab",
+    "showQuoted": "Show quoted text",
+    "hideQuoted": "Hide quoted text"
   },
   "draft": {
     "title": "Draft · waiting for approval",
@@ -222,7 +264,9 @@
   "downloadsBlocked": "Downloads are blocked: this email carries malware.",
   "chip": {
     "code": "code",
-    "link": "link"
+    "link": "link",
+    "codeTip": "Contains a verification code",
+    "linkTip": "Contains a sign-in link"
   },
   "gray": {
     "dmarcPassNone": "DMARC gray: the message passed DMARC, but the sender's domain publishes p=none, so receivers aren't asked to block mail that fails.",
@@ -238,6 +282,7 @@
   "received": {
     "title": "All received",
     "hint": "Every email your domains received, including addresses without an inbox.",
+    "hintShort": "Every email your domains received",
     "search": "Search sender, inbox or subject…",
     "loadError": "Couldn't load received emails.",
     "empty": "No received emails yet.",
@@ -252,6 +297,7 @@
     },
     "badge": {
       "quarantined": "Quarantined",
+      "screening": "Screening",
       "spam": "Spam",
       "virus": "Virus"
     },
@@ -265,7 +311,8 @@
       "suspicious": "Suspicious",
       "quarantined": "Quarantined",
       "spam": "Spam",
-      "virus": "Virus"
+      "virus": "Virus",
+      "screening": "Being screened"
     },
     "range": {
       "h24": "Last 24 hours",
@@ -296,7 +343,6 @@
     "code": "Code",
     "link": "Sign-in link",
     "linkElsewhere": "The link points to a domain other than the sender's.",
-    "scores": "Risk (0–100): injection {injection} · phishing {phishing}",
     "receivedFor": "Received for",
     "messageId": "Message-ID",
     "envelopeFrom": "Envelope from",
@@ -315,9 +361,9 @@
     "received": "Received",
     "scanned": "Scanned",
     "screened": "Screened",
-    "delivered": "Delivered to {inbox}",
     "quarantined": "Quarantined",
-    "released": "Released by {who}",
+    "released": "Released",
+    "releasedBy": "by {who}",
     "replied": "Replied",
     "forwarded": "Forwarded",
     "webhook": "Webhook"

@@ -55,6 +55,15 @@ export function grayExplanation(
   return "dmarcGeneric";
 }
 
+// The tiers core's senderTrust grants only on alignment with the From domain;
+// a known thread's proof is the thread, not the domain.
+const AUTHENTICATED_TRUST: ReadonlySet<string> = new Set(["owner", "allowlisted", "external"]);
+
+/** Whether authentication (DMARC, or aligned DKIM or SPF) ties received mail to its From domain. */
+export function authenticatedSender(trust: string | null | undefined): boolean {
+  return trust != null && AUTHENTICATED_TRUST.has(trust);
+}
+
 /** The d= domains of DKIM-Signature header values (one per line), minus the From domain. */
 export function dkimSignerDomains(signatures: string, fromDomain: string): string[] {
   const domains = [...signatures.matchAll(/(?:^|;)\s*d=([^;\s]+)/gim)].map((match) =>

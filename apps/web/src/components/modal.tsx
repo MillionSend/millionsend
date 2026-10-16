@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { FOCUSABLE } from "@/lib/keyboard";
 import { refusedAsReadOnly } from "@/lib/read-only";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 import { DotParts } from "./dot-parts";
@@ -29,10 +30,6 @@ function CloseGlyph({ onClose }: { onClose: () => void }) {
     </button>
   );
 }
-
-/** Tab stops inside a panel that runs its own focus loop (dialogs, anchored editors). */
-export const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Modal({
   open,

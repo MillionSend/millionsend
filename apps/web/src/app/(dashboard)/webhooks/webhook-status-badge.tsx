@@ -50,9 +50,9 @@ export function WebhookStatusBadge({ status }: { status: EndpointStatus }) {
   );
 }
 
-type DeliveryStatus = "pending" | "success" | "failed" | "exhausted";
+export type DeliveryStatus = "pending" | "success" | "failed" | "exhausted";
 
-const DELIVERY_VARIANTS: Record<DeliveryStatus, string> = {
+export const DELIVERY_VARIANTS: Record<DeliveryStatus, keyof typeof TONE_COLOR> = {
   pending: "neutral",
   success: "success",
   failed: "danger",

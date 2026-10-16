@@ -25,7 +25,7 @@ export function Svg({
   children,
 }: {
   size: number;
-  strokeWidth?: number;
+  strokeWidth?: number | undefined;
   children: React.ReactNode;
 }) {
   return (

@@ -6,8 +6,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { useAnchoredPanel } from "@/components/anchored-panel";
 import { PlusGlyph } from "@/components/icons/nav-icons";
-import { FOCUSABLE } from "@/components/modal";
 import { Select, type SelectOption } from "@/components/select";
+import { FOCUSABLE } from "@/lib/keyboard";
 import {
   BASE_FIELDS,
   type BuilderRow,

@@ -5,7 +5,10 @@ import type { ApiKeyAuth } from "../api-key-auth.js";
 import type { Plan } from "../plans.js";
 import { MAX_RECEIVED_MESSAGE_BYTES } from "../receiving/protocol.js";
 import { DAY_MS } from "../utc-day.js";
+import { TRASH_RETENTION_DAYS } from "./organize.js";
 import type { InboxKind } from "./types.js";
+
+export { INBOX_LABELS_MAX } from "./organize.js";
 
 const HOUR_MS = 3_600_000;
 
@@ -33,7 +36,6 @@ export const INBOX_CREATES_PER_HOUR: Record<Plan, number | null> = {
 /** Accepted messages per inbox per rolling hour before RCPT answers 452. */
 export const INBOX_FLOOD_PER_HOUR: Record<InboxKind, number> = { agent: 200, human: 2000 };
 
-export const INBOX_LABELS_MAX = 100;
 export const INBOX_ALLOWLIST_MAX = 500;
 export const INBOX_OWNER_ADDRESSES_MAX = 50;
 export const INBOX_FORWARD_TO_MAX = 5;
@@ -62,7 +64,7 @@ export const SHARED_SUBDOMAIN_FALLBACK_MS = DAY_MS;
 /** Milliseconds a pending_approval draft waits before it expires. */
 export const DRAFT_APPROVAL_TTL = 7 * DAY_MS;
 /** Milliseconds a trashed thread is kept. */
-export const TRASH_RETENTION = 30 * DAY_MS;
+export const TRASH_RETENTION = TRASH_RETENTION_DAYS * DAY_MS;
 /** Milliseconds a received code or link counts as private for outgoing mail. */
 export const RECEIVED_SECRET_WINDOW = 24 * HOUR_MS;
 /** Milliseconds between two looks at the shared-domain switch by mail it holds. */

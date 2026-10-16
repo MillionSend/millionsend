@@ -9,6 +9,7 @@ import {
   safetyProblem,
   sealReceivedExtracted,
 } from "@millionsend/core";
+import { LABEL_COLORS } from "@millionsend/core/inbox-organize";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -375,7 +376,13 @@ describe("support view", () => {
     expect(core.listThreadEmails).toHaveBeenCalledWith(
       db,
       expect.anything(),
-      expect.objectContaining({ envelopeOnly: true, agentView: false, includeHeld: true }),
+      // The pane renders the HTML: its cid: images come inlined.
+      expect.objectContaining({
+        envelopeOnly: true,
+        agentView: false,
+        includeHeld: true,
+        inlineImages: true,
+      }),
     );
     expect(page.items).toEqual([
       {
@@ -1252,5 +1259,32 @@ describe("Settings → Receiving", () => {
       maxSizeBytes: 40 * 1024 * 1024,
     });
     expect(health.receivedToday).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("labels", () => {
+  it("are made in the color picked, else one of the palette's, and never in another form", async () => {
+    const member = caller(acme, "member");
+    expect(
+      await member.inboxes.labels.create({ inboxId, name: "Refund", color: "#ab4aba" }),
+    ).toMatchObject({ name: "Refund", color: "#AB4ABA" });
+    const picked = await member.inboxes.labels.create({ inboxId, name: "Billing" });
+    expect(Object.values(LABEL_COLORS)).toContain(picked.color);
+    for (const color of ["red", "#abc", "AB4ABA"]) {
+      await expect(
+        member.inboxes.labels.create({ inboxId, name: `Not ${color}`, color }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    // Another team's inbox reads as missing.
+    await expect(
+      caller(beta).inboxes.labels.create({ inboxId, name: "Theirs", color: "#AB4ABA" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // A recolor takes the same check.
+    await expect(
+      member.inboxes.labels.update({ inboxId, labelId: picked.id, color: "blue" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(
+      await member.inboxes.labels.update({ inboxId, labelId: picked.id, color: "#00a2c7" }),
+    ).toMatchObject({ name: "Billing", color: "#00A2C7" });
   });
 });

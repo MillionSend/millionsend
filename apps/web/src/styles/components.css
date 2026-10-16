@@ -594,6 +594,90 @@ table.ms-table {
     min-height: 0;
   }
 }
+/* A label's pill, in thread rows and under the open thread's title: the
+   neutral badge led by the label's color dot (inboxes/[id]/labels.tsx). */
+.ms-label-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The labels picker: the pencil on its active row, and the color swatches its
+   create row and edit view share. A palette swatch is a radio drawn as its
+   color, ringed in bone once picked; the dashed one opens the native picker
+   through the color input laid over it, and fills with a custom pick. */
+.ms-menu-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px -3px 2px;
+  border-radius: 6px;
+  color: var(--ms-muted);
+  cursor: pointer;
+}
+.ms-menu-edit:hover {
+  background: var(--ms-line);
+  color: var(--ms-bone);
+}
+.ms-swatches,
+.ms-swatches > [role="radiogroup"] {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ms-swatches {
+  padding: 4px 8px 8px;
+}
+.ms-swatch {
+  appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.ms-swatch:checked,
+.ms-swatch.on {
+  outline: 1.5px solid var(--ms-bone);
+  outline-offset: 2px;
+}
+.ms-swatch.custom {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--ms-faint);
+  color: var(--ms-muted);
+  transition:
+    color var(--ms-dur-fast) var(--ms-ease),
+    border-color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-swatch.custom:hover {
+  border-color: var(--ms-muted);
+  color: var(--ms-bone);
+}
+.ms-swatch.custom.on {
+  border-color: transparent;
+}
+.ms-swatch.custom:has(:focus-visible) {
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-swatch-picker {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
 
 /* Inputs. A fieldset's legend labels its group like any field's label. */
 .ms-field label,
@@ -617,10 +701,6 @@ table.ms-table {
   outline: none;
   box-sizing: border-box;
   transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
-}
-.ms-input:focus {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
 }
 .ms-input.error {
   background: var(--ms-danger-bg);
@@ -754,7 +834,8 @@ table.ms-table {
     animation: none;
   }
 }
-.ms-chip button {
+.ms-chip button,
+.ms-label-badge button {
   background: none;
   border: 0;
   color: var(--ms-muted);
@@ -768,7 +849,8 @@ table.ms-table {
   flex-shrink: 0;
   transition: color var(--ms-dur-fast) var(--ms-ease);
 }
-.ms-chip button:hover {
+.ms-chip button:hover,
+.ms-label-badge button:hover {
   color: var(--ms-bone);
 }
 /* Chips inside the token input (chip-multi-select.tsx) are 20px, so one never
@@ -1770,14 +1852,24 @@ svg:focus {
 /* The same policy, globally: nothing ever shows the browser's default ring,
    and every interactive control without a rule of its own (nav links, tabs,
    table links, focusable spans) draws the steel ring on :focus-visible.
-   Component rules above and below win on specificity where they differ. */
+   Component rules above and below win on specificity where they differ.
+   Text fields and editors are left out on purpose: their caret is the only
+   focus mark, so a click into a field never draws a ring around it. */
 :focus {
   outline: none;
 }
 a:focus-visible,
 button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
+input:is(
+  [type="checkbox"],
+  [type="radio"],
+  [type="color"],
+  [type="range"],
+  [type="file"],
+  [type="button"],
+  [type="submit"],
+  [type="reset"]
+):focus-visible,
 select:focus-visible,
 summary:focus-visible,
 [tabindex="0"]:focus-visible {
@@ -1897,11 +1989,6 @@ summary:focus-visible,
 .ms-menu-search::placeholder {
   color: var(--ms-faint);
 }
-/* The panel is the focus surface; the global input ring, clipped by the
-   panel, would show as a band under the hairline. */
-.ms-menu-search:focus-visible {
-  box-shadow: none;
-}
 /* Non-interactive menu row (e.g. the Appearance row): keeps the item metrics,
    drops the hover affordance. */
 .ms-menu-item.static {
@@ -1937,6 +2024,44 @@ summary:focus-visible,
 .ms-tooltip-trigger.inline.ms-truncate-host {
   display: block;
   min-width: 0;
+}
+/* A list row's lead cell (lead-cell.tsx): tile, value, "+N" and a muted
+   tail on one line. The tail's basis is 0, so it gets only the width the
+   others leave: it gives way first, and only then does the value shrink. */
+.ms-lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ms-lead-value {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.ms-lead-more {
+  color: var(--ms-muted);
+}
+.ms-lead-tail,
+.ms-lead-action {
+  font-family: var(--ms-font-sans);
+  font-size: 12.5px;
+  color: var(--ms-muted);
+  white-space: nowrap;
+}
+.ms-lead-tail {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* An action after the tail (the catch-all row's "turn off") stays whole and
+   right after the tail's words, which grow no wider than they are. */
+.ms-lead-tail:has(+ .ms-lead-action) {
+  max-width: max-content;
+}
+.ms-lead-action {
+  flex: none;
+  margin-left: -6px;
 }
 
 .ms-theme-toggle {
@@ -2191,9 +2316,9 @@ summary:focus-visible,
 }
 .ms-tooltip {
   position: fixed;
-  /* Modal-level so a tooltip inside a modal wins; ties with the overlay
-     resolve by DOM order — the tooltip portal mounts after the modal's. */
-  z-index: var(--ms-z-modal);
+  /* The top layer: a tooltip names something in the modal or the portaled
+     menu it opened from, so it clears both. */
+  z-index: calc(var(--ms-z-menu) + 1);
   /* The max-width below is the whole panel, padding and border included,
      which is what tooltip.tsx clamps into the viewport. */
   box-sizing: border-box;
@@ -2229,6 +2354,107 @@ summary:focus-visible,
 .ms-badge .ms-tooltip-trigger svg {
   width: 12px;
   height: 12px;
+}
+
+/* Received mail (mail-frame.tsx): the message's frame, boxed inside a thread
+   card; the remote-images bar above it; the "•••" quoted-text toggle under
+   it; and a link's destination in the tooltip panel. In a panel
+   (.ms-mail-panel) the frame runs edge to edge and the bar is a strip. */
+.ms-mail-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: 10px;
+  background: var(--ms-ground);
+  font-size: 12.5px;
+  color: var(--ms-muted);
+}
+/* Narrow, the actions wrap under the words rather than the words under the icon. */
+.ms-mail-bar-text {
+  flex: 1 1 240px;
+}
+.ms-mail-bar > .ms-btn {
+  height: 26px;
+  padding: 3px 9px;
+  font-size: 12.5px;
+}
+.ms-mail-bar > .ms-link {
+  margin-right: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+.ms-mail-frame {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--ms-line);
+  border-radius: 10px;
+}
+.ms-mail-panel > .ms-mail-bar {
+  margin: 0;
+  padding-left: 18px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+.ms-mail-panel > .ms-mail-frame {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.ms-mail-quote {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-top: 8px;
+  padding: 0 7px;
+  border: 1px solid var(--ms-line-strong);
+  border-radius: var(--ms-r-chip);
+  background: var(--ms-panel-raised);
+  color: var(--ms-muted);
+  font: 700 10px / 1 var(--ms-font-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-mail-quote:hover,
+.ms-mail-quote[aria-expanded="true"] {
+  color: var(--ms-bone);
+}
+.ms-mail-panel .ms-mail-quote {
+  margin: 10px 18px 12px;
+}
+/* The host is never cut, and the domain its owner registered stands out: a
+   look-alike host buries it at the end. Tracking paths run to hundreds of
+   characters, so the rest stops after four lines. */
+.ms-mail-host,
+.ms-mail-href {
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  color: var(--ms-muted);
+}
+.ms-mail-host {
+  display: block;
+}
+.ms-mail-host strong {
+  font-weight: 700;
+  color: var(--ms-bone);
+}
+.ms-mail-href {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.ms-mail-href-note {
+  display: block;
+  color: var(--ms-muted);
 }
 
 /* Busy spinner (spinner.tsx) — currentColor stroke ring, composed inside
@@ -2962,6 +3188,7 @@ summary:focus-visible,
   .ms-modal-close,
   .ms-tooltip-trigger:not(.inline),
   .ms-chip button,
+  .ms-label-badge button,
   button.ms-notice-strip-action,
   .ms-crumb {
     position: relative;
@@ -2969,6 +3196,7 @@ summary:focus-visible,
   .ms-modal-close::after,
   .ms-tooltip-trigger:not(.inline)::after,
   .ms-chip button::after,
+  .ms-label-badge button::after,
   button.ms-notice-strip-action::after {
     content: "";
     position: absolute;
@@ -3336,11 +3564,6 @@ input[type="number"]::-webkit-inner-spin-button {
   border-radius: 7px;
   background: var(--ms-inset);
   color: var(--ms-muted);
-  transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
-}
-.ms-code-find:focus-within {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
 }
 .ms-code-find input {
   flex: 1 1 auto;
@@ -3359,19 +3582,6 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .ms-code-find input::placeholder {
   color: var(--ms-faint);
-}
-/* The frame shows the focus ring (:focus-within); the bare input must not add its own. */
-.ms-code-find input:focus-visible {
-  box-shadow: none;
-}
-/* The token input (chip-multi-select.tsx) works the same way: the rounded
-   frame takes the ring, never a square around the bare input inside. */
-.ms-chip-input:focus-within {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
-}
-.ms-chip-input input:focus-visible {
-  box-shadow: none;
 }
 .ms-code-find-count {
   flex: none;
@@ -3416,20 +3626,11 @@ input[type="number"]::-webkit-inner-spin-button {
   border-radius: var(--ms-r-input);
   background: var(--ms-inset);
   overflow: hidden;
-  transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
 }
 /* Under its toolbar row the frame joins the head: line-tone at rest, no top rounding. */
 .ms-tpl-code-source .ms-code-editor {
   border-color: var(--ms-line);
   border-radius: 0 0 var(--ms-r-input) var(--ms-r-input);
-}
-.ms-code-editor:focus-within {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
-}
-.ms-tpl-code-source .ms-code-editor:focus-within {
-  /* The head above would sit outside a ring; the border colour alone marks focus. */
-  box-shadow: none;
 }
 /* Mirror and textarea share every metric that moves a glyph. */
 .ms-code-editor-hl,
@@ -3458,10 +3659,6 @@ input[type="number"]::-webkit-inner-spin-button {
   color: transparent;
   -webkit-text-fill-color: transparent;
   caret-color: var(--ms-bone);
-}
-.ms-code-editor-input:focus-visible {
-  /* The ring sits on the frame (focus-within), where overflow: hidden cannot clip it. */
-  box-shadow: none;
 }
 .ms-code-editor-input::selection {
   background: color-mix(in srgb, var(--ms-info) 32%, transparent);

@@ -60,11 +60,10 @@ const verdictFilter: Record<(typeof VERDICT_FILTERS)[number], SQL> = {
   spam: sql`${r.spamVerdict} = 'fail'`,
   quarantined: membershipWhere(sql`m.verdict = 'quarantined'`),
   suspicious: membershipWhere(sql`m.verdict = 'suspicious'`),
-  clean: sql`${r.virusVerdict} is distinct from 'fail' and ${r.spamVerdict} is distinct from 'fail' and not ${membershipWhere(sql`m.verdict in ('pending', 'suspicious', 'quarantined')`)}`,
+  // Clean as the row's tile reads it (lib/received-state.ts): a scanner that
+  // failed is not clean, and no scanner at all is.
+  clean: sql`(${r.virusVerdict} is null or ${r.virusVerdict} = 'pass') and ${r.spamVerdict} is distinct from 'fail' and not ${membershipWhere(sql`m.verdict in ('pending', 'suspicious', 'quarantined')`)}`,
 };
-
-/** Held from every agent: screening still running, or quarantined and not released. */
-const heldSql = membershipWhere(sql`m.verdict in ('pending', 'quarantined')`);
 
 const recipients = z.array(z.email()).max(50);
 
@@ -103,6 +102,21 @@ export const receivingRouter = router({
       );
       // Counted on the first page only; later pages keep reading pages[0].total.
       const [total] = input.cursor ? [] : await ctx.db.select({ n: count() }).from(r).where(where);
+      // Each row's screening across the inboxes it reached, one aggregate per
+      // row: still running, quarantined, or let in as suspicious by any of them.
+      const screening = ctx.db
+        .select({
+          pending: sql<boolean>`coalesce(bool_or(${m.verdict} = 'pending'), false)`.as("pending"),
+          quarantined: sql<boolean>`coalesce(bool_or(${m.verdict} = 'quarantined'), false)`.as(
+            "quarantined",
+          ),
+          suspicious: sql<boolean>`coalesce(bool_or(${m.verdict} = 'suspicious'), false)`.as(
+            "suspicious",
+          ),
+        })
+        .from(m)
+        .where(eq(m.receivedEmailId, r.id))
+        .as("screening");
       // Metadata columns only: a row's sealed raw message runs to 40 MiB.
       const rows = await ctx.db
         .select({
@@ -116,11 +130,14 @@ export const receivingRouter = router({
           extractedKinds: r.extractedKinds,
           spamVerdict: r.spamVerdict,
           virusVerdict: r.virusVerdict,
-          held: sql<boolean>`${heldSql}`,
+          pending: screening.pending,
+          quarantined: screening.quarantined,
+          suspicious: screening.suspicious,
           createdAt: r.createdAt,
           cursorCreatedAt: createdAtCursorField(r),
         })
         .from(r)
+        .crossJoinLateral(screening)
         .where(input.cursor ? and(where, beforeCursor(r, input.cursor)) : where)
         .orderBy(desc(r.createdAt), desc(r.id))
         .limit(input.limit + 1);

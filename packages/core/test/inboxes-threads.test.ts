@@ -10,6 +10,7 @@ import { EnvKeyring } from "../src/crypto/keyring.js";
 import type { InboxActor } from "../src/inboxes/activity.js";
 import type { InboxDeps } from "../src/inboxes/inboxes.js";
 import { createLabel, deleteLabel, listLabels, updateLabel } from "../src/inboxes/labels.js";
+import { LABEL_COLORS } from "../src/inboxes/organize.js";
 import { listQuarantined } from "../src/inboxes/quarantine.js";
 import { defaultSafety } from "../src/inboxes/safety.js";
 import {
@@ -105,6 +106,8 @@ async function inbound(
     text?: string;
     html?: string;
     attach?: boolean;
+    /** A logo the HTML shows by cid:logo@sender.test. */
+    logo?: boolean;
     held?: "pending" | "quarantined";
     virus?: boolean;
     read?: boolean;
@@ -122,15 +125,27 @@ async function inbound(
     subject: p.subject,
     text: p.text ?? `About ${p.subject}`,
     html: p.html,
-    attachments: p.attach
-      ? [
-          {
-            filename: "invoice.pdf",
-            content: Buffer.from("%PDF-1.4 x"),
-            contentType: "application/pdf",
-          },
-        ]
-      : [],
+    attachments: [
+      ...(p.attach
+        ? [
+            {
+              filename: "invoice.pdf",
+              content: Buffer.from("%PDF-1.4 x"),
+              contentType: "application/pdf",
+            },
+          ]
+        : []),
+      ...(p.logo
+        ? [
+            {
+              filename: "logo.png",
+              content: Buffer.from("logo"),
+              contentType: "image/png",
+              cid: "logo@sender.test",
+            },
+          ]
+        : []),
+    ],
   });
   const raw = info.message as Buffer;
   const owner = { teamId: s.teamId, rowId: id };
@@ -673,7 +688,8 @@ describe("labels", () => {
     });
     expect(red).toMatchObject({ ok: true, label: { name: "Billing", color: "#E93D82" } });
     const picked = await label(s, "Support");
-    expect(picked.color).toMatch(/^#[0-9A-F]{6}$/);
+    // Without a color, one of the palette the dashboard offers.
+    expect(Object.values(LABEL_COLORS)).toContain(picked.color);
     const duplicate = await createLabel(db, deps, {
       teamId: s.teamId,
       inboxId: s.inboxId,
@@ -871,6 +887,32 @@ describe("thread emails", () => {
       subject: "Hi",
     });
     expect(await list({ query: { after: heldId } })).toMatchObject({ error: { status: 404 } });
+  });
+
+  it("inlines cid: images only for a viewer that renders the HTML", async () => {
+    const s = await setup("thread-cid");
+    const id = await thread(s, { subject: "Logo" });
+    await inbound(s, id, {
+      subject: "Logo",
+      html: '<p>Thanks</p><img src="cid:logo@sender.test">',
+      logo: true,
+    });
+    const html = async (inlineImages?: boolean) => {
+      const page = await listThreadEmails(db, keyring, {
+        teamId: s.teamId,
+        inboxId: s.inboxId,
+        threadId: id,
+        query: {},
+        agentView: false,
+        includeHeld: true,
+        inlineImages,
+      });
+      return "data" in page ? page.data[0]?.html : null;
+    };
+    expect(await html()).toBe('<p>Thanks</p><img src="cid:logo@sender.test">');
+    expect(await html(true)).toBe(
+      `<p>Thanks</p><img src="data:image/png;base64,${Buffer.from("logo").toString("base64")}">`,
+    );
   });
 
   it("answers a held message 403 to agents, a pending one 404, and shows a virus's text only", async () => {
