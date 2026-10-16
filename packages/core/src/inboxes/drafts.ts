@@ -11,6 +11,7 @@ import {
   enqueueTeamWebhookEvents,
   type TeamWebhookEvent,
   type WebhookEnqueue,
+  webhookBatch,
 } from "../webhooks.js";
 import {
   canApprove,
@@ -24,7 +25,6 @@ import { addressKey, forwardSubject, replySubject } from "./compose.js";
 import { draftDeletedEvent, draftEvent, draftSentEvent } from "./events.js";
 import { DRAFT_APPROVAL_TTL, findLiveInbox, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
 import {
-  deferredEnqueue,
   dispatchSend,
   forwardFiles,
   type HoldSpec,
@@ -301,7 +301,7 @@ export async function createDraft(
     html: fields.html,
     text: fields.text,
   });
-  const queued = deferredEnqueue();
+  const queued = webhookBatch(deps.enqueueWebhookDeliveries);
   let row: DraftRow;
   try {
     row = await db.transaction(async (txDb) => {
@@ -338,7 +338,7 @@ export async function createDraft(
       await emitDraftEvent(tx, {
         teamId: p.teamId,
         row: inserted,
-        enqueue: queued.enqueue,
+        enqueue: queued.collect,
         events: (thread) => [
           draftEvent("inbox.draft.created", {
             source: webhookSource(p.actor),
@@ -365,7 +365,7 @@ export async function createDraft(
     }
     throw err;
   }
-  await queued.flush(deps.enqueueWebhookDeliveries);
+  await queued.flush();
   return { ok: true, created: true, draft: wireOf(row, { html: fields.html, text: fields.text }) };
 }
 
@@ -480,7 +480,7 @@ export async function updateDraft(
   };
   const sealed =
     bodyGiven || !stored ? await sealBody(deps.keyring, row.teamId, row.id, body) : null;
-  const queued = deferredEnqueue();
+  const queued = webhookBatch(deps.enqueueWebhookDeliveries);
   const updated = await db.transaction(async (txDb) => {
     const tx = txDb as unknown as Db;
     const [next] = await tx
@@ -510,7 +510,7 @@ export async function updateDraft(
     await emitDraftEvent(tx, {
       teamId: row.teamId,
       row: next,
-      enqueue: queued.enqueue,
+      enqueue: queued.collect,
       events: (thread) => [
         draftEvent("inbox.draft.updated", {
           source: webhookSource(p.actor),
@@ -525,7 +525,7 @@ export async function updateDraft(
   });
   if (!updated)
     return fail(409, "validation_error", "This draft changed while it was being updated");
-  await queued.flush(deps.enqueueWebhookDeliveries);
+  await queued.flush();
   return { ok: true, draft: updated };
 }
 
@@ -538,7 +538,7 @@ export async function deleteDraft(
   if (!row) return draftNotFound();
   if (row.status === "sent") return fail(409, "validation_error", "This draft was already sent");
   const now = new Date();
-  const queued = deferredEnqueue();
+  const queued = webhookBatch(deps.enqueueWebhookDeliveries);
   const deleted = await db.transaction(async (txDb) => {
     const tx = txDb as unknown as Db;
     const [gone] = await tx
@@ -557,7 +557,7 @@ export async function deleteDraft(
     await emitDraftEvent(tx, {
       teamId: row.teamId,
       row,
-      enqueue: queued.enqueue,
+      enqueue: queued.collect,
       events: (thread) => [
         draftDeletedEvent({
           source: webhookSource(p.actor),
@@ -572,7 +572,7 @@ export async function deleteDraft(
   });
   if (!deleted)
     return fail(409, "validation_error", "This draft changed while it was being deleted");
-  await queued.flush(deps.enqueueWebhookDeliveries);
+  await queued.flush();
   return { ok: true };
 }
 
@@ -800,7 +800,7 @@ export async function rejectDraft(
   const done = finished(row);
   if (done) return done;
   const now = new Date();
-  const queued = deferredEnqueue();
+  const queued = webhookBatch(deps.enqueueWebhookDeliveries);
   const rejected = await db.transaction(async (txDb) => {
     const tx = txDb as unknown as Db;
     const [next] = await tx
@@ -827,7 +827,7 @@ export async function rejectDraft(
     await emitDraftEvent(tx, {
       teamId: row.teamId,
       row,
-      enqueue: queued.enqueue,
+      enqueue: queued.collect,
       events: (thread) => [
         draftDeletedEvent({
           source: webhookSource(p.actor),
@@ -842,7 +842,7 @@ export async function rejectDraft(
   });
   if (!rejected)
     return fail(409, "validation_error", "This draft changed while it was being rejected");
-  await queued.flush(deps.enqueueWebhookDeliveries);
+  await queued.flush();
   return { ok: true, draft: wireOf(rejected, await openBody(deps.keyring, rejected)) };
 }
 
@@ -851,7 +851,7 @@ const EXPIRE_BATCH = 500;
 
 /** Pending drafts nobody approved within DRAFT_APPROVAL_TTL: expired, and deleted to webhooks. */
 export async function expireDrafts(db: Db, deps: InboxSendDeps, now: Date): Promise<number> {
-  const queued = deferredEnqueue();
+  const queued = webhookBatch(deps.enqueueWebhookDeliveries);
   const expired = await db.transaction(async (txDb) => {
     const tx = txDb as unknown as Db;
     const due = await tx
@@ -887,7 +887,7 @@ export async function expireDrafts(db: Db, deps: InboxSendDeps, now: Date): Prom
       await emitDraftEvent(tx, {
         teamId: row.teamId,
         row,
-        enqueue: queued.enqueue,
+        enqueue: queued.collect,
         events: (thread) => [
           draftDeletedEvent({
             source: "system",
@@ -901,7 +901,7 @@ export async function expireDrafts(db: Db, deps: InboxSendDeps, now: Date): Prom
     }
     return rows.length;
   });
-  await queued.flush(deps.enqueueWebhookDeliveries);
+  await queued.flush();
   return expired;
 }
 
@@ -956,7 +956,7 @@ export async function draftForHeldSend(
     const existing = await reuse();
     const id = existing?.id ?? randomUUID();
     const sealed = spec.draftId ? null : await sealBody(deps.keyring, held.teamId, id, body);
-    const queued = deferredEnqueue();
+    const queued = webhookBatch(deps.enqueueWebhookDeliveries);
     try {
       const draft = await db.transaction(async (txDb) => {
         const tx = txDb as unknown as Db;
@@ -1024,7 +1024,7 @@ export async function draftForHeldSend(
         await emitDraftEvent(tx, {
           teamId: held.teamId,
           row: stored,
-          enqueue: queued.enqueue,
+          enqueue: queued.collect,
           events: (thread) => [
             draftEvent(existing ? "inbox.draft.updated" : "inbox.draft.created", {
               source: webhookSource(held.actor),
@@ -1038,7 +1038,7 @@ export async function draftForHeldSend(
         await complete?.(tx, `draft:${stored.id}`);
         return wire;
       });
-      await queued.flush(deps.enqueueWebhookDeliveries);
+      await queued.flush();
       return draft;
     } catch (err) {
       // Lost a race for the one unsent reply draft of the target: hold into the winner's.

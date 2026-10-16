@@ -11,7 +11,6 @@ import { type InboxActor, inboxActorFromAuth } from "./inboxes/activity.js";
 import type { InboxKeys } from "./inboxes/keys.js";
 import {
   beginInboxAccept,
-  deferredEnqueue,
   finishInboxAccept,
   gateGenericSend,
   type InboxAcceptState,
@@ -27,7 +26,7 @@ import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppression
 import { type SendRefusal, sendRefusal } from "./team-standing.js";
 import { findTopicOptOuts } from "./topics.js";
 import { utcDay } from "./utc-day.js";
-import type { WebhookEnqueue } from "./webhooks.js";
+import { type WebhookEnqueue, webhookBatch } from "./webhooks.js";
 
 /**
  * Domain part of an RFC 5322 sender, lowercased. SECURITY: strict
@@ -610,7 +609,7 @@ export async function acceptEmail(
   // against the current billing period, whenever it delivers.
   const deliveryAt = quotaChargeAt(payload.scheduledAt);
   const day = utcDay(deliveryAt);
-  const inboxEvents = deferredEnqueue();
+  const inboxEvents = webhookBatch(deps.enqueueWebhookDeliveries);
   const acceptRow = async (txDb: Db, inbox: InboxAcceptState | null) => {
     const reservation =
       opts.quota === "deferred"
@@ -710,7 +709,7 @@ export async function acceptEmail(
         attachments: payload.attachments,
         actor,
         now,
-        enqueue: opts.inboxWebhooks ?? inboxEvents.enqueue,
+        enqueue: opts.inboxWebhooks ?? inboxEvents.collect,
       });
     }
     return { id: row.id, parked };
@@ -770,7 +769,7 @@ export async function acceptEmail(
       console.error("email.send enqueue failed; reconcile sweep will recover", err);
     }
   }
-  if (!opts.tx) await inboxEvents.flush(deps.enqueueWebhookDeliveries);
+  if (!opts.tx) await inboxEvents.flush();
   return {
     ok: true,
     id: accepted.id,

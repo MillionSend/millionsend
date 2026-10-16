@@ -555,6 +555,30 @@ export async function enqueueTeamWebhookEvents(
   await insertDeliveryRows(db, values, params.enqueue);
 }
 
+/**
+ * Webhook rows written inside a transaction and handed to the queue after
+ * it commits: `collect` is the enqueue a fan-out inside the transaction
+ * takes, `flush` runs after the commit. A failed hand-off, or no `enqueue`
+ * at all, leaves the committed rows to the webhooks.reconcile sweep.
+ */
+export function webhookBatch(enqueue: WebhookEnqueue | undefined) {
+  const rows: QueuedWebhookDelivery[] = [];
+  const collect: WebhookEnqueue = async (queued) => {
+    rows.push(...queued);
+  };
+  return {
+    collect,
+    emit: (db: Db, teamId: string, events: TeamWebhookEvent[]) =>
+      enqueueTeamWebhookEvents(db, { teamId, events, enqueue: collect }),
+    flush: async () => {
+      if (rows.length === 0 || !enqueue) return;
+      await enqueue(rows).catch((err: unknown) => {
+        console.warn("webhook enqueue failed; the reconcile sweep will send", err);
+      });
+    },
+  };
+}
+
 type DeliveryInsert = typeof schema.webhookDeliveries.$inferInsert;
 
 /**

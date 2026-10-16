@@ -914,6 +914,7 @@ export {
   type WebhookEventType,
   type WebhookPayload,
   type WebhookSignatureHeaders,
+  webhookBatch,
 } from "./webhooks.js";
 
 // Its own statement, apart from the team-standing block above, so edits to
