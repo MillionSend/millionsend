@@ -10,6 +10,7 @@ import { EnvKeyring } from "../src/crypto/keyring.js";
 import type { InboxActor } from "../src/inboxes/activity.js";
 import type { InboxDeps } from "../src/inboxes/inboxes.js";
 import { createLabel, deleteLabel, listLabels, updateLabel } from "../src/inboxes/labels.js";
+import { LABEL_COLORS } from "../src/inboxes/organize.js";
 import { listQuarantined } from "../src/inboxes/quarantine.js";
 import { defaultSafety } from "../src/inboxes/safety.js";
 import {
@@ -673,7 +674,8 @@ describe("labels", () => {
     });
     expect(red).toMatchObject({ ok: true, label: { name: "Billing", color: "#E93D82" } });
     const picked = await label(s, "Support");
-    expect(picked.color).toMatch(/^#[0-9A-F]{6}$/);
+    // Without a color, one of the palette the dashboard offers.
+    expect(Object.values(LABEL_COLORS)).toContain(picked.color);
     const duplicate = await createLabel(db, deps, {
       teamId: s.teamId,
       inboxId: s.inboxId,
