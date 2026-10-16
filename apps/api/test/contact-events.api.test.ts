@@ -220,6 +220,8 @@ describe("audience webhook events", () => {
       email: "blocked@example.com",
       origin: "unsubscribe",
       source: "api",
+      // Resend's field: the email that caused the suppression, none for one added by hand.
+      source_id: null,
     });
     // Re-adding an already suppressed address publishes nothing.
     const before = (await deliveries()).length;
@@ -228,7 +230,12 @@ describe("audience webhook events", () => {
 
     expect((await call("DELETE", `/suppressions/${id}`)).status).toBe(200);
     row = (await deliveries()).find((r) => r.eventType === "suppression.removed");
-    expect(row?.data).toMatchObject({ id, email: "blocked@example.com", origin: "unsubscribe" });
+    expect(row?.data).toMatchObject({
+      id,
+      email: "blocked@example.com",
+      origin: "unsubscribe",
+      source_id: null,
+    });
   });
 });
 

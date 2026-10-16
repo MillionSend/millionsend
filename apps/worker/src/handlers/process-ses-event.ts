@@ -266,6 +266,7 @@ export async function processSesEvent(
           id: schema.suppressions.id,
           email: schema.suppressions.email,
           reason: schema.suppressions.reason,
+          sourceEmailId: schema.suppressions.sourceEmailId,
           createdAt: schema.suppressions.createdAt,
         });
       if (inserted) suppressedRows.push(inserted);

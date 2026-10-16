@@ -200,6 +200,30 @@ it("bounce events carry bounce extras and reach type-subscribed endpoints", asyn
   });
 });
 
+it("a hard bounce's suppression.added names the bounced email as source_id", async () => {
+  const bounceTeamId = await createTeam(db, "bounce-source-team");
+  const endpointId = await insertEndpoint(bounceTeamId, ["suppression.added"]);
+  const emailId = await insertSentEmail("wh-mid-source", bounceTeamId);
+  await processSesEvent(
+    db,
+    {
+      eventType: "Bounce",
+      sesMessageId: "wh-mid-source",
+      occurredAt: "2026-10-16T12:00:00.000Z",
+      bounce: { bounceType: "Permanent", bounceSubType: "General", recipients: ["r@example.com"] },
+      data: { eventType: "Bounce" },
+    },
+    { snsMessageId: "sns-wh-source", enqueueWebhookDelivery: async () => {} },
+  );
+
+  const rows = await deliveriesFor([endpointId]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.payload).toMatchObject({
+    type: "suppression.added",
+    data: { email: "r@example.com", origin: "bounce", source_id: emailId },
+  });
+});
+
 it("an SES Reject fires email.failed once, as message_rejected, even when SES repeats it", async () => {
   // Fresh team: endpoints created by other tests must not receive this event.
   const rejectTeamId = await createTeam(db, "reject-hooks-team");
