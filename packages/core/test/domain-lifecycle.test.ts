@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
+import { count, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createFixedWindowLimiter,
@@ -122,7 +122,12 @@ describe("failQueuedEmailsForDomain", () => {
       ])
       .returning({ id: schema.emails.id });
 
-    expect(await failQueuedEmailsForDomain(db, { teamId, domainId: domain.id })).toBe(2);
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.failed"]);
+    const collected: string[] = [];
+    const enqueue = async (rows: readonly { id: string }[]) => {
+      collected.push(...rows.map((r) => r.id));
+    };
+    expect(await failQueuedEmailsForDomain(db, { teamId, domainId: domain.id, enqueue })).toBe(2);
 
     const statusOf = async (id: string | undefined) =>
       (
@@ -142,7 +147,56 @@ describe("failQueuedEmailsForDomain", () => {
       .from(schema.emailEvents)
       .where(eq(schema.emailEvents.emailId, queued?.id ?? ""));
     expect(events).toEqual([{ type: "failed", data: { reason: "domain_deleted" } }]);
+
+    const deliveries = await db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+    expect(deliveries.map((d) => d.emailId).sort()).toEqual([queued?.id, parked?.id].sort());
+    expect(deliveries[0]?.payload).toMatchObject({
+      type: "email.failed",
+      data: { failed: { reason: "domain_deleted" } },
+    });
+    expect(collected.sort()).toEqual(deliveries.map((d) => d.id).sort());
   });
+
+  it("fails a backlog too large for one statement's bind parameters, in one call", async () => {
+    // 17,000 rows at four bound values each would be 68,000 parameters, past
+    // Postgres's 65,535: the old per-row event insert aborted the delete.
+    const teamId = await createTeam(db, "backlog-team");
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: "backlog.example.com", region: "us-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    await createWebhookEndpoint(db, teamId, null);
+    await db.execute(sql`
+      insert into ${schema.emails} (team_id, domain_id, "from", "to", subject, latest_status)
+      select ${teamId}::uuid, ${domain.id}::uuid, 'a@backlog.example.com',
+        '["r@example.com"]'::jsonb, 's', 'queued_quota'
+      from generate_series(1, 17000)
+    `);
+    let collected = 0;
+
+    const failed = await db.transaction((tx) =>
+      failQueuedEmailsForDomain(tx as unknown as Db, {
+        teamId,
+        domainId: domain.id,
+        enqueue: async (rows) => {
+          collected += rows.length;
+        },
+      }),
+    );
+
+    expect(failed).toBe(17_000);
+    const [events] = await db
+      .select({ n: count() })
+      .from(schema.emailEvents)
+      .innerJoin(schema.emails, eq(schema.emails.id, schema.emailEvents.emailId))
+      .where(eq(schema.emails.teamId, teamId));
+    expect(events?.n).toBe(17_000);
+    expect(collected).toBe(17_000);
+  }, 60_000);
 });
 
 describe("isIdentitySharedByOtherDomains", () => {

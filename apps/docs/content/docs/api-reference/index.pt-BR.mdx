@@ -181,13 +181,15 @@ deliberadas e explícitas:
   do MillionSend.
 - Um envio em que todos os destinatários de `to` estão na lista de supressão ou
   saíram do `topic_id` é recusado com `422 all_recipients_suppressed` (mensagem
-  `All recipients are suppressed`); destinatários removidos de um envio que
-  ainda tem alguém são simplesmente omitidos. Quando só a lista de supressão
-  esvazia `to`, o `POST /emails` guarda um e-mail `suppressed` só com metadados,
-  e cada nova tentativa com o mesmo `Idempotency-Key` adiciona outro; uma saída
-  de tópico, um item de lote e o relay SMTP não guardam nada. Entradas de descadastro só contam
-  em envios com `topic_id`; bounces, reclamações e entradas manuais contam
-  sempre.
+  `All recipients are suppressed`), e não com o `200` do Resend; destinatários
+  removidos de um envio que ainda tem alguém são simplesmente omitidos. Quando
+  a lista de supressão sozinha deixa `to` vazio, o `POST /emails` guarda um
+  e-mail `suppressed` só com os metadados e, como no Resend, dispara o
+  `email.suppressed`; cada nova tentativa com o mesmo `Idempotency-Key` deixa
+  mais um. Se quem deixa `to` vazio é a saída do tópico, ou se a recusa vem de
+  um item de lote ou do relay SMTP, nada fica guardado. Entradas de
+  descadastro só contam em envios com `topic_id`; bounces, reclamações e
+  entradas manuais contam sempre.
 - `to`, `cc` e `bcc` juntos não podem passar de 50 destinatários, e cada
   endereço precisa ser uma única caixa postal — um nome de exibição contendo
   `@` é rejeitado, e endereços aceitos voltam na forma canônica
@@ -365,7 +367,10 @@ encaminhamentos e envios de rascunho das caixas, e
 `POST /emails/receiving/{id}/reply` e `/forward`. Repetir com a mesma chave e
 o mesmo payload retorna a resposta original em vez de enviar de novo; a mesma
 chave com payload diferente retorna `409`. Um envio que ficou retido para
-aprovação responde à repetição com o mesmo rascunho, como `202`.
+aprovação responde à repetição com o mesmo rascunho, como `202`. Um
+`POST /emails` recusado não prende a chave: a repetição roda de novo e,
+quando a lista de supressão sozinha deixa `to` vazio, fica guardado mais um
+e-mail `suppressed`.
 
 ## Paginação
 

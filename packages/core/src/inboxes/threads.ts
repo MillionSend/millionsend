@@ -29,6 +29,7 @@ import {
 } from "../receiving/message.js";
 import { formatMailbox } from "../sender-address.js";
 import { DAY_MS } from "../utc-day.js";
+import { webhookBatch } from "../webhooks.js";
 import { type InboxActor, isAgentActor, recordInboxActivity, webhookSource } from "./activity.js";
 import { threadFolderEvent, threadLabelsEvent } from "./events.js";
 import {
@@ -39,7 +40,6 @@ import {
   keysetRows,
   labelNotFound,
   notFound,
-  webhookBatch,
 } from "./inbox-common.js";
 import type { InboxDeps } from "./inboxes.js";
 import { findLiveInbox, TRASH_RETENTION } from "./limits.js";

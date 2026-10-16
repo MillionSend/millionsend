@@ -17,6 +17,7 @@ import {
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type QuotaTeamRow, teamRung } from "../src/plans.js";
 import { readPeriodUsage } from "../src/quota.js";
+import { hashRecipient } from "../src/suppressions.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
 let db: Db;
@@ -352,6 +353,32 @@ describe("acceptEmail", () => {
     };
     expect(await storedTags(FREE)).toEqual({ campaign: "launch" });
     expect(await storedTags("uncapped")).toEqual(tags);
+  });
+
+  it("keeps a refused send's tags on its suppressed record, the system-mail mark dropped", async () => {
+    const refusing = await createTeam(db, "record-tags");
+    await db.insert(schema.suppressions).values({
+      teamId: refusing,
+      email: "gone@example.com",
+      emailHash: hashRecipient("gone@example.com"),
+      reason: "hard_bounce",
+    });
+    const result = await acceptEmail(
+      deps(),
+      { teamId: refusing, billing: FREE, apiKeyId: null },
+      payload({
+        domainId: null,
+        to: ["gone@example.com"],
+        tags: { [SYSTEM_MAIL_TAG]: "password_reset", campaign: "launch" },
+      }),
+      { recordSuppressed: true },
+    );
+    expect(result).toEqual({ ok: false, reason: "all_suppressed" });
+    const rows = await db
+      .select({ status: schema.emails.latestStatus, tags: schema.emails.tags })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, refusing));
+    expect(rows).toEqual([{ status: "suppressed", tags: { campaign: "launch" } }]);
   });
 
   it("refuses a recipient whose domain can never receive mail, unless the caller checked already", async () => {

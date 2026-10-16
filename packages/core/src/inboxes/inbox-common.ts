@@ -1,14 +1,7 @@
 import { randomInt } from "node:crypto";
-import type { Db } from "@millionsend/db";
 import { type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { AuditActor } from "../audit.js";
-import {
-  enqueueTeamWebhookEvents,
-  type QueuedWebhookDelivery,
-  type TeamWebhookEvent,
-  type WebhookEnqueue,
-} from "../webhooks.js";
 import type { InboxActor } from "./activity.js";
 import {
   CURSOR_NOT_FOUND_MESSAGE,
@@ -57,30 +50,6 @@ export function oneLineName(value: string, max = NAME_MAX): string | InboxError 
   return name.length === 0 || name.length > max || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(name)
     ? invalid(`name must be 1-${max} characters on one line`)
     : name;
-}
-
-/**
- * Webhook rows written inside a transaction and handed to the queue after
- * it commits; a failed hand-off leaves them to the reconcile sweep.
- */
-export function webhookBatch(enqueue: WebhookEnqueue | undefined) {
-  const rows: QueuedWebhookDelivery[] = [];
-  return {
-    emit: (db: Db, teamId: string, events: TeamWebhookEvent[]) =>
-      enqueueTeamWebhookEvents(db, {
-        teamId,
-        events,
-        enqueue: async (queued) => {
-          rows.push(...queued);
-        },
-      }),
-    flush: async () => {
-      if (rows.length === 0 || !enqueue) return;
-      await enqueue(rows).catch((err: unknown) => {
-        console.warn("inboxes: webhook enqueue failed; the reconcile sweep will send", err);
-      });
-    },
-  };
 }
 
 /**

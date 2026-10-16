@@ -7,11 +7,11 @@ import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypt
 import type { Keyring } from "./crypto/keyring.js";
 import { admitWarmup } from "./domain-warmup.js";
 import { purgedEmailBodyColumns } from "./email-retention.js";
+import { errorClassAndCode } from "./error-summary.js";
 import { type InboxActor, inboxActorFromAuth } from "./inboxes/activity.js";
 import type { InboxKeys } from "./inboxes/keys.js";
 import {
   beginInboxAccept,
-  deferredEnqueue,
   finishInboxAccept,
   gateGenericSend,
   type InboxAcceptState,
@@ -27,7 +27,12 @@ import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppression
 import { type SendRefusal, sendRefusal } from "./team-standing.js";
 import { findTopicOptOuts } from "./topics.js";
 import { utcDay } from "./utc-day.js";
-import type { WebhookEnqueue } from "./webhooks.js";
+import {
+  enqueueWebhookDeliveries,
+  suppressedEmailExtras,
+  type WebhookEnqueue,
+  webhookBatch,
+} from "./webhooks.js";
 
 /**
  * Domain part of an RFC 5322 sender, lowercased. SECURITY: strict
@@ -91,9 +96,9 @@ export interface AcceptEmailDeps {
    */
   monitorSettings?: (() => Promise<MonitorSettings>) | undefined;
   /**
-   * Arms the webhook drain for the inbox events an inbox send writes.
-   * Optional: without it the rows still land and the webhooks.reconcile
-   * sweep sends them.
+   * Arms the webhook drain for the rows an accept writes (email.scheduled,
+   * an inbox send's events). Optional: without it the rows still land and
+   * the webhooks.reconcile sweep sends them.
    */
   enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
 }
@@ -389,46 +394,63 @@ export type AcceptEmailResult =
 
 /**
  * A send refused because the suppression list empties `to` still leaves a
- * metadata-only row (status "suppressed", with its event) so the attempt shows
- * in the dashboard and `GET /emails`, as it does at Resend. No body is kept
- * (bodyPurgedAt marks it as already purged), nothing is charged to the quota,
- * and nothing is sent; the caller still answers 422 all_recipients_suppressed.
- * Best-effort: the row is only for visibility, so a failed insert is logged
- * (class and SQLSTATE only, since the message quotes the recipients) and the
- * refusal stands.
+ * metadata-only row (status "suppressed", with its event and email.suppressed)
+ * so the attempt shows in the dashboard and `GET /emails`, as it does at
+ * Resend. No body is kept (bodyPurgedAt marks it as already purged), nothing
+ * is charged to the quota, and nothing is sent; the caller still answers 422
+ * all_recipients_suppressed. Best-effort: the row is only for visibility, so
+ * any failure is logged (class and SQLSTATE only, since the message quotes
+ * the recipients) and the refusal stands.
  */
 async function recordSuppressedAttempt(
-  db: Db,
+  deps: AcceptEmailDeps,
   auth: AcceptEmailAuth,
   payload: AcceptEmailPayload,
+  tags: Record<string, string> | null,
   now: Date,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    const [row] = await tx
-      .insert(schema.emails)
-      .values({
+  try {
+    const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
+    await deps.db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      const [row] = await txDb
+        .insert(schema.emails)
+        .values({
+          teamId: auth.teamId,
+          domainId: payload.domainId,
+          apiKeyId: auth.apiKeyId,
+          from: payload.from,
+          to: payload.to,
+          cc: payload.cc && payload.cc.length > 0 ? payload.cc : null,
+          bcc: payload.bcc && payload.bcc.length > 0 ? payload.bcc : null,
+          replyTo: payload.replyTo ?? null,
+          subject: payload.subject,
+          tags,
+          topicId: payload.topicId ?? null,
+          latestStatus: "suppressed",
+          ...purgedEmailBodyColumns(now),
+        })
+        .returning({ id: schema.emails.id });
+      if (!row) throw new Error("suppressed email insert returned no row");
+      await txDb.insert(schema.emailEvents).values({
+        emailId: row.id,
+        type: "suppressed",
+        occurredAt: now,
+        data: { source: "api", reason: "recipient_suppressed" },
+      });
+      await enqueueWebhookDeliveries(txDb, {
         teamId: auth.teamId,
-        domainId: payload.domainId,
-        apiKeyId: auth.apiKeyId,
-        from: payload.from,
-        to: payload.to,
-        cc: payload.cc && payload.cc.length > 0 ? payload.cc : null,
-        bcc: payload.bcc && payload.bcc.length > 0 ? payload.bcc : null,
-        replyTo: payload.replyTo ?? null,
-        subject: payload.subject,
-        topicId: payload.topicId ?? null,
-        latestStatus: "suppressed",
-        ...purgedEmailBodyColumns(now),
-      })
-      .returning({ id: schema.emails.id });
-    if (!row) throw new Error("suppressed email insert returned no row");
-    await tx.insert(schema.emailEvents).values({
-      emailId: row.id,
-      type: "suppressed",
-      occurredAt: now,
-      data: { source: "api", reason: "recipient_suppressed" },
+        email: { emailId: row.id, from: payload.from, to: payload.to, subject: payload.subject },
+        type: "email.suppressed",
+        occurredAt: now,
+        extras: suppressedEmailExtras("recipient_suppressed"),
+        enqueue: hooks.collect,
+      });
     });
-  });
+    await hooks.flush();
+  } catch (err) {
+    console.error("suppressed email record failed", ...errorClassAndCode(err));
+  }
 }
 
 /**
@@ -470,8 +492,9 @@ export async function acceptEmail(
     parkUnderReview?: boolean | undefined;
     /**
      * Keep a metadata-only "suppressed" email when the suppression list alone
-     * empties `to`. Only the surface that asks for it records: POST /emails
-     * today. Topic opt-outs, batches (`tx`) and the other callers keep nothing.
+     * empties `to`, written through deps.db outside any `tx`. Only the surface
+     * that asks for it records, POST /emails; topic opt-outs, batches and the
+     * other callers keep nothing.
      */
     recordSuppressed?: boolean | undefined;
     /** Who an inbox send's activity names; read from `auth` when absent. */
@@ -482,10 +505,10 @@ export async function acceptEmail(
      */
     recipientsChecked?: boolean | undefined;
     /**
-     * With `tx`: where an inbox send's webhook rows go, for the caller to
+     * With `tx`: where the accept's webhook rows go, for the caller to
      * queue after its own commit, as it queues the send.
      */
-    inboxWebhooks?: WebhookEnqueue | undefined;
+    webhooks?: WebhookEnqueue | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
   let underReview = false;
@@ -534,6 +557,13 @@ export async function acceptEmail(
     inboxAccept = gate.inbox ?? undefined;
   }
 
+  // SECURITY: only the account-mail path may mark a row as system mail; any
+  // other caller's copy of the mark is dropped, on a refused send's record too.
+  let tags = payload.tags ?? null;
+  if (tags && SYSTEM_MAIL_TAG in tags && auth.billing !== "uncapped") {
+    tags = Object.fromEntries(Object.entries(tags).filter(([name]) => name !== SYSTEM_MAIL_TAG));
+  }
+
   // Suppression: dedupe, check every recipient field, and strip suppressed
   // addresses; refuse only when no `to` recipient remains.
   const allRecipients = [
@@ -561,14 +591,7 @@ export async function acceptEmail(
   const to = keep(payload.to) ?? [];
   if (to.length === 0) {
     if (opts.recordSuppressed && payload.to.every((r) => listSuppressed.has(r))) {
-      await recordSuppressedAttempt(deps.db, auth, payload, now).catch((err: unknown) => {
-        const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
-        console.error(
-          "suppressed email record failed",
-          err instanceof Error ? err.name : "error",
-          typeof code === "string" ? code : "",
-        );
-      });
+      await recordSuppressedAttempt(deps, auth, payload, tags, now);
     }
     return { ok: false, reason: "all_suppressed" };
   }
@@ -592,13 +615,6 @@ export async function acceptEmail(
       ? await sealAttachments(payload.attachments, deps.keyring, owner)
       : null;
 
-  // SECURITY: only the account-mail path may mark a row as system mail; any
-  // other caller's copy of the mark is dropped.
-  let tags = payload.tags ?? null;
-  if (tags && SYSTEM_MAIL_TAG in tags && auth.billing !== "uncapped") {
-    tags = Object.fromEntries(Object.entries(tags).filter(([name]) => name !== SYSTEM_MAIL_TAG));
-  }
-
   const quota: TeamQuota =
     auth.billing === "uncapped" ? { kind: "none" } : teamQuota(auth.billing, deps.isCloud);
   // Quota reservation, email insert, and the caller's in-transaction hook
@@ -610,7 +626,7 @@ export async function acceptEmail(
   // against the current billing period, whenever it delivers.
   const deliveryAt = quotaChargeAt(payload.scheduledAt);
   const day = utcDay(deliveryAt);
-  const inboxEvents = deferredEnqueue();
+  const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
   const acceptRow = async (txDb: Db, inbox: InboxAcceptState | null) => {
     const reservation =
       opts.quota === "deferred"
@@ -710,7 +726,16 @@ export async function acceptEmail(
         attachments: payload.attachments,
         actor,
         now,
-        enqueue: opts.inboxWebhooks ?? inboxEvents.enqueue,
+        enqueue: opts.webhooks ?? hooks.collect,
+      });
+    }
+    if (payload.scheduledAt && payload.scheduledAt.getTime() > now.getTime()) {
+      await enqueueWebhookDeliveries(txDb, {
+        teamId: auth.teamId,
+        email: { emailId: row.id, from: row.from, to: row.to, subject: row.subject },
+        type: "email.scheduled",
+        occurredAt: now,
+        enqueue: opts.webhooks ?? hooks.collect,
       });
     }
     return { id: row.id, parked };
@@ -770,7 +795,7 @@ export async function acceptEmail(
       console.error("email.send enqueue failed; reconcile sweep will recover", err);
     }
   }
-  if (!opts.tx) await inboxEvents.flush(deps.enqueueWebhookDeliveries);
+  if (!opts.tx) await hooks.flush();
   return {
     ok: true,
     id: accepted.id,

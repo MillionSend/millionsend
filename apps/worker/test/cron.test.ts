@@ -1,8 +1,8 @@
 import { DAY_MS, dailyCeiling, SYSTEM_MAIL_TAG, teamRung, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq, sql } from "drizzle-orm";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   drainQuotaParked,
@@ -515,6 +515,105 @@ it("reconcile fails a claim that never reached SES (worker killed mid-send) with
   expect(events.map((e) => [e.type, e.data?.reason])).toEqual([["failed", "send_interrupted"]]);
 });
 
+it("the stalled-claim sweep fires email.failed once per interrupted row, to each row's own team", async () => {
+  const now = new Date();
+  const old = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const otherTeam = await createTeam(db, "cron-other");
+  const mine = await createWebhookEndpoint(db, teamId, null);
+  const theirs = await createWebhookEndpoint(db, otherTeam, ["email.failed"]);
+  const base = {
+    from: "a@acme.dev",
+    to: ["r@example.com"],
+    subject: "s",
+    latestStatus: "queued" as const,
+    createdAt: old(60),
+    sentAt: old(30),
+  };
+  const [ours, other, taken] = await db
+    .insert(schema.emails)
+    .values([
+      { ...base, teamId },
+      { ...base, teamId: otherTeam },
+      // SES took it and no event joined yet: its events own its fate.
+      { ...base, teamId, sesMessageId: "cron-mid-taken" },
+    ])
+    .returning({ id: schema.emails.id });
+  if (!ours || !other || !taken) throw new Error("insert failed");
+  const enqueued: string[] = [];
+  const sweep = () =>
+    reconcileStalledSends(db, {
+      enqueueSends: async () => {},
+      enqueueWebhookDelivery: async (rows) => {
+        enqueued.push(...rows.map((r) => r.id));
+      },
+      now,
+    });
+
+  await sweep();
+  await sweep();
+
+  const deliveries = await db.select().from(schema.webhookDeliveries);
+  expect(deliveries.map((d) => [d.endpointId, d.emailId]).sort()).toEqual(
+    [
+      [mine, ours.id],
+      [theirs, other.id],
+    ].sort(),
+  );
+  for (const d of deliveries) {
+    expect(d.payload).toMatchObject({
+      type: "email.failed",
+      data: { failed: { reason: "send_interrupted" } },
+    });
+  }
+  expect(enqueued.sort()).toEqual(deliveries.map((d) => d.id).sort());
+  expect(await statusOf(taken.id)).toBe("queued");
+});
+
+it("a delivery row that can't be written rolls the stalled-claim sweep back whole", async () => {
+  const now = new Date();
+  const old = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const endpointId = await createWebhookEndpoint(db, teamId, null);
+  const [interrupted] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued",
+      createdAt: old(60),
+      sentAt: old(30),
+    })
+    .returning({ id: schema.emails.id });
+  if (!interrupted) throw new Error("insert failed");
+  const sweep = () => reconcileStalledSends(db, { enqueueSends: async () => {}, now });
+  const events = () =>
+    db.select().from(schema.emailEvents).where(eq(schema.emailEvents.emailId, interrupted.id));
+  const deliveries = () =>
+    db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+  await db.execute(sql`
+    create function refuse_delivery() returns trigger language plpgsql as $$
+    begin raise exception 'deliveries unavailable'; end $$`);
+  await db.execute(
+    sql`create trigger refuse_delivery before insert on webhook_deliveries for each row execute function refuse_delivery()`,
+  );
+
+  await expect(sweep()).rejects.toThrow();
+
+  expect(await statusOf(interrupted.id)).toBe("queued");
+  expect(await events()).toEqual([]);
+  expect(await deliveries()).toEqual([]);
+
+  // The next sweep ends it once.
+  await db.execute(sql`drop trigger refuse_delivery on webhook_deliveries`);
+  await sweep();
+  expect(await statusOf(interrupted.id)).toBe("failed");
+  expect(await deliveries()).toHaveLength(1);
+});
+
 it("metadata purge deletes whole expired rows (events cascade) and old deliveries, keeping fresh and future-scheduled ones", async () => {
   const now = new Date("2026-08-14T00:00:00Z");
   const base = { teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" };
@@ -643,6 +742,82 @@ it("payload strip nulls expired event data and drops delivery data/response on t
   expect(row?.payload).toEqual({ type: "email.bounced", test: "true" });
   expect(row?.lastResponseBody).toBeNull();
   // Already-stripped rows are not rewritten on the next run.
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 0,
+    deliveries: 0,
+  });
+});
+
+it("payload strip keeps a suppressed event's source and reason, which name no one", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" })
+    .returning({ id: schema.emails.id });
+  if (!email) throw new Error("insert failed");
+  const old = new Date("2026-07-01T00:00:00Z");
+  await db.insert(schema.emailEvents).values([
+    {
+      emailId: email.id,
+      type: "suppressed",
+      occurredAt: old,
+      data: { source: "api", reason: "recipient_suppressed" },
+    },
+    { emailId: email.id, type: "failed", occurredAt: old, data: { eventType: "Reject" } },
+  ]);
+
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 1,
+    deliveries: 0,
+  });
+  const events = await db
+    .select({ type: schema.emailEvents.type, data: schema.emailEvents.data })
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, email.id));
+  expect(events).toEqual(
+    expect.arrayContaining([
+      { type: "suppressed", data: { source: "api", reason: "recipient_suppressed" } },
+      { type: "failed", data: null },
+    ]),
+  );
+});
+
+it("payload strip walks past more kept suppressed events than one batch and strips every eligible one", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" })
+    .returning({ id: schema.emails.id });
+  if (!email) throw new Error("insert failed");
+  const kept = '{"source":"worker","reason":"recipient_suppressed"}';
+  // 1,500 kept rows older than every eligible one, then 2,500 eligible rows
+  // and 10 more kept ones at one instant: the batches split that tie by id
+  // alone.
+  await db.execute(sql`
+    insert into ${schema.emailEvents} (email_id, type, occurred_at, data)
+    select ${email.id}::uuid, 'suppressed', timestamptz '2026-06-01 00:00:00+00' + g * interval '1 second', ${kept}::jsonb
+    from generate_series(1, 1500) g
+  `);
+  await db.execute(sql`
+    insert into ${schema.emailEvents} (email_id, type, occurred_at, data)
+    select ${email.id}::uuid, case when g <= 10 then 'suppressed'::email_event_type else 'delivered' end,
+      timestamptz '2026-07-01 00:00:00+00',
+      case when g <= 10 then ${kept}::jsonb else '{"eventType":"Delivery"}'::jsonb end
+    from generate_series(1, 2510) g
+  `);
+  const left = () =>
+    db
+      .select({ type: schema.emailEvents.type, n: sql<number>`count(*)::int` })
+      .from(schema.emailEvents)
+      .where(isNotNull(schema.emailEvents.data))
+      .groupBy(schema.emailEvents.type)
+      .orderBy(schema.emailEvents.type);
+
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 2500,
+    deliveries: 0,
+  });
+  expect(await left()).toEqual([{ type: "suppressed", n: 1510 }]);
   expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
     events: 0,
     deliveries: 0,

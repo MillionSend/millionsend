@@ -27,11 +27,11 @@ import {
   countParked,
   DAY_MS,
   decryptEmailBody,
-  deferredEnqueue,
   emitContactEvents,
   emitSuppressionEvents,
   enforceDomainWarmup,
   eraseRecipient,
+  errorClassAndCode,
   exceededSendSize,
   extractTokenPrefix,
   fetchAccountScore,
@@ -98,6 +98,7 @@ import {
   type VirusResult,
   verifySenderDomain,
   type WebhookEnqueue,
+  webhookBatch,
   wireLastEvent,
 } from "@millionsend/core";
 import { captureError } from "@millionsend/core/error-tracking-node";
@@ -3557,12 +3558,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     })().catch((err: unknown) => {
       // A failed insert's message quotes the row, request and response bodies
       // included, so only its class and SQLSTATE reach the process log.
-      const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
-      console.error(
-        "api request log failed",
-        err instanceof Error ? err.name : "error",
-        typeof code === "string" ? code : "",
-      );
+      console.error("api request log failed", ...errorClassAndCode(err));
     });
   });
 
@@ -4065,7 +4061,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       // committed. Idempotency completion is recorded in the same transaction;
       // enqueue happens only after commit (reconcile re-enqueues any lost job).
       const quota = teamQuota(auth.billing, deps.isCloud);
-      const inboxWebhooks = deferredEnqueue();
+      const webhooks = webhookBatch(deps.enqueueWebhookDeliveries);
       const accepted = await deps.db.transaction(async (dbTx) => {
         const txDb = dbTx as unknown as Db;
         const out: {
@@ -4084,7 +4080,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             tx: txDb,
             quota: "deferred",
             parkUnderReview: true,
-            inboxWebhooks: inboxWebhooks.enqueue,
+            webhooks: webhooks.collect,
             recipientsChecked: true,
           });
           if (!result.ok) throw new AcceptRejectedError(result, index);
@@ -4263,7 +4259,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           console.error("batch email.send enqueue failed; reconcile sweep will recover", err);
         }
       }
-      await inboxWebhooks.flush(deps.enqueueWebhookDeliveries);
+      await webhooks.flush();
       return c.json(
         {
           data: accepted.map((o) => ({ id: o.id })),

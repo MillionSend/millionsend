@@ -15,3 +15,19 @@ export function errorSummary(error: unknown): string {
   const summary = typeof code === "string" ? `${code} ${current.message}` : current.message;
   return summary.slice(0, SUMMARY_MAX);
 }
+
+/**
+ * A failed write as a log line may name it: the outer error's class and the
+ * first string `code` down its cause chain (the SQLSTATE a driver error
+ * carries), "" when there is none. Never the message, which for a failed
+ * query lists its parameters.
+ */
+export function errorClassAndCode(error: unknown): [errorClass: string, code: string] {
+  let current: unknown = error;
+  while (current instanceof Error) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") return [(error as Error).name, code];
+    current = current.cause;
+  }
+  return [error instanceof Error ? error.name : "error", ""];
+}

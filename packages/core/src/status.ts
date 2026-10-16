@@ -1,7 +1,14 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { sql } from "drizzle-orm";
-import { firstRow } from "./driver-result.js";
+import { type SQL, sql } from "drizzle-orm";
+import { firstRow, resultRows } from "./driver-result.js";
+import {
+  type EmailWebhookEvent,
+  enqueueEmailWebhookEvents,
+  failedEmailExtras,
+  suppressedEmailExtras,
+  type WebhookEnqueue,
+} from "./webhooks.js";
 
 export type EmailStatus = (typeof schema.emailStatusEnum.enumValues)[number];
 
@@ -55,6 +62,78 @@ export async function transitionQueueState(
     returning id
   `);
   return firstRow<{ id: string }>(rows) !== undefined;
+}
+
+/**
+ * Ends queued emails as failed or suppressed: one guarded UPDATE that also
+ * writes each row's event with `data` as given, then email.<status> for
+ * each team the rows belong to. It runs on the db or transaction it is
+ * handed, so a caller's transaction commits the status, the events and the
+ * delivery rows together; `enqueue` collects those rows for the caller to
+ * hand to the queue after its commit. Returns how many rows it ended.
+ *
+ * The base guard leaves alone any row SES accepted (ses_message_id set):
+ * the SES events own its fate, and failing it would fire email.failed for
+ * mail that was delivered.
+ */
+export async function endQueuedEmails(
+  db: Db,
+  params: {
+    status: "failed" | "suppressed";
+    /** The site's own guard, on top of the base one. */
+    where: SQL | undefined;
+    data: { source?: string; reason: string };
+    now: Date;
+    enqueue: WebhookEnqueue;
+  },
+): Promise<number> {
+  const t = schema.emails;
+  // The events go in through INSERT ... SELECT, not one bound row each: a
+  // domain's parked backlog can end in one call, past Postgres's cap of
+  // 65,535 parameters a statement.
+  const ended = resultRows<{
+    id: string;
+    teamId: string;
+    from: string;
+    to: string[];
+    subject: string;
+  }>(
+    await db.execute(sql`
+      with ended as (
+        update ${t}
+        set latest_status = ${params.status}${params.status === "failed" ? sql`, sent_at = null` : sql``}
+        where ${t.latestStatus} in ('queued', 'queued_quota')
+          and ${t.sesMessageId} is null
+          and ${params.where ?? sql`true`}
+        returning ${t.id}, ${t.teamId}, ${t.from}, ${t.to}, ${t.subject}
+      ), events as (
+        insert into ${schema.emailEvents} (email_id, type, occurred_at, data)
+        select id, ${params.status}::email_event_type, ${params.now}::timestamptz,
+          ${JSON.stringify(params.data)}::jsonb
+        from ended
+      )
+      select id, team_id as "teamId", "from", "to", subject from ended
+    `),
+  );
+  const extras =
+    params.status === "failed"
+      ? failedEmailExtras(params.data.reason)
+      : suppressedEmailExtras(params.data.reason);
+  const byTeam = new Map<string, EmailWebhookEvent[]>();
+  for (const row of ended) {
+    const events = byTeam.get(row.teamId) ?? [];
+    events.push({
+      type: `email.${params.status}`,
+      email: { emailId: row.id, from: row.from, to: row.to, subject: row.subject },
+      occurredAt: params.now,
+      extras,
+    });
+    byTeam.set(row.teamId, events);
+  }
+  for (const [teamId, events] of byTeam) {
+    await enqueueEmailWebhookEvents(db, { teamId, events, enqueue: params.enqueue });
+  }
+  return ended.length;
 }
 
 /**

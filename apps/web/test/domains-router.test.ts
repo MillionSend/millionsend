@@ -1,9 +1,9 @@
 import { createPublicKey } from "node:crypto";
-import { PLAN_DOMAIN_LIMIT, SUSPENSION_REASONS } from "@millionsend/core";
+import { PLAN_DOMAIN_LIMIT, SUSPENSION_REASONS, type WebhookEnqueue } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDomainsRouter, type DomainsSesDeps } from "@/server/routers/domains";
@@ -95,6 +95,7 @@ function callerFor(
   teamId: string,
   deps: DomainsSesDeps,
   role: "owner" | "admin" | "member" = "owner",
+  enqueueWebhookDeliveries?: WebhookEnqueue,
 ) {
   const factory = createCallerFactory(router({ domains: createDomainsRouter(deps) }));
   const ctx: Context = {
@@ -102,6 +103,7 @@ function callerFor(
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
     role,
+    ...(enqueueWebhookDeliveries ? { enqueueWebhookDeliveries } : {}),
   };
   return factory(ctx);
 }
@@ -946,6 +948,41 @@ describe("domains.delete", () => {
       .from(schema.emailEvents)
       .where(eq(schema.emailEvents.emailId, queued?.id ?? ""));
     expect(events).toEqual([{ type: "failed" }]);
+  });
+
+  it("fires email.failed for the emails the delete fails, handed to the queue after it commits", async () => {
+    const teamId = await createTeam(db, "team-hooks");
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.failed"]);
+    const { deps } = fakeSes();
+    const domainLeft: boolean[] = [];
+    const enqueued: string[] = [];
+    const caller = callerFor(teamId, deps, "owner", async (rows) => {
+      enqueued.push(...rows.map((r) => r.id));
+      const rowsLeft = await db
+        .select({ id: schema.domains.id })
+        .from(schema.domains)
+        .where(eq(schema.domains.teamId, teamId));
+      domainLeft.push(rowsLeft.length > 0);
+    });
+    const { id } = await caller.domains.create({ name: "hooks.example.com", region: "us-east-1" });
+    const [queued] = await db
+      .insert(schema.emails)
+      .values({ teamId, domainId: id, from: "a@hooks.example.com", to: ["r@x.com"], subject: "s" })
+      .returning({ id: schema.emails.id });
+
+    await caller.domains.delete({ id });
+
+    const deliveries = await db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+    expect(deliveries.map((d) => d.emailId)).toEqual([queued?.id]);
+    expect(deliveries[0]?.payload).toMatchObject({
+      type: "email.failed",
+      data: { failed: { reason: "domain_deleted" } },
+    });
+    expect(enqueued).toEqual([deliveries[0]?.id]);
+    expect(domainLeft).toEqual([false]);
   });
 
   it("revokes and unscopes domain-scoped keys so the restrict FK cannot block the delete", async () => {

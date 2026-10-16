@@ -12,7 +12,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
@@ -154,12 +154,15 @@ describe("send edge cases", () => {
   });
 
   it("records each refused all-suppressed send as a metadata-only suppressed email", async () => {
-    await db.insert(schema.suppressions).values({
-      teamId,
-      email: "gone@example.com",
-      emailHash: hashRecipient("gone@example.com"),
-      reason: "hard_bounce",
-    });
+    await db
+      .insert(schema.suppressions)
+      .values({
+        teamId,
+        email: "gone@example.com",
+        emailHash: hashRecipient("gone@example.com"),
+        reason: "hard_bounce",
+      })
+      .onConflictDoNothing();
     const rowsFor = () =>
       db.select().from(schema.emails).where(eq(schema.emails.subject, "refused-once"));
     const [usageBefore] = await db
@@ -173,6 +176,7 @@ describe("send edge cases", () => {
       to: ["gone@example.com"],
       subject: "refused-once",
       html: "<p>do not keep</p>",
+      tags: [{ name: "campaign", value: "spring" }],
     };
     expect((await post(body)).status).toBe(422);
     expect((await post(body)).status).toBe(422);
@@ -184,6 +188,7 @@ describe("send edge cases", () => {
     expect(row).toMatchObject({
       teamId,
       to: ["gone@example.com"],
+      tags: { campaign: "spring" },
       latestStatus: "suppressed",
       bodyCiphertext: null,
       sesMessageId: null,
@@ -224,12 +229,26 @@ describe("send edge cases", () => {
       })
       .onConflictDoNothing();
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const tx = vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("gone@example.com"));
+    // As a driver error reaches it: the query and its parameters in the
+    // message, the SQLSTATE on the cause.
+    const failure = new Error(
+      'Failed query: insert into "emails" ("to") values ($1)\nparams: ["gone@example.com"]',
+      {
+        cause: Object.assign(new Error('duplicate key value violates unique constraint "x"'), {
+          code: "23505",
+        }),
+      },
+    );
+    const tx = vi.spyOn(db, "transaction").mockRejectedValueOnce(failure);
     try {
       const res = await post({ ...validBody, to: ["gone@example.com"], subject: "record-fails" });
       expect(res.status).toBe(422);
       expect(await res.json()).toMatchObject({ name: "all_recipients_suppressed" });
-      expect(logged).toHaveBeenCalledWith("suppressed email record failed", "Error", "");
+      expect(logged).toHaveBeenCalledWith("suppressed email record failed", "Error", "23505");
+      for (const arg of logged.mock.calls.flat()) {
+        expect(typeof arg).toBe("string");
+        expect(arg).not.toContain("gone@example.com");
+      }
     } finally {
       tx.mockRestore();
       logged.mockRestore();
@@ -239,6 +258,28 @@ describe("send edge cases", () => {
       .from(schema.emails)
       .where(eq(schema.emails.subject, "record-fails"));
     expect(rows).toHaveLength(0);
+  });
+
+  it("records another suppressed email for each retry under the same Idempotency-Key", async () => {
+    await db
+      .insert(schema.suppressions)
+      .values({
+        teamId,
+        email: "gone@example.com",
+        emailHash: hashRecipient("gone@example.com"),
+        reason: "hard_bounce",
+      })
+      .onConflictDoNothing();
+    const body = { ...validBody, to: ["gone@example.com"], subject: "refused-retried" };
+    // A refusal releases its key, so the retry runs again rather than replaying.
+    for (let i = 0; i < 2; i++) {
+      expect((await post(body, { "idempotency-key": "refused-retry" })).status).toBe(422);
+    }
+    const rows = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "refused-retried"));
+    expect(rows).toEqual([{ status: "suppressed" }, { status: "suppressed" }]);
   });
 
   it("does not record a suppressed email when a send is only partly suppressed", async () => {
@@ -1814,5 +1855,156 @@ describe("quota day of a scheduled send", () => {
       [utcDay(dayAhead(1))]: 1,
       [utcDay(dayAhead(2))]: 1,
     });
+  });
+});
+
+describe("webhooks fired at accept", () => {
+  let hookApp: ReturnType<typeof createApi>;
+  let hookToken: string;
+  let endpointId: string;
+  const handedOff: string[] = [];
+
+  beforeAll(async () => {
+    const hookTeam = await createTeam(db, "scheduled-hooks");
+    await db.insert(schema.domains).values({
+      teamId: hookTeam,
+      name: "scheduled-hooks.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const key = generateApiKey();
+    hookToken = key.token;
+    await db.insert(schema.apiKeys).values({
+      teamId: hookTeam,
+      name: "t",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    endpointId = await createWebhookEndpoint(db, hookTeam, null);
+    hookApp = createApi({
+      db,
+      keyring,
+      isCloud: true,
+      enqueueEmailSend: async () => {},
+      enqueueWebhookDeliveries: async (rows) => {
+        handedOff.push(...rows.map((r) => r.id));
+      },
+    });
+  });
+
+  const call = (method: string, path: string, payload: unknown) =>
+    hookApp.request(path, {
+      method,
+      headers: { authorization: `Bearer ${hookToken}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  const body = { ...validBody, from: "A <a@scheduled-hooks.dev>" };
+  const idOf = async (res: Response) => ((await res.json()) as { id: string }).id;
+  const deliveriesFor = async (emailId: string) =>
+    db.select().from(schema.webhookDeliveries).where(eq(schema.webhookDeliveries.emailId, emailId));
+
+  it("fires for a send scheduled ahead, not for an immediate or backdated one", async () => {
+    const ahead = await idOf(
+      await call("POST", "/emails", {
+        ...body,
+        subject: "ahead",
+        scheduled_at: new Date(Date.now() + 3_600_000).toISOString(),
+      }),
+    );
+    const now = await idOf(await call("POST", "/emails", body));
+    const backdated = await idOf(
+      await call("POST", "/emails", {
+        ...body,
+        scheduled_at: new Date(Date.now() - 3_600_000).toISOString(),
+      }),
+    );
+
+    const [delivery, ...more] = await deliveriesFor(ahead);
+    expect(more).toEqual([]);
+    expect(delivery).toMatchObject({ endpointId, eventType: "email.scheduled" });
+    const payload = delivery?.payload as { data: Record<string, unknown> };
+    expect(Object.keys(payload.data).sort()).toEqual(
+      ["created_at", "email_id", "from", "subject", "to"].sort(),
+    );
+    expect(payload.data).toMatchObject({
+      email_id: ahead,
+      subject: "ahead",
+      to: ["r@example.com"],
+    });
+    expect(handedOff).toContain(delivery?.id);
+    expect(await deliveriesFor(now)).toEqual([]);
+    expect(await deliveriesFor(backdated)).toEqual([]);
+  });
+
+  it("fires for a batch's scheduled items once the batch commits", async () => {
+    const res = await call("POST", "/emails/batch", [
+      { ...body, to: ["later@example.com"], scheduled_at: "in 2 hours" },
+      { ...body, to: ["now@example.com"] },
+    ]);
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { id: string }[] };
+    const [later, now] = data.map((item) => item.id);
+
+    const deliveries = await deliveriesFor(later ?? "");
+    expect(deliveries.map((d) => d.eventType)).toEqual(["email.scheduled"]);
+    expect(handedOff).toContain(deliveries[0]?.id);
+    expect(await deliveriesFor(now ?? "")).toEqual([]);
+  });
+
+  it("fires email.suppressed for a refused send's record, handed to the queue after commit", async () => {
+    const [team] = await db
+      .select({ id: schema.domains.teamId })
+      .from(schema.domains)
+      .where(eq(schema.domains.name, "scheduled-hooks.dev"));
+    await db.insert(schema.suppressions).values({
+      teamId: team?.id ?? "",
+      email: "listed@example.com",
+      emailHash: hashRecipient("listed@example.com"),
+      reason: "complaint",
+    });
+    const res = await call("POST", "/emails", {
+      ...body,
+      to: ["listed@example.com"],
+      subject: "refused-hooked",
+    });
+    expect(res.status).toBe(422);
+    const [record] = await db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "refused-hooked"));
+
+    const deliveries = await deliveriesFor(record?.id ?? "");
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toMatchObject({ endpointId, eventType: "email.suppressed" });
+    expect(deliveries[0]?.payload).toMatchObject({
+      type: "email.suppressed",
+      data: {
+        email_id: record?.id,
+        to: ["listed@example.com"],
+        subject: "refused-hooked",
+        suppressed: {
+          type: "OnAccountSuppressionList",
+          message: "The recipient is on your suppression list.",
+          reason: "recipient_suppressed",
+        },
+      },
+    });
+    expect(handedOff).toContain(deliveries[0]?.id);
+  });
+
+  it("fires nothing more when the email is rescheduled", async () => {
+    const id = await idOf(
+      await call("POST", "/emails", {
+        ...body,
+        scheduled_at: new Date(Date.now() + 3_600_000).toISOString(),
+      }),
+    );
+    const res = await call("PATCH", `/emails/${id}`, {
+      scheduled_at: new Date(Date.now() + 7_200_000).toISOString(),
+    });
+    expect(res.status).toBe(200);
+    expect((await deliveriesFor(id)).map((d) => d.eventType)).toEqual(["email.scheduled"]);
   });
 });

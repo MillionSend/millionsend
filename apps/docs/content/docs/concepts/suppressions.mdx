@@ -29,10 +29,7 @@ automatically. Suppressions are per team.
   entry are stripped from `to`/`cc`/`bcc`. If *every* `to` recipient is
   suppressed, the send is rejected with `422 all_recipients_suppressed`
   (message `All recipients are suppressed`; the SMTP relay answers `550` with
-  that message). A `POST /emails` refused this way keeps a metadata-only email
-  with status `suppressed` (no content, not counted toward your quota), and each
-  retry with the same `Idempotency-Key` adds another; the SMTP relay and batch
-  items keep nothing. An **unsubscribe** entry does not apply here: someone who
+  that message). An **unsubscribe** entry does not apply here: someone who
   opted out of marketing still receives password resets, receipts and other
   account mail — the same meaning Resend gives `unsubscribed` ("unsubscribed
   from all Broadcasts").
@@ -42,6 +39,20 @@ automatically. Suppressions are per team.
 
 A list imported with `origin: "unsubscribe"` therefore blocks topic sends and
 broadcasts only. Import with `manual` to block every send.
+
+When the suppression list alone leaves a `POST /emails` with no `to`
+recipient, with or without a `topic_id`, a metadata-only email with status
+`suppressed` is kept (no content, not counted toward your quota), and each
+retry with the same `Idempotency-Key` keeps another. Each email kept this way
+fires [`email.suppressed`](/concepts/webhooks#scheduled-failed-and-suppressed-email).
+Nothing is kept when topic opt-outs empty `to`, for a batch item, or on the
+SMTP relay.
+
+An email that waits before it goes out, such as a scheduled one, is checked
+again when it does. Recipients suppressed in the meantime are dropped, and on
+a topic send or a broadcast, so are those who opted out of the topic. If no
+`to` recipient is left, the email ends `suppressed` without being sent and
+fires [`email.suppressed`](/concepts/webhooks#scheduled-failed-and-suppressed-email).
 
 Every change to the list publishes a `suppression.added` or
 `suppression.removed` [webhook event](/concepts/webhooks#event-types).

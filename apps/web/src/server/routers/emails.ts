@@ -532,7 +532,13 @@ export const emailsRouter = router({
           .insert(t)
           .values({ teamId: ctx.teamId, email: input.email, emailHash, reason: input.reason })
           .onConflictDoNothing()
-          .returning({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt });
+          .returning({
+            id: t.id,
+            email: t.email,
+            reason: t.reason,
+            sourceEmailId: t.sourceEmailId,
+            createdAt: t.createdAt,
+          });
         if (row) {
           await emitSuppressionEvents(ctx.db, {
             teamId: ctx.teamId,
@@ -559,7 +565,13 @@ export const emailsRouter = router({
       const [row] = await ctx.db
         .delete(t)
         .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-        .returning({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt });
+        .returning({
+          id: t.id,
+          email: t.email,
+          reason: t.reason,
+          sourceEmailId: t.sourceEmailId,
+          createdAt: t.createdAt,
+        });
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       await emitSuppressionEvents(ctx.db, {
         teamId: ctx.teamId,

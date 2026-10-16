@@ -436,7 +436,7 @@ export {
 } from "./email-insights-lookup.js";
 export { purgedEmailBodyColumns } from "./email-retention.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
-export { errorSummary } from "./error-summary.js";
+export { errorClassAndCode, errorSummary } from "./error-summary.js";
 export { type SesEventsHealth, sesEventsHealth } from "./events-health.js";
 export {
   type ArchiveType,
@@ -752,6 +752,7 @@ export {
 export {
   applyStatusCas,
   type EmailStatus,
+  endQueuedEmails,
   highestStatus,
   transitionQueueState,
 } from "./status.js";
@@ -885,18 +886,24 @@ export {
   clearWebhookEndpointNotifications,
   decryptWebhookSecret,
   decryptWebhookSigningSecrets,
+  type EmailWebhookEvent,
   encryptWebhookSecret,
+  enqueueEmailWebhookEvents,
   enqueueTeamWebhookDeliveries,
   enqueueTeamWebhookEvents,
   enqueueWebhookDeliveries,
+  failedEmailExtras,
   generateWebhookSecret,
   isWebhookEventType,
   parseWebhookSecret,
+  publicFailureReason,
   type QueuedWebhookDelivery,
   retryAfterMs,
   rotatedWebhookSecretColumns,
   rotationOverlapEnd,
+  SUPPRESSED_EMAIL_DETAILS,
   signWebhook,
+  suppressedEmailExtras,
   type TeamWebhookEvent,
   verifyWebhookSignature,
   WEBHOOK_BACKLOG_AGE_MS,
@@ -914,6 +921,7 @@ export {
   type WebhookEventType,
   type WebhookPayload,
   type WebhookSignatureHeaders,
+  webhookBatch,
 } from "./webhooks.js";
 
 // Its own statement, apart from the team-standing block above, so edits to

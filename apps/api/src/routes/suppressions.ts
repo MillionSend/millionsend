@@ -120,6 +120,7 @@ export function registerSuppressionRoutes(
           emailHash: s.emailHash,
           email: s.email,
           reason: s.reason,
+          sourceEmailId: s.sourceEmailId,
           createdAt: s.createdAt,
           // A row this statement inserted has xmax 0; one it reached through
           // the conflict update does not. Only the former are new to the list.
@@ -216,7 +217,13 @@ export function registerSuppressionRoutes(
       const rows = await db
         .delete(s)
         .where(and(eq(s.teamId, auth.teamId), match))
-        .returning({ id: s.id, email: s.email, reason: s.reason, createdAt: s.createdAt });
+        .returning({
+          id: s.id,
+          email: s.email,
+          reason: s.reason,
+          sourceEmailId: s.sourceEmailId,
+          createdAt: s.createdAt,
+        });
       await removed(auth.teamId, rows);
       return c.json(
         {
@@ -362,7 +369,13 @@ export function registerSuppressionRoutes(
       const [row] = await db
         .delete(s)
         .where(byIdOrEmail(auth.teamId, c.req.valid("param").id))
-        .returning({ id: s.id, email: s.email, reason: s.reason, createdAt: s.createdAt });
+        .returning({
+          id: s.id,
+          email: s.email,
+          reason: s.reason,
+          sourceEmailId: s.sourceEmailId,
+          createdAt: s.createdAt,
+        });
       if (!row) return c.json(errorBody(404, "not_found", "Suppression not found"), 404);
       await removed(auth.teamId, [row]);
       return c.json({ object: "suppression" as const, id: row.id, deleted: true as const }, 200);

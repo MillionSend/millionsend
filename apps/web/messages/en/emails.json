@@ -113,7 +113,7 @@
     "formatted": "Formatted",
     "insights": "Insights",
     "bodyPurged": "Body purged after retention window.",
-    "bodyNotStored": "Not sent: every recipient is suppressed, so no content was stored.",
+    "bodyNotStored": "Not sent: every To recipient is suppressed, so no content was stored.",
     "noHtml": "No HTML body.",
     "noText": "No plain-text body.",
     "previewLight": "Light",

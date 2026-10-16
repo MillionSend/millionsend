@@ -412,7 +412,10 @@ await queue.scheduleCrons({
     console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
   },
   "sends.reconcile": async () => {
-    const requeued = await reconcileStalledSends(db, { enqueueSends });
+    const requeued = await reconcileStalledSends(db, {
+      enqueueSends,
+      enqueueWebhookDelivery: enqueueWebhook,
+    });
     if (requeued > 0) console.log(`sends.reconcile: requeued=${requeued}`);
     const screens = await reconcilePendingScreens(db, (p) => queue.enqueueScreening(p));
     if (screens > 0) console.log(`sends.reconcile: screens=${screens}`);
@@ -679,7 +682,10 @@ await queue.scheduleCrons({
     // operator's own teams and adopts existing SES identities on create, so
     // an unverified row blocks nobody there.
     if (!env.IS_CLOUD) return;
-    const reaped = await reapUnverifiedDomains(db, { clientForRegion });
+    const reaped = await reapUnverifiedDomains(db, {
+      clientForRegion,
+      enqueueWebhookDelivery: enqueueWebhook,
+    });
     if (reaped > 0) console.log(`domains.reap: reaped=${reaped}`);
   },
 });
@@ -707,7 +713,7 @@ backfillSharedSubdomains().catch((err) => {
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
 // to resurrect forever.
 await queue.workDeadLetter("email.send", async ({ emailId }) => {
-  const failed = await failQueuedEmail(db, emailId, "retries_exhausted");
+  const failed = await failQueuedEmail(db, emailId, "retries_exhausted", enqueueWebhook);
   console.error(`email.send: dead-lettered ${emailId} (marked failed=${failed})`);
 });
 

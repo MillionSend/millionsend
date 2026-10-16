@@ -42,11 +42,7 @@ import { formatMailbox, parseMailbox, parseSingleSender } from "../sender-addres
 import { QUOTA_COLUMNS } from "../team-plan.js";
 import { sendRefusalError } from "../team-standing.js";
 import { utcDay } from "../utc-day.js";
-import {
-  enqueueTeamWebhookEvents,
-  type QueuedWebhookDelivery,
-  type WebhookEnqueue,
-} from "../webhooks.js";
+import { enqueueTeamWebhookEvents, type WebhookEnqueue } from "../webhooks.js";
 import { type InboxActor, isAgentActor, recordInboxActivity } from "./activity.js";
 import {
   addressKey,
@@ -1028,26 +1024,6 @@ export async function finishInboxAccept(
     ],
     enqueue: p.enqueue,
   });
-}
-
-/** Webhook rows written inside a transaction, handed to the queue once it committed. */
-export function deferredEnqueue(): {
-  enqueue: WebhookEnqueue;
-  flush: (to: WebhookEnqueue | undefined) => Promise<void>;
-} {
-  const rows: QueuedWebhookDelivery[] = [];
-  return {
-    enqueue: async (batch) => {
-      rows.push(...batch);
-    },
-    flush: async (to) => {
-      if (rows.length === 0 || !to) return;
-      // The rows are committed; a queue hiccup only delays them to the reconcile sweep.
-      await to(rows).catch((err: unknown) => {
-        console.warn("inbox webhook enqueue failed; the reconcile sweep will send", err);
-      });
-    },
-  };
 }
 
 /** The accept auth an inbox actor sends with; the activity rows still name the actor. */

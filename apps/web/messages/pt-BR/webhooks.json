@@ -31,6 +31,7 @@
   },
   "eventLabel": {
     "email": {
+      "scheduled": "E-mail agendado",
       "sent": "E-mail enviado",
       "delivered": "E-mail entregue",
       "delivery_delayed": "Entrega atrasada",
@@ -39,7 +40,9 @@
       "prefetched": "E-mail pré-carregado",
       "received": "E-mail recebido",
       "bounced": "E-mail devolvido",
-      "complained": "Marcado como spam"
+      "complained": "Marcado como spam",
+      "failed": "Falha no envio",
+      "suppressed": "E-mail suprimido"
     },
     "deliverability": {
       "warning": "Entregabilidade em risco",

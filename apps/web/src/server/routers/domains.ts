@@ -26,6 +26,7 @@ import {
   setDomainReceiving,
   teamSharedDomain,
   warmupCap,
+  webhookBatch,
 } from "@millionsend/core";
 import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
@@ -730,9 +731,14 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           reason: "domain_deleted",
         });
       }
+      const hooks = webhookBatch(ctx.enqueueWebhookDeliveries);
       await ctx.db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
-        await failQueuedEmailsForDomain(txDb, { teamId: ctx.teamId, domainId: domain.id });
+        await failQueuedEmailsForDomain(txDb, {
+          teamId: ctx.teamId,
+          domainId: domain.id,
+          enqueue: hooks.collect,
+        });
         // api_keys.domainId is ON DELETE restrict: a key scoped to this domain
         // would block the delete, and set-null would silently widen it to an
         // all-domains key. So revoke every scoped key and drop its FK first — a
@@ -747,6 +753,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           .delete(schema.domains)
           .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
       });
+      await hooks.flush();
       await recordAudit(ctx, {
         action: "domain.deleted",
         target: { type: "domain", id: domain.id },

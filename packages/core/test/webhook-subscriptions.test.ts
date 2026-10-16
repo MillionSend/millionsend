@@ -8,6 +8,13 @@ describe("endpointSubscribes", () => {
     expect(endpointSubscribes(["email.opened"], "email.opened")).toBe(true);
   });
 
+  it("delivers email.scheduled, email.failed and email.suppressed to all-events endpoints", () => {
+    for (const type of ["email.scheduled", "email.failed", "email.suppressed"] as const) {
+      expect(endpointSubscribes(null, type), type).toBe(true);
+      expect(endpointSubscribes(["email.bounced"], type), type).toBe(false);
+    }
+  });
+
   it("hands opt-in events only to endpoints that name them", () => {
     expect(endpointSubscribes(null, "email.prefetched")).toBe(false);
     expect(endpointSubscribes(["email.prefetched"], "email.prefetched")).toBe(true);

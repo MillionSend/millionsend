@@ -6,24 +6,29 @@ import type { SourceBroadcast, SourceDomain, SourceTemplate } from "./model.js";
  * imported: keep them identical to their sources.
  */
 
-/** Mirror of packages/core/src/webhooks.ts WEBHOOK_EVENT_TYPES. */
 /**
- * Resend webhook event names MillionSend also emits, so a subscription carries
- * over as-is. Resend's other names (domain.*, email.suppressed, …) have no
- * counterpart here and are dropped per webhook, listed in the plan.
+ * The Resend webhook event names among packages/core/src/webhooks.ts
+ * WEBHOOK_EVENT_TYPES, in its order: a subscription to these carries over
+ * as-is. Resend's other names (domain.*, topic.*, contact.topics.updated, …)
+ * have no counterpart here and are dropped per webhook, listed in the plan.
  */
 export const TARGET_WEBHOOK_EVENTS = [
+  "email.scheduled",
   "email.sent",
   "email.delivered",
   "email.delivery_delayed",
   "email.bounced",
   "email.complained",
+  "email.failed",
+  "email.suppressed",
   "email.opened",
   "email.clicked",
   "email.received",
   "contact.created",
   "contact.updated",
   "contact.deleted",
+  "suppression.added",
+  "suppression.removed",
   "inbox.created",
   "inbox.updated",
   "inbox.deleted",

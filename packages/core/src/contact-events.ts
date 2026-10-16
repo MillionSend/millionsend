@@ -171,6 +171,8 @@ export interface SuppressionEventRow {
   id: string;
   email: string | null;
   reason: SuppressionReason;
+  /** The email whose bounce or complaint added the row, the API's source_id. */
+  sourceEmailId: string | null;
   createdAt?: Date | null | undefined;
 }
 
@@ -203,6 +205,7 @@ export async function emitSuppressionEvents(
           email: row.email ?? ERASED_TOMBSTONE,
           origin: SUPPRESSION_ORIGIN_BY_REASON[row.reason],
           source: params.source ?? null,
+          source_id: row.sourceEmailId,
           created_at: (row.createdAt ?? occurredAt).toISOString(),
         },
       })),

@@ -150,7 +150,15 @@ export async function clearUnsubscribeSuppression(
   db: Db,
   teamId: string,
   email: string,
-): Promise<{ id: string; email: string | null; reason: SuppressionReason; createdAt: Date }[]> {
+): Promise<
+  {
+    id: string;
+    email: string | null;
+    reason: SuppressionReason;
+    sourceEmailId: string | null;
+    createdAt: Date;
+  }[]
+> {
   const t = schema.suppressions;
   return db
     .delete(t)
@@ -161,5 +169,11 @@ export async function clearUnsubscribeSuppression(
         inArray(t.emailHash, suppressionHashesFor(email)),
       ),
     )
-    .returning({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt });
+    .returning({
+      id: t.id,
+      email: t.email,
+      reason: t.reason,
+      sourceEmailId: t.sourceEmailId,
+      createdAt: t.createdAt,
+    });
 }

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey } from "@millionsend/core";
+import { EnvKeyring, generateApiKey, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -191,6 +191,27 @@ describe("topic opt-out suppression at accept", () => {
       .select()
       .from(schema.emails)
       .where(eq(schema.emails.subject, "topic-opt-out-only"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("keeps no suppressed email when a list hit and a topic opt-out together empty `to`", async () => {
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email: "listed@example.com",
+      emailHash: hashRecipient("listed@example.com"),
+      reason: "hard_bounce",
+    });
+    const res = await post("/emails", {
+      ...base,
+      to: ["listed@example.com", OPTED_OUT],
+      subject: "list-and-opt-out",
+      topic_id: optInTopicId,
+    });
+    expect(res.status).toBe(422);
+    const rows = await db
+      .select()
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "list-and-opt-out"));
     expect(rows).toHaveLength(0);
   });
 

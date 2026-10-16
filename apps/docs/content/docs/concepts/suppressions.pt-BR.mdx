@@ -30,10 +30,7 @@ automaticamente. Supressões são por equipe.
   removidos de `to`/`cc`/`bcc`. Se *todos* os destinatários em `to` estiverem
   suprimidos, o envio é rejeitado com `422 all_recipients_suppressed`
   (mensagem `All recipients are suppressed`; o relay SMTP responde `550` com
-  essa mensagem). Um `POST /emails` recusado assim guarda um e-mail só com
-  metadados e status `suppressed` (sem conteúdo, fora da sua cota), e cada nova
-  tentativa com o mesmo `Idempotency-Key` adiciona outro; o relay SMTP e os
-  itens de lote não guardam nada. Uma entrada de **descadastro** não se aplica aqui: quem saiu
+  essa mensagem). Uma entrada de **descadastro** não se aplica aqui: quem saiu
   do marketing continua recebendo redefinições de senha, recibos e outras
   mensagens da conta — o mesmo significado que o Resend dá a `unsubscribed`
   ("descadastrado de todos os Broadcasts").
@@ -43,6 +40,22 @@ automaticamente. Supressões são por equipe.
 
 Uma lista importada com `origin: "unsubscribe"` bloqueia, portanto, apenas
 envios com tópico e transmissões. Importe com `manual` para bloquear todo envio.
+
+Quando a lista de supressão sozinha deixa um `POST /emails` sem destinatários
+em `to`, com ou sem `topic_id`, fica guardado um e-mail com status
+`suppressed`, só com os metadados (sem conteúdo e sem contar na sua cota), e
+cada nova tentativa com o mesmo `Idempotency-Key` deixa mais um. Cada e-mail
+guardado assim dispara o
+[`email.suppressed`](/pt-BR/concepts/webhooks#e-mails-agendados-com-falha-e-suprimidos).
+Nada fica guardado quando é a saída do tópico que deixa `to` vazio, nem nos
+itens de lote ou no relay SMTP.
+
+Um e-mail que espera antes de sair, como um agendado, é conferido de novo na
+hora do envio. Os destinatários suprimidos nesse meio-tempo são removidos e,
+num envio com tópico ou numa transmissão, também os que saíram do tópico. Se
+não sobrar ninguém em `to`, o e-mail fica como `suppressed`, não é enviado e
+dispara o
+[`email.suppressed`](/pt-BR/concepts/webhooks#e-mails-agendados-com-falha-e-suprimidos).
 
 Toda mudança na lista publica um evento de webhook `suppression.added` ou
 `suppression.removed` — veja [Webhooks](/pt-BR/concepts/webhooks#tipos-de-evento).

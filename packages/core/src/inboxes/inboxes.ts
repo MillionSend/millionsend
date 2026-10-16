@@ -21,7 +21,7 @@ import { asciiHostname } from "../org-domain.js";
 import type { Plan } from "../plans.js";
 import { teamMemberEmails } from "../receiving/inbox-routing.js";
 import { DAY_MS } from "../utc-day.js";
-import type { WebhookEnqueue } from "../webhooks.js";
+import { type WebhookEnqueue, webhookBatch } from "../webhooks.js";
 import { type InboxActor, recordInboxActivity, webhookSource } from "./activity.js";
 import { inboxDeletedEvent, inboxEvent } from "./events.js";
 import {
@@ -32,7 +32,6 @@ import {
   keysetRows,
   oneLineName,
   randomAlnum,
-  webhookBatch,
 } from "./inbox-common.js";
 import {
   expiresInMs,

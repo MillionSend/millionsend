@@ -545,6 +545,39 @@ it("SES failure leaves the email queued for the job retry", async () => {
   expect(row?.sentAt).toBeNull();
 });
 
+it("a send cut off at its deadline keeps the claim: SES may have it, so the retry sends nothing", async () => {
+  let attempts = 0;
+  const ses: SesSender = {
+    async sendRaw() {
+      attempts += 1;
+      throw Object.assign(new Error("Request aborted"), { name: "AbortError" });
+    },
+  };
+  const emailId = await insertEmail({ tags: { [SYSTEM_MAIL_TAG]: "password_reset" } });
+  await expect(sendEmail(db, { keyring, ses }, { emailId })).rejects.toThrow("Request aborted");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("queued");
+  expect(row?.sentAt).not.toBeNull();
+  // Nothing sends it again, so its credential goes as after a send.
+  expect(row?.bodyCiphertext).toBeNull();
+  expect(row?.bodyPurgedAt).toBeInstanceOf(Date);
+
+  // The retry stops at the claim before any other check: a hold would
+  // otherwise report a send SES may hold as parked.
+  const suspend = (suspendedAt: Date | null) =>
+    db
+      .update(schema.teams)
+      .set({ suspendedAt, suspensionReason: suspendedAt ? "manual" : null })
+      .where(eq(schema.teams.id, teamId));
+  await suspend(new Date());
+  try {
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("skipped");
+  } finally {
+    await suspend(null);
+  }
+  expect(attempts).toBe(1);
+});
+
 it("no-ops a canceled email: no SES call, status stays canceled", async () => {
   const { ses, sends } = fakeSes("mid-cancel");
   const deps: SendDeps = { keyring, ses };
@@ -1158,6 +1191,106 @@ it("a transactional row re-checks suppression at send time: hits are stripped, a
   const refused = await insertEmail({ to: ["gone@example.com"] });
   expect(await sendEmail(db, { keyring, ses }, { emailId: refused })).toBe("suppressed");
   expect(sends).toHaveLength(1);
+});
+
+it("a topic row re-checks opt-outs at send time: opted-out recipients are stripped, an empty to refuses", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Late tx opt-out", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  const optedOut = await insertContact("tx-optout@example.com");
+  const unsubscribed = await insertContact("tx-global@example.com");
+  await insertContact("tx-stays@example.com");
+  const stripped = await insertEmail({
+    topicId: topic.id,
+    to: ["tx-stays@example.com", "tx-optout@example.com"],
+    cc: ["Global <tx-global@example.com>"],
+  });
+  const refused = await insertEmail({ topicId: topic.id, to: ["tx-optout@example.com"] });
+  await db.insert(schema.suppressions).values({
+    teamId,
+    email: "tx-bounced@example.com",
+    emailHash: hashRecipient("tx-bounced@example.com"),
+    reason: "hard_bounce",
+  });
+  const bounced = await insertEmail({ topicId: topic.id, to: ["tx-bounced@example.com"] });
+  // The list alone doesn't empty this one's `to`: the opt-out names the reason.
+  const mixed = await insertEmail({
+    topicId: topic.id,
+    to: ["tx-bounced@example.com", "tx-optout@example.com"],
+  });
+  // Both opt-outs land after accept: a topic override and a global unsubscribe.
+  await db
+    .insert(schema.contactTopicSubscriptions)
+    .values({ contactId: optedOut, topicId: topic.id, subscribed: false });
+  await db
+    .update(schema.contacts)
+    .set({ unsubscribed: true, unsubscribedAt: new Date() })
+    .where(eq(schema.contacts.id, unsubscribed));
+
+  const { ses, sends } = fakeSes("mid-topic-strip");
+  expect(await sendEmail(db, { keyring, ses }, { emailId: stripped })).toBe("sent");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, stripped));
+  expect(row?.to).toEqual(["tx-stays@example.com"]);
+  expect(row?.cc).toEqual([]);
+  const mime = sends[0]?.raw.toString() ?? "";
+  expect(mime).not.toContain("tx-optout@example.com");
+  expect(mime).not.toContain("tx-global@example.com");
+
+  for (const [emailId, reason] of [
+    [refused, "topic_unsubscribed"],
+    [bounced, "recipient_suppressed"],
+    [mixed, "topic_unsubscribed"],
+  ] as const) {
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("suppressed");
+    const [event] = await db
+      .select()
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, emailId));
+    expect(event).toMatchObject({ type: "suppressed", data: { reason } });
+  }
+  expect(sends).toHaveLength(1);
+});
+
+it("an opt-out that lands while the send waits for its rate token strips the row and hands it back", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Mid-send opt-out", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  const contactId = await insertContact("mid-optout@example.com");
+  const emailId = await insertEmail({
+    topicId: topic.id,
+    to: ["mid-stays@example.com", "mid-optout@example.com"],
+  });
+  const { ses, sends } = fakeSes("mid-recheck");
+  const rescheduled: string[] = [];
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    // The rate wait sits between the first eligibility check and the pre-claim re-check.
+    throttle: async () => {
+      await db
+        .insert(schema.contactTopicSubscriptions)
+        .values({ contactId, topicId: topic.id, subscribed: false })
+        .onConflictDoNothing();
+    },
+    reschedule: async (id) => {
+      rescheduled.push(id);
+    },
+  };
+
+  // The MIME was built before the opt-out and still names the recipient.
+  expect(await sendEmail(db, deps, { emailId })).toBe("deferred");
+  expect(sends).toHaveLength(0);
+  expect(rescheduled).toEqual([emailId]);
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.to).toEqual(["mid-stays@example.com"]);
+  expect(row?.sentAt).toBeNull();
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  expect(sends[0]?.raw.toString()).not.toContain("mid-optout@example.com");
 });
 
 it("the send-rate token is taken only after every check that can still skip the row", async () => {

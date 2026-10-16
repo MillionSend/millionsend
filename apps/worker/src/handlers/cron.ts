@@ -4,6 +4,7 @@ import {
   DAY_MS,
   DRAIN_MAX_PER_RUN,
   deliverabilityHold,
+  endQueuedEmails,
   failQueuedEmailsForDomain,
   fetchDeliverabilityHealth,
   getInstanceSettings,
@@ -30,6 +31,7 @@ import {
   WEBHOOK_MAX_AGE_MS,
   type WebhookEnqueue,
   warmupCap,
+  webhookBatch,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { affectedRows, keysetCursorWhere, schema } from "@millionsend/db";
@@ -651,39 +653,33 @@ const RECONCILE_MAX_PER_RUN = 20_000;
  * by the queue's dead-letter path, which fails the row after its retries.
  *
  * A claim (sentAt set) that never recorded an SES MessageId is a send
- * interrupted between claim and accept (worker killed mid-flight). Nothing
- * else ever picks such a row up, so after a generous window it is failed
- * with an event rather than left queued forever.
+ * interrupted between claim and accept (worker killed mid-flight, or the
+ * send cut off at its deadline). Nothing else ever picks such a row up, so
+ * after a generous window it is failed with an event and email.failed
+ * rather than left queued forever.
  */
 export async function reconcileStalledSends(
   db: Db,
-  deps: { enqueueSends: EnqueueEmailSends; now?: Date },
+  deps: {
+    enqueueSends: EnqueueEmailSends;
+    enqueueWebhookDelivery?: WebhookEnqueue | undefined;
+    now?: Date;
+  },
 ): Promise<number> {
   const now = deps.now ?? new Date();
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
-  const interrupted = await db
-    .update(schema.emails)
-    .set({ latestStatus: "failed", sentAt: null })
-    .where(
-      and(
-        eq(schema.emails.latestStatus, "queued"),
-        isNotNull(schema.emails.sentAt),
-        isNull(schema.emails.sesMessageId),
-        lt(schema.emails.sentAt, staleBefore),
-      ),
-    )
-    .returning({ id: schema.emails.id });
-  if (interrupted.length > 0) {
-    await db.insert(schema.emailEvents).values(
-      interrupted.map((email) => ({
-        emailId: email.id,
-        type: "failed" as const,
-        occurredAt: now,
-        data: { source: "worker", reason: "send_interrupted" },
-      })),
-    );
-  }
   const e = schema.emails;
+  const hooks = webhookBatch(deps.enqueueWebhookDelivery);
+  await db.transaction((tx) =>
+    endQueuedEmails(tx as unknown as Db, {
+      status: "failed",
+      where: and(eq(e.latestStatus, "queued"), isNotNull(e.sentAt), lt(e.sentAt, staleBefore)),
+      data: { source: "worker", reason: "send_interrupted" },
+      now,
+      enqueue: hooks.collect,
+    }),
+  );
+  await hooks.flush();
   // A row scheduled for later is waiting by design, not lost; its job is due
   // with it and would only be re-enqueued every sweep until then.
   const stalled = and(
@@ -1009,6 +1005,8 @@ class ReapRaced extends Error {}
 
 export interface ReapUnverifiedDomainsDeps {
   clientForRegion: (region: string) => SesIdentityClient;
+  /** Arms the webhook drain for the failed emails' rows; absent, the reconcile sweep sends them. */
+  enqueueWebhookDelivery?: WebhookEnqueue | undefined;
   now?: Date;
 }
 
@@ -1079,10 +1077,15 @@ export async function reapUnverifiedDomains(
           if ((err as { name?: string }).name !== "NotFoundException") throw err;
         }
       }
+      const hooks = webhookBatch(deps.enqueueWebhookDelivery);
       const deleted = await db
         .transaction(async (tx) => {
           const txDb = tx as unknown as Db;
-          await failQueuedEmailsForDomain(txDb, { teamId: domain.teamId, domainId: domain.id });
+          await failQueuedEmailsForDomain(txDb, {
+            teamId: domain.teamId,
+            domainId: domain.id,
+            enqueue: hooks.collect,
+          });
           await txDb
             .update(schema.apiKeys)
             .set({ revokedAt: now, domainId: null })
@@ -1101,6 +1104,7 @@ export async function reapUnverifiedDomains(
           throw err;
         });
       if (!deleted) continue;
+      await hooks.flush();
       await recordAudit(db, {
         teamId: domain.teamId,
         actor: "system",
@@ -1279,9 +1283,11 @@ export async function purgeExpiredEmailMetadata(
  * Content-window strip for provider and webhook payloads, on the SAME
  * effective window as email bodies. email_events.data is the raw SES subset
  * (recipient addresses, diagnostics, remote MTAs) and is dropped whole — the
- * typed `type` column keeps the timeline readable. Webhook deliveries keep
- * their envelope (type, created_at, test marker) and lose `data` and the
- * captured response body.
+ * typed `type` column keeps the timeline readable. A `suppressed` event keeps
+ * its data: it is only {source, reason}, no personal data, and the dashboard
+ * reads its source to tell a refusal at accept, which never stored a body.
+ * Webhook deliveries keep their envelope (type, created_at, test marker) and
+ * lose `data` and the captured response body.
  */
 export async function stripExpiredEventPayloads(
   db: Db,
@@ -1293,25 +1299,40 @@ export async function stripExpiredEventPayloads(
   const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
   const ev = schema.emailEvents;
   let events = 0;
+  // Each batch resumes after the last row the batch before took, so a kept
+  // suppressed row is read once a run rather than once a batch.
+  // ponytail: kept rows stay in the unstripped index, so every run still
+  // walks them once; a partial index that leaves them out is the upgrade.
+  let cursorId: string | undefined;
   for (;;) {
-    const batch = affectedRows(
+    const page = await db
+      .select({ id: ev.id })
+      .from(ev)
+      .where(
+        and(
+          lt(ev.occurredAt, cutoff),
+          isNotNull(ev.data),
+          ne(ev.type, "suppressed"),
+          cursorId ? keysetCursorWhere(ev.occurredAt, ev.id, cursorId) : undefined,
+        ),
+      )
+      .orderBy(asc(ev.occurredAt), asc(ev.id))
+      .limit(PURGE_BATCH);
+    const last = page.at(-1);
+    if (!last) break;
+    cursorId = last.id;
+    events += affectedRows(
       await db
         .update(ev)
         .set({ data: null })
         .where(
           inArray(
             ev.id,
-            db
-              .select({ id: ev.id })
-              .from(ev)
-              .where(and(lt(ev.occurredAt, cutoff), isNotNull(ev.data)))
-              .orderBy(asc(ev.occurredAt))
-              .limit(PURGE_BATCH),
+            page.map((row) => row.id),
           ),
         ),
     );
-    events += batch;
-    if (batch < PURGE_BATCH) break;
+    if (page.length < PURGE_BATCH) break;
   }
   const d = schema.webhookDeliveries;
   let deliveries = 0;

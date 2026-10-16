@@ -1,7 +1,9 @@
 import { sharedInboxDomain } from "@millionsend/config";
 import { type Db, schema } from "@millionsend/db";
-import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { parseSingleSender } from "./sender-address.js";
+import { endQueuedEmails } from "./status.js";
+import type { WebhookEnqueue } from "./webhooks.js";
 
 /**
  * Consumer mailbox providers: no tenant can own one as a sender, on every
@@ -124,41 +126,26 @@ export async function isIdentitySharedByOtherDomains(
 
 /**
  * Terminally fails every not-yet-claimed queued email of a domain about to
- * be deleted, with a `failed` event carrying the reason. Must run in the
- * same transaction as the row delete: emails.domain_id is ON DELETE SET
- * NULL, so afterwards the rows can no longer be found by domain, and a
- * still-queued row would make the worker retry a sender that no longer
- * exists. Claimed rows (sent_at set) are left to the send handler.
+ * be deleted, with a `failed` event carrying the reason and email.failed.
+ * Must run in the same transaction as the row delete: emails.domain_id is
+ * ON DELETE SET NULL, so afterwards the rows can no longer be found by
+ * domain, and a still-queued row would make the worker retry a sender that
+ * no longer exists. Claimed rows (sent_at set) are left to the send
+ * handler. `enqueue` collects the webhook rows for the caller to hand to
+ * the queue once its transaction commits (webhookBatch).
  */
 export async function failQueuedEmailsForDomain(
   db: Db,
-  params: { teamId: string; domainId: string },
+  params: { teamId: string; domainId: string; enqueue: WebhookEnqueue },
 ): Promise<number> {
   const e = schema.emails;
-  const failed = await db
-    .update(e)
-    .set({ latestStatus: "failed" })
-    .where(
-      and(
-        eq(e.teamId, params.teamId),
-        eq(e.domainId, params.domainId),
-        inArray(e.latestStatus, ["queued", "queued_quota"]),
-        isNull(e.sentAt),
-      ),
-    )
-    .returning({ id: e.id });
-  if (failed.length > 0) {
-    const occurredAt = new Date();
-    await db.insert(schema.emailEvents).values(
-      failed.map((row) => ({
-        emailId: row.id,
-        type: "failed" as const,
-        occurredAt,
-        data: { reason: "domain_deleted" },
-      })),
-    );
-  }
-  return failed.length;
+  return endQueuedEmails(db, {
+    status: "failed",
+    where: and(eq(e.teamId, params.teamId), eq(e.domainId, params.domainId), isNull(e.sentAt)),
+    data: { reason: "domain_deleted" },
+    now: new Date(),
+    enqueue: params.enqueue,
+  });
 }
 
 /**

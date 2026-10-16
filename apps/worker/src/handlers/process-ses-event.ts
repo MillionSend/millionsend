@@ -4,13 +4,14 @@ import {
   type EmailStatus,
   emitSuppressionEvents,
   enqueueWebhookDeliveries,
+  failedEmailExtras,
   hashRecipient,
   isWebhookEventType,
   noteConsoleCodeUndelivered,
-  type QueuedWebhookDelivery,
   type SuppressionEventRow,
   utcDay,
   type WebhookEnqueue,
+  webhookBatch,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -73,6 +74,7 @@ function webhookExtras(event: SerializedSesEvent): Record<string, unknown> {
       ? { complaint_feedback_type: event.complaint.complaintFeedbackType }
       : {};
   }
+  if (event.eventType === "Reject") return failedEmailExtras("ses_Reject");
   return {};
 }
 
@@ -81,7 +83,7 @@ export async function processSesEvent(
   event: SerializedSesEvent,
   opts: {
     snsMessageId?: string;
-    /** Arms the webhook drain for the endpoints written; deliveries are skipped when absent. */
+    /** Arms the webhook drain for the rows written; absent, the reconcile sweep sends them. */
     enqueueWebhookDelivery?: WebhookEnqueue;
   } = {},
 ): Promise<void> {
@@ -135,7 +137,7 @@ export async function processSesEvent(
   // delivery rows) commit in ONE transaction — a gate committed without its
   // effects would make a retry early-return and permanently drop them,
   // losing e.g. a hard-bounce suppression.
-  const deliveries: QueuedWebhookDelivery[] = [];
+  const hooks = webhookBatch(opts.enqueueWebhookDelivery);
   const applied = await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
     if (email.matchedByTag) {
@@ -169,7 +171,7 @@ export async function processSesEvent(
       .returning({ id: schema.emailEvents.id });
     if (!inserted) return false;
 
-    await applyStatusCas(txDb, email.id, status);
+    const flipped = await applyStatusCas(txDb, email.id, status);
     if (status === "bounced" || status === "failed") {
       await noteConsoleCodeUndelivered(txDb, email);
     }
@@ -178,18 +180,22 @@ export async function processSesEvent(
     // delivery rows join the transaction; the queue enqueue happens after
     // commit (a lost job is recovered by the webhook reconcile sweep).
     // "sent" is excluded here: the send worker already fires email.sent at
-    // claim time, and the SES Send event would duplicate it.
+    // claim time, and the SES Send event would duplicate it. email.failed
+    // fires only for the event that failed the row: SES can repeat a Reject
+    // under a new SNS id, which the gate above lets through.
     const webhookType = `email.${eventType}`;
-    if (opts.enqueueWebhookDelivery && eventType !== "sent" && isWebhookEventType(webhookType)) {
+    if (
+      eventType !== "sent" &&
+      isWebhookEventType(webhookType) &&
+      (webhookType !== "email.failed" || flipped)
+    ) {
       await enqueueWebhookDeliveries(txDb, {
         teamId: email.teamId,
         email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
         type: webhookType,
         occurredAt: new Date(event.occurredAt),
         extras: webhookExtras(event),
-        enqueue: async (rows) => {
-          deliveries.push(...rows);
-        },
+        enqueue: hooks.collect,
       });
     }
 
@@ -260,34 +266,25 @@ export async function processSesEvent(
           id: schema.suppressions.id,
           email: schema.suppressions.email,
           reason: schema.suppressions.reason,
+          sourceEmailId: schema.suppressions.sourceEmailId,
           createdAt: schema.suppressions.createdAt,
         });
       if (inserted) suppressedRows.push(inserted);
     }
     // New suppressions publish like the email event: rows join this
     // transaction, the queue sends happen after commit.
-    if (opts.enqueueWebhookDelivery && suppressedRows.length > 0) {
+    if (suppressedRows.length > 0) {
       await emitSuppressionEvents(txDb, {
         teamId: email.teamId,
         type: "suppression.added",
         rows: suppressedRows,
-        enqueue: async (rows) => {
-          deliveries.push(...rows);
-        },
+        enqueue: hooks.collect,
       });
     }
     return true;
   });
   if (!applied) return;
-
-  const enqueueDelivery = opts.enqueueWebhookDelivery;
-  if (enqueueDelivery && deliveries.length > 0) {
-    try {
-      await enqueueDelivery(deliveries);
-    } catch (err) {
-      console.error("webhook drain enqueue failed; reconcile sweep will recover", err);
-    }
-  }
+  await hooks.flush();
 }
 
 function isUuid(value: string): boolean {

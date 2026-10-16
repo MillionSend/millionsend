@@ -115,7 +115,7 @@ domains
 webhooks
   ~ https://webhook.example.com/handler  events
   ! https://webhook.example.com/handler  events not delivered here:
-    email.suppressed
+    domain.created
   + https://hooks.example.com/contacts  2 events, fresh secret
 templates
   ~ welcome  name
@@ -409,7 +409,7 @@ describe("buildPlan diffs against existing rows", () => {
     ]);
   });
 
-  it("narrows a target webhook subscribed to all seven events down to Resend's set", () => {
+  it("narrows a target webhook subscribed to every target event down to Resend's set", () => {
     const plan = buildPlan({
       snapshot,
       target: withRows({
