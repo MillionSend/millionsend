@@ -1200,6 +1200,11 @@ it("a topic row re-checks opt-outs at send time: opted-out recipients are stripp
     reason: "hard_bounce",
   });
   const bounced = await insertEmail({ topicId: topic.id, to: ["tx-bounced@example.com"] });
+  // The list alone doesn't empty this one's `to`: the opt-out names the reason.
+  const mixed = await insertEmail({
+    topicId: topic.id,
+    to: ["tx-bounced@example.com", "tx-optout@example.com"],
+  });
   // Both opt-outs land after accept: a topic override and a global unsubscribe.
   await db
     .insert(schema.contactTopicSubscriptions)
@@ -1221,6 +1226,7 @@ it("a topic row re-checks opt-outs at send time: opted-out recipients are stripp
   for (const [emailId, reason] of [
     [refused, "topic_unsubscribed"],
     [bounced, "recipient_suppressed"],
+    [mixed, "topic_unsubscribed"],
   ] as const) {
     expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("suppressed");
     const [event] = await db
