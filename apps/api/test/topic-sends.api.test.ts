@@ -179,6 +179,21 @@ describe("topic opt-out suppression at accept", () => {
     });
   });
 
+  it("keeps no suppressed email when only a topic opt-out empties `to`", async () => {
+    const res = await post("/emails", {
+      ...base,
+      to: [OPTED_OUT],
+      subject: "topic-opt-out-only",
+      topic_id: optInTopicId,
+    });
+    expect(res.status).toBe(422);
+    const rows = await db
+      .select()
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "topic-opt-out-only"));
+    expect(rows).toHaveLength(0);
+  });
+
   it("partial drop keeps sending to the remaining recipients", async () => {
     const res = await post("/emails", {
       ...base,

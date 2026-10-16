@@ -212,10 +212,16 @@ describe("smtp relay", () => {
       transport({ user: SMTP_USERNAME, pass: token }).sendMail({
         from: "a@acme.dev",
         to: "dead@example.com",
-        subject: "s",
+        subject: "smtp-refused",
         text: "t",
       }),
     ).rejects.toMatchObject({ responseCode: 550 });
+    // The relay refuses without keeping a suppressed email.
+    const rows = await db
+      .select()
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "smtp-refused"));
+    expect(rows).toHaveLength(0);
   });
 
   it("confines a domain-scoped key to its domain (550 from another)", async () => {

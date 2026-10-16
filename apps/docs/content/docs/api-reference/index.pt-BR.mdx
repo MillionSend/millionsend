@@ -182,7 +182,10 @@ deliberadas e explícitas:
 - Um envio em que todos os destinatários de `to` estão na lista de supressão ou
   saíram do `topic_id` é recusado com `422 all_recipients_suppressed` (mensagem
   `All recipients are suppressed`); destinatários removidos de um envio que
-  ainda tem alguém são simplesmente omitidos. Entradas de descadastro só contam
+  ainda tem alguém são simplesmente omitidos. Quando só a lista de supressão
+  esvazia `to`, o `POST /emails` guarda um e-mail `suppressed` só com metadados,
+  e cada nova tentativa com o mesmo `Idempotency-Key` adiciona outro; uma saída
+  de tópico, um item de lote e o relay SMTP não guardam nada. Entradas de descadastro só contam
   em envios com `topic_id`; bounces, reclamações e entradas manuais contam
   sempre.
 - `to`, `cc` e `bcc` juntos não podem passar de 50 destinatários, e cada

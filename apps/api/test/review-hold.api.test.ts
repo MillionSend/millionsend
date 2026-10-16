@@ -144,7 +144,11 @@ it("refuses what an ordinary send refuses: suppressed recipients and a full back
   expect(await full.json()).toMatchObject({ name: "daily_quota_exceeded" });
   const fullBatch = await post("/emails/batch", [base]);
   expect(fullBatch.status).toBe(429);
-  expect(await rows()).toHaveLength(backlog);
+  // Nothing was accepted: the parked backlog plus the one `suppressed` record
+  // the refused all-suppressed send left behind.
+  const all = await rows();
+  expect(all).toHaveLength(backlog + 1);
+  expect(all.filter((r) => r.latestStatus === "suppressed")).toHaveLength(1);
   expect(enqueued).toEqual([]);
 });
 

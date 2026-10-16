@@ -30,7 +30,10 @@ automaticamente. Supressões são por equipe.
   removidos de `to`/`cc`/`bcc`. Se *todos* os destinatários em `to` estiverem
   suprimidos, o envio é rejeitado com `422 all_recipients_suppressed`
   (mensagem `All recipients are suppressed`; o relay SMTP responde `550` com
-  essa mensagem). Uma entrada de **descadastro** não se aplica aqui: quem saiu
+  essa mensagem). Um `POST /emails` recusado assim guarda um e-mail só com
+  metadados e status `suppressed` (sem conteúdo, fora da sua cota), e cada nova
+  tentativa com o mesmo `Idempotency-Key` adiciona outro; o relay SMTP e os
+  itens de lote não guardam nada. Uma entrada de **descadastro** não se aplica aqui: quem saiu
   do marketing continua recebendo redefinições de senha, recibos e outras
   mensagens da conta — o mesmo significado que o Resend dá a `unsubscribed`
   ("descadastrado de todos os Broadcasts").
