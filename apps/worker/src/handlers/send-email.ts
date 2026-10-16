@@ -491,9 +491,10 @@ export async function sendEmail(
     .select()
     .from(schema.emails)
     .where(eq(schema.emails.id, payload.emailId));
-  // Only queued emails are sendable: quota-parked, already-sent, and failed
-  // rows are skipped no matter how the job arrived.
-  if (email?.latestStatus !== "queued") return "skipped";
+  // Only queued, unclaimed emails are sendable: quota-parked, already-sent,
+  // and failed rows are skipped no matter how the job arrived, and so is a
+  // claimed one, which SES took or may have taken.
+  if (email?.latestStatus !== "queued" || email.sentAt) return "skipped";
   let outcome: SendOutcome;
   try {
     outcome = await sendQueued(db, deps, email);
@@ -970,6 +971,20 @@ async function sendQueued(
     .returning({ id: schema.emails.id });
   if (claimed.length === 0) return "skipped";
 
+  // Credential-bearing account mail loses its body the moment SES holds it,
+  // or may hold it: a reset link is live for thirty minutes, and the row's
+  // body is otherwise readable by every member of the owning team, any
+  // full-access key and any connected app until the retention purge.
+  // Recipient, subject, status, events and counters stay. Other system kinds
+  // carry only dashboard links and keep their body for the normal retention
+  // window.
+  const purgeCredential = async () => {
+    if (!systemMail || !CREDENTIAL_MAIL_KINDS.has(email.tags?.[SYSTEM_MAIL_TAG] ?? "")) return;
+    await db
+      .update(schema.emails)
+      .set(purgedEmailBodyColumns(new Date()))
+      .where(eq(schema.emails.id, email.id));
+  };
   const send = (tenant: string | undefined) =>
     deps.ses.sendRaw({
       raw: mime,
@@ -1004,7 +1019,10 @@ async function sendQueued(
     if (TERMINAL_SES_ERRORS.has(name)) {
       return fail(`ses_${name}`, true);
     }
-    if (name === "AbortError") throw err;
+    if (name === "AbortError") {
+      await purgeCredential();
+      throw err;
+    }
     await db
       .update(schema.emails)
       .set({ sentAt: null })
@@ -1052,19 +1070,8 @@ async function sendQueued(
     });
   await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
   if (bulk) deps.sesQuota?.noteBulkSent?.(region);
-  // Credential-bearing account mail loses its body the moment SES holds it: a
-  // reset link is live for thirty minutes, and the row's body is otherwise
-  // readable by every member of the owning team, any full-access key and
-  // any connected app until the retention purge. Recipient, subject, status,
-  // events and counters stay; insights below evaluate the in-memory body.
-  // Other system kinds carry only dashboard links and keep their body for the
-  // normal retention window.
-  if (systemMail && CREDENTIAL_MAIL_KINDS.has(email.tags?.[SYSTEM_MAIL_TAG] ?? "")) {
-    await db
-      .update(schema.emails)
-      .set(purgedEmailBodyColumns(new Date()))
-      .where(eq(schema.emails.id, email.id));
-  }
+  // Insights below evaluate the in-memory body.
+  await purgeCredential();
   // Insights are best-effort bookkeeping on an already-accepted send: a bug
   // here must never fail (and so retry) the delivery.
   let insights: ReturnType<typeof evaluateEmailInsights> | undefined;

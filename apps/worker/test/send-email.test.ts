@@ -553,13 +553,28 @@ it("a send cut off at its deadline keeps the claim: SES may have it, so the retr
       throw Object.assign(new Error("Request aborted"), { name: "AbortError" });
     },
   };
-  const emailId = await insertEmail();
+  const emailId = await insertEmail({ tags: { [SYSTEM_MAIL_TAG]: "password_reset" } });
   await expect(sendEmail(db, { keyring, ses }, { emailId })).rejects.toThrow("Request aborted");
   const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
   expect(row?.latestStatus).toBe("queued");
   expect(row?.sentAt).not.toBeNull();
+  // Nothing sends it again, so its credential goes as after a send.
+  expect(row?.bodyCiphertext).toBeNull();
+  expect(row?.bodyPurgedAt).toBeInstanceOf(Date);
 
-  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("skipped");
+  // The retry stops at the claim before any other check: a hold would
+  // otherwise report a send SES may hold as parked.
+  const suspend = (suspendedAt: Date | null) =>
+    db
+      .update(schema.teams)
+      .set({ suspendedAt, suspensionReason: suspendedAt ? "manual" : null })
+      .where(eq(schema.teams.id, teamId));
+  await suspend(new Date());
+  try {
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("skipped");
+  } finally {
+    await suspend(null);
+  }
   expect(attempts).toBe(1);
 });
 
