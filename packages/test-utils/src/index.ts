@@ -6,7 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { drizzle } from "drizzle-orm/pglite";
-import LinkifyIt from "linkify-it";
+import { LinkifyIt } from "linkify-it";
 import { find } from "linkifyjs";
 
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "../../db/drizzle");
@@ -167,7 +167,9 @@ export function readable(text: string | undefined): string {
   return (text ?? "").replaceAll("\u200a", "");
 }
 
-const linkifyIt = new LinkifyIt({ fuzzyIP: true });
+// Bare domains and a user:pass@ prefix before the real host are lure shapes,
+// and linkify-it 6 skips both unless asked.
+const linkifyIt = new LinkifyIt({ fuzzyLink: true, fuzzyIP: true, urlAuth: true });
 
 /**
  * Seven or more digits joined only by spaces and punctuation: what iOS Mail's

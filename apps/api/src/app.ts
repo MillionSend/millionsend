@@ -683,7 +683,7 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
 const AUTH_FAILURES_PER_MINUTE = 20;
 
 const MiB = 1024 * 1024;
-const DEFAULT_BODY_LIMIT_BYTES = 25 * MiB;
+export const DEFAULT_BODY_LIMIT_BYTES = 25 * MiB;
 const MX_DELIVER_URL_PATH = `${MX_INGEST_PATH}${MX_DELIVER_PATH}`;
 
 const bodyTooLarge = (maxBytes: number) => (c: Context) =>
