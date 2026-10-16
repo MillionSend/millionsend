@@ -1008,6 +1008,13 @@ describe("a message in the thread pane", () => {
     expect(held).not.toContain("Show quoted text");
   });
 
+  it("reads the sender's address, and so its domain, from where From ends", () => {
+    // Authentication vouched for promo@attacker.example; the name is the sender's own words.
+    const html = render({ from: '"Bank <alerts@bank.example>" <promo@attacker.example>' });
+    expect(html).toContain('color:var(--ms-muted)">promo@attacker.example</span>');
+    expect(html).not.toContain(">alerts@bank.example<");
+  });
+
   it("loads images unasked only for a sender authentication proved", () => {
     expect(["owner", "allowlisted", "external"].every(authenticatedSender)).toBe(true);
     // A known thread proves the thread, not the From domain.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   abbreviateDkim,
+  addrSpec,
   formatBytes,
   formatDayUtc,
   formatDurationShort,
@@ -103,6 +104,16 @@ describe("formatMoneyTotals", () => {
     );
     expect(formatMoneyTotals([{ amount: 500, currency: "jpy" }], "en")).toBe("¥500");
     expect(formatMoneyTotals([], "en")).toBe("");
+  });
+});
+
+describe("addrSpec", () => {
+  it("reads the address the From value ends with, never one its display name carries", () => {
+    expect(addrSpec("Ana <ana@sender.example>")).toBe("ana@sender.example");
+    expect(addrSpec("ana@sender.example")).toBe("ana@sender.example");
+    expect(addrSpec('"Bank <alerts@bank.example>" <promo@attacker.example>')).toBe(
+      "promo@attacker.example",
+    );
   });
 });
 
