@@ -4,10 +4,34 @@
  * events" strip the sent and received email pages share: per-event glyphs and
  * tones, the node, the connector and the loading placeholder.
  */
+import type {
+  QuarantineReason,
+  ScreeningVerdict,
+  SpamVerdict,
+  VirusVerdict,
+} from "@millionsend/core";
 import { useLocale } from "next-intl";
+import {
+  DELIVERY_VARIANTS,
+  type DeliveryStatus,
+} from "@/app/(dashboard)/webhooks/webhook-status-badge";
 import { formatDayTime, formatDurationShort, formatUtcTimestampMs } from "@/lib/format";
+import {
+  BugIcon,
+  ForwardIcon,
+  InboxIcon,
+  LockIcon,
+  LockOpenIcon,
+  ReplyIcon,
+  ScanEyeIcon,
+  ShieldAlertIcon,
+  ShieldCheckIcon,
+  ShieldHalfIcon,
+  SpamIcon,
+  WebhookIcon,
+} from "./icons/mail-icons";
 import { Skeleton, SkeletonBadge } from "./skeleton";
-import { StatusTile } from "./status-tile";
+import { StatusTile, TONE_COLOR } from "./status-tile";
 
 /** Tone per email/event status — mirrors the ledger colors used elsewhere. */
 export function emailStatusColor(status: string): string {
@@ -31,6 +55,78 @@ export function emailStatusColor(status: string): string {
       // queued / queued_quota / sent / canceled / prefetched — the baseline,
       // not an outcome.
       return "var(--ms-muted)";
+  }
+}
+
+/** A lucide glyph at 14px on its 24-unit frame, as heavy as the 16-unit event glyphs. */
+const EVENT_ICON_STROKE = 2.4;
+
+/** A received message's step on its events strip, with the facts its tone reads. */
+export type ReceivedEventStep =
+  | { type: "received" | "quarantined" | "released" | "delivered" | "replied" | "forwarded" }
+  | { type: "scanned"; spam: SpamVerdict | null; virus: VirusVerdict | null }
+  | { type: "screened"; verdict: ScreeningVerdict; quarantineReason: QuarantineReason | null }
+  | { type: "webhook"; status: DeliveryStatus };
+
+/**
+ * Tone and glyph per received step, in the sent tones: the pipeline's own
+ * steps stay muted, a person acting informs, delivery succeeds, doubt warns,
+ * and malware or a hold is a danger. A scan reads top-down, first match wins.
+ */
+export function receivedEventLook(step: ReceivedEventStep): {
+  color: string;
+  glyph: React.ReactNode;
+} {
+  const stroke = EVENT_ICON_STROKE;
+  switch (step.type) {
+    case "received":
+      return { color: TONE_COLOR.neutral, glyph: <InboxIcon strokeWidth={stroke} /> };
+    case "scanned":
+      if (step.virus === "fail") {
+        return { color: TONE_COLOR.danger, glyph: <BugIcon strokeWidth={stroke} /> };
+      }
+      // Amber like the list's Spam badge: spam is filed away, not held.
+      if (step.spam === "fail") {
+        return { color: TONE_COLOR.warn, glyph: <SpamIcon strokeWidth={stroke} /> };
+      }
+      if (step.spam === "gray" || step.virus === "processing_failed") {
+        return { color: TONE_COLOR.warn, glyph: <ShieldAlertIcon strokeWidth={stroke} /> };
+      }
+      return {
+        color: TONE_COLOR.neutral,
+        // Half a shield when a scanner gave no verdict: no ClamAV leaves the virus verdict null.
+        glyph:
+          step.spam === "pass" && step.virus === "pass" ? (
+            <ShieldCheckIcon strokeWidth={stroke} />
+          ) : (
+            <ShieldHalfIcon strokeWidth={stroke} />
+          ),
+      };
+    case "screened":
+      return {
+        color:
+          step.quarantineReason === "injection" || step.quarantineReason === "phishing"
+            ? TONE_COLOR.danger
+            : step.verdict === "suspicious"
+              ? TONE_COLOR.warn
+              : TONE_COLOR.neutral,
+        glyph: <ScanEyeIcon strokeWidth={stroke} />,
+      };
+    case "quarantined":
+      return { color: TONE_COLOR.danger, glyph: <LockIcon strokeWidth={stroke} /> };
+    case "released":
+      return { color: TONE_COLOR.info, glyph: <LockOpenIcon strokeWidth={stroke} /> };
+    case "delivered":
+      return { color: emailStatusColor("delivered"), glyph: <EventGlyph type="delivered" /> };
+    case "replied":
+      return { color: TONE_COLOR.info, glyph: <ReplyIcon strokeWidth={stroke} /> };
+    case "forwarded":
+      return { color: TONE_COLOR.info, glyph: <ForwardIcon strokeWidth={stroke} /> };
+    case "webhook":
+      return {
+        color: TONE_COLOR[DELIVERY_VARIANTS[step.status]],
+        glyph: <WebhookIcon strokeWidth={stroke} />,
+      };
   }
 }
 

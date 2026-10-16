@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { inferRouterOutputs } from "@trpc/server";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -9,6 +10,12 @@ import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { EmailContentPanel } from "@/components/email-content-panel";
+import {
+  EventGap,
+  EventNode,
+  type ReceivedEventStep,
+  receivedEventLook,
+} from "@/components/email-status-icon";
 import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
@@ -21,9 +28,10 @@ import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { AUTH_CHECKS, dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
-import { formatBytes, formatDayTime, formatRelative, mailDomain } from "@/lib/format";
+import { formatBytes, formatRelative, mailDomain } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamRole } from "@/lib/use-team-role";
+import type { AppRouter } from "@/server/routers";
 import { QuarantinedBadge, TrustBadge } from "../../parts";
 import { AuthBadge } from "../received-list";
 
@@ -117,6 +125,149 @@ function ReceivedEmailSkeleton() {
   );
 }
 
+type ReceivedEmail = inferRouterOutputs<AppRouter>["receiving"]["get"];
+
+/**
+ * received → scanned → screened → delivered / quarantined / released →
+ * replied / forwarded → webhook, each with what is known of it, on the sent
+ * strip's nodes. A scan or a screening has no time of its own.
+ */
+export function ReceivedEvents({
+  email,
+}: {
+  email: Pick<
+    ReceivedEmail,
+    "createdAt" | "spam" | "virus" | "memberships" | "activity" | "webhook"
+  >;
+}) {
+  const t = useTranslations("inboxes");
+  const te = useTranslations("emails");
+  const common = useTranslations("common");
+  const timeline: {
+    key: string;
+    step: ReceivedEventStep;
+    label: string;
+    detail?: React.ReactNode;
+    at?: Date | string;
+  }[] = [
+    {
+      key: "received",
+      step: { type: "received" },
+      label: t("timeline.received"),
+      at: email.createdAt,
+    },
+  ];
+  if (email.virus.verdict || email.spam.verdict) {
+    timeline.push({
+      key: "scanned",
+      step: { type: "scanned", spam: email.spam.verdict, virus: email.virus.verdict },
+      label: t("timeline.scanned"),
+      detail: [
+        ...(email.spam.verdict ? [t(`spam.${email.spam.verdict}`)] : []),
+        email.virus.verdict === "fail"
+          ? t("virus.fail", { signature: email.virus.signature ?? "" })
+          : t(`virus.${email.virus.verdict ?? "none"}`),
+      ].join(" · "),
+    });
+  }
+  for (const m of email.memberships) {
+    if (m.injectionScore !== null || m.phishingScore !== null) {
+      timeline.push({
+        key: `screened-${m.inboxId}`,
+        step: { type: "screened", verdict: m.verdict, quarantineReason: m.quarantineReason },
+        label: t("timeline.screened"),
+        detail: t("review.scoreLine", {
+          injection: m.injectionScore ?? "–",
+          phishing: m.phishingScore ?? "–",
+        }),
+      });
+    }
+    if (m.quarantinedAt) {
+      timeline.push({
+        key: `quarantined-${m.inboxId}`,
+        step: { type: "quarantined" },
+        label: t("timeline.quarantined"),
+        detail: m.quarantineReason ? t(`qr.${m.quarantineReason}`) : m.address,
+        at: m.quarantinedAt,
+      });
+    }
+    if (m.releasedAt) {
+      timeline.push({
+        key: `released-${m.inboxId}`,
+        step: { type: "released" },
+        label: t("timeline.released"),
+        detail: m.releasedByName ? t("timeline.releasedBy", { who: m.releasedByName }) : null,
+        at: m.releasedAt,
+      });
+    }
+    if (m.deliveredAt) {
+      timeline.push({
+        key: `delivered-${m.inboxId}`,
+        step: { type: "delivered" },
+        label: common("status.delivered"),
+        detail: <Breakable text={m.address} />,
+        at: m.deliveredAt,
+      });
+    }
+  }
+  for (const [index, a] of email.activity.filter((x) => x.action !== "email.released").entries()) {
+    const type = a.action === "email.forwarded" ? "forwarded" : "replied";
+    timeline.push({
+      key: `activity-${index}`,
+      step: { type },
+      label: t(`timeline.${type}`),
+      detail: a.by,
+      at: a.at,
+    });
+  }
+  if (email.webhook) {
+    timeline.push({
+      key: "webhook",
+      step: { type: "webhook", status: email.webhook.status },
+      label: t("timeline.webhook"),
+      detail: `email.received · ${email.webhook.responseCode ?? email.webhook.status}`,
+      at: email.webhook.at,
+    });
+  }
+  const times = timeline.map((entry) => (entry.at ? new Date(entry.at).getTime() : null));
+  // The strip keeps the pipeline's order, so the newest step is the latest in
+  // time (a webhook listed after a later reply is not), or the last one while
+  // the strip ends on a scan or screening with nothing after it yet.
+  const newest =
+    times.at(-1) === null
+      ? times.length - 1
+      : times.lastIndexOf(Math.max(...times.map((time) => time ?? Number.NEGATIVE_INFINITY)));
+  return (
+    <section style={{ marginTop: 26 }}>
+      <div className="ms-microlabel">{te("detail.events")}</div>
+      <div className="ms-events">
+        {timeline.map((entry, index) => {
+          const { color, glyph } = receivedEventLook(entry.step);
+          const at = times[index] ?? null;
+          const since = times.slice(0, index).findLast((time) => time !== null) ?? null;
+          return (
+            <div key={entry.key} style={{ display: "contents" }}>
+              {index > 0 ? (
+                <EventGap ms={at !== null && since !== null ? at - since : null} />
+              ) : null}
+              <EventNode
+                type={entry.step.type}
+                color={color}
+                glyph={glyph}
+                label={entry.label}
+                at={entry.at}
+                detail={entry.detail}
+                wrapDetail
+                latest={index === newest}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function ReceivedEmailView() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("inboxes");
@@ -195,86 +346,6 @@ export function ReceivedEmailView() {
     }
   };
   const releasing = releaseInbox.isPending || releaseRow.isPending;
-
-  // received → scanned → screened → delivered / quarantined / released →
-  // replied / forwarded → webhook, each with what is known of it.
-  const timeline: { key: string; label: string; detail?: string; at?: Date | string }[] = [
-    { key: "received", label: t("timeline.received"), at: email.createdAt },
-    ...(email.virus.verdict || email.spam.verdict
-      ? [
-          {
-            key: "scanned",
-            label: t("timeline.scanned"),
-            detail: [
-              ...(email.spam.verdict ? [t(`spam.${email.spam.verdict}`)] : []),
-              email.virus.verdict === "fail"
-                ? t("virus.fail", { signature: email.virus.signature ?? "" })
-                : t(`virus.${email.virus.verdict ?? "none"}`),
-            ].join(" · "),
-          },
-        ]
-      : []),
-    ...email.memberships.flatMap((m) => [
-      ...(m.injectionScore !== null || m.phishingScore !== null
-        ? [
-            {
-              key: `screened-${m.inboxId}`,
-              label: t("timeline.screened"),
-              detail: t("detail.scores", {
-                injection: m.injectionScore ?? "–",
-                phishing: m.phishingScore ?? "–",
-              }),
-            },
-          ]
-        : []),
-      ...(m.quarantinedAt
-        ? [
-            {
-              key: `quarantined-${m.inboxId}`,
-              label: t("timeline.quarantined"),
-              detail: m.quarantineReason ? t(`qr.${m.quarantineReason}`) : m.address,
-              at: m.quarantinedAt,
-            },
-          ]
-        : []),
-      ...(m.releasedAt
-        ? [
-            {
-              key: `released-${m.inboxId}`,
-              label: t("timeline.released", { who: m.releasedByName ?? "—" }),
-              at: m.releasedAt,
-            },
-          ]
-        : []),
-      ...(m.deliveredAt
-        ? [
-            {
-              key: `delivered-${m.inboxId}`,
-              label: t("timeline.delivered", { inbox: m.address }),
-              at: m.deliveredAt,
-            },
-          ]
-        : []),
-    ]),
-    ...email.activity
-      .filter((a) => a.action !== "email.released")
-      .map((a, index) => ({
-        key: `activity-${index}`,
-        label: a.action === "email.forwarded" ? t("timeline.forwarded") : t("timeline.replied"),
-        ...(a.by ? { detail: a.by } : {}),
-        at: a.at,
-      })),
-    ...(email.webhook
-      ? [
-          {
-            key: "webhook",
-            label: t("timeline.webhook"),
-            detail: `email.received · ${email.webhook.responseCode ?? email.webhook.status}`,
-            at: email.webhook.at,
-          },
-        ]
-      : []),
-  ];
 
   return (
     <>
@@ -510,38 +581,7 @@ export function ReceivedEmailView() {
         </MetaItem>
       </div>
 
-      <section style={{ marginTop: 26 }}>
-        <div className="ms-microlabel">{te("detail.events")}</div>
-        <div className="ms-events" style={{ marginTop: 12 }}>
-          {timeline.map((step, index) => (
-            <div key={step.key} style={{ display: "contents" }}>
-              {index > 0 ? (
-                <div className="ms-events-gap">
-                  <span className="ms-events-line" />
-                </div>
-              ) : null}
-              <div className="ms-events-node">
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ms-bone)" }}>
-                  {step.label}
-                </span>
-                {step.at ? (
-                  <span style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 5 }}>
-                    {formatDayTime(step.at, locale)}
-                  </span>
-                ) : null}
-                {step.detail ? (
-                  <span
-                    className="ms-mono"
-                    style={{ fontSize: 11, color: "var(--ms-muted)", marginTop: 3, maxWidth: 220 }}
-                  >
-                    {step.detail}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <ReceivedEvents email={email} />
 
       {email.attachments.length > 0 ? (
         <section style={{ marginTop: 26 }}>
