@@ -12,11 +12,14 @@ entregas por endpoint.
 
 | Evento | Disparado quando |
 | --- | --- |
+| `email.scheduled` | Um e-mail foi aceito com um `scheduled_at` no futuro; leia esse horário com `GET /emails/{id}`. Mudar o horário com `PATCH /emails/{id}` não dispara nada. Veja [o payload](#e-mails-agendados-com-falha-e-suprimidos) abaixo. |
 | `email.sent` | O SES aceitou a mensagem para entrega. |
 | `email.delivered` | O servidor do destinatário a aceitou. |
 | `email.delivery_delayed` | A entrega está sendo repetida (ex.: caixa cheia, greylisting). |
 | `email.bounced` | A mensagem voltou (bounce). `data.bounce.type` diz como: `Permanent` é um hard bounce, e o endereço também é [suprimido](/pt-BR/concepts/suppressions); `Transient` ou `Undetermined` quer dizer que o SES desistiu depois de tentar de novo (caixa cheia, um domínio que não existe), e o endereço não é suprimido. |
 | `email.complained` | O destinatário marcou como spam. Também suprimido. |
+| `email.failed` | O e-mail falhou de vez: não vai ser enviado, ou o SES o recusou depois do `email.sent`; `data.failed.reason` diz o motivo. Veja [os motivos](#e-mails-agendados-com-falha-e-suprimidos) abaixo. |
+| `email.suppressed` | O e-mail não vai ser enviado. A lista de supressão, um descadastro ou a saída do tópico barrou o envio, ou o contato, a transmissão ou o tópico dele foi excluído ou mudou antes do envio; `data.suppressed` diz qual. Veja [os motivos](#e-mails-agendados-com-falha-e-suprimidos) abaixo. |
 | `email.opened` | Uma pessoa carregou o pixel de rastreamento (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). `data.open` traz `ipAddress`, `userAgent` e `timestamp` da busca. Um clique em uma mensagem ainda sem abertura também registra uma, com `data.open.reason: "click"`: ninguém clica no que nunca renderizou, e para leitores do Apple Mail é a única abertura que pode ser vista. |
 | `email.clicked` | Uma pessoa clicou em um link reescrito (exige rastreamento de cliques). `data.click` traz `link`, `ipAddress`, `userAgent` e `timestamp`, como no Resend. Um link que uma máquina seguiu — gateway de segurança, pré-visualização de link, busca segundos após a entrega — é registrado como `email.prefetched`. |
 | `email.prefetched` | O pixel foi buscado, ou um link seguido, por uma máquina — o Mail Privacy Protection da Apple, o pré-carregamento do Gmail, um scanner de segurança, uma identidade de navegador que nenhum navegador real envia, uma busca segundos após a entrega ou todos os links da mensagem em um segundo; `data.open.reason` ou `data.click.reason` diz qual (veja [precisão da taxa de abertura](/pt-BR/concepts/domains#precisão-da-taxa-de-abertura)). Um clique registrado antes de o resto da rajada chegar é registrado de novo aqui com o mesmo `data.click.timestamp` que seu `email.clicked` levou: trate isso como o clique sendo desfeito, junto com qualquer `email.opened` com `data.open.reason: "click"` marcado um milissegundo antes dele. Opt-in: entregue só a endpoints que o listam, nunca a "todos os eventos". |
@@ -37,8 +40,8 @@ seja quem for que mudou. `data` traz o contato no formato do Resend — `id`,
 `email`, `first_name`, `last_name`, `unsubscribed`, `created_at`, `updated_at`
 — mais `source`: `api`, `dashboard`, `hosted_page` (a central de preferências)
 ou `one_click` (um POST de header RFC 8058). O Resend emite apenas
-`contact.created`, `contact.updated` e `contact.deleted`; os demais são
-extensões do MillionSend.
+`contact.created`, `contact.updated`, `contact.deleted`, `suppression.added`
+e `suppression.removed`; os demais são extensões do MillionSend.
 
 | Evento | Disparado quando | `data` extra |
 | --- | --- | --- |
@@ -48,7 +51,99 @@ extensões do MillionSend.
 | `contact.unsubscribed` | O contato saiu de todo e-mail de marketing. | |
 | `contact.resubscribed` | Uma reinscrição explícita (`unsubscribed: false`). | |
 | `contact.topic_opt_in` / `contact.topic_opt_out` | A inscrição efetiva do contato em um tópico mudou. | `topic_id`, `topic_name` |
-| `suppression.added` / `suppression.removed` | Um endereço entrou ou saiu da [lista de supressão](/pt-BR/concepts/suppressions). Linhas de bounce e reclamação vêm do SES, com `source: null`. | `data` é `{ id, email, origin, source, created_at }` |
+| `suppression.added` / `suppression.removed` | Um endereço entrou ou saiu da [lista de supressão](/pt-BR/concepts/suppressions). Linhas de bounce e reclamação vêm do SES, com `source: null`; `source_id` é o e-mail cujo bounce ou reclamação criou a entrada, ou `null`. | `data` é `{ id, email, origin, source, source_id, created_at }` |
+
+### E-mails agendados, com falha e suprimidos
+
+Como todo evento de um e-mail que você envia, esses três trazem `email_id`,
+`from`, `to`, `subject` e `created_at`, a hora do evento.
+
+```json title="email.scheduled"
+{
+  "type": "email.scheduled",
+  "created_at": "2026-10-13T09:30:12.084Z",
+  "data": {
+    "email_id": "b10f77bb-a99a-48c9-bd0a-a5d2cb1ba4a1",
+    "from": "Acme <hello@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your trial ends tomorrow",
+    "created_at": "2026-10-13T09:30:12.084Z"
+  }
+}
+```
+
+`email.failed` e `email.suppressed` disparam uma vez por e-mail que termina
+como `failed` ou `suppressed`, e acrescentam um objeto que diz o motivo.
+
+```json title="email.failed"
+{
+  "type": "email.failed",
+  "created_at": "2026-10-13T10:00:02.317Z",
+  "data": {
+    "email_id": "3f7b2c71-5274-4246-82f3-57bc1563c276",
+    "from": "Acme <billing@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your receipt",
+    "created_at": "2026-10-13T10:00:02.317Z",
+    "failed": {
+      "reason": "domain_not_verified"
+    }
+  }
+}
+```
+
+| `failed.reason` | O que aconteceu |
+| --- | --- |
+| `domain_not_verified` | O domínio de envio, ou o subdomínio de MAIL FROM dele, não estava verificado na hora do envio. |
+| `domain_deleted` | O domínio de envio foi excluído enquanto o e-mail esperava para sair. |
+| `body_missing` | O conteúdo guardado do e-mail não estava lá na hora do envio. |
+| `body_unreadable` | Não deu para descriptografar o conteúdo guardado do e-mail. |
+| `message_rejected` | O SES recusou a mensagem: na hora do envio, ou depois do `email.sent`, por ela ter vírus. |
+| `retries_exhausted` | Todas as tentativas de envio falharam por erros temporários, e não sobrou nenhuma. |
+| `send_interrupted` | Um envio foi interrompido antes de o SES confirmar, então o e-mail pode ter saído ou não. Ele não é tentado de novo. |
+| `provider_error` | Qualquer outro erro que impediu o envio. |
+
+```json title="email.suppressed"
+{
+  "type": "email.suppressed",
+  "created_at": "2026-10-14T09:30:00.912Z",
+  "data": {
+    "email_id": "b10f77bb-a99a-48c9-bd0a-a5d2cb1ba4a1",
+    "from": "Acme <hello@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your trial ends tomorrow",
+    "created_at": "2026-10-14T09:30:00.912Z",
+    "suppressed": {
+      "type": "OnAccountSuppressionList",
+      "message": "The recipient is on your suppression list.",
+      "reason": "recipient_suppressed"
+    }
+  }
+}
+```
+
+| `suppressed.reason` | `type` | `message` |
+| --- | --- | --- |
+| `recipient_suppressed` | `OnAccountSuppressionList` | `The recipient is on your suppression list.` |
+| `contact_unsubscribed` | `Unsubscribed` | `The contact unsubscribed from your emails.` |
+| `topic_unsubscribed` | `Unsubscribed` | `The recipient opted out of this email's topic.` |
+| `contact_missing` | `Ineligible` | `The contact was deleted before the email was sent.` |
+| `contact_recipient_mismatch` | `Ineligible` | `The contact's address changed before the email was sent.` |
+| `broadcast_missing` | `Ineligible` | `The broadcast was deleted before the email was sent.` |
+| `topic_missing` | `Ineligible` | `The email's topic was deleted before it was sent.` |
+| `ineligible` ou qualquer outro | `Ineligible` | `The email was no longer eligible to send.` |
+
+`OnAccountSuppressionList` é o valor do Resend; `Unsubscribed` e `Ineligible`
+são do próprio MillionSend.
+
+- Um `POST /emails` que a lista de supressão sozinha recusa com
+  `422 all_recipients_suppressed` guarda um e-mail `suppressed`, que também
+  dispara o `email.suppressed`; veja
+  [Supressões](/pt-BR/concepts/suppressions#o-que-a-supressão-faz).
+- Remover só alguns destinatários, no aceite ou na hora do envio, não dispara
+  o `email.suppressed`: o e-mail vai para os outros.
+- Cancelar uma transmissão não dispara nada para os e-mails que deixam de
+  sair.
 
 ### E-mails recebidos
 

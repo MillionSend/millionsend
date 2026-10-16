@@ -12,11 +12,14 @@ delivery log.
 
 | Event | Fired when |
 | --- | --- |
+| `email.scheduled` | An email was accepted with a `scheduled_at` in the future; read that time with `GET /emails/{id}`. Changing it with `PATCH /emails/{id}` fires nothing. See [the payload](#scheduled-failed-and-suppressed-email) below. |
 | `email.sent` | SES accepted the message for delivery. |
 | `email.delivered` | The recipient server accepted it. |
 | `email.delivery_delayed` | Delivery is being retried (e.g. mailbox full, greylisting). |
 | `email.bounced` | The message bounced. `data.bounce.type` says how: `Permanent` is a hard bounce, and the address is also [suppressed](/concepts/suppressions); `Transient` or `Undetermined` means SES gave up after retrying (a full mailbox, a domain that never resolves), and the address is not suppressed. |
 | `email.complained` | The recipient marked it as spam. Also suppressed. |
+| `email.failed` | The email failed for good: it won't be sent, or SES refused it after `email.sent`; `data.failed.reason` says why. See [the reasons](#scheduled-failed-and-suppressed-email) below. |
+| `email.suppressed` | The email won't be sent. The suppression list, an unsubscribe or a topic opt-out stopped it, or its contact, broadcast or topic was deleted or changed before it went out; `data.suppressed` says which. See [the reasons](#scheduled-failed-and-suppressed-email) below. |
 | `email.opened` | A person loaded the tracking pixel (requires open tracking on the [domain](/concepts/domains)). `data.open` carries the fetch's `ipAddress`, `userAgent` and `timestamp`. A click on a message with no open yet also records one, with `data.open.reason: "click"`: a person cannot click what they never rendered, and for Apple Mail readers it is the only open that can ever be seen. |
 | `email.clicked` | A person clicked a rewritten link (requires click tracking). `data.click` carries `link`, `ipAddress`, `userAgent` and `timestamp`, as Resend's does. A link a machine followed — a security gateway, a link preview, a fetch seconds after delivery — is recorded as `email.prefetched` instead. |
 | `email.prefetched` | The pixel was fetched, or a link followed, by a machine — Apple Mail Privacy Protection, Gmail's prefetch, a security scanner, a browser identity no real browser sends, a fetch within seconds of delivery, or every link of the message within a second; `data.open.reason` or `data.click.reason` says which (see [open-rate accuracy](/concepts/domains#open-rate-accuracy)). A click recorded before the rest of its burst arrived is re-recorded here with the same `data.click.timestamp` its `email.clicked` carried: treat that as the retraction of the click and of any `email.opened` with `data.open.reason: "click"` stamped one millisecond before it. Opt-in: delivered only to endpoints that name it, never to "all events". |
@@ -37,7 +40,8 @@ changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 `first_name`, `last_name`, `unsubscribed`, `created_at`, `updated_at` — plus
 `source`: `api`, `dashboard`, `hosted_page` (the preference center) or
 `one_click` (an RFC 8058 header post). Resend emits only `contact.created`,
-`contact.updated` and `contact.deleted`; the rest are MillionSend extensions.
+`contact.updated`, `contact.deleted`, `suppression.added` and
+`suppression.removed`; the rest are MillionSend extensions.
 
 | Event | Fired when | Extra `data` |
 | --- | --- | --- |
@@ -47,7 +51,98 @@ changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 | `contact.unsubscribed` | The contact opted out of all marketing email. | |
 | `contact.resubscribed` | An explicit re-subscribe (`unsubscribed: false`). | |
 | `contact.topic_opt_in` / `contact.topic_opt_out` | The contact's effective subscription to a topic flipped. | `topic_id`, `topic_name` |
-| `suppression.added` / `suppression.removed` | An address joined or left the [suppression list](/concepts/suppressions). Bounce and complaint rows come from SES, with `source: null`. | `data` is `{ id, email, origin, source, created_at }` |
+| `suppression.added` / `suppression.removed` | An address joined or left the [suppression list](/concepts/suppressions). Bounce and complaint rows come from SES, with `source: null`; `source_id` is the email whose bounce or complaint created the entry, otherwise `null`. | `data` is `{ id, email, origin, source, source_id, created_at }` |
+
+### Scheduled, failed and suppressed email
+
+Like every event about an email you send, these three carry `email_id`,
+`from`, `to`, `subject` and `created_at`, when the event happened.
+
+```json title="email.scheduled"
+{
+  "type": "email.scheduled",
+  "created_at": "2026-10-13T09:30:12.084Z",
+  "data": {
+    "email_id": "b10f77bb-a99a-48c9-bd0a-a5d2cb1ba4a1",
+    "from": "Acme <hello@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your trial ends tomorrow",
+    "created_at": "2026-10-13T09:30:12.084Z"
+  }
+}
+```
+
+`email.failed` and `email.suppressed` fire once per email that ends `failed`
+or `suppressed`, and add an object that says why.
+
+```json title="email.failed"
+{
+  "type": "email.failed",
+  "created_at": "2026-10-13T10:00:02.317Z",
+  "data": {
+    "email_id": "3f7b2c71-5274-4246-82f3-57bc1563c276",
+    "from": "Acme <billing@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your receipt",
+    "created_at": "2026-10-13T10:00:02.317Z",
+    "failed": {
+      "reason": "domain_not_verified"
+    }
+  }
+}
+```
+
+| `failed.reason` | What happened |
+| --- | --- |
+| `domain_not_verified` | The sending domain, or its MAIL FROM subdomain, wasn't verified when the email went out. |
+| `domain_deleted` | The sending domain was deleted while the email waited to go out. |
+| `body_missing` | The email's stored content was missing when it went out. |
+| `body_unreadable` | The email's stored content couldn't be decrypted. |
+| `message_rejected` | SES refused the message: when it was sent, or after `email.sent` because it carried a virus. |
+| `retries_exhausted` | Every send attempt failed on a temporary error, and none is left. |
+| `send_interrupted` | A send was cut off before SES confirmed it, so the email may or may not have gone out. It isn't tried again. |
+| `provider_error` | Any other error that stopped the send. |
+
+```json title="email.suppressed"
+{
+  "type": "email.suppressed",
+  "created_at": "2026-10-14T09:30:00.912Z",
+  "data": {
+    "email_id": "b10f77bb-a99a-48c9-bd0a-a5d2cb1ba4a1",
+    "from": "Acme <hello@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your trial ends tomorrow",
+    "created_at": "2026-10-14T09:30:00.912Z",
+    "suppressed": {
+      "type": "OnAccountSuppressionList",
+      "message": "The recipient is on your suppression list.",
+      "reason": "recipient_suppressed"
+    }
+  }
+}
+```
+
+| `suppressed.reason` | `type` | `message` |
+| --- | --- | --- |
+| `recipient_suppressed` | `OnAccountSuppressionList` | `The recipient is on your suppression list.` |
+| `contact_unsubscribed` | `Unsubscribed` | `The contact unsubscribed from your emails.` |
+| `topic_unsubscribed` | `Unsubscribed` | `The recipient opted out of this email's topic.` |
+| `contact_missing` | `Ineligible` | `The contact was deleted before the email was sent.` |
+| `contact_recipient_mismatch` | `Ineligible` | `The contact's address changed before the email was sent.` |
+| `broadcast_missing` | `Ineligible` | `The broadcast was deleted before the email was sent.` |
+| `topic_missing` | `Ineligible` | `The email's topic was deleted before it was sent.` |
+| `ineligible` or any other | `Ineligible` | `The email was no longer eligible to send.` |
+
+`OnAccountSuppressionList` is Resend's value; `Unsubscribed` and `Ineligible`
+are MillionSend's own.
+
+- A `POST /emails` that the suppression list alone refuses with
+  `422 all_recipients_suppressed` keeps a `suppressed` email, which fires
+  `email.suppressed` too; see
+  [Suppressions](/concepts/suppressions#what-suppression-does).
+- Dropping only some recipients, at accept or when the email goes out, fires
+  no `email.suppressed`: the email goes to the rest.
+- Canceling a broadcast fires nothing for the emails it stops.
 
 ### Received mail
 
