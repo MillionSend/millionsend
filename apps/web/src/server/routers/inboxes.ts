@@ -52,6 +52,7 @@ import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, gt, inArray, max, sql } from "drizzle-orm";
 import { z } from "zod";
+import { HEX_COLOR_RE } from "@/lib/hex-color";
 import { fetchQuotaRow } from "../billing";
 import {
   actorNames,
@@ -594,13 +595,20 @@ export const inboxesRouter = router({
       ),
 
     create: receivingProcedure
-      .input(z.object({ ...inboxRef, name: z.string().trim().min(1).max(64) }))
+      .input(
+        z.object({
+          ...inboxRef,
+          name: z.string().trim().min(1).max(64),
+          color: z.string().regex(HEX_COLOR_RE).optional(),
+        }),
+      )
       .mutation(async ({ ctx, input }) => {
         const result = await createLabel(ctx.db, inboxDeps(ctx), {
           teamId: ctx.teamId,
           inboxId: input.inboxId,
           actor: userActor(ctx),
           name: input.name,
+          color: input.color,
         });
         if (!result.ok) throw inboxFailure(result.error);
         return result.label;
@@ -612,10 +620,7 @@ export const inboxesRouter = router({
           ...inboxRef,
           labelId: z.uuid(),
           name: z.string().trim().min(1).max(64).optional(),
-          color: z
-            .string()
-            .regex(/^#[0-9A-Fa-f]{6}$/)
-            .optional(),
+          color: z.string().regex(HEX_COLOR_RE).optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
