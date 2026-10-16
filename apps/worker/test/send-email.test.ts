@@ -1160,6 +1160,100 @@ it("a transactional row re-checks suppression at send time: hits are stripped, a
   expect(sends).toHaveLength(1);
 });
 
+it("a topic row re-checks opt-outs at send time: opted-out recipients are stripped, an empty to refuses", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Late tx opt-out", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  const optedOut = await insertContact("tx-optout@example.com");
+  const unsubscribed = await insertContact("tx-global@example.com");
+  await insertContact("tx-stays@example.com");
+  const stripped = await insertEmail({
+    topicId: topic.id,
+    to: ["tx-stays@example.com", "tx-optout@example.com"],
+    cc: ["Global <tx-global@example.com>"],
+  });
+  const refused = await insertEmail({ topicId: topic.id, to: ["tx-optout@example.com"] });
+  await db.insert(schema.suppressions).values({
+    teamId,
+    email: "tx-bounced@example.com",
+    emailHash: hashRecipient("tx-bounced@example.com"),
+    reason: "hard_bounce",
+  });
+  const bounced = await insertEmail({ topicId: topic.id, to: ["tx-bounced@example.com"] });
+  // Both opt-outs land after accept: a topic override and a global unsubscribe.
+  await db
+    .insert(schema.contactTopicSubscriptions)
+    .values({ contactId: optedOut, topicId: topic.id, subscribed: false });
+  await db
+    .update(schema.contacts)
+    .set({ unsubscribed: true, unsubscribedAt: new Date() })
+    .where(eq(schema.contacts.id, unsubscribed));
+
+  const { ses, sends } = fakeSes("mid-topic-strip");
+  expect(await sendEmail(db, { keyring, ses }, { emailId: stripped })).toBe("sent");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, stripped));
+  expect(row?.to).toEqual(["tx-stays@example.com"]);
+  expect(row?.cc).toEqual([]);
+  const mime = sends[0]?.raw.toString() ?? "";
+  expect(mime).not.toContain("tx-optout@example.com");
+  expect(mime).not.toContain("tx-global@example.com");
+
+  for (const [emailId, reason] of [
+    [refused, "topic_unsubscribed"],
+    [bounced, "recipient_suppressed"],
+  ] as const) {
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("suppressed");
+    const [event] = await db
+      .select()
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, emailId));
+    expect(event).toMatchObject({ type: "suppressed", data: { reason } });
+  }
+  expect(sends).toHaveLength(1);
+});
+
+it("an opt-out that lands while the send waits for its rate token strips the row and hands it back", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Mid-send opt-out", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  const contactId = await insertContact("mid-optout@example.com");
+  const emailId = await insertEmail({
+    topicId: topic.id,
+    to: ["mid-stays@example.com", "mid-optout@example.com"],
+  });
+  const { ses, sends } = fakeSes("mid-recheck");
+  const rescheduled: string[] = [];
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    // The rate wait sits between the first eligibility check and the pre-claim re-check.
+    throttle: async () => {
+      await db
+        .insert(schema.contactTopicSubscriptions)
+        .values({ contactId, topicId: topic.id, subscribed: false })
+        .onConflictDoNothing();
+    },
+    reschedule: async (id) => {
+      rescheduled.push(id);
+    },
+  };
+
+  // The MIME was built before the opt-out and still names the recipient.
+  expect(await sendEmail(db, deps, { emailId })).toBe("deferred");
+  expect(sends).toHaveLength(0);
+  expect(rescheduled).toEqual([emailId]);
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.to).toEqual(["mid-stays@example.com"]);
+  expect(row?.sentAt).toBeNull();
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  expect(sends[0]?.raw.toString()).not.toContain("mid-optout@example.com");
+});
+
 it("the send-rate token is taken only after every check that can still skip the row", async () => {
   const { ses } = fakeSes();
   let throttled = 0;

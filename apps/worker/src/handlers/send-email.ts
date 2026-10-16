@@ -17,6 +17,7 @@ import {
   fetchTeamQuota,
   fetchTeamStanding,
   findSuppressed,
+  findTopicOptOuts,
   hashRecipient,
   isOnboardingSender,
   isSharedInboxSender,
@@ -182,7 +183,10 @@ interface SendEligibility {
   eligible: boolean;
   topicId: string | null;
   reason?: string;
-  /** Recipients suppressed since accept; the send drops them (accept-time strip semantics). */
+  /**
+   * Recipients suppressed or opted out of the topic since accept; the send
+   * drops them (accept-time strip semantics).
+   */
   strip?: Set<string>;
 }
 
@@ -191,18 +195,25 @@ async function checkSendEligibility(
   email: typeof schema.emails.$inferSelect,
 ): Promise<SendEligibility> {
   if (!email.contactId) {
-    // Bounces and complaints recorded after accept (a scheduled or
+    // Suppressions and topic opt-outs recorded after accept (a scheduled or
     // quota-parked row can wait days) are honored the way accept does:
     // strip the hit, refuse only when no primary recipient is left.
     const recipients = [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])];
     const suppressed = await findSuppressed(db, email.teamId, recipients, {
       transactional: email.topicId === null,
     });
-    if (suppressed.size === 0) return { eligible: true, topicId: null };
-    if (email.to.every((r) => suppressed.has(r))) {
-      return { eligible: false, topicId: null, reason: "recipient_suppressed" };
+    const optedOut = email.topicId
+      ? await findTopicOptOuts(db, email.teamId, email.topicId, recipients)
+      : new Set<string>();
+    const strip = new Set([...suppressed, ...optedOut]);
+    if (strip.size === 0) return { eligible: true, topicId: null };
+    if (email.to.every((r) => strip.has(r))) {
+      const reason = email.to.every((r) => suppressed.has(r))
+        ? "recipient_suppressed"
+        : "topic_unsubscribed";
+      return { eligible: false, topicId: null, reason };
     }
-    return { eligible: true, topicId: null, strip: suppressed };
+    return { eligible: true, topicId: null, strip };
   }
 
   const [contact] = await db
@@ -292,7 +303,10 @@ async function endQueuedEmail(
   return ended > 0;
 }
 
-/** Drops suppressed recipients from the row (and the in-memory copy the MIME is built from). */
+/**
+ * Drops suppressed or opted-out recipients from the row (and the in-memory
+ * copy the MIME is built from).
+ */
 async function stripRecipients(
   db: Db,
   email: typeof schema.emails.$inferSelect,
@@ -917,9 +931,9 @@ async function sendQueued(
 
   // Re-check immediately before the atomic claim: quota delays and throttling
   // can leave a row queued long enough for a recipient to opt out after the
-  // broadcast fan-out first selected them. A recipient suppressed in the
-  // meantime invalidates the MIME already built, so the row is stripped and
-  // handed straight back to the queue.
+  // broadcast fan-out first selected them. A recipient suppressed or opted
+  // out in the meantime invalidates the MIME already built, so the row is
+  // stripped and handed straight back to the queue.
   eligibility = await checkSendEligibility(db, email);
   if (!eligibility.eligible) return refuse(db, deps, email, eligibility.reason);
   if (eligibility.strip) {
