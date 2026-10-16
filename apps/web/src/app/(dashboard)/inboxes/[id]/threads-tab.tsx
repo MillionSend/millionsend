@@ -1,20 +1,22 @@
 "use client";
 
+import { TRASH_RETENTION_DAYS } from "@millionsend/core/inbox-organize";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
 import { DraftBanner } from "@/components/draft-banner";
-import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import {
   ArchiveIcon,
   FolderInputIcon,
+  InboxIcon,
+  RestoreIcon,
   SpamIcon,
-  TagIcon,
   TrashIcon,
+  XIcon,
 } from "@/components/icons/mail-icons";
-import { NavGlyph, RefreshGlyph } from "@/components/icons/nav-icons";
+import { RefreshGlyph } from "@/components/icons/nav-icons";
 import { MessageEditor } from "@/components/maily-editor/lazy";
 import { ConfirmKeycap } from "@/components/modal-footer";
 import { PopoverMenu } from "@/components/popover-menu";
@@ -29,6 +31,7 @@ import { htmlToText } from "@/lib/html";
 import { isReadOnly } from "@/lib/read-only";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useEscape } from "@/lib/use-escape";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { SearchBox, StateCard } from "../../emails/list-parts";
 import {
@@ -43,11 +46,12 @@ import {
   type ThreadRow,
   TrustBadge,
 } from "../parts";
+import { LabelBadge, LabelsMenu } from "./labels";
 
 const FOLDERS = ["inbox", "archive", "spam", "sent", "trash"] as const;
 const MOVE_TO = ["inbox", "archive", "spam", "trash"] as const;
 const FOLDER_ICONS: Record<(typeof MOVE_TO)[number], React.ReactNode> = {
-  inbox: <NavGlyph name="inboxes" size={14} />,
+  inbox: <InboxIcon />,
   archive: <ArchiveIcon />,
   spam: <SpamIcon />,
   trash: <TrashIcon />,
@@ -138,6 +142,11 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
           </button>
         </Tooltip>
       </div>
+      {folder === "trash" ? (
+        <p style={{ margin: "-4px 0 12px", fontSize: 12.5, color: "var(--ms-muted)" }}>
+          {t("trashRetention", { days: TRASH_RETENTION_DAYS })}
+        </p>
+      ) : null}
       <div className={threadId ? "ms-thread-split" : undefined}>
         <div>
           {active.isPending ? (
@@ -225,21 +234,19 @@ export function ThreadListRow({
 }) {
   const t = useTranslations("inboxes");
   const id = useId();
-  const unreadLabel = t(agent ? "unreadAgent" : "unread");
-  const dot = row.read ? null : (
-    <StatusDot id={`${id}-dot`} color="var(--ms-bone)" label={unreadLabel} />
-  );
+  // An agent's unread is its queue, not the person's: its dot says so.
+  const readLabel = t(row.read ? "read" : agent ? "unreadAgent" : "unread");
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the row only widens its button's click; keyboard users reach the button
     <li className={row.read ? "ms-thread-row" : "ms-thread-row unread"} onClick={onOpen}>
-      {/* An agent's unread is its queue, not the person's: the dot says so on hover. */}
-      {dot && agent ? (
-        <Tooltip inline text={unreadLabel}>
-          {dot}
-        </Tooltip>
-      ) : (
-        dot
-      )}
+      {/* A hollow ring when read, so every row keeps a mark in the dot column. */}
+      <Tooltip inline text={readLabel}>
+        <StatusDot
+          id={`${id}-dot`}
+          {...(row.read ? {} : { color: "var(--ms-bone)" })}
+          label={readLabel}
+        />
+      </Tooltip>
       <span className="ms-thread-from">
         <span id={`${id}-from`} className="ms-thread-name">
           {sent
@@ -260,10 +267,7 @@ export function ThreadListRow({
             <SuspiciousBadge injection={row.injection_score} phishing={row.phishing_score} />
           ) : null}
           {row.labels.map((label) => (
-            <span key={label.id} className="ms-badge ms-badge-neutral">
-              <StatusDot color={label.color} />
-              {label.name}
-            </span>
+            <LabelBadge key={label.id} label={label} />
           ))}
         </span>
         {/* No handler of its own: its click, Enter's included, bubbles to the row. */}
@@ -272,7 +276,7 @@ export function ThreadListRow({
           className="ms-thread-open"
           aria-current={selected || undefined}
           aria-labelledby={`${id}-from ${id}-title`}
-          aria-describedby={dot ? `${id}-dot ${id}-pills` : `${id}-pills`}
+          aria-describedby={`${id}-dot ${id}-pills`}
         >
           <span className="ms-thread-text">
             <span id={`${id}-title`} className="ms-thread-title">
@@ -299,7 +303,6 @@ function ThreadPane({
   onClose: () => void;
 }) {
   const t = useTranslations("inboxes");
-  const tc = useTranslations("common");
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -324,16 +327,6 @@ function ThreadPane({
       onError: (error) => toast(error.message, "danger"),
     }),
   );
-  // A label made here is applied to the open thread at once.
-  const createLabel = useMutation(
-    trpc.inboxes.labels.create.mutationOptions({
-      onSuccess: (label) => {
-        void queryClient.invalidateQueries({ queryKey: trpc.inboxes.labels.pathKey() });
-        update.mutate({ ...ref, labelId: label.id });
-      },
-      onError: (error) => toast(error.message, "danger"),
-    }),
-  );
   const unread = thread.data?.read === false;
   const { mutate } = update;
   // In a people inbox opening a thread reads it, as a mail client does. In an
@@ -353,6 +346,26 @@ function ThreadPane({
       pane.scrollIntoView({ block: "start", behavior: "auto" });
     }
   }, []);
+  // Focus inside the pane would fall to the page as it goes: it moves to the thread's row.
+  const close = () => {
+    const pane = paneRef.current;
+    if (pane?.contains(document.activeElement)) {
+      pane.previousElementSibling?.querySelector<HTMLElement>('[aria-current="true"]')?.focus();
+    }
+    onClose();
+  };
+  useEscape(close);
+  const moveTo = (folder: (typeof MOVE_TO)[number]) =>
+    update.mutate(
+      { ...ref, folder },
+      {
+        // The thread has left the list beside it, so the pane goes too.
+        onSuccess: () => {
+          toast(t("movedTo", { folder }));
+          onClose();
+        },
+      },
+    );
 
   if (thread.isError) {
     return (
@@ -360,7 +373,7 @@ function ThreadPane({
         tone="error"
         headline={t("threadError")}
         actionLabel={t("close")}
-        onAction={onClose}
+        onAction={close}
       />
     );
   }
@@ -393,6 +406,17 @@ function ThreadPane({
             {/* An expired inbox is read-only; each message keeps its own link. */}
             {inbox.expired ? null : (
               <>
+                {summary.folder === "spam" || summary.folder === "trash" ? (
+                  <button
+                    type="button"
+                    className="ms-btn ms-btn-secondary"
+                    disabled={update.isPending}
+                    onClick={() => moveTo("inbox")}
+                  >
+                    {summary.folder === "spam" ? <InboxIcon /> : <RestoreIcon />}
+                    {t(summary.folder === "spam" ? "notSpam" : "restore")}
+                  </button>
+                ) : null}
                 <PopoverMenu
                   label={t("moveTo")}
                   ariaLabel={t("moveTo")}
@@ -401,44 +425,15 @@ function ThreadPane({
                   items={MOVE_TO.filter((folder) => folder !== summary.folder).map((folder) => ({
                     label: t(`folder.${folder}`),
                     icon: FOLDER_ICONS[folder],
-                    onSelect: () =>
-                      update.mutate(
-                        { ...ref, folder },
-                        {
-                          // The thread has left the list beside it, so the pane goes too.
-                          onSuccess: () => {
-                            toast(t("movedTo", { folder }));
-                            onClose();
-                          },
-                        },
-                      ),
+                    onSelect: () => moveTo(folder),
                   }))}
                 />
                 {/* ponytail: the ✓ follows the refetch, so a second toggle of one label
                     before it lands repeats the first; keep a pending value if that bites. */}
-                <GroupedMultiSelect
-                  button
-                  ariaLabel={t("addLabel")}
-                  summary={
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                      <TagIcon />
-                      {t("addLabel")}
-                    </span>
-                  }
+                <LabelsMenu
+                  inboxId={inbox.id}
+                  labels={labels.data ?? []}
                   value={labelIds}
-                  options={(labels.data ?? []).map((label) => ({
-                    value: label.id,
-                    label: label.name,
-                    group: "labels",
-                    adornment: <StatusDot color={label.color} />,
-                  }))}
-                  groups={[{ key: "labels", label: "" }]}
-                  searchPlaceholder={t("labelSearch")}
-                  noResultsLabel={tc("select.noResults")}
-                  // labels.create takes 64 characters at most.
-                  maxLength={64}
-                  onCreate={(name) => createLabel.mutate({ inboxId: inbox.id, name })}
-                  createLabel={(name) => t("createLabel", { name })}
                   onChange={(next) => {
                     // A pick toggles one row: the id that differs says which, and how.
                     const added = next.find((id) => !labelIds.includes(id));
@@ -446,6 +441,8 @@ function ThreadPane({
                     if (added) update.mutate({ ...ref, labelId: added });
                     else if (removed) update.mutate({ ...ref, removeLabelId: removed });
                   }}
+                  // A label made here goes on the open thread at once.
+                  onCreated={(label) => update.mutate({ ...ref, labelId: label.id })}
                 />
                 <PopoverMenu
                   boxed
@@ -458,7 +455,7 @@ function ThreadPane({
                           { ...ref, read: !summary.read },
                           // Back to the list, as a mail client does; left open, a
                           // people inbox would read the thread again at once.
-                          summary.read ? { onSuccess: onClose } : undefined,
+                          summary.read ? { onSuccess: close } : undefined,
                         ),
                     },
                     ...(newest
@@ -473,27 +470,29 @@ function ThreadPane({
                 />
               </>
             )}
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={onClose}>
-              {t("close")}
-            </button>
           </>
         ) : null}
+        <Tooltip inline focusableChild text={t("close")}>
+          <button
+            type="button"
+            className="ms-btn ms-btn-icon"
+            aria-label={t("close")}
+            onClick={close}
+          >
+            <XIcon />
+          </button>
+        </Tooltip>
       </div>
       {summary && summary.labels.length > 0 ? (
         <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {summary.labels.map((label) => (
-            <span key={label.id} className="ms-chip">
-              <StatusDot color={label.color} />
-              {label.name}
-              <button
-                type="button"
-                aria-label={t("removeLabel", { label: label.name })}
-                disabled={inbox.expired}
-                onClick={() => update.mutate({ ...ref, removeLabelId: label.id })}
-              >
-                ✕
-              </button>
-            </span>
+            <LabelBadge
+              key={label.id}
+              label={label}
+              {...(inbox.expired
+                ? {}
+                : { onRemove: () => update.mutate({ ...ref, removeLabelId: label.id }) })}
+            />
           ))}
         </span>
       ) : null}

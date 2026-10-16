@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { LABEL_COLORS } from "@millionsend/core/inbox-organize";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -26,18 +27,21 @@ vi.mock("next-intl", async (importOriginal) => {
       actual.createTranslator({ locale: "en", messages: en, namespace }),
   };
 });
+// The page's query string, which a test may set.
+const nav = vi.hoisted(() => ({ search: "" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => "/inboxes",
   useParams: () => ({ id: "i1" }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
-// What the query hooks answer (nothing unless a test sets it), the error
-// a mutation came back with, the options and calls mutations got, and the
-// queries invalidated.
+// What the query hooks answer (nothing unless a test sets it, by procedure
+// path where a screen asks for several), the error a mutation came back with,
+// the options and calls mutations got, and the queries invalidated.
 const rq = vi.hoisted(() => ({
   data: undefined as unknown,
   pages: undefined as unknown,
+  byPath: {} as Record<string, unknown>,
   error: null as unknown,
   mutate: vi.fn(),
   mutations: [] as { path?: string; onSuccess?: () => unknown }[],
@@ -62,8 +66,13 @@ vi.mock("@tanstack/react-query", () => ({
     return { mutate: rq.mutate, isPending: false, error: rq.error };
   },
   useQueryClient: () => ({ invalidateQueries: rq.invalidate }),
-  useQuery: () => ({ data: rq.data }),
-  useInfiniteQuery: () => ({ data: rq.pages, isPending: false }),
+  useQuery: (options?: { path?: string }) => ({
+    data: options?.path && options.path in rq.byPath ? rq.byPath[options.path] : rq.data,
+  }),
+  useInfiniteQuery: (options?: { path?: string }) => ({
+    data: options?.path && options.path in rq.byPath ? rq.byPath[options.path] : rq.pages,
+    isPending: false,
+  }),
 }));
 // A native select lists every option a picker offers, which a closed one never renders.
 vi.mock("@/components/select", () => ({
@@ -105,6 +114,11 @@ const { InboxView } = await import("@/app/(dashboard)/inboxes/[id]/inbox-view");
 const { EditDialog } = await import("@/app/(dashboard)/inboxes/[id]/edit-dialog");
 const { CreateInboxDialog } = await import("@/app/(dashboard)/inboxes/create-inbox-dialog");
 const { ThreadListRow } = await import("@/app/(dashboard)/inboxes/[id]/threads-tab");
+// The real tab, past the mock above that keeps it off the inbox page.
+const { ThreadsTab } = await vi.importActual<
+  typeof import("@/app/(dashboard)/inboxes/[id]/threads-tab")
+>("@/app/(dashboard)/inboxes/[id]/threads-tab");
+const { LabelColorField, LabelEditor } = await import("@/app/(dashboard)/inboxes/[id]/labels");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
 const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
   await import("@/app/(dashboard)/inboxes/parts");
@@ -264,6 +278,177 @@ describe("webhook picker", () => {
     // email.received is not opt-in: it keeps reaching "all events" endpoints.
     expect(WEBHOOK_EVENT_META["email.received"]).toEqual(
       expect.not.objectContaining({ optIn: true }),
+    );
+  });
+});
+
+describe("threads", () => {
+  const billing = { id: "l1", name: "Billing", color: "#46A758" };
+  const row = {
+    id: "t1",
+    subject: "Verify your mailbox now",
+    from: "Account Security <security@mailbox-verify.example>",
+    to: ["orders@acme.example"],
+    cc: [],
+    bcc: [],
+    labels: [billing],
+    message_count: 1,
+    has_attachment: false,
+    has_draft: false,
+    read: true,
+    received_at: new Date().toISOString(),
+    folder: "inbox",
+    quarantined: 0,
+    quarantine_reason: null,
+    injection_score: null,
+    phishing_score: null,
+    suspicious: false,
+    pending_approval: false,
+    snippet: "Your mailbox will be suspended",
+  } as ThreadRow;
+  /** The threads tab in a folder, the thread above open beside the list. */
+  const tab = (folder: string, inbox: Partial<InboxDetail> = {}) => {
+    nav.search = `folder=${folder}&thread=t1`;
+    rq.byPath = {
+      "inboxes.threads.list.infiniteQueryOptions": { pages: [{ items: [{ ...row, folder }] }] },
+      "inboxes.threads.get.queryOptions": { ...row, folder },
+      "inboxes.threads.emails.infiniteQueryOptions": { pages: [{ items: [] }] },
+      "inboxes.drafts.list.queryOptions": { items: [] },
+      "inboxes.labels.list.queryOptions": [billing],
+    };
+    try {
+      return renderToStaticMarkup(
+        createElement(ThreadsTab, {
+          inbox: { id: "i1", kind: "human", expired: false, ...inbox } as InboxDetail,
+        }),
+      ).replaceAll("&#x27;", "'");
+    } finally {
+      nav.search = "";
+      rq.byPath = {};
+    }
+  };
+  /** The open thread's header row, title to its last control. */
+  const header = (html: string) => html.match(/<section[^>]*>(<div.*?)<\/div><span/s)?.[1] ?? "";
+
+  it("marks a read thread with a hollow ring where an unread one has its dot, each named", () => {
+    const render = (read: boolean, agent = false) =>
+      renderToStaticMarkup(
+        createElement(ThreadListRow, {
+          row: { ...row, read },
+          agent,
+          sent: false,
+          selected: false,
+          onOpen: () => {},
+        }),
+      );
+    const read = render(true);
+    expect(read).toMatch(
+      /<span class="ms-tooltip-trigger inline" tabindex="0"><span id="[^"]+-dot" class="ms-dot ring" role="img" aria-label="Read"><\/span><\/span>/,
+    );
+    // Every row's button reads its mark out, read or not.
+    expect(read).toMatch(/aria-describedby="(\S+)-dot \1-pills"/);
+    expect(render(true, true)).toContain('class="ms-dot ring" role="img" aria-label="Read"');
+    expect(render(false)).toMatch(
+      /class="ms-tooltip-trigger inline" tabindex="0"><span id="[^"]+-dot" class="ms-dot" style="background:var\(--ms-bone\)" role="img" aria-label="Unread">/,
+    );
+    expect(render(false, true)).toContain('aria-label="Your agent hasn&#x27;t marked it read yet"');
+    // The row's label is the sans pill, without the header's ✕.
+    expect(read).toContain(
+      '<span class="ms-badge ms-badge-neutral ms-label-badge"><span class="ms-dot" style="background:#46A758" aria-hidden="true"></span>Billing</span>',
+    );
+  });
+
+  it("closes the open thread with an icon button named Close, the last control in its header", () => {
+    const html = header(tab("inbox"));
+    expect(html).toMatch(
+      /<span class="ms-tooltip-trigger inline"><button type="button" class="ms-btn ms-btn-icon" aria-label="Close"><svg[^>]*>(<path[^>]*><\/path>){2}<\/svg><\/button><\/span>$/,
+    );
+    expect(html).not.toContain("ms-btn-ghost");
+    // The same pill as the rows, keeping its ✕.
+    expect(tab("inbox")).toContain(
+      '<span class="ms-badge ms-badge-neutral ms-label-badge"><span class="ms-dot" style="background:#46A758" aria-hidden="true"></span>Billing<button type="button" aria-label="Remove Billing">✕</button></span>',
+    );
+  });
+
+  it("puts Not spam before Move in Spam, Restore in Trash, and neither elsewhere", () => {
+    const button = (label: string) =>
+      new RegExp(
+        `<button type="button" class="ms-btn ms-btn-secondary"><svg[^>]*>.*?</svg>${label}</button>`,
+      );
+    const spam = header(tab("spam"));
+    expect(spam).toMatch(button("Not spam"));
+    expect(spam.indexOf("Not spam")).toBeLessThan(spam.indexOf('aria-label="Move"'));
+    expect(spam).not.toContain("Restore");
+    const trash = header(tab("trash"));
+    expect(trash).toMatch(button("Restore"));
+    expect(trash).not.toContain("Not spam");
+    for (const folder of ["inbox", "archive", "sent"]) {
+      expect(header(tab(folder))).not.toMatch(/Not spam|Restore/);
+    }
+  });
+
+  it("leaves an expired inbox's open thread only its Close", () => {
+    const html = tab("spam", { expired: true });
+    expect(header(html)).toContain('aria-label="Close"');
+    expect(header(html)).not.toMatch(/Not spam|aria-label="Move"|aria-label="Labels"|More actions/);
+    // Its labels show, with no ✕ to take them off.
+    expect(html).toContain("ms-label-badge");
+    expect(html).not.toContain("Remove Billing");
+  });
+
+  it("says over Trash how long it keeps a thread, from core's own number", () => {
+    const line = "Threads in Trash are deleted 30 days after they're moved here.";
+    expect(tab("trash")).toContain(
+      `<p style="margin:-4px 0 12px;font-size:12.5px;color:var(--ms-muted)">${line}</p>`,
+    );
+    expect(tab("spam")).not.toContain(line);
+  });
+
+  it("offers the palette as swatches, the pick checked, and a dashed custom one", () => {
+    const field = (value: string) =>
+      renderToStaticMarkup(createElement(LabelColorField, { value, onChange: () => {} }));
+    const swatches = (html: string) =>
+      [...html.matchAll(/<input type="radio"[^>]*>/g)].map((match) => match[0]);
+    const purple = field("#AB4ABA");
+    expect(swatches(purple)).toHaveLength(Object.keys(LABEL_COLORS).length);
+    expect(swatches(purple).filter((swatch) => swatch.includes('checked=""'))).toEqual([
+      expect.stringContaining('aria-label="Purple"'),
+    ]);
+    expect(purple).toContain('role="radiogroup"');
+    expect(purple).toMatch(/<label class="ms-swatch custom" title="Custom color"><svg/);
+    expect(purple).toContain(
+      '<input type="color" class="ms-swatch-picker" aria-label="Custom color" value="#ab4aba"/>',
+    );
+    // A color off the palette fills the custom swatch, and checks none of the others.
+    const custom = field("#123456");
+    expect(swatches(custom).some((swatch) => swatch.includes("checked"))).toBe(false);
+    expect(custom).toContain('<label class="ms-swatch custom on" style="background:#123456"');
+    // Every swatch has a name to read out, in both languages.
+    expect(Object.keys(en.inboxes.labels.colors)).toEqual(Object.keys(LABEL_COLORS));
+  });
+
+  it("edits a label in the picker: back, name, the same swatches, delete and save", () => {
+    const html = renderToStaticMarkup(
+      createElement(LabelEditor, {
+        inboxId: "i1",
+        label: billing,
+        labels: [billing, { id: "l2", name: "Follow-up", color: "#F76B15" }],
+        onDone: () => {},
+      }),
+    );
+    expect(html).toMatch(
+      /<button type="button" class="ms-menu-trigger-bare"[^>]*aria-label="Back"/,
+    );
+    expect(html).toContain(">Edit label<");
+    expect(html).toMatch(
+      /<input class="ms-input"[^>]*aria-label="Name" maxLength="64" value="Billing"/,
+    );
+    expect(html).toMatch(/aria-label="Green" name="[^"]+" checked=""/);
+    expect(html).toContain(
+      '<button type="button" class="ms-menu-item danger" style="width:auto">Delete label</button>',
+    );
+    expect(html).toMatch(
+      /<button type="submit" class="ms-btn ms-btn-primary ms-btn-sm">.*Save<\/button>/,
     );
   });
 });

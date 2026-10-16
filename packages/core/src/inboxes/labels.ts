@@ -13,24 +13,12 @@ import {
 } from "./inbox-common.js";
 import type { InboxDeps } from "./inboxes.js";
 import { findLiveInbox, INBOX_LABELS_MAX } from "./limits.js";
+import { LABEL_COLORS } from "./organize.js";
 import type { InboxError, LabelWire } from "./types.js";
 import { labelWire } from "./wire.js";
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-/** Picked from when a label is created without a color: legible on light and dark. */
-const PALETTE = [
-  "#00A2C7",
-  "#12A594",
-  "#46A758",
-  "#BDEE63",
-  "#FFE629",
-  "#F76B15",
-  "#5B5BD6",
-  "#AB4ABA",
-  "#E93D82",
-  "#A18072",
-  "#8E8C99",
-];
+const PALETTE = Object.values(LABEL_COLORS);
 
 type LabelResult = { ok: true; label: LabelWire } | { ok: false; error: InboxError };
 

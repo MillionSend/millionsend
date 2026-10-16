@@ -79,6 +79,10 @@
     "./inbox-username": {
       "types": "./src/inboxes/username.ts",
       "default": "./src/inboxes/username.ts"
+    },
+    "./inbox-organize": {
+      "types": "./src/inboxes/organize.ts",
+      "default": "./src/inboxes/organize.ts"
     }
   },
   "scripts": {
