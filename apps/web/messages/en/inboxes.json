@@ -225,7 +225,9 @@
   "downloadsBlocked": "Downloads are blocked: this email carries malware.",
   "chip": {
     "code": "code",
-    "link": "link"
+    "link": "link",
+    "codeTip": "Contains a verification code",
+    "linkTip": "Contains a sign-in link"
   },
   "gray": {
     "dmarcPassNone": "DMARC gray: the message passed DMARC, but the sender's domain publishes p=none, so receivers aren't asked to block mail that fails.",
@@ -256,6 +258,7 @@
     },
     "badge": {
       "quarantined": "Quarantined",
+      "screening": "Screening",
       "spam": "Spam",
       "virus": "Virus"
     },
@@ -269,7 +272,8 @@
       "suspicious": "Suspicious",
       "quarantined": "Quarantined",
       "spam": "Spam",
-      "virus": "Virus"
+      "virus": "Virus",
+      "screening": "Being screened"
     },
     "range": {
       "h24": "Last 24 hours",

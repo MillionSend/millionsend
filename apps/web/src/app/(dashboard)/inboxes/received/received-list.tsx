@@ -5,16 +5,33 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
-import { Breakable } from "@/components/breakable";
+import { EnvelopeGlyph } from "@/components/email-status-icon";
 import { EmptyState } from "@/components/empty-state";
+import {
+  BugIcon,
+  ClockIcon,
+  LockIcon,
+  PaperclipIcon,
+  ShieldAlertIcon,
+  ShieldHalfIcon,
+  SpamIcon,
+} from "@/components/icons/mail-icons";
+import { LEAD_GLYPH, LeadCell, SkeletonLead } from "@/components/lead-cell";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
+import { StatusTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { type AuthCheck, authResultTone } from "@/lib/auth-result";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { isUuid } from "@/lib/log-body-links";
+import {
+  RECEIVED_STATE_TONE,
+  type ReceivedState,
+  type ReceivedVerdicts,
+  receivedState,
+} from "@/lib/received-state";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { ListFooter, SearchBox, StateCard } from "../../emails/list-parts";
@@ -52,6 +69,44 @@ export function AuthBadge({
 const RANGE_KEYS: RangeKey[] = ["h24", "d7", "d15", "d30", "all"];
 const VERDICTS = ["clean", "suspicious", "quarantined", "spam", "virus"] as const;
 
+/** Per row state: the From tile's glyph and tooltip, and the subject's badge; clean mail carries none. */
+const STATE_VIEW: Record<
+  ReceivedState,
+  { glyph: React.ReactNode; tip: string; badge: string | null }
+> = {
+  virus: {
+    glyph: <BugIcon {...LEAD_GLYPH} />,
+    tip: "received.verdict.virus",
+    badge: "received.badge.virus",
+  },
+  quarantined: {
+    glyph: <LockIcon {...LEAD_GLYPH} />,
+    tip: "received.verdict.quarantined",
+    badge: "received.badge.quarantined",
+  },
+  screening: {
+    glyph: <ClockIcon {...LEAD_GLYPH} />,
+    tip: "received.verdict.screening",
+    badge: "received.badge.screening",
+  },
+  spam: {
+    glyph: <SpamIcon {...LEAD_GLYPH} />,
+    tip: "received.verdict.spam",
+    badge: "received.badge.spam",
+  },
+  suspicious: {
+    glyph: <ShieldAlertIcon {...LEAD_GLYPH} />,
+    tip: "received.verdict.suspicious",
+    badge: "received.verdict.suspicious",
+  },
+  unscanned: {
+    glyph: <ShieldHalfIcon {...LEAD_GLYPH} />,
+    tip: "virus.processing_failed",
+    badge: "virus.none",
+  },
+  clean: { glyph: <EnvelopeGlyph />, tip: "received.verdict.clean", badge: null },
+};
+
 function ReceivedHead() {
   const t = useTranslations("inboxes");
   return (
@@ -79,7 +134,7 @@ function ReceivedSkeleton() {
           // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows, position is identity
           <tr key={row}>
             <td>
-              <Skeleton width={width} height={13} />
+              <SkeletonLead width={width} />
             </td>
             <td>
               <Skeleton width={widths[widths.length - 1 - row] ?? "50%"} height={13} />
@@ -97,7 +152,7 @@ function ReceivedSkeleton() {
   );
 }
 
-export interface ReceivedRow {
+export interface ReceivedRow extends ReceivedVerdicts {
   id: string;
   from: string;
   fromName: string;
@@ -105,9 +160,6 @@ export interface ReceivedRow {
   subject: string;
   attachmentCount: number;
   extractedKinds: ("code" | "link")[];
-  spamVerdict: "pass" | "gray" | "fail" | null;
-  virusVerdict: "pass" | "fail" | "processing_failed" | null;
-  held: boolean;
   createdAt: Date | string;
 }
 
@@ -123,22 +175,24 @@ export function ReceivedEmailsTable({ rows }: { rows: ReceivedRow[] }) {
       <tbody>
         {rows.map((row) => {
           const href = `/inboxes/received/${row.id}`;
+          const state = receivedState(row);
+          const view = STATE_VIEW[state];
+          const tone = RECEIVED_STATE_TONE[state];
+          const attachments = t("detail.attachmentCount", { count: row.attachmentCount });
           return (
             <tr key={row.id} className="hoverable" onClick={() => router.push(href)}>
-              <td className="ms-mono ms-cell-wrap">
-                <Link href={href} onClick={(event) => event.stopPropagation()}>
-                  {/* The null sender <> leaves no From address to show. */}
-                  <Breakable text={row.from || "<>"} />
-                </Link>
-              </td>
-              <td className="ms-mono ms-cell-wrap">
-                <Breakable text={row.receivedFor[0] ?? ""} />
-                {row.receivedFor.length > 1 ? (
-                  <span style={{ color: "var(--ms-muted)", marginLeft: 8 }}>
-                    +{row.receivedFor.length - 1}
-                  </span>
-                ) : null}
-              </td>
+              <LeadCell
+                tile={
+                  <StatusTile color={TONE_COLOR[tone]} label={t(view.tip)}>
+                    {view.glyph}
+                  </StatusTile>
+                }
+                // The null sender <> leaves no From address to show.
+                value={row.from || "<>"}
+                href={href}
+                mono
+              />
+              <LeadCell value={row.receivedFor[0] ?? ""} more={row.receivedFor.slice(1)} mono />
               <td className="ms-cell-fill">
                 <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <span
@@ -154,28 +208,34 @@ export function ReceivedEmailsTable({ rows }: { rows: ReceivedRow[] }) {
                     {row.subject || t("noSubject")}
                   </span>
                   {row.attachmentCount > 0 ? (
-                    <span className="ms-mono" style={{ color: "var(--ms-muted)", fontSize: 12 }}>
-                      {nf.format(row.attachmentCount)}
-                    </span>
+                    <Tooltip inline text={attachments}>
+                      <span
+                        role="img"
+                        aria-label={attachments}
+                        className="ms-mono"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 3,
+                          color: "var(--ms-muted)",
+                          fontSize: 12,
+                        }}
+                      >
+                        <PaperclipIcon size={12} strokeWidth={2} />
+                        {nf.format(row.attachmentCount)}
+                      </span>
+                    </Tooltip>
                   ) : null}
                   {/* Kinds only: a code's value shows on the email's own page, never in a list. */}
                   {row.extractedKinds.map((kind) => (
-                    <span
-                      key={kind}
-                      className="ms-chip"
-                      style={{ fontSize: 10.5, padding: "1px 7px" }}
-                    >
-                      {t(`chip.${kind}`)}
-                    </span>
+                    <Tooltip key={kind} inline text={t(`chip.${kind}Tip`)}>
+                      <span className="ms-chip" style={{ fontSize: 10.5, padding: "1px 7px" }}>
+                        {t(`chip.${kind}`)}
+                      </span>
+                    </Tooltip>
                   ))}
-                  {row.virusVerdict === "fail" ? (
-                    <span className="ms-badge ms-badge-danger">{t("received.badge.virus")}</span>
-                  ) : row.held ? (
-                    <span className="ms-badge ms-badge-danger">
-                      {t("received.badge.quarantined")}
-                    </span>
-                  ) : row.spamVerdict === "fail" ? (
-                    <span className="ms-badge ms-badge-warn">{t("received.badge.spam")}</span>
+                  {view.badge ? (
+                    <span className={`ms-badge ms-badge-${tone}`}>{t(view.badge)}</span>
                   ) : null}
                 </span>
               </td>

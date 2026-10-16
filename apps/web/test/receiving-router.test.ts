@@ -205,7 +205,9 @@ describe("receiving", () => {
       extractedKinds: [],
       spamVerdict: "pass",
       virusVerdict: null,
-      held: false,
+      pending: false,
+      quarantined: false,
+      suspicious: false,
       createdAt: expect.any(Date),
     });
     expect((await caller(beta).receiving.list({})).items.map((row) => row.id)).toEqual([betaOnly]);
@@ -410,9 +412,13 @@ describe("received mail as Inboxes reads it", () => {
     expect((await caller(acme).receiving.list({ inbox: inboxId })).total).toBe(2);
   });
 
-  it("marks held rows and names a found code's kind, never its value", async () => {
+  it("marks quarantined rows and names a found code's kind, never its value", async () => {
     const rows = (await caller(acme).receiving.list({})).items;
-    expect(rows.find((row) => row.id === held)?.held).toBe(true);
+    expect(rows.find((row) => row.id === held)).toMatchObject({
+      pending: false,
+      quarantined: true,
+      suspicious: false,
+    });
     const coded = rows.find((row) => row.id === withCode);
     expect(coded?.extractedKinds).toEqual(["code"]);
     expect(JSON.stringify(coded)).not.toContain("482913");
@@ -545,5 +551,117 @@ describe("received mail as Inboxes reads it", () => {
 
   it("answers the operator's intake card for the operator only", async () => {
     await expect(caller(acme).receiving.health()).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("each received row's screening across the inboxes it reached", () => {
+  let screening: string;
+  let doubted: string;
+  let heldAndScreening: string;
+  let unscanned: string;
+
+  beforeAll(async () => {
+    // Received while no inbox has the address; the memberships are set by hand below.
+    const to = ["lists@inbound.acme.test"];
+    screening = await receive(message("Still being screened"), to);
+    doubted = await receive(message("Doubted by one inbox"), to);
+    heldAndScreening = await receive(message("Held by one, screened by another"), to);
+    unscanned = await receive(message("The scanner failed"), to);
+    const [domain] = await db
+      .select({ id: schema.domains.id })
+      .from(schema.domains)
+      .where(eq(schema.domains.name, "inbound.acme.test"));
+    if (!domain) throw new Error("no domain");
+    const inboxes = await db
+      .insert(schema.inboxes)
+      .values(
+        ["first", "second"].map((localPart) => ({
+          teamId: acme,
+          kind: "agent" as const,
+          emailAddress: `${localPart}@inbound.acme.test`,
+          localPart,
+          domainId: domain.id,
+          name: localPart,
+          safety: defaultSafety("agent", false),
+        })),
+      )
+      .returning({ id: schema.inboxes.id });
+    const threads = await db
+      .insert(schema.inboxThreads)
+      .values(inboxes.map((inbox) => ({ teamId: acme, inboxId: inbox.id })))
+      .returning({ id: schema.inboxThreads.id, inboxId: schema.inboxThreads.inboxId });
+    const [first, second] = threads;
+    if (!first || !second) throw new Error("no threads");
+    const membership = (thread: typeof first) => ({
+      inboxId: thread.inboxId,
+      teamId: acme,
+      threadId: thread.id,
+      address: "lists@inbound.acme.test",
+      senderTrust: "external" as const,
+    });
+    await db.insert(schema.receivedEmailInboxes).values([
+      { ...membership(first), receivedEmailId: screening, verdict: "pending" },
+      {
+        ...membership(first),
+        receivedEmailId: doubted,
+        verdict: "clean",
+        deliveredAt: new Date(),
+      },
+      {
+        ...membership(second),
+        receivedEmailId: doubted,
+        verdict: "suspicious",
+        deliveredAt: new Date(),
+      },
+      {
+        ...membership(first),
+        receivedEmailId: heldAndScreening,
+        verdict: "quarantined",
+        quarantineReason: "phishing",
+        quarantinedAt: new Date(),
+      },
+      { ...membership(second), receivedEmailId: heldAndScreening, verdict: "pending" },
+    ]);
+    await db
+      .update(schema.receivedEmails)
+      .set({ virusVerdict: "processing_failed" })
+      .where(eq(schema.receivedEmails.id, unscanned));
+  });
+
+  const list = async (verdict?: "clean" | "suspicious" | "quarantined") =>
+    (await caller(acme).receiving.list({ limit: 50, ...(verdict ? { verdict } : {}) })).items;
+
+  it("flags a row pending, quarantined or suspicious when any of its inboxes has it so", async () => {
+    const rows = await list();
+    const flags = (id: string) => {
+      const row = rows.find((x) => x.id === id);
+      return (
+        row && { pending: row.pending, quarantined: row.quarantined, suspicious: row.suspicious }
+      );
+    };
+    // Still being screened is not quarantined.
+    expect(flags(screening)).toEqual({ pending: true, quarantined: false, suspicious: false });
+    expect(flags(doubted)).toEqual({ pending: false, quarantined: false, suspicious: true });
+    expect(flags(heldAndScreening)).toEqual({
+      pending: true,
+      quarantined: true,
+      suspicious: false,
+    });
+    expect(flags(unscanned)).toEqual({ pending: false, quarantined: false, suspicious: false });
+  });
+
+  it("filters each verdict apart, and counts as clean only what the list shows as clean", async () => {
+    const ids = async (verdict: "clean" | "suspicious" | "quarantined") =>
+      (await list(verdict)).map((row) => row.id);
+    const quarantined = await ids("quarantined");
+    expect(quarantined).toContain(heldAndScreening);
+    expect(quarantined).not.toContain(screening);
+    const suspicious = await ids("suspicious");
+    expect(suspicious).toContain(doubted);
+    expect(suspicious).not.toContain(screening);
+    const clean = await ids("clean");
+    for (const id of [screening, doubted, heldAndScreening, unscanned]) {
+      expect(clean).not.toContain(id);
+    }
   });
 });
