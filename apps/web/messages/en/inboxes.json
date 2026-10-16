@@ -59,7 +59,9 @@
     "activity": "Activity"
   },
   "type": {
-    "catchAll": "Catch-all"
+    "catchAll": "Catch-all",
+    "agent": "Agent inbox",
+    "human": "People inbox"
   },
   "col": {
     "inbox": "Inbox",
@@ -87,7 +89,8 @@
     "full": "You've reached the inbox limit of your plan. Upgrade to create more."
   },
   "catchAll": {
-    "row": "Addresses without an inbox · <link>turn off on the domain</link>"
+    "row": "Addresses with no inbox · <link>turn off</link>",
+    "turnOff": "Turn off on the domain"
   },
   "create": {
     "title": "Create inbox",
@@ -238,6 +241,7 @@
   "received": {
     "title": "All received",
     "hint": "Every email your domains received, including addresses without an inbox.",
+    "hintShort": "Every email your domains received",
     "search": "Search sender, inbox or subject…",
     "loadError": "Couldn't load received emails.",
     "empty": "No received emails yet.",

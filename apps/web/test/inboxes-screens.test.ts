@@ -393,6 +393,66 @@ describe("inbox screens", () => {
     expect(html).not.toContain("5 unread");
   });
 
+  it("lays every inboxes row on one line, behind a muted tile naming the row's kind", () => {
+    const inbox = (kind: string, address: string, extra: object) => ({
+      id: address,
+      email_address: address,
+      name: "",
+      kind,
+      unread: 0,
+      pending_approval: 0,
+      quarantined: 0,
+      received_30d: 0,
+      last_received: null,
+      expires_at: null,
+      forward_to: [],
+      ...extra,
+    });
+    rq.data = { domains: [], sharedDomain: "inboxes.example", plan: { used: 2, limit: 3 } };
+    rq.pages = {
+      pages: [
+        {
+          items: [
+            inbox("agent", "orders@acme.example", { name: "Orders agent", quarantined: 1 }),
+            inbox("human", "support@acme.example", {
+              name: "Support",
+              forward_to: ["ops@example.com"],
+            }),
+          ],
+          counts: { agent: 1, human: 1 },
+          overview: {
+            allReceived: { received30d: 12, lastReceived: null },
+            catchAll: [
+              { domainId: "d1", name: "acme.example", received30d: 3, lastReceived: null },
+            ],
+          },
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(createElement(InboxesView));
+    rq.data = rq.pages = undefined;
+    expect(html).not.toContain("ms-cell-wrap");
+    expect(html).not.toContain("<wbr");
+    // Muted even where the row needs attention: that column says so.
+    for (const label of ["All received", "Catch-all", "Agent inbox", "People inbox"]) {
+      expect(html, label).toMatch(
+        new RegExp(`role="img" aria-label="${label}" style="[^"]*color:var\\(--ms-muted\\)"`),
+      );
+    }
+    // What took a second line rides after the value, muted, cut first.
+    const tail = (text: string) => `class="ms-lead-tail"><span class="ms-truncate">${text}<`;
+    expect(html).toContain(tail("Every email your domains received"));
+    expect(html).toContain(tail("Orders agent"));
+    expect(html).toContain(tail("Support · forwards to ops@example.com"));
+    // The catch-all's turn-off link stays in its tail, the where in its tooltip.
+    expect(html).toMatch(
+      /class="ms-lead-tail">Addresses with no inbox · <span class="ms-tooltip-trigger inline"><a href="\/domains\/d1">turn off<\/a><\/span><\/span>/,
+    );
+    expect(t("catchAll.turnOff")).toBe("Turn off on the domain");
+    expect(html).toContain('<th style="width:90px">Type</th>');
+    expect(html).toContain('<th style="width:22%">Needs attention</th>');
+  });
+
   it("lays a thread out on one line whose button wraps no other stop", () => {
     const row = {
       id: "t1",
