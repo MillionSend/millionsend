@@ -1282,9 +1282,11 @@ export async function purgeExpiredEmailMetadata(
  * Content-window strip for provider and webhook payloads, on the SAME
  * effective window as email bodies. email_events.data is the raw SES subset
  * (recipient addresses, diagnostics, remote MTAs) and is dropped whole — the
- * typed `type` column keeps the timeline readable. Webhook deliveries keep
- * their envelope (type, created_at, test marker) and lose `data` and the
- * captured response body.
+ * typed `type` column keeps the timeline readable. A `suppressed` event keeps
+ * its data: it is only {source, reason}, no personal data, and the dashboard
+ * reads its source to tell a refusal at accept, which never stored a body.
+ * Webhook deliveries keep their envelope (type, created_at, test marker) and
+ * lose `data` and the captured response body.
  */
 export async function stripExpiredEventPayloads(
   db: Db,
@@ -1307,7 +1309,10 @@ export async function stripExpiredEventPayloads(
             db
               .select({ id: ev.id })
               .from(ev)
-              .where(and(lt(ev.occurredAt, cutoff), isNotNull(ev.data)))
+              // ponytail: kept suppressed rows stay in the unstripped index the
+              // scan walks; a partial index excluding them is the upgrade if
+              // they ever slow the strip.
+              .where(and(lt(ev.occurredAt, cutoff), isNotNull(ev.data), ne(ev.type, "suppressed")))
               .orderBy(asc(ev.occurredAt))
               .limit(PURGE_BATCH),
           ),

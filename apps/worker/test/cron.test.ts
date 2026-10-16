@@ -703,6 +703,40 @@ it("payload strip nulls expired event data and drops delivery data/response on t
   });
 });
 
+it("payload strip keeps a suppressed event's source and reason, which name no one", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" })
+    .returning({ id: schema.emails.id });
+  if (!email) throw new Error("insert failed");
+  const old = new Date("2026-07-01T00:00:00Z");
+  await db.insert(schema.emailEvents).values([
+    {
+      emailId: email.id,
+      type: "suppressed",
+      occurredAt: old,
+      data: { source: "api", reason: "recipient_suppressed" },
+    },
+    { emailId: email.id, type: "failed", occurredAt: old, data: { eventType: "Reject" } },
+  ]);
+
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 1,
+    deliveries: 0,
+  });
+  const events = await db
+    .select({ type: schema.emailEvents.type, data: schema.emailEvents.data })
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, email.id));
+  expect(events).toEqual(
+    expect.arrayContaining([
+      { type: "suppressed", data: { source: "api", reason: "recipient_suppressed" } },
+      { type: "failed", data: null },
+    ]),
+  );
+});
+
 it("session purge drops only expired sessions", async () => {
   const now = new Date("2026-08-14T00:00:00Z");
   await db.insert(schema.user).values({ id: "u1", name: "u1", email: "u1@example.com" });
