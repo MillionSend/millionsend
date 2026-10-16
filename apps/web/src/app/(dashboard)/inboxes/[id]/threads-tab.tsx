@@ -28,6 +28,7 @@ import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { authenticatedSender } from "@/lib/auth-result";
+import { isForwardSubject } from "@/lib/email-preview";
 import { addrSpec, formatBytes, formatRelative, mailDomain, senderName } from "@/lib/format";
 import { htmlToText } from "@/lib/html";
 import { isReadOnly } from "@/lib/read-only";
@@ -556,6 +557,8 @@ export function MessageCard({
   const inbound = message.direction === "inbound";
   const verdict = inbound ? message.screening.verdict : null;
   const held = verdict === "quarantined";
+  // A forward's quoted original is what the sender wants read.
+  const forward = isForwardSubject(message.subject);
   return (
     <article style={held ? { ...card, borderColor: "var(--ms-danger-border)" } : card}>
       <header style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -625,9 +628,10 @@ export function MessageCard({
           title={t("mail.title", { name: senderName(message.from) })}
           domain={mailDomain(addrSpec(message.from))}
           authenticated={inbound && authenticatedSender(message.screening.sender_trust)}
+          foldQuote={!forward}
         />
       ) : message.text ? (
-        <MailText text={message.text} foldQuote={!held} />
+        <MailText text={message.text} foldQuote={!held && !forward} />
       ) : null}
       {message.attachments.length > 0 ? (
         <ul style={{ margin: "10px 0 0", padding: 0, listStyle: "none", ...muted }}>

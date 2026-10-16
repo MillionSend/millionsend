@@ -9,7 +9,7 @@ import { Drawer } from "@/components/drawer";
 import { MailFrame } from "@/components/mail-frame";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import { Switch } from "@/components/switch";
-import { emulateEmailScheme, PREVIEW_CANVAS } from "@/lib/email-preview";
+import { emulateEmailScheme, isForwardSubject, PREVIEW_CANVAS } from "@/lib/email-preview";
 import { formatDayTime } from "@/lib/format";
 import { formatHtml } from "@/lib/html";
 import { BAND_TONE, checkGlyph, formatScoreTenths } from "@/lib/score-band";
@@ -475,6 +475,7 @@ export function EmailContentPanel({
                 scheme={scheme}
                 domain={received.domain}
                 authenticated={received.authenticated}
+                foldQuote={!isForwardSubject(email.subject)}
               />
             ) : email.html ? (
               // Edge to edge: the message lays itself out inside the frame,

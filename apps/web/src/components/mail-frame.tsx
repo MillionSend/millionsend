@@ -10,6 +10,7 @@ import {
   type EmailScheme,
   emulateEmailScheme,
   imagesAlwaysShown,
+  type LinkDestination,
   linkDestination,
   lockDownReceivedHtml,
   onImagesAlwaysShown,
@@ -35,9 +36,7 @@ const FIT_TO_CONTENT =
 // Gmail or Apple Mail carry no font, and the browser's would be a serif.
 const CLIENT_FONT = "<style>body{font-family:sans-serif;font-size:13.5px}</style>";
 
-interface LinkTip {
-  text: string;
-  mail: boolean;
+interface LinkTip extends LinkDestination {
   /** The link's box in the dashboard's viewport. */
   anchor: Box;
 }
@@ -102,6 +101,7 @@ export function MailFrame({
   authenticated,
   scheme,
   panel = false,
+  foldQuote = true,
 }: {
   html: string;
   title: string;
@@ -113,13 +113,16 @@ export function MailFrame({
   scheme?: EmailScheme | undefined;
   /** Edge to edge in a panel, rather than boxed inside a card. */
   panel?: boolean;
+  /** A reply's quoted history folds under "•••"; a forward's never does. */
+  foldQuote?: boolean;
 }) {
   const t = useTranslations("inboxes");
   const [themeScheme] = usePreviewScheme();
   const shownScheme = scheme ?? themeScheme;
   const prepared = useMemo(() => prepareReceivedHtml(html), [html]);
+  const trimmed = foldQuote ? prepared.trimmed : null;
   const [quoteShown, setQuoteShown] = useState(false);
-  const body = quoteShown || !prepared.trimmed ? prepared.full : prepared.trimmed;
+  const body = quoteShown || !trimmed ? prepared.full : trimmed;
   // A spoofed From proves no domain, so it never gets images loaded unasked.
   const trusted = authenticated && domain !== "";
   const always = useSyncExternalStore(
@@ -131,7 +134,7 @@ export function MailFrame({
   const images = imagesShown || always;
   const srcDoc =
     lockDownReceivedHtml(emulateEmailScheme(CLIENT_FONT + body.html, shownScheme), {
-      remoteImages: images,
+      imageHosts: images ? body.imageHosts : [],
     }) + FIT_TO_CONTENT;
 
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -147,50 +150,92 @@ export function MailFrame({
     // document before it (the initial blank one, or the last rendering).
     const before = frame.contentDocument;
     let doc: Document | null = null;
-    let link: Element | null = null;
-    let width = frame.clientWidth;
     let raf = 0;
+    let watching = 0;
+    /** The link the tip names, and where it was drawn. */
+    let link: Element | null = null;
+    let drawn: Box | null = null;
+    /** A link whose tip Esc put away: it stays away until the reader moves on. */
+    let dismissed: Element | null = null;
+    /** Whether focus was in the message when last looked. */
+    let inside = false;
     const measure = () => {
       const root = doc?.documentElement;
       const view = frame.contentWindow;
-      if (!root || !view) return;
+      if (!root || !view || frame.contentDocument !== doc) return;
       // A sideways scrollbar takes its height out of the viewport.
       setHeight(
         Math.ceil(root.getBoundingClientRect().height) + view.innerHeight - root.clientHeight,
       );
     };
-    const follow = (target: EventTarget | null) => {
-      const found =
-        target && "closest" in target ? (target as Element).closest("a[href], area[href]") : null;
+    // The document's own size: images arriving, an expanded <details>, the
+    // frame's width. Observed from here, it is heard in every engine.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    /** The tip names the link under the pointer, else the one focused in the message. */
+    const update = () => {
+      if (!doc) return;
+      const focused = document.activeElement === frame;
+      const target =
+        (frame.matches(":hover") ? doc.querySelector("a[href]:hover, area[href]:hover") : null) ??
+        (focused ? (doc.activeElement?.closest("a[href], area[href]") ?? null) : null);
+      if (target !== dismissed) dismissed = null;
+      const shown = target === dismissed ? null : target;
       // An SVG link's href is no string: it gets no tip.
-      const href = (found as HTMLAnchorElement | null)?.href;
-      const next = typeof href === "string" ? found : null;
-      if (next === link) return;
-      link = next;
-      if (!next || typeof href !== "string") {
-        setTip(null);
+      const href: unknown = (shown as HTMLAnchorElement | null)?.href;
+      if (!shown || typeof href !== "string") {
+        if (link) setTip(null);
+        link = null;
+        drawn = null;
         return;
       }
-      const inner = next.getBoundingClientRect();
+      const inner = shown.getBoundingClientRect();
       const outer = frame.getBoundingClientRect();
       const left = outer.left + frame.clientLeft;
       const top = outer.top + frame.clientTop;
-      setTip({
-        ...linkDestination(href),
-        anchor: {
-          left: left + inner.left,
-          right: left + inner.right,
-          top: top + inner.top,
-          bottom: top + inner.bottom,
-        },
-      });
+      const anchor = {
+        left: left + inner.left,
+        right: left + inner.right,
+        top: top + inner.top,
+        bottom: top + inner.bottom,
+      };
+      if (shown === link && drawn?.left === anchor.left && drawn.top === anchor.top) return;
+      link = shown;
+      drawn = anchor;
+      setTip({ ...linkDestination(href), anchor });
     };
-    const hide = () => follow(null);
-    // Esc dismisses an open tip, and only that: the pane's own Esc sees it handled.
+    // WebKit runs no listener on a document whose frame allows no scripts,
+    // the dashboard's included: while the pointer is over the frame, or one
+    // of its links has focus, it is read every frame instead.
+    const watch = () => {
+      const focused = document.activeElement === frame;
+      // A click into the message is one outside the dashboard's open menus and pinned tooltips.
+      if (focused && !inside)
+        frame.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      inside = focused;
+      update();
+      const onLink = focused && doc?.activeElement?.closest("a[href], area[href]");
+      watching = frame.matches(":hover") || onLink ? requestAnimationFrame(watch) : 0;
+    };
+    const enter = () => {
+      if (watching) return;
+      inside = document.activeElement === frame;
+      watch();
+    };
+    // The dashboard's window blurs as focus moves into the frame (Tab onto a
+    // link), a moment before the link inside has it.
+    const blur = () => {
+      if (document.activeElement !== frame || watching) return;
+      inside = true;
+      watching = requestAnimationFrame(watch);
+    };
+    // Esc puts the tip away, and only that: the pane's own Esc sees it handled.
     const dismiss = (event: Event) => {
       if ((event as KeyboardEvent).key !== "Escape" || !link) return;
       event.preventDefault();
-      hide();
+      dismissed = link;
+      link = null;
+      drawn = null;
+      setTip(null);
     };
     // Keys pressed in the message never reach the dashboard's window: an Esc
     // the tip didn't take goes on from the frame, so the page's own Esc
@@ -205,26 +250,13 @@ export function MailFrame({
       );
     };
     const listeners: [string, (event: Event) => void][] = [
-      ["load", measure],
-      ["error", measure],
-      ["mouseover", (event) => follow(event.target)],
-      // A scroll hides the tip it would misplace; the pointer's next move brings it back.
-      ["mousemove", (event) => follow(event.target)],
-      ["focusin", (event) => follow(event.target)],
-      [
-        "mouseout",
-        (event) => {
-          // Leaving the frame; a move between its elements is the next mouseover's call.
-          if (!(event as MouseEvent).relatedTarget) hide();
-        },
-      ],
-      ["focusout", (event) => follow((event as FocusEvent).relatedTarget)],
+      ["focusin", update],
+      ["scroll", update],
       ["keydown", forward],
-      ["scroll", hide],
     ];
     const attach = () => {
       const current = frame.contentDocument;
-      // Gone cross-origin: a link with its own target navigated the frame.
+      // Cross-origin, past reading: every link opens a new tab, so it never should be.
       if (!current) return;
       if (current === before || current.readyState === "loading") {
         raf = requestAnimationFrame(attach);
@@ -232,26 +264,26 @@ export function MailFrame({
       }
       doc = current;
       for (const [type, listener] of listeners) doc.addEventListener(type, listener, true);
+      observer?.observe(doc.documentElement);
       measure();
+      if (frame.matches(":hover") || document.activeElement === frame) enter();
     };
     attach();
     frame.addEventListener("load", measure);
-    window.addEventListener("scroll", hide, { capture: true, passive: true });
+    frame.addEventListener("mouseenter", enter);
+    window.addEventListener("blur", blur);
+    window.addEventListener("scroll", update, { capture: true, passive: true });
+    document.addEventListener("focusin", update, true);
     document.addEventListener("keydown", dismiss, true);
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => {
-            if (frame.clientWidth === width) return;
-            width = frame.clientWidth;
-            measure();
-          });
-    observer?.observe(frame);
     return () => {
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(watching);
       observer?.disconnect();
       frame.removeEventListener("load", measure);
-      window.removeEventListener("scroll", hide, { capture: true });
+      frame.removeEventListener("mouseenter", enter);
+      window.removeEventListener("blur", blur);
+      window.removeEventListener("scroll", update, { capture: true });
+      document.removeEventListener("focusin", update, true);
       document.removeEventListener("keydown", dismiss, true);
       for (const [type, listener] of listeners) doc?.removeEventListener(type, listener, true);
       if (link) setTip(null);
@@ -273,17 +305,19 @@ export function MailFrame({
     el.style.top = `${placed.top}px`;
   }, [tip]);
 
+  // The bar goes with the click: focus moves on to the message it opened up.
+  const showImages = () => {
+    setImagesShown(true);
+    frameRef.current?.focus();
+  };
+
   return (
     <div className={panel ? "ms-mail-panel" : undefined}>
-      {body.remoteImages && !images ? (
+      {body.imageHosts.length > 0 && !images ? (
         <div className="ms-mail-bar">
           <ImageOffIcon />
           <span className="ms-mail-bar-text">{t("mail.imagesHidden")}</span>
-          <button
-            type="button"
-            className="ms-btn ms-btn-secondary"
-            onClick={() => setImagesShown(true)}
-          >
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={showImages}>
             {t("mail.showImages")}
           </button>
           {trusted ? (
@@ -292,7 +326,7 @@ export function MailFrame({
               className="ms-link"
               onClick={() => {
                 alwaysShowImages(domain);
-                setImagesShown(true);
+                showImages();
               }}
             >
               {t("mail.alwaysFor", { domain })}
@@ -309,7 +343,7 @@ export function MailFrame({
         className="ms-mail-frame"
         style={{ height, background: PREVIEW_CANVAS[shownScheme] }}
       />
-      {prepared.trimmed ? (
+      {trimmed ? (
         <QuoteToggle shown={quoteShown} onToggle={() => setQuoteShown((shown) => !shown)} />
       ) : null}
       {tip
@@ -321,7 +355,13 @@ export function MailFrame({
               // First-paint guess; the layout effect places it before paint.
               style={{ left: tip.anchor.left, top: tip.anchor.bottom + TIP_GAP }}
             >
-              <span className="ms-mono ms-mail-href">{tip.text}</span>
+              {tip.lead || tip.domain ? (
+                <span className="ms-mono ms-mail-host">
+                  {tip.lead}
+                  {tip.domain ? <strong>{tip.domain}</strong> : null}
+                </span>
+              ) : null}
+              {tip.rest ? <span className="ms-mono ms-mail-href">{tip.rest}</span> : null}
               {tip.mail ? null : (
                 <span className="ms-mail-href-note">{t("mail.opensInNewTab")}</span>
               )}
