@@ -1,0 +1,1 @@
+ALTER TABLE "oauth_consent" ADD COLUMN "expires_at" timestamp with time zone;

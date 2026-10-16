@@ -375,16 +375,18 @@
       "user": "Authorized by",
       "scopes": "Permissions",
       "granted": "Granted",
+      "expires": "Expires",
       "menu": "Grant actions"
     },
     "you": "you",
     "allTeams": "All teams",
+    "untilDisconnected": "Until you disconnect it",
     "scopesCount": "{count, plural, one {# permission} other {# permissions}}",
     "revoke": "Revoke access",
     "revokeAllTeamsForbidden": "This grant also covers teams you do not administer. Only its holder can revoke it.",
     "revokeConfirm": {
       "title": "Revoke access",
-      "body": "{name} loses access to this team at its next token refresh, within 15 minutes.",
+      "body": "{name} loses access to this team at its next token refresh, within an hour.",
       "confirm": "Revoke access"
     }
   },
@@ -546,7 +548,7 @@
       },
       "inbox_attention": {
         "label": "Inbox alerts",
-        "note": "Quarantine, drafts to approve and held sends, at most once a day."
+        "note": "Quarantine, drafts to approve and refused sends, at most once a day."
       },
       "billing_payment_failed": {
         "label": "Payment failed",

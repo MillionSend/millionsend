@@ -4,6 +4,7 @@ import {
   emailInsightsView,
   emitSuppressionEvents,
   fetchEmailInsights,
+  findSuppressionsFor,
   hashRecipient,
   utcDay,
 } from "@millionsend/core";
@@ -499,6 +500,22 @@ export const emailsRouter = router({
         bounce = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
       }
       return { ...row, bounce };
+    }),
+
+    /** The suppressions any recipient of one email (to, cc or bcc) matches, for its detail. */
+    forEmail: teamProcedure.input(z.object({ emailId: z.uuid() })).query(async ({ ctx, input }) => {
+      const e = schema.emails;
+      const [email] = await ctx.db
+        .select({ to: e.to, cc: e.cc, bcc: e.bcc })
+        .from(e)
+        .where(and(eq(e.id, input.emailId), eq(e.teamId, ctx.teamId)))
+        .limit(1);
+      if (!email) throw new TRPCError({ code: "NOT_FOUND" });
+      return findSuppressionsFor(ctx.db, ctx.teamId, [
+        ...email.to,
+        ...(email.cc ?? []),
+        ...(email.bcc ?? []),
+      ]);
     }),
 
     add: teamProcedure

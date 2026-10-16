@@ -12,8 +12,10 @@ import {
   deleteReceivedEmail,
   EMAIL_QUARANTINED_MESSAGE,
   escapeLike,
+  findKeyInbox,
   heldFrom,
   INBOX_KEY_SCOPE_MESSAGE,
+  INBOX_NOT_FOUND_MESSAGE,
   inboxActorFromAuth,
   ingestReceivedEmail,
   isAgentActor,
@@ -49,7 +51,7 @@ import {
 } from "@millionsend/core";
 import { captureError } from "@millionsend/core/error-tracking-node";
 import { keysetCursorWhere, schema } from "@millionsend/db";
-import { and, asc, desc, eq, gt, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
@@ -211,7 +213,7 @@ export function registerReceivingRoutes(
       method: "get",
       path: "/emails/receiving",
       summary: "List received emails",
-      description: `Mail received at the team's receiving domains and inboxes, newest first like Resend (\`after\` pages toward older mail), with cursor pagination. Needs a full access key; a domain-scoped key lists mail addressed to its domain only, an inbox-scoped key mail delivered into its inbox. Mail held for screening or in quarantine is left out unless a full access key asks for it (include_quarantined, quarantined). With wait, the request is held until matching mail arrives (long-poll). ${untrusted}`,
+      description: `Mail received at the team's receiving domains and inboxes, newest first like Resend (\`after\` pages toward older mail), with cursor pagination. Needs a full access key; a domain-scoped key lists mail addressed to its domain only, an inbox-scoped key mail delivered into its inbox. Mail held for screening or in quarantine is left out unless a full access key asks for it (include_quarantined, quarantined). With wait, the request is held until matching mail arrives (long-poll). An inbox_id the key can't reach answers 404 at once, without waiting; an inbox-scoped key naming another inbox gets 403 restricted_api_key. ${untrusted}`,
       middleware,
       request: { query: listReceivedEmailsQuerySchema },
       responses: {
@@ -220,6 +222,7 @@ export function registerReceivingRoutes(
           description: "Received emails",
         },
         403: jsonErr("Restricted API key"),
+        404: jsonErr("Inbox not found"),
         422: jsonErr("Validation error"),
         429: jsonErr("Too many concurrent waits"),
       },
@@ -238,7 +241,13 @@ export function registerReceivingRoutes(
           403,
         );
       }
+      if (q.inbox_id && !(await findKeyInbox(db, auth, q.inbox_id))) {
+        return c.json(errorBody(404, "not_found", INBOX_NOT_FOUND_MESSAGE), 404);
+      }
       const inboxId = auth.inboxId ?? q.inbox_id ?? null;
+      if (q.unread && !inboxId) {
+        return c.json(errorBody(422, "validation_error", "unread needs inbox_id"), 422);
+      }
       const view = { inboxId, agent };
       const filters: SQL[] = [];
       if (q.since) filters.push(gt(t.createdAt, new Date(q.since)));
@@ -252,7 +261,7 @@ export function registerReceivingRoutes(
       const subject = q.subject_contains
         ? sql`${t.subject} ilike ${`%${escapeLike(q.subject_contains)}%`} escape '\\'`
         : undefined;
-      if (q.unread && inboxId) {
+      if (q.unread) {
         filters.push(
           sql`exists (select 1 from ${m} where ${m.receivedEmailId} = ${t.id} and ${m.inboxId} = ${inboxId} and ${m.readAt} is ${sql.raw(q.unread === "true" ? "null" : "not null")})`,
         );
@@ -274,7 +283,6 @@ export function registerReceivingRoutes(
           query: q,
           createdAt: t.createdAt,
           id: t.id,
-          newestFirst: true,
           loadCursor: async (id) =>
             (
               await db
@@ -282,14 +290,12 @@ export function registerReceivingRoutes(
                 .from(t)
                 .where(and(eq(t.id, id), where(held)))
             )[0],
-          loadRows: (cond, descending, take) =>
+          loadRows: (cond, orderBy, take) =>
             db
               .select(RECEIVED_EMAIL_META_COLUMNS)
               .from(t)
               .where(and(where(held), cond))
-              .orderBy(
-                ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-              )
+              .orderBy(...orderBy)
               .limit(take),
         });
         if (page === "bad_cursor") {

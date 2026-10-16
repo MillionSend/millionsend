@@ -51,6 +51,7 @@ describe("system mail around customer text shaped like a lure", () => {
             app: lure,
             team: lure,
             scopes: ["emails:send"],
+            expiresAt: new Date("2026-11-14T12:00:00Z"),
             locale,
           }),
           buildAccountEmail({

@@ -39,6 +39,7 @@ export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
 export const EMAIL_METADATA_RETENTION_DAYS_DEFAULT = 30;
 export const OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT = 10;
 export const INVITES_PER_TEAM_PER_DAY_DEFAULT = 50;
+export const API_RATE_LIMIT_PER_MINUTE_DEFAULT = 600;
 
 /** Break-glass content access in the console; "off" is the default everywhere. */
 export const CONTENT_REVEAL_MODES = ["off", "on"] as const;
@@ -135,7 +136,11 @@ export const env = createEnv({
     // Git SHA baked into the image (Dockerfile ARG GIT_SHA); reported by the
     // API's /health so a running deployment can be matched to a commit.
     MILLIONSEND_REVISION: z.string().default(REVISION_UNKNOWN),
-    API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(600),
+    API_RATE_LIMIT_PER_MINUTE: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(API_RATE_LIMIT_PER_MINUTE_DEFAULT),
     DATABASE_URL: z.url(),
 
     IS_CLOUD: boolFromString,

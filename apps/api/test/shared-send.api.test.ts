@@ -39,8 +39,8 @@ async function addKey(values: Partial<typeof schema.apiKeys.$inferInsert> = {}) 
   return key.token;
 }
 
-const call = (token: string, method: string, path: string, body?: unknown) =>
-  app.request(path, {
+const call = (token: string, method: string, path: string, body?: unknown, via = app) =>
+  via.request(path, {
     method,
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -182,7 +182,7 @@ describe("POST /emails from a shared address", () => {
 });
 
 describe("safety rules on the shared domain", () => {
-  it("refuses allowlist outright, and open while the team's mode is not open (422)", async () => {
+  it("refuses send_policy allowlist outright, and open while the team's mode is not open (422)", async () => {
     const shared = await addInbox(w, { local: "rules", shared: true });
     const patch = (body: Record<string, unknown>) =>
       call(teamKey, "PATCH", `/inboxes/${shared.id}/safety`, body);
@@ -191,7 +191,7 @@ describe("safety rules on the shared domain", () => {
     expect(await json(allowlist)).toMatchObject({
       name: "validation_error",
       message:
-        'send_policy "allowlist" is not available on the shared domain: its allowlist never counts there',
+        'send_policy "allowlist" is not available on the shared domain: there the allowlist counts for incoming mail only',
     });
     const open = await patch({ send_policy: "open" });
     expect(open.status).toBe(422);
@@ -204,5 +204,32 @@ describe("safety rules on the shared domain", () => {
     const opened = await patch({ send_policy: "open" });
     expect(opened.status).toBe(200);
     expect(await json(opened)).toMatchObject({ send_policy: "open" });
+  });
+});
+
+describe("POST /broadcasts from a shared address", () => {
+  it("answers 403 inbox_send_policy as batch does, on create with send and on send", async () => {
+    openSending();
+    // Broadcasts need APP_BASE_URL before any sender check.
+    const withBase = createApi({
+      ...w.deps,
+      sharedInboxDomain: w.sharedDomain,
+      appBaseUrl: "https://app.example.test",
+    });
+    const refused = {
+      statusCode: 403,
+      name: "inbox_send_policy",
+      message: SHARED_REPLY_ONLY_MESSAGE,
+    };
+    const draft = { from: inbox.emailAddress, subject: "News", text: "Hello" };
+    const created = await call(teamKey, "POST", "/broadcasts", { ...draft, send: true }, withBase);
+    expect(created.status).toBe(403);
+    expect(await json(created)).toEqual(refused);
+    const { id } = await json<{ id: string }>(
+      await call(teamKey, "POST", "/broadcasts", draft, withBase),
+    );
+    const sent = await call(teamKey, "POST", `/broadcasts/${id}/send`, {}, withBase);
+    expect(sent.status).toBe(403);
+    expect(await json(sent)).toEqual(refused);
   });
 });

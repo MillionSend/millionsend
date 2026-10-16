@@ -1067,7 +1067,8 @@
       "source": {
         "db": "set here",
         "env": "from the environment ({value})",
-        "default": "built-in default {value}"
+        "default": "built-in default {value}",
+        "unsaved": "not saved yet"
       }
     },
     "reveal": {

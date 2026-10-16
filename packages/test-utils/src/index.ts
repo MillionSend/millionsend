@@ -33,12 +33,26 @@ export async function createTestDb(): Promise<{ db: Db; close: () => Promise<voi
   return { db, close: () => client.close() };
 }
 
-export async function createTeam(db: Db, slug = "acme"): Promise<string> {
+/**
+ * A team named after its slug; with `sharedInboxDomain`, also its unlocked
+ * subdomain label `<slug>.<sharedInboxDomain>`, which a real team gets when
+ * it is created.
+ */
+export async function createTeam(
+  db: Db,
+  slug = "acme",
+  opts: { sharedInboxDomain?: string | undefined } = {},
+): Promise<string> {
   const [team] = await db
     .insert(schema.teams)
     .values({ name: slug, slug })
     .returning({ id: schema.teams.id });
   if (!team) throw new Error("team insert failed");
+  if (opts.sharedInboxDomain) {
+    await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId: team.id, name: `${slug}.${opts.sharedInboxDomain}` });
+  }
   return team.id;
 }
 

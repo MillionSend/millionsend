@@ -1067,7 +1067,8 @@
       "source": {
         "db": "definido aqui",
         "env": "do ambiente ({value})",
-        "default": "padrão embutido {value}"
+        "default": "padrão embutido {value}",
+        "unsaved": "falta salvar"
       }
     },
     "reveal": {

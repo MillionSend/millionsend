@@ -95,7 +95,9 @@ The send tells you up front:
 
 ## Guardrails
 
-- Only a **verified domain** of your team may appear in `from`.
+- Only a **verified domain** of your team may appear in `from`. Your team's
+  [shared subdomain](/concepts/domains#shared-subdomain) reads `verified`
+  too, but sending a broadcast from it answers `403 inbox_send_policy`.
 - If your trailing bounce or complaint rate has crossed the SES pause
   threshold, new broadcast sends are blocked with a `403 sending_paused`
   error — stopping the damage before SES pauses sending entirely.

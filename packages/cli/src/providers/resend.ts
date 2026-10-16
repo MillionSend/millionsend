@@ -90,6 +90,8 @@ interface WireRecord {
 interface WireDomain {
   id: string;
   name: string;
+  /** A MillionSend source's subdomain of its shared inbox domain, which POST /domains refuses. */
+  shared?: boolean;
   status?: string;
   region?: string;
   open_tracking?: boolean;
@@ -336,14 +338,15 @@ export function createResendSource(http: Http, log: Logger): Source {
     return items;
   }
 
-  /** List, then GET each item; progress counts the detail fetches against the list length. */
+  /** List, then GET each item `keep` passes; progress counts the detail fetches against those. */
   async function listWithDetails<L extends { id: string }, D>(
     route: string,
     label: string,
     onProgress: OnProgress | undefined,
     detail: (item: L) => Promise<D>,
+    keep: (item: L) => boolean = () => true,
   ): Promise<D[]> {
-    const list = await listAll<L>(route);
+    const list = (await listAll<L>(route)).filter(keep);
     const out: D[] = [];
     for (const item of list) {
       out.push(await detail(item));
@@ -372,6 +375,7 @@ export function createResendSource(http: Http, log: Logger): Source {
           "Domains",
           onProgress,
           async (item) => toDomain((await get<WireDomain>(path("domains", item.id))).body),
+          (item) => item.shared !== true,
         );
       }
       if (include.has("properties") || include.has("enrichment")) {

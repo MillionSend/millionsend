@@ -14,15 +14,10 @@ import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { WarnCard } from "@/components/warn-card";
 import { typedAllowlistEntry, typedListAddress } from "@/lib/email-input";
+import { sharedModeKey } from "@/lib/shared-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
-import {
-  ACCEPT_FROM,
-  acceptFromHint,
-  acceptFromWarns,
-  type InboxDetail,
-  sharedModeKey,
-} from "../parts";
+import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, type InboxDetail } from "../parts";
 
 const POLICIES = ["reply_only", "allowlist", "open"] as const;
 const SHARED_HINT = {
@@ -109,8 +104,8 @@ export function SafetyForm({
   const agent = inbox.kind === "agent";
   const shared = inbox.shared ? "yes" : "no";
   const sharedMode = sharedModeKey(inbox);
-  // The shared domain never counts the allowlist, and opens only in its open
-  // mode; a stored choice stays listed so a downgraded inbox can step back.
+  // On the shared domain the allowlist never vouches for a recipient, and open
+  // needs the open mode; a stored choice stays listed so a downgraded inbox can step back.
   const policies = inbox.shared
     ? POLICIES.filter(
         (p) =>
@@ -154,7 +149,7 @@ export function SafetyForm({
               />
               <span>
                 {t(`acceptFrom.${value}`)}
-                <div className="sub">{acceptFromHint(t, inbox.kind, value)}</div>
+                <div className="sub">{acceptFromHint(t, inbox.kind, inbox.shared, value)}</div>
               </span>
             </label>
           ))}

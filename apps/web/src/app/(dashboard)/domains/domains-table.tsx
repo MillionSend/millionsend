@@ -22,6 +22,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { shortcutBlocked } from "@/lib/keyboard";
+import { sharedModeKey } from "@/lib/shared-mode";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage } from "@/lib/trpc-error";
 import { useUrlState } from "@/lib/url-state";
@@ -69,9 +70,11 @@ const shown = (d: { status: string; trackingPending: boolean }) =>
 export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
   const t = useTranslations("domains");
   const common = useTranslations("common");
+  const inboxes = useTranslations("inboxes");
   const trpc = useTRPC();
   const router = useRouter();
   const domains = useQuery(trpc.domains.list.queryOptions());
+  const shared = useQuery(trpc.domains.shared.queryOptions());
   const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
 
@@ -127,6 +130,12 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
   }, []);
 
   const rows = domains.data ?? [];
+  const sharedRow = shared.data ?? null;
+  const sharedMode = sharedRow
+    ? sharedModeKey({ shared: true, sharedSending: sharedRow.sharedSending })
+    : null;
+  // Rows show once both queries settle, so the shared row never pops in above the others.
+  const settled = domains.isSuccess && !shared.isPending;
   const regions = useMemo(() => [...new Set(rows.map((d) => d.region))], [rows]);
 
   // URL params are untrusted: unknown values fall back to "all".
@@ -178,70 +187,50 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
             {t("list.retry")}
           </button>
         </div>
-      ) : domains.isSuccess && rows.length === 0 ? (
-        <EmptyState
-          area="domains"
-          headline={t("list.empty")}
-          body={t("list.emptyBody")}
-          cta={
-            <Link href="/domains/new" className="ms-btn ms-btn-primary">
-              <PlusGlyph />
-              {t("list.addDomain")}
-            </Link>
-          }
-        />
       ) : (
         <>
-          <div
-            className="ms-filter-row"
-            style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
-          >
-            {/* Search stretches to fill the filter row; the selects keep fixed widths. */}
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <input
-                ref={searchRef}
-                type="text"
-                className="ms-input"
-                style={{ width: "100%" }}
-                placeholder={t("list.searchPlaceholder")}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+          {settled && rows.length === 0 ? null : (
+            <div
+              className="ms-filter-row"
+              style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
+            >
+              {/* Search stretches to fill the filter row; the selects keep fixed widths. */}
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <input
+                  ref={searchRef}
+                  type="text"
+                  className="ms-input"
+                  style={{ width: "100%" }}
+                  placeholder={t("list.searchPlaceholder")}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              <Select
+                value={status}
+                onChange={setStatus}
+                ariaLabel={t("list.allStatuses")}
+                options={[
+                  { value: "all", label: t("list.allStatuses") },
+                  ...(["verified", "partial", "pending", "failed"] as const).map((key) => ({
+                    value: key,
+                    label: common(`status.${key}`),
+                  })),
+                ]}
+              />
+              <Select
+                value={region}
+                onChange={setRegion}
+                ariaLabel={t("list.allRegions")}
+                options={[
+                  { value: "all", label: t("list.allRegions") },
+                  ...regions.map((code) => ({ value: code, label: code })),
+                ]}
               />
             </div>
-            <Select
-              value={status}
-              onChange={setStatus}
-              ariaLabel={t("list.allStatuses")}
-              options={[
-                { value: "all", label: t("list.allStatuses") },
-                ...(["verified", "partial", "pending", "failed"] as const).map((key) => ({
-                  value: key,
-                  label: common(`status.${key}`),
-                })),
-              ]}
-            />
-            <Select
-              value={region}
-              onChange={setRegion}
-              ariaLabel={t("list.allRegions")}
-              options={[
-                { value: "all", label: t("list.allRegions") },
-                ...regions.map((code) => ({ value: code, label: code })),
-              ]}
-            />
-          </div>
+          )}
 
-          {domains.isSuccess && filtered.length === 0 ? (
-            <StateCard
-              headline={t("list.noMatch")}
-              actionLabel={t("list.clearFilters")}
-              onAction={() => {
-                setSearch("");
-                setStatus("all");
-                setRegion("all");
-              }}
-            />
-          ) : (
+          {settled && !sharedRow && filtered.length === 0 ? null : (
             <>
               <Table>
                 <thead>
@@ -256,10 +245,36 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
                     <th className="right" />
                   </tr>
                 </thead>
-                {domains.isPending ? (
-                  <SkeletonRows />
-                ) : (
+                {settled ? (
                   <tbody>
+                    {/* The team's subdomain of the shared domain: read-only, outside the
+                        filters and the count. The API lists it last; on this one-page
+                        list it goes first, where it is easiest to find. */}
+                    {sharedRow ? (
+                      <tr>
+                        <td className="ms-mono">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                            <NavTile name="domains" color={TONE_COLOR.neutral} />
+                            <Breakable text={sharedRow.name} />
+                          </span>
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <span className="ms-badge ms-badge-neutral">{t("list.shared")}</span>
+                          <span style={{ marginLeft: 8, color: "var(--ms-muted)" }}>
+                            {sharedMode
+                              ? inboxes(`sharedMode.${sharedMode}`)
+                              : t("list.sharedOpen")}
+                          </span>
+                        </td>
+                        <td style={{ color: "var(--ms-muted)" }}>
+                          <RegionLabel region={sharedRow.region} />
+                        </td>
+                        <td className="right" style={{ color: "var(--ms-muted)" }}>
+                          <RelativeTime date={sharedRow.createdAt} />
+                        </td>
+                        <td className="right" style={{ width: 40 }} />
+                      </tr>
+                    ) : null}
                     {filtered.map((domain) => (
                       <tr key={domain.id}>
                         <td className="ms-mono">
@@ -318,9 +333,11 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
                       </tr>
                     ))}
                   </tbody>
+                ) : (
+                  <SkeletonRows />
                 )}
               </Table>
-              {domains.isSuccess ? (
+              {settled && filtered.length > 0 ? (
                 <ListFooter
                   left={t("list.pageOf", { pages: 1, total: filtered.length })}
                   singlePage
@@ -328,6 +345,34 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
               ) : null}
             </>
           )}
+
+          {settled && filtered.length === 0 ? (
+            <div style={sharedRow ? { marginTop: 14 } : undefined}>
+              {rows.length === 0 ? (
+                <EmptyState
+                  area="domains"
+                  headline={t("list.empty")}
+                  body={t("list.emptyBody")}
+                  cta={
+                    <Link href="/domains/new" className="ms-btn ms-btn-primary">
+                      <PlusGlyph />
+                      {t("list.addDomain")}
+                    </Link>
+                  }
+                />
+              ) : (
+                <StateCard
+                  headline={t("list.noMatch")}
+                  actionLabel={t("list.clearFilters")}
+                  onAction={() => {
+                    setSearch("");
+                    setStatus("all");
+                    setRegion("all");
+                  }}
+                />
+              )}
+            </div>
+          ) : null}
         </>
       )}
 

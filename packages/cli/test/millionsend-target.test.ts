@@ -436,6 +436,7 @@ describe("readState", () => {
         ]),
       },
     ]);
+    // Oldest first, although the API lists newest first.
     expect(state.properties).toEqual([
       { id: ids.property, key: "plan", type: "string" },
       { id: ids.numberProperty, key: "seats", type: "number" },
@@ -583,5 +584,39 @@ describe("rollback deletes", () => {
     expect(state.webhooks.map((w) => w.id)).toEqual([ids.webhook2]);
     expect(state.topics.map((t) => t.id)).toEqual([ids.topic]);
     expect(state.properties.map((p) => p.id)).toEqual([ids.numberProperty]);
+  });
+});
+
+describe("the team's subdomain of the shared inbox domain", () => {
+  it("is neither fetched nor counted among the target's domains", async () => {
+    const api = await startLiveApi({
+      slug: "shared-target",
+      sharedInboxDomain: "agents.example.test",
+    });
+    const paths: string[] = [];
+    try {
+      const shared = createMillionSendTarget(
+        createHttp({
+          baseUrl: api.baseUrl,
+          token: api.apiKey,
+          userAgent: "millionsend-cli/test",
+          rps: 1000,
+          name: "MillionSend",
+          log,
+          fetch: (input, init) => {
+            paths.push(new URL(String(input)).pathname);
+            return fetch(input, init);
+          },
+        }),
+        log,
+        api.baseUrl,
+      );
+      const own = ok(await shared.createDomain({ name: "own.example.com" })).id;
+      const state = await shared.readState();
+      expect(state.domains.map((d) => d.id)).toEqual([own]);
+      expect(paths.filter((path) => path.startsWith("/domains/"))).toEqual([`/domains/${own}`]);
+    } finally {
+      await api.stop();
+    }
   });
 });

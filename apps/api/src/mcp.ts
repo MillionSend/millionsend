@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { type OpenAPIHono, z } from "@hono/zod-openapi";
+import { API_RATE_LIMIT_PER_MINUTE_DEFAULT } from "@millionsend/config";
 import {
   ADMIN_MCP_SCOPES,
   ALL_TEAMS_GRANT,
@@ -475,6 +476,10 @@ const enc = (id: string): string => {
   if (id === "." || id === "..") throw new Error(`"${id}" is not a valid id`);
   return encodeURIComponent(id);
 };
+
+const SHARED_ROW_READ_ONLY =
+  "The team's subdomain of the shared inbox domain (shared: true) is read-only and answers 403.";
+
 /** How to read records[] on a domain response; shared by get_domain and verify_domain. */
 const RECORD_STATUS_NOTE =
   "Only the DKIM and MAIL FROM (SPF) rows gate sending. The DMARC row is recommended, and reads verified when a parent-domain policy covers the subdomain (see inherited_from and policy). Each record's live field says what public DNS answers now; detail explains a pending or failed row.";
@@ -655,7 +660,7 @@ function buildServer(
     {
       title: "List emails",
       description:
-        "List the team's transactional emails (sent, queued and scheduled), oldest first, with cursor pagination.",
+        "List the team's sent, queued and scheduled emails, broadcast copies included, newest first, with cursor pagination (after pages toward older emails).",
       inputSchema: listQuerySchema,
       readOnly: true,
     },
@@ -720,7 +725,7 @@ function buildServer(
     {
       title: "List contacts",
       description:
-        "List contacts of the team, oldest first, with cursor pagination. segment_id limits the list to that segment's members; include=properties,topics attaches the typed property map and the topic subscriptions to every item.",
+        "List contacts of the team, newest first, with cursor pagination (after pages toward older contacts). segment_id limits the list to that segment's members; include=properties,topics attaches the typed property map and the topic subscriptions to every item.",
       inputSchema: listContactsQuerySchema.extend({
         segment_id: z.uuid().optional().describe("Only contacts in this segment"),
       }),
@@ -818,7 +823,7 @@ function buildServer(
     {
       title: "List suppressions",
       description:
-        "List suppressed addresses — bounces, complaints and manual blocks that every send skips, plus unsubscribes that block topic sends and broadcasts only — oldest first, with cursor pagination. origin filters to one kind. Addresses erased for GDPR/LGPD are hidden here and reachable by id only.",
+        "List suppressed addresses — bounces, complaints and manual blocks that every send skips, plus unsubscribes that block topic sends and broadcasts only — newest first, with cursor pagination (after pages toward older entries). origin filters to one kind. Addresses erased for GDPR/LGPD are hidden here and reachable by id only.",
       inputSchema: listSuppressionsQuerySchema,
       readOnly: true,
     },
@@ -866,7 +871,7 @@ function buildServer(
     {
       title: "List templates",
       description:
-        "List email templates (name, alias, timestamps), oldest first, with cursor pagination.",
+        "List email templates (name, alias, timestamps), newest first, with cursor pagination (after pages toward older templates).",
       inputSchema: listQuerySchema,
       readOnly: true,
     },
@@ -927,18 +932,19 @@ function buildServer(
       {
         title: "List domains",
         description:
-          "List sending domains with verification status. Emails can only be sent from a verified domain.",
+          "List up to 100 of the team's domains with verification status. Emails can only be sent from a verified domain; the team's subdomain of the shared inbox domain, when it has one, is the last row (shared: true), read-only and with its sending_mode, and sends only from its inboxes' own addresses (create_inbox), never from any other address on it.",
         inputSchema: z.object({}),
         readOnly: true,
       },
-      () => api("GET", "/domains"),
+      // The shared row comes last: a bigger page shows it to a team with many domains.
+      () => api("GET", "/domains?limit=100"),
     );
     tool(
       "get_domain",
       "domains:read",
       {
         title: "Get domain",
-        description: `Get one sending domain with its DNS records (DKIM, MAIL FROM, DMARC, the Tracking CNAME once a tracking subdomain is set, and the Receiving MX while receiving is enabled) and per-record status. ${RECORD_STATUS_NOTE}`,
+        description: `Get one sending domain with its DNS records (DKIM, MAIL FROM, DMARC, the Tracking CNAME once a tracking subdomain is set, and the Receiving MX while receiving is enabled) and per-record status. ${RECORD_STATUS_NOTE} The team's subdomain of the shared inbox domain (shared: true) has no records: there is nothing to set up.`,
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         readOnly: true,
         openWorld: true,
@@ -1127,7 +1133,7 @@ function buildServer(
       {
         title: "Get verification code",
         description:
-          "Get a verification code or sign-in link from received mail: one email's (email_id), or the newest in an inbox (inbox_id) within max_age_minutes, waiting up to wait seconds for one to arrive. status found carries kind otp with the code, or kind link with the url and whether its domain matches the sender's; none, ambiguous (no single clear candidate) and timeout carry no value. Codes come only from delivered mail of senders that did not fail authentication, in inboxes that extract codes; links are never fetched.",
+          "Get a verification code or sign-in link from received mail: one email's (email_id), or the newest in an inbox (inbox_id) within max_age_minutes and received after received_after (such as a used code's received_at), waiting up to wait seconds for one to arrive. status found carries kind otp with the code, or kind link with the url and whether its domain matches the sender's; none, ambiguous (no single clear candidate) and timeout carry no value. Codes come only from delivered mail of senders that did not fail authentication, in inboxes that extract codes; links are never fetched.",
         inputSchema: z.object({
           email_id: receivedEmailId.optional().describe("This email's code; wins over inbox_id"),
           inbox_id: inboxId.optional(),
@@ -1145,11 +1151,19 @@ function buildServer(
             .min(1)
             .max(1440)
             .default(10)
-            .describe("With inbox_id: how old the mail may be, 1-1440 minutes (default 10)"),
+            .describe(
+              "With inbox_id: how long ago the code may have reached the inbox, 1-1440 minutes (default 10); a released code counts from its release",
+            ),
+          received_after: z.iso
+            .datetime({ offset: true })
+            .optional()
+            .describe(
+              "With inbox_id: only mail received after this ISO 8601 instant, such as the received_at of a code already used",
+            ),
         }),
         readOnly: true,
       },
-      ({ email_id, inbox_id, from, wait, max_age_minutes }, signal) => {
+      ({ email_id, inbox_id, from, wait, max_age_minutes, received_after }, signal) => {
         if (email_id) {
           return mapped(
             rest("GET", withQuery(`/emails/receiving/${enc(email_id)}`, { html_format: "cid" })),
@@ -1161,7 +1175,7 @@ function buildServer(
             toolResult(errorBody(422, "validation_error", "Pass email_id or inbox_id"), false),
           );
         }
-        const query = { from, wait, max_age: max_age_minutes * 60 };
+        const query = { from, wait, max_age: max_age_minutes * 60, since: received_after };
         return mapped(
           rest(
             "GET",
@@ -1886,8 +1900,7 @@ function buildServer(
       "domains:write",
       {
         title: "Update domain",
-        description:
-          "Change a domain's open/click tracking, or switch inbound mail for it on or off with capabilities.receiving (verified domains only, on an instance that receives mail; the returned records then include the Receiving MX). receiving_catch_all decides whether mail to an address with no inbox is stored (true) or refused (false); turning it on needs receiving and, on MillionSend Cloud, a paid plan. Tracking is served from the domain's own tracking subdomain: tracking_subdomain (a label such as \"links\") sets it, and the returned records include its CNAME; links are tracked through it once that CNAME resolves (verify_domain re-checks it). On MillionSend Cloud, turning tracking on without a subdomain is refused.",
+        description: `Change a domain's open/click tracking, or switch inbound mail for it on or off with capabilities.receiving (verified domains only, on an instance that receives mail; the returned records then include the Receiving MX). receiving_catch_all decides whether mail to an address with no inbox is stored (true) or refused (false); turning it on needs receiving and, on MillionSend Cloud, a paid plan. Tracking is served from the domain's own tracking subdomain: tracking_subdomain (a label such as "links") sets it, and the returned records include its CNAME; links are tracked through it once that CNAME resolves (verify_domain re-checks it). On MillionSend Cloud, turning tracking on without a subdomain is refused. ${SHARED_ROW_READ_ONLY}`,
         inputSchema: updateDomainRequestSchema.extend({
           id: z.uuid().describe("Domain id from list_domains"),
         }),
@@ -1902,7 +1915,7 @@ function buildServer(
       "domains:write",
       {
         title: "Verify domain",
-        description: `Re-check a domain's DNS records and SES verification, returning the domain with fresh per-record status. ${RECORD_STATUS_NOTE}`,
+        description: `Re-check a domain's DNS records and SES verification, returning the domain with fresh per-record status. ${RECORD_STATUS_NOTE} ${SHARED_ROW_READ_ONLY}`,
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         idempotent: true,
         openWorld: true,
@@ -1914,8 +1927,7 @@ function buildServer(
       "domains:write",
       {
         title: "Delete domain",
-        description:
-          "Remove a sending domain and its SES identity. Sends from it stop immediately; this cannot be undone.",
+        description: `Remove a sending domain and its SES identity. Sends from it stop immediately; this cannot be undone. ${SHARED_ROW_READ_ONLY}`,
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         destructive: true,
         idempotent: true,
@@ -1980,14 +1992,17 @@ function buildServer(
       {
         title: "Create inbox",
         description:
-          "Create an agent inbox: an address on one of the team's verified domains with receiving on or, with email_address omitted, an address on the instance's shared inbox domain, which needs no DNS: username picks the part before the @, or it is random. On the shared domain a chosen username or from_name is reviewed first, and while that review is unavailable the answer is 503 with retry-after; without either the answer is never 503. The inbox never expires unless expires_in says so; a shared one unused for 90 days is deleted. It screens incoming mail and holds risky sends as drafts for a person; whether a shared address may start conversations depends on the team's plan and the instance. Human inboxes (team mailboxes) are made in the dashboard. accept_from decides who may write in; mail that fails it is quarantined. Every other safety rule keeps the agent default and is changed by a person in the dashboard. Returns the inbox.",
+          "Create an agent inbox: an address on one of the team's verified domains with receiving on or, with email_address and domain_id omitted (or domain_id naming the shared row), an address on the instance's shared inbox domain, which needs no DNS: username picks the part before the @, or it is random. The team's subdomain of the shared domain is the list_domains row with shared: true. On the shared domain a chosen username or from_name is reviewed first, and while that review is unavailable the answer is 503 with retry-after; also 503 while the team's subdomain waits for its name review. The inbox never expires unless expires_in says so; a shared one unused for 90 days is deleted. It screens incoming mail and holds risky sends as drafts for a person; whether a shared address may start conversations depends on the team's plan and the instance. Human inboxes (team mailboxes) are made in the dashboard. accept_from decides who may write in; mail that fails it is quarantined. Every other safety rule keeps the agent default and is changed by a person in the dashboard. Returns the inbox.",
         inputSchema: z.object({
           email_address: z
             .string()
             .optional()
             .describe(
-              "An address on one of the team's verified domains with receiving on; omitted, an address on the shared inbox domain (see username)",
+              "An address on one of the team's verified domains with receiving on; left out with no domain_id, an address on the shared inbox domain (see username)",
             ),
+          domain_id: createInboxRequestSchema.shape.domain_id.describe(
+            "Id of a row from list_domains: the shared subdomain (shared: true), or one of the team's domains with username as the part before the @",
+          ),
           username: createInboxRequestSchema.shape.username,
           name: createInboxRequestSchema.shape.name,
           from_name: createInboxRequestSchema.shape.from_name,
@@ -2068,7 +2083,7 @@ export function registerMcp(app: OpenAPIHono<Env>, deps: ApiDeps, appBaseUrl: st
       appBaseUrl,
       resource,
       createRemoteJWKSet(new URL(`${appBaseUrl}/api/auth/jwks`)),
-      deps.rateLimitPerMinute ?? 600,
+      deps.rateLimitPerMinute ?? API_RATE_LIMIT_PER_MINUTE_DEFAULT,
     ),
     resourceMetadataUrl,
   };

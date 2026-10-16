@@ -46,8 +46,8 @@ resolve by id first).
 
 - `POST /templates` with `{ name, html, subject?, text?, alias? }` →
   `{ "object": "template", "id": "..." }`.
-- `GET /templates` — keyset-paginated list; `GET /templates/{id-or-alias}` —
-  the full body.
+- `GET /templates` — keyset-paginated list, newest first;
+  `GET /templates/{id-or-alias}` — the full body.
 - `PATCH /templates/{id-or-alias}` — any of the fields above; `""` or `null`
   clears `subject` or `text`. Writing `html` or `text` turns a template built
   in the dashboard's block editor into a raw-HTML one (the editor's block

@@ -75,7 +75,7 @@ async function inbox(token: string, body: Record<string, unknown>) {
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
-  teamId = await createTeam(db, "inbox-api");
+  teamId = await createTeam(db, "inbox-api", { sharedInboxDomain: SHARED });
   await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
   const [domain] = await db
     .insert(schema.domains)
@@ -90,7 +90,7 @@ beforeAll(async () => {
   domainId = domain?.id as string;
   teamKey = await key(teamId);
   sendKey = await key(teamId, { permission: "sending_access" });
-  const other = await createTeam(db, "inbox-api-other");
+  const other = await createTeam(db, "inbox-api-other", { sharedInboxDomain: SHARED });
   otherKey = await key(other);
   app = makeApp();
 });
@@ -220,6 +220,12 @@ describe("POST /inboxes and the inbox object", () => {
       shared: true,
       expires_at: null,
     });
+    // The name a long address defaults to goes back as it came.
+    const long = await inbox(teamKey, { username: "x".repeat(64) });
+    const renamed = await call(teamKey, "PATCH", `/inboxes/${long.id}`, {
+      name: long.email_address,
+    });
+    expect(renamed.status).toBe(200);
     const taken = await call(teamKey, "POST", "/inboxes", { username: "leo.bot" });
     expect(taken.status).toBe(409);
     expect(await json(taken)).toEqual({
@@ -252,6 +258,35 @@ describe("POST /inboxes and the inbox object", () => {
         message,
       });
     }
+  });
+
+  it("takes domain_id: the shared row's gives an address on the team's subdomain, an own domain's one on that domain", async () => {
+    const [label] = await db
+      .select({ id: schema.sharedInboxDomains.id })
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, teamId));
+    const shared = await call(teamKey, "POST", "/inboxes", {
+      domain_id: label?.id,
+      username: "desk",
+    });
+    expect(shared.status).toBe(201);
+    expect(await json(shared)).toMatchObject({
+      email_address: "desk@inbox-api.agents.example.test",
+      domain_id: label?.id,
+      shared: true,
+    });
+    const own = await call(teamKey, "POST", "/inboxes", { domain_id: domainId, username: "sales" });
+    expect(await json(own)).toMatchObject({
+      email_address: "sales@in.acme.test",
+      domain_id: domainId,
+      shared: false,
+    });
+    const foreign = await call(teamKey, "POST", "/inboxes", { domain_id: randomUUID() });
+    expect(await json(foreign)).toEqual({
+      statusCode: 422,
+      name: "validation_error",
+      message: "domain_id must be a verified domain of this team: the id of a GET /domains row",
+    });
   });
 
   it("marks an inbox used whenever a key reaches it through its routes", async () => {
@@ -413,7 +448,7 @@ describe("the shared domain's name review", () => {
   });
 
   beforeAll(async () => {
-    judgedTeam = await createTeam(db, "judged-desk");
+    judgedTeam = await createTeam(db, "judged-desk", { sharedInboxDomain: SHARED });
     await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, judgedTeam));
     judgedKey = await key(judgedTeam);
     // The review is built from ABUSE_JUDGE* when the routes are registered.
@@ -443,14 +478,22 @@ describe("the shared domain's name review", () => {
     vi.unstubAllGlobals();
   });
 
-  it("never holds a request without a chosen name: an outage gives the team a random label", async () => {
-    jev = "down";
-    const res = await review({ name: "Signups" });
-    expect(res.status).toBe(201);
-    expect((await json(res)).email_address).toMatch(
-      /^inbox-[a-z0-9]{8}@team-[a-z0-9]{6}\.agents\.example\.test$/,
-    );
-    expect(asked).toEqual([{ label: "judged-desk" }]);
+  it("answers 503 with retry-after 300 while the team's subdomain waits for its name review, spending no review", async () => {
+    const pendingKey = await key(await createTeam(db, "pending-desk"));
+    jev = {};
+    asked.length = 0;
+    for (const body of [{ name: "Signups" }, { username: "leo", from_name: "Leo" }]) {
+      const res = await call(pendingKey, "POST", "/inboxes", body, judged);
+      expect(res.status, JSON.stringify(body)).toBe(503);
+      expect(res.headers.get("retry-after")).toBe("300");
+      expect(await json(res)).toEqual({
+        statusCode: 503,
+        name: "name_review_unavailable",
+        message:
+          "Your team's subdomain on the shared domain is waiting for its name review: try again shortly",
+      });
+    }
+    expect(asked).toEqual([]);
   });
 
   it("reviews a chosen username and from_name: 422 refused, 503 with retry-after while down", async () => {
@@ -961,12 +1004,14 @@ describe("openapi", () => {
     );
   });
 
-  it("documents username and the name review's 429 and 503 on create and update", async () => {
+  it("documents username, domain_id and the name review's 429 and 503 on create and update, without a shared domain too", async () => {
     const doc = await json<{
       paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
       components: { schemas: Record<string, { properties: Record<string, unknown> }> };
-    }>(await app.request("/openapi.json"));
-    expect(doc.components.schemas.CreateInboxRequest?.properties).toHaveProperty("username");
+    }>(await makeApp({ sharedInboxDomain: undefined }).request("/openapi.json"));
+    expect(Object.keys(doc.components.schemas.CreateInboxRequest?.properties ?? {})).toEqual(
+      expect.arrayContaining(["username", "domain_id"]),
+    );
     for (const [path, method] of [
       ["/inboxes", "post"],
       ["/inboxes/{inbox_id}", "patch"],

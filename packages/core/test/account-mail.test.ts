@@ -12,6 +12,7 @@ import {
   buildAccountMail,
   formatMailDate,
   MAIL_LOCALES,
+  mailCountList,
   planCapPhrase,
   planMove,
 } from "../src/account-mail.js";
@@ -111,6 +112,17 @@ describe("account mail catalogs", () => {
         values: { date: "1 de outubro" },
       }),
     ).toBe("O Stripe tenta de novo em 1 de outubro.");
+  });
+
+  it("lists counts in either language, singular for one, zeros left out", () => {
+    expect(mailCountList("en", "inbox.attention", { quarantined: 1, drafts: 0, refused: 2 })).toBe(
+      "1 email in quarantine and 2 sends refused by your inbox rules",
+    );
+    expect(
+      mailCountList("pt-BR", "inbox.attention", { quarantined: 1000, drafts: 1, refused: 1 }),
+    ).toBe(
+      "1.000 e-mails em quarentena, 1 rascunho aguardando aprovação e 1 envio barrado pelas regras das suas caixas",
+    );
   });
 
   it("names every monitor tier in the operator's language, never by its key", () => {

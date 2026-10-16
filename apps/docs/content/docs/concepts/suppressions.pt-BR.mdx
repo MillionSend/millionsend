@@ -29,10 +29,11 @@ automaticamente. Supressões são por equipe.
   destinatários suprimidos por bounce, reclamação ou entrada manual são
   removidos de `to`/`cc`/`bcc`. Se *todos* os destinatários em `to` estiverem
   suprimidos, o envio é rejeitado com `422 all_recipients_suppressed`
-  (mensagem `All recipients are suppressed`). Uma entrada de **descadastro**
-  não se aplica aqui: quem saiu do marketing continua recebendo redefinições
-  de senha, recibos e outras mensagens da conta — o mesmo significado que o
-  Resend dá a `unsubscribed` ("descadastrado de todos os Broadcasts").
+  (mensagem `All recipients are suppressed`; o relay SMTP responde `550` com
+  essa mensagem). Uma entrada de **descadastro** não se aplica aqui: quem saiu
+  do marketing continua recebendo redefinições de senha, recibos e outras
+  mensagens da conta — o mesmo significado que o Resend dá a `unsubscribed`
+  ("descadastrado de todos os Broadcasts").
 - **Envios com tópico** (`POST /emails` com `topic_id`) e **transmissões**: toda
   entrada se aplica, descadastros incluídos, mais a saída do destinatário
   daquele tópico; as transmissões pulam esses contatos no fan-out.
@@ -70,8 +71,8 @@ entrada é lida como `{ id, email, origin, source_id, created_at }`, onde
 `origin` é `bounce`, `complaint`, `manual` ou `unsubscribe` e `source_id` é o
 e-mail cujo bounce ou reclamação a criou.
 
-- `GET /suppressions?origin=bounce` — listagem com paginação por cursor,
-  opcionalmente filtrada por origem.
+- `GET /suppressions?origin=bounce` — listagem com paginação por cursor, da
+  mais nova para a mais antiga, opcionalmente filtrada por origem.
 - `GET /suppressions/{id}` e `DELETE /suppressions/{id}` — o segmento de
   caminho é o id da supressão ou o endereço de e-mail.
 - `POST /suppressions` com `{ "email": "...", "origin": "manual" }` — bloqueia

@@ -8,6 +8,7 @@ import {
   fetchBroadcastInsights,
   fetchTeamStanding,
   injectPreheader,
+  MAX_SUBJECT_LENGTH,
   type MergeContact,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
@@ -149,7 +150,7 @@ const fromSchema = z
   .refine((v) => parseSingleSender(v) !== null, {
     message: "From must be a single address like ada@example.com or Ada <ada@example.com>",
   });
-const subjectSchema = z.string().trim().min(1).max(998);
+const subjectSchema = z.string().trim().min(1).max(MAX_SUBJECT_LENGTH);
 // "" clears the field — stored as null, never as an empty string.
 const nameSchema = z.string().trim().max(200);
 const bodySchema = z.string().max(500_000);
@@ -598,7 +599,7 @@ export const broadcastsRouter = router({
     .input(
       z.object({
         from: z.string().trim().min(1),
-        subject: z.string().trim().min(1),
+        subject: subjectSchema,
         html: z.string().max(500_000).nullable(),
         text: z.string().nullable(),
         previewText: z.string().nullable().optional(),

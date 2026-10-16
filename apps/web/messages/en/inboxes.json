@@ -111,6 +111,7 @@
       "username": "Use lowercase letters, digits and . _ - (up to 64), starting and ending with a letter or digit, with no two dots in a row.",
       "nameRefused": "This name can't be used on the shared domain. Pick another.",
       "reviewUnavailable": "We couldn't check this name right now. Try again in a minute.",
+      "sharedPending": "The shared domain isn't ready for your team yet. Try again in a few minutes.",
       "tooManyNames": "Too many names were checked today. Try again tomorrow.",
       "orRandom": "Or leave the address empty for a random one."
     }
@@ -123,7 +124,7 @@
     "anyoneHint": "Takes mail from any sender; mail that fails authentication is quarantined.",
     "anyoneHumanHint": "Like a regular mailbox: everything arrives, and mail that fails authentication goes to Spam.",
     "verifiedHint": "Takes senders who prove they write from their own domain, like any Gmail or Outlook account, and replies in this inbox's threads.",
-    "allowlistHint": "Takes only your team, the owner addresses, the allowlist and replies in this inbox's threads.",
+    "allowlistHint": "{shared, select, yes {Takes only your team, the allowlist and replies in this inbox's threads.} other {Takes only your team, the owner addresses, the allowlist and replies in this inbox's threads.}}",
     "anyoneWarn": "Also lets in mail whose sender can't be proven, including forged gmail.com, outlook.com and other addresses on domains that don't block forgery. Real Gmail and Outlook senders already pass “Verified senders”: use this only if you must hear from misconfigured domains."
   },
   "expires": {

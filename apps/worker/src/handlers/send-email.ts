@@ -38,6 +38,7 @@ import {
   rewriteForTracking,
   SCORE_VERSION,
   type SendMedia,
+  SHARED_PAUSED_RETRY_MS,
   SYSTEM_MAIL_TAG,
   sampleAcceptedEmail,
   screenBeforeSend,
@@ -396,8 +397,6 @@ const TERMINAL_SES_ERRORS = new Set([
   "AccountSuspendedException",
   "BadRequestException",
 ]);
-
-const SHARED_PAUSED_RETRY_MS = 5 * 60_000;
 
 /**
  * Whether an error came from infrastructure that may recover (a KMS/network

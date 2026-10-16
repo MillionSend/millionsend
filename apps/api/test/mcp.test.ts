@@ -52,6 +52,7 @@ const userId = "mcp-user-1";
 const enqueued: string[] = [];
 /** The MX's bearer for deliveries into `app`. */
 const INGEST_SECRET = "m".repeat(32);
+const SHARED_DOMAIN = "agents.example.test";
 
 const ALL_SCOPES = MCP_SCOPES.join(" ");
 
@@ -109,7 +110,7 @@ function resultJson(result: { content?: unknown }): Record<string, unknown> {
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
-  teamId = await createTeam(db, "mcp");
+  teamId = await createTeam(db, "mcp", { sharedInboxDomain: SHARED_DOMAIN });
   await db.insert(schema.user).values({ id: userId, name: "MCP User", email: "mcp@acme.dev" });
   await db.insert(schema.teamMembers).values({ teamId, userId, role: "admin" });
   await db.insert(schema.domains).values({
@@ -709,6 +710,128 @@ describe("tools", () => {
       data: Array<{ name: string; status: string }>;
     };
     expect(domains.data.map((d) => d.name)).toContain("acme.dev");
+    await client.close();
+  });
+});
+
+describe("the team's subdomain of the shared domain", () => {
+  // A user of its own, so the all-teams token tests keep counting their teams.
+  const sharedUser = "mcp-shared-user";
+  let sharedTeam: string;
+  let ownIds: string[];
+  let shared: { id: string; name: string };
+  let withShared: ReturnType<typeof createApi>;
+  const day = (n: number) => new Date(Date.UTC(2026, 0, n));
+
+  beforeAll(async () => {
+    sharedTeam = await createTeam(db, "mcp-shared", { sharedInboxDomain: SHARED_DOMAIN });
+    await db
+      .insert(schema.user)
+      .values({ id: sharedUser, name: "Shared", email: "mcp-shared@example.com" });
+    await db
+      .insert(schema.teamMembers)
+      .values({ teamId: sharedTeam, userId: sharedUser, role: "admin" });
+    const own = await db
+      .insert(schema.domains)
+      .values(
+        Array.from({ length: 20 }, (_, i) => ({
+          teamId: sharedTeam,
+          name: `d${i + 1}.mcp-shared.example.com`,
+          region: "sa-east-1",
+          status: "verified" as const,
+          // The oldest receives, so create_inbox can name an address on it.
+          receivingEnabled: i === 0,
+          createdAt: day(i + 1),
+        })),
+      )
+      .returning({ id: schema.domains.id });
+    ownIds = own.map((row) => row.id);
+    const [label] = await db
+      .select({ id: schema.sharedInboxDomains.id, name: schema.sharedInboxDomains.name })
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, sharedTeam));
+    if (!label) throw new Error("no shared subdomain");
+    shared = label;
+    withShared = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: false,
+      appBaseUrl,
+      enqueueEmailSend: async () => {},
+      ses: {
+        clientForRegion: () => {
+          throw new Error("SES is not exercised by these tests");
+        },
+        regions: ["sa-east-1"],
+      },
+      receiving: { mxHost: "mx.millionsend.test", ingestSecret: INGEST_SECRET },
+      inboxKeys: deriveInboxKeys(randomBytes(32)),
+      sharedInboxDomain: SHARED_DOMAIN,
+    });
+  });
+
+  it("list_domains returns all 20 own domains of a team that has 20, then the shared row", async () => {
+    const client = await connect(
+      await mintToken({ team_id: sharedTeam, sub: sharedUser }),
+      withShared,
+    );
+    const listed = resultJson(await client.callTool({ name: "list_domains", arguments: {} })) as {
+      data: { id: string; shared: boolean }[];
+      has_more: boolean;
+    };
+    expect(listed.data.map((d) => d.id)).toEqual([...ownIds].reverse().concat(shared.id));
+    expect(listed.data[20]).toMatchObject({ name: shared.name, shared: true });
+    expect(listed.has_more).toBe(false);
+    await client.close();
+  });
+
+  it("get_domain returns the shared row; update_domain, verify_domain and delete_domain answer 403", async () => {
+    const client = await connect(
+      await mintToken({ team_id: sharedTeam, sub: sharedUser }),
+      withShared,
+    );
+    const got = await client.callTool({ name: "get_domain", arguments: { id: shared.id } });
+    expect(got.isError).toBeFalsy();
+    expect(resultJson(got)).toMatchObject({
+      object: "domain",
+      id: shared.id,
+      shared: true,
+      status: "verified",
+      records: [],
+    });
+    for (const [name, args] of [
+      ["update_domain", { id: shared.id, open_tracking: true }],
+      ["verify_domain", { id: shared.id }],
+      ["delete_domain", { id: shared.id }],
+    ] as const) {
+      const refused = await client.callTool({ name, arguments: args });
+      expect(refused.isError, name).toBe(true);
+      expect(resultJson(refused), name).toEqual({
+        statusCode: 403,
+        name: "forbidden",
+        message: `${shared.name} is your team's subdomain of the shared domain: it can't be changed or deleted`,
+      });
+    }
+    await client.close();
+  });
+
+  it("create_inbox takes domain_id: the shared row, or an own domain with username", async () => {
+    const client = await connect(
+      await mintToken({ team_id: sharedTeam, sub: sharedUser }),
+      withShared,
+    );
+    const create = async (args: Record<string, unknown>) =>
+      resultJson(await client.callTool({ name: "create_inbox", arguments: args }));
+    expect(await create({ domain_id: shared.id, username: "desk" })).toMatchObject({
+      email_address: `desk@${shared.name}`,
+      domain_id: shared.id,
+      shared: true,
+    });
+    expect(await create({ domain_id: ownIds[0], username: "agent" })).toMatchObject({
+      email_address: "agent@d1.mcp-shared.example.com",
+      domain_id: ownIds[0],
+      shared: false,
+    });
     await client.close();
   });
 });
@@ -1819,6 +1942,14 @@ describe("receiving tools", () => {
           }),
         ),
       ).toEqual({ status: "none" });
+      expect(
+        resultJson(
+          await client.callTool({
+            name: "get_verification_code",
+            arguments: { inbox_id: inboxId, received_after: code.received_at },
+          }),
+        ),
+      ).toEqual({ status: "none" });
       const neither = await client.callTool({ name: "get_verification_code", arguments: {} });
       expect(neither.isError).toBe(true);
       expect(resultJson(neither)).toMatchObject({ statusCode: 422 });
@@ -2060,7 +2191,7 @@ describe("receiving tools", () => {
         enqueueEmailSend: async () => {},
         receiving: { mxHost: "mx.millionsend.test", ingestSecret: INGEST_SECRET },
         inboxKeys: deriveInboxKeys(randomBytes(32)),
-        sharedInboxDomain: "agents.example.test",
+        sharedInboxDomain: SHARED_DOMAIN,
       });
       const client = await connect(await mintToken(), withShared);
       const created = resultJson(
@@ -2167,6 +2298,19 @@ describe("receiving tools", () => {
           }),
         ),
       ).toEqual({ status: "timeout" });
+      await client.close();
+    });
+
+    it("refuse a wait on an inbox they can't reach at once, as not found", async () => {
+      const client = await connect(await mintToken());
+      const startedAt = Date.now();
+      const waited = await client.callTool({
+        name: "wait_for_received_email",
+        arguments: { inbox_id: randomUUID(), timeout: 30 },
+      });
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      expect(waited.isError).toBe(true);
+      expect(resultJson(waited)).toMatchObject({ statusCode: 404, message: "Inbox not found." });
       await client.close();
     });
   });

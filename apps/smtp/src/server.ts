@@ -41,6 +41,7 @@ const server = createSmtpServer({
     : {}),
   allowInsecureAuth: env.SMTP_ALLOW_INSECURE_AUTH,
   onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+  rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   inboxKeys: deriveInboxKeys(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64")),
   sharedInboxDomain: sharedInboxDomain(),
 });

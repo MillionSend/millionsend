@@ -6,8 +6,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { type AcceptEmailPayload, acceptEmail } from "../src/accept-email.js";
 import type { InboxActor } from "../src/inboxes/activity.js";
 import { createDraft, sendDraft, updateDraft } from "../src/inboxes/drafts.js";
+import { FORWARD_WAIT_MAX, SHARED_PAUSED_RETRY_MS } from "../src/inboxes/limits.js";
 import {
   beginInboxAccept,
+  forwardToForwardTargets,
   refundInboxAccept,
   replyInThread,
   type SendOutcome,
@@ -15,7 +17,7 @@ import {
 } from "../src/inboxes/send.js";
 import { SHARED_REFUSALS, type SharedRefusalReason } from "../src/inboxes/send-policy.js";
 import { resolveMonitorSettings } from "../src/monitor-settings.js";
-import { DAY_MS, utcDay } from "../src/utc-day.js";
+import { DAY_MS, nextUtcDayStart, utcDay } from "../src/utc-day.js";
 import {
   addInbox,
   addThread,
@@ -168,6 +170,63 @@ describe("the shared domain's mode, on every inbox send", () => {
     });
     const out = sent(await sendNew(w, inbox, ["ana@example.org"], TEAM_KEY));
     expect((await emailRow(out.email.id))?.firstContact).toBe(true);
+  });
+
+  it("holds an agent's reply that follows a foreign Reply-To on the shared domain, even from an allowlisted sender", async () => {
+    const w = await seedWorld(db, "shared-reply-to");
+    await establish(w);
+    openSending();
+    const safety = { send_policy: "open" as const, allowlist: ["*@sender.example"] };
+    const target = async (inbox: InboxRow) => {
+      const threadId = await addThread(w, inbox.id);
+      const received = await receive(w, {
+        inbox,
+        threadId,
+        senderTrust: "allowlisted",
+        message: { replyTo: "other@elsewhere.example" },
+      });
+      return { teamId: w.teamId, inboxId: inbox.id, threadId, emailId: received.id };
+    };
+    const reply = async (inbox: InboxRow) =>
+      replyInThread(db, w.deps, {
+        ...(await target(inbox)),
+        billing: await billing(w),
+        actor: TEAM_KEY,
+        body: { text: "Sure" },
+      });
+    const replyByDraft = async (inbox: InboxRow) => {
+      const { threadId, emailId, ...at } = await target(inbox);
+      // A team-wide key's send approves its own draft; the inbox's own key sends unattended.
+      const actor: InboxActor = {
+        kind: "api_key",
+        apiKeyId: "00000000-0000-4000-8000-000000000002",
+        inboxId: inbox.id,
+      };
+      const draft = await createDraft(db, w.deps, {
+        ...at,
+        actor,
+        input: {
+          to: ["other@elsewhere.example"],
+          text: "Sure",
+          thread_id: threadId,
+          reply_to_email_id: emailId,
+        },
+      });
+      if (!draft.ok) throw new Error(draft.error.message);
+      return sendDraft(db, w.deps, {
+        ...at,
+        billing: await billing(w),
+        actor,
+        draftId: draft.draft.id,
+      });
+    };
+    const shared = await addInbox(w, { local: "bot", shared: true, safety });
+    const desk = await addInbox(w, { local: "desk", safety });
+    for (const answer of [reply, replyByDraft]) {
+      expect(drafted(await answer(shared)).approval_reasons).toContain("reply_to_redirect");
+      // On a team's own domain the allowlisted sender still vouches for its Reply-To.
+      sent(await answer(desk));
+    }
   });
 
   it("keeps an inbox replying only while its display name, address or team label fails the guards", async () => {
@@ -463,5 +522,77 @@ describe("a generic send from a shared address", () => {
     expect(await send()).toEqual({ ok: false, reason: "shared_plan" });
     vi.stubEnv("SHARED_INBOX_SEND", "false");
     expect(await send()).toEqual({ ok: false, reason: "shared_paused" });
+  });
+});
+
+describe("forward_to copies from the shared domain", () => {
+  it("wait out a paused domain and the team's daily cap, until FORWARD_WAIT_MAX after delivery", async () => {
+    const w = await seedWorld(db, "forward-wait");
+    const inbox = await addInbox(w, {
+      local: "relay",
+      shared: true,
+      safety: { forward_to: [w.owner] },
+    });
+    const threadId = await addThread(w, inbox.id);
+    const received = await receive(w, { inbox, threadId });
+    const forward = () =>
+      forwardToForwardTargets(db, w.deps, { receivedEmailId: received.id, inboxId: inbox.id });
+    const waitsUntil = (out: Awaited<ReturnType<typeof forward>>) =>
+      out?.kind === "wait" ? out.until.getTime() : null;
+    const m = schema.receivedEmailInboxes;
+    const deliveredAt = (at: number) =>
+      db
+        .update(m)
+        .set({ deliveredAt: new Date(at) })
+        .where(and(eq(m.receivedEmailId, received.id), eq(m.inboxId, inbox.id)));
+    const refusals = async () =>
+      (
+        await db
+          .select()
+          .from(schema.inboxActivity)
+          .where(
+            and(
+              eq(schema.inboxActivity.inboxId, inbox.id),
+              eq(schema.inboxActivity.action, "email.refused"),
+            ),
+          )
+      ).length;
+
+    vi.stubEnv("SHARED_INBOX_SEND", "false");
+    const before = Date.now();
+    const paused = waitsUntil(await forward());
+    expect(paused).toBeGreaterThan(before);
+    expect(paused).toBeLessThanOrEqual(Date.now() + SHARED_PAUSED_RETRY_MS);
+    expect(
+      await db.select().from(schema.emails).where(eq(schema.emails.inboxId, inbox.id)),
+    ).toEqual([]);
+    expect(await refusals()).toBe(0);
+    // Past FORWARD_WAIT_MAX the pause refuses the copy for good.
+    await deliveredAt(Date.now() - FORWARD_WAIT_MAX);
+    expect(await forward()).toMatchObject(refusedFor("shared_paused"));
+    expect(await refusals()).toBe(1);
+
+    vi.stubEnv("SHARED_INBOX_SEND", "true");
+    vi.stubEnv("SHARED_INBOX_TEAM_DAILY_CAP", "1");
+    await deliveredAt(Date.now());
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: w.teamId, day: utcDay(), sharedRecipients: 1 });
+    const reset = nextUtcDayStart().getTime();
+    expect(waitsUntil(await forward())).toBeGreaterThanOrEqual(reset);
+
+    vi.stubEnv("SHARED_INBOX_TEAM_DAILY_CAP", "2");
+    expect(await forward()).toMatchObject({ kind: "sent" });
+
+    // The pause holds the shared domain only: a team's own domain forwards at once.
+    vi.stubEnv("SHARED_INBOX_SEND", "false");
+    const own = await addInbox(w, { local: "relay-own", safety: { forward_to: [w.owner] } });
+    const ownReceived = await receive(w, { inbox: own, threadId: await addThread(w, own.id) });
+    expect(
+      await forwardToForwardTargets(db, w.deps, {
+        receivedEmailId: ownReceived.id,
+        inboxId: own.id,
+      }),
+    ).toMatchObject({ kind: "sent" });
   });
 });

@@ -12,6 +12,8 @@ import {
   THREAD_FOLDERS,
   type ThreadFolder,
 } from "@millionsend/core";
+import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
+import { AFTER_CURSOR_DESCRIPTION, BEFORE_CURSOR_DESCRIPTION } from "../schemas.js";
 
 /**
  * Resend's Inboxes beta (/inboxes/**), plus MillionSend's extension keys.
@@ -33,11 +35,13 @@ const safetyFields = {
   allowlist: z
     .array(z.string())
     .max(INBOX_ALLOWLIST_MAX)
-    .describe('"local@domain" (exact) or "*@domain" (the domain and its subdomains)'),
+    .describe(
+      '"local@domain" (exact) or "*@domain" (the domain and its subdomains). On the shared domain it only lets mail in',
+    ),
   owner_addresses: z
     .array(z.string())
     .max(INBOX_OWNER_ADDRESSES_MAX)
-    .describe("Owners besides the team members' login addresses"),
+    .describe("Owners besides the team members' login addresses; ignored on the shared domain"),
   screening: z.boolean().describe("Score external mail for prompt injection (agent inboxes only)"),
   extract_codes: z.boolean().describe("Expose extracted codes and sign-in links"),
   send_policy: z
@@ -57,7 +61,9 @@ const safetyFields = {
   forward_to: z
     .array(z.string())
     .max(INBOX_FORWARD_TO_MAX)
-    .describe("Forward every delivered message to these team member or owner addresses"),
+    .describe(
+      "Forward every delivered message to these team member or owner addresses; team members only on the shared domain",
+    ),
 };
 
 export const inboxSafetyPatchBodySchema = z
@@ -85,18 +91,26 @@ export const createInboxRequestSchema = z
       .string()
       .optional()
       .describe(
-        "An address on one of your verified domains; it needs receiving on unless forwarding is true. MillionSend extension: omitted, the inbox gets an address on the shared inbox domain (no DNS), named by username or random.",
+        "An address on one of your verified domains; it needs receiving on unless forwarding is true. MillionSend extension: omitted, the inbox gets an address on the shared inbox domain (no DNS), named by username or random, unless domain_id names one of your domains.",
+      ),
+    domain_id: z
+      .uuid()
+      .optional()
+      .describe(
+        "MillionSend extension: the id of a GET /domains row, instead of email_address. The team's subdomain of the shared domain (the row with shared: true) is the same as leaving email_address out; one of your verified domains needs username, the part before the @.",
       ),
     username: z
       .string()
       .optional()
       .describe(
-        "MillionSend extension: with email_address omitted, the part before the @ of the shared-domain address, trimmed and lowercased: 1-64 letters, digits, dots, hyphens and underscores, starting and ending with a letter or digit, never cut short. Reserved names (postmaster, abuse, admin, security, support, noreply, no-reply, billing, hostmaster, webmaster, mailer-daemon, root, compared without dots, hyphens and underscores), the fwd- prefix and brand look-alikes answer 422, and one already in use 409. Where the instance reviews names, a chosen one is reviewed first: 503 with retry-after while that review is unavailable. Omitted: a random one.",
+        "MillionSend extension: with email_address omitted, the part before the @ of the shared-domain address, trimmed and lowercased: 1-64 letters, digits, dots, hyphens and underscores, starting and ending with a letter or digit, never cut short. Reserved names (postmaster, abuse, admin, security, support, noreply, no-reply, billing, hostmaster, webmaster, mailer-daemon, root, compared without dots, hyphens and underscores), the fwd- prefix and brand look-alikes answer 422, and one already in use 409. Where the instance reviews names, a chosen one is reviewed first: 503 with retry-after while that review is unavailable. Omitted: a random one. With a domain_id of one of your domains, it is the part before the @ there, required, under email_address's rule.",
       ),
     name: z
       .string()
       .optional()
-      .describe("Internal name, 1-64 characters. Defaults to email_address."),
+      .describe(
+        `Internal name, 1-${INBOX_NAME_MAX} characters, so any address fits. Defaults to email_address.`,
+      ),
     from_name: z
       .string()
       .optional()
@@ -154,7 +168,9 @@ export const inboxSchema = z
     email_address: z.string(),
     domain_id: z
       .uuid()
-      .describe("A shared address's is its shared subdomain's id, which /domains does not list"),
+      .describe(
+        "A shared address's is its team's shared subdomain: the GET /domains row with shared: true",
+      ),
     receiving_address: z.string().nullable(),
     from_name: z.string().nullable(),
     unread: z.number().int().describe("Threads with an unread message"),
@@ -265,6 +281,13 @@ const threadListItemSchema = z.object({
   has_attachment: z.boolean(),
   has_draft: z.boolean(),
   read: z.boolean(),
+  quarantined: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "MillionSend extension, with include_quarantined=true: messages in quarantine, not yet released; mail still being screened isn't counted. Held mail never counts as unread",
+    ),
   received_at: z.string(),
   folder: z.enum(THREAD_FOLDERS),
 });
@@ -424,8 +447,8 @@ const optionalString = (description: string) => z.string().optional().describe(d
 
 const pagingFields = {
   limit: optionalString("Page size, 1-100 (default 20)"),
-  after: optionalString("The id of the last item of the current page; returns the next page"),
-  before: optionalString("The id of the first item of the current page; returns the previous page"),
+  after: optionalString(AFTER_CURSOR_DESCRIPTION),
+  before: optionalString(BEFORE_CURSOR_DESCRIPTION),
 };
 
 export const pagingQuerySchema = z.object(pagingFields);
@@ -473,7 +496,15 @@ export const searchThreadsQuerySchema = z.object({
 export const codesQuerySchema = z.object({
   from: optionalString("An exact sender address, or a domain covering itself and its subdomains"),
   wait: optionalString("Seconds to wait for a code to arrive, 0-50 (default 0)"),
-  max_age: optionalString("Oldest mail considered, in seconds, 60-86400 (default 600)"),
+  max_age: optionalString(
+    "How long ago the code may have reached the inbox, in seconds, 60-86400 (default 600); a released code counts from its release",
+  ),
+  since: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      "Only mail received after this ISO 8601 instant, such as the received_at of a code already used",
+    ),
 });
 
 /** Resend's pagination messages, shared by every /inboxes list. */

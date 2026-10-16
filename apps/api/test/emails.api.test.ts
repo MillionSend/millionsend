@@ -5,6 +5,7 @@ import {
   EnvKeyring,
   generateApiKey,
   hashRecipient,
+  MAX_SUBJECT_LENGTH,
   openAttachments,
   teamRung,
   utcDay,
@@ -298,6 +299,56 @@ describe("get email wire shape", () => {
       .where(eq(schema.emails.id, id));
     const body = (await (await get(id)).json()) as { message_id: string };
     expect(body.message_id).toBe("<0100019abc@email.amazonses.com>");
+  });
+});
+
+describe("GET /emails", () => {
+  it("lists newest first: after pages toward older emails, before back toward newer", async () => {
+    const listTeam = await createTeam(db, "list-order");
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId: listTeam,
+      name: "t",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    // Pinned created_at: rows inserted in one go could tie and fall back to the random id.
+    const rows = await db
+      .insert(schema.emails)
+      .values(
+        ["First", "Second", "Third"].map((subject, day) => ({
+          teamId: listTeam,
+          from: "A <a@example.com>",
+          to: ["r@example.com"],
+          subject,
+          latestStatus: "sent" as const,
+          createdAt: new Date(Date.UTC(2026, 0, day + 1)),
+        })),
+      )
+      .returning({ id: schema.emails.id, subject: schema.emails.subject });
+    const list = async (query: string) =>
+      (await (
+        await app.request(`/emails${query}`, { headers: { authorization: `Bearer ${key.token}` } })
+      ).json()) as { has_more: boolean; data: { id: string; subject: string }[] };
+    const page = await list("?limit=2");
+    expect(page).toMatchObject({
+      has_more: true,
+      data: [{ subject: "Third" }, { subject: "Second" }],
+    });
+    expect(await list(`?limit=2&after=${page.data[1]?.id}`)).toMatchObject({
+      has_more: false,
+      data: [{ subject: "First" }],
+    });
+    const oldest = rows.find((r) => r.subject === "First")?.id;
+    expect(await list(`?limit=1&before=${oldest}`)).toMatchObject({
+      has_more: true,
+      data: [{ subject: "Second" }],
+    });
+    expect(await list(`?before=${oldest}`)).toMatchObject({
+      has_more: false,
+      data: [{ subject: "Third" }, { subject: "Second" }],
+    });
   });
 });
 
@@ -739,7 +790,7 @@ describe("batch permissive validation", () => {
     };
     expect(body.data).toHaveLength(1);
     expect(body.errors).toEqual([
-      { index: 1, message: expect.stringMatching(/html or text/) },
+      { index: 1, message: "Either html or text must be provided" },
       { index: 2, message: expect.stringMatching(/not verified/) },
       { index: 3, message: expect.stringMatching(/suppressed/) },
     ]);
@@ -774,7 +825,7 @@ describe("batch permissive validation", () => {
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({
       name: "validation_error",
-      message: expect.stringMatching(/^emails\.1: /),
+      message: "emails.1: Either html or text must be provided",
     });
     expect(enqueuedSends.length).toBe(before);
   });
@@ -1139,6 +1190,35 @@ describe("attachments and custom headers", () => {
       .where(eq(schema.emails.id, data[0]?.id ?? ""));
     expect(row?.headers).toEqual({ "X-Entity-Ref-ID": "batch-1" });
     expect(row?.attachments).toBeTruthy();
+  });
+});
+
+describe("subject length", () => {
+  const batch = (items: unknown[]) =>
+    app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(items),
+    });
+
+  it("422s a subject past MAX_SUBJECT_LENGTH characters, single and batch alike", async () => {
+    const tooLong = { ...validBody, subject: "s".repeat(MAX_SUBJECT_LENGTH + 1) };
+    const single = await post(tooLong);
+    expect(single.status).toBe(422);
+    expect(await single.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/^subject: /),
+    });
+    const items = await batch([{ ...validBody, to: ["subject-ok@example.com"] }, tooLong]);
+    expect(items.status).toBe(422);
+    expect(await items.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/^emails\.1: subject: /),
+    });
+
+    const atCap = { ...validBody, subject: "s".repeat(MAX_SUBJECT_LENGTH) };
+    expect((await post({ ...atCap, to: ["subject-cap@example.com"] })).status).toBe(200);
+    expect((await batch([{ ...atCap, to: ["subject-cap-batch@example.com"] }])).status).toBe(200);
   });
 });
 

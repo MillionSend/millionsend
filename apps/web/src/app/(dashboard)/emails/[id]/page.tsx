@@ -18,6 +18,7 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
+import { suppressedAtAccept } from "@/lib/email-events";
 import {
   addrSpec,
   displayUrl,
@@ -551,23 +552,36 @@ export default function EmailDetailPage() {
   const email = query.data;
   const recipient = email?.to[0] ?? null;
 
-  // The suppression row backing the "Suppressed details" drawer (and its
+  // The suppressions backing the "Suppressed details" drawer (and their
   // destructive remove) — fetched only when that drawer opens.
   const suppressionQuery = useQuery(
-    trpc.emails.suppressions.list.queryOptions(
-      { search: recipient ?? "", limit: 50 },
-      { enabled: drawer === "suppressed" && recipient != null },
+    trpc.emails.suppressions.forEmail.queryOptions(
+      { emailId: id },
+      { enabled: drawer === "suppressed" },
     ),
   );
-  const suppressionRow =
-    suppressionQuery.data?.items.find((item) => item.email === recipient) ?? null;
+  const suppressionRows = suppressionQuery.data ?? [];
   const removeMutation = useMutation(
     trpc.emails.suppressions.remove.mutationOptions({
-      onSuccess: () => {
-        setDrawer(null);
-        queryClient.invalidateQueries(trpc.emails.suppressions.pathFilter());
+      onSuccess: (removed) => {
+        if (suppressionRows.every((row) => row.id === removed.id)) setDrawer(null);
+        return queryClient.invalidateQueries(trpc.emails.suppressions.pathFilter());
       },
     }),
+  );
+  const removeButton = (row: (typeof suppressionRows)[number] | null, marginTop: number) => (
+    <button
+      type="button"
+      className="ms-btn ms-btn-destructive"
+      style={{ width: "100%", justifyContent: "center", marginTop }}
+      disabled={!row || removeMutation.isPending}
+      onClick={() => {
+        if (row) removeMutation.mutate({ id: row.id });
+      }}
+    >
+      <BtnSpinner on={removeMutation.isPending && removeMutation.variables?.id === row?.id} />
+      {t("suppressedDrawer.remove")}
+    </button>
   );
 
   if (query.isPending) {
@@ -1044,6 +1058,7 @@ export default function EmailDetailPage() {
             insights: email.insights,
             bodyPurgedAt: email.bodyPurgedAt,
             hiddenBySupportView: email.hiddenBySupportView,
+            suppressedAtAccept: suppressedAtAccept(email.events),
           }}
         />
       </div>
@@ -1151,36 +1166,39 @@ export default function EmailDetailPage() {
         onClose={() => setDrawer(null)}
         title={t("suppressedDrawer.title")}
       >
-        <div className="ms-wrap-row" style={{ display: "flex", gap: 32, marginTop: 16 }}>
-          <div>
-            <Microlabel>{t("suppressedDrawer.origin")}</Microlabel>
-            <div style={{ fontSize: 14, marginTop: 4 }}>
-              {suppressionRow
-                ? [
-                    t(`suppressions.reason.${suppressionRow.reason}`),
-                    ...(suppressionRow.reason === "hard_bounce" && bounce?.bounceType
-                      ? [bounce.bounceType.toLowerCase()]
-                      : []),
-                  ].join(" — ")
-                : "—"}
+        {/* One block per suppression a recipient matches; dashes while loading or when none does. */}
+        {(suppressionRows.length > 0 ? suppressionRows : [null]).map((row, index) => (
+          <div
+            key={row?.id ?? "none"}
+            style={index > 0 ? { marginTop: 18, borderTop: "1px solid var(--ms-line)" } : undefined}
+          >
+            <div className="ms-wrap-row" style={{ display: "flex", gap: 32, marginTop: 16 }}>
+              <div>
+                <Microlabel>{t("suppressedDrawer.origin")}</Microlabel>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {row ? t(`suppressions.reason.${row.reason}`) : "—"}
+                </div>
+              </div>
+              <div>
+                <Microlabel>{t("suppressedDrawer.added")}</Microlabel>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {row ? formatRelative(row.createdAt, locale) : "—"}
+                </div>
+              </div>
             </div>
+            {row ? (
+              <div style={{ marginTop: 12 }}>
+                <Microlabel>{t("suppressedDrawer.recipient")}</Microlabel>
+                <div className="ms-mono" style={{ fontSize: 13, marginTop: 5 }}>
+                  {/* An erased row matches by its hash alone and keeps its address unknown. */}
+                  {row.email ?? <span style={{ color: "var(--ms-faint)" }}>—</span>}
+                </div>
+              </div>
+            ) : null}
+            {suppressionRows.length > 1 ? removeButton(row, 14) : null}
           </div>
-          <div>
-            <Microlabel>{t("suppressedDrawer.added")}</Microlabel>
-            <div style={{ fontSize: 14, marginTop: 4 }}>
-              {suppressionRow ? formatRelative(suppressionRow.createdAt, locale) : "—"}
-            </div>
-          </div>
-        </div>
-        {recipient ? (
-          <div style={{ marginTop: 12 }}>
-            <Microlabel>{t("suppressedDrawer.recipient")}</Microlabel>
-            <div className="ms-mono" style={{ fontSize: 13, marginTop: 5 }}>
-              {recipient}
-            </div>
-          </div>
-        ) : null}
-        <div style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6, marginTop: 14 }}>
+        ))}
+        <div style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6, marginTop: 16 }}>
           {t.rich("suppressedDrawer.blocked", {
             code: (chunks) => (
               <span className="ms-mono" style={{ fontSize: 12, color: "var(--ms-bone)" }}>
@@ -1196,18 +1214,8 @@ export default function EmailDetailPage() {
           <StepRow index={1} text={t("suppressedDrawer.step1")} />
           <StepRow index={2} text={t("suppressedDrawer.step2")} last />
         </div>
-        <button
-          type="button"
-          className="ms-btn ms-btn-destructive"
-          style={{ width: "100%", justifyContent: "center", marginTop: 16 }}
-          disabled={!suppressionRow || removeMutation.isPending}
-          onClick={() => {
-            if (suppressionRow) removeMutation.mutate({ id: suppressionRow.id });
-          }}
-        >
-          <BtnSpinner on={removeMutation.isPending} />
-          {t("suppressedDrawer.remove")}
-        </button>
+        {/* Remove follows the steps that say to confirm first; several matches each need their own. */}
+        {suppressionRows.length > 1 ? null : removeButton(suppressionRows[0] ?? null, 16)}
       </Drawer>
 
       <Drawer

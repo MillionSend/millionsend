@@ -404,6 +404,14 @@ sending is paused for its bounce or complaint rate, the relay answers
 `451 4.7.1` after DATA, so the client keeps the message and retries; a
 suspended team gets `550`.
 
+Every message counts against its API key's per-minute rate limit, the same
+budget the key's API requests spend (`API_RATE_LIMIT_PER_MINUTE`, default
+600), and, like the API, the relay caps each team at 3,000 messages a minute
+across all of its keys. The count happens at `MAIL FROM`, before any of the
+message is sent: past either limit the relay answers `451 4.7.1` with the
+seconds left until the next minute, so the client keeps the message and
+retries.
+
 A recipient whose domain can never receive mail (see
 [Errors](/api-reference#errors)) gets `550 5.1.2` at `RCPT TO`, with the
 API's message, and the relay still accepts the other recipients. If it was
@@ -583,7 +591,10 @@ under it, as a sending domain.
    ([AWS: Creating and verifying identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html)).
 3. **Turn it on.** Set `SHARED_INBOX_DOMAIN=agents.example` in `.env` and run
    `docker compose up -d`. The app refuses to boot when the value isn't a
-   lowercase hostname, or when `RECEIVING_MX_HOST` is unset.
+   lowercase hostname, or when `RECEIVING_MX_HOST` is unset. From then on a
+   team gets its subdomain when it's created, and teams that already exist
+   get theirs at the worker's next boot, with one name review each where a
+   [judge](#content-monitoring-optional) is configured.
 4. **Give role mail a home.** Mail to `postmaster@` and `abuse@` at the
    domain, or at any team's subdomain, goes to your own team, never to the
    team whose subdomain it is: the oldest team on the `system` plan (Console
@@ -608,7 +619,7 @@ until they are; the console wins:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `SHARED_INBOX_SEND` | `true` | Whether shared addresses send at all. Off, nothing goes out from them, replies included, and mail already queued waits until it's back on; mail to them still arrives |
+| `SHARED_INBOX_SEND` | `true` | Whether shared addresses send at all. Off, nothing goes out from them, replies included, and mail already queued waits until it's back on (`forward_to` copies for up to 2 days); mail to them still arrives |
 | `SHARED_INBOX_OPEN` | `false` | Whether paid teams' shared addresses (every team's, self-hosted) may start conversations. Off, without a judge (`ABUSE_JUDGE`) or with `MONITOR_AUTO_HOLD` off, they only reply inside their threads |
 | `SHARED_INBOX_TENANTS` | `false` | Whether shared mail goes out under the sending team's SES tenant, with `SES_TENANTS` on |
 | `SHARED_INBOX_TEAM_DAILY_CAP` | 1000 | Recipients one team may reach per UTC day from all its shared addresses, approved sends included |
@@ -1423,12 +1434,18 @@ latency and error class; the review page shows those and never a subject or
 a body. Sample rows are pruned after 90 days.
 
 **Names on the shared domain.** With a
-[shared inbox domain](#shared-inbox-domain), the API and the dashboard also
-send TypeSafe the names a team publishes there, for review before they're
-used: a chosen username, a shared inbox's display name (`from_name`) and
-the team's subdomain label, as written, with nothing else about the team or
-the inbox. Only a count of the names reviewed and refused per team and day
-is kept. List these in the privacy notice too.
+[shared inbox domain](#shared-inbox-domain), the API, the dashboard and the
+worker also send TypeSafe the names a team publishes there, for review
+before they're used: a chosen username, a shared inbox's display name
+(`from_name`) and every team's subdomain label, made from the team name
+(lowercased, accents dropped, each run of other characters turned into a
+hyphen, up to 30 characters), each as it would be published, with nothing
+else about the team or the inbox. A label is sent when its team is
+created, on a rename that changes it, and once for every existing team
+that has none, at the worker's first boot on v0.14.0 or after the shared
+domain is set, whether or not the team uses the shared domain. Only a
+count of the names reviewed and refused per team and day is kept. List
+these in the privacy notice too.
 
 **Images and attachments.** Screening opens what an email carries, inside
 the worker: the text and links of PDF (up to 50 pages), Word, Excel,

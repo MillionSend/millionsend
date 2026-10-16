@@ -10,6 +10,7 @@ import {
   hasHeaderControlChar,
   isReservedTagName,
   LONG_POLL_MAX_SECONDS,
+  MAX_SUBJECT_LENGTH,
   MEDIA_TYPE_TOKEN,
   parseMailbox,
   parseScheduledAt,
@@ -200,6 +201,7 @@ export const sendEmailRequestSchema = z
     subject: z
       .string()
       .min(1)
+      .max(MAX_SUBJECT_LENGTH)
       .refine((v) => !hasHeaderControlChar(v), {
         message: "subject must not contain control characters",
       })
@@ -658,6 +660,12 @@ export const usageResponseSchema = z
   })
   .openapi("UsageResponse");
 
+// Order-neutral: lists that don't run newest first share these fields too.
+export const AFTER_CURSOR_DESCRIPTION =
+  "Cursor: id of the last item of the current page; returns the next page. Must be an id this list returned; there is no sentinel value.";
+export const BEFORE_CURSOR_DESCRIPTION =
+  "Cursor: id of the first item of the current page; returns the previous page; same rule as after.";
+
 /**
  * Resend SDK pagination (buildPaginationQuery): ?limit=&after= / ?before=,
  * limit 1-100 (default 20), cursors are item ids, after and before are
@@ -671,18 +679,8 @@ const listQueryFields = z.object({
     .max(100)
     .optional()
     .describe("Page size, 1-100 (default 20)"),
-  after: z
-    .uuid()
-    .optional()
-    .describe(
-      "Cursor: id of the last item of the previous page. Must be an id this list returned; there is no sentinel value.",
-    ),
-  before: z
-    .uuid()
-    .optional()
-    .describe(
-      "Cursor: id of the first item of the next page (page backwards); same rule as after.",
-    ),
+  after: z.uuid().optional().describe(AFTER_CURSOR_DESCRIPTION),
+  before: z.uuid().optional().describe(BEFORE_CURSOR_DESCRIPTION),
 });
 const oneCursor = <T extends z.ZodObject>(fields: T) =>
   fields.refine((q) => !(q.after && q.before), {
@@ -732,7 +730,9 @@ export const listReceivedEmailsQuerySchema = oneCursor(
       .describe("MillionSend extension: case-insensitive subject substring"),
     unread: booleanQuery
       .optional()
-      .describe("MillionSend extension, with inbox_id: read state in that inbox"),
+      .describe(
+        "MillionSend extension, with an inbox in context (inbox_id, or an inbox-scoped key): read state in that inbox",
+      ),
     include_quarantined: booleanQuery
       .optional()
       .describe(
@@ -742,9 +742,7 @@ export const listReceivedEmailsQuerySchema = oneCursor(
       .optional()
       .describe("MillionSend extension, full access keys only: list held mail only"),
   }),
-).refine((q) => q.unread === undefined || q.inbox_id !== undefined, {
-  message: "unread needs inbox_id",
-});
+);
 
 export const CONTACT_INCLUDES = ["properties", "topics"] as const;
 export type ContactInclude = (typeof CONTACT_INCLUDES)[number];
@@ -1127,11 +1125,12 @@ export const createBroadcastRequestSchema = z
       .optional()
       .describe("Segment to send to; omitted means every contact of the team"),
     from: fromAddress.describe(
-      'Sender, "Name <user@domain>"; the domain must be verified for the team',
+      'Sender, "Name <user@domain>"; the domain must be one of the team\'s own verified domains when the broadcast is sent: sending from an address on the shared inbox domain answers 403',
     ),
     subject: z
       .string()
       .min(1)
+      .max(MAX_SUBJECT_LENGTH)
       .describe("Subject line; supports {{{FIRST_NAME|there}}} merge fields"),
     html: z
       .string()
@@ -1170,7 +1169,7 @@ export const updateBroadcastRequestSchema = z
     name: z.string().optional(),
     segment_id: z.uuid().optional(),
     from: fromAddress.optional(),
-    subject: z.string().min(1).optional(),
+    subject: z.string().min(1).max(MAX_SUBJECT_LENGTH).optional(),
     html: z.string().optional(),
     text: z.string().optional(),
     reply_to: replyToList.optional(),
@@ -1431,7 +1430,9 @@ const domainCapabilitiesRequestSchema = z
   .object({
     sending: capabilityStatusSchema
       .optional()
-      .describe("Always enabled: receive-only domains are not supported, so disabled is a 422."),
+      .describe(
+        "Only enabled is accepted: a domain of your own can't be receive-only, so disabled is a 422.",
+      ),
     receiving: capabilityStatusSchema
       .optional()
       .describe(
@@ -1557,7 +1558,11 @@ const domainSchema = z.object({
   click_tracking: z.boolean(),
   tracking_subdomain: z.string().nullable(),
   capabilities: z.object({
-    sending: z.string().describe("Always enabled"),
+    sending: z
+      .string()
+      .describe(
+        "enabled; on the shared row, disabled while the instance pauses sending from the shared domain",
+      ),
     receiving: z
       .string()
       .describe(
@@ -1568,6 +1573,24 @@ const domainSchema = z.object({
     .boolean()
     .describe(
       "MillionSend extension: whether mail to an address without an inbox is stored (true) or refused at RCPT (false)",
+    ),
+  shared: z
+    .boolean()
+    .describe(
+      "MillionSend extension: true on the team's subdomain of the shared inbox domain, a read-only row listed after the team's own domains (403 on changes) that POST /inboxes domain_id takes; false on the team's own domains",
+    ),
+  sending_mode: z
+    .enum(["open", "reply_only", "receive_only"])
+    .optional()
+    .describe(
+      "MillionSend extension, on the shared row only: what its inboxes' addresses may send. open starts conversations, reply_only replies inside their threads, receive_only sends nothing. Holds on names still apply per send: an address whose username or from_name imitates a brand, or one on an older label that does, replies only, even when the mode is open.",
+    ),
+  sending_mode_reason: z
+    .enum(["plan", "instance"])
+    .nullable()
+    .optional()
+    .describe(
+      "MillionSend extension, on the shared row only: what holds sending below open: the team's plan or the instance; null when open",
     ),
 });
 
@@ -1729,7 +1752,8 @@ export const createApiKeyRequestSchema = z
       .uuid()
       .nullish()
       .describe(
-        "Restricts the key to sending from this one verified domain. Omitted or null, the key " +
+        "Restricts the key to sending from this one verified domain of the team: a GET /domains " +
+          "row with shared: false. Omitted or null, the key " +
           "inherits the calling key's scope: all domains, or the calling key's domain if it is " +
           "domain-scoped. A domain-scoped calling key cannot name any other domain " +
           "(403 restricted_api_key).",
@@ -1938,7 +1962,7 @@ const templateNameSchema = z.string().trim().min(1).max(200);
 const templateSubjectSchema = z
   .string()
   .trim()
-  .max(998)
+  .max(MAX_SUBJECT_LENGTH)
   .nullable()
   .describe('"" or null clears the subject');
 const templateBodySchema = z.string().max(500_000);

@@ -1,14 +1,18 @@
+import { API_RATE_LIMIT_PER_MINUTE_DEFAULT } from "@millionsend/config";
 import {
   type AcceptEmailDeps,
   type ApiKeyAuth,
   acceptEmail,
   authenticateApiKey,
+  countApiKeyRequest,
   customHeaderIssues,
   findLiveInbox,
+  fixedWindowCounter,
   formatMailbox,
   hasHeaderControlChar,
   INBOX_KEY_FROM_MESSAGE,
   isSharedInboxSender,
+  MAX_SUBJECT_LENGTH,
   monthlyQuotaMessage,
   msgIds,
   parseMailbox,
@@ -17,6 +21,7 @@ import {
   SES_MAX_MESSAGE_BYTES,
   SHARED_REPLY_ONLY_MESSAGE,
   sendRefusalError,
+  TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT,
   type UndeliverableReason,
   undeliverableRecipientMessage,
   undeliverableRecipients,
@@ -48,6 +53,10 @@ export interface SmtpDeps extends AcceptEmailDeps {
   maxMessageBytes?: number | undefined;
   /** ONBOARDING_EMAIL_FROM: refused as a From like on the HTTP API. */
   onboardingEmailFrom?: string | undefined;
+  /** Messages a minute per API key, from the same budget as the key's API requests. */
+  rateLimitPerMinute?: number | undefined;
+  /** Messages a minute per team across all of its keys, counted by this process alone. */
+  teamRateLimitPerMinute?: number | undefined;
 }
 
 function smtpError(responseCode: number, message: string): Error {
@@ -69,6 +78,11 @@ function toSmtpError(err: unknown): Error {
 /** 5.1.2: bad destination system address (RFC 3463). */
 function undeliverableError(hit: { address: string; reason: UndeliverableReason }): Error {
   return smtpError(550, `5.1.2 ${undeliverableRecipientMessage(hit, { forSend: true })}`);
+}
+
+/** A 451, so the client keeps the message and retries once the minute rolls over. */
+function rateLimitedError(retryAfterSec: number): Error {
+  return smtpError(451, `4.7.1 Too many messages, try again in ${retryAfterSec}s`);
 }
 
 /**
@@ -151,6 +165,9 @@ async function handleMessage(
   if (!subject) throw smtpError(553, "A non-empty Subject header is required");
   if (hasHeaderControlChar(subject)) {
     throw smtpError(554, "Subject must not contain control characters");
+  }
+  if (subject.length > MAX_SUBJECT_LENGTH) {
+    throw smtpError(554, `Subject must be at most ${MAX_SUBJECT_LENGTH} characters`);
   }
   const html = parsed.html === false ? undefined : parsed.html;
   const text = parsed.text;
@@ -257,6 +274,9 @@ async function handleMessage(
  */
 export function createSmtpServer(deps: SmtpDeps): SMTPServer {
   const maxMessageBytes = deps.maxMessageBytes ?? MAX_MESSAGE_BYTES;
+  const rateLimitPerMinute = deps.rateLimitPerMinute ?? API_RATE_LIMIT_PER_MINUTE_DEFAULT;
+  const teamRateLimitPerMinute = deps.teamRateLimitPerMinute ?? TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT;
+  const countTeamMessage = fixedWindowCounter();
   const connectionsByIp = new Map<string, number>();
   // Sessions admitted by onConnect; onClose also fires for rejected ones.
   const admitted = new Set<string>();
@@ -311,6 +331,22 @@ export function createSmtpServer(deps: SmtpDeps): SMTPServer {
             : toSmtpError(err),
         );
       });
+    },
+    // Counted at MAIL FROM, before any of the message arrives, and again for
+    // every transaction a session opens after RSET.
+    onMailFrom(_address, session, callback) {
+      void (async () => {
+        // smtp-server answers MAIL before AUTH with its own 530.
+        const auth = session.user as unknown as ApiKeyAuth | undefined;
+        if (!auth?.apiKeyId) throw smtpError(530, "Authentication required");
+        const key = await countApiKeyRequest(deps.db, auth.apiKeyId);
+        if (key.count > rateLimitPerMinute) throw rateLimitedError(key.retryAfterSec);
+        const team = countTeamMessage(auth.teamId);
+        if (team.count > teamRateLimitPerMinute) throw rateLimitedError(team.retryAfterSec);
+      })().then(
+        () => callback(),
+        (err) => callback(toSmtpError(err)),
+      );
     },
     onRcptTo(address, session, callback) {
       if ((rcptRefusals.get(session.id) ?? 0) >= MAX_RCPT_TO) {

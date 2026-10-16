@@ -100,7 +100,7 @@ export function safetyProblem(
   },
 ): string | null {
   if (ctx.shared && s.send_policy === "allowlist") {
-    return 'send_policy "allowlist" is not available on the shared domain: its allowlist never counts there';
+    return 'send_policy "allowlist" is not available on the shared domain: there the allowlist counts for incoming mail only';
   }
   if (ctx.shared && s.send_policy === "open" && ctx.sharedSending?.mode !== "open") {
     return SHARED_REFUSALS[

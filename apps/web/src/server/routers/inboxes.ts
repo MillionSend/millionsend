@@ -12,7 +12,6 @@ import {
   deleteDraft,
   deleteInboxes,
   deleteLabel,
-  ensureSharedSubdomain,
   fetchEffectivePlan,
   forwardInThread,
   getDraft,
@@ -40,6 +39,7 @@ import {
   sendNewFromInbox,
   THREAD_FOLDERS,
   teamMemberEmails,
+  teamSharedDomain,
   updateDraft,
   updateInbox,
   updateInboxSafety,
@@ -47,6 +47,7 @@ import {
   updateThread,
   visibleLine,
 } from "@millionsend/core";
+import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, gt, inArray, max, sql } from "drizzle-orm";
@@ -253,15 +254,6 @@ async function receivedOverview(db: Db, teamId: string) {
   };
 }
 
-/** The team's name, which its shared subdomain label is drawn from. */
-async function teamName(db: Db, teamId: string): Promise<string> {
-  const [team] = await db
-    .select({ name: schema.teams.name })
-    .from(schema.teams)
-    .where(eq(schema.teams.id, teamId));
-  return team?.name ?? "";
-}
-
 /** Support view: thread messages and drafts read as their envelope, never their content. */
 function withoutContent<T extends { html: string | null; text: string | null }>(item: T): T {
   return {
@@ -284,41 +276,14 @@ export const inboxesRouter = router({
       )
       .orderBy(dm.name);
     const shared = sharedInboxDomain();
-    const [subdomain] = shared
-      ? await ctx.db
-          .select({ name: schema.sharedInboxDomains.name })
-          .from(schema.sharedInboxDomains)
-          .where(eq(schema.sharedInboxDomains.teamId, ctx.teamId))
-      : [];
+    const subdomain = shared ? await teamSharedDomain(ctx.db, ctx.teamId) : null;
     return {
       domains,
-      // The team's subdomain once it has one; the parent domain before.
+      // The team's subdomain; the parent domain while its name review is pending.
       sharedDomain: shared ? (subdomain?.name ?? shared) : null,
-      sharedSubdomainReady: subdomain !== undefined,
       sharedSending: shared ? await sharedSending(ctx) : null,
       plan: await planUsage(ctx.db, ctx.teamId),
     };
-  }),
-
-  /**
-   * Claims the team's shared subdomain as its first shared inbox would, so
-   * the screens naming the shared domain show the address that inbox will
-   * get. Null, claiming nothing, where the instance has no shared domain or
-   * the name review can't answer now: nothing is being created yet, so the
-   * claim waits rather than fix a random label for good.
-   */
-  reserveSharedSubdomain: receivingProcedure.mutation(async ({ ctx }) => {
-    const deps = inboxDeps(ctx);
-    if (!deps.sharedInboxDomain) return null;
-    const sub = await ensureSharedSubdomain(ctx.db, {
-      teamId: ctx.teamId,
-      teamName: await teamName(ctx.db, ctx.teamId),
-      sharedInboxDomain: deps.sharedInboxDomain,
-      review: deps.judgeSharedNames,
-      now: new Date(),
-      onTransient: "skip",
-    });
-    return sub && { name: sub.name };
   }),
 
   list: receivingProcedure
@@ -405,7 +370,7 @@ export const inboxesRouter = router({
     .input(
       z.object({
         kind: z.enum(INBOX_KINDS),
-        name: z.string().trim().max(64).optional(),
+        name: z.string().trim().max(INBOX_NAME_MAX).optional(),
         // With domainId, the address's local part; without, the shared address's username.
         localPart: z.string().trim().toLowerCase().min(1).max(64).optional(),
         domainId: z.uuid().optional(),
@@ -429,7 +394,6 @@ export const inboxesRouter = router({
       }
       const result = await createInbox(ctx.db, inboxDeps(ctx), {
         teamId: ctx.teamId,
-        teamName: await teamName(ctx.db, ctx.teamId),
         plan: (await fetchEffectivePlan(ctx.db, ctx.teamId)) ?? "free",
         isCloud: isCloudDeployment(),
         actor: userActor(ctx),
@@ -450,7 +414,7 @@ export const inboxesRouter = router({
     .input(
       z.object({
         id: z.uuid(),
-        name: z.string().trim().min(1).max(64).optional(),
+        name: z.string().trim().min(1).max(INBOX_NAME_MAX).optional(),
         fromName: z.string().trim().max(78).optional(),
         expiresIn: z.enum(EXPIRY_CHOICES).nullable().optional(),
       }),

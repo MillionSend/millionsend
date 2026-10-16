@@ -11,7 +11,7 @@
   "list": {
     "title": "Domains",
     "addDomain": "Add domain",
-    "empty": "No domains yet.",
+    "empty": "No domains of your own yet.",
     "emptyBody": "Add a domain to start sending.",
     "error": "Couldn't load domains.",
     "retry": "Retry",
@@ -20,8 +20,10 @@
     "allRegions": "All regions",
     "rowDetails": "Domain details",
     "pageOf": "Page 1 – {pages} of {total} domains",
-    "noMatch": "No domains match the filters.",
+    "noMatch": "None of your domains match the filters.",
     "clearFilters": "Clear filters",
+    "shared": "Shared",
+    "sharedOpen": "can start conversations",
     "columns": {
       "domain": "Domain",
       "status": "Status",

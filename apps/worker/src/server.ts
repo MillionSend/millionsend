@@ -25,6 +25,7 @@ import {
   anyYoungLinkDomain,
   committedDailyVolume,
   createDomainAgeResolver,
+  createSharedNameReview,
   DomainAgeRetryableError,
   deriveInboxKeys,
   deriveSamplingKey,
@@ -117,6 +118,10 @@ import { screenReceived } from "./handlers/screen-received.js";
 import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
+import {
+  queueMissingSharedSubdomains,
+  runSharedSubdomainJob,
+} from "./handlers/shared-subdomain.js";
 import {
   abandonTenantStatus,
   retryTenantStatus,
@@ -384,6 +389,16 @@ const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise
   );
 };
 
+const backfillSharedSubdomains = async (): Promise<void> => {
+  const { stamped, queued } = await queueMissingSharedSubdomains(db, {
+    sharedInboxDomain: sharedDomain,
+    sendMany: (jobs) => queue.enqueueSharedSubdomains(jobs),
+  });
+  if (stamped > 0 || queued > 0) {
+    console.log(`shared.subdomain: stamped=${stamped} queued=${queued}`);
+  }
+};
+
 // Crons and dead-letter workers first: they poll slowly and must never wait
 // behind the send lanes' registration on a backlog.
 await queue.scheduleCrons({
@@ -601,6 +616,12 @@ await queue.scheduleCrons({
     );
   },
   "domains.reverify": async () => {
+    // First and on its own: a throw here skips no domain check, and none of theirs skips this.
+    try {
+      await backfillSharedSubdomains();
+    } catch (err) {
+      console.warn("shared.subdomain: sweep failed; the next run tries again", err);
+    }
     const result = await reverifyDomains(db, {
       clientForRegion,
       resolver: nodeDnsResolver,
@@ -675,6 +696,12 @@ if (stripe) {
 // A fresh instance would otherwise wait for the daily run to have any copy.
 queue.runCronNow("reference.refresh").catch((err) => {
   console.warn("reference.refresh at boot failed; the daily run covers it", err);
+});
+
+// Teams still without a label, such as every team when the shared domain is
+// first set, are queued now rather than at the first sweep.
+backfillSharedSubdomains().catch((err) => {
+  console.warn("shared.subdomain at boot failed; the 15-minute sweep covers it", err);
 });
 
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
@@ -834,9 +861,11 @@ await queue.work(
   { concurrency: 4, groupConcurrency: 2 },
 );
 
-await queue.work("inbox.forward", (job) => forwardToOwners(db, inboxSendDeps, job), {
-  concurrency: 2,
-});
+await queue.work(
+  "inbox.forward",
+  (job) => forwardToOwners(db, inboxSendDeps, job, (at) => queue.enqueueInboxForward(job, at)),
+  { concurrency: 2 },
+);
 
 await queue.work(
   "ses.event",
@@ -927,6 +956,26 @@ await queue.work("domain.age", async ({ domainId }) => {
     throw err;
   }
 });
+
+// Two lanes keep the name review's load low; a batch above one keeps a
+// backfill burst fetching.
+if (sharedDomain) {
+  const review = createSharedNameReview(judgeConfig);
+  await queue.work(
+    "shared.subdomain",
+    (job) =>
+      runSharedSubdomainJob(
+        db,
+        {
+          sharedInboxDomain: sharedDomain,
+          review,
+          requeue: (next, startAfter) => queue.enqueueSharedSubdomains([next], startAfter),
+        },
+        job,
+      ),
+    { concurrency: 2, batchSize: 10 },
+  );
+}
 
 // Erasure scans a team's whole history; it runs here so the request that
 // asked for it returns at once.

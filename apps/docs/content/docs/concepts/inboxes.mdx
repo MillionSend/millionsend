@@ -90,9 +90,10 @@ person. The last five fields are MillionSend's.
 
 | Field | Rules |
 | --- | --- |
-| `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for an address on the [shared domain](#shared-domain). |
-| `username` | With `email_address` left out, the part before `@` of the [shared-domain](#shared-domain) address: trimmed and lowercased, 1–64 letters, digits and `. _ -`, starting and ending with a letter or digit, without `..`, never cut short. Left out, the address is random. It can't change later. |
-| `name` | 1–64 characters; the address when left out. |
+| `email_address` | An address on a verified domain of your team that receives here (see [Addresses](#addresses)). It is trimmed and lowercased; the part before `@` takes up to 64 letters, digits and `. _ % + -`, with no dot at either end and no `..`. It can't change later. Leave it out for an address on the [shared domain](#shared-domain), or on the domain `domain_id` names. |
+| `username` | With `email_address` left out, the part before `@` of the [shared-domain](#shared-domain) address: trimmed and lowercased, 1–64 letters, digits and `. _ -`, starting and ending with a letter or digit, without `..`, never cut short. Left out, the address is random. With a `domain_id` of one of your own domains, it is the part before `@` there, required, under `email_address`'s rules. It can't change later. |
+| `domain_id` | The id of a `GET /domains` row, instead of `email_address`: your team's subdomain of the shared domain (the row with `shared: true`), which works like leaving `email_address` out, or one of your verified domains, where `username` names the address and `email_address`'s rules apply. |
+| `name` | 1–320 characters, so any address fits; the address when left out. |
 | `from_name` | The display name of the mail the inbox sends, up to 78 characters: a plain name, without `@`, `:`, `<`, `>`, line breaks, links or phone numbers. On the shared domain it is [reviewed](#shared-domain) first. |
 | `kind` | `agent` (the default) or `human`. |
 | `expires_in` | When the inbox [expires](#expiry), such as `1h`, `24h` or `7d`; left out, never. |
@@ -104,8 +105,8 @@ person. The last five fields are MillionSend's.
 | `409 validation_error` | Another inbox already uses the address, a chosen `username` included: no other name is picked for you. |
 | `403 validation_error` | The plan's inbox limit is reached: "You have reached the inbox limit of your plan. Upgrade to add more." |
 | `429 rate_limit_exceeded` | Too many inboxes were created in the last hour, or the shared domain's name review reached today's limit for your team (20 refused names or 200 reviews); `retry-after` says when to try again. Deleting inboxes doesn't give that room back. |
-| `422 validation_error` | The domain isn't a verified domain of your team, it doesn't receive here, the instance has no shared domain, the instance doesn't receive mail at all, a `username` breaks a rule, is reserved or can't be used on the shared domain, `username` comes with `email_address`, or a setting breaks a rule. |
-| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now; `retry-after: 60`. A request with neither never gets this answer. |
+| `422 validation_error` | The domain isn't a verified domain of your team, it doesn't receive here, the instance has no shared domain, the instance doesn't receive mail at all, a `username` breaks a rule, is reserved or can't be used on the shared domain, `username` or `domain_id` comes with `email_address`, `domain_id` isn't a verified domain of your team or names one of your own domains without `username`, or a setting breaks a rule. |
+| `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now (`retry-after: 60`), or your team's subdomain still waits for its [name review](#shared-domain), and until then no address can be created on it, random and forwarding ones included (`retry-after: 300`). Try again shortly. |
 
 The other calls:
 
@@ -165,11 +166,19 @@ address your app doesn't already send from.
 An instance can offer a shared domain for inboxes that need no DNS at all
 (its operator sets `SHARED_INBOX_DOMAIN`; see
 [Self-hosting](/self-hosting#shared-inbox-domain)). Each team gets its own
-subdomain there, named after the team, such as `acme.agents.example`, or
-`team-` and six random characters when the name looks like a well-known
-brand or a reserved name, or the review below doesn't pass it. A deleted
-team's subdomain is never given to another team. Leave `email_address` out
-and `username` names the address:
+subdomain there when the team is created, named after it, such as
+`acme.agents.example`, or `team-` and six random characters when the name
+looks like a well-known brand or a reserved name, or the review below
+doesn't pass it. Until its first address, the subdomain follows the team's
+renames. Once an address has been on it, it never changes and is never
+given to another team, even after its team is deleted; one that never had
+an address is freed by a rename or by the team's deletion. A subdomain that
+already existed before v0.14.0 never changes either, address or not.
+
+`GET /domains` lists the subdomain as its last row, with `shared: true` and
+its `sending_mode` (see [Domains](/concepts/domains#shared-subdomain)); its
+id is the `domain_id` of your shared inboxes. Leave `email_address` out, or
+send that id as `domain_id`, and `username` names the address:
 
 ```sh
 curl -X POST "https://api.millionsend.com/inboxes" \
@@ -197,12 +206,17 @@ government or an official role. A refused name answers
 `422 validation_error`, such as "username can't be used on the shared
 domain: pick another", never with the judge's reasoning. While the review
 can't answer, a username or `from_name` answers
-`503 name_review_unavailable` with `retry-after: 60`, and a new team
-subdomain falls back to `team-` and six random characters. After 20 refused
-names, or 200 reviews, in a UTC day, the answer is `429 rate_limit_exceeded`
-until midnight UTC. A random address with no `from_name` is never refused
-over the review, and an instance without a judge applies only the rules
-above.
+`503 name_review_unavailable` with `retry-after: 60`. A new team waits for
+its subdomain instead of taking a random one at once: the review is tried
+again after 5 minutes, then hourly, and after 24 hours the team takes
+`team-` and six random characters. Until then, creating an address on the
+shared domain answers `503 name_review_unavailable` with `retry-after: 300`:
+try again shortly. A renamed team keeps its subdomain until the review
+answers. After 20 refused names, or 200 reviews, in a UTC day, the answer is
+`429 rate_limit_exceeded` until midnight UTC. A random address with no
+`from_name` is never refused over the review, though it waits with the
+`503` above while the team's subdomain does; an instance without a judge
+applies only the rules above.
 
 Mail to `postmaster@` and `abuse@` at the shared domain, or at any team's
 subdomain, goes to the instance's operator, never to an inbox.
@@ -235,16 +249,22 @@ team's:
   Each of these refusals answers `403 inbox_send_policy`, approved or not. A
   stored `send_policy` is never rewritten: it applies again once the plan or
   the instance allows it.
-- Owner addresses, the allowlist and a `Reply-To` at another organization
-  don't count here (`send_policy` can't be `allowlist`), and `forward_to`
-  takes members' sign-in addresses only: the shared domain is every team's,
-  so it never writes to an address nobody proved.
+- Owner addresses don't count here, for mail coming in or going out. The
+  allowlist counts for incoming mail only: it lets its senders in, but as a
+  recipient an address on it is like any other (`send_policy` can't be
+  `allowlist`), and a `Reply-To` at another organization never counts.
+  `forward_to` takes members' sign-in addresses only: the shared domain is
+  every team's, so it never writes to an address nobody proved.
 - They send to 10 recipients per email at most (`422 validation_error`) and
   50 a day per inbox (`send_cap` from 1 to 50). All your team's shared
   addresses together reach 1,000 recipients per UTC day, unless the instance
   sets another limit; past it, approved sends included, they answer
   `429 inbox_send_cap_reached` ("Your team reached today's limit for mail
   from the shared domain").
+- A `forward_to` copy waits instead of being lost: while the instance pauses
+  shared sending, and, once your team is past today's limit, until the next
+  UTC day. If it still can't go out 2 days after the message was delivered,
+  it isn't sent; the message stays in the inbox.
 - They go through `POST /emails` and the MCP tool `send_email` only where
   they may start conversations, under the inbox's rules. `from` must be the
   inbox's address exactly, without a `+tag`, with no display name or the
@@ -252,9 +272,8 @@ team's:
   attachments or custom headers: each answers `422 validation_error` naming
   the rule. A key restricted to a domain gets `403 restricted_api_key`.
   Elsewhere `POST /emails` answers `403 inbox_send_policy`, and
-  `POST /emails/batch` and the SMTP relay always refuse a shared address.
-- Their `domain_id` is the id of the team's shared subdomain, which
-  `GET /domains` doesn't list.
+  `POST /emails/batch`, broadcasts and the SMTP relay always refuse a shared
+  address.
 
 On an instance without a shared domain, `POST /inboxes` without
 `email_address` answers `422`.
@@ -313,11 +332,15 @@ out first.
 **Read state.** Every received message is read or unread. A `PATCH` with
 `read` marks the whole thread. A thread is read when all its messages are,
 and the inbox's `unread` counts the threads with an unread message. Mail the
-inbox sent is always read. In the dashboard, opening a thread marks it read
-in a people inbox. In an agent inbox, read state belongs to your agent: it
-marks a thread read once it's handled, and the threads listed with
-`read=false` are what's left. In either kind, a person can mark a thread read
-or unread from its menu.
+inbox sent is always read. Held mail stays out of read state until it's
+released: it never makes a thread unread, can't be marked read, and arrives
+unread when released. So a thread holding only held mail, listed with
+`include_quarantined=true`, has `read: true`, and its `quarantined` counts
+the messages in quarantine; mail still being screened isn't counted. In the
+dashboard, opening a thread marks it read in a people inbox. In an agent
+inbox, read state belongs to your agent: it marks a thread read once it's
+handled, and the threads listed with `read=false` are what's left. In either
+kind, a person can mark a thread read or unread from its menu.
 
 **Labels.** Up to 100 per inbox. Names take 1–64 characters and are unique
 regardless of letter case; colors are `#RRGGBB`, in uppercase, and random
@@ -327,7 +350,7 @@ it off every thread.
 
 | Call | Does |
 | --- | --- |
-| `GET /inboxes/{id}/threads` | Threads, latest activity first. `folders` (`inbox` by default, `inbox,archive,sent` with `labels`), `labels` (up to 50 ids; any of them matches), `read` (`true` or `false`). |
+| `GET /inboxes/{id}/threads` | Threads, latest activity first. `folders` (`inbox` by default, `inbox,archive,sent` with `labels`), `labels` (up to 50 ids; any of them matches), `read` (`true` or `false`), `include_quarantined=true` (a full-access key that isn't restricted to an inbox) to list held mail too, with each thread's `quarantined` count. |
 | `GET /inboxes/{id}/threads/search` | The same filters, plus `query` (up to 256 characters and 32 words; `"exact phrase"` and `-excluded` work), `from`, `to`, `cc` and `bcc` (up to 20 values each, matching part of an address or name), `has_attachment`, `start_date` and `end_date`. Each result adds `matched_email_id` and `highlights`. |
 | `GET /inboxes/{id}/threads/{thread_id}` | One thread: subject, folder, labels and read state. |
 | `PATCH /inboxes/{id}/threads/{thread_id}` | `read`, `folder` (`inbox`, `archive`, `spam` or `trash`) or `label_id`. |
@@ -473,23 +496,23 @@ curl -X PATCH "https://api.millionsend.com/inboxes/{id}/safety" \
 | Setting | Does |
 | --- | --- |
 | `accept_from` | Whose mail reaches the inbox: `anyone`; `verified`, senders whose domain vouches for the From address, plus owners, the allowlist and known threads; or `allowlist`, owners, the allowlist and known threads only. The rest is quarantined. |
-| `allowlist` | Up to 500 entries: `name@domain`, exact and as written, or `*@domain` for a domain and its subdomains. An entry counts only for mail whose domain vouches for it. |
-| `owner_addresses` | Up to 50 more addresses treated as the inbox's owners, besides your team members' sign-in addresses. |
+| `allowlist` | Up to 500 entries: `name@domain`, exact and as written, or `*@domain` for a domain and its subdomains. An entry counts only for mail whose domain vouches for it. On the shared domain it counts for incoming mail only. |
+| `owner_addresses` | Up to 50 more addresses treated as the inbox's owners, besides your team members' sign-in addresses. Ignored on the shared domain. |
 | `screening` | Score mail from outside senders for prompt injection and phishing (agent inboxes). |
 | `extract_codes` | Pull verification codes and sign-in links out of mail (`extracted.code`, `extracted.link`, `codes/latest`). |
 | `send_policy` | `reply_only`; `allowlist`, which adds new conversations with owners and the allowlist (not on the shared domain); or `open`, anyone, once the team is past its first sends, and on the shared domain only where it may start conversations. |
 | `require_approval` | Every send from the inbox waits for a person. |
 | `private_codes` | A code or sign-in link the inbox received can't be sent to anyone but owners and the allowlist. |
 | `send_cap` | Recipients the inbox may send to per UTC day without a person: 1–100,000, or `null` for no cap; 1–50 on the shared domain. |
-| `forward_to` | Up to 5 addresses that get a copy of every delivered message except spam: team members' sign-in addresses or owner addresses. |
+| `forward_to` | Up to 5 addresses that get a copy of every delivered message except spam: team members' sign-in addresses or owner addresses (on the shared domain, sign-in addresses only). |
 
-A setting that breaks a rule answers `422` with the reason: `allowlist` on
-the shared domain, `open` on a shared address that may only reply or for a
-team still new to sending, `screening` on a `human` inbox, or a `forward_to`
-address that is neither a member's nor an owner address. An inbox-scoped key can't change these settings
-(`403 restricted_api_key`), the MCP server has no tool for them, and in the
-dashboard only owners and admins can. [Agent safety](/concepts/agent-safety)
-explains what each one does.
+A setting that breaks a rule answers `422` with the reason: `send_policy`
+`allowlist` on the shared domain, `open` on a shared address that may only
+reply or for a team still new to sending, `screening` on a `human` inbox, or
+a `forward_to` address that is neither a member's nor an owner address. An
+inbox-scoped key can't change these settings (`403 restricted_api_key`), the
+MCP server has no tool for them, and in the dashboard only owners and admins
+can. [Agent safety](/concepts/agent-safety) explains what each one does.
 
 ## Quarantine
 
@@ -550,7 +573,12 @@ curl "https://api.millionsend.com/inboxes/{id}/codes/latest?from=example.org&wai
 - `from` narrows it to a sender: an address, or a domain with its
   subdomains.
 - `wait`, from 0 to 50 seconds, waits for one to arrive; `max_age`, from 60
-  to 86,400 seconds (600 by default), skips older mail.
+  to 86,400 seconds (600 by default), skips codes delivered to the inbox
+  longer ago than that; a code released from quarantine counts from its
+  release.
+- `since`, an ISO 8601 time, skips mail received at or before it. To wait for
+  the code of a second sign-in, pass the `received_at` of the code you
+  already used.
 - `status` is `found`; `none`; `ambiguous`, when two different codes or links
   are equally likely, so none is answered; or `timeout`, when `wait` ran out
   with nothing new. The answer is always `200`.
@@ -675,8 +703,9 @@ leaves room, or MillionSend differs:
 
 - Creating an inbox or a draft answers the whole object; Resend's
   `{ object, id }` is part of it.
-- Resend requires `email_address`; here it is optional: left out, the inbox
-  gets an address on the [shared domain](#shared-domain), random through a
+- Resend requires `email_address`; here it is optional: left out, with no
+  `domain_id`, the inbox gets an address on the
+  [shared domain](#shared-domain), random through a
   Resend SDK, which can't send `username`, and permanent, since it can't
   send `expires_in` either.
 - `kind` defaults to `agent`, since a Resend SDK can't send it, so inboxes
@@ -698,8 +727,9 @@ leaves room, or MillionSend differs:
   `503 name_review_unavailable` (see [Errors](/api-reference#errors)). An address already in use, or a draft
   edited after it was sent or while another request changed it, answers
   `409 validation_error`.
-- MillionSend's additions are extra fields (`username`, `kind`, `shared`,
-  `expires_at`, `screening`, `extracted_text` and others) and extra
+- MillionSend's additions are extra fields (`username` and `domain_id` on
+  create, `kind`, `shared`, `expires_at`, `screening`, `extracted_text` and
+  others) and extra
   endpoints (`/safety`, `/quarantine`, `/codes/latest`,
   `/drafts/{id}/reject`). Resend's enums
   never gain a value: quarantined mail is hidden from agents rather than put

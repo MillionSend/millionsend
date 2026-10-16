@@ -20,6 +20,9 @@ let db: Db;
 let closeDb: () => Promise<void>;
 let server: ServerType;
 let resend: Resend;
+const SHARED = "agents.example.test";
+/** The team's subdomain of the shared inbox domain, which GET /domains lists last. */
+let shared: { id: string; name: string };
 
 // Toggled per test: flipping these flips what the fake SES/DNS answer.
 const state: { dkimStatus: DkimVerificationStatus; verifiedForSending: boolean } = {
@@ -46,7 +49,13 @@ const fakeSes: SesIdentityClient = {
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
-  const teamId = await createTeam(db, "domains-contract");
+  const teamId = await createTeam(db, "domains-contract", { sharedInboxDomain: SHARED });
+  const [label] = await db
+    .select({ id: schema.sharedInboxDomains.id, name: schema.sharedInboxDomains.name })
+    .from(schema.sharedInboxDomains)
+    .where(eq(schema.sharedInboxDomains.teamId, teamId));
+  if (!label) throw new Error("no shared subdomain");
+  shared = label;
   const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
@@ -61,6 +70,7 @@ beforeAll(async () => {
     keyring,
     isCloud: false,
     enqueueEmailSend: async () => {},
+    sharedInboxDomain: SHARED,
     ses: {
       clientForRegion: () => fakeSes,
       dns: {
@@ -131,12 +141,19 @@ describe("official resend SDK: domains", () => {
     expect(dup.error?.statusCode).toBe(409);
   });
 
-  it("lists domains in the list envelope", async () => {
+  it("lists domains in the list envelope, the team's shared subdomain last", async () => {
     const listed = await resend.domains.list();
     expect(listed.error).toBeNull();
     expect(listed.data?.object).toBe("list");
     expect(listed.data?.has_more).toBe(false);
-    expect(listed.data?.data.map((d) => d.id)).toEqual([domainId]);
+    expect(listed.data?.data.map((d) => d.id)).toEqual([domainId, shared.id]);
+    expect(listed.data?.data[1]).toMatchObject({
+      name: shared.name,
+      status: "verified",
+      region: "us-east-1",
+      capabilities: { sending: "enabled", receiving: "enabled" },
+      shared: true,
+    });
   });
 
   it("gets a domain with SES-derived record statuses", async () => {

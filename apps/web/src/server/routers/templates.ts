@@ -1,3 +1,4 @@
+import { MAX_SUBJECT_LENGTH } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -10,7 +11,7 @@ import { router, teamProcedure } from "../trpc";
 
 const nameSchema = z.string().trim().min(1).max(200);
 // "" clears the field — stored as null, never as an empty string.
-const subjectSchema = z.string().trim().max(998);
+const subjectSchema = z.string().trim().max(MAX_SUBJECT_LENGTH);
 const bodySchema = z.string().max(500_000);
 // Maily editor source of truth; null clears it back to a legacy raw-HTML row.
 const documentSchema = mailyDocumentSchema.nullable();

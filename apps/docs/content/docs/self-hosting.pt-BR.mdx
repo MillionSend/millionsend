@@ -418,6 +418,14 @@ pela taxa de bounce ou de reclamação, o relay responde `451 4.7.1` após o
 DATA, e o cliente guarda a mensagem e tenta de novo; uma equipe suspensa
 recebe `550`.
 
+Cada mensagem conta no limite por minuto da sua chave de API, o mesmo usado
+pelas requisições dessa chave à API (`API_RATE_LIMIT_PER_MINUTE`, padrão 600),
+e, como a API, o relay limita cada equipe a 3.000 mensagens por minuto,
+somando todas as suas chaves. A contagem acontece no `MAIL FROM`, antes de a
+mensagem ser enviada: se passar de qualquer um dos limites, o relay responde
+`451 4.7.1` com os segundos que faltam para o próximo minuto, e o cliente
+guarda a mensagem e tenta de novo.
+
 Um destinatário cujo domínio nunca recebe e-mail (veja
 [Erros](/pt-BR/api-reference#erros)) recebe `550 5.1.2` no `RCPT TO`, com a
 mesma mensagem da API, e o relay continua aceitando os outros
@@ -603,7 +611,11 @@ dele, como domínio de envio.
    ([AWS: Creating and verifying identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html)).
 3. **Ligue.** Defina `SHARED_INBOX_DOMAIN=agents.example` no `.env` e rode
    `docker compose up -d`. O app se recusa a subir quando o valor não é um
-   hostname em minúsculas, ou quando falta o `RECEIVING_MX_HOST`.
+   hostname em minúsculas, ou quando falta o `RECEIVING_MX_HOST`. A partir
+   daí, cada equipe ganha o subdomínio dela quando é criada, e as equipes que
+   já existem ganham o delas quando o worker subir de novo, com uma revisão
+   de nomes para cada uma quando há um
+   [avaliador](#monitoramento-de-conteúdo-opcional) configurado.
 4. **Receba o postmaster@ e o abuse@.** Os e-mails para `postmaster@` e
    `abuse@` no domínio, ou no subdomínio de qualquer equipe, vão para a sua
    própria equipe, nunca para a equipe dona do subdomínio: a equipe mais
@@ -631,8 +643,8 @@ prevalece:
 
 | Configuração | Padrão | Significado |
 | --- | --- | --- |
-| `SHARED_INBOX_SEND` | `true` | Se os endereços compartilhados enviam alguma coisa. Desligada, nada sai deles, nem respostas, e o que já está na fila espera até ela voltar; os e-mails para eles continuam chegando |
-| `SHARED_INBOX_OPEN` | `false` | Se os endereços compartilhados das equipes pagas (de todas, na auto-hospedagem) podem começar conversas. Desligada, sem juiz (`ABUSE_JUDGE`) ou com o `MONITOR_AUTO_HOLD` desligado, eles só respondem dentro das próprias conversas |
+| `SHARED_INBOX_SEND` | `true` | Se os endereços compartilhados enviam alguma coisa. Desligada, nada sai deles, nem respostas, e o que já está na fila espera até ela voltar (as cópias do `forward_to`, por até 2 dias); os e-mails para eles continuam chegando |
+| `SHARED_INBOX_OPEN` | `false` | Se os endereços compartilhados das equipes pagas (de todas, na auto-hospedagem) podem começar conversas. Desligada, sem avaliador (`ABUSE_JUDGE`) ou com o `MONITOR_AUTO_HOLD` desligado, eles só respondem dentro das próprias conversas |
 | `SHARED_INBOX_TENANTS` | `false` | Se o e-mail compartilhado sai com o tenant do SES da equipe que envia, com `SES_TENANTS` ligado |
 | `SHARED_INBOX_TEAM_DAILY_CAP` | 1000 | Para quantos destinatários uma equipe pode enviar por dia UTC, somando todos os endereços compartilhados dela, envios aprovados incluídos |
 
@@ -642,8 +654,8 @@ de fora da equipe que nunca escreveu para a caixa é avaliada antes do SES,
 em todo nível menos o da equipe de sistema: uma avaliação do tipo phishing
 a partir de `MONITOR_HOLD_REPEAT_SCORE` deixa a mensagem em espera na lista
 de revisão, uma avaliação dessas pausa para revisão uma equipe no nível
-Nova, e quando o juiz não responde, o e-mail espera e depois fica em espera
-como o de um domínio novo.
+Nova, e quando o avaliador não responde, o e-mail espera e depois fica em
+espera como o de um domínio novo.
 
 Para abrir o envio compartilhado numa instância com `SES_TENANTS` ligado
 (sem ele, pule para o passo 4):
@@ -683,7 +695,7 @@ Para abrir o envio compartilhado numa instância com `SES_TENANTS` ligado
    enviado de novo sem o tenant. Se algum dos dois for diferente, deixe o
    `SHARED_INBOX_TENANTS` desligado.
 3. Ligue o `SHARED_INBOX_TENANTS`.
-4. Confira se o juiz revisa os nomes: com o `ABUSE_JUDGE` definido, criar
+4. Confira se o avaliador revisa os nomes: com o `ABUSE_JUDGE` definido, criar
    uma caixa compartilhada com um nome de usuário responde `201`, não
    `503 name_review_unavailable`.
 5. Ligue o `SHARED_INBOX_OPEN`.
@@ -726,9 +738,9 @@ antivírus nunca segura e-mails.
 
 As caixas de agente
 [analisam](/pt-BR/concepts/agent-safety#análise-de-injeção-de-prompt) os
-e-mails de remetentes de fora em busca de injeção de prompt com o juiz do
+e-mails de remetentes de fora em busca de injeção de prompt com o avaliador do
 [monitoramento de conteúdo](#monitoramento-de-conteúdo-opcional): com
-`ABUSE_JUDGE=typesafe` a análise roda, e com o juiz desligado as caixas
+`ABUSE_JUDGE=typesafe` a análise roda, e com o avaliador desligado as caixas
 decidem só pelas próprias regras. Ela conta à parte do monitoramento de
 conteúdo, com os mesmos valores de `MONITOR_TEAM_DAILY_CAP` e
 `MONITOR_INSTANCE_DAILY_CAP`, mais 200 mensagens por caixa por dia; acima de
@@ -741,7 +753,7 @@ autenticação dele, o assunto e o texto visível com os códigos mascarados e o
 endereços reduzidos ao domínio, o texto oculto que foi removido, o texto e o
 domínio dos links (nunca acessados) e os nomes dos anexos. São e-mails de
 terceiros para os seus usuários: inclua isso no seu aviso de privacidade
-antes de ligar o juiz.
+antes de ligar o avaliador.
 
 ## Site de documentação
 
@@ -1485,13 +1497,19 @@ a classe de erro; a página de revisão mostra isso e nunca um assunto ou um
 corpo. As linhas de amostra são removidas após 90 dias.
 
 **Nomes no domínio compartilhado.** Com um
-[domínio compartilhado das caixas](#domínio-compartilhado-das-caixas), a API
-e o painel também mandam para a TypeSafe os nomes que uma equipe publica
-nele, para revisão antes de serem usados: um nome de usuário escolhido, o
-nome de exibição (`from_name`) de uma caixa compartilhada e o subdomínio da
-equipe, como foram escritos, sem mais nada sobre a equipe ou a caixa. Só
-fica guardada uma contagem dos nomes revisados e recusados por equipe e
-dia. Inclua isso também no aviso de privacidade.
+[domínio compartilhado das caixas](#domínio-compartilhado-das-caixas), a
+API, o painel e o worker também mandam para a TypeSafe os nomes que uma
+equipe publica nele, para revisão antes de serem usados: um nome de usuário
+escolhido, o nome de exibição (`from_name`) de uma caixa compartilhada e o
+subdomínio de cada equipe, feito a partir do nome dela (em minúsculas, sem
+acentos, com um hífen no lugar de cada sequência de outros caracteres e até
+30 caracteres), cada um como seria publicado, sem mais nada sobre a equipe
+ou a caixa. O subdomínio é enviado quando a equipe é criada, quando uma
+mudança de nome muda o subdomínio, e uma vez para cada equipe que já existe
+e ainda não tem um, na primeira vez que o worker sobe na v0.14.0 ou depois
+que o domínio compartilhado é definido, mesmo que a equipe não use o
+domínio compartilhado. Só fica guardada uma contagem dos nomes revisados e
+recusados por equipe e dia. Inclua isso também no aviso de privacidade.
 
 **Imagens e anexos.** A triagem abre o que o e-mail traz, dentro do
 worker: o texto e os links de anexos PDF (até 50 páginas), Word, Excel,

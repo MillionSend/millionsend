@@ -17,7 +17,9 @@ import {
   PLAN_INBOX_LIMIT,
   parseInboxActor,
   type SendOutcome,
+  SHARED_SUBDOMAIN_FIRST_RETRY_MS,
   type SharedSending,
+  settleSharedSubdomain,
   teamSharedSending,
   type WebhookEnqueue,
 } from "@millionsend/core";
@@ -25,7 +27,7 @@ import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, eq, inArray } from "drizzle-orm";
 import { getKeyring } from "./keyring";
-import { enqueueInboxForward } from "./queue";
+import { enqueueInboxForward, enqueueSharedSubdomain } from "./queue";
 
 /** The dashboard acts as the signed-in person, who may approve held sends and release quarantine. */
 export function userActor(ctx: { session: { user: { id: string } } }): InboxActor {
@@ -153,6 +155,34 @@ export async function actorNames(db: Db, teamId: string, encoded: string[]) {
             : "";
     return { kind: a.kind, name: names.get(key) ?? null };
   });
+}
+
+/**
+ * Settles the team's subdomain label on the shared inbox domain, or has the
+ * worker retry it, first SHARED_SUBDOMAIN_FIRST_RETRY_MS later, while the
+ * name review can't answer or the settle fails. Never throws: the team
+ * stands either way.
+ */
+export async function settleTeamSubdomain(db: Db, teamId: string): Promise<void> {
+  const shared = sharedInboxDomain();
+  if (!shared) return;
+  const now = new Date();
+  try {
+    const outcome = await settleSharedSubdomain(db, {
+      teamId,
+      sharedInboxDomain: shared,
+      review: createSharedNameReview(abuseJudgeConfig()),
+      now,
+    });
+    if (outcome === "settled") return;
+  } catch (err) {
+    console.warn(`shared subdomain of team ${teamId} not settled; the worker retries`, err);
+  }
+  await enqueueSharedSubdomain(
+    teamId,
+    now,
+    new Date(now.getTime() + SHARED_SUBDOMAIN_FIRST_RETRY_MS),
+  );
 }
 
 /** What the team's addresses on the shared domain may send now, on its effective plan. */

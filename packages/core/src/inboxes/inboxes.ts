@@ -42,16 +42,18 @@ import {
   inboxRoom,
   liveInbox,
   SHARED_INBOX_IDLE_TTL,
+  SHARED_SUBDOMAIN_FIRST_RETRY_MS,
 } from "./limits.js";
 import { defaultSafety, type InboxSafety, inboxSafetySchema, safetyProblem } from "./safety.js";
 import { teamInNewTier, teamSharedSending } from "./send.js";
 import { secondsToNextUtcDay } from "./send-policy.js";
 import {
-  ensureSharedSubdomain,
+  isSharedDomainId,
   reservedSharedName,
   reviewSharedNames,
   type SharedNameReview,
   type SharedNameText,
+  teamSharedDomain,
 } from "./shared-domain.js";
 import {
   INBOX_KINDS,
@@ -61,7 +63,7 @@ import {
   type InboxWire,
   type ListQuery,
 } from "./types.js";
-import { SHARED_USERNAME } from "./username.js";
+import { INBOX_NAME_MAX, SHARED_USERNAME } from "./username.js";
 import { type InboxCounts, inboxListItemWire, inboxWire } from "./wire.js";
 
 export interface InboxDeps {
@@ -78,6 +80,11 @@ export interface InboxDeps {
 
 export interface CreateInboxInput {
   email_address?: string | undefined;
+  /**
+   * A GET /domains row instead of email_address: the team's shared
+   * subdomain, or one of its verified domains with username as the local part.
+   */
+  domain_id?: string | undefined;
   /** The local part of a shared-domain address, asked for instead of email_address. */
   username?: string | undefined;
   name?: string | undefined;
@@ -125,6 +132,21 @@ const NAME_REVIEW_UNAVAILABLE: InboxError = {
     "This name couldn't be reviewed right now: try again shortly, or leave username out for a random address",
   retryAfterSec: 60,
 };
+
+const SUBDOMAIN_PENDING: InboxError = {
+  status: 503,
+  name: "name_review_unavailable",
+  message:
+    "Your team's subdomain on the shared domain is waiting for its name review: try again shortly",
+  retryAfterSec: SHARED_SUBDOMAIN_FIRST_RETRY_MS / 1000,
+};
+
+/** A refusal found inside a transaction, thrown so it rolls back what the transaction wrote. */
+class Refused extends Error {
+  constructor(readonly error: InboxError) {
+    super(error.message);
+  }
+}
 
 /** Generated addresses retried on collision before giving up. */
 const ADDRESS_ATTEMPTS = 5;
@@ -312,16 +334,54 @@ async function wireOf(db: Db, row: InboxRow): Promise<InboxWire> {
   return inboxWire(row, (await countsFor(db, [row.id])).get(row.id) ?? ZERO_COUNTS);
 }
 
+/**
+ * The request with `domain_id` read as the address it names: the team's
+ * shared subdomain as if email_address were left out, or `username@` one
+ * of the team's verified domains.
+ */
+async function withDomainId(
+  db: Db,
+  deps: InboxDeps,
+  teamId: string,
+  input: CreateInboxInput,
+): Promise<CreateInboxInput | InboxError> {
+  const { domain_id: domainId, ...rest } = input;
+  if (domainId === undefined) return input;
+  if (input.email_address !== undefined) {
+    return invalid("Send domain_id or email_address, not both");
+  }
+  if (deps.sharedInboxDomain && isSharedDomainId(await teamSharedDomain(db, teamId), domainId)) {
+    return rest;
+  }
+  const d = schema.domains;
+  const [domain] = UUID.test(domainId)
+    ? await db
+        .select({ name: d.name })
+        .from(d)
+        .where(and(eq(d.id, domainId), eq(d.teamId, teamId), eq(d.status, "verified")))
+    : [];
+  if (!domain) {
+    return invalid(
+      "domain_id must be a verified domain of this team: the id of a GET /domains row",
+    );
+  }
+  const username = input.username?.trim();
+  if (!username) {
+    return invalid("domain_id of one of your domains needs username: the part before the @");
+  }
+  return { ...rest, username: undefined, email_address: `${username}@${domain.name}` };
+}
+
 /** Where a new inbox's address lives, resolved from the request. */
 type AddressPlan =
-  | { shared: true; sub: { id: string; name: string }; username: string | undefined }
+  | { shared: true; username: string | undefined }
   | {
       shared: false;
       emailAddress: string;
       localPart: string;
       domainId: string;
-      /** The shared subdomain a forwarding inbox's receiving_address sits on. */
-      forwardingSub: { id: string; name: string } | null;
+      /** Whether a receiving_address goes on the team's shared subdomain. */
+      forwarding: boolean;
     };
 
 async function addressPlan(
@@ -329,7 +389,6 @@ async function addressPlan(
   deps: InboxDeps,
   p: {
     teamId: string;
-    teamName: string;
     input: CreateInboxInput;
     username: string | undefined;
     fromName: string | null;
@@ -345,19 +404,14 @@ async function addressPlan(
     if (!shared) {
       return invalid("email_address is required: this instance has no shared inbox domain");
     }
+    // Before the review, so a create that can't succeed spends none of its budget.
+    if (!(await teamSharedDomain(db, p.teamId))) return SUBDOMAIN_PENDING;
     const texts: SharedNameText[] = [];
     if (p.username !== undefined) texts.push({ field: "username", value: p.username });
     if (p.fromName !== null) texts.push({ field: "from_name", value: p.fromName });
     const refused = await reviewRefusal(db, deps, { teamId: p.teamId, texts, now: p.now });
     if (refused) return refused;
-    const sub = await ensureSharedSubdomain(db, {
-      teamId: p.teamId,
-      teamName: p.teamName,
-      sharedInboxDomain: shared,
-      review: deps.judgeSharedNames,
-      now: p.now,
-    });
-    return { shared: true, sub, username: p.username };
+    return { shared: true, username: p.username };
   }
   const address = input.email_address.trim().toLowerCase();
   const at = address.lastIndexOf("@");
@@ -390,26 +444,34 @@ async function addressPlan(
       `Turn on receiving for ${domain} first, or create the inbox with forwarding: true`,
     );
   }
-  let forwardingSub: { id: string; name: string } | null = null;
-  if (input.forwarding) {
-    if (!shared) {
-      return invalid("forwarding needs a shared inbox domain, which this instance does not have");
-    }
-    forwardingSub = await ensureSharedSubdomain(db, {
-      teamId: p.teamId,
-      teamName: p.teamName,
-      sharedInboxDomain: shared,
-      review: deps.judgeSharedNames,
-      now: p.now,
-    });
+  if (input.forwarding && !shared) {
+    return invalid("forwarding needs a shared inbox domain, which this instance does not have");
   }
   return {
     shared: false,
     emailAddress: `${localPart}@${domain}`,
     localPart,
     domainId: row.id,
-    forwardingSub,
+    forwarding: input.forwarding === true,
   };
+}
+
+/**
+ * Locks the team's subdomain label for an address this create puts on it:
+ * from now on its name never changes. The address takes the name this
+ * returns, so a rename that commits first is the one it gets, and a rename
+ * after finds the label locked.
+ */
+async function lockedLabel(tx: Db, teamId: string, now: Date) {
+  const s = schema.sharedInboxDomains;
+  const [label] = await tx
+    .update(s)
+    .set({ lockedAt: sql`coalesce(${s.lockedAt}, ${now})` })
+    .where(eq(s.teamId, teamId))
+    .returning({ id: s.id, name: s.name });
+  // No label: its name review is pending, or the team was deleted meanwhile.
+  if (!label) throw new Refused(SUBDOMAIN_PENDING);
+  return label;
 }
 
 export async function createInbox(
@@ -417,7 +479,6 @@ export async function createInbox(
   deps: InboxDeps,
   p: {
     teamId: string;
-    teamName: string;
     plan: Plan;
     isCloud: boolean;
     actor: InboxActor;
@@ -428,11 +489,12 @@ export async function createInbox(
   },
 ): Promise<{ ok: true; inbox: InboxWire } | { ok: false; error: InboxError }> {
   const now = p.now ?? new Date();
-  const { input } = p;
   if (!deps.receivingEnabled) return fail(invalid("This instance does not receive mail"));
+  const input = await withDomainId(db, deps, p.teamId, p.input);
+  if (isInboxError(input)) return fail(input);
   const kind = input.kind ?? "agent";
   if (!INBOX_KINDS.includes(kind)) return fail(invalid("kind must be agent or human"));
-  const name = input.name === undefined ? undefined : oneLineName(input.name);
+  const name = input.name === undefined ? undefined : oneLineName(input.name, INBOX_NAME_MAX);
   if (isInboxError(name)) return fail(name);
   const shared = input.email_address === undefined;
   const fromName = input.from_name === undefined ? null : fromNameOf(input.from_name, shared);
@@ -454,7 +516,13 @@ export async function createInbox(
   }
 
   if (p.onlyDomainId && shared) return fail(OUTSIDE_KEY_DOMAIN);
-  const plan = await addressPlan(db, deps, { ...p, username, fromName, now });
+  const plan = await addressPlan(db, deps, {
+    teamId: p.teamId,
+    input,
+    username,
+    fromName,
+    now,
+  });
   if (isInboxError(plan)) return fail(plan);
   if (p.onlyDomainId && (plan.shared || plan.domainId !== p.onlyDomainId)) {
     return fail(OUTSIDE_KEY_DOMAIN);
@@ -482,70 +550,77 @@ export async function createInbox(
 
   const i = schema.inboxes;
   const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
-  const row = await db.transaction(async (tx) => {
-    const t = tx as unknown as Db;
-    for (let attempt = 0; attempt < ADDRESS_ATTEMPTS; attempt += 1) {
-      const localPart = plan.shared ? (plan.username ?? `inbox-${randomAlnum(8)}`) : plan.localPart;
-      // A random draw can spell a brand look-alike, which the send rules would hold back.
-      if (
-        plan.shared &&
-        plan.username === undefined &&
-        imitatedBrandIn(localPart, { everydayWords: false })
-      ) {
-        continue;
+  const row = await db
+    .transaction(async (tx) => {
+      const t = tx as unknown as Db;
+      const at = plan.shared
+        ? { ...plan, label: await lockedLabel(t, p.teamId, now) }
+        : { ...plan, label: plan.forwarding ? await lockedLabel(t, p.teamId, now) : null };
+      for (let attempt = 0; attempt < ADDRESS_ATTEMPTS; attempt += 1) {
+        const localPart = at.shared ? (at.username ?? `inbox-${randomAlnum(8)}`) : at.localPart;
+        // A random draw can spell a brand look-alike, which the send rules would hold back.
+        if (
+          at.shared &&
+          at.username === undefined &&
+          imitatedBrandIn(localPart, { everydayWords: false })
+        ) {
+          continue;
+        }
+        const emailAddress = at.shared ? `${localPart}@${at.label.name}` : at.emailAddress;
+        const [inserted] = await t
+          .insert(i)
+          .values({
+            teamId: p.teamId,
+            kind,
+            emailAddress,
+            localPart,
+            domainId: at.shared ? null : at.domainId,
+            sharedDomainId: at.label?.id ?? null,
+            receivingAddress:
+              !at.shared && at.label ? `fwd-${randomAlnum(16)}@${at.label.name}` : null,
+            name: name ?? emailAddress,
+            fromName,
+            safety,
+            expiresAt: expiry.expiresAt,
+            lastUsedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (inserted) {
+          await recordInboxActivity(t, {
+            teamId: p.teamId,
+            inboxId: inserted.id,
+            actor: p.actor,
+            action: "inbox.created",
+          });
+          await hooks.emit(t, p.teamId, [
+            inboxEvent("inbox.created", {
+              source: webhookSource(p.actor),
+              inbox: inboxWire(inserted, ZERO_COUNTS),
+              occurredAt: now,
+            }),
+          ]);
+          return inserted;
+        }
+        // A chosen address collides only with its own; a generated one is drawn again.
+        if (!at.shared || at.username !== undefined) {
+          const [taken] = await t
+            .select({ id: i.id })
+            .from(i)
+            .where(eq(i.emailAddress, emailAddress));
+          // Thrown, not returned: a create that hands out no address locks no label.
+          if (taken) throw new Refused(ADDRESS_TAKEN);
+        }
       }
-      const emailAddress = plan.shared ? `${localPart}@${plan.sub.name}` : plan.emailAddress;
-      const [inserted] = await t
-        .insert(i)
-        .values({
-          teamId: p.teamId,
-          kind,
-          emailAddress,
-          localPart,
-          domainId: plan.shared ? null : plan.domainId,
-          sharedDomainId: plan.shared ? plan.sub.id : (plan.forwardingSub?.id ?? null),
-          receivingAddress:
-            !plan.shared && plan.forwardingSub
-              ? `fwd-${randomAlnum(16)}@${plan.forwardingSub.name}`
-              : null,
-          name: name ?? emailAddress,
-          fromName,
-          safety,
-          expiresAt: expiry.expiresAt,
-          lastUsedAt: now,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .onConflictDoNothing()
-        .returning();
-      if (inserted) {
-        await recordInboxActivity(t, {
-          teamId: p.teamId,
-          inboxId: inserted.id,
-          actor: p.actor,
-          action: "inbox.created",
-        });
-        await hooks.emit(t, p.teamId, [
-          inboxEvent("inbox.created", {
-            source: webhookSource(p.actor),
-            inbox: inboxWire(inserted, ZERO_COUNTS),
-            occurredAt: now,
-          }),
-        ]);
-        return inserted;
-      }
-      // A chosen address collides only with its own; a generated one is drawn again.
-      if (!plan.shared || plan.username !== undefined) {
-        const [taken] = await t
-          .select({ id: i.id })
-          .from(i)
-          .where(eq(i.emailAddress, emailAddress));
-        if (taken) return null;
-      }
-    }
-    throw new Error("no free inbox address after several draws");
-  });
-  if (!row) return fail(ADDRESS_TAKEN);
+      throw new Error("no free inbox address after several draws");
+    })
+    .catch((err: unknown) => {
+      if (err instanceof Refused) return err;
+      throw err;
+    });
+  if (row instanceof Refused) return fail(row.error);
   await hooks.flush();
   if (p.actor.kind === "user") {
     await recordAudit(db, {
@@ -665,7 +740,7 @@ export async function updateInbox(
   const shared = inbox.domainId === null;
   const set: Partial<typeof schema.inboxes.$inferInsert> = { updatedAt: now };
   if (p.patch.name !== undefined) {
-    const name = oneLineName(p.patch.name);
+    const name = oneLineName(p.patch.name, INBOX_NAME_MAX);
     if (isInboxError(name)) return fail(name);
     set.name = name;
   }

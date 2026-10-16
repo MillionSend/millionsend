@@ -126,6 +126,7 @@ export {
   type InboxAccept,
   isReservedTagName,
   MAX_ATTACHMENT_BYTES,
+  MAX_SUBJECT_LENGTH,
   QUOTA_BACKLOG_DAYS,
   RESERVED_TAG_PREFIX,
   reviewBacklogLimit,
@@ -152,6 +153,7 @@ export {
   type MailContent,
   type MailLocale,
   type MailPhraseKey,
+  mailCountList,
   type PlanMove,
   type PlanSnapshot,
   planCapPhrase,
@@ -625,6 +627,11 @@ export {
   reserveQuota,
 } from "./quota.js";
 export {
+  countApiKeyRequest,
+  fixedWindowCounter,
+  TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT,
+} from "./rate-limit.js";
+export {
   classifyRecipientDomain,
   createTldExists,
   type UndeliverableReason,
@@ -767,6 +774,7 @@ export {
   clearUnsubscribeSuppression,
   extractAddrSpec,
   findSuppressed,
+  findSuppressionsFor,
   hashRecipient,
   normalizeAddress,
   SUPPRESSION_ORIGIN_BY_REASON,

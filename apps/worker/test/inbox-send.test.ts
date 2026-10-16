@@ -326,7 +326,12 @@ describe("the inbox.forward job", () => {
     const inbox = await addInbox(w, { local: "forwarder", safety: { forward_to: [w.owner] } });
     const threadId = await addThread(w, inbox.id);
     const received = await receive(w, { inbox, threadId });
-    await forwardToOwners(db, w.deps, { receivedEmailId: received.id, inboxId: inbox.id });
+    await forwardToOwners(
+      db,
+      w.deps,
+      { receivedEmailId: received.id, inboxId: inbox.id },
+      async () => {},
+    );
     const [email] = await db
       .select()
       .from(schema.emails)
@@ -352,8 +357,15 @@ describe("the inbox.forward job", () => {
       reason: "hard_bounce",
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const again = vi.fn(async (_at: Date) => {});
     try {
-      await forwardToOwners(db, team.deps, { receivedEmailId: received.id, inboxId: inbox.id });
+      await forwardToOwners(
+        db,
+        team.deps,
+        { receivedEmailId: received.id, inboxId: inbox.id },
+        again,
+      );
+      expect(again).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledTimes(1);
       const line = String(warn.mock.calls[0]?.[0]);
       expect(line).toContain(
@@ -363,5 +375,38 @@ describe("the inbox.forward job", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("runs a copy the shared domain holds back again later, without a word in the log", async () => {
+    const team = await seedWorld(db, "worker-forward-wait");
+    const inbox = await addInbox(team, {
+      local: "forwarder",
+      shared: true,
+      safety: { forward_to: [team.owner] },
+    });
+    const threadId = await addThread(team, inbox.id);
+    const received = await receive(team, { inbox, threadId });
+    const deps = {
+      ...team.deps,
+      monitorSettings: async () => ({ ...MONITOR_SETTING_DEFAULTS, sharedInboxSend: false }),
+    };
+    const again: Date[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await forwardToOwners(
+        db,
+        deps,
+        { receivedEmailId: received.id, inboxId: inbox.id },
+        async (at) => void again.push(at),
+      );
+      expect(again).toHaveLength(1);
+      expect(again[0]?.getTime()).toBeGreaterThan(Date.now());
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+    expect(
+      await db.select().from(schema.emails).where(eq(schema.emails.inboxId, inbox.id)),
+    ).toEqual([]);
   });
 });

@@ -42,6 +42,11 @@ export function formatDayUtc(day: string, locale: string): string {
   }).format(new Date(`${day}T00:00:00Z`));
 }
 
+/** Calendar date with its year ("Nov 14, 2026" / "14 de nov. de 2026"). */
+export function formatDate(date: Date | string | number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(date));
+}
+
 /** Natural day+time stamp ("Aug 16, 8:12 PM" / "16 de ago., 20:12"). */
 export function formatDayTime(date: Date | string | number, locale: string): string {
   return new Intl.DateTimeFormat(locale, {

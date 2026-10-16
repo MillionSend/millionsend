@@ -1,6 +1,6 @@
 "use client";
 
-import { SHARED_USERNAME } from "@millionsend/core/inbox-username";
+import { INBOX_NAME_MAX, SHARED_USERNAME } from "@millionsend/core/inbox-username";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -29,14 +29,11 @@ export function CreateInboxDialog({
   onClose,
   domains,
   sharedDomain,
-  claiming,
 }: {
   open: boolean;
   onClose: () => void;
   domains: { id: string; name: string }[];
   sharedDomain: string | null;
-  /** Whether the team's shared subdomain is being claimed, so sharedDomain may still be the parent domain. */
-  claiming: boolean;
 }) {
   const t = useTranslations("inboxes");
   const common = useTranslations("common");
@@ -74,8 +71,7 @@ export function CreateInboxDialog({
     ? local === "" || SHARED_USERNAME.test(local)
     : LOCAL_PART_RE.test(local);
   const domainName = shared ? sharedDomain : domains.find((d) => d.id === domain)?.name;
-  // A shared address waits for the claim, so it is created at the domain the picker shows.
-  const blocked = !domain || !localValid || create.isPending || (shared && claiming);
+  const blocked = !domain || !localValid || create.isPending;
   const submit = () => {
     if (blocked) return;
     create.mutate({
@@ -154,7 +150,7 @@ export function CreateInboxDialog({
             className="ms-input"
             style={{ width: "100%" }}
             value={name}
-            maxLength={64}
+            maxLength={INBOX_NAME_MAX}
             disabled={create.isPending}
             placeholder={t("create.namePlaceholder")}
             onChange={(event) => setName(event.target.value)}
@@ -217,12 +213,16 @@ export function CreateInboxDialog({
           <p
             style={{ margin: "-8px 0 0", fontSize: 12, lineHeight: 1.5, color: "var(--ms-muted)" }}
           >
-            {acceptFromHint(t, kind, acceptFrom)}
+            {acceptFromHint(t, kind, shared, acceptFrom)}
           </p>
         )}
         {error ? (
           <div className="ms-field-error" style={{ margin: 0 }}>
-            {review ? `${review} ${t("create.errors.orRandom")}` : error}
+            {review
+              ? review.orRandom
+                ? `${review.text} ${t("create.errors.orRandom")}`
+                : review.text
+              : error}
           </div>
         ) : null}
         <ModalFooter>

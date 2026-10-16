@@ -27,7 +27,7 @@ import { mailboxIdentity } from "./suppressions.js";
 import { type SuspensionReason, suspendTeam } from "./team-standing.js";
 import { DAY_MS } from "./utc-day.js";
 
-/** Stored emails read at a suspension, the latest of each sender and subject... */
+/** Stored emails read at a suspension, one of each sender and subject... */
 const CAPTURE_EMAILS = 40;
 /** ...found among this many of the team's latest. */
 const CAPTURE_SCAN = 500;
@@ -131,6 +131,9 @@ async function domainFingerprints(
   return rows.map((row) => fingerprint("sending_domain", row.name));
 }
 
+const hasBody = (row: { ciphertext: Buffer | null; purgedAt: Date | null }) =>
+  row.ciphertext !== null && !row.purgedAt;
+
 /** What the team's latest stored mail carries; a body that cannot be opened gives its sender and subject only. */
 async function mailFingerprints(
   db: Db,
@@ -153,15 +156,18 @@ async function mailFingerprints(
     .where(eq(e.teamId, teamId))
     .orderBy(desc(e.createdAt))
     .limit(CAPTURE_SCAN);
-  const seen = new Set<string>();
-  const picked = rows.filter((row) => {
+  // Each sender and subject is read from its newest email that still has a
+  // body, else its newest: a newer one whose body is gone, or was never
+  // stored, would hide the campaign's links, phones and text.
+  const byKey = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
     const key = `${row.from}\n${row.subject}`;
-    if (seen.has(key) || seen.size >= CAPTURE_EMAILS) return false;
-    seen.add(key);
-    return true;
-  });
+    const kept = byKey.get(key);
+    if (kept ? !hasBody(kept) && hasBody(row) : byKey.size < CAPTURE_EMAILS) byKey.set(key, row);
+  }
+  const picked = [...byKey.values()];
   let ring: Keyring | null = null;
-  if (picked.some((row) => row.ciphertext && !row.purgedAt)) {
+  if (picked.some(hasBody)) {
     try {
       ring = keyring?.() ?? null;
     } catch (err) {

@@ -15,6 +15,13 @@ vi.mock("next/headers", () => ({
     get: () => (locale.cookie ? { value: locale.cookie } : undefined),
   }),
 }));
+const enqueueSharedSubdomain = vi.hoisted(() =>
+  vi.fn(async (_teamId: string, _since: Date, _startAfter?: Date) => {}),
+);
+vi.mock("@/server/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/queue")>()),
+  enqueueSharedSubdomain,
+}));
 
 let db: Db;
 let close: () => Promise<void>;
@@ -25,6 +32,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  enqueueSharedSubdomain.mockClear();
   locale.cookie = undefined;
   await close();
 });
@@ -42,6 +51,48 @@ function callerFor(userId: string, overrides: Partial<Context> = {}) {
     ...overrides,
   });
 }
+
+describe("team.createTeam and the team's shared subdomain", () => {
+  const SHARED = "agents.example.com";
+  const labels = (teamId: string) =>
+    db
+      .select({
+        name: schema.sharedInboxDomains.name,
+        lockedAt: schema.sharedInboxDomains.lockedAt,
+      })
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, teamId));
+
+  it("gives a new team its unlocked label", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    await insertUser("u1", "u1@example.com");
+    const { teamId } = await callerFor("u1").team.createTeam({ name: "Acme Inc" });
+    expect(await labels(teamId)).toEqual([{ name: `acme-inc.${SHARED}`, lockedAt: null }]);
+    expect(enqueueSharedSubdomain).not.toHaveBeenCalled();
+  });
+
+  it("creates the team while the name review can't answer, and has the worker settle it from 5 minutes on", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("judge down")));
+    await insertUser("u1", "u1@example.com");
+    const { teamId } = await callerFor("u1").team.createTeam({ name: "Acme Inc" });
+    expect(await db.select().from(schema.teams).where(eq(schema.teams.id, teamId))).toHaveLength(1);
+    expect(await labels(teamId)).toEqual([]);
+    expect(enqueueSharedSubdomain).toHaveBeenCalledTimes(1);
+    const [queuedFor, since, startAfter] = enqueueSharedSubdomain.mock.calls[0] ?? [];
+    expect(queuedFor).toBe(teamId);
+    expect((startAfter?.getTime() ?? 0) - (since?.getTime() ?? 0)).toBe(5 * 60_000);
+  });
+
+  it("does nothing without a shared domain", async () => {
+    await insertUser("u1", "u1@example.com");
+    const { teamId } = await callerFor("u1").team.createTeam({ name: "Acme Inc" });
+    expect(await labels(teamId)).toEqual([]);
+    expect(enqueueSharedSubdomain).not.toHaveBeenCalled();
+  });
+});
 
 describe("team.createTeam", () => {
   it("creates the team and an owner membership", async () => {

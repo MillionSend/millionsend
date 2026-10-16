@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, type JsonWebKey, randomBytes, verify } from "node:crypto";
-import type { SystemMailMessage } from "@millionsend/core";
+import { DAY_MS, formatMailDate, type SystemMailMessage } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -31,6 +31,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   await close();
 });
@@ -65,20 +66,33 @@ async function call(path: string, init: RequestInit & { cookie?: string } = {}) 
   return auth.handler(new Request(`${BASE}/api/auth${path}`, { ...init, headers }));
 }
 
+const PASSWORD = "correct horse battery";
+
+function sessionCookie(headers: Headers): string {
+  return headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
+}
+
 async function signUp(
   email: string,
   requestHeaders?: Record<string, string>,
 ): Promise<{ userId: string; cookie: string }> {
   const { headers, response } = await auth.api.signUpEmail({
-    body: { name: email.split("@")[0] ?? email, email, password: "correct horse battery" },
+    body: { name: email.split("@")[0] ?? email, email, password: PASSWORD },
     returnHeaders: true,
     ...(requestHeaders ? { headers: new Headers(requestHeaders) } : {}),
   });
-  const cookie = headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0])
-    .join("; ");
-  return { userId: response.user.id, cookie };
+  return { userId: response.user.id, cookie: sessionCookie(headers) };
+}
+
+async function signIn(email: string): Promise<string> {
+  const { headers } = await auth.api.signInEmail({
+    body: { email, password: PASSWORD },
+    returnHeaders: true,
+  });
+  return sessionCookie(headers);
 }
 
 async function registerClient(
@@ -117,12 +131,11 @@ async function clientRow(clientId: string) {
   return row;
 }
 
-/** Authorization-code + PKCE round trip as an MCP client would run it. */
-async function authorize(
+/** An MCP client's authorization request, up to the consent screen it lands on. */
+async function consentScreen(
   clientId: string,
   cookie: string,
-  consentScope?: string,
-  prompt?: "consent",
+  { scope = SCOPE, prompt }: { scope?: string; prompt?: "consent" } = {},
 ) {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -130,7 +143,7 @@ async function authorize(
     response_type: "code",
     client_id: clientId,
     redirect_uri: REDIRECT_URI,
-    scope: SCOPE,
+    scope,
     state: "xyz",
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -141,17 +154,35 @@ async function authorize(
   const consentUrl = new URL(await redirectTarget(authorizeRes), BASE);
   expect(consentUrl.pathname).toBe("/oauth/consent");
   expect(consentUrl.searchParams.get("client_id")).toBe(clientId);
+  return { consentUrl, verifier };
+}
 
-  const consentRes = await call("/oauth2/consent", {
+/** What the consent form posts: the decision plus the page's signed query. */
+function postConsent(consentUrl: URL, cookie: string, decision: Record<string, unknown>) {
+  return call("/oauth2/consent", {
     method: "POST",
     cookie,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      accept: true,
-      oauth_query: consentUrl.search.slice(1),
-      // What the consent form sends when the user unticks permissions.
-      ...(consentScope !== undefined ? { scope: consentScope } : {}),
-    }),
+    body: JSON.stringify({ ...decision, oauth_query: consentUrl.search.slice(1) }),
+  });
+}
+
+/** Authorization-code + PKCE round trip as an MCP client would run it. */
+async function authorize(
+  clientId: string,
+  cookie: string,
+  {
+    consentScope,
+    lifetime = "never",
+    ...request
+  }: { scope?: string; consentScope?: string; prompt?: "consent"; lifetime?: string } = {},
+) {
+  const { consentUrl, verifier } = await consentScreen(clientId, cookie, request);
+  const consentRes = await postConsent(consentUrl, cookie, {
+    accept: true,
+    lifetime,
+    // What the consent form sends when the user unticks permissions.
+    ...(consentScope !== undefined ? { scope: consentScope } : {}),
   });
   const callback = new URL(await redirectTarget(consentRes), BASE);
   expect(callback.origin + callback.pathname).toBe(REDIRECT_URI);
@@ -234,6 +265,45 @@ describe("OAuth authorization server", () => {
     expect(consents[0]?.referenceId).toBe(teamId);
   });
 
+  it("issues a refresh token to an MCP client that did not ask for offline_access", async () => {
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+
+    const { status, body } = await authorize(clientId, cookie, { scope: RESOURCE_SCOPE });
+    expect(status).toBe(200);
+    expect(body.scope).toBe(RESOURCE_SCOPE);
+    expect(typeof body.refresh_token).toBe("string");
+    const refreshed = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token as string,
+      client_id: clientId,
+    });
+    expect(refreshed.status).toBe(200);
+    expect(decodeJwt(refreshed.body.access_token as string).team_id).toBe(teamId);
+  });
+
+  it("still requires PKCE once offline_access is added", async () => {
+    const { cookie } = await signUp("ada@example.com");
+    const clientId = await registerClient();
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: REDIRECT_URI,
+      scope: RESOURCE_SCOPE,
+      state: "xyz",
+      resource: RESOURCE,
+    });
+    const refused = new URL(
+      await redirectTarget(await call(`/oauth2/authorize?${query}`, { cookie })),
+      BASE,
+    );
+    expect(refused.origin + refused.pathname).toBe(REDIRECT_URI);
+    expect(refused.searchParams.get("error")).toBe("invalid_request");
+    expect(refused.searchParams.get("code")).toBeNull();
+  });
+
   it("binds the grant to the team chosen on the consent screen", async () => {
     const first = await createTeam(db, "first");
     const second = await createTeam(db, "second");
@@ -301,6 +371,121 @@ describe("OAuth authorization server", () => {
     });
     expect(denied.status).toBeGreaterThanOrEqual(400);
     expect(denied.body.error).toBe("invalid_grant");
+  });
+
+  it("ends a 30-day grant at its bound, however recently it refreshed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.parse("2026-01-05T09:00:00Z");
+    vi.setSystemTime(t0);
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    const { body } = await authorize(clientId, cookie, { lifetime: "30d" });
+    const caller = createCaller({
+      db,
+      session: { user: { id: userId, email: "ada@example.com", name: "ada" } },
+      teamId,
+      role: "owner",
+    });
+    expect((await caller.connectedApps.list())[0]?.expiresAt).toEqual(new Date(t0 + 30 * DAY_MS));
+    const refresh = (refreshToken: unknown) =>
+      token({
+        grant_type: "refresh_token",
+        refresh_token: String(refreshToken),
+        client_id: clientId,
+      });
+
+    vi.setSystemTime(t0 + 29 * DAY_MS);
+    const lastDay = await refresh(body.refresh_token);
+    expect(lastDay.status).toBe(200);
+    vi.setSystemTime(t0 + 30 * DAY_MS + 60_000);
+    const ended = await refresh(lastDay.body.refresh_token ?? body.refresh_token);
+    expect(ended.status).toBe(400);
+    expect(ended.body.error).toBe("invalid_grant");
+    expect(await caller.connectedApps.list()).toHaveLength(0);
+
+    // Signing in again from the client brings the consent screen back, for
+    // a new grant; the old grant's refresh token stays dead.
+    const renewed = await authorize(clientId, await signIn("ada@example.com"));
+    expect(renewed.status).toBe(200);
+    expect((await refresh(body.refresh_token)).body.error).toBe("invalid_grant");
+    expect((await refresh(renewed.body.refresh_token)).status).toBe(200);
+  });
+
+  it("keeps a grant made until disconnected refreshing for years", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.parse("2026-01-05T09:00:00Z");
+    vi.setSystemTime(t0);
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    const { body } = await authorize(clientId, cookie);
+    const caller = createCaller({
+      db,
+      session: { user: { id: userId, email: "ada@example.com", name: "ada" } },
+      teamId,
+      role: "owner",
+    });
+    expect((await caller.connectedApps.list())[0]?.expiresAt).toBeNull();
+
+    let refreshToken = body.refresh_token as string;
+    for (const day of [31, 400, 800]) {
+      vi.setSystemTime(t0 + day * DAY_MS);
+      const refreshed = await token({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: clientId,
+      });
+      expect(refreshed.status, `day ${day}`).toBe(200);
+      // A response without a new refresh token means the client keeps its own.
+      refreshToken = (refreshed.body.refresh_token as string | undefined) ?? refreshToken;
+    }
+  });
+
+  it("stops refreshing a grant whose consent was deleted without its tokens", async () => {
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    const { body } = await authorize(clientId, cookie);
+    const [consent] = await db.select({ id: schema.oauthConsent.id }).from(schema.oauthConsent);
+    // The provider's own endpoint deletes the consent row and nothing else.
+    const deleted = await call("/oauth2/delete-consent", {
+      method: "POST",
+      cookie,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: consent?.id }),
+    });
+    expect(deleted.status).toBe(200);
+    expect(await db.select().from(schema.oauthRefreshToken)).toHaveLength(1);
+
+    const denied = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token as string,
+      client_id: clientId,
+    });
+    expect(denied.status).toBe(400);
+    expect(denied.body.error).toBe("invalid_grant");
+  });
+
+  it("refuses a stay-connected choice outside the offered ones", async () => {
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    const { consentUrl } = await consentScreen(clientId, cookie);
+    for (const decision of [
+      { accept: true, lifetime: "10y" },
+      { accept: true, lifetime: "toString" },
+      { accept: true },
+    ]) {
+      const res = await postConsent(consentUrl, cookie, decision);
+      expect(res.status, JSON.stringify(decision)).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid_request" });
+    }
+    expect(await db.select().from(schema.oauthConsent)).toHaveLength(0);
   });
 
   it("stops issuing tokens once the user leaves the team", async () => {
@@ -476,7 +661,9 @@ describe("OAuth authorization server", () => {
     await addMember(userId, teamId);
     const clientId = await registerClient();
 
-    const { status, body } = await authorize(clientId, cookie, "offline_access emails:send");
+    const { status, body } = await authorize(clientId, cookie, {
+      consentScope: "offline_access emails:send",
+    });
     expect(status).toBe(200);
     expect(body.scope).toBe("emails:send");
     expect(decodeJwt(body.access_token as string).scope).toBe("emails:send");
@@ -498,7 +685,9 @@ describe("OAuth authorization server", () => {
     const { userId, cookie } = await signUp("ada@example.com");
     await addMember(userId, teamId);
     const clientId = await registerClient();
-    await expect(authorize(clientId, cookie, "offline_access domains:write")).rejects.toThrow();
+    await expect(
+      authorize(clientId, cookie, { consentScope: "offline_access domains:write" }),
+    ).rejects.toThrow();
   });
 
   it("binds an all-teams grant and resolves membership per refresh", async () => {
@@ -740,6 +929,7 @@ describe("connected-app receipt", () => {
     expect(sent[0]?.subject).toBe("An app is connected to your MillionSend account");
     expect(sent[0]?.text).toContain("You allowed Claude Code to act on acme");
     expect(sent[0]?.text).toContain("emails:send");
+    expect(sent[0]?.text).toContain("in your name, until you disconnect it.");
     expect(sent[0]?.text).toContain("/settings/connected-apps");
     // Granting the same app again later (prompt=consent brings the screen
     // back) updates the stored consent: a repeat, not news. The provider
@@ -748,7 +938,7 @@ describe("connected-app receipt", () => {
       .update(schema.oauthConsent)
       .set({ createdAt: new Date(Date.now() - 5_000) })
       .where(eq(schema.oauthConsent.clientId, clientId));
-    await authorize(clientId, cookie, undefined, "consent");
+    await authorize(clientId, cookie, { prompt: "consent" });
     expect(sent).toHaveLength(1);
   });
 
@@ -768,5 +958,23 @@ describe("connected-app receipt", () => {
       .join("; ");
     await authorize(clientId, bare);
     expect(sent[0]?.subject).toBe("Um app foi conectado à sua conta do MillionSend");
+    expect(sent[0]?.text).toContain("em seu nome, até você desconectar.");
+  });
+
+  it("names the day a grant made for a set time ends", async () => {
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@mail.example.com>");
+    const { userId, cookie } = await signUp("ada@example.com");
+    const teamId = await createTeam(db, "acme");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    sent.length = 0;
+    await authorize(clientId, cookie, { lifetime: "30d" });
+    const [consent] = await db
+      .select({ expiresAt: schema.oauthConsent.expiresAt })
+      .from(schema.oauthConsent);
+    if (!consent?.expiresAt) throw new Error("grant not stamped");
+    expect(sent[0]?.text).toContain(
+      `in your name, until ${formatMailDate("en", consent.expiresAt)}.`,
+    );
   });
 });

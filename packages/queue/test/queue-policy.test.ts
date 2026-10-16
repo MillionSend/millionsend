@@ -137,10 +137,11 @@ it("the worker starts a migrating, listening consumer first and a producer secon
     "recipient.erase",
     "abuse.judge",
     "tenant.status",
+    "shared.subdomain",
   ]) {
     expect(queues.get(name)).toEqual({
       policy: "short",
-      notify: name !== "recipient.erase",
+      notify: name !== "recipient.erase" && name !== "shared.subdomain",
     });
   }
   for (const name of Object.values(DEAD_LETTER_QUEUES)) {
@@ -420,6 +421,35 @@ it("a batch of sends carries the same options as a single send: key, priority, d
     retryDelay: 5,
   });
   expect(inserted[0]?.job).not.toHaveProperty("startAfter");
+});
+
+it("defers a forward_to pass it runs again, under the same key", async () => {
+  const queue = await Queue.start("postgres://unused");
+  const at = new Date(1_000);
+  await queue.enqueueInboxForward({ receivedEmailId: "r1", inboxId: "i1" });
+  await queue.enqueueInboxForward({ receivedEmailId: "r1", inboxId: "i1" }, at);
+  expect(sent.map((s) => s.name)).toEqual(["inbox.forward", "inbox.forward"]);
+  expect(sent[0]?.opts).not.toHaveProperty("startAfter");
+  expect(sent[1]?.opts).toMatchObject({ singletonKey: "r1:i1", startAfter: at });
+});
+
+it("settles each team's shared subdomain under the team's key, later when asked, with no dead letter", async () => {
+  const queue = await Queue.start("postgres://unused");
+  const at = new Date(1_000);
+  const since = "2026-01-01T00:00:00.000Z";
+  await queue.enqueueSharedSubdomains([
+    { teamId: "t1", since },
+    { teamId: "t2", since },
+  ]);
+  await queue.enqueueSharedSubdomains([{ teamId: "t1", since }], at);
+  expect(inserted.map((i) => i.job)).toEqual([
+    expect.objectContaining({ data: { teamId: "t1", since }, singletonKey: "t1" }),
+    expect.objectContaining({ data: { teamId: "t2", since }, singletonKey: "t2" }),
+    expect.objectContaining({ singletonKey: "t1", startAfter: at }),
+  ]);
+  expect(inserted[0]?.job).not.toHaveProperty("startAfter");
+  expect(inserted[0]?.job).not.toHaveProperty("deadLetter");
+  expect(queues.get("shared.subdomain")).toEqual({ policy: "short", notify: false });
 });
 
 it("arms one drain per distinct endpoint, keyed and grouped by the endpoint so a created one absorbs the rest and passes run one at a time", async () => {

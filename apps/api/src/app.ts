@@ -1,5 +1,6 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { API_RATE_LIMIT_PER_MINUTE_DEFAULT } from "@millionsend/config";
 import {
   type AcceptEmailPayload,
   type AcceptEmailResult,
@@ -21,6 +22,7 @@ import {
   contactPropertiesChange,
   contactRoom,
   contactSnapshotColumns,
+  countApiKeyRequest,
   countDistinctRecipients,
   countParked,
   DAY_MS,
@@ -39,6 +41,7 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
+  fixedWindowCounter,
   INBOX_KEY_FROM_MESSAGE,
   INBOX_KEY_SCOPE_MESSAGE,
   type InboxKeys,
@@ -83,6 +86,7 @@ import {
   sendRefusalError,
   sesMessageIdHeader,
   sharedModeReason,
+  TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT,
   teamQuota,
   teamSharedSending,
   transitionQueueState,
@@ -356,9 +360,11 @@ export function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
 }
 
-/** Wire message for a failed schema parse: `path: issue; path: issue`. */
+/** Wire message for a failed schema parse: `path: issue; path: issue`, a whole-object issue bare. */
 export function validationMessage(error: z.ZodError): string {
-  return error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+  return error.issues
+    .map((i) => (i.path.length > 0 ? `${i.path.join(".")}: ${i.message}` : i.message))
+    .join("; ");
 }
 
 /**
@@ -674,8 +680,6 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
   if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
 }
 
-const RATE_WINDOW_MS = 60_000;
-const RATE_COUNTER_SWEEP_SIZE = 10_000;
 const AUTH_FAILURES_PER_MINUTE = 20;
 
 const MiB = 1024 * 1024;
@@ -684,29 +688,6 @@ const MX_DELIVER_URL_PATH = `${MX_INGEST_PATH}${MX_DELIVER_PATH}`;
 
 const bodyTooLarge = (maxBytes: number) => (c: Context) =>
   c.json(errorBody(413, "payload_too_large", `Request body exceeds ${maxBytes / MiB} MiB`), 413);
-
-/**
- * Fixed-window hit counter. Returns the count for `key` in the current
- * window after this hit, plus the seconds until the window rolls over.
- * ponytail: per-process; the DB bucket table is keyed by api_key uuid, so
- * move these there (text key) if the API ever runs more than one replica.
- */
-function fixedWindowCounter() {
-  const hits = new Map<string, { windowStart: number; count: number }>();
-  return (key: string, now = Date.now()): { count: number; retryAfterSec: number } => {
-    const windowStart = now - (now % RATE_WINDOW_MS);
-    if (hits.size > RATE_COUNTER_SWEEP_SIZE) {
-      for (const [k, v] of hits) if (v.windowStart !== windowStart) hits.delete(k);
-    }
-    const current = hits.get(key);
-    const count = current?.windowStart === windowStart ? current.count + 1 : 1;
-    hits.set(key, { windowStart, count });
-    return {
-      count,
-      retryAfterSec: Math.max(1, Math.ceil((windowStart + RATE_WINDOW_MS - now) / 1000)),
-    };
-  };
-}
 
 /**
  * Cloud sits behind Cloudflare only (the origin firewall admits nothing
@@ -723,33 +704,46 @@ function clientIp(c: Context, isCloud: boolean): string | null {
   }
 }
 
+/** Page size of a Resend list when the request has no limit. */
+export const DEFAULT_PAGE_LIMIT = 20;
+
+export const KEYSET_LIST_DESCRIPTION =
+  "Newest first, as on Resend, with cursor pagination: `after` takes the last id of a page and pages toward older items, `before` takes the first id and pages back toward newer ones.";
+
 /**
  * Keyset pagination for the Resend list endpoints: limit 1-100 (default 20),
- * `after`/`before` cursors are item ids, rows ordered by (created_at, id),
- * oldest first unless `newestFirst` (Resend's order, `after` paging toward
- * older items).
+ * `after`/`before` cursors are item ids, rows newest first by (created_at, id)
+ * as on Resend: `after` pages toward older items, `before` back toward newer.
  */
 export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
-  newestFirst?: boolean;
-  /** Resolves a cursor id to its sort key, scoped to the caller's team. */
-  loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
-  loadRows: (cond: SQL | undefined, descending: boolean, take: number) => Promise<R[]>;
+  /**
+   * Resolves a cursor id to its sort key, scoped to the caller's team. "end"
+   * is a cursor below every row: after it the page is empty, and before it
+   * the page starts at the oldest row.
+   */
+  loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | "end" | undefined>;
+  loadRows: (cond: SQL | undefined, orderBy: SQL[], take: number) => Promise<R[]>;
 }): Promise<{ rows: R[]; hasMore: boolean } | "bad_cursor"> {
   const { query } = opts;
-  const limit = query.limit ?? 20;
+  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
   const cursorId = query.before ?? query.after;
-  const towardNewer = opts.newestFirst ? Boolean(query.before) : !query.before;
+  const towardNewer = Boolean(query.before);
   let cond: SQL | undefined;
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
     if (!cur) return "bad_cursor";
-    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
+    if (cur !== "end") {
+      cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
+    } else if (!towardNewer) {
+      return { rows: [], hasMore: false };
+    }
   }
+  const dir = towardNewer ? asc : desc;
   // One extra row decides has_more without a count query.
-  const fetched = await opts.loadRows(cond, !towardNewer, limit + 1);
+  const fetched = await opts.loadRows(cond, [dir(opts.createdAt), dir(opts.id)], limit + 1);
   const hasMore = fetched.length > limit;
   const rows = fetched.slice(0, limit);
   // `before` pages are fetched outward from the cursor; responses keep the list's order.
@@ -762,7 +756,7 @@ export function arrayPage<T extends { id: string }>(
   items: readonly T[],
   query: ListQuery,
 ): { rows: T[]; hasMore: boolean } | "bad_cursor" {
-  const limit = query.limit ?? 20;
+  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
   const cursorId = query.before ?? query.after;
   let start = 0;
   let end = items.length;
@@ -1779,6 +1773,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/contacts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listContactsQuerySchema },
       responses: {
         200: {
@@ -1802,14 +1797,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .from(t)
               .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(t)
             .where(and(eq(t.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2538,6 +2531,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -2560,14 +2554,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(s)
               .where(and(eq(s.id, id), eq(s.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(s)
             .where(and(eq(s.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(s.createdAt), desc(s.id)] : [asc(s.createdAt), asc(s.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2615,6 +2607,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments/{id}/contacts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { params: idParam, query: listContactsQuerySchema },
       responses: {
         200: {
@@ -2646,14 +2639,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(ct)
               .where(and(eq(ct.id, id), eq(ct.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(ct)
             .where(and(eq(ct.teamId, auth.teamId), inSegment, cond))
-            .orderBy(
-              ...(descending ? [desc(ct.createdAt), desc(ct.id)] : [asc(ct.createdAt), asc(ct.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2866,6 +2857,12 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     // the sender.
     const reserved = reservedSenderRefusal(broadcast.from, deps.onboardingEmailFrom);
     if (reserved) return fail(422, reserved.name, reserved.message);
+    // As batch and SMTP answer it, before a "not verified" 422 that the
+    // shared row's verified status in GET /domains would contradict.
+    if (isSharedInboxSender(broadcast.from, deps.sharedInboxDomain)) {
+      const { name, message } = sharedSenderRefusal.body;
+      return fail(403, name, message);
+    }
     const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
     if (!domain.ok) {
       return fail(
@@ -3063,7 +3060,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast created (and scheduled when send: true)",
         },
         400: jsonErr("Broadcast state conflict"),
-        403: jsonErr("Restricted API key or sending paused"),
+        403: jsonErr("Restricted API key, sending paused, or a From on the shared inbox domain"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },
@@ -3127,6 +3124,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/broadcasts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -3150,14 +3148,12 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .from(b)
               .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(b)
             .where(and(eq(b.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(b.createdAt), desc(b.id)] : [asc(b.createdAt), asc(b.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -3360,7 +3356,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast scheduled; finishes_at and warning say when it goes out",
         },
         400: jsonErr("Not a draft"),
-        403: jsonErr("Sending paused"),
+        403: jsonErr("Sending paused, or a From on the shared inbox domain"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },
@@ -3455,8 +3451,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return next();
   });
 
-  // Uncaught throws must still speak Resend's error format — SDK clients
-  // parse the body as JSON.
+  // Uncaught throws and unmatched routes must still speak Resend's error
+  // format — SDK clients parse the body as JSON. The 404 never echoes the
+  // path: it can carry an address, and the request log keeps response bodies.
+  app.notFound((c) =>
+    c.json(errorBody(404, "not_found", "The requested endpoint does not exist."), 404),
+  );
   app.onError((err, c) => {
     // The request validators refuse a malformed JSON body (400) or one that
     // isn't JSON (415) by throwing: the caller's mistake, not ours to report.
@@ -3656,30 +3656,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // OAuth (MCP) callers have no api_keys row to bucket on; the /mcp gate
     // rate-limits them per user instead.
     if (!auth || auth.apiKeyId === null) return next();
-    const bucket = schema.apiRateLimits;
-    const windowStart = sql<Date>`date_trunc('minute', now())`;
-    const [row] = await deps.db
-      .insert(bucket)
-      .values({ apiKeyId: auth.apiKeyId, windowStart, count: 1 })
-      .onConflictDoUpdate({
-        target: bucket.apiKeyId,
-        set: {
-          windowStart,
-          count: sql`case when ${bucket.windowStart} = ${windowStart} then ${bucket.count} + 1 else 1 end`,
-        },
-      })
-      .returning({
-        count: bucket.count,
-        retryAfter: sql<number>`greatest(1, ceil(extract(epoch from (${bucket.windowStart} + interval '1 minute' - now()))))::int`,
-      });
-    const limit = deps.rateLimitPerMinute ?? 600;
-    if ((row?.count ?? 0) > limit) {
-      c.header("retry-after", String(row?.retryAfter ?? 60));
+    const key = await countApiKeyRequest(deps.db, auth.apiKeyId);
+    if (key.count > (deps.rateLimitPerMinute ?? API_RATE_LIMIT_PER_MINUTE_DEFAULT)) {
+      c.header("retry-after", String(key.retryAfterSec));
       return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
     }
     // The team bucket spans every key, so minting keys cannot multiply the cap.
     const team = countTeamRequest(`team:${auth.teamId}`);
-    if (team.count > (deps.teamRateLimitPerMinute ?? 3000)) {
+    if (team.count > (deps.teamRateLimitPerMinute ?? TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT)) {
       c.header("retry-after", String(team.retryAfterSec));
       return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
     }
@@ -4714,6 +4698,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const listEmailsRoute = createRoute({
     method: "get",
     path: "/emails",
+    description: KEYSET_LIST_DESCRIPTION,
     middleware: [requireFullAccess],
     request: { query: listQuerySchema },
     responses: {
@@ -4743,14 +4728,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             .from(t)
             .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
         )[0],
-      loadRows: (cond, descending, take) =>
+      loadRows: (cond, orderBy, take) =>
         deps.db
           .select()
           .from(t)
           .where(and(eq(t.teamId, auth.teamId), cond))
-          .orderBy(
-            ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-          )
+          .orderBy(...orderBy)
           .limit(take),
     });
     if (page === "bad_cursor") {

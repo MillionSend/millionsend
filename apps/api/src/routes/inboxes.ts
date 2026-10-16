@@ -8,7 +8,7 @@ import {
   createSharedNameReview,
   deleteInboxes,
   deleteLabel,
-  findLiveInbox,
+  findKeyInbox,
   getInbox,
   getThread,
   getThreadEmail,
@@ -37,8 +37,6 @@ import {
   type VerificationCodeWire,
   waitForReceived,
 } from "@millionsend/core";
-import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { type ApiDeps, type Env, errorBody } from "../app.js";
 import {
@@ -124,16 +122,9 @@ export function registerInboxRoutes(
     failure(c, { status: 404, name: "not_found", message });
   const cursorNotFound = (c: Context<Env>) => notFound(c, CURSOR_NOT_FOUND_MESSAGE);
 
-  /**
-   * SECURITY: the inbox must be the team's, live, the key's own when the key
-   * is inbox-scoped, and on the key's domain when it is domain-scoped (as
-   * its received-mail reads are); anything else reads as not found.
-   */
   const ownInboxSafety = async (c: Context<Env>, inboxId: string) => {
-    const auth = c.get("auth");
-    if (auth.inboxId && auth.inboxId !== inboxId.toLowerCase()) return null;
-    const inbox = await findLiveInbox(db, { teamId: auth.teamId, inboxId });
-    if (!inbox || (auth.domainId !== null && inbox.domainId !== auth.domainId)) return null;
+    const inbox = await findKeyInbox(db, c.get("auth"), inboxId);
+    if (!inbox) return null;
     touchInboxInBackground(db, inbox.id);
     return inbox.safety;
   };
@@ -171,7 +162,7 @@ export function registerInboxRoutes(
       path: "/inboxes",
       summary: "Create an inbox",
       description:
-        "An address that receives into threads, on one of your verified domains (receiving on, or forwarding: true) or, with email_address omitted, an address on the shared inbox domain that needs no DNS: username names it, or it is random. It never expires unless expires_in says so. Returns the full inbox. MillionSend extensions: username, kind (agent by default), expires_in and safety.",
+        "An address that receives into threads, on one of your verified domains (receiving on, or forwarding: true) or, with email_address omitted, an address on the shared inbox domain that needs no DNS: username names it, or it is random. domain_id takes a row of GET /domains instead of email_address: the team's shared subdomain, or one of your domains with username. It never expires unless expires_in says so. Returns the full inbox. MillionSend extensions: username, domain_id, kind (agent by default), expires_in and safety.",
       request: {
         body: { content: { "application/json": { schema: createInboxRequestSchema } } },
       },
@@ -184,20 +175,15 @@ export function registerInboxRoutes(
           "Too many inboxes created in the last hour, or too many names reviewed or refused on the shared domain today",
         ),
         503: jsonErr(
-          "A chosen username or from_name on the shared domain can't be reviewed right now; retry-after says when to try again",
+          "A chosen username or from_name on the shared domain can't be reviewed right now, or the team's subdomain on the shared domain is still waiting for its name review; retry-after says when to try again",
         ),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const [team] = await db
-        .select({ name: schema.teams.name })
-        .from(schema.teams)
-        .where(eq(schema.teams.id, auth.teamId));
       const result = await createInbox(db, inboxDeps(), {
         teamId: auth.teamId,
-        teamName: team?.name ?? "",
         plan: auth.plan,
         isCloud: deps.isCloud,
         actor: actorOf(c),
@@ -948,7 +934,7 @@ export function registerInboxRoutes(
       path: "/inboxes/{inbox_id}/codes/latest",
       summary: "Retrieve the latest verification code",
       description:
-        "MillionSend extension: the newest code or sign-in link in delivered mail, never from held mail or senders that failed authentication; links are never fetched. wait > 0 long-polls until one arrives (status timeout when none did). Always 200; status none when there is nothing.",
+        "MillionSend extension: the newest code or sign-in link in delivered mail, never from held mail or senders that failed authentication; links are never fetched. max_age counts from delivery, so a code released from quarantine counts from its release; since skips mail received at or before it, so a second sign-in waits for its own code. wait > 0 long-polls until one arrives (status timeout when none did). Always 200; status none when there is nothing.",
       request: { params: inboxIdParam, query: codesQuerySchema },
       responses: {
         200: json(verificationCodeResponseSchema, "The latest code, or a status saying why none"),
@@ -972,6 +958,7 @@ export function registerInboxRoutes(
           inboxId: inbox_id,
           from: q.from || null,
           maxAgeMs: maxAge.value * 1000,
+          since: q.since ? new Date(q.since) : null,
           actor: actorOf(c),
         });
       if (wait.value === 0) return c.json(await read(), 200);

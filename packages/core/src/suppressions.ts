@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { sha256Hex } from "./hash.js";
 import { GMAIL_DOMAINS } from "./mailbox-providers.js";
 import { parseMailbox } from "./sender-address.js";
@@ -118,6 +118,26 @@ export async function findSuppressed(
     if (hashes.some((h) => suppressedHashes.has(h))) suppressed.add(recipient);
   }
   return suppressed;
+}
+
+/**
+ * The team's suppression rows for any of `recipients`, newest first, matched
+ * by hash as findSuppressed matches them, whatever the reason. An erased row
+ * still matches and reads a null email.
+ */
+export async function findSuppressionsFor(
+  db: Db,
+  teamId: string,
+  recipients: readonly string[],
+): Promise<{ id: string; email: string | null; reason: SuppressionReason; createdAt: Date }[]> {
+  if (recipients.length === 0) return [];
+  const t = schema.suppressions;
+  const hashes = recipients.flatMap((r) => suppressionHashesFor(r));
+  return db
+    .select({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt })
+    .from(t)
+    .where(and(eq(t.teamId, teamId), inArray(t.emailHash, hashes)))
+    .orderBy(desc(t.createdAt), desc(t.id));
 }
 
 /**

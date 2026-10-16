@@ -1,8 +1,14 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, desc, eq } from "drizzle-orm";
-import { type Env, errorBody, isUniqueViolation, keysetPage } from "../app.js";
+import { and, eq } from "drizzle-orm";
+import {
+  type Env,
+  errorBody,
+  isUniqueViolation,
+  KEYSET_LIST_DESCRIPTION,
+  keysetPage,
+} from "../app.js";
 import {
   createTemplateRequestSchema,
   errorSchema,
@@ -128,6 +134,7 @@ export function registerTemplateRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/templates",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -150,14 +157,12 @@ export function registerTemplateRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(t)
               .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(t)
             .where(and(eq(t.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {

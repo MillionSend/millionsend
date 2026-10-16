@@ -32,6 +32,11 @@ export interface JobPayloads {
   "received.screen": { receivedEmailId: string; inboxId: string };
   // A delivered message passed on to its inbox's forward_to owners.
   "inbox.forward": { receivedEmailId: string; inboxId: string };
+  // A team's subdomain label on the shared inbox domain, settled once its
+  // name review answers. `since` (ISO) is when the first job was queued:
+  // each successor carries it, and a team without a label takes a random
+  // one a day after it.
+  "shared.subdomain": { teamId: string; since: string };
 }
 
 /** ParsedSesEvent with occurredAt as ISO string (JSON-safe). */
@@ -127,6 +132,7 @@ const JOB_QUEUES = [
   "domain.age",
   "received.screen",
   "inbox.forward",
+  "shared.subdomain",
 ] as const;
 // Compile-time check that every JobPayloads key is listed above.
 const _everyJobQueueListed: Record<Exclude<JobName, (typeof JOB_QUEUES)[number]>, never> = {};
@@ -430,9 +436,31 @@ export class Queue {
     });
   }
 
-  /** A delivered message's pass to its inbox's forward_to owners. */
-  async enqueueInboxForward(p: JobPayloads["inbox.forward"]): Promise<void> {
-    await this.send("inbox.forward", p, { dedupeKey: `${p.receivedEmailId}:${p.inboxId}` });
+  /**
+   * A delivered message's pass to its inbox's forward_to owners; `startAfter`
+   * runs it again later. The running job may enqueue its own successor: the
+   * short policy only collapses a key while a job is still created.
+   */
+  async enqueueInboxForward(p: JobPayloads["inbox.forward"], startAfter?: Date): Promise<void> {
+    await this.send("inbox.forward", p, {
+      dedupeKey: `${p.receivedEmailId}:${p.inboxId}`,
+      startAfter,
+    });
+  }
+
+  /**
+   * Settles each team's shared subdomain label; `startAfter` runs them later.
+   * Keyed by the team: a job still waiting absorbs a new one and keeps its
+   * older `since`, while a job already running may queue its successor.
+   */
+  async enqueueSharedSubdomains(
+    jobs: readonly JobPayloads["shared.subdomain"][],
+    startAfter?: Date,
+  ): Promise<void> {
+    await this.sendMany(
+      "shared.subdomain",
+      jobs.map((payload) => ({ payload, dedupeKey: payload.teamId, startAfter })),
+    );
   }
 
   /**

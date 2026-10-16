@@ -111,6 +111,11 @@ export const sharedInboxDomains = pgTable("shared_inbox_domains", {
   // The configuration set associated alongside (null = none was). A shared
   // send names TenantName only while both columns match what it uses.
   sesTenantConfigSet: text("ses_tenant_config_set"),
+  // Set by the first inbox that takes an address on the label. Until then
+  // (and while no inbox is on it) the label follows the team name and is
+  // released on rename or deletion; from then on it never changes, and a
+  // deleted team leaves it as a tombstone.
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -159,6 +164,10 @@ export const inboxes = pgTable(
       .where(sql`${t.receivingAddress} is not null`),
     index("inboxes_team_created_idx").on(t.teamId, t.createdAt, t.id),
     index("inboxes_domain_idx").on(t.domainId).where(sql`${t.domainId} is not null`),
+    // Deleting a label cascades here; without it each delete scans inboxes.
+    index("inboxes_shared_domain_idx")
+      .on(t.sharedDomainId)
+      .where(sql`${t.sharedDomainId} is not null`),
     index("inboxes_expires_idx").on(t.expiresAt).where(sql`${t.expiresAt} is not null`),
   ],
 );

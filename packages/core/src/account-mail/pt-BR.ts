@@ -23,11 +23,15 @@ export const ptBR = {
     subject: "Um app foi conectado à sua conta do MillionSend",
     body: [
       "Você permitiu que {app} atue em {team} pelo servidor MCP do MillionSend com estas permissões: {scopes}.",
-      "Ele pode fazer o mesmo que você, em seu nome, até você revogar o acesso.",
+      "Ele pode fazer o mesmo que você, em seu nome, {until}.",
     ],
     button: "Revisar apps conectados",
     muted: ["Não autorizou isso? Revogue agora."],
-    extra: { allTeams: "todas as suas equipes" },
+    extra: {
+      allTeams: "todas as suas equipes",
+      untilDisconnected: "até você desconectar",
+      untilDate: "até {date}",
+    },
   },
   "api_key.created": {
     subject: "Uma nova chave de API foi criada",
@@ -254,11 +258,16 @@ export const ptBR = {
   },
   "inbox.attention": {
     subject: "Suas caixas de entrada precisam de atenção",
-    body: [
-      "Até agora hoje: {quarantined} e-mails em quarentena, {drafts} rascunhos aguardando aprovação e {refused} envios barrados pelas regras das suas caixas.",
-      "Revise no painel.",
-    ],
+    body: ["Até agora hoje: {counts}.", "Revise no painel."],
     button: "Revisar caixas",
+    extra: {
+      "quarantined.one": "{n} e-mail em quarentena",
+      "quarantined.other": "{n} e-mails em quarentena",
+      "drafts.one": "{n} rascunho aguardando aprovação",
+      "drafts.other": "{n} rascunhos aguardando aprovação",
+      "refused.one": "{n} envio barrado pelas regras das suas caixas",
+      "refused.other": "{n} envios barrados pelas regras das suas caixas",
+    },
   },
   "billing.payment_failed": {
     subject: "Pagamento recusado no seu plano {plan}",

@@ -60,7 +60,7 @@ export interface InboxWire {
   id: string;
   name: string;
   email_address: string;
-  /** A shared inbox's is its shared_inbox_domains id, which /domains never lists. */
+  /** A shared inbox's is its team's shared subdomain: the GET /domains row with shared: true. */
   domain_id: string;
   receiving_address: string | null;
   from_name: string | null;
@@ -126,6 +126,8 @@ export interface ThreadListItemWire {
   has_attachment: boolean;
   has_draft: boolean;
   read: boolean;
+  /** Held messages not yet released; present only when held mail is listed. */
+  quarantined?: number;
   /** The thread's last_message_at. */
   received_at: string;
   folder: ThreadFolder;

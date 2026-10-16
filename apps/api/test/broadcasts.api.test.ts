@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, utcDay } from "@millionsend/core";
+import { EnvKeyring, generateApiKey, MAX_SUBJECT_LENGTH, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -195,6 +195,25 @@ describe("broadcasts API", () => {
 
     const updated = await call(tokenA, "PATCH", `/broadcasts/${broadcastId}`, { from: spoof });
     expect(updated.status).toBe(422);
+  });
+
+  it("caps the subject at MAX_SUBJECT_LENGTH characters on create and update", async () => {
+    const tooLong = "s".repeat(MAX_SUBJECT_LENGTH + 1);
+    const refused = await call(tokenA, "POST", "/broadcasts", { ...draftBody(), subject: tooLong });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/^subject: /),
+    });
+
+    const atCap = "s".repeat(MAX_SUBJECT_LENGTH);
+    const created = await call(tokenA, "POST", "/broadcasts", { ...draftBody(), subject: atCap });
+    expect(created.status).toBe(200);
+    const path = `/broadcasts/${(await json(created)).id}`;
+    const patched = await call(tokenA, "PATCH", path, { subject: tooLong });
+    expect(patched.status).toBe(422);
+    expect(await patched.json()).toMatchObject({ message: expect.stringMatching(/^subject: /) });
+    expect((await call(tokenA, "PATCH", path, { subject: atCap })).status).toBe(200);
   });
 
   it("send rejects a stored multi-mailbox From (pre-validation rows)", async () => {

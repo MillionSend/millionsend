@@ -166,9 +166,10 @@ em que você não pode confiar totalmente de todo modo.
 
 Um domínio verificado também pode [receber e-mails](/pt-BR/concepts/receiving)
 (beta). Toda resposta de domínio traz o objeto `capabilities` do Resend:
-`sending` é sempre `enabled` (pedir para desligá-lo dá `422`), e `receiving` é
-`enabled` ou `disabled`. Ligue ou desligue o recebimento em **Ativar
-recebimento**, na página do domínio, ou mande
+`sending` é `enabled` (pedir para desligá-lo dá `422`; só o
+[subdomínio compartilhado](#subdomínio-compartilhado) pode vir `disabled`),
+e `receiving` é `enabled` ou `disabled`. Ligue ou desligue o recebimento em
+**Ativar recebimento**, na página do domínio, ou mande
 `{ "capabilities": { "receiving": "enabled" } }` (ou `"disabled"`) para
 `PATCH /domains/{id}`. Só um domínio verificado pode ativá-lo, e é por isso
 que `POST /domains` recusa `"receiving": "enabled"` com `422`: adicione o
@@ -212,6 +213,39 @@ Cloud ele exige um plano pago. Veja
 [Quais endereços recebem](/pt-BR/concepts/receiving#quais-endereços-recebem).
 Excluir um domínio exclui as caixas dele, com as conversas e os rascunhos, e
 revoga as chaves de API delas.
+
+## Subdomínio compartilhado
+
+Numa instância com um
+[domínio compartilhado das caixas](/pt-BR/concepts/inboxes#domínio-compartilhado),
+o `GET /domains` termina com mais uma linha: o subdomínio da sua equipe
+nele, como `acme.agents.example`, onde as suas caixas compartilhadas ganham
+os endereços; uma equipe cujo subdomínio espera a revisão de nomes ainda
+não tem essa linha. Toda linha traz o `shared`, e essa é a que vem com
+`shared: true`. Ela aparece como `verified`, na região padrão da instância,
+com o recebimento ligado, o pega-tudo e o rastreamento desligados, e com
+dois campos só dela:
+
+- `sending_mode`: o que os endereços nela podem enviar agora: `open`
+  (começar conversas), `reply_only` (responder dentro das próprias
+  conversas) ou `receive_only` (nada sai, e o `capabilities.sending` vem
+  `disabled`). Uma caixa cujo endereço ou `from_name` parece o de uma
+  marca conhecida só responde, mesmo com o modo `open` (veja
+  [Domínio compartilhado](/pt-BR/concepts/inboxes#domínio-compartilhado)).
+- `sending_mode_reason`: por que o envio não está `open`: `plan` (o plano
+  da equipe) ou `instance` (a configuração da instância); `null` quando
+  está `open`.
+
+A linha é só de leitura: o `GET /domains/{id}` devolve essa linha com
+`records: []`, porque não há nada para configurar, e `PATCH`,
+`POST /domains/{id}/verify` e `DELETE` respondem `403 forbidden`. Ela não
+conta no limite de domínios do seu plano, e o id dela continua o mesmo
+quando uma mudança de nome da equipe muda o nome dela. Mesmo verificada, ela
+só envia pelo próprio endereço de cada caixa nela, e o `POST /api-keys`
+recusa o id dela como `domain_id` com `422 validation_error`. Para criar uma
+caixa nela, mande o id dela como `domain_id` no `POST /inboxes`. A página
+**Domínios** do painel mostra essa linha primeiro, marcada como
+**Compartilhado**.
 
 ## Chaves de API e domínios
 
