@@ -45,22 +45,35 @@ export function createSesSender(defaultRegion: string, deadlineMs = SEND_DEADLIN
       if (!ToAddresses) throw new Error("no envelope recipients; refusing to send");
       const CcAddresses = toAddrSpecs(cc);
       const BccAddresses = toAddrSpecs(bcc);
-      const out = await clientFor(region ?? defaultRegion).send(
-        new SendEmailCommand({
-          Content: { Raw: { Data: raw } },
-          Destination: {
-            ToAddresses,
-            ...(CcAddresses ? { CcAddresses } : {}),
-            ...(BccAddresses ? { BccAddresses } : {}),
-          },
-          EmailTags: [{ Name: "millionsend_email_id", Value: emailId }],
-          ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
-          ...(tenantName ? { TenantName: tenantName } : {}),
-        }),
-        // Not a per-attempt requestTimeout: the SDK retries that by sending
-        // the request again, while past this deadline no attempt goes out.
-        { abortSignal: AbortSignal.timeout(deadlineMs) },
-      );
+      const deadline = AbortSignal.timeout(deadlineMs);
+      const out = await clientFor(region ?? defaultRegion)
+        .send(
+          new SendEmailCommand({
+            Content: { Raw: { Data: raw } },
+            Destination: {
+              ToAddresses,
+              ...(CcAddresses ? { CcAddresses } : {}),
+              ...(BccAddresses ? { BccAddresses } : {}),
+            },
+            EmailTags: [{ Name: "millionsend_email_id", Value: emailId }],
+            ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
+            ...(tenantName ? { TenantName: tenantName } : {}),
+          }),
+          // Not a per-attempt requestTimeout: the SDK retries that by sending
+          // the request again, while past this deadline no attempt goes out.
+          { abortSignal: deadline },
+        )
+        .catch((err: unknown) => {
+          // Cut off while SES's answer was arriving, the send fails with the
+          // socket's error rather than the abort. Past the deadline, anything
+          // but SES's own answer is a send SES may hold.
+          if (deadline.aborted && (err as { $fault?: unknown } | null)?.$fault === undefined) {
+            throw Object.assign(new Error("SES send passed its deadline", { cause: err }), {
+              name: "AbortError",
+            });
+          }
+          throw err;
+        });
       if (!out.MessageId) {
         throw new Error("SES accepted the send but returned no MessageId");
       }
