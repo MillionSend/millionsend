@@ -121,7 +121,6 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
     html: string;
     text: string;
     switchedHtml: string;
-    savedHtml: string;
     dirty: boolean;
   } | null>(null);
 
@@ -273,12 +272,13 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   // ⌘S saves, ⌘↵ saves and closes — matching the keycaps on the buttons.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // A dialog's own ⌘↵ must not also save the page behind it.
-      if (!(event.metaKey || event.ctrlKey) || modalOpen()) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      // Behind an open dialog nothing saves, but ⌘S still never opens the
+      // browser's Save Page.
       if (event.key === "s") {
         event.preventDefault();
-        void save(false);
-      } else if (event.key === "Enter") {
+        if (!modalOpen()) void save(false);
+      } else if (event.key === "Enter" && !modalOpen()) {
         event.preventDefault();
         void save(true);
       }
@@ -360,7 +360,6 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         html,
         text,
         switchedHtml: source.html,
-        savedHtml: savedHtml.current,
         dirty,
       });
     }
@@ -445,7 +444,6 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
     setAsCode(false);
     setConverting(false);
     setTab("edit");
-    savedHtml.current = beforeSwitch.savedHtml;
     setDirty(beforeSwitch.dirty);
     setBeforeSwitch(null);
   }
@@ -548,43 +546,48 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
             <div
               style={{
                 display: "flex",
-                flex: "none",
+                flexWrap: "wrap",
                 alignItems: "center",
-                gap: 6,
+                justifyContent: "flex-end",
+                gap: "6px 12px",
                 marginLeft: "auto",
               }}
             >
               {mode === "blocks" || beforeSwitch ? (
+                // Off while saving: the save in flight resets the baselines
+                // for the body it sent, whichever mode the page is in by then.
                 <button
                   type="button"
                   className="ms-maily-tool ms-maily-tool-labeled"
-                  style={{ marginRight: 6 }}
+                  disabled={saving}
                   onClick={mode === "blocks" ? requestCode : requestBlocks}
                 >
                   {mode === "blocks" ? <CodeGlyph size={14} /> : null}
                   {t(mode === "blocks" ? "html.editAsHtml" : "html.backToBlocks")}
                 </button>
               ) : null}
-              {(["edit", "preview"] as const).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  style={{
-                    fontSize: 13,
-                    padding: "4px 10px",
-                    borderRadius: 8,
-                    border: 0,
-                    cursor: "pointer",
-                    background: tab === key ? "var(--ms-panel-raised)" : "none",
-                    color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-                    font: "inherit",
-                    whiteSpace: "nowrap",
-                  }}
-                  onClick={() => setTab(key)}
-                >
-                  {t(key === "edit" ? "editor.editTab" : "editor.previewTab")}
-                </button>
-              ))}
+              <span style={{ display: "flex", gap: 6 }}>
+                {(["edit", "preview"] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    style={{
+                      fontSize: 13,
+                      padding: "4px 10px",
+                      borderRadius: 8,
+                      border: 0,
+                      cursor: "pointer",
+                      background: tab === key ? "var(--ms-panel-raised)" : "none",
+                      color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
+                      font: "inherit",
+                      whiteSpace: "nowrap",
+                    }}
+                    onClick={() => setTab(key)}
+                  >
+                    {t(key === "edit" ? "editor.editTab" : "editor.previewTab")}
+                  </button>
+                ))}
+              </span>
             </div>
           </div>
           {tab === "edit" && mode === "blocks" ? (
@@ -675,7 +678,6 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         onClose={() => setSwitchOpen(false)}
         onDuplicate={initial ? duplicateAsHtml : undefined}
         onSwitchInPlace={switchInPlace}
-        inPlaceLabel={t("html.convertInPlace")}
       />
       <BackToBlocksDialog
         open={backOpen}

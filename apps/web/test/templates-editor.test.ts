@@ -36,6 +36,8 @@ const rq = vi.hoisted(() => ({
   render: vi.fn(),
   /** What the debounced email.render query holds; every other query is empty. */
   rendered: { data: undefined as unknown },
+  /** Whether the save mutations report a request in flight. */
+  saving: false,
   /** The props the block editor last mounted with. */
   blockEditor: null as null | { value: { document: unknown; html: string }; convertHtml?: boolean },
 }));
@@ -50,7 +52,13 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (options?: { input?: object }) =>
     options?.input && "document" in options.input ? rq.rendered : { data: undefined },
   useInfiniteQuery: () => rq.infinite,
-  useMutation: () => ({ mutateAsync: rq.save, mutate: vi.fn(), isPending: false, isError: false }),
+  useMutation: () => ({
+    mutateAsync: rq.save,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+    isPending: rq.saving,
+    isError: false,
+  }),
   useQueryClient: () => ({ invalidateQueries: vi.fn(), fetchQuery: rq.render }),
 }));
 // The router stub keeps inputs available for request assertions.
@@ -121,6 +129,7 @@ describe("template mode recovery", () => {
     rq.render.mockReset().mockResolvedValue({ html: "<p>Current</p>", text: "Current" });
     rq.rendered = { data: undefined };
     rq.blockEditor = null;
+    rq.saving = false;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -330,9 +339,63 @@ describe("template mode recovery", () => {
     await press("Enter");
     await press("s");
     expect(rq.save).not.toHaveBeenCalled();
+    // Still kept from the browser's Save Page while the dialog is up.
+    const saveKey = new KeyboardEvent("keydown", { key: "s", metaKey: true, cancelable: true });
+    await act(async () => window.dispatchEvent(saveKey));
+    expect(saveKey.defaultPrevented).toBe(true);
     await click("common.cancel");
     await press("s");
     expect(rq.save).toHaveBeenCalledOnce();
+  });
+
+  it("puts the leave guard back as it was with the blocks", async () => {
+    const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await switchedRow();
+    await click("templates.html.backToBlocks");
+    // Nothing is unsaved again, so leaving for a copy needs no prompt.
+    await click("templates.html.editAsHtml");
+    await click("templates.html.switchCopy");
+    expect(ask).not.toHaveBeenCalled();
+    expect(rq.save).toHaveBeenCalledOnce();
+  });
+
+  it("drops the way back when a recovered draft replaces the body", async () => {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        savedAt: Date.now(),
+        data: { ...HTML_ROW, subject: "", text: "", html: "<p>Draft</p>", asCode: true },
+      }),
+    );
+    await switchedRow();
+    expect(container.textContent).toContain("templates.html.backToBlocks");
+    await click("common.draftRestore");
+    expect(container.querySelector<HTMLTextAreaElement>("#tpl-html")?.value).toBe("<p>Draft</p>");
+    expect(container.textContent).not.toContain("templates.html.backToBlocks");
+  });
+
+  it("forgets the way back once the HTML is converted to blocks instead", async () => {
+    await switchedRow();
+    await click("templates.editor.previewTab");
+    await click("templates.html.convert");
+    await click("templates.html.convertInPlace");
+    // Back as HTML before the parse lands: the old blocks are no longer the way back.
+    await click("templates.html.editAsHtml");
+    await click("templates.html.convertInPlace");
+    expect(container.querySelector("textarea#tpl-html")).not.toBeNull();
+    expect(container.textContent).not.toContain("templates.html.backToBlocks");
+  });
+
+  it("keeps the mode switch off while a save is in flight", async () => {
+    await switchedRow();
+    rq.saving = true;
+    await act(async () =>
+      root.render(createElement(TemplateEditor, { initial: { ...HTML_ROW, document: BLOCKS } })),
+    );
+    const back = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.startsWith("templates.html.backToBlocks"),
+    );
+    expect(back?.disabled).toBe(true);
   });
 
   it("offers no duplicate when a template that was never saved converts to blocks", async () => {
@@ -600,7 +663,6 @@ describe("edit-as-html dialog", () => {
         onClose: () => {},
         onDuplicate: () => {},
         onSwitchInPlace: () => {},
-        inPlaceLabel: "templates.html.convertInPlace",
       }),
     );
     expect(out).toContain("templates.html.switchTitle");
@@ -617,7 +679,6 @@ describe("edit-as-html dialog", () => {
         onClose: () => {},
         onDuplicate: undefined,
         onSwitchInPlace: () => {},
-        inPlaceLabel: "templates.html.convertInPlace",
       }),
     );
     expect(out).not.toContain("ms-btn-primary");
@@ -632,7 +693,6 @@ describe("edit-as-html dialog", () => {
         error: "templates.html.switchError",
         onClose: () => {},
         onSwitchInPlace: () => {},
-        inPlaceLabel: "templates.html.convertInPlace",
       }),
     );
     expect(failed).toMatch(/role="alert"[^>]*>templates\.html\.switchError</);
@@ -643,7 +703,6 @@ describe("edit-as-html dialog", () => {
         onClose: () => {},
         onDuplicate: () => {},
         onSwitchInPlace: () => {},
-        inPlaceLabel: "templates.html.convertInPlace",
       }),
     );
     expect(running.match(/<button[^>]*disabled=""/g)).toHaveLength(3);

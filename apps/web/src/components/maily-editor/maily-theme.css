@@ -86,9 +86,11 @@
   font: 500 12.5px var(--ms-font-sans);
   white-space: nowrap;
 }
-/* Maily portals a selected block's menu above every layer. A modal covers the
-   editor that menu acts on, and the editor never mounts inside one. */
-body:has(.ms-modal-overlay) [data-radix-popper-content-wrapper] {
+/* Maily portals a selected block's menu above every layer, so a modal opened
+   over the page's editor would show it floating on top. A modal holding an
+   editor of its own keeps its menus. */
+body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
+[data-radix-popper-content-wrapper] {
   display: none;
 }
 .ms-maily-sep {

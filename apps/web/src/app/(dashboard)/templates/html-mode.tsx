@@ -369,7 +369,6 @@ export function SwitchHtmlDialog({
   onClose,
   onDuplicate,
   onSwitchInPlace,
-  inPlaceLabel,
 }: {
   open: boolean;
   /** What is in flight: the render for the switch, or creating the copy. */
@@ -380,8 +379,6 @@ export function SwitchHtmlDialog({
   /** Absent on a template that is not saved yet: there is nothing to copy from. */
   onDuplicate?: (() => void) | undefined;
   onSwitchInPlace: () => void;
-  /** Names what switches in place: this template, this broadcast. */
-  inPlaceLabel: string;
 }) {
   const t = useTranslations("templates");
   return (
@@ -392,7 +389,7 @@ export function SwitchHtmlDialog({
       title={t("html.switchTitle")}
       body={t("html.switchBody")}
       copyLabel={t("html.switchCopy")}
-      inPlaceLabel={inPlaceLabel}
+      inPlaceLabel={t("html.convertInPlace")}
       onClose={onClose}
       onDuplicate={onDuplicate}
       onInPlace={onSwitchInPlace}

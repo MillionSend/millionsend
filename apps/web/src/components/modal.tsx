@@ -76,6 +76,9 @@ export function Modal({
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         if (onConfirm) {
           event.preventDefault();
+          // The dialog owns ⌘↵. A page shortcut on window would run next and
+          // find no dialog, since React commits the close in between.
+          event.stopPropagation();
           // The one confirm path no button carries, so nothing a read-only
           // view dims can stop it.
           if (!refusedAsReadOnly()) onConfirm();
