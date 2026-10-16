@@ -467,13 +467,45 @@ export async function enqueueWebhookDeliveries(
     enqueue: WebhookEnqueue;
   },
 ): Promise<void> {
-  await insertDeliveries(db, {
-    teamId: params.teamId,
-    emailId: params.email.emailId,
-    type: params.type,
-    payload: buildWebhookPayload(params.type, params.email, params.occurredAt, params.extras),
-    enqueue: params.enqueue,
+  const { teamId, enqueue, ...event } = params;
+  await enqueueEmailWebhookEvents(db, { teamId, events: [event], enqueue });
+}
+
+export interface EmailWebhookEvent {
+  type: WebhookEventType;
+  email: WebhookEmailFacts;
+  occurredAt: Date;
+  extras?: Record<string, unknown> | undefined;
+}
+
+/**
+ * Several email events of one team at once (a domain delete fails its whole
+ * queue): the endpoints are read once, each payload is built once, and the
+ * delivery rows land in bounded slices.
+ */
+export async function enqueueEmailWebhookEvents(
+  db: Db,
+  params: {
+    teamId: string;
+    events: readonly EmailWebhookEvent[];
+    enqueue: WebhookEnqueue;
+  },
+): Promise<void> {
+  if (params.events.length === 0) return;
+  const endpoints = await enabledEndpoints(db, params.teamId);
+  const values = params.events.flatMap((event) => {
+    const matching = endpoints.filter((e) => endpointSubscribes(e.events, event.type));
+    if (matching.length === 0) return [];
+    const payload = buildWebhookPayload(event.type, event.email, event.occurredAt, event.extras);
+    return matching.map((endpoint) => ({
+      endpointId: endpoint.id,
+      emailId: event.email.emailId,
+      messageId: `msg_${randomUUID()}`,
+      eventType: event.type,
+      payload: payload as unknown as Record<string, unknown>,
+    }));
   });
+  await insertDeliveryRows(db, values, params.enqueue);
 }
 
 /**
@@ -618,29 +650,4 @@ function enabledEndpoints(db: Db, teamId: string) {
         eq(schema.webhookEndpoints.status, "enabled"),
       ),
     );
-}
-
-async function insertDeliveries(
-  db: Db,
-  params: {
-    teamId: string;
-    emailId: string | null;
-    type: WebhookEventType;
-    payload: WebhookPayload;
-    enqueue: WebhookEnqueue;
-  },
-): Promise<void> {
-  const endpoints = await enabledEndpoints(db, params.teamId);
-  const matching = endpoints.filter((e) => endpointSubscribes(e.events, params.type));
-  await insertDeliveryRows(
-    db,
-    matching.map((endpoint) => ({
-      endpointId: endpoint.id,
-      emailId: params.emailId,
-      messageId: `msg_${randomUUID()}`,
-      eventType: params.type,
-      payload: params.payload as unknown as Record<string, unknown>,
-    })),
-    params.enqueue,
-  );
 }

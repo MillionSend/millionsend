@@ -2,11 +2,12 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import {
   clearWebhookEndpointNotifications,
   encryptWebhookSecret,
+  enqueueEmailWebhookEvents,
   enqueueTeamWebhookDeliveries,
   enqueueTeamWebhookEvents,
   generateWebhookSecret,
@@ -71,6 +72,64 @@ it("fans a team-level event out to subscribed endpoints with no email attached",
   // Due at once: the drain claims on nextAttemptAt, which a column default never sets.
   expect(rows[0]?.nextAttemptAt).toBeInstanceOf(Date);
   expect(enqueued).toEqual([rows[0]?.id]);
+});
+
+it("fans several email events out with one endpoint read, each to the endpoints it matches", async () => {
+  const all = await endpoint(null);
+  const bounces = await endpoint(["email.bounced"]);
+  await endpoint(["email.complained"]);
+  const occurredAt = new Date("2026-10-16T12:00:00Z");
+  const facts = (subject: string) => ({
+    emailId: randomUUID(),
+    from: "a@acme.dev",
+    to: ["r@example.com"],
+    subject,
+  });
+  const bounced = facts("bounced");
+  const sent = facts("sent");
+  const reads = vi.spyOn(db, "select");
+  const enqueued: string[] = [];
+  try {
+    await enqueueEmailWebhookEvents(db, {
+      teamId,
+      events: [
+        {
+          type: "email.bounced",
+          email: bounced,
+          occurredAt,
+          extras: { bounce: { type: "Permanent" } },
+        },
+        { type: "email.sent", email: sent, occurredAt },
+      ],
+      enqueue: async (rows) => {
+        enqueued.push(...rows.map((r) => r.id));
+      },
+    });
+    expect(reads).toHaveBeenCalledTimes(1);
+  } finally {
+    reads.mockRestore();
+  }
+  const rows = await db.select().from(schema.webhookDeliveries);
+  expect(rows.map((r) => [r.endpointId, r.emailId, r.eventType]).sort()).toEqual(
+    [
+      [all, bounced.emailId, "email.bounced"],
+      [bounces, bounced.emailId, "email.bounced"],
+      [all, sent.emailId, "email.sent"],
+    ].sort(),
+  );
+  expect(rows.find((r) => r.endpointId === bounces)?.payload).toEqual({
+    type: "email.bounced",
+    created_at: occurredAt.toISOString(),
+    data: {
+      email_id: bounced.emailId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "bounced",
+      created_at: occurredAt.toISOString(),
+      bounce: { type: "Permanent" },
+    },
+  });
+  expect(enqueued.sort()).toEqual(rows.map((r) => r.id).sort());
 });
 
 it("reads Retry-After as delta-seconds or an HTTP-date, a minute by default, an hour at most", () => {
