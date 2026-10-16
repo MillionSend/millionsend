@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { Breakable } from "@/components/breakable";
 import { EmailStatusIcon } from "@/components/email-status-icon";
+import { LeadCell } from "@/components/lead-cell";
 import { RelativeTime } from "@/components/relative-time";
 import { type BadgeStatus, StatusBadge } from "@/components/status-badge";
 import { Table } from "@/components/table";
@@ -64,14 +63,15 @@ export function EmailsTable({
   broadcastChip?: boolean;
 }) {
   const t = useTranslations("emails");
+  const tc = useTranslations("common");
   const router = useRouter();
   const items = rows;
   return (
     <Table>
       <thead>
         <tr>
-          <th style={{ width: "34%" }}>{t("list.to")}</th>
-          <th style={{ width: "15%" }}>{t("list.status")}</th>
+          <th style={{ width: "35%" }}>{t("list.to")}</th>
+          <th style={{ width: "14%" }}>{t("list.status")}</th>
           <th>{t("list.subject")}</th>
           <th className="right" style={{ width: "13%" }}>
             {t("list.when")}
@@ -79,66 +79,61 @@ export function EmailsTable({
         </tr>
       </thead>
       <tbody>
-        {items.map((row) => (
-          <tr key={row.id} className="hoverable" onClick={() => router.push(`/emails/${row.id}`)}>
-            <td className="ms-mono ms-cell-wrap">
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                <EmailStatusIcon status={row.latestStatus} />
-                <Link href={`/emails/${row.id}`} onClick={(event) => event.stopPropagation()}>
-                  <Breakable text={row.to[0] ?? row.subject} />
-                </Link>
-              </span>
-              {row.to.length > 1 ? (
-                <span style={{ color: "var(--ms-muted)", marginLeft: 8 }}>
-                  +{row.to.length - 1}
-                </span>
-              ) : null}
-            </td>
-            <td>
-              {row.held ? (
-                <Tooltip inline text={t("held.body")}>
-                  <StatusBadge status={row.latestStatus} label={t("held.label")} />
-                </Tooltip>
-              ) : (
-                <StatusBadge
-                  status={row.latestStatus}
-                  label={
-                    row.broadcastId && row.latestStatus === "queued_quota"
-                      ? t("list.queuedBroadcast")
-                      : undefined
-                  }
-                />
-              )}
-            </td>
-            <td className="ms-cell-fill">
-              <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                {broadcastChip && row.broadcastId ? (
+        {items.map((row) => {
+          // The tile names the status in the badge's own words.
+          const status = row.held
+            ? t("held.label")
+            : row.broadcastId && row.latestStatus === "queued_quota"
+              ? t("list.queuedBroadcast")
+              : tc(`status.${row.latestStatus}`);
+          return (
+            <tr key={row.id} className="hoverable" onClick={() => router.push(`/emails/${row.id}`)}>
+              <LeadCell
+                tile={<EmailStatusIcon status={row.latestStatus} label={status} />}
+                value={row.to[0] ?? row.subject}
+                href={`/emails/${row.id}`}
+                more={row.to.slice(1)}
+                mono
+              />
+              <td>
+                {row.held ? (
+                  <Tooltip inline text={t("held.body")}>
+                    <StatusBadge status={row.latestStatus} label={status} />
+                  </Tooltip>
+                ) : (
+                  <StatusBadge status={row.latestStatus} label={status} />
+                )}
+              </td>
+              <td className="ms-cell-fill">
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  {broadcastChip && row.broadcastId ? (
+                    <span
+                      className="ms-chip"
+                      style={{ fontSize: 10.5, padding: "1px 7px", flex: "none" }}
+                    >
+                      {t("list.broadcastChip")}
+                    </span>
+                  ) : null}
                   <span
-                    className="ms-chip"
-                    style={{ fontSize: 10.5, padding: "1px 7px", flex: "none" }}
+                    style={{
+                      display: "block",
+                      minWidth: 0,
+                      maxWidth: 480,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    {t("list.broadcastChip")}
+                    {row.subject}
                   </span>
-                ) : null}
-                <span
-                  style={{
-                    display: "block",
-                    minWidth: 0,
-                    maxWidth: 480,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {row.subject}
                 </span>
-              </span>
-            </td>
-            <td className="right" style={{ whiteSpace: "nowrap" }}>
-              <WhenCell row={row} />
-            </td>
-          </tr>
-        ))}
+              </td>
+              <td className="right" style={{ whiteSpace: "nowrap" }}>
+                <WhenCell row={row} />
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </Table>
   );

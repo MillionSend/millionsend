@@ -59,7 +59,9 @@
     "activity": "Activity"
   },
   "type": {
-    "catchAll": "Catch-all"
+    "catchAll": "Catch-all",
+    "agent": "Agent inbox",
+    "human": "People inbox"
   },
   "col": {
     "inbox": "Inbox",
@@ -87,7 +89,8 @@
     "full": "You've reached the inbox limit of your plan. Upgrade to create more."
   },
   "catchAll": {
-    "row": "Addresses without an inbox · <link>turn off on the domain</link>"
+    "row": "Addresses with no inbox · <link>turn off</link>",
+    "turnOff": "Turn off on the domain"
   },
   "create": {
     "title": "Create inbox",
@@ -222,7 +225,9 @@
   "downloadsBlocked": "Downloads are blocked: this email carries malware.",
   "chip": {
     "code": "code",
-    "link": "link"
+    "link": "link",
+    "codeTip": "Contains a verification code",
+    "linkTip": "Contains a sign-in link"
   },
   "gray": {
     "dmarcPassNone": "DMARC gray: the message passed DMARC, but the sender's domain publishes p=none, so receivers aren't asked to block mail that fails.",
@@ -238,6 +243,7 @@
   "received": {
     "title": "All received",
     "hint": "Every email your domains received, including addresses without an inbox.",
+    "hintShort": "Every email your domains received",
     "search": "Search sender, inbox or subject…",
     "loadError": "Couldn't load received emails.",
     "empty": "No received emails yet.",
@@ -252,6 +258,7 @@
     },
     "badge": {
       "quarantined": "Quarantined",
+      "screening": "Screening",
       "spam": "Spam",
       "virus": "Virus"
     },
@@ -265,7 +272,8 @@
       "suspicious": "Suspicious",
       "quarantined": "Quarantined",
       "spam": "Spam",
-      "virus": "Virus"
+      "virus": "Virus",
+      "screening": "Being screened"
     },
     "range": {
       "h24": "Last 24 hours",

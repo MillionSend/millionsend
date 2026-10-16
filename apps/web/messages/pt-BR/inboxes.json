@@ -59,7 +59,9 @@
     "activity": "Atividade"
   },
   "type": {
-    "catchAll": "Pega-tudo"
+    "catchAll": "Pega-tudo",
+    "agent": "Caixa de agente",
+    "human": "Caixa de pessoas"
   },
   "col": {
     "inbox": "Caixa",
@@ -87,7 +89,8 @@
     "full": "Você chegou ao limite de caixas do seu plano. Faça upgrade para criar mais."
   },
   "catchAll": {
-    "row": "Endereços sem caixa de entrada · <link>desligar no domínio</link>"
+    "row": "Endereços sem caixa · <link>desligar</link>",
+    "turnOff": "Desligar no domínio"
   },
   "create": {
     "title": "Criar caixa de entrada",
@@ -222,7 +225,9 @@
   "downloadsBlocked": "Downloads bloqueados: este e-mail tem malware.",
   "chip": {
     "code": "código",
-    "link": "link"
+    "link": "link",
+    "codeTip": "Contém um código de verificação",
+    "linkTip": "Contém um link de acesso"
   },
   "gray": {
     "dmarcPassNone": "DMARC cinza: a mensagem passou no DMARC, mas o domínio do remetente usa p=none, então os servidores não são orientados a bloquear e-mails que falham.",
@@ -238,6 +243,7 @@
   "received": {
     "title": "Todos os recebidos",
     "hint": "Todos os e-mails que seus domínios receberam, inclusive em endereços sem caixa de entrada.",
+    "hintShort": "Tudo o que chegou nos seus domínios",
     "search": "Buscar remetente, caixa ou assunto…",
     "loadError": "Não foi possível carregar os e-mails recebidos.",
     "empty": "Nenhum e-mail recebido ainda.",
@@ -252,6 +258,7 @@
     },
     "badge": {
       "quarantined": "Em quarentena",
+      "screening": "Em análise",
       "spam": "Spam",
       "virus": "Vírus"
     },
@@ -265,7 +272,8 @@
       "suspicious": "Suspeito",
       "quarantined": "Em quarentena",
       "spam": "Spam",
-      "virus": "Vírus"
+      "virus": "Vírus",
+      "screening": "Em análise"
     },
     "range": {
       "h24": "Últimas 24 horas",

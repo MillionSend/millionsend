@@ -6,13 +6,15 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { BetaPill } from "@/components/beta-pill";
-import { Breakable } from "@/components/breakable";
 import { EmptyState } from "@/components/empty-state";
+import { AsteriskIcon, BotIcon, MailsIcon, UsersIcon } from "@/components/icons/mail-icons";
 import { PlusGlyph } from "@/components/icons/nav-icons";
+import { LEAD_GLYPH, LeadCell, SkeletonLead } from "@/components/lead-cell";
 import { ListFooter } from "@/components/list-footer";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
+import { StatusTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { formatTimeLeft } from "@/lib/format";
@@ -26,7 +28,6 @@ const TABS = ["all", "agent", "human"] as const;
 // The overview rows count 30 days, so they open the list on the same range.
 const RECEIVED_30D = "/inboxes/received?range=d30";
 
-const muted: React.CSSProperties = { color: "var(--ms-muted)", fontSize: 12.5 };
 const none = <span style={{ color: "var(--ms-faint)" }}>—</span>;
 
 function InboxesHead() {
@@ -35,8 +36,8 @@ function InboxesHead() {
     <thead>
       <tr>
         <th>{t("col.inbox")}</th>
-        <th style={{ width: 110 }}>{t("col.type")}</th>
-        <th style={{ width: "26%" }}>{t("col.attention")}</th>
+        <th style={{ width: 90 }}>{t("col.type")}</th>
+        <th style={{ width: "22%" }}>{t("col.attention")}</th>
         <th className="right" style={{ width: 130 }}>
           {t("col.received30d")}
         </th>
@@ -56,7 +57,7 @@ function InboxesSkeleton() {
         {["62%", "48%", "56%", "40%"].map((width) => (
           <tr key={width}>
             <td>
-              <Skeleton width={width} height={13} />
+              <SkeletonLead width={width} />
             </td>
             <td>
               <Skeleton width={48} />
@@ -208,12 +209,16 @@ export function InboxesView() {
             <tbody>
               {overview ? (
                 <tr className="hoverable" onClick={() => router.push(RECEIVED_30D)}>
-                  <td>
-                    <Link href={RECEIVED_30D} onClick={(event) => event.stopPropagation()}>
-                      {t("received.title")}
-                    </Link>
-                    <div style={muted}>{t("received.hint")}</div>
-                  </td>
+                  <LeadCell
+                    tile={
+                      <StatusTile color={TONE_COLOR.neutral} label={t("received.title")}>
+                        <MailsIcon {...LEAD_GLYPH} />
+                      </StatusTile>
+                    }
+                    value={t("received.title")}
+                    href={RECEIVED_30D}
+                    tail={t("received.hintShort")}
+                  />
                   <td>{none}</td>
                   <td>{none}</td>
                   <td className="right ms-digits">{nf.format(overview.allReceived.received30d)}</td>
@@ -230,27 +235,28 @@ export function InboxesView() {
                 const href = `${RECEIVED_30D}&inbox=catch_all`;
                 return (
                   <tr key={domain.domainId} className="hoverable" onClick={() => router.push(href)}>
-                    <td className="ms-cell-wrap">
-                      <Link
-                        href={href}
-                        className="ms-mono"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <Breakable text={`*@${domain.name}`} />
-                      </Link>
-                      <div style={muted}>
-                        {t.rich("catchAll.row", {
-                          link: (chunks) => (
+                    <LeadCell
+                      tile={
+                        <StatusTile color={TONE_COLOR.neutral} label={t("type.catchAll")}>
+                          <AsteriskIcon {...LEAD_GLYPH} />
+                        </StatusTile>
+                      }
+                      value={`*@${domain.name}`}
+                      href={href}
+                      mono
+                      tail={t.rich("catchAll.row", {
+                        link: (chunks) => (
+                          <Tooltip inline focusableChild text={t("catchAll.turnOff")}>
                             <Link
                               href={`/domains/${domain.domainId}`}
                               onClick={(event) => event.stopPropagation()}
                             >
                               {chunks}
                             </Link>
-                          ),
-                        })}
-                      </div>
-                    </td>
+                          </Tooltip>
+                        ),
+                      })}
+                    />
                     <td>{t("type.catchAll")}</td>
                     <td>{none}</td>
                     <td className="right ms-digits">{nf.format(domain.received30d)}</td>
@@ -289,18 +295,32 @@ export function InboxesView() {
                 ];
                 return (
                   <tr key={inbox.id} className="hoverable" onClick={() => router.push(href)}>
-                    <td className="ms-cell-wrap">
-                      <Link
-                        href={href}
-                        className="ms-mono"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <Breakable text={inbox.email_address} />
-                      </Link>
-                      {detail.length > 0 ? <div style={muted}>{detail.join(" · ")}</div> : null}
-                    </td>
+                    <LeadCell
+                      tile={
+                        <StatusTile
+                          color={TONE_COLOR.neutral}
+                          label={t(inbox.kind === "human" ? "type.human" : "type.agent")}
+                        >
+                          {inbox.kind === "human" ? (
+                            <UsersIcon {...LEAD_GLYPH} />
+                          ) : (
+                            <BotIcon {...LEAD_GLYPH} />
+                          )}
+                        </StatusTile>
+                      }
+                      value={inbox.email_address}
+                      href={href}
+                      mono
+                      tail={detail.join(" · ")}
+                    />
                     <td>{kindWord(t, inbox.kind)}</td>
-                    <td style={{ color: attention.length > 0 ? "var(--ms-bone)" : undefined }}>
+                    {/* One line: the inbox column gives up the width instead. */}
+                    <td
+                      style={{
+                        whiteSpace: "nowrap",
+                        color: attention.length > 0 ? "var(--ms-bone)" : undefined,
+                      }}
+                    >
                       {attention.length > 0 ? attention.join(" · ") : none}
                     </td>
                     <td className="right ms-digits">{nf.format(inbox.received_30d)}</td>

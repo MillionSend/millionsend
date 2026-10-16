@@ -31,25 +31,39 @@ export function emailStatusColor(status: string): string {
 }
 
 /** Rounded-square envelope tile tinted by status. */
-export function EmailStatusIcon({ status, size = 28 }: { status: string; size?: number }) {
-  const glyph = Math.round(size * 0.5);
+export function EmailStatusIcon({
+  status,
+  size = 28,
+  label,
+}: {
+  status: string;
+  size?: number;
+  label?: string | undefined;
+}) {
   return (
-    <StatusTile color={emailStatusColor(status)} size={size}>
-      <svg
-        width={glyph}
-        height={glyph}
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="1.5" y="3.2" width="13" height="9.6" rx="1.8" />
-        <path d="m2.2 4.4 5.8 4.4 5.8-4.4" />
-      </svg>
+    <StatusTile color={emailStatusColor(status)} size={size} label={label}>
+      <EnvelopeGlyph size={Math.round(size * 0.5)} />
     </StatusTile>
+  );
+}
+
+/** The envelope on its 16-unit grid: the mark of an email row, sent or received. */
+export function EnvelopeGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="1.5" y="3.2" width="13" height="9.6" rx="1.8" />
+      <path d="m2.2 4.4 5.8 4.4 5.8-4.4" />
+    </svg>
   );
 }
 
