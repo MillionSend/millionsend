@@ -4,6 +4,7 @@ import {
   encryptEmailBody,
   encryptWebhookSecret,
   generateWebhookSecret,
+  hashRecipient,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -14,7 +15,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { reconcileWebhookDeliveries } from "../src/handlers/cron.js";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
-import { sendEmail } from "../src/handlers/send-email.js";
+import { failQueuedEmail, type SesSender, sendEmail } from "../src/handlers/send-email.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -68,6 +69,51 @@ async function insertSentEmail(sesMessageId: string, ownerTeamId = teamId): Prom
   if (!row) throw new Error("email insert failed");
   return row.id;
 }
+
+/** A fresh team with a verified domain and one all-events endpoint: no other test's rows reach it. */
+async function sendingTeam(slug: string) {
+  const sendTeamId = await createTeam(db, slug);
+  const endpointId = await insertEndpoint(sendTeamId, null);
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: sendTeamId,
+      name: `${slug}.example.com`,
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  const body = await encryptEmailBody({ html: null, text: "hi" }, keyring);
+  const queued = async (overrides: Partial<typeof schema.emails.$inferInsert> = {}) => {
+    const [email] = await db
+      .insert(schema.emails)
+      .values({
+        teamId: sendTeamId,
+        domainId: domain.id,
+        from: `a@${slug}.example.com`,
+        to: ["r@example.com"],
+        subject: "s",
+        latestStatus: "queued",
+        bodyCiphertext: body.ciphertext,
+        bodyIv: body.iv,
+        bodyWrappedDek: body.wrappedDek,
+        bodyKeyVersion: body.keyVersion,
+        ...overrides,
+      })
+      .returning({ id: schema.emails.id });
+    if (!email) throw new Error("email insert failed");
+    return email.id;
+  };
+  return { teamId: sendTeamId, endpointId, domainId: domain.id, queued };
+}
+
+const refusingSes = (name: string): SesSender => ({
+  async sendRaw() {
+    throw Object.assign(new Error("refused"), { name });
+  },
+});
 
 async function deliveriesFor(endpointIds: string[]) {
   return db
@@ -243,6 +289,166 @@ it("send path fans out email.sent after the claim", async () => {
   expect(rows[0]?.eventType).toBe("email.sent");
   expect(rows[0]?.payload).toMatchObject({ type: "email.sent", data: { email_id: email.id } });
   expect(enqueued).toEqual([rows[0]?.id]);
+});
+
+it("the send path fires email.suppressed and email.failed once per row, with public reasons", async () => {
+  const team = await sendingTeam("end-hooks");
+  await db.insert(schema.suppressions).values({
+    teamId: team.teamId,
+    email: "gone@example.com",
+    emailHash: hashRecipient("gone@example.com"),
+    reason: "hard_bounce",
+  });
+  const enqueued: string[] = [];
+  const enqueueWebhookDelivery: WebhookEnqueue = async (rows) => {
+    enqueued.push(...rows.map((r) => r.id));
+  };
+  const ses: SesSender = { sendRaw: async () => ({ messageId: "unused" }) };
+  const suppressed = await team.queued({ to: ["gone@example.com"] });
+  const missing = await team.queued({ bodyCiphertext: null });
+  const rejected = await team.queued();
+  const suspended = await team.queued();
+
+  const send = (emailId: string, sender = ses) =>
+    sendEmail(db, { keyring, ses: sender, enqueueWebhookDelivery }, { emailId });
+  expect(await send(suppressed)).toBe("suppressed");
+  expect(await send(missing)).toBe("failed");
+  expect(await send(rejected, refusingSes("MessageRejected"))).toBe("failed");
+  expect(await send(suspended, refusingSes("AccountSuspendedException"))).toBe("failed");
+  // A second pass over an ended row ends nothing.
+  expect(await send(suppressed)).toBe("skipped");
+
+  const rows = await deliveriesFor([team.endpointId]);
+  const payloadOf = (emailId: string) => {
+    const mine = rows.filter((r) => r.emailId === emailId);
+    expect(mine).toHaveLength(1);
+    return mine[0]?.payload;
+  };
+  expect(payloadOf(suppressed)).toMatchObject({
+    type: "email.suppressed",
+    data: {
+      email_id: suppressed,
+      to: ["gone@example.com"],
+      suppressed: {
+        type: "OnAccountSuppressionList",
+        message: "The recipient is on your suppression list.",
+        reason: "recipient_suppressed",
+      },
+    },
+  });
+  expect(payloadOf(missing)).toMatchObject({
+    type: "email.failed",
+    data: { failed: { reason: "body_missing" } },
+  });
+  expect(payloadOf(rejected)).toMatchObject({ data: { failed: { reason: "message_rejected" } } });
+  expect(payloadOf(suspended)).toMatchObject({ data: { failed: { reason: "provider_error" } } });
+  expect(enqueued.sort()).toEqual(rows.map((r) => r.id).sort());
+  // The stored event keeps the internal code.
+  const events = await db
+    .select({ data: schema.emailEvents.data })
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, suspended));
+  expect(events).toEqual([{ data: { source: "worker", reason: "ses_AccountSuspendedException" } }]);
+});
+
+it("never fails a row SES already took, however a retry or the dead-letter reaches it", async () => {
+  const team = await sendingTeam("taken-hooks");
+  const claimedAt = new Date();
+  const taken = await team.queued({ sentAt: claimedAt, sesMessageId: "wh-mid-taken" });
+  // The domain lost verification after SES took the row: the retry reaches the domain gate.
+  await db
+    .update(schema.domains)
+    .set({ status: "failed" })
+    .where(eq(schema.domains.id, team.domainId));
+  const deps = { keyring, ses: refusingSes("unused"), enqueueWebhookDelivery: async () => {} };
+
+  expect(await sendEmail(db, deps, { emailId: taken })).toBe("skipped");
+  expect(await failQueuedEmail(db, taken, "retries_exhausted", async () => {})).toBe(false);
+
+  const [row] = await db
+    .select({ status: schema.emails.latestStatus, sentAt: schema.emails.sentAt })
+    .from(schema.emails)
+    .where(eq(schema.emails.id, taken));
+  expect(row).toEqual({ status: "queued", sentAt: claimedAt });
+  const events = await db
+    .select()
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, taken));
+  expect(events).toEqual([]);
+  expect(await deliveriesFor([team.endpointId])).toEqual([]);
+});
+
+it("the dead-letter fails a row once and fires email.failed as retries_exhausted", async () => {
+  const team = await sendingTeam("dead-hooks");
+  const emailId = await team.queued();
+  const enqueued: string[] = [];
+  const enqueue: WebhookEnqueue = async (rows) => {
+    enqueued.push(...rows.map((r) => r.id));
+  };
+
+  expect(await failQueuedEmail(db, emailId, "retries_exhausted", enqueue)).toBe(true);
+  expect(await failQueuedEmail(db, emailId, "retries_exhausted", enqueue)).toBe(false);
+
+  const rows = await deliveriesFor([team.endpointId]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.payload).toMatchObject({
+    type: "email.failed",
+    data: { email_id: emailId, failed: { reason: "retries_exhausted" } },
+  });
+  expect(enqueued).toEqual([rows[0]?.id]);
+});
+
+it("a canceled broadcast's row fires nothing", async () => {
+  const team = await sendingTeam("canceled-hooks");
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({
+      teamId: team.teamId,
+      from: "a@canceled-hooks.example.com",
+      subject: "s",
+      status: "canceled",
+    })
+    .returning({ id: schema.broadcasts.id });
+  const [contact] = await db
+    .insert(schema.contacts)
+    .values({ teamId: team.teamId, email: "stopped@example.com" })
+    .returning({ id: schema.contacts.id });
+  const emailId = await team.queued({
+    broadcastId: broadcast?.id,
+    contactId: contact?.id,
+    to: ["stopped@example.com"],
+  });
+
+  const outcome = await sendEmail(
+    db,
+    {
+      keyring,
+      ses: refusingSes("unused"),
+      enqueueWebhookDelivery: async () => {},
+      unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+    },
+    { emailId },
+  );
+  expect(outcome).toBe("canceled");
+  expect(await deliveriesFor([team.endpointId])).toEqual([]);
+});
+
+it("with no queue hand-off wired, the send path's rows still land for the reconcile sweep", async () => {
+  const team = await sendingTeam("sweep-hooks");
+  const sent = await team.queued();
+  const failed = await team.queued({ bodyCiphertext: null });
+  const deps = { keyring, ses: { sendRaw: async () => ({ messageId: `wh-sweep-${sent}` }) } };
+
+  expect(await sendEmail(db, deps, { emailId: sent })).toBe("sent");
+  expect(await sendEmail(db, deps, { emailId: failed })).toBe("failed");
+
+  const rows = await deliveriesFor([team.endpointId]);
+  expect(rows.map((r) => [r.emailId, r.eventType]).sort()).toEqual(
+    [
+      [sent, "email.sent"],
+      [failed, "email.failed"],
+    ].sort(),
+  );
 });
 
 it("endpoint row stores no plaintext secret", async () => {

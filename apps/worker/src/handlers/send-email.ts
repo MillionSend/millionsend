@@ -10,6 +10,7 @@ import {
   deliverabilityHold,
   type EmailAttachment,
   type EmailBody,
+  endQueuedEmails,
   enqueueWebhookDeliveries,
   evaluateEmailInsights,
   extractAddrSpec,
@@ -49,6 +50,7 @@ import {
   transitionQueueState,
   utcDay,
   type WebhookEnqueue,
+  webhookBatch,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -118,7 +120,7 @@ export interface SendDeps {
     | undefined;
   /** SES's 24-hour quota and the broadcast share; absent in tests that never reach it. */
   sesQuota?: SendQuotaControls | undefined;
-  /** Arms the webhook drain for the endpoints written; email.sent webhooks are skipped when absent. */
+  /** Arms the webhook drain for the rows written; absent, the reconcile sweep sends them. */
   enqueueWebhookDelivery?: WebhookEnqueue | undefined;
   /**
    * RFC 8058 one-click unsubscribe config for broadcast emails. Broadcast
@@ -257,26 +259,37 @@ async function checkSendEligibility(
   return { eligible: true, topicId: broadcast.topicId };
 }
 
-async function suppressQueuedEmail(db: Db, emailId: string, reason: string): Promise<boolean> {
-  const [updated] = await db
-    .update(schema.emails)
-    .set({ latestStatus: "suppressed" })
-    .where(
-      and(
-        eq(schema.emails.id, emailId),
-        eq(schema.emails.latestStatus, "queued"),
-        isNull(schema.emails.sentAt),
+/**
+ * Ends a still-queued email as failed or suppressed with its event and
+ * webhook, in one transaction, and hands the delivery rows to the queue
+ * once that commits. False when the row already left "queued" (sent,
+ * canceled, ended) or SES already took it: nothing to end then.
+ */
+async function endQueuedEmail(
+  db: Db,
+  emailId: string,
+  status: "failed" | "suppressed",
+  reason: string,
+  enqueue: WebhookEnqueue | undefined,
+): Promise<boolean> {
+  const e = schema.emails;
+  const hooks = webhookBatch(enqueue);
+  const ended = await db.transaction((tx) =>
+    endQueuedEmails(tx as unknown as Db, {
+      status,
+      // A failure releases the send claim; a suppression never takes a claimed row.
+      where: and(
+        eq(e.id, emailId),
+        eq(e.latestStatus, "queued"),
+        status === "suppressed" ? isNull(e.sentAt) : undefined,
       ),
-    )
-    .returning({ id: schema.emails.id });
-  if (!updated) return false;
-  await db.insert(schema.emailEvents).values({
-    emailId,
-    type: "suppressed",
-    occurredAt: new Date(),
-    data: { source: "worker", reason },
-  });
-  return true;
+      data: { source: "worker", reason },
+      now: new Date(),
+      enqueue: hooks.collect,
+    }),
+  );
+  await hooks.flush();
+  return ended > 0;
 }
 
 /** Drops suppressed recipients from the row (and the in-memory copy the MIME is built from). */
@@ -297,23 +310,17 @@ async function stripRecipients(
 
 /**
  * Terminal failure for a still-queued email: releases any send claim, moves
- * the row to "failed" and records why. Returns false when the row already
- * left "queued" (sent, canceled, suppressed) — nothing to fail then.
+ * the row to "failed", records why and fires email.failed. Returns false
+ * when the row already left "queued" (sent, canceled, suppressed) or SES
+ * took it — nothing to fail then.
  */
-export async function failQueuedEmail(db: Db, emailId: string, reason: string): Promise<boolean> {
-  const [updated] = await db
-    .update(schema.emails)
-    .set({ latestStatus: "failed", sentAt: null })
-    .where(and(eq(schema.emails.id, emailId), eq(schema.emails.latestStatus, "queued")))
-    .returning({ id: schema.emails.id });
-  if (!updated) return false;
-  await db.insert(schema.emailEvents).values({
-    emailId,
-    type: "failed",
-    occurredAt: new Date(),
-    data: { source: "worker", reason },
-  });
-  return true;
+export async function failQueuedEmail(
+  db: Db,
+  emailId: string,
+  reason: string,
+  enqueue?: WebhookEnqueue,
+): Promise<boolean> {
+  return endQueuedEmail(db, emailId, "failed", reason, enqueue);
 }
 
 /**
@@ -434,15 +441,21 @@ async function broadcastCanceled(db: Db, broadcastId: string): Promise<boolean> 
 /** An ineligible row: canceled with its broadcast, suppressed for any other reason. */
 async function refuse(
   db: Db,
+  deps: SendDeps,
   email: { id: string; teamId: string },
   reason: string | undefined,
 ): Promise<SendOutcome> {
   if (reason === "broadcast_canceled") {
     return (await cancelQueuedEmail(db, email)) ? "canceled" : "skipped";
   }
-  return (await suppressQueuedEmail(db, email.id, reason ?? "ineligible"))
-    ? "suppressed"
-    : "skipped";
+  const ended = await endQueuedEmail(
+    db,
+    email.id,
+    "suppressed",
+    reason ?? "ineligible",
+    deps.enqueueWebhookDelivery,
+  );
+  return ended ? "suppressed" : "skipped";
 }
 
 export async function sendEmail(
@@ -561,7 +574,7 @@ async function sendQueued(
     // Before any park: a row of a stopped broadcast must end canceled, never
     // parked where no sweep looks again.
     if (email.broadcastId && (await broadcastCanceled(db, email.broadcastId))) {
-      return refuse(db, email, "broadcast_canceled");
+      return refuse(db, deps, email, "broadcast_canceled");
     }
     // Past the pause line a broadcast row waits for the drain, which releases
     // it once the rates recover. Rows the fan-out queued while the team was
@@ -584,8 +597,14 @@ async function sendQueued(
     return "parked";
   }
 
+  // Terminal: "skipped" when the row was no longer this attempt's to fail.
+  const fail = async (reason: string): Promise<SendOutcome> =>
+    (await failQueuedEmail(db, email.id, reason, deps.enqueueWebhookDelivery))
+      ? "failed"
+      : "skipped";
+
   let eligibility = await checkSendEligibility(db, email);
-  if (!eligibility.eligible) return refuse(db, email, eligibility.reason);
+  if (!eligibility.eligible) return refuse(db, deps, email, eligibility.reason);
   if (eligibility.strip) await stripRecipients(db, email, eligibility.strip);
 
   // The shared onboarding sender and the shared inbox domain are identities
@@ -605,8 +624,7 @@ async function sendQueued(
     // Terminal, not retried: a domain demoted or deleted after accept does
     // not come back on its own, and the row would otherwise ride the retry
     // and reconcile loops until its body is purged.
-    await failQueuedEmail(db, email.id, "domain_not_verified");
-    return "failed";
+    return fail("domain_not_verified");
   }
   // Read per send so the operator's switch also holds mail queued before it
   // was turned off: that mail waits in the queue until sending resumes.
@@ -623,8 +641,7 @@ async function sendQueued(
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
   if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
-    await failQueuedEmail(db, email.id, "body_missing");
-    return "failed";
+    return fail("body_missing");
   }
   let body: EmailBody;
   let attachments: EmailAttachment[] | null;
@@ -646,8 +663,7 @@ async function sendQueued(
       : null;
   } catch (err) {
     if (isTransientError(err)) throw err;
-    await failQueuedEmail(db, email.id, "body_unreadable");
-    return "failed";
+    return fail("body_unreadable");
   }
 
   // Screening before SES: mail with a reason to be judged first waits for
@@ -905,7 +921,7 @@ async function sendQueued(
   // meantime invalidates the MIME already built, so the row is stripped and
   // handed straight back to the queue.
   eligibility = await checkSendEligibility(db, email);
-  if (!eligibility.eligible) return refuse(db, email, eligibility.reason);
+  if (!eligibility.eligible) return refuse(db, deps, email, eligibility.reason);
   if (eligibility.strip) {
     await stripRecipients(db, email, eligibility.strip);
     await deps.reschedule?.(email.id, new Date(), emailSendPriority(email));
@@ -958,8 +974,7 @@ async function sendQueued(
     // rather than risking a duplicate delivery.)
     const name = (err as { name?: string }).name ?? "";
     if (TERMINAL_SES_ERRORS.has(name)) {
-      await failQueuedEmail(db, email.id, `ses_${name}`);
-      return "failed";
+      return fail(`ses_${name}`);
     }
     await db
       .update(schema.emails)
@@ -1135,15 +1150,13 @@ async function sendQueued(
   }
   // The sentAt claim above makes this path single-shot per email, so the
   // email.sent fan-out cannot double-fire on a job retry.
-  if (deps.enqueueWebhookDelivery) {
-    await enqueueWebhookDeliveries(db, {
-      teamId: email.teamId,
-      email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
-      type: "email.sent",
-      occurredAt: new Date(),
-      enqueue: deps.enqueueWebhookDelivery,
-    });
-  }
+  await enqueueWebhookDeliveries(db, {
+    teamId: email.teamId,
+    email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+    type: "email.sent",
+    occurredAt: new Date(),
+    enqueue: deps.enqueueWebhookDelivery ?? (async () => {}),
+  });
   return "sent";
 }
 

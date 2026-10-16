@@ -707,7 +707,7 @@ backfillSharedSubdomains().catch((err) => {
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
 // to resurrect forever.
 await queue.workDeadLetter("email.send", async ({ emailId }) => {
-  const failed = await failQueuedEmail(db, emailId, "retries_exhausted");
+  const failed = await failQueuedEmail(db, emailId, "retries_exhausted", enqueueWebhook);
   console.error(`email.send: dead-lettered ${emailId} (marked failed=${failed})`);
 });
 
