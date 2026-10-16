@@ -71,6 +71,10 @@ import { clearSharedTenant, isTenantNotAssociated } from "./tenants.js";
  */
 
 export interface SesSender {
+  /**
+   * Rejects with an AbortError when its deadline passes before SES answers:
+   * SES may still have taken the message.
+   */
   sendRaw(params: {
     raw: Buffer;
     /** Server-owned fallback join key copied into an SES message tag. */
@@ -495,8 +499,9 @@ export async function sendEmail(
     outcome = await sendQueued(db, deps, email);
   } catch (err) {
     // A retry may still send it, too late for a one-time code. A claim that
-    // stands is one SES took, failing only in the bookkeeping after: that
-    // code is on its way. The send's own error is the one the job reports.
+    // stands is one SES took or may have taken (the bookkeeping after it
+    // failed, or the send ran past its deadline): that code may be on its
+    // way. The send's own error is the one the job reports.
     if (email.tags?.[SYSTEM_MAIL_TAG] === "console_code") {
       try {
         const [row] = await db
@@ -987,15 +992,19 @@ async function sendQueued(
       return send(undefined);
     }));
   } catch (err) {
-    // sendRaw threw ⇒ the SDK exhausted its own retries without an accept.
-    // A permanent refusal ends the email here; anything else releases the
-    // claim so the job retry can send. (After a SUCCESSFUL sendRaw the claim
-    // is never released — a bookkeeping failure then leaves the row claimed
-    // rather than risking a duplicate delivery.)
+    // sendRaw threw ⇒ the SDK exhausted its own retries without an accept,
+    // unless the send deadline cut it off: SES may hold that one, so its
+    // claim stands and the job retry skips the row, leaving it to SES's
+    // events or the stalled-claim sweep. A permanent refusal ends the email
+    // here; anything else releases the claim so the job retry can send.
+    // (After a SUCCESSFUL sendRaw the claim is never released — a
+    // bookkeeping failure then leaves the row claimed rather than risking a
+    // duplicate delivery.)
     const name = (err as { name?: string }).name ?? "";
     if (TERMINAL_SES_ERRORS.has(name)) {
       return fail(`ses_${name}`, true);
     }
+    if (name === "AbortError") throw err;
     await db
       .update(schema.emails)
       .set({ sentAt: null })

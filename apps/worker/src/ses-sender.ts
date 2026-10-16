@@ -17,16 +17,24 @@ function toAddrSpecs(recipients: readonly string[] | null | undefined): string[]
 }
 
 /**
+ * How long one send may wait on SES, the SDK's retries included: far inside
+ * the 15 minutes after which the stalled-claim sweep fails a claimed row.
+ */
+const SEND_DEADLINE_MS = 60_000;
+
+/**
  * Production SesSender over SESv2 raw sending. SES identities are verified
  * per region, so one client per region is cached and each send is keyed by
  * the caller's region (defaultRegion when none is given).
  */
-export function createSesSender(defaultRegion: string): SesSender {
+export function createSesSender(defaultRegion: string, deadlineMs = SEND_DEADLINE_MS): SesSender {
   const clients = new Map<string, SESv2Client>();
   const clientFor = (region: string): SESv2Client => {
     let client = clients.get(region);
     if (!client) {
-      client = new SESv2Client({ region });
+      // A connection that never opens sent nothing: it fails fast and stays
+      // retryable instead of running into the send deadline.
+      client = new SESv2Client({ region, requestHandler: { connectionTimeout: 10_000 } });
       clients.set(region, client);
     }
     return client;
@@ -49,6 +57,9 @@ export function createSesSender(defaultRegion: string): SesSender {
           ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
           ...(tenantName ? { TenantName: tenantName } : {}),
         }),
+        // Not a per-attempt requestTimeout: the SDK retries that by sending
+        // the request again, while past this deadline no attempt goes out.
+        { abortSignal: AbortSignal.timeout(deadlineMs) },
       );
       if (!out.MessageId) {
         throw new Error("SES accepted the send but returned no MessageId");

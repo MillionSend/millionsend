@@ -653,9 +653,10 @@ const RECONCILE_MAX_PER_RUN = 20_000;
  * by the queue's dead-letter path, which fails the row after its retries.
  *
  * A claim (sentAt set) that never recorded an SES MessageId is a send
- * interrupted between claim and accept (worker killed mid-flight). Nothing
- * else ever picks such a row up, so after a generous window it is failed
- * with an event and email.failed rather than left queued forever.
+ * interrupted between claim and accept (worker killed mid-flight, or the
+ * send cut off at its deadline). Nothing else ever picks such a row up, so
+ * after a generous window it is failed with an event and email.failed
+ * rather than left queued forever.
  */
 export async function reconcileStalledSends(
   db: Db,

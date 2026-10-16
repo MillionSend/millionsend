@@ -545,6 +545,24 @@ it("SES failure leaves the email queued for the job retry", async () => {
   expect(row?.sentAt).toBeNull();
 });
 
+it("a send cut off at its deadline keeps the claim: SES may have it, so the retry sends nothing", async () => {
+  let attempts = 0;
+  const ses: SesSender = {
+    async sendRaw() {
+      attempts += 1;
+      throw Object.assign(new Error("Request aborted"), { name: "AbortError" });
+    },
+  };
+  const emailId = await insertEmail();
+  await expect(sendEmail(db, { keyring, ses }, { emailId })).rejects.toThrow("Request aborted");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("queued");
+  expect(row?.sentAt).not.toBeNull();
+
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("skipped");
+  expect(attempts).toBe(1);
+});
+
 it("no-ops a canceled email: no SES call, status stays canceled", async () => {
   const { ses, sends } = fakeSes("mid-cancel");
   const deps: SendDeps = { keyring, ses };
