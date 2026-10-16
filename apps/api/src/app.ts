@@ -4065,7 +4065,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       // committed. Idempotency completion is recorded in the same transaction;
       // enqueue happens only after commit (reconcile re-enqueues any lost job).
       const quota = teamQuota(auth.billing, deps.isCloud);
-      const inboxWebhooks = webhookBatch(deps.enqueueWebhookDeliveries);
+      const webhooks = webhookBatch(deps.enqueueWebhookDeliveries);
       const accepted = await deps.db.transaction(async (dbTx) => {
         const txDb = dbTx as unknown as Db;
         const out: {
@@ -4084,7 +4084,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             tx: txDb,
             quota: "deferred",
             parkUnderReview: true,
-            inboxWebhooks: inboxWebhooks.collect,
+            webhooks: webhooks.collect,
             recipientsChecked: true,
           });
           if (!result.ok) throw new AcceptRejectedError(result, index);
@@ -4263,7 +4263,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           console.error("batch email.send enqueue failed; reconcile sweep will recover", err);
         }
       }
-      await inboxWebhooks.flush();
+      await webhooks.flush();
       return c.json(
         {
           data: accepted.map((o) => ({ id: o.id })),

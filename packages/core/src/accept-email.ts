@@ -26,7 +26,7 @@ import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppression
 import { type SendRefusal, sendRefusal } from "./team-standing.js";
 import { findTopicOptOuts } from "./topics.js";
 import { utcDay } from "./utc-day.js";
-import { type WebhookEnqueue, webhookBatch } from "./webhooks.js";
+import { enqueueWebhookDeliveries, type WebhookEnqueue, webhookBatch } from "./webhooks.js";
 
 /**
  * Domain part of an RFC 5322 sender, lowercased. SECURITY: strict
@@ -90,9 +90,9 @@ export interface AcceptEmailDeps {
    */
   monitorSettings?: (() => Promise<MonitorSettings>) | undefined;
   /**
-   * Arms the webhook drain for the inbox events an inbox send writes.
-   * Optional: without it the rows still land and the webhooks.reconcile
-   * sweep sends them.
+   * Arms the webhook drain for the rows an accept writes (email.scheduled,
+   * an inbox send's events). Optional: without it the rows still land and
+   * the webhooks.reconcile sweep sends them.
    */
   enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
 }
@@ -481,10 +481,10 @@ export async function acceptEmail(
      */
     recipientsChecked?: boolean | undefined;
     /**
-     * With `tx`: where an inbox send's webhook rows go, for the caller to
+     * With `tx`: where the accept's webhook rows go, for the caller to
      * queue after its own commit, as it queues the send.
      */
-    inboxWebhooks?: WebhookEnqueue | undefined;
+    webhooks?: WebhookEnqueue | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
   let underReview = false;
@@ -609,7 +609,7 @@ export async function acceptEmail(
   // against the current billing period, whenever it delivers.
   const deliveryAt = quotaChargeAt(payload.scheduledAt);
   const day = utcDay(deliveryAt);
-  const inboxEvents = webhookBatch(deps.enqueueWebhookDeliveries);
+  const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
   const acceptRow = async (txDb: Db, inbox: InboxAcceptState | null) => {
     const reservation =
       opts.quota === "deferred"
@@ -709,7 +709,16 @@ export async function acceptEmail(
         attachments: payload.attachments,
         actor,
         now,
-        enqueue: opts.inboxWebhooks ?? inboxEvents.collect,
+        enqueue: opts.webhooks ?? hooks.collect,
+      });
+    }
+    if (payload.scheduledAt && payload.scheduledAt.getTime() > now.getTime()) {
+      await enqueueWebhookDeliveries(txDb, {
+        teamId: auth.teamId,
+        email: { emailId: row.id, from: row.from, to: row.to, subject: row.subject },
+        type: "email.scheduled",
+        occurredAt: now,
+        enqueue: opts.webhooks ?? hooks.collect,
       });
     }
     return { id: row.id, parked };
@@ -769,7 +778,7 @@ export async function acceptEmail(
       console.error("email.send enqueue failed; reconcile sweep will recover", err);
     }
   }
-  if (!opts.tx) await inboxEvents.flush();
+  if (!opts.tx) await hooks.flush();
   return {
     ok: true,
     id: accepted.id,

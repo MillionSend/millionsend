@@ -12,7 +12,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
@@ -1814,5 +1814,115 @@ describe("quota day of a scheduled send", () => {
       [utcDay(dayAhead(1))]: 1,
       [utcDay(dayAhead(2))]: 1,
     });
+  });
+});
+
+describe("email.scheduled webhook", () => {
+  let hookApp: ReturnType<typeof createApi>;
+  let hookToken: string;
+  let endpointId: string;
+  const handedOff: string[] = [];
+
+  beforeAll(async () => {
+    const hookTeam = await createTeam(db, "scheduled-hooks");
+    await db.insert(schema.domains).values({
+      teamId: hookTeam,
+      name: "scheduled-hooks.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const key = generateApiKey();
+    hookToken = key.token;
+    await db.insert(schema.apiKeys).values({
+      teamId: hookTeam,
+      name: "t",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    endpointId = await createWebhookEndpoint(db, hookTeam, null);
+    hookApp = createApi({
+      db,
+      keyring,
+      isCloud: true,
+      enqueueEmailSend: async () => {},
+      enqueueWebhookDeliveries: async (rows) => {
+        handedOff.push(...rows.map((r) => r.id));
+      },
+    });
+  });
+
+  const call = (method: string, path: string, payload: unknown) =>
+    hookApp.request(path, {
+      method,
+      headers: { authorization: `Bearer ${hookToken}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  const body = { ...validBody, from: "A <a@scheduled-hooks.dev>" };
+  const idOf = async (res: Response) => ((await res.json()) as { id: string }).id;
+  const scheduledFor = async (emailId: string) =>
+    db.select().from(schema.webhookDeliveries).where(eq(schema.webhookDeliveries.emailId, emailId));
+
+  it("fires for a send scheduled ahead, not for an immediate or backdated one", async () => {
+    const ahead = await idOf(
+      await call("POST", "/emails", {
+        ...body,
+        subject: "ahead",
+        scheduled_at: new Date(Date.now() + 3_600_000).toISOString(),
+      }),
+    );
+    const now = await idOf(await call("POST", "/emails", body));
+    const backdated = await idOf(
+      await call("POST", "/emails", {
+        ...body,
+        scheduled_at: new Date(Date.now() - 3_600_000).toISOString(),
+      }),
+    );
+
+    const [delivery, ...more] = await scheduledFor(ahead);
+    expect(more).toEqual([]);
+    expect(delivery).toMatchObject({ endpointId, eventType: "email.scheduled" });
+    const payload = delivery?.payload as { data: Record<string, unknown> };
+    expect(Object.keys(payload.data).sort()).toEqual(
+      ["created_at", "email_id", "from", "subject", "to"].sort(),
+    );
+    expect(payload.data).toMatchObject({
+      email_id: ahead,
+      subject: "ahead",
+      to: ["r@example.com"],
+    });
+    expect(handedOff).toContain(delivery?.id);
+    expect(await scheduledFor(now)).toEqual([]);
+    expect(await scheduledFor(backdated)).toEqual([]);
+  });
+
+  it("fires for a batch's scheduled items once the batch commits", async () => {
+    const res = await call("POST", "/emails/batch", [
+      { ...body, to: ["later@example.com"], scheduled_at: "in 2 hours" },
+      { ...body, to: ["now@example.com"] },
+    ]);
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { id: string }[] };
+    const [later, now] = data.map((item) => item.id);
+
+    const deliveries = await scheduledFor(later ?? "");
+    expect(deliveries.map((d) => d.eventType)).toEqual(["email.scheduled"]);
+    expect(handedOff).toContain(deliveries[0]?.id);
+    expect(await scheduledFor(now ?? "")).toEqual([]);
+  });
+
+  it("fires nothing more when the email is rescheduled", async () => {
+    const id = await idOf(
+      await call("POST", "/emails", {
+        ...body,
+        scheduled_at: new Date(Date.now() + 3_600_000).toISOString(),
+      }),
+    );
+    const res = await call("PATCH", `/emails/${id}`, {
+      scheduled_at: new Date(Date.now() + 7_200_000).toISOString(),
+    });
+    expect(res.status).toBe(200);
+    expect((await scheduledFor(id)).map((d) => d.eventType)).toEqual(["email.scheduled"]);
   });
 });
