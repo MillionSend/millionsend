@@ -203,12 +203,20 @@ it("fires email.failed for the emails a reap fails once it commits, and nothing 
     },
   });
   const enqueued: string[] = [];
+  const domainLeft: boolean[] = [];
 
   expect(
     await reapUnverifiedDomains(db, {
       clientForRegion,
       enqueueWebhookDelivery: async (rows) => {
         enqueued.push(...rows.map((r) => r.id));
+        // Handed over before the commit, this read waits on the open
+        // transaction: under PGlite that shows as the test timing out.
+        const rowsLeft = await db
+          .select({ id: schema.domains.id })
+          .from(schema.domains)
+          .where(eq(schema.domains.id, reaped));
+        domainLeft.push(rowsLeft.length > 0);
       },
     }),
   ).toBe(1);
@@ -223,6 +231,7 @@ it("fires email.failed for the emails a reap fails once it commits, and nothing 
     data: { failed: { reason: "domain_deleted" } },
   });
   expect(enqueued).toEqual([deliveries[0]?.id]);
+  expect(domainLeft).toEqual([false]);
   const [racedRow] = await db
     .select({ status: schema.emails.latestStatus })
     .from(schema.emails)
