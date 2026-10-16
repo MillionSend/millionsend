@@ -11,7 +11,7 @@ import { decodeEntities } from "../html.js";
 import { type BodyLink, extractLinks, type HtmlTag, scanHtml } from "../links.js";
 import { extractCode, extractLink, receivedSecretValues, type SecretKind } from "./codes.js";
 import type { ReceivedExtracted } from "./message.js";
-import { splitTextQuotes } from "./quotes.js";
+import { OUTLOOK_QUOTE_IDS, QUOTE_CLASSES, splitTextQuotes } from "./quotes.js";
 
 /**
  * The read path agents and the dashboard's extracted view get: what a person
@@ -39,8 +39,8 @@ const BLOCK = new Set(
   ),
 );
 const PARAGRAPH = new Set("p h1 h2 h3 h4 h5 h6 blockquote pre table ul ol".split(" "));
-const QUOTE_CLASS =
-  /(?:^|\s)(?:gmail_quote(?:_container)?|moz-cite-prefix|yahoo_quoted|protonmail_quote)(?:\s|$)/i;
+const QUOTE_CLASS = new RegExp(`(?:^|\\s)(?:${QUOTE_CLASSES.join("|")})(?:\\s|$)`, "i");
+const OUTLOOK_QUOTE_ID: ReadonlySet<string> = new Set(OUTLOOK_QUOTE_IDS);
 
 export interface ModelAnchor {
   href: string;
@@ -149,13 +149,7 @@ export function htmlToModelText(html: string): {
       }
       const id = attr(t, "id")?.toLowerCase();
       // Outlook marks where the quoted original starts: it and everything after is history.
-      if (
-        id === "divrplyfwdmsg" ||
-        id === "appendonsend" ||
-        (t.name === "hr" && id === "stopspelling")
-      ) {
-        cut = true;
-      }
+      if (id !== undefined && OUTLOOK_QUOTE_ID.has(id)) cut = true;
       if (t.name === "br") {
         sink().push("\n");
         return;

@@ -1,9 +1,24 @@
 /**
  * Quoted history and signatures in a reply's text, in the languages the
  * product serves (en, pt-BR, es) plus fr and de attributions. Mail clients
- * mark quotes in HTML too (gmail_quote, blockquote type=cite, Outlook's
- * divRplyFwdMsg); the read pipeline cuts those before this runs.
+ * mark quotes in HTML too (the markers below, and blockquote type=cite); the
+ * read pipeline cuts those before this runs. No imports: the dashboard reads
+ * received mail with the same rules.
  */
+
+/** Classes mail clients give the element that holds a reply's quoted history. */
+export const QUOTE_CLASSES = [
+  "gmail_quote",
+  "gmail_quote_container",
+  "moz-cite-prefix",
+  "yahoo_quoted",
+  "protonmail_quote",
+] as const;
+/**
+ * Ids, lowercased, Outlook gives the element where a reply's quoted original
+ * starts: it and everything after it are history.
+ */
+export const OUTLOOK_QUOTE_IDS = ["divrplyfwdmsg", "appendonsend", "stopspelling"] as const;
 
 const ATTRIBUTION = [
   /^On\b.{4,300}\bwrote:\s*$/i,
