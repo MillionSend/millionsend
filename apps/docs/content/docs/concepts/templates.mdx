@@ -5,8 +5,9 @@ description: Reusable email content for broadcasts, managed in the dashboard or 
 
 A template is reusable email content — subject, HTML and an optional plain
 text part — kept ready for the next [broadcast](/concepts/broadcasts). Compose
-one in the dashboard's block editor, with the same per-contact merge fields
-broadcasts use, or manage templates via the API. Picking a template in the
+one in the dashboard, in the block editor or as HTML in code mode, with the
+same per-contact merge fields broadcasts use, or manage templates via the API.
+Picking a template in the
 broadcast composer copies its content in as a starting point; editing the
 template later does not touch that broadcast, and deleting it leaves every
 broadcast intact.
@@ -31,6 +32,13 @@ layout into blocks flattens it. Converting to blocks is the user's explicit
 choice in the dashboard: as a converted duplicate (`<name> (blocks)`, the
 original untouched) or in place, where the stored HTML only changes on the
 next save.
+
+The other way works too: **Edit as HTML** moves a block template to code mode,
+as a duplicate (`<name> (HTML)`) or in place, and a new template can start
+there. The blocks are replaced by the HTML they render; until the next save,
+**Back to blocks** puts them back exactly as they were. In code mode, a plain
+text part generated from the HTML keeps following it as you edit, while plain
+text supplied through the API is sent as stored.
 
 ## Aliases
 

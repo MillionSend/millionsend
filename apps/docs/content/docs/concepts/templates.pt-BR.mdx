@@ -5,9 +5,10 @@ description: Conteúdo de e-mail reutilizável para transmissões, gerenciado no
 
 Um template é conteúdo de e-mail reutilizável — assunto, HTML e uma parte em
 texto puro opcional — deixado pronto para a próxima
-[transmissão](/pt-BR/concepts/broadcasts). Crie um no editor de blocos do
-painel, com os mesmos campos de mesclagem por contato que as transmissões usam,
-ou gerencie templates pela API. Escolher um template no editor da
+[transmissão](/pt-BR/concepts/broadcasts). Crie um no painel, no editor de
+blocos ou direto em HTML no modo código, com os mesmos campos de mesclagem por
+contato que as transmissões usam, ou gerencie templates pela API. Escolher um
+template no editor da
 transmissão copia o conteúdo dele como ponto de partida; editar o template
 depois não altera aquela transmissão, e apagá-lo deixa todas as transmissões
 intactas.
@@ -33,6 +34,14 @@ layout de tabelas e CSS inline como blocos o achata. Converter em blocos é uma
 escolha explícita do usuário no painel: como uma cópia convertida
 (`<name> (blocks)`, com o original intacto) ou no próprio template, caso em
 que o HTML armazenado só muda na próxima gravação.
+
+O caminho inverso também existe: **Editar como HTML** passa um template de
+blocos para o modo código, como cópia (`<name> (HTML)`) ou no próprio
+template, e um template novo pode começar direto por lá. Os blocos viram o
+HTML que eles geram; até a próxima gravação, **Voltar para blocos** traz os
+blocos de volta exatamente como estavam. No modo código, a parte em texto puro
+gerada a partir do HTML acompanha as suas edições, e o texto puro enviado pela
+API vai como foi gravado.
 
 ## Aliases
 
