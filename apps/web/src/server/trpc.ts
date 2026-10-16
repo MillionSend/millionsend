@@ -141,7 +141,22 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
   return { ...shared, teamId: membership?.teamId ?? null, role: membership?.role ?? null };
 }
 
-const t = initTRPC.context<Context>().create({ transformer: superjson });
+/** What the browser reads for a fault (INTERNAL_SERVER_ERROR) in place of its own text. */
+export const FAULT_MESSAGE =
+  "Something went wrong. Try again, or contact support if it keeps happening.";
+
+// A fault's text can carry SQL, table and column names and query parameters,
+// so its message and stack reach the browser only under `next dev`; the
+// route's onError logs and reports it whole. Passed to tRPC too: its default
+// (any NODE_ENV but production) would send the stack in tests.
+const isDev = process.env.NODE_ENV === "development";
+
+const t = initTRPC.context<Context>().create({
+  transformer: superjson,
+  isDev,
+  errorFormatter: ({ shape, error }) =>
+    error.code === "INTERNAL_SERVER_ERROR" && !isDev ? { ...shape, message: FAULT_MESSAGE } : shape,
+});
 
 export const router = t.router;
 export const createCallerFactory = t.createCallerFactory;

@@ -761,7 +761,8 @@ export function createSettingsRouter(
             .update(schema.teamInvitations)
             .set({ lastSentAt: invite.lastSentAt, sendCount: invite.sendCount })
             .where(eq(schema.teamInvitations.id, invite.id));
-          throw await inviteRefusal("INTERNAL_SERVER_ERROR", "sendFailed");
+          // Not INTERNAL_SERVER_ERROR: the browser never reads a fault's own message.
+          throw await inviteRefusal("SERVICE_UNAVAILABLE", "sendFailed");
         }
         await recordAudit(ctx, {
           action: "invitation.resent",
