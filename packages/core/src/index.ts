@@ -752,6 +752,7 @@ export {
 export {
   applyStatusCas,
   type EmailStatus,
+  endQueuedEmails,
   highestStatus,
   transitionQueueState,
 } from "./status.js";
