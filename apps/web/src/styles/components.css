@@ -618,10 +618,6 @@ table.ms-table {
   box-sizing: border-box;
   transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
 }
-.ms-input:focus {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
-}
 .ms-input.error {
   background: var(--ms-danger-bg);
   border-color: var(--ms-danger-border);
@@ -1770,14 +1766,24 @@ svg:focus {
 /* The same policy, globally: nothing ever shows the browser's default ring,
    and every interactive control without a rule of its own (nav links, tabs,
    table links, focusable spans) draws the steel ring on :focus-visible.
-   Component rules above and below win on specificity where they differ. */
+   Component rules above and below win on specificity where they differ.
+   Text fields and editors are left out on purpose: their caret is the only
+   focus mark, so a click into a field never draws a ring around it. */
 :focus {
   outline: none;
 }
 a:focus-visible,
 button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
+input:is(
+  [type="checkbox"],
+  [type="radio"],
+  [type="color"],
+  [type="range"],
+  [type="file"],
+  [type="button"],
+  [type="submit"],
+  [type="reset"]
+):focus-visible,
 select:focus-visible,
 summary:focus-visible,
 [tabindex="0"]:focus-visible {
@@ -1896,11 +1902,6 @@ summary:focus-visible,
 }
 .ms-menu-search::placeholder {
   color: var(--ms-faint);
-}
-/* The panel is the focus surface; the global input ring, clipped by the
-   panel, would show as a band under the hairline. */
-.ms-menu-search:focus-visible {
-  box-shadow: none;
 }
 /* Non-interactive menu row (e.g. the Appearance row): keeps the item metrics,
    drops the hover affordance. */
@@ -3336,11 +3337,6 @@ input[type="number"]::-webkit-inner-spin-button {
   border-radius: 7px;
   background: var(--ms-inset);
   color: var(--ms-muted);
-  transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
-}
-.ms-code-find:focus-within {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
 }
 .ms-code-find input {
   flex: 1 1 auto;
@@ -3359,19 +3355,6 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .ms-code-find input::placeholder {
   color: var(--ms-faint);
-}
-/* The frame shows the focus ring (:focus-within); the bare input must not add its own. */
-.ms-code-find input:focus-visible {
-  box-shadow: none;
-}
-/* The token input (chip-multi-select.tsx) works the same way: the rounded
-   frame takes the ring, never a square around the bare input inside. */
-.ms-chip-input:focus-within {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
-}
-.ms-chip-input input:focus-visible {
-  box-shadow: none;
 }
 .ms-code-find-count {
   flex: none;
@@ -3416,20 +3399,11 @@ input[type="number"]::-webkit-inner-spin-button {
   border-radius: var(--ms-r-input);
   background: var(--ms-inset);
   overflow: hidden;
-  transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
 }
 /* Under its toolbar row the frame joins the head: line-tone at rest, no top rounding. */
 .ms-tpl-code-source .ms-code-editor {
   border-color: var(--ms-line);
   border-radius: 0 0 var(--ms-r-input) var(--ms-r-input);
-}
-.ms-code-editor:focus-within {
-  border-color: var(--ms-focus-border);
-  box-shadow: var(--ms-focus-ring);
-}
-.ms-tpl-code-source .ms-code-editor:focus-within {
-  /* The head above would sit outside a ring; the border colour alone marks focus. */
-  box-shadow: none;
 }
 /* Mirror and textarea share every metric that moves a glyph. */
 .ms-code-editor-hl,
@@ -3458,10 +3432,6 @@ input[type="number"]::-webkit-inner-spin-button {
   color: transparent;
   -webkit-text-fill-color: transparent;
   caret-color: var(--ms-bone);
-}
-.ms-code-editor-input:focus-visible {
-  /* The ring sits on the frame (focus-within), where overflow: hidden cannot clip it. */
-  box-shadow: none;
 }
 .ms-code-editor-input::selection {
   background: color-mix(in srgb, var(--ms-info) 32%, transparent);
