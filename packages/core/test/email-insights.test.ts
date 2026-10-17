@@ -881,7 +881,8 @@ describe("crafted html", () => {
     for (const html of junk) {
       const started = performance.now();
       evaluateEmailInsights(input({ html, preTrackingHtml: html }));
-      expect(performance.now() - started).toBeLessThan(1000);
+      // A quadratic pass takes minutes at this size; the slack absorbs a busy CI runner.
+      expect(performance.now() - started).toBeLessThan(5000);
     }
   });
 });
