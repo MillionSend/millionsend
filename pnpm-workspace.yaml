@@ -14,3 +14,8 @@ overrides:
   "esbuild@<0.25.0": ">=0.25.0"
   # Stack-exhaustion advisory in <8 (GHSA via mailparser→html-to-text).
   "deepmerge-ts@<8.0.0": ">=8.0.0"
+  # From 1.16.12, @swc/core unpacks its native addon into a cache directory
+  # on first load and refuses to load without a writable, executable one,
+  # which a read-only container with a noexec /tmp lacks. next.config.ts
+  # loads it through next-intl's plugin, so `next start` would die at boot.
+  "@swc/core": "1.16.2"
