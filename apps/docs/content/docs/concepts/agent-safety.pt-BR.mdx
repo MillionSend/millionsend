@@ -135,15 +135,36 @@ e-mail retido quando pede (`include_quarantined=true`,
 então um agente acordado por um webhook nunca recebe um id retido; o
 `inbox.email.quarantined` avisa os endpoints que se inscrevem nele.
 
-**Liberar.** Uma pessoa libera pela aba **Precisa de revisão** da caixa, uma
-chave de acesso total da equipe com
+**Liberar.** Qualquer pessoa da equipe libera pelo painel: na aba **Precisa
+de revisão** da caixa, na mensagem dentro da conversa ou na página do e-mail
+recebido. Todos abrem a mesma janela, com o motivo da retenção, o que a
+liberação dispara e o texto do e-mail; o que ficou retido por `injection`,
+`phishing`, `virus` ou `failed_auth` só é liberado depois que a pessoa marca
+que leu. Uma chave de acesso total da equipe libera com
 [`POST /inboxes/{id}/quarantine/{email_id}/release`](/pt-BR/concepts/inboxes#quarentena),
-e um cliente MCP com `release_email`, sob `receiving:manage`; uma chave
-restrita a uma caixa nunca consegue. **Liberar e confiar no remetente**
-(`trust_sender`) também coloca o remetente na lista de permitidos. Uma
-mensagem liberada é entregue como se tivesse acabado de chegar, com
-webhooks, e não é analisada de novo. Vírus continua sendo vírus: liberar um
-mostra o texto, e os anexos e a mensagem original continuam bloqueados.
+e um cliente MCP com `release_email`, sob `receiving:manage`, menos esses
+quatro motivos: esse e-mail tem o agente como alvo, então uma pessoa revisa
+no painel (`403 forbidden`). Uma chave restrita a uma caixa nunca libera.
+
+- **Analisado antes.** O e-mail retido antes da análise (`not_allowlisted`,
+  `unauthenticated_sender`, `failed_auth`) é analisado na hora de liberar,
+  numa caixa de agente com o `screening` ligado, pelo mesmo avaliador e com a
+  mesma linha de corte do e-mail que chega. Com 80 ou mais, ele continua na
+  quarentena, agora como `injection` ou `phishing`, com as notas
+  (`409 held_by_screening` na API). Quando o avaliador não responde, ou a
+  instância não tem um, a liberação segue: foi decisão de uma pessoa.
+- **Confiar no remetente.** O `trust_sender` (**Confiar também** na janela)
+  coloca o endereço do remetente na lista de permitidos da caixa. Ele só vale
+  para e-mail retido como `not_allowlisted` de um remetente que passou na
+  autenticação (`external`), o único caso em que a lista de permitidos
+  deixaria o e-mail entrar, e só para donos e admins ou uma chave de acesso
+  total da equipe, que podem mudar a própria lista; qualquer outro caso
+  responde `403 trust_not_allowed`. Clientes MCP nunca confiam num
+  remetente.
+- Uma mensagem liberada é entregue como se tivesse acabado de chegar, com
+  webhooks e cópias do `forward_to`, e não é analisada de novo. Vírus
+  continua sendo vírus: liberar um mostra o texto, e os anexos e a mensagem
+  original continuam bloqueados.
 
 Os responsáveis recebem um e-mail por dia, **Suas caixas de entrada precisam
 de atenção**, enquanto houver mensagens na quarentena, rascunhos esperando
@@ -397,8 +418,8 @@ sua equipe.
 ## O que essas proteções não fazem
 
 - As linhas de corte da análise e da nota de spam são valores iniciais. Um
-  e-mail pode escapar delas, e um e-mail legítimo pode ficar retido; o que
-  está retido está a um clique de ser liberado.
+  e-mail pode escapar delas, e um e-mail legítimo pode ficar retido até uma
+  pessoa ler e liberar.
 - Um domínio que não publica política DMARC, ou publica `p=none`, não
   consegue provar muita coisa: o e-mail legítimo dele e uma falsificação
   podem parecer iguais.

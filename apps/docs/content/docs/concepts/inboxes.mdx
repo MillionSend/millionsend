@@ -538,9 +538,19 @@ one, and `{ "trust_sender": true }` also adds its sender to the allowlist:
 ```
 
 Both take a full-access key that isn't restricted to an inbox (inbox-scoped
-keys get `403`). A message that isn't quarantined answers `404`. People
-release from the inbox's **Needs review** tab, and MCP clients with
-`receiving:manage` with `release_email`.
+keys get `403`). A release can also answer:
+
+| Status, name | When |
+| --- | --- |
+| `404 not_found` | The message isn't quarantined in the inbox. |
+| `409 held_by_screening` | The message was held before screening ran, and screening found prompt injection or phishing at 80 or more: it stays in quarantine under that reason, with its scores. |
+| `403 trust_not_allowed` | `trust_sender` on anything but a message held as `not_allowlisted` from a verified (`external`) sender. |
+| `403 forbidden` | An MCP client releasing mail held for `injection`, `phishing`, `virus` or `failed_auth`. |
+| `422 validation_error` | `trust_sender` while the allowlist is full. |
+
+People release from the dashboard, and MCP clients with `receiving:manage`
+with `release_email`. [Agent safety](/concepts/agent-safety#quarantine)
+explains who may release what, and the screening a release runs first.
 
 ## Verification codes
 
@@ -680,7 +690,8 @@ drafts in place, **Needs review** (drafts to approve and quarantine),
 
 Any member can create inboxes, work their threads, approve drafts and release
 quarantine. Owners and admins can also delete inboxes, change safety rules,
-create inbox-scoped keys, delete received mail and switch catch-all.
+trust the sender of a message they release, create inbox-scoped keys, delete
+received mail and switch catch-all.
 
 ## MCP
 
@@ -690,8 +701,9 @@ labels and drafts), `receiving:reply` (reply, forward and organize threads)
 and `receiving:manage` (create, change and delete inboxes, list and release
 quarantine). An MCP client always sees mail the way an agent does, without
 held mail and with message text fenced as untrusted. It can't change safety
-settings, beyond picking `accept_from` when it creates an inbox, and it never
-approves drafts.
+settings, beyond picking `accept_from` when it creates an inbox; it never
+approves drafts, never trusts a sender, and never releases mail held for
+its content or a failed authentication.
 
 ## Resend compatibility
 
