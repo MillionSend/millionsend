@@ -108,10 +108,17 @@ function CatchAllRelease({ id, ...props }: DialogProps & { id: string }) {
   );
 }
 
-/** The hold as the dialog shows it; inboxId null for a catch-all row. */
+/**
+ * The hold as the dialog shows it; inboxId null for a catch-all row. Nothing
+ * outlives the closed dialog: screening on release may have held the mail
+ * again for another reason, which the next opening must gate on.
+ */
 function useHold(inboxId: string | null, emailId: string) {
   const trpc = useTRPC();
-  return useQuery(trpc.inboxes.quarantine.preview.queryOptions({ inboxId, emailId }));
+  return useQuery({
+    ...trpc.inboxes.quarantine.preview.queryOptions({ inboxId, emailId }),
+    gcTime: 0,
+  });
 }
 
 /**

@@ -404,6 +404,7 @@ describe("the release dialog", () => {
       path: "inboxes.quarantine.preview.queryOptions",
       inboxId: null,
       emailId: "row1",
+      gcTime: 0,
     });
     await click(tick());
     await click(confirmButton());
