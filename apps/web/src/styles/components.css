@@ -1830,6 +1830,19 @@ button.ms-notice-strip-action {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* The release dialog: why the mail was held and what releasing does, beside
+   its text, so the decision fits a laptop screen; one column on phones. */
+.ms-release-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px 24px;
+  align-items: start;
+}
+@media (max-width: 639px) {
+  .ms-release-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 /* What the server shortened or masked. The span already holds the replacement
    — the original never reached this page — so it stays legible: the box says
    "changed", not "hidden behind a bar you could select". */

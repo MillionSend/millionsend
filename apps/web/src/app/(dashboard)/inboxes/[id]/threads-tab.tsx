@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
+import { DotParts } from "@/components/dot-parts";
 import { DraftBanner } from "@/components/draft-banner";
 import {
   ArchiveIcon,
@@ -39,9 +40,11 @@ import { useLocalDraft } from "@/lib/use-local-draft";
 import { SearchBox, StateCard } from "../../emails/list-parts";
 import {
   approvalReasonWords,
+  heldWhy,
   type InboxDetail,
   messageHref,
   QuarantinedBadge,
+  ReleasedBadge,
   replyAllAdds,
   replyTarget,
   SuspiciousBadge,
@@ -49,6 +52,7 @@ import {
   type ThreadRow,
   TrustBadge,
 } from "../parts";
+import { ReleaseButton } from "../release-dialog";
 import { LabelBadge, LabelsMenu } from "./labels";
 
 const FOLDERS = ["inbox", "archive", "spam", "sent", "trash"] as const;
@@ -574,16 +578,10 @@ export function MessageCard({
   onChange: () => void;
 }) {
   const t = useTranslations("inboxes");
-  const trpc = useTRPC();
-  const release = useMutation(
-    trpc.inboxes.quarantine.release.mutationOptions({
-      onSuccess: onChange,
-      onError: (error) => toast(error.message, "danger"),
-    }),
-  );
   const inbound = message.direction === "inbound";
   const verdict = inbound ? message.screening.verdict : null;
   const held = verdict === "quarantined";
+  const releasedAt = inbound && verdict === "released" ? message.screening.released_at : null;
   // A forward's quoted original is what the sender wants read.
   const forward = isForwardSubject(message.subject);
   return (
@@ -597,6 +595,9 @@ export function MessageCard({
           <>
             <TrustBadge trust={message.screening.sender_trust} />
             {held ? <QuarantinedBadge reason={message.screening.quarantine_reason} /> : null}
+            {releasedAt ? (
+              <ReleasedBadge screening={message.screening} releasedAt={releasedAt} />
+            ) : null}
             {inbox.kind === "agent" && verdict === "suspicious" ? (
               <SuspiciousBadge
                 injection={message.screening.injection_score}
@@ -614,35 +615,8 @@ export function MessageCard({
           <RelativeTime date={message.received_at} />
         </span>
       </header>
-      {held ? (
-        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-          <p style={{ margin: 0, fontSize: 13, color: "var(--ms-danger)" }}>
-            {t("message.quarantined")}
-          </p>
-          <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="ms-btn ms-btn-primary"
-              disabled={release.isPending || inbox.expired}
-              onClick={() =>
-                release.mutate({ inboxId: inbox.id, emailId: message.id, trustSender: false })
-              }
-            >
-              <BtnSpinner on={release.isPending} />
-              {t("release")}
-            </button>
-            <button
-              type="button"
-              className="ms-btn ms-btn-secondary"
-              disabled={release.isPending || inbox.expired}
-              onClick={() =>
-                release.mutate({ inboxId: inbox.id, emailId: message.id, trustSender: true })
-              }
-            >
-              {t("releaseTrust")}
-            </button>
-          </span>
-        </div>
+      {inbound && held ? (
+        <HeldNotice kind={inbox.kind} screening={message.screening} />
       ) : verdict === "pending" ? (
         <p style={{ margin: "10px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
           {t("message.screening")}
@@ -670,14 +644,73 @@ export function MessageCard({
           ))}
         </ul>
       ) : null}
-      <Link
-        href={messageHref(message)}
-        className="ms-link"
-        style={{ display: "inline-block", marginTop: 10, fontSize: 12.5 }}
-      >
-        {t("openEmail")}
-      </Link>
+      {/* Release comes after the text it is decided on, never before it. */}
+      {held ? (
+        <footer
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginTop: 12,
+            paddingTop: 12,
+            borderTop: "1px solid var(--ms-line)",
+          }}
+        >
+          <Link href={messageHref(message)} className="ms-link" style={{ fontSize: 12.5 }}>
+            {t("openEmail")}
+          </Link>
+          <span style={{ marginLeft: "auto" }}>
+            <ReleaseButton
+              kind={inbox.kind}
+              target={{ inboxId: inbox.id, emailId: message.id }}
+              disabled={inbox.expired}
+              onChange={onChange}
+            />
+          </span>
+        </footer>
+      ) : (
+        <Link
+          href={messageHref(message)}
+          className="ms-link"
+          style={{ display: "inline-block", marginTop: 10, fontSize: 12.5 }}
+        >
+          {t("openEmail")}
+        </Link>
+      )}
     </article>
+  );
+}
+
+/** The held card's notice: who can't see the mail yet, then the risk and the screening's reasons. */
+function HeldNotice({
+  kind,
+  screening,
+}: {
+  kind: InboxDetail["kind"];
+  screening: Extract<ThreadMessage, { direction: "inbound" }>["screening"];
+}) {
+  const t = useTranslations("inboxes");
+  const why = heldWhy(
+    t,
+    {
+      reason: screening.quarantine_reason,
+      injectionScore: screening.injection_score,
+      phishingScore: screening.phishing_score,
+      reasons: screening.reasons,
+    },
+    false,
+  );
+  return (
+    <div style={{ marginTop: 10, display: "grid", gap: 3 }}>
+      <p style={{ margin: 0, fontSize: 13, color: "var(--ms-danger)" }}>
+        {t("message.quarantined", { kind })}
+      </p>
+      {why ? (
+        <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: "var(--ms-muted)" }}>
+          <DotParts text={why} />
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -183,7 +183,7 @@
   "riskScores": "Risk (0–100): prompt injection {injection} · phishing {phishing}. At 80 or more, the email is held in quarantine.",
   "message": {
     "screening": "Being screened…",
-    "quarantined": "Held in quarantine: your agent can't see it until someone releases it.",
+    "quarantined": "{kind, select, human {Held in quarantine: it shows up in the inbox once someone releases it.} other {Held in quarantine: your agent can't see it until someone releases it.}}",
     "hiddenText": "Hidden text removed"
   },
   "mail": {
@@ -231,7 +231,53 @@
     "scoreLine": "injection {injection} · phishing {phishing}"
   },
   "release": "Release",
-  "releaseTrust": "Release and trust sender",
+  "quarantine": {
+    "title": "{kind, select, human {Release this email into the inbox?} other {Release this email to your agent?}}",
+    "subject": "“{subject}”",
+    "fromTo": "from <mono>{from}</mono> to <mono>{inbox}</mono>",
+    "why": "Why it was held",
+    "text": "Email text",
+    "noText": "This email has no text.",
+    "ifReleased": "If you release it",
+    "risk": "risk {score}/100",
+    "score": "{label} {score}/100",
+    "sender": "Sender: {trust}",
+    "hiddenText": "Hidden text was removed from it",
+    "notAllowlisted": "This inbox only takes mail from its allowlist, so it was held before screening could read it.",
+    "effects": {
+      "agent": "Your agent gets it as new mail: it can act on what it says.",
+      "agentReply": "Your agent gets it as new mail: it can act on what it says and reply to the sender without approval.",
+      "human": "It shows up in the inbox as new mail.",
+      "channels": "{channels, select, both {Webhooks fire and forward copies go out, as for any new mail.} webhooks {Webhooks fire, as for any new mail.} other {Forward copies go out, as for any new mail.}}",
+      "notAgain": "It isn't screened again and can't go back to quarantine.",
+      "skips": "It skips screening and can't go back to quarantine.",
+      "rescreen": "It's screened first when screening can run, and stays held at a risk of 80 or more. Once released, it can't go back to quarantine."
+    },
+    "ack": "{kind, select, human {I've read this email and I'm sure it's safe.} other {I've read this email and it's safe for my agent.}}",
+    "trust": "Also trust <mono>{address}</mono>",
+    "trustLead": "Puts it on this inbox's allowlist:",
+    "trustInbound": "{kind, select, human {Its next emails reach the inbox, as long as they pass authentication. Viruses are still held.} other {Its next emails reach your agent without screening, as long as they pass authentication. Viruses are still held.}}",
+    "trustSend": "Your agent can start new conversations with it without approval.",
+    "trustCodes": "Your agent can send it the codes and sign-in links this inbox receives.",
+    "trustAdmins": "Owners and admins can also put the sender on the allowlist.",
+    "keep": "Keep in quarantine",
+    "confirm": "{kind, select, human {Release to inbox} other {Release to agent}}",
+    "done": "{kind, select, human {Released to the inbox.} other {Released to your agent.}}",
+    "heldAgain": "Screening found {reason} (risk {score}/100). It stays in quarantine.",
+    "errors": {
+      "trust_not_allowed": "You can't put this sender on the allowlist. Untick “Also trust” to release the email.",
+      "allowlist_full": "This inbox's allowlist is full. Untick “Also trust”, or remove an entry in Safety & rules.",
+      "not_quarantined": "This email isn't in quarantine anymore.",
+      "forbidden": "You can't release this email.",
+      "failed": "Couldn't release this email. Try again."
+    }
+  },
+  "released": {
+    "badge": "Released by {who}",
+    "held": "Held: {reason}{score, select, none {} other {, risk {score}/100}}.",
+    "by": "Released by {who}, {time}.",
+    "at": "Released {time}."
+  },
   "qr": {
     "failed_auth": "failed authentication",
     "unauthenticated_sender": "sender not verified",
@@ -241,6 +287,14 @@
     "virus": "virus",
     "unscreened": "couldn't be screened",
     "screening_cap": "daily screening limit reached"
+  },
+  "screeningReason": {
+    "targets_agent": "Speaks to an AI, not a person",
+    "override": "Tries to change the reader's instructions",
+    "exfiltration": "Asks to send out codes, links, keys or data",
+    "unsafe_action": "Asks for an action outside the conversation",
+    "concealed": "Hides instructions",
+    "credential_lure": "Asks for passwords, codes or card details"
   },
   "trust": {
     "owner": "Owner",
