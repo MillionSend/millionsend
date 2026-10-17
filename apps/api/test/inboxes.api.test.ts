@@ -785,11 +785,6 @@ describe("inbox-scoped API keys", () => {
     expect((await call(inboxKey, "GET", `/inboxes/${own.id}/safety`)).status).toBe(200);
     expect((await call(inboxKey, "GET", `/inboxes/${own.id}/threads`)).status).toBe(200);
     expect((await call(inboxKey, "GET", "/emails/receiving")).status).toBe(200);
-    // Its own inbox's release is reached, held to the agent rule there.
-    expect(
-      (await call(inboxKey, "POST", `/inboxes/${own.id}/quarantine/${randomUUID()}/release`, {}))
-        .status,
-    ).toBe(404);
     const refused: [string, string, unknown?][] = [
       ["GET", `/inboxes/${other.id}`],
       ["GET", `/inboxes/${other.id}/threads`],
@@ -798,7 +793,7 @@ describe("inbox-scoped API keys", () => {
       ["DELETE", `/inboxes/${own.id}`],
       ["PATCH", `/inboxes/${own.id}/safety`, { screening: false }],
       ["GET", `/inboxes/${own.id}/quarantine`],
-      ["POST", `/inboxes/${other.id}/quarantine/${randomUUID()}/release`, {}],
+      ["POST", `/inboxes/${own.id}/quarantine/${randomUUID()}/release`, {}],
       ["GET", "/domains"],
       ["GET", "/api-keys"],
       ["POST", "/api-keys", { name: "child" }],

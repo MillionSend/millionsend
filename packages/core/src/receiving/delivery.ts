@@ -484,7 +484,7 @@ async function judgeBeforeRelease(
  * again; trustSender also allowlists the From address. The judge reads a
  * hold first, against the line inbound mail meets, when a person or a team
  * key releases one made before screening (screensOnRelease) and whenever
- * an agent credential releases: at the line, the message stays held for
+ * an agent (MCP) releases: at the line, the message stays held for
  * what the judge found (held_again). A judge that can't answer (none, a
  * failure, a spent cap) leaves a person's or a team key's decision
  * standing, and refuses an agent's release (screening_unavailable). A hold
@@ -514,7 +514,7 @@ export async function releaseQuarantined(
   const r = schema.receivedEmails;
   const releasedBy = encodeInboxActor(p.actor);
   const rights = (reason: QuarantineReason, senderTrust: SenderTrust) =>
-    releaseRights({ reason, senderTrust, actor: p.actor, inboxId: p.inboxId, admin: p.admin });
+    releaseRights({ reason, senderTrust, actor: p.actor, admin: p.admin });
   const refusal = (may: ReturnType<typeof releaseRights>): ReleaseRefusal | null => {
     if (!may.release) return "forbidden";
     return p.trustSender && !may.trust ? "trust_not_allowed" : null;

@@ -1763,11 +1763,9 @@ export const createApiKeyRequestSchema = z
       .nullish()
       .describe(
         "MillionSend extension: restricts the key to one inbox of the team. It reads that inbox's " +
-          "threads, drafts and received mail, sends only from its address, and releases its held " +
-          "mail as an agent does (never mail held for its content, the rest only on screening's " +
-          "verdict); every other route answers 403 restricted_api_key. Needs full_access, can't " +
-          "be combined with domain_id, and an inbox holds at most 5 active keys (outside the " +
-          "team's 25).",
+          "threads, drafts and received mail and sends only from its address; every other route " +
+          "answers 403 restricted_api_key. Needs full_access, can't be combined with domain_id, " +
+          "and an inbox holds at most 5 active keys (outside the team's 25).",
       ),
   })
   .openapi("CreateApiKeyRequest");

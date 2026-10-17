@@ -20,7 +20,6 @@ describe("inboxKeyAllows", () => {
       ["PATCH", `/inboxes/${OWN}/labels/${T}`],
       ["DELETE", `/inboxes/${OWN}/labels/${T}`],
       ["GET", `/inboxes/${OWN}/codes/latest`],
-      ["POST", `/inboxes/${OWN}/quarantine/${E}/release`],
       ["GET", `/inboxes/${OWN}/threads`],
       ["GET", `/inboxes/${OWN}/threads/search`],
       ["GET", `/inboxes/${OWN}/threads/${T}`],
@@ -60,7 +59,6 @@ describe("inboxKeyAllows", () => {
       ["GET", `/inboxes/${OTHER}/threads/${T}/emails/${E}`],
       ["POST", `/inboxes/${OTHER}/drafts`],
       ["GET", `/inboxes/${OTHER}/codes/latest`],
-      ["POST", `/inboxes/${OTHER}/quarantine/${E}/release`],
       // Exposure and approval stay with people and team keys.
       ["POST", "/inboxes"],
       ["PATCH", `/inboxes/${OWN}`],
@@ -68,6 +66,7 @@ describe("inboxKeyAllows", () => {
       ["PATCH", `/inboxes/${OWN}/safety`],
       ["PATCH", `/inboxes/${OWN}/agent`],
       ["GET", `/inboxes/${OWN}/quarantine`],
+      ["POST", `/inboxes/${OWN}/quarantine/${E}/release`],
       ["POST", `/inboxes/${OWN}/drafts/${T}/reject`],
       ["DELETE", `/emails/receiving/${E}`],
       // The rest of the API.

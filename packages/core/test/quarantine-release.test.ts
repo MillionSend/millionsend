@@ -24,19 +24,12 @@ const TEAM_KEY: InboxActor = { kind: "api_key", apiKeyId: randomUUID(), inboxId:
 const INBOX_KEY: InboxActor = { kind: "api_key", apiKeyId: randomUUID(), inboxId: randomUUID() };
 const AGENT: InboxActor = { kind: "oauth", userId: "u-rel-owner", clientId: "client-1" };
 const SYSTEM: InboxActor = { kind: "system" };
-/** A key scoped to one inbox: an agent's credential there. */
-const keyFor = (inboxId: string): InboxActor => ({
-  kind: "api_key",
-  apiKeyId: randomUUID(),
-  inboxId,
-});
 
 describe("releaseRights", () => {
-  const inboxId = randomUUID();
   const rights = (reason: QuarantineReason, actor: InboxActor) =>
-    releaseRights({ reason, senderTrust: "external", actor, inboxId, admin: true });
+    releaseRights({ reason, senderTrust: "external", actor, admin: true });
 
-  it("lets a person or a team key release any hold on their own decision, no other inbox's key", () => {
+  it("lets a person or a team key release any hold on their own decision, an inbox key none", () => {
     for (const reason of QUARANTINE_REASONS) {
       for (const actor of [OWNER, TEAM_KEY]) {
         expect(rights(reason, actor)).toMatchObject({ release: true, needsVerdict: false });
@@ -48,21 +41,12 @@ describe("releaseRights", () => {
     }
   });
 
-  it("lets an agent credential release only what isn't a content hold, and only on a verdict", () => {
+  it("lets an agent release only what isn't a content hold, and only on a verdict", () => {
     expect([...CONTENT_HOLDS].sort()).toEqual(["failed_auth", "injection", "phishing", "virus"]);
-    // Ids compare regardless of case, as Postgres compares uuids.
-    const ownKey = keyFor(inboxId.toUpperCase());
     for (const reason of QUARANTINE_REASONS) {
       const may = !CONTENT_HOLDS.includes(reason);
-      for (const agent of [AGENT, ownKey]) {
-        expect(rights(reason, agent)).toEqual({ release: may, trust: false, needsVerdict: may });
-      }
+      expect(rights(reason, AGENT)).toEqual({ release: may, trust: false, needsVerdict: may });
     }
-    // A catch-all row belongs to no inbox, so to no inbox's key.
-    expect(
-      releaseRights({ reason: "unscreened", senderTrust: "external", actor: ownKey, inboxId: null })
-        .release,
-    ).toBe(false);
   });
 
   it("offers trust only for a verified sender held off the allowlist, to owners, admins and team keys", () => {
@@ -71,7 +55,6 @@ describe("releaseRights", () => {
       ["member", OWNER, false],
       ["team key", TEAM_KEY, false],
       ["inbox key", INBOX_KEY, true],
-      ["own inbox key", keyFor(inboxId), true],
       ["agent", AGENT, true],
       ["system", SYSTEM, true],
     ] as const;
@@ -79,7 +62,7 @@ describe("releaseRights", () => {
     for (const reason of QUARANTINE_REASONS) {
       for (const senderTrust of SENDER_TRUSTS) {
         for (const [who, actor, admin] of releasers) {
-          if (releaseRights({ reason, senderTrust, actor, inboxId, admin }).trust) {
+          if (releaseRights({ reason, senderTrust, actor, admin }).trust) {
             trusted.push(`${reason} ${senderTrust} ${who}`);
           }
         }
@@ -538,7 +521,7 @@ describe("screening on release", () => {
   });
 });
 
-describe("an agent's release", () => {
+describe("an MCP release", () => {
   const AGENT_HOLDS = [
     "not_allowlisted",
     "unauthenticated_sender",
@@ -558,16 +541,10 @@ describe("an agent's release", () => {
     return { id, inbox };
   }
 
-  /** Each hold an agent may release, held anew for an MCP token and for the inbox's own key. */
+  /** Each hold an agent may release, held anew. */
   async function agentCases() {
     const cases = [];
-    for (const reason of AGENT_HOLDS) {
-      for (const who of ["mcp", "inbox key"] as const) {
-        const { id, inbox } = await heldFor(reason);
-        const actor = who === "mcp" ? AGENT : keyFor(inbox);
-        cases.push({ label: `${reason} by ${who}`, reason, id, inbox, actor });
-      }
-    }
+    for (const reason of AGENT_HOLDS) cases.push({ reason, ...(await heldFor(reason)) });
     return cases;
   }
 
@@ -577,18 +554,18 @@ describe("an agent's release", () => {
         verdict({ injectionScore: 79, phishingScore: 79, reasons: ["targets_agent"] }),
       );
       expect(
-        await release(c.id, c.inbox, { actor: c.actor, screen: screenWith(screen) }),
-        c.label,
+        await release(c.id, c.inbox, { actor: AGENT, screen: screenWith(screen) }),
+        c.reason,
       ).toMatchObject({ ok: true, outcome: "released", trustedSender: null });
-      expect(screen, c.label).toHaveBeenCalledTimes(1);
-      expect(await membership(c.id, c.inbox), c.label).toMatchObject({
+      expect(screen, c.reason).toHaveBeenCalledTimes(1);
+      expect(await membership(c.id, c.inbox), c.reason).toMatchObject({
         verdict: "released",
         quarantineReason: c.reason,
         injectionScore: 79,
         phishingScore: 79,
         reasons: ["targets_agent"],
         judge: { status: "judged" },
-        releasedBy: encodeInboxActor(c.actor),
+        releasedBy: encodeInboxActor(AGENT),
       });
     }
   });
@@ -597,8 +574,8 @@ describe("an agent's release", () => {
     for (const c of await agentCases()) {
       const screen = vi.fn(async () => verdict({ phishingScore: 80 }));
       expect(
-        await release(c.id, c.inbox, { actor: c.actor, screen: screenWith(screen) }),
-        c.label,
+        await release(c.id, c.inbox, { actor: AGENT, screen: screenWith(screen) }),
+        c.reason,
       ).toEqual({
         ok: true,
         outcome: "held_again",
@@ -606,7 +583,7 @@ describe("an agent's release", () => {
         injectionScore: 3,
         phishingScore: 80,
       });
-      expect(await membership(c.id, c.inbox), c.label).toMatchObject({
+      expect(await membership(c.id, c.inbox), c.reason).toMatchObject({
         verdict: "quarantined",
         quarantineReason: "phishing",
         deliveredAt: null,
@@ -618,13 +595,13 @@ describe("an agent's release", () => {
     const timeout = vi.fn(async () => Promise.reject(new JudgeError("timeout")));
     for (const c of await agentCases()) {
       for (const screen of [screenWith(timeout), undefined]) {
-        expect(await release(c.id, c.inbox, { actor: c.actor, screen }), c.label).toEqual({
+        expect(await release(c.id, c.inbox, { actor: AGENT, screen }), c.reason).toEqual({
           ok: false,
           reason: "screening_unavailable",
           retryAfterSec: 60,
         });
       }
-      expect(await membership(c.id, c.inbox), c.label).toMatchObject({
+      expect(await membership(c.id, c.inbox), c.reason).toMatchObject({
         verdict: "quarantined",
         quarantineReason: c.reason,
         injectionScore: null,
@@ -633,7 +610,7 @@ describe("an agent's release", () => {
         releasedAt: null,
       });
     }
-    expect(timeout).toHaveBeenCalledTimes(AGENT_HOLDS.length * 2);
+    expect(timeout).toHaveBeenCalledTimes(AGENT_HOLDS.length);
   });
 
   it("refuses past the day's screening cap without asking the judge, until midnight UTC", async () => {
@@ -642,10 +619,10 @@ describe("an agent's release", () => {
     const unasked = vi.fn(async () => verdict());
     for (const c of cases) {
       expect(
-        await release(c.id, c.inbox, { actor: c.actor, screen: screenWith(unasked) }),
-        c.label,
+        await release(c.id, c.inbox, { actor: AGENT, screen: screenWith(unasked) }),
+        c.reason,
       ).toEqual({ ok: false, reason: "screening_unavailable", retryAfterSec: 12 * 3600 });
-      expect(await membership(c.id, c.inbox), c.label).toMatchObject({
+      expect(await membership(c.id, c.inbox), c.reason).toMatchObject({
         verdict: "quarantined",
         quarantineReason: c.reason,
       });
@@ -653,15 +630,17 @@ describe("an agent's release", () => {
     expect(unasked).not.toHaveBeenCalled();
   });
 
-  it("refuses another inbox's key, a content hold and trust, without asking the judge", async () => {
+  it("refuses an inbox key every release, and an agent a content hold or trust, without asking the judge", async () => {
     const screen = vi.fn(async () => verdict());
     const { id, inbox } = await heldFor("not_allowlisted");
-    const elsewhere = await addInbox(`elsewhere-${++n}`);
+    // Even a key scoped to the hold's own inbox releases nothing.
+    const ownKey: InboxActor = { kind: "api_key", apiKeyId: randomUUID(), inboxId: inbox };
+    expect(await release(id, inbox, { actor: ownKey, screen: screenWith(screen) })).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
     expect(
-      await release(id, inbox, { actor: keyFor(elsewhere), screen: screenWith(screen) }),
-    ).toEqual({ ok: false, reason: "forbidden" });
-    expect(
-      await release(id, inbox, { actor: keyFor(inbox), trust: true, screen: screenWith(screen) }),
+      await release(id, inbox, { actor: AGENT, trust: true, screen: screenWith(screen) }),
     ).toEqual({ ok: false, reason: "trust_not_allowed" });
 
     const local = `content-${++n}`;
@@ -677,12 +656,10 @@ describe("an agent's release", () => {
     );
     expect(await Promise.all(reasons)).toEqual(["failed_auth", "injection", "virus"]);
     for (const held of [forged, injected, infected]) {
-      for (const actor of [AGENT, keyFor(strict)]) {
-        expect(await release(held, strict, { actor, screen: screenWith(screen) })).toEqual({
-          ok: false,
-          reason: "forbidden",
-        });
-      }
+      expect(await release(held, strict, { actor: AGENT, screen: screenWith(screen) })).toEqual({
+        ok: false,
+        reason: "forbidden",
+      });
     }
     expect(screen).not.toHaveBeenCalled();
     expect(await membership(id, inbox)).toMatchObject({ verdict: "quarantined" });

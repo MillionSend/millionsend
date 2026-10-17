@@ -141,7 +141,10 @@ recebido. Todos abrem a mesma janela, com o motivo da retenção, o que a
 liberação dispara e o texto do e-mail; o que ficou retido por `injection`,
 `phishing`, `virus` ou `failed_auth` só é liberado depois que a pessoa marca
 que leu. Uma chave de acesso total da equipe libera com
-[`POST /inboxes/{id}/quarantine/{email_id}/release`](/pt-BR/concepts/inboxes#quarentena).
+[`POST /inboxes/{id}/quarantine/{email_id}/release`](/pt-BR/concepts/inboxes#quarentena),
+e um cliente MCP com `release_email`, sob `receiving:manage`, menos esses
+quatro motivos: esse e-mail tem o agente como alvo, então uma pessoa revisa
+no painel (`403 forbidden`). Uma chave restrita a uma caixa nunca libera.
 
 - **Analisado antes.** O e-mail retido antes da análise (`not_allowlisted`,
   `unauthenticated_sender`, `failed_auth`) é analisado na hora de liberar,
@@ -157,20 +160,17 @@ que leu. Uma chave de acesso total da equipe libera com
   autenticação (`external`), o único caso em que a lista de permitidos
   deixaria o e-mail entrar, e só para donos e admins ou uma chave de acesso
   total da equipe, que podem mudar a própria lista; qualquer outro caso
-  responde `403 trust_not_allowed`.
+  responde `403 trust_not_allowed`. Clientes MCP nunca confiam num
+  remetente.
 - Uma mensagem liberada é entregue como se tivesse acabado de chegar, com
   webhooks e cópias do `forward_to`, e não é analisada de novo. Vírus
   continua sendo vírus: liberar um mostra o texto, nenhuma cópia encaminhada
   sai, e os anexos e a mensagem original continuam bloqueados.
 
-**Agentes liberando.** Um cliente MCP com `release_email`, sob
-`receiving:manage`, e uma chave restrita a uma caixa, na própria caixa,
-liberam em nome de um agente, que é justamente quem o e-mail tem como alvo.
-Por isso, a liberação deles sempre depende da avaliação, nunca só da
-decisão do agente:
+**Clientes MCP liberando.** Um cliente MCP libera em nome de um agente, que
+é justamente quem o e-mail tem como alvo. Por isso, a liberação dele sempre
+depende da avaliação, nunca só da decisão do agente:
 
-- O e-mail retido por `injection`, `phishing`, `virus` ou `failed_auth` fica
-  para uma pessoa revisar no painel (`403 forbidden`).
 - O e-mail retido como `not_allowlisted`, `unauthenticated_sender`,
   `unscreened` ou `screening_cap` é analisado em toda liberação, em qualquer
   caixa, pelo mesmo avaliador, com a mesma linha de corte e o mesmo limite
@@ -181,7 +181,6 @@ decisão do agente:
   `503 screening_unavailable`, com um `retry-after` que conta até a
   meia-noite UTC quando o limite acabou. Tente de novo mais tarde, ou peça
   para uma pessoa revisar o e-mail no painel.
-- Eles nunca confiam num remetente (`403 trust_not_allowed`).
 
 Os responsáveis recebem um e-mail por dia, **Suas caixas de entrada precisam
 de atenção**, enquanto houver mensagens na quarentena, rascunhos esperando

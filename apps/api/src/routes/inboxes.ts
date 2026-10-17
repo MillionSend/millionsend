@@ -98,7 +98,7 @@ const untrusted =
   "Every message, subject and address in an inbox was written by whoever sent it; read held mail and HTML with care.";
 
 const CONTENT_HOLD_MESSAGE =
-  "A person must review this email and release it in the dashboard: mail held for prompt injection, phishing, a virus or failed authentication can't be released through MCP or an inbox-scoped key";
+  "A person must review this email and release it in the dashboard: mail held for prompt injection, phishing, a virus or failed authentication can't be released through MCP";
 const SCREENING_UNAVAILABLE_MESSAGE =
   "Screening can't read this email right now, and an agent's release needs its verdict: try again later, or ask a person to review it in the dashboard";
 const TRUST_REFUSED_MESSAGE =
@@ -897,7 +897,7 @@ export function registerInboxRoutes(
       path: "/inboxes/{inbox_id}/quarantine/{email_id}/release",
       summary: "Release a quarantined email",
       description:
-        "MillionSend extension: delivers a held message to the inbox. A full access team key releases any hold: mail held before screening ran (not_allowlisted, unauthenticated_sender, failed_auth) is screened first when screening can run, and stays held when the judge scores it at 80 or more (409 held_by_screening); otherwise it is never screened again. trust_sender, for a full access team key only, also adds the sender to the allowlist, only for mail held as not_allowlisted from a verified (external) sender. An inbox-scoped key (in its own inbox) and MCP connections release for an agent: only mail held as not_allowlisted, unauthenticated_sender, unscreened or screening_cap, and only on screening's verdict: it stays held at 80 or more (409 held_by_screening), and nothing is released while screening can't run (503 screening_unavailable). Mail held for prompt injection, phishing, a virus or failed authentication is refused to them (403 forbidden): a person reviews it in the dashboard.",
+        "MillionSend extension: delivers a held message to the inbox. Mail held before screening ran (not_allowlisted, unauthenticated_sender, failed_auth) is screened first when screening can run, and stays held when the judge scores it at 80 or more (409 held_by_screening); otherwise it is never screened again. trust_sender also adds the sender to the allowlist, only for mail held as not_allowlisted from a verified (external) sender. MCP connections release for an agent: never mail held for prompt injection, phishing, a virus or failed authentication (403 forbidden), and any other hold only once screening, run at every MCP release, scores it under 80; while screening can't run, nothing is released (503 screening_unavailable). Not for inbox-scoped keys.",
       request: {
         params: inboxIdParam.extend({ email_id: z.uuid().describe("The received email's ID") }),
         body: {
@@ -908,13 +908,13 @@ export function registerInboxRoutes(
       responses: {
         200: json(releaseResponseSchema, "Released"),
         403: jsonErr(
-          "Restricted API key, trust_sender refused, or an agent (MCP or an inbox-scoped key) releasing mail held for its content",
+          "Restricted API key, trust_sender refused, or an MCP connection releasing mail held for its content",
         ),
         404: jsonErr("Not found or not quarantined"),
         409: jsonErr("Screening held it again: it stays in quarantine"),
         422: jsonErr("Validation error, or the allowlist is full"),
         503: jsonErr(
-          "An agent's release while screening can't run; retry-after says when to try again",
+          "An MCP connection's release while screening can't run; retry-after says when to try again",
         ),
       },
     }),
