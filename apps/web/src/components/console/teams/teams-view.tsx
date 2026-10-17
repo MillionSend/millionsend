@@ -1,6 +1,7 @@
 "use client";
 
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
 import { DOMAIN_REGIONS, regionFlag } from "@/app/(dashboard)/domains/regions";
@@ -96,6 +97,7 @@ export function TeamsView() {
   const locale = useLocale();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const planName = usePlanName();
+  const router = useRouter();
   const trpc = useTRPC();
   const client = useTRPCClient();
 
@@ -335,6 +337,7 @@ export function TeamsView() {
                             supportView,
                             silentlySuspended: row.silentlySuspended,
                             copyId: copy,
+                            navigate: (href) => router.push(href),
                           })}
                         />
                       </td>

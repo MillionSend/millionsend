@@ -179,6 +179,42 @@ describe("the team's id on the console's team screens", () => {
   });
 });
 
+describe("the Teams list's row menu", () => {
+  it("opens the team's Trust & safety review page", () => {
+    const visited: string[] = [];
+    const noop = () => {};
+    const items = teamMenuItems(
+      {
+        id: teamId,
+        name: "acme",
+        plan: "free",
+        planQuota: null,
+        suspendedAt: null,
+        broadcastsPausedByOperatorAt: null,
+      },
+      {
+        openTeam: noop,
+        adjustLimits: noop,
+        changePlan: noop,
+        pauseBroadcasts: noop,
+        resumeBroadcasts: noop,
+        suspend: noop,
+        reinstate: noop,
+        viewAsOwner: noop,
+        dialogs: null,
+      },
+      (key) => consoleEn.teams.menu[key as keyof typeof consoleEn.teams.menu],
+      { supportView: true, silentlySuspended: false, navigate: (href) => visited.push(href) },
+    );
+    expect(items.slice(0, 2).map((item) => item?.label)).toEqual([
+      "Open team",
+      "Open in Trust & safety",
+    ]);
+    items[1]?.onSelect();
+    expect(visited).toEqual([`/console/safety/${teamId}`]);
+  });
+});
+
 describe("the View as owner dialog", () => {
   const render = (
     step: Parameters<typeof ViewDialog>[0]["step"],

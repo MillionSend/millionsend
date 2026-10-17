@@ -7,6 +7,7 @@ import type { PopoverMenuItem } from "@/components/popover-menu";
 import { toast } from "@/components/toast";
 import { planLabel } from "@/lib/console-format";
 import { formatMoneyTotals } from "@/lib/format";
+import { consoleReviewHref } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
 import { usePlanName } from "./teams/cells";
 import { PauseDialog, ReinstateDialog, SuspendDialog } from "./teams/hold-dialogs";
@@ -311,18 +312,25 @@ export function useTeamActions(onChanged: () => void): TeamActions {
 
 /**
  * The Teams list's "…" items for one team, from the shared actions: Open
- * team, Copy ID (when `copyId` is given), View as owner (when `options` are
- * given: disabled with the reason while the feature is off or the team is
- * silently suspended), Adjust limits, Change plan, separator, Pause/Resume
- * broadcasts, Suspend/Reinstate team. `labels` come from console.teams.menu.
+ * team, Open in Trust & safety (when `navigate` is given), Copy ID (when
+ * `copyId` is given), View as owner (when `options` are given: disabled with
+ * the reason while the feature is off or the team is silently suspended),
+ * Adjust limits, Change plan, separator, Pause/Resume broadcasts,
+ * Suspend/Reinstate team. `labels` come from console.teams.menu.
  */
 export function teamMenuItems(
   team: TeamActionTarget,
   actions: TeamActions,
   labels: (key: string) => string,
-  options?: { supportView: boolean; silentlySuspended: boolean; copyId?: (id: string) => void },
+  options?: {
+    supportView: boolean;
+    silentlySuspended: boolean;
+    copyId?: (id: string) => void;
+    navigate?: (href: string) => void;
+  },
 ): (PopoverMenuItem | null)[] {
   const copyId = options?.copyId;
+  const navigate = options?.navigate;
   const viewOff = !options?.supportView
     ? "viewOff"
     : options.silentlySuspended
@@ -330,6 +338,9 @@ export function teamMenuItems(
       : null;
   return [
     { label: labels("open"), onSelect: () => actions.openTeam(team) },
+    ...(navigate
+      ? [{ label: labels("review"), onSelect: () => navigate(consoleReviewHref(team.id)) }]
+      : []),
     ...(copyId ? [{ label: labels("copyId"), onSelect: () => copyId(team.id) }] : []),
     options
       ? {
