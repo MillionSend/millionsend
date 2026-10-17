@@ -27,6 +27,8 @@ import {
   actorNames,
   forwardQuietly,
   inboxSendDeps,
+  previewStub,
+  type ReleaseResult,
   releaseFailure,
   sendResult,
   userActor,
@@ -364,24 +366,28 @@ export const receivingRouter = router({
   }),
 
   /** Releases a virus-held catch-all row; quarantined inbox mail goes through inboxes.quarantine. */
-  release: receivingProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
-    const result = await releaseQuarantined(
-      ctx.db,
-      {
-        enqueueWebhookDeliveries: ctx.enqueueWebhookDeliveries,
-        enqueueInboxForward: forwardQuietly,
-      },
-      {
-        teamId: ctx.teamId,
-        receivedEmailId: input.id,
-        inboxId: null,
-        actor: userActor(ctx),
-        trustSender: false,
-      },
-    );
-    if (!result.ok) throw releaseFailure(result.reason);
-    return { releasedAt: result.releasedAt };
-  }),
+  preview: receivingProcedure.input(z.object({ id: z.uuid() })).query(() => previewStub()),
+
+  release: receivingProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }): Promise<ReleaseResult> => {
+      const result = await releaseQuarantined(
+        ctx.db,
+        {
+          enqueueWebhookDeliveries: ctx.enqueueWebhookDeliveries,
+          enqueueInboxForward: forwardQuietly,
+        },
+        {
+          teamId: ctx.teamId,
+          receivedEmailId: input.id,
+          inboxId: null,
+          actor: userActor(ctx),
+          trustSender: false,
+        },
+      );
+      if (!result.ok) throw releaseFailure(result.reason);
+      return { outcome: "released" };
+    }),
 
   delete: adminProcedure
     .use(receivingOnly)

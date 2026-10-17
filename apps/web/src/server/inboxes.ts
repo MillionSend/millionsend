@@ -16,6 +16,8 @@ import {
   liveInbox,
   PLAN_INBOX_LIMIT,
   parseInboxActor,
+  type QuarantineReason,
+  type SenderTrust,
   type SendOutcome,
   SHARED_SUBDOMAIN_FIRST_RETRY_MS,
   type SharedSending,
@@ -209,4 +211,39 @@ export async function planUsage(db: Db, teamId: string) {
     .where(and(eq(schema.inboxes.teamId, teamId), liveInbox(new Date())));
   const plan = isCloudDeployment() ? ((await fetchEffectivePlan(db, teamId)) ?? "free") : null;
   return { used: row?.n ?? 0, limit: plan ? PLAN_INBOX_LIMIT[plan] : null };
+}
+
+/**
+ * Stand-in for the server side of the quarantine release contract, so the
+ * dashboard typechecks on its own; the server implementation replaces it.
+ */
+export interface QuarantinePreview {
+  subject: string | null;
+  from: string;
+  fromName: string | null;
+  inboxAddress: string;
+  inboxKind: "agent" | "human";
+  reason: QuarantineReason;
+  injectionScore: number | null;
+  phishingScore: number | null;
+  reasons: string[];
+  hiddenTextRemoved: boolean;
+  senderTrust: SenderTrust;
+  virusSignature: string | null;
+  text: string | null;
+  trustOffered: boolean;
+  trustEffects: { sendWithoutApproval: boolean; codesExempt: boolean };
+  releaseEffects: { replyWithoutApproval: boolean; webhooks: boolean; forwards: boolean };
+  rescreenOnRelease: boolean;
+}
+
+export interface ReleaseResult {
+  outcome: "released" | "held_again";
+  reason?: QuarantineReason;
+  injectionScore?: number | null;
+  phishingScore?: number | null;
+}
+
+export function previewStub(): QuarantinePreview {
+  throw new TRPCError({ code: "NOT_IMPLEMENTED" });
 }

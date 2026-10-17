@@ -62,6 +62,8 @@ import {
   inboxFailure,
   inboxSendDeps,
   planUsage,
+  previewStub,
+  type ReleaseResult,
   releaseFailure,
   sendResult,
   sharedSending,
@@ -561,7 +563,21 @@ export const inboxesRouter = router({
         });
         if ("error" in result) throw inboxFailure(result.error);
         const page = idPage(result);
-        return envelopeOnly ? { ...page, items: page.items.map(withoutContent) } : page;
+        const listed = envelopeOnly ? { ...page, items: page.items.map(withoutContent) } : page;
+        return {
+          ...listed,
+          items: listed.items.map((item) =>
+            item.direction === "inbound"
+              ? {
+                  ...item,
+                  screening: item.screening as typeof item.screening & {
+                    released_by?: string | null;
+                    released_at?: string | null;
+                  },
+                }
+              : item,
+          ),
+        };
       }),
 
     update: receivingProcedure
@@ -833,9 +849,13 @@ export const inboxesRouter = router({
         return idPage(result);
       }),
 
+    preview: receivingProcedure
+      .input(z.object({ ...inboxRef, emailId: z.uuid() }))
+      .query(() => previewStub()),
+
     release: receivingProcedure
       .input(z.object({ ...inboxRef, emailId: z.uuid(), trustSender: z.boolean().default(false) }))
-      .mutation(async ({ ctx, input }) => {
+      .mutation(async ({ ctx, input }): Promise<ReleaseResult> => {
         const result = await releaseQuarantined(
           ctx.db,
           {
@@ -851,7 +871,7 @@ export const inboxesRouter = router({
           },
         );
         if (!result.ok) throw releaseFailure(result.reason);
-        return { releasedAt: result.releasedAt, trustedSender: result.trustedSender };
+        return { outcome: "released" };
       }),
   }),
 
