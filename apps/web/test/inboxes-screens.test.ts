@@ -967,6 +967,8 @@ describe("a message in the thread pane", () => {
     injection_score: null,
     phishing_score: null,
     hidden_text_removed: false,
+    released_by: null,
+    released_at: null,
   };
   const message = {
     id: "m1",

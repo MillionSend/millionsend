@@ -8,6 +8,7 @@ import { type AbuseJudge, type InboundJudgeVerdict, JudgeError } from "../src/ab
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import type { InboxActor } from "../src/inboxes/activity.js";
 import { deriveInboxKeys } from "../src/inboxes/keys.js";
+import { releasePreview } from "../src/inboxes/quarantine.js";
 import { CONTENT_HOLDS, releaseRights, screensOnRelease } from "../src/inboxes/release-rules.js";
 import { defaultSafety, type InboxSafety } from "../src/inboxes/safety.js";
 import { QUARANTINE_REASONS, SENDER_TRUSTS } from "../src/inboxes/types.js";
@@ -84,6 +85,7 @@ describe("screensOnRelease", () => {
 let db: Db;
 let close: () => Promise<void>;
 let team: string;
+let other: string;
 let domainId: string;
 let hook: string;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
@@ -267,6 +269,7 @@ const release = (
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
   team = await createTeam(db, "release-acme");
+  other = await createTeam(db, "release-other");
   await db.insert(schema.user).values({ id: "u-rel-owner", name: "Owner", email: "o@acme.test" });
   await db
     .insert(schema.teamMembers)
@@ -493,5 +496,122 @@ describe("who may release and trust", () => {
     expect(received?.payload).toMatchObject({
       data: { email: { attachments: [{ filename: "quote.pdf" }] } },
     });
+  });
+});
+
+describe("releasePreview", () => {
+  const preview = (
+    id: string,
+    inboxId: string | null,
+    o: { admin?: boolean; judgeConfigured?: boolean; withText?: boolean; teamId?: string } = {},
+  ) =>
+    releasePreview(db, keyring, {
+      teamId: o.teamId ?? team,
+      inboxId,
+      receivedEmailId: id,
+      actor: OWNER,
+      admin: o.admin ?? true,
+      judgeConfigured: o.judgeConfigured ?? true,
+      withText: o.withText ?? true,
+    });
+
+  it("says why it was held, what a release sets off and what this person may do", async () => {
+    const inbox = await addInbox("agent", {
+      accept_from: "allowlist",
+      send_policy: "allowlist",
+      private_codes: true,
+      require_approval: false,
+      forward_to: ["o@acme.test"],
+    });
+    const id = await receive(`agent@${DOMAIN}`);
+    expect(await preview(id, inbox)).toEqual({
+      subject: expect.stringMatching(/^Quote \d+$/),
+      from: "marta@fabrikam.example",
+      fromName: "Marta",
+      inboxAddress: `agent@${DOMAIN}`,
+      inboxKind: "agent",
+      reason: "not_allowlisted",
+      injectionScore: null,
+      phishingScore: null,
+      reasons: [],
+      hiddenTextRemoved: false,
+      senderTrust: "external",
+      virusSignature: null,
+      text: expect.stringContaining("Here is the updated quote."),
+      textTruncated: false,
+      trustOffered: true,
+      trustNeedsAdmin: false,
+      trustEffects: { sendWithoutApproval: true, codesExempt: true },
+      releaseEffects: { replyWithoutApproval: true, webhooks: true, forwards: true },
+      rescreenOnRelease: true,
+    });
+    expect(await preview(id, inbox, { admin: false })).toMatchObject({
+      trustOffered: false,
+      trustNeedsAdmin: true,
+    });
+    expect(await preview(id, inbox, { judgeConfigured: false, withText: false })).toMatchObject({
+      rescreenOnRelease: false,
+      text: null,
+    });
+    await judgedAs(id, inbox, "injection");
+    expect(await preview(id, inbox)).toMatchObject({
+      reason: "injection",
+      injectionScore: 91,
+      trustOffered: false,
+      trustNeedsAdmin: false,
+      rescreenOnRelease: false,
+    });
+    expect(await preview(id, inbox, { teamId: other })).toBe("not_found");
+    await release(id, inbox);
+    expect(await preview(id, inbox)).toBe("not_quarantined");
+  });
+
+  it("lists only what applies: no agent lines in a people inbox, no unattended reply under approval", async () => {
+    const people = await addInbox("people", { accept_from: "allowlist" }, "human");
+    const toPeople = await receive(`people@${DOMAIN}`);
+    expect(await preview(toPeople, people)).toMatchObject({
+      inboxKind: "human",
+      trustOffered: true,
+      trustEffects: { sendWithoutApproval: false, codesExempt: false },
+      releaseEffects: { replyWithoutApproval: false, forwards: false },
+      rescreenOnRelease: false,
+    });
+    const careful = await addInbox("careful", {
+      accept_from: "verified",
+      require_approval: true,
+      send_policy: "reply_only",
+      private_codes: false,
+    });
+    const unverified = await receive(`careful@${DOMAIN}`, { auth: NONE });
+    expect(await preview(unverified, careful)).toMatchObject({
+      reason: "unauthenticated_sender",
+      trustOffered: false,
+      trustNeedsAdmin: false,
+      trustEffects: { sendWithoutApproval: false, codesExempt: false },
+      releaseEffects: { replyWithoutApproval: false },
+    });
+  });
+
+  it("previews a catch-all copy held for a virus, which belongs to no inbox", async () => {
+    const id = await receive(`nobody@${DOMAIN}`, {
+      scanVirus: async () => ({ verdict: "fail", signature: "Eicar-Test-Signature" }),
+    });
+    expect(await preview(id, null)).toMatchObject({
+      inboxAddress: `nobody@${DOMAIN}`,
+      inboxKind: "human",
+      reason: "virus",
+      virusSignature: "Eicar-Test-Signature",
+      trustOffered: false,
+      trustNeedsAdmin: false,
+      // The endpoint takes inbox events only, never email.received.
+      releaseEffects: { replyWithoutApproval: false, webhooks: false, forwards: false },
+      rescreenOnRelease: false,
+    });
+    expect(await release(id, null, { trust: true })).toEqual({
+      ok: false,
+      reason: "trust_not_allowed",
+    });
+    expect(await release(id, null)).toMatchObject({ outcome: "released" });
+    expect(await preview(id, null)).toBe("not_quarantined");
   });
 });

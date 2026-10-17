@@ -231,6 +231,11 @@ export interface ReceivedRead {
   stripped: VisibleHtml | null;
 }
 
+/** The reply and its signature as a person reads them, the signature after "-- ". */
+export function replyWithSignature(x: Pick<ReceivedExtracted, "text" | "signature">): string {
+  return [x.text, x.signature].filter(Boolean).join("\n-- \n");
+}
+
 /** At most `max` UTF-16 units, never half a surrogate pair. */
 function cap(value: string, max: number, flags: Set<string>): string {
   if (value.length <= max) return value;
