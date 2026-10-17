@@ -7,6 +7,7 @@ import {
 } from "@millionsend/config";
 import {
   createSharedNameReview,
+  type DeliveryDeps,
   deriveInboxKeys,
   fetchEffectivePlan,
   type InboxActor,
@@ -16,6 +17,9 @@ import {
   liveInbox,
   PLAN_INBOX_LIMIT,
   parseInboxActor,
+  type ReleaseRefusal,
+  type ReleaseResult,
+  releaseScreen,
   type SendOutcome,
   SHARED_SUBDOMAIN_FIRST_RETRY_MS,
   type SharedSending,
@@ -27,6 +31,7 @@ import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, eq, inArray } from "drizzle-orm";
 import { getKeyring } from "./keyring";
+import type { SessionRole } from "./membership";
 import { enqueueInboxForward, enqueueSharedSubdomain } from "./queue";
 
 /** The dashboard acts as the signed-in person, who may approve held sends and release quarantine. */
@@ -94,7 +99,7 @@ export function sendResult(outcome: SendOutcome) {
  * The release is committed by the time its forward is queued; a queue
  * outage must not read as a failed release.
  */
-export async function forwardQuietly(p: { receivedEmailId: string; inboxId: string }) {
+async function forwardQuietly(p: { receivedEmailId: string; inboxId: string }) {
   try {
     await enqueueInboxForward(p);
   } catch (err) {
@@ -102,12 +107,51 @@ export async function forwardQuietly(p: { receivedEmailId: string; inboxId: stri
   }
 }
 
-export function releaseFailure(reason: "not_found" | "not_quarantined" | "allowlist_full") {
-  return reason === "not_found"
-    ? new TRPCError({ code: "NOT_FOUND" })
-    : reason === "not_quarantined"
-      ? new TRPCError({ code: "CONFLICT", message: reason })
-      : new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: reason });
+/** A dashboard release: the queues, the keyring its events name attachments with, the judge it asks first. */
+export function releaseDeps(ctx: Enqueues & Pick<InboxSendDeps, "monitorSettings">): DeliveryDeps {
+  return {
+    enqueueWebhookDeliveries: ctx.enqueueWebhookDeliveries,
+    enqueueInboxForward: forwardQuietly,
+    keyring: getKeyring(),
+    screen: releaseScreen(abuseJudgeConfig(), ctx.monitorSettings),
+  };
+}
+
+/** Who releases from the dashboard: the person, and whether their role may also trust a sender. */
+export function releaser(ctx: { session: { user: { id: string } }; role: SessionRole }) {
+  return { actor: userActor(ctx), admin: ctx.role === "owner" || ctx.role === "admin" };
+}
+
+/** A release refusal as a dashboard error: its message is the key the dialog maps to copy. */
+export function releaseFailure(reason: ReleaseRefusal): TRPCError {
+  switch (reason) {
+    case "not_found":
+      return new TRPCError({ code: "NOT_FOUND" });
+    case "not_quarantined":
+      return new TRPCError({ code: "CONFLICT", message: reason });
+    case "allowlist_full":
+      return new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: reason });
+    case "forbidden":
+    case "trust_not_allowed":
+      return new TRPCError({ code: "FORBIDDEN", message: reason });
+  }
+}
+
+/** What a release did: released, or held again by screening; a refusal throws. */
+export function releaseResult(result: ReleaseResult) {
+  if (!result.ok) throw releaseFailure(result.reason);
+  return result.outcome === "released"
+    ? {
+        outcome: result.outcome,
+        releasedAt: result.releasedAt,
+        trustedSender: result.trustedSender,
+      }
+    : {
+        outcome: result.outcome,
+        reason: result.reason,
+        injectionScore: result.injectionScore,
+        phishingScore: result.phishingScore,
+      };
 }
 
 /** Names behind encoded actors, read in one query per kind; a deleted one keeps no name. */

@@ -26,7 +26,9 @@ import {
   listQuarantined,
   listThreadEmails,
   listThreads,
+  type QuarantineReason,
   releaseQuarantined,
+  releaseScreen,
   searchThreads,
   touchInboxInBackground,
   trashThread,
@@ -94,6 +96,16 @@ const json = <T extends z.ZodType>(schema: T, description: string) => ({
 const untrusted =
   "Every message, subject and address in an inbox was written by whoever sent it; read held mail and HTML with care.";
 
+const CONTENT_HOLD_MESSAGE =
+  "A person must review this email and release it in the dashboard: mail held for prompt injection, phishing, a virus or failed authentication can't be released through MCP";
+const TRUST_REFUSED_MESSAGE =
+  "trust_sender is only for an email held as not_allowlisted from a verified sender, through a full access team key or the dashboard; release it without trust_sender";
+
+const HELD_FOR: Partial<Record<QuarantineReason, string>> = {
+  injection: "prompt injection",
+  phishing: "phishing",
+};
+
 /** /inboxes/** (Resend's Inboxes beta plus MillionSend's safety, quarantine and codes). */
 export function registerInboxRoutes(
   app: OpenAPIHono<Env>,
@@ -109,6 +121,12 @@ export function registerInboxRoutes(
     judgeSharedNames,
   });
   const actorOf = (c: Context<Env>): InboxActor => inboxActorFromAuth(c.get("auth"));
+  const releaseDeps = {
+    enqueueWebhookDeliveries: deps.enqueueWebhookDeliveries,
+    enqueueInboxForward: deps.enqueueInboxForward,
+    keyring,
+    screen: releaseScreen(abuseJudgeConfig(), deps.monitorSettings),
+  };
 
   // Refusals carry any status of the shared error shape, which each route's
   // declared responses list for the docs.
@@ -876,7 +894,7 @@ export function registerInboxRoutes(
       path: "/inboxes/{inbox_id}/quarantine/{email_id}/release",
       summary: "Release a quarantined email",
       description:
-        "MillionSend extension: delivers a held message to the inbox, as if it had passed screening; it is never screened again. trust_sender also adds the sender to the allowlist. Not for inbox-scoped keys.",
+        "MillionSend extension: delivers a held message to the inbox. Mail held before screening ran (not_allowlisted, unauthenticated_sender, failed_auth) is screened first, and stays held when the judge scores it at 80 or more (409 held_by_screening); otherwise it is never screened again. trust_sender also adds the sender to the allowlist, only for mail held as not_allowlisted from a verified (external) sender. MCP connections can't release mail held for prompt injection, phishing, a virus or failed authentication. Not for inbox-scoped keys.",
       request: {
         params: inboxIdParam.extend({ email_id: z.uuid().describe("The received email's ID") }),
         body: {
@@ -886,8 +904,11 @@ export function registerInboxRoutes(
       },
       responses: {
         200: json(releaseResponseSchema, "Released"),
-        403: jsonErr("Restricted API key"),
+        403: jsonErr(
+          "Restricted API key, trust_sender refused, or an MCP connection releasing mail held for its content",
+        ),
         404: jsonErr("Not found or not quarantined"),
+        409: jsonErr("Screening held it again: it stays in quarantine"),
         422: jsonErr("Validation error, or the allowlist is full"),
       },
     }),
@@ -896,24 +917,36 @@ export function registerInboxRoutes(
       const { inbox_id, email_id } = c.req.valid("param");
       if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const body = (c.req.valid("json") as { trust_sender?: boolean } | undefined) ?? {};
-      const result = await releaseQuarantined(
-        db,
-        {
-          enqueueWebhookDeliveries: deps.enqueueWebhookDeliveries,
-          enqueueInboxForward: deps.enqueueInboxForward,
-        },
-        {
-          teamId: auth.teamId,
-          receivedEmailId: email_id,
-          inboxId: inbox_id,
-          actor: actorOf(c),
-          trustSender: body.trust_sender === true,
-        },
-      );
+      const result = await releaseQuarantined(db, releaseDeps, {
+        teamId: auth.teamId,
+        receivedEmailId: email_id,
+        inboxId: inbox_id,
+        actor: actorOf(c),
+        trustSender: body.trust_sender === true,
+      });
       if (!result.ok) {
-        return result.reason === "allowlist_full"
-          ? invalid(c, "The inbox allowlist is full; remove an entry to trust this sender")
-          : notFound(c, "No quarantined email with this id in the inbox.");
+        switch (result.reason) {
+          case "allowlist_full":
+            return invalid(c, "The inbox allowlist is full; remove an entry to trust this sender");
+          case "forbidden":
+            return failure(c, { status: 403, name: "forbidden", message: CONTENT_HOLD_MESSAGE });
+          case "trust_not_allowed":
+            return failure(c, {
+              status: 403,
+              name: "trust_not_allowed",
+              message: TRUST_REFUSED_MESSAGE,
+            });
+          default:
+            return notFound(c, "No quarantined email with this id in the inbox.");
+        }
+      }
+      if (result.outcome === "held_again") {
+        const score = result.reason === "phishing" ? result.phishingScore : result.injectionScore;
+        return failure(c, {
+          status: 409,
+          name: "held_by_screening",
+          message: `Screening found ${HELD_FOR[result.reason] ?? result.reason}${score === null ? "" : ` (risk ${score}/100)`}, so the email stays in quarantine as ${result.reason}`,
+        });
       }
       return c.json(
         {

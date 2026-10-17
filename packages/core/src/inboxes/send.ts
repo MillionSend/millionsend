@@ -1,4 +1,4 @@
-import { abuseJudgeConfig, env } from "@millionsend/config";
+import { abuseJudgeConfig } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
@@ -21,11 +21,7 @@ import { decryptEmailBody, type EmailAttachment, openAttachments } from "../cryp
 import { firstRow } from "../driver-result.js";
 import { beginIdempotent, completeIdempotent, releaseIdempotent } from "../idempotency.js";
 import { imitatedBrandIn } from "../imitated-brands.js";
-import {
-  getMonitorSettingsRow,
-  type MonitorSettings,
-  resolveMonitorSettings,
-} from "../monitor-settings.js";
+import { instanceSettings, type MonitorSettings } from "../monitor-settings.js";
 import { registrableDomain } from "../org-domain.js";
 import { effectivePlan, monthlyQuotaMessage, type Plan, type QuotaTeamRow } from "../plans.js";
 import { outgoingSecretValues } from "../receiving/codes.js";
@@ -165,18 +161,6 @@ export const isOutcome = (v: unknown): v is SendOutcome =>
   typeof v === "object" && v !== null && "kind" in v;
 
 const MiB = 1024 * 1024;
-
-/** The instance's trust & safety settings: the process's reader when it has one, else a read. */
-async function instanceSettings(
-  db: Db,
-  deps: Pick<AcceptEmailDeps, "monitorSettings"> = {},
-): Promise<MonitorSettings> {
-  if (deps.monitorSettings) return deps.monitorSettings();
-  return resolveMonitorSettings(
-    await getMonitorSettingsRow(db),
-    env as unknown as Record<string, unknown>,
-  ).settings;
-}
 
 /**
  * Whether the team sits in the content monitor's new tier, where send_policy

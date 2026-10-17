@@ -126,15 +126,34 @@ mail when it asks (`include_quarantined=true`, `GET /inboxes/{id}/quarantine`).
 agent woken by a webhook never gets a held id; `inbox.email.quarantined`
 tells endpoints that subscribe to it.
 
-**Releasing.** A person releases from the inbox's **Needs review** tab, a
-full-access team key with
+**Releasing.** Any team member releases from the dashboard: the inbox's
+**Needs review** tab, the message in its thread, or the received email's
+page. Each opens the same dialog, with why the message was held, what
+releasing it sets off and its text; mail held for `injection`, `phishing`,
+`virus` or `failed_auth` is released only once the person ticks that they
+read it. A full-access team key releases with
 [`POST /inboxes/{id}/quarantine/{email_id}/release`](/concepts/inboxes#quarantine),
-and an MCP client with `release_email` under `receiving:manage`; an
-inbox-scoped key never can. **Release and trust sender** (`trust_sender`)
-also adds the sender to the allowlist. A released message is delivered as
-if it had just arrived, webhooks included, and isn't screened again. A virus
-stays a virus: releasing one shows its text, and its attachments and raw
-message stay blocked.
+and an MCP client with `release_email` under `receiving:manage`, except
+those four reasons: that mail is aimed at the agent, so a person reviews it
+in the dashboard (`403 forbidden`). An inbox-scoped key never releases.
+
+- **Screened first.** Mail held before screening ran (`not_allowlisted`,
+  `unauthenticated_sender`, `failed_auth`) is screened when it is released,
+  in an agent inbox with `screening` on, by the same judge and against the
+  same line as incoming mail. At 80 or more it stays in quarantine, now as
+  `injection` or `phishing` with its scores (`409 held_by_screening` on the
+  API). When the judge can't answer, or the instance runs none, the release
+  goes through: a person decided.
+- **Trusting the sender.** `trust_sender` (**Also trust** in the dialog)
+  adds the From address to the inbox's allowlist. It is only for mail held
+  as `not_allowlisted` from a sender that authenticated (`external`), the
+  one case the allowlist would let in, and only for owners and admins or a
+  full-access team key, who may edit the allowlist itself; anything else
+  answers `403 trust_not_allowed`. MCP clients never trust a sender.
+- A released message is delivered as if it had just arrived, webhooks and
+  `forward_to` copies included, and isn't screened again. A virus stays a
+  virus: releasing one shows its text, and its attachments and raw message
+  stay blocked.
 
 Owners get one email a day, **Your inboxes need a look**, while messages wait
 in quarantine, drafts wait for approval or sends were refused, with the counts
@@ -365,8 +384,8 @@ through the same abuse review as any send from your team.
 ## What these protections don't do
 
 - The screening and spam thresholds are starting values. Mail can slip past
-  them, and legitimate mail can be held; held mail is one click from
-  release.
+  them, and legitimate mail can be held until a person reads it and
+  releases it.
 - A domain that publishes no DMARC policy, or `p=none`, can't prove much:
   its genuine mail and a forgery can read the same.
 - Hidden-text detection follows the HTML the way mail clients render it,

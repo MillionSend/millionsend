@@ -11,9 +11,11 @@ import {
 } from "../inboxes/activity.js";
 import { emailQuarantinedEvent, threadEmailEvent, threadFolderEvent } from "../inboxes/events.js";
 import { INBOX_ALLOWLIST_MAX } from "../inboxes/limits.js";
+import { releaseRights, screensOnRelease } from "../inboxes/release-rules.js";
 import { threadSummaryOf } from "../inboxes/threads.js";
-import type { QuarantineReason } from "../inboxes/types.js";
+import type { QuarantineReason, SenderTrust } from "../inboxes/types.js";
 import { inboundThreadEmailWire } from "../inboxes/wire.js";
+import { instanceSettings } from "../monitor-settings.js";
 import { utcDay } from "../utc-day.js";
 import {
   enqueueTeamWebhookEvents,
@@ -29,6 +31,7 @@ import {
   receivedEmailEventData,
 } from "./message.js";
 import { receivedEmailVisible } from "./rcpt.js";
+import { heldReason, type InboundJudgeRun, judgeReceived, type ReleaseScreen } from "./screen.js";
 
 export interface DeliveryDeps {
   enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
@@ -37,6 +40,8 @@ export interface DeliveryDeps {
     | undefined;
   /** Opens the sealed attachment list the event emails name; without it they list none. */
   keyring?: Keyring | undefined;
+  /** The judge a release asks first, with the keyring; without it a release goes unscreened. */
+  screen?: ReleaseScreen | undefined;
 }
 
 type Membership = typeof schema.receivedEmailInboxes.$inferSelect;
@@ -361,14 +366,106 @@ export async function bumpInboxReceived(tx: Db, inboxId: string, now: Date): Pro
     .onConflictDoUpdate({ target: [u.inboxId, u.day], set: { received: sql`${u.received} + 1` } });
 }
 
+export type ReleaseRefusal =
+  | "not_found"
+  | "not_quarantined"
+  | "allowlist_full"
+  | "forbidden"
+  | "trust_not_allowed";
+
+export type ReleaseResult =
+  | { ok: true; outcome: "released"; releasedAt: Date; trustedSender: string | null }
+  | {
+      ok: true;
+      outcome: "held_again";
+      reason: QuarantineReason;
+      injectionScore: number | null;
+      phishingScore: number | null;
+    }
+  | { ok: false; reason: ReleaseRefusal };
+
 /**
- * Releases held mail. With an inbox: a quarantined membership is delivered
- * with verdict released (its events and the row's announcement as a
- * delivery would bring), never judged again; trustSender also allowlists
- * the From address. Without one: a catch-all row held for a virus becomes
- * visible. A virus release still never serves the files or the raw message.
- * Callers check who may release (canApprove, or an MCP token with
- * receiving:manage).
+ * The judge's run on a hold that a release would deliver unscreened, or
+ * null when none is due: no judge, a hold the judge already read, or an
+ * actor the release refuses. It runs ahead of the release's transaction, so
+ * no lock waits on the judge; the transaction checks the hold is still the
+ * one judged.
+ */
+async function judgeBeforeRelease(
+  db: Db,
+  deps: DeliveryDeps,
+  p: {
+    teamId: string;
+    receivedEmailId: string;
+    inboxId: string;
+    now: Date;
+    refused: (reason: QuarantineReason, senderTrust: SenderTrust) => boolean;
+  },
+): Promise<{ reason: QuarantineReason; run: InboundJudgeRun } | null> {
+  const { screen, keyring } = deps;
+  if (!screen || !keyring) return null;
+  const m = schema.receivedEmailInboxes;
+  const i = schema.inboxes;
+  const [held] = await db
+    .select({
+      verdict: m.verdict,
+      reason: m.quarantineReason,
+      senderTrust: m.senderTrust,
+      kind: i.kind,
+      safety: i.safety,
+    })
+    .from(m)
+    .innerJoin(i, eq(i.id, m.inboxId))
+    .where(
+      and(
+        eq(m.receivedEmailId, p.receivedEmailId),
+        eq(m.inboxId, p.inboxId),
+        eq(m.teamId, p.teamId),
+      ),
+    );
+  if (held?.verdict !== "quarantined") return null;
+  const reason = held.reason ?? "unscreened";
+  if (
+    p.refused(reason, held.senderTrust) ||
+    !screensOnRelease({ reason, kind: held.kind, screening: held.safety.screening })
+  ) {
+    return null;
+  }
+  const r = schema.receivedEmails;
+  const [row] = await db.select().from(r).where(eq(r.id, p.receivedEmailId));
+  if (!row) return null;
+  try {
+    const run = await judgeReceived(
+      db,
+      {
+        judge: screen.judge,
+        keyring,
+        settings: await instanceSettings(db, { monitorSettings: screen.settings }),
+        timeoutMs: screen.timeoutMs,
+        retries: 0,
+      },
+      { row, tier: held.senderTrust, inboxId: p.inboxId, now: p.now },
+    );
+    return { reason, run };
+  } catch (err) {
+    // A judge that can't run leaves the person's decision standing.
+    console.warn(
+      `release: screening of ${p.receivedEmailId} failed (${err instanceof Error ? err.name : "error"})`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Releases held mail, where releaseRights lets the actor. With an inbox: a
+ * quarantined membership is delivered with verdict released (its events
+ * and the row's announcement as a delivery would bring), never judged
+ * again; trustSender also allowlists the From address. A hold made before
+ * screening is judged first, against the line inbound mail meets: at it,
+ * the message stays held for what the judge found (held_again), and a judge
+ * that can't answer leaves the person's decision standing. Without an
+ * inbox: a catch-all row held for a virus becomes visible. A virus release
+ * still never serves the files or the raw message.
  */
 export async function releaseQuarantined(
   db: Db,
@@ -378,31 +475,45 @@ export async function releaseQuarantined(
     receivedEmailId: string;
     inboxId: string | null;
     actor: InboxActor;
+    /** The person releasing is an owner or admin. */
+    admin?: boolean | undefined;
     trustSender: boolean;
     now?: Date | undefined;
   },
-): Promise<
-  | { ok: true; releasedAt: Date; trustedSender: string | null }
-  | { ok: false; reason: "not_found" | "not_quarantined" | "allowlist_full" }
-> {
+): Promise<ReleaseResult> {
   const now = p.now ?? new Date();
   const after = afterCommit();
   const r = schema.receivedEmails;
   const releasedBy = encodeInboxActor(p.actor);
-  const outcome = await db.transaction(async (raw) => {
+  const refusal = (reason: QuarantineReason, senderTrust: SenderTrust): ReleaseRefusal | null => {
+    const may = releaseRights({ reason, senderTrust, actor: p.actor, admin: p.admin });
+    if (!may.release) return "forbidden";
+    return p.trustSender && !may.trust ? "trust_not_allowed" : null;
+  };
+  const judged =
+    p.inboxId === null
+      ? null
+      : await judgeBeforeRelease(db, deps, {
+          teamId: p.teamId,
+          receivedEmailId: p.receivedEmailId,
+          inboxId: p.inboxId,
+          now,
+          refused: (reason, senderTrust) => refusal(reason, senderTrust) !== null,
+        });
+  const outcome = await db.transaction(async (raw): Promise<ReleaseResult> => {
     const tx = raw as unknown as Db;
     const [row] = await tx
       .select(RECEIVED_EMAIL_META_COLUMNS)
       .from(r)
       .where(and(eq(r.id, p.receivedEmailId), eq(r.teamId, p.teamId)))
       .for("update");
-    if (!row) return { ok: false as const, reason: "not_found" as const };
+    if (!row) return { ok: false, reason: "not_found" };
     const attachments = deps.keyring ? await openReceivedAttachments(row, deps.keyring) : [];
     if (p.inboxId === null) {
-      if (!row.catchAll || row.virusVerdict !== "fail") {
-        return { ok: false as const, reason: "not_found" as const };
-      }
-      if (row.releasedAt) return { ok: false as const, reason: "not_quarantined" as const };
+      if (!row.catchAll || row.virusVerdict !== "fail") return { ok: false, reason: "not_found" };
+      if (row.releasedAt) return { ok: false, reason: "not_quarantined" };
+      const refused = refusal("virus", row.senderTrust);
+      if (refused) return { ok: false, reason: refused };
       const [released] = await tx
         .update(r)
         .set({ releasedAt: now, releasedBy })
@@ -410,17 +521,67 @@ export async function releaseQuarantined(
         .returning(RECEIVED_EMAIL_META_COLUMNS);
       if (!released) throw new Error("received_emails update returned no row");
       await announceIfVisible(tx, { row: released, attachments, now, after });
-      return { ok: true as const, releasedAt: now, trustedSender: null };
+      return { ok: true, outcome: "released", releasedAt: now, trustedSender: null };
     }
     const m = schema.receivedEmailInboxes;
     const [membership] = await tx
-      .select({ verdict: m.verdict, threadId: m.threadId })
+      .select({
+        verdict: m.verdict,
+        threadId: m.threadId,
+        reason: m.quarantineReason,
+        senderTrust: m.senderTrust,
+        injectionScore: m.injectionScore,
+        phishingScore: m.phishingScore,
+      })
       .from(m)
       .where(and(eq(m.receivedEmailId, row.id), eq(m.inboxId, p.inboxId), eq(m.teamId, p.teamId)))
       .for("update");
-    if (!membership) return { ok: false as const, reason: "not_found" as const };
-    if (membership.verdict !== "quarantined") {
-      return { ok: false as const, reason: "not_quarantined" as const };
+    if (!membership) return { ok: false, reason: "not_found" };
+    if (membership.verdict !== "quarantined") return { ok: false, reason: "not_quarantined" };
+    const reason = membership.reason ?? "unscreened";
+    const refused = refusal(reason, membership.senderTrust);
+    if (refused) return { ok: false, reason: refused };
+    // Another release judged it meanwhile and held it again: that verdict stands.
+    if (judged && judged.reason !== reason) {
+      return {
+        ok: true,
+        outcome: "held_again",
+        reason,
+        injectionScore: membership.injectionScore,
+        phishingScore: membership.phishingScore,
+      };
+    }
+    const verdict = judged?.run.verdict ?? null;
+    const scores = verdict
+      ? {
+          reasons: verdict.reasons,
+          injectionScore: verdict.injectionScore,
+          phishingScore: verdict.phishingScore,
+        }
+      : {};
+    const screened = judged ? { ...scores, judge: judged.run.record } : {};
+    const heldFor = verdict ? heldReason(verdict) : null;
+    if (verdict && heldFor) {
+      await tx
+        .update(m)
+        .set({ ...screened, quarantineReason: heldFor })
+        .where(and(eq(m.receivedEmailId, row.id), eq(m.inboxId, p.inboxId)));
+      await recordInboxActivity(tx, {
+        teamId: p.teamId,
+        inboxId: p.inboxId,
+        actor: { kind: "system" },
+        action: "email.quarantined",
+        threadId: membership.threadId,
+        emailId: row.id,
+        decision: { result: "quarantined", reasons: [heldFor] },
+      });
+      return {
+        ok: true,
+        outcome: "held_again",
+        reason: heldFor,
+        injectionScore: verdict.injectionScore,
+        phishingScore: verdict.phishingScore,
+      };
     }
     const i = schema.inboxes;
     const [inbox] = await tx
@@ -428,13 +589,13 @@ export async function releaseQuarantined(
       .from(i)
       .where(eq(i.id, p.inboxId))
       .for("update");
-    if (!inbox) return { ok: false as const, reason: "not_found" as const };
+    if (!inbox) return { ok: false, reason: "not_found" };
     let trustedSender: string | null = null;
     const sender = row.from.toLowerCase();
     if (p.trustSender && sender) {
       if (!inbox.safety.allowlist.includes(sender)) {
         if (inbox.safety.allowlist.length >= INBOX_ALLOWLIST_MAX) {
-          return { ok: false as const, reason: "allowlist_full" as const };
+          return { ok: false, reason: "allowlist_full" };
         }
         await tx
           .update(i)
@@ -450,7 +611,7 @@ export async function releaseQuarantined(
       row,
       key: { receivedEmailId: row.id, inboxId: p.inboxId },
       from: "quarantined",
-      set: { verdict: "released", releasedAt: now, releasedBy },
+      set: { ...screened, verdict: "released", releasedAt: now, releasedBy },
       spam: false,
       forwardTo: inbox.safety.forward_to,
       attachments,
@@ -467,9 +628,9 @@ export async function releaseQuarantined(
       decision: { result: "released", reasons: trustedSender ? ["trust_sender"] : [] },
     });
     await announceIfVisible(tx, { row, attachments, now, after });
-    return { ok: true as const, releasedAt: now, trustedSender };
+    return { ok: true, outcome: "released", releasedAt: now, trustedSender };
   });
-  if (!outcome.ok) return outcome;
+  if (!outcome.ok || outcome.outcome === "held_again") return outcome;
   await runAfterCommit(deps, after);
   // A person's release reaches the team's audit trail; a key's stays in the inbox activity.
   if (p.actor.kind === "user") {

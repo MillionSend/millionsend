@@ -335,11 +335,13 @@ Besides Resend's names, [received mail](/concepts/receiving),
 | `503 name_review_unavailable` | A chosen `username` or a `from_name` on the shared domain couldn't be reviewed right now (`retry-after: 60`), or your team's subdomain of the shared domain still waits for its name review, and until then no address can be created on it (`retry-after: 300`). |
 | `403 approval_required` | An agent sending a draft that waits for approval. |
 | `403 email_quarantined` | An agent reading, replying to or forwarding held mail, or any forward of infected mail. |
+| `409 held_by_screening` | A release of mail held before screening ran, which screening found to be prompt injection or phishing: it stays in quarantine. |
+| `403 trust_not_allowed` | `trust_sender` on a release of anything but mail held as `not_allowlisted` from a verified sender. |
 | `410 email_blocked` | A download of infected mail. |
 | `429 too_many_waits` | Too many long-polls at once from one team; `retry-after: 1`. |
 | `403 validation_error` | The plan's inbox limit, with Resend's message. |
 | `403 plan_limit_reached` | Catch-all on the Free plan. |
-| `403 forbidden` | A change, verification or deletion of your team's shared subdomain, which is read-only. |
+| `403 forbidden` | A change, verification or deletion of your team's shared subdomain, which is read-only; an MCP client releasing mail held for prompt injection, phishing, a virus or failed authentication. |
 | `404 not_found` | An unknown inbox, thread, label, draft or pagination cursor, with Resend's messages (`Inbox not found.`). |
 
 ## Idempotency

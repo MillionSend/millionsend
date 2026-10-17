@@ -568,9 +568,20 @@ para as mais antigas, com `id`, `thread_id`, `from`, `subject`,
 ```
 
 As duas pedem uma chave de acesso total que não esteja restrita a uma caixa
-(chaves restritas recebem `403`). Uma mensagem que não está na quarentena
-responde `404`. Pessoas liberam pela aba **Precisa de revisão** da caixa, e
-clientes MCP com `receiving:manage` pela ferramenta `release_email`.
+(chaves restritas recebem `403`). Uma liberação também pode responder:
+
+| Status, nome | Quando |
+| --- | --- |
+| `404 not_found` | A mensagem não está na quarentena da caixa. |
+| `409 held_by_screening` | A mensagem ficou retida antes da análise, e a análise achou injeção de prompt ou phishing com 80 ou mais: ela continua na quarentena por esse motivo, com as notas. |
+| `403 trust_not_allowed` | `trust_sender` em qualquer coisa que não seja uma mensagem retida como `not_allowlisted` de um remetente verificado (`external`). |
+| `403 forbidden` | Um cliente MCP liberando e-mail retido por `injection`, `phishing`, `virus` ou `failed_auth`. |
+| `422 validation_error` | `trust_sender` com a lista de permitidos cheia. |
+
+Pessoas liberam pelo painel, e clientes MCP com `receiving:manage` pela
+ferramenta `release_email`.
+[Segurança de agentes](/pt-BR/concepts/agent-safety#quarentena) explica quem
+pode liberar o quê, e a análise que a liberação faz antes.
 
 ## Códigos de verificação
 
@@ -713,8 +724,9 @@ quarentena), **Segurança e regras** e **Atividade**.
 
 Qualquer pessoa da equipe cria caixas, trabalha nas conversas, aprova
 rascunhos e libera a quarentena. Donos e admins também excluem caixas, mudam
-as regras de segurança, criam chaves restritas a uma caixa, excluem e-mails
-recebidos e ligam ou desligam o pega-tudo.
+as regras de segurança, confiam no remetente de uma mensagem que liberam,
+criam chaves restritas a uma caixa, excluem e-mails recebidos e ligam ou
+desligam o pega-tudo.
 
 ## MCP
 
@@ -725,7 +737,9 @@ listar caixas, conversas, etiquetas e rascunhos), `receiving:reply`
 mudar e excluir caixas, listar e liberar a quarentena). Um cliente MCP sempre
 vê os e-mails como um agente vê: sem os retidos e com o texto das mensagens
 marcado como não confiável. Ele não muda configurações de segurança, a não
-ser escolher o `accept_from` ao criar uma caixa, e nunca aprova rascunhos.
+ser escolher o `accept_from` ao criar uma caixa; nunca aprova rascunhos,
+nunca confia num remetente e nunca libera e-mail retido pelo conteúdo ou por
+falha na autenticação.
 
 ## Compatibilidade com o Resend
 

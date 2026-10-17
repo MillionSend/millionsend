@@ -2,7 +2,7 @@ import { countInvisible, dropInvisible } from "../customer-text.js";
 import type { SenderTrust } from "../inboxes/types.js";
 import { extractLinks } from "../links.js";
 import { registrableDomain } from "../org-domain.js";
-import { readReceived } from "../receiving/read.js";
+import { readReceived, replyWithSignature } from "../receiving/read.js";
 import {
   clip,
   JUDGE_HIDDEN_TEXT_MAX_CHARS,
@@ -212,7 +212,7 @@ export function buildInboundJudgeBlock(input: InboundJudgeBlockInput): string {
     fromDomain: null,
   });
   const stripped = read.stripped;
-  const reply = [read.extracted.text, read.extracted.signature].filter(Boolean).join("\n-- \n");
+  const reply = replyWithSignature(read.extracted);
   const visible = read.extracted.quoted ? `${reply}\nQuoted:\n${read.extracted.quoted}` : reply;
   const preview = redacted(dropInvisible(stripped?.preview ?? ""));
   const hidden = [
