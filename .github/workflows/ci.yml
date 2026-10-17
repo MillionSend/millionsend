@@ -40,24 +40,54 @@ jobs:
 
   # `next build` (web, and docs, whose MDX compiles nowhere else) and the
   # Dockerfiles would otherwise first run after merge, in `build`. amd64 only,
-  # nothing pushed. Reads main's layer cache but never writes one: PR-scoped
-  # entries would crowd main's out of the repository's cache quota.
+  # nothing pushed; the app image is loaded locally to boot it. Reads main's
+  # layer cache but never writes one: PR-scoped entries would crowd main's out
+  # of the repository's cache quota.
   image:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env:
+          POSTGRES_USER: millionsend
+          POSTGRES_PASSWORD: millionsend
+        ports: ["5432:5432"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          outputs: type=cacheonly
+          load: true
+          tags: millionsend:ci
           cache-from: type=gha,scope=app-amd64
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: scripts/backup
           outputs: type=cacheonly
           cache-from: type=gha,scope=backup-amd64
+      # Runs the image as the compose files do: read-only rootfs, non-root,
+      # and Docker's default tmpfs (noexec) at the same paths. A dependency
+      # that writes or executes anywhere else fails here instead of on deploy.
+      - name: Image boots read-only
+        run: |
+          docker run -d --name app --network host --init --read-only --user millionsend \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp --tmpfs /app/apps/web/.next/cache \
+            --tmpfs /app/apps/docs/.next/cache --tmpfs /app/apps/docs/.source \
+            -e DATABASE_URL=postgres://millionsend:millionsend@localhost:5432/millionsend \
+            -e MASTER_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+            -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+            -e APP_BASE_URL=http://localhost:3000 \
+            millionsend:ci
+          for _ in $(seq 60); do
+            curl -fs -o /dev/null localhost:3000/login && curl -fs -o /dev/null localhost:3001/health && exit 0
+            [ "$(docker inspect -f '{{.State.Running}}' app)" = true ] || break
+            sleep 2
+          done
+          docker logs app
+          exit 1
 
   # Whole-history secret scan with the pinned gitleaks image (the GitHub
   # action needs a license key for organization repos; the CLI does not).
