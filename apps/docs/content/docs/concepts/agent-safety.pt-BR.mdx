@@ -152,7 +152,7 @@ no painel (`403 forbidden`). Uma chave restrita a uma caixa nunca libera.
   mesma linha de corte do e-mail que chega. Com 80 ou mais, ele continua na
   quarentena, agora como `injection` ou `phishing`, com as notas
   (`409 held_by_screening` na API). Quando o avaliador não responde, ou a
-  instância não tem um, a liberação segue: foi decisão de uma pessoa.
+  instância não tem um, a liberação segue sem análise.
 - **Confiar no remetente.** O `trust_sender` (**Confiar também** na janela)
   coloca o endereço do remetente na lista de permitidos da caixa. Ele só vale
   para e-mail retido como `not_allowlisted` de um remetente que passou na
@@ -163,8 +163,8 @@ no painel (`403 forbidden`). Uma chave restrita a uma caixa nunca libera.
   remetente.
 - Uma mensagem liberada é entregue como se tivesse acabado de chegar, com
   webhooks e cópias do `forward_to`, e não é analisada de novo. Vírus
-  continua sendo vírus: liberar um mostra o texto, e os anexos e a mensagem
-  original continuam bloqueados.
+  continua sendo vírus: liberar um mostra o texto, nenhuma cópia encaminhada
+  sai, e os anexos e a mensagem original continuam bloqueados.
 
 Os responsáveis recebem um e-mail por dia, **Suas caixas de entrada precisam
 de atenção**, enquanto houver mensagens na quarentena, rascunhos esperando

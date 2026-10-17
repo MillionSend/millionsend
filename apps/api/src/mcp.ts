@@ -2053,11 +2053,16 @@ function buildServer(
       {
         title: "Release quarantined email",
         description:
-          "Deliver an email held as not_allowlisted, unauthenticated_sender, unscreened or screening_cap to its inbox. Mail held before screening ran is screened first and stays in quarantine when screening finds prompt injection or phishing (held_by_screening). Mail held for prompt injection, phishing, a virus or failed authentication is released only by a person, in the dashboard (forbidden), and only a person can put a sender on the allowlist.",
-        inputSchema: z.object({
-          inbox_id: inboxId,
-          email_id: z.uuid().describe("Quarantined email id from list_quarantined_emails"),
-        }),
+          "Deliver an email held as not_allowlisted, unauthenticated_sender, unscreened or screening_cap to its inbox; a release can't be undone. Mail held before screening ran is screened first when screening can run, and stays in quarantine when it finds prompt injection or phishing (held_by_screening); when screening can't run it is released unscreened. Mail held for prompt injection, phishing, a virus or failed authentication is released only by a person, in the dashboard (forbidden), and only a person can put a sender on the allowlist.",
+        // Strict: an argument it doesn't take, like a trust_sender only a person may set, fails the call
+        // instead of being dropped from a release that can't be undone.
+        inputSchema: z
+          .object({
+            inbox_id: inboxId,
+            email_id: z.uuid().describe("Quarantined email id from list_quarantined_emails"),
+          })
+          .strict(),
+        destructive: true,
       },
       ({ inbox_id, email_id }) =>
         api("POST", `/inboxes/${enc(inbox_id)}/quarantine/${enc(email_id)}/release`, {}),

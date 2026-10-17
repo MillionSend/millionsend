@@ -319,7 +319,13 @@ describe("tool listing", () => {
     }
     expect(client.getInstructions()).toContain("purchased, rented and scraped lists");
     const hint = (name: string) => tools.find((t) => t.name === name)?.annotations;
-    for (const name of ["send_email", "create_broadcast", "update_contact", "cancel_email"]) {
+    for (const name of [
+      "send_email",
+      "create_broadcast",
+      "update_contact",
+      "cancel_email",
+      "release_email",
+    ]) {
       expect(hint(name)?.destructiveHint, name).toBe(true);
     }
     expect(hint("create_contact")?.destructiveHint).toBe(false);
@@ -2289,7 +2295,22 @@ describe("receiving tools", () => {
         data: [{ id: heldId, quarantine_reason: "not_allowlisted", sender_trust: "external" }],
       });
 
-      // Only a person trusts a sender: the agent's release leaves the allowlist alone.
+      // Only a person trusts a sender: asked to, the tool refuses and releases nothing.
+      const trusting = await client.callTool({
+        name: "release_email",
+        arguments: { inbox_id: guardedId, email_id: heldId, trust_sender: true },
+      });
+      expect(trusting.isError).toBe(true);
+      expect((trusting.content as Array<{ text: string }>)[0]?.text).toContain("trust_sender");
+      expect(
+        resultJson(
+          await client.callTool({
+            name: "list_quarantined_emails",
+            arguments: { inbox_id: guardedId },
+          }),
+        ),
+      ).toMatchObject({ data: [{ id: heldId }] });
+      // The agent's release leaves the allowlist alone.
       expect(
         resultJson(
           await client.callTool({

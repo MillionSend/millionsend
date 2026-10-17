@@ -12,6 +12,7 @@ import {
   getInbox,
   getThread,
   getThreadEmail,
+  holdRisk,
   INBOX_NOT_FOUND_MESSAGE,
   type InboxActor,
   type InboxDeps,
@@ -894,7 +895,7 @@ export function registerInboxRoutes(
       path: "/inboxes/{inbox_id}/quarantine/{email_id}/release",
       summary: "Release a quarantined email",
       description:
-        "MillionSend extension: delivers a held message to the inbox. Mail held before screening ran (not_allowlisted, unauthenticated_sender, failed_auth) is screened first, and stays held when the judge scores it at 80 or more (409 held_by_screening); otherwise it is never screened again. trust_sender also adds the sender to the allowlist, only for mail held as not_allowlisted from a verified (external) sender. MCP connections can't release mail held for prompt injection, phishing, a virus or failed authentication. Not for inbox-scoped keys.",
+        "MillionSend extension: delivers a held message to the inbox. Mail held before screening ran (not_allowlisted, unauthenticated_sender, failed_auth) is screened first when screening can run, and stays held when the judge scores it at 80 or more (409 held_by_screening); otherwise it is never screened again. trust_sender also adds the sender to the allowlist, only for mail held as not_allowlisted from a verified (external) sender. MCP connections can't release mail held for prompt injection, phishing, a virus or failed authentication. Not for inbox-scoped keys.",
       request: {
         params: inboxIdParam.extend({ email_id: z.uuid().describe("The received email's ID") }),
         body: {
@@ -941,7 +942,7 @@ export function registerInboxRoutes(
         }
       }
       if (result.outcome === "held_again") {
-        const score = result.reason === "phishing" ? result.phishingScore : result.injectionScore;
+        const score = holdRisk(result);
         return failure(c, {
           status: 409,
           name: "held_by_screening",
