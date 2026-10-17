@@ -27,6 +27,7 @@ services:
       POSTGRES_DB: millionsend
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U millionsend -d millionsend"]
       interval: 5s
@@ -161,10 +162,10 @@ services:
     # Published from scripts/backup on the same tags as the app.
     image: "${MILLIONSEND_BACKUP_IMAGE:-ghcr.io/millionsend/backup:latest}"
     env_file: .env
-    # Stays a no-op (prints a hint, exits 0, restart "no") until
-    # S3_BACKUP_BUCKET and the S3_* credentials are set in .env.
+    # Stays a no-op (prints a hint, then idles: an exit would restart-loop it)
+    # until S3_BACKUP_BUCKET and the S3_* credentials are set in .env.
     profiles: ["backup"]
-    restart: "no"
+    restart: unless-stopped
     init: true
     security_opt:
       - no-new-privileges:true

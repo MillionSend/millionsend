@@ -945,8 +945,8 @@ para o mundo todo.
 O serviço `backup` do compose faz um `pg_dump` agendado do Postgres e o envia
 para qualquer bucket compatível com S3 via rclone — o Cloudflare R2 funciona
 sem ajustes. Vem desligado por padrão: sem `S3_BACKUP_BUCKET` o contêiner
-imprime `backups disabled — set S3_BACKUP_BUCKET to enable` e sai com
-código 0, inofensivo.
+imprime `backups disabled — set S3_BACKUP_BUCKET to enable` e depois fica
+ocioso, sem fazer nada.
 
 Ative definindo as credenciais S3 compartilhadas e um bucket de backup no
 `.env` (a etapa de armazenamento do assistente de setup cria o bucket e
