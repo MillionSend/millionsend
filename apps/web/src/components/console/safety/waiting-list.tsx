@@ -12,6 +12,7 @@ import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
+import { consoleReviewHref } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamActions } from "../team-actions";
 import { CardHead, WHY_DOT } from "./parts";
@@ -168,7 +169,7 @@ export function WaitingList({ teamId, onChanged }: { teamId?: string; onChanged?
                         {teamId ? (
                           group.team.name
                         ) : (
-                          <Link href={`/console/safety/${group.team.id}`}>{group.team.name}</Link>
+                          <Link href={consoleReviewHref(group.team.id)}>{group.team.name}</Link>
                         )}
                         <span style={{ color: "var(--ms-muted)", fontWeight: 400 }}>
                           {[

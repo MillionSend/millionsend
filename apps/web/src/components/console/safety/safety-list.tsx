@@ -17,6 +17,7 @@ import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
+import { consoleReviewHref } from "@/lib/nav";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -252,7 +253,7 @@ export function SafetyList() {
                       suspendedAt: row.suspendedAt,
                       broadcastsPausedByOperatorAt: row.broadcastsPausedByOperatorAt,
                     };
-                    const href = `/console/safety/${row.teamId}`;
+                    const href = consoleReviewHref(row.teamId);
                     const standing = row.guardrail !== null;
                     return (
                       <tr

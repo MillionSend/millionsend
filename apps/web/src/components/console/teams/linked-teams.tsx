@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { Table } from "@/components/table";
 import { formatRelative } from "@/lib/format";
+import { consoleReviewHref } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
 import { CardHead } from "../safety/parts";
 
@@ -46,7 +47,7 @@ export function LinkedTeams({ teamId, framed = false }: { teamId: string; framed
                   {shown(match.kind, match.matched)}
                 </td>
                 <td>
-                  <Link className="ms-link" href={`/console/safety/${link.linkedTeamId}`}>
+                  <Link className="ms-link" href={consoleReviewHref(link.linkedTeamId)}>
                     {link.linkedTeamName}
                   </Link>
                 </td>

@@ -432,6 +432,7 @@
     "empty": "0 equipes encontradas.",
     "menu": {
       "open": "Abrir equipe",
+      "review": "Abrir em Confiança e segurança",
       "copyId": "Copiar ID",
       "view": "Ver como proprietário",
       "viewOff": "Desligado nesta instância: ative com SUPPORT_VIEW=on",

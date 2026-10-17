@@ -432,6 +432,7 @@
     "empty": "0 teams match.",
     "menu": {
       "open": "Open team",
+      "review": "Open in Trust & safety",
       "copyId": "Copy ID",
       "view": "View as owner",
       "viewOff": "Off on this instance: SUPPORT_VIEW=on turns it on",
