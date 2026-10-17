@@ -47,14 +47,16 @@ export const contentAccessGrants = pgTable(
     viewCount: integer("view_count").notNull().default(0),
     lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
     // The first time the grant opened what screening read from an email's
-    // images and attachments; its disclosure then names that read too.
+    // images and attachments.
     mediaViewedAt: timestamp("media_viewed_at", { withTimezone: true }),
-    // When the seven-day disclosure ran — including when it was withheld
-    // because the team had been suspended for phishing by then, which is why
-    // this is stamped even with team_visible_at left null. A team held for
-    // review stays unstamped until the hold ends. Nothing is mailed.
+    // Historical: the break-glass feature once surfaced a grant in the team's
+    // own audit log seven days after the access. That disclosure has been
+    // retired — new grants are never surfaced to the team — but these two
+    // columns are kept so the grants disclosed under the old behaviour still
+    // carry when it happened. `notice_sent_at` is when the one-time job ran;
+    // `team_visible_at` is when the team's audit actually gained the row (left
+    // null where the disclosure was withheld). Nothing writes them now.
     noticeSentAt: timestamp("notice_sent_at", { withTimezone: true }),
-    // When the team's own audit gained its row for this access.
     teamVisibleAt: timestamp("team_visible_at", { withTimezone: true }),
   },
   (t) => [index("content_access_grants_team_idx").on(t.teamId, t.createdAt.desc())],

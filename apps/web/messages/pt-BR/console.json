@@ -767,14 +767,23 @@
         "none": "Todas as checagens passam em todos os e-mails pontuados."
       },
       "emails": {
+        "cardTitle": "E-mails",
+        "tabs": {
+          "flagged": "Sinalizados",
+          "all": "Todos os e-mails"
+        },
         "title": "E-mails sinalizados · {count}",
         "subtitle": "Enviados nos últimos 7 dias com uma checagem crítica ou importante falhando, e os não enviados que uma avaliação de phishing segurou antes do SES. Assunto e corpo são conteúdo e ficam criptografados; passe o mouse ou toque na etiqueta para ver o motivo.",
+        "allSubtitle": "Todos os e-mails da equipe, dos mais recentes aos mais antigos. Só os metadados; o assunto e o corpo ficam criptografados até uma autorização.",
         "sent": "Enviado",
+        "at": "Data",
         "from": "De",
         "recipients": "Destinatários",
         "insight": "Insight",
         "more": "+{count} mais",
         "none": "0 e-mails sinalizados no período.",
+        "allNone": "Nenhum e-mail.",
+        "allCount": "{shown} de {total}",
         "monitor": "Monitor",
         "modelScore": "Modelo: {score} · <detail></detail>",
         "notFlagged": "não sinalizado",
@@ -1102,7 +1111,7 @@
         "window": "Janela",
         "windowValue": "30 minutos, depois some de novo",
         "recorded": "Registrado",
-        "recordedValue": "Auditoria da instância · auditoria da equipe em 7 dias",
+        "recordedValue": "Log de auditoria da instância; a equipe não é avisada",
         "note": "Corpos já apagados pela retenção não podem ser revelados.",
         "confirm": "Revelar",
         "whyPlaceholder": "As avaliações apontam imitação de marca e os links vão para um domínio parecido."

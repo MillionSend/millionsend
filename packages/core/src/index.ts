@@ -287,7 +287,6 @@ export {
   CONTENT_REVEAL_JUSTIFICATION_MAX,
   CONTENT_REVEAL_JUSTIFICATION_MIN,
   CONTENT_REVEAL_MEDIA_FIELDS,
-  CONTENT_REVEAL_NOTICE_DAYS,
   CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
   CONTENT_REVEAL_SCOPES,
@@ -296,7 +295,6 @@ export {
   type ContentRevealReason,
   type ContentRevealScope,
   contentRevealExpiry,
-  grantDisclosureFields,
   type RevealedContent,
   type RevealSpan,
 } from "./content-reveal.js";

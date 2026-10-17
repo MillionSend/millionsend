@@ -232,9 +232,6 @@ export const CRON_JOBS = {
   // Every 10 min: the content monitor's sample count and unjudged share as
   // probes, and the operator's notice when the judge keeps failing.
   "monitor.health": "*/10 * * * *",
-  // Daily: the seven-day disclosure of break-glass content access, the
-  // team's audit row. No-op with none due.
-  "safety.reveal_notices": "40 4 * * *",
   // Daily: third-party reference data (the disposable-domain list, and the
   // DB-IP databases, monthly files) is refreshed where it is switched on; a
   // failed download keeps the last copy.
@@ -601,6 +598,12 @@ export class Queue {
         { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
         () => this.#reported(name, handlers[name]),
       );
+    }
+    // Drop schedules this build no longer defines, so a cron that was removed
+    // from CRON_JOBS stops firing instead of enqueueing daily to a queue
+    // nothing serves.
+    for (const schedule of await this.#producer.getSchedules()) {
+      if (!(schedule.name in CRON_JOBS)) await this.#producer.unschedule(schedule.name);
     }
   }
 

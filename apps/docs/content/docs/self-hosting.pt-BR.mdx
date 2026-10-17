@@ -1744,10 +1744,14 @@ anterior.
 ## Acesso ao conteúdo (emergência)
 
 Desligado por padrão. Com ele ligado, um operador autorizado pode ler o
-assunto e o texto visível renderizado de mensagens específicas de uma equipe
-sinalizada, e o que a avaliação leu nas imagens e anexos dos e-mails em
+assunto e o texto visível renderizado de mensagens específicas de qualquer
+equipe, e o que a avaliação leu nas imagens e anexos dos e-mails em
 espera, por um motivo de segurança que ele nomeia e justifica antes de
-qualquer coisa ser descriptografada, por no máximo 30 minutos. É o caminho
+qualquer coisa ser descriptografada, por no máximo 30 minutos. A mensagem
+não precisa ter sido sinalizada pelo monitor de conteúdo: um golpista
+habilidoso escapa da sinalização automática (sem links, um golpe em outro
+idioma), então qualquer mensagem de qualquer equipe pode ser aberta sob uma
+autorização. É o caminho
 de emergência para os casos que os metadados armazenados não resolvem: as
 métricas sabem que um link aponta para um encurtador, não se o texto ao
 redor é um golpe bancário ou uma newsletter.
@@ -1802,18 +1806,15 @@ A primeira olhada de uma autorização num painel de mídia escreve uma
 segunda linha `content.revealed`, com campos que nomeiam o que a avaliação
 leu nas imagens e anexos, e marca a autorização (`media_viewed_at`).
 
-**O que a equipe vê, e quando.** Sete dias depois, uma rotina diária
-acrescenta uma linha `content.accessed` ao registro de auditoria da própria
-equipe — datada no acesso, não na divulgação — com o motivo, quantas
-mensagens e quais campos foram lidos: `subject, rendered text`, seguido de
-`what screening read from its images and attachments` só quando a
-autorização abriu um painel de mídia. Ninguém recebe e-mail sobre um acesso,
-nem na hora nem depois. Uma equipe suspensa por phishing nunca recebe a
-linha; a autorização registra que a etapa de divulgação rodou, para não ser
-repetida toda noite. Uma equipe aguardando revisão a recebe quando a
-pausa para revisão termina: depois de uma liberação, a próxima rotina diária a
-escreve, e se a pausa virar uma suspensão por phishing a linha nunca é
-divulgada.
+**O que a equipe fica sabendo.** Nada, a cada acesso. A equipe não recebe
+e-mail, e nenhuma linha é acrescentada ao registro de auditoria dela, quando
+o conteúdo é lido. Que os operadores da plataforma podem ler o conteúdo das
+mensagens por esses motivos de segurança é informado uma vez, nos termos e
+no aviso de privacidade da instância (veja abaixo), e não mensagem por
+mensagem. As autorizações feitas numa versão anterior apareciam no registro
+de auditoria da própria equipe sete dias após o acesso; essas linhas
+continuam exatamente como a equipe já as viu, e as colunas `notice_sent_at` /
+`team_visible_at` ainda guardam quando cada uma rodou.
 
 **Como ligar**, no `.env` da instância, lido pelo worker e pelo app (um
 restart aplica):
@@ -1823,10 +1824,10 @@ CONTENT_REVEAL=on
 ```
 
 Desligado, os botões do console aparecem desabilitados com uma dica nomeando
-a variável e todo procedimento de conteúdo recusa. Ler as mensagens de outras
-pessoas só é lícito como uma medida de segurança estreita, registrada e
-informada: diga isso nos termos e no aviso de privacidade da instância antes
-de ligar.
+a variável e todo procedimento de conteúdo recusa. Ler as mensagens dos
+clientes só é lícito como uma medida de segurança estreita, registrada na
+auditoria do operador e informada nos seus termos e aviso de privacidade:
+diga isso lá antes de ligar.
 
 ## Modo de suporte (opcional)
 

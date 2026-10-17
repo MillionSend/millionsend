@@ -747,6 +747,49 @@ export const consoleSafetyRouter = router({
   }),
 
   /**
+   * Every email of a team, newest first, paginated, for the review page's
+   * "All emails" list. Metadata only (sender, when, recipient count): the
+   * subject and body are content and stay encrypted until a grant names the
+   * message.
+   */
+  teamEmails: operatorProcedure
+    .input(
+      z.object({
+        teamId: z.uuid(),
+        limit: z.number().int().min(1).max(100).default(25),
+        offset: z.number().int().min(0).default(0),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const e = schema.emails;
+      const recipients = sql<number>`jsonb_array_length(${e.to}) + coalesce(jsonb_array_length(${e.cc}), 0) + coalesce(jsonb_array_length(${e.bcc}), 0)`;
+      const [rows, [count]] = await Promise.all([
+        ctx.db
+          .select({
+            id: e.id,
+            from: e.from,
+            recipients,
+            sentAt: e.sentAt,
+            createdAt: e.createdAt,
+          })
+          .from(e)
+          .where(eq(e.teamId, input.teamId))
+          .orderBy(desc(e.createdAt), desc(e.id))
+          .limit(input.limit + 1)
+          .offset(input.offset),
+        ctx.db
+          .select({ total: sql<number>`count(*)::int` })
+          .from(e)
+          .where(eq(e.teamId, input.teamId)),
+      ]);
+      return {
+        items: rows.slice(0, input.limit),
+        total: count?.total ?? 0,
+        nextOffset: rows.length > input.limit ? input.offset + input.limit : null,
+      };
+    }),
+
+  /**
    * The warm-up override: a trusted team, or one trusted domain of it, sends
    * at its plan's volume from day one. The audit row is the instance's, as
    * the owner's own log never shows trust & safety levers.
@@ -782,8 +825,10 @@ export const consoleSafetyRouter = router({
 
   /**
    * Break-glass: a time-boxed grant to read the subject and rendered text of
-   * flagged messages, for a named security reason. Nothing decrypts here —
-   * the grant row and its audit exist before any content can be asked for.
+   * a team's messages, for a named security reason. Scope "email" names any
+   * one message of the team, flagged or not; "flagged_window" covers the
+   * review page's flagged set. Nothing decrypts here — the grant row and its
+   * operator audit exist before any content can be asked for.
    */
   requestAccess: operatorProcedure
     .input(
@@ -814,27 +859,37 @@ export const consoleSafetyRouter = router({
       assertContentRevealOn();
       const team = await loadTeam(ctx.db, input.teamId);
       const now = new Date();
-      const flagged = await flaggedEmails(
-        ctx.db,
-        team.id,
-        flaggedSince(now),
-        (await monitorSettingsNow(ctx.db)).holdRepeatScore,
-      );
-      const wanted =
-        input.scope === "email" ? flagged.filter((row) => row.id === input.emailId) : flagged;
-      if (wanted.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "not_flagged" });
+      // Scope "email" names any one message of the team; "flagged_window" the
+      // flagged set. Either way a grant only ever names ids that belong here.
+      let candidateIds: string[];
+      if (input.scope === "email") {
+        const emailId = input.emailId;
+        if (!emailId) throw new TRPCError({ code: "BAD_REQUEST" });
+        const [email] = await ctx.db
+          .select({ id: schema.emails.id })
+          .from(schema.emails)
+          .where(and(eq(schema.emails.id, emailId), eq(schema.emails.teamId, team.id)));
+        if (!email) throw new TRPCError({ code: "NOT_FOUND", message: "not_found" });
+        candidateIds = [email.id];
+      } else {
+        const flagged = await flaggedEmails(
+          ctx.db,
+          team.id,
+          flaggedSince(now),
+          (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+        );
+        if (flagged.length === 0) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "not_flagged" });
+        }
+        candidateIds = flagged.map((row) => row.id);
+      }
       // A purged body cannot be revealed by anyone: retention already took it.
       const bodies = await ctx.db
         .select({ id: schema.emails.id, purgedAt: schema.emails.bodyPurgedAt })
         .from(schema.emails)
-        .where(
-          inArray(
-            schema.emails.id,
-            wanted.map((row) => row.id),
-          ),
-        );
+        .where(inArray(schema.emails.id, candidateIds));
       const purged = new Set(bodies.filter((row) => row.purgedAt !== null).map((row) => row.id));
-      const emailIds = wanted.map((row) => row.id).filter((id) => !purged.has(id));
+      const emailIds = candidateIds.filter((id) => !purged.has(id));
       const refused = [...purged].map((emailId) => ({ emailId, status: "purged" as const }));
       if (emailIds.length === 0) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "purged" });
@@ -853,8 +908,8 @@ export const consoleSafetyRouter = router({
         })
         .returning({ id: g.id, expiresAt: g.expiresAt });
       if (!grant) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      // teamId null: the instance's own row, which the team's audit query
-      // can never reach. Its own row arrives seven days later, from the cron.
+      // teamId null: the operator's own record, which the team's audit query
+      // can never reach. The team is not notified of the access.
       await auditOperator(ctx, {
         teamId: null,
         action: "content.revealed",
