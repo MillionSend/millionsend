@@ -409,7 +409,7 @@ describe("ingest into inboxes", () => {
       decision: { result: "quarantined", reasons: ["not_allowlisted"] },
     });
 
-    // A person releases it and trusts the sender: delivered, announced once, the sender allowlisted.
+    // An owner releases it and trusts the sender: delivered, announced once, the sender allowlisted.
     const released = await releaseQuarantined(
       db,
       { keyring },
@@ -418,11 +418,17 @@ describe("ingest into inboxes", () => {
         receivedEmailId: id,
         inboxId: inbox,
         actor: { kind: "user", userId: "u-owner" },
+        admin: true,
         trustSender: true,
         now: NOW,
       },
     );
-    expect(released).toEqual({ ok: true, releasedAt: NOW, trustedSender: "sender@sender.example" });
+    expect(released).toEqual({
+      ok: true,
+      outcome: "released",
+      releasedAt: NOW,
+      trustedSender: "sender@sender.example",
+    });
     const [after] = await memberships(id);
     expect(after).toMatchObject({
       verdict: "released",

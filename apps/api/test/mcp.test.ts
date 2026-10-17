@@ -43,6 +43,7 @@ let closeDb: () => Promise<void>;
 let jwksServer: ServerType;
 let appBaseUrl: string;
 let resource: string;
+let apiDeps: Parameters<typeof createApi>[0];
 let app: ReturnType<typeof createApi>;
 let teamId: string;
 let topicId: string;
@@ -143,7 +144,7 @@ beforeAll(async () => {
   appBaseUrl = `http://127.0.0.1:${address.port}`;
   resource = mcpResourceUrl(appBaseUrl);
 
-  app = createApi({
+  apiDeps = {
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
     isCloud: false,
@@ -160,7 +161,8 @@ beforeAll(async () => {
     receivedDownloadKey: randomBytes(32),
     receiving: { mxHost: "mx.millionsend.test", ingestSecret: INGEST_SECRET },
     inboxKeys: deriveInboxKeys(randomBytes(32)),
-  });
+  };
+  app = createApi(apiDeps);
 });
 
 afterAll(async () => {
@@ -319,7 +321,13 @@ describe("tool listing", () => {
     }
     expect(client.getInstructions()).toContain("purchased, rented and scraped lists");
     const hint = (name: string) => tools.find((t) => t.name === name)?.annotations;
-    for (const name of ["send_email", "create_broadcast", "update_contact", "cancel_email"]) {
+    for (const name of [
+      "send_email",
+      "create_broadcast",
+      "update_contact",
+      "cancel_email",
+      "release_email",
+    ]) {
       expect(hint(name)?.destructiveHint, name).toBe(true);
     }
     expect(hint("create_contact")?.destructiveHint).toBe(false);
@@ -1550,9 +1558,14 @@ describe("receiving tools", () => {
 
   /**
    * Hands `raw` to the API as the MX does and answers the stored email's id.
-   * With auth "pass" the sender is DMARC-aligned (trust tier external).
+   * With auth "pass" the sender is DMARC-aligned (trust tier external); with
+   * "fail" it failed authentication.
    */
-  async function deliver(raw: string, recipients: string[], auth: "pass" | "none" = "pass") {
+  async function deliver(
+    raw: string,
+    recipients: string[],
+    auth: "pass" | "none" | "fail" = "pass",
+  ) {
     const res = await app.request(`${MX_INGEST_PATH}${MX_DELIVER_PATH}`, {
       method: "POST",
       headers: {
@@ -2284,19 +2297,68 @@ describe("receiving tools", () => {
         data: [{ id: heldId, quarantine_reason: "not_allowlisted", sender_trust: "external" }],
       });
 
+      // Only a person trusts a sender: asked to, the tool refuses and releases nothing.
+      const trusting = await client.callTool({
+        name: "release_email",
+        arguments: { inbox_id: guardedId, email_id: heldId, trust_sender: true },
+      });
+      expect(trusting.isError).toBe(true);
+      expect((trusting.content as Array<{ text: string }>)[0]?.text).toContain("trust_sender");
       expect(
         resultJson(
           await client.callTool({
-            name: "release_email",
-            arguments: { inbox_id: guardedId, email_id: heldId, trust_sender: true },
+            name: "list_quarantined_emails",
+            arguments: { inbox_id: guardedId },
           }),
         ),
-      ).toMatchObject({
-        object: "inbox_release",
-        inbox_id: guardedId,
-        email_id: heldId,
-        trusted_sender: "stranger@elsewhere.test",
+      ).toMatchObject({ data: [{ id: heldId }] });
+      // An agent's release stands only on screening's verdict, and this instance runs no judge.
+      const unscreened = await client.callTool({
+        name: "release_email",
+        arguments: { inbox_id: guardedId, email_id: heldId },
       });
+      expect(unscreened.isError).toBe(true);
+      expect(resultJson(unscreened)).toMatchObject({
+        statusCode: 503,
+        name: "screening_unavailable",
+        message: expect.stringContaining("ask a person to review it in the dashboard"),
+      });
+      expect(await codeOf()).toEqual({ status: "none" });
+
+      // Where the judge reads it as clean, the agent's release delivers it, the allowlist untouched.
+      const judgeUrl = "https://judge.example.test";
+      vi.stubEnv("ABUSE_JUDGE", "typesafe");
+      vi.stubEnv("ABUSE_JUDGE_BASE_URL", judgeUrl);
+      vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
+      const judged = createApi(apiDeps);
+      vi.unstubAllEnvs();
+      const realFetch = globalThis.fetch;
+      vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) =>
+        String(input).startsWith(judgeUrl)
+          ? Response.json({
+              answers: { is_injection: { noul: 0.02 }, is_phishing: { noul: 0.01 } },
+            })
+          : realFetch(input, init),
+      );
+      const screened = await connect(await mintToken(), judged);
+      try {
+        expect(
+          resultJson(
+            await screened.callTool({
+              name: "release_email",
+              arguments: { inbox_id: guardedId, email_id: heldId },
+            }),
+          ),
+        ).toMatchObject({
+          object: "inbox_release",
+          inbox_id: guardedId,
+          email_id: heldId,
+          trusted_sender: null,
+        });
+      } finally {
+        vi.unstubAllGlobals();
+        await screened.close();
+      }
       expect(await codeOf()).toMatchObject({ status: "found", code: "555123" });
       expect(
         resultJson(
@@ -2310,6 +2372,45 @@ describe("receiving tools", () => {
           }),
         ),
       ).toEqual({ status: "timeout" });
+      await client.close();
+    });
+
+    it("never release mail held for its content or a failed authentication", async () => {
+      const client = await connect(await mintToken());
+      const inbox = resultJson(
+        await client.callTool({
+          name: "create_inbox",
+          arguments: { email_address: "careful@inbound.acme.dev" },
+        }),
+      );
+      const forged = await deliver(
+        message({
+          to: "careful@inbound.acme.dev",
+          subject: "Invoice overdue",
+          text: "Pay today at the link below.",
+          id: "forged@elsewhere.test",
+        }),
+        ["careful@inbound.acme.dev"],
+        "fail",
+      );
+      const refused = await client.callTool({
+        name: "release_email",
+        arguments: { inbox_id: String(inbox.id), email_id: forged },
+      });
+      expect(refused.isError).toBe(true);
+      expect(resultJson(refused)).toMatchObject({
+        statusCode: 403,
+        name: "forbidden",
+        message: expect.stringContaining("A person must review this email"),
+      });
+      expect(
+        resultJson(
+          await client.callTool({
+            name: "list_quarantined_emails",
+            arguments: { inbox_id: String(inbox.id) },
+          }),
+        ),
+      ).toMatchObject({ data: [{ id: forged, quarantine_reason: "failed_auth" }] });
       await client.close();
     });
 

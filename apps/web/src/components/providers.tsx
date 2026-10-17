@@ -8,9 +8,10 @@ import { TRPCProvider } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import type { AppRouter } from "@/server/routers";
 
-// Answers that will not change on a retry: a record that is gone, or one the
+// Answers that will not change on a retry: a record that is gone, one in a
+// state that rules the read out (held mail released meanwhile), or one the
 // caller may not see. Everything else keeps react-query's default three tries.
-const FINAL_CODES = new Set(["NOT_FOUND", "FORBIDDEN", "UNAUTHORIZED", "BAD_REQUEST"]);
+const FINAL_CODES = new Set(["NOT_FOUND", "CONFLICT", "FORBIDDEN", "UNAUTHORIZED", "BAD_REQUEST"]);
 
 export function makeQueryClient() {
   return new QueryClient({

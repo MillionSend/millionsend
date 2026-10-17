@@ -632,6 +632,23 @@ function endpointCoversInboxes(
   return eventInboxIds.some((id) => endpointInboxIds.includes(id));
 }
 
+/** Whether an enabled endpoint of the team would take any of these events about these inboxes. */
+export async function endpointsTake(
+  db: Db,
+  p: {
+    teamId: string;
+    types: readonly WebhookEventType[];
+    inboxIds?: readonly string[] | undefined;
+  },
+): Promise<boolean> {
+  const endpoints = await enabledEndpoints(db, p.teamId);
+  return endpoints.some(
+    (e) =>
+      p.types.some((type) => endpointSubscribes(e.events, type)) &&
+      endpointCoversInboxes(e.inboxIds, p.inboxIds),
+  );
+}
+
 /**
  * Several team-level events at once (a batch import creates hundreds of
  * contacts): the endpoints are read once and every matching delivery row

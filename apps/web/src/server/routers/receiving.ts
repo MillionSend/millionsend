@@ -25,9 +25,10 @@ import { escapeLike } from "@/lib/sql";
 import { fetchQuotaRow } from "../billing";
 import {
   actorNames,
-  forwardQuietly,
   inboxSendDeps,
-  releaseFailure,
+  releaseDeps,
+  releaseResult,
+  releaser,
   sendResult,
   userActor,
 } from "../inboxes";
@@ -364,24 +365,17 @@ export const receivingRouter = router({
   }),
 
   /** Releases a virus-held catch-all row; quarantined inbox mail goes through inboxes.quarantine. */
-  release: receivingProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
-    const result = await releaseQuarantined(
-      ctx.db,
-      {
-        enqueueWebhookDeliveries: ctx.enqueueWebhookDeliveries,
-        enqueueInboxForward: forwardQuietly,
-      },
-      {
+  release: receivingProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) =>
+    releaseResult(
+      await releaseQuarantined(ctx.db, releaseDeps(ctx), {
         teamId: ctx.teamId,
         receivedEmailId: input.id,
         inboxId: null,
-        actor: userActor(ctx),
+        ...releaser(ctx),
         trustSender: false,
-      },
-    );
-    if (!result.ok) throw releaseFailure(result.reason);
-    return { releasedAt: result.releasedAt };
-  }),
+      }),
+    ),
+  ),
 
   delete: adminProcedure
     .use(receivingOnly)

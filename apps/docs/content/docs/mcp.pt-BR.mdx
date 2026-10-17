@@ -167,7 +167,13 @@ marcado como não confiável (veja
 [Resultados das ferramentas](#resultados-das-ferramentas)). Ele não aprova
 rascunhos nem muda as configurações de segurança de uma caixa; o
 `create_inbox` só cria caixas de agente e aceita o `accept_from` e nenhuma
-outra configuração de segurança.
+outra configuração de segurança. O `release_email` nunca libera e-mail retido
+por injeção de prompt, phishing, vírus ou falha na autenticação, que uma
+pessoa revisa no painel, e nunca confia num remetente. Os outros e-mails
+retidos ele só libera com a avaliação da análise: a análise lê o e-mail em
+toda liberação, o e-mail continua na quarentena com 80 ou mais e, enquanto a
+análise não pode rodar, nada é liberado (`screening_unavailable`). Veja
+[Segurança de agentes](/pt-BR/concepts/agent-safety#quarentena).
 
 | Ferramenta | Permissão | Descrição |
 | --- | --- | --- |
@@ -253,7 +259,7 @@ outra configuração de segurança.
 | `create_inbox` | `receiving:manage` | Cria uma caixa de agente (as caixas de pessoas são criadas no painel); o `accept_from` é a única configuração de segurança que ela aceita, e o `username` dá nome a um endereço no domínio compartilhado. O `domain_id` aceita uma linha do `list_domains`: o subdomínio compartilhado da equipe (`shared: true`), ou um dos domínios dela, com o `username` como a parte antes do @. Enquanto o subdomínio da equipe espera a revisão de nomes, ela responde `503`. |
 | `update_inbox` | `receiving:manage` | Muda o nome, o nome de remetente ou a validade de uma caixa; fazer ela vencer antes exige o papel de responsável ou de admin. |
 | `delete_inbox` | `receiving:manage` | **admin** Exclui uma caixa com as conversas e os rascunhos dela; as chaves de API dela são revogadas. |
-| `release_email` | `receiving:manage` | Libera um e-mail da quarentena para a caixa; `trust_sender` também coloca o remetente na lista de permitidos. |
+| `release_email` | `receiving:manage` | Libera um e-mail da quarentena para a caixa, só com a avaliação da análise: ele continua retido quando a análise acha injeção de prompt ou phishing (`held_by_screening`), e nada é liberado enquanto a análise não pode rodar (`screening_unavailable`); o retido pelo conteúdo ou por falha na autenticação responde `forbidden`. |
 
 ## Resultados das ferramentas
 

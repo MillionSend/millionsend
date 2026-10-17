@@ -1,11 +1,12 @@
 "use client";
 
+import { holdRisk } from "@millionsend/core/release-rules";
 import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import type { BadgeTone } from "@/components/status-badge";
 import { Tooltip } from "@/components/tooltip";
-import { addrSpec } from "@/lib/format";
+import { addrSpec, capitalize, formatRelative } from "@/lib/format";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import type { AppRouter } from "@/server/routers";
 
@@ -14,6 +15,11 @@ type Outputs = inferRouterOutputs<AppRouter>["inboxes"];
 export type InboxDetail = Outputs["get"];
 export type ThreadRow = Outputs["threads"]["list"]["items"][number];
 export type ThreadMessage = Outputs["threads"]["emails"]["items"][number];
+export type InboundScreening = Extract<ThreadMessage, { direction: "inbound" }>["screening"];
+/** Held mail as the release dialog reads it, whichever screen opened it. */
+export type QuarantinePreview = Outputs["quarantine"]["preview"];
+/** A release's answer: delivered, or held again by the screening it ran first. */
+export type ReleaseResult = Outputs["quarantine"]["release"];
 
 export type SenderTrust =
   | "owner"
@@ -66,6 +72,103 @@ export function SuspiciousBadge({
       <span className="ms-badge ms-badge-warn">{t("received.verdict.suspicious")}</span>
     </Tooltip>
   );
+}
+
+/**
+ * "Released by Ana Souza": held mail someone released (a person, a key or an
+ * MCP client); why it was held, and when, in its tooltip.
+ */
+export function ReleasedBadge({
+  screening,
+  releasedAt,
+}: {
+  screening: InboundScreening;
+  releasedAt: string;
+}) {
+  const t = useTranslations("inboxes");
+  const locale = useLocale();
+  const hold = holdOf(screening);
+  const score = holdRisk(hold);
+  const who = screening.released_by;
+  // It ends a sentence, whose own period would double pt-BR's "há 2 min.".
+  const time = formatRelative(releasedAt, locale).replace(/\.$/, "");
+  const tip = [
+    t("released.held", {
+      code: hold.reason ?? "other",
+      reason: hold.reason ? t(`qr.${hold.reason}`) : "",
+      score: score === null ? "none" : String(score),
+    }),
+    who ? t("released.by", { who, time }) : t("released.at", { time }),
+  ].join("\n");
+  return (
+    <Tooltip inline text={tip}>
+      <span className="ms-badge ms-badge-warn">
+        {who ? t("released.badge", { who }) : t("timeline.released")}
+      </span>
+    </Tooltip>
+  );
+}
+
+/** What a hold rests on, as the thread wire, the Received page and the release dialog each carry it. */
+interface Hold {
+  reason: string | null;
+  injectionScore: number | null;
+  phishingScore: number | null;
+  reasons: readonly string[];
+}
+
+/** A thread message's hold, as the other surfaces carry it. */
+export function holdOf(screening: InboundScreening): Hold {
+  return {
+    reason: screening.quarantine_reason,
+    injectionScore: screening.injection_score,
+    phishingScore: screening.phishing_score,
+    reasons: screening.reasons,
+  };
+}
+
+/** The screening's reasons in words; a key with no words yet is left out. */
+export function screeningReasonWords(
+  t: ReturnType<typeof useTranslations>,
+  reasons: readonly string[],
+): string[] {
+  return reasons.flatMap((key) =>
+    t.has(`screeningReason.${key}`) ? [t(`screeningReason.${key}`)] : [],
+  );
+}
+
+/**
+ * Why mail is held, " · "-joined: its risk and the screening's reasons, led by
+ * the reason itself where no badge beside the line names it. Empty when none
+ * of that is known.
+ */
+export function heldWhy(
+  t: ReturnType<typeof useTranslations>,
+  hold: Hold,
+  leadReason: boolean,
+): string {
+  const score = holdRisk(hold);
+  const risk = score === null ? [] : [t("quarantine.risk", { score })];
+  const words = screeningReasonWords(t, hold.reasons);
+  const parts =
+    leadReason && hold.reason
+      ? [capitalize(t(`qr.${hold.reason}`)), ...risk, ...words]
+      : [...risk.map(capitalize), ...words];
+  return parts.join(" · ");
+}
+
+/**
+ * A refused or failed release, or its preview, in words: the server's stable
+ * message keys pick the copy, `fallback` words anything else.
+ */
+export function releaseErrorText(
+  t: ReturnType<typeof useTranslations>,
+  error: unknown,
+  fallback: "quarantine.errors.failed" | "detail.error" = "quarantine.errors.failed",
+): string {
+  const key = (error as { message?: string } | null)?.message ?? "";
+  if (t.has(`quarantine.errors.${key}`)) return t(`quarantine.errors.${key}`);
+  return trpcErrorCode(error) === "NOT_FOUND" ? t("detail.notFound") : t(fallback);
 }
 
 /**

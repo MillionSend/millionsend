@@ -1763,21 +1763,26 @@ button.ms-notice-strip-action {
   text-align: left;
 }
 /* Radio cards hold every radio in the app. The radio is .ms-checkbox's box
-   (declared with it) in a circle, and the chosen card lifts like the active tab. */
+   (declared with it) in a circle, and the chosen card lifts like the active tab.
+   A tick card is the same card around a checkbox and what the tick means. */
+.ms-radio-card,
+.ms-check-card {
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-r-input);
+  transition:
+    background-color var(--ms-dur-fast) var(--ms-ease),
+    border-color var(--ms-dur-fast) var(--ms-ease);
+}
 .ms-radio-card {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   font-size: var(--ms-fs-label);
   padding: 8px 10px;
-  border: 1px solid var(--ms-line);
-  border-radius: var(--ms-r-input);
   cursor: pointer;
-  transition:
-    background-color var(--ms-dur-fast) var(--ms-ease),
-    border-color var(--ms-dur-fast) var(--ms-ease);
 }
-.ms-radio-card:has(input:checked) {
+.ms-radio-card:has(input:checked),
+.ms-check-card:has(input:checked) {
   background: var(--ms-panel-raised);
   border-color: var(--ms-line-strong);
 }
@@ -1805,7 +1810,8 @@ button.ms-notice-strip-action {
 }
 @media (prefers-reduced-motion: reduce) {
   .ms-radio-card,
-  .ms-radio-card input {
+  .ms-radio-card input,
+  .ms-check-card {
     transition: none;
   }
 }
@@ -1829,6 +1835,19 @@ button.ms-notice-strip-action {
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* The release dialog: why the mail was held and what releasing does, beside
+   its text, so the decision fits a laptop screen; one column on phones. */
+.ms-release-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px 24px;
+  align-items: start;
+}
+@media (max-width: 639px) {
+  .ms-release-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 /* What the server shortened or masked. The span already holds the replacement
    — the original never reached this page — so it stays legible: the box says

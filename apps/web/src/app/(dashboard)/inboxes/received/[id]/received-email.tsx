@@ -9,6 +9,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
+import { DotParts } from "@/components/dot-parts";
 import { EmailContentPanel } from "@/components/email-content-panel";
 import {
   EventGap,
@@ -35,10 +36,12 @@ import {
   grayExplanation,
 } from "@/lib/auth-result";
 import { formatBytes, formatRelative, mailDomain } from "@/lib/format";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamRole } from "@/lib/use-team-role";
 import type { AppRouter } from "@/server/routers";
-import { QuarantinedBadge, TrustBadge } from "../../parts";
+import { heldWhy, QuarantinedBadge, TrustBadge } from "../../parts";
+import { ReleaseButton } from "../../release-dialog";
 import { AuthBadge } from "../received-list";
 
 const LIST_HREF = "/inboxes/received";
@@ -63,7 +66,16 @@ function Mono({ text }: { text: string }) {
   );
 }
 
-function Banner({ tone, children }: { tone: "danger" | "warn"; children: React.ReactNode }) {
+function Banner({
+  tone,
+  glow = false,
+  children,
+}: {
+  tone: "danger" | "warn";
+  /** The status wash, for the banner that is the page's loudest thing. */
+  glow?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div
       role="status"
@@ -78,6 +90,7 @@ function Banner({ tone, children }: { tone: "danger" | "warn"; children: React.R
         borderRadius: 12,
         padding: "11px 16px",
         marginBottom: 18,
+        ...(glow ? { backgroundColor: "var(--ms-ground)", backgroundImage: statusGlow(tone) } : {}),
       }}
     >
       {children}
@@ -311,10 +324,6 @@ export function ReceivedEmailView() {
   );
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: trpc.receiving.get.queryKey({ id }) });
-  const releaseInbox = useMutation(
-    trpc.inboxes.quarantine.release.mutationOptions({ onSuccess: refresh }),
-  );
-  const releaseRow = useMutation(trpc.receiving.release.mutationOptions({ onSuccess: refresh }));
   const remove = useMutation(
     trpc.receiving.delete.mutationOptions({
       onSuccess: () => {
@@ -345,9 +354,9 @@ export function ReceivedEmailView() {
 
   const { envelope } = email;
   const virus = email.virus.verdict === "fail";
+  // Held in two inboxes, the banner releases one at a time, the dialog naming which.
   const held = email.memberships.find((m) => m.verdict === "quarantined");
   const pending = email.memberships.some((m) => m.verdict === "pending");
-  const canRelease = Boolean(held) || email.heldCatchAll;
   const subtitle = [
     formatRelative(email.createdAt, locale),
     formatBytes(email.sizeBytes),
@@ -360,14 +369,21 @@ export function ReceivedEmailView() {
     email.headers?.["dkim-signature"] ?? "",
     mailDomain(email.from),
   );
-  const release = (trustSender: boolean) => {
-    if (held) {
-      releaseInbox.mutate({ inboxId: held.inboxId, emailId: email.id, trustSender });
-    } else if (email.heldCatchAll) {
-      releaseRow.mutate({ id: email.id });
-    }
-  };
-  const releasing = releaseInbox.isPending || releaseRow.isPending;
+  // A held catch-all row belongs to no inbox: a virus holds it, before any screening.
+  const why = heldWhy(
+    t,
+    held
+      ? {
+          reason: held.quarantineReason,
+          injectionScore: held.injectionScore,
+          phishingScore: held.phishingScore,
+          reasons: held.reasons,
+        }
+      : { reason: "virus", injectionScore: null, phishingScore: null, reasons: [] },
+    true,
+  );
+  // The team's API reads a released catch-all row, so it is worded as an agent's mail.
+  const kind = held?.kind ?? "agent";
 
   return (
     <>
@@ -382,17 +398,6 @@ export function ReceivedEmailView() {
         subtitle={subtitle}
         actions={
           <>
-            {canRelease ? (
-              <button
-                type="button"
-                className="ms-btn ms-btn-primary"
-                disabled={releasing}
-                onClick={() => release(false)}
-              >
-                <BtnSpinner on={releasing} />
-                {t("release")}
-              </button>
-            ) : null}
             <button
               type="button"
               className="ms-btn ms-btn-secondary"
@@ -452,18 +457,20 @@ export function ReceivedEmailView() {
         </Banner>
       ) : null}
       {held || email.heldCatchAll ? (
-        <Banner tone="danger">
-          <span style={{ flex: "1 1 18rem" }}>{t("message.quarantined")}</span>
-          {held ? (
-            <button
-              type="button"
-              className="ms-btn ms-btn-secondary"
-              disabled={releasing}
-              onClick={() => release(true)}
-            >
-              {t("releaseTrust")}
-            </button>
-          ) : null}
+        <Banner tone="danger" glow>
+          <span style={{ flex: "1 1 18rem", display: "grid", gap: 3 }}>
+            <span>{t("message.quarantined", { kind })}</span>
+            {why ? (
+              <span style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--ms-muted)" }}>
+                <DotParts text={why} />
+              </span>
+            ) : null}
+          </span>
+          <ReleaseButton
+            kind={kind}
+            target={held ? { inboxId: held.inboxId, emailId: email.id } : { catchAllId: email.id }}
+            onChange={refresh}
+          />
         </Banner>
       ) : pending ? (
         <Banner tone="warn">{t("message.screening")}</Banner>

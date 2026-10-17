@@ -44,6 +44,19 @@ describe("query cache", () => {
     expect(hits(/useInfiniteQuery\(\{\s*queryKey:\s*trpc\./g)).toEqual([]);
   });
 
+  it("retries a failed read only where a retry could answer otherwise", () => {
+    const retry = makeQueryClient().getDefaultOptions().queries?.retry;
+    if (typeof retry !== "function") throw new Error("no retry rule");
+    const failed = (code?: string) => Object.assign(new Error("x"), code ? { data: { code } } : {});
+    // Held mail released meanwhile stays released: its preview answers at once.
+    for (const code of ["NOT_FOUND", "CONFLICT", "FORBIDDEN"]) {
+      expect(retry(0, failed(code)), code).toBe(false);
+    }
+    expect(retry(0, failed("INTERNAL_SERVER_ERROR"))).toBe(true);
+    expect(retry(0, failed())).toBe(true);
+    expect(retry(3, failed())).toBe(false);
+  });
+
   it("never remounts a form on a refetch", () => {
     // dataUpdatedAt moves on every successful fetch, identical data included.
     expect(hits(/key=\{[^}]*dataUpdatedAt/g)).toEqual([]);

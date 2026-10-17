@@ -47,6 +47,7 @@ const core = vi.hoisted(() => ({
   replyInThread: vi.fn(),
   listQuarantined: vi.fn(),
   releaseQuarantined: vi.fn(),
+  releasePreview: vi.fn(),
 }));
 vi.mock("@millionsend/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@millionsend/core")>()),
@@ -246,21 +247,23 @@ describe("tiers", () => {
 
     core.releaseQuarantined.mockResolvedValue({
       ok: true,
+      outcome: "released",
       releasedAt: new Date(),
-      trustedSender: "ana@sender.example",
+      trustedSender: null,
     });
     const emailId = randomUUID();
     await caller(beta, "member").inboxes.quarantine.release({
       inboxId,
       emailId,
-      trustSender: true,
+      trustSender: false,
     });
     expect(core.releaseQuarantined).toHaveBeenCalledWith(db, expect.anything(), {
       teamId: beta,
       receivedEmailId: emailId,
       inboxId,
       actor: user,
-      trustSender: true,
+      admin: false,
+      trustSender: false,
     });
     core.releaseQuarantined.mockResolvedValue({ ok: false, reason: "allowlist_full" });
     await expect(
@@ -368,6 +371,7 @@ describe("support view", () => {
           html: "<p>secret</p>",
           text: "secret",
           extracted_text: "secret",
+          screening: { verdict: "clean" },
         },
       ],
       hasMore: false,
@@ -392,6 +396,7 @@ describe("support view", () => {
         html: null,
         text: null,
         extracted_text: null,
+        screening: { verdict: "clean", released_by: null, released_at: null },
       },
     ]);
 
@@ -415,6 +420,177 @@ describe("support view", () => {
     ).toMatchObject({
       text: "secret",
     });
+  });
+});
+
+describe("releasing held mail", () => {
+  it("releases as the person with their role, the keyring and the queues, answering what happened", async () => {
+    const emailId = randomUUID();
+    core.releaseQuarantined.mockResolvedValue({
+      ok: true,
+      outcome: "released",
+      releasedAt: new Date("2026-10-17T12:00:00Z"),
+      trustedSender: "ana@sender.example",
+    });
+    expect(
+      await caller(acme, "admin").inboxes.quarantine.release({
+        inboxId,
+        emailId,
+        trustSender: true,
+      }),
+    ).toEqual({
+      outcome: "released",
+      releasedAt: new Date("2026-10-17T12:00:00Z"),
+      trustedSender: "ana@sender.example",
+    });
+    // The keyring goes along, so the events of released mail name their attachments.
+    expect(core.releaseQuarantined).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        keyring: getKeyring(),
+        enqueueInboxForward: expect.any(Function),
+      }),
+      {
+        teamId: acme,
+        receivedEmailId: emailId,
+        inboxId,
+        actor: user,
+        admin: true,
+        trustSender: true,
+      },
+    );
+    core.releaseQuarantined.mockResolvedValue({
+      ok: true,
+      outcome: "held_again",
+      reason: "injection",
+      injectionScore: 92,
+      phishingScore: 40,
+    });
+    expect(
+      await caller(acme).inboxes.quarantine.release({
+        inboxId,
+        emailId,
+        trustSender: false,
+        reviewed: "not_allowlisted",
+      }),
+    ).toEqual({
+      outcome: "held_again",
+      reason: "injection",
+      injectionScore: 92,
+      phishingScore: 40,
+    });
+    // The hold the dialog showed goes along, so one held again since is never released on it.
+    expect(core.releaseQuarantined).toHaveBeenLastCalledWith(
+      db,
+      expect.anything(),
+      expect.objectContaining({ reviewed: "not_allowlisted" }),
+    );
+  });
+
+  it("answers each refusal with the key the dialog shows copy for", async () => {
+    const release = () =>
+      caller(acme).inboxes.quarantine.release({
+        inboxId,
+        emailId: randomUUID(),
+        trustSender: true,
+      });
+    for (const [reason, code] of [
+      ["trust_not_allowed", "FORBIDDEN"],
+      ["forbidden", "FORBIDDEN"],
+      ["not_quarantined", "CONFLICT"],
+      ["allowlist_full", "UNPROCESSABLE_CONTENT"],
+    ] as const) {
+      core.releaseQuarantined.mockResolvedValue({ ok: false, reason });
+      await expect(release()).rejects.toMatchObject({ code, message: reason });
+    }
+    core.releaseQuarantined.mockResolvedValue({ ok: false, reason: "not_found" });
+    await expect(release()).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("previews a hold for the person, without its text under a support view", async () => {
+    const emailId = randomUUID();
+    core.releasePreview.mockResolvedValue({ reason: "not_allowlisted", trustOffered: false });
+    expect(await caller(acme, "member").inboxes.quarantine.preview({ inboxId, emailId })).toEqual({
+      reason: "not_allowlisted",
+      trustOffered: false,
+    });
+    expect(core.releasePreview).toHaveBeenLastCalledWith(db, getKeyring(), {
+      teamId: acme,
+      inboxId,
+      receivedEmailId: emailId,
+      actor: user,
+      admin: false,
+      judgeConfigured: false,
+      withText: true,
+    });
+    await caller(acme, "viewer", view()).inboxes.quarantine.preview({ inboxId: null, emailId });
+    expect(core.releasePreview).toHaveBeenLastCalledWith(
+      db,
+      expect.anything(),
+      expect.objectContaining({ inboxId: null, withText: false }),
+    );
+    core.releasePreview.mockResolvedValue("not_quarantined");
+    await expect(
+      caller(acme).inboxes.quarantine.preview({ inboxId, emailId }),
+    ).rejects.toMatchObject({ code: "CONFLICT", message: "not_quarantined" });
+  });
+
+  it("says who released a message in the thread, and when", async () => {
+    const releasedId = await received(acme);
+    const keptId = await received(acme);
+    const at = new Date("2026-10-17T09:30:00Z");
+    await db.insert(schema.receivedEmailInboxes).values([
+      {
+        receivedEmailId: releasedId,
+        inboxId,
+        teamId: acme,
+        threadId,
+        address: "orders@in.acme.test",
+        senderTrust: "external",
+        verdict: "released",
+        quarantineReason: "not_allowlisted",
+        quarantinedAt: at,
+        deliveredAt: at,
+        releasedAt: at,
+        releasedBy: encodeInboxActor({ kind: "user", userId: OWNER.id }),
+      },
+      {
+        receivedEmailId: keptId,
+        inboxId,
+        teamId: acme,
+        threadId,
+        address: "orders@in.acme.test",
+        senderTrust: "external",
+        verdict: "clean",
+        deliveredAt: at,
+      },
+    ]);
+    core.listThreadEmails.mockResolvedValue({
+      data: [
+        { id: releasedId, direction: "inbound", screening: { verdict: "released" } },
+        { id: keptId, direction: "inbound", screening: { verdict: "clean" } },
+        { id: "sent-1", direction: "outbound" },
+      ],
+      hasMore: false,
+    });
+    const page = await caller(acme, "member").inboxes.threads.emails({ inboxId, threadId });
+    expect(page.items).toEqual([
+      {
+        id: releasedId,
+        direction: "inbound",
+        screening: {
+          verdict: "released",
+          released_by: OWNER.name,
+          released_at: at.toISOString(),
+        },
+      },
+      {
+        id: keptId,
+        direction: "inbound",
+        screening: { verdict: "clean", released_by: null, released_at: null },
+      },
+      { id: "sent-1", direction: "outbound" },
+    ]);
   });
 });
 

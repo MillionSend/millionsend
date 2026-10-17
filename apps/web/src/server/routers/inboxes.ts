@@ -1,4 +1,5 @@
 import {
+  abuseJudgeConfig,
   EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
   EMAIL_RETENTION_DAYS_DEFAULT,
   isCloudDeployment,
@@ -31,13 +32,16 @@ import {
   liveInbox,
   MOVE_FOLDERS,
   openReceivedExtracted,
+  QUARANTINE_REASONS,
   rejectDraft,
+  releasePreview,
   releaseQuarantined,
   replyInThread,
   searchThreads,
   sendDraft,
   sendNewFromInbox,
   THREAD_FOLDERS,
+  type ThreadEmailWire,
   teamMemberEmails,
   teamSharedDomain,
   updateDraft,
@@ -57,12 +61,14 @@ import { HEX_COLOR_RE } from "@/lib/hex-color";
 import { fetchQuotaRow } from "../billing";
 import {
   actorNames,
-  forwardQuietly,
   inboxDeps,
   inboxFailure,
   inboxSendDeps,
   planUsage,
+  releaseDeps,
   releaseFailure,
+  releaseResult,
+  releaser,
   sendResult,
   sharedSending,
   userActor,
@@ -254,6 +260,48 @@ async function receivedOverview(db: Db, teamId: string) {
     allReceived: { received30d: all?.received30d ?? 0, lastReceived: all?.lastReceived ?? null },
     catchAll,
   };
+}
+
+/**
+ * Each inbound message's screening with who released it and when, named as
+ * the Received page names them; both null for mail never released.
+ */
+async function withReleases(db: Db, teamId: string, inboxId: string, items: ThreadEmailWire[]) {
+  const m = schema.receivedEmailInboxes;
+  const ids = items.flatMap((item) =>
+    item.direction === "inbound" && item.screening.verdict === "released" ? [item.id] : [],
+  );
+  const rows =
+    ids.length === 0
+      ? []
+      : await db
+          .select({ id: m.receivedEmailId, at: m.releasedAt, by: m.releasedBy })
+          .from(m)
+          .where(
+            and(eq(m.teamId, teamId), eq(m.inboxId, inboxId), inArray(m.receivedEmailId, ids)),
+          );
+  const names = await actorNames(
+    db,
+    teamId,
+    rows.map((row) => row.by ?? ""),
+  );
+  const released = new Map(
+    rows.map((row, index) => [
+      row.id,
+      { released_by: names[index]?.name ?? null, released_at: row.at?.toISOString() ?? null },
+    ]),
+  );
+  return items.map((item) =>
+    item.direction === "inbound"
+      ? {
+          ...item,
+          screening: {
+            ...item.screening,
+            ...(released.get(item.id) ?? { released_by: null, released_at: null }),
+          },
+        }
+      : item,
+  );
 }
 
 /** Support view: thread messages and drafts read as their envelope, never their content. */
@@ -561,7 +609,8 @@ export const inboxesRouter = router({
         });
         if ("error" in result) throw inboxFailure(result.error);
         const page = idPage(result);
-        return envelopeOnly ? { ...page, items: page.items.map(withoutContent) } : page;
+        const items = await withReleases(ctx.db, ctx.teamId, input.inboxId, page.items);
+        return { ...page, items: envelopeOnly ? items.map(withoutContent) : items };
       }),
 
     update: receivingProcedure
@@ -833,26 +882,44 @@ export const inboxesRouter = router({
         return idPage(result);
       }),
 
+    /** What the release dialog shows; inboxId null for a catch-all row held for a virus. */
+    preview: receivingProcedure
+      .input(z.object({ inboxId: z.uuid().nullable(), emailId: z.uuid() }))
+      .query(async ({ ctx, input }) => {
+        const preview = await releasePreview(ctx.db, getKeyring(), {
+          teamId: ctx.teamId,
+          inboxId: input.inboxId,
+          receivedEmailId: input.emailId,
+          ...releaser(ctx),
+          judgeConfigured: abuseJudgeConfig() !== null,
+          withText: !ctx.supportView,
+        });
+        if (typeof preview === "string") throw releaseFailure(preview);
+        return preview;
+      }),
+
     release: receivingProcedure
-      .input(z.object({ ...inboxRef, emailId: z.uuid(), trustSender: z.boolean().default(false) }))
-      .mutation(async ({ ctx, input }) => {
-        const result = await releaseQuarantined(
-          ctx.db,
-          {
-            enqueueWebhookDeliveries: ctx.enqueueWebhookDeliveries,
-            enqueueInboxForward: forwardQuietly,
-          },
-          {
+      .input(
+        z.object({
+          ...inboxRef,
+          emailId: z.uuid(),
+          trustSender: z.boolean().default(false),
+          /** The hold the dialog showed: one changed since answers held_again. */
+          reviewed: z.enum(QUARANTINE_REASONS).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) =>
+        releaseResult(
+          await releaseQuarantined(ctx.db, releaseDeps(ctx), {
             teamId: ctx.teamId,
             receivedEmailId: input.emailId,
             inboxId: input.inboxId,
-            actor: userActor(ctx),
+            ...releaser(ctx),
+            reviewed: input.reviewed,
             trustSender: input.trustSender,
-          },
-        );
-        if (!result.ok) throw releaseFailure(result.reason);
-        return { releasedAt: result.releasedAt, trustedSender: result.trustedSender };
-      }),
+          }),
+        ),
+      ),
   }),
 
   activity: router({

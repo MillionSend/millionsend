@@ -47,7 +47,6 @@ import {
 import {
   createInboxRequestSchema,
   inboxSafetyPatchBodySchema,
-  releaseRequestSchema,
   updateInboxRequestSchema,
   updateThreadRequestSchema,
 } from "./schemas/inboxes.js";
@@ -1360,7 +1359,7 @@ function buildServer(
       {
         title: "List quarantined emails",
         description:
-          "List an inbox's quarantined emails, newest first, with cursor pagination: sender, subject, why each was held, the sender's trust tier, injection and phishing scores and any virus signature. Their content is not readable here or anywhere else through these tools until release_email delivers them.",
+          "List an inbox's quarantined emails, newest first, with cursor pagination: sender, subject, why each was held, the sender's trust tier, injection and phishing scores and any virus signature. Their content is not readable here or anywhere else through these tools until they are released.",
         inputSchema: listQuerySchema.extend({ inbox_id: inboxId }),
         readOnly: true,
       },
@@ -2054,15 +2053,19 @@ function buildServer(
       {
         title: "Release quarantined email",
         description:
-          "Deliver a quarantined email to its inbox as if it had passed screening; it is never screened again, and mail that carries malware keeps its downloads blocked. trust_sender also adds the sender's address to the inbox allowlist.",
-        inputSchema: z.object({
-          inbox_id: inboxId,
-          email_id: z.uuid().describe("Quarantined email id from list_quarantined_emails"),
-          trust_sender: releaseRequestSchema.shape.trust_sender,
-        }),
+          "Deliver an email held as not_allowlisted, unauthenticated_sender, unscreened or screening_cap to its inbox; a release can't be undone. Screening reads the email first, every time: it stays in quarantine when screening finds prompt injection or phishing (held_by_screening), and nothing is released while screening can't run (screening_unavailable: try again later, or ask a person to review it in the dashboard). Mail held for prompt injection, phishing, a virus or failed authentication is released only by a person, in the dashboard (forbidden), and only a person can put a sender on the allowlist.",
+        // Strict: an argument it doesn't take, like a trust_sender only a person may set, fails the call
+        // instead of being dropped from a release that can't be undone.
+        inputSchema: z
+          .object({
+            inbox_id: inboxId,
+            email_id: z.uuid().describe("Quarantined email id from list_quarantined_emails"),
+          })
+          .strict(),
+        destructive: true,
       },
-      ({ inbox_id, email_id, ...body }) =>
-        api("POST", `/inboxes/${enc(inbox_id)}/quarantine/${enc(email_id)}/release`, body),
+      ({ inbox_id, email_id }) =>
+        api("POST", `/inboxes/${enc(inbox_id)}/quarantine/${enc(email_id)}/release`, {}),
     );
   }
 

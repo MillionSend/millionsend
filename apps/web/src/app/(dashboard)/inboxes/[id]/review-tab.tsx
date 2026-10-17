@@ -11,6 +11,7 @@ import { toast } from "@/components/toast";
 import { useTRPC } from "@/lib/trpc";
 import { StateCard } from "../../emails/list-parts";
 import { approvalReasonWords, type InboxDetail, TrustBadge } from "../parts";
+import { ReleaseButton } from "../release-dialog";
 
 const heading: React.CSSProperties = { margin: "0 0 10px" };
 
@@ -39,10 +40,7 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
   const reject = useMutation(
     trpc.inboxes.drafts.reject.mutationOptions({ onSuccess: refresh, onError: fail }),
   );
-  const release = useMutation(
-    trpc.inboxes.quarantine.release.mutationOptions({ onSuccess: refresh, onError: fail }),
-  );
-  const busy = approve.isPending || reject.isPending || release.isPending;
+  const busy = approve.isPending || reject.isPending;
 
   if (drafts.isPending || held.isPending) return <Skeleton width="50%" height={14} />;
   const pending = (drafts.data?.items ?? []).filter((d) => d.status === "pending_approval");
@@ -168,32 +166,12 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
                     <RelativeTime date={item.received_at} />
                   </td>
                   <td className="right" style={{ whiteSpace: "nowrap" }}>
-                    <span style={{ display: "inline-flex", gap: 6 }}>
-                      <button
-                        type="button"
-                        className="ms-btn ms-btn-secondary"
-                        disabled={busy || inbox.expired}
-                        onClick={() =>
-                          release.mutate({ inboxId: inbox.id, emailId: item.id, trustSender: true })
-                        }
-                      >
-                        {t("releaseTrust")}
-                      </button>
-                      <button
-                        type="button"
-                        className="ms-btn ms-btn-primary"
-                        disabled={busy || inbox.expired}
-                        onClick={() =>
-                          release.mutate({
-                            inboxId: inbox.id,
-                            emailId: item.id,
-                            trustSender: false,
-                          })
-                        }
-                      >
-                        {t("release")}
-                      </button>
-                    </span>
+                    <ReleaseButton
+                      kind={inbox.kind}
+                      target={{ inboxId: inbox.id, emailId: item.id }}
+                      disabled={inbox.expired}
+                      onChange={refresh}
+                    />
                   </td>
                 </tr>
               ))}

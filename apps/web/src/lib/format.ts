@@ -261,6 +261,11 @@ export function dotParts(text: string): string[] {
   return parts.map((part, i) => (i < parts.length - 1 ? `${part}\u00a0·` : part));
 }
 
+/** A lower-case label made to lead a line ("prompt injection" → "Prompt injection"). */
+export function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 const QUARTER_HOUR_MS = 15 * 60_000;
 
 /** The instant when it is less than a day old, else null. */
