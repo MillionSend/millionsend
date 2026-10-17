@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { QuarantinePreview } from "@/app/(dashboard)/inboxes/parts";
+import type { QuarantinePreview, ThreadMessage } from "@/app/(dashboard)/inboxes/parts";
 
 const catalogs = {
   en: {
@@ -67,6 +67,7 @@ vi.mock("@/components/toast", () => ({ toast }));
 
 const { ReleaseButton } = await import("@/app/(dashboard)/inboxes/release-dialog");
 const { setReadOnly } = await import("@/lib/read-only");
+const { ReleasedBadge } = await import("@/app/(dashboard)/inboxes/parts");
 
 const INBOX_RELEASE = "inboxes.quarantine.release.mutationOptions";
 
@@ -462,5 +463,62 @@ describe("a release's answer", () => {
     }
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(onChange).toHaveBeenCalledTimes(cases.length);
+  });
+});
+
+describe("the Released badge", () => {
+  const screening = {
+    verdict: "released",
+    sender_trust: "external",
+    quarantine_reason: "injection",
+    reasons: [],
+    injection_score: 97,
+    phishing_score: 41,
+    hidden_text_removed: false,
+    released_by: "Ana Souza",
+    released_at: null,
+  } as unknown as Extract<ThreadMessage, { direction: "inbound" }>["screening"];
+  const tooltip = async (fields: Record<string, unknown>, locale: "en" | "pt-BR" = "en") => {
+    lang.locale = locale;
+    const releasedAt = new Date(Date.now() - 2 * 60_000).toISOString();
+    await act(async () =>
+      root.render(
+        createElement(ReleasedBadge, { screening: { ...screening, ...fields }, releasedAt }),
+      ),
+    );
+    const trigger = container.querySelector<HTMLElement>(".ms-tooltip-trigger");
+    await act(async () => trigger?.focus());
+    return {
+      badge: container.querySelector(".ms-badge-warn")?.textContent,
+      tip: document.querySelector(".ms-tooltip")?.textContent,
+    };
+  };
+
+  it("names who let it through, and says why it was held and when", async () => {
+    expect(await tooltip({})).toEqual({
+      badge: "Released by Ana Souza",
+      tip: "Held: prompt injection, risk 97/100.\nReleased by Ana Souza, 2m ago.",
+    });
+  });
+
+  it("leaves out a risk the hold had none of, and a releaser no longer known", async () => {
+    expect(
+      await tooltip({
+        quarantine_reason: "not_allowlisted",
+        injection_score: null,
+        phishing_score: null,
+        released_by: null,
+      }),
+    ).toEqual({ badge: "Released", tip: "Held: not on the allowlist.\nReleased 2m ago." });
+  });
+
+  it("reads in Brazilian Portuguese, one period where the time ends the sentence", async () => {
+    expect(await tooltip({}, "pt-BR")).toEqual({
+      badge: "Liberado por Ana Souza",
+      tip: "Retido: injeção de prompt, risco 97/100.\nLiberado por Ana Souza, há 2 min.",
+    });
+    expect((await tooltip({ released_by: null }, "pt-BR")).tip).toBe(
+      "Retido: injeção de prompt, risco 97/100.\nLiberado há 2 min.",
+    );
   });
 });

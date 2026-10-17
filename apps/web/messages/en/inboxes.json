@@ -272,6 +272,12 @@
       "failed": "Couldn't release this email. Try again."
     }
   },
+  "released": {
+    "badge": "Released by {who}",
+    "held": "Held: {reason}{score, select, none {} other {, risk {score}/100}}.",
+    "by": "Released by {who}, {time}.",
+    "at": "Released {time}."
+  },
   "qr": {
     "failed_auth": "failed authentication",
     "unauthenticated_sender": "sender not verified",

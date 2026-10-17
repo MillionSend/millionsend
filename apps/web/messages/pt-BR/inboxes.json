@@ -272,6 +272,12 @@
       "failed": "Não foi possível liberar este e-mail. Tente de novo."
     }
   },
+  "released": {
+    "badge": "Liberado por {who}",
+    "held": "Retido: {reason}{score, select, none {} other {, risco {score}/100}}.",
+    "by": "Liberado por {who}, {time}.",
+    "at": "Liberado {time}."
+  },
   "qr": {
     "failed_auth": "falhou na autenticação",
     "unauthenticated_sender": "remetente não verificado",

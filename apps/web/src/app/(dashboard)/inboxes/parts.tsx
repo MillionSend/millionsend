@@ -2,10 +2,10 @@
 
 import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import type { BadgeTone } from "@/components/status-badge";
 import { Tooltip } from "@/components/tooltip";
-import { addrSpec, capitalize } from "@/lib/format";
+import { addrSpec, capitalize, formatRelative } from "@/lib/format";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import type { AppRouter } from "@/server/routers";
 
@@ -14,6 +14,7 @@ type Outputs = inferRouterOutputs<AppRouter>["inboxes"];
 export type InboxDetail = Outputs["get"];
 export type ThreadRow = Outputs["threads"]["list"]["items"][number];
 export type ThreadMessage = Outputs["threads"]["emails"]["items"][number];
+type InboundScreening = Extract<ThreadMessage, { direction: "inbound" }>["screening"];
 /** Held mail as the release dialog reads it, whichever screen opened it. */
 export type QuarantinePreview = Outputs["quarantine"]["preview"];
 /** A release's answer: delivered, or held again by the screening it ran first. */
@@ -68,6 +69,41 @@ export function SuspiciousBadge({
   return (
     <Tooltip inline text={[t("suspiciousTip"), ...scores].join("\n")}>
       <span className="ms-badge ms-badge-warn">{t("received.verdict.suspicious")}</span>
+    </Tooltip>
+  );
+}
+
+/** "Released by Ana Souza": held mail a person let through; why it was held, and when, in its tooltip. */
+export function ReleasedBadge({
+  screening,
+  releasedAt,
+}: {
+  screening: InboundScreening;
+  releasedAt: string;
+}) {
+  const t = useTranslations("inboxes");
+  const locale = useLocale();
+  const reason = screening.quarantine_reason;
+  const score = holdScore({
+    reason,
+    injectionScore: screening.injection_score,
+    phishingScore: screening.phishing_score,
+  });
+  const who = screening.released_by;
+  // It ends a sentence, whose own period would double pt-BR's "há 2 min.".
+  const time = formatRelative(releasedAt, locale).replace(/\.$/, "");
+  const tip = [
+    t("released.held", {
+      reason: reason ? t(`qr.${reason}`) : "",
+      score: score === null ? "none" : String(score),
+    }),
+    who ? t("released.by", { who, time }) : t("released.at", { time }),
+  ].join("\n");
+  return (
+    <Tooltip inline text={tip}>
+      <span className="ms-badge ms-badge-warn">
+        {who ? t("released.badge", { who }) : t("timeline.released")}
+      </span>
     </Tooltip>
   );
 }

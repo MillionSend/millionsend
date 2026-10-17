@@ -967,6 +967,8 @@ describe("a message in the thread pane", () => {
     injection_score: null,
     phishing_score: null,
     hidden_text_removed: false,
+    released_by: null,
+    released_at: null,
   };
   const message = {
     id: "m1",
@@ -1041,6 +1043,17 @@ describe("a message in the thread pane", () => {
       "Held in quarantine: it shows up in the inbox once someone releases it.",
     );
     expect(read).not.toMatch(/agent/i);
+  });
+
+  it("keeps a badge on released mail naming who let it through, and no Release", () => {
+    const released = { ...injection, verdict: "released", released_by: "Ana Souza" };
+    const html = render(
+      { screening: { ...released, released_at: new Date().toISOString() } },
+      "agent",
+    );
+    expect(html).toContain('<span class="ms-badge ms-badge-warn">Released by Ana Souza</span>');
+    expect(html).not.toContain(">Release<");
+    expect(render({ screening: released }, "agent")).not.toContain("Released by");
   });
 
   it("shows the HTML in a frame that never runs the sender's code", () => {

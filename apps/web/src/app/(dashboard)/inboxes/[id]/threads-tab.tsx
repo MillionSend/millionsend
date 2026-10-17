@@ -44,6 +44,7 @@ import {
   type InboxDetail,
   messageHref,
   QuarantinedBadge,
+  ReleasedBadge,
   replyAllAdds,
   replyTarget,
   SuspiciousBadge,
@@ -580,6 +581,7 @@ export function MessageCard({
   const inbound = message.direction === "inbound";
   const verdict = inbound ? message.screening.verdict : null;
   const held = verdict === "quarantined";
+  const releasedAt = inbound && verdict === "released" ? message.screening.released_at : null;
   // A forward's quoted original is what the sender wants read.
   const forward = isForwardSubject(message.subject);
   return (
@@ -593,6 +595,9 @@ export function MessageCard({
           <>
             <TrustBadge trust={message.screening.sender_trust} />
             {held ? <QuarantinedBadge reason={message.screening.quarantine_reason} /> : null}
+            {releasedAt ? (
+              <ReleasedBadge screening={message.screening} releasedAt={releasedAt} />
+            ) : null}
             {inbox.kind === "agent" && verdict === "suspicious" ? (
               <SuspiciousBadge
                 injection={message.screening.injection_score}
