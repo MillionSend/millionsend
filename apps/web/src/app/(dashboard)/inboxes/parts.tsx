@@ -151,26 +151,9 @@ export function heldWhy(
   return parts.join(" · ");
 }
 
-/**
- * Holds released only once "I've read this email" is ticked: what screening
- * flagged, and a sender whose From is probably forged.
- */
-export function releaseNeedsRead(reason: string): boolean {
-  return ["injection", "phishing", "virus", "failed_auth"].includes(reason);
-}
-
 /** Holds screening already judged, so a release never screens them again. */
 export function screenedBeforeHold(reason: string): boolean {
   return ["injection", "phishing", "virus"].includes(reason);
-}
-
-/**
- * Whether the allowlist would let the sender's next mail in: a verified sender
- * held only for not being on it. The server decides who may trust; this only
- * words the case for those who can't.
- */
-export function trustWouldAdmit(hold: Pick<QuarantinePreview, "reason" | "senderTrust">): boolean {
-  return hold.reason === "not_allowlisted" && hold.senderTrust === "external";
 }
 
 /** A refused or failed release in words: the server's stable message keys pick the copy. */

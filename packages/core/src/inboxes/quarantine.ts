@@ -244,7 +244,8 @@ export async function releasePreview(
     if (row.releasedAt) return "not_quarantined";
     hold = {
       inboxAddress: row.receivedFor.join(", "),
-      inboxKind: "human",
+      // Team keys and MCP list a released catch-all row: an agent may act on it.
+      inboxKind: "agent",
       reason: "virus",
       injectionScore: null,
       phishingScore: null,

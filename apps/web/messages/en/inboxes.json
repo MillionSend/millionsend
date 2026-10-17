@@ -238,6 +238,7 @@
     "why": "Why it was held",
     "text": "Email text",
     "noText": "This email has no text.",
+    "textTruncated": "Cut short here: the email goes on.",
     "ifReleased": "If you release it",
     "risk": "risk {score}/100",
     "score": "{label} {score}/100",

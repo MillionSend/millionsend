@@ -238,6 +238,7 @@
     "why": "Por que ficou retido",
     "text": "Texto do e-mail",
     "noText": "Este e-mail não tem texto.",
+    "textTruncated": "Cortado aqui: o e-mail continua.",
     "ifReleased": "Se você liberar",
     "risk": "risco {score}/100",
     "score": "{label} {score}/100",

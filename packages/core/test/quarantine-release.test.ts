@@ -598,7 +598,7 @@ describe("releasePreview", () => {
     });
     expect(await preview(id, null)).toMatchObject({
       inboxAddress: `nobody@${DOMAIN}`,
-      inboxKind: "human",
+      inboxKind: "agent",
       reason: "virus",
       virusSignature: "Eicar-Test-Signature",
       trustOffered: false,

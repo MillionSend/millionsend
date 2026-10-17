@@ -1,5 +1,6 @@
 "use client";
 
+import { CONTENT_HOLDS } from "@millionsend/core/release-rules";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -19,10 +20,8 @@ import {
   type QuarantinePreview,
   type ReleaseResult,
   releaseErrorText,
-  releaseNeedsRead,
   screenedBeforeHold,
   screeningReasonWords,
-  trustWouldAdmit,
 } from "./parts";
 
 /** Who reads held mail once it is released: an agent, or people in the inbox. */
@@ -81,7 +80,7 @@ function InboxRelease({
   ...props
 }: DialogProps & { inboxId: string; emailId: string }) {
   const trpc = useTRPC();
-  const preview = useQuery(trpc.inboxes.quarantine.preview.queryOptions({ inboxId, emailId }));
+  const preview = useHold(inboxId, emailId);
   const settle = useSettle(props);
   const release = useMutation(trpc.inboxes.quarantine.release.mutationOptions(settle));
   return (
@@ -96,7 +95,7 @@ function InboxRelease({
 
 function CatchAllRelease({ id, ...props }: DialogProps & { id: string }) {
   const trpc = useTRPC();
-  const preview = useQuery(trpc.receiving.preview.queryOptions({ id }));
+  const preview = useHold(null, id);
   const settle = useSettle(props);
   const release = useMutation(trpc.receiving.release.mutationOptions(settle));
   return (
@@ -109,6 +108,12 @@ function CatchAllRelease({ id, ...props }: DialogProps & { id: string }) {
   );
 }
 
+/** The hold as the dialog shows it; inboxId null for a catch-all row. */
+function useHold(inboxId: string | null, emailId: string) {
+  const trpc = useTRPC();
+  return useQuery(trpc.inboxes.quarantine.preview.queryOptions({ inboxId, emailId }));
+}
+
 /**
  * A release's answer in words. The callbacks sit on the mutation itself, so
  * the toast and the refresh still come when Esc closed the dialog mid-request.
@@ -118,15 +123,10 @@ function useSettle({ kind, onClose, onChange }: DialogProps) {
   return {
     onSuccess: (result: ReleaseResult) => {
       if (result.outcome === "held_again") {
-        const score = holdScore({
-          reason: result.reason ?? null,
-          injectionScore: result.injectionScore ?? null,
-          phishingScore: result.phishingScore ?? null,
-        });
         toast(
           t("quarantine.heldAgain", {
-            reason: result.reason ? t(`qr.${result.reason}`) : "",
-            score: score ?? "–",
+            reason: t(`qr.${result.reason}`),
+            score: holdScore(result) ?? "–",
           }),
           "warn",
         );
@@ -162,7 +162,7 @@ function ReleaseDialog({
   const [read, setRead] = useState(false);
   const [trust, setTrust] = useState(false);
   const hold = preview.data;
-  const ready = hold !== undefined && !pending && (read || !releaseNeedsRead(hold.reason));
+  const ready = hold !== undefined && !pending && (read || !CONTENT_HOLDS.includes(hold.reason));
   const release = () => {
     if (!hold || !ready) return;
     onRelease(trust && hold.trustOffered);
@@ -243,7 +243,8 @@ function HoldDetails({
   const t = useTranslations("inboxes");
   const te = useTranslations("emails");
   // Red where the content or a forged sender is the risk; amber where only the sender is unknown.
-  const tone = releaseNeedsRead(hold.reason) ? "danger" : "warn";
+  const contentHold = CONTENT_HOLDS.includes(hold.reason);
+  const tone = contentHold ? "danger" : "warn";
   const score = holdScore(hold);
   const flagged = [
     ...screeningReasonWords(t, hold.reasons),
@@ -290,7 +291,7 @@ function HoldDetails({
     ...(hold.trustEffects.sendWithoutApproval ? [t("quarantine.trustSend")] : []),
     ...(hold.trustEffects.codesExempt ? [t("quarantine.trustCodes")] : []),
   ];
-  const gate = releaseNeedsRead(hold.reason) ? (
+  const gate = contentHold ? (
     <CheckCard checked={read} onChange={onRead} label={t("quarantine.ack", { kind })} />
   ) : hold.trustOffered ? (
     <CheckCard
@@ -305,7 +306,7 @@ function HoldDetails({
         ))}
       </ul>
     </CheckCard>
-  ) : trustWouldAdmit(hold) ? (
+  ) : hold.trustNeedsAdmin ? (
     <p style={{ margin: 0, fontSize: 12.5, color: "var(--ms-muted)" }}>
       {t("quarantine.trustAdmins")}
     </p>
@@ -424,6 +425,11 @@ function HoldDetails({
               </span>
             )}
           </div>
+          {hold.text && hold.textTruncated ? (
+            <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
+              {t("quarantine.textTruncated")}
+            </p>
+          ) : null}
         </div>
       </div>
       {gate ? <div style={{ marginTop: 18 }}>{gate}</div> : null}
