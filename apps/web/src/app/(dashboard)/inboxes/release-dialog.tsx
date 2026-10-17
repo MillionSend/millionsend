@@ -1,6 +1,6 @@
 "use client";
 
-import { CONTENT_HOLDS } from "@millionsend/core/release-rules";
+import { CONTENT_HOLDS, holdRisk, JUDGED_HOLDS } from "@millionsend/core/release-rules";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -12,15 +12,13 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { toast } from "@/components/toast";
 import { capitalize } from "@/lib/format";
-import { isReadOnly } from "@/lib/read-only";
+import { isReadOnly, refusedAsReadOnly } from "@/lib/read-only";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import {
-  holdScore,
   type QuarantinePreview,
   type ReleaseResult,
   releaseErrorText,
-  screenedBeforeHold,
   screeningReasonWords,
 } from "./parts";
 
@@ -88,7 +86,9 @@ function InboxRelease({
       {...props}
       preview={preview}
       pending={release.isPending}
-      onRelease={(trustSender) => release.mutate({ inboxId, emailId, trustSender })}
+      onRelease={(trustSender, reviewed) =>
+        release.mutate({ inboxId, emailId, trustSender, reviewed })
+      }
     />
   );
 }
@@ -133,7 +133,7 @@ function useSettle({ kind, onClose, onChange }: DialogProps) {
         toast(
           t("quarantine.heldAgain", {
             reason: t(`qr.${result.reason}`),
-            score: holdScore(result) ?? "–",
+            score: holdRisk(result) ?? "–",
           }),
           "warn",
         );
@@ -157,13 +157,13 @@ function ReleaseDialog({
   preview,
   pending,
   onClose,
+  onChange,
   onRelease,
-}: {
-  kind: Kind;
-  preview: { data?: QuarantinePreview | undefined; isError: boolean };
+}: DialogProps & {
+  preview: { data?: QuarantinePreview | undefined; isError: boolean; error?: unknown };
   pending: boolean;
-  onClose: () => void;
-  onRelease: (trustSender: boolean) => void;
+  /** The release as the person read it: whether to trust the sender, and the hold they reviewed. */
+  onRelease: (trustSender: boolean, reviewed: QuarantinePreview["reason"]) => void;
 }) {
   const t = useTranslations("inboxes");
   const [read, setRead] = useState(false);
@@ -171,13 +171,20 @@ function ReleaseDialog({
   const hold = preview.data;
   const ready = hold !== undefined && !pending && (read || !CONTENT_HOLDS.includes(hold.reason));
   const release = () => {
-    if (!hold || !ready) return;
-    onRelease(trust && hold.trustOffered);
+    // A support view only dims the button: a keyboard still reaches it.
+    if (!hold || !ready || refusedAsReadOnly()) return;
+    onRelease(trust && hold.trustOffered, hold.reason);
+  };
+  // A hold that couldn't be shown may be gone or released by now: closing
+  // refreshes the screen behind, so its Release button goes with it.
+  const close = () => {
+    onClose();
+    if (preview.isError) onChange();
   };
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={close}
       onConfirm={release}
       size="wide"
       title={t("quarantine.title", { kind })}
@@ -193,7 +200,7 @@ function ReleaseDialog({
         />
       ) : preview.isError ? (
         <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--ms-danger)" }}>
-          {t("detail.error")}
+          {releaseErrorText(t, preview.error, "detail.error")}
         </p>
       ) : (
         <div style={{ display: "grid", gap: 8, margin: "6px 0 0" }}>
@@ -211,7 +218,7 @@ function ReleaseDialog({
           type="button"
           className="ms-btn ms-btn-secondary"
           disabled={pending}
-          onClick={onClose}
+          onClick={close}
         >
           {t("quarantine.keep")} <span className="ms-keycap">Esc</span>
         </button>
@@ -252,7 +259,7 @@ function HoldDetails({
   // Red where the content or a forged sender is the risk; amber where only the sender is unknown.
   const contentHold = CONTENT_HOLDS.includes(hold.reason);
   const tone = contentHold ? "danger" : "warn";
-  const score = holdScore(hold);
+  const score = holdRisk(hold);
   const flagged = [
     ...screeningReasonWords(t, hold.reasons),
     ...(hold.hiddenTextRemoved ? [t("quarantine.hiddenText")] : []),
@@ -264,6 +271,15 @@ function HoldDetails({
       : [t("quarantine.score", { label: capitalize(t(`qr.${key}`)), score: value })];
   });
   const { replyWithoutApproval, webhooks, forwards } = hold.releaseEffects;
+  // The judge reads agent inboxes only: a people inbox's mail never meets it.
+  const screening =
+    kind === "human"
+      ? "final"
+      : hold.rescreenOnRelease
+        ? "rescreen"
+        : JUDGED_HOLDS.includes(hold.reason)
+          ? "notAgain"
+          : "skips";
   const channels = webhooks ? (forwards ? "both" : "webhooks") : forwards ? "forwards" : null;
   const effects = [
     kind === "human"
@@ -282,16 +298,7 @@ function HoldDetails({
           },
         ]
       : []),
-    {
-      icon: <RestoreIcon strokeWidth={1.6} />,
-      text: t(
-        hold.rescreenOnRelease
-          ? "quarantine.effects.rescreen"
-          : screenedBeforeHold(hold.reason)
-            ? "quarantine.effects.notAgain"
-            : "quarantine.effects.skips",
-      ),
-    },
+    { icon: <RestoreIcon strokeWidth={1.6} />, text: t(`quarantine.effects.${screening}`) },
   ];
   const trustLines = [
     t("quarantine.trustInbound", { kind }),
@@ -325,7 +332,11 @@ function HoldDetails({
         style={{ margin: "6px 0 18px", color: "var(--ms-muted)", fontSize: 13.5, lineHeight: 1.5 }}
       >
         <span style={{ color: "var(--ms-bone)", fontWeight: 600 }}>
-          {t("quarantine.subject", { subject: hold.subject ?? t("noSubject") })}
+          {hold.subject ? (
+            t("quarantine.subject", { subject: hold.subject })
+          ) : (
+            <span style={{ color: "var(--ms-muted)" }}>{t("noSubject")}</span>
+          )}
         </span>
         <br />
         {t.rich("quarantine.fromTo", { from: hold.from, inbox: hold.inboxAddress, mono })}
@@ -373,7 +384,7 @@ function HoldDetails({
                   color: "var(--ms-bone)",
                 }}
               >
-                {t("quarantine.notAllowlisted")}
+                {t("quarantine.notAllowlisted", { kind })}
               </p>
             ) : null}
             {hold.virusSignature ? (
@@ -460,13 +471,7 @@ function CheckCard({
   children?: React.ReactNode;
 }) {
   return (
-    <div
-      style={{
-        borderRadius: "var(--ms-r-input)",
-        border: `1px solid var(${checked ? "--ms-line-strong" : "--ms-line"})`,
-        background: checked ? "var(--ms-panel-raised)" : "none",
-      }}
-    >
+    <div className="ms-check-card">
       <label
         style={{
           display: "flex",

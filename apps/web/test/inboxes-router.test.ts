@@ -467,13 +467,24 @@ describe("releasing held mail", () => {
       phishingScore: 40,
     });
     expect(
-      await caller(acme).inboxes.quarantine.release({ inboxId, emailId, trustSender: false }),
+      await caller(acme).inboxes.quarantine.release({
+        inboxId,
+        emailId,
+        trustSender: false,
+        reviewed: "not_allowlisted",
+      }),
     ).toEqual({
       outcome: "held_again",
       reason: "injection",
       injectionScore: 92,
       phishingScore: 40,
     });
+    // The hold the dialog showed goes along, so one held again since is never released on it.
+    expect(core.releaseQuarantined).toHaveBeenLastCalledWith(
+      db,
+      expect.anything(),
+      expect.objectContaining({ reviewed: "not_allowlisted" }),
+    );
   });
 
   it("answers each refusal with the key the dialog shows copy for", async () => {

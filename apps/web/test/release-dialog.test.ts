@@ -29,12 +29,12 @@ vi.mock("next-intl", async (importOriginal) => {
       actual.createTranslator({ locale: lang.locale, messages: catalogs[lang.locale], namespace }),
   };
 });
-// What the preview answers by email (or catch-all row) id, whether it failed,
-// whether a release is in flight, each query asked, each mutation's options
+// What the preview answers by email (or catch-all row) id, the error it failed
+// with, if any, whether a release is in flight, each query asked, each mutation's options
 // and every release sent.
 const rq = vi.hoisted(() => ({
   previews: {} as Record<string, unknown>,
-  failed: false,
+  failed: null as { error: unknown } | null,
   pending: false,
   queried: [] as unknown[],
   settle: {} as Record<string, { onSuccess: (r: unknown) => void; onError: (e: unknown) => void }>,
@@ -43,7 +43,11 @@ const rq = vi.hoisted(() => ({
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { path: string; emailId: string }) => {
     rq.queried.push(options);
-    return { data: rq.previews[options.emailId], isError: rq.failed };
+    return {
+      data: rq.previews[options.emailId],
+      isError: rq.failed !== null,
+      error: rq.failed?.error,
+    };
   },
   useMutation: (options: (typeof rq.settle)[string] & { path: string }) => {
     rq.settle[options.path] = options;
@@ -129,7 +133,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   Object.assign(rq, {
     previews: {},
-    failed: false,
+    failed: null,
     pending: false,
     queried: [],
     settle: {},
@@ -211,7 +215,10 @@ describe("the release dialog", () => {
     expect(confirmButton()?.disabled).toBe(false);
     await press({ key: "Enter", metaKey: true });
     expect(rq.sent).toEqual([
-      { path: INBOX_RELEASE, variables: { inboxId: "i1", emailId: "e1", trustSender: false } },
+      {
+        path: INBOX_RELEASE,
+        variables: { inboxId: "i1", emailId: "e1", trustSender: false, reviewed: "injection" },
+      },
     ]);
   });
 
@@ -265,10 +272,11 @@ describe("the release dialog", () => {
     await click(confirmButton());
     await click(tick());
     await click(confirmButton());
-    expect(rq.sent.map((s) => (s.variables as { trustSender: boolean }).trustSender)).toEqual([
-      false,
-      true,
+    expect(rq.sent.map((s) => s.variables)).toEqual([
+      { inboxId: "i1", emailId: "e1", trustSender: false, reviewed: "not_allowlisted" },
+      { inboxId: "i1", emailId: "e1", trustSender: true, reviewed: "not_allowlisted" },
     ]);
+    expect(tick()?.closest(".ms-check-card")).not.toBeNull();
   });
 
   it("tells a member who can trust instead, and says nothing where trust can't help", async () => {
@@ -326,9 +334,14 @@ describe("the release dialog", () => {
       "Release this email into the inbox?",
     );
     expect(text).toContain("It shows up in the inbox as new mail.");
+    expect(text).toContain("It can't go back to quarantine.");
     expect(text).toContain("I've read this email and I'm sure it's safe.");
     expect(confirmButton()?.textContent).toContain("Release to inbox");
-    expect(text).not.toMatch(/agent/i);
+    expect(text).not.toMatch(/agent|screen/i);
+    await press({ key: "Escape" });
+    await openDialog({ ...notAllowlisted, inboxKind: "human", rescreenOnRelease: false }, "human");
+    expect(dialogText()).toContain("This inbox only takes mail from its allowlist.");
+    expect(dialogText()).not.toMatch(/screen/i);
   });
 
   it("reads in Brazilian Portuguese", async () => {
@@ -391,9 +404,46 @@ describe("the release dialog", () => {
     await press({ key: "Enter", metaKey: true });
     expect(rq.sent).toEqual([]);
     await press({ key: "Escape" });
-    rq.failed = true;
+    expect(onChange).not.toHaveBeenCalled();
+    rq.failed = { error: new Error("Failed to fetch") };
     await openDialog(undefined);
     expect(dialogText()).toContain("Couldn't load this email.");
+  });
+
+  it("says why a hold can't be shown, and refreshes the screen behind once closed", async () => {
+    const refusal = (message: string, code: string) =>
+      Object.assign(new Error(message), { data: { code } });
+    rq.failed = { error: refusal("not_quarantined", "CONFLICT") };
+    await openDialog(undefined);
+    expect(dialogText()).toContain("This email isn't in quarantine anymore.");
+    expect(onChange).not.toHaveBeenCalled();
+    await press({ key: "Escape" });
+    expect(onChange).toHaveBeenCalledOnce();
+    rq.failed = { error: refusal("NOT_FOUND", "NOT_FOUND") };
+    await openDialog(undefined);
+    expect(dialogText()).toContain("Email not found.");
+    await click(document.querySelector<HTMLElement>('[role="dialog"] .ms-btn-secondary'));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("quotes a subject, never the words standing in for a missing one", async () => {
+    await openDialog({ ...injection, subject: null });
+    expect(dialogText()).toContain("(no subject)");
+    expect(dialogText()).not.toContain("“(no subject)”");
+  });
+
+  it("sends nothing from a support view, keyboard included", async () => {
+    setReadOnly(true, "Read-only support view.");
+    try {
+      await openDialog(notAllowlisted);
+      await click(confirmButton());
+      await press({ key: "Enter", metaKey: true });
+      expect(rq.sent).toEqual([]);
+      expect(toast).toHaveBeenCalledWith("Read-only support view.", "danger");
+    } finally {
+      setReadOnly(false);
+    }
   });
 
   it("reads a catch-all row as held mail of no inbox, and releases it through the receiving router", async () => {
@@ -513,7 +563,7 @@ describe("the Released badge", () => {
   it("names who let it through, and says why it was held and when", async () => {
     expect(await tooltip({})).toEqual({
       badge: "Released by Ana Souza",
-      tip: "Held: prompt injection, risk 97/100.\nReleased by Ana Souza, 2m ago.",
+      tip: "Held for prompt injection, risk 97/100.\nReleased by Ana Souza, 2m ago.",
     });
   });
 
@@ -526,15 +576,19 @@ describe("the Released badge", () => {
         released_by: null,
       }),
     ).toEqual({ badge: "Released", tip: "Held: not on the allowlist.\nReleased 2m ago." });
+    expect(
+      (await tooltip({ quarantine_reason: "virus", injection_score: null, phishing_score: null }))
+        .tip,
+    ).toBe("Held for a virus.\nReleased by Ana Souza, 2m ago.");
   });
 
   it("reads in Brazilian Portuguese, one period where the time ends the sentence", async () => {
     expect(await tooltip({}, "pt-BR")).toEqual({
       badge: "Liberado por Ana Souza",
-      tip: "Retido: injeção de prompt, risco 97/100.\nLiberado por Ana Souza, há 2 min.",
+      tip: "Retido por injeção de prompt, risco 97/100.\nLiberado por Ana Souza, há 2 min.",
     });
     expect((await tooltip({ released_by: null }, "pt-BR")).tip).toBe(
-      "Retido: injeção de prompt, risco 97/100.\nLiberado há 2 min.",
+      "Retido por injeção de prompt, risco 97/100.\nLiberado há 2 min.",
     );
   });
 });

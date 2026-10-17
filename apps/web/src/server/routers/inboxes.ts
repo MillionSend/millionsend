@@ -32,6 +32,7 @@ import {
   liveInbox,
   MOVE_FOLDERS,
   openReceivedExtracted,
+  QUARANTINE_REASONS,
   rejectDraft,
   releasePreview,
   releaseQuarantined,
@@ -898,7 +899,15 @@ export const inboxesRouter = router({
       }),
 
     release: receivingProcedure
-      .input(z.object({ ...inboxRef, emailId: z.uuid(), trustSender: z.boolean().default(false) }))
+      .input(
+        z.object({
+          ...inboxRef,
+          emailId: z.uuid(),
+          trustSender: z.boolean().default(false),
+          /** The hold the dialog showed: one changed since answers held_again. */
+          reviewed: z.enum(QUARANTINE_REASONS).optional(),
+        }),
+      )
       .mutation(async ({ ctx, input }) =>
         releaseResult(
           await releaseQuarantined(ctx.db, releaseDeps(ctx), {
@@ -906,6 +915,7 @@ export const inboxesRouter = router({
             receivedEmailId: input.emailId,
             inboxId: input.inboxId,
             ...releaser(ctx),
+            reviewed: input.reviewed,
             trustSender: input.trustSender,
           }),
         ),

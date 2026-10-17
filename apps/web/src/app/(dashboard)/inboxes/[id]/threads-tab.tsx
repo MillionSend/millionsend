@@ -41,6 +41,8 @@ import { SearchBox, StateCard } from "../../emails/list-parts";
 import {
   approvalReasonWords,
   heldWhy,
+  holdOf,
+  type InboundScreening,
   type InboxDetail,
   messageHref,
   QuarantinedBadge,
@@ -687,19 +689,10 @@ function HeldNotice({
   screening,
 }: {
   kind: InboxDetail["kind"];
-  screening: Extract<ThreadMessage, { direction: "inbound" }>["screening"];
+  screening: InboundScreening;
 }) {
   const t = useTranslations("inboxes");
-  const why = heldWhy(
-    t,
-    {
-      reason: screening.quarantine_reason,
-      injectionScore: screening.injection_score,
-      phishingScore: screening.phishing_score,
-      reasons: screening.reasons,
-    },
-    false,
-  );
+  const why = heldWhy(t, holdOf(screening), false);
   return (
     <div style={{ marginTop: 10, display: "grid", gap: 3 }}>
       <p style={{ margin: 0, fontSize: 13, color: "var(--ms-danger)" }}>

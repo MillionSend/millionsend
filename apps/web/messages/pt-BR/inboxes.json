@@ -244,7 +244,7 @@
     "score": "{label} {score}/100",
     "sender": "Remetente: {trust}",
     "hiddenText": "Tinha texto oculto, que foi removido",
-    "notAllowlisted": "Esta caixa só aceita e-mails da lista de permitidos, então ele ficou retido antes da análise.",
+    "notAllowlisted": "{kind, select, human {Esta caixa só aceita e-mails da lista de permitidos.} other {Esta caixa só aceita e-mails da lista de permitidos, então ele ficou retido antes da análise.}}",
     "effects": {
       "agent": "O agente recebe como e-mail novo: pode fazer o que ele pede.",
       "agentReply": "O agente recebe como e-mail novo: pode fazer o que ele pede e responder ao remetente sem aprovação.",
@@ -252,6 +252,7 @@
       "channels": "{channels, select, both {Os webhooks disparam e as cópias encaminhadas saem, como em qualquer e-mail novo.} webhooks {Os webhooks disparam, como em qualquer e-mail novo.} other {As cópias encaminhadas saem, como em qualquer e-mail novo.}}",
       "notAgain": "Ele não é analisado de novo e não volta para a quarentena.",
       "skips": "Ele não passa pela análise e não volta para a quarentena.",
+      "final": "Ele não volta para a quarentena.",
       "rescreen": "Antes, ele passa pela análise quando der, e continua retido se o risco for 80 ou mais. Depois de liberado, não volta para a quarentena."
     },
     "ack": "{kind, select, human {Li este e-mail e tenho certeza de que é seguro.} other {Li este e-mail e ele é seguro para o agente.}}",
@@ -275,7 +276,7 @@
   },
   "released": {
     "badge": "Liberado por {who}",
-    "held": "Retido: {reason}{score, select, none {} other {, risco {score}/100}}.",
+    "held": "{code, select, injection {Retido por injeção de prompt} phishing {Retido por phishing} virus {Retido por vírus} failed_auth {Retido por falha na autenticação} other {Retido: {reason}}}{score, select, none {} other {, risco {score}/100}}.",
     "by": "Liberado por {who}, {time}.",
     "at": "Liberado {time}."
   },

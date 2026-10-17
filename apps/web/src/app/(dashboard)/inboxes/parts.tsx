@@ -1,5 +1,6 @@
 "use client";
 
+import { holdRisk } from "@millionsend/core/release-rules";
 import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useLocale, useTranslations } from "next-intl";
@@ -14,7 +15,7 @@ type Outputs = inferRouterOutputs<AppRouter>["inboxes"];
 export type InboxDetail = Outputs["get"];
 export type ThreadRow = Outputs["threads"]["list"]["items"][number];
 export type ThreadMessage = Outputs["threads"]["emails"]["items"][number];
-type InboundScreening = Extract<ThreadMessage, { direction: "inbound" }>["screening"];
+export type InboundScreening = Extract<ThreadMessage, { direction: "inbound" }>["screening"];
 /** Held mail as the release dialog reads it, whichever screen opened it. */
 export type QuarantinePreview = Outputs["quarantine"]["preview"];
 /** A release's answer: delivered, or held again by the screening it ran first. */
@@ -73,7 +74,10 @@ export function SuspiciousBadge({
   );
 }
 
-/** "Released by Ana Souza": held mail a person let through; why it was held, and when, in its tooltip. */
+/**
+ * "Released by Ana Souza": held mail someone released (a person, a key or an
+ * MCP client); why it was held, and when, in its tooltip.
+ */
 export function ReleasedBadge({
   screening,
   releasedAt,
@@ -83,18 +87,15 @@ export function ReleasedBadge({
 }) {
   const t = useTranslations("inboxes");
   const locale = useLocale();
-  const reason = screening.quarantine_reason;
-  const score = holdScore({
-    reason,
-    injectionScore: screening.injection_score,
-    phishingScore: screening.phishing_score,
-  });
+  const hold = holdOf(screening);
+  const score = holdRisk(hold);
   const who = screening.released_by;
   // It ends a sentence, whose own period would double pt-BR's "há 2 min.".
   const time = formatRelative(releasedAt, locale).replace(/\.$/, "");
   const tip = [
     t("released.held", {
-      reason: reason ? t(`qr.${reason}`) : "",
+      code: hold.reason ?? "other",
+      reason: hold.reason ? t(`qr.${hold.reason}`) : "",
       score: score === null ? "none" : String(score),
     }),
     who ? t("released.by", { who, time }) : t("released.at", { time }),
@@ -113,12 +114,17 @@ interface Hold {
   reason: string | null;
   injectionScore: number | null;
   phishingScore: number | null;
+  reasons: readonly string[];
 }
 
-/** The risk behind a hold: the score of what screening found; other reasons have none. */
-export function holdScore(hold: Hold): number | null {
-  if (hold.reason === "injection") return hold.injectionScore;
-  return hold.reason === "phishing" ? hold.phishingScore : null;
+/** A thread message's hold, as the other surfaces carry it. */
+export function holdOf(screening: InboundScreening): Hold {
+  return {
+    reason: screening.quarantine_reason,
+    injectionScore: screening.injection_score,
+    phishingScore: screening.phishing_score,
+    reasons: screening.reasons,
+  };
 }
 
 /** The screening's reasons in words; a key with no words yet is left out. */
@@ -138,10 +144,10 @@ export function screeningReasonWords(
  */
 export function heldWhy(
   t: ReturnType<typeof useTranslations>,
-  hold: Hold & { reasons: readonly string[] },
+  hold: Hold,
   leadReason: boolean,
 ): string {
-  const score = holdScore(hold);
+  const score = holdRisk(hold);
   const risk = score === null ? [] : [t("quarantine.risk", { score })];
   const words = screeningReasonWords(t, hold.reasons);
   const parts =
@@ -151,18 +157,18 @@ export function heldWhy(
   return parts.join(" · ");
 }
 
-/** Holds screening already judged, so a release never screens them again. */
-export function screenedBeforeHold(reason: string): boolean {
-  return ["injection", "phishing", "virus"].includes(reason);
-}
-
-/** A refused or failed release in words: the server's stable message keys pick the copy. */
-export function releaseErrorText(t: ReturnType<typeof useTranslations>, error: unknown): string {
+/**
+ * A refused or failed release, or its preview, in words: the server's stable
+ * message keys pick the copy, `fallback` words anything else.
+ */
+export function releaseErrorText(
+  t: ReturnType<typeof useTranslations>,
+  error: unknown,
+  fallback: "quarantine.errors.failed" | "detail.error" = "quarantine.errors.failed",
+): string {
   const key = (error as { message?: string } | null)?.message ?? "";
   if (t.has(`quarantine.errors.${key}`)) return t(`quarantine.errors.${key}`);
-  return trpcErrorCode(error) === "NOT_FOUND"
-    ? t("detail.notFound")
-    : t("quarantine.errors.failed");
+  return trpcErrorCode(error) === "NOT_FOUND" ? t("detail.notFound") : t(fallback);
 }
 
 /**

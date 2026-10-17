@@ -244,7 +244,7 @@
     "score": "{label} {score}/100",
     "sender": "Sender: {trust}",
     "hiddenText": "Hidden text was removed from it",
-    "notAllowlisted": "This inbox only takes mail from its allowlist, so it was held before screening could read it.",
+    "notAllowlisted": "{kind, select, human {This inbox only takes mail from its allowlist.} other {This inbox only takes mail from its allowlist, so it was held before screening could read it.}}",
     "effects": {
       "agent": "Your agent gets it as new mail: it can act on what it says.",
       "agentReply": "Your agent gets it as new mail: it can act on what it says and reply to the sender without approval.",
@@ -252,6 +252,7 @@
       "channels": "{channels, select, both {Webhooks fire and forward copies go out, as for any new mail.} webhooks {Webhooks fire, as for any new mail.} other {Forward copies go out, as for any new mail.}}",
       "notAgain": "It isn't screened again and can't go back to quarantine.",
       "skips": "It skips screening and can't go back to quarantine.",
+      "final": "It can't go back to quarantine.",
       "rescreen": "It's screened first when screening can run, and stays held at a risk of 80 or more. Once released, it can't go back to quarantine."
     },
     "ack": "{kind, select, human {I've read this email and I'm sure it's safe.} other {I've read this email and it's safe for my agent.}}",
@@ -275,7 +276,7 @@
   },
   "released": {
     "badge": "Released by {who}",
-    "held": "Held: {reason}{score, select, none {} other {, risk {score}/100}}.",
+    "held": "{code, select, injection {Held for prompt injection} phishing {Held for phishing} virus {Held for a virus} failed_auth {Held for failed authentication} other {Held: {reason}}}{score, select, none {} other {, risk {score}/100}}.",
     "by": "Released by {who}, {time}.",
     "at": "Released {time}."
   },
