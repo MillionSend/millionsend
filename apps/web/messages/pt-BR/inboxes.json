@@ -183,7 +183,7 @@
   "riskScores": "Risco (0–100): injeção de prompt {injection} · phishing {phishing}. A partir de 80, o e-mail fica retido na quarentena.",
   "message": {
     "screening": "Em análise…",
-    "quarantined": "Retido em quarentena: o agente só vê depois que alguém liberar.",
+    "quarantined": "{kind, select, human {Retido em quarentena: só aparece na caixa depois que alguém liberar.} other {Retido em quarentena: o agente só vê depois que alguém liberar.}}",
     "hiddenText": "Texto oculto removido"
   },
   "mail": {
@@ -231,7 +231,47 @@
     "scoreLine": "injeção {injection} · phishing {phishing}"
   },
   "release": "Liberar",
-  "releaseTrust": "Liberar e confiar no remetente",
+  "quarantine": {
+    "title": "{kind, select, human {Liberar este e-mail para a caixa?} other {Liberar este e-mail para o agente?}}",
+    "subject": "“{subject}”",
+    "fromTo": "de <mono>{from}</mono> para <mono>{inbox}</mono>",
+    "why": "Por que ficou retido",
+    "text": "Texto do e-mail",
+    "noText": "Este e-mail não tem texto.",
+    "ifReleased": "Se você liberar",
+    "risk": "risco {score}/100",
+    "score": "{label} {score}/100",
+    "sender": "Remetente: {trust}",
+    "hiddenText": "Tinha texto oculto, que foi removido",
+    "notAllowlisted": "Esta caixa só aceita e-mails da lista de permitidos, então ele ficou retido antes da análise.",
+    "effects": {
+      "agent": "O agente recebe como e-mail novo: pode fazer o que ele pede.",
+      "agentReply": "O agente recebe como e-mail novo: pode fazer o que ele pede e responder ao remetente sem aprovação.",
+      "human": "Ele aparece na caixa como e-mail novo.",
+      "channels": "{channels, select, both {Os webhooks disparam e as cópias encaminhadas saem, como em qualquer e-mail novo.} webhooks {Os webhooks disparam, como em qualquer e-mail novo.} other {As cópias encaminhadas saem, como em qualquer e-mail novo.}}",
+      "notAgain": "Ele não é analisado de novo e não volta para a quarentena.",
+      "skips": "Ele não passa pela análise e não volta para a quarentena.",
+      "rescreen": "Antes, ele passa pela análise quando der, e continua retido se o risco for 80 ou mais. Depois de liberado, não volta para a quarentena."
+    },
+    "ack": "{kind, select, human {Li este e-mail e tenho certeza de que é seguro.} other {Li este e-mail e ele é seguro para o agente.}}",
+    "trust": "Confiar também em <mono>{address}</mono>",
+    "trustLead": "Coloca o endereço na lista de permitidos desta caixa:",
+    "trustInbound": "{kind, select, human {Os próximos e-mails dele chegam à caixa, desde que sejam autenticados. Vírus continuam retidos.} other {Os próximos e-mails dele chegam ao agente sem análise, desde que sejam autenticados. Vírus continuam retidos.}}",
+    "trustSend": "O agente pode começar conversas novas com ele sem aprovação.",
+    "trustCodes": "O agente pode enviar para ele os códigos e links de acesso que esta caixa receber.",
+    "trustAdmins": "Donos e admins também podem colocar o remetente na lista de permitidos.",
+    "keep": "Manter na quarentena",
+    "confirm": "{kind, select, human {Liberar para a caixa} other {Liberar para o agente}}",
+    "done": "{kind, select, human {Liberado para a caixa.} other {Liberado para o agente.}}",
+    "heldAgain": "A análise encontrou {reason} (risco {score}/100). Ele continua na quarentena.",
+    "errors": {
+      "trust_not_allowed": "Você não pode colocar este remetente na lista de permitidos. Desmarque “Confiar também” para liberar o e-mail.",
+      "allowlist_full": "A lista de permitidos desta caixa está cheia. Desmarque “Confiar também” ou remova um endereço em Segurança e regras.",
+      "not_quarantined": "Este e-mail não está mais na quarentena.",
+      "forbidden": "Você não pode liberar este e-mail.",
+      "failed": "Não foi possível liberar este e-mail. Tente de novo."
+    }
+  },
   "qr": {
     "failed_auth": "falhou na autenticação",
     "unauthenticated_sender": "remetente não verificado",
@@ -241,6 +281,14 @@
     "virus": "vírus",
     "unscreened": "não deu para analisar",
     "screening_cap": "limite diário de análise atingido"
+  },
+  "screeningReason": {
+    "targets_agent": "Fala com uma IA, não com uma pessoa",
+    "override": "Tenta mudar as instruções de quem lê",
+    "exfiltration": "Pede para mandar códigos, links, chaves ou dados para fora",
+    "unsafe_action": "Pede uma ação fora da conversa",
+    "concealed": "Esconde instruções",
+    "credential_lure": "Pede senhas, códigos ou dados de cartão"
   },
   "trust": {
     "owner": "Responsável",

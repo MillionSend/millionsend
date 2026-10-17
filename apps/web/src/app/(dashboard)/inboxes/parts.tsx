@@ -5,7 +5,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslations } from "next-intl";
 import type { BadgeTone } from "@/components/status-badge";
 import { Tooltip } from "@/components/tooltip";
-import { addrSpec } from "@/lib/format";
+import { addrSpec, capitalize } from "@/lib/format";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import type { AppRouter } from "@/server/routers";
 
@@ -14,6 +14,10 @@ type Outputs = inferRouterOutputs<AppRouter>["inboxes"];
 export type InboxDetail = Outputs["get"];
 export type ThreadRow = Outputs["threads"]["list"]["items"][number];
 export type ThreadMessage = Outputs["threads"]["emails"]["items"][number];
+/** Held mail as the release dialog reads it, whichever screen opened it. */
+export type QuarantinePreview = Outputs["quarantine"]["preview"];
+/** A release's answer: delivered, or held again by the screening it ran first. */
+export type ReleaseResult = Outputs["quarantine"]["release"];
 
 export type SenderTrust =
   | "owner"
@@ -66,6 +70,80 @@ export function SuspiciousBadge({
       <span className="ms-badge ms-badge-warn">{t("received.verdict.suspicious")}</span>
     </Tooltip>
   );
+}
+
+/** What a hold rests on, as the thread wire, the Received page and the release dialog each carry it. */
+interface Hold {
+  reason: string | null;
+  injectionScore: number | null;
+  phishingScore: number | null;
+}
+
+/** The risk behind a hold: the score of what screening found; other reasons have none. */
+export function holdScore(hold: Hold): number | null {
+  if (hold.reason === "injection") return hold.injectionScore;
+  return hold.reason === "phishing" ? hold.phishingScore : null;
+}
+
+/** The screening's reasons in words; a key with no words yet is left out. */
+export function screeningReasonWords(
+  t: ReturnType<typeof useTranslations>,
+  reasons: readonly string[],
+): string[] {
+  return reasons.flatMap((key) =>
+    t.has(`screeningReason.${key}`) ? [t(`screeningReason.${key}`)] : [],
+  );
+}
+
+/**
+ * Why mail is held, " · "-joined: its risk and the screening's reasons, led by
+ * the reason itself where no badge beside the line names it. Empty when none
+ * of that is known.
+ */
+export function heldWhy(
+  t: ReturnType<typeof useTranslations>,
+  hold: Hold & { reasons: readonly string[] },
+  leadReason: boolean,
+): string {
+  const score = holdScore(hold);
+  const risk = score === null ? [] : [t("quarantine.risk", { score })];
+  const words = screeningReasonWords(t, hold.reasons);
+  const parts =
+    leadReason && hold.reason
+      ? [capitalize(t(`qr.${hold.reason}`)), ...risk, ...words]
+      : [...risk.map(capitalize), ...words];
+  return parts.join(" · ");
+}
+
+/**
+ * Holds released only once "I've read this email" is ticked: what screening
+ * flagged, and a sender whose From is probably forged.
+ */
+export function releaseNeedsRead(reason: string): boolean {
+  return ["injection", "phishing", "virus", "failed_auth"].includes(reason);
+}
+
+/** Holds screening already judged, so a release never screens them again. */
+export function screenedBeforeHold(reason: string): boolean {
+  return ["injection", "phishing", "virus"].includes(reason);
+}
+
+/**
+ * Whether the allowlist would let the sender's next mail in: a verified sender
+ * held only for not being on it. The server decides who may trust; this only
+ * words the case for those who can't.
+ */
+export function trustWouldAdmit(hold: Pick<QuarantinePreview, "reason" | "senderTrust">): boolean {
+  return hold.reason === "not_allowlisted" && hold.senderTrust === "external";
+}
+
+/** A refused or failed release in words: the server's stable message keys pick the copy. */
+export function releaseErrorText(t: ReturnType<typeof useTranslations>, error: unknown): string {
+  const key = (error as { message?: string } | null)?.message ?? "";
+  if (t.has(`quarantine.errors.${key}`)) return t(`quarantine.errors.${key}`);
+  return trpcErrorCode(error) === "NOT_FOUND"
+    ? t("detail.notFound")
+    : t("quarantine.errors.failed");
 }
 
 /**
