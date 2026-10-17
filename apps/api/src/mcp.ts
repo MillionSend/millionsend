@@ -47,7 +47,6 @@ import {
 import {
   createInboxRequestSchema,
   inboxSafetyPatchBodySchema,
-  releaseRequestSchema,
   updateInboxRequestSchema,
   updateThreadRequestSchema,
 } from "./schemas/inboxes.js";
@@ -1360,7 +1359,7 @@ function buildServer(
       {
         title: "List quarantined emails",
         description:
-          "List an inbox's quarantined emails, newest first, with cursor pagination: sender, subject, why each was held, the sender's trust tier, injection and phishing scores and any virus signature. Their content is not readable here or anywhere else through these tools until release_email delivers them.",
+          "List an inbox's quarantined emails, newest first, with cursor pagination: sender, subject, why each was held, the sender's trust tier, injection and phishing scores and any virus signature. Their content is not readable here or anywhere else through these tools until they are released.",
         inputSchema: listQuerySchema.extend({ inbox_id: inboxId }),
         readOnly: true,
       },
@@ -2054,15 +2053,14 @@ function buildServer(
       {
         title: "Release quarantined email",
         description:
-          "Deliver a quarantined email to its inbox as if it had passed screening; it is never screened again, and mail that carries malware keeps its downloads blocked. trust_sender also adds the sender's address to the inbox allowlist.",
+          "Deliver an email held as not_allowlisted, unauthenticated_sender, unscreened or screening_cap to its inbox. Mail held before screening ran is screened first and stays in quarantine when screening finds prompt injection or phishing (held_by_screening). Mail held for prompt injection, phishing, a virus or failed authentication is released only by a person, in the dashboard (forbidden), and only a person can put a sender on the allowlist.",
         inputSchema: z.object({
           inbox_id: inboxId,
           email_id: z.uuid().describe("Quarantined email id from list_quarantined_emails"),
-          trust_sender: releaseRequestSchema.shape.trust_sender,
         }),
       },
-      ({ inbox_id, email_id, ...body }) =>
-        api("POST", `/inboxes/${enc(inbox_id)}/quarantine/${enc(email_id)}/release`, body),
+      ({ inbox_id, email_id }) =>
+        api("POST", `/inboxes/${enc(inbox_id)}/quarantine/${enc(email_id)}/release`, {}),
     );
   }
 

@@ -109,7 +109,12 @@ describe("POST /inboxes/{id}/quarantine/{email_id}/release", () => {
   it("releases for a team key and answers the release object", async () => {
     const emailId = randomUUID();
     const at = new Date("2026-10-12T10:00:00Z");
-    released.mockResolvedValue({ ok: true, releasedAt: at, trustedSender: "ana@sender.test" });
+    released.mockResolvedValue({
+      ok: true,
+      outcome: "released",
+      releasedAt: at,
+      trustedSender: "ana@sender.test",
+    });
     const res = await call(teamKey, "POST", `/inboxes/${inboxId}/quarantine/${emailId}/release`, {
       trust_sender: true,
     });
@@ -121,9 +126,10 @@ describe("POST /inboxes/{id}/quarantine/{email_id}/release", () => {
       released_at: at.toISOString(),
       trusted_sender: "ana@sender.test",
     });
+    // The keyring goes along, so the events of the released mail name its attachments.
     expect(released).toHaveBeenCalledWith(
       expect.anything(),
-      expect.anything(),
+      expect.objectContaining({ keyring: expect.anything() }),
       expect.objectContaining({
         teamId,
         receivedEmailId: emailId,
@@ -132,6 +138,42 @@ describe("POST /inboxes/{id}/quarantine/{email_id}/release", () => {
         actor: expect.objectContaining({ kind: "api_key", inboxId: null }),
       }),
     );
+  });
+
+  it("answers each refusal with its own error, and screening's hold as a conflict", async () => {
+    const release = () =>
+      call(teamKey, "POST", `/inboxes/${inboxId}/quarantine/${randomUUID()}/release`, {
+        trust_sender: true,
+      });
+    released.mockResolvedValue({ ok: false, reason: "forbidden" });
+    const forbidden = await release();
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({
+      name: "forbidden",
+      message: expect.stringContaining("release it in the dashboard"),
+    });
+    released.mockResolvedValue({ ok: false, reason: "trust_not_allowed" });
+    const trust = await release();
+    expect(trust.status).toBe(403);
+    expect(await trust.json()).toMatchObject({
+      name: "trust_not_allowed",
+      message: expect.stringContaining("not_allowlisted from a verified sender"),
+    });
+    released.mockResolvedValue({
+      ok: true,
+      outcome: "held_again",
+      reason: "injection",
+      injectionScore: 92,
+      phishingScore: 40,
+    });
+    const held = await release();
+    expect(held.status).toBe(409);
+    expect(await held.json()).toEqual({
+      statusCode: 409,
+      name: "held_by_screening",
+      message:
+        "Screening found prompt injection (risk 92/100), so the email stays in quarantine as injection",
+    });
   });
 
   it("takes no body, maps refusals, and never reaches the function for an inbox key", async () => {

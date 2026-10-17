@@ -1550,9 +1550,14 @@ describe("receiving tools", () => {
 
   /**
    * Hands `raw` to the API as the MX does and answers the stored email's id.
-   * With auth "pass" the sender is DMARC-aligned (trust tier external).
+   * With auth "pass" the sender is DMARC-aligned (trust tier external); with
+   * "fail" it failed authentication.
    */
-  async function deliver(raw: string, recipients: string[], auth: "pass" | "none" = "pass") {
+  async function deliver(
+    raw: string,
+    recipients: string[],
+    auth: "pass" | "none" | "fail" = "pass",
+  ) {
     const res = await app.request(`${MX_INGEST_PATH}${MX_DELIVER_PATH}`, {
       method: "POST",
       headers: {
@@ -2284,18 +2289,19 @@ describe("receiving tools", () => {
         data: [{ id: heldId, quarantine_reason: "not_allowlisted", sender_trust: "external" }],
       });
 
+      // Only a person trusts a sender: the agent's release leaves the allowlist alone.
       expect(
         resultJson(
           await client.callTool({
             name: "release_email",
-            arguments: { inbox_id: guardedId, email_id: heldId, trust_sender: true },
+            arguments: { inbox_id: guardedId, email_id: heldId },
           }),
         ),
       ).toMatchObject({
         object: "inbox_release",
         inbox_id: guardedId,
         email_id: heldId,
-        trusted_sender: "stranger@elsewhere.test",
+        trusted_sender: null,
       });
       expect(await codeOf()).toMatchObject({ status: "found", code: "555123" });
       expect(
@@ -2310,6 +2316,45 @@ describe("receiving tools", () => {
           }),
         ),
       ).toEqual({ status: "timeout" });
+      await client.close();
+    });
+
+    it("never release mail held for its content or a failed authentication", async () => {
+      const client = await connect(await mintToken());
+      const inbox = resultJson(
+        await client.callTool({
+          name: "create_inbox",
+          arguments: { email_address: "careful@inbound.acme.dev" },
+        }),
+      );
+      const forged = await deliver(
+        message({
+          to: "careful@inbound.acme.dev",
+          subject: "Invoice overdue",
+          text: "Pay today at the link below.",
+          id: "forged@elsewhere.test",
+        }),
+        ["careful@inbound.acme.dev"],
+        "fail",
+      );
+      const refused = await client.callTool({
+        name: "release_email",
+        arguments: { inbox_id: String(inbox.id), email_id: forged },
+      });
+      expect(refused.isError).toBe(true);
+      expect(resultJson(refused)).toMatchObject({
+        statusCode: 403,
+        name: "forbidden",
+        message: expect.stringContaining("A person must review this email"),
+      });
+      expect(
+        resultJson(
+          await client.callTool({
+            name: "list_quarantined_emails",
+            arguments: { inbox_id: String(inbox.id) },
+          }),
+        ),
+      ).toMatchObject({ data: [{ id: forged, quarantine_reason: "failed_auth" }] });
       await client.close();
     });
 

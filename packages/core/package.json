@@ -87,6 +87,10 @@
     "./inbox-organize": {
       "types": "./src/inboxes/organize.ts",
       "default": "./src/inboxes/organize.ts"
+    },
+    "./release-rules": {
+      "types": "./src/inboxes/release-rules.ts",
+      "default": "./src/inboxes/release-rules.ts"
     }
   },
   "scripts": {

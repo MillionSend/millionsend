@@ -57,12 +57,13 @@ import { HEX_COLOR_RE } from "@/lib/hex-color";
 import { fetchQuotaRow } from "../billing";
 import {
   actorNames,
-  forwardQuietly,
   inboxDeps,
   inboxFailure,
   inboxSendDeps,
   planUsage,
-  releaseFailure,
+  releaseDeps,
+  releaseResult,
+  releaser,
   sendResult,
   sharedSending,
   userActor,
@@ -835,24 +836,17 @@ export const inboxesRouter = router({
 
     release: receivingProcedure
       .input(z.object({ ...inboxRef, emailId: z.uuid(), trustSender: z.boolean().default(false) }))
-      .mutation(async ({ ctx, input }) => {
-        const result = await releaseQuarantined(
-          ctx.db,
-          {
-            enqueueWebhookDeliveries: ctx.enqueueWebhookDeliveries,
-            enqueueInboxForward: forwardQuietly,
-          },
-          {
+      .mutation(async ({ ctx, input }) =>
+        releaseResult(
+          await releaseQuarantined(ctx.db, releaseDeps(ctx), {
             teamId: ctx.teamId,
             receivedEmailId: input.emailId,
             inboxId: input.inboxId,
-            actor: userActor(ctx),
+            ...releaser(ctx),
             trustSender: input.trustSender,
-          },
-        );
-        if (!result.ok) throw releaseFailure(result.reason);
-        return { releasedAt: result.releasedAt, trustedSender: result.trustedSender };
-      }),
+          }),
+        ),
+      ),
   }),
 
   activity: router({

@@ -532,16 +532,30 @@ describe("received mail as Inboxes reads it", () => {
   });
 
   it("releases a virus-held catch-all row, which belongs to no inbox", async () => {
+    const releasedAt = new Date();
     core.releaseQuarantined.mockResolvedValue({
       ok: true,
-      releasedAt: new Date(),
+      outcome: "released",
+      releasedAt,
       trustedSender: null,
     });
-    await caller(acme).receiving.release({ id: infected });
+    expect(await caller(acme).receiving.release({ id: infected })).toEqual({
+      outcome: "released",
+      releasedAt,
+      trustedSender: null,
+    });
     expect(core.releaseQuarantined).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ enqueueInboxForward: expect.any(Function) }),
-      expect.objectContaining({ teamId: acme, receivedEmailId: infected, inboxId: null }),
+      expect.objectContaining({
+        enqueueInboxForward: expect.any(Function),
+        keyring: expect.anything(),
+      }),
+      expect.objectContaining({
+        teamId: acme,
+        receivedEmailId: infected,
+        inboxId: null,
+        trustSender: false,
+      }),
     );
     core.releaseQuarantined.mockResolvedValue({ ok: false, reason: "not_quarantined" });
     await expect(caller(acme).receiving.release({ id: infected })).rejects.toMatchObject({
