@@ -442,13 +442,15 @@ async function judgeBeforeRelease(
         keyring,
         settings: await instanceSettings(db, { monitorSettings: screen.settings }),
         timeoutMs: screen.timeoutMs,
-        retries: 0,
+        // A person waits on the answer: one quick retry rides out a passing throttle.
+        retries: 1,
+        backoffMs: 250,
       },
       { row, tier: held.senderTrust, inboxId: p.inboxId, now: p.now },
     );
     return { reason, run };
   } catch (err) {
-    // A judge that can't run leaves the person's decision standing.
+    // A judge that can't run leaves the releaser's decision standing.
     console.warn(
       `release: screening of ${p.receivedEmailId} failed (${err instanceof Error ? err.name : "error"})`,
     );
@@ -463,9 +465,11 @@ async function judgeBeforeRelease(
  * again; trustSender also allowlists the From address. A hold made before
  * screening is judged first, against the line inbound mail meets: at it,
  * the message stays held for what the judge found (held_again), and a judge
- * that can't answer leaves the person's decision standing. Without an
- * inbox: a catch-all row held for a virus becomes visible. A virus release
- * still never serves the files or the raw message.
+ * that can't answer leaves the releaser's decision standing. A hold that
+ * changed since it was reviewed (`reviewed`) or judged answers held_again
+ * as it now stands. Without an inbox: a catch-all row held for a virus
+ * becomes visible. A virus release still never serves the files or the raw
+ * message.
  */
 export async function releaseQuarantined(
   db: Db,
@@ -477,6 +481,8 @@ export async function releaseQuarantined(
     actor: InboxActor;
     /** The person releasing is an owner or admin. */
     admin?: boolean | undefined;
+    /** The hold the person read before releasing, as the release dialog showed it. */
+    reviewed?: QuarantineReason | undefined;
     trustSender: boolean;
     now?: Date | undefined;
   },
@@ -508,7 +514,10 @@ export async function releaseQuarantined(
       .where(and(eq(r.id, p.receivedEmailId), eq(r.teamId, p.teamId)))
       .for("update");
     if (!row) return { ok: false, reason: "not_found" };
-    const attachments = deps.keyring ? await openReceivedAttachments(row, deps.keyring) : [];
+    // A list that can't be opened (corrupt, an unknown key version) only leaves the events naming none.
+    const attachments = deps.keyring
+      ? await openReceivedAttachments(row, deps.keyring).catch(() => [])
+      : [];
     if (p.inboxId === null) {
       if (!row.catchAll || row.virusVerdict !== "fail") return { ok: false, reason: "not_found" };
       if (row.releasedAt) return { ok: false, reason: "not_quarantined" };
@@ -539,10 +548,9 @@ export async function releaseQuarantined(
     if (!membership) return { ok: false, reason: "not_found" };
     if (membership.verdict !== "quarantined") return { ok: false, reason: "not_quarantined" };
     const reason = membership.reason ?? "unscreened";
-    const refused = refusal(reason, membership.senderTrust);
-    if (refused) return { ok: false, reason: refused };
-    // Another release judged it meanwhile and held it again: that verdict stands.
-    if (judged && judged.reason !== reason) {
+    // Another release's screening held it again since it was read or judged:
+    // that verdict stands, never released on a reading of the old hold.
+    if ((p.reviewed ?? reason) !== reason || (judged && judged.reason !== reason)) {
       return {
         ok: true,
         outcome: "held_again",
@@ -551,6 +559,8 @@ export async function releaseQuarantined(
         phishingScore: membership.phishingScore,
       };
     }
+    const refused = refusal(reason, membership.senderTrust);
+    if (refused) return { ok: false, reason: refused };
     const verdict = judged?.run.verdict ?? null;
     const scores = verdict
       ? {

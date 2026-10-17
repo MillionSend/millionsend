@@ -87,6 +87,8 @@ export async function judgeReceived(
     settings: MonitorSettings;
     timeoutMs: number;
     retries: number;
+    /** The first wait after a throttle (THROTTLE_BACKOFF_MS by default); each retry doubles it. */
+    backoffMs?: number | undefined;
     /** Waits between throttled calls; tests skip the wait. */
     sleep?: ((ms: number) => Promise<void>) | undefined;
   },
@@ -146,7 +148,7 @@ export async function judgeReceived(
     } catch (err) {
       const errorClass = judgeErrorClass(err);
       if (errorClass === "throttled" && attempt < deps.retries) {
-        await sleep(THROTTLE_BACKOFF_MS * 2 ** attempt);
+        await sleep((deps.backoffMs ?? THROTTLE_BACKOFF_MS) * 2 ** attempt);
         continue;
       }
       return { verdict: null, record: record(errorClass, Date.now() - started) };

@@ -11,7 +11,7 @@ import { deriveInboxKeys } from "../src/inboxes/keys.js";
 import { releasePreview } from "../src/inboxes/quarantine.js";
 import { CONTENT_HOLDS, releaseRights, screensOnRelease } from "../src/inboxes/release-rules.js";
 import { defaultSafety, type InboxSafety } from "../src/inboxes/safety.js";
-import { QUARANTINE_REASONS, SENDER_TRUSTS } from "../src/inboxes/types.js";
+import { QUARANTINE_REASONS, type QuarantineReason, SENDER_TRUSTS } from "../src/inboxes/types.js";
 import type { MonitorSettings } from "../src/monitor-settings.js";
 import { releaseQuarantined } from "../src/receiving/delivery.js";
 import { ingestReceivedEmail } from "../src/receiving/ingest.js";
@@ -250,7 +250,13 @@ const hookPayloads = async (emailId: string) =>
 const release = (
   id: string,
   inboxId: string | null,
-  o: { actor?: InboxActor; admin?: boolean; trust?: boolean; screen?: ReleaseScreen } = {},
+  o: {
+    actor?: InboxActor;
+    admin?: boolean;
+    trust?: boolean;
+    reviewed?: QuarantineReason;
+    screen?: ReleaseScreen;
+  } = {},
 ) =>
   releaseQuarantined(
     db,
@@ -261,6 +267,7 @@ const release = (
       inboxId,
       actor: o.actor ?? OWNER,
       admin: o.admin ?? true,
+      reviewed: o.reviewed,
       trustSender: o.trust ?? false,
       now: NOW,
     },
@@ -429,7 +436,8 @@ describe("screening on release", () => {
         .where(and(eq(m.receivedEmailId, id), eq(m.inboxId, inbox)));
       return verdict();
     });
-    expect(await release(id, inbox, { screen: screenWith(screen) })).toEqual({
+    // Trust ticked too: the new hold answers, not a refusal of the trust it no longer allows.
+    expect(await release(id, inbox, { trust: true, screen: screenWith(screen) })).toEqual({
       ok: true,
       outcome: "held_again",
       reason: "phishing",
@@ -437,6 +445,67 @@ describe("screening on release", () => {
       phishingScore: 88,
     });
     expect(await membership(id, inbox)).toMatchObject({ verdict: "quarantined" });
+  });
+
+  it("never releases a hold that changed since the person read it", async () => {
+    const inbox = await addInbox("stale", { accept_from: "allowlist" });
+    const id = await receive(`stale@${DOMAIN}`);
+    const shown = await releasePreview(db, keyring, {
+      teamId: team,
+      inboxId: inbox,
+      receivedEmailId: id,
+      actor: OWNER,
+      admin: false,
+      judgeConfigured: true,
+      withText: true,
+    });
+    expect(shown).toMatchObject({ reason: "not_allowlisted" });
+    // While that dialog is open, the agent's release has screening hold it for phishing.
+    const screen = vi.fn(async () => verdict({ phishingScore: 92, reasons: ["credential_lure"] }));
+    expect(await release(id, inbox, { actor: AGENT, screen: screenWith(screen) })).toMatchObject({
+      outcome: "held_again",
+      reason: "phishing",
+    });
+    expect(
+      await release(id, inbox, { reviewed: "not_allowlisted", screen: screenWith(screen) }),
+    ).toEqual({
+      ok: true,
+      outcome: "held_again",
+      reason: "phishing",
+      injectionScore: 3,
+      phishingScore: 92,
+    });
+    expect(screen).toHaveBeenCalledTimes(1);
+    expect(await membership(id, inbox)).toMatchObject({
+      verdict: "quarantined",
+      deliveredAt: null,
+    });
+    // Read again as it now stands, it is the person's to release.
+    expect(await release(id, inbox, { reviewed: "phishing" })).toMatchObject({
+      outcome: "released",
+    });
+  });
+
+  it("asks a throttled judge once more before releasing unscreened", async () => {
+    const inbox = await addInbox("busy", { accept_from: "allowlist" });
+    const once = await receive(`busy@${DOMAIN}`);
+    const throttledOnce = vi
+      .fn<NonNullable<AbuseJudge["screen"]>>()
+      .mockRejectedValueOnce(new JudgeError("throttled"))
+      .mockResolvedValue(verdict());
+    expect(await release(once, inbox, { screen: screenWith(throttledOnce) })).toMatchObject({
+      outcome: "released",
+    });
+    expect(throttledOnce).toHaveBeenCalledTimes(2);
+    expect(await membership(once, inbox)).toMatchObject({ judge: { status: "judged" } });
+
+    const twice = await receive(`busy@${DOMAIN}`);
+    const throttled = vi.fn(async () => Promise.reject(new JudgeError("throttled")));
+    expect(await release(twice, inbox, { screen: screenWith(throttled) })).toMatchObject({
+      outcome: "released",
+    });
+    expect(throttled).toHaveBeenCalledTimes(2);
+    expect(await membership(twice, inbox)).toMatchObject({ judge: { status: "throttled" } });
   });
 });
 
@@ -496,6 +565,19 @@ describe("who may release and trust", () => {
     expect(received?.payload).toMatchObject({
       data: { email: { attachments: [{ filename: "quote.pdf" }] } },
     });
+
+    // A list no key here opens still releases, its events naming no attachments.
+    const sealed = await receive(`files@${DOMAIN}`, { attach: true });
+    const stranger = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
+    expect(
+      await releaseQuarantined(
+        db,
+        { keyring: stranger },
+        { teamId: team, receivedEmailId: sealed, inboxId: inbox, actor: OWNER, trustSender: false },
+      ),
+    ).toMatchObject({ outcome: "released" });
+    const announced = (await hookPayloads(sealed)).find((h) => h.type === "inbox.email.received");
+    expect(announced?.payload).toMatchObject({ data: { email: { attachments: [] } } });
   });
 });
 

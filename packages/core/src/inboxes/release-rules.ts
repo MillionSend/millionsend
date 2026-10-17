@@ -26,6 +26,19 @@ export const SCREENED_ON_RELEASE: readonly QuarantineReason[] = [
   "failed_auth",
 ];
 
+/** Holds for what the judge or the virus scan found in the message: a release never screens one again. */
+export const JUDGED_HOLDS: readonly QuarantineReason[] = ["injection", "phishing", "virus"];
+
+/** The risk behind a hold: the score of what the judge found; other holds have none. */
+export function holdRisk(hold: {
+  reason: string | null;
+  injectionScore: number | null;
+  phishingScore: number | null;
+}): number | null {
+  if (hold.reason === "injection") return hold.injectionScore;
+  return hold.reason === "phishing" ? hold.phishingScore : null;
+}
+
 /**
  * Whether the actor may release a hold, and may also trust its sender. A
  * person or a team-wide key releases any hold; an agent (MCP) only what
