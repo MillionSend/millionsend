@@ -326,7 +326,13 @@ export async function releasePreview(
     };
   }
   const rights = (admin: boolean) =>
-    releaseRights({ reason: hold.reason, senderTrust: hold.senderTrust, actor: p.actor, admin });
+    releaseRights({
+      reason: hold.reason,
+      senderTrust: hold.senderTrust,
+      actor: p.actor,
+      inboxId: p.inboxId,
+      admin,
+    });
   const trustOffered = rights(p.admin).trust;
   return {
     subject: row.subject === "" ? null : row.subject,

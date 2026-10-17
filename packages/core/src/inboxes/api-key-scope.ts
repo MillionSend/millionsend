@@ -10,6 +10,8 @@ const ALLOWED = [
   "GET /inboxes/:own/agent",
   "GET /inboxes/:own/labels",
   "GET /inboxes/:own/codes/latest",
+  // releaseRights holds it to the agent rule: no content hold, and only on the judge's verdict.
+  "POST /inboxes/:own/quarantine/:id/release",
   "POST /inboxes/:own/labels",
   "PATCH /inboxes/:own/labels/:id",
   "DELETE /inboxes/:own/labels/:id",

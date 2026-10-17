@@ -352,13 +352,14 @@ respondem estes:
 | `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado (`retry-after: 60`), ou o subdomínio da sua equipe no domínio compartilhado ainda espera a revisão de nomes e, até lá, nenhum endereço pode ser criado nele (`retry-after: 300`). |
 | `403 approval_required` | Um agente enviando um rascunho que espera aprovação. |
 | `403 email_quarantined` | Um agente lendo, respondendo ou encaminhando um e-mail retido, ou qualquer encaminhamento de e-mail infectado. |
-| `409 held_by_screening` | A liberação de um e-mail retido antes da análise, em que a análise achou injeção de prompt ou phishing: ele continua na quarentena. |
+| `409 held_by_screening` | Uma liberação em que a análise achou injeção de prompt ou phishing: o e-mail continua na quarentena. |
 | `403 trust_not_allowed` | `trust_sender` na liberação de qualquer coisa que não seja um e-mail retido como `not_allowlisted` de um remetente verificado. |
+| `503 screening_unavailable` | A liberação feita por um agente, por um cliente MCP ou por uma chave restrita a uma caixa, quando a análise não pode rodar: a instância não tem avaliador, o avaliador falhou ou demorou demais, ou o limite diário de análises acabou. `retry-after: 60`, ou até a meia-noite UTC quando o limite acabou. |
 | `410 email_blocked` | Um download de e-mail infectado. |
 | `429 too_many_waits` | Long-polls demais ao mesmo tempo de uma equipe; `retry-after: 1`. |
 | `403 validation_error` | O limite de caixas do plano, com a mensagem do Resend. |
 | `403 plan_limit_reached` | Pega-tudo no plano Free. |
-| `403 forbidden` | Uma mudança, verificação ou exclusão do subdomínio compartilhado da sua equipe, que é só de leitura; um cliente MCP liberando e-mail retido por injeção de prompt, phishing, vírus ou falha na autenticação. |
+| `403 forbidden` | Uma mudança, verificação ou exclusão do subdomínio compartilhado da sua equipe, que é só de leitura; um cliente MCP ou uma chave restrita a uma caixa liberando e-mail retido por injeção de prompt, phishing, vírus ou falha na autenticação. |
 | `404 not_found` | Uma caixa, conversa, etiqueta, rascunho ou cursor de paginação desconhecido, com as mensagens do Resend (`Inbox not found.`). |
 
 ## Idempotência

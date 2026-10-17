@@ -134,6 +134,8 @@ export function releaseFailure(reason: ReleaseRefusal): TRPCError {
     case "forbidden":
     case "trust_not_allowed":
       return new TRPCError({ code: "FORBIDDEN", message: reason });
+    case "screening_unavailable":
+      return new TRPCError({ code: "SERVICE_UNAVAILABLE", message: reason });
   }
 }
 

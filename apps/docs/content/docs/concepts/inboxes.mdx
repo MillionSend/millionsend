@@ -537,20 +537,24 @@ one, and `{ "trust_sender": true }` also adds its sender to the allowlist:
 }
 ```
 
-Both take a full-access key that isn't restricted to an inbox (inbox-scoped
-keys get `403`). A release can also answer:
+Both take a full-access key that isn't restricted to an inbox. An
+inbox-scoped key gets `403` listing them, and releases only in its own
+inbox, as an agent: never mail held for its content, and the rest only on
+screening's verdict. A release can also answer:
 
 | Status, name | When |
 | --- | --- |
 | `404 not_found` | The message isn't quarantined in the inbox. |
-| `409 held_by_screening` | The message was held before screening ran, and screening found prompt injection or phishing at 80 or more: it stays in quarantine under that reason, with its scores. |
+| `409 held_by_screening` | Screening at release found prompt injection or phishing at 80 or more: the message stays in quarantine under that reason, with its scores. |
 | `403 trust_not_allowed` | `trust_sender` on anything but a message held as `not_allowlisted` from a verified (`external`) sender. |
-| `403 forbidden` | An MCP client releasing mail held for `injection`, `phishing`, `virus` or `failed_auth`. |
+| `403 forbidden` | An MCP client or an inbox-scoped key releasing mail held for `injection`, `phishing`, `virus` or `failed_auth`. |
+| `503 screening_unavailable` | An MCP client or an inbox-scoped key releasing while screening can't run; `retry-after` says when to try again. |
 | `422 validation_error` | `trust_sender` while the allowlist is full. |
 
-People release from the dashboard, and MCP clients with `receiving:manage`
-with `release_email`. [Agent safety](/concepts/agent-safety#quarantine)
-explains who may release what, and the screening a release runs first.
+People release from the dashboard, MCP clients with `receiving:manage`
+with `release_email`, and agents with their inbox-scoped key.
+[Agent safety](/concepts/agent-safety#quarantine) explains who may release
+what, and the screening a release runs first.
 
 ## Verification codes
 
@@ -624,9 +628,12 @@ curl -X POST "https://api.millionsend.com/api-keys" \
   writes drafts and sends them, and sends from the inbox's address only:
   through `POST /emails` and `POST /emails/batch`, another `from` answers
   `403 restricted_api_key`, and through the SMTP relay `550 5.7.1`.
+- It releases its inbox's quarantine as an agent does: never mail held for
+  its content, and the rest only on screening's verdict (see
+  [Agent safety](/concepts/agent-safety#quarantine)).
 - Everything else answers `403 restricted_api_key`: it can't change safety
-  settings, list or release quarantine, approve drafts, create keys or reach
-  any other inbox.
+  settings, list quarantine, approve drafts, create keys or reach any other
+  inbox.
 - It stops working when its inbox expires, and deleting the inbox revokes
   it.
 
@@ -702,8 +709,9 @@ and `receiving:manage` (create, change and delete inboxes, list and release
 quarantine). An MCP client always sees mail the way an agent does, without
 held mail and with message text fenced as untrusted. It can't change safety
 settings, beyond picking `accept_from` when it creates an inbox; it never
-approves drafts, never trusts a sender, and never releases mail held for
-its content or a failed authentication.
+approves drafts, never trusts a sender, never releases mail held for its
+content or a failed authentication, and releases other held mail only on
+screening's verdict.
 
 ## Resend compatibility
 

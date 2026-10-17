@@ -12,8 +12,9 @@ import {
 import { emailQuarantinedEvent, threadEmailEvent, threadFolderEvent } from "../inboxes/events.js";
 import { INBOX_ALLOWLIST_MAX } from "../inboxes/limits.js";
 import { releaseRights, screensOnRelease } from "../inboxes/release-rules.js";
+import { secondsToNextUtcDay } from "../inboxes/send-policy.js";
 import { threadSummaryOf } from "../inboxes/threads.js";
-import type { QuarantineReason, SenderTrust } from "../inboxes/types.js";
+import type { InboxKind, QuarantineReason, SenderTrust } from "../inboxes/types.js";
 import { inboundThreadEmailWire } from "../inboxes/wire.js";
 import { instanceSettings } from "../monitor-settings.js";
 import { utcDay } from "../utc-day.js";
@@ -40,7 +41,10 @@ export interface DeliveryDeps {
     | undefined;
   /** Opens the sealed attachment list the event emails name; without it they list none. */
   keyring?: Keyring | undefined;
-  /** The judge a release asks first, with the keyring; without it a release goes unscreened. */
+  /**
+   * The judge a release asks first, with the keyring; without it a person's
+   * release goes unscreened and an agent's is refused.
+   */
   screen?: ReleaseScreen | undefined;
 }
 
@@ -371,7 +375,8 @@ export type ReleaseRefusal =
   | "not_quarantined"
   | "allowlist_full"
   | "forbidden"
-  | "trust_not_allowed";
+  | "trust_not_allowed"
+  | "screening_unavailable";
 
 export type ReleaseResult =
   | { ok: true; outcome: "released"; releasedAt: Date; trustedSender: string | null }
@@ -382,14 +387,19 @@ export type ReleaseResult =
       injectionScore: number | null;
       phishingScore: number | null;
     }
-  | { ok: false; reason: ReleaseRefusal };
+  | {
+      ok: false;
+      reason: ReleaseRefusal;
+      /** screening_unavailable: seconds until screening may run again. */
+      retryAfterSec?: number | undefined;
+    };
 
 /**
  * The judge's run on a hold that a release would deliver unscreened, or
- * null when none is due: no judge, a hold the judge already read, or an
- * actor the release refuses. It runs ahead of the release's transaction, so
- * no lock waits on the judge; the transaction checks the hold is still the
- * one judged.
+ * null when none is due (no judge, a hold the release doesn't screen, an
+ * actor it refuses) or the judge couldn't run. It runs ahead of the
+ * release's transaction, so no lock waits on the judge; the transaction
+ * checks the hold is still the one judged.
  */
 async function judgeBeforeRelease(
   db: Db,
@@ -399,7 +409,13 @@ async function judgeBeforeRelease(
     receivedEmailId: string;
     inboxId: string;
     now: Date;
-    refused: (reason: QuarantineReason, senderTrust: SenderTrust) => boolean;
+    /** Whether this release of the hold, as it stands, asks the judge first. */
+    screens: (hold: {
+      reason: QuarantineReason;
+      senderTrust: SenderTrust;
+      kind: InboxKind;
+      screening: boolean;
+    }) => boolean;
   },
 ): Promise<{ reason: QuarantineReason; run: InboundJudgeRun } | null> {
   const { screen, keyring } = deps;
@@ -426,8 +442,12 @@ async function judgeBeforeRelease(
   if (held?.verdict !== "quarantined") return null;
   const reason = held.reason ?? "unscreened";
   if (
-    p.refused(reason, held.senderTrust) ||
-    !screensOnRelease({ reason, kind: held.kind, screening: held.safety.screening })
+    !p.screens({
+      reason,
+      senderTrust: held.senderTrust,
+      kind: held.kind,
+      screening: held.safety.screening,
+    })
   ) {
     return null;
   }
@@ -442,7 +462,7 @@ async function judgeBeforeRelease(
         keyring,
         settings: await instanceSettings(db, { monitorSettings: screen.settings }),
         timeoutMs: screen.timeoutMs,
-        // A person waits on the answer: one quick retry rides out a passing throttle.
+        // The releaser waits on the answer: one quick retry rides out a passing throttle.
         retries: 1,
         backoffMs: 250,
       },
@@ -450,7 +470,6 @@ async function judgeBeforeRelease(
     );
     return { reason, run };
   } catch (err) {
-    // A judge that can't run leaves the releaser's decision standing.
     console.warn(
       `release: screening of ${p.receivedEmailId} failed (${err instanceof Error ? err.name : "error"})`,
     );
@@ -462,14 +481,17 @@ async function judgeBeforeRelease(
  * Releases held mail, where releaseRights lets the actor. With an inbox: a
  * quarantined membership is delivered with verdict released (its events
  * and the row's announcement as a delivery would bring), never judged
- * again; trustSender also allowlists the From address. A hold made before
- * screening is judged first, against the line inbound mail meets: at it,
- * the message stays held for what the judge found (held_again), and a judge
- * that can't answer leaves the releaser's decision standing. A hold that
- * changed since it was reviewed (`reviewed`) or judged answers held_again
- * as it now stands. Without an inbox: a catch-all row held for a virus
- * becomes visible. A virus release still never serves the files or the raw
- * message.
+ * again; trustSender also allowlists the From address. The judge reads a
+ * hold first, against the line inbound mail meets, when a person or a team
+ * key releases one made before screening (screensOnRelease) and whenever
+ * an agent credential releases: at the line, the message stays held for
+ * what the judge found (held_again). A judge that can't answer (none, a
+ * failure, a spent cap) leaves a person's or a team key's decision
+ * standing, and refuses an agent's release (screening_unavailable). A hold
+ * that changed since it was reviewed (`reviewed`) or judged answers
+ * held_again as it now stands. Without an inbox: a catch-all row held for a
+ * virus becomes visible. A virus release still never serves the files or
+ * the raw message.
  */
 export async function releaseQuarantined(
   db: Db,
@@ -491,8 +513,9 @@ export async function releaseQuarantined(
   const after = afterCommit();
   const r = schema.receivedEmails;
   const releasedBy = encodeInboxActor(p.actor);
-  const refusal = (reason: QuarantineReason, senderTrust: SenderTrust): ReleaseRefusal | null => {
-    const may = releaseRights({ reason, senderTrust, actor: p.actor, admin: p.admin });
+  const rights = (reason: QuarantineReason, senderTrust: SenderTrust) =>
+    releaseRights({ reason, senderTrust, actor: p.actor, inboxId: p.inboxId, admin: p.admin });
+  const refusal = (may: ReturnType<typeof releaseRights>): ReleaseRefusal | null => {
     if (!may.release) return "forbidden";
     return p.trustSender && !may.trust ? "trust_not_allowed" : null;
   };
@@ -504,7 +527,10 @@ export async function releaseQuarantined(
           receivedEmailId: p.receivedEmailId,
           inboxId: p.inboxId,
           now,
-          refused: (reason, senderTrust) => refusal(reason, senderTrust) !== null,
+          screens: (hold) => {
+            const may = rights(hold.reason, hold.senderTrust);
+            return refusal(may) === null && (may.needsVerdict || screensOnRelease(hold));
+          },
         });
   const outcome = await db.transaction(async (raw): Promise<ReleaseResult> => {
     const tx = raw as unknown as Db;
@@ -521,7 +547,7 @@ export async function releaseQuarantined(
     if (p.inboxId === null) {
       if (!row.catchAll || row.virusVerdict !== "fail") return { ok: false, reason: "not_found" };
       if (row.releasedAt) return { ok: false, reason: "not_quarantined" };
-      const refused = refusal("virus", row.senderTrust);
+      const refused = refusal(rights("virus", row.senderTrust));
       if (refused) return { ok: false, reason: refused };
       const [released] = await tx
         .update(r)
@@ -559,9 +585,19 @@ export async function releaseQuarantined(
         phishingScore: membership.phishingScore,
       };
     }
-    const refused = refusal(reason, membership.senderTrust);
+    const may = rights(reason, membership.senderTrust);
+    const refused = refusal(may);
     if (refused) return { ok: false, reason: refused };
     const verdict = judged?.run.verdict ?? null;
+    if (may.needsVerdict && !verdict) {
+      return {
+        ok: false,
+        reason: "screening_unavailable",
+        // A spent cap resets at midnight UTC; a judge that failed may answer again soon.
+        retryAfterSec:
+          judged?.run.record.status === "screening_cap" ? secondsToNextUtcDay(now) : 60,
+      };
+    }
     const scores = verdict
       ? {
           reasons: verdict.reasons,

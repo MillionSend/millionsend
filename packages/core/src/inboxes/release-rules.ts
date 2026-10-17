@@ -9,8 +9,8 @@ import type { InboxKind, QuarantineReason, SenderTrust } from "./types.js";
 
 /**
  * Holds for what a message says, or for a From that failed authentication:
- * a person reads the message before releasing it, and an agent never
- * releases one, since the mail is aimed at the agent.
+ * a person reads the message before releasing it, and an agent credential
+ * never releases one, since the mail is aimed at the agent.
  */
 export const CONTENT_HOLDS: readonly QuarantineReason[] = [
   "injection",
@@ -40,30 +40,49 @@ export function holdRisk(hold: {
 }
 
 /**
- * Whether the actor may release a hold, and may also trust its sender. A
- * person or a team-wide key releases any hold; an agent (MCP) only what
- * isn't a content hold. Trust allowlists the From address, and the
- * allowlist admits only mail that passes authentication: it is offered for
- * a not_allowlisted hold from an authenticated (external) sender, the one
- * case it would let in, and only to those who may edit the allowlist
+ * Whether the actor may release a hold, may also trust its sender, and
+ * releases only on the judge's verdict. A person or a team-wide key
+ * releases any hold on their own decision. An agent credential, an MCP
+ * token or a key scoped to the hold's inbox, is the reader the mail is
+ * aimed at: it releases only what isn't a content hold, and only once the
+ * judge reads the message under the line, so a judge that can't answer
+ * never lets mail through to it. Trust allowlists the From address, and
+ * the allowlist admits only mail that passes authentication: it is offered
+ * for a not_allowlisted hold from an authenticated (external) sender, the
+ * one case it would let in, and only to those who may edit the allowlist
  * itself, owners and admins or a team-wide key. Agents never trust.
  */
 export function releaseRights(p: {
   reason: QuarantineReason;
   senderTrust: SenderTrust;
   actor: InboxActor;
+  /** The hold's inbox; null for a catch-all row, which belongs to none. */
+  inboxId: string | null;
   /** The person releasing is an owner or admin; read for a person only. */
   admin?: boolean | undefined;
-}): { release: boolean; trust: boolean } {
-  const person = p.actor.kind === "user";
-  const teamKey = p.actor.kind === "api_key" && p.actor.inboxId === null;
-  const release =
-    person || teamKey || (p.actor.kind === "oauth" && !CONTENT_HOLDS.includes(p.reason));
+}): { release: boolean; trust: boolean; needsVerdict: boolean } {
+  const { actor } = p;
+  const person = actor.kind === "user";
+  const teamKey = actor.kind === "api_key" && actor.inboxId === null;
+  const agent =
+    actor.kind === "oauth" ||
+    (actor.kind === "api_key" &&
+      actor.inboxId !== null &&
+      actor.inboxId.toLowerCase() === p.inboxId?.toLowerCase());
+  const release = person || teamKey || (agent && !CONTENT_HOLDS.includes(p.reason));
   const trustable = p.reason === "not_allowlisted" && p.senderTrust === "external";
-  return { release, trust: release && trustable && ((person && p.admin === true) || teamKey) };
+  return {
+    release,
+    trust: release && trustable && ((person && p.admin === true) || teamKey),
+    needsVerdict: release && agent,
+  };
 }
 
-/** Whether releasing a hold asks the judge first: agent inboxes that screen, holds from before screening. */
+/**
+ * Whether a person's or a team key's release asks the judge first: agent
+ * inboxes that screen, holds from before screening. An agent credential's
+ * release always does (releaseRights' needsVerdict).
+ */
 export function screensOnRelease(p: {
   reason: QuarantineReason;
   kind: InboxKind;

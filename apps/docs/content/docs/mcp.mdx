@@ -161,7 +161,10 @@ change an inbox's safety settings; `create_inbox` makes agent inboxes only and
 takes `accept_from` and no other safety setting. `release_email` never
 releases mail held for prompt injection, phishing, a virus or failed
 authentication, which a person reviews in the dashboard, and never trusts a
-sender.
+sender. Other held mail it releases only on screening's verdict: screening
+reads the email at every release, keeps it in quarantine at 80 or more, and
+while it can't run, nothing is released (`screening_unavailable`). See
+[Agent safety](/concepts/agent-safety#quarantine).
 
 | Tool | Permission | Description |
 | --- | --- | --- |
@@ -247,7 +250,7 @@ sender.
 | `create_inbox` | `receiving:manage` | Create an agent inbox (people's inboxes are made in the dashboard); `accept_from` is the only safety setting it takes, and `username` names an address on the shared domain. `domain_id` takes a `list_domains` row: the team's shared subdomain (`shared: true`), or one of its own domains with `username` as the part before the @. While the team's subdomain waits for its name review, it answers `503`. |
 | `update_inbox` | `receiving:manage` | Change an inbox's name, from name or expiry; making it expire sooner takes the owner or admin role. |
 | `delete_inbox` | `receiving:manage` | **admin** Delete an inbox with its threads and drafts; its API keys are revoked. |
-| `release_email` | `receiving:manage` | Release a quarantined email into its inbox. Mail held before screening ran is screened first when screening can run, and stays held when it finds prompt injection or phishing (`held_by_screening`); mail held for its content or a failed authentication answers `forbidden`. |
+| `release_email` | `receiving:manage` | Release a quarantined email into its inbox, only on screening's verdict: it stays held when screening finds prompt injection or phishing (`held_by_screening`), and nothing is released while screening can't run (`screening_unavailable`); mail held for its content or a failed authentication answers `forbidden`. |
 
 ## Tool results
 

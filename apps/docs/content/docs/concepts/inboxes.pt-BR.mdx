@@ -567,19 +567,22 @@ para as mais antigas, com `id`, `thread_id`, `from`, `subject`,
 }
 ```
 
-As duas pedem uma chave de acesso total que não esteja restrita a uma caixa
-(chaves restritas recebem `403`). Uma liberação também pode responder:
+As duas aceitam uma chave de acesso total que não esteja restrita a uma
+caixa. Uma chave restrita a uma caixa recebe `403` ao listar, e só libera
+na própria caixa, como um agente: nunca o e-mail retido pelo conteúdo, e o
+resto só com a avaliação da análise. Uma liberação também pode responder:
 
 | Status, nome | Quando |
 | --- | --- |
 | `404 not_found` | A mensagem não está na quarentena da caixa. |
-| `409 held_by_screening` | A mensagem ficou retida antes da análise, e a análise achou injeção de prompt ou phishing com 80 ou mais: ela continua na quarentena por esse motivo, com as notas. |
+| `409 held_by_screening` | A análise feita na liberação achou injeção de prompt ou phishing com 80 ou mais: a mensagem continua na quarentena por esse motivo, com as notas. |
 | `403 trust_not_allowed` | `trust_sender` em qualquer coisa que não seja uma mensagem retida como `not_allowlisted` de um remetente verificado (`external`). |
-| `403 forbidden` | Um cliente MCP liberando e-mail retido por `injection`, `phishing`, `virus` ou `failed_auth`. |
+| `403 forbidden` | Um cliente MCP ou uma chave restrita a uma caixa liberando e-mail retido por `injection`, `phishing`, `virus` ou `failed_auth`. |
+| `503 screening_unavailable` | Um cliente MCP ou uma chave restrita a uma caixa liberando quando a análise não pode rodar; o `retry-after` diz quando tentar de novo. |
 | `422 validation_error` | `trust_sender` com a lista de permitidos cheia. |
 
-Pessoas liberam pelo painel, e clientes MCP com `receiving:manage` pela
-ferramenta `release_email`.
+Pessoas liberam pelo painel, clientes MCP com `receiving:manage` pela
+ferramenta `release_email`, e agentes com a chave restrita à caixa deles.
 [Segurança de agentes](/pt-BR/concepts/agent-safety#quarentena) explica quem
 pode liberar o quê, e a análise que a liberação faz antes.
 
@@ -656,9 +659,12 @@ curl -X POST "https://api.millionsend.com/api-keys" \
   responde, encaminha, escreve rascunhos e os envia, e só envia pelo endereço
   da caixa: pelo `POST /emails` e pelo `POST /emails/batch`, outro `from`
   responde `403 restricted_api_key`, e pelo relay SMTP, `550 5.7.1`.
+- Ela libera a quarentena da própria caixa como um agente: nunca o e-mail
+  retido pelo conteúdo, e o resto só com a avaliação da análise (veja
+  [Segurança de agentes](/pt-BR/concepts/agent-safety#quarentena)).
 - Todo o resto responde `403 restricted_api_key`: ela não muda as
-  configurações de segurança, não lista nem libera a quarentena, não aprova
-  rascunhos, não cria chaves e não alcança nenhuma outra caixa.
+  configurações de segurança, não lista a quarentena, não aprova rascunhos,
+  não cria chaves e não alcança nenhuma outra caixa.
 - Ela para de funcionar quando a caixa vence, e excluir a caixa a revoga.
 
 Uma chave restrita a um domínio (`domain_id`) só alcança as caixas desse
@@ -738,8 +744,9 @@ mudar e excluir caixas, listar e liberar a quarentena). Um cliente MCP sempre
 vê os e-mails como um agente vê: sem os retidos e com o texto das mensagens
 marcado como não confiável. Ele não muda configurações de segurança, a não
 ser escolher o `accept_from` ao criar uma caixa; nunca aprova rascunhos,
-nunca confia num remetente e nunca libera e-mail retido pelo conteúdo ou por
-falha na autenticação.
+nunca confia num remetente, nunca libera e-mail retido pelo conteúdo ou por
+falha na autenticação, e só libera os outros e-mails retidos com a avaliação
+da análise.
 
 ## Compatibilidade com o Resend
 

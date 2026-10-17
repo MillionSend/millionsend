@@ -43,6 +43,7 @@ let closeDb: () => Promise<void>;
 let jwksServer: ServerType;
 let appBaseUrl: string;
 let resource: string;
+let apiDeps: Parameters<typeof createApi>[0];
 let app: ReturnType<typeof createApi>;
 let teamId: string;
 let topicId: string;
@@ -143,7 +144,7 @@ beforeAll(async () => {
   appBaseUrl = `http://127.0.0.1:${address.port}`;
   resource = mcpResourceUrl(appBaseUrl);
 
-  app = createApi({
+  apiDeps = {
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
     isCloud: false,
@@ -160,7 +161,8 @@ beforeAll(async () => {
     receivedDownloadKey: randomBytes(32),
     receiving: { mxHost: "mx.millionsend.test", ingestSecret: INGEST_SECRET },
     inboxKeys: deriveInboxKeys(randomBytes(32)),
-  });
+  };
+  app = createApi(apiDeps);
 });
 
 afterAll(async () => {
@@ -2310,20 +2312,53 @@ describe("receiving tools", () => {
           }),
         ),
       ).toMatchObject({ data: [{ id: heldId }] });
-      // The agent's release leaves the allowlist alone.
-      expect(
-        resultJson(
-          await client.callTool({
-            name: "release_email",
-            arguments: { inbox_id: guardedId, email_id: heldId },
-          }),
-        ),
-      ).toMatchObject({
-        object: "inbox_release",
-        inbox_id: guardedId,
-        email_id: heldId,
-        trusted_sender: null,
+      // An agent's release stands only on screening's verdict, and this instance runs no judge.
+      const unscreened = await client.callTool({
+        name: "release_email",
+        arguments: { inbox_id: guardedId, email_id: heldId },
       });
+      expect(unscreened.isError).toBe(true);
+      expect(resultJson(unscreened)).toMatchObject({
+        statusCode: 503,
+        name: "screening_unavailable",
+        message: expect.stringContaining("ask a person to review it in the dashboard"),
+      });
+      expect(await codeOf()).toEqual({ status: "none" });
+
+      // Where the judge reads it as clean, the agent's release delivers it, the allowlist untouched.
+      const judgeUrl = "https://judge.example.test";
+      vi.stubEnv("ABUSE_JUDGE", "typesafe");
+      vi.stubEnv("ABUSE_JUDGE_BASE_URL", judgeUrl);
+      vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
+      const judged = createApi(apiDeps);
+      vi.unstubAllEnvs();
+      const realFetch = globalThis.fetch;
+      vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) =>
+        String(input).startsWith(judgeUrl)
+          ? Response.json({
+              answers: { is_injection: { noul: 0.02 }, is_phishing: { noul: 0.01 } },
+            })
+          : realFetch(input, init),
+      );
+      const screened = await connect(await mintToken(), judged);
+      try {
+        expect(
+          resultJson(
+            await screened.callTool({
+              name: "release_email",
+              arguments: { inbox_id: guardedId, email_id: heldId },
+            }),
+          ),
+        ).toMatchObject({
+          object: "inbox_release",
+          inbox_id: guardedId,
+          email_id: heldId,
+          trusted_sender: null,
+        });
+      } finally {
+        vi.unstubAllGlobals();
+        await screened.close();
+      }
       expect(await codeOf()).toMatchObject({ status: "found", code: "555123" });
       expect(
         resultJson(

@@ -174,9 +174,45 @@ describe("POST /inboxes/{id}/quarantine/{email_id}/release", () => {
       message:
         "Screening found prompt injection (risk 92/100), so the email stays in quarantine as injection",
     });
+    released.mockResolvedValue({ ok: false, reason: "screening_unavailable", retryAfterSec: 60 });
+    const unscreened = await release();
+    expect(unscreened.status).toBe(503);
+    expect(unscreened.headers.get("retry-after")).toBe("60");
+    expect(await unscreened.json()).toMatchObject({
+      name: "screening_unavailable",
+      message: expect.stringContaining("ask a person to review it in the dashboard"),
+    });
   });
 
-  it("takes no body, maps refusals, and never reaches the function for an inbox key", async () => {
+  it("lets an inbox key release in its own inbox only, as the agent it is", async () => {
+    released.mockResolvedValue({ ok: false, reason: "screening_unavailable", retryAfterSec: 120 });
+    const own = await call(
+      inboxKey,
+      "POST",
+      `/inboxes/${inboxId}/quarantine/${randomUUID()}/release`,
+    );
+    expect(own.status).toBe(503);
+    expect(own.headers.get("retry-after")).toBe("120");
+    expect(released).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        inboxId,
+        actor: expect.objectContaining({ kind: "api_key", inboxId }),
+      }),
+    );
+    released.mockClear();
+    const other = await call(
+      inboxKey,
+      "POST",
+      `/inboxes/${randomUUID()}/quarantine/${randomUUID()}/release`,
+    );
+    expect(other.status).toBe(403);
+    expect(await other.json()).toMatchObject({ name: "restricted_api_key" });
+    expect(released).not.toHaveBeenCalled();
+  });
+
+  it("takes no body, maps refusals, and never reaches the function for an unknown inbox", async () => {
     released.mockResolvedValue({ ok: false, reason: "not_quarantined" });
     const bare = await app.request(`/inboxes/${inboxId}/quarantine/${randomUUID()}/release`, {
       method: "POST",
@@ -199,13 +235,6 @@ describe("POST /inboxes/{id}/quarantine/{email_id}/release", () => {
     );
     expect(full.status).toBe(422);
     released.mockClear();
-    const agent = await call(
-      inboxKey,
-      "POST",
-      `/inboxes/${inboxId}/quarantine/${randomUUID()}/release`,
-      {},
-    );
-    expect(agent.status).toBe(403);
     const other = await call(
       teamKey,
       "POST",
