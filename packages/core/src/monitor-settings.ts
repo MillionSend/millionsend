@@ -1,4 +1,4 @@
-import { type Env, isCloudDeployment } from "@millionsend/config";
+import { type Env, env, isCloudDeployment } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 
@@ -270,6 +270,18 @@ export async function getMonitorSettingsRow(db: Db): Promise<MonitorSettingsRow 
       row[k as keyof typeof schema.monitorSettingColumns],
     ]),
   ) as MonitorSettingsRow;
+}
+
+/** The instance's trust & safety settings: the process's reader when it has one, else a read. */
+export async function instanceSettings(
+  db: Db,
+  deps: { monitorSettings?: (() => Promise<MonitorSettings>) | undefined } = {},
+): Promise<MonitorSettings> {
+  if (deps.monitorSettings) return deps.monitorSettings();
+  return resolveMonitorSettings(
+    await getMonitorSettingsRow(db),
+    env as unknown as Record<string, unknown>,
+  ).settings;
 }
 
 export const MONITOR_SETTINGS_TTL_MS = 60_000;
