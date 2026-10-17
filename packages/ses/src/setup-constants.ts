@@ -459,7 +459,7 @@ S3_STORAGE_PUBLIC_URL=
 # service. Use a SEPARATE, PRIVATE bucket that already exists — dumps contain
 # the whole database, and R2 public access is bucket-wide, so a dump in the
 # public uploads bucket would be world-readable. Unset: the service prints a
-# hint and exits.
+# hint and idles.
 S3_BACKUP_BUCKET=
 
 # Backup tuning, meaningful only with S3_BACKUP_BUCKET set: object key prefix
