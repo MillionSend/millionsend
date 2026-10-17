@@ -49,13 +49,13 @@ export const contentAccessGrants = pgTable(
     // The first time the grant opened what screening read from an email's
     // images and attachments.
     mediaViewedAt: timestamp("media_viewed_at", { withTimezone: true }),
-    // Historical: the break-glass feature once surfaced a grant in the team's
-    // own audit log seven days after the access. That disclosure has been
-    // retired — new grants are never surfaced to the team — but these two
-    // columns are kept so the grants disclosed under the old behaviour still
-    // carry when it happened. `notice_sent_at` is when the one-time job ran;
-    // `team_visible_at` is when the team's audit actually gained the row (left
-    // null where the disclosure was withheld). Nothing writes them now.
+    // The team-side disclosure older builds made: a daily job added a row to
+    // the team's own audit log seven days after the access, for every grant
+    // with notice_sent_at null, then stamped notice_sent_at, and
+    // team_visible_at too unless it withheld the row. Grants are no longer
+    // disclosed, so a grant is created with notice_sent_at set and
+    // team_visible_at null, a withheld disclosure, which that job skips if an
+    // older build is ever run again. Rows a team was shown keep both stamps.
     noticeSentAt: timestamp("notice_sent_at", { withTimezone: true }),
     teamVisibleAt: timestamp("team_visible_at", { withTimezone: true }),
   },

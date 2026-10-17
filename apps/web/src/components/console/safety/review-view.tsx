@@ -22,7 +22,7 @@ import { Tooltip } from "@/components/tooltip";
 import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
-import { useTRPC, useTRPCClient } from "@/lib/trpc";
+import { useTRPC } from "@/lib/trpc";
 import { useTeamActions } from "../team-actions";
 import { LinkedTeams } from "../teams/linked-teams";
 import {
@@ -841,15 +841,13 @@ function TeamEmailsTable({
   const locale = useLocale();
   const nf = new Intl.NumberFormat(locale);
   const trpc = useTRPC();
-  const client = useTRPCClient();
   const [limit, setLimit] = useState(25);
-  const query = useInfiniteQuery({
-    queryKey: [...trpc.console.safety.teamEmails.queryKey({ teamId: team.id, limit }), "infinite"],
-    queryFn: ({ pageParam }) =>
-      client.console.safety.teamEmails.query({ teamId: team.id, limit, offset: pageParam }),
-    initialPageParam: 0,
-    getNextPageParam: (page) => page.nextOffset ?? undefined,
-  });
+  const query = useInfiniteQuery(
+    trpc.console.safety.teamEmails.infiniteQueryOptions(
+      { teamId: team.id, limit },
+      { getNextPageParam: (page) => page.nextCursor },
+    ),
+  );
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const first = query.data?.pages[0];
   const grantFor = (emailId: string) => grants.find((g) => g.emailIds.includes(emailId));
@@ -914,7 +912,7 @@ function TeamEmailsTable({
       {first ? (
         <div style={{ padding: "0 20px 16px" }}>
           <ListFooter
-            left={t("emails.allCount", { shown: items.length, total: first.total })}
+            left={t("emails.allCount", { shown: items.length, total: first.total ?? items.length })}
             size={limit}
             onSize={setLimit}
             sizeLabel={(size) => common("perPage", { n: size })}

@@ -1719,12 +1719,13 @@ and stamps the grant (`media_viewed_at`).
 
 **What the team is told.** Nothing, per access. The team is not emailed, and
 no row is added to its own audit log, when its content is read. That the
-platform's operators may read message content for these security reasons is
-disclosed once, in the instance's terms and privacy notice (see below), not
-message by message. Grants made under an earlier build were surfaced in the
-team's own audit log seven days after the access; those rows stay exactly as
-the team already saw them, and the `notice_sent_at` / `team_visible_at`
-columns still record when each ran.
+platform's operators may read message content for these security reasons
+must be disclosed in your terms and privacy notice before you turn this on
+(see below), not message by message. Grants an earlier build already
+surfaced keep their `content.accessed` rows in the team's audit log,
+unchanged. A grant still waiting for that disclosure when you upgrade (made
+in the last seven days, or deferred by a review hold) is never surfaced; if
+your privacy notice promised per-access notice, change it before upgrading.
 
 **Turning it on** in the instance's `.env`, read by the worker and the app
 (a restart applies it):

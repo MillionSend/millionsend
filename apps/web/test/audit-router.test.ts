@@ -243,7 +243,7 @@ describe("audit.list", () => {
       note: "lure kit seen",
       notify: false,
     });
-    // The seven-day disclosure of a content access, as the worker writes it.
+    // The seven-day disclosure of a content access, as older builds wrote it.
     await db.insert(schema.auditLog).values({
       teamId,
       actorId: "system",

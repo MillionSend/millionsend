@@ -773,8 +773,8 @@
           "all": "All emails"
         },
         "title": "Flagged emails · {count}",
-        "subtitle": "Sent in the last 7 days with a failing critical or major check, and unsent ones a phishing-type verdict stopped before SES. Subject and body are content and stay encrypted; the pill explains itself on hover or tap.",
-        "allSubtitle": "Every message of the team, newest first. Metadata only; the subject and body stay encrypted until a grant.",
+        "subtitle": "Sent in the last 7 days with a failing critical or major check, and unsent ones a phishing-type verdict stopped before SES. Subject and body are content and stay hidden; the pill explains itself on hover or tap.",
+        "allSubtitle": "Every message of the team, newest first. Metadata only; the subject and body stay hidden until a grant.",
         "sent": "Sent",
         "at": "Date",
         "from": "From",

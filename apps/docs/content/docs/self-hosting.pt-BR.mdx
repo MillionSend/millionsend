@@ -1809,12 +1809,14 @@ leu nas imagens e anexos, e marca a autorização (`media_viewed_at`).
 **O que a equipe fica sabendo.** Nada, a cada acesso. A equipe não recebe
 e-mail, e nenhuma linha é acrescentada ao registro de auditoria dela, quando
 o conteúdo é lido. Que os operadores da plataforma podem ler o conteúdo das
-mensagens por esses motivos de segurança é informado uma vez, nos termos e
-no aviso de privacidade da instância (veja abaixo), e não mensagem por
-mensagem. As autorizações feitas numa versão anterior apareciam no registro
-de auditoria da própria equipe sete dias após o acesso; essas linhas
-continuam exatamente como a equipe já as viu, e as colunas `notice_sent_at` /
-`team_visible_at` ainda guardam quando cada uma rodou.
+mensagens por esses motivos de segurança precisa estar nos seus termos e no
+seu aviso de privacidade antes de você ligar isso (veja abaixo), e não
+mensagem por mensagem. As autorizações que uma versão anterior já mostrou
+continuam com as linhas `content.accessed` no registro de auditoria da
+equipe, do jeito que estavam. Uma autorização que ainda estiver esperando
+esse aviso quando você atualizar (feita nos últimos sete dias, ou adiada por
+uma pausa para revisão) nunca vai aparecer; se o seu aviso de privacidade
+prometia avisar a cada acesso, mude isso antes de atualizar.
 
 **Como ligar**, no `.env` da instância, lido pelo worker e pelo app (um
 restart aplica):

@@ -773,8 +773,8 @@
           "all": "Todos os e-mails"
         },
         "title": "E-mails sinalizados · {count}",
-        "subtitle": "Enviados nos últimos 7 dias com uma checagem crítica ou importante falhando, e os não enviados que uma avaliação de phishing segurou antes do SES. Assunto e corpo são conteúdo e ficam criptografados; passe o mouse ou toque na etiqueta para ver o motivo.",
-        "allSubtitle": "Todos os e-mails da equipe, dos mais recentes aos mais antigos. Só os metadados; o assunto e o corpo ficam criptografados até uma autorização.",
+        "subtitle": "Enviados nos últimos 7 dias com uma checagem crítica ou importante falhando, e os não enviados que uma avaliação de phishing segurou antes do SES. Assunto e corpo são conteúdo e ficam ocultos; passe o mouse ou toque na etiqueta para ver o motivo.",
+        "allSubtitle": "Todos os e-mails da equipe, dos mais recentes aos mais antigos. Só os metadados; o assunto e o corpo ficam ocultos até uma autorização.",
         "sent": "Enviado",
         "at": "Data",
         "from": "De",

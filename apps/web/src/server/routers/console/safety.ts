@@ -51,6 +51,7 @@ import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { judgeStatus, monitorSettingsNow } from "../../console/monitor";
 import { getKeyring } from "../../keyring";
+import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../../keyset";
 import { enqueueEmailSend } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
 import { auditOperator, kickQuotaDrain, loadTeam, type OperatorCtx } from "./shared";
@@ -749,7 +750,7 @@ export const consoleSafetyRouter = router({
   /**
    * Every email of a team, newest first, paginated, for the review page's
    * "All emails" list. Metadata only (sender, when, recipient count): the
-   * subject and body are content and stay encrypted until a grant names the
+   * subject is withheld and the body stays encrypted until a grant names the
    * message.
    */
   teamEmails: operatorProcedure
@@ -757,11 +758,12 @@ export const consoleSafetyRouter = router({
       z.object({
         teamId: z.uuid(),
         limit: z.number().int().min(1).max(100).default(25),
-        offset: z.number().int().min(0).default(0),
+        cursor: cursorSchema.optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
       const e = schema.emails;
+      const ofTeam = eq(e.teamId, input.teamId);
       const recipients = sql<number>`jsonb_array_length(${e.to}) + coalesce(jsonb_array_length(${e.cc}), 0) + coalesce(jsonb_array_length(${e.bcc}), 0)`;
       const [rows, [count]] = await Promise.all([
         ctx.db
@@ -771,22 +773,18 @@ export const consoleSafetyRouter = router({
             recipients,
             sentAt: e.sentAt,
             createdAt: e.createdAt,
+            cursorCreatedAt: createdAtCursorField(e),
           })
           .from(e)
-          .where(eq(e.teamId, input.teamId))
+          .where(and(ofTeam, input.cursor ? beforeCursor(e, input.cursor) : undefined))
           .orderBy(desc(e.createdAt), desc(e.id))
-          .limit(input.limit + 1)
-          .offset(input.offset),
-        ctx.db
-          .select({ total: sql<number>`count(*)::int` })
-          .from(e)
-          .where(eq(e.teamId, input.teamId)),
+          .limit(input.limit + 1),
+        // Counted for the first page only: a scroll costs one count, not one per page.
+        input.cursor
+          ? [null]
+          : ctx.db.select({ total: sql<number>`count(*)::int` }).from(e).where(ofTeam),
       ]);
-      return {
-        items: rows.slice(0, input.limit),
-        total: count?.total ?? 0,
-        nextOffset: rows.length > input.limit ? input.offset + input.limit : null,
-      };
+      return { ...paginate(rows, input.limit), total: count?.total ?? null };
     }),
 
   /**
@@ -905,6 +903,8 @@ export const consoleSafetyRouter = router({
           emailIds,
           createdAt: now,
           expiresAt: contentRevealExpiry(now),
+          // A withheld disclosure (see the column): an older build's job skips it.
+          noticeSentAt: now,
         })
         .returning({ id: g.id, expiresAt: g.expiresAt });
       if (!grant) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -995,7 +995,7 @@ export const consoleSafetyRouter = router({
       if (!email.media) throw new TRPCError({ code: "NOT_FOUND", message: "no_media" });
       const team = await loadTeam(ctx.db, email.teamId);
       // A grant's first look at the media is its own instance audit row, written
-      // before anything decrypts; the stamp makes the team's disclosure name it.
+      // before anything decrypts; the stamp records that this grant opened the media.
       const [first] = await ctx.db
         .update(g)
         .set({ mediaViewedAt: now })
