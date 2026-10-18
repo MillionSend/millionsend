@@ -1,0 +1,40 @@
+{
+  "status": {
+    "warming": "Warming up",
+    "paused": "Paused",
+    "done": "Warm-up done"
+  },
+  "signals": {
+    "delays": "Gmail delayed {pct} of the day's mail.",
+    "opens": "Gmail opens were {pct} of other inboxes'.",
+    "hardBounces": "{pct} of addresses bounced.",
+    "mailboxFull": "{pct} of mailboxes were full or inactive.",
+    "complaints": "{pct} of people marked it as spam."
+  },
+  "signalsShort": {
+    "delays": "Gmail delayed {pct} of it",
+    "opens": "Gmail opens were {pct} of other inboxes'",
+    "hardBounces": "{pct} bounced",
+    "mailboxFull": "{pct} of mailboxes were full or inactive",
+    "complaints": "{pct} marked it as spam"
+  },
+  "rail": {
+    "now": "Now",
+    "todayLabel": "Today",
+    "day": "Day {n}",
+    "days": "Days {from} to {to}",
+    "first": "{count} go out · most active first",
+    "next": "up to {count} if delivery stays healthy",
+    "more": "up to {count}",
+    "range": "{from} to {to} a day",
+    "target": "{target} · full volume",
+    "sent": "{count} sent",
+    "held": "{count} sent · held",
+    "steppedBack": "{count} sent · cut back",
+    "paused": "{count} sent · paused",
+    "firstNote": "Most active first",
+    "today": "{allowance} go out · {sent} sent so far",
+    "todayWindow": "{start} until about {end}",
+    "todayWaiting": "Starts after today's check"
+  }
+}

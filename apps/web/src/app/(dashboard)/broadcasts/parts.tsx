@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import { DotParts } from "@/components/dot-parts";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import type { TONE_COLOR } from "@/components/status-tile";
+import { type RailStep, StepRail } from "@/components/step-rail";
 import { emulateEmailScheme, PREVIEW_CANVAS } from "@/lib/email-preview";
 import {
   formatDayTime,
@@ -228,18 +229,15 @@ export function SendPlanSummary({
         {count === 0 ? t("guard.zero") : t("guard.body", { count: nf.format(count) })}
       </p>
       {steps.length > 0 ? (
-        <ol className="ms-steps" aria-label={t("guard.title")}>
-          {steps.map((step, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: fixed order, position is identity
-            <li key={i} className={step.now ? "now" : undefined}>
-              <span className="when">{step.when}</span>
-              <span className="what">
-                {step.what}
-                {step.sub ? <small>{step.sub}</small> : null}
-              </span>
-            </li>
-          ))}
-        </ol>
+        <StepRail
+          label={t("guard.title")}
+          steps={steps.map((step) => ({
+            when: step.when,
+            what: step.what,
+            sub: step.sub,
+            state: step.now ? "now" : undefined,
+          }))}
+        />
       ) : null}
       {paced && (planLine || estimate.planHold === null) ? (
         <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>
@@ -293,60 +291,44 @@ export function PacingSteps({
   const days = sendingDays(sent, releases, now);
   if (days.length < 2) return null;
   const time = (d: Date) => formatStepTime(d, locale);
-  return (
-    <ol className={compact ? "ms-steps compact" : "ms-steps"} aria-label={t("detail.pacing")}>
-      {days.map((day, i) => {
-        const n = nf.format(day.count);
-        const last = i === days.length - 1;
-        const finish = time(roundUpToQuarterHour(day.endsAt));
-        let what: string;
-        let sub: string | undefined;
-        if (day.state === "done") {
-          what = t("detail.pacingDone", { count: n });
-          sub = t("detail.pacingRange", { start: time(day.startsAt), end: time(day.endsAt) });
-        } else if (day.state === "now") {
-          what = compact
-            ? t("detail.pacingTodayShort", { sent: nf.format(day.sent), count: n })
-            : t("detail.pacingToday", { sent: nf.format(day.sent), count: n });
-          sub = t(last ? "detail.pacingTodayLast" : "detail.pacingTodayRange", {
-            start: time(day.startsAt),
-            end: finish,
-          });
-        } else if (last) {
-          what = compact
-            ? t("detail.pacingLastShort", { count: n })
-            : t("guard.stepLast", { count: n, time: finish });
-        } else {
-          what = compact
-            ? t("detail.pacingMoreShort", { count: n })
-            : t("guard.stepMore", { count: n });
-          sub = t("detail.pacingFrom", { time: time(day.startsAt) });
-        }
-        return (
-          <li key={day.startsAt.getTime()} className={day.state === "next" ? undefined : day.state}>
-            <span className="when">
-              {day.state === "now"
-                ? t("detail.pacingTodayLabel")
-                : formatStepDay(day.startsAt, locale)}
-            </span>
-            <span className="what">
-              {what}
-              {!compact && day.state === "now" ? (
-                <span className="bar" aria-hidden="true">
-                  <b
-                    style={{
-                      width: `${Math.min(100, (day.sent / Math.max(1, day.count)) * 100)}%`,
-                    }}
-                  />
-                </span>
-              ) : null}
-              {!compact && sub ? <small>{sub}</small> : null}
-            </span>
-          </li>
-        );
-      })}
-    </ol>
-  );
+  const steps = days.map((day, i): RailStep => {
+    const n = nf.format(day.count);
+    const last = i === days.length - 1;
+    const finish = time(roundUpToQuarterHour(day.endsAt));
+    let what: string;
+    let sub: string | undefined;
+    if (day.state === "done") {
+      what = t("detail.pacingDone", { count: n });
+      sub = t("detail.pacingRange", { start: time(day.startsAt), end: time(day.endsAt) });
+    } else if (day.state === "now") {
+      what = compact
+        ? t("detail.pacingTodayShort", { sent: nf.format(day.sent), count: n })
+        : t("detail.pacingToday", { sent: nf.format(day.sent), count: n });
+      sub = t(last ? "detail.pacingTodayLast" : "detail.pacingTodayRange", {
+        start: time(day.startsAt),
+        end: finish,
+      });
+    } else if (last) {
+      what = compact
+        ? t("detail.pacingLastShort", { count: n })
+        : t("guard.stepLast", { count: n, time: finish });
+    } else {
+      what = compact
+        ? t("detail.pacingMoreShort", { count: n })
+        : t("guard.stepMore", { count: n });
+      sub = t("detail.pacingFrom", { time: time(day.startsAt) });
+    }
+    return {
+      key: day.startsAt.getTime(),
+      when:
+        day.state === "now" ? t("detail.pacingTodayLabel") : formatStepDay(day.startsAt, locale),
+      what,
+      sub,
+      state: day.state === "next" ? undefined : day.state,
+      progress: day.state === "now" ? day.sent / Math.max(1, day.count) : undefined,
+    };
+  });
+  return <StepRail label={t("detail.pacing")} steps={steps} compact={compact} />;
 }
 
 /** "70,000 sent · 99,700 waiting": every row not yet out counts as waiting. */

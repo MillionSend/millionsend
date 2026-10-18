@@ -1,0 +1,40 @@
+{
+  "status": {
+    "warming": "Em aquecimento",
+    "paused": "Pausado",
+    "done": "Aquecimento concluído"
+  },
+  "signals": {
+    "delays": "O Gmail atrasou {pct} dos e-mails do dia.",
+    "opens": "As aberturas no Gmail ficaram em {pct} das outras caixas.",
+    "hardBounces": "{pct} dos endereços deram bounce.",
+    "mailboxFull": "{pct} das caixas estavam cheias ou inativas.",
+    "complaints": "{pct} das pessoas marcaram como spam."
+  },
+  "signalsShort": {
+    "delays": "O Gmail atrasou {pct} deles",
+    "opens": "As aberturas no Gmail ficaram em {pct} das outras caixas",
+    "hardBounces": "{pct} deram bounce",
+    "mailboxFull": "{pct} das caixas estavam cheias ou inativas",
+    "complaints": "{pct} marcaram como spam"
+  },
+  "rail": {
+    "now": "Agora",
+    "todayLabel": "Hoje",
+    "day": "Dia {n}",
+    "days": "Dias {from} a {to}",
+    "first": "{count} saem · os mais ativos primeiro",
+    "next": "até {count} se a entrega continuar saudável",
+    "more": "até {count}",
+    "range": "de {from} a {to} por dia",
+    "target": "{target} · volume total",
+    "sent": "{count} enviados",
+    "held": "{count} enviados · mantido",
+    "steppedBack": "{count} enviados · reduzido",
+    "paused": "{count} enviados · pausado",
+    "firstNote": "Os mais ativos primeiro",
+    "today": "{allowance} saem · {sent} enviados até agora",
+    "todayWindow": "{start} até cerca de {end}",
+    "todayWaiting": "Começa depois da verificação de hoje"
+  }
+}
