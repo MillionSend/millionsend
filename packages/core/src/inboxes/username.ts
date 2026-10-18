@@ -13,3 +13,6 @@ export const SHARED_USERNAME = /^(?!.*\.\.)[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])
  * to 255). Label names keep oneLineName's default, LABEL_NAME_MAX.
  */
 export const INBOX_NAME_MAX = 320;
+
+/** Resend's from_name limit. */
+export const FROM_NAME_MAX = 78;

@@ -450,9 +450,12 @@
     "sent": "Enviado.",
     "drafted": "Aguardando aprovação. Está em Precisa de revisão.",
     "checks": {
-      "title": "Antes de sair",
+      "title": "Antes de enviar",
       "count": "{n, plural, =0 {# de {total} valem uma olhada} one {# de {total} vale uma olhada} other {# de {total} valem uma olhada}}",
       "allGood": "Nome do remetente, assunto e mensagem parecem de uma pessoa. {auth}",
+      "subjectEmpty": {
+        "label": "Sem assunto ainda."
+      },
       "subjectShort": {
         "label": "O assunto tem uma palavra só.",
         "hint": "{test, select, yes {“Teste” é o assunto mais filtrado que existe.} other {Assunto de uma palavra só costuma cair no filtro.}}"
@@ -488,7 +491,7 @@
       },
       "firstContact": {
         "label": "Primeiro e-mail deste endereço para {domain}.",
-        "hint": "Par novo começa sem histórico: é a resposta de lá que cria um."
+        "hint": "Sem histórico entre os dois, o que cria um é a resposta de lá."
       }
     }
   },

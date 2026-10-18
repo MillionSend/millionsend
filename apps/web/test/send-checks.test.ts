@@ -16,10 +16,18 @@ describe("sendChecks", () => {
   it("finds nothing worth a look in a message that reads like a person's", () => {
     const rows = sendChecks(good);
     expect(rows).toEqual([
-      { key: "subjectOk", tone: "ok", params: {} },
-      { key: "messageOk", tone: "ok", params: {} },
-      { key: "senderName", tone: "ok", params: { name: "Mo at Acme", address: "mo@acme.example" } },
-      { key: "domainAligned", tone: "ok", params: { domain: "acme.example", policy: "reject" } },
+      { key: "subjectOk", tone: "success", params: {} },
+      { key: "messageOk", tone: "success", params: {} },
+      {
+        key: "senderName",
+        tone: "success",
+        params: { name: "Mo at Acme", address: "mo@acme.example" },
+      },
+      {
+        key: "domainAligned",
+        tone: "success",
+        params: { domain: "acme.example", policy: "reject" },
+      },
     ]);
     expect(rows.filter((row) => row.tone === "warn")).toHaveLength(0);
   });
@@ -33,6 +41,7 @@ describe("sendChecks", () => {
     expect(sendChecks({ ...good, subject: " test " })[0]?.params).toEqual({ test: "yes" });
     expect(sendChecks({ ...good, subject: "Teste" })[0]?.params).toEqual({ test: "yes" });
     expect(sendChecks({ ...good, subject: "Testing 1 2" })[0]?.key).toBe("subjectOk");
+    expect(sendChecks({ ...good, subject: " " })[0]?.key).toBe("subjectEmpty");
   });
 
   it("flags a short or single-line message with its word count", () => {
@@ -59,7 +68,7 @@ describe("sendChecks", () => {
     const params = { domain: "acme.example" };
     expect(domainRow({ ...own, shared: true, dmarc: null })).toEqual({
       key: "domainShared",
-      tone: "ok",
+      tone: "success",
       params,
     });
     expect(domainRow({ ...own, dmarc: null })).toEqual({

@@ -1,6 +1,6 @@
 "use client";
 
-import { INBOX_NAME_MAX, SHARED_USERNAME } from "@millionsend/core/inbox-username";
+import { FROM_NAME_MAX, INBOX_NAME_MAX, SHARED_USERNAME } from "@millionsend/core/inbox-username";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -11,7 +11,7 @@ import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { WarnCard } from "@/components/warn-card";
-import { localPartFromName } from "@/lib/inbox-defaults";
+import { fromNameFromName, localPartFromName } from "@/lib/inbox-defaults";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, nameReviewError } from "./parts";
@@ -21,7 +21,6 @@ type AcceptFrom = InboxSafety["accept_from"];
 
 const SHARED = "shared";
 const EXPIRY = ["never", "1h", "24h", "7d", "30d"] as const;
-const FROM_NAME_MAX = 78;
 // Lowercase ASCII, no leading, trailing or doubled dot (the API's own rule).
 const LOCAL_PART_RE = /^(?!\.)(?!.*\.\.)[a-z0-9._%+-]{1,64}(?<!\.)$/;
 const HINT = { margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" } as const;
@@ -54,7 +53,7 @@ export function CreateInboxDialog({
   const [expires, setExpires] = useState<(typeof EXPIRY)[number]>("never");
   const shared = domain === SHARED;
   const localPart = typedLocal ?? localPartFromName(name);
-  const fromName = typedSender ?? name.slice(0, FROM_NAME_MAX);
+  const fromName = typedSender ?? fromNameFromName(name);
 
   const create = useMutation(
     trpc.inboxes.create.mutationOptions({
@@ -181,15 +180,17 @@ export function CreateInboxDialog({
             onChange={(event) => setTypedSender(event.target.value)}
           />
           <p style={HINT}>{t("create.fromNameHint")}</p>
-          <p style={HINT}>
-            {t.rich("create.preview", {
-              named: sender ? "yes" : "no",
-              sender,
-              local: local || (shared ? t("create.previewRandom") : ""),
-              domain: domainName ?? "",
-              addr: (chunks) => <span className="ms-mono">{chunks}</span>,
-            })}
-          </p>
+          {local || shared ? (
+            <p style={HINT}>
+              {t.rich("create.preview", {
+                named: sender ? "yes" : "no",
+                sender,
+                local: local || t("create.previewRandom"),
+                domain: domainName ?? "",
+                addr: (chunks) => <span className="ms-mono">{chunks}</span>,
+              })}
+            </p>
+          ) : null}
         </div>
         <fieldset className="ms-field" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend>{t("create.kind")}</legend>
@@ -254,7 +255,8 @@ export function CreateInboxDialog({
         {error ? (
           <div className="ms-field-error" style={{ margin: 0 }}>
             {review
-              ? review.orRandom
+              ? // A sender name goes to the same review, so a random address alone gets nothing past it.
+                review.orRandom && !sender
                 ? `${review.text} ${t("create.errors.orRandom")}`
                 : review.text
               : error}

@@ -1542,29 +1542,16 @@ describe("the send dialog's checks", () => {
     const history = (id: string, domain: string) =>
       caller(acme).inboxes.contactHistory({ id, domain });
     expect(await history(inboxId, "fresh.example")).toEqual({ seen: false });
-    await db.insert(schema.emails).values({
-      teamId: acme,
-      inboxId,
-      from: "orders@in.acme.test",
-      to: ["cc@elsewhere.example", "Ana@Fresh.example"],
-      subject: "Order #8841",
-    });
+    // What core records on a send and on an authenticated receive.
+    const now = new Date();
+    await db.insert(schema.inboxCorrespondents).values([
+      { inboxId, address: "ana@fresh.example", firstOutAt: now, lastOutAt: now, lastSeenAt: now },
+      { inboxId, address: "sam@writer.example", firstInAt: now, lastSeenAt: now },
+    ]);
     expect(await history(inboxId, "Fresh.example")).toEqual({ seen: true });
+    expect(await history(inboxId, "writer.example")).toEqual({ seen: true });
     // The whole host, never a suffix of it.
     expect(await history(inboxId, "example")).toEqual({ seen: false });
-
-    const id = await received(acme, { from: "sam@writer.example" });
-    await db.insert(schema.receivedEmailInboxes).values({
-      receivedEmailId: id,
-      inboxId,
-      teamId: acme,
-      threadId,
-      address: "orders@in.acme.test",
-      senderTrust: "external",
-      verdict: "clean",
-      deliveredAt: new Date(),
-    });
-    expect(await history(inboxId, "writer.example")).toEqual({ seen: true });
 
     const [other] = await db
       .insert(schema.inboxes)

@@ -52,7 +52,7 @@ import {
   visibleLine,
 } from "@millionsend/core";
 import { LABEL_NAME_MAX } from "@millionsend/core/inbox-organize";
-import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
+import { FROM_NAME_MAX, INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, gt, ilike, inArray, max, sql } from "drizzle-orm";
@@ -462,29 +462,15 @@ export const inboxesRouter = router({
         .from(i)
         .where(and(eq(i.id, input.id), eq(i.teamId, ctx.teamId)));
       if (!inbox) throw new TRPCError({ code: "NOT_FOUND" });
-      const atDomain = `%@${escapeLike(input.domain)}`;
-      const e = schema.emails;
-      const sent = await ctx.db
-        .select({ id: e.id })
-        .from(e)
-        .where(
-          and(
-            eq(e.teamId, ctx.teamId),
-            eq(e.inboxId, inbox.id),
-            sql`exists (select 1 from jsonb_array_elements_text(${e}."to") as t(address) where t.address ilike ${atDomain})`,
-          ),
-        )
+      // Bare lowercase addresses the inbox wrote to or heard from; a From that
+      // failed authentication is never among them, so it never counts as contact.
+      const c = schema.inboxCorrespondents;
+      const [row] = await ctx.db
+        .select({ address: c.address })
+        .from(c)
+        .where(and(eq(c.inboxId, inbox.id), ilike(c.address, `%@${escapeLike(input.domain)}`)))
         .limit(1);
-      if (sent.length > 0) return { seen: true };
-      const m = schema.receivedEmailInboxes;
-      const r = schema.receivedEmails;
-      const got = await ctx.db
-        .select({ id: m.receivedEmailId })
-        .from(m)
-        .innerJoin(r, eq(r.id, m.receivedEmailId))
-        .where(and(eq(m.teamId, ctx.teamId), eq(m.inboxId, inbox.id), ilike(r.from, atDomain)))
-        .limit(1);
-      return { seen: got.length > 0 };
+      return { seen: row !== undefined };
     }),
 
   create: receivingProcedure
@@ -492,7 +478,7 @@ export const inboxesRouter = router({
       z.object({
         kind: z.enum(INBOX_KINDS),
         name: z.string().trim().max(INBOX_NAME_MAX).optional(),
-        fromName: z.string().trim().max(78).optional(),
+        fromName: z.string().trim().max(FROM_NAME_MAX).optional(),
         // With domainId, the address's local part; without, the shared address's username.
         localPart: z.string().trim().toLowerCase().min(1).max(64).optional(),
         domainId: z.uuid().optional(),
@@ -538,7 +524,7 @@ export const inboxesRouter = router({
       z.object({
         id: z.uuid(),
         name: z.string().trim().min(1).max(INBOX_NAME_MAX).optional(),
-        fromName: z.string().trim().max(78).optional(),
+        fromName: z.string().trim().max(FROM_NAME_MAX).optional(),
         expiresIn: z.enum(EXPIRY_CHOICES).nullable().optional(),
       }),
     )

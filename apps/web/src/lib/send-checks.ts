@@ -1,6 +1,6 @@
 import { mailDomain } from "./format";
 
-export type CheckTone = "warn" | "ok" | "info";
+export type CheckTone = "warn" | "success" | "info";
 
 /** One row of the send dialog's checklist: a catalog key under compose.checks and its placeholders. */
 export interface SendCheck {
@@ -48,18 +48,20 @@ export function sendChecks(input: SendCheckInput): SendCheck[] {
   const bodyWords = wordCount(input.text);
   const name = input.fromName?.trim() || null;
   const checks: SendCheck[] = [
-    wordCount(subject) < 2
-      ? {
-          key: "subjectShort",
-          tone: "warn",
-          params: { test: /^teste?\b/i.test(subject) ? "yes" : "no" },
-        }
-      : { key: "subjectOk", tone: "ok", params: {} },
+    subject === ""
+      ? { key: "subjectEmpty", tone: "warn", params: {} }
+      : wordCount(subject) < 2
+        ? {
+            key: "subjectShort",
+            tone: "warn",
+            params: { test: /^teste?\b/i.test(subject) ? "yes" : "no" },
+          }
+        : { key: "subjectOk", tone: "success", params: {} },
     bodyWords < 8 || !input.text.trim().includes("\n")
       ? { key: "messageShort", tone: "warn", params: { n: bodyWords } }
-      : { key: "messageOk", tone: "ok", params: {} },
+      : { key: "messageOk", tone: "success", params: {} },
     name
-      ? { key: "senderName", tone: "ok", params: { name, address: input.address } }
+      ? { key: "senderName", tone: "success", params: { name, address: input.address } }
       : { key: "noSenderName", tone: "warn", params: {} },
   ];
   const domain = input.domain;
@@ -67,12 +69,16 @@ export function sendChecks(input: SendCheckInput): SendCheck[] {
     const params = { domain: domain.name };
     checks.push(
       domain.shared
-        ? { key: "domainShared", tone: "ok", params }
+        ? { key: "domainShared", tone: "success", params }
         : !domain.verified
           ? { key: "domainUnverified", tone: "warn", params }
           : domain.dmarc === null
             ? { key: "domainNoDmarc", tone: "warn", params }
-            : { key: "domainAligned", tone: "ok", params: { ...params, policy: domain.dmarc } },
+            : {
+                key: "domainAligned",
+                tone: "success",
+                params: { ...params, policy: domain.dmarc },
+              },
     );
   }
   if (input.recipientDomain && input.contactBefore === false) {

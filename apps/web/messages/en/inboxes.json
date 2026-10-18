@@ -453,6 +453,9 @@
       "title": "Before it goes out",
       "count": "{n} of {total} worth a look",
       "allGood": "Sender name, subject and message look like a person's. {auth}",
+      "subjectEmpty": {
+        "label": "No subject yet."
+      },
       "subjectShort": {
         "label": "Subject is one word.",
         "hint": "{test, select, yes {“Test” is the single most filtered subject there is.} other {One-word subjects get filtered.}}"

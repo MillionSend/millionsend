@@ -1,5 +1,6 @@
 "use client";
 
+import { FROM_NAME_MAX } from "@millionsend/core/inbox-username";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
@@ -7,25 +8,16 @@ import { MessageEditor } from "@/components/maily-editor/lazy";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { BtnSpinner } from "@/components/spinner";
+import { StatusDot } from "@/components/status-badge";
+import { TONE_COLOR } from "@/components/status-tile";
 import { toast } from "@/components/toast";
 import { htmlToText } from "@/lib/html";
-import {
-  type CheckTone,
-  firstRecipientDomain,
-  type SendCheck,
-  sendChecks,
-} from "@/lib/send-checks";
+import { firstRecipientDomain, type SendCheck, sendChecks } from "@/lib/send-checks";
 import { useTRPC } from "@/lib/trpc";
 import { type InboxDetail, nameReviewError } from "../parts";
 
 /** How long the To field rests before its first address's domain is asked about. */
 const RECIPIENT_DEBOUNCE_MS = 400;
-
-const TONE_COLOR: Record<CheckTone, string> = {
-  warn: "var(--ms-warn)",
-  ok: "var(--ms-success)",
-  info: "var(--ms-info)",
-};
 
 /** A new conversation from the inbox; the inbox's send rules may hold it as a draft. */
 export function SendDialog({
@@ -126,7 +118,7 @@ export function SendDialog({
       ? [
           {
             key: "allGood",
-            tone: "ok" as const,
+            tone: "success" as const,
             text: t("compose.checks.allGood", { auth: domainRow ? label(domainRow) : "" }),
             hint: null,
           },
@@ -172,13 +164,14 @@ export function SendDialog({
                       className="ms-link"
                       style={{
                         font: "inherit",
+                        fontFamily: "var(--ms-font-sans)",
                         background: "none",
                         border: 0,
                         padding: 0,
                         cursor: "pointer",
                       }}
                       onClick={() => {
-                        setFromName(inbox.name);
+                        setFromName(inbox.name === inbox.email_address ? "" : inbox.name);
                         setNaming(true);
                       }}
                     >
@@ -198,7 +191,7 @@ export function SendDialog({
                 autoFocus
                 aria-label={t("edit.fromName")}
                 value={fromName}
-                maxLength={78}
+                maxLength={FROM_NAME_MAX}
                 disabled={rename.isPending}
                 onChange={(event) => setFromName(event.target.value)}
                 // Enter here saves the name; the form around it would send the mail.
@@ -283,26 +276,22 @@ export function SendDialog({
             }}
           >
             <span>{t("compose.checks.title")}</span>
-            <span className="ms-mono" style={{ color: "var(--ms-faint)" }}>
+            <span className="ms-mono" style={{ color: "var(--ms-muted)" }}>
               {t("compose.checks.count", { n: worth, total: checks.length })}
             </span>
           </div>
           {rows.map((row) => (
             <div
               key={row.key}
-              style={{ display: "flex", gap: 8, fontSize: "var(--ms-fs-label)", lineHeight: 1.4 }}
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: 8,
+                fontSize: "var(--ms-fs-label)",
+                lineHeight: 1.4,
+              }}
             >
-              <span
-                aria-hidden
-                style={{
-                  flex: "none",
-                  width: 7,
-                  height: 7,
-                  marginTop: 6,
-                  borderRadius: "50%",
-                  background: TONE_COLOR[row.tone],
-                }}
-              />
+              <StatusDot color={TONE_COLOR[row.tone]} />
               <span style={{ color: "var(--ms-bone)" }}>
                 {row.text}
                 {row.hint ? <span style={{ color: "var(--ms-muted)" }}> {row.hint}</span> : null}
