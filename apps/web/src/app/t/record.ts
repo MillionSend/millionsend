@@ -5,6 +5,7 @@ import {
   classifyOpen,
   deriveTrackingKey,
   enqueueWebhookDeliveries,
+  extractAddrSpec,
   forwardedClientIp,
   highestStatus,
   type QueuedWebhookDelivery,
@@ -13,7 +14,7 @@ import {
   type WebhookEnqueue,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { and, asc, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { trustedProxies } from "../../server/trusted-proxies";
 
@@ -263,6 +264,7 @@ export async function recordEngagement(
       .select({
         id: schema.emails.id,
         teamId: schema.emails.teamId,
+        contactId: schema.emails.contactId,
         from: schema.emails.from,
         to: schema.emails.to,
         subject: schema.emails.subject,
@@ -358,8 +360,29 @@ export async function recordEngagement(
       .insert(schema.emailEvents)
       .values({ emailId: email.id, type: recorded, occurredAt, data });
     // A prefetch is a fact about a machine, never about the recipient: the
-    // status ladder moves only for a person.
-    if (recorded !== "prefetched") await applyStatusCas(tx, email.id, recorded);
+    // status ladder and the contact's last engagement move only for a person.
+    if (recorded !== "prefetched") {
+      await applyStatusCas(tx, email.id, recorded);
+      const c = schema.contacts;
+      const recipient = email.to[0];
+      const contact = email.contactId
+        ? eq(c.id, email.contactId)
+        : recipient
+          ? sql`lower(${c.email}) = lower(${extractAddrSpec(recipient)})`
+          : undefined;
+      if (contact) {
+        await tx
+          .update(c)
+          .set({ lastEngagedAt: occurredAt })
+          .where(
+            and(
+              eq(c.teamId, email.teamId),
+              contact,
+              or(isNull(c.lastEngagedAt), lt(c.lastEngagedAt, occurredAt)),
+            ),
+          );
+      }
+    }
 
     // A person cannot click a link in a message they never rendered, so a
     // click on an email with no open yet is also its open — the only way one

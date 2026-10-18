@@ -220,6 +220,7 @@ export {
   resolveBounceGuidance,
   resolveComplaintGuidance,
 } from "./bounce-guidance.js";
+export { broadcastAudience, broadcastAudienceWhere } from "./broadcast-audience.js";
 export {
   applyMergeFields,
   injectPreheader,
@@ -617,6 +618,7 @@ export {
   sesComplaintReadings,
 } from "./platform-breaker.js";
 export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
+export { broadcastProviderBreakdown, type ProviderBreakdownRow } from "./provider-breakdown.js";
 export {
   dailyCeiling,
   type QuotaResult,
@@ -886,6 +888,47 @@ export {
 export { isLoopbackUrl, unwrapRedirect } from "./url.js";
 export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./usage-hourly.js";
 export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
+export {
+  checkWarmups,
+  contactActivity,
+  contactPropertyDateSql,
+  enableWarmup,
+  getWarmup,
+  isInactiveContact,
+  movedWarmupVolume,
+  pauseWarmup,
+  planDomainWarmup,
+  planWarmupDays,
+  recentTransactionalByAddress,
+  reserveWarmupDay,
+  resumeWarmup,
+  roundWarmupVolume,
+  turnOffWarmup,
+  updateWarmupSettings,
+  WARMUP_INACTIVE_DAYS,
+  WARMUP_LIMITS,
+  WARMUP_SLICES_PER_DAY,
+  WARMUP_START_VOLUME,
+  type WarmupDayCounts,
+  type WarmupEvent,
+  type WarmupOutcome,
+  type WarmupOverview,
+  type WarmupPlan,
+  type WarmupPlanInput,
+  type WarmupRelease,
+  type WarmupSendPreview,
+  type WarmupSettings,
+  type WarmupSettingsInput,
+  type WarmupStatus,
+  warmupDayOutcome,
+  warmupMailValues,
+  warmupOverview,
+  warmupRelease,
+  warmupSendOrder,
+  warmupSendPreview,
+  warmupSignalFigure,
+  warmupSignals,
+} from "./warmup-ramp.js";
 export {
   buildWebhookPayload,
   clearWebhookEndpointNotifications,

@@ -53,6 +53,7 @@ export function mailPreferenceOf(kind: SystemMailKind): MailPreferenceKey | null
   // The progress note of a paced broadcast rides the same switch as its report.
   if (kind === "broadcast.sending") return "broadcast.sent";
   if (kind.startsWith("quota.")) return "quota";
-  if (kind.startsWith("deliverability.")) return "deliverability";
+  // A domain's warm-up pausing or finishing is deliverability news too.
+  if (kind.startsWith("deliverability.") || kind.startsWith("warmup.")) return "deliverability";
   return isMailPreferenceKey(kind) ? kind : null;
 }

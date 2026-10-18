@@ -1,5 +1,8 @@
 import {
   broadcastSendSpacingMs,
+  buildAccountMail,
+  checkWarmups,
+  claimNotification,
   countDistinctRecipients,
   DAY_MS,
   DRAIN_MAX_PER_RUN,
@@ -20,6 +23,7 @@ import {
   releaseQuota,
   reserveQuota,
   reserveWarmup,
+  reserveWarmupDay,
   SES_QUOTA_SLOT_MS,
   SYSTEM_MAIL_TAG,
   type TeamQuota,
@@ -27,10 +31,14 @@ import {
   transitionQueueState,
   utcDay,
   type WarmupCap,
+  type WarmupEvent,
+  type WarmupRelease,
   WEBHOOK_BACKLOG_AGE_MS,
   WEBHOOK_MAX_AGE_MS,
   type WebhookEnqueue,
   warmupCap,
+  warmupMailValues,
+  warmupRelease,
   webhookBatch,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -61,6 +69,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { mailOwners, type SystemMailer } from "../system-mail.js";
 import { exhaustOpenDeliveries } from "./deliver-webhook.js";
 
 /**
@@ -183,6 +192,10 @@ export interface DrainDeps {
     | undefined;
   /** Called for every broadcast the bulk pass touched; flips it to sent once nothing of it remains. */
   finalize?: ((broadcastId: string) => Promise<unknown>) | undefined;
+  /** Owners hear when a domain's warm-up pauses or finishes; absent = silent (tests). */
+  mailer?: SystemMailer | undefined;
+  /** Dashboard origin for the links in those mails. */
+  appBaseUrl?: string | undefined;
   now?: Date | undefined;
 }
 
@@ -195,11 +208,12 @@ export interface DrainResult {
 class DrainRaced extends Error {}
 
 /**
- * Sentinel: the sending domain's warm-up, or the team's shared one, is spent
- * for the day; roll the plan's reservation back.
+ * Sentinel: the sending domain's warm-up, the team's shared one, or the
+ * domain's reputation warm-up ("ramp") is spent for the day; roll the
+ * plan's reservation back.
  */
 class WarmupHeld extends Error {
-  constructor(readonly full: "domain" | "pool") {
+  constructor(readonly full: "domain" | "pool" | "ramp") {
     super(`warm-up ${full} full`);
   }
 }
@@ -225,6 +239,8 @@ interface DrainRun {
   warmupFull: Set<string>;
   poolFull: Set<string>;
   heldDomains: Set<string>;
+  /** Each sending domain's reputation warm-up, read once per run, with what the run released against it. */
+  ramps: Map<string, (WarmupRelease & { released: number }) | null>;
   failures: unknown[];
 }
 
@@ -246,16 +262,23 @@ interface DrainRun {
  * sweep leaves them alone. A broadcast whose last parked row went is
  * finalized at the end of the run.
  *
+ * A domain warming up its reputation releases its broadcasts by the
+ * warm-up's day, judged each run between the two passes (checkWarmups), so
+ * a long check never holds transactional mail: nothing until yesterday is
+ * checked, the most active contacts first, never more in a run than a 48th
+ * of the day's allowance, and nothing while it is paused.
+ *
  * Reserve + transition commit atomically per email (no crash window that
  * burns quota or half-moves a row). One email's failure never blocks the
  * rest — errors are collected and rethrown at the end so the cron retries.
  */
 export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainResult> {
+  const now = deps.now ?? new Date();
   await deps.sesQuota?.recount?.();
   const regions = deps.sesQuota?.regions ?? [];
   const held = regions.filter((region) => deps.sesQuota?.exhausted(region));
   const run: DrainRun = {
-    now: deps.now ?? new Date(),
+    now,
     heldTeams: new Set(),
     checkedTeams: new Set(),
     pausedTeams: new Set(),
@@ -263,6 +286,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     warmupFull: new Set(),
     poolFull: new Set(),
     heldDomains: new Set(),
+    ramps: new Map(),
     failures: [],
   };
   let drained = 0;
@@ -281,6 +305,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       );
     }
   }
+  await mailWarmupEvents(db, deps, await checkWarmups(db, now));
   let budget = DRAIN_MAX_PER_RUN - drained;
   if (budget > 0) {
     const b = schema.broadcasts;
@@ -332,6 +357,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
         budget: grant,
         held: [],
         spacingMs,
+        bySendOrder: true,
       });
       drained += released.total;
       budget -= released.total;
@@ -362,116 +388,165 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
  * Keyset pages over (createdAt, id): a row that stays parked (exhausted
  * team, failed enqueue) can never be re-read into an infinite loop, and
  * teams found exhausted leave the page query so one capped team's backlog
- * is never walked row by row.
+ * is never walked row by row. `bySendOrder` first walks the rows a warm-up
+ * put in line, by (sendOrder, id), then the rest oldest first.
  */
 async function releaseParkedRows(
   db: Db,
   deps: DrainDeps,
   run: DrainRun,
-  opts: { where: SQL; budget: number; held: readonly string[]; spacingMs: number },
+  opts: {
+    where: SQL;
+    budget: number;
+    held: readonly string[];
+    spacingMs: number;
+    bySendOrder?: boolean;
+  },
 ): Promise<{ total: number; byRegion: Map<string, number> }> {
   const regions = deps.sesQuota?.regions ?? [];
   const region = sql<string>`coalesce(${schema.domains.region}, ${regions[0] ?? ""})`;
   const systemMail = sql<boolean>`coalesce(${schema.emails.tags} ? ${SYSTEM_MAIL_TAG}, false)`;
   const byRegion = new Map<string, number>();
   let total = 0;
-  let cursorId: string | undefined;
-  while (total < opts.budget) {
-    const page = await db
-      .select({
-        id: schema.emails.id,
-        teamId: schema.emails.teamId,
-        domainId: schema.emails.domainId,
-        broadcastId: schema.emails.broadcastId,
-        ...QUOTA_COLUMNS,
-        scheduledAt: schema.emails.scheduledAt,
-        to: schema.emails.to,
-        cc: schema.emails.cc,
-        bcc: schema.emails.bcc,
-        region,
-        systemMail,
-      })
-      .from(schema.emails)
-      .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
-      .leftJoin(schema.domains, eq(schema.emails.domainId, schema.domains.id))
-      .where(
-        and(
-          eq(schema.emails.latestStatus, "queued_quota"),
-          opts.where,
-          // The operator's holds: a suspended team releases nothing, a paused
-          // team releases only its transactional rows, and what screening
-          // parked waits for the review list.
-          isNull(schema.teams.suspendedAt),
-          or(isNull(schema.emails.broadcastId), isNull(schema.teams.broadcastsPausedByOperatorAt)),
-          or(
-            isNull(schema.emails.parkReason),
-            notInArray(schema.emails.parkReason, [...OPERATOR_PARK_REASONS]),
+  const e = schema.emails;
+  const passes = opts.bySendOrder
+    ? [
+        { order: e.sendOrder, where: isNotNull(e.sendOrder) },
+        { order: e.createdAt, where: isNull(e.sendOrder) },
+      ]
+    : [{ order: e.createdAt, where: undefined }];
+  for (const pass of passes) {
+    let cursorId: string | undefined;
+    while (total < opts.budget) {
+      const page = await db
+        .select({
+          id: schema.emails.id,
+          teamId: schema.emails.teamId,
+          domainId: schema.emails.domainId,
+          broadcastId: schema.emails.broadcastId,
+          ...QUOTA_COLUMNS,
+          scheduledAt: schema.emails.scheduledAt,
+          to: schema.emails.to,
+          cc: schema.emails.cc,
+          bcc: schema.emails.bcc,
+          region,
+          systemMail,
+        })
+        .from(schema.emails)
+        .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
+        .leftJoin(schema.domains, eq(schema.emails.domainId, schema.domains.id))
+        .where(
+          and(
+            eq(schema.emails.latestStatus, "queued_quota"),
+            opts.where,
+            pass.where,
+            // The operator's holds: a suspended team releases nothing, a paused
+            // team releases only its transactional rows, and what screening
+            // parked waits for the review list.
+            isNull(schema.teams.suspendedAt),
+            or(
+              isNull(schema.emails.broadcastId),
+              isNull(schema.teams.broadcastsPausedByOperatorAt),
+            ),
+            or(
+              isNull(schema.emails.parkReason),
+              notInArray(schema.emails.parkReason, [...OPERATOR_PARK_REASONS]),
+            ),
+            // A row due on a later UTC day is charged on that day, its warm-up
+            // included, when it comes: reserved against today, days of the cap
+            // could all go out at one future instant.
+            or(
+              isNull(schema.emails.scheduledAt),
+              lt(schema.emails.scheduledAt, nextUtcDayStart(run.now)),
+            ),
+            run.heldTeams.size > 0
+              ? notInArray(schema.emails.teamId, [...run.heldTeams])
+              : undefined,
+            run.pausedTeams.size > 0
+              ? or(notInArray(schema.emails.teamId, [...run.pausedTeams]), systemMail)
+              : undefined,
+            run.heldDomains.size > 0
+              ? or(
+                  isNull(schema.emails.domainId),
+                  notInArray(schema.emails.domainId, [...run.heldDomains]),
+                )
+              : undefined,
+            opts.held.length > 0 ? notInArray(region, [...opts.held]) : undefined,
+            cursorId ? keysetCursorWhere(pass.order, schema.emails.id, cursorId) : undefined,
           ),
-          // A row due on a later UTC day is charged on that day, its warm-up
-          // included, when it comes: reserved against today, days of the cap
-          // could all go out at one future instant.
-          or(
-            isNull(schema.emails.scheduledAt),
-            lt(schema.emails.scheduledAt, nextUtcDayStart(run.now)),
-          ),
-          run.heldTeams.size > 0 ? notInArray(schema.emails.teamId, [...run.heldTeams]) : undefined,
-          run.pausedTeams.size > 0
-            ? or(notInArray(schema.emails.teamId, [...run.pausedTeams]), systemMail)
-            : undefined,
-          run.heldDomains.size > 0
-            ? or(
-                isNull(schema.emails.domainId),
-                notInArray(schema.emails.domainId, [...run.heldDomains]),
-              )
-            : undefined,
-          opts.held.length > 0 ? notInArray(region, [...opts.held]) : undefined,
-          cursorId
-            ? keysetCursorWhere(schema.emails.createdAt, schema.emails.id, cursorId)
-            : undefined,
-        ),
-      )
-      .orderBy(asc(schema.emails.createdAt), asc(schema.emails.id))
-      .limit(DRAIN_PAGE);
-    const last = page.at(-1);
-    if (!last) break;
-    cursorId = last.id;
-    const moved: MovedEmail[] = [];
-    for (const email of page) {
-      if (total + moved.length >= opts.budget) break;
-      const throttleAt =
-        opts.spacingMs > 0
-          ? new Date(run.now.getTime() + (total + moved.length) * opts.spacingMs)
-          : null;
-      const released = await releaseParked(db, deps, email, run, throttleAt);
-      if (released) moved.push(released);
-    }
-    if (moved.length === 0) continue;
-    try {
-      await deps.enqueueSends(
-        moved.map((m) => ({
-          emailId: m.id,
-          startAfter: m.scheduledAt ?? undefined,
-          priority: emailSendPriority(m),
-        })),
-      );
-      total += moved.length;
-      for (const m of moved) byRegion.set(m.region, (byRegion.get(m.region) ?? 0) + 1);
-    } catch (err) {
-      // The page's enqueue is one statement, so it failed whole: "queued"
-      // emails with no job would only be picked up by the reconcile sweep;
-      // re-park them so the drain retry handles them sooner.
-      run.failures.push(err);
-      for (const m of moved) {
-        // A row a racing send lane already claimed keeps its reservation:
-        // refunding it here would credit the team for a send that happened.
-        if (await transitionQueueState(db, m.id, { from: "queued", to: "queued_quota" })) {
-          await releaseQuota(db, { teamId: m.teamId, count: m.units, quota: m.quota });
-        }
+        )
+        .orderBy(asc(pass.order), asc(schema.emails.id))
+        .limit(DRAIN_PAGE);
+      const last = page.at(-1);
+      if (!last) break;
+      cursorId = last.id;
+      const moved: MovedEmail[] = [];
+      for (const email of page) {
+        if (total + moved.length >= opts.budget) break;
+        const throttleAt =
+          opts.spacingMs > 0
+            ? new Date(run.now.getTime() + (total + moved.length) * opts.spacingMs)
+            : null;
+        const released = await releaseParked(db, deps, email, run, throttleAt);
+        if (released) moved.push(released);
       }
-      break;
+      if (moved.length === 0) continue;
+      try {
+        await deps.enqueueSends(
+          moved.map((m) => ({
+            emailId: m.id,
+            startAfter: m.scheduledAt ?? undefined,
+            priority: emailSendPriority(m),
+          })),
+        );
+        total += moved.length;
+        for (const m of moved) byRegion.set(m.region, (byRegion.get(m.region) ?? 0) + 1);
+      } catch (err) {
+        // The page's enqueue is one statement, so it failed whole: "queued"
+        // emails with no job would only be picked up by the reconcile sweep;
+        // re-park them so the drain retry handles them sooner.
+        run.failures.push(err);
+        for (const m of moved) {
+          // A row a racing send lane already claimed keeps its reservation:
+          // refunding it here would credit the team for a send that happened.
+          if (await transitionQueueState(db, m.id, { from: "queued", to: "queued_quota" })) {
+            await releaseQuota(db, { teamId: m.teamId, count: m.units, quota: m.quota });
+          }
+        }
+        return { total, byRegion };
+      }
     }
   }
   return { total, byRegion };
+}
+
+/**
+ * The owners hear when a domain's warm-up paused itself or finished, once
+ * per episode; a mail that fails is logged and never fails the drain.
+ */
+async function mailWarmupEvents(db: Db, deps: DrainDeps, events: WarmupEvent[]): Promise<void> {
+  const { mailer } = deps;
+  if (!mailer) return;
+  for (const event of events) {
+    try {
+      const claimed = await claimNotification(db, {
+        teamId: event.teamId,
+        kind: `${event.kind}:${event.domainId}`,
+        periodKey: event.episode,
+      });
+      if (!claimed) continue;
+      await mailOwners(db, mailer, event.teamId, event.kind, (locale) =>
+        buildAccountMail({
+          kind: event.kind,
+          locale,
+          url: `${deps.appBaseUrl ?? ""}/domains/${event.domainId}`,
+          values: warmupMailValues(event, locale),
+        }),
+      );
+    } catch (err) {
+      console.error(`${event.kind} mail for domain ${event.domainId} skipped`, err);
+    }
+  }
 }
 
 async function countParked(db: Db): Promise<number> {
@@ -585,6 +660,20 @@ async function releaseParked(
         return null;
       }
     }
+    // A domain warming up its reputation lets its broadcasts out by the
+    // warm-up's day; transactional mail never waits on it.
+    let ramp: (WarmupRelease & { released: number }) | null = null;
+    if (domainId && email.broadcastId) {
+      if (!run.ramps.has(domainId)) {
+        const state = await warmupRelease(db, { teamId: email.teamId, domainId, now: run.now });
+        run.ramps.set(domainId, state && { ...state, released: 0 });
+      }
+      ramp = run.ramps.get(domainId) ?? null;
+      if (ramp && (ramp.status === "paused" || !ramp.ready || ramp.released + units > ramp.slice)) {
+        run.heldDomains.add(domainId);
+        return null;
+      }
+    }
     const outcome = await db
       .transaction(async (tx) => {
         const txDb = tx as unknown as Db;
@@ -593,6 +682,18 @@ async function releaseParked(
         if (warmup) {
           const held = await reserveWarmup(txDb, warmup, units, utcDay(run.now));
           if (!held.reserved) throw new WarmupHeld(held.full);
+        }
+        if (
+          ramp &&
+          domainId &&
+          !(await reserveWarmupDay(txDb, {
+            domainId,
+            day: utcDay(run.now),
+            volume: ramp.volume,
+            count: units,
+          }))
+        ) {
+          throw new WarmupHeld("ramp");
         }
         const moved = await transitionQueueState(txDb, email.id, {
           from: "queued_quota",
@@ -609,20 +710,21 @@ async function releaseParked(
       })
       .catch((err) => {
         if (err instanceof DrainRaced) return "raced" as const;
-        if (err instanceof WarmupHeld) return err.full === "pool" ? "pool_full" : "domain_full";
+        if (err instanceof WarmupHeld) return `${err.full}_full` as const;
         throw err;
       });
     if (outcome === "exhausted") {
       run.heldTeams.add(email.teamId);
       return null;
     }
-    if (outcome === "domain_full" || outcome === "pool_full") {
+    if (outcome === "domain_full" || outcome === "pool_full" || outcome === "ramp_full") {
       if (warmup && outcome === "pool_full") run.poolFull.add(warmup.teamId);
-      else if (warmup) run.warmupFull.add(warmup.key);
+      else if (warmup && outcome === "domain_full") run.warmupFull.add(warmup.key);
       if (domainId) run.heldDomains.add(domainId);
       return null;
     }
     if (outcome === "raced") return null;
+    if (ramp) ramp.released += units;
     const { id, teamId, broadcastId, region } = email;
     return {
       id,

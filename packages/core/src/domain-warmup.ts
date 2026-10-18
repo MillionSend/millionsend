@@ -2,6 +2,7 @@ import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   loadMonitorState,
   MONITOR_HOLD_CATEGORIES,
@@ -198,6 +199,46 @@ export async function warmupCap(
   };
 }
 
+type ColumnValues = readonly (readonly [AnyPgColumn, unknown])[];
+
+/**
+ * One guarded counter upsert, the pattern of reserveDailyQuota: the row
+ * `key` names takes `count` more on `counter` only while it stays within
+ * `limit`, which the statement reads itself so racing reservations never
+ * overshoot it. An absent row is created with the key, `fill` and the
+ * count; the caller checks that the count fits a fresh row. True when the
+ * count was taken.
+ */
+export async function addWithinLimit(
+  db: Db,
+  input: {
+    counter: AnyPgColumn;
+    key: ColumnValues;
+    fill?: ColumnValues;
+    count: number;
+    limit: number | SQL;
+  },
+): Promise<boolean> {
+  const values = [...input.key, ...(input.fill ?? []), [input.counter, input.count] as const];
+  const names = (pairs: ColumnValues) =>
+    sql.join(
+      pairs.map(([column]) => sql.identifier(column.name)),
+      sql`, `,
+    );
+  const rows = await db.execute(sql`
+    insert into ${input.counter.table} (${names(values)})
+    values (${sql.join(
+      values.map(([, value]) => sql`${value}`),
+      sql`, `,
+    )})
+    on conflict (${names(input.key)}) do update
+      set ${sql.identifier(input.counter.name)} = ${input.counter} + ${input.count}
+      where ${input.counter} + ${input.count} <= ${input.limit}
+    returning 1 as taken
+  `);
+  return firstRow(rows) !== undefined;
+}
+
 export type WarmupReservation = { reserved: true } | { reserved: false; full: "domain" | "pool" };
 
 /**
@@ -218,25 +259,27 @@ export async function reserveWarmup(
   // must never wait on a send holding another while that send waits on the
   // batch. The pool is never below the domain's cap, so a first insert fits.
   const p = schema.teamWarmupUsage;
-  const pool = await db.execute(sql`
-    insert into ${p} (team_id, day, accepted)
-    values (${cap.teamId}, ${day}, ${count})
-    on conflict (team_id, day) do update
-      set accepted = ${p.accepted} + ${count}
-      where ${p.accepted} + ${count} <= ${cap.pool}
-    returning accepted
-  `);
-  if (firstRow(pool) === undefined) return { reserved: false, full: "pool" };
+  const pool = await addWithinLimit(db, {
+    counter: p.accepted,
+    key: [
+      [p.teamId, cap.teamId],
+      [p.day, day],
+    ],
+    count,
+    limit: cap.pool,
+  });
+  if (!pool) return { reserved: false, full: "pool" };
   const u = schema.domainWarmupUsage;
-  const domain = await db.execute(sql`
-    insert into ${u} (registrable_domain, day, accepted)
-    values (${cap.key}, ${day}, ${count})
-    on conflict (registrable_domain, day) do update
-      set accepted = ${u.accepted} + ${count}
-      where ${u.accepted} + ${count} <= ${cap.cap}
-    returning accepted
-  `);
-  if (firstRow(domain) !== undefined) return { reserved: true };
+  const domain = await addWithinLimit(db, {
+    counter: u.accepted,
+    key: [
+      [u.registrableDomain, cap.key],
+      [u.day, day],
+    ],
+    count,
+    limit: cap.cap,
+  });
+  if (domain) return { reserved: true };
   // The caller commits the park, so the pool's charge goes back here.
   await db
     .update(p)

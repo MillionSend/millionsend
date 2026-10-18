@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, MAX_SUBJECT_LENGTH, utcDay } from "@millionsend/core";
+import {
+  EnvKeyring,
+  enableWarmup,
+  generateApiKey,
+  MAX_SUBJECT_LENGTH,
+  pauseWarmup,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -931,4 +938,68 @@ describe("broadcasts API pacing", () => {
       .where(eq(schema.broadcasts.id, id));
     return row;
   }
+});
+
+describe("broadcasts API warm-up", () => {
+  type Sent = {
+    finishes_at?: string | null;
+    warning?: { code: string; days: number; message: string };
+  };
+
+  // A sendable team whose domain warms up from 100 a day, with `contacts` subscribed.
+  async function warming(slug: string, contacts: number) {
+    const team = await makeSendableTeam(slug);
+    const [domain] = await db
+      .select({ id: schema.domains.id })
+      .from(schema.domains)
+      .where(eq(schema.domains.teamId, team.teamId));
+    if (!domain) throw new Error("domain missing");
+    await db.insert(schema.contacts).values(
+      Array.from({ length: contacts }, (_, i) => ({
+        teamId: team.teamId,
+        email: `${slug}-${i}@example.com`,
+      })),
+    );
+    await enableWarmup(db, {
+      teamId: team.teamId,
+      domainId: domain.id,
+      settings: { startVolume: 100, dailyTarget: 1_000 },
+    });
+    return { ...team, domainId: domain.id };
+  }
+
+  it("says a warming domain's send goes out over days, and when it finishes, on both send routes", async () => {
+    const { token, broadcastId } = await warming("bc-warm", 250);
+    const res = await call(token, "POST", `/broadcasts/${broadcastId}/send`, {});
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Sent;
+    // 250 against 100 today and 150 tomorrow: never inside one day.
+    expect(body.warning?.code).toBe("warming_up");
+    expect(body.warning?.days).toBeGreaterThanOrEqual(2);
+    expect(body.warning?.message).toBe(
+      `This domain is warming up, so this broadcast goes out over about ${body.warning?.days} days, most active contacts first.`,
+    );
+    expect(new Date(body.finishes_at ?? 0).getTime()).toBeGreaterThan(Date.now());
+
+    const created = await call(token, "POST", "/broadcasts", { ...draftBody(), send: true });
+    expect(created.status).toBe(200);
+    expect(((await created.json()) as Sent).warning?.code).toBe("warming_up");
+  });
+
+  it("has no finish while the warm-up is paused", async () => {
+    const { teamId, token, broadcastId, domainId } = await warming("bc-warm-paused", 5);
+    await pauseWarmup(db, { teamId, domainId });
+    const res = await call(token, "POST", `/broadcasts/${broadcastId}/send`, {});
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: broadcastId,
+      finishes_at: null,
+      estimated: true,
+      warning: {
+        code: "warming_up",
+        days: 0,
+        message: "This domain's warm-up is paused, so this broadcast waits until it resumes.",
+      },
+    });
+  });
 });

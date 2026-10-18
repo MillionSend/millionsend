@@ -151,3 +151,64 @@ describe("recordEngagement webhook fan-out", () => {
     expect(ev).toBeTruthy();
   });
 });
+
+describe("recordEngagement and the contact's last engagement", () => {
+  async function engagedAt(contactId: string): Promise<Date | null> {
+    const [row] = await db
+      .select({ at: schema.contacts.lastEngagedAt })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, contactId));
+    return row?.at ?? null;
+  }
+
+  async function contact(teamId: string, email: string): Promise<string> {
+    const [row] = await db
+      .insert(schema.contacts)
+      .values({ teamId, email })
+      .returning({ id: schema.contacts.id });
+    return row?.id ?? "";
+  }
+
+  it("stamps a real open on the contact by address, and only in the email's team", async () => {
+    const teamId = await createTeam(db, "engaged");
+    const other = await createTeam(db, "engaged-other");
+    const mine = await contact(teamId, "R@example.com");
+    const theirs = await contact(other, "r@example.com");
+
+    await recordEngagement(db, await seedEmail(teamId), "opened", undefined, HUMAN);
+
+    expect(await engagedAt(mine)).toBeInstanceOf(Date);
+    expect(await engagedAt(theirs)).toBeNull();
+  });
+
+  it("stamps a broadcast copy's own contact on a click", async () => {
+    const teamId = await createTeam(db, "engaged-copy");
+    const id = await contact(teamId, "reader@example.com");
+    const [email] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        contactId: id,
+        from: "s@example.com",
+        to: ["r@example.com"],
+        subject: "Hi",
+      })
+      .returning({ id: schema.emails.id });
+
+    await recordEngagement(db, email?.id ?? "", "clicked", undefined, {
+      ...HUMAN,
+      link: "https://example.com/a",
+    });
+
+    expect(await engagedAt(id)).toBeInstanceOf(Date);
+  });
+
+  it("leaves it alone on a prefetch", async () => {
+    const teamId = await createTeam(db, "engaged-machine");
+    const id = await contact(teamId, "r@example.com");
+
+    await recordEngagement(db, await seedEmail(teamId), "opened", undefined, APPLE_MPP);
+
+    expect(await engagedAt(id)).toBeNull();
+  });
+});
