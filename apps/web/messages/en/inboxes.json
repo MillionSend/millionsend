@@ -426,6 +426,8 @@
   },
   "compose": {
     "from": "From {address}",
+    "fromNamed": "From <name>{fromName}</name> <{address}>",
+    "setSenderName": "Set a sender name",
     "to": "To",
     "toName": "To {name}",
     "subject": "Subject",
@@ -440,7 +442,49 @@
     "replyPlaceholder": "Write a reply…",
     "send": "Send",
     "sent": "Sent.",
-    "drafted": "Held for approval. It's waiting in Needs review."
+    "drafted": "Held for approval. It's waiting in Needs review.",
+    "checks": {
+      "title": "Before it goes out",
+      "count": "{n} of {total} worth a look",
+      "allGood": "Sender name, subject and message look like a person's. {auth}",
+      "subjectShort": {
+        "label": "Subject is one word.",
+        "hint": "{test, select, yes {“Test” is the single most filtered subject there is.} other {One-word subjects get filtered.}}"
+      },
+      "subjectOk": {
+        "label": "Subject reads fine."
+      },
+      "messageShort": {
+        "label": "{n, plural, one {Message is # word, no sign-off.} other {Message is # words, no sign-off.}}",
+        "hint": "A sentence and a name read as a person."
+      },
+      "messageOk": {
+        "label": "Message has a sentence and a sign-off."
+      },
+      "noSenderName": {
+        "label": "No sender name: recipients see the bare address."
+      },
+      "senderName": {
+        "label": "Sender name set.",
+        "hint": "{name} <{address}>"
+      },
+      "domainShared": {
+        "label": "{domain}: SPF, DKIM and DMARC aligned."
+      },
+      "domainAligned": {
+        "label": "{domain}: DKIM verified, DMARC {policy}."
+      },
+      "domainNoDmarc": {
+        "label": "{domain}: no DMARC record."
+      },
+      "domainUnverified": {
+        "label": "{domain} isn't verified yet."
+      },
+      "firstContact": {
+        "label": "First mail from this address to {domain}.",
+        "hint": "New pairs start with no history: a reply back is what builds it."
+      }
+    }
   },
   "safety": {
     "whoCanWrite": "Who can write in",
