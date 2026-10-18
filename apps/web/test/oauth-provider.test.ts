@@ -540,6 +540,18 @@ describe("OAuth authorization server", () => {
     expect(await ownerCaller.connectedApps.list()).toHaveLength(1);
   });
 
+  it("registers Cursor's custom-scheme, https and loopback callbacks as one native client", async () => {
+    const clientId = await registerClient(undefined, {
+      client_name: "Cursor",
+      redirect_uris: [
+        "cursor://anysphere.cursor-mcp/oauth/callback",
+        "https://www.cursor.com/agents/mcp/oauth/callback",
+        "http://localhost:8787/callback",
+      ],
+    });
+    expect(await clientRow(clientId)).toMatchObject({ applicationType: "native" });
+  });
+
   it("keeps registration links only when https on a redirect URI's own origin", async () => {
     // A loopback (native) client has no web origin to vouch for: every link
     // is dropped, registration still succeeds.

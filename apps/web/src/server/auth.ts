@@ -14,7 +14,6 @@ import {
   fillTemplate,
   findSenderDomainOwner,
   forwardedClientIp,
-  isLoopbackUrl,
   isPlainName,
   MCP_SCOPES,
   recordSignup,
@@ -66,7 +65,7 @@ export { resolveBaseUrl };
  * the registration these are dropped unless https and on the origin of a
  * redirect URI: a name plus a link to an arbitrary site on the trusted host
  * is the consent-phishing recipe, while a link to the callback's own origin
- * says nothing the redirect does not. Native (loopback) clients therefore
+ * says nothing the redirect does not. Loopback-only clients therefore
  * never get a link, which is fine — they have no web origin to vouch for.
  */
 const CLIENT_LINK_FIELDS = ["client_uri", "logo_uri", "tos_uri", "policy_uri"] as const;
@@ -567,6 +566,11 @@ export function createAuth(
         // MCP clients (Claude Code, Cursor) still self-register via RFC 7591.
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
+        // MCP clients omit application_type, which OIDC registration defaults
+        // to web, yet register native callbacks: an http loopback (Claude
+        // Code), or cursor://, https and loopback URIs together (Cursor, Grok
+        // Bot). "infer" registers those as native, under the RFC 8252 rules.
+        clientRegistrationDefaultApplicationType: "infer",
         // Access tokens are JWTs the API verifies offline, so revoking a grant
         // only bites at the next refresh; an hour bounds that window while a
         // client that cannot refresh still keeps a working session.
@@ -762,10 +766,6 @@ export function createAuth(
       },
     },
     hooks: {
-      // MCP clients register with http://localhost:<port> redirect URIs and
-      // usually omit application_type, which RFC 7591 defaults to "web" — a
-      // type the provider (rightly) refuses http redirects for. A loopback
-      // redirect is the RFC 8252 signature of a native app, so classify it as one.
       before: createAuthMiddleware(async (ctx) => {
         // Refused here, ahead of the endpoint: thrown from inside user
         // creation, a 403 reads to better-auth as its own anti-enumeration
@@ -839,13 +839,6 @@ export function createAuth(
             delete body[field];
           }
         }
-        if (
-          body.application_type ||
-          !redirects.every((uri) => uri.startsWith("http://") && isLoopbackUrl(uri))
-        ) {
-          return;
-        }
-        return { context: { body: { ...body, application_type: "native" } } };
       }),
       // Registration persists a scope list (the client's own, or the server's
       // list as of that day) and authorization validates against it — which

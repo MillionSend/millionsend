@@ -15,12 +15,6 @@ updates:
       # RESTRICT violations and inherits the host time zone. Lift with the DB.
       - dependency-name: "@electric-sql/pglite"
         versions: [">=0.4.0"]
-      # 1.7.3+ never writes account.issuer and refuses our NOT NULL column at
-      # init; lift once the column is nullable (better-auth 1.7 upgrade guide).
-      - dependency-name: "better-auth"
-        versions: [">=1.7.3"]
-      - dependency-name: "@better-auth/oauth-provider"
-        versions: [">=1.7.3"]
     groups:
       production-dependencies:
         dependency-type: production
