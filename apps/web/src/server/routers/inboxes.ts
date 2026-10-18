@@ -421,6 +421,7 @@ export const inboxesRouter = router({
       z.object({
         kind: z.enum(INBOX_KINDS),
         name: z.string().trim().max(INBOX_NAME_MAX).optional(),
+        fromName: z.string().trim().max(78).optional(),
         // With domainId, the address's local part; without, the shared address's username.
         localPart: z.string().trim().toLowerCase().min(1).max(64).optional(),
         domainId: z.uuid().optional(),
@@ -451,6 +452,7 @@ export const inboxesRouter = router({
           email_address: emailAddress,
           username: input.domainId ? undefined : input.localPart,
           name: input.name || undefined,
+          from_name: input.fromName || undefined,
           kind: input.kind,
           expires_in: input.expiresIn,
           safety: { accept_from: input.acceptFrom },

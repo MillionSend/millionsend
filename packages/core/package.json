@@ -80,6 +80,10 @@
       "types": "./src/receiving/quotes.ts",
       "default": "./src/receiving/quotes.ts"
     },
+    "./slug": {
+      "types": "./src/slug.ts",
+      "default": "./src/slug.ts"
+    },
     "./inbox-username": {
       "types": "./src/inboxes/username.ts",
       "default": "./src/inboxes/username.ts"

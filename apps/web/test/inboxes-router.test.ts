@@ -961,6 +961,31 @@ describe("creating an inbox", () => {
     });
   });
 
+  it("hands the sender name on trimmed, and none when the field was left empty", async () => {
+    core.createInbox.mockResolvedValue({
+      ok: true,
+      inbox: wire(randomUUID(), { from_name: "Orders agent" }),
+    });
+    const named = await caller(acme).inboxes.create({
+      kind: "agent",
+      name: "Orders agent",
+      fromName: " Orders agent ",
+      acceptFrom: "verified",
+      expiresIn: null,
+    });
+    expect(core.createInbox.mock.calls[0]?.[2].input.from_name).toBe("Orders agent");
+    expect(named.from_name).toBe("Orders agent");
+    core.createInbox.mockResolvedValue({ ok: true, inbox: wire(randomUUID()) });
+    const bare = await caller(acme).inboxes.create({
+      kind: "agent",
+      fromName: " ",
+      acceptFrom: "verified",
+      expiresIn: null,
+    });
+    expect(core.createInbox.mock.calls[1]?.[2].input.from_name).toBeUndefined();
+    expect(bare.from_name).toBeNull();
+  });
+
   it("hands names to the shared domain's review where a judge is configured", async () => {
     core.createInbox.mockResolvedValue({ ok: true, inbox: wire(randomUUID()) });
     core.updateInbox.mockResolvedValue({ ok: true, inbox: wire(inboxId) });

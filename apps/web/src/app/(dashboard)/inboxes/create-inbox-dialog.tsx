@@ -11,6 +11,7 @@ import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { WarnCard } from "@/components/warn-card";
+import { localPartFromName } from "@/lib/inbox-defaults";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, nameReviewError } from "./parts";
@@ -20,8 +21,10 @@ type AcceptFrom = InboxSafety["accept_from"];
 
 const SHARED = "shared";
 const EXPIRY = ["never", "1h", "24h", "7d", "30d"] as const;
+const FROM_NAME_MAX = 78;
 // Lowercase ASCII, no leading, trailing or doubled dot (the API's own rule).
 const LOCAL_PART_RE = /^(?!\.)(?!.*\.\.)[a-z0-9._%+-]{1,64}(?<!\.)$/;
+const HINT = { margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" } as const;
 
 /** A new inbox: an address, who reads it, whose mail it takes and how long it lives. */
 export function CreateInboxDialog({
@@ -42,12 +45,16 @@ export function CreateInboxDialog({
   const queryClient = useQueryClient();
   const firstDomain = domains[0]?.id ?? (sharedDomain ? SHARED : "");
   const [domain, setDomain] = useState(firstDomain);
-  const [localPart, setLocalPart] = useState("");
   const [name, setName] = useState("");
+  // The address and the sender name follow the name until typed in (then "" counts as typed).
+  const [typedLocal, setTypedLocal] = useState<string | null>(null);
+  const [typedSender, setTypedSender] = useState<string | null>(null);
   const [kind, setKind] = useState<Kind>("agent");
   const [acceptFrom, setAcceptFrom] = useState<AcceptFrom>("verified");
   const [expires, setExpires] = useState<(typeof EXPIRY)[number]>("never");
   const shared = domain === SHARED;
+  const localPart = typedLocal ?? localPartFromName(name);
+  const fromName = typedSender ?? name.slice(0, FROM_NAME_MAX);
 
   const create = useMutation(
     trpc.inboxes.create.mutationOptions({
@@ -60,12 +67,14 @@ export function CreateInboxDialog({
   const { reset } = create;
   const close = useCallback(() => {
     reset();
-    setLocalPart("");
     setName("");
+    setTypedLocal(null);
+    setTypedSender(null);
     onClose();
   }, [reset, onClose]);
 
   const local = localPart.trim().toLowerCase();
+  const sender = fromName.trim();
   // On the shared domain the address is optional: left empty, it is random.
   const localValid = shared
     ? local === "" || SHARED_USERNAME.test(local)
@@ -79,6 +88,7 @@ export function CreateInboxDialog({
       acceptFrom,
       expiresIn: expires === "never" ? null : expires,
       ...(name.trim() ? { name: name.trim() } : {}),
+      ...(sender ? { fromName: sender } : {}),
       ...(shared ? (local ? { localPart: local } : {}) : { domainId: domain, localPart: local }),
     });
   };
@@ -110,6 +120,20 @@ export function CreateInboxDialog({
           {t("empty.body")}
         </p>
         <div className="ms-field">
+          <label htmlFor="inbox-name">{t("create.name")}</label>
+          <input
+            id="inbox-name"
+            className="ms-input"
+            style={{ width: "100%" }}
+            value={name}
+            maxLength={INBOX_NAME_MAX}
+            disabled={create.isPending}
+            placeholder={t("create.namePlaceholder")}
+            onChange={(event) => setName(event.target.value)}
+          />
+          <p style={HINT}>{t("create.nameHint")}</p>
+        </div>
+        <div className="ms-field">
           <label htmlFor="inbox-local">{t("create.address")}</label>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input
@@ -121,7 +145,7 @@ export function CreateInboxDialog({
               placeholder={shared ? t("create.random") : "orders-agent"}
               autoComplete="off"
               spellCheck={false}
-              onChange={(event) => setLocalPart(event.target.value)}
+              onChange={(event) => setTypedLocal(event.target.value)}
             />
             <Select
               value={domain}
@@ -135,26 +159,37 @@ export function CreateInboxDialog({
               ]}
             />
           </div>
-          <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
+          <p style={HINT}>
             {local && !localValid
               ? t(shared ? "create.errors.username" : "create.errors.localPart")
-              : sharedDomain
-                ? t("create.addressHint", { domain: sharedDomain })
-                : t("create.addressHintOwn")}
+              : local && typedLocal === null
+                ? t(shared ? "create.addressFromName" : "create.addressFromNameOwn")
+                : sharedDomain
+                  ? t("create.addressHint", { domain: sharedDomain })
+                  : t("create.addressHintOwn")}
           </p>
         </div>
         <div className="ms-field">
-          <label htmlFor="inbox-name">{t("create.name")}</label>
+          <label htmlFor="inbox-from-name">{t("edit.fromName")}</label>
           <input
-            id="inbox-name"
+            id="inbox-from-name"
             className="ms-input"
             style={{ width: "100%" }}
-            value={name}
-            maxLength={INBOX_NAME_MAX}
+            value={fromName}
+            maxLength={FROM_NAME_MAX}
             disabled={create.isPending}
-            placeholder={t("create.namePlaceholder")}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => setTypedSender(event.target.value)}
           />
+          <p style={HINT}>{t("create.fromNameHint")}</p>
+          <p style={HINT}>
+            {t.rich("create.preview", {
+              named: sender ? "yes" : "no",
+              sender,
+              local: local || (shared ? t("create.previewRandom") : ""),
+              domain: domainName ?? "",
+              addr: (chunks) => <span className="ms-mono">{chunks}</span>,
+            })}
+          </p>
         </div>
         <fieldset className="ms-field" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend>{t("create.kind")}</legend>
