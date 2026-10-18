@@ -314,7 +314,7 @@ export function useTeamActions(onChanged: () => void): TeamActions {
  * The Teams list's "…" items for one team, from the shared actions: Open
  * team, Open in Trust & safety (when `navigate` is given), Copy ID (when
  * `copyId` is given), View as owner (when `options` are given: disabled with
- * the reason while the feature is off or the team is silently suspended),
+ * the reason while the feature is off),
  * Adjust limits, Change plan, separator, Pause/Resume broadcasts,
  * Suspend/Reinstate team. `labels` come from console.teams.menu.
  */
@@ -324,18 +324,13 @@ export function teamMenuItems(
   labels: (key: string) => string,
   options?: {
     supportView: boolean;
-    silentlySuspended: boolean;
     copyId?: (id: string) => void;
     navigate?: (href: string) => void;
   },
 ): (PopoverMenuItem | null)[] {
   const copyId = options?.copyId;
   const navigate = options?.navigate;
-  const viewOff = !options?.supportView
-    ? "viewOff"
-    : options.silentlySuspended
-      ? "viewSilent"
-      : null;
+  const viewOff = options?.supportView ? null : "viewOff";
   return [
     { label: labels("open"), onSelect: () => actions.openTeam(team) },
     ...(navigate

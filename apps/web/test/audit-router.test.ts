@@ -202,12 +202,8 @@ describe("audit.list", () => {
       action: "api_key.created",
       actor: { kind: "user", id: "op", name: "Operator", email: "op@example.com" },
     });
-    expect(before.map((row) => row.action).sort()).toEqual([
-      "support.view_ended",
-      "support.view_started",
-      "team.reinstated",
-      "team.suspended",
-    ]);
+    // The support view it opened never reached the team's trail.
+    expect(before.map((row) => row.action).sort()).toEqual(["team.reinstated", "team.suspended"]);
     for (const row of before) expect(row.actor).toEqual({ kind: "operator" });
     expect(JSON.stringify(before)).not.toMatch(/Operator|op@example\.com|"op"/);
   });

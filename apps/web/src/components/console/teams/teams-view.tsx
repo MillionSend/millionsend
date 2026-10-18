@@ -335,7 +335,6 @@ export function TeamsView() {
                           ariaLabel={common("actions")}
                           items={teamMenuItems(row, actions, (key) => t(`menu.${key}`), {
                             supportView,
-                            silentlySuspended: row.silentlySuspended,
                             copyId: copy,
                             navigate: (href) => router.push(href),
                           })}

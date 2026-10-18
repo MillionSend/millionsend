@@ -280,11 +280,8 @@ export const consoleTeamsRouter = router({
           .leftJoin(st, eq(st.teamId, t.id))
           .where(where),
       ]);
-      const items = rows
-        .slice(0, input.limit)
-        .map((row) => ({ ...row, silentlySuspended: isSilentlySuspended(row) }));
       return {
-        items,
+        items: rows.slice(0, input.limit),
         total: count?.total ?? 0,
         nextOffset: rows.length > input.limit ? input.offset + input.limit : null,
         rungs: operatorRungs(),
@@ -314,7 +311,6 @@ export const consoleTeamsRouter = router({
     ]);
     return {
       ...row,
-      silentlySuspended: isSilentlySuspended(row),
       stripeSubscriptionUrl: row.stripeSubscriptionId
         ? `https://dashboard.stripe.com/${isLiveKey(env.STRIPE_SECRET_KEY ?? "") ? "" : "test/"}subscriptions/${row.stripeSubscriptionId}`
         : null,
@@ -393,9 +389,6 @@ export const consoleTeamsRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_off" });
       }
       const team = await loadTeam(ctx.db, input.id);
-      if (isSilentlySuspended(team)) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "silent_suspension" });
-      }
       const [own] = await ctx.db
         .select({ id: schema.teamMembers.id })
         .from(schema.teamMembers)

@@ -575,23 +575,5 @@
         "note": "O plano pago terminou."
       }
     }
-  },
-  "supportAccess": {
-    "title": "Acesso de suporte",
-    "intro": "A seu pedido, um operador da instância pode abrir este painel em modo somente leitura por até 30 minutos. O conteúdo dos e-mails enviados, exportações e segredos ficam ocultos, e a sessão aparece no registro de auditoria.",
-    "none": "Nenhuma sessão de suporte ativa em {team}.",
-    "operator": "Operador",
-    "started": "Início",
-    "expires": "Termina",
-    "reason": "Motivo",
-    "reference": "Referência",
-    "reasons": {
-      "support_ticket": "Chamado de suporte",
-      "billing_dispute": "Contestação de cobrança",
-      "other": "Outro"
-    },
-    "end": "Encerrar sessão",
-    "ended": "Sessão de suporte encerrada",
-    "error": "Não foi possível encerrar a sessão: {reason}"
   }
 }

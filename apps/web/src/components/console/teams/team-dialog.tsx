@@ -62,11 +62,7 @@ export function TeamDialog({
   const none = common("none");
 
   const owner = detail?.members.find((m) => m.role === "owner") ?? detail?.members[0];
-  const viewOff = !detail?.supportViewEnabled
-    ? "viewOff"
-    : detail.silentlySuspended
-      ? "viewSilent"
-      : null;
+  const viewOff = detail?.supportViewEnabled ? null : "viewOff";
   const memberEmails = detail?.members.map((m) => m.email).join(", ") ?? "";
   // Known before the detail loads, so it never waits behind a skeleton.
   const idRow = (

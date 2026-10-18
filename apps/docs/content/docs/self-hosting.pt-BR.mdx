@@ -1837,12 +1837,10 @@ Desligado por padrão; `SUPPORT_VIEW=on` liga. Na lista de Equipes do
 console, "Ver como proprietário" abre o painel de uma equipe como o
 proprietário o vê, em modo somente leitura, por 30 minutos, depois que o
 operador informa um motivo (chamado de suporte, contestação de cobrança, outro)
-e a referência do chamado. Todo motivo é um pedido feito pelo cliente; um
-operador que verifica uma denúncia de abuso usa as páginas de Confiança e segurança
-do console e, quando precisa do texto da mensagem, a revelação de conteúdo.
-Nenhum modo começa em uma equipe suspensa por phishing ou aguardando revisão.
-A sessão usa o login do próprio operador; nenhuma sessão é criada em nome do
-proprietário.
+e uma referência: o chamado, a contestação ou o caso. Abre em qualquer
+equipe, inclusive uma suspensa; para o texto de uma mensagem, o caminho
+continua sendo a revelação de conteúdo. A sessão usa o login do próprio
+operador; nenhuma sessão é criada em nome do proprietário.
 
 **O que o operador vê.** O painel sob uma faixa ("Modo de suporte de
 &lt;equipe&gt; · somente leitura · termina em mm:ss"): e-mails e seus
@@ -1867,8 +1865,7 @@ do que a tela mostra.
 ativo por operador: iniciar outro, pelo console ou de dentro de um modo,
 encerra antes o que está ativo, exatamente como Encerrar sessão, e é assim
 que termina um modo deixado aberto em uma aba fechada. O operador encerra pela
-faixa, o proprietário em Configurações → Acesso de suporte, e a expiração
-encerra na requisição seguinte.
+faixa, e a expiração encerra na requisição seguinte.
 
 **Como iniciar.** O diálogo envia um código de 6 dígitos ao e-mail do
 próprio operador, a partir de `AUTH_EMAIL_FROM`. Ele vale uma vez, por 10
@@ -1884,17 +1881,18 @@ devolvido ou em espera antes do SES), o diálogo diz isso, e por 10 minutos um
 login feito nos últimos 15 minutos vale no lugar do código. De um jeito ou de
 outro, uma sessão antiga roubada não consegue abrir um modo.
 
-**O que é registrado.** `support.view_started` e `support.view_ended`, na
-auditoria da instância e, na hora, no Registro de auditoria da própria
-equipe em Configurações: quem, o motivo, a referência, como terminou, os
-minutos e quantos procedimentos distintos foram lidos. O registro guarda uma
-contagem por nome de procedimento e nunca o que um procedimento devolveu.
+**O que é registrado.** `support.view_started` e `support.view_ended`, só na
+auditoria da instância: quem, a equipe, o motivo, a referência, como
+terminou, os minutos e quantos procedimentos distintos foram lidos. O
+registro guarda uma contagem por nome de procedimento e nunca o que um
+procedimento devolveu.
 
-**O que o proprietário vê.** Nenhum e-mail. A sessão aparece na hora em
-Configurações → Registro de auditoria da equipe, e o cartão Acesso de
-suporte em Configurações a mostra enquanto ela está ativa, com um botão
-"Encerrar sessão". Os dois mostram MillionSend, nunca o operador: nenhum
-nome, e-mail ou id de usuário chega à equipe.
+**O que a equipe vê.** Nada: nenhum e-mail, nenhuma linha no próprio
+registro de auditoria, nenhum cartão em Configurações. Um modo não deixa
+rastro do lado da equipe, então uma equipe em revisão não descobre nada por
+ele; é no aviso de privacidade da instância que as equipes ficam sabendo que
+esses modos existem. Linhas gravadas por versões anteriores continuam no
+registro de auditoria da equipe.
 
 ```sh
 SUPPORT_VIEW=on

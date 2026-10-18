@@ -1481,13 +1481,11 @@ on.
 
 Off by default. With `SUPPORT_VIEW=on`, the console's Teams list gains
 "View as owner": the operator names a reason (support ticket, billing
-dispute, other) and the ticket reference, and opens the team's dashboard as
-its owner sees it, read-only, for 30 minutes. Every reason is a request the
-customer made; an operator checking an abuse report works from the console's
-own Trust & safety pages instead, and from the content reveal when the
-message text itself is needed. No view starts on a team suspended for
-phishing or held for review. The session rides on the operator's own login;
-no session is ever minted for the owner.
+dispute, other) and a reference (the ticket, the dispute or the case), and
+opens the team's dashboard as its owner sees it, read-only, for 30 minutes.
+It opens on any team, a suspended one included; the content reveal is still
+the way to the text of a message. The session rides on the operator's own
+login; no session is ever minted for the owner.
 
 - **What the operator sees:** the dashboard under a banner ("Support view
   of <team> · read-only · ends in mm:ss"): emails and their events (a
@@ -1510,8 +1508,8 @@ no session is ever minted for the owner.
 - **How long:** 30 minutes, enforced on every request; one live view per
   operator. Starting another, from the console or from under a view, ends
   the live one first exactly as End session does, which is how a view left
-  open in a closed tab ends. The operator ends it from the banner, the owner
-  from Settings → Support access, and expiry ends it on the next request.
+  open in a closed tab ends. The operator ends it from the banner, and
+  expiry ends it on the next request.
 - **Starting one:** the dialog emails a 6-digit code to the operator's own
   address, from `AUTH_EMAIL_FROM`. It works once, for 10 minutes; five
   wrong tries void it, a new code replaces the old one, and one operator is
@@ -1525,14 +1523,15 @@ no session is ever minted for the owner.
   sign-in from the last 15 minutes stands in for the code. Either way a
   stolen long-lived session cannot open a view.
 - **What is logged:** `support.view_started` and `support.view_ended` in
-  the instance audit and, at once, in the team's own Settings → Audit log
-  (who, the reason, the reference, how it ended, the minutes, how many
-  distinct procedures were read). The grant row keeps a count per
-  procedure name and never anything a procedure returned.
-- **What the owner sees:** no email; the session is in the team's audit
-  log at once, and the Support access card under Settings shows it while it
-  is live, with an "End session" button. Both name MillionSend, never the
-  operator: no name, email or user id reaches the team.
+  the instance audit only (who, the team, the reason, the reference, how it
+  ended, the minutes, how many distinct procedures were read). The grant
+  row keeps a count per procedure name and never anything a procedure
+  returned.
+- **What the team sees:** nothing: no email, no row in its own audit log,
+  no card under Settings. A view leaves no trace on the team's side, so a
+  team under review learns nothing from it; the instance's privacy notice
+  is where teams learn that such views happen. Rows written by earlier
+  versions stay in the team's audit log.
 
 ```sh
 SUPPORT_VIEW=on

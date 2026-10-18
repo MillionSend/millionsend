@@ -43,8 +43,9 @@ function teamVisibleData(
 
 /**
  * Read-only, and never a member feed: the trail is a forensic record. A
- * support view reads it too — it is metadata, it carries that session's own
- * two rows, and answering "when did this change" is what support is for.
+ * support view reads it too — it is metadata, and answering "when did this
+ * change" is what support is for; the view's own rows are the instance's,
+ * never the team's.
  */
 export const auditRouter = router({
   list: teamProcedure
@@ -93,7 +94,7 @@ export const auditRouter = router({
       // The instance operator is the platform to a team, never a person it
       // could name or write to. Only what it did there as a member, from its
       // join on, carries its name: an invitation accepted later must not name
-      // it on the console actions and support views that came before.
+      // it on the console actions that came before.
       const operator = await findInstanceOperator(ctx.db);
       const m = schema.teamMembers;
       const [operatorMembership] = operator
