@@ -1,6 +1,7 @@
 import { isNotNull, isNull, sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
   boolean,
   index,
   integer,
@@ -155,6 +156,9 @@ export const emails = pgTable(
     }),
     // An agent inbox's first mail to some recipient: the worker samples it for the content monitor.
     firstContact: boolean("first_contact").notNull().default(false),
+    // A warm-up broadcast row's place in line: the newer the contact's last
+    // activity, the lower, so the drain releases the most active first.
+    sendOrder: bigint("send_order", { mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp("sent_at", { withTimezone: true }),
   },
@@ -179,6 +183,10 @@ export const emails = pgTable(
     index("emails_parked_broadcast_idx")
       .on(t.broadcastId, t.createdAt, t.id)
       .where(sql`${t.latestStatus} = 'queued_quota'`),
+    // A warming domain's broadcast releases its parked rows by send order.
+    index("emails_parked_send_order_idx")
+      .on(t.broadcastId, t.sendOrder, t.id)
+      .where(sql`${t.latestStatus} = 'queued_quota' and ${t.sendOrder} is not null`),
     // The send reconcile sweep walks queued rows oldest first every 15
     // minutes; without this it reads the whole table twice per run.
     index("emails_queued_created_idx").on(t.createdAt).where(sql`${t.latestStatus} = 'queued'`),

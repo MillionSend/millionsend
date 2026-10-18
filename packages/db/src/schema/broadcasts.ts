@@ -59,6 +59,8 @@ export const broadcasts = pgTable(
     // interrupted by a crash resumes from it instead of rescanning the team.
     // Cleared when the walk ends.
     fanOutCursor: uuid("fan_out_cursor"),
+    // Contacts a warm-up fan-out left out for being inactive 90+ days.
+    warmupSkipped: integer("warmup_skipped").notNull().default(0),
     // Results recorded once the broadcast's emails are about to age out of
     // the metadata window, so a campaign keeps its numbers after its rows
     // are gone. Null while the emails are still there to count.
