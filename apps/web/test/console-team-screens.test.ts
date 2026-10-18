@@ -171,7 +171,7 @@ describe("the team's id on the console's team screens", () => {
         dialogs: null,
       },
       (key) => key,
-      { supportView: true, silentlySuspended: false, copyId: (id) => copied.push(id) },
+      { supportView: true, copyId: (id) => copied.push(id) },
     );
     expect(items.slice(0, 3).map((item) => item?.label)).toEqual(["open", "copyId", "view"]);
     items[1]?.onSelect();
@@ -204,7 +204,7 @@ describe("the Teams list's row menu", () => {
         dialogs: null,
       },
       (key) => consoleEn.teams.menu[key as keyof typeof consoleEn.teams.menu],
-      { supportView: true, silentlySuspended: false, navigate: (href) => visited.push(href) },
+      { supportView: true, navigate: (href) => visited.push(href) },
     );
     expect(items.slice(0, 2).map((item) => item?.label)).toEqual([
       "Open team",

@@ -60,7 +60,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </main>
       <ConfirmDialogHost />
       {/* The dashboard raises toasts too (a refused mutation under a support
-          view, the Support access card); without a host they are dropped. */}
+          view); without a host they are dropped. */}
       <ToastHost />
     </AppShell>
   );

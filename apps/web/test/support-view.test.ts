@@ -222,12 +222,11 @@ function auditRows(action: string) {
 }
 
 describe("feature off", () => {
-  it("refuses to start, shows nothing to the owner and disables the console item", async () => {
+  it("refuses to start and disables the console item", async () => {
     vi.stubEnv("SUPPORT_VIEW", "off");
     await expect(
       operator().console.teams.startSupportView({ id: teamId, reason: "other" }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "support_view_off" });
-    expect(await owner().team.supportView.current()).toEqual({ enabled: false, live: null });
     expect((await operator().console.teams.list({})).supportViewEnabled).toBe(false);
     expect((await operator().console.teams.detail({ id: teamId })).supportViewEnabled).toBe(false);
     // An existing cookie is ignored while the feature is off.
@@ -257,44 +256,27 @@ describe("console.teams.startSupportView", () => {
     expect(await db.select().from(schema.supportViewGrants)).toHaveLength(before);
   });
 
-  it.each(SUSPENSION_REASONS)(
-    "refuses a team suspended for %s only when the team must not learn of it",
-    async (reason) => {
-      const slug = `suspended-${reason}`;
-      const id = await createTeam(db, slug);
-      await db
-        .update(schema.teams)
-        .set({ suspendedAt: new Date(), suspensionReason: reason })
-        .where(eq(schema.teams.id, id));
-      const silent = ["phishing", "review"].includes(reason);
-      // The console disables the item with the reason before anyone clicks.
-      const [row] = (await operator().console.teams.list({ search: slug })).items;
-      expect(row).toMatchObject({ id, silentlySuspended: silent });
-      expect(await operator().console.teams.detail({ id })).toMatchObject({
-        silentlySuspended: silent,
-      });
-      const started = operator().console.teams.startSupportView({
-        id,
-        reason: "support_ticket",
-        reference: "#4812",
-      });
-      if (silent) {
-        await expect(started).rejects.toMatchObject({
-          code: "PRECONDITION_FAILED",
-          message: "silent_suspension",
-        });
-      } else {
-        await started;
-      }
-      const grants = await db
-        .select()
-        .from(schema.supportViewGrants)
-        .where(eq(schema.supportViewGrants.teamId, id));
-      expect(grants).toHaveLength(silent ? 0 : 1);
-    },
-  );
+  it.each(SUSPENSION_REASONS)("opens a view on a team suspended for %s", async (reason) => {
+    const id = await createTeam(db, `suspended-${reason}`);
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: reason })
+      .where(eq(schema.teams.id, id));
+    // A view is silent, so refusing one on a suspension the team must not
+    // learn of would itself be the clue.
+    await operator().console.teams.startSupportView({
+      id,
+      reason: "support_ticket",
+      reference: "#4812",
+    });
+    const grants = await db
+      .select()
+      .from(schema.supportViewGrants)
+      .where(eq(schema.supportViewGrants.teamId, id));
+    expect(grants).toHaveLength(1);
+  });
 
-  it("opens a 30-minute grant, sets the cookie, audits the team and mails nobody", async () => {
+  it("opens a 30-minute grant, sets the cookie, audits the instance and mails nobody", async () => {
     const setCookie = vi.fn();
     const before = Date.now();
     const result = await callerFor(OPERATOR, ownTeamId, "owner", {
@@ -317,14 +299,20 @@ describe("console.teams.startSupportView", () => {
 
     const started = (await auditRows("support.view_started")).at(-1);
     expect(started).toMatchObject({
-      teamId,
+      teamId: null,
       actorId: `user:${OPERATOR}`,
-      target: `support_view:${grant.id}`,
-      data: { reason: "support_ticket", reference: "#4812", minutes: 30 },
+      target: `team:${teamId}`,
+      data: {
+        grantId: grant.id,
+        team: "acme",
+        reason: "support_ticket",
+        reference: "#4812",
+        minutes: 30,
+      },
     });
 
     // A sender is configured and the team has an owner, so an empty outbox
-    // means the start itself mails nobody; the team audit row is the record.
+    // means the start itself mails nobody; the instance audit row is the record.
     expect(h.sent).toEqual([]);
   });
 
@@ -382,7 +370,7 @@ describe("console.teams.startSupportView", () => {
     expect((await grantRow(first.id)).endedAt).toBeInstanceOf(Date);
     const ended = await auditRows("support.view_ended");
     expect(ended.at(-1)).toMatchObject({
-      teamId,
+      teamId: null,
       actorId: `user:${OPERATOR}`,
       data: { by: "operator", procedures: 0 },
     });
@@ -406,7 +394,7 @@ describe("console.teams.startSupportView", () => {
     expect(await grantRow(loser)).toMatchObject({ endedBy: "operator" });
   });
 
-  it("ends the live view on another team first, as End session does, and its owner sees it end", async () => {
+  it("ends the live view on another team first, as End session does, out of the team's sight", async () => {
     const otherTeam = await createTeam(db, "globex");
     const first = await start();
     const before = (await auditRows("support.view_ended")).length;
@@ -419,17 +407,14 @@ describe("console.teams.startSupportView", () => {
     const ended = await auditRows("support.view_ended");
     expect(ended).toHaveLength(before + 1);
     expect(ended.at(-1)).toMatchObject({
-      teamId,
+      teamId: null,
       actorId: `user:${OPERATOR}`,
-      target: `support_view:${first.id}`,
-      data: { by: "operator", minutes: 0, procedures: 0 },
+      target: `team:${teamId}`,
+      data: { grantId: first.id, by: "operator", minutes: 0, procedures: 0 },
     });
-    // The owner's card shows nothing live, and the team's own trail the end.
-    expect((await owner().team.supportView.current()).live).toBeNull();
+    // Neither row reaches the team's own trail.
     const trail = await owner().audit.list({});
-    expect(
-      trail.items.filter((r) => r.target === `support_view:${first.id}`).map((r) => r.action),
-    ).toEqual(["support.view_ended", "support.view_started"]);
+    expect(trail.items.filter((r) => r.action.startsWith("support."))).toEqual([]);
   });
 
   it("has no reason that is not a request the customer made", async () => {
@@ -467,12 +452,18 @@ describe("console.teams.startSupportView", () => {
     await start({ reference: "#6" });
     expect(await grantRow(first.id)).toMatchObject({ endedBy: "expiry", endedAt: deadline });
     const ended = (await auditRows("support.view_ended")).filter(
-      (row) => row.target === `support_view:${first.id}`,
+      (row) => (row.data as { grantId?: string }).grantId === first.id,
     );
     expect(ended).toEqual([
       expect.objectContaining({
         actorId: "system",
-        data: { by: "expiry", minutes: SUPPORT_VIEW_MINUTES, procedures: 0 },
+        data: {
+          grantId: first.id,
+          team: "acme",
+          by: "expiry",
+          minutes: SUPPORT_VIEW_MINUTES,
+          procedures: 0,
+        },
       }),
     ]);
   });
@@ -556,15 +547,21 @@ describe("the emailed code in front of a start", () => {
     expect(h.sent.at(-1)?.text).toContain(`Ele vale uma vez, por ${CONSOLE_CODE_MINUTES} minutos.`);
   });
 
-  it("starts the view with the code, once, leaving the team's start row as it was", async () => {
+  it("starts the view with the code, once, leaving the start row as it was", async () => {
     canSendMail();
     await operator().console.teams.sendSupportViewCode();
     const code = sentCode();
     // The sign-in is old: the code alone is what lets the operator in.
     const result = await startWith(code, stale());
     const started = (await auditRows("support.view_started")).at(-1);
-    expect(started?.target).toBe(`support_view:${result.grantId}`);
-    expect(started?.data).toEqual({ reason: "support_ticket", reference: "#4812", minutes: 30 });
+    expect(started?.target).toBe(`team:${teamId}`);
+    expect(started?.data).toEqual({
+      grantId: result.grantId,
+      team: "acme",
+      reason: "support_ticket",
+      reference: "#4812",
+      minutes: 30,
+    });
     // The code is spent; what stays is the mark of the session that entered it.
     expect((await codeRows()).map((row) => row.identifier)).toEqual([
       "console-code-verified:s-old",
@@ -848,7 +845,7 @@ describe("resolveSupportView", () => {
     expect(await grantRow(grant.id)).toMatchObject({ endedBy: "expiry", endedAt: past });
     const ended = await auditRows("support.view_ended");
     expect(ended.at(-1)).toMatchObject({
-      teamId,
+      teamId: null,
       actorId: "system",
       data: { by: "expiry", minutes: SUPPORT_VIEW_MINUTES },
     });
@@ -870,7 +867,6 @@ describe("the read-only guard", () => {
     ).rejects.toMatchObject(READ_ONLY);
     await expect(v.settings.team.rename({ name: "renamed" })).rejects.toMatchObject(READ_ONLY);
     await expect(v.team.switch({ teamId: ownTeamId })).rejects.toMatchObject(READ_ONLY);
-    await expect(v.team.supportView.end()).rejects.toMatchObject(READ_ONLY);
     await expect(v.webhooks.create({ url: "https://hook.example.com/in" })).rejects.toMatchObject(
       READ_ONLY,
     );
@@ -927,8 +923,8 @@ describe("the read-only guard", () => {
     expect(await v.support.current()).toMatchObject({ grantId: grant.id, teamId });
     await v.apiKeys.list();
     expect((await grantRow(grant.id)).procedures).toEqual({ "apiKeys.list": 1 });
-    // The owner ends it; the next poll is what tells the operator's tab.
-    await owner().team.supportView.end();
+    // Ended from another tab; the next poll is what tells this one.
+    await operator().support.end();
     expect(await callerFor(OPERATOR, ownTeamId, "owner").support.current()).toBeNull();
   });
 
@@ -943,7 +939,7 @@ describe("the read-only guard", () => {
     expect(await grantRow(grant.id)).toMatchObject({ endedBy: "operator" });
     const ended = await auditRows("support.view_ended");
     expect(ended.at(-1)).toMatchObject({
-      teamId,
+      teamId: null,
       actorId: `user:${OPERATOR}`,
       data: { by: "operator", minutes: 0, procedures: 2 },
     });
@@ -1138,10 +1134,10 @@ describe("what a view can and cannot see", () => {
     expect(listed.items[0]).not.toHaveProperty("html");
   });
 
-  it("lets a support view read the team's own audit trail, and never a member", async () => {
+  it("lets a support view read the team's own audit trail, which never shows the view, and never a member", async () => {
     const grant = await start();
     const trail = await viewer(grant).audit.list({});
-    expect(trail.items.some((r) => r.action === "support.view_started")).toBe(true);
+    expect(trail.items.some((r) => r.action.startsWith("support."))).toBe(false);
     await expect(member().audit.list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
@@ -1211,51 +1207,33 @@ describe("what a view can and cannot see", () => {
   });
 });
 
-describe("the owner's side", () => {
-  it("sees the live view, ends it, and both trails carry the rows", async () => {
+describe("the team's side", () => {
+  it("sees nothing of a view, while the instance trail carries both rows", async () => {
     const grant = await start({ reason: "billing_dispute", reference: "INV-77" });
-    const current = await owner().team.supportView.current();
-    // The card names MillionSend: nothing of the operator reaches the team.
-    expect(current).toStrictEqual({
-      enabled: true,
-      live: {
-        id: grant.id,
-        reason: "billing_dispute",
-        reference: "INV-77",
-        startedAt: grant.createdAt,
-        expiresAt: grant.expiresAt,
-      },
-    });
-    expect(JSON.stringify(current)).not.toMatch(/Operator|op@example\.com/);
-    // The card is owner/admin only, and so is the read behind it.
-    await expect(member().team.supportView.current()).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(member().team.supportView.end()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const ofView = (r: { action: string; data: unknown }) =>
+      r.action.startsWith("support.") && (r.data as { grantId?: string }).grantId === grant.id;
+    expect((await owner().audit.list({})).items.filter(ofView)).toEqual([]);
+    expect(await operator().support.end()).toEqual({ ended: true, teamId });
+    expect((await owner().audit.list({})).items.filter(ofView)).toEqual([]);
 
-    expect(await owner().team.supportView.end()).toEqual({ ended: true });
-    expect(await grantRow(grant.id)).toMatchObject({ endedBy: "owner" });
-    expect((await owner().team.supportView.current()).live).toBeNull();
-    expect(await owner().team.supportView.end()).toEqual({ ended: false });
-    expect(await resolveSupportView(db, OPERATOR, grant.id)).toBeNull();
-
-    const teamTrail = await owner().audit.list({});
-    const rows = teamTrail.items.filter((r) => r.target === `support_view:${grant.id}`);
-    expect(rows.map((r) => [r.action, r.actor])).toEqual([
-      ["support.view_ended", { kind: "user", id: OWNER, name: "Bob", email: "bob@example.com" }],
-      ["support.view_started", { kind: "operator" }],
-    ]);
-    expect(rows[0]?.data).toMatchObject({ by: "owner" });
-
+    // The instance's rows about the team: no team row to join, so the name
+    // rides in the data, and the review page's audit tail lists them.
     const instanceTrail = await operator().console.audit.list({});
     expect(instanceTrail.actions).toEqual(
       expect.arrayContaining(["support.view_started", "support.view_ended"]),
     );
     expect(
       instanceTrail.items
-        .filter((r) => r.target === `support_view:${grant.id}`)
-        .map((r) => [r.action, r.teamName]),
+        .filter(ofView)
+        .map((r) => [r.action, r.teamId, r.target, (r.data as { team?: string }).team]),
     ).toEqual([
-      ["support.view_ended", "acme"],
-      ["support.view_started", "acme"],
+      ["support.view_ended", null, `team:${teamId}`, "acme"],
+      ["support.view_started", null, `team:${teamId}`, "acme"],
+    ]);
+    const review = await operator().console.safety.review({ teamId });
+    expect(review.audit.filter(ofView).map((r) => r.action)).toEqual([
+      "support.view_ended",
+      "support.view_started",
     ]);
   });
 });
@@ -1311,9 +1289,10 @@ describe("through the tRPC route (cookie to context)", () => {
     expect((await mutate("settings.team.rename", { name: "x" })).status).toBe(403);
     expect((await grantRow(grantId)).procedures).toEqual({ "team.list": 1 });
 
-    // The owner ends it: the next request falls back to the operator's own
-    // team and tells the browser to drop the cookie.
-    await owner().team.supportView.end();
+    // The grant ends elsewhere (another session of the operator's): the next
+    // request falls back to the operator's own team and tells the browser to
+    // drop the cookie.
+    await operator().support.end();
     const after = await call("team.list");
     expect(after.data.activeTeamId).toBe(ownTeamId);
     expect(h.cookieDeletes).toContain("ms_support_view");

@@ -22,10 +22,7 @@ export type SupportViewGrant = typeof schema.supportViewGrants.$inferSelect;
 
 const g = schema.supportViewGrants;
 
-/**
- * A live grant with the operator behind it, for the console. The operator is
- * never passed on to the team, which sees the view as MillionSend's.
- */
+/** A live grant with the operator behind it, for the console. */
 export interface LiveSupportView extends SupportViewGrant {
   operator: { name: string; email: string };
 }
@@ -82,11 +79,22 @@ export function liveSupportViewOfOperator(
   return liveWhere(db, eq(g.operatorUserId, operatorUserId), now);
 }
 
+/** The team's name for the instance audit, whose rows join no team. */
+async function teamNameOf(db: Db, teamId: string): Promise<string | undefined> {
+  const [team] = await db
+    .select({ name: schema.teams.name })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, teamId));
+  return team?.name;
+}
+
 /**
  * Opens a view on `teamId` for the operator. A view they still hold, from
  * a closed tab or another team, ends first exactly as End session ends it,
- * so there is one live view per operator. Records the start in the audit
- * log with the team set, so the team's own trail shows it at once.
+ * so there is one live view per operator. Records the start in the instance
+ * audit only, as the instance's row about the team (target `team`, the grant
+ * in the data) so the console's review page lists it, while the team's own
+ * trail never does: a team under review learns nothing from a view.
  */
 export async function startSupportView(
   db: Db,
@@ -100,9 +108,9 @@ export async function startSupportView(
   now: Date = new Date(),
 ): Promise<SupportViewGrant> {
   const expiresAt = new Date(now.getTime() + SUPPORT_VIEW_MINUTES * 60_000);
-  // The audit rows are the owner's only record of either session, so they
-  // commit with the grants or nothing changes: a start that fails leaves
-  // the previous view live. recordAudit would swallow a failed write.
+  // The audit rows are the only record of either session, so they commit
+  // with the grants or nothing changes: a start that fails leaves the
+  // previous view live. recordAudit would swallow a failed write.
   return db.transaction(async (tx) => {
     const t = tx as unknown as Db;
     // Two starts by one operator queue here, so the later one ends the
@@ -130,11 +138,13 @@ export async function startSupportView(
     if (!grant) throw new Error("support view insert returned no row");
     await t.insert(schema.auditLog).values(
       auditRow({
-        teamId: grant.teamId,
+        teamId: null,
         actor: { userId: grant.operatorUserId },
         action: "support.view_started",
-        target: { type: "support_view", id: grant.id },
+        target: { type: "team", id: grant.teamId },
         metadata: {
+          grantId: grant.id,
+          team: await teamNameOf(t, grant.teamId),
           reason: grant.reason,
           reference: grant.reference,
           minutes: SUPPORT_VIEW_MINUTES,
@@ -149,7 +159,7 @@ type EndableGrant = Pick<
   SupportViewGrant,
   "id" | "teamId" | "operatorUserId" | "createdAt" | "expiresAt"
 >;
-type EndedBy = { by: "operator" | "expiry" } | { by: "owner"; userId: string };
+type EndedBy = { by: "operator" | "expiry" };
 
 /**
  * Marks a grant ended once and returns its audit event, or null when it had
@@ -171,14 +181,13 @@ async function closeGrant(
     .returning({ procedures: g.procedures });
   if (!row) return null;
   return {
-    teamId: grant.teamId,
-    actor:
-      ended.by === "expiry"
-        ? "system"
-        : { userId: ended.by === "owner" ? ended.userId : grant.operatorUserId },
+    teamId: null,
+    actor: ended.by === "expiry" ? "system" : { userId: grant.operatorUserId },
     action: "support.view_ended",
-    target: { type: "support_view", id: grant.id },
+    target: { type: "team", id: grant.teamId },
     metadata: {
+      grantId: grant.id,
+      team: await teamNameOf(db, grant.teamId),
       by: ended.by,
       minutes: Math.round((endedAt.getTime() - grant.createdAt.getTime()) / 60_000),
       procedures: Object.keys(row.procedures).length,

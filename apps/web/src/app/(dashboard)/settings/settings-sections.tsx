@@ -10,7 +10,6 @@ import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
-import { KvRow } from "@/components/kv-row";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { RelativeTime } from "@/components/relative-time";
@@ -20,16 +19,13 @@ import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
-import { toast } from "@/components/toast";
 import { authClient } from "@/lib/auth-client";
 import { UPDATES_URL } from "@/lib/docs-links";
-import { formatDayTime, formatMmSs } from "@/lib/format";
 import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
 import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
-import { useCountdown } from "@/lib/use-countdown";
 import { useSwitchLocale } from "@/lib/use-switch-locale";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter } from "../emails/list-parts";
@@ -742,90 +738,6 @@ function MembersSection() {
   );
 }
 
-function SupportEndsAt({ expiresAt }: { expiresAt: Date }) {
-  const locale = useLocale();
-  const left = formatMmSs(useCountdown(expiresAt));
-  return (
-    <>
-      {formatDayTime(expiresAt, locale)} · {left}
-    </>
-  );
-}
-
-/**
- * The operator's read-only look at this team, for its owners and admins:
- * who, since when, until when and why, with the way to end it. Absent
- * while the instance has the feature off.
- */
-function SupportAccessSection() {
-  const t = useTranslations("settings.supportAccess");
-  const actors = useTranslations("settings.audit.actors");
-  const locale = useLocale();
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const role = useTeamRole();
-  const canManage = role === "owner" || role === "admin";
-  // The card reads the active team only, so it names it: an owner of several
-  // teams switches to see the others.
-  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const team = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.teamName ?? "";
-  const current = useQuery(
-    trpc.team.supportView.current.queryOptions(undefined, {
-      enabled: canManage,
-      // A session an operator opens shows up without a reload.
-      refetchInterval: 30_000,
-    }),
-  );
-  const end = useMutation(
-    trpc.team.supportView.end.mutationOptions({
-      onSuccess: () => {
-        toast(t("ended"));
-        void queryClient.invalidateQueries(trpc.team.supportView.current.queryFilter());
-      },
-      onError: (e) => toast(t("error", { reason: e.message }), "danger"),
-    }),
-  );
-  if (!canManage || !current.data?.enabled) return null;
-  const live = current.data.live;
-  return (
-    <SectionCard
-      title={t("title")}
-      action={
-        live ? (
-          <button
-            type="button"
-            className="ms-btn ms-btn-destructive"
-            disabled={end.isPending}
-            onClick={() => end.mutate()}
-          >
-            <BtnSpinner on={end.isPending} />
-            {t("end")}
-          </button>
-        ) : null
-      }
-    >
-      <p style={{ margin: "0 0 14px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
-        {t("intro")}
-      </p>
-      {live ? (
-        <dl className="ms-kv">
-          <KvRow label={t("operator")}>{actors("operator")}</KvRow>
-          <KvRow label={t("started")}>{formatDayTime(live.startedAt, locale)}</KvRow>
-          <KvRow label={t("expires")}>
-            <SupportEndsAt expiresAt={live.expiresAt} />
-          </KvRow>
-          <KvRow label={t("reason")}>{t(`reasons.${live.reason}`)}</KvRow>
-          <KvRow label={t("reference")}>{live.reference ?? "—"}</KvRow>
-        </dl>
-      ) : (
-        <p style={{ margin: 0, color: "var(--ms-bone)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("none", { team })}
-        </p>
-      )}
-    </SectionCard>
-  );
-}
-
 function LanguageSection() {
   const t = useTranslations("settings");
   const locale = useLocale();
@@ -1150,7 +1062,6 @@ export function SettingsSections({ showInstance }: { showInstance: boolean }) {
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <TeamSection billing={!showInstance} />
       <MembersSection />
-      <SupportAccessSection />
       {showInstance ? <InstanceSection /> : null}
       <LanguageSection />
       <DangerSection />

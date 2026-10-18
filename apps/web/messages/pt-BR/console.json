@@ -436,7 +436,6 @@
       "copyId": "Copiar ID",
       "view": "Ver como proprietário",
       "viewOff": "Desligado nesta instância: ative com SUPPORT_VIEW=on",
-      "viewSilent": "Indisponível enquanto a equipe está suspensa por phishing ou aguardando revisão",
       "limits": "Ajustar limites",
       "plan": "Alterar plano",
       "pause": "Pausar transmissões",
@@ -613,7 +612,7 @@
     },
     "viewDialog": {
       "title": "Ver {team} como proprietário",
-      "lead": "Abre o painel da equipe em modo somente leitura, com uma faixa de aviso, por 30 minutos, depois que um código de uso único enviado ao seu e-mail confirma que é você. Um modo que você ainda tenha aberto é encerrado antes. Cada leitura é contada na sessão, e a sessão aparece na auditoria da própria equipe na hora.",
+      "lead": "Abre o painel da equipe em modo somente leitura, com uma faixa de aviso, por 30 minutos, depois que um código de uso único enviado ao seu e-mail confirma que é você. Um modo que você ainda tenha aberto é encerrado antes. Cada leitura é contada na sessão. A equipe não vê nada disso.",
       "reasons": {
         "support_ticket": "Chamado de suporte",
         "billing_dispute": "Contestação de cobrança",
@@ -639,7 +638,6 @@
         "support_view_off": "O modo de suporte está desligado nesta instância (ative com SUPPORT_VIEW=on).",
         "sign_in_again": "Sem um código por e-mail, iniciar um modo de suporte exige um login recente. Saia e entre de novo, depois inicie outra vez.",
         "own_team": "Você é membro desta equipe; abra-a pelo seletor de equipes.",
-        "silent_suspension": "Esta equipe está suspensa por phishing ou aguardando revisão, então nenhum modo de suporte pode começar.",
         "reference_required": "Uma referência de chamado é obrigatória.",
         "code_required": "Agora é preciso um código: envie um para o seu e-mail.",
         "code_invalid": "Esse código não confere. Confira o e-mail e tente de novo.",
