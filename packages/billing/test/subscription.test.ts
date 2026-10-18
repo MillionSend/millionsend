@@ -88,7 +88,9 @@ describe("changeRung up", () => {
             { id: "si_sub_1", price: priceId("millionsend_pro_200k_monthly") },
             { id: "si_sub_1_overage", price: priceId("millionsend_pro_200k_overage") },
           ],
-          proration_behavior: "create_prorations",
+          proration_behavior: "always_invoice",
+          payment_behavior: "pending_if_incomplete",
+          expand: ["latest_invoice"],
         },
       ],
     ]);
@@ -142,6 +144,30 @@ describe("changeRung up", () => {
       planQuota: 200_000,
       stripeOverageItemId: "si_sub_1_overage",
     });
+  });
+
+  it("moves nothing while the charge waits on the bank, and hands back the invoice that applies it", async () => {
+    const teamId = await subscribedTeam(
+      withOverage("millionsend_pro_200k_monthly", "millionsend_pro_200k_overage", {
+        schedule: schedule([price("millionsend_pro_100k_monthly")]),
+      }),
+      250_000,
+    );
+    state.declineUpdates = true;
+    state.meterError = new Error("Stripe is down");
+    expect(await changeRung(deps(), { teamId, rung: "scale_500k" })).toEqual({
+      applied: "payment_required",
+      url: "https://invoice.stripe.com/i/in_pending",
+    });
+    // The downgrade went with the request to move up; the volume stays the paid one.
+    expect(state.scheduleReleases).toEqual(["sched_0"]);
+    expect(await team(teamId)).toMatchObject({
+      plan: "pro",
+      planQuota: 200_000,
+      pendingRung: null,
+    });
+    // Overage the old rung has not billed yet is still owed: nothing is marked settled.
+    expect(await reportedOverage(teamId)).toBe(0);
   });
 
   it("refuses a rung that is not for sale", async () => {

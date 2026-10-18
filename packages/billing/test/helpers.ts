@@ -158,6 +158,8 @@ export function fakeStripe() {
     scheduleReleases: [] as string[],
     meterEvents: [] as Stripe.Billing.MeterEventCreateParams[],
     meterError: null as Error | null,
+    /** The bank declines (or wants confirmed) the charge a pending_if_incomplete update makes. */
+    declineUpdates: false,
     customers: [] as Stripe.CustomerCreateParams[],
     checkouts: [] as Stripe.Checkout.SessionCreateParams[],
   };
@@ -219,6 +221,19 @@ export function fakeStripe() {
         state.calls.push("subscriptions.update");
         state.updates.push([id, params]);
         const s = sub(id);
+        // Like Stripe's pending updates: nothing changes until the invoice is paid.
+        if (state.declineUpdates && params.payment_behavior === "pending_if_incomplete") {
+          return {
+            ...s,
+            pending_update: { expires_at: PERIOD_START + 82_800 },
+            latest_invoice: {
+              id: "in_pending",
+              object: "invoice",
+              status: "open",
+              hosted_invoice_url: "https://invoice.stripe.com/i/in_pending",
+            },
+          };
+        }
         for (const change of params.items ?? []) {
           if (!change.id) {
             if (change.price) {

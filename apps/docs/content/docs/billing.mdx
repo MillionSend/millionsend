@@ -186,13 +186,19 @@ worker reports, so the customer's **overage** switch is a plain row flag,
    `current_period_end`, `stripe_overage_item_id` and `pending_rung`.
 4. **Switching rung** happens in the dashboard (`billing.changePlan`), and
    the direction decides when:
-   - **Up** applies now: the subscription's items are updated — the plan
-     item to the new rung's price, the metered item re-priced for a monthly
-     rung or dropped for a daily one after its usage is reported — with the
-     difference prorated on the next invoice, and the webhook that follows
-     re-applies the same state. Sends already accepted inside the old volume
-     are marked settled on the period row, so the new rung never bills them
-     as overage.
+   - **Up** waits for its own payment: the subscription's items are
+     updated — the plan item to the new rung's price, the metered item
+     re-priced for a monthly rung after its usage is reported — with
+     `proration_behavior: always_invoice` and `payment_behavior:
+     pending_if_incomplete`, so the prorated difference and the overage so
+     far are invoiced and charged at once, and the new volume applies only
+     once that invoice is paid. When the bank declines or asks for
+     authentication nothing changes: Stripe holds the update for 23 hours,
+     the dashboard sends the customer to the invoice's hosted page, and
+     paying it there applies the move (the webhook writes the row);
+     otherwise Stripe voids the invoice. Sends already accepted inside the
+     old volume are marked settled on the period row, so the new rung never
+     bills them as overage.
    - **Down** applies at the period end, with no proration and no refund: a
      Stripe subscription schedule is created from the subscription (or the
      pending one reused) with two phases — the current items until
@@ -302,8 +308,12 @@ period, where Stripe invoices it (the invoice stays a draft for about an hour
 after the period closes; rows older than 35 days can no longer be metered and
 are logged).
 The same report runs before the switch turns off, before a move up (sends
-made under the old rung settle at its rate) and when the metered item leaves
-the subscription, so nothing unbilled is lost.
+made under the old rung settle at its rate), before a team is deleted (its
+cancellation carries a final invoice) and when the metered item leaves the
+subscription. One gap remains: Stripe drops a meter event it has not
+processed by the time a move up re-prices the metered item, so the step
+reported just before the move, at most the sends since the cron's last run,
+can go unbilled.
 
 ## Environment
 

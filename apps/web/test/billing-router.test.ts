@@ -45,6 +45,8 @@ let calls: {
   meterEvents: Stripe.Billing.MeterEventCreateParams[];
 };
 let onCustomerCreate: (() => Promise<void>) | undefined;
+/** The bank declines (or wants confirmed) the charge a move up makes, so Stripe holds the update. */
+let declineUpdates = false;
 
 // Stripe stamps whole seconds; rows and the fake agree from the start.
 const wholeSeconds = (ms: number) => new Date(Math.floor(ms / 1000) * 1000);
@@ -112,6 +114,13 @@ const stripe = {
     retrieve: async () => sub,
     update: async (_id: string, params: Stripe.SubscriptionUpdateParams) => {
       calls.updates.push(params);
+      if (declineUpdates && params.payment_behavior === "pending_if_incomplete") {
+        return {
+          ...sub,
+          pending_update: { expires_at: seconds(PERIOD_END) },
+          latest_invoice: { id: "in_1", hosted_invoice_url: "https://invoice.stripe.com/i/in_1" },
+        };
+      }
       const kept = sub.items.data.filter(
         (i) => !params.items?.some((u) => u.id === i.id && u.deleted),
       );
@@ -273,6 +282,7 @@ beforeEach(async () => {
   };
   schedule = null;
   onCustomerCreate = undefined;
+  declineUpdates = false;
   vi.stubEnv("IS_CLOUD", "true");
   vi.stubEnv("APP_BASE_URL", "https://app.example.com");
 });
@@ -482,7 +492,7 @@ describe("billing router", () => {
     });
   });
 
-  it("changePlan moves up at once with prorations, re-pricing the metered item, and drains on a raise", async () => {
+  it("changePlan moves up once the prorated charge is paid, re-pricing the metered item, and drains on a raise", async () => {
     const teamId = await subscribedTeam("pro_100k");
     const owner = callerFor(teamId, "owner");
     expect(await owner.billing.changePlan({ rung: "scale_500k" })).toEqual({ applied: "now" });
@@ -492,7 +502,9 @@ describe("billing router", () => {
           { id: "si_base", price: "price_scale_500k" },
           { id: "si_overage", price: "price_scale_500k_overage" },
         ],
-        proration_behavior: "create_prorations",
+        proration_behavior: "always_invoice",
+        payment_behavior: "pending_if_incomplete",
+        expand: ["latest_invoice"],
       },
     ]);
     expect(calls.scheduleCreates).toEqual([]);
@@ -505,6 +517,26 @@ describe("billing router", () => {
     expect(h.runCronNow).toHaveBeenCalledWith("quota.drain");
     expect(await auditRows()).toEqual([
       { action: "billing.plan_changed", data: { rung: "scale_500k", applied: "now" } },
+    ]);
+  });
+
+  it("changePlan hands back the invoice page when the charge waits on the bank, moving nothing", async () => {
+    const teamId = await subscribedTeam("pro_100k");
+    declineUpdates = true;
+    const owner = callerFor(teamId, "owner");
+    expect(await owner.billing.changePlan({ rung: "scale_500k" })).toEqual({
+      applied: "payment_required",
+      url: "https://invoice.stripe.com/i/in_1",
+    });
+    expect(await teamRow(teamId)).toMatchObject({ plan: "pro", planQuota: 100_000 });
+    // Nothing moved, so nothing drains and no one hears of a move yet.
+    expect(h.runCronNow).not.toHaveBeenCalled();
+    expect(h.sent).toEqual([]);
+    expect(await auditRows()).toEqual([
+      {
+        action: "billing.plan_changed",
+        data: { rung: "scale_500k", applied: "payment_required" },
+      },
     ]);
   });
 

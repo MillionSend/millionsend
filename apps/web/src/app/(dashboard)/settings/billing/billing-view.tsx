@@ -122,6 +122,12 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const changePlan = useMutation(
     trpc.billing.changePlan.mutationOptions({
       onSuccess: async (result, variables) => {
+        // The bank declined the move's charge or wants it confirmed: Stripe's
+        // invoice page takes the payment, and paying it applies the move.
+        if (result.applied === "payment_required" && result.url) {
+          window.location.assign(result.url);
+          return;
+        }
         await refresh.onSuccess();
         // The outcome shows on the plan card at the top of the page, so the
         // dialog gives way to it and the page scrolls there with a notice.
@@ -146,14 +152,16 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     return r ? planLabel(r.plan, r.period === "month" ? r.included : null) : key;
   };
   const changedText = changed
-    ? changed.result.applied === "now"
-      ? t("switchedNow", { plan: rungLabel(changed.rung) })
-      : changed.result.applied === "period_end"
-        ? t("pendingChange", {
-            plan: rungLabel(changed.rung),
-            date: formatDay(changed.result.at, locale),
-          })
-        : t("stayOn", { plan: rungLabel(changed.rung) })
+    ? changed.result.applied === "payment_required"
+      ? null
+      : changed.result.applied === "now"
+        ? t("switchedNow", { plan: rungLabel(changed.rung) })
+        : changed.result.applied === "period_end"
+          ? t("pendingChange", {
+              plan: rungLabel(changed.rung),
+              date: formatDay(changed.result.at, locale),
+            })
+          : t("stayOn", { plan: rungLabel(changed.rung) })
     : null;
   const success = (text: string) => (
     <div
@@ -192,6 +200,13 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
       </div>
     ) : changedText ? (
       success(changedText)
+    ) : changed?.result.applied === "payment_required" ? (
+      <div role="status" className="ms-toast ms-toast-neutral">
+        <span className="ms-toast-icon" aria-hidden="true">
+          i
+        </span>
+        {t("paymentRequired", { plan: rungLabel(changed.rung) })}
+      </div>
     ) : null;
 
   if (!status.data) {

@@ -194,13 +194,18 @@ linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
    `current_period_end`, `stripe_overage_item_id` e `pending_rung`.
 4. **Trocar de faixa** acontece no painel (`billing.changePlan`), e a
    direção decide quando:
-   - **Subir** vale na hora: os itens da assinatura são atualizados — o item
-     do plano para o preço da nova faixa, o item medido reprecificado para
-     uma faixa mensal ou removido para uma diária depois de reportar o uso —
-     com a diferença rateada na próxima fatura, e o webhook que vem em
-     seguida reaplica o mesmo estado. Os envios já aceitos dentro do volume
-     antigo são marcados como acertados na linha do período, então a nova
-     faixa nunca os cobra como excedente.
+   - **Subir** espera o próprio pagamento: os itens da assinatura são
+     atualizados — o item do plano para o preço da nova faixa, o item medido
+     reprecificado para uma faixa mensal depois de reportar o uso — com
+     `proration_behavior: always_invoice` e `payment_behavior:
+     pending_if_incomplete`, então a diferença proporcional e o excedente
+     até ali são faturados e cobrados na hora, e o novo volume só vale
+     depois que essa fatura é paga. Quando o banco recusa ou pede
+     autenticação nada muda: o Stripe segura a atualização por 23 horas, o
+     painel leva o cliente à página hospedada da fatura, e pagar lá aplica a
+     troca (o webhook grava a linha); senão o Stripe anula a fatura. Os
+     envios já aceitos dentro do volume antigo são marcados como acertados
+     na linha do período, então a nova faixa nunca os cobra como excedente.
    - **Descer** vale ao fim do período, sem rateio e sem reembolso: um
      subscription schedule do Stripe é criado a partir da assinatura (ou o
      pendente é reaproveitado) com duas fases — os itens atuais até
@@ -312,8 +317,12 @@ carimbado um segundo dentro desse período, onde o Stripe o fatura (a fatura
 fica em rascunho por cerca de uma hora após o fim do período; linhas com mais
 de 35 dias não podem mais ser medidas e vão para o log). O mesmo relato roda
 antes de a chave desligar,
-antes de uma subida (os envios feitos na faixa antiga acertam na taxa dela)
-e quando o item medido sai da assinatura, para nada ficar sem cobrar.
+antes de uma subida (os envios feitos na faixa antiga acertam na taxa dela),
+antes de excluir uma equipe (o cancelamento leva uma fatura final)
+e quando o item medido sai da assinatura. Resta uma lacuna: o Stripe descarta
+um evento de medidor que ainda não processou quando uma subida reprecifica o
+item medido, então o trecho reportado logo antes da troca, no máximo os
+envios desde a última rodada do cron, pode ficar sem cobrança.
 
 ## Ambiente
 

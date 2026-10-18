@@ -232,17 +232,23 @@ async function rungItems(
 export type RungChange =
   | { applied: "now" }
   | { applied: "period_end"; at: Date }
-  | { applied: "unscheduled" };
+  | { applied: "unscheduled" }
+  /** Nothing moved yet: paying the invoice behind `url` applies the move. */
+  | { applied: "payment_required"; url: string | null };
 
 /**
- * Moves a live subscription to another rung. Up (or across): at once, with
- * prorations on the next invoice, and any pending downgrade dropped. Down: a
- * subscription schedule swaps the items when the current period ends, with
- * no proration, so the paid volume is kept to the day it was paid for; a
- * later move up releases the schedule. Choosing the current rung while a
- * downgrade is pending drops it. Stripe's customer portal cannot switch
- * plans on a subscription carrying more than one item, so this is the one
- * place plan changes happen; the webhook that follows re-applies the state.
+ * Moves a live subscription to another rung. Up: the prorated difference
+ * and the overage so far are invoiced and charged at once, any pending
+ * downgrade is dropped, and the new volume applies only once that invoice
+ * is paid. When the bank declines or asks for authentication nothing moves:
+ * Stripe holds the change for 23 hours, paying the invoice on its hosted
+ * page applies it, and otherwise the invoice is voided. Down: a subscription
+ * schedule swaps the items when the current period ends, with no proration,
+ * so the paid volume is kept to the day it was paid for; a later move up
+ * releases the schedule. Choosing the current rung while a downgrade is
+ * pending drops it. Stripe's customer portal cannot switch plans on a
+ * subscription carrying more than one item, so this is the one place plan
+ * changes happen; the webhook that follows re-applies the state.
  */
 export async function changeRung(
   deps: BillingDeps,
@@ -293,7 +299,10 @@ export async function changeRung(
   } else {
     await input.beforeMoveUp?.();
     await releaseSchedule(deps, sub);
-    // Sends made under the old rung settle at its rate before the move.
+    // Sends made under the old rung settle at its rate before the move. Stripe
+    // drops a meter event it has not processed by the time the metered price
+    // changes, so the step reported here can go unbilled; earlier reports
+    // from the overage cron are already counted.
     if (overage) await reportOverage(deps, { teamId: input.teamId });
     const items: Stripe.SubscriptionUpdateParams.Item[] = [
       { id: base.id, price: await resolvePriceId(deps.stripe, rungLookupKey(rung)) },
@@ -304,10 +313,17 @@ export async function changeRung(
     } else if (overage) {
       items.push({ id: overage.id, deleted: true });
     }
-    await deps.stripe.subscriptions.update(sub.id, {
+    const updated = await deps.stripe.subscriptions.update(sub.id, {
       items,
-      proration_behavior: "create_prorations",
+      proration_behavior: "always_invoice",
+      payment_behavior: "pending_if_incomplete",
+      expand: ["latest_invoice"],
     });
+    if (updated.pending_update) {
+      const invoice = typeof updated.latest_invoice === "object" ? updated.latest_invoice : null;
+      await applyLocked(deps, customerId, sub.id);
+      return { applied: "payment_required", url: invoice?.hosted_invoice_url ?? null };
+    }
     // What was accepted inside the old volume is never re-judged as overage
     // under the new one: the period row counts it as already settled.
     if (rung.period === "month" && base.current_period_start) {
