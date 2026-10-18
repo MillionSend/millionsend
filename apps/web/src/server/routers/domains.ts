@@ -5,7 +5,6 @@ import {
   receivingMxHost,
   servedRegions,
   sesTenantsEnabled,
-  sharedInboxDomain,
   trackingCnameTarget,
   trackingSubdomainsSupported,
 } from "@millionsend/config";
@@ -24,7 +23,6 @@ import {
   liveInbox,
   PLAN_DOMAIN_LIMIT,
   setDomainReceiving,
-  teamSharedDomain,
   warmupCap,
   webhookBatch,
 } from "@millionsend/core";
@@ -56,7 +54,7 @@ import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
-import { catchAllAllowed, inboxDeps, sharedSending, userActor } from "../inboxes";
+import { catchAllAllowed, inboxDeps, userActor } from "../inboxes";
 import { enqueueDomainAge } from "../queue";
 import { assertTeamNotSuspended } from "../suspension-lock";
 import { adminProcedure, router, teamProcedure } from "../trpc";
@@ -224,24 +222,6 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         ...row,
         trackingPending: trackingSubdomain !== null && trackingSubdomainSetAt !== null,
       }));
-    }),
-
-    /**
-     * The team's subdomain of the shared inbox domain, which the Domains page
-     * shows read-only; null without a shared domain or while its name review
-     * is pending. Kept out of list, which feeds pickers that must never offer it.
-     */
-    shared: teamProcedure.query(async ({ ctx }) => {
-      const sub = sharedInboxDomain() ? await teamSharedDomain(ctx.db, ctx.teamId) : null;
-      if (!sub) return null;
-      return {
-        id: sub.id,
-        name: sub.name,
-        // Where the shared identity lives: the default region.
-        region: servedRegions()[0] ?? env.AWS_REGION,
-        createdAt: sub.createdAt,
-        sharedSending: await sharedSending(ctx),
-      };
     }),
 
     get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {

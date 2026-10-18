@@ -22,7 +22,6 @@ import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { shortcutBlocked } from "@/lib/keyboard";
-import { sharedModeKey } from "@/lib/shared-mode";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage } from "@/lib/trpc-error";
 import { useUrlState } from "@/lib/url-state";
@@ -70,11 +69,9 @@ const shown = (d: { status: string; trackingPending: boolean }) =>
 export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
   const t = useTranslations("domains");
   const common = useTranslations("common");
-  const inboxes = useTranslations("inboxes");
   const trpc = useTRPC();
   const router = useRouter();
   const domains = useQuery(trpc.domains.list.queryOptions());
-  const shared = useQuery(trpc.domains.shared.queryOptions());
   const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
 
@@ -130,12 +127,7 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
   }, []);
 
   const rows = domains.data ?? [];
-  const sharedRow = shared.data ?? null;
-  const sharedMode = sharedRow
-    ? sharedModeKey({ shared: true, sharedSending: sharedRow.sharedSending })
-    : null;
-  // Rows show once both queries settle, so the shared row never pops in above the others.
-  const settled = domains.isSuccess && !shared.isPending;
+  const settled = domains.isSuccess;
   const regions = useMemo(() => [...new Set(rows.map((d) => d.region))], [rows]);
 
   // URL params are untrusted: unknown values fall back to "all".
@@ -230,7 +222,7 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
             </div>
           )}
 
-          {settled && !sharedRow && filtered.length === 0 ? null : (
+          {settled && filtered.length === 0 ? null : (
             <>
               <Table>
                 <thead>
@@ -247,34 +239,6 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
                 </thead>
                 {settled ? (
                   <tbody>
-                    {/* The team's subdomain of the shared domain: read-only, outside the
-                        filters and the count. The API lists it last; on this one-page
-                        list it goes first, where it is easiest to find. */}
-                    {sharedRow ? (
-                      <tr>
-                        <td className="ms-mono">
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                            <NavTile name="domains" color={TONE_COLOR.neutral} />
-                            <Breakable text={sharedRow.name} />
-                          </span>
-                        </td>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          <span className="ms-badge ms-badge-neutral">{t("list.shared")}</span>
-                          <span style={{ marginLeft: 8, color: "var(--ms-muted)" }}>
-                            {sharedMode
-                              ? inboxes(`sharedMode.${sharedMode}`)
-                              : t("list.sharedOpen")}
-                          </span>
-                        </td>
-                        <td style={{ color: "var(--ms-muted)" }}>
-                          <RegionLabel region={sharedRow.region} />
-                        </td>
-                        <td className="right" style={{ color: "var(--ms-muted)" }}>
-                          <RelativeTime date={sharedRow.createdAt} />
-                        </td>
-                        <td className="right" style={{ width: 40 }} />
-                      </tr>
-                    ) : null}
                     {filtered.map((domain) => (
                       <tr key={domain.id}>
                         <td className="ms-mono">
@@ -347,7 +311,7 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
           )}
 
           {settled && filtered.length === 0 ? (
-            <div style={sharedRow ? { marginTop: 14 } : undefined}>
+            <div>
               {rows.length === 0 ? (
                 <EmptyState
                   area="domains"
