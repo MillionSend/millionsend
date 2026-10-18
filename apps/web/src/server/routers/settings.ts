@@ -1077,6 +1077,7 @@ export function createSettingsRouter(
                   start: quota.periodStart,
                   end: quota.periodEnd,
                   overage: quota.overage,
+                  overagePaused: quota.overagePaused === true,
                 }
               : null;
           const todayRow = rows.find((r) => r.day === today);

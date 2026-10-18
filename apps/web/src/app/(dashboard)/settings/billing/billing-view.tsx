@@ -389,7 +389,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
 
         {planStatus === "past_due" ? (
           <WarnCard action={canManage ? portalButton(t("updateCard"), "ms-btn-secondary") : null}>
-            {t(quota.kind === "month" ? "pastDueMonthly" : "pastDue")}
+            {t(quota.kind === "month" && quota.overagePaused ? "pastDueMonthly" : "pastDue")}
           </WarnCard>
         ) : null}
 
@@ -436,7 +436,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                 <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
                   {t("overageCopy", { price: usd(quota.overageCentsPer1k) })}
                 </div>
-                {overageEnabled && planStatus === "past_due" ? (
+                {quota.overagePaused ? (
                   <div style={{ fontSize: 12.5, color: "var(--ms-warn)", marginTop: 6 }}>
                     {t("overagePaused")}
                   </div>

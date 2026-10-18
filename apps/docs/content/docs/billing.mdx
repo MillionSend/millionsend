@@ -106,7 +106,8 @@ not per recipient, in `usage_counters.received` and
   every tenth received message adds one email to `usage_periods.accepted`,
   which the [overage cron](#the-overage-cron) bills like a send. Past the
   allowance, received mail is deferred once `accepted` reaches the period's
-  ceiling: 5× the volume with overage on, the volume itself with it off.
+  ceiling: 5× the volume with overage on, the volume itself with it off or
+  paused for a past-due payment.
 
 The MX asks at every `RCPT TO`, so a team out of room is deferred before the
 message is sent; the sender retries. Self-hosted instances count received

@@ -124,6 +124,8 @@ export const ptBR = {
         "Eles saem depois que a cota renovar às {resetsAt} UTC, ou minutos depois de você mudar para um plano maior.",
       releaseMonthly:
         "Eles saem quando o período renovar em {date}, assim que o excedente for ativado em Cobrança, ou minutos depois de você mudar para um plano maior.",
+      releasePaused:
+        "Há um pagamento pendente, então o excedente está pausado. Eles saem poucos minutos depois de você pagar a fatura em aberto em Cobrança, ou quando o período renovar em {date}.",
     },
   },
   "broadcast.held": {
@@ -177,7 +179,7 @@ export const ptBR = {
       noOverage:
         "Ao atingir a cota, novos envios pela API são recusados e as transmissões ficam em espera até o período renovar. Ative o excedente em Cobrança para continuar enviando além dela, ou mude para um plano maior.",
       overagePaused:
-        "Há um pagamento pendente, então o excedente está pausado: ao atingir a cota, novos envios pela API são recusados e as transmissões ficam em espera até a fatura em aberto ser paga. Atualize o cartão em Cobrança para liberar.",
+        "Há um pagamento pendente, então o excedente está pausado: ao atingir a cota, novos envios pela API são recusados e as transmissões ficam em espera até a fatura em aberto ser paga. Atualize o cartão em Cobrança para liberar o excedente.",
     },
   },
   "quota.monthly_reached": {
@@ -196,7 +198,7 @@ export const ptBR = {
       noOverage:
         "Novos envios pela API são recusados até o período renovar em {renewsAt} ou o excedente ser ativado em Cobrança; as transmissões ficam em espera até lá. Um plano maior aumenta a cota na hora e libera o que estava em espera em minutos.",
       overagePaused:
-        "Há um pagamento pendente, então o excedente está pausado: novos envios pela API são recusados e as transmissões ficam em espera até a fatura em aberto ser paga. Atualize o cartão em Cobrança; o que estava em espera sai em minutos depois do pagamento.",
+        "Há um pagamento pendente, então o excedente está pausado: novos envios pela API são recusados e as transmissões ficam em espera até a fatura em aberto ser paga. Atualize o cartão em Cobrança; o que estava em espera sai poucos minutos depois do pagamento.",
     },
   },
   "deliverability.warning": {

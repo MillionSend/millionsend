@@ -761,7 +761,14 @@ describe("settings.usage", () => {
     await addMember(teamId, "u1", "owner");
     const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
     expect(usage.today.limit).toBeNull();
-    expect(usage.period).toEqual({ accepted: 777, included: 500_000, start, end, overage: true });
+    expect(usage.period).toEqual({
+      accepted: 777,
+      included: 500_000,
+      start,
+      end,
+      overage: true,
+      overagePaused: false,
+    });
   });
 
   it("reports no limit and no period on self-host, where plans are not enforced", async () => {

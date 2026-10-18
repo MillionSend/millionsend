@@ -124,6 +124,8 @@ export const en = {
         "They go out after the reset at {resetsAt} UTC, or within minutes of a higher plan.",
       releaseMonthly:
         "They go out when the period renews on {date}, as soon as overage is turned on in Billing, or within minutes of a higher plan.",
+      releasePaused:
+        "A payment is past due, so overage is paused. They go out within minutes of paying the failed invoice from Billing, or when the period renews on {date}.",
     },
   },
   "broadcast.held": {

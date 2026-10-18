@@ -225,6 +225,8 @@ export type TeamQuota =
       periodEnd: Date;
       /** Sends past `included` bill instead of stopping: the customer's switch, off while a payment is past due. */
       overage: boolean;
+      /** The switch is on, but a past-due payment holds overage off until the invoice is paid. */
+      overagePaused?: true | undefined;
       overageCentsPer1k: number;
       /** An operator ceiling on each UTC day inside the period; absent or null = the period alone caps. */
       dailyCeiling?: number | null | undefined;
@@ -260,13 +262,15 @@ function planQuota(team: QuotaTeamRow, isCloud: boolean, now: Date): TeamQuota {
   const rung = teamRung(plan, plan === team.plan ? team.planQuota : null);
   if (rung.period === "day") return { kind: "day", plan, limit: rung.included };
   const period = quotaPeriod(team, now);
+  const paused = team.overageEnabled && team.planStatus === "past_due";
   return {
     kind: "month",
     plan,
     included: rung.included,
     periodStart: period.start,
     periodEnd: period.end,
-    overage: team.overageEnabled && team.planStatus !== "past_due",
+    overage: team.overageEnabled && !paused,
+    ...(paused ? { overagePaused: true } : {}),
     overageCentsPer1k: rung.overageCentsPer1k ?? 0,
   };
 }

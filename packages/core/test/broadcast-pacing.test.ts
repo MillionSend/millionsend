@@ -190,6 +190,10 @@ it("plans a region's sends from its live state and names the rung that fits", as
     })[0];
   expect(rungThatFits(pro100, used, NOW, runner)).toMatchObject({ overage: true });
   expect(rungThatFits({ ...pro100, overage: true }, used, NOW, runner)).toBeNull();
+  // Switched on but held by a past-due payment: turning overage on is no advice.
+  expect(rungThatFits({ ...pro100, overagePaused: true }, used, NOW, runner)?.rung.key).not.toBe(
+    "pro_100k",
+  );
   expect(
     rungThatFits({ kind: "day", plan: "free", limit: 100 }, { day: 0, period: 0 }, NOW, runner),
   ).toMatchObject({ rung: { key: "pro_200k" }, overage: false });

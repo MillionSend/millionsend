@@ -892,7 +892,7 @@ async function reportWalkEnd(
           ? accountMailPhrase({
               locale,
               kind,
-              key: "releaseMonthly",
+              key: quota.overagePaused ? "releasePaused" : "releaseMonthly",
               values: { date: formatMailDate(locale, quota.periodEnd) },
             })
           : accountMailPhrase({

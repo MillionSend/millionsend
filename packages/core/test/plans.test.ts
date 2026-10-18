@@ -228,7 +228,12 @@ describe("teamQuota", () => {
       kind: "month",
       included: 100_000,
       overage: false,
+      overagePaused: true,
     });
+    // With the switch off there is nothing to pause, so nothing to lift on payment.
+    expect(teamQuota(row({ planStatus: "past_due" }), true, now)).not.toHaveProperty(
+      "overagePaused",
+    );
     // The paid invoice lifts the pause: more mail fits, so parked broadcasts drain.
     expect(
       raisesQuota(

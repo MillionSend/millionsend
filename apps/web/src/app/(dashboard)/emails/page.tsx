@@ -210,10 +210,15 @@ export default function EmailsPage() {
           {stats.data && stats.data.queuedQuota > 0 ? (
             <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
               {cap.monthly && usage.data?.period
-                ? t("list.capBanner.queuedMonth", {
-                    count: nf.format(stats.data.queuedQuota),
-                    date: formatDay(usage.data.period.end, locale),
-                  })
+                ? t(
+                    usage.data.period.overagePaused
+                      ? "list.capBanner.queuedMonthPaused"
+                      : "list.capBanner.queuedMonth",
+                    {
+                      count: nf.format(stats.data.queuedQuota),
+                      date: formatDay(usage.data.period.end, locale),
+                    },
+                  )
                 : t("list.capBanner.queued", {
                     count: nf.format(stats.data.queuedQuota),
                     duration: formatHoursMinutes(msToUtcMidnight()),
