@@ -1,6 +1,6 @@
 "use client";
 
-import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
+import { FROM_NAME_MAX, INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
@@ -93,7 +93,7 @@ export function EditDialog({
             className="ms-input"
             style={{ width: "100%" }}
             value={fromName}
-            maxLength={78}
+            maxLength={FROM_NAME_MAX}
             disabled={save.isPending}
             onChange={(event) => setFromName(event.target.value)}
           />

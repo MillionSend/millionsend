@@ -811,6 +811,18 @@ describe("addresses on the shared domain", () => {
     rq.error = null;
     const html = createDialog();
     expect(html).toMatch(/<input id="inbox-local"[^>]*placeholder="Random address"/);
+    // The name first, feeding the address and the sender name under it; who reads it after.
+    const order = [
+      'id="inbox-name"',
+      'id="inbox-local"',
+      'id="inbox-from-name"',
+      'name="inbox-kind"',
+      'id="inbox-accept"',
+    ].map((marker) => html.indexOf(marker));
+    expect(order).not.toContain(-1);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // Nothing typed yet: the From line shows no sender name and a random address.
+    expect(html).toContain('From: <span class="ms-mono">&lt;random@acme.agents.example&gt;</span>');
     const expires = picker(html, "inbox-expires");
     expect(offered(expires)).toEqual(["never", "1h", "24h", "7d", "30d"]);
     expect(expires).toContain('<option value="never" selected="">Never</option>');

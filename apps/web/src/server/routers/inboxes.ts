@@ -52,12 +52,14 @@ import {
   visibleLine,
 } from "@millionsend/core";
 import { LABEL_NAME_MAX } from "@millionsend/core/inbox-organize";
-import { INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
+import { FROM_NAME_MAX, INBOX_NAME_MAX } from "@millionsend/core/inbox-username";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, count, desc, eq, gt, inArray, max, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, ilike, inArray, max, sql } from "drizzle-orm";
 import { z } from "zod";
+import { mailDomain } from "@/lib/format";
 import { HEX_COLOR_RE } from "@/lib/hex-color";
+import { escapeLike } from "@/lib/sql";
 import { fetchQuotaRow } from "../billing";
 import {
   actorNames,
@@ -416,11 +418,67 @@ export const inboxesRouter = router({
     };
   }),
 
+  /** The standing of the domain a send from this inbox goes out on, for the dialog's checks. */
+  sendContext: receivingProcedure
+    .input(z.object({ id: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      const i = schema.inboxes;
+      const d = schema.domains;
+      const [inbox] = await ctx.db
+        .select({
+          address: i.emailAddress,
+          domainId: i.domainId,
+          name: d.name,
+          status: d.status,
+          dmarc: d.dmarcPolicy,
+        })
+        .from(i)
+        .leftJoin(d, eq(d.id, i.domainId))
+        .where(and(eq(i.id, input.id), eq(i.teamId, ctx.teamId)));
+      if (!inbox) throw new TRPCError({ code: "NOT_FOUND" });
+      // The shared domain's records are the instance's: verified by construction, no DMARC to read.
+      if (inbox.domainId === null) {
+        return {
+          shared: true,
+          domain: { name: mailDomain(inbox.address), verified: true, dmarc: null },
+        };
+      }
+      return {
+        shared: false,
+        domain:
+          inbox.name === null
+            ? null
+            : { name: inbox.name, verified: inbox.status === "verified", dmarc: inbox.dmarc },
+      };
+    }),
+
+  /** Whether this inbox has sent to a domain or received from it: a first contact starts with no history. */
+  contactHistory: receivingProcedure
+    .input(z.object({ id: z.uuid(), domain: z.string().toLowerCase().min(1).max(253) }))
+    .query(async ({ ctx, input }) => {
+      const i = schema.inboxes;
+      const [inbox] = await ctx.db
+        .select({ id: i.id })
+        .from(i)
+        .where(and(eq(i.id, input.id), eq(i.teamId, ctx.teamId)));
+      if (!inbox) throw new TRPCError({ code: "NOT_FOUND" });
+      // Bare lowercase addresses the inbox wrote to or heard from; a From that
+      // failed authentication is never among them, so it never counts as contact.
+      const c = schema.inboxCorrespondents;
+      const [row] = await ctx.db
+        .select({ address: c.address })
+        .from(c)
+        .where(and(eq(c.inboxId, inbox.id), ilike(c.address, `%@${escapeLike(input.domain)}`)))
+        .limit(1);
+      return { seen: row !== undefined };
+    }),
+
   create: receivingProcedure
     .input(
       z.object({
         kind: z.enum(INBOX_KINDS),
         name: z.string().trim().max(INBOX_NAME_MAX).optional(),
+        fromName: z.string().trim().max(FROM_NAME_MAX).optional(),
         // With domainId, the address's local part; without, the shared address's username.
         localPart: z.string().trim().toLowerCase().min(1).max(64).optional(),
         domainId: z.uuid().optional(),
@@ -451,6 +509,7 @@ export const inboxesRouter = router({
           email_address: emailAddress,
           username: input.domainId ? undefined : input.localPart,
           name: input.name || undefined,
+          from_name: input.fromName || undefined,
           kind: input.kind,
           expires_in: input.expiresIn,
           safety: { accept_from: input.acceptFrom },
@@ -465,7 +524,7 @@ export const inboxesRouter = router({
       z.object({
         id: z.uuid(),
         name: z.string().trim().min(1).max(INBOX_NAME_MAX).optional(),
-        fromName: z.string().trim().max(78).optional(),
+        fromName: z.string().trim().max(FROM_NAME_MAX).optional(),
         expiresIn: z.enum(EXPIRY_CHOICES).nullable().optional(),
       }),
     )

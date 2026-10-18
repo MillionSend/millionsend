@@ -62,7 +62,7 @@ import {
   type InboxWire,
   type ListQuery,
 } from "./types.js";
-import { INBOX_NAME_MAX, SHARED_USERNAME } from "./username.js";
+import { FROM_NAME_MAX, INBOX_NAME_MAX, SHARED_USERNAME } from "./username.js";
 import { type InboxCounts, inboxListItemWire, inboxWire } from "./wire.js";
 
 export interface InboxDeps {
@@ -151,9 +151,6 @@ class Refused extends Error {
 const ADDRESS_ATTEMPTS = 5;
 const EXPIRE_BATCH = 1000;
 const LOCAL_PART = /^[a-z0-9._%+-]{1,64}$/;
-
-/** Resend's from_name limit. */
-const FROM_NAME_MAX = 78;
 
 /** The 422 for a name the shared domain won't carry; why is never said. */
 const refusedOnShared = (field: string): InboxError =>
