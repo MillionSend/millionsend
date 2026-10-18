@@ -174,6 +174,8 @@ export const en = {
         "Sends past the quota bill at your plan's overage rate and show on the next invoice. A higher plan includes more emails at a lower rate.",
       noOverage:
         "At the quota, new API sends are refused and broadcasts park until the period renews. Turn on overage in Billing to keep sending past it, or move to a higher plan.",
+      overagePaused:
+        "A payment is past due, so overage is paused: at the quota, new API sends are refused and broadcasts park until the failed invoice is paid. Update the card from Billing to lift it.",
     },
   },
   "quota.monthly_reached": {
@@ -189,6 +191,8 @@ export const en = {
         "Sends past the quota now bill at your plan's overage rate and show on the next invoice. They stop at {hardCap} times the included volume ({stopAt}) until the period renews on {renewsAt}; a higher plan includes more emails at a lower rate.",
       noOverage:
         "New API sends are refused until the period renews on {renewsAt} or overage is turned on in Billing; broadcasts park until then. A higher plan raises the quota immediately and releases parked mail within minutes.",
+      overagePaused:
+        "A payment is past due, so overage is paused: new API sends are refused and broadcasts park until the failed invoice is paid. Update the card from Billing; parked mail goes out within minutes of the payment.",
     },
   },
   "deliverability.warning": {
@@ -263,13 +267,15 @@ export const en = {
     subject: "Payment failed for your {plan} plan",
     body: [
       "We couldn't charge the card on file for {team}'s {plan} plan.",
-      "{retry} For now {team} keeps its {plan} plan ({cap}). If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
+      "{retry} For now {team} keeps its {plan} plan ({cap}){overage}. If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
     ],
     button: "Pay the invoice",
     muted: ["Or update the card from Billing: {billingUrl}"],
     extra: {
       retryOn: "Stripe retries on {date}.",
       noRetry: "Stripe is not retrying on its own.",
+      overagePaused:
+        ", but overage is paused until the invoice is paid, so sends stop at the included volume",
     },
   },
   "billing.plan_activated": {

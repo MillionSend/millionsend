@@ -61,11 +61,11 @@ no volume incluído depende da chave **excedente** em Cobrança, ligada por
 padrão (o cliente a desliga lá):
 
 - **Excedente desligado**: a API recusa com `429 monthly_quota_exceeded`
-  ("Monthly sending quota exceeded with overage off; the period renews on
-  `<data>`"); nada fica em espera pela API. As transmissões ainda
-  deixam o que sobra em espera como `queued_quota`, e o drain o reconfere contra o
-  período a cada rodada: sai quando o período renova, quando o excedente é
-  ligado ou quando o plano sobe.
+  ("Monthly sending quota exceeded with overage off or paused for a past-due
+  payment; the period renews on `<data>`"); nada fica em espera pela API.
+  As transmissões ainda deixam o que sobra em espera como `queued_quota`, e o
+  drain o reconfere contra o período a cada rodada: sai quando o período
+  renova, quando o excedente é ligado ou quando o plano sobe.
 - **Excedente ligado**: os envios além do volume incluído são reportados a um
   medidor do Stripe e cobrados por 1.000 na taxa da faixa, na próxima fatura
   (veja [o cron de excedente](#o-cron-de-excedente)) — até um teto rígido de
@@ -74,6 +74,13 @@ padrão (o cliente a desliga lá):
   com o mesmo `429 monthly_quota_exceeded` ("Monthly sending quota exceeded:
   sends stop at 5 times the included volume even with overage on; the period
   renews on `<data>`") até o período renovar.
+
+Enquanto o pagamento de uma renovação está pendente, o excedente fica pausado,
+seja qual for a posição da chave: a equipe mantém o volume incluído durante as
+novas tentativas do Stripe, e o que passar dele é recusado ou fica em espera
+como com o excedente desligado, até a fatura em aberto ser paga. O e-mail de
+pagamento recusado, a página de cobrança e os e-mails de cota avisam disso, e
+a fatura paga libera as transmissões em espera em poucos minutos.
 
 Os proprietários recebem `quota.warning` em 80% e `quota.reached` em 100% do volume
 incluído, uma vez por período; o e-mail de limite atingido diz se os envios
@@ -174,7 +181,8 @@ preços por ambiente. Uma assinatura em uma faixa mensal carrega o preço da
 faixa e o preço medido dela como segundo item desde o Checkout (o id do item
 fica em `teams.stripe_overage_item_id`); o item medido só cobra o que o worker
 reporta, então a chave de **excedente** do cliente é uma simples flag na
-linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
+linha, `teams.overage_enabled`, que é o que toda superfície de envio lê,
+pausada enquanto `teams.plan_status` é `past_due`.
 
 ## O fluxo
 
@@ -269,7 +277,7 @@ não medido da assinatura nomeia a faixa, nesta ordem:
 | Status da assinatura buscada de novo | `plan`, `plan_quota` | `plan_status` |
 | --- | --- | --- |
 | `active`, `trialing` | O plano e o volume incluído da faixa (`plan_quota` é nulo em uma faixa diária). Preço desconhecido: registrado em log, nada muda. | o mesmo |
-| `past_due` | Inalterado (carência de pagamento; o Stripe continua tentando) | `past_due` |
+| `past_due` | Inalterado (carência de pagamento; o Stripe continua tentando); o excedente fica pausado até a fatura ser paga | `past_due` |
 | `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, qualquer outro | `free`, nulo | `unpaid` / `canceled` / `incomplete` / `canceled` |
 
 Regras adicionais:

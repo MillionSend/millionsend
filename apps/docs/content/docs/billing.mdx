@@ -58,11 +58,11 @@ included volume depends on the **overage** switch in Billing, on by default
 (the customer turns it off there):
 
 - **Overage off**: the API refuses with `429 monthly_quota_exceeded`
-  ("Monthly sending quota exceeded with overage off; the period renews on
-  `<date>`"); nothing parks through the API. Broadcasts
-  still park their overflow as `queued_quota`, and the drain re-checks it
-  against the period each run: it goes out when the period renews, when
-  overage is turned on, or when the plan moves up.
+  ("Monthly sending quota exceeded with overage off or paused for a past-due
+  payment; the period renews on `<date>`"); nothing parks through the API.
+  Broadcasts still park their overflow as `queued_quota`, and the drain
+  re-checks it against the period each run: it goes out when the period
+  renews, when overage is turned on, or when the plan moves up.
 - **Overage on**: sends past the included volume are reported to a Stripe
   meter and billed per 1,000 at the rung's rate on the next invoice (see
   [the overage cron](#the-overage-cron)) — up to a hard cap of 5× the
@@ -71,6 +71,12 @@ included volume depends on the **overage** switch in Billing, on by default
   the same `429 monthly_quota_exceeded` ("Monthly sending quota exceeded:
   sends stop at 5 times the included volume even with overage on; the period
   renews on `<date>`") until the period renews.
+
+While a renewal payment is past due, overage pauses whatever the switch says:
+the team keeps its included volume through Stripe's retries, and sends past
+it are refused or park as with overage off until the failed invoice is paid.
+The payment-failed mail, the billing page and the quota mails say so, and the
+paid invoice releases parked broadcasts within minutes.
 
 Owners hear `quota.warning` at 80% and `quota.reached` at 100% of the included
 volume, once per period; the reached mail says whether sends now bill overage
@@ -167,7 +173,8 @@ configuration. A subscription on a monthly rung carries the rung's price and
 its metered price as a second item from Checkout on (the item's id is stored
 in `teams.stripe_overage_item_id`); the metered item bills only what the
 worker reports, so the customer's **overage** switch is a plain row flag,
-`teams.overage_enabled`, which is what every send surface reads.
+`teams.overage_enabled`, which is what every send surface reads, paused
+while `teams.plan_status` is `past_due`.
 
 ## The flow
 
@@ -260,7 +267,7 @@ The subscription's non-metered item names the rung, tried in this order:
 | Re-fetched subscription status | `plan`, `plan_quota` | `plan_status` |
 | --- | --- | --- |
 | `active`, `trialing` | The rung's plan and included volume (`plan_quota` is null on a daily rung). Unknown price: logged, nothing changes. | same |
-| `past_due` | Unchanged (payment grace; Stripe keeps retrying) | `past_due` |
+| `past_due` | Unchanged (payment grace; Stripe keeps retrying); overage pauses until the invoice is paid | `past_due` |
 | `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, anything else | `free`, null | `unpaid` / `canceled` / `incomplete` / `canceled` |
 
 Additional rules:

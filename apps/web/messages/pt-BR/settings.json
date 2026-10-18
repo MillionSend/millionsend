@@ -304,6 +304,8 @@
     "readOnly": "Apenas proprietários e administradores podem alterar a cobrança.",
     "systemNotice": "Esta é a equipe da própria instância: envia os e-mails de conta e as novidades, nunca é cobrada e não tem limite de envio. O plano é definido pelo operador.",
     "pastDue": "O pagamento falhou — atualize seu cartão para manter o plano.",
+    "pastDueMonthly": "O pagamento falhou — atualize seu cartão para manter o plano. Até o pagamento ser aprovado, o excedente fica pausado e os envios param no volume incluído.",
+    "overagePaused": "Pausado até o pagamento pendente ser aprovado.",
     "updateCard": "Atualizar forma de pagamento",
     "usageTitle": "Uso",
     "overage": "Excedente",

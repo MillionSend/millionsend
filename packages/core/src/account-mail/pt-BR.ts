@@ -176,6 +176,8 @@ export const ptBR = {
         "Os envios acima da cota são cobrados pela tarifa de excedente do seu plano e aparecem na próxima fatura. Um plano maior inclui mais e-mails a uma tarifa menor.",
       noOverage:
         "Ao atingir a cota, novos envios pela API são recusados e as transmissões ficam em espera até o período renovar. Ative o excedente em Cobrança para continuar enviando além dela, ou mude para um plano maior.",
+      overagePaused:
+        "Há um pagamento pendente, então o excedente está pausado: ao atingir a cota, novos envios pela API são recusados e as transmissões ficam em espera até a fatura em aberto ser paga. Atualize o cartão em Cobrança para liberar.",
     },
   },
   "quota.monthly_reached": {
@@ -193,6 +195,8 @@ export const ptBR = {
         "Os envios acima da cota agora são cobrados pela tarifa de excedente do seu plano e aparecem na próxima fatura. Eles param em {hardCap} vezes o volume incluído ({stopAt}) até o período renovar em {renewsAt}; um plano maior inclui mais e-mails a uma tarifa menor.",
       noOverage:
         "Novos envios pela API são recusados até o período renovar em {renewsAt} ou o excedente ser ativado em Cobrança; as transmissões ficam em espera até lá. Um plano maior aumenta a cota na hora e libera o que estava em espera em minutos.",
+      overagePaused:
+        "Há um pagamento pendente, então o excedente está pausado: novos envios pela API são recusados e as transmissões ficam em espera até a fatura em aberto ser paga. Atualize o cartão em Cobrança; o que estava em espera sai em minutos depois do pagamento.",
     },
   },
   "deliverability.warning": {
@@ -273,13 +277,15 @@ export const ptBR = {
     subject: "Pagamento recusado no seu plano {plan}",
     body: [
       "Não conseguimos cobrar o cartão cadastrado do plano {plan} de {team}.",
-      "{retry} Por enquanto {team} mantém o plano {plan} ({cap}). Se a fatura continuar em aberto, o Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
+      "{retry} Por enquanto {team} mantém o plano {plan} ({cap}){overage}. Se a fatura continuar em aberto, o Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
     ],
     button: "Pagar fatura",
     muted: ["Ou atualize o cartão em Cobrança: {billingUrl}"],
     extra: {
       retryOn: "O Stripe tenta de novo em {date}.",
       noRetry: "O Stripe não vai tentar de novo sozinho.",
+      overagePaused:
+        ", mas o excedente fica pausado até a fatura ser paga, então os envios param no volume incluído",
     },
   },
   "billing.plan_activated": {

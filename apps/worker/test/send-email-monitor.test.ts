@@ -156,6 +156,7 @@ it("draws a customer's send that carried the system-mail tag like any other", as
       billing: {
         plan: "free",
         planQuota: null,
+        planStatus: "none",
         currentPeriodStart: null,
         currentPeriodEnd: null,
         overageEnabled: false,

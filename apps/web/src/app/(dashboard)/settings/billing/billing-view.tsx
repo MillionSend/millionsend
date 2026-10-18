@@ -226,6 +226,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     planStatus,
     currentPeriodEnd,
     quota,
+    overageEnabled,
     usage,
     hasCustomer,
     hasLiveSubscription,
@@ -388,7 +389,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
 
         {planStatus === "past_due" ? (
           <WarnCard action={canManage ? portalButton(t("updateCard"), "ms-btn-secondary") : null}>
-            {t("pastDue")}
+            {t(quota.kind === "month" ? "pastDueMonthly" : "pastDue")}
           </WarnCard>
         ) : null}
 
@@ -425,8 +426,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               }}
             >
               <Switch
-                checked={quota.overage}
-                disabled={!canManage || !hasLiveSubscription || busy || (held && !quota.overage)}
+                checked={overageEnabled}
+                disabled={!canManage || !hasLiveSubscription || busy || (held && !overageEnabled)}
                 onChange={(enabled) => setOverage.mutate({ enabled })}
                 ariaLabel={t("overage")}
               />
@@ -435,6 +436,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                 <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
                   {t("overageCopy", { price: usd(quota.overageCentsPer1k) })}
                 </div>
+                {overageEnabled && planStatus === "past_due" ? (
+                  <div style={{ fontSize: 12.5, color: "var(--ms-warn)", marginTop: 6 }}>
+                    {t("overagePaused")}
+                  </div>
+                ) : null}
                 {over > 0 ? (
                   <div style={{ fontSize: 12.5, color: "var(--ms-bone)", marginTop: 6 }}>
                     {t("overSoFar", {

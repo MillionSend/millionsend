@@ -69,6 +69,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       inboxExpiresAt: schema.inboxes.expiresAt,
       plan: schema.teams.plan,
       planQuota: schema.teams.planQuota,
+      planStatus: schema.teams.planStatus,
       currentPeriodStart: schema.teams.currentPeriodStart,
       currentPeriodEnd: schema.teams.currentPeriodEnd,
       overageEnabled: schema.teams.overageEnabled,
@@ -98,6 +99,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
     billing: {
       plan: match.plan,
       planQuota: match.planQuota,
+      planStatus: match.planStatus,
       currentPeriodStart: match.currentPeriodStart,
       currentPeriodEnd: match.currentPeriodEnd,
       overageEnabled: match.overageEnabled,

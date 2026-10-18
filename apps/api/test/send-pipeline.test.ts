@@ -192,4 +192,25 @@ describe("monthly plan", () => {
     expect((await post(base)).status).toBe(200);
     expect(enqueued).toHaveLength(1);
   });
+
+  it("while a payment is past due, overage pauses and sends stop at the included volume", async () => {
+    const setTeam = (planStatus: "past_due" | "active") =>
+      db.update(schema.teams).set({ planStatus }).where(eq(schema.teams.id, teamId));
+    await db
+      .update(schema.usagePeriods)
+      .set({ accepted: included })
+      .where(eq(schema.usagePeriods.teamId, teamId));
+    await setTeam("past_due");
+    const res = await post(base);
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      name: "monthly_quota_exceeded",
+      message: expect.stringContaining("past-due payment"),
+    });
+    expect(enqueued).toEqual([]);
+
+    await setTeam("active");
+    expect((await post(base)).status).toBe(200);
+    expect(enqueued).toHaveLength(1);
+  });
 });

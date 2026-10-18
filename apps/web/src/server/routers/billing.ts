@@ -125,6 +125,8 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         planStatus: team.planStatus,
         currentPeriodEnd: team.currentPeriodEnd,
         quota,
+        // The switch shows the customer's choice; quota.overage is what applies (off while past due).
+        overageEnabled: team.overageEnabled,
         usage: await readUsage(ctx.db, ctx.teamId, quota),
         hasCustomer: team.stripeCustomerId !== null,
         hasLiveSubscription: live,

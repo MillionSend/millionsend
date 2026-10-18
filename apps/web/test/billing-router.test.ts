@@ -323,6 +323,7 @@ describe("billing router", () => {
       planStatus: "none",
       currentPeriodEnd: null,
       quota: { kind: "day", plan: "free", limit: 100 },
+      overageEnabled: true,
       usage: { accepted: 0, reportedOverage: 0 },
       hasCustomer: false,
       hasLiveSubscription: false,

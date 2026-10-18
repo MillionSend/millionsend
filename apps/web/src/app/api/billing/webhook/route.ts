@@ -221,6 +221,10 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
           team,
           plan: planLabel(after.plan, after.planQuota),
           cap: planCapPhrase(locale, after.plan, after.planQuota),
+          overage:
+            after.overageEnabled && teamQuota(after, true).kind === "month"
+              ? accountMailPhrase({ locale, kind: "billing.payment_failed", key: "overagePaused" })
+              : "",
           freeCap: freeCapText(locale),
           retry: nextAttempt
             ? accountMailPhrase({

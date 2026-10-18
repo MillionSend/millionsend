@@ -233,6 +233,21 @@ it("monthly quota reached with overage on says sends now bill", async () => {
   });
 });
 
+it("monthly quota reached while a payment is past due says overage waits for the invoice", async () => {
+  const { used } = await monthlyPlan(true);
+  await db.update(schema.teams).set({ planStatus: "past_due" }).where(eq(schema.teams.id, teamId));
+  await used(100_000);
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+  expect(sends[0]?.text).toContain(
+    "A payment is past due, so overage is paused: new API sends are refused and broadcasts park until the failed invoice is paid.",
+  );
+  const [row] = await deliveries();
+  expect(row?.payload).toMatchObject({
+    type: "quota.reached",
+    data: { used: 100_000, limit: 100_000, period: "month", overage: false },
+  });
+});
+
 it("a monthly period that rolled before its renewal webhook is judged by the row keyed at the old period end", async () => {
   const { periodEnd, used } = await monthlyPlan();
   // Last period's row, also full: judged in its own period, never again.

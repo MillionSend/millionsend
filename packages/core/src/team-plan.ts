@@ -22,6 +22,7 @@ export async function fetchEffectivePlan(db: Db, teamId: string): Promise<Plan |
 export const QUOTA_COLUMNS = {
   plan: schema.teams.plan,
   planQuota: schema.teams.planQuota,
+  planStatus: schema.teams.planStatus,
   currentPeriodStart: schema.teams.currentPeriodStart,
   currentPeriodEnd: schema.teams.currentPeriodEnd,
   overageEnabled: schema.teams.overageEnabled,
