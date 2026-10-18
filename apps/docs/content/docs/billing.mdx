@@ -201,7 +201,8 @@ while `teams.plan_status` is `past_due`.
      pending_if_incomplete`, so the prorated difference and the overage so
      far are invoiced and charged at once, and the new volume applies only
      once that invoice is paid. When the bank declines or asks for
-     authentication nothing changes: Stripe holds the update for 23 hours,
+     authentication the rung stays as it is, though a move down scheduled
+     before is already dropped: Stripe holds the update for 23 hours,
      the dashboard sends the customer to the invoice's hosted page, and
      paying it there applies the move (the webhook writes the row);
      otherwise Stripe voids the invoice. Sends already accepted inside the
@@ -318,10 +319,14 @@ are logged).
 The same report runs before the switch turns off, before a move up (sends
 made under the old rung settle at its rate), before a team is deleted (its
 cancellation carries a final invoice) and when the metered item leaves the
-subscription. One gap remains: Stripe drops a meter event it has not
-processed by the time a move up re-prices the metered item, so the step
-reported just before the move, at most the sends since the cron's last run,
-can go unbilled.
+subscription. Stripe drops a meter event it has not counted by the time a
+move up re-prices the metered item, and counting takes about a minute, so a
+move up first compares the period's reported overage with Stripe's meter
+summaries: while more than 1% of the volume (at least 1,000 emails) is
+still uncounted, `billing.changePlan` refuses with `CONFLICT`
+(`overage_in_flight`) and the dashboard asks to try again in a minute. A
+team delete refuses the same way when the meter rejects its last report,
+since the cancel would delete the rows that owe it.
 
 ## Environment
 

@@ -545,6 +545,8 @@ describe("cancelTeamSubscription", () => {
     );
     expect(state.cancels).toEqual(["sub_1"]);
     expect(state.cancelParams).toEqual({ invoice_now: true, prorate: false });
+    // Stamped before the second the cancel can land in.
+    expect(state.meterEvents[0]?.timestamp).toBeLessThan(Math.floor(Date.now() / 1000));
     expect(await team(teamId)).toEqual({
       plan: "free",
       planQuota: null,
@@ -567,6 +569,23 @@ describe("cancelTeamSubscription", () => {
     await cancelTeamSubscription(deps(), teamId);
     expect(state.cancels).toEqual(["sub_1"]);
     expect(await team(teamId)).toMatchObject({ plan: "free", stripeSubscriptionId: null });
+  });
+});
+
+describe("cancelTeamSubscription when the meter refuses", () => {
+  it("keeps the subscription and the rows that owe the step, so the delete can be retried", async () => {
+    const teamId = await customerTeam();
+    state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active", undefined, {
+      overageKey: "millionsend_pro_100k_overage",
+    });
+    await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: new Date(PERIOD_START * 1000), accepted: 100_500 });
+    state.meterError = new Error("Stripe is down");
+    await expect(cancelTeamSubscription(deps(), teamId)).rejects.toThrow("overage not reported");
+    expect(state.cancels).toEqual([]);
+    expect(await team(teamId)).toMatchObject({ plan: "pro", stripeSubscriptionId: "sub_1" });
   });
 });
 

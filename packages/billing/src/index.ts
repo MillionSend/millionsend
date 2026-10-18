@@ -6,7 +6,7 @@ export {
   createPortalSession,
   hasLiveSubscription,
 } from "./checkout.js";
-export { type OverageReport, reportOverage } from "./overage.js";
+export { OverageInFlightError, type OverageReport, reportOverage } from "./overage.js";
 export {
   METER_EVENT_NAME,
   overageLookupKey,

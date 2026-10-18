@@ -302,7 +302,7 @@ export const ptBR = {
     subject: "Sua equipe mudou de {old} para {new}",
     body: [
       "{team} agora está no {new}, que permite {cap}. Com um limite menor, os envios já aceitos não mudam; o que passar do novo limite espera o próximo dia UTC nos planos diários e, nos planos mensais, é cobrado como excedente (quando ativado) ou recusado pela API até o período renovar.",
-      "O rateio aparece na próxima fatura do Stripe.",
+      "Subir de plano é cobrado na hora, proporcional ao resto do período e junto com o excedente usado até agora; descer vale na renovação, sem reembolso.",
     ],
     button: "Abrir cobrança",
   },

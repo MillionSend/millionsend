@@ -4,7 +4,7 @@ import { schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import type { BillingDeps } from "./checkout.js";
-import { reportOverage } from "./overage.js";
+import { assertOverageCounted, hasPendingOverage, reportOverage } from "./overage.js";
 import {
   overageLookupKey,
   pendingRungOf,
@@ -240,9 +240,10 @@ export type RungChange =
  * Moves a live subscription to another rung. Up: the prorated difference
  * and the overage so far are invoiced and charged at once, any pending
  * downgrade is dropped, and the new volume applies only once that invoice
- * is paid. When the bank declines or asks for authentication nothing moves:
- * Stripe holds the change for 23 hours, paying the invoice on its hosted
- * page applies it, and otherwise the invoice is voided. Down: a subscription
+ * is paid. When the bank declines or asks for authentication the rung stays
+ * (the pending downgrade is already gone): Stripe holds the change for 23
+ * hours, paying the invoice on its hosted page applies it, and otherwise the
+ * invoice is voided. Down: a subscription
  * schedule swaps the items when the current period ends, with no proration,
  * so the paid volume is kept to the day it was paid for; a later move up
  * releases the schedule. Choosing the current rung while a downgrade is
@@ -298,12 +299,19 @@ export async function changeRung(
     result = { applied: "period_end", at: new Date(periodEnd * 1000) };
   } else {
     await input.beforeMoveUp?.();
+    // Sends made under the old rung settle at its rate before the move.
+    if (overage) {
+      await reportOverage(deps, { teamId: input.teamId });
+      if (current.period === "month" && base.current_period_start) {
+        await assertOverageCounted(deps, {
+          teamId: input.teamId,
+          customerId,
+          periodStart: new Date(base.current_period_start * 1000),
+          included: current.included,
+        });
+      }
+    }
     await releaseSchedule(deps, sub);
-    // Sends made under the old rung settle at its rate before the move. Stripe
-    // drops a meter event it has not processed by the time the metered price
-    // changes, so the step reported here can go unbilled; earlier reports
-    // from the overage cron are already counted.
-    if (overage) await reportOverage(deps, { teamId: input.teamId });
     const items: Stripe.SubscriptionUpdateParams.Item[] = [
       { id: base.id, price: await resolvePriceId(deps.stripe, rungLookupKey(rung)) },
     ];
@@ -396,7 +404,16 @@ async function endSubscription(
   if (!team?.stripeSubscriptionId) return;
   const sub = await deps.stripe.subscriptions.retrieve(team.stripeSubscriptionId);
   if (sub.status !== "canceled" && sub.status !== "incomplete_expired") {
-    if (finalInvoice) await reportOverage(deps, { teamId });
+    if (finalInvoice) {
+      // A second early: the final invoice takes events stamped before the
+      // cancel, which can land in the same second as the report.
+      await reportOverage(deps, { teamId, now: new Date(Date.now() - 1000) });
+      // A pin left standing is a step Stripe refused; the team's rows, and
+      // what they owe, go away once the cancel succeeds.
+      if (await hasPendingOverage(deps.db, teamId)) {
+        throw new Error(`team ${teamId}: overage not reported; the subscription stays`);
+      }
+    }
     await deps.stripe.subscriptions.cancel(sub.id, { invoice_now: finalInvoice, prorate: false });
   }
   await deps.db

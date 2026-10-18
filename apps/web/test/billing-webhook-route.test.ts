@@ -258,6 +258,15 @@ describe("owner mail", () => {
     expect(kinds()).toEqual(["billing.payment_failed", "billing.payment_failed"]);
     expect(h.sent[1]?.text).toContain("Stripe is not retrying on its own.");
 
+    // A held move up's own invoice failing is not the renewal: no mail about it.
+    await send("evt_upgrade", "invoice.payment_failed", {
+      id: "in_upgrade",
+      attempt_count: 1,
+      billing_reason: "subscription_update",
+      hosted_invoice_url: "https://invoice.stripe.com/i/in_upgrade",
+    });
+    expect(kinds()).toHaveLength(2);
+
     // A first checkout that fails never had a plan to lose: no receipt.
     await h.db
       .update(schema.teams)

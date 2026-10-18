@@ -160,6 +160,9 @@ export function fakeStripe() {
     meterError: null as Error | null,
     /** The bank declines (or wants confirmed) the charge a pending_if_incomplete update makes. */
     declineUpdates: false,
+    /** What the meter's summaries have counted; null counts every event sent, as if Stripe were instant. */
+    meterCounted: null as number | null,
+    summaryParams: [] as [string, Stripe.Billing.MeterListEventSummariesParams][],
     customers: [] as Stripe.CustomerCreateParams[],
     checkouts: [] as Stripe.Checkout.SessionCreateParams[],
   };
@@ -360,6 +363,20 @@ export function fakeStripe() {
           if (state.meterError) throw state.meterError;
           state.meterEvents.push(p);
           return p;
+        },
+      },
+      meters: {
+        async list() {
+          state.calls.push("billing.meters.list");
+          return { data: [{ id: "mtr_1", event_name: "emails_over_quota" }] };
+        },
+        async listEventSummaries(id: string, p: Stripe.Billing.MeterListEventSummariesParams) {
+          state.calls.push("billing.meters.listEventSummaries");
+          state.summaryParams.push([id, p]);
+          const counted =
+            state.meterCounted ??
+            state.meterEvents.reduce((sum, e) => sum + Number(e.payload.value), 0);
+          return { data: [{ aggregated_value: counted }] };
         },
       },
     },

@@ -329,8 +329,9 @@
     "stayOn": "You stay on {plan}.",
     "keepPlan": "Keep {plan}",
     "switchAtPeriodEnd": "Switch at period end",
-    "changeHint": "Moving up charges the prorated difference now and applies as soon as it is paid. Moving down applies when the period renews.",
+    "changeHint": "Moving up charges the prorated difference and any overage so far now, and applies as soon as that is paid; it also drops a scheduled move down. Moving down applies when the period renews.",
     "paymentRequired": "The charge for {plan} did not go through, so your plan is unchanged. Update your card in the billing portal and try again.",
+    "overageCounting": "Stripe is still counting your latest overage. Try the move again in a minute.",
     "upgradesHeld": "Upgrades are unavailable for this team right now. Contact support if you need help.",
     "upgradesHeldLive": "Upgrades are unavailable for this team right now. You can still cancel or move to a smaller plan. Contact support if you need help.",
     "features": {
@@ -397,6 +398,7 @@
     "title": "Danger zone",
     "deleteTeam": "Delete team",
     "deleteTeamBody": "Permanently delete {name} with all its contacts, emails, domains, API keys, templates, broadcasts and members. This cannot be undone.",
+    "deleteTeamBodyBilled": "Permanently delete {name} with all its contacts, emails, domains, API keys, templates, broadcasts and members. A paid plan ends now, with a final invoice for this period's overage; the unused time is not refunded. This cannot be undone.",
     "deleteAccount": "Delete my account",
     "deleteAccountBody": "Permanently delete your account and sign you out everywhere. Teams you are the only owner of must be deleted or handed over first. This cannot be undone.",
     "deleteAccountError": "Could not delete the account. Delete or hand over the teams you own, sign in again, and retry.",

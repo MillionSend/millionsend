@@ -947,7 +947,7 @@ function InstanceSection() {
   );
 }
 
-function DangerSection() {
+function DangerSection({ billing }: { billing: boolean }) {
   const t = useTranslations("settings.danger");
   const trpc = useTRPC();
   const { data: teamList } = useQuery(trpc.team.list.queryOptions());
@@ -967,7 +967,7 @@ function DangerSection() {
     if (!active) return;
     const ok = await confirmDialog({
       title: t("deleteTeam"),
-      message: t("deleteTeamBody", { name: active.teamName }),
+      message: t(billing ? "deleteTeamBodyBilled" : "deleteTeamBody", { name: active.teamName }),
       confirmLabel: t("deleteTeam"),
       danger: true,
       typeToConfirm: true,
@@ -1064,7 +1064,7 @@ export function SettingsSections({ showInstance }: { showInstance: boolean }) {
       <MembersSection />
       {showInstance ? <InstanceSection /> : null}
       <LanguageSection />
-      <DangerSection />
+      <DangerSection billing={!showInstance} />
     </div>
   );
 }

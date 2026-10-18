@@ -292,7 +292,7 @@ export const en = {
     subject: "Your team moved from {old} to {new}",
     body: [
       "{team} is now on {new}, which allows {cap}. On a lower cap, sends already accepted are unaffected; past the new cap, daily plans wait for the next UTC day and monthly plans either bill overage (when it is on) or refuse new API sends until the period renews.",
-      "Proration shows on the next Stripe invoice.",
+      "A move up is charged at once for the rest of the period, with the overage used so far; a move down takes effect at renewal with no refund.",
     ],
     button: "Open billing",
   },

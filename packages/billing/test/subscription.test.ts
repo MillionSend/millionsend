@@ -4,6 +4,7 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { OverageInFlightError } from "../src/overage.js";
 import type { BillingStripe } from "../src/stripe.js";
 import {
   applySubscription,
@@ -148,14 +149,14 @@ describe("changeRung up", () => {
 
   it("moves nothing while the charge waits on the bank, and hands back the invoice that applies it", async () => {
     const teamId = await subscribedTeam(
-      withOverage("millionsend_pro_200k_monthly", "millionsend_pro_200k_overage", {
-        schedule: schedule([price("millionsend_pro_100k_monthly")]),
+      withOverage("millionsend_pro_100k_monthly", "millionsend_pro_100k_overage", {
+        schedule: schedule([price("millionsend_starter_monthly")]),
       }),
-      250_000,
+      450_000,
     );
     state.declineUpdates = true;
     state.meterError = new Error("Stripe is down");
-    expect(await changeRung(deps(), { teamId, rung: "scale_500k" })).toEqual({
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({
       applied: "payment_required",
       url: "https://invoice.stripe.com/i/in_pending",
     });
@@ -163,11 +164,50 @@ describe("changeRung up", () => {
     expect(state.scheduleReleases).toEqual(["sched_0"]);
     expect(await team(teamId)).toMatchObject({
       plan: "pro",
-      planQuota: 200_000,
+      planQuota: 100_000,
       pendingRung: null,
     });
-    // Overage the old rung has not billed yet is still owed: nothing is marked settled.
-    expect(await reportedOverage(teamId)).toBe(0);
+    // Overage the old rung has not billed is still owed: nothing is marked
+    // settled (a settle would write 250,000), and the cron keeps the pin.
+    const [row] = await db
+      .select({
+        reportedOverage: schema.usagePeriods.reportedOverage,
+        pendingOverage: schema.usagePeriods.pendingOverage,
+      })
+      .from(schema.usagePeriods)
+      .where(eq(schema.usagePeriods.teamId, teamId));
+    expect(row).toEqual({ reportedOverage: 0, pendingOverage: 350_000 });
+  });
+
+  it("waits while Stripe has not counted a large overage step, and moves nothing", async () => {
+    const teamId = await subscribedTeam(
+      withOverage("millionsend_pro_100k_monthly", "millionsend_pro_100k_overage", {
+        schedule: schedule([price("millionsend_starter_monthly")]),
+      }),
+      400_000,
+    );
+    state.meterCounted = 0;
+    await expect(changeRung(deps(), { teamId, rung: "pro_200k" })).rejects.toBeInstanceOf(
+      OverageInFlightError,
+    );
+    // The burst reached the meter, but nothing re-priced it and the downgrade stands.
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["300000"]);
+    expect(state.summaryParams[0]?.[0]).toBe("mtr_1");
+    expect(state.summaryParams[0]?.[1]).toMatchObject({ customer: "cus_1" });
+    expect(state.updates).toEqual([]);
+    expect(state.scheduleReleases).toEqual([]);
+    expect(await team(teamId)).toMatchObject({ planQuota: 100_000, pendingRung: "starter" });
+
+    // Once counted, the same move goes through.
+    state.meterCounted = null;
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({ applied: "now" });
+  });
+
+  it("lets a small uncounted step through: it is at most a minute of overage", async () => {
+    const teamId = await subscribedTeam(withOverage(), 100_900);
+    state.meterCounted = 0;
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({ applied: "now" });
+    expect(state.calls).not.toContain("billing.meters.listEventSummaries");
   });
 
   it("refuses a rung that is not for sale", async () => {

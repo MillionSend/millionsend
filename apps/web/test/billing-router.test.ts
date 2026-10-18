@@ -182,6 +182,11 @@ const stripe = {
         return {};
       },
     },
+    meters: {
+      list: async () => ({ data: [{ id: "mtr_1", event_name: "emails_over_quota" }] }),
+      // Stripe has counted nothing yet: every reported step is still in flight.
+      listEventSummaries: async () => ({ data: [] }),
+    },
   },
   checkout: {
     sessions: {
@@ -539,6 +544,18 @@ describe("billing router", () => {
         data: { rung: "scale_500k", applied: "payment_required" },
       },
     ]);
+  });
+
+  it("changePlan refuses a move up with CONFLICT while Stripe is still counting a large overage step", async () => {
+    const teamId = await subscribedTeam("pro_100k", { overage: true });
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: PERIOD_START, accepted: 400_000 });
+    await expect(
+      callerFor(teamId, "owner").billing.changePlan({ rung: "pro_200k" }),
+    ).rejects.toMatchObject({ code: "CONFLICT", message: "overage_in_flight" });
+    expect(calls.updates).toEqual([]);
+    expect(await teamRow(teamId)).toMatchObject({ planQuota: 100_000 });
   });
 
   it("changePlan adds the metered item a subscription from before the ladder lacks", async () => {

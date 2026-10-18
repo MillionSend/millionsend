@@ -329,8 +329,9 @@
     "stayOn": "Você continua no {plan}.",
     "keepPlan": "Manter {plan}",
     "switchAtPeriodEnd": "Trocar no fim do período",
-    "changeHint": "Subir de plano cobra a diferença proporcional na hora e vale assim que o pagamento é aprovado. Descer vale quando o período renovar.",
+    "changeHint": "Subir de plano cobra na hora a diferença proporcional e o excedente até agora, e vale assim que o pagamento é aprovado; isso também cancela uma descida agendada. Descer vale quando o período renovar.",
     "paymentRequired": "A cobrança do {plan} não foi aprovada, então seu plano não mudou. Atualize seu cartão no portal de cobrança e tente de novo.",
+    "overageCounting": "O Stripe ainda está contando seu excedente mais recente. Tente a troca de novo em um minuto.",
     "upgradesHeld": "Não é possível subir de plano nesta equipe no momento. Fale com o suporte se precisar de ajuda.",
     "upgradesHeldLive": "Não é possível subir de plano nesta equipe no momento. Você ainda pode cancelar ou mudar para um plano menor. Fale com o suporte se precisar de ajuda.",
     "features": {
@@ -397,6 +398,7 @@
     "title": "Zona de perigo",
     "deleteTeam": "Excluir equipe",
     "deleteTeamBody": "Exclui permanentemente {name} com todos os contatos, e-mails, domínios, chaves de API, modelos, transmissões e membros. Isso não pode ser desfeito.",
+    "deleteTeamBodyBilled": "Exclui permanentemente {name} com todos os contatos, e-mails, domínios, chaves de API, modelos, transmissões e membros. Um plano pago termina na hora, com uma fatura final do excedente deste período; o tempo não usado não é reembolsado. Isso não pode ser desfeito.",
     "deleteAccount": "Excluir minha conta",
     "deleteAccountBody": "Exclui permanentemente sua conta e encerra todas as suas sessões. Equipes das quais você é o único proprietário precisam ser excluídas ou transferidas antes. Isso não pode ser desfeito.",
     "deleteAccountError": "Não foi possível excluir a conta. Exclua ou transfira as equipes que você possui, entre de novo e tente outra vez.",

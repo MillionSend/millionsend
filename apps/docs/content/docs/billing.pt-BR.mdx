@@ -209,7 +209,8 @@ pausada enquanto `teams.plan_status` é `past_due`.
      pending_if_incomplete`, então a diferença proporcional e o excedente
      até ali são faturados e cobrados na hora, e o novo volume só vale
      depois que essa fatura é paga. Quando o banco recusa ou pede
-     autenticação nada muda: o Stripe segura a atualização por 23 horas, o
+     autenticação a faixa continua a mesma, mas uma descida agendada antes
+     já foi cancelada: o Stripe segura a atualização por 23 horas, o
      painel leva o cliente à página hospedada da fatura, e pagar lá aplica a
      troca (o webhook grava a linha); senão o Stripe anula a fatura. Os
      envios já aceitos dentro do volume antigo são marcados como acertados
@@ -327,10 +328,15 @@ de 35 dias não podem mais ser medidas e vão para o log). O mesmo relato roda
 antes de a chave desligar,
 antes de uma subida (os envios feitos na faixa antiga acertam na taxa dela),
 antes de excluir uma equipe (o cancelamento leva uma fatura final)
-e quando o item medido sai da assinatura. Resta uma lacuna: o Stripe descarta
-um evento de medidor que ainda não processou quando uma subida reprecifica o
-item medido, então o trecho reportado logo antes da troca, no máximo os
-envios desde a última rodada do cron, pode ficar sem cobrança.
+e quando o item medido sai da assinatura. O Stripe descarta um evento de
+medidor que ainda não contou quando uma subida reprecifica o item medido, e a
+contagem leva cerca de um minuto, então uma subida compara antes o excedente
+reportado no período com os resumos do medidor no Stripe: enquanto mais de 1%
+do volume (no mínimo 1.000 e-mails) ainda não foi contado,
+`billing.changePlan` recusa com `CONFLICT` (`overage_in_flight`) e o painel
+pede para tentar de novo em um minuto. Excluir uma equipe recusa do mesmo
+jeito quando o medidor rejeita o último relato, já que o cancelamento apagaria
+as linhas que o devem.
 
 ## Ambiente
 

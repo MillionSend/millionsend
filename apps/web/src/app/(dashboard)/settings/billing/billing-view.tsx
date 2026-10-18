@@ -24,7 +24,7 @@ import { WarnCard } from "@/components/warn-card";
 import { formatDay, formatDayTime, formatUsd } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
-import { UPGRADES_HELD } from "@/lib/trpc-error";
+import { OVERAGE_IN_FLIGHT, UPGRADES_HELD } from "@/lib/trpc-error";
 import { useTeamRole } from "@/lib/use-team-role";
 import { QuotaRow } from "../usage/usage-view";
 
@@ -142,7 +142,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const busy = mutations.some((m) => m.isPending);
   // A hold that lands after the page loaded surfaces as this refusal.
   const heldError = mutations.some((m) => m.error?.message === UPGRADES_HELD);
-  const failed = mutations.some((m) => m.isError) && !heldError;
+  const counting = changePlan.error?.message === OVERAGE_IN_FLIGHT;
+  const failed = mutations.some((m) => m.isError) && !heldError && !counting;
 
   const fmt = new Intl.NumberFormat(locale);
   const usd = (cents: number) => formatUsd(cents, locale);
@@ -621,6 +622,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
           </div>
           {held ? (
             heldNotice
+          ) : counting ? (
+            <WarnCard>{t("overageCounting")}</WarnCard>
           ) : canManage && hasLiveSubscription ? (
             <p
               style={{

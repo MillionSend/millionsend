@@ -112,6 +112,7 @@ interface BillingEvent {
     attemptCount: number;
     nextAttempt: Date | null;
     hostedUrl: string | null;
+    billingReason: string | null;
   } | null;
 }
 
@@ -128,6 +129,7 @@ function parseEvent(rawBody: string): BillingEvent | null {
           attempt_count?: unknown;
           next_payment_attempt?: unknown;
           hosted_invoice_url?: unknown;
+          billing_reason?: unknown;
         };
       };
     };
@@ -151,6 +153,7 @@ function parseEvent(rawBody: string): BillingEvent | null {
                 : null,
             hostedUrl:
               typeof object.hosted_invoice_url === "string" ? object.hosted_invoice_url : null,
+            billingReason: typeof object.billing_reason === "string" ? object.billing_reason : null,
           }
         : null;
     return { type, customerId, invoice };
@@ -212,7 +215,15 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
     }
   };
 
-  if (event.type === "invoice.payment_failed" && event.invoice && after.planStatus === "past_due") {
+  // A move up's own invoice failing leaves the plan where it was; the
+  // dashboard already sent the owner to pay it, and this mail is about the
+  // renewal that put the team past due.
+  if (
+    event.type === "invoice.payment_failed" &&
+    event.invoice &&
+    event.invoice.billingReason !== "subscription_update" &&
+    after.planStatus === "past_due"
+  ) {
     const { id, attemptCount, nextAttempt, hostedUrl } = event.invoice;
     if (await claim("billing.payment_failed", `${id}:${attemptCount}`)) {
       await send(
