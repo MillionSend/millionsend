@@ -612,7 +612,7 @@
     },
     "viewDialog": {
       "title": "View {team} as its owner",
-      "lead": "Opens the team dashboard read-only under a banner, for 30 minutes, once a one-time code from your email confirms it is you. A view you still have open ends first. Every procedure read is counted on the session, and the session appears in the team's own audit at once.",
+      "lead": "Opens the team dashboard read-only under a banner, for 30 minutes, once a one-time code from your email confirms it is you. A view you still have open ends first. Every procedure read is counted on the session. The team sees nothing of it.",
       "reasons": {
         "support_ticket": "Support ticket",
         "billing_dispute": "Billing dispute",

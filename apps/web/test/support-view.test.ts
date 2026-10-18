@@ -301,8 +301,14 @@ describe("console.teams.startSupportView", () => {
     expect(started).toMatchObject({
       teamId: null,
       actorId: `user:${OPERATOR}`,
-      target: `support_view:${grant.id}`,
-      data: { team: "acme", reason: "support_ticket", reference: "#4812", minutes: 30 },
+      target: `team:${teamId}`,
+      data: {
+        grantId: grant.id,
+        team: "acme",
+        reason: "support_ticket",
+        reference: "#4812",
+        minutes: 30,
+      },
     });
 
     // A sender is configured and the team has an owner, so an empty outbox
@@ -403,12 +409,12 @@ describe("console.teams.startSupportView", () => {
     expect(ended.at(-1)).toMatchObject({
       teamId: null,
       actorId: `user:${OPERATOR}`,
-      target: `support_view:${first.id}`,
-      data: { by: "operator", minutes: 0, procedures: 0 },
+      target: `team:${teamId}`,
+      data: { grantId: first.id, by: "operator", minutes: 0, procedures: 0 },
     });
     // Neither row reaches the team's own trail.
     const trail = await owner().audit.list({});
-    expect(trail.items.filter((r) => r.target === `support_view:${first.id}`)).toEqual([]);
+    expect(trail.items.filter((r) => r.action.startsWith("support."))).toEqual([]);
   });
 
   it("has no reason that is not a request the customer made", async () => {
@@ -446,12 +452,18 @@ describe("console.teams.startSupportView", () => {
     await start({ reference: "#6" });
     expect(await grantRow(first.id)).toMatchObject({ endedBy: "expiry", endedAt: deadline });
     const ended = (await auditRows("support.view_ended")).filter(
-      (row) => row.target === `support_view:${first.id}`,
+      (row) => (row.data as { grantId?: string }).grantId === first.id,
     );
     expect(ended).toEqual([
       expect.objectContaining({
         actorId: "system",
-        data: { team: "acme", by: "expiry", minutes: SUPPORT_VIEW_MINUTES, procedures: 0 },
+        data: {
+          grantId: first.id,
+          team: "acme",
+          by: "expiry",
+          minutes: SUPPORT_VIEW_MINUTES,
+          procedures: 0,
+        },
       }),
     ]);
   });
@@ -542,8 +554,9 @@ describe("the emailed code in front of a start", () => {
     // The sign-in is old: the code alone is what lets the operator in.
     const result = await startWith(code, stale());
     const started = (await auditRows("support.view_started")).at(-1);
-    expect(started?.target).toBe(`support_view:${result.grantId}`);
+    expect(started?.target).toBe(`team:${teamId}`);
     expect(started?.data).toEqual({
+      grantId: result.grantId,
       team: "acme",
       reason: "support_ticket",
       reference: "#4812",
@@ -1197,23 +1210,30 @@ describe("what a view can and cannot see", () => {
 describe("the team's side", () => {
   it("sees nothing of a view, while the instance trail carries both rows", async () => {
     const grant = await start({ reason: "billing_dispute", reference: "INV-77" });
-    const target = `support_view:${grant.id}`;
-    expect((await owner().audit.list({})).items.filter((r) => r.target === target)).toEqual([]);
+    const ofView = (r: { action: string; data: unknown }) =>
+      r.action.startsWith("support.") && (r.data as { grantId?: string }).grantId === grant.id;
+    expect((await owner().audit.list({})).items.filter(ofView)).toEqual([]);
     expect(await operator().support.end()).toEqual({ ended: true, teamId });
-    expect((await owner().audit.list({})).items.filter((r) => r.target === target)).toEqual([]);
+    expect((await owner().audit.list({})).items.filter(ofView)).toEqual([]);
 
+    // The instance's rows about the team: no team row to join, so the name
+    // rides in the data, and the review page's audit tail lists them.
     const instanceTrail = await operator().console.audit.list({});
     expect(instanceTrail.actions).toEqual(
       expect.arrayContaining(["support.view_started", "support.view_ended"]),
     );
-    // No team row to join: the instance trail names the team in the data.
     expect(
       instanceTrail.items
-        .filter((r) => r.target === target)
-        .map((r) => [r.action, r.teamId, (r.data as { team?: string }).team]),
+        .filter(ofView)
+        .map((r) => [r.action, r.teamId, r.target, (r.data as { team?: string }).team]),
     ).toEqual([
-      ["support.view_ended", null, "acme"],
-      ["support.view_started", null, "acme"],
+      ["support.view_ended", null, `team:${teamId}`, "acme"],
+      ["support.view_started", null, `team:${teamId}`, "acme"],
+    ]);
+    const review = await operator().console.safety.review({ teamId });
+    expect(review.audit.filter(ofView).map((r) => r.action)).toEqual([
+      "support.view_ended",
+      "support.view_started",
     ]);
   });
 });

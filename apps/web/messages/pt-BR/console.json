@@ -612,7 +612,7 @@
     },
     "viewDialog": {
       "title": "Ver {team} como proprietário",
-      "lead": "Abre o painel da equipe em modo somente leitura, com uma faixa de aviso, por 30 minutos, depois que um código de uso único enviado ao seu e-mail confirma que é você. Um modo que você ainda tenha aberto é encerrado antes. Cada leitura é contada na sessão, e a sessão aparece na auditoria da própria equipe na hora.",
+      "lead": "Abre o painel da equipe em modo somente leitura, com uma faixa de aviso, por 30 minutos, depois que um código de uso único enviado ao seu e-mail confirma que é você. Um modo que você ainda tenha aberto é encerrado antes. Cada leitura é contada na sessão. A equipe não vê nada disso.",
       "reasons": {
         "support_ticket": "Chamado de suporte",
         "billing_dispute": "Contestação de cobrança",

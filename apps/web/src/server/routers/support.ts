@@ -3,9 +3,9 @@ import { protectedProcedure, router } from "../trpc";
 
 export const supportRouter = router({
   /**
-   * The caller's own live view, for the banner to check it still holds: the
-   * owner can end a session from their side, and nothing else would tell a
-   * tab already under the banner that its view is over.
+   * The caller's own live view, for the banner to check it still holds: a
+   * session can end from another tab or by expiry, and nothing else would
+   * tell a tab already under the banner that its view is over.
    */
   current: protectedProcedure.query(async ({ ctx }) => {
     const live = await liveSupportViewOfOperator(ctx.db, ctx.session.user.id);

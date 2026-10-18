@@ -92,8 +92,9 @@ async function teamNameOf(db: Db, teamId: string): Promise<string | undefined> {
  * Opens a view on `teamId` for the operator. A view they still hold, from
  * a closed tab or another team, ends first exactly as End session ends it,
  * so there is one live view per operator. Records the start in the instance
- * audit only: a view leaves no trace on the team's side, so a team under
- * review learns nothing from it.
+ * audit only, as the instance's row about the team (target `team`, the grant
+ * in the data) so the console's review page lists it, while the team's own
+ * trail never does: a team under review learns nothing from a view.
  */
 export async function startSupportView(
   db: Db,
@@ -140,8 +141,9 @@ export async function startSupportView(
         teamId: null,
         actor: { userId: grant.operatorUserId },
         action: "support.view_started",
-        target: { type: "support_view", id: grant.id },
+        target: { type: "team", id: grant.teamId },
         metadata: {
+          grantId: grant.id,
           team: await teamNameOf(t, grant.teamId),
           reason: grant.reason,
           reference: grant.reference,
@@ -182,8 +184,9 @@ async function closeGrant(
     teamId: null,
     actor: ended.by === "expiry" ? "system" : { userId: grant.operatorUserId },
     action: "support.view_ended",
-    target: { type: "support_view", id: grant.id },
+    target: { type: "team", id: grant.teamId },
     metadata: {
+      grantId: grant.id,
       team: await teamNameOf(db, grant.teamId),
       by: ended.by,
       minutes: Math.round((endedAt.getTime() - grant.createdAt.getTime()) / 60_000),
