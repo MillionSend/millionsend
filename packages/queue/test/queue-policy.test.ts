@@ -15,6 +15,9 @@ const workers: { name: string; opts: Record<string, unknown>; handler: Handler; 
 const inserted: { name: string; job: Record<string, unknown> }[] = [];
 const updated: { name: string; opts: Record<string, unknown> }[] = [];
 const scheduled: string[] = [];
+// pg-boss's schedule table, and the names scheduleCrons reconciled away.
+const scheduleTable = new Set<string>();
+const unscheduled: string[] = [];
 const bosses: { options: Record<string, unknown>; events: string[]; stopped: boolean }[] = [];
 // Shutdown ordering as seen from the mock: "stop:<boss index>" plus whatever a test pushes.
 const order: string[] = [];
@@ -71,6 +74,14 @@ vi.mock("pg-boss", () => ({
     }
     async schedule(name: string): Promise<void> {
       scheduled.push(name);
+      scheduleTable.add(name);
+    }
+    async getSchedules(): Promise<{ name: string }[]> {
+      return [...scheduleTable].map((name) => ({ name }));
+    }
+    async unschedule(name: string): Promise<void> {
+      unscheduled.push(name);
+      scheduleTable.delete(name);
     }
     async work(name: string, opts: Record<string, unknown>, handler: Handler): Promise<string> {
       workers.push({ name, opts, handler, boss: this.#index });
@@ -90,6 +101,8 @@ beforeEach(() => {
   inserted.length = 0;
   updated.length = 0;
   scheduled.length = 0;
+  scheduleTable.clear();
+  unscheduled.length = 0;
   bosses.length = 0;
   order.length = 0;
   createQueueError = undefined;
@@ -264,6 +277,8 @@ it("cron and dead-letter workers poll slowly; crons are scheduled through the pr
     opts: { batchSize: 1, pollingIntervalSeconds: 30 },
     boss: 0,
   });
+  // A schedule left by an earlier build whose cron this one no longer defines.
+  scheduleTable.add("safety.reveal_notices");
   const handlers = Object.fromEntries(
     Object.keys(CRON_JOBS).map((name) => [name, async () => {}]),
   ) as Parameters<Queue["scheduleCrons"]>[0];
@@ -272,6 +287,8 @@ it("cron and dead-letter workers poll slowly; crons are scheduled through the pr
   const cronWorkers = workers.slice(1);
   expect(cronWorkers.map((w) => w.name)).toEqual(Object.keys(CRON_JOBS));
   expect(cronWorkers.every((w) => w.opts.pollingIntervalSeconds === 30 && w.boss === 0)).toBe(true);
+  // The retired cron's schedule is dropped; the current ones are left alone.
+  expect(unscheduled).toEqual(["safety.reveal_notices"]);
 });
 
 it("creates job queues with the dedupe-enforcing policy", async () => {

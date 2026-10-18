@@ -1,13 +1,14 @@
 "use client";
 
 import { AUDIT_ACTIONS } from "@millionsend/core/audit-actions";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useState } from "react";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
 import { CopyChip } from "@/components/copy-chip";
 import { DotParts } from "@/components/dot-parts";
 import { KvRow } from "@/components/kv-row";
+import { ListFooter } from "@/components/list-footer";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -32,7 +33,7 @@ import {
   usePercent,
   usePlanLabel,
 } from "./parts";
-import { RevealCell, useContentReveal } from "./reveal";
+import { RevealCell, type RevealTeam, useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
 
 const TILE: React.CSSProperties = { padding: "16px 20px" };
@@ -110,6 +111,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
   });
   const [flagDialog, setFlagDialog] = useState(false);
   const [note, setNote] = useState("");
+  const [emailTab, setEmailTab] = useState<"flagged" | "all">("flagged");
   const closeFlagDialog = useCallback(() => {
     setFlagDialog(false);
     setNote("");
@@ -583,96 +585,138 @@ export function ReviewView({ teamId }: { teamId: string }) {
       <WaitingList teamId={team.id} onChanged={refetch} />
 
       <div className="ms-card" style={{ padding: 0, marginBottom: 16 }}>
-        <CardHead
-          inset
-          title={t("emails.title", { count: flaggedEmails.length })}
-          subtitle={t("emails.subtitle")}
-        />
-        <Table>
-          <thead>
-            <tr>
-              <th>{t("emails.sent")}</th>
-              <th>{t("emails.from")}</th>
-              <th className="right">{t("emails.recipients")}</th>
-              <th>{t("emails.insight")}</th>
-              <th>{t("emails.monitor")}</th>
-              <th className="right">{t("emails.content")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {flaggedEmails.length === 0 ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap",
+            padding: "16px 20px 12px",
+            borderBottom: "1px solid var(--ms-line)",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <CardHead
+              flush
+              title={t("emails.cardTitle")}
+              subtitle={emailTab === "flagged" ? t("emails.subtitle") : t("emails.allSubtitle")}
+            />
+          </div>
+          <div className="ms-tabs" role="tablist" aria-label={t("emails.cardTitle")}>
+            <button
+              type="button"
+              aria-pressed={emailTab === "flagged"}
+              className={emailTab === "flagged" ? "active" : undefined}
+              onClick={() => setEmailTab("flagged")}
+            >
+              {t("emails.tabs.flagged")}
+              <span className="count">{flaggedEmails.length}</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={emailTab === "all"}
+              className={emailTab === "all" ? "active" : undefined}
+              onClick={() => setEmailTab("all")}
+            >
+              {t("emails.tabs.all")}
+            </button>
+          </div>
+        </div>
+        {emailTab === "flagged" ? (
+          <Table>
+            <thead>
               <tr>
-                <td colSpan={6} style={{ color: "var(--ms-muted)" }}>
-                  {t("emails.none")}
-                </td>
+                <th>{t("emails.sent")}</th>
+                <th>{t("emails.from")}</th>
+                <th className="right">{t("emails.recipients")}</th>
+                <th>{t("emails.insight")}</th>
+                <th>{t("emails.monitor")}</th>
+                <th className="right">{t("emails.content")}</th>
               </tr>
-            ) : (
-              flaggedEmails.map((email) => (
-                <tr key={email.id}>
-                  <td style={{ color: "var(--ms-muted)" }}>
-                    {email.sentAt ? <RelativeTime date={email.sentAt} /> : common("none")}
-                  </td>
-                  <td className="ms-mono">{email.from}</td>
-                  <td className="right ms-digits">{nf.format(email.recipients)}</td>
-                  <td>
-                    {email.check ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <Tooltip
-                          inline
-                          text={emails(`insights.check.${email.check.id}.description`)}
-                        >
-                          <span
-                            className={`ms-badge ms-badge-${email.check.severity === "critical" ? "danger" : "warn"}`}
-                          >
-                            {emails(`insights.check.${email.check.id}.title`)}
-                          </span>
-                        </Tooltip>
-                        {email.failingCount > 1 ? (
-                          <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-                            {t("emails.more", { count: email.failingCount - 1 })}
-                          </span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      common("none")
-                    )}
-                  </td>
-                  <td
-                    style={{
-                      fontSize: 12,
-                      color: "var(--ms-muted)",
-                      whiteSpace: "normal",
-                      minWidth: 260,
-                    }}
-                  >
-                    {!email.model
-                      ? common("none")
-                      : email.model.status === "judged" && email.model.score !== null
-                        ? t.rich("emails.modelScore", {
-                            score: email.model.score,
-                            detail: modelDetail(
-                              email.model.score >= monitor.flagScore ? email.model.reasons : null,
-                            ),
-                          })
-                        : email.model.status === "pending"
-                          ? monitorT("pending")
-                          : t("emails.modelUnjudged", { error: email.model.errorClass ?? "" })}
-                  </td>
-                  <td className="right">
-                    <RevealCell
-                      grant={grantFor(email.id)}
-                      disabled={!contentReveal}
-                      onReveal={revealRequest(email)}
-                      onOpen={(grantId) =>
-                        reveal.view({ id: team.id, name: team.name }, grantId, email.id)
-                      }
-                    />
+            </thead>
+            <tbody>
+              {flaggedEmails.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ color: "var(--ms-muted)" }}>
+                    {t("emails.none")}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </Table>
+              ) : (
+                flaggedEmails.map((email) => (
+                  <tr key={email.id}>
+                    <td style={{ color: "var(--ms-muted)" }}>
+                      {email.sentAt ? <RelativeTime date={email.sentAt} /> : common("none")}
+                    </td>
+                    <td className="ms-mono">{email.from}</td>
+                    <td className="right ms-digits">{nf.format(email.recipients)}</td>
+                    <td>
+                      {email.check ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <Tooltip
+                            inline
+                            text={emails(`insights.check.${email.check.id}.description`)}
+                          >
+                            <span
+                              className={`ms-badge ms-badge-${email.check.severity === "critical" ? "danger" : "warn"}`}
+                            >
+                              {emails(`insights.check.${email.check.id}.title`)}
+                            </span>
+                          </Tooltip>
+                          {email.failingCount > 1 ? (
+                            <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
+                              {t("emails.more", { count: email.failingCount - 1 })}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : (
+                        common("none")
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        fontSize: 12,
+                        color: "var(--ms-muted)",
+                        whiteSpace: "normal",
+                        minWidth: 260,
+                      }}
+                    >
+                      {!email.model
+                        ? common("none")
+                        : email.model.status === "judged" && email.model.score !== null
+                          ? t.rich("emails.modelScore", {
+                              score: email.model.score,
+                              detail: modelDetail(
+                                email.model.score >= monitor.flagScore ? email.model.reasons : null,
+                              ),
+                            })
+                          : email.model.status === "pending"
+                            ? monitorT("pending")
+                            : t("emails.modelUnjudged", { error: email.model.errorClass ?? "" })}
+                    </td>
+                    <td className="right">
+                      <RevealCell
+                        grant={grantFor(email.id)}
+                        disabled={!contentReveal}
+                        onReveal={revealRequest(email)}
+                        onOpen={(grantId) =>
+                          reveal.view({ id: team.id, name: team.name }, grantId, email.id)
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </Table>
+        ) : (
+          <TeamEmailsTable
+            team={{ id: team.id, name: team.name }}
+            grants={grants}
+            contentReveal={contentReveal}
+            reveal={reveal}
+            flagLabel={safety(`reasons.${flag?.reason ?? "manual"}`)}
+          />
+        )}
       </div>
 
       <WarmupCard
@@ -769,6 +813,122 @@ export function ReviewView({ teamId }: { teamId: string }) {
       </Modal>
       {actions.dialogs}
       {reveal.dialogs}
+    </>
+  );
+}
+
+/**
+ * The review page's "All emails" tab: every message of the team, newest
+ * first, paginated like the console's other lists. Metadata only — the body
+ * is read only under a grant, through the same Reveal control as the flagged
+ * list. Mounted only while the tab is open.
+ */
+function TeamEmailsTable({
+  team,
+  grants,
+  contentReveal,
+  reveal,
+  flagLabel,
+}: {
+  team: RevealTeam;
+  grants: { id: string; emailIds: string[]; expiresAt: Date }[];
+  contentReveal: boolean;
+  reveal: ReturnType<typeof useContentReveal>;
+  flagLabel: string;
+}) {
+  const t = useTranslations("console.safety.review");
+  const common = useTranslations("console.common");
+  const locale = useLocale();
+  const nf = new Intl.NumberFormat(locale);
+  const trpc = useTRPC();
+  const [limit, setLimit] = useState(25);
+  const query = useInfiniteQuery(
+    trpc.console.safety.teamEmails.infiniteQueryOptions(
+      { teamId: team.id, limit },
+      { getNextPageParam: (page) => page.nextCursor },
+    ),
+  );
+  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const first = query.data?.pages[0];
+  const grantFor = (emailId: string) => grants.find((g) => g.emailIds.includes(emailId));
+
+  return (
+    <>
+      <Table>
+        <thead>
+          <tr>
+            <th>{t("emails.at")}</th>
+            <th>{t("emails.from")}</th>
+            <th className="right">{t("emails.recipients")}</th>
+            <th className="right">{t("emails.content")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {query.isPending ? (
+            <tr>
+              <td colSpan={4} style={{ color: "var(--ms-muted)" }}>
+                …
+              </td>
+            </tr>
+          ) : items.length === 0 ? (
+            <tr>
+              <td colSpan={4} style={{ color: "var(--ms-muted)" }}>
+                {t("emails.allNone")}
+              </td>
+            </tr>
+          ) : (
+            items.map((email) => (
+              <tr key={email.id}>
+                <td style={{ color: "var(--ms-muted)" }}>
+                  <RelativeTime date={email.sentAt ?? email.createdAt} />
+                </td>
+                <td className="ms-mono">{email.from}</td>
+                <td className="right ms-digits">{nf.format(email.recipients)}</td>
+                <td className="right">
+                  <RevealCell
+                    grant={grantFor(email.id)}
+                    disabled={!contentReveal}
+                    onReveal={() =>
+                      reveal.request({
+                        team,
+                        email: {
+                          id: email.id,
+                          from: email.from,
+                          sentAt: email.sentAt,
+                          recipients: email.recipients,
+                        },
+                        flaggedCount: 0,
+                        flagLabel,
+                      })
+                    }
+                    onOpen={(grantId) => reveal.view(team, grantId, email.id)}
+                  />
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </Table>
+      {first ? (
+        <div style={{ padding: "0 20px 16px" }}>
+          <ListFooter
+            left={t("emails.allCount", { shown: items.length, total: first.total ?? items.length })}
+            size={limit}
+            onSize={setLimit}
+            sizeLabel={(size) => common("perPage", { n: size })}
+            singlePage={!query.hasNextPage && query.data?.pages.length === 1}
+            loadMore={
+              query.hasNextPage
+                ? {
+                    label: common("loadMore"),
+                    onClick: () => query.fetchNextPage(),
+                    loading: query.isFetchingNextPage,
+                  }
+                : undefined
+            }
+          />
+        </div>
+      ) : null}
     </>
   );
 }

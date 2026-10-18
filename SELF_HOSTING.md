@@ -1397,10 +1397,13 @@ page.
 <summary><b>Content access (break-glass)</b></summary>
 
 Off by default. With it on, an authorised operator can read the subject and
-the rendered visible text of specific messages of a flagged team, and what
+the rendered visible text of specific messages of any team, and what
 screening read from the images and attachments of mail it held, for a
 security reason they name and justify before anything is decrypted, for at
-most 30 minutes. It is the break-glass path for the cases the stored
+most 30 minutes. The message need not have been flagged by the content
+monitor: a sophisticated abuser evades automated flagging (no links, a
+foreign-language lure), so any message of any team can be opened under a
+grant. It is the break-glass path for the cases the stored
 metadata cannot settle: the insights know a link points at a shortener, not
 whether the text around it is a bank lure or a newsletter.
 
@@ -1448,16 +1451,15 @@ A grant's first look at a media panel writes a second `content.revealed`
 row, whose fields name what screening read from the images and attachments,
 and stamps the grant (`media_viewed_at`).
 
-**What the team sees, and when.** Seven days later a daily job adds a
-`content.accessed` row to the team's own audit log — dated at the access,
-not at the disclosure — with the reason, how many messages and which fields
-were read: `subject, rendered text`, followed by
-`what screening read from its images and attachments` only when the grant
-opened a media panel. Nobody is emailed about an access, then or later. A
-team suspended for phishing never gets the row; the grant records that the
-disclosure step ran, so it is not retried nightly. A team held for review
-gets it once the hold ends: after a release the next daily run writes it,
-and if the hold becomes a phishing suspension it is withheld for good.
+**What the team is told.** Nothing, per access. The team is not emailed, and
+no row is added to its own audit log, when its content is read. That the
+platform's operators may read message content for these security reasons
+must be disclosed in your terms and privacy notice before you turn this on
+(see below), not message by message. Grants an earlier build already
+surfaced keep their `content.accessed` rows in the team's audit log,
+unchanged. A grant still waiting for that disclosure when you upgrade (made
+in the last seven days, or deferred by a review hold) is never surfaced; if
+your privacy notice promised per-access notice, change it before upgrading.
 
 **Turning it on** in the instance's `.env`, read by the worker and the app
 (a restart applies it):
@@ -1467,9 +1469,10 @@ CONTENT_REVEAL=on
 ```
 
 Off, the console's buttons render disabled with a tooltip naming the
-variable and every content procedure refuses. Reading other people's messages
-is lawful only as a narrow, recorded, disclosed security measure: say so in
-the instance's terms and privacy notice before turning it on.
+variable and every content procedure refuses. Reading customers' messages is
+lawful only as a narrow security measure, recorded in the operator audit and
+disclosed in your terms and privacy notice: say so there before turning it
+on.
 
 </details>
 

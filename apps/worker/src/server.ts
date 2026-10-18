@@ -112,7 +112,6 @@ import { runMonitorHealth } from "./handlers/monitor-health.js";
 import { reportPlanMove, sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
-import { runRevealNotices } from "./handlers/reveal-notices.js";
 import { runSafetyFlags } from "./handlers/safety-flags.js";
 import { screenReceived } from "./handlers/screen-received.js";
 import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
@@ -586,14 +585,6 @@ await queue.scheduleCrons({
       keyring: () => keyring,
       cards: stripe ? (customerId) => cardFingerprints(stripe, customerId) : undefined,
     });
-  },
-  "safety.reveal_notices": async () => {
-    const result = await runRevealNotices(db);
-    if (result.disclosed > 0 || result.withheld > 0) {
-      console.log(
-        `safety.reveal_notices: disclosed=${result.disclosed} withheld=${result.withheld}`,
-      );
-    }
   },
   "monitor.health": async () => {
     const result = await runMonitorHealth(db, {

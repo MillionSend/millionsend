@@ -296,9 +296,10 @@ export const env = createEnv({
       .regex(/^[a-z]{2}(?:-[a-z]+)+-\d+$/, "must be an AWS region like us-east-1")
       .default(ABUSE_VISION_REGION_DEFAULT),
     // Break-glass: with this on, an operator can read the subject and
-    // rendered text of a flagged team's messages for a recorded security
-    // reason, for 30 minutes, disclosed to the team after 7 days. The cloud
-    // keeps it off until its terms and privacy notice say so.
+    // rendered text of any team's messages for a recorded security reason,
+    // for 30 minutes. The read is kept in the operator audit, never shown to
+    // the team. The cloud keeps it off until its terms and privacy notice
+    // say so.
     CONTENT_REVEAL: z.enum(CONTENT_REVEAL_MODES).default("off"),
     MONITOR_FIRST_SENDS: z.coerce.number().int().min(0).optional(),
     MONITOR_FIRST_HOURS: z.coerce.number().int().min(0).optional(),

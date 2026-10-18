@@ -767,14 +767,23 @@
         "none": "Every check passes on every scored email."
       },
       "emails": {
+        "cardTitle": "Emails",
+        "tabs": {
+          "flagged": "Flagged",
+          "all": "All emails"
+        },
         "title": "Flagged emails · {count}",
-        "subtitle": "Sent in the last 7 days with a failing critical or major check, and unsent ones a phishing-type verdict stopped before SES. Subject and body are content and stay encrypted; the pill explains itself on hover or tap.",
+        "subtitle": "Sent in the last 7 days with a failing critical or major check, and unsent ones a phishing-type verdict stopped before SES. Subject and body are content and stay hidden; the pill explains itself on hover or tap.",
+        "allSubtitle": "Every message of the team, newest first. Metadata only; the subject and body stay hidden until a grant.",
         "sent": "Sent",
+        "at": "Date",
         "from": "From",
         "recipients": "Recipients",
         "insight": "Insight",
         "more": "+{count} more",
         "none": "0 flagged emails in the window.",
+        "allNone": "No emails.",
+        "allCount": "{shown} of {total}",
         "monitor": "Monitor",
         "modelScore": "Model: {score} · <detail></detail>",
         "notFlagged": "not flagged",
@@ -1102,7 +1111,7 @@
         "window": "Window",
         "windowValue": "30 minutes, then hidden again",
         "recorded": "Recorded",
-        "recordedValue": "Instance audit · team audit after 7 days",
+        "recordedValue": "Instance audit log; the team isn't notified",
         "note": "Bodies already purged by retention cannot be revealed.",
         "confirm": "Reveal",
         "whyPlaceholder": "The verdicts name impersonation and the links point at a lookalike host."

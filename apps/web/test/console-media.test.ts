@@ -268,7 +268,7 @@ describe("console.safety.media", () => {
     }
 
     // The first look at the media is recorded with its own fields, once per grant,
-    // and stamped on the grant so the team's disclosure names it.
+    // and stamped on the grant.
     await operator().console.safety.media({ grantId, emailId });
     const [grant] = await db.select().from(schema.contentAccessGrants);
     expect(grant?.viewCount).toBe(2);
