@@ -15,6 +15,7 @@ import {
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
 import { DotParts } from "@/components/dot-parts";
+import { GradientBanner } from "@/components/gradient-banner";
 import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
@@ -29,7 +30,6 @@ import { toast } from "@/components/toast";
 import { WarnCard } from "@/components/warn-card";
 import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
 import { formatDay, formatRelative, formatUtcMinute } from "@/lib/format";
-import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
@@ -37,41 +37,6 @@ import { zoneRelativeName } from "@/lib/zone";
 import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
 import { RegionLabel } from "../region-label";
 import { useTrackingToggle } from "../use-tracking-toggle";
-
-/**
- * Status-tinted gradient banner (canvas: near-black ground, glow rising from
- * the left edge). The rgba glows are the canvas values verbatim — the token
- * palette only carries their hex bases.
- */
-function GradientBanner({
-  variant,
-  children,
-}: {
-  variant: "success" | "warn";
-  children: React.ReactNode;
-}) {
-  const glow = statusGlow(variant, variant === "success" ? 15 : 14);
-  return (
-    <div
-      role="status"
-      className="ms-wrap-row"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        backgroundColor: "var(--ms-ground)",
-        backgroundImage: glow,
-        border: `1px solid var(--ms-${variant}-border)`,
-        borderRadius: 12,
-        padding: "11px 16px",
-        marginTop: 24,
-        maxWidth: 1000,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
 
 /** Party-popper (Lucide, MIT) — the celebratory mark on the verified banner. */
 function TadaIcon() {
@@ -872,26 +837,24 @@ export function DomainDetail({ id }: { id: string }) {
       </div>
 
       {checking ? (
-        <GradientBanner variant="warn">
-          <Spinner size={16} />
-          <span style={{ fontSize: 13.5, color: "var(--ms-warn)" }}>
-            {t("detail.bannerLooking")}
-          </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
-            {provider
-              ? t("detail.bannerLookingBody", { provider: provider.name })
-              : t("detail.bannerLookingBodyGeneric")}
-          </span>
+        <GradientBanner
+          variant="warn"
+          icon={<Spinner size={16} />}
+          title={t("detail.bannerLooking")}
+          style={{ marginTop: 24, maxWidth: 1000 }}
+        >
+          {provider
+            ? t("detail.bannerLookingBody", { provider: provider.name })
+            : t("detail.bannerLookingBodyGeneric")}
         </GradientBanner>
       ) : status === "verified" ? (
-        <GradientBanner variant="success">
-          <TadaIcon />
-          <span style={{ fontSize: 13.5, color: "var(--ms-success)" }}>
-            {t("detail.bannerVerified")}
-          </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
-            {t("detail.bannerVerifiedBody")}
-          </span>
+        <GradientBanner
+          variant="success"
+          icon={<TadaIcon />}
+          title={t("detail.bannerVerified")}
+          style={{ marginTop: 24, maxWidth: 1000 }}
+        >
+          {t("detail.bannerVerifiedBody")}
         </GradientBanner>
       ) : null}
 

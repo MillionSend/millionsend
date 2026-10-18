@@ -19,6 +19,7 @@ import {
   EventNode,
   EventStripSkeleton,
 } from "@/components/email-status-icon";
+import { GradientBanner } from "@/components/gradient-banner";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
@@ -34,7 +35,6 @@ import {
   formatUtcTimestampMs,
   mailDomain,
 } from "@/lib/format";
-import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
 type EventType =
@@ -727,33 +727,19 @@ export default function EmailDetailPage() {
       />
 
       {hardBounced ? (
-        <div
-          className="ms-wrap-row"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            backgroundColor: "var(--ms-ground)",
-            backgroundImage: statusGlow("danger"),
-            border: "1px solid var(--ms-danger-border)",
-            borderRadius: 12,
-            padding: "12px 16px",
-            marginBottom: 24,
-          }}
+        <GradientBanner
+          variant="danger"
+          title={t("detail.bounceBanner.hard")}
+          style={{ marginBottom: 24 }}
         >
-          <span style={{ fontSize: 13.5, color: "var(--ms-danger)" }}>
-            {t("detail.bounceBanner.hard")}
-          </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
-            {t.rich("detail.bounceBanner.suppressed", {
-              link: (chunks) => (
-                <Link href="/emails/suppressions" className="ms-link">
-                  {chunks}
-                </Link>
-              ),
-            })}
-          </span>
-        </div>
+          {t.rich("detail.bounceBanner.suppressed", {
+            link: (chunks) => (
+              <Link href="/emails/suppressions" className="ms-link">
+                {chunks}
+              </Link>
+            ),
+          })}
+        </GradientBanner>
       ) : null}
 
       <div
