@@ -220,6 +220,15 @@ linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
    portal do Stripe não consegue atualizar uma assinatura com mais de um
    item, e uma faixa mensal tem dois.
 
+Excluir uma equipe cancela a assinatura na hora com uma fatura final
+(`invoice_now`): o excedente do período é reportado antes, e a fatura o cobra
+junto com qualquer valor proporcional ainda pendente. O Stripe deixa essa
+fatura em rascunho por cerca de uma hora, então um evento de medidor ainda em
+processamento entra nela, e tenta de novo uma cobrança recusada no calendário
+de sempre. O tempo não usado não é reembolsado. A exceção é a equipe suspensa
+por fraude: a assinatura termina sem fatura final, já que tudo o que ela
+pagou nos últimos 120 dias é reembolsado.
+
 Uma equipe não pode comprar nem subir de plano enquanto estiver suspensa
 (por qualquer motivo) ou tiver uma sinalização aberta em Confiança e
 segurança que a rotina de segurança abriu por abuso (`monitor`, `guardrail`

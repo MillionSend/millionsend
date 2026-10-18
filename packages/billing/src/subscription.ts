@@ -360,16 +360,28 @@ export async function setOverage(
 }
 
 /**
- * Cancels the team's subscription immediately (no final invoice) and clears
- * its plan; used when the team itself goes away. No-op without a live
- * subscription.
+ * Cancels the team's subscription immediately and clears its plan; used when
+ * the team itself goes away. A final invoice bills the overage the period
+ * has accrued and any proration still pending: the usage reaches the meter
+ * first, and Stripe keeps that invoice a draft for about an hour, so a meter
+ * event still being processed lands on it. The unused time is not refunded.
+ * No-op without a live subscription.
  */
 export async function cancelTeamSubscription(deps: BillingDeps, teamId: string): Promise<void> {
+  await endSubscription(deps, teamId, true);
+}
+
+async function endSubscription(
+  deps: BillingDeps,
+  teamId: string,
+  finalInvoice: boolean,
+): Promise<void> {
   const team = await loadBillingColumns(deps.db, teamId);
   if (!team?.stripeSubscriptionId) return;
   const sub = await deps.stripe.subscriptions.retrieve(team.stripeSubscriptionId);
   if (sub.status !== "canceled" && sub.status !== "incomplete_expired") {
-    await deps.stripe.subscriptions.cancel(sub.id, { invoice_now: false, prorate: false });
+    if (finalInvoice) await reportOverage(deps, { teamId });
+    await deps.stripe.subscriptions.cancel(sub.id, { invoice_now: finalInvoice, prorate: false });
   }
   await deps.db
     .update(schema.teams)
@@ -402,13 +414,15 @@ export interface FraudRefund {
 
 /**
  * Ends the billing of a team suspended for fraud: its subscription is
- * canceled at once (cancelTeamSubscription: no final invoice, no proration),
- * then every payment of the last 120 days is refunded in full as fraudulent,
- * which also puts the card and email on Radar's block lists. A disputed
- * payment is left to its dispute and a refunded one is skipped; the rest of a
- * partly refunded one goes back, since a partial refund can still be disputed
- * in full. Each refund is keyed by its charge, so a retry never refunds twice.
- * A Stripe failure is returned, never thrown: the suspension before it stands.
+ * canceled at once with no proration and no final invoice, whose charge
+ * would land about an hour later, after the refunds, on a card already
+ * judged fraudulent. Then every payment of the last 120 days is refunded in
+ * full as fraudulent, which also puts the card and email on Radar's block
+ * lists. A disputed payment is left to its dispute and a refunded one is
+ * skipped; the rest of a partly refunded one goes back, since a partial
+ * refund can still be disputed in full. Each refund is keyed by its charge,
+ * so a retry never refunds twice. A Stripe failure is returned, never
+ * thrown: the suspension before it stands.
  */
 export async function cancelAndRefundFraud(
   deps: BillingDeps,
@@ -420,7 +434,7 @@ export async function cancelAndRefundFraud(
   if (!team?.stripeCustomerId) return outcome;
   try {
     if (team.stripeSubscriptionId) {
-      await cancelTeamSubscription(deps, teamId);
+      await endSubscription(deps, teamId, false);
       outcome.canceled = team.stripeSubscriptionId;
     }
     const charges = deps.stripe.charges.list({

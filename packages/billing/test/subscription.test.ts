@@ -289,7 +289,7 @@ describe("cancelAndRefundFraud", () => {
   const refunded = () => state.refunds.map(([params]) => params.charge);
 
   it("cancels at once, then refunds each payment of the last 120 days in full as fraud under its own key", async () => {
-    const teamId = await subscribedTeam(withOverage());
+    const teamId = await subscribedTeam(withOverage(), 100_500);
     state.charges = [
       charge("ch_old", "cus_1", ago(119), { amount: 900 }),
       charge("ch_new", "cus_1", ago(2)),
@@ -305,7 +305,9 @@ describe("cancelAndRefundFraud", () => {
       failed: null,
     });
     expect(state.cancels).toEqual(["sub_1"]);
+    // No final invoice: its charge would land after the refunds, on the same card.
     expect(state.cancelParams).toEqual({ invoice_now: false, prorate: false });
+    expect(state.meterEvents).toEqual([]);
     callOrder("subscriptions.cancel", "charges.list");
     expect(state.chargeListParams).toEqual({
       customer: "cus_1",

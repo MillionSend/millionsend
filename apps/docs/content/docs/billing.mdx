@@ -212,6 +212,15 @@ worker reports, so the customer's **overage** switch is a plain row flag,
    cannot update a subscription with more than one item, and a monthly rung
    has two.
 
+Deleting a team cancels its subscription at once with a final invoice
+(`invoice_now`): the period's overage is reported first, and the invoice
+bills it with any proration still pending. Stripe keeps that invoice a draft
+for about an hour, so a meter event still being processed lands on it, and
+retries a failed charge on its usual schedule. The unused time is not
+refunded. A team suspended for fraud is the exception: its subscription ends
+with no final invoice, since everything it paid in the last 120 days is
+refunded.
+
 A team cannot buy or move up while it is suspended (for any reason) or
 holds an open Trust & safety flag that the safety job opened for abuse
 (`monitor`, `guardrail` or `complaints`) or that an operator opened or

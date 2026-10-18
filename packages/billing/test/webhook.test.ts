@@ -525,7 +525,7 @@ describe("reconcileTeamPlan", () => {
 });
 
 describe("cancelTeamSubscription", () => {
-  it("cancels the live subscription immediately and clears the plan; no subscription is a no-op", async () => {
+  it("reports the period's overage, cancels at once with a final invoice and clears the plan; no subscription is a no-op", async () => {
     const teamId = await customerTeam();
     await cancelTeamSubscription(deps(), teamId);
     expect(state.cancels).toEqual([]);
@@ -534,8 +534,17 @@ describe("cancelTeamSubscription", () => {
       overageKey: "millionsend_pro_100k_overage",
     });
     await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: new Date(PERIOD_START * 1000), accepted: 100_500 });
     await cancelTeamSubscription(deps(), teamId);
+    // The final invoice bills what the meter holds when the subscription ends.
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["500"]);
+    expect(state.calls.indexOf("billing.meterEvents.create")).toBeLessThan(
+      state.calls.indexOf("subscriptions.cancel"),
+    );
     expect(state.cancels).toEqual(["sub_1"]);
+    expect(state.cancelParams).toEqual({ invoice_now: true, prorate: false });
     expect(await team(teamId)).toEqual({
       plan: "free",
       planQuota: null,
