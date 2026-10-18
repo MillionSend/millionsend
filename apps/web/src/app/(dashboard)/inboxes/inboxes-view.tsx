@@ -21,6 +21,7 @@ import { Truncated } from "@/components/truncated";
 import { formatTimeLeft } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useLastDefined } from "@/lib/use-last-defined";
 import { StateCard } from "../emails/list-parts";
 import { CreateInboxDialog } from "./create-inbox-dialog";
 import { kindWord } from "./parts";
@@ -101,7 +102,8 @@ export function InboxesView() {
   );
   const first = query.data?.pages[0];
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
-  const counts = first?.counts ?? null;
+  // The counts cover every tab, so the badges keep the last ones while a tab change loads.
+  const counts = useLastDefined(first?.counts);
   const overview = tab === "all" ? (first?.overview ?? null) : null;
   const plan = options.data?.plan ?? null;
   const atLimit = plan?.limit != null && plan.used >= plan.limit;
