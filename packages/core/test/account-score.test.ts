@@ -6,11 +6,13 @@ import {
   MIN_OUTCOME_SENDS,
 } from "../src/account-score.js";
 
+/** Every send could draw a complaint unless `complaintSent` says otherwise. */
 function input(overrides: Partial<AccountScoreInput>): AccountScoreInput {
   return {
     contentWeightedTenths: 0,
     contentRecipients: 0,
     sent: 0,
+    complaintSent: overrides.sent ?? 0,
     complained: 0,
     hardBounced: 0,
     guardrailStatus: "ok",
@@ -65,6 +67,21 @@ describe("computeAccountScore", () => {
     expect(s.outcomeScoreTenths).toBe(70);
   });
 
+  it("rates a Gmail-heavy team's complaints over the sends that could draw one", () => {
+    // 2 complaints in 10,000 sends would be 0.02%; 9,000 went to Gmail, which
+    // never reports one, so the rate is 0.2% of the 1,000 left.
+    const s = computeAccountScore(input({ sent: 10_000, complaintSent: 1_000, complained: 2 }));
+    expect(s.complaintRate).toBe(0.002);
+    expect(s.complaintSent).toBe(1_000);
+    expect(s.outcomeScoreTenths).toBe(70);
+    // Under the floor of such sends the rate is shown but not judged.
+    const few = computeAccountScore(
+      input({ sent: 10_000, complaintSent: MIN_OUTCOME_SENDS - 1, complained: 2 }),
+    );
+    expect(few.complaintRate).toBeCloseTo(2 / 99);
+    expect(few.outcomeScoreTenths).toBe(100);
+  });
+
   it("ramps the hard-bounce penalty from 2%", () => {
     const s = computeAccountScore(input({ sent: 10_000, hardBounced: 300 }));
     expect(s.hardBounceRate).toBeCloseTo(0.03);
@@ -113,6 +130,7 @@ describe("contentFactorImpact", () => {
       contentWeightedTenths: 90 * 1000,
       contentRecipients: 1000,
       sent: 1000,
+      complaintSent: 1000,
       complained: 0,
       hardBounced: 0,
       guardrailStatus: "ok" as const,
@@ -133,6 +151,7 @@ describe("contentFactorImpact", () => {
       contentWeightedTenths: 80 * 100,
       contentRecipients: 100,
       sent: 1000,
+      complaintSent: 1000,
       complained: 0,
       hardBounced: 0,
       guardrailStatus: "paused" as const,

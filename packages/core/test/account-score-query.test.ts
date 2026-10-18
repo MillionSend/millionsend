@@ -126,6 +126,17 @@ it("weights the content sub-score by recipients across API sends and fan-out ema
   expect(input.contentRecipients).toBe(5);
 });
 
+it("counts complaints over the sends a recipient's provider could report", async () => {
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: "2026-09-03", sent: 500, sentNoFeedback: 300, complained: 1 });
+  expect(await fetchAccountScoreInput(db, teamId, { now })).toMatchObject({
+    sent: 500,
+    complaintSent: 200,
+    complained: 1,
+  });
+});
+
 it("aggregates failing checks over the same population, heaviest first", async () => {
   const factors = await fetchContentFactors(db, teamId, { now });
   expect(factors).toEqual([

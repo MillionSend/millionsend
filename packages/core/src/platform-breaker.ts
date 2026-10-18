@@ -1,9 +1,25 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { RegionBreakerReason } from "@millionsend/db/schema";
-import { and, asc, desc, eq, gte, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  notInArray,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { MIN_PAUSE_COMPLAINTS, MIN_PAUSE_HARD_BOUNCES } from "./deliverability.js";
+import {
+  counterComplaintSent,
+  MIN_PAUSE_COMPLAINTS,
+  MIN_PAUSE_HARD_BOUNCES,
+  type WindowCounts,
+} from "./deliverability.js";
 import { NO_COMPLAINT_FEEDBACK_DOMAINS } from "./mailbox-providers.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -33,16 +49,7 @@ export const SES_COMPLAINT_PAUSE_RATE = 0.005;
 export const SES_COMPLAINT_ALERT_RATE = 0.003;
 export const BREAKER_SES_COMPLAINT_RATE = 0.004;
 
-export interface RegionWindowCounts {
-  sent: number;
-  /**
-   * The complaint rate's denominator: sends with a recipient at a provider
-   * that reports complaints.
-   */
-  complaintSent: number;
-  hardBounced: number;
-  complained: number;
-}
+export type RegionWindowCounts = WindowCounts;
 
 const NO_COUNTS: RegionWindowCounts = { sent: 0, complaintSent: 0, hardBounced: 0, complained: 0 };
 
@@ -65,7 +72,7 @@ const HOUR_MS = 60 * 60 * 1000;
 // raw bounce object under data.bounce), so hard bounces are read back from it.
 // The column is authoritative; the json path covers rows written before it
 // existed (until retention strips their payload).
-const hardBounceFilter = sql`${schema.emailEvents.type} = 'bounced' and coalesce(${schema.emailEvents.bounceType}, ${schema.emailEvents.data}->'bounce'->>'bounceType') = 'Permanent'`;
+export const hardBounceFilter = sql`${schema.emailEvents.type} = 'bounced' and coalesce(${schema.emailEvents.bounceType}, ${schema.emailEvents.data}->'bounce'->>'bounceType') = 'Permanent'`;
 const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
 /**
  * A send's recipients in to, cc and bcc, one `domain` row each, read the way
@@ -160,12 +167,12 @@ export async function regionCounterTotals(
     .as("team_region");
   // ::bigint — a region's weekly sum can overflow int4; the driver returns
   // bigint as a string, exact through Number() up to 2^53.
-  const total = (col: AnyPgColumn) => sql<string>`coalesce(sum(${col}), 0)::bigint`;
+  const total = (col: AnyPgColumn | SQL) => sql<string>`coalesce(sum(${col}), 0)::bigint`;
   const rows = await db
     .select({
       region: teamRegion.region,
       sent: total(c.sent),
-      sentNoFeedback: total(c.sentNoFeedback),
+      complaintSent: total(counterComplaintSent),
       hardBounced: total(c.hardBounced),
       complained: total(c.complained),
     })
@@ -182,7 +189,7 @@ export async function regionCounterTotals(
   for (const row of rows) {
     const counts = {
       sent: Number(row.sent),
-      complaintSent: Number(row.sent) - Number(row.sentNoFeedback),
+      complaintSent: Number(row.complaintSent),
       hardBounced: Number(row.hardBounced),
       complained: Number(row.complained),
     };

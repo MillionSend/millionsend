@@ -1,12 +1,15 @@
 import {
   applyStatusCas,
   bumpHourlyUsage,
+  DAY_MS,
   type EmailStatus,
   emitSuppressionEvents,
   enqueueWebhookDeliveries,
   failedEmailExtras,
   hashRecipient,
+  INACTIVE_MAILBOX_PATTERN,
   isWebhookEventType,
+  MAILBOX_FULL_PATTERN,
   noteConsoleCodeUndelivered,
   type SuppressionEventRow,
   utcDay,
@@ -95,6 +98,7 @@ export async function processSesEvent(
     .select({
       id: schema.emails.id,
       teamId: schema.emails.teamId,
+      contactId: schema.emails.contactId,
       from: schema.emails.from,
       to: schema.emails.to,
       cc: schema.emails.cc,
@@ -110,6 +114,7 @@ export async function processSesEvent(
       .select({
         id: schema.emails.id,
         teamId: schema.emails.teamId,
+        contactId: schema.emails.contactId,
         from: schema.emails.from,
         to: schema.emails.to,
         cc: schema.emails.cc,
@@ -234,22 +239,33 @@ export async function processSesEvent(
       });
     }
 
-    // Auto-suppression: permanent bounces and complaints, scoped to the
-    // owning team only and to addresses the email was actually sent to —
-    // the event payload never gets to name who is suppressed.
+    // Auto-suppression: permanent bounces, full or abandoned mailboxes (as
+    // hard bounces, see fullMailboxes) and complaints, scoped to the owning
+    // team only and to addresses the email was actually sent to — the event
+    // payload never gets to name who is suppressed.
     const ownRecipients = new Set(
       [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])].map(hashRecipient),
     );
-    const toSuppress = (
-      event.eventType === "Bounce" && event.bounce?.bounceType === "Permanent"
-        ? event.bounce.recipients.map((r) => ({ email: r, reason: "hard_bounce" as const }))
+    const own = (recipients: readonly string[]) =>
+      recipients.filter((r) => ownRecipients.has(hashRecipient(r)));
+    const toSuppress =
+      event.eventType === "Bounce" && event.bounce
+        ? (event.bounce.bounceType === "Permanent"
+            ? own(event.bounce.recipients)
+            : await fullMailboxes(
+                txDb,
+                email,
+                event.bounce,
+                own(event.bounce.recipients),
+                new Date(event.occurredAt),
+              )
+          ).map((r) => ({ email: r, reason: "hard_bounce" as const }))
         : event.eventType === "Complaint"
-          ? (event.complaint?.recipients ?? []).map((r) => ({
+          ? own(event.complaint?.recipients ?? []).map((r) => ({
               email: r,
               reason: "complaint" as const,
             }))
-          : []
-    ).filter((s) => ownRecipients.has(hashRecipient(s.email)));
+          : [];
     const suppressedRows: SuppressionEventRow[] = [];
     for (const s of toSuppress) {
       const [inserted] = await txDb
@@ -285,6 +301,51 @@ export async function processSesEvent(
   });
   if (!applied) return;
   await hooks.flush();
+}
+
+/**
+ * The recipients a soft bounce gives up on. An answer naming an abandoned
+ * mailbox gives up at once. A full one gives up on a contact whose first
+ * "full" answer came a day to 30 days before this one; with none, or one
+ * older than that, this answer becomes the first, and one under a day old
+ * stays first, so a mailbox answering "full" every hour still reaches the
+ * day. Anyone not a contact is only given up on as abandoned. Times are the
+ * bounces' own, so a late or reordered event neither stretches nor shrinks
+ * the gap.
+ */
+async function fullMailboxes(
+  db: Db,
+  email: { teamId: string; contactId: string | null },
+  bounce: NonNullable<SerializedSesEvent["bounce"]>,
+  recipients: string[],
+  at: Date,
+): Promise<string[]> {
+  const answer = `${bounce.bounceSubType} ${bounce.diagnosticCode ?? ""}`;
+  if (bounce.bounceType !== "Transient" || !MAILBOX_FULL_PATTERN.test(answer)) return [];
+  if (INACTIVE_MAILBOX_PATTERN.test(answer)) return recipients;
+  const c = schema.contacts;
+  const out: string[] = [];
+  for (const recipient of recipients) {
+    const [contact] = await db
+      .select({ id: c.id, mailboxFullAt: c.mailboxFullAt })
+      .from(c)
+      .where(
+        and(
+          eq(c.teamId, email.teamId),
+          email.contactId
+            ? eq(c.id, email.contactId)
+            : sql`lower(${c.email}) = lower(${recipient})`,
+        ),
+      );
+    if (!contact) continue;
+    const age = contact.mailboxFullAt ? at.getTime() - contact.mailboxFullAt.getTime() : null;
+    if (age !== null && age >= DAY_MS && age <= 30 * DAY_MS) {
+      out.push(recipient);
+    } else if (age === null || age > 30 * DAY_MS) {
+      await db.update(c).set({ mailboxFullAt: at }).where(eq(c.id, contact.id));
+    }
+  }
+  return out;
 }
 
 function isUuid(value: string): boolean {

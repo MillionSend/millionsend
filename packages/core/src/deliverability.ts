@@ -3,7 +3,7 @@ import type { Db } from "@millionsend/db";
 // postgres driver (node:net), which breaks any client bundle that imports this
 // module's thresholds. The type-only Db import above is erased.
 import * as schema from "@millionsend/db/schema";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -18,7 +18,10 @@ import { DAY_MS, utcDay } from "./utc-day.js";
  * - PAUSE_* mirror SES's own review lines; crossing one blocks new sends
  *   before SES pauses the whole account.
  * Bounce rates count hard (permanent) bounces only, as SES does: greylisting
- * and full mailboxes are not a reputation signal.
+ * and full mailboxes are not a reputation signal. Complaint rates count only
+ * the sends a recipient's provider could report, as SES does too: Gmail,
+ * Apple and Deutsche Telekom never report one, so mail to them would dilute
+ * the rate.
  */
 export const WARN_BOUNCE_RATE = 0.04;
 export const WARN_COMPLAINT_RATE = 0.0005;
@@ -27,7 +30,8 @@ export const PAUSE_COMPLAINT_RATE = 0.001;
 
 /**
  * Below this many sends in a window no tier fires regardless of rate: a
- * handful of bounces in a tiny sample must never pause an account.
+ * handful of bounces in a tiny sample must never pause an account. The
+ * complaint tiers count only the sends that could draw a complaint.
  */
 export const MIN_GUARDRAIL_VOLUME = 100;
 
@@ -77,9 +81,17 @@ export interface DeliverabilityReason {
 /** Counts summed over one window. Hard bounces only: transient ones never count. */
 export interface WindowCounts {
   sent: number;
+  /**
+   * The complaint rate's denominator: sends with a recipient at a provider
+   * that reports complaints.
+   */
+  complaintSent: number;
   hardBounced: number;
   complained: number;
 }
+
+/** complaintSent from a usage_counters row, for summing over a window. */
+export const counterComplaintSent: SQL = sql`${schema.usageCounters.sent} - ${schema.usageCounters.sentNoFeedback}`;
 
 export interface DeliverabilityEvaluation {
   /** Hard-bounce rate over the warning window. */
@@ -90,8 +102,10 @@ export interface DeliverabilityEvaluation {
 }
 
 export interface DeliverabilityHealth extends DeliverabilityEvaluation {
-  /** Sends in the warning window (the denominator of the displayed rates). */
+  /** Sends in the warning window (the denominator of the displayed bounce rate). */
   sent: number;
+  /** The warning window's sends that could draw a complaint (the complaint rate's denominator). */
+  complaintSent: number;
   windowDays: number;
   pause: WindowCounts & { windowDays: number };
 }
@@ -112,8 +126,9 @@ const rateOf = (events: number, sent: number): number => (sent > 0 ? events / se
  * Pure guardrail decision. The pause tier reads the short window: rate at or
  * over the pause line AND at least MIN_PAUSE_* events. The warning tier reads
  * the long window: rate at or over the warning line. Neither fires under
- * `minVolume` sends in its own window. The rates returned for display are the
- * long window's; zero sends yields zero rates, never NaN.
+ * `minVolume` sends in its own window, counted over the metric's own
+ * denominator (complaints over complaintSent). The rates returned for display
+ * are the long window's; zero sends yields zero rates, never NaN.
  */
 export function evaluateDeliverability(
   windows: { warn: WindowCounts; pause: WindowCounts },
@@ -125,18 +140,21 @@ export function evaluateDeliverability(
     metric: DeliverabilityReason["metric"],
     lines: { warn: number; pause: number; minPauseEvents: number; minWarnEvents: number },
   ) => {
-    const events = metric === "bounce" ? "hardBounced" : "complained";
-    const pauseRate = rateOf(pause[events], pause.sent);
+    const [events, sends] =
+      metric === "bounce"
+        ? (["hardBounced", "sent"] as const)
+        : (["complained", "complaintSent"] as const);
+    const pauseRate = rateOf(pause[events], pause[sends]);
     if (
-      pause.sent >= minVolume &&
+      pause[sends] >= minVolume &&
       pauseRate >= lines.pause &&
       pause[events] >= lines.minPauseEvents
     ) {
       reasons.push({ metric, rate: pauseRate, tier: "paused", windowDays: PAUSE_WINDOW_DAYS });
       return;
     }
-    const warnRate = rateOf(warn[events], warn.sent);
-    if (warn.sent >= minVolume && warnRate >= lines.warn && warn[events] >= lines.minWarnEvents) {
+    const warnRate = rateOf(warn[events], warn[sends]);
+    if (warn[sends] >= minVolume && warnRate >= lines.warn && warn[events] >= lines.minWarnEvents) {
       reasons.push({ metric, rate: warnRate, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS });
     }
   };
@@ -161,7 +179,7 @@ export function evaluateDeliverability(
 
   return {
     bounceRate: rateOf(warn.hardBounced, warn.sent),
-    complaintRate: rateOf(warn.complained, warn.sent),
+    complaintRate: rateOf(warn.complained, warn.complaintSent),
     status,
     reasons,
   };
@@ -170,9 +188,10 @@ export function evaluateDeliverability(
 /**
  * A team's current deliverability standing. Sums usage_counters over both
  * windows in one round-trip (the pause window is the recent slice of the
- * warning window), using the successful SES send count as the denominator,
- * with the windows' lower bounds derived from utcDay so rows join on the exact
- * same UTC-day key production writes.
+ * warning window), using the successful SES send count as the denominator
+ * (complaints: the sends that could draw one), with the windows' lower bounds
+ * derived from utcDay so rows join on the exact same UTC-day key production
+ * writes.
  */
 export async function fetchDeliverabilityHealth(
   db: Db,
@@ -186,15 +205,17 @@ export async function fetchDeliverabilityHealth(
   const c = schema.usageCounters;
   // ::bigint — a busy sender's window sum can overflow int4. The driver
   // returns bigint as a string; Number() is exact up to 2^53.
-  const total = (col: AnyPgColumn) => sql<string>`coalesce(sum(${col}), 0)::bigint`;
-  const recent = (col: AnyPgColumn) =>
+  const total = (col: AnyPgColumn | SQL) => sql<string>`coalesce(sum(${col}), 0)::bigint`;
+  const recent = (col: AnyPgColumn | SQL) =>
     sql<string>`coalesce(sum(case when ${c.day} >= ${sincePause} then ${col} else 0 end), 0)::bigint`;
   const [row] = await db
     .select({
       sent: total(c.sent),
+      complaintSent: total(counterComplaintSent),
       hardBounced: total(c.hardBounced),
       complained: total(c.complained),
       pauseSent: recent(c.sent),
+      pauseComplaintSent: recent(counterComplaintSent),
       pauseHardBounced: recent(c.hardBounced),
       pauseComplained: recent(c.complained),
     })
@@ -204,11 +225,13 @@ export async function fetchDeliverabilityHealth(
   const n = (v: string | undefined) => Number(v ?? 0);
   const warn = {
     sent: n(row?.sent),
+    complaintSent: n(row?.complaintSent),
     hardBounced: n(row?.hardBounced),
     complained: n(row?.complained),
   };
   const pause = {
     sent: n(row?.pauseSent),
+    complaintSent: n(row?.pauseComplaintSent),
     hardBounced: n(row?.pauseHardBounced),
     complained: n(row?.pauseComplained),
   };
@@ -216,6 +239,7 @@ export async function fetchDeliverabilityHealth(
   return {
     ...evaluateDeliverability({ warn, pause }),
     sent: warn.sent,
+    complaintSent: warn.complaintSent,
     windowDays: GUARDRAIL_WINDOW_DAYS,
     pause: { ...pause, windowDays: PAUSE_WINDOW_DAYS },
   };

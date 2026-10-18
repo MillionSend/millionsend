@@ -1,10 +1,10 @@
-import { hashRecipient } from "@millionsend/core";
+import { DAY_MS, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
 
 let db: Db;
@@ -17,11 +17,16 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
-async function insertSentEmail(sesMessageId: string, to = ["r@example.com"]): Promise<string> {
+async function insertSentEmail(
+  sesMessageId: string,
+  to = ["r@example.com"],
+  contactId: string | null = null,
+): Promise<string> {
   const [row] = await db
     .insert(schema.emails)
     .values({
       teamId,
+      contactId,
       from: "a@acme.dev",
       to,
       subject: "s",
@@ -102,7 +107,7 @@ it("Permanent bounce: status + suppression scoped to the owning team", async () 
   expect(counter?.hardBounced).toBe(1);
 });
 
-it("Transient bounce: status moves but nothing is suppressed", async () => {
+it("Transient bounce: status moves but nothing is suppressed, a full mailbox of no contact included", async () => {
   const emailId = await insertSentEmail("mid-soft", ["soft@example.com"]);
   const [before] = await db
     .select()
@@ -375,4 +380,127 @@ it("suppresses only addresses the email was sent to — never a payload-supplied
   expect(hashes).toContain(hashRecipient("real@example.com"));
   expect(hashes).toContain(hashRecipient("copy@example.com"));
   expect(hashes).not.toContain(hashRecipient("stranger@example.com"));
+});
+
+describe("full and abandoned mailboxes", () => {
+  const bouncedAt = new Date("2026-09-10T12:00:00.000Z");
+  const earlier = (ms: number) => new Date(bouncedAt.getTime() - ms);
+
+  async function addContact(email: string, mailboxFullAt: Date | null = null, team = teamId) {
+    const [row] = await db
+      .insert(schema.contacts)
+      .values({ teamId: team, email, mailboxFullAt })
+      .returning({ id: schema.contacts.id });
+    if (!row) throw new Error("insert failed");
+    return row.id;
+  }
+
+  /** A soft bounce of a fresh email to `to`, "mailbox full" unless told otherwise. */
+  async function softBounce(
+    to: string,
+    opts: { contactId?: string; subType?: string; diagnosticCode?: string } = {},
+  ): Promise<string> {
+    const emailId = await insertSentEmail(`mid-full-${to}`, [to], opts.contactId);
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Bounce",
+        sesMessageId: `mid-full-${to}`,
+        occurredAt: bouncedAt.toISOString(),
+        bounce: {
+          bounceType: "Transient",
+          bounceSubType: opts.subType ?? "MailboxFull",
+          recipients: [to],
+          ...(opts.diagnosticCode ? { diagnosticCode: opts.diagnosticCode } : {}),
+        },
+      }),
+    );
+    return emailId;
+  }
+
+  async function suppressionOf(address: string) {
+    const [row] = await db
+      .select({ reason: schema.suppressions.reason, source: schema.suppressions.sourceEmailId })
+      .from(schema.suppressions)
+      .where(
+        and(
+          eq(schema.suppressions.teamId, teamId),
+          eq(schema.suppressions.emailHash, hashRecipient(address)),
+        ),
+      );
+    return row;
+  }
+
+  async function mailboxFullAtOf(contactId: string) {
+    const [row] = await db
+      .select({ at: schema.contacts.mailboxFullAt })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, contactId));
+    return row?.at;
+  }
+
+  it("an abandoned mailbox is suppressed as a hard bounce at once, contact or not", async () => {
+    const emailId = await softBounce("gone@example.com", {
+      subType: "General",
+      diagnosticCode: "552-5.2.2 The recipient's inbox is out of storage space and inactive.",
+    });
+    expect(await suppressionOf("gone@example.com")).toEqual({
+      reason: "hard_bounce",
+      source: emailId,
+    });
+  });
+
+  it("a contact's first full answer is kept, not suppressed", async () => {
+    const id = await addContact("full-first@example.com");
+    await softBounce("full-first@example.com", { contactId: id });
+    expect(await suppressionOf("full-first@example.com")).toBeUndefined();
+    expect(await mailboxFullAtOf(id)).toEqual(bouncedAt);
+  });
+
+  it("a second full answer a day to 30 days after the first suppresses the contact", async () => {
+    for (const [address, ago] of [
+      ["full-day@example.com", DAY_MS],
+      ["full-month@example.com", 30 * DAY_MS],
+    ] as const) {
+      const id = await addContact(address, earlier(ago));
+      const emailId = await softBounce(address, { contactId: id });
+      expect(await suppressionOf(address)).toEqual({ reason: "hard_bounce", source: emailId });
+    }
+  });
+
+  it("an answer within the day keeps the first; one past 30 days starts over", async () => {
+    const first = earlier(DAY_MS - 1);
+    const soon = await addContact("full-soon@example.com", first);
+    await softBounce("full-soon@example.com", { contactId: soon });
+    expect(await suppressionOf("full-soon@example.com")).toBeUndefined();
+    expect(await mailboxFullAtOf(soon)).toEqual(first);
+
+    const stale = await addContact("full-stale@example.com", earlier(30 * DAY_MS + 1));
+    await softBounce("full-stale@example.com", { contactId: stale });
+    expect(await suppressionOf("full-stale@example.com")).toBeUndefined();
+    expect(await mailboxFullAtOf(stale)).toEqual(bouncedAt);
+  });
+
+  it("finds the contact by address when the email names none, in the sending team only", async () => {
+    const mine = await addContact("Full.Case@example.com");
+    const theirs = await addContact(
+      "full.case@example.com",
+      null,
+      await createTeam(db, "events-other-team"),
+    );
+    await softBounce("FULL.case@example.com");
+    expect(await mailboxFullAtOf(mine)).toEqual(bouncedAt);
+    expect(await mailboxFullAtOf(theirs)).toBeNull();
+  });
+
+  it("other soft bounces leave the contact alone", async () => {
+    const id = await addContact("busy@example.com");
+    await softBounce("busy@example.com", {
+      contactId: id,
+      subType: "General",
+      diagnosticCode: "421 4.7.0 Try again later",
+    });
+    expect(await mailboxFullAtOf(id)).toBeNull();
+    expect(await suppressionOf("busy@example.com")).toBeUndefined();
+  });
 });
