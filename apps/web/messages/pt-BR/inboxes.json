@@ -432,6 +432,8 @@
   },
   "compose": {
     "from": "De {address}",
+    "fromNamed": "De <name>{fromName}</name> <{address}>",
+    "setSenderName": "Definir um nome de remetente",
     "to": "Para",
     "toName": "Para {name}",
     "subject": "Assunto",
@@ -446,7 +448,49 @@
     "replyPlaceholder": "Escreva uma resposta…",
     "send": "Enviar",
     "sent": "Enviado.",
-    "drafted": "Aguardando aprovação. Está em Precisa de revisão."
+    "drafted": "Aguardando aprovação. Está em Precisa de revisão.",
+    "checks": {
+      "title": "Antes de sair",
+      "count": "{n, plural, =0 {# de {total} valem uma olhada} one {# de {total} vale uma olhada} other {# de {total} valem uma olhada}}",
+      "allGood": "Nome do remetente, assunto e mensagem parecem de uma pessoa. {auth}",
+      "subjectShort": {
+        "label": "O assunto tem uma palavra só.",
+        "hint": "{test, select, yes {“Teste” é o assunto mais filtrado que existe.} other {Assunto de uma palavra só costuma cair no filtro.}}"
+      },
+      "subjectOk": {
+        "label": "O assunto está bom."
+      },
+      "messageShort": {
+        "label": "{n, plural, =0 {A mensagem tem # palavras e nenhuma despedida.} one {A mensagem tem # palavra e nenhuma despedida.} other {A mensagem tem # palavras e nenhuma despedida.}}",
+        "hint": "Uma frase e um nome no fim fazem parecer uma pessoa."
+      },
+      "messageOk": {
+        "label": "A mensagem tem uma frase e uma despedida."
+      },
+      "noSenderName": {
+        "label": "Sem nome de remetente: quem recebe vê só o endereço."
+      },
+      "senderName": {
+        "label": "Nome do remetente definido.",
+        "hint": "{name} <{address}>"
+      },
+      "domainShared": {
+        "label": "{domain}: SPF, DKIM e DMARC alinhados."
+      },
+      "domainAligned": {
+        "label": "{domain}: DKIM verificado, DMARC {policy}."
+      },
+      "domainNoDmarc": {
+        "label": "{domain}: sem registro DMARC."
+      },
+      "domainUnverified": {
+        "label": "{domain} ainda não foi verificado."
+      },
+      "firstContact": {
+        "label": "Primeiro e-mail deste endereço para {domain}.",
+        "hint": "Par novo começa sem histórico: é a resposta de lá que cria um."
+      }
+    }
   },
   "safety": {
     "whoCanWrite": "Quem pode escrever",

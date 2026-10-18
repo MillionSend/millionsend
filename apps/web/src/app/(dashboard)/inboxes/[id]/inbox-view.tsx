@@ -188,12 +188,7 @@ export function InboxView() {
         <ActivityTab inboxId={inbox.id} />
       )}
 
-      <SendDialog
-        open={sending}
-        onClose={closeSend}
-        inboxId={inbox.id}
-        from={inbox.email_address}
-      />
+      <SendDialog open={sending} onClose={closeSend} inbox={inbox} />
       <EditDialog inbox={inbox} open={editing} onClose={closeEdit} />
     </>
   );

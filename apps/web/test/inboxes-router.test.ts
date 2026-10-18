@@ -1489,3 +1489,99 @@ describe("labels", () => {
     ).toMatchObject({ name: "Billing", color: "#00A2C7" });
   });
 });
+
+describe("the send dialog's checks", () => {
+  it("read the inbox's domain standing, the shared domain as aligned, and nothing of another team's", async () => {
+    expect(await caller(acme).inboxes.sendContext({ id: inboxId })).toEqual({
+      shared: false,
+      domain: { name: "in.acme.test", verified: true, dmarc: null },
+    });
+    await db
+      .update(schema.domains)
+      .set({ status: "pending", dmarcPolicy: "reject" })
+      .where(eq(schema.domains.id, domainId));
+    expect(await caller(acme, "member").inboxes.sendContext({ id: inboxId })).toEqual({
+      shared: false,
+      domain: { name: "in.acme.test", verified: false, dmarc: "reject" },
+    });
+    await db
+      .update(schema.domains)
+      .set({ status: "verified", dmarcPolicy: null })
+      .where(eq(schema.domains.id, domainId));
+
+    await db
+      .insert(schema.sharedInboxDomains)
+      .values({ teamId: acme, name: "acme.agents.example.net" })
+      .onConflictDoNothing();
+    const [sub] = await db
+      .select({ id: schema.sharedInboxDomains.id })
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, acme));
+    const [shared] = await db
+      .insert(schema.inboxes)
+      .values({
+        teamId: acme,
+        kind: "human",
+        emailAddress: "checks@acme.agents.example.net",
+        localPart: "checks",
+        sharedDomainId: sub?.id,
+        name: "Checks",
+        safety: defaultSafety("human", true),
+      })
+      .returning({ id: schema.inboxes.id });
+    expect(await caller(acme).inboxes.sendContext({ id: shared?.id as string })).toEqual({
+      shared: true,
+      domain: { name: "acme.agents.example.net", verified: true, dmarc: null },
+    });
+    await expect(caller(beta).inboxes.sendContext({ id: inboxId })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+
+  it("say whether the inbox and a domain have mail between them, either way, for that inbox alone", async () => {
+    const history = (id: string, domain: string) =>
+      caller(acme).inboxes.contactHistory({ id, domain });
+    expect(await history(inboxId, "fresh.example")).toEqual({ seen: false });
+    await db.insert(schema.emails).values({
+      teamId: acme,
+      inboxId,
+      from: "orders@in.acme.test",
+      to: ["cc@elsewhere.example", "Ana@Fresh.example"],
+      subject: "Order #8841",
+    });
+    expect(await history(inboxId, "Fresh.example")).toEqual({ seen: true });
+    // The whole host, never a suffix of it.
+    expect(await history(inboxId, "example")).toEqual({ seen: false });
+
+    const id = await received(acme, { from: "sam@writer.example" });
+    await db.insert(schema.receivedEmailInboxes).values({
+      receivedEmailId: id,
+      inboxId,
+      teamId: acme,
+      threadId,
+      address: "orders@in.acme.test",
+      senderTrust: "external",
+      verdict: "clean",
+      deliveredAt: new Date(),
+    });
+    expect(await history(inboxId, "writer.example")).toEqual({ seen: true });
+
+    const [other] = await db
+      .insert(schema.inboxes)
+      .values({
+        teamId: acme,
+        kind: "agent",
+        emailAddress: "checks-other@in.acme.test",
+        localPart: "checks-other",
+        domainId,
+        name: "Other",
+        safety: defaultSafety("agent", false),
+      })
+      .returning({ id: schema.inboxes.id });
+    expect(await history(other?.id as string, "fresh.example")).toEqual({ seen: false });
+    expect(await history(other?.id as string, "writer.example")).toEqual({ seen: false });
+    await expect(
+      caller(beta).inboxes.contactHistory({ id: inboxId, domain: "fresh.example" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
