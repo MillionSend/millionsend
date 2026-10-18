@@ -789,41 +789,6 @@ describe("domains.records", () => {
   });
 });
 
-describe("domains.shared", () => {
-  it("returns the team's shared subdomain with its region and sending mode, apart from the list", async () => {
-    const teamId = await createTeam(db);
-    const caller = callerFor(teamId, fakeSes().deps, "member");
-    expect(await caller.domains.shared()).toBeNull();
-    vi.stubEnv("SHARED_INBOX_DOMAIN", "agents.example.com");
-    // Still pending its name review.
-    expect(await caller.domains.shared()).toBeNull();
-    const [row] = await db
-      .insert(schema.sharedInboxDomains)
-      .values({ teamId, name: "acme.agents.example.com" })
-      .returning();
-    if (!row) throw new Error("label insert failed");
-    const shown = {
-      id: row.id,
-      name: "acme.agents.example.com",
-      region: "us-east-1",
-      createdAt: row.createdAt,
-    };
-    expect(await caller.domains.shared()).toEqual({
-      ...shown,
-      sharedSending: { mode: "reply_only", cause: "instance" },
-    });
-    vi.stubEnv("SHARED_INBOX_OPEN", "true");
-    vi.stubEnv("ABUSE_JUDGE", "typesafe");
-    expect(await caller.domains.shared()).toEqual({
-      ...shown,
-      sharedSending: { mode: "open", cause: null },
-    });
-    expect(await caller.domains.list()).toEqual([]);
-    vi.stubEnv("SHARED_INBOX_DOMAIN", "");
-    expect(await caller.domains.shared()).toBeNull();
-  });
-});
-
 describe("domains.get", () => {
   it("returns a zero sent count for a fresh domain", async () => {
     const teamId = await createTeam(db);

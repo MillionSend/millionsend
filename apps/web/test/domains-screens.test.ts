@@ -2,10 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-// What the list and shared queries answer, and the page's query string.
+// What the list query answers, and the page's query string.
 const h = vi.hoisted(() => ({
   list: [] as unknown[],
-  shared: null as unknown,
   search: "",
 }));
 
@@ -15,7 +14,6 @@ vi.mock("next-intl", async (importOriginal) => {
   const messages = {
     domains: (await import("../messages/en/domains.json")).default,
     common: (await import("../messages/en/common.json")).default,
-    inboxes: (await import("../messages/en/inboxes.json")).default,
   };
   return {
     ...actual,
@@ -39,9 +37,9 @@ vi.mock("@/lib/trpc", () => {
 });
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ path }: { path: string }) =>
-    path === "domains.list" || path === "domains.shared"
+    path === "domains.list"
       ? {
-          data: path === "domains.list" ? h.list : h.shared,
+          data: h.list,
           isPending: false,
           isError: false,
           isSuccess: true,
@@ -63,17 +61,8 @@ const own = (name: string, status: string) => ({
   createdAt: new Date(),
   trackingPending: false,
 });
-const sharedRow = (sharedSending: { mode: string; cause: string | null }) => ({
-  id: "s1",
-  name: "acme.agents.example",
-  region: "us-east-1",
-  createdAt: new Date(),
-  sharedSending,
-});
-
-function page(p: { list: unknown[]; shared: unknown; search?: string }) {
+function page(p: { list: unknown[]; search?: string }) {
   h.list = p.list;
-  h.shared = p.shared;
   h.search = p.search ?? "";
   // A name's break points (Breakable) put back together.
   const html = renderToStaticMarkup(createElement(DomainsView, { awsBanner: null })).replaceAll(
@@ -84,60 +73,31 @@ function page(p: { list: unknown[]; shared: unknown; search?: string }) {
   return { html, rows };
 }
 
-describe("the Domains page's shared subdomain", () => {
+describe("the Domains page", () => {
   const owned = [own("mail.acme.example", "verified"), own("news.acme.example", "pending")];
 
-  it("comes first, read-only, with its sending mode, outside the count", () => {
-    const { html, rows } = page({
-      list: owned,
-      shared: sharedRow({ mode: "reply_only", cause: "plan" }),
-    });
-    const [first, ...rest] = rows;
-    expect(first).toContain("acme.agents.example");
-    expect(first).toContain('class="ms-badge ms-badge-neutral">Shared<');
-    expect(first).toContain(">replies only on the Free plan<");
-    // No link to a detail page and no menu: there is nothing to set up or delete.
-    expect(first).not.toContain("<a ");
-    expect(first).not.toContain('aria-label="More actions"');
-    expect(rest).toHaveLength(2);
-    for (const row of rest) expect(row).toContain('aria-label="More actions"');
-    expect(rest[0]).toContain('href="/domains/mail.acme.example"');
+  it("lists the team's own domains, each with a link and a menu, and counts them", () => {
+    const { html, rows } = page({ list: owned });
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row).toContain('aria-label="More actions"');
+    expect(rows[0]).toContain('href="/domains/mail.acme.example"');
     expect(html).toContain("Page 1 – 1 of 2 domains");
-
-    const open = page({ list: owned, shared: sharedRow({ mode: "open", cause: null }) });
-    expect(open.rows[0]).toContain(">can start conversations<");
   });
 
-  it("stays above the no-match card when the filters match no own domain", () => {
-    // Its own name matches: the filters read the team's own domains only.
-    const { html, rows } = page({
-      list: owned,
-      shared: sharedRow({ mode: "open", cause: null }),
-      search: "q=agents",
-    });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toContain("acme.agents.example");
-    expect(html.indexOf("None of your domains match the filters.")).toBeGreaterThan(
-      html.indexOf("</table>"),
-    );
+  it("shows the no-match card alone when the filters match no domain", () => {
+    const { html, rows } = page({ list: owned, search: "q=agents" });
+    expect(rows).toHaveLength(0);
+    expect(html).not.toContain("<table");
+    expect(html).toContain("None of your domains match the filters.");
     expect(html).not.toContain("Page 1 –");
   });
 
-  it("sits above the empty state when the team has no own domain", () => {
-    const { html, rows } = page({
-      list: [],
-      shared: sharedRow({ mode: "receive_only", cause: "instance" }),
-    });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toContain(">sending paused<");
-    expect(html.indexOf("No domains of your own yet.")).toBeGreaterThan(html.indexOf("</table>"));
+  it("shows the empty state alone when the team has no domain", () => {
+    const { html } = page({ list: [] });
+    expect(html).not.toContain("<table");
+    expect(html).toContain("No domains of your own yet.");
     expect(html).toContain('href="/domains/new"');
     // Nothing to filter.
     expect(html).not.toContain('class="ms-filter-row"');
-
-    // Without the row (no shared domain, or its name review pending), the empty state alone.
-    const alone = page({ list: [], shared: null });
-    expect(alone.html).not.toContain("<table");
-    expect(alone.html).toContain("No domains of your own yet.");
   });
 });
