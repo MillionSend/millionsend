@@ -1353,8 +1353,6 @@ describe("dashboard admin parity", () => {
     // No tool changes an inbox's safety rules or erases received mail.
     "inboxes.updateSafety": [],
     "receiving.delete": [],
-    "team-bootstrap.current": [],
-    "team-bootstrap.end": [],
     "webhooks.create": [
       {
         name: "create_webhook",
