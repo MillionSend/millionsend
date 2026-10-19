@@ -39,4 +39,4 @@ ALTER TABLE "emails" ADD COLUMN "send_order" bigint;--> statement-breakpoint
 ALTER TABLE "domain_warmup_days" ADD CONSTRAINT "domain_warmup_days_domain_id_domain_warmups_domain_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domain_warmups"("domain_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "domain_warmups" ADD CONSTRAINT "domain_warmups_domain_id_domains_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "domain_warmups" ADD CONSTRAINT "domain_warmups_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "emails_parked_send_order_idx" ON "emails" USING btree ("broadcast_id","send_order","id") WHERE "emails"."latest_status" = 'queued_quota' and "emails"."send_order" is not null;
+CREATE INDEX "emails_warmup_send_order_idx" ON "emails" USING btree ("broadcast_id","send_order","id") WHERE "emails"."latest_status" = 'queued_quota' and "emails"."send_order" is not null;

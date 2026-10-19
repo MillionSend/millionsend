@@ -4318,8 +4318,8 @@
           "method": "btree",
           "with": {}
         },
-        "emails_parked_send_order_idx": {
-          "name": "emails_parked_send_order_idx",
+        "emails_warmup_send_order_idx": {
+          "name": "emails_warmup_send_order_idx",
           "columns": [
             {
               "expression": "broadcast_id",

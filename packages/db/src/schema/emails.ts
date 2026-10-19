@@ -184,7 +184,7 @@ export const emails = pgTable(
       .on(t.broadcastId, t.createdAt, t.id)
       .where(sql`${t.latestStatus} = 'queued_quota'`),
     // A warming domain's broadcast releases its parked rows by send order.
-    index("emails_parked_send_order_idx")
+    index("emails_warmup_send_order_idx")
       .on(t.broadcastId, t.sendOrder, t.id)
       .where(sql`${t.latestStatus} = 'queued_quota' and ${t.sendOrder} is not null`),
     // The send reconcile sweep walks queued rows oldest first every 15
