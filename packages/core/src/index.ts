@@ -240,6 +240,8 @@ export {
   rungThatFits,
   type SendingBroadcast,
   sendingBroadcasts,
+  warmupBroadcastPlans,
+  warmupPastHorizon,
 } from "./broadcast-pacing.js";
 export type { FingerprintMessage } from "./campaign-fingerprints.js";
 export {

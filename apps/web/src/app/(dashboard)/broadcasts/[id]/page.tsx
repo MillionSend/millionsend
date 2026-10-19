@@ -1,6 +1,7 @@
 "use client";
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { inferRouterOutputs } from "@trpc/server";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -9,6 +10,7 @@ import { Breakable } from "@/components/breakable";
 import { CopyChip } from "@/components/copy-chip";
 import { EmailContentPanel } from "@/components/email-content-panel";
 import { EmailsTable } from "@/components/emails-table";
+import { GradientBanner } from "@/components/gradient-banner";
 import { LoadError } from "@/components/load-error";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -16,10 +18,30 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
-import { formatDayTime, formatUtcTimestamp, sendingDays } from "@/lib/format";
+import { type RailStep, StepRail } from "@/components/step-rail";
+import { Table } from "@/components/table";
+import { formatPercent } from "@/lib/console-format";
+import {
+  formatDayTime,
+  formatStepDay,
+  formatStepTime,
+  formatUtcTimestamp,
+  roundUpToQuarterHour,
+  sendingDays,
+} from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+import {
+  utcDayInstant,
+  type WarmupSignalView,
+  warmupPlanSteps,
+  warmupReasonShort,
+  warmupReasons,
+} from "@/lib/warmup";
+import type { AppRouter } from "@/server/routers";
 import { ListFooter } from "../../emails/list-parts";
 import { type BroadcastStatus, FinishCell, PacingSteps, SendingStatus } from "../parts";
+
+type BroadcastWarmup = NonNullable<inferRouterOutputs<AppRouter>["broadcasts"]["get"]["warmup"]>;
 
 function Microlabel({ children }: { children: React.ReactNode }) {
   return (
@@ -160,6 +182,7 @@ export default function BroadcastDetailPage() {
               progress={progress}
               planHold={broadcast.planHold?.resumesAt ?? null}
               held={broadcast.held}
+              warmup={broadcast.warmup?.status ?? null}
               locale={locale}
             />
           ) : (
@@ -182,6 +205,13 @@ export default function BroadcastDetailPage() {
           {broadcast?.topicName ? (
             <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>
               {t("detail.topic")}: {broadcast.topicName}
+            </div>
+          ) : null}
+          {broadcast?.warmup ? (
+            <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>
+              {broadcast.warmupSkipped > 0
+                ? t("detail.warmupOrderSkipped", { skipped: nf.format(broadcast.warmupSkipped) })
+                : t("detail.warmupOrder")}
             </div>
           ) : null}
         </div>
@@ -226,7 +256,14 @@ export default function BroadcastDetailPage() {
         </div>
       </div>
 
-      {progress && broadcast && broadcast.releases.length > 0 ? (
+      {broadcast?.warmup ? (
+        <WarmupBand
+          warmup={broadcast.warmup}
+          sent={broadcast.sent}
+          finishesAt={finishesAt}
+          locale={locale}
+        />
+      ) : progress && broadcast && broadcast.releases.length > 0 ? (
         <PacingBand sent={broadcast.sent} releases={broadcast.releases} locale={locale} />
       ) : null}
 
@@ -286,6 +323,10 @@ export default function BroadcastDetailPage() {
           value={broadcast ? engagement(broadcast.stats.unsubscribed) : null}
         />
       </div>
+
+      {status === "sending" || status === "sent" || status === "canceled" ? (
+        <ProvidersTable broadcastId={id} />
+      ) : null}
 
       <div className="ms-microlabel">{t("detail.content")}</div>
       <div style={{ marginTop: 12 }}>
@@ -377,6 +418,201 @@ function PacingBand({
       </div>
       <PacingSteps sent={sent} releases={releases} locale={locale} />
       <p>{t("guard.reason")}</p>
+    </div>
+  );
+}
+
+/** A checked day's outcome as its rail row words it. */
+const RAIL_OUTCOME: Record<string, string> = {
+  held: "rail.held",
+  stepped_back: "rail.steppedBack",
+  paused: "rail.paused",
+};
+
+/**
+ * The domain's warm-up while it holds rows of this send: a banner when the
+ * last check held or cut the volume, or paused the warm-up, and while it
+ * warms, this send's days on the rail (those it sent, today with its meter,
+ * the rest of its plan).
+ */
+function WarmupBand({
+  warmup,
+  sent,
+  finishesAt,
+  locale,
+}: {
+  warmup: BroadcastWarmup;
+  sent: { at: Date; count: number }[];
+  finishesAt: Date | null;
+  locale: string;
+}) {
+  const t = useTranslations("broadcasts");
+  const tWarmup = useTranslations("warmup");
+  const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+  const reasons = (signals: readonly WarmupSignalView[] | null) =>
+    warmupReasons(signals ?? [], tWarmup, locale);
+  if (warmup.status === "paused") {
+    return (
+      <GradientBanner
+        variant="danger"
+        title={tWarmup("row.pausedTitle")}
+        action={
+          <Link
+            href={`/domains/${warmup.domainId}?tab=warmup`}
+            style={{
+              color: "var(--ms-bone)",
+              textDecoration: "underline dotted var(--ms-muted)",
+              textUnderlineOffset: 3,
+            }}
+          >
+            {t("detail.openWarmup")}
+          </Link>
+        }
+        style={{ marginBottom: 6 }}
+      >
+        {t("detail.warmupPausedBody", { reasons: reasons(warmup.pauseSignals) }).trim()}
+      </GradientBanner>
+    );
+  }
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const sentByDay = new Map<string, number>();
+  for (const s of sent) {
+    const day = new Date(s.at).toISOString().slice(0, 10);
+    sentByDay.set(day, (sentByDay.get(day) ?? 0) + s.count);
+  }
+  const checked = new Map(warmup.days.map((d) => [d.day, d]));
+  const steps: RailStep[] = [...sentByDay]
+    .filter(([day]) => day < today)
+    .map(([day, count], i) => {
+      const check = checked.get(day);
+      const reason = check?.signals ? warmupReasonShort(check.signals, tWarmup, locale) : null;
+      return {
+        key: day,
+        when: formatStepDay(utcDayInstant(day), locale),
+        what: tWarmup(RAIL_OUTCOME[check?.outcome ?? ""] ?? "rail.sent", {
+          count: nf.format(count),
+        }),
+        sub: reason ? (
+          <span style={{ color: "var(--ms-warn)" }}>{reason}</span>
+        ) : i === 0 ? (
+          tWarmup("rail.firstNote")
+        ) : undefined,
+        state: "done",
+      };
+    });
+  const sentToday = sentByDay.get(today) ?? 0;
+  const planned = warmup.perDay[0]?.day === today ? warmup.perDay[0].count : 0;
+  // Today leads the plan's rows when anything of this send goes out today.
+  const ahead = warmup.perDay.filter((d) => d.count > 0 || (d.day === today && sentToday > 0));
+  const finish = finishesAt ? roundUpToQuarterHour(finishesAt) : null;
+  const rest = warmupPlanSteps({
+    perDay: ahead,
+    locale,
+    t: tWarmup,
+    labels: "dates",
+    last: (count) =>
+      finish
+        ? t("guard.stepLast", { count, time: formatStepTime(finish, locale) })
+        : tWarmup("rail.more", { count }),
+  });
+  if (ahead[0]?.day === today) {
+    const allowance = sentToday + planned;
+    rest[0] = {
+      key: today,
+      when: tWarmup("rail.todayLabel"),
+      what: tWarmup("rail.today", {
+        allowance: nf.format(allowance),
+        sent: nf.format(sentToday),
+      }),
+      sub: !warmup.checked
+        ? tWarmup("rail.todayWaiting")
+        : warmup.today
+          ? tWarmup("rail.todayWindow", {
+              start: formatStepTime(warmup.today.startsAt, locale),
+              end: formatStepTime(roundUpToQuarterHour(warmup.today.endsAt), locale),
+            })
+          : undefined,
+      state: "now",
+      progress: sentToday / Math.max(1, allowance),
+    };
+  }
+  const latest = warmup.latest;
+  return (
+    <>
+      {latest?.outcome === "held" || latest?.outcome === "stepped_back" ? (
+        <GradientBanner
+          variant="warn"
+          title={t(latest.outcome === "held" ? "detail.warmupHeld" : "detail.warmupCut", {
+            volume: nf.format(warmup.volume),
+          })}
+          style={{ marginBottom: 6 }}
+        >
+          {t("detail.warmupHeldBody", { reasons: reasons(latest.signals) }).trim()}
+        </GradientBanner>
+      ) : null}
+      <div className="ms-pacing">
+        <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
+          {tWarmup("pace.label")}
+        </div>
+        <StepRail label={tWarmup("pace.label")} steps={[...steps, ...rest]} />
+        <p>{t("detail.warmupNote", { domain: warmup.domain ?? "" })}</p>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The broadcast's sends by recipient mailbox provider. Delivered, bounced
+ * and delayed are shares of what went out, opened and clicked of what was
+ * delivered: a provider filing the mail as spam shows as a low open share.
+ */
+function ProvidersTable({ broadcastId }: { broadcastId: string }) {
+  const t = useTranslations("broadcasts");
+  const locale = useLocale();
+  const trpc = useTRPC();
+  const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+  const query = useQuery(trpc.broadcasts.providers.queryOptions({ id: broadcastId }));
+  const rows = query.data ?? [];
+  if (rows.length === 0) return null;
+  const share = (n: number, of: number) => (of > 0 ? formatPercent(n / of, locale, 1) : "—");
+  return (
+    <div style={{ marginBottom: 26 }}>
+      <div className="ms-microlabel" style={{ marginBottom: 12 }}>
+        {t("detail.providers.label")}
+      </div>
+      <Table className="baseline">
+        <thead>
+          <tr>
+            <th>{t("detail.providers.provider")}</th>
+            <th className="right">{t("detail.providers.sent")}</th>
+            <th className="right">{t("detail.providers.delivered")}</th>
+            <th className="right">{t("detail.providers.opened")}</th>
+            <th className="right">{t("detail.providers.clicked")}</th>
+            <th className="right">{t("detail.providers.bounced")}</th>
+            <th className="right">{t("detail.providers.delayed")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.provider}>
+              <td>{t(`detail.providers.${row.provider}`)}</td>
+              <td className="right num">{nf.format(row.sent)}</td>
+              <td className="right num">{share(row.delivered, row.sent)}</td>
+              <td className="right num">{share(row.opened, row.delivered)}</td>
+              <td className="right num">{share(row.clicked, row.delivered)}</td>
+              <td className="right num">{share(row.bounced, row.sent)}</td>
+              {/* The table mutes its last column; these figures read alike. */}
+              <td className="right num" style={{ color: "var(--ms-bone)" }}>
+                {share(row.delayed, row.sent)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+      <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
+        {t("detail.providers.note")}
+      </p>
     </div>
   );
 }

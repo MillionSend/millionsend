@@ -58,7 +58,9 @@ import {
   makeUnsubscribeToken,
   markSegmentsStale,
   monthlyQuotaMessage,
+  PACING_HORIZON_MAX_RETENTION_DAYS,
   PLAN_CONTACT_LIMIT,
+  pacingHorizonDays,
   parseScheduledAt,
   planCaps,
   planRegionSend,
@@ -100,6 +102,8 @@ import {
   type VirusResult,
   verifySenderDomain,
   type WebhookEnqueue,
+  warmupBroadcastPlans,
+  warmupPastHorizon,
   warmupSendPreview,
   webhookBatch,
   wireLastEvent,
@@ -2896,6 +2900,20 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             at: scheduledAt,
           })
         : null;
+    // The warm-up's own plan meets the same horizon a paced send does; a
+    // paused warm-up has no finish, and its send waits.
+    if (warmup?.plan) {
+      const horizonDays = deps.pacing
+        ? await deps.pacing.horizonDays()
+        : pacingHorizonDays(PACING_HORIZON_MAX_RETENTION_DAYS);
+      if (warmupPastHorizon(warmup.plan, horizonDays)) {
+        return fail(
+          422,
+          "broadcast_too_large",
+          `At this warm-up's pace this broadcast needs more than ${horizonDays} days. Raise the daily target or send to a smaller segment.`,
+        );
+      }
+    }
     // The planner says when the send finishes and refuses one that would
     // not finish inside the horizon; without SES's numbers it says nothing.
     const estimate = warmup?.plan
@@ -3003,12 +3021,17 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     return mine ? { ...mine, count, horizonDays } : null;
   };
 
-  /** finishes_at per broadcast of the team still going out: one planner run per region, under the team's own caps. */
+  /**
+   * finishes_at per broadcast of the team still going out: a warming
+   * domain's from its warm-up's plan, the rest from one planner run per
+   * region, under the team's own caps.
+   */
   const liveFinishes = async (teamId: string): Promise<Map<string, Date | null>> => {
     const out = new Map<string, Date | null>();
-    if (!deps.pacing) return out;
     const mine = await sendingBroadcasts(db, { teamId });
-    const regions = new Set(mine.flatMap((b) => (b.region ? [b.region] : [])));
+    for (const [id, plan] of await warmupBroadcastPlans(db, mine)) out.set(id, plan.finishesAt);
+    if (!deps.pacing) return out;
+    const regions = new Set(mine.flatMap((b) => (b.region && !b.warmup ? [b.region] : [])));
     if (regions.size === 0) return out;
     const [reservePercent, rateCeiling, horizonDays, quota] = await Promise.all([
       deps.pacing.reservePercent(),

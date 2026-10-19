@@ -10,27 +10,43 @@ import {
   broadcastSendSpacingMs,
   bulkSentBySlot,
   bulkShare,
+  DAY_MS,
   fetchDeliverabilityHealth,
   fetchTeamQuota,
   getInstanceSettings,
+  getWarmup,
+  type InstanceSettings,
   type PlanCap,
   type PlanInput,
   pacingHorizonDays,
   pausedRegions,
   planBulkWaves,
   planCaps,
+  planDomainWarmup,
   planLabel,
+  planWarmupDays,
   quotaUsage,
   regionBulkCounts,
   rungThatFits,
   type SendingBroadcast,
   sendingBroadcasts,
   transactionalSent24h,
+  utcDay,
   verifySenderDomain,
+  WARMUP_INACTIVE_DAYS,
+  type WarmupOutcome,
+  type WarmupPlan,
+  type WarmupStatus,
+  warmupBroadcastPlans,
+  warmupOverview,
+  warmupPastHorizon,
+  warmupSendPreview,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { and, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { utcDayInstant, type WarmupSignalView } from "@/lib/warmup";
 import { plannerRegionAccount } from "./console/ses-regions";
+import { signalViews, warmupTodayWindow } from "./warmup-view";
 
 /** What the send dialog and the send mutation say about a send being initiated. */
 export interface SendEstimate {
@@ -59,6 +75,13 @@ export interface RegionPlan {
 
 const NEW_SEND = "new";
 
+/** Days a send may take before it is refused. */
+function horizonDaysOf(settings: InstanceSettings): number {
+  return pacingHorizonDays(
+    settings.emailRetentionDays ?? Number(env.EMAIL_RETENTION_DAYS ?? EMAIL_RETENTION_DAYS_DEFAULT),
+  );
+}
+
 /**
  * The planner over a region's live state, for one team's surfaces. Null when
  * SES has not answered GetAccount yet (a cold cache, or a region down): the
@@ -80,9 +103,7 @@ export async function planBroadcastSend(
     Number(env.SES_TRANSACTIONAL_RESERVE ?? SES_TRANSACTIONAL_RESERVE_DEFAULT);
   const rateCeiling =
     settings.sesMaxSendRate ?? Number(env.SES_MAX_SEND_RATE ?? SES_MAX_SEND_RATE_DEFAULT);
-  const horizonDays = pacingHorizonDays(
-    settings.emailRetentionDays ?? Number(env.EMAIL_RETENTION_DAYS ?? EMAIL_RETENTION_DAYS_DEFAULT),
-  );
+  const horizonDays = horizonDaysOf(settings);
   const { quota: sesQuota } = account.overview;
   const [counts, sentBySlot, sending, quota] = await Promise.all([
     regionBulkCounts(db, now),
@@ -106,13 +127,16 @@ export async function planBroadcastSend(
     sentBySlot,
     start: now,
     horizonDays,
-    broadcasts: sending.map((b) => ({
-      key: b.id,
-      queued: b.queued,
-      parked: b.parked,
-      ...(b.scheduledAt ? { at: Math.min(b.scheduledAt.getTime(), now.getTime()) } : {}),
-      ...(b.teamId === opts.teamId ? { caps: ownCaps.map((c) => ({ ...c })) } : {}),
-    })),
+    // A warming domain trickles out by its warm-up's day: warmupBroadcastPlans says when.
+    broadcasts: sending
+      .filter((b) => !b.warmup)
+      .map((b) => ({
+        key: b.id,
+        queued: b.queued,
+        parked: b.parked,
+        ...(b.scheduledAt ? { at: Math.min(b.scheduledAt.getTime(), now.getTime()) } : {}),
+        ...(b.teamId === opts.teamId ? { caps: ownCaps.map((c) => ({ ...c })) } : {}),
+      })),
   };
   const byKey = (estimates: BroadcastEstimate[]) =>
     new Map(estimates.filter((e) => e.key !== NEW_SEND).map((e) => [e.key, e]));
@@ -172,12 +196,28 @@ export interface SendingProgressRow {
   releases: { at: Date; endsAt: Date; count: number }[];
   /** Rows already out, in quarter-hour buckets. */
   sent: { at: Date; count: number }[];
+  /** Its domain's warm-up while warming or paused, with the plan for its rows still waiting. */
+  warmup: { status: "warming" | "paused"; domainId: string; plan: WarmupPlan } | null;
+}
+
+/**
+ * A warm-up plan as the rail's releases: the first day from now, the rest at
+ * their UTC noon (a date every zone reads alike), the last ending at the finish.
+ */
+function warmupReleases(plan: WarmupPlan, now: Date): SendingProgressRow["releases"] {
+  const days = plan.perDay.filter((d) => d.count > 0);
+  return days.map((d, i) => {
+    const at = d.day === utcDay(now) ? now : utcDayInstant(d.day);
+    const endsAt = i === days.length - 1 && plan.finishesAt ? plan.finishesAt : at;
+    return { at, endsAt, count: d.count };
+  });
 }
 
 /**
  * The rows of a team's sending broadcasts as the list and the detail show
  * them: how many went out and when, how many still wait, and when the rest
- * goes. One planner run per region; nothing when no broadcast is sending.
+ * goes. One planner run per region, and the warm-up's own plan for a warming
+ * domain's; nothing when no broadcast is sending.
  */
 export async function sendingProgress(
   db: Db,
@@ -187,15 +227,16 @@ export async function sendingProgress(
   const out = new Map<string, SendingProgressRow>();
   const mine = await sendingBroadcasts(db, { teamId });
   if (mine.length === 0) return out;
-  const regions = new Set(mine.flatMap((b) => (b.region ? [b.region] : [])));
+  const regions = new Set(mine.flatMap((b) => (b.region && !b.warmup ? [b.region] : [])));
   const e = schema.emails;
   const bucket = sql<Date>`date_bin('15 minutes', ${e.sentAt}, timestamptz 'epoch')`;
-  const [plans, sentRows] = await Promise.all([
+  const [plans, warmups, sentRows] = await Promise.all([
     Promise.all(
       [...regions].map(
         async (region) => [region, await planBroadcastSend(db, { teamId, region, now })] as const,
       ),
     ).then((entries) => new Map(entries)),
+    warmupBroadcastPlans(db, mine, now),
     db
       .select({ broadcastId: e.broadcastId, at: bucket, count: sql<number>`count(*)::int` })
       .from(e)
@@ -212,15 +253,18 @@ export async function sendingProgress(
       .orderBy(bucket),
   ]);
   for (const b of mine) {
+    const plan = warmups.get(b.id);
     const estimate = b.region ? plans.get(b.region)?.estimates.get(b.id) : undefined;
     out.set(b.id, {
       sentCount: b.sent,
       parkedCount: b.parked,
-      finishesAt: estimate?.finishesAt ?? null,
-      releases: estimate?.releases ?? [],
+      finishesAt: plan ? plan.finishesAt : (estimate?.finishesAt ?? null),
+      releases: plan ? warmupReleases(plan, now) : (estimate?.releases ?? []),
       sent: sentRows
         .filter((r) => r.broadcastId === b.id)
         .map((r) => ({ at: new Date(r.at), count: r.count })),
+      warmup:
+        plan && b.warmup && b.domainId ? { status: b.warmup, domainId: b.domainId, plan } : null,
     });
   }
   return out;
@@ -264,4 +308,183 @@ export async function planHoldUntil(
     (cap) => cap.remaining <= 0,
   );
   return bound.length > 0 ? new Date(Math.min(...bound.map((cap) => cap.resetsAt))) : null;
+}
+
+/** What a domain's warm-up does to a send: the dialog shows it, the send enforces it. */
+export interface WarmupSendPlan {
+  status: WarmupStatus;
+  bestDay: number;
+  /** The send's audience. */
+  eligible: number;
+  /** Of those, inactive by the warm-up's order (its defaults while it has none). */
+  inactive: number;
+  /** A contact with no activity since then reads as inactive. */
+  inactiveSince: Date;
+  /** Whether the plan leaves the inactive out: the choice given, else the warm-up's own. */
+  skipInactive: boolean;
+  /** Far bigger than anything the domain sent in a day lately, with no warm-up on. */
+  risky: boolean;
+  /** The live plan while warming or paused; while off, the one a warm-up turned on now would follow. */
+  plan: WarmupPlan;
+  /** The plan goes out past the horizon: the send is refused. */
+  blocked: boolean;
+  horizonDays: number;
+}
+
+/** A send over this many, and over twice the domain's best day lately, reads as risky. */
+const RISKY_MIN = 5_000;
+
+/**
+ * What a domain's warm-up does to a send, for the dialog and for the send
+ * itself: while warming or paused, its live plan; while off, the plan a
+ * warm-up turned on now would follow, for a risky send or one that turns it
+ * on (`enabling`). Null when the warm-up has nothing to say.
+ */
+export async function warmupSendPlan(
+  db: Db,
+  opts: {
+    teamId: string;
+    domainId: string;
+    segmentId: string | null;
+    topicId: string | null;
+    /** The send's audience: a small one skips the warm-up's reads. */
+    count: number;
+    at: Date;
+    skipInactive?: boolean | undefined;
+    enabling?: boolean | undefined;
+  },
+): Promise<WarmupSendPlan | null> {
+  const { teamId, domainId } = opts;
+  const row = await getWarmup(db, teamId, domainId);
+  const live = row?.status === "warming" || row?.status === "paused" ? row : null;
+  if (!live && !opts.enabling && opts.count <= RISKY_MIN) return null;
+  const now = new Date();
+  const [preview, settings] = await Promise.all([
+    warmupSendPreview(db, {
+      teamId,
+      domainId,
+      segmentId: opts.segmentId,
+      topicId: opts.topicId,
+      at: opts.at,
+      now,
+    }),
+    getInstanceSettings(db),
+  ]);
+  if (!preview) return null;
+  const risky = !live && preview.eligible > Math.max(RISKY_MIN, 2 * preview.bestDay);
+  if (!live && !risky && !opts.enabling) return null;
+  // Off, a warm-up starts from the team's earlier settings, else the defaults.
+  const ramp = live ?? (await warmupOverview(db, { teamId, domainId, now }))?.settings;
+  if (!ramp) return null;
+  const skipInactive = opts.skipInactive ?? ramp.skipInactive;
+  const count = preview.eligible - (skipInactive ? preview.inactive : 0);
+  const plan = live
+    ? await planDomainWarmup(db, { teamId, domainId, count, at: opts.at })
+    : planWarmupDays({
+        now: opts.at,
+        paused: false,
+        volume: ramp.startVolume,
+        dailyTarget: ramp.dailyTarget,
+        today: null,
+        waitingAhead: 0,
+        count,
+      });
+  if (!plan) return null;
+  const horizonDays = horizonDaysOf(settings);
+  return {
+    status: preview.status,
+    bestDay: preview.bestDay,
+    eligible: preview.eligible,
+    inactive: preview.inactive,
+    inactiveSince: new Date(now.getTime() - WARMUP_INACTIVE_DAYS * DAY_MS),
+    skipInactive,
+    risky,
+    plan,
+    blocked: warmupPastHorizon(plan, horizonDays),
+    horizonDays,
+  };
+}
+
+/** A sending broadcast's warm-up as its page shows it. */
+export interface BroadcastWarmup {
+  status: "warming" | "paused";
+  domainId: string;
+  /** The day's volume now. */
+  volume: number;
+  /** The newest checked day of this run: one that held or cut explains today's volume. */
+  latest: { outcome: WarmupOutcome | null; signals: WarmupSignalView[] | null } | null;
+  /** What paused it; null when the team did. */
+  pauseSignals: WarmupSignalView[] | null;
+  /** Yesterday is checked, so today's mail may go. */
+  checked: boolean;
+  /** This run's checked days since the broadcast started, oldest first. */
+  days: { day: string; outcome: WarmupOutcome | null; signals: WarmupSignalView[] | null }[];
+  /** Its rows still waiting, by UTC day from today. */
+  perDay: { day: string; count: number }[];
+  /** Today's window for its rows at the drain's pace; null when none go today. */
+  today: { startsAt: Date; endsAt: Date } | null;
+}
+
+export async function broadcastWarmup(
+  db: Db,
+  teamId: string,
+  warmup: NonNullable<SendingProgressRow["warmup"]>,
+  startedAt: Date | null,
+  now: Date = new Date(),
+): Promise<BroadcastWarmup | null> {
+  const d = schema.domainWarmupDays;
+  const [row, rows] = await Promise.all([
+    getWarmup(db, teamId, warmup.domainId),
+    db
+      .select({
+        day: d.day,
+        allowance: d.allowance,
+        sent: d.sent,
+        outcome: d.outcome,
+        signals: d.signals,
+        checkedAt: d.checkedAt,
+      })
+      .from(d)
+      .where(eq(d.domainId, warmup.domainId))
+      .orderBy(desc(d.day))
+      .limit(60),
+  ]);
+  if (!row) return null;
+  const today = utcDay(now);
+  // A restart begins a new history: only this run's days.
+  const checked = rows.filter((x) => x.checkedAt && x.day >= utcDay(row.startedAt));
+  const since = utcDay(startedAt ?? now);
+  const opened = rows.find((x) => x.day === today);
+  const first = warmup.plan.perDay[0];
+  const ready = (row.checkedThrough ?? "") >= utcDay(now.getTime() - DAY_MS);
+  const view = (x: (typeof rows)[number]) => ({
+    day: x.day,
+    outcome: x.outcome,
+    signals: signalViews(x.signals),
+  });
+  return {
+    status: warmup.status,
+    domainId: warmup.domainId,
+    volume: row.volume,
+    latest: checked[0] ? view(checked[0]) : null,
+    pauseSignals: signalViews(row.pauseSignals),
+    checked: ready,
+    days: checked
+      .filter((x) => x.day >= since)
+      .reverse()
+      .map(view),
+    perDay: warmup.plan.perDay,
+    today:
+      ready && warmup.status === "warming"
+        ? warmupTodayWindow(
+            {
+              day: today,
+              allowance: opened?.allowance ?? row.volume,
+              sent: opened?.sent ?? 0,
+            },
+            first?.day === today ? first.count : 0,
+            now,
+          )
+        : null,
+  };
 }

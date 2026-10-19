@@ -1,14 +1,17 @@
 "use client";
 
+import type { inferRouterOutputs } from "@trpc/server";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { DotParts } from "@/components/dot-parts";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
+import { Select } from "@/components/select";
 import type { TONE_COLOR } from "@/components/status-tile";
 import { type RailStep, StepRail } from "@/components/step-rail";
 import { emulateEmailScheme, PREVIEW_CANVAS } from "@/lib/email-preview";
 import {
+  formatDay,
   formatDayTime,
   formatFinishAbout,
   formatStepDay,
@@ -17,11 +20,14 @@ import {
   groupReleasesByDay,
   roundUpToQuarterHour,
   sameLocalDay,
+  sameUtcDay,
   sendingDays,
 } from "@/lib/format";
 import { escapeHtml } from "@/lib/html";
 import { MERGE_TOKEN_RE } from "@/lib/merge-fields";
 import { usePreviewScheme } from "@/lib/use-preview-scheme";
+import { utcDayInstant, warmupPlanSteps } from "@/lib/warmup";
+import type { AppRouter } from "@/server/routers";
 
 // Stand-in values so every merge pill reads as real content in the preview
 // rather than a raw {{{TOKEN}}}. UNSUBSCRIBE_URL becomes a dead "#" — the
@@ -59,14 +65,17 @@ export const PILL_VARIANT: Record<BroadcastStatus, keyof typeof TONE_COLOR> = {
 /**
  * Broadcast status pill; "sending" carries a pulsing dot — it is the only
  * live state. A `hold` replaces the pill with the still reason ("Waiting for
- * the plan · resumes …", "Delayed"), drawn as a warning.
+ * the plan · resumes …", "Delayed"), drawn as a warning; a `label` renames
+ * the state ("Warming up").
  */
 export function StatusPill({
   status,
   hold,
+  label,
 }: {
   status: BroadcastStatus;
   hold?: string | undefined;
+  label?: string | undefined;
 }) {
   const t = useTranslations("broadcasts");
   if (hold) return <span className="ms-badge ms-badge-warn">{hold}</span>;
@@ -88,7 +97,7 @@ export function StatusPill({
           }}
         />
       ) : null}
-      {t(`status.${status}`)}
+      {label ?? t(`status.${status}`)}
     </span>
   );
 }
@@ -108,6 +117,22 @@ export interface SendPlanEstimate {
   horizonDays: number;
 }
 
+/** What the sender domain's warm-up does to the send, as the router returns it. */
+export type SendPlanWarmup = NonNullable<
+  inferRouterOutputs<AppRouter>["broadcasts"]["sendPlan"]["warmup"]
+>;
+
+/** The send dialog's choice while a warm-up is offered. */
+export type SendPace = "warmup" | "normal";
+
+/** Whether the send goes out by the domain's warm-up: always while it is on, by choice while offered. */
+export function sendsByWarmup(warmup: SendPlanWarmup | null, pace: SendPace): boolean {
+  return (
+    warmup !== null &&
+    (warmup.status === "warming" || warmup.status === "paused" || pace === "warmup")
+  );
+}
+
 interface Step {
   when: string;
   what: string;
@@ -122,7 +147,9 @@ const NOW_WINDOW_MS = 60_000;
  * The send dialog's plan: the intro count, one timeline row per sending day
  * when the send is paced, and the reason (or the plan that would not hold
  * it back). Renders the too-large error in place of the timeline; the
- * caller disables the primary on `estimate.blocked`.
+ * caller disables the primary on `estimate.blocked`. With a `warmup`, the
+ * domain's warm-up: its plan while it is on, or, for a risky send, the
+ * choice between warming up and the normal pace.
  */
 export function SendPlanSummary({
   count,
@@ -130,14 +157,26 @@ export function SendPlanSummary({
   cloud,
   locale,
   now = new Date(),
+  warmup = null,
+  pace = "warmup",
+  onPace,
+  onSkipInactive,
+  scheduled = false,
 }: {
   count: number;
   estimate: SendPlanEstimate | null;
   cloud: boolean;
   locale: string;
   now?: Date;
+  warmup?: SendPlanWarmup | null;
+  pace?: SendPace;
+  onPace?: (pace: SendPace) => void;
+  onSkipInactive?: (skip: boolean) => void;
+  /** Starts later than now, so the warm-up's first day reads as a date. */
+  scheduled?: boolean;
 }) {
   const t = useTranslations("broadcasts");
+  const tWarmup = useTranslations("warmup");
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const finish = estimate?.finishesAt ? roundUpToQuarterHour(estimate.finishesAt) : null;
   const time = (d: Date) => formatStepTime(d, locale);
@@ -223,12 +262,125 @@ export function SendPlanSummary({
             : formatFinishAbout(rungFinish, locale),
         })
       : null;
+  const byWarmup = sendsByWarmup(warmup, pace);
+  const offered = warmup !== null && warmup.status !== "warming" && warmup.status !== "paused";
+  const warmFinish = warmup?.plan.finishesAt ? roundUpToQuarterHour(warmup.plan.finishesAt) : null;
+  // Paused, the send waits with nothing to plan; on, the warm-up's own days.
+  const ramp = byWarmup && warmup?.status !== "paused" ? warmup : null;
+  const rampDays = ramp?.plan.perDay.filter((d) => d.count > 0) ?? [];
+  const pacedRail = !byWarmup && steps.length > 0;
   return (
     <>
-      <p style={{ margin: `0 0 ${steps.length > 0 ? 14 : 18}px`, fontSize: "var(--ms-fs-ui)" }}>
+      <p
+        style={{
+          margin: `0 0 ${pacedRail || warmup ? 14 : 18}px`,
+          fontSize: "var(--ms-fs-ui)",
+        }}
+      >
         {count === 0 ? t("guard.zero") : t("guard.body", { count: nf.format(count) })}
       </p>
-      {steps.length > 0 ? (
+      {warmup && offered ? (
+        <>
+          <div
+            className="ms-notice-strip ms-notice-strip-warn"
+            role="status"
+            style={{ marginBottom: 14 }}
+          >
+            <span className="ms-notice-strip-text">
+              {warmup.bestDay > 0
+                ? t("guard.riskNotice", {
+                    domain: warmup.domain,
+                    best: nf.format(warmup.bestDay),
+                    count: nf.format(warmup.eligible),
+                  })
+                : t("guard.riskNoticeNew", {
+                    domain: warmup.domain,
+                    count: nf.format(warmup.eligible),
+                  })}
+            </span>
+          </div>
+          <div style={{ display: "grid", gap: 6, marginBottom: 16 }}>
+            <label className="ms-radio-card">
+              <input
+                type="radio"
+                name="send-pace"
+                checked={pace === "warmup"}
+                onChange={() => onPace?.("warmup")}
+              />
+              <span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    color: "var(--ms-bone)",
+                  }}
+                >
+                  {t("guard.optionWarmup")}
+                  <span className="ms-chip" style={{ fontSize: 10.5, padding: "1px 7px" }}>
+                    {t("guard.recommended")}
+                  </span>
+                </span>
+                <div className="sub">
+                  {warmFinish
+                    ? t("guard.optionWarmupSub", {
+                        start: nf.format(warmup.plan.perDay[0]?.count ?? 0),
+                        date: formatStepDay(warmFinish, locale),
+                      })
+                    : t("guard.optionWarmupSubOpen", {
+                        start: nf.format(warmup.plan.perDay[0]?.count ?? 0),
+                      })}
+                </div>
+              </span>
+            </label>
+            <label className="ms-radio-card">
+              <input
+                type="radio"
+                name="send-pace"
+                checked={pace === "normal"}
+                onChange={() => onPace?.("normal")}
+              />
+              <span>
+                <span style={{ color: "var(--ms-bone)" }}>{t("guard.optionNormal")}</span>
+                <div className="sub">
+                  {finish && !estimate?.blocked
+                    ? t("guard.optionNormalSub", { date: formatStepDay(finish, locale) })
+                    : t("guard.optionNormalSubOpen")}
+                </div>
+              </span>
+            </label>
+          </div>
+        </>
+      ) : warmup ? (
+        <p style={{ margin: "0 0 14px", fontSize: "var(--ms-fs-ui)" }}>
+          {t(warmup.status === "paused" ? "guard.pausedIntro" : "guard.warmingIntro", {
+            domain: warmup.domain,
+          })}
+        </p>
+      ) : null}
+      {ramp && rampDays.length > 0 ? (
+        <StepRail
+          label={t("guard.warmupPlan")}
+          steps={warmupPlanSteps({
+            perDay: rampDays,
+            locale,
+            t: tWarmup,
+            labels: "dates",
+            startsNow:
+              !scheduled &&
+              rampDays[0] !== undefined &&
+              sameUtcDay(utcDayInstant(rampDays[0].day), now),
+            last: (n) =>
+              warmFinish
+                ? t(rampDays.length === 1 ? "guard.stepOnly" : "guard.stepLast", {
+                    count: n,
+                    time: time(warmFinish),
+                  })
+                : tWarmup("rail.more", { count: n }),
+          })}
+        />
+      ) : null}
+      {pacedRail ? (
         <StepRail
           label={t("guard.title")}
           steps={steps.map((step) => ({
@@ -239,7 +391,46 @@ export function SendPlanSummary({
           }))}
         />
       ) : null}
-      {paced && (planLine || estimate.planHold === null) ? (
+      {ramp && ramp.inactive > 0 ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            margin: "6px 0 14px",
+            padding: "10px 0",
+            borderTop: "1px solid var(--ms-line)",
+            borderBottom: "1px solid var(--ms-line)",
+          }}
+        >
+          <span style={{ fontSize: 13, color: "var(--ms-bone)" }}>
+            {t("guard.inactiveLabel")}
+            <span style={{ display: "block", fontSize: 12, color: "var(--ms-muted)" }}>
+              {t("guard.inactiveSub", { date: formatDay(ramp.inactiveSince, locale) })}
+            </span>
+          </span>
+          <Select
+            value={ramp.skipInactive ? "skip" : "last"}
+            onChange={(value) => onSkipInactive?.(value === "skip")}
+            ariaLabel={t("guard.inactiveLabel")}
+            width={220}
+            options={[
+              {
+                value: "skip",
+                label: t("guard.inactiveSkip", { count: nf.format(ramp.inactive) }),
+              },
+              { value: "last", label: tWarmup("settings.inactiveLast") },
+            ]}
+          />
+        </div>
+      ) : null}
+      {ramp ? (
+        <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>
+          {t("guard.warmupReason")}
+        </p>
+      ) : !byWarmup && paced && (planLine || estimate.planHold === null) ? (
         <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>
           {planLine ? (
             <>
@@ -250,7 +441,13 @@ export function SendPlanSummary({
           )}
         </p>
       ) : null}
-      {estimate?.blocked ? (
+      {byWarmup ? (
+        warmup?.blocked ? (
+          <p className="ms-field-error" style={{ margin: "0 0 18px" }}>
+            {t("guard.warmupTooLong", { days: warmup.horizonDays })}
+          </p>
+        ) : null
+      ) : estimate?.blocked ? (
         <p className="ms-field-error" style={{ margin: "0 0 18px" }}>
           {t(cloud ? "guard.tooLarge" : "guard.tooLargeSelfHost", { days: estimate.horizonDays })}
         </p>
@@ -350,21 +547,27 @@ export function SendingStatus({
   progress,
   planHold,
   held,
+  warmup = null,
   locale,
 }: {
   status: BroadcastStatus;
   progress: SendingProgress | null;
   planHold: Date | null;
   held: boolean;
+  /** Its domain's warm-up, while it still holds rows of this send. */
+  warmup?: "warming" | "paused" | null;
   locale: string;
 }) {
   const t = useTranslations("broadcasts");
+  const tWarmup = useTranslations("warmup");
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const hold = held
     ? t("held.label")
     : status === "sending" && planHold
       ? t("detail.planHold", { date: formatStepDay(planHold, locale) })
-      : undefined;
+      : warmup === "paused"
+        ? tWarmup("status.paused")
+        : undefined;
   const line = held
     ? t("held.body")
     : status === "sending" && progress
@@ -373,7 +576,11 @@ export function SendingStatus({
   return (
     <>
       <div style={{ marginTop: 6 }}>
-        <StatusPill status={status} hold={hold} />
+        <StatusPill
+          status={status}
+          hold={hold}
+          label={warmup === "warming" ? tWarmup("status.warming") : undefined}
+        />
       </div>
       {line ? (
         <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 6 }}>
