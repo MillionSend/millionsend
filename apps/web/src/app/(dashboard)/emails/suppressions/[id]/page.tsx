@@ -138,12 +138,14 @@ export default function SuppressionDetailPage() {
   const row = query.data;
   const bounce = (row.bounce as BounceData | null) ?? null;
   const diagnostic = bounce?.bouncedRecipients?.[0]?.diagnosticCode ?? null;
-  const origin = [
-    t(`suppressions.reason.${row.reason}`),
-    ...(row.reason === "hard_bounce" && bounce?.bounceType
-      ? [bounce.bounceType.toLowerCase()]
-      : []),
-  ].join(" — ");
+  const origin = row.fullMailbox
+    ? t("suppressions.fullMailbox")
+    : [
+        t(`suppressions.reason.${row.reason}`),
+        ...(row.reason === "hard_bounce" && bounce?.bounceType
+          ? [bounce.bounceType.toLowerCase()]
+          : []),
+      ].join(" · ");
   // ponytail: complaint feedbackType isn't fetched here, so complaints resolve
   // to the generic "complaint.other" guidance; pull the complaint event's
   // feedbackType into suppressions.get if per-type complaint copy is needed.
@@ -248,7 +250,11 @@ export default function SuppressionDetailPage() {
 
       {row.reason === "hard_bounce" ? (
         <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 12 }}>
-          {t("suppressions.detail.removeNote")}
+          {t(
+            row.fullMailbox
+              ? "suppressions.detail.removeNoteFull"
+              : "suppressions.detail.removeNote",
+          )}
         </div>
       ) : null}
     </>

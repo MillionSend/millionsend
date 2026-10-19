@@ -364,8 +364,20 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
           ) : (
             <div style={{ display: "grid", gap: 16 }}>
               {[
-                { label: score("complaintRate"), rate: data.complaintRate, lines: COMPLAINT_LINES },
-                { label: score("hardBounceRate"), rate: data.hardBounceRate, lines: BOUNCE_LINES },
+                {
+                  label: score("complaintRate"),
+                  rate: data.complaintRate,
+                  lines: COMPLAINT_LINES,
+                  basis: t("complaintBasis", { sent: fmt.format(data.complaintSent) }),
+                  judged: data.complaintsJudged,
+                },
+                {
+                  label: score("hardBounceRate"),
+                  rate: data.hardBounceRate,
+                  lines: BOUNCE_LINES,
+                  basis: t("bounceBasis", { sent: fmt.format(data.sent) }),
+                  judged: true,
+                },
               ].map((row) => (
                 <div key={row.label}>
                   <div
@@ -376,17 +388,32 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
                     }}
                   >
                     <span style={{ color: "var(--ms-bone)" }}>{row.label}</span>
-                    <span className="ms-digits">{pct2.format(row.rate)}</span>
+                    <span
+                      className="ms-digits"
+                      style={row.judged ? undefined : { color: "var(--ms-faint)" }}
+                    >
+                      {pct2.format(row.rate)}
+                    </span>
                   </div>
-                  <RateTrack
-                    rate={row.rate}
-                    lines={row.lines}
-                    format={(rate) => pctLine.format(rate)}
-                    formatPenalty={(tenths) => signed(tenths)}
-                  />
+                  <div
+                    className="ms-mono"
+                    style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 2 }}
+                  >
+                    {row.basis}
+                  </div>
+                  {row.judged ? (
+                    <RateTrack
+                      rate={row.rate}
+                      lines={row.lines}
+                      format={(rate) => pctLine.format(rate)}
+                      formatPenalty={(tenths) => signed(tenths)}
+                    />
+                  ) : (
+                    <Note>{t("complaintsTooFew")}</Note>
+                  )}
                 </div>
               ))}
-              <Note>{t("outcomeNote", { sent: fmt.format(data.sent) })}</Note>
+              <Note>{t("outcomeNote")}</Note>
             </div>
           )}
 

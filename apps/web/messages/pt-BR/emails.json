@@ -139,8 +139,12 @@
       "notSentYet": "Ainda não enviado. Os eventos de entrega aparecem aqui assim que o provedor responder.",
       "waiting": "Aguardando envio",
       "waitingBody": "Sai assim que houver capacidade de envio.",
-      "warmup": "Domínio em aquecimento",
-      "warmupBody": "Domínios novos aumentam o volume aos poucos para proteger a entregabilidade. Sai conforme o volume diário permitir."
+      "warmup": "Esperando o aquecimento do domínio",
+      "warmupBody": "Este domínio envia um pouco mais a cada dia, com os contatos mais ativos primeiro. Este e-mail sai conforme o volume do dia permitir.",
+      "warmupPaused": "Esperando o aquecimento ser retomado",
+      "warmupPausedBody": "O aquecimento do domínio está pausado. Este e-mail sai depois que ele for retomado.",
+      "newDomainLimit": "Esperando o volume diário do domínio",
+      "newDomainLimitBody": "Domínios registrados há pouco enviam um pouco mais a cada dia. Este e-mail sai conforme o volume do dia permitir."
     },
     "headers": "Cabeçalhos",
     "noHeaders": "Sem cabeçalhos."
@@ -349,6 +353,7 @@
       "manual": "Manual",
       "one_click_unsubscribe": "Descadastro"
     },
+    "fullMailbox": "Caixa cheia ou inativa",
     "detail": {
       "breadcrumb": "Detalhes da supressão",
       "notFound": "Supressão não encontrada.",
@@ -356,7 +361,8 @@
       "recipient": "Destinatário",
       "added": "Adicionado",
       "details": "Detalhes",
-      "removeNote": "Se você remover um endereço que deu bounce permanente, ele provavelmente vai dar bounce de novo — remova apenas depois que a caixa postal for corrigida."
+      "removeNote": "Um endereço que deu bounce permanente provavelmente vai dar bounce de novo. Remova apenas depois que a caixa postal for corrigida.",
+      "removeNoteFull": "Esta caixa respondeu que estava cheia ou inativa. Remova quando souber que ela voltou a receber e-mails."
     },
     "removeDialog": {
       "title": "Remover endereço de e-mail",

@@ -532,7 +532,7 @@
       },
       "deliverability": {
         "label": "Deliverability",
-        "note": "Bounce or complaint rates at risk, or sending paused."
+        "note": "Bounce or complaint rates at risk, sending paused, and a domain's warm-up paused or done."
       },
       "webhook_failing": {
         "label": "Webhook endpoint failing",

@@ -18,7 +18,12 @@
   "complaint": {
     "title": "Taxa de reclamação",
     "risk": "RISCO {rate}",
-    "complained": "Reclamações"
+    "complained": "Reclamações",
+    "window": "últimos {days} dias em UTC",
+    "ofReportable": "{count} de {sent} para caixas que avisam sobre spam",
+    "noReports": "Para caixas que não avisam sobre spam",
+    "notCounted": "fora da taxa",
+    "noReportsHint": "O Gmail, o iCloud e a t-online nunca avisam os remetentes quando alguém marca um e-mail como spam, então os e-mails para eles ficam fora da taxa."
   },
   "chart": {
     "soFar": "até agora",
@@ -59,7 +64,10 @@
       "noFactors": "Todas as verificações passam em todos os e-mails avaliados.",
       "passing": "{count, plural, one {# verificação passando} other {# verificações passando}} em todo o volume",
       "outcomeSection": "Resultado · as taxas comparadas aos limites",
-      "outcomeNote": "Taxas sobre {sent} envios. Os limites seguem o Google Postmaster: reclamações abaixo de 0,10% e nunca chegando a 0,30%.",
+      "complaintBasis": "sobre {sent} envios para caixas que avisam sobre spam",
+      "bounceBasis": "sobre {sent} envios",
+      "complaintsTooFew": "Ainda não dá para avaliar as reclamações: há poucos envios para caixas que avisam sobre spam.",
+      "outcomeNote": "Os limites seguem o Google Postmaster: reclamações abaixo de 0,10% e nunca chegando a 0,30%.",
       "lift": "Como melhorar",
       "liftLine": "{title} · nota da conta sobe para {score}",
       "liftNone": "Não há mais o que ganhar no conteúdo. O que resta está nas taxas de resultado.",
