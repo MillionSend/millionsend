@@ -118,7 +118,10 @@ A nota da conta é uma visão móvel de 30 dias, construída de duas sub-notas:
   nunca alcance 0,30%): 0 a 6 pontos perdidos entre 0,1%–0,3%, caindo até 10
   entre 0,3%–1%. Hard bounces custam 0 a 4 pontos entre 2%–5%, até 6 entre
   5%–10%. Com menos de 100 envios na janela a sub-nota de resultado aparece
-  como "dados insuficientes" em vez de fabricada de uma amostra minúscula.
+  como "dados insuficientes" em vez de fabricada de uma amostra minúscula. A
+  taxa de reclamação é o número de reclamações sobre os envios para
+  provedores que as informam, e ela só tira pontos quando a janela tem 100
+  desses envios.
 
 A nota principal é `min(0,4·C + 0,6·O, O + 1,5)`. O segundo termo é um
 teto: um lint de conteúdo imaculado nunca mascara um problema real de
@@ -127,13 +130,17 @@ outra sozinha.
 
 A [proteção de envio](/pt-BR/concepts/broadcasts#proteções) adicionalmente limita
 a nota principal — em 6.9 em alerta, em 4.9 em pausa — para que a
-nota e uma pausa de envio nunca possam discordar.
+nota e uma pausa de envio nunca possam discordar. Ela lê a taxa de
+reclamação do mesmo jeito, então as reclamações só contam para um alerta ou
+uma pausa a partir de 100 desses envios.
 
 <Callout type="warn">
-O Amazon SES não oferece feedback loop do Gmail, então a taxa de reclamação
-aqui exclui estruturalmente o Gmail — sua taxa real de reclamação no Gmail
-pode ser pior que o número exibido. O [Google Postmaster
-Tools](https://postmaster.google.com) tem a visão do lado do Gmail.
+Gmail, Apple Mail e t-online nunca informam reclamações, então a taxa de
+reclamação deixa os e-mails para eles de fora e conta as reclamações sobre os
+envios para os provedores que informam. Sua taxa de spam no Gmail ainda pode
+ser pior que qualquer número exibido aqui. O
+[Google Postmaster Tools](https://postmaster.google.com) tem a visão do lado
+do Gmail.
 </Callout>
 
 ## API e MCP

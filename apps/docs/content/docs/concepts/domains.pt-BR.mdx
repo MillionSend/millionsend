@@ -57,7 +57,7 @@ adicione de novo na outra região — os registros DNS mudam, já que as
 identidades do SES são por região. No MillionSend Cloud, um nome de domínio
 que outra equipe já tem está tomado em todas as regiões.
 
-## Aquecimento de domínio novo
+## Limite de domínio novo
 
 No MillionSend Cloud, um domínio registrado há pouco tempo envia aos poucos
 enquanto constrói reputação com os provedores de e-mail. A idade é a do
@@ -75,20 +75,149 @@ dia UTC:
 
 Um domínio que envia de forma limpa (poucos bounces, nenhuma reclamação de
 spam) sobe um degrau antes. O limite vale além do seu plano, e mudar de plano
-não o libera. Enquanto ele vale, a página do domínio mostra "Em aquecimento:
-N/dia hoje · volume total a partir de …".
+não o libera. Enquanto ele vale, a página do domínio mostra "Limite de
+domínio novo: N/dia hoje · volume total a partir de …".
 
 Os domínios novos da sua equipe compartilham um único volume diário, o maior
 entre os limites deles, e cada um continua dentro do seu: adicionar outro
 domínio novo não acrescenta volume. Domínios com 30 dias ou mais ficam de
-fora. Quando mais de um domínio seu está em aquecimento, a página do domínio
+fora. Quando mais de um domínio seu está sob esse limite, a página do domínio
 avisa que o volume é compartilhado.
 
 O que passa do limite do dia nunca é recusado nem perdido: é aceito, aparece
 como **Aguardando** e sai conforme o limite permite, do mais antigo para o
 mais novo. Só quando já há muita coisa aguardando um envio responde
-`429 daily_quota_exceeded` (SMTP `452`) com uma mensagem que cita o
-aquecimento; tente de novo depois da virada do dia UTC.
+`429 daily_quota_exceeded` (SMTP `452`) com uma mensagem que cita esse
+limite. Tente de novo depois da virada do dia UTC.
+
+Esse limite é automático e separado do [aquecimento](#aquecimento) opcional
+abaixo. Quando os dois valem, uma transmissão sai dentro do menor deles.
+
+## Aquecimento
+
+Os provedores de e-mail confiam um pouco mais em um remetente novo a cada dia
+de bom comportamento. O aquecimento (beta) aproveita isso: enquanto ele está
+ligado em um domínio, as transmissões desse domínio saem com um volume diário
+que começa pequeno e cresce a cada dia de entrega saudável, com os contatos
+mais ativos primeiro. Ele vem desligado e vale para um domínio de cada vez.
+Seus e-mails transacionais nunca ficam retidos.
+
+Ligue pelo painel: na aba **Aquecimento** do domínio, ao adicionar o domínio
+(respondendo "Não, é novo" a "Este domínio já enviou e-mails?") ou na janela
+**Enviar transmissão**, que oferece o aquecimento quando uma transmissão é bem
+maior que tudo o que o domínio já enviou em um dia.
+
+### Quando usar
+
+Ligue para um domínio ou subdomínio novo antes do primeiro envio grande, ou
+antes de um envio bem maior que tudo o que o domínio já enviou em um dia.
+
+Deixe desligado para um domínio que já envia esse volume por outro provedor.
+Ele mantém a reputação que já tem lá. Um domínio que envia menos em outro
+lugar ainda pode aquecer a partir do que envia todo dia: aumente o volume
+inicial para esse número.
+
+### Como funciona
+
+- O dia 1 envia o volume inicial: 1.500, ou o dobro do dia de maior envio do
+  domínio nos últimos 30 dias, se for maior. Você pode definir de 100 a
+  1.000.000.
+- Cada dia saudável aumenta o volume em 1,5×, até a meta diária, o máximo que
+  você pretende enviar em um dia. A meta começa no número de contatos
+  inscritos, no mínimo 10.000, e você pode definir de 1.000 a 10.000.000. O
+  aquecimento termina depois de um dia saudável na meta.
+- O volume de um dia sai em partes de 1/48, uma a cada 15 minutos, então leva
+  pelo menos 12 horas. Os dias são dias UTC, e cada um só começa depois que o dia
+  anterior é verificado.
+- O que passar do volume do dia espera o dia seguinte, na mesma ordem, e
+  aparece como **Aguardando**. Nada se perde.
+- Só as transmissões esperam. E-mails enviados com `POST /emails`, em lote ou
+  pelo SMTP nunca ficam retidos.
+- Um dia que envia menos da metade do volume não o aumenta. Dias sem envio
+  não contam, e depois de 30 seguidos o volume recomeça do início.
+
+### Quem recebe primeiro
+
+O volume de cada dia vai para os contatos com mais chance de abrir, pela
+atividade mais recente entre estes sinais. Você escolhe quais contam na aba
+**Aquecimento**.
+
+- A última abertura ou o último clique. Um pré-carregamento feito por máquina
+  nunca conta.
+- O último e-mail transacional que o contato recebeu da sua equipe nos
+  últimos 30 dias.
+- Uma propriedade do contato que você escolhe, lida como data, como o último
+  login. Ela aceita uma data ou data e hora ISO 8601, ou um timestamp Unix em
+  segundos ou milissegundos.
+
+Um contato cujo sinal mais recente tem 90 dias ou mais está inativo. Por
+padrão, o aquecimento pula os contatos inativos: eles não recebem a
+transmissão, e a página da transmissão mostra quantos ficaram de fora.
+Escolha **Enviar por último** para colocá-los no fim da fila. Um contato sem
+nenhum sinal não conta como inativo: ele recebe depois dos ativos.
+
+### A verificação diária
+
+No começo de cada dia UTC, o dia anterior é verificado em cinco sinais, lidos
+dos e-mails de transmissão do domínio naquele dia. O Gmail é medido à parte
+das outras caixas.
+
+| Sinal | O que mede | Limite | Grave |
+| --- | --- | --- | --- |
+| Atrasos na entrega | E-mails para o Gmail que o Gmail atrasou | abaixo de 5% | 20% ou mais |
+| Aberturas, Gmail vs. outras | A taxa de abertura no Gmail como fração da taxa das outras caixas | pelo menos metade | abaixo de um quarto |
+| Hard bounces | Endereços que deram bounce permanente | abaixo de 2% | 5% ou mais |
+| Caixas cheias ou inativas | Caixas que responderam que estão cheias ou inativas | abaixo de 2% | 5% ou mais |
+| Denúncias de spam | Denúncias sobre os e-mails para provedores que as informam | abaixo de 0,05% | 0,1% ou mais |
+
+Um sinal que passa do limite fica **Fora**. O Gmail não avisa os remetentes
+sobre denúncias de spam, então as denúncias vêm dos outros provedores, e sua
+taxa de spam no Gmail fica no
+[Google Postmaster Tools](https://postmaster.google.com). As aberturas só são
+lidas com o [rastreamento de aberturas](#configuração-por-domínio) ligado, e
+um pré-carregamento feito por máquina nunca conta como abertura. Um sinal com
+poucos e-mails por trás (menos de 100, ou 200 nas denúncias) aparece como
+**Poucos e-mails** e nunca conta contra o dia. É preciso ter pelo menos duas
+denúncias para passar do limite de denúncias e três para ficar grave.
+
+Depois da verificação:
+
+- Todos os sinais dentro do limite: o volume cresce 1,5×.
+- Um sinal fora: o volume se mantém.
+- Dois ou mais fora: o volume cai 30%.
+- Um sinal grave: o aquecimento pausa e os proprietários da equipe recebem um
+  e-mail.
+
+### Pausar, retomar ou desligar
+
+- **Pausar aquecimento** segura as transmissões do domínio. Os e-mails delas
+  esperam na ordem e nada se perde. Um sinal grave pausa o aquecimento do
+  mesmo jeito.
+- **Retomar** recomeça a partir de hoje com metade do volume que ele tinha.
+- **Desligar** encerra o aquecimento, e os e-mails que estavam esperando saem
+  na velocidade normal. Um dia grande de um domínio com pouco histórico tende
+  a cair no spam, então o painel pergunta antes.
+- Depois que o aquecimento termina, as transmissões do domínio saem na
+  velocidade normal. **Aquecer de novo** recomeça do volume inicial.
+
+Os e-mails que estão esperando mantêm o lugar enquanto o conteúdo dos e-mails
+é guardado, contando a partir do envio da transmissão: 30 dias no MillionSend
+Cloud, ou a retenção de e-mails da instância na auto-hospedagem. O que ainda
+estiver esperando depois disso não é enviado.
+
+Os proprietários da equipe recebem um e-mail quando um sinal grave pausa o
+aquecimento, com os sinais que ficaram fora e quantos e-mails estão
+esperando, e outro quando o aquecimento termina. Eles escolhem esses avisos em
+**Entregabilidade**, em **Configurações → Notificações**.
+
+### Devo trocar para um subdomínio novo?
+
+Não. Os provedores de e-mail julgam a reputação pelo domínio organizacional
+(`example.com` para `news.example.com`) e pelas pessoas para quem você envia,
+então um subdomínio novo não começa do zero. Trocar de domínio o tempo todo
+parece snowshoeing, o truque de spammers que espalha os envios por muitos
+domínios, e os provedores ficam de olho nisso. Aqueça o domínio que você já
+tem.
 
 ## Configuração por domínio
 
