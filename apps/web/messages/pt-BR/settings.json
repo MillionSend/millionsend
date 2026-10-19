@@ -331,7 +331,7 @@
     "switchAtPeriodEnd": "Trocar no fim do período",
     "changeHint": "Subir de plano cobra na hora a diferença proporcional e o excedente até agora, e vale assim que o pagamento é aprovado; isso também cancela uma descida agendada. Descer vale quando o período renovar.",
     "paymentRequired": "A cobrança do {plan} não foi aprovada, então seu plano não mudou. Atualize seu cartão no portal de cobrança e tente de novo.",
-    "overageCounting": "O Stripe ainda está contando seu excedente mais recente. Tente a troca de novo em um minuto.",
+    "overageCounting": "O Stripe ainda está contando seu excedente mais recente. Tente a troca de novo em um minuto, ou quando um envio grande terminar.",
     "upgradesHeld": "Não é possível subir de plano nesta equipe no momento. Fale com o suporte se precisar de ajuda.",
     "upgradesHeldLive": "Não é possível subir de plano nesta equipe no momento. Você ainda pode cancelar ou mudar para um plano menor. Fale com o suporte se precisar de ajuda.",
     "features": {

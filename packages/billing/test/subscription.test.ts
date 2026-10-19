@@ -155,11 +155,12 @@ describe("changeRung up", () => {
       450_000,
     );
     state.declineUpdates = true;
-    state.meterError = new Error("Stripe is down");
     expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({
       applied: "payment_required",
       url: "https://invoice.stripe.com/i/in_pending",
     });
+    // The overage so far reached the meter under the old rung, for that invoice to bill.
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["350000"]);
     // The downgrade went with the request to move up; the volume stays the paid one.
     expect(state.scheduleReleases).toEqual(["sched_0"]);
     expect(await team(teamId)).toMatchObject({
@@ -167,16 +168,21 @@ describe("changeRung up", () => {
       planQuota: 100_000,
       pendingRung: null,
     });
-    // Overage the old rung has not billed is still owed: nothing is marked
-    // settled (a settle would write 250,000), and the cron keeps the pin.
-    const [row] = await db
-      .select({
-        reportedOverage: schema.usagePeriods.reportedOverage,
-        pendingOverage: schema.usagePeriods.pendingOverage,
-      })
-      .from(schema.usagePeriods)
-      .where(eq(schema.usagePeriods.teamId, teamId));
-    expect(row).toEqual({ reportedOverage: 0, pendingOverage: 350_000 });
+  });
+
+  it("waits while a step Stripe refused is still pinned, and sends it again on the retry", async () => {
+    const teamId = await subscribedTeam(withOverage(), 400_000);
+    state.meterError = new Error("Stripe is down");
+    await expect(changeRung(deps(), { teamId, rung: "pro_200k" })).rejects.toBeInstanceOf(
+      OverageInFlightError,
+    );
+    expect(state.updates).toEqual([]);
+    expect(await reportedOverage(teamId)).toBe(0);
+
+    state.meterError = null;
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({ applied: "now" });
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["300000"]);
+    expect(await reportedOverage(teamId)).toBe(300_000);
   });
 
   it("waits while Stripe has not counted a large overage step, and moves nothing", async () => {

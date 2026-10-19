@@ -587,6 +587,27 @@ describe("cancelTeamSubscription when the meter refuses", () => {
     expect(state.cancels).toEqual([]);
     expect(await team(teamId)).toMatchObject({ plan: "pro", stripeSubscriptionId: "sub_1" });
   });
+
+  it("does not wait on a pin no run sends again, such as one left before a move down to Starter", async () => {
+    const teamId = await customerTeam();
+    state.subscriptions.sub_1 = subscription(
+      "sub_1",
+      "cus_1",
+      "active",
+      "millionsend_starter_monthly",
+    );
+    await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
+    await db.insert(schema.usagePeriods).values({
+      teamId,
+      periodStart: new Date(PERIOD_START * 1000),
+      accepted: 100_500,
+      pendingOverage: 500,
+    });
+    state.meterError = new Error("Stripe is down");
+    await cancelTeamSubscription(deps(), teamId);
+    expect(state.calls).not.toContain("billing.meterEvents.create");
+    expect(state.cancels).toEqual(["sub_1"]);
+  });
 });
 
 describe("the system plan", () => {

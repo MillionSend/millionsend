@@ -16,6 +16,7 @@ export class OverageInFlightError extends Error {
 
 export interface OverageReport {
   reported: number;
+  /** Steps Stripe refused; each stays pinned for the next run. */
   failed: number;
 }
 
@@ -89,7 +90,6 @@ export async function reportOverage(
       log(
         `overage: team ${row.teamId} period ${row.periodStart.toISOString()} is too old to meter`,
       );
-      failed += 1;
       continue;
     }
     const key = and(eq(p.teamId, row.teamId), eq(p.periodStart, row.periodStart));
@@ -122,17 +122,6 @@ export async function reportOverage(
   return { reported, failed };
 }
 
-/** Whether a period row of the team still holds a step whose meter event Stripe refused. */
-export async function hasPendingOverage(db: BillingDeps["db"], teamId: string): Promise<boolean> {
-  const p = schema.usagePeriods;
-  const rows = await db
-    .select({ teamId: p.teamId })
-    .from(p)
-    .where(and(eq(p.teamId, teamId), isNotNull(p.pendingOverage)))
-    .limit(1);
-  return rows.length > 0;
-}
-
 /**
  * Stripe drops a meter event it has not counted yet when the metered price
  * changes, and counting takes about a minute. A move up re-prices the metered
@@ -146,9 +135,14 @@ export async function assertOverageCounted(
 ): Promise<void> {
   const p = schema.usagePeriods;
   const [row] = await deps.db
-    .select({ reported: p.reportedOverage })
+    .select({ reported: p.reportedOverage, pending: p.pendingOverage })
     .from(p)
     .where(and(eq(p.teamId, input.teamId), eq(p.periodStart, input.periodStart)));
+  // A pinned step is one Stripe refused or another run is still sending:
+  // the move would drop it, and nothing would report the period again.
+  if (row && row.pending !== null && row.pending > row.reported) {
+    throw new OverageInFlightError();
+  }
   const slack = Math.max(1_000, Math.ceil(input.included / 100));
   const reported = row?.reported ?? 0;
   if (reported <= slack) return;

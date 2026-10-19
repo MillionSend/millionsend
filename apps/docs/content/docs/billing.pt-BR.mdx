@@ -332,11 +332,14 @@ e quando o item medido sai da assinatura. O Stripe descarta um evento de
 medidor que ainda não contou quando uma subida reprecifica o item medido, e a
 contagem leva cerca de um minuto, então uma subida compara antes o excedente
 reportado no período com os resumos do medidor no Stripe: enquanto mais de 1%
-do volume (no mínimo 1.000 e-mails) ainda não foi contado,
-`billing.changePlan` recusa com `CONFLICT` (`overage_in_flight`) e o painel
-pede para tentar de novo em um minuto. Excluir uma equipe recusa do mesmo
-jeito quando o medidor rejeita o último relato, já que o cancelamento apagaria
-as linhas que o devem.
+do volume (no mínimo 1.000 e-mails) ainda não foi contado, ou um passo que o
+medidor rejeitou ainda espera novo envio, `billing.changePlan` recusa com
+`CONFLICT` (`overage_in_flight`) e o painel pede para tentar de novo em um
+minuto. Cada tentativa reporta antes o que foi enviado desde o último relato,
+então, enquanto uma equipe envia mais que essa margem por minuto, a subida
+espera o envio desacelerar. Excluir uma equipe recusa do mesmo jeito quando o
+medidor rejeita o relato que ela faz, já que o cancelamento apagaria as linhas
+que o devem.
 
 ## Ambiente
 

@@ -4,7 +4,7 @@ import { schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import type { BillingDeps } from "./checkout.js";
-import { assertOverageCounted, hasPendingOverage, reportOverage } from "./overage.js";
+import { assertOverageCounted, reportOverage } from "./overage.js";
 import {
   overageLookupKey,
   pendingRungOf,
@@ -407,10 +407,10 @@ async function endSubscription(
     if (finalInvoice) {
       // A second early: the final invoice takes events stamped before the
       // cancel, which can land in the same second as the report.
-      await reportOverage(deps, { teamId, now: new Date(Date.now() - 1000) });
-      // A pin left standing is a step Stripe refused; the team's rows, and
-      // what they owe, go away once the cancel succeeds.
-      if (await hasPendingOverage(deps.db, teamId)) {
+      const { failed } = await reportOverage(deps, { teamId, now: new Date(Date.now() - 1000) });
+      // A step Stripe refused here would go away with the team's rows once
+      // the cancel succeeds. An older pin no run sends again does not count.
+      if (failed > 0) {
         throw new Error(`team ${teamId}: overage not reported; the subscription stays`);
       }
     }

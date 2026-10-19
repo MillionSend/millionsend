@@ -323,10 +323,13 @@ subscription. Stripe drops a meter event it has not counted by the time a
 move up re-prices the metered item, and counting takes about a minute, so a
 move up first compares the period's reported overage with Stripe's meter
 summaries: while more than 1% of the volume (at least 1,000 emails) is
-still uncounted, `billing.changePlan` refuses with `CONFLICT`
-(`overage_in_flight`) and the dashboard asks to try again in a minute. A
-team delete refuses the same way when the meter rejects its last report,
-since the cancel would delete the rows that owe it.
+still uncounted, or a step the meter rejected still waits to be sent again,
+`billing.changePlan` refuses with `CONFLICT` (`overage_in_flight`) and the
+dashboard asks to try again in a minute. Each attempt first reports what was
+sent since the last report, so while a team sends more than that margin each
+minute, the move waits for sending to slow. A team delete refuses the same
+way when the meter rejects the report it makes, since the cancel would delete
+the rows that owe it.
 
 ## Environment
 
