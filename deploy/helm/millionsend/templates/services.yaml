@@ -5,7 +5,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "millionsend.fullname" $ }}-{{ $name }}
+  name: {{ include "millionsend.componentName" (dict "root" $ "suffix" $name) }}
   labels:
     {{- include "millionsend.labels" $ | nindent 4 }}
     app.kubernetes.io/component: {{ $name }}
@@ -15,6 +15,12 @@ metadata:
   {{- end }}
 spec:
   type: {{ $v.service.type }}
+  {{- with $v.service.externalTrafficPolicy }}
+  {{- if not (has $v.service.type (list "NodePort" "LoadBalancer")) }}
+  {{- fail (printf "%s.service.externalTrafficPolicy applies to NodePort and LoadBalancer Services only (type is %s)" $name $v.service.type) }}
+  {{- end }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
   {{- with $v.service.loadBalancerSourceRanges }}
   loadBalancerSourceRanges:
     {{- toYaml . | nindent 4 }}

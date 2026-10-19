@@ -5,19 +5,23 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "millionsend.fullname" . }}-migrate
+  name: {{ include "millionsend.componentName" (dict "root" . "suffix" "migrate") }}
   labels:
     {{- include "millionsend.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrate
   annotations:
     # Runs before the new pods, so a failing migration stops the upgrade
-    # while the old pods keep serving (ArgoCD maps this to PreSync).
+    # while the old pods keep serving (ArgoCD maps this to PreSync). Pass
+    # --timeout of at least activeDeadlineSeconds to helm upgrade: with the
+    # 5 min default Helm fails the release while the Job keeps running.
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   backoffLimit: {{ .Values.migrations.job.backoffLimit }}
   activeDeadlineSeconds: {{ .Values.migrations.job.activeDeadlineSeconds }}
+  # Helm deletes a succeeded Job; a failed one stays this long for its logs.
+  ttlSecondsAfterFinished: {{ .Values.migrations.job.ttlSecondsAfterFinished }}
   template:
     metadata:
       labels:

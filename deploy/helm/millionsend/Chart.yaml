@@ -3,9 +3,11 @@ name: millionsend
 description: Self-hosted MillionSend (web, api, worker, optional smtp relay and docs) on Kubernetes
 type: application
 version: 0.1.0
-# The image tag defaults to this. "latest" is the newest tagged release;
-# pin image.tag (a version or @sha256 digest) for production.
-appVersion: "latest"
+# The image tag defaults to this: a pinned release, never "latest". With a
+# moving tag a restarted pod (OOM, eviction, drain) pulls a newer build than
+# its neighbours and runs its migrations against the shared database, and
+# helm rollback cannot move the version back. Releases stamp both fields.
+appVersion: "0.19.0"
 home: https://millionsend.com
 sources:
   - https://github.com/MillionSend/millionsend

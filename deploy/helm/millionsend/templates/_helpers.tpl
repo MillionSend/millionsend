@@ -15,10 +15,27 @@
 {{- end }}
 {{- end }}
 
+{{/*
+<fullname>-<suffix>, shortened to fit `limit` characters (63 by default;
+52 for a CronJob, whose Jobs append an 11-character timestamp).
+Usage: include "millionsend.componentName" (dict "root" $ "suffix" "web")
+*/}}
+{{- define "millionsend.componentName" -}}
+{{- $suffix := printf "-%s" .suffix -}}
+{{- $limit := int (default 63 .limit) -}}
+{{- $base := include "millionsend.fullname" .root | trunc (int (sub $limit (len $suffix))) | trimSuffix "-" -}}
+{{- printf "%s%s" $base $suffix }}
+{{- end }}
+
+{{/* The version the pods run: image.tag when set, else the chart's appVersion. */}}
+{{- define "millionsend.version" -}}
+{{- default .Chart.AppVersion .Values.image.tag }}
+{{- end }}
+
 {{- define "millionsend.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{ include "millionsend.selectorLabels" . }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/version: {{ include "millionsend.version" . | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
@@ -46,21 +63,26 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
-{{/* image reference: repository@digest, else repository:tag (tag defaults to appVersion). */}}
+{{/* image reference: repository@digest, else repository:tag (tag defaults to .version). */}}
 {{- define "millionsend.imageRef" -}}
 {{- $img := .image -}}
 {{- if $img.digest }}
 {{- printf "%s@%s" $img.repository $img.digest }}
 {{- else }}
-{{- printf "%s:%s" $img.repository (default .appVersion $img.tag) }}
+{{- printf "%s:%s" $img.repository (default .version $img.tag) }}
 {{- end }}
 {{- end }}
 
 {{- define "millionsend.image" -}}
-{{- include "millionsend.imageRef" (dict "image" .Values.image "appVersion" .Chart.AppVersion) }}
+{{- include "millionsend.imageRef" (dict "image" .Values.image "version" .Chart.AppVersion) }}
 {{- end }}
 
-{{/* envFrom shared by every app container: the ConfigMap, then the Secret. */}}
+{{/* The backup image follows the app's version unless pinned on its own. */}}
+{{- define "millionsend.backupImage" -}}
+{{- include "millionsend.imageRef" (dict "image" .Values.backup.image "version" (include "millionsend.version" .)) }}
+{{- end }}
+
+{{/* envFrom shared by the app containers: the ConfigMap, then the Secret. */}}
 {{- define "millionsend.envFrom" -}}
 - configMapRef:
     name: {{ include "millionsend.fullname" . }}
@@ -69,6 +91,44 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- with .Values.extraEnvFrom }}
 {{ toYaml . }}
 {{- end }}
+{{- end }}
+
+{{/* docs serves static content: no database, no keys, so no Secret. */}}
+{{- define "millionsend.envFromConfigOnly" -}}
+- configMapRef:
+    name: {{ include "millionsend.fullname" . }}
+{{- with .Values.extraEnvFrom }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
+ConfigMap keys the chart derives from other values, so web (the dashboard's
+SMTP tab, the console's per-worker rate) sees what the other processes run
+with. The smtp container overrides SMTP_PORT with its listen port.
+*/}}
+{{- define "millionsend.managedConfig" -}}
+{{- range $k := list "WORKER_REPLICAS" "SMTP_PORT" "SMTP_TLS_CERT_PATH" "SMTP_TLS_KEY_PATH" "SMTP_PUBLIC_HOST" }}
+{{- if hasKey $.Values.config $k }}
+{{- fail (printf "config.%s is set by the chart (from worker.replicas, smtp.port, smtp.service.port, smtp.tlsSecretName and smtp.publicHost); remove it from config" $k) }}
+{{- end }}
+{{- end }}
+WORKER_REPLICAS: {{ .Values.worker.replicas | toString | quote }}
+{{- if .Values.smtp.enabled }}
+SMTP_PORT: {{ .Values.smtp.service.port | toString | quote }}
+{{- if .Values.smtp.tlsSecretName }}
+SMTP_TLS_CERT_PATH: "/certs/tls.crt"
+SMTP_TLS_KEY_PATH: "/certs/tls.key"
+{{- end }}
+{{- with .Values.smtp.publicHost }}
+SMTP_PUBLIC_HOST: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/* True when the relay may run without a keypair (plaintext AUTH; private networks only). */}}
+{{- define "millionsend.smtpInsecureAuth" -}}
+{{- eq (toString (.Values.config.SMTP_ALLOW_INSECURE_AUTH | default "false")) "true" }}
 {{- end }}
 
 {{/* Rolls every pod when the rendered config changes. */}}

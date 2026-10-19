@@ -20,7 +20,8 @@ compose file does.
 
 Every variable from [`.env.example`](../../../.env.example) works here: put
 non-secret values under `config` (a ConfigMap) and secret values in the Secret
-(see below). Both reach every pod through `envFrom`.
+(see below). Both reach every pod through `envFrom`. The few variables that only
+exist for compose are listed [at the end](#compose-only-variables).
 
 ## Install
 
@@ -28,6 +29,13 @@ non-secret values under `config` (a ConfigMap) and secret values in the Secret
 helm upgrade --install millionsend deploy/helm/millionsend \
   -n millionsend --create-namespace -f my-values.yaml
 ```
+
+The image tag defaults to the chart's `appVersion`, a pinned release. Upgrade by
+upgrading the chart, or set `image.tag` (or `image.digest`) to hold another
+version. Never point it at `latest` or `edge`: a pod that restarts (OOM,
+eviction, node drain) would pull a newer build than its neighbours and run that
+build's migrations against the shared database, and `helm rollback` could not
+move the version back.
 
 Starting points:
 
@@ -37,6 +45,18 @@ Starting points:
 - [`examples/values-eks.yaml`](examples/values-eks.yaml): AWS Load Balancer
   Controller, RDS, External Secrets Operator with AWS Secrets Manager, and IRSA.
 
+### What has been verified
+
+- k3s with the `restricted` Pod Security Standard, Postgres 17 and every
+  component on: fresh install, a failing migrate hook keeping the old pods up,
+  the worker's `Recreate` rollout, the backup CronJob (dump, upload, verify,
+  prune, and a restore of the dump), STARTTLS on the relay.
+- `aws.webIdentity` from a k3s cluster against a real IAM role, with the issuer
+  published as static files (the recipe below), in production.
+- `values-eks.yaml` renders and syncs through External Secrets Operator. It has
+  **not** run on a real EKS cluster yet: treat IRSA, the ALB annotations and the
+  RDS notes as untested until someone reports back.
+
 ## Secrets
 
 `secrets.mode` decides where the Secret comes from. Every mode produces one
@@ -44,13 +64,13 @@ Secret that all pods load.
 
 | Mode | Use it when | Secret name |
 |---|---|---|
-| `existingSecret` (default) | You create the Secret yourself: `kubectl`, SealedSecrets, SOPS, Vault Agent, ... | `secrets.existingSecret.name` |
+| `existingSecret` (default) | You create the Secret yourself: `kubectl`, SealedSecrets, SOPS, Vault Secrets Operator, ... | `secrets.existingSecret.name` |
 | `externalSecret` | [External Secrets Operator](https://external-secrets.io) is installed | the release fullname |
 | `create` | Local tests only: values are stored in the Helm release | the release fullname |
 
 Required keys: `DATABASE_URL`, `MASTER_ENCRYPTION_KEY`, `BETTER_AUTH_SECRET`.
 Also add `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, unless the pods get AWS
-credentials some other way (see IRSA below). Add `S3_ACCESS_KEY_ID`,
+credentials some other way (see below). Add `S3_ACCESS_KEY_ID`,
 `S3_SECRET_ACCESS_KEY` and `S3_ENDPOINT` when you use uploads or backups.
 
 ```sh
@@ -63,7 +83,7 @@ kubectl -n millionsend create secret generic millionsend-secrets \
 ```
 
 Pods read the Secret at start, so after changing it run
-`kubectl rollout restart deployment -l app.kubernetes.io/instance=<release>`.
+`kubectl -n <namespace> rollout restart deployment -l app.kubernetes.io/instance=<release>`.
 
 Back up `MASTER_ENCRYPTION_KEY`. Without it, the stored email bodies cannot be
 read.
@@ -73,9 +93,21 @@ read.
 If the Secret has no `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, every AWS
 client in the app (SES sending, GetAccount, SQS polling, quotas) uses the AWS
 SDK default provider chain. That chain picks up a web identity token, so the
-pods can assume an IAM role and never hold a long-lived key. In both setups
-below, give the role the `millionsend-ses` permissions
-(`infra/millionsend-ses.cfn.yaml`).
+pods can assume an IAM role and never hold a long-lived key.
+
+In both setups below, the role needs the `millionsend-ses` permissions
+(`infra/millionsend-ses.cfn.yaml`) **and read access to the SES events queue**.
+The CloudFormation template grants the queue only to the IAM user it creates, so
+add this to the role, or sending works while every `ReceiveMessage` is denied and
+bounces and complaints never reach the suppression list:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+  "Resource": "arn:aws:sqs:<region>:<account>:millionsend-events"
+}
+```
 
 ### Any cluster (k3s, kubeadm, ...): `aws.webIdentity`
 
@@ -101,14 +133,50 @@ serviceAccount:
 
 You need these outside the chart:
 
-- **A public issuer.** The cluster's service-account issuer must be published at
-  an HTTPS URL that AWS can reach, serving `/.well-known/openid-configuration`
-  and the JWKS. On k3s, set it with
-  `--kube-apiserver-arg=service-account-issuer=<url>`.
-- **An IAM OIDC provider** for that issuer, with audience `sts.amazonaws.com`.
-- **A role that trusts only this ServiceAccount**, with the condition
-  `<issuer>:sub = system:serviceaccount:<namespace>:millionsend` and
-  `<issuer>:aud = sts.amazonaws.com`.
+**A public issuer.** AWS must be able to download
+`<issuer>/.well-known/openid-configuration` and the JWKS it points at. The API
+server of a k3s cluster is private, so publish the two documents yourself, as
+static files on any HTTPS host (an S3 or R2 bucket behind a custom domain is
+enough), and tell the API server about them. On every k3s server, in
+`/etc/rancher/k3s/config.yaml`:
+
+```yaml
+kube-apiserver-arg:
+  # The first issuer is the one new tokens carry.
+  - service-account-issuer=https://oidc.example.com/k3s-prd
+  # Keep the previous issuer as a second entry, or every token issued
+  # before the change stops validating until its pod restarts.
+  - service-account-issuer=https://kubernetes.default.svc.cluster.local
+  - service-account-jwks-uri=https://oidc.example.com/k3s-prd/openid/v1/jwks
+```
+
+Publish, before restarting the API servers:
+
+- `https://oidc.example.com/k3s-prd/.well-known/openid-configuration`
+
+  ```json
+  {
+    "issuer": "https://oidc.example.com/k3s-prd",
+    "jwks_uri": "https://oidc.example.com/k3s-prd/openid/v1/jwks",
+    "response_types_supported": ["id_token"],
+    "subject_types_supported": ["public"],
+    "id_token_signing_alg_values_supported": ["RS256"]
+  }
+  ```
+
+- `https://oidc.example.com/k3s-prd/openid/v1/jwks`: the output of
+  `kubectl get --raw /openid/v1/jwks` (public keys only).
+
+The issuer URL is the cluster's identity in every trust policy, so pick one you
+will not change. The JWKS must be republished before
+`/var/lib/rancher/k3s/server/tls/service.key` is ever rotated, or every AWS call
+from the cluster fails until it is.
+
+**An IAM OIDC provider** for that issuer, with audience `sts.amazonaws.com`.
+
+**A role that trusts only this ServiceAccount**, with the condition
+`<issuer>:sub = system:serviceaccount:<namespace>:millionsend` and
+`<issuer>:aud = sts.amazonaws.com`.
 
 Do not put AWS keys in the Secret. Explicit keys take precedence over the role,
 and the chart refuses keys only where it can see them (`config` and
@@ -123,60 +191,190 @@ Identity association. Also set `config.AWS_DEFAULT_CHAIN: "true"`. Without it,
 account mail (password resets, email verification) stays off when there are no
 static keys.
 
-## Worker replicas
+## Scaling
 
-`worker.replicas` is also written to `WORKER_REPLICAS`. Each worker takes 1/N of
-the SES send rate. So scale the worker only through the chart: an HPA or
-`kubectl scale` would leave `WORKER_REPLICAS` out of date and push the account
-over its quota. The worker uses the `Recreate` strategy for the same reason,
-because during a rolling update old and new workers would overlap. `web` and
-`api` are stateless and can be scaled freely.
+`worker.replicas` is also written to `WORKER_REPLICAS`, which every pod reads
+(the console divides the SES rate by it). Each worker takes 1/N of the send
+rate, so scale the worker only through the chart: an HPA or `kubectl scale`
+would leave `WORKER_REPLICAS` out of date and push the account over its quota.
+The worker uses the `Recreate` strategy for the same reason, because during a
+rolling update old and new workers would overlap.
+
+`web` and `api` can run more than one replica, with two costs:
+
+- The sign-in, sign-up, password-reset, failed-auth and MCP rate limiters are
+  kept per process, so N replicas allow N times those limits.
+- Each web or api replica opens about 26 Postgres connections, and the worker
+  about 36. Size `max_connections` for the sum.
+
+The EKS example runs one replica of each for that reason. When you raise them,
+`podDisruptionBudget.enabled: true` adds a budget for every component with more
+than one replica, so a node drain keeps one pod of each.
 
 ## Migrations
 
 Every app pod runs pending migrations at boot. A Postgres advisory lock
 serializes concurrent boots, so plain `helm upgrade` is enough. The startup
-probe allows 10 minutes, so a long migration is not killed partway through.
+probe allows 10 minutes (`startupProbe.periodSeconds` x `failureThreshold`), so a
+long migration is not killed partway through; raise it before a release whose
+notes warn about a slow migration.
 
 You can also set `migrations.job.enabled: true` to run `migrate` as a
 `pre-install,pre-upgrade` hook (ArgoCD treats it as PreSync). Then a failing
 migration stops the upgrade and the old pods keep serving, which is the
 Kubernetes version of the `docker compose run --rm --no-deps millionsend migrate`
-step in SELF_HOSTING.md. The hook runs before the chart's own resources, so it
-needs `secrets.mode: existingSecret` with a Secret that already exists. With
-ArgoCD, a SealedSecret in the same Application is only created after PreSync,
-so the first sync fails: manage the SealedSecret in its own Application that
-syncs first.
+step in SELF_HOSTING.md. Run the upgrade with `--timeout 30m` (anything at least
+`migrations.job.activeDeadlineSeconds`): with Helm's default of 5 minutes the
+release fails while the Job keeps running, and a retry deletes the Job in the
+middle of the migration. Helm deletes a succeeded Job; a failed one stays for
+`ttlSecondsAfterFinished` (a day) so its logs can be read.
 
-## Ingress and client IPs
+The hook runs before the chart's own resources, so it needs
+`secrets.mode: existingSecret` with a Secret that already exists. With ArgoCD, a
+SealedSecret in the same Application is only created after PreSync, so the first
+sync fails: manage the SealedSecret in its own Application that syncs first.
+
+## Ingress
 
 `ingress.hosts[].paths[].component` routes each path to `web`, `api` or `docs`.
 Set `ingress.className` for your controller (`traefik`, `alb`, `nginx`, ...).
-`APP_BASE_URL` (and `PUBLIC_API_URL` if you use it) must match the public hosts
-exactly.
 
-Set `config.TRUSTED_PROXIES` to the addresses your ingress connects from: the
-pod CIDR for in-cluster controllers (k3s default `10.42.0.0/16`; a custom
-`--cluster-cidr` changes it, so check the nodes' `spec.podCIDR`) or the VPC CIDR
-for an ALB. CIDRs are accepted. If you leave it out, every visitor is recorded
-with the proxy's IP.
+The default host carries two paths, in this order: `/ses/events` (`Exact`) to
+`api`, which confirms the SNS subscription and receives the bounce, complaint and
+delivery notifications (routed to `web` it answers 404 and the subscription stays
+pending), and `/` to `web`.
+
+`APP_BASE_URL` must match the dashboard's public origin exactly. Set
+`config.PUBLIC_API_URL` whenever the api gets its own host or prefix: without it
+the dashboard and the MCP tokens point at `https://<dashboard host>:3001`.
+
+ingress-nginx caps request bodies at 1m by default while the API accepts
+25 MiB; add `nginx.ingress.kubernetes.io/proxy-body-size: 25m` to
+`ingress.annotations`.
+
+### Client addresses
+
+The app finds the client address by reading `X-Forwarded-For` from the right and
+skipping every address listed in `config.TRUSTED_PROXIES`; the first address it
+does not trust is the client. Your ingress controller appends the address it
+accepted the connection from, so **with a single hop (Traefik, ingress-nginx, an
+ALB) leave `TRUSTED_PROXIES` unset**: the rightmost entry already is the client.
+
+List only proxies *in front of* the ingress controller whose entries the
+controller keeps: a CDN, a Cloudflare tunnel (`cloudflared`), an external load
+balancer that adds a hop. Two things have to hold for that to work:
+
+- The ingress controller must trust the forwarded headers it receives from that
+  proxy (Traefik: `forwardedHeaders.trustedIPs` on the entrypoint; ingress-nginx:
+  `use-forwarded-headers` with `proxy-real-ip-cidr`). Otherwise it replaces the
+  chain with the proxy's own address and the client is already gone.
+- `TRUSTED_PROXIES` must contain that proxy's addresses, so the walk steps past
+  them.
+
+Do not put the pod CIDR or the VPC CIDR there. Every in-cluster caller would
+then share one rate-limit bucket, and any pod could claim a client address of
+its choice.
 
 ## SMTP relay
 
 The relay will not start without a STARTTLS keypair. Create a
-`kubernetes.io/tls` Secret (for example with a cert-manager `Certificate` for
-the relay hostname) and set `smtp.enabled: true` and `smtp.tlsSecretName`. It is
-mounted at `/certs` and the `SMTP_TLS_*` variables are set for you. SMTP is not
-HTTP, so expose it with `smtp.service.type: LoadBalancer` (optionally limited by
-`loadBalancerSourceRanges`) or a TCP route on your ingress controller.
+`kubernetes.io/tls` Secret (for example with a cert-manager `Certificate` for the
+relay hostname), set `smtp.enabled: true` and `smtp.tlsSecretName`, and set
+`smtp.publicHost` to the hostname clients will connect to. The Secret is mounted
+at `/certs`, and the `SMTP_TLS_*`, `SMTP_PORT` and `SMTP_PUBLIC_HOST` variables
+are rendered into the shared ConfigMap, so the dashboard's SMTP tab shows the
+relay's real state, host and port. `SMTP_PORT` in the ConfigMap is the Service
+port (what clients use); the relay container itself listens on `smtp.port`.
+
+SMTP is not HTTP, so expose it with `smtp.service.type: LoadBalancer` or
+`NodePort` (optionally limited by `loadBalancerSourceRanges`), and set
+`smtp.service.externalTrafficPolicy: Local`. The relay allows 10 connections per
+client address and checks that before AUTH; with the default `Cluster` policy
+every client arrives as a node address, so one busy client locks the others out
+with `421 Too many connections`. A TCP-proxying load balancer or an ingress TCP
+route hides client addresses the same way, unless it speaks PROXY protocol
+(which the relay does not).
+
+**Certificate renewal.** The relay reads its keypair once at boot, so a
+cert-manager renewal never reaches the running process and STARTTLS breaks when
+the old certificate expires. Restart the Deployment after each renewal:
+
+```sh
+kubectl -n <namespace> rollout restart deploy/<release>-smtp
+```
+
+Either from a CronJob that runs inside the renewal window with a ServiceAccount
+allowed to patch that Deployment, or with
+[Reloader](https://github.com/stakater/Reloader), which watches the Secret:
+
+```yaml
+deploymentAnnotations:
+  secret.reloader.stakater.com/reload: <smtp.tlsSecretName>
+```
+
+A relay that only serves pods of the same cluster can use a long-lived
+self-signed certificate instead (the clients then skip chain validation), with
+the Service left as `ClusterIP`.
+
+For a private network without TLS at all, `config.SMTP_ALLOW_INSECURE_AUTH:
+"true"` lets the relay start with no Secret; AUTH is then plaintext. Never
+combine it with a public Service.
 
 ## Backups
 
-`backup.enabled: true` runs a CronJob with `ghcr.io/millionsend/backup`. It
-dumps, uploads to S3-compatible storage, verifies the upload and prunes, once
-per run. It needs `config.S3_BACKUP_BUCKET` and the S3 credentials. Skip it if
-your database already backs itself up (CloudNativePG `ScheduledBackup`, RDS
-snapshots). Restores follow SELF_HOSTING.md.
+`backup.enabled: true` runs a CronJob with `ghcr.io/millionsend/backup`, at the
+app's version unless `backup.image` pins its own. It dumps, uploads to
+S3-compatible storage, verifies the upload and prunes, once per run. It needs
+`config.S3_BACKUP_BUCKET` and the S3 credentials. `backup.schedule` takes any
+cron expression (the compose-only `BACKUP_CRON` is not used), and a run that
+hangs is killed after `backup.activeDeadlineSeconds`. Skip it if your database
+already backs itself up (CloudNativePG `ScheduledBackup`, RDS snapshots).
+
+Restore with the same image. Stop the app first so nothing writes mid-restore:
+
+```sh
+kubectl -n <namespace> scale deployment -l app.kubernetes.io/instance=<release> --replicas=0
+```
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: millionsend-restore
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext: { runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, fsGroup: 70, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: restore
+          image: ghcr.io/millionsend/backup:<version>
+          envFrom:
+            - configMapRef: { name: <release> }
+            - secretRef: { name: <secret> }
+          command: ["sh", "-c"]
+          args:
+            - rclone copyto ":s3:$S3_BACKUP_BUCKET/${S3_BACKUP_PREFIX:-backups}/millionsend-YYYYMMDD-HHMMSS.dump" /tmp/restore.dump
+              && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+```
+
+Then scale the Deployments back (`helm upgrade` with your values also restores
+the replica counts). Dumps encrypted with `BACKUP_AGE_RECIPIENT` need
+`age --decrypt` before `pg_restore`, as in SELF_HOSTING.md.
+
+## Compose-only variables
+
+| In `.env` | In the chart |
+|---|---|
+| `BACKUP_CRON` | `backup.schedule` (any cron expression, not only the daily form) |
+| `PORT`, `SMTP_PORT` | set by the chart: the api listens on 3001, the relay on `smtp.port` |
+| `WEB_PORT`, `DOCS_PORT`, `*_BIND_ADDRESS` | compose host ports and bind addresses; Services and the Ingress take their place |
+| `COMPOSE_PROFILES` | `smtp.enabled`, `docs.enabled`, `backup.enabled` |
+| `MILLIONSEND_IMAGE`, `MILLIONSEND_BACKUP_IMAGE` | `image.*`, `backup.image.*` |
+| `POSTGRES_PASSWORD` | not used: Postgres is external, `DATABASE_URL` carries the password |
+| `WORKER_REPLICAS` | `worker.replicas` |
 
 ## Security defaults
 
@@ -186,7 +384,13 @@ The pods run with the same hardening as the compose files:
 - read-only root filesystem, with `emptyDir` on the paths compose mounts as tmpfs
 - all capabilities dropped and no privilege escalation
 - `RuntimeDefault` seccomp
-- no ServiceAccount token mounted
+- no ServiceAccount token mounted (the web identity token, when on, is a
+  projected token for AWS only)
+- a shared PID namespace, so the pause container reaps the zombie each
+  boot-time migration leaves (compose's `init: true`)
+- the docs pod loads the ConfigMap only, never the Secret
 
-The grace period is 45 s, longer than the worker's 30 s drain. These defaults
-pass the `restricted` Pod Security Standard.
+web, api, smtp and docs sleep 10 s in `preStop` so in-flight requests finish
+while the endpoint removal propagates (api and smtp exit at once on SIGTERM);
+the grace period is 55 s, that sleep plus the worker's 30 s drain with margin.
+These defaults pass the `restricted` Pod Security Standard.

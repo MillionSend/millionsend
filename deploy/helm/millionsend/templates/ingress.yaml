@@ -34,7 +34,7 @@ spec:
             pathType: {{ .pathType | default "Prefix" }}
             backend:
               service:
-                name: {{ include "millionsend.fullname" $ }}-{{ .component }}
+                name: {{ include "millionsend.componentName" (dict "root" $ "suffix" .component) }}
                 port:
                   name: {{ .component }}
           {{- end }}

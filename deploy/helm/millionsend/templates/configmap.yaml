@@ -13,3 +13,4 @@ data:
   {{- range $k, $v := .Values.config }}
   {{ $k }}: {{ toString $v | quote }}
   {{- end }}
+  {{- include "millionsend.managedConfig" . | nindent 2 }}

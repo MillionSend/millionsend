@@ -5,7 +5,8 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "millionsend.fullname" . }}-backup
+  # 52 characters at most: each Job appends an 11-character timestamp.
+  name: {{ include "millionsend.componentName" (dict "root" . "suffix" "backup" "limit" 52) }}
   labels:
     {{- include "millionsend.labels" . | nindent 4 }}
     app.kubernetes.io/component: backup
@@ -20,6 +21,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: {{ .Values.backup.backoffLimit }}
+      # A run that hangs (a stalled upload, a locked table) is killed past
+      # this instead of blocking the next schedule under Forbid.
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
       template:
         metadata:
           labels:
@@ -37,7 +41,7 @@ spec:
             {{- toYaml .Values.backup.podSecurityContext | nindent 12 }}
           containers:
             - name: backup
-              image: {{ include "millionsend.imageRef" (dict "image" .Values.backup.image "appVersion" .Chart.AppVersion) }}
+              image: {{ include "millionsend.backupImage" . }}
               {{- with .Values.backup.image.pullPolicy }}
               imagePullPolicy: {{ . }}
               {{- end }}

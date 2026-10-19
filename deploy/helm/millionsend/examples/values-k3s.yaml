@@ -3,28 +3,31 @@
 # access through OIDC web identity (no access keys).
 #   helm upgrade --install millionsend deploy/helm/millionsend \
 #     -n millionsend --create-namespace -f deploy/helm/millionsend/examples/values-k3s.yaml
-image:
-  tag: "latest" # pin a release for production
+#
+# The image tag is the chart's appVersion, a pinned release. Set image.tag
+# (or image.digest) to hold another version; never a moving tag.
 
 config:
   APP_BASE_URL: "https://mail.example.com"
+  # The api has its own host below, so the dashboard and MCP tokens must
+  # point there.
   PUBLIC_API_URL: "https://api.mail.example.com"
   AWS_REGION: "us-east-1"
   SNS_TOPIC_ARNS: "arn:aws:sns:us-east-1:123456789012:millionsend-events"
   SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events"
   SES_CONFIGURATION_SET: "millionsend"
-  # The pod CIDR Traefik runs in: 10.42.0.0/16 is the k3s default, but a
-  # custom --cluster-cidr changes it, so check
-  #   kubectl get nodes -o custom-columns=NAME:.metadata.name,CIDR:.spec.podCIDR
-  # A cloudflared tunnel in front connects from its own pod, inside the same CIDR.
-  TRUSTED_PROXIES: "10.42.0.0/16"
+  # Traefik is the only hop and appends the client address to
+  # X-Forwarded-For itself, so TRUSTED_PROXIES stays unset. With a
+  # Cloudflare tunnel or another proxy in front of Traefik, see "Client
+  # addresses" in the README.
 
 # The role trusts this cluster's service-account issuer for
 # system:serviceaccount:<namespace>:millionsend (the name pinned below, so
-# the trust policy does not depend on the release name) and carries the millionsend-ses permissions
-# (infra/millionsend-ses.cfn.yaml). The issuer's discovery document and JWKS
-# must be reachable by AWS: k3s needs --kube-apiserver-arg
-# service-account-issuer=https://<public issuer URL>.
+# the trust policy does not depend on the release name). It needs the
+# millionsend-ses permissions (infra/millionsend-ses.cfn.yaml) plus
+# sqs:ReceiveMessage, sqs:DeleteMessage and sqs:GetQueueAttributes on the
+# events queue. The issuer's discovery document and JWKS must be reachable
+# by AWS: README, "Any cluster: aws.webIdentity", has the k3s recipe.
 aws:
   webIdentity:
     enabled: true
@@ -48,6 +51,10 @@ ingress:
   hosts:
     - host: mail.example.com
       paths:
+        # SNS delivers SES events here; the api serves it.
+        - path: /ses/events
+          pathType: Exact
+          component: api
         - path: /
           pathType: Prefix
           component: web
@@ -60,15 +67,18 @@ ingress:
     - secretName: millionsend-tls
       hosts: [mail.example.com, api.mail.example.com]
 
+# Requests near the use measured on a small production instance (web
+# ~185Mi, api ~120Mi, worker ~145Mi) with headroom; the limits absorb
+# peaks.
 web:
   resources:
-    requests: { cpu: 100m, memory: 384Mi }
+    requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 1Gi }
 api:
   resources:
-    requests: { cpu: 100m, memory: 256Mi }
+    requests: { cpu: 100m, memory: 192Mi }
     limits: { memory: 768Mi }
 worker:
   resources:
-    requests: { cpu: 100m, memory: 256Mi }
+    requests: { cpu: 100m, memory: 192Mi }
     limits: { memory: 768Mi }

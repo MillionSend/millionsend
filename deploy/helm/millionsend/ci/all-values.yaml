@@ -1,0 +1,136 @@
+# CI only: every option on at once, so the templates the examples leave
+# off (smtp, docs, backup, the migrate hook, web identity, budgets) render
+# on every change. Not a deployment recipe.
+image:
+  tag: "1.2.3"
+  pullPolicy: IfNotPresent
+imagePullSecrets:
+  - name: ghcr
+# 62 characters: exercises the name truncation (CronJob names max out at 52).
+fullnameOverride: a-rather-long-release-name-to-exercise-the-truncation-of-names
+
+config:
+  APP_BASE_URL: "https://mail.example.com"
+  PUBLIC_API_URL: "https://api.mail.example.com"
+  AWS_REGION: "us-east-1"
+  TRUSTED_PROXIES: "203.0.113.10"
+  S3_BACKUP_BUCKET: millionsend-backups
+
+secrets:
+  mode: existingSecret
+  existingSecret:
+    name: millionsend-secrets
+
+serviceAccount:
+  name: millionsend
+  annotations:
+    example.com/owner: ci
+
+aws:
+  webIdentity:
+    enabled: true
+    roleArn: arn:aws:iam::123456789012:role/millionsend
+
+podAnnotations:
+  example.com/pod: "true"
+podLabels:
+  example.com/pod: "true"
+deploymentAnnotations:
+  secret.reloader.stakater.com/reload: millionsend-smtp-tls
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+extraEnv:
+  - name: EXAMPLE
+    value: "1"
+extraEnvFrom:
+  - configMapRef:
+      name: millionsend-extra
+      optional: true
+
+web:
+  replicas: 2
+  extraEnv:
+    - name: WEB_ONLY
+      value: "1"
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+api:
+  replicas: 2
+worker:
+  replicas: 2
+smtp:
+  enabled: true
+  replicas: 2
+  tlsSecretName: millionsend-smtp-tls
+  publicHost: smtp.mail.example.com
+  service:
+    type: LoadBalancer
+    port: 587
+    externalTrafficPolicy: Local
+    loadBalancerSourceRanges: [203.0.113.0/24]
+docs:
+  enabled: true
+  replicas: 2
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 25m
+  hosts:
+    - host: mail.example.com
+      paths:
+        - path: /ses/events
+          pathType: Exact
+          component: api
+        - path: /
+          pathType: Prefix
+          component: web
+    - host: api.mail.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          component: api
+    - host: docs.mail.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          component: docs
+  tls:
+    - secretName: millionsend-tls
+      hosts: [mail.example.com, api.mail.example.com, docs.mail.example.com]
+
+migrations:
+  job:
+    enabled: true
+
+backup:
+  enabled: true
+  timeZone: America/Sao_Paulo
+
+nodeSelector:
+  kubernetes.io/os: linux
+tolerations:
+  - key: example.com/dedicated
+    operator: Equal
+    value: mail
+    effect: NoSchedule
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+            - key: example.com/pool
+              operator: In
+              values: [mail]
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: millionsend
