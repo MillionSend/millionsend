@@ -2,7 +2,7 @@ import { getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { httpOrigin } from "@/lib/http-url";
+import { redirectTarget } from "@/lib/http-url";
 import { getAuth, OAUTH_SCOPES } from "@/server/auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, listMemberships } from "@/server/membership";
 import { ConsentForm } from "./consent-form";
@@ -62,9 +62,7 @@ export default async function ConsentPage({
               // Where the code (and the user) end up after Allow — the one
               // fact about the app the registrant could not make up. A
               // native app's private-use scheme has no origin, so it shows whole.
-              redirectOrigins: [
-                ...new Set(client.redirectUris.map((uri) => httpOrigin(uri) ?? uri)),
-              ],
+              redirectOrigins: [...new Set(client.redirectUris.map(redirectTarget))],
             }
           : null
       }
