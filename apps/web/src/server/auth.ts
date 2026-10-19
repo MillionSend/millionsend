@@ -21,7 +21,7 @@ import {
   stripInvisible,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
-import { type BetterAuthPlugin, betterAuth } from "better-auth";
+import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { captcha, jwt } from "better-auth/plugins";
@@ -30,7 +30,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { headers } from "next/headers";
 import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
 import { GRANT_LIFETIME_DAYS, isGrantLifetime } from "@/lib/grant-lifetime";
-import { httpOrigin } from "@/lib/http-url";
+import { httpOrigin, isUnlistedHostRedirect } from "@/lib/http-url";
 import { isAppLocale, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE } from "@/lib/locale-cookie";
 import enAuth from "../../messages/en/auth.json";
 import enCommon from "../../messages/en/common.json";
@@ -604,9 +604,7 @@ export function createAuth(
             },
           },
         ],
-        // The provider's OpenAPI parameter types (`items?: undefined`) do not
-        // satisfy better-call's under exactOptionalPropertyTypes; runtime shape is fine.
-      }) as unknown as BetterAuthPlugin,
+      }),
     ],
     emailAndPassword: {
       enabled: true,
@@ -620,9 +618,9 @@ export function createAuth(
       // learns the password changed and can start a reset of their own.
       onPasswordReset: async ({ user }: { user: { email: string } }, request?: Request) => {
         if (!accountEmailFrom()) return;
-        // Detached, language lookup included: Better Auth revokes the other
-        // sessions only after this hook returns, and nothing here may delay
-        // or fail that.
+        // Detached, language lookup included, so a slow lookup or a failed
+        // send never delays or fails the reset; the other sessions are
+        // already revoked when this runs.
         void accountMailLocale(db, user.email, request?.headers)
           .then((locale) =>
             sendAccountMail(buildPasswordChangedEmail({ to: user.email, locale }), mail),
@@ -828,6 +826,13 @@ export function createAuth(
         const redirects = Array.isArray(body.redirect_uris)
           ? body.redirect_uris.filter((uri): uri is string => typeof uri === "string")
           : [];
+        const unlisted = redirects.find(isUnlistedHostRedirect);
+        if (unlisted) {
+          throw new APIError("BAD_REQUEST", {
+            error: "invalid_redirect_uri",
+            error_description: `custom-scheme redirect URIs carry a host only for known apps: ${unlisted}`,
+          });
+        }
         const redirectOrigins = new Set(redirects.map(httpOrigin));
         for (const field of CLIENT_LINK_FIELDS) {
           const value = body[field];

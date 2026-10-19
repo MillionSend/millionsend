@@ -97,8 +97,9 @@ export function ConsentForm({
       const { data, error } = await authClient.oauth2.consent(body);
       if (error) throw error;
       // The auth client's redirect plugin already navigates on `redirect: true`;
-      // this covers a response without that flag.
-      if (data?.url) window.location.assign(data.url);
+      // this covers a response without that flag. Never both: a custom-scheme
+      // callback leaves the page loaded, so its app would get the code twice.
+      if (data?.url && !data.redirect) window.location.assign(data.url);
     } catch {
       setFailed(true);
       setPending(null);
