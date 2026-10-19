@@ -12,6 +12,17 @@ export type PauseReason = (typeof PAUSE_REASONS)[number];
 export const SUSPENSION_REASONS = ["phishing", "reputation", "non_payment", "manual"] as const;
 export type SuspensionReason = (typeof SUSPENSION_REASONS)[number];
 
+/**
+ * The reasons that offer to cancel and refund, each with its default:
+ * phishing usually pays with a stolen card, the others are the operator's
+ * call, and non-payment paid nothing.
+ */
+const REFUND_DEFAULT: Partial<Record<SuspensionReason, boolean>> = {
+  phishing: true,
+  reputation: false,
+  manual: false,
+};
+
 export interface HoldInput<R extends string> {
   reason: R;
   note?: string;
@@ -137,30 +148,52 @@ export function PauseDialog({
   );
 }
 
-/** Every send refused until reinstated. A phishing suspension never emails the owner. */
+/**
+ * Every send refused until reinstated. A phishing suspension never emails the
+ * owner. A team on a live Stripe subscription is offered its cancel and
+ * refund, whose default follows the reason until the operator ticks or
+ * unticks it.
+ */
 export function SuspendDialog({
   name,
+  initialReason = "reputation",
+  refundPlan,
   pending,
   onClose,
   onSubmit,
 }: {
   name: string;
+  initialReason?: SuspensionReason | undefined;
+  /** The plan the team's live subscription bills; null without one, undefined while it loads. */
+  refundPlan: string | null | undefined;
   pending: boolean;
   onClose: () => void;
-  onSubmit: (input: HoldInput<SuspensionReason>) => void;
+  onSubmit: (input: HoldInput<SuspensionReason> & { refund: boolean }) => void;
 }) {
   const t = useTranslations("console.teams.suspendDialog");
+  const refundT = useTranslations("console.teams.refund");
   const common = useTranslations("console.common");
   const id = useId();
-  const [reason, setReason] = useState<SuspensionReason>("reputation");
+  const [reason, setReason] = useState<SuspensionReason>(initialReason);
   const [note, setNote] = useState("");
   const [notify, setNotify] = useState(true);
+  const [refundChoice, setRefundChoice] = useState<boolean | null>(null);
   const phishing = reason === "phishing";
+  const refundDefault = REFUND_DEFAULT[reason];
+  const refundOffer = refundPlan && refundDefault !== undefined ? refundPlan : null;
+  const refund = refundOffer !== null && (refundChoice ?? refundDefault === true);
+  // Submitting before the subscription is known would drop a refund the operator never saw.
+  const busy = pending || refundPlan === undefined;
 
   function submit() {
-    if (pending) return;
+    if (busy) return;
     const trimmed = note.trim();
-    onSubmit({ reason, ...(trimmed ? { note: trimmed } : {}), notify: notify && !phishing });
+    onSubmit({
+      reason,
+      ...(trimmed ? { note: trimmed } : {}),
+      notify: notify && !phishing,
+      refund,
+    });
   }
 
   return (
@@ -210,19 +243,30 @@ export function SuspendDialog({
             onChange={(event) => setNote(event.target.value)}
           />
         </div>
-        {phishing ? null : (
-          <NotifyRow
-            id={`${id}-notify`}
-            label={common("notifyOwner")}
-            checked={notify}
-            disabled={pending}
-            onChange={setNotify}
-          />
-        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {phishing ? null : (
+            <NotifyRow
+              id={`${id}-notify`}
+              label={common("notifyOwner")}
+              checked={notify}
+              disabled={pending}
+              onChange={setNotify}
+            />
+          )}
+          {refundOffer ? (
+            <NotifyRow
+              id={`${id}-refund`}
+              label={refundT("offer", { plan: refundOffer })}
+              checked={refund}
+              disabled={pending}
+              onChange={setRefundChoice}
+            />
+          ) : null}
+        </div>
         <ModalFooter>
           <CancelButton onClose={onClose} />
-          <button type="submit" className="ms-btn ms-btn-destructive" disabled={pending}>
-            <BtnSpinner on={pending} />
+          <button type="submit" className="ms-btn ms-btn-destructive" disabled={busy}>
+            <BtnSpinner on={busy} />
             {t("confirm")} <ConfirmKeycap />
           </button>
         </ModalFooter>

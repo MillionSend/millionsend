@@ -5,30 +5,35 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "replay:media": "tsx src/replay-media.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.1130.0",
-    "@aws-sdk/client-sqs": "^3.1130.0",
+    "@anthropic-ai/bedrock-sdk": "0.34.4",
+    "@aws-sdk/client-sesv2": "^3.1150.0",
+    "@aws-sdk/client-sqs": "^3.1150.0",
     "@millionsend/billing": "workspace:*",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "nodemailer": "^10.0.3",
-    "tsx": "^4.23.13"
+    "drizzle-orm": "^0.45.4",
+    "mupdf": "1.28.1",
+    "nodemailer": "^10.1.0",
+    "sharp": "0.35.5",
+    "tsx": "^4.23.15",
+    "zxing-wasm": "3.1.5"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.1.1",
+    "@hono/node-server": "^2.1.5",
     "@millionsend/api": "workspace:*",
     "@millionsend/test-utils": "workspace:*",
-    "@types/node": "^22.20.2",
+    "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.1",
-    "resend": "^6.27.0",
+    "resend": "^6.32.1",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.4"
   }
 }

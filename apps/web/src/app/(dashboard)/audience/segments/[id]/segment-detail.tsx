@@ -167,33 +167,33 @@ export function SegmentDetail({ id }: { id: string }) {
           </>
         }
         actions={
-          <>
-            <Link href={`/audience?segment=${data.id}`} className="ms-btn ms-btn-secondary">
-              {t("detail.viewContacts")}
-            </Link>
-            <PopoverMenu
-              boxed
-              ariaLabel={t("detail.moreActions")}
-              items={[
-                {
-                  label: t("detail.rename"),
-                  onSelect: () => {
-                    renameMutation.reset();
-                    setRenameTo(data.name);
-                  },
+          <Link href={`/audience?segment=${data.id}`} className="ms-btn ms-btn-secondary">
+            {t("detail.viewContacts")}
+          </Link>
+        }
+        menu={
+          <PopoverMenu
+            boxed
+            ariaLabel={t("detail.moreActions")}
+            items={[
+              {
+                label: t("detail.rename"),
+                onSelect: () => {
+                  renameMutation.reset();
+                  setRenameTo(data.name);
                 },
-                null,
-                {
-                  label: t("delete"),
-                  danger: true,
-                  onSelect: () => {
-                    deleteMutation.reset();
-                    setConfirmingDelete(true);
-                  },
+              },
+              null,
+              {
+                label: t("delete"),
+                danger: true,
+                onSelect: () => {
+                  deleteMutation.reset();
+                  setConfirmingDelete(true);
                 },
-              ]}
-            />
-          </>
+              },
+            ]}
+          />
         }
       />
 

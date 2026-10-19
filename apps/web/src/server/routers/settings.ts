@@ -1,26 +1,42 @@
 import { cancelTeamSubscription } from "@millionsend/billing";
 import {
   accountEmailFrom,
+  disposableEmailsBlocked,
   env,
+  invitesPerTeamPerDay,
   isCloudDeployment,
   notificationsEmailFrom,
+  receivingEnabled,
 } from "@millionsend/config";
 import {
   accountLocale,
   createFixedWindowLimiter,
   DAY_MS,
+  fillTemplate,
+  flagImitatedBrand,
+  getMonitorSettingsRow,
   INVITE_EMAILS_PER_HOUR,
   INVITE_MAX_SENDS,
   INVITE_RESEND_COOLDOWN_MS,
   INVITE_TTL_MS,
   isMailPreferenceKey,
+  loadMonitorState,
   MAIL_LOCALES,
   MAIL_PREFERENCE_KEYS,
   type MailPreferenceKey,
+  monitorTier,
   QUOTA_COLUMNS,
+  type QuotaTeamRow,
+  RECEIVED_PER_BILLED_EMAIL,
   readPeriodUsage,
+  receivingRule,
+  releaseSharedSubdomain,
+  resolveMonitorSettings,
+  SHARED_LABEL_MAX,
   SystemMailRefused,
+  sharedSlug,
   signInviteToken,
+  teamMonitorRow,
   teamQuota,
   utcDay,
   verifyInviteToken,
@@ -34,24 +50,45 @@ import {
   SES_REGIONS,
 } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
-import { and, asc, count, desc, eq, gt, gte, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  isNull,
+  lt,
+  ne,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
+import enSettings from "../../../messages/en/settings.json";
+import ptBRSettings from "../../../messages/pt-BR/settings.json";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
+import { requireAuthSecret } from "../auth-secret";
 import { getStripe } from "../billing";
+import { disposableAddressTest } from "../disposable-email";
+import { settleTeamSubdomain } from "../inboxes";
 import { activeLocale } from "../locale";
 import { poweredByLocked } from "../powered-by";
 import { smtpRelayOffered } from "../smtp";
 import { deletePublicObject, keyFromPublicUrl, uploadsEnabled } from "../storage";
+import { assertTeamNotSuspended } from "../suspension-lock";
 import {
   awsCredentialsConfigured,
   buildInvitationEmail,
   defaultSystemMailDeps,
   type SystemMailDeps,
 } from "../system-mail";
+import { teamNameSchema } from "../team-name";
 import { protectedProcedure, publicProcedure, router, teamProcedure } from "../trpc";
 
 /** Managing members is an owner/admin concern; plain members are read-only. */
@@ -154,16 +191,6 @@ async function removeMembership(db: Db, teamId: string, userId: string): Promise
   });
 }
 
-function requireAuthSecret(): string {
-  if (!env.BETTER_AUTH_SECRET) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "BETTER_AUTH_SECRET is required",
-    });
-  }
-  return env.BETTER_AUTH_SECRET;
-}
-
 function inviteAcceptUrl(inviteId: string): string {
   return `${resolveBaseUrl(env.APP_BASE_URL)}/invite/${signInviteToken(inviteId, requireAuthSecret())}`;
 }
@@ -182,10 +209,60 @@ function inviteEmailsEnabled(): boolean {
 // Invite spam guard shared by create and resend, keyed by team.
 const inviteEmailsLimited = createFixedWindowLimiter(INVITE_EMAILS_PER_HOUR, 3_600_000);
 
-const INVITE_HOURLY_LIMIT_ERROR = new TRPCError({
-  code: "TOO_MANY_REQUESTS",
-  message: "Too many invitations this hour. Try again later.",
-});
+const INVITE_REFUSALS = {
+  en: enSettings.invitations.refused,
+  "pt-BR": ptBRSettings.invitations.refused,
+} as const;
+
+/** An invitation refused in the dashboard's language; the dialogs show the message as is. */
+async function inviteRefusal(
+  code: TRPCError["code"],
+  reason: keyof typeof enSettings.invitations.refused,
+  values: Record<string, string> = {},
+): Promise<TRPCError> {
+  return new TRPCError({
+    code,
+    message: fillTemplate(INVITE_REFUSALS[await activeLocale()][reason], values),
+  });
+}
+
+/**
+ * Invitations a team, or one member across all their teams, started in the
+ * last day, whatever became of them. A revoke and the team's deletion take
+ * the row along, but its member.invited audit row stays; a row whose audit
+ * row is not written yet (its email is still going out) counts itself.
+ */
+async function invitesInLastDay(
+  tx: Tx,
+  by: { teamId: string } | { userId: string },
+): Promise<number> {
+  const since = new Date(Date.now() - DAY_MS);
+  const a = schema.auditLog;
+  const i = schema.teamInvitations;
+  const invited = and(eq(a.action, "member.invited"), gt(a.createdAt, since));
+  const [audited] = await tx
+    .select({ n: count() })
+    .from(a)
+    .where(
+      and(invited, "teamId" in by ? eq(a.teamId, by.teamId) : eq(a.actorId, `user:${by.userId}`)),
+    );
+  const [unaudited] = await tx
+    .select({ n: count() })
+    .from(i)
+    .where(
+      and(
+        "teamId" in by ? eq(i.teamId, by.teamId) : eq(i.invitedByUserId, by.userId),
+        gt(i.createdAt, since),
+        notExists(
+          tx
+            .select({ id: a.id })
+            .from(a)
+            .where(and(invited, eq(a.target, sql`'invitation:' || ${i.id}`))),
+        ),
+      ),
+    );
+  return (audited?.n ?? 0) + (unaudited?.n ?? 0);
+}
 
 /**
  * Hostname a self-hoster points their app's SMTP client at: an explicit
@@ -240,17 +317,31 @@ export function createSettingsRouter(
    * shows the link, and nothing is charged against the invite.
    */
   async function emailInvite(
-    ctx: { db: Db; teamId: string; session: { user: { name: string } } },
+    ctx: { db: Db; teamId: string; session: { user: { id: string } } },
     invite: { id: string; email: string; role: "member" | "admin" },
   ): Promise<boolean> {
     const [team] = await ctx.db
       .select({ name: schema.teams.name })
       .from(schema.teams)
       .where(eq(schema.teams.id, ctx.teamId));
+    const [inviter] = await ctx.db
+      .select({ email: schema.user.email, verified: schema.user.emailVerified })
+      .from(schema.user)
+      .where(eq(schema.user.id, ctx.session.user.id));
+    const now = new Date();
+    const { settings } = resolveMonitorSettings(
+      await getMonitorSettingsRow(ctx.db),
+      env as unknown as Record<string, unknown>,
+    );
+    const tier = monitorTier(
+      await loadMonitorState(ctx.db, await teamMonitorRow(ctx.db, ctx.teamId), now),
+      settings,
+      now,
+    );
     const message = buildInvitationEmail({
       to: invite.email,
-      inviterName: ctx.session.user.name,
-      teamName: team?.name ?? "",
+      inviterEmail: inviter?.verified ? inviter.email : null,
+      teamName: tier === "new" ? null : (team?.name ?? null),
       role: invite.role,
       url: inviteAcceptUrl(invite.id),
       expiresInDays: Math.round(INVITE_TTL_MS / DAY_MS),
@@ -295,13 +386,32 @@ export function createSettingsRouter(
       }),
 
       rename: teamProcedure
-        .input(z.object({ name: z.string().trim().min(1).max(80) }))
+        .input(z.object({ name: teamNameSchema }))
         .mutation(async ({ ctx, input }) => {
           if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
-          await ctx.db
-            .update(schema.teams)
-            .set({ name: input.name })
-            .where(eq(schema.teams.id, ctx.teamId));
+          const old = await ctx.db.transaction(async (tx) => {
+            const [team] = await tx
+              .select({ name: schema.teams.name })
+              .from(schema.teams)
+              .where(eq(schema.teams.id, ctx.teamId))
+              .for("update");
+            // Saving the name it already has is no rename: an operator's clear of
+            // its brand flag stands.
+            if (!team || team.name === input.name) return null;
+            await tx
+              .update(schema.teams)
+              .set({ name: input.name })
+              .where(eq(schema.teams.id, ctx.teamId));
+            return team.name;
+          });
+          if (old !== null) {
+            await flagImitatedBrand(ctx.db, ctx.teamId, input.name);
+            // A rename to the same slug (Acme to ACME) would only redraw a suffixed
+            // or random label, spending a review.
+            if (sharedSlug(old, SHARED_LABEL_MAX) !== sharedSlug(input.name, SHARED_LABEL_MAX)) {
+              await settleTeamSubdomain(ctx.db, ctx.teamId);
+            }
+          }
           return { name: input.name };
         }),
 
@@ -314,6 +424,7 @@ export function createSettingsRouter(
        */
       delete: teamProcedure.mutation(async ({ ctx }) => {
         if (ctx.role !== "owner") throw new TRPCError({ code: "FORBIDDEN" });
+        await assertTeamNotSuspended(ctx.db, ctx.teamId, "deleteTeam");
         if (env.IS_CLOUD) await deps.cancelSubscription(ctx.db, ctx.teamId);
         const { domains, logoUrl, name } = await ctx.db.transaction(async (tx) => {
           const [team] = await tx
@@ -332,6 +443,7 @@ export function createSettingsRouter(
           await revokeTeamGrants(tx, ctx.teamId);
           await tx.delete(schema.broadcasts).where(eq(schema.broadcasts.teamId, ctx.teamId));
           await tx.delete(schema.apiKeys).where(eq(schema.apiKeys.teamId, ctx.teamId));
+          await releaseSharedSubdomain(tx as unknown as Db, ctx.teamId);
           await tx.delete(schema.teams).where(eq(schema.teams.id, ctx.teamId));
           return { domains, logoUrl: team.logoUrl, name: team.name };
         });
@@ -471,18 +583,51 @@ export function createSettingsRouter(
         )
         .mutation(async ({ ctx, input }) => {
           assertCanManageMembers(ctx.role);
-          if (inviteEmailsLimited(ctx.teamId)) throw INVITE_HOURLY_LIMIT_ERROR;
+          await assertTeamNotSuspended(ctx.db, ctx.teamId, "invite");
+          if (disposableEmailsBlocked() && (await disposableAddressTest(ctx.db))(input.email)) {
+            throw await inviteRefusal("BAD_REQUEST", "disposable");
+          }
+          if (inviteEmailsLimited(ctx.teamId)) {
+            throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly");
+          }
           try {
-            const [row] = await ctx.db
-              .insert(schema.teamInvitations)
-              .values({
-                teamId: ctx.teamId,
-                email: input.email,
-                role: input.role,
-                invitedByUserId: ctx.session.user.id,
-                expiresAt: new Date(Date.now() + INVITE_TTL_MS),
-              })
-              .returning({ id: schema.teamInvitations.id });
+            const row = await ctx.db.transaction(async (tx) => {
+              // The team's and then the inviter's row lock queue the invites
+              // each cap counts, so two at once cannot both pass one. No key
+              // update: the team's sends only check the row as a foreign key,
+              // and an invite must neither wait for them nor hold them up.
+              await tx
+                .select({ id: schema.teams.id })
+                .from(schema.teams)
+                .where(eq(schema.teams.id, ctx.teamId))
+                .for("no key update");
+              await tx
+                .select({ id: schema.user.id })
+                .from(schema.user)
+                .where(eq(schema.user.id, ctx.session.user.id))
+                .for("no key update");
+              const cap = invitesPerTeamPerDay();
+              const limit = { limit: String(cap) };
+              if ((await invitesInLastDay(tx, { teamId: ctx.teamId })) >= cap) {
+                throw await inviteRefusal("TOO_MANY_REQUESTS", "daily", limit);
+              }
+              // Per member too: deleting a team and starting another would
+              // otherwise hand its whole day back.
+              if ((await invitesInLastDay(tx, { userId: ctx.session.user.id })) >= cap) {
+                throw await inviteRefusal("TOO_MANY_REQUESTS", "dailyMember", limit);
+              }
+              const [inserted] = await tx
+                .insert(schema.teamInvitations)
+                .values({
+                  teamId: ctx.teamId,
+                  email: input.email,
+                  role: input.role,
+                  invitedByUserId: ctx.session.user.id,
+                  expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+                })
+                .returning({ id: schema.teamInvitations.id });
+              return inserted;
+            });
             if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
             const senderConfigured = inviteEmailsEnabled();
             const emailed =
@@ -511,9 +656,7 @@ export function createSettingsRouter(
               noSender: !senderConfigured && !isCloudDeployment(),
             };
           } catch (error) {
-            if (isUniqueViolation(error)) {
-              throw new TRPCError({ code: "CONFLICT", message: "Already invited." });
-            }
+            if (isUniqueViolation(error)) throw await inviteRefusal("CONFLICT", "duplicate");
             throw error;
           }
         }),
@@ -547,12 +690,8 @@ export function createSettingsRouter(
        */
       resend: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
         assertCanManageMembers(ctx.role);
-        if (!inviteEmailsEnabled()) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "No email sender is configured; share the invitation link instead.",
-          });
-        }
+        await assertTeamNotSuspended(ctx.db, ctx.teamId, "invite");
+        if (!inviteEmailsEnabled()) throw await inviteRefusal("PRECONDITION_FAILED", "noSender");
         const [invite] = await ctx.db
           .select({
             id: schema.teamInvitations.id,
@@ -571,21 +710,19 @@ export function createSettingsRouter(
           );
         if (!invite) throw new TRPCError({ code: "NOT_FOUND" });
         if (invite.sendCount >= INVITE_MAX_SENDS) {
-          throw new TRPCError({
-            code: "TOO_MANY_REQUESTS",
-            message: `This invitation was already sent ${INVITE_MAX_SENDS} times. Revoke it and invite again.`,
+          throw await inviteRefusal("TOO_MANY_REQUESTS", "maxSends", {
+            max: String(INVITE_MAX_SENDS),
           });
         }
         if (
           invite.lastSentAt &&
           Date.now() - invite.lastSentAt.getTime() < INVITE_RESEND_COOLDOWN_MS
         ) {
-          throw new TRPCError({
-            code: "TOO_MANY_REQUESTS",
-            message: "This invitation was just sent. Wait a couple of minutes before resending.",
-          });
+          throw await inviteRefusal("TOO_MANY_REQUESTS", "cooldown");
         }
-        if (inviteEmailsLimited(ctx.teamId)) throw INVITE_HOURLY_LIMIT_ERROR;
+        if (inviteEmailsLimited(ctx.teamId)) {
+          throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly");
+        }
         const now = new Date();
         // The cooldown and the cap live in the same conditional update as the
         // counter bump, so two concurrent resends cannot both pass the pre-read.
@@ -611,12 +748,7 @@ export function createSettingsRouter(
             ),
           )
           .returning({ expiresAt: schema.teamInvitations.expiresAt });
-        if (!renewed) {
-          throw new TRPCError({
-            code: "TOO_MANY_REQUESTS",
-            message: "This invitation was just sent. Wait a couple of minutes before resending.",
-          });
-        }
+        if (!renewed) throw await inviteRefusal("TOO_MANY_REQUESTS", "cooldown");
         const emailed = await emailInvite(ctx, {
           id: invite.id,
           email: invite.email,
@@ -629,10 +761,8 @@ export function createSettingsRouter(
             .update(schema.teamInvitations)
             .set({ lastSentAt: invite.lastSentAt, sendCount: invite.sendCount })
             .where(eq(schema.teamInvitations.id, invite.id));
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "The invitation email could not be sent. Try again in a moment.",
-          });
+          // Not INTERNAL_SERVER_ERROR: the browser never reads a fault's own message.
+          throw await inviteRefusal("SERVICE_UNAVAILABLE", "sendFailed");
         }
         await recordAudit(ctx, {
           action: "invitation.resent",
@@ -735,6 +865,7 @@ export function createSettingsRouter(
               });
             if (!claimed)
               throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid invitation." });
+            await assertTeamNotSuspended(tx as unknown as Db, claimed.teamId, "invite");
 
             await tx
               .insert(schema.teamMembers)
@@ -932,6 +1063,7 @@ export function createSettingsRouter(
               delivered: c.delivered,
               bounced: c.bounced,
               complained: c.complained,
+              received: c.received,
             })
             .from(c)
             .where(and(eq(c.teamId, ctx.teamId), gte(c.day, since)))
@@ -945,20 +1077,54 @@ export function createSettingsRouter(
                   start: quota.periodStart,
                   end: quota.periodEnd,
                   overage: quota.overage,
+                  overagePaused: quota.overagePaused === true,
                 }
               : null;
+          const todayRow = rows.find((r) => r.day === today);
           return {
             rows,
             today: {
-              accepted: rows.find((r) => r.day === today)?.accepted ?? 0,
+              accepted: todayRow?.accepted ?? 0,
               limit: quota.kind === "day" ? quota.limit : null,
             },
             /** The billing period a monthly plan counts against; null on a daily cap or self-host. */
             period,
+            receiving: receivingEnabled()
+              ? await receivingUsage(ctx.db, ctx.teamId, team, todayRow?.received ?? 0)
+              : null,
           };
         }),
     }),
   });
+}
+
+/**
+ * Received mail against its free allowance (receivingRule): the shared daily
+ * cap on Free, twice the plan's volume per day or per billing period
+ * otherwise, uncapped on self-host. `allowance` is null when nothing caps it.
+ */
+async function receivingUsage(db: Db, teamId: string, team: QuotaTeamRow, receivedToday: number) {
+  const rule = receivingRule(team, isCloudDeployment());
+  if (rule.kind !== "month") {
+    return {
+      kind: rule.kind,
+      received: receivedToday,
+      allowance:
+        rule.kind === "day" ? rule.allowance : rule.kind === "shared_day" ? rule.quota.limit : null,
+      perBilledEmail: RECEIVED_PER_BILLED_EMAIL,
+    };
+  }
+  const p = schema.usagePeriods;
+  const [period] = await db
+    .select({ received: p.received })
+    .from(p)
+    .where(and(eq(p.teamId, teamId), eq(p.periodStart, rule.periodStart)));
+  return {
+    kind: rule.kind,
+    received: period?.received ?? 0,
+    allowance: rule.allowance,
+    perBilledEmail: RECEIVED_PER_BILLED_EMAIL,
+  };
 }
 
 /** The keys a person turned off, as stored; a key the app no longer knows is dropped on read. */

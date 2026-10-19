@@ -77,7 +77,10 @@ const conditionSchema = z
         ctx.addIssue({ code: "custom", message: `unsupported operator "${cond.op}"` });
         return;
       }
-      if (cond.value === null || Number.isNaN(Date.parse(cond.value))) {
+      // Postgres has no year 0 and misreads a signed, extended year, so a
+      // filter holding one could be stored but never counted.
+      const year = cond.value === null ? Number.NaN : new Date(cond.value).getUTCFullYear();
+      if (!(year >= 1 && year <= 9999)) {
         ctx.addIssue({ code: "custom", message: `operator "${cond.op}" requires an ISO date` });
       }
       return;
@@ -106,7 +109,7 @@ export class SegmentFilterError extends Error {
  * contains/starts_with/ends_with matching literal substrings (still a bound
  * parameter — this is pattern correctness, not injection defense).
  */
-function escapeLike(value: string): string {
+export function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
@@ -161,9 +164,12 @@ function conditionSql(
       : sql`${contacts.unsubscribed} = false`;
   }
   if (field === "created_at") {
+    // The instant the validator read, not the raw value: Postgres cannot read
+    // every form a JS Date accepts, such as "2026" or "2026-10".
+    const at = new Date(value ?? "").toISOString();
     return op === "before"
-      ? sql`${contacts.createdAt} < ${value}::timestamptz`
-      : sql`${contacts.createdAt} > ${value}::timestamptz`;
+      ? sql`${contacts.createdAt} < ${at}::timestamptz`
+      : sql`${contacts.createdAt} > ${at}::timestamptz`;
   }
   return textConditionSql(textExpr(contacts, field), op as TextOp, value);
 }

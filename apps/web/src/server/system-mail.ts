@@ -11,9 +11,11 @@ import {
   accountMailCard,
   accountMailPhrase,
   buildAccountMail,
-  fillTemplate as fill,
+  fillMailTemplate as fill,
+  formatMailDate,
   type MailLocale,
   type SystemMailMessage,
+  type SystemMailOptions,
   sendSystemMail,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
@@ -21,10 +23,12 @@ import { createSesSendClient, sendSimpleEmail } from "@millionsend/ses";
 import { and, eq, gt, like, ne } from "drizzle-orm";
 import { appBaseUrl } from "@/lib/api-base-url";
 import { DOCS_URL } from "@/lib/docs-links";
+import enConsoleCode from "../../messages/en/console-code-email.json";
 import enInvite from "../../messages/en/invite-email.json";
 import en from "../../messages/en/reset-email.json";
 import enUpdates from "../../messages/en/updates.json";
 import enVerify from "../../messages/en/verify-email.json";
+import ptBRConsoleCode from "../../messages/pt-BR/console-code-email.json";
 import ptBRInvite from "../../messages/pt-BR/invite-email.json";
 import ptBR from "../../messages/pt-BR/reset-email.json";
 import ptBRUpdates from "../../messages/pt-BR/updates.json";
@@ -43,6 +47,7 @@ const MESSAGES = { en, "pt-BR": ptBR } as const;
 const INVITE_MESSAGES = { en: enInvite, "pt-BR": ptBRInvite } as const;
 const VERIFY_MESSAGES = { en: enVerify, "pt-BR": ptBRVerify } as const;
 const UPDATES_MESSAGES = { en: enUpdates.email, "pt-BR": ptBRUpdates.email } as const;
+const CONSOLE_CODE_MESSAGES = { en: enConsoleCode, "pt-BR": ptBRConsoleCode } as const;
 
 export type { MailLocale };
 
@@ -79,22 +84,24 @@ export function emailVerificationEnabled(): boolean {
   return passwordRecoveryEnabled();
 }
 
-/** Exported for tests; interpolates and escapes, so strings stay in JSON. */
+/**
+ * Exported for tests; interpolates and escapes, so strings stay in JSON. Like
+ * the verification, it greets nobody by name: whoever registers an address
+ * types the account's name, and this mail reaches that address.
+ */
 export function buildResetEmail(input: {
   to: string;
-  name: string;
   url: string;
   locale: MailLocale;
 }): SystemMailMessage {
   const m = MESSAGES[input.locale];
-  const greeting = fill(m.greeting, { name: input.name });
   const expiry = fill(m.expiry, { minutes: String(RESET_TOKEN_TTL_MINUTES) });
   return {
     from: env.AUTH_EMAIL_FROM ?? "",
     to: input.to,
     subject: m.subject,
     ...accountMailCard({
-      paragraphs: [greeting, m.body],
+      paragraphs: [m.greeting, m.body],
       button: m.button,
       url: input.url,
       linkFallback: m.linkFallback,
@@ -107,25 +114,45 @@ export function buildResetEmail(input: {
 /** Exported for tests. Same card as the reset, from the same sender. */
 export function buildVerificationEmail(input: {
   to: string;
-  name: string;
   url: string;
   locale: MailLocale;
 }): SystemMailMessage {
   const m = VERIFY_MESSAGES[input.locale];
-  const greeting = fill(m.greeting, { name: input.name });
   const expiry = fill(m.expiry, { minutes: String(VERIFY_TOKEN_TTL_MINUTES) });
   return {
     from: env.AUTH_EMAIL_FROM ?? "",
     to: input.to,
     subject: m.subject,
     ...accountMailCard({
-      paragraphs: [greeting, m.body],
+      paragraphs: [m.greeting, m.body],
       button: m.button,
       url: input.url,
       linkFallback: m.linkFallback,
       muted: [`${expiry} ${m.ignore}`],
     }),
     kind: "email_verification",
+  };
+}
+
+/** The console's one-time code, from the auth sender, to the operator's own address. */
+export function buildConsoleCodeEmail(input: {
+  to: string;
+  code: string;
+  minutes: number;
+  locale: MailLocale;
+}): SystemMailMessage {
+  const m = CONSOLE_CODE_MESSAGES[input.locale];
+  const expiry = fill(m.expiry, { minutes: String(input.minutes) });
+  return {
+    from: env.AUTH_EMAIL_FROM ?? "",
+    to: input.to,
+    subject: m.subject,
+    ...accountMailCard({
+      heading: input.code,
+      paragraphs: [m.body],
+      muted: [`${expiry} ${m.ignore}`],
+    }),
+    kind: "console_code",
   };
 }
 
@@ -157,11 +184,16 @@ export function buildUpdatesConfirmEmail(input: {
  * Exported for tests. The invitee's stored language picks it when they
  * already have an account; otherwise the inviter's dashboard locale does,
  * since teammates usually share one.
+ *
+ * Any team can invite any address, so the mail prints no name anyone typed:
+ * the inviter is their verified address, and the team's name waits until
+ * the team is past the monitor's "new" tier. Null for either prints a line
+ * without it; without an inviter the line names no team either.
  */
 export function buildInvitationEmail(input: {
   to: string;
-  inviterName: string;
-  teamName: string;
+  inviterEmail: string | null;
+  teamName: string | null;
   role: "member" | "admin";
   url: string;
   expiresInDays: number;
@@ -169,20 +201,26 @@ export function buildInvitationEmail(input: {
 }): SystemMailMessage {
   const m = INVITE_MESSAGES[input.locale];
   const values = {
-    inviter: input.inviterName,
-    team: input.teamName,
+    inviter: input.inviterEmail ?? "",
+    team: input.teamName ?? "",
     role: m.roles[input.role],
     days: String(input.expiresInDays),
     email: input.to,
   };
-  const subject = fill(m.subject, values);
-  const body = fill(m.body, values);
+  const body = fill(
+    input.inviterEmail === null
+      ? m.bodyNoInviter
+      : input.teamName === null
+        ? m.bodyNewTeam
+        : m.body,
+    values,
+  );
   const expiry = fill(m.expiry, values);
   const noAccount = fill(m.noAccount, values);
   return {
     from: notificationsEmailFrom() ?? "",
     to: input.to,
-    subject,
+    subject: m.subject,
     ...accountMailCard({
       paragraphs: [body],
       button: m.button,
@@ -199,7 +237,7 @@ export function buildInvitationEmail(input: {
  * One account mail on the shared card; the button opens `path` on this
  * instance unless `url` says elsewhere. Mail to a person about their own
  * account goes from the account sender; an owner notice passes the
- * notifications sender, as the worker's do.
+ * notifications sender, as the worker's do, and the team it is about.
  */
 export function buildAccountEmail(input: {
   to: string;
@@ -209,6 +247,7 @@ export function buildAccountEmail(input: {
   url?: string | undefined;
   from?: string | undefined;
   values?: Record<string, string>;
+  aboutTeamId?: string | undefined;
 }): SystemMailMessage {
   return {
     from: input.from ?? accountEmailFrom() ?? "",
@@ -220,6 +259,7 @@ export function buildAccountEmail(input: {
       ...(input.values ? { values: input.values } : {}),
     }),
     kind: input.kind,
+    aboutTeamId: input.aboutTeamId,
   };
 }
 
@@ -252,24 +292,38 @@ export function buildPasswordChangedEmail(input: {
   });
 }
 
-/** Exported for tests. `team` is the team's name, or every team when the grant was for all. */
+/**
+ * Exported for tests. `team` is the team's name, or every team when the grant
+ * was for all; `expiresAt` is when the grant ends, null until disconnected.
+ */
 export function buildMcpConnectedEmail(input: {
   to: string;
   app: string;
   team: string | "*";
   scopes: string[];
+  expiresAt: Date | null;
   locale: MailLocale;
 }): SystemMailMessage {
-  const team =
-    input.team === "*"
-      ? accountMailPhrase({ locale: input.locale, kind: "mcp.connected", key: "allTeams" })
-      : input.team;
+  const phrase = (key: string, values?: Record<string, string>) =>
+    accountMailPhrase({
+      locale: input.locale,
+      kind: "mcp.connected",
+      key,
+      ...(values && { values }),
+    });
   return buildAccountEmail({
     to: input.to,
     kind: "mcp.connected",
     locale: input.locale,
     path: "/settings/connected-apps",
-    values: { app: input.app, team, scopes: input.scopes.join(", ") },
+    values: {
+      app: input.app,
+      team: input.team === "*" ? phrase("allTeams") : input.team,
+      scopes: input.scopes.join(", "),
+      until: input.expiresAt
+        ? phrase("untilDate", { date: formatMailDate(input.locale, input.expiresAt) })
+        : phrase("untilDisconnected"),
+    },
   });
 }
 
@@ -289,7 +343,7 @@ export function sendAccountMail(
 
 /** Mail seam so tests capture sends instead of stubbing the pipeline or the AWS SDK. */
 export interface SystemMailDeps {
-  send(message: SystemMailMessage): Promise<void>;
+  send(message: SystemMailMessage, opts?: SystemMailOptions): Promise<void>;
 }
 
 /**
@@ -300,7 +354,7 @@ export interface SystemMailDeps {
  * is nothing worth caching.
  */
 export const defaultSystemMailDeps: SystemMailDeps = {
-  send: async (message) => {
+  send: async (message, opts) => {
     await sendSystemMail(
       {
         db: getDb(),
@@ -318,6 +372,7 @@ export const defaultSystemMailDeps: SystemMailDeps = {
           ),
       },
       message,
+      opts,
     );
   },
 };
@@ -356,11 +411,7 @@ export async function sendPasswordResetEmail(
     if (recent) return;
     // The language lookup is detached with the send, for the same timing reason.
     void accountMailLocale(db, data.user.email, request?.headers)
-      .then((locale) =>
-        deps.send(
-          buildResetEmail({ to: data.user.email, name: data.user.name, url: data.url, locale }),
-        ),
-      )
+      .then((locale) => deps.send(buildResetEmail({ to: data.user.email, url: data.url, locale })))
       .catch((error) => {
         console.error("Password reset email failed to send", error);
       });
@@ -385,14 +436,7 @@ export function sendVerificationEmail(
   try {
     void accountMailLocale(db, data.user.email, request?.headers)
       .then((locale) =>
-        deps.send(
-          buildVerificationEmail({
-            to: data.user.email,
-            name: data.user.name,
-            url: data.url,
-            locale,
-          }),
-        ),
+        deps.send(buildVerificationEmail({ to: data.user.email, url: data.url, locale })),
       )
       .catch((error) => {
         console.error("Verification email failed to send", error);

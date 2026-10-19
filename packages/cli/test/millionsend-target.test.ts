@@ -14,7 +14,7 @@ import {
 } from "../src/millionsend.js";
 import type { Snapshot } from "../src/model.js";
 import { buildPlan } from "../src/plan.js";
-import { TARGET_WEBHOOK_EVENTS } from "../src/translate.js";
+import { TARGET_ALL_EVENTS } from "../src/translate.js";
 import { createApiKey, type LiveApi, startLiveApi } from "./helpers/live-api.js";
 
 let cloud: LiveApi;
@@ -334,7 +334,9 @@ describe("writers", () => {
       [1, "created"],
     ]);
     expect(first.counts).toEqual({ created: 2, updated: 0, skipped: 0, failed: 1 });
-    expect(first.errors).toEqual([{ index: 2, message: expect.stringMatching(/^email: /) }]);
+    expect(first.errors).toEqual([
+      { index: 2, statusCode: 422, message: expect.stringMatching(/^email: /) },
+    ]);
     ids.ada = first.data[0]?.id ?? "";
     ids.bob = first.data[1]?.id ?? "";
 
@@ -375,7 +377,7 @@ describe("writers", () => {
     expect(out.data).toHaveLength(BATCH_MAX + 1);
     expect(out.data.at(-1)?.index).toBe(BATCH_MAX);
     expect(out.errors).toEqual([
-      { index: BATCH_MAX + 1, message: expect.stringMatching(/^email/) },
+      { index: BATCH_MAX + 1, statusCode: 422, message: expect.stringMatching(/^email/) },
     ]);
     await cloud.db
       .update(schema.teams)
@@ -395,7 +397,9 @@ describe("writers", () => {
 
     const bad = await target.addSuppressions(["nope"], "manual");
     expect(bad.ids).toEqual([]);
-    expect(bad.errors).toEqual([{ index: 0, message: expect.stringMatching(/emails/) }]);
+    expect(bad.errors).toEqual([
+      { index: 0, statusCode: 422, message: expect.stringMatching(/emails/) },
+    ]);
 
     const listed = await fetch(`${cloud.baseUrl}/suppressions?origin=bounce`, {
       headers: { authorization: `Bearer ${cloud.apiKey}` },
@@ -432,6 +436,7 @@ describe("readState", () => {
         ]),
       },
     ]);
+    // Oldest first, although the API lists newest first.
     expect(state.properties).toEqual([
       { id: ids.property, key: "plan", type: "string" },
       { id: ids.numberProperty, key: "seats", type: "number" },
@@ -461,7 +466,7 @@ describe("readState", () => {
       {
         id: ids.webhook2,
         endpoint: "https://hooks.example.test/b",
-        events: [...TARGET_WEBHOOK_EVENTS],
+        events: [...TARGET_ALL_EVENTS],
         status: "enabled",
       },
     ]);
@@ -493,7 +498,7 @@ describe("readState", () => {
         {
           id: "src-b",
           endpoint: "https://hooks.example.test/b",
-          events: [...TARGET_WEBHOOK_EVENTS],
+          events: [...TARGET_ALL_EVENTS],
           status: "enabled",
           signingSecret: null,
         },
@@ -579,5 +584,39 @@ describe("rollback deletes", () => {
     expect(state.webhooks.map((w) => w.id)).toEqual([ids.webhook2]);
     expect(state.topics.map((t) => t.id)).toEqual([ids.topic]);
     expect(state.properties.map((p) => p.id)).toEqual([ids.numberProperty]);
+  });
+});
+
+describe("the team's subdomain of the shared inbox domain", () => {
+  it("is neither fetched nor counted among the target's domains", async () => {
+    const api = await startLiveApi({
+      slug: "shared-target",
+      sharedInboxDomain: "agents.example.test",
+    });
+    const paths: string[] = [];
+    try {
+      const shared = createMillionSendTarget(
+        createHttp({
+          baseUrl: api.baseUrl,
+          token: api.apiKey,
+          userAgent: "millionsend-cli/test",
+          rps: 1000,
+          name: "MillionSend",
+          log,
+          fetch: (input, init) => {
+            paths.push(new URL(String(input)).pathname);
+            return fetch(input, init);
+          },
+        }),
+        log,
+        api.baseUrl,
+      );
+      const own = ok(await shared.createDomain({ name: "own.example.com" })).id;
+      const state = await shared.readState();
+      expect(state.domains.map((d) => d.id)).toEqual([own]);
+      expect(paths.filter((path) => path.startsWith("/domains/"))).toEqual([`/domains/${own}`]);
+    } finally {
+      await api.stop();
+    }
   });
 });

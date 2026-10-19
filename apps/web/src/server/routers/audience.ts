@@ -16,6 +16,8 @@ import {
   PLAN_CONTACT_LIMIT,
   recordContactActivity,
   resultRows,
+  undeliverableRecipientMessage,
+  undeliverableRecipients,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -312,6 +314,21 @@ export const audienceRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const t = schema.contacts;
+        const [hit] = await undeliverableRecipients([input.email]);
+        if (hit) {
+          // Only new contacts are refused; a stored address still gets the CONFLICT below.
+          const [stored] = await ctx.db
+            .select({ id: t.id })
+            .from(t)
+            .where(and(eq(t.teamId, ctx.teamId), sql`lower(${t.email}) = lower(${input.email})`))
+            .limit(1);
+          if (!stored) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: undeliverableRecipientMessage(hit),
+            });
+          }
+        }
         await assertContactRoom(ctx, 1);
         const [row] = await ctx.db
           .insert(t)
@@ -339,9 +356,9 @@ export const audienceRouter = router({
       }),
 
     /**
-     * CSV import path. Rows with invalid addresses, batch-internal
-     * duplicates, or addresses the team already has count as skipped —
-     * one bad CSV line must not reject the batch.
+     * CSV import path. Rows with invalid addresses, addresses that can never
+     * receive mail, batch-internal duplicates, or addresses the team already
+     * has count as skipped — one bad CSV line must not reject the batch.
      */
     addMany: teamProcedure
       .input(
@@ -362,7 +379,7 @@ export const audienceRouter = router({
         const t = schema.contacts;
         let skipped = 0;
         const seen = new Set<string>();
-        const valid: { email: string; firstName: string | null; lastName: string | null }[] = [];
+        const parsed: { email: string; firstName: string | null; lastName: string | null }[] = [];
         for (const row of input.rows) {
           const key = row.email.toLowerCase();
           if (!emailSchema.safeParse(row.email).success || seen.has(key)) {
@@ -370,12 +387,17 @@ export const audienceRouter = router({
             continue;
           }
           seen.add(key);
-          valid.push({
+          parsed.push({
             email: row.email,
             firstName: row.firstName || null,
             lastName: row.lastName || null,
           });
         }
+        const refused = new Set(
+          (await undeliverableRecipients(parsed.map((p) => p.email))).map((hit) => hit.index),
+        );
+        const valid = parsed.filter((_, i) => !refused.has(i));
+        skipped += refused.size;
         if (valid.length === 0) return { created: 0, skipped };
         await assertContactRoom(ctx, valid.length);
         // ON CONFLICT, not a pre-SELECT: a concurrent import racing the same

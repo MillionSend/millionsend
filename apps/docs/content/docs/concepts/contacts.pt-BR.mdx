@@ -1,11 +1,11 @@
 ---
 title: Contatos
-description: Contatos globais ao time, com estado de inscrição e propriedades customizadas.
+description: Contatos globais à equipe, com estado de inscrição e propriedades personalizadas.
 ---
 
-Contatos são **globais ao time**: uma lista por time, uma linha por endereço
-de email (único, sem diferenciar maiúsculas). Não existe o conceito de
-"audiences" — um contato pertence diretamente ao seu time, e você segmenta
+Contatos são **globais à equipe**: uma lista por equipe, uma linha por endereço
+de e-mail (único, sem diferenciar maiúsculas). Não existe o conceito de
+"audiences" — um contato pertence diretamente à sua equipe, e você segmenta
 com [segmentos](/pt-BR/concepts/segments) e [tópicos](/pt-BR/concepts/topics).
 No MillionSend Cloud o plano Free guarda até 1.000 contatos (criar um além
 disso retorna `403 plan_limit_reached`; contatos existentes continuam sendo
@@ -17,12 +17,15 @@ caminhos de contato são os mesmos, sem o aninhamento de audience.
 
 ## O que um contato armazena
 
-- `email` — a identidade. Criar um segundo contato com o mesmo email
-  (qualquer capitalização) retorna `409`.
+- `email` — a identidade. Criar um segundo contato com o mesmo e-mail
+  (qualquer capitalização) retorna `409`, e criar um contato em um endereço
+  cujo domínio nunca recebe e-mail, como `example.com` ou `.test`, retorna
+  `422` (veja [Erros](/pt-BR/api-reference#erros)). Um contato que já existe
+  num endereço assim continua lá e ainda pode ser atualizado.
 - `first_name`, `last_name`
 - `unsubscribed` — o estado global de inscrição. Contatos descadastrados são
-  excluídos de todo broadcast.
-- `properties` — um mapa plano de valores string customizados
+  excluídos de toda transmissão.
+- `properties` — um mapa plano de valores string personalizados
   (`plan: "pro"`, `city: "Berlin"`). Objetos aninhados e arrays são
   rejeitados com `422`. As propriedades alimentam os campos de mesclagem de
   templates e os filtros de segmentos. `PATCH /contacts/{id}` mescla
@@ -34,14 +37,14 @@ caminhos de contato são os mesmos, sem o aninhamento de audience.
 Contatos são gerenciados via `POST/GET/PATCH/DELETE /contacts` e
 `GET /contacts/{id}` — veja a [referência da API](/pt-BR/api-reference). O
 segmento de caminho `{id}` aceita tanto o UUID do contato quanto seu endereço
-de email; a comparação de email não diferencia maiúsculas.
+de e-mail; a comparação de e-mail não diferencia maiúsculas.
 
 Duas extensões do MillionSend tornam barata a leitura de uma audiência.
 `GET /contacts` e `GET /segments/{id}/contacts` aceitam
 `include=properties,topics` e anexam a cada item o mapa de propriedades
 `{type, value}` e as linhas de tópicos que `GET /contacts/{id}` e
 `GET /contacts/{id}/topics` retornam; sem `include`, os itens mantêm o formato
-do Resend. `POST /contacts/batch/get` lê até 1.000 contatos por id ou email em
+do Resend. `POST /contacts/batch/get` lê até 1.000 contatos por id ou e-mail em
 uma requisição, na ordem do pedido, com o mesmo `include`; entradas que não
 correspondem a nenhum contato são listadas em `missing` em vez de falhar a
 chamada. Uma chamada conta como uma requisição no limite de taxa.
@@ -69,10 +72,10 @@ Toda mudança em um contato publica um
 ## Exclusão em massa
 
 `POST /contacts/batch/remove` exclui até 1.000 contatos em uma requisição, por
-`ids` ou por `emails` (exatamente um dos dois; a comparação de email não
+`ids` ou por `emails` (exatamente um dos dois; a comparação de e-mail não
 diferencia maiúsculas), e retorna as linhas de fato excluídas — entradas
 desconhecidas são ignoradas. Excluir mantém os e-mails do contato no log, onde
-expiram com a janela de retenção do time; `erase: true` também apaga cada
+expiram com a janela de retenção da equipe; `erase: true` também apaga cada
 endereço do histórico de e-mails, dos payloads de eventos e dos logs da API,
 igual a `DELETE /contacts/{id}?erase=true`. O Resend não tem exclusão em
 massa; é uma extensão do MillionSend, também exposta como a ferramenta MCP
@@ -90,7 +93,7 @@ curl -X POST "https://api.millionsend.com/contacts/batch/remove" \
 `POST /contacts/batch` recebe um array JSON de 1 a 1000 itens, cada um no
 formato de um corpo de `POST /contacts`, e grava todos em uma única transação
 (uma extensão do MillionSend — o Resend só importa contatos via CSV). O
-parâmetro de query `on_conflict` decide o que acontece com um item cujo email
+parâmetro de query `on_conflict` decide o que acontece com um item cujo e-mail
 já pertence a um contato, ou que se repete dentro do lote:
 
 - `error` (padrão) — o item falha: `409 Contact already exists` para um
@@ -127,25 +130,38 @@ curl -X POST "https://api.millionsend.com/contacts/batch?on_conflict=upsert" \
 {
   "data": [{ "object": "contact", "index": 0, "id": "9b2f…", "status": "updated" }],
   "counts": { "created": 0, "updated": 1, "skipped": 0, "failed": 1 },
-  "errors": [{ "index": 1, "message": "email: Invalid email address" }]
+  "errors": [
+    {
+      "index": 1,
+      "statusCode": 422,
+      "name": "validation_error",
+      "message": "email: Invalid email address"
+    }
+  ]
 }
 ```
 
+`ana@example.com` só funciona aqui porque o contato já existe: um contato novo
+em um endereço reservado como esse é recusado.
+
 `data` mantém a ordem da requisição e traz uma entrada por item bem-sucedido
 (status `created`, `updated` ou `skipped`); `counts` sempre soma o tamanho
-da requisição; `errors` só aparece no modo permissivo.
+da requisição; `errors` só aparece no modo permissivo. Cada entrada de
+`errors` traz o `statusCode` e o `name` que o modo estrito retornaria para
+esse item.
 
 ## Importação e exportação CSV
 
 O painel importa contatos de CSV (interpretado no cliente e criado em lote) e
 exporta a lista atual — inclusive visões filtradas por segmento ou tópico —
-de volta para CSV.
+de volta para CSV. Linhas com um endereço que nunca recebe e-mail são
+puladas, como as de endereço inválido.
 
 ## Descadastros
 
-Emails de broadcast levam headers `List-Unsubscribe` de um clique (RFC 8058)
+E-mails de transmissão levam headers `List-Unsubscribe` de um clique (RFC 8058)
 e uma página de descadastro hospedada. Um destinatário pode se descadastrar
 globalmente ou sair de [tópicos](/pt-BR/concepts/topics) individuais.
 Descadastros globais definem `unsubscribed: true` no contato e param envios
-com tópico e broadcasts; envios transacionais sem `topic_id` continuam
+com tópico e transmissões; envios transacionais sem `topic_id` continuam
 chegando — veja [Supressões](/pt-BR/concepts/suppressions#o-que-a-supressão-faz).

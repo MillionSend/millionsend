@@ -3,17 +3,21 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTransport } from "nodemailer";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   type AcceptEmailPayload,
   acceptEmail,
+  estimateMimeBytes,
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
-  verifyOnboardingSender,
+  SES_MAX_MESSAGE_BYTES,
+  SYSTEM_MAIL_TAG,
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type QuotaTeamRow, teamRung } from "../src/plans.js";
 import { readPeriodUsage } from "../src/quota.js";
+import { hashRecipient } from "../src/suppressions.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
 let db: Db;
@@ -34,57 +38,8 @@ beforeAll(async () => {
   domainId = domain.id;
 });
 afterAll(() => close());
-
-describe("verifyOnboardingSender", () => {
-  const platform = "MillionSend <onboarding@ms.example>";
-  it("only the shared sender qualifies, and only for the team's own members", async () => {
-    await db
-      .insert(schema.user)
-      .values([
-        { id: "member-1", name: "Ada", email: "Ada@Example.com", emailVerified: true },
-        { id: "member-2", name: "Bob", email: "bob@example.com" },
-      ])
-      .onConflictDoNothing();
-    await db.insert(schema.teamMembers).values([
-      { teamId, userId: "member-1", role: "owner" },
-      { teamId, userId: "member-2", role: "member" },
-    ]);
-
-    expect(
-      await verifyOnboardingSender(db, teamId, "a@acme.dev", ["ada@example.com"], platform),
-    ).toBeNull();
-    expect(
-      await verifyOnboardingSender(db, teamId, platform, ["ada@example.com"], undefined),
-    ).toBeNull();
-    expect(
-      await verifyOnboardingSender(
-        db,
-        teamId,
-        "onboarding@ms.example",
-        ["ada@example.com"],
-        platform,
-      ),
-    ).toEqual({ ok: true, domainId: null, address: "onboarding@ms.example" });
-    expect(
-      await verifyOnboardingSender(
-        db,
-        teamId,
-        platform,
-        ["Ada <ada@example.com>", "stranger@example.com"],
-        platform,
-      ),
-    ).toEqual({ ok: false, reason: "recipient_not_member" });
-    // A member whose address was never verified may be anyone's inbox —
-    // unless the instance cannot verify anyone, where members stay reachable.
-    expect(
-      await verifyOnboardingSender(db, teamId, platform, ["bob@example.com"], platform),
-    ).toEqual({ ok: false, reason: "recipient_not_verified" });
-    expect(
-      await verifyOnboardingSender(db, teamId, platform, ["bob@example.com"], platform, {
-        requireVerified: false,
-      }),
-    ).toMatchObject({ ok: true });
-  });
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 const deps = () => ({
@@ -98,6 +53,7 @@ const deps = () => ({
 const FREE: QuotaTeamRow = {
   plan: "free",
   planQuota: null,
+  planStatus: "none",
   currentPeriodStart: null,
   currentPeriodEnd: null,
   overageEnabled: false,
@@ -148,20 +104,81 @@ describe("acceptEmail", () => {
     expect(row?.accepted).toBe(1);
   });
 
-  it("rejects attachments whose decoded bytes exceed the cap", async () => {
-    const content = Buffer.alloc(MAX_ATTACHMENT_BYTES / 2 + 1).toString("base64");
-    const result = await acceptEmail(deps(), auth(), {
-      ...payload(),
-      attachments: [
-        { filename: "a.bin", content },
-        { filename: "b.bin", content },
-      ],
-    });
-    expect(result).toEqual({
-      ok: false,
-      reason: "attachments_too_large",
-      maxBytes: MAX_ATTACHMENT_BYTES,
-    });
+  it("charges a send scheduled in the past to today: an earlier day's quota never reopens", async () => {
+    vi.useFakeTimers({ now: new Date("2026-10-09T10:00:00Z"), toFake: ["Date"] });
+    try {
+      const team = await createTeam(db, "backdated-sender");
+      const [old] = await db
+        .insert(schema.domains)
+        .values({
+          teamId: team,
+          name: "backdated.dev",
+          region: "us-east-1",
+          status: "verified",
+          registeredAt: new Date("2014-01-01T00:00:00Z"),
+        })
+        .returning({ id: schema.domains.id });
+      const ceiling = Math.floor(teamRung("free", null).included * (1 + QUOTA_TOLERANCE));
+      await db
+        .insert(schema.usageCounters)
+        .values({ teamId: team, day: "2026-10-09", accepted: ceiling });
+      const result = await acceptEmail(
+        deps(),
+        { teamId: team, billing: FREE, apiKeyId: null },
+        payload({
+          from: "a@backdated.dev",
+          domainId: old?.id ?? null,
+          scheduledAt: new Date("2026-10-06T10:00:00Z"),
+        }),
+      );
+      expect(result).toMatchObject({ ok: true, parked: true, day: "2026-10-09" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses over 10 MiB of attachments, or a send SES would refuse once encoded", async () => {
+    const overCap = Buffer.alloc(MAX_ATTACHMENT_BYTES + 3).toString("base64");
+    expect(
+      await acceptEmail(deps(), auth(), {
+        ...payload(),
+        attachments: [{ filename: "a.bin", content: overCap }],
+      }),
+    ).toEqual({ ok: false, reason: "attachments_too_large", maxBytes: MAX_ATTACHMENT_BYTES });
+    // 9 MiB of files under 30 MiB of html: over 40 MiB as the worker builds the message.
+    const nine = Buffer.alloc(9 * 1024 * 1024).toString("base64");
+    expect(
+      await acceptEmail(deps(), auth(), {
+        ...payload(),
+        html: "a".repeat(30 * 1024 * 1024),
+        attachments: [{ filename: "a.bin", content: nine }],
+      }),
+    ).toEqual({ ok: false, reason: "attachments_too_large", maxBytes: SES_MAX_MESSAGE_BYTES });
+  });
+
+  it("measures the worker's MIME message from above, and closely", async () => {
+    const transport = createTransport({ streamTransport: true, buffer: true });
+    for (const [mib, html] of [
+      [1, "<p>hi</p>"],
+      [29, `<p>Olá, ${"número ".repeat(5000)}</p>`],
+    ] as const) {
+      const content = Buffer.alloc(mib * 1024 * 1024, 7).toString("base64");
+      const email = {
+        subject: "Pedido nº 42",
+        html,
+        text: "hi",
+        headers: { "X-Entity-Ref-ID": "r1" },
+      };
+      const built = await transport.sendMail({
+        from: "a@acme.dev",
+        to: "b@example.com",
+        ...email,
+        attachments: [{ filename: "a.bin", content, encoding: "base64" }],
+      });
+      const estimate = estimateMimeBytes({ ...email, attachments: [{ content }] });
+      expect(estimate).toBeGreaterThanOrEqual((built.message as Buffer).length);
+      expect(estimate - (built.message as Buffer).length).toBeLessThan(64 * 1024);
+    }
   });
 
   it("parks over-quota mail until the backlog cap, then refuses", async () => {
@@ -204,6 +221,7 @@ describe("acceptEmail", () => {
     const billing: QuotaTeamRow = {
       plan: "pro",
       planQuota: 100_000,
+      planStatus: "active",
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
       overageEnabled: false,
@@ -257,5 +275,131 @@ describe("acceptEmail", () => {
       periodEnd,
       overage: true,
     });
+  });
+
+  it("charges a past scheduled_at to today, so a full day parks it instead of an unspent past one", async () => {
+    const backdating = await createTeam(db, "backdating");
+    const ceiling = Math.floor(teamRung("free", null).included * (1 + QUOTA_TOLERANCE));
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: backdating, day: utcDay(), accepted: ceiling });
+    const past = new Date(Date.now() - 3 * DAY_MS);
+    const result = await acceptEmail(
+      deps(),
+      { teamId: backdating, billing: FREE, apiKeyId: null },
+      payload({ domainId: null, scheduledAt: past }),
+    );
+    expect(result).toMatchObject({ ok: true, parked: true, day: utcDay() });
+    const days = await db
+      .select({ day: schema.usageCounters.day, accepted: schema.usageCounters.accepted })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, backdating));
+    expect(days).toEqual([{ day: utcDay(), accepted: ceiling }]);
+  });
+
+  it("refuses a suspended or paused team before writing anything; account mail still lands", async () => {
+    const held = await createTeam(db, "held");
+    const heldAuth = { teamId: held, billing: FREE, apiKeyId: null };
+    const rows = () =>
+      db.select({ id: schema.emails.id }).from(schema.emails).where(eq(schema.emails.teamId, held));
+
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "manual" })
+      .where(eq(schema.teams.id, held));
+    expect(await acceptEmail(deps(), heldAuth, payload({ domainId: null }))).toEqual({
+      ok: false,
+      reason: "team_suspended",
+      suspension: "manual",
+    });
+
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, held));
+    // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: held, day: utcDay(), sent: 200, hardBounced: 20 });
+    expect(await acceptEmail(deps(), heldAuth, payload({ domainId: null }))).toMatchObject({
+      ok: false,
+      reason: "sending_paused",
+      pause: { metric: "bounce", tier: "paused" },
+    });
+    expect(await rows()).toEqual([]);
+
+    const account = await acceptEmail(
+      deps(),
+      { ...heldAuth, billing: "uncapped" },
+      payload({ domainId: null }),
+    );
+    expect(account).toMatchObject({ ok: true, parked: false });
+    expect(await rows()).toHaveLength(1);
+  });
+
+  it("keeps the system-mail mark on the account-mail path alone", async () => {
+    const tagged = await createTeam(db, "tagged");
+    const tags = { [SYSTEM_MAIL_TAG]: "password_reset", campaign: "launch" };
+    const storedTags = async (billing: QuotaTeamRow | "uncapped") => {
+      const result = await acceptEmail(
+        deps(),
+        { teamId: tagged, billing, apiKeyId: null },
+        payload({ domainId: null, tags }),
+      );
+      if (!result.ok) throw new Error(result.reason);
+      const [row] = await db
+        .select({ tags: schema.emails.tags })
+        .from(schema.emails)
+        .where(eq(schema.emails.id, result.id));
+      return row?.tags;
+    };
+    expect(await storedTags(FREE)).toEqual({ campaign: "launch" });
+    expect(await storedTags("uncapped")).toEqual(tags);
+  });
+
+  it("keeps a refused send's tags on its suppressed record, the system-mail mark dropped", async () => {
+    const refusing = await createTeam(db, "record-tags");
+    await db.insert(schema.suppressions).values({
+      teamId: refusing,
+      email: "gone@example.com",
+      emailHash: hashRecipient("gone@example.com"),
+      reason: "hard_bounce",
+    });
+    const result = await acceptEmail(
+      deps(),
+      { teamId: refusing, billing: FREE, apiKeyId: null },
+      payload({
+        domainId: null,
+        to: ["gone@example.com"],
+        tags: { [SYSTEM_MAIL_TAG]: "password_reset", campaign: "launch" },
+      }),
+      { recordSuppressed: true },
+    );
+    expect(result).toEqual({ ok: false, reason: "all_suppressed" });
+    const rows = await db
+      .select({ status: schema.emails.latestStatus, tags: schema.emails.tags })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, refusing));
+    expect(rows).toEqual([{ status: "suppressed", tags: { campaign: "launch" } }]);
+  });
+
+  it("refuses a recipient whose domain can never receive mail, unless the caller checked already", async () => {
+    vi.stubEnv("RECIPIENT_DOMAIN_CHECK", "on");
+    const teamAuth = { teamId: await createTeam(db, "unreachable"), billing: FREE, apiKeyId: null };
+    const impossible = payload({
+      domainId: null,
+      to: ["success@simulator.amazonses.com"],
+      cc: ["Printer <X@Printer.LOCAL>"],
+      bcc: ["x@mail.example.com"],
+    });
+    expect(await acceptEmail(deps(), teamAuth, impossible)).toEqual({
+      ok: false,
+      reason: "undeliverable_recipient",
+      address: "x@printer.local",
+      why: "reserved_name",
+    });
+    expect(
+      await acceptEmail(deps(), teamAuth, impossible, { recipientsChecked: true }),
+    ).toMatchObject({ ok: true, parked: false });
   });
 });

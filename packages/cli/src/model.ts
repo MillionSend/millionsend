@@ -284,5 +284,6 @@ export interface MigrateState {
     enrichmentCompleted?: boolean | undefined;
     suppressionsDone?: boolean | undefined;
   };
-  failures: { resource: Resource; key: string; message: string }[];
+  /** Older state files, and instances without per-row status codes, leave `statusCode` out. */
+  failures: { resource: Resource; key: string; message: string; statusCode?: number | undefined }[];
 }

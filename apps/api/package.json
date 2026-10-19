@@ -15,25 +15,28 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.1",
+    "@hono/node-server": "^2.1.5",
     "@hono/zod-openapi": "^1.6.3",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
-    "@modelcontextprotocol/server": "2.0.0",
-    "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.7",
+    "@modelcontextprotocol/server": "2.3.1",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.13",
     "jose": "6.2.12",
-    "tsx": "^4.23.13"
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
-    "@modelcontextprotocol/client": "2.0.0",
-    "@types/node": "^22.20.2",
-    "resend": "^6.27.0",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@types/node": "^22.20.5",
+    "@types/nodemailer": "^8.0.1",
+    "nodemailer": "^10.1.0",
+    "resend": "^6.32.1",
+    "resend-inboxes": "npm:resend@6.32.1-preview-inboxes.6",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.4"
   }
 }

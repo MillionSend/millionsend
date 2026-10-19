@@ -1,18 +1,13 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Fragment, useState } from "react";
-import { regionFlag } from "@/app/(dashboard)/domains/regions";
+import { useState } from "react";
 import { PopoverMenu } from "@/components/popover-menu";
-import { Sparkline } from "@/components/sparkline";
 import { toast } from "@/components/toast";
-import { formatDurationShort, formatRelative, formatUsd, withinLastDay } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import type { AppRouter } from "@/server/routers";
-import { useRegionFormats } from "./regions/formatters";
 import {
   PauseDialog,
   QuotaDialog,
@@ -24,7 +19,6 @@ import {
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 /** One served region as console.regions.list returns it. */
 export type ServedRegion = RouterOutputs["console"]["regions"]["list"]["served"][number];
-type RegionList = RouterOutputs["console"]["regions"]["list"];
 
 type RegionDialog = "quota" | "template" | "pause" | "resume" | "stop" | null;
 
@@ -38,19 +32,10 @@ export function RegionBadge({ status }: { status: ServedRegion["status"] }) {
 /**
  * The "…" menu of a served region (refresh probe, request quota increase,
  * production access template, pause/resume broadcasts in this region, stop
- * serving) with its dialogs. Rendered in the Overview's region cards
- * (boxed) and the Regions table rows (bare). `onChanged` re-fetches the
- * caller's list after an action.
+ * serving) with its dialogs, at the end of a region table's row.
+ * `onChanged` re-fetches the caller's list after an action.
  */
-export function RegionMenu({
-  region,
-  onChanged,
-  boxed = true,
-}: {
-  region: ServedRegion;
-  onChanged: () => void;
-  boxed?: boolean;
-}) {
+export function RegionMenu({ region, onChanged }: { region: ServedRegion; onChanged: () => void }) {
   const t = useTranslations("console.region");
   const common = useTranslations("console.common");
   const trpc = useTRPC();
@@ -79,7 +64,6 @@ export function RegionMenu({
     <>
       <PopoverMenu
         ariaLabel={common("actions")}
-        boxed={boxed}
         items={[
           {
             label: t("menu.refresh"),
@@ -186,299 +170,6 @@ export function QuotaBar({
           }}
         />
       ) : null}
-    </div>
-  );
-}
-
-function Dot({ tone }: { tone: "success" | "warn" | "danger" | "info" | "steel" }) {
-  return <span className="ms-dot" style={{ background: `var(--ms-${tone})`, marginRight: 6 }} />;
-}
-
-/**
- * The Overview's region card (flag, city, code, Serving/Sandbox badge, 24h
- * quota bar, key/value rows, the bleed sparkline of sends per hour, the
- * RegionMenu). The Events row reads the list-wide pipeline facts from the
- * regions.list query the caller already holds (react-query dedupes it).
- */
-export function RegionCard({ region, onChanged }: { region: ServedRegion; onChanged: () => void }) {
-  const t = useTranslations("console.region");
-  const domains = useTranslations("domains");
-  const trpc = useTRPC();
-  const f = useRegionFormats();
-  const list = useQuery(trpc.console.regions.list.queryOptions());
-  const account = region.account;
-  const sandbox = region.status === "sandbox";
-  const plan = account?.pricingPlan ?? null;
-  const enforcement = account?.enforcementStatus ?? null;
-  const breaker = region.breaker;
-  const txParked = withinLastDay(region.txParkedAt);
-  // The window split: what broadcasts hold, what transactional mail holds
-  // (warn-coloured past the usable reserve), and the share as a tick. A
-  // sandbox region keeps its plain warn fill.
-  const split =
-    account && !sandbox && region.share !== null && region.usableReserve !== null
-      ? {
-          segments: [
-            { value: region.bulkSent24h, color: "var(--ms-steel)" },
-            {
-              value: region.txSent24h ?? 0,
-              color:
-                (region.txSent24h ?? 0) > region.usableReserve
-                  ? "var(--ms-warn)"
-                  : "var(--ms-info)",
-            },
-          ],
-          tick: region.share / account.quota.max24h,
-        }
-      : null;
-  // The SQS pipeline is one queue for every region: the list-wide health and lag apply to each card.
-  const events = (pipeline: Pick<RegionList, "eventsHealth" | "eventsLagSeconds">) =>
-    pipeline.eventsHealth === null
-      ? t("eventsOff")
-      : pipeline.eventsHealth.status === "unhealthy"
-        ? t("eventsUnhealthy")
-        : pipeline.eventsHealth.status === "idle" || pipeline.eventsLagSeconds === null
-          ? t("eventsIdle")
-          : t("eventsLag", { lag: formatDurationShort(pipeline.eventsLagSeconds * 1000) });
-
-  const rows: [string, React.ReactNode][] = [
-    [
-      t("maxRate"),
-      account
-        ? t("rateValue", {
-            rate: f.oneDecimal(account.quota.maxSendRate),
-            bucket: f.oneDecimal(region.effectiveRate ?? 0),
-          })
-        : t("planUnknown"),
-    ],
-    [
-      t("plan"),
-      plan === "NONE"
-        ? t("planNone")
-        : plan === "ESSENTIALS"
-          ? t("planEssentials")
-          : plan
-            ? t("planOther", { plan })
-            : t("planUnknown"),
-    ],
-    [
-      t("enforcement"),
-      <>
-        <Dot tone={enforcement === "HEALTHY" ? "success" : "warn"} />
-        {enforcement ? enforcement.toLowerCase() : t("planUnknown")}
-      </>,
-    ],
-    [t("domains"), t("domainsValue", { count: region.domainsVerified })],
-    [
-      t("queue"),
-      region.bulkParked > 0
-        ? t("queueValue", {
-            waiting: f.n(region.bulkParked),
-            count: region.waitingBroadcasts,
-            clears: region.lastFinishesAt ? f.clearsAbout(region.lastFinishesAt) : "—",
-          })
-        : t("queueEmpty"),
-    ],
-    [
-      t("txParked"),
-      txParked ? (
-        <>
-          <Dot tone="danger" />
-          {t("txParkedAt", { ago: formatRelative(txParked, f.locale) })}
-        </>
-      ) : (
-        <>
-          <Dot tone="success" />
-          {t("txParkedNone")}
-        </>
-      ),
-    ],
-    sandbox
-      ? [
-          t("productionRow"),
-          <>
-            <Dot tone="warn" />
-            {t("productionPending")}
-          </>,
-        ]
-      : [
-          t("breaker"),
-          breaker && breaker.manualReason !== null ? (
-            <>
-              <Dot tone="danger" />
-              {t("breakerManual")}
-            </>
-          ) : breaker?.reason ? (
-            <>
-              <Dot tone="danger" />
-              {t("breakerOpen", {
-                metric: t(`metric.${breaker.reason.metric}`),
-                rate: f.pct2(breaker.reason.rate),
-              })}
-            </>
-          ) : (
-            <>
-              <Dot tone="success" />
-              {t("breakerRates", {
-                closed: t("breakerClosed"),
-                bounce: region.week ? f.pct2(region.week.hardBounceRate) : "—",
-                complaint: region.week ? f.pct2(region.week.complaintRate) : "—",
-              })}
-            </>
-          ),
-        ],
-    [t("events"), list.data ? events(list.data) : "—"],
-    [
-      t("cost"),
-      t("costValue", {
-        amount: formatUsd(region.cost.cents, f.locale),
-        sent: f.n(region.cost.sentThisMonth),
-        rate: formatUsd(region.cost.centsPer1k, f.locale),
-      }) + (region.cost.tenants ? t("costTenants") : ""),
-    ],
-  ];
-
-  return (
-    <div
-      className="ms-card ms-card-bleed"
-      style={{
-        position: "relative",
-        padding: 20,
-        paddingBottom: 78,
-        display: "flex",
-        flexDirection: "column",
-        gap: 14,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 20, lineHeight: 1 }} aria-hidden="true">
-          {regionFlag(region.region)}
-        </span>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600 }}>{domains(`regions.${region.region}`)}</div>
-          <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-            {region.region} · {t(sandbox ? "sandboxLower" : "production")}
-          </div>
-        </div>
-        <span style={{ marginLeft: "auto" }}>
-          <RegionBadge status={region.status} />
-        </span>
-        <RegionMenu region={region} onChanged={onChanged} />
-      </div>
-      <div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            fontSize: "var(--ms-fs-label)",
-          }}
-        >
-          <span style={{ color: "var(--ms-muted)" }}>{t("quota")}</span>
-          {account ? (
-            <span className="ms-mono" style={{ fontSize: 12.5 }}>
-              {t("quotaOf", {
-                used: f.n(account.quota.sentLast24h),
-                max: f.n(account.quota.max24h),
-              })}
-            </span>
-          ) : (
-            <span style={{ color: "var(--ms-danger)", fontSize: 12 }}>
-              {t("error", { message: region.error ?? "" })}
-            </span>
-          )}
-        </div>
-        <QuotaBar
-          used={account?.quota.sentLast24h ?? 0}
-          max={account?.quota.max24h ?? 0}
-          warn={sandbox}
-          {...(split ? { segments: split.segments, tick: split.tick } : {})}
-          style={{ marginTop: 6 }}
-        />
-        {split && region.share !== null && region.usableReserve !== null ? (
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              flexWrap: "wrap",
-              marginTop: 8,
-              fontSize: 11.5,
-              color: "var(--ms-bone)",
-            }}
-          >
-            <span>
-              <Dot tone="steel" />
-              {t("legendBroadcasts", { sent: f.n(region.bulkSent24h), share: f.n(region.share) })}
-            </span>
-            <span>
-              <Dot tone={split.segments[1]?.color === "var(--ms-warn)" ? "warn" : "info"} />
-              {t("legendTransactional", { sent: f.n(region.txSent24h ?? 0) })}{" "}
-              <span style={{ color: "var(--ms-muted)" }}>
-                {t("legendUsable", { usable: f.n(region.usableReserve) })}
-              </span>
-            </span>
-          </div>
-        ) : null}
-      </div>
-      <dl className="ms-kv">
-        {rows.map(([label, value]) => (
-          <Fragment key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </Fragment>
-        ))}
-      </dl>
-      <span
-        className="ms-microlabel"
-        style={{ position: "absolute", left: 20, bottom: 60, pointerEvents: "none" }}
-      >
-        {t("sparkLabel")}
-      </span>
-      <div className="ms-bleed" style={{ height: 56 }}>
-        <Sparkline
-          values={region.hourly.map((p) => p.sent)}
-          labels={region.hourly.map((p) => f.hourLabel(p.t))}
-          formatValue={(v) => f.n(Math.round(v))}
-          height={56}
-          min={0}
-        />
-      </div>
-    </div>
-  );
-}
-
-/** The dashed "Add a region" card; the Regions page opens its panel for `?add=<region>`. */
-export function AddRegionCard({ region }: { region: string }) {
-  const t = useTranslations("console.overview.addRegion");
-  return (
-    <div
-      className="ms-card"
-      style={{
-        borderStyle: "dashed",
-        boxShadow: "none",
-        background: "transparent",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        textAlign: "center",
-        color: "var(--ms-muted)",
-        minHeight: 220,
-        padding: 20,
-      }}
-    >
-      <div style={{ fontSize: 18, letterSpacing: 4, filter: "grayscale(1)", opacity: 0.7 }}>
-        🇮🇪 🇯🇵 🇩🇪
-      </div>
-      <div style={{ fontWeight: 600, color: "var(--ms-bone)" }}>{t("title")}</div>
-      <div style={{ fontSize: 13, maxWidth: 230 }}>{t("body")}</div>
-      <Link
-        href={`/console/regions?add=${encodeURIComponent(region)}`}
-        className="ms-btn ms-btn-secondary"
-      >
-        {t("cta", { region })}
-      </Link>
     </div>
   );
 }

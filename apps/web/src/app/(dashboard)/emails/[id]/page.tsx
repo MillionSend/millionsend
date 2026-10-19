@@ -8,15 +8,24 @@ import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
-import { CopyChip, CopyGlyph } from "@/components/copy-chip";
+import { Breakable } from "@/components/breakable";
+import { CopyBlock, CopyChip } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { EmailContentPanel } from "@/components/email-content-panel";
-import { EmailStatusIcon, EventIconTile } from "@/components/email-status-icon";
+import {
+  EmailStatusIcon,
+  EventGap,
+  EventIconTile,
+  EventNode,
+  EventStripSkeleton,
+} from "@/components/email-status-icon";
+import { GradientBanner } from "@/components/gradient-banner";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
+import { suppressedAtAccept } from "@/lib/email-events";
 import {
   addrSpec,
   displayUrl,
@@ -26,7 +35,6 @@ import {
   formatUtcTimestampMs,
   mailDomain,
 } from "@/lib/format";
-import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
 type EventType =
@@ -44,30 +52,6 @@ type EventType =
   | "failed"
   | "prefetched"
   | "unsubscribed";
-
-/**
- * Ledger word color per the canvas: sent stays muted (it's the baseline,
- * not an outcome), delivered succeeds, opens/clicks inform, bounce and
- * suppression are dangers, complaints warn.
- */
-const EVENT_COLOR: Record<EventType, string> = {
-  queued: "var(--ms-muted)",
-  queued_quota: "var(--ms-muted)",
-  sent: "var(--ms-muted)",
-  delivery_delayed: "var(--ms-neutral)",
-  delivered: "var(--ms-success)",
-  opened: "var(--ms-info)",
-  clicked: "var(--ms-info)",
-  bounced: "var(--ms-danger)",
-  complained: "var(--ms-warn)",
-  suppressed: "var(--ms-danger)",
-  rendering_failure: "var(--ms-danger)",
-  failed: "var(--ms-danger)",
-  // A machine's fetch, not an outcome: the same muted tone as sent.
-  prefetched: "var(--ms-muted)",
-  // An opt-out through this email's link: a warning-tone outcome, like a complaint.
-  unsubscribed: "var(--ms-warn)",
-};
 
 function isPrefetchReason(value: unknown): value is PrefetchReason {
   return typeof value === "string" && (PREFETCH_REASONS as readonly string[]).includes(value);
@@ -88,6 +72,15 @@ function bounceOf(data: EventData): BounceData | null {
 function deliveryOf(data: EventData): { recipients?: string[] } | null {
   const d = data?.delivery;
   return d && typeof d === "object" ? (d as { recipients?: string[] }) : null;
+}
+type DelayData = {
+  delayType?: string;
+  expirationTime?: string;
+  delayedRecipients?: Array<{ diagnosticCode?: string; status?: string }>;
+};
+function delayOf(data: EventData): DelayData | null {
+  const d = data?.deliveryDelay;
+  return d && typeof d === "object" ? (d as DelayData) : null;
 }
 function clickOf(data: EventData): { link?: string; userAgent?: string } | null {
   const c = data?.click;
@@ -152,7 +145,7 @@ function Meta({
         className={mono ? "ms-mono" : undefined}
         style={{ fontSize: mono ? 13 : 14, marginTop: 5, overflowWrap: "anywhere" }}
       >
-        {children}
+        {typeof children === "string" ? <Breakable text={children} /> : children}
       </div>
     </div>
   );
@@ -241,38 +234,6 @@ function ApplePrivateRelaySteps({ from }: { from: string }) {
   );
 }
 
-/** Mono code block with a top-right copy glyph (SMTP responses, diagnostics). */
-function CodeBlock({ value }: { value: string }) {
-  return (
-    <div
-      style={{
-        position: "relative",
-        background: "var(--ms-inset)",
-        border: "1px solid var(--ms-line)",
-        borderRadius: 10,
-        padding: "14px 16px",
-      }}
-    >
-      <pre
-        className="ms-mono"
-        style={{
-          margin: 0,
-          fontSize: 12,
-          lineHeight: 1.7,
-          color: "var(--ms-bone)",
-          whiteSpace: "pre-wrap",
-          overflowWrap: "anywhere",
-        }}
-      >
-        {value}
-      </pre>
-      <span style={{ position: "absolute", top: 10, right: 12 }}>
-        <CopyGlyph value={value} />
-      </span>
-    </div>
-  );
-}
-
 /** Mirrors the loaded page's boxes (header, meta grid, events strip, body panel). */
 function EmailDetailSkeleton() {
   const t = useTranslations("emails");
@@ -335,61 +296,7 @@ function EmailDetailSkeleton() {
 
       <div style={{ marginTop: 26 }}>
         <div className="ms-microlabel">{t("detail.events")}</div>
-        <div
-          style={{
-            marginTop: 12,
-            border: "1px solid var(--ms-line)",
-            borderRadius: 14,
-            padding: "30px 26px",
-            backgroundImage: "radial-gradient(var(--ms-line) 1px, transparent 1px)",
-            backgroundSize: "18px 18px",
-            backgroundPosition: "center",
-            display: "flex",
-            alignItems: "center",
-            overflowX: "auto",
-          }}
-        >
-          {[0, 1, 2].map((index) => (
-            <div key={index} style={{ display: "contents" }}>
-              {index > 0 ? (
-                <div
-                  style={{
-                    flex: "none",
-                    minWidth: 56,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 5,
-                    padding: "0 4px",
-                  }}
-                >
-                  <span className="ms-mono" style={{ fontSize: 10.5, display: "flex" }}>
-                    <Skeleton width={32} height="1lh" />
-                  </span>
-                  <span style={{ height: 1, background: "var(--ms-line-strong)", width: "100%" }} />
-                </div>
-              ) : null}
-              <div
-                style={{
-                  background: "var(--ms-panel)",
-                  border: "1px solid var(--ms-line)",
-                  borderRadius: 12,
-                  padding: "12px 16px",
-                  width: 264,
-                  boxSizing: "border-box",
-                  flex: "none",
-                }}
-              >
-                <div style={{ fontSize: 13.5, fontWeight: 600, display: "flex" }}>
-                  <Skeleton width={70} height="1lh" />
-                </div>
-                <div className="ms-mono" style={{ fontSize: 11.5, marginTop: 7, display: "flex" }}>
-                  <Skeleton width={168} height="1lh" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <EventStripSkeleton />
       </div>
 
       <div
@@ -436,6 +343,10 @@ type Pending =
   | { kind: "queued" }
   | { kind: "plan"; resumesAt: Date }
   | { kind: "waiting" }
+  | { kind: "warmup" }
+  | { kind: "warmupPaused" }
+  | { kind: "newDomainLimit" }
+  | { kind: "held" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
 /**
@@ -500,6 +411,24 @@ function PendingEvents({
       body: t("detail.pending.waitingBody"),
       estimate: true,
     });
+  } else if (
+    pending.kind === "warmup" ||
+    pending.kind === "warmupPaused" ||
+    pending.kind === "newDomainLimit"
+  ) {
+    nodes.push({
+      type: "queued_quota",
+      label: t(`detail.pending.${pending.kind}`),
+      body: t(`detail.pending.${pending.kind}Body`),
+      estimate: true,
+    });
+  } else if (pending.kind === "held") {
+    nodes.push({
+      type: "queued_quota",
+      label: t("held.label"),
+      body: t("held.body"),
+      estimate: true,
+    });
   } else {
     nodes.push({
       type: "queued_quota",
@@ -520,43 +449,16 @@ function PendingEvents({
   }
   return (
     <>
-      <div
-        style={{
-          marginTop: 12,
-          border: "1px solid var(--ms-line)",
-          borderRadius: 14,
-          padding: "30px 26px",
-          backgroundImage: "radial-gradient(var(--ms-line) 1px, transparent 1px)",
-          backgroundSize: "18px 18px",
-          backgroundPosition: "center",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 6,
-          overflowX: "auto",
-        }}
-      >
+      <div className="ms-events">
         {nodes.map((node, i) => (
           <div key={node.label} style={{ display: "contents" }}>
             {i > 0 ? (
               <span
                 aria-hidden="true"
-                style={{
-                  flex: "1 0 40px",
-                  marginTop: 17,
-                  borderTop: `1px ${node.estimate ? "dashed" : "solid"} var(--ms-line-strong)`,
-                }}
+                className={node.estimate ? "ms-events-link dashed" : "ms-events-link"}
               />
             ) : null}
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                textAlign: "center",
-                flex: "none",
-                maxWidth: 240,
-              }}
-            >
+            <div className="ms-events-node">
               <EventIconTile type={node.type} dashed={node.estimate ?? false} />
               <span className="ms-badge ms-badge-neutral" style={{ marginTop: 10 }}>
                 {node.label}
@@ -616,23 +518,36 @@ export default function EmailDetailPage() {
   const email = query.data;
   const recipient = email?.to[0] ?? null;
 
-  // The suppression row backing the "Suppressed details" drawer (and its
+  // The suppressions backing the "Suppressed details" drawer (and their
   // destructive remove) — fetched only when that drawer opens.
   const suppressionQuery = useQuery(
-    trpc.emails.suppressions.list.queryOptions(
-      { search: recipient ?? "", limit: 50 },
-      { enabled: drawer === "suppressed" && recipient != null },
+    trpc.emails.suppressions.forEmail.queryOptions(
+      { emailId: id },
+      { enabled: drawer === "suppressed" },
     ),
   );
-  const suppressionRow =
-    suppressionQuery.data?.items.find((item) => item.email === recipient) ?? null;
+  const suppressionRows = suppressionQuery.data ?? [];
   const removeMutation = useMutation(
     trpc.emails.suppressions.remove.mutationOptions({
-      onSuccess: () => {
-        setDrawer(null);
-        queryClient.invalidateQueries(trpc.emails.suppressions.pathFilter());
+      onSuccess: (removed) => {
+        if (suppressionRows.every((row) => row.id === removed.id)) setDrawer(null);
+        return queryClient.invalidateQueries(trpc.emails.suppressions.pathFilter());
       },
     }),
+  );
+  const removeButton = (row: (typeof suppressionRows)[number] | null, marginTop: number) => (
+    <button
+      type="button"
+      className="ms-btn ms-btn-destructive"
+      style={{ width: "100%", justifyContent: "center", marginTop }}
+      disabled={!row || removeMutation.isPending}
+      onClick={() => {
+        if (row) removeMutation.mutate({ id: row.id });
+      }}
+    >
+      <BtnSpinner on={removeMutation.isPending && removeMutation.variables?.id === row?.id} />
+      {t("suppressedDrawer.remove")}
+    </button>
   );
 
   if (query.isPending) {
@@ -766,6 +681,22 @@ export default function EmailDetailPage() {
       const parts = [code ?? b.bounceSubType, b.bounceType?.toLowerCase()].filter(Boolean);
       return parts.length > 0 ? parts.join(" · ") : null;
     }
+    if (type === "delivery_delayed") {
+      const d = delayOf(data);
+      if (!d) return null;
+      const delayed = d.delayedRecipients?.[0];
+      const parts = [
+        d.delayType && t.has(`detail.delayType.${d.delayType}`)
+          ? t(`detail.delayType.${d.delayType}`)
+          : d.delayType,
+        smtpCode(delayed?.diagnosticCode) ?? delayed?.status,
+        // Intl throws on an invalid date; a malformed stamp must not take the page down.
+        d.expirationTime && !Number.isNaN(Date.parse(d.expirationTime))
+          ? t("detail.retriesUntil", { time: formatDayTime(d.expirationTime, locale) })
+          : null,
+      ].filter(Boolean);
+      return parts.length > 0 ? parts.join(" · ") : null;
+    }
     if (type === "clicked") {
       const link = clickOf(data)?.link;
       return link ? displayUrl(link) : null;
@@ -798,37 +729,23 @@ export default function EmailDetailPage() {
         title={recipient ?? email.subject}
         leading={<EmailStatusIcon status={email.latestStatus} size={42} />}
         subtitle={sublineParts.join(" · ")}
-        actions={<ApiDocsButton />}
+        menu={<ApiDocsButton />}
       />
 
       {hardBounced ? (
-        <div
-          className="ms-wrap-row"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            backgroundColor: "var(--ms-ground)",
-            backgroundImage: statusGlow("danger"),
-            border: "1px solid var(--ms-danger-border)",
-            borderRadius: 12,
-            padding: "12px 16px",
-            marginBottom: 24,
-          }}
+        <GradientBanner
+          variant="danger"
+          title={t("detail.bounceBanner.hard")}
+          style={{ marginBottom: 24 }}
         >
-          <span style={{ fontSize: 13.5, color: "var(--ms-danger)" }}>
-            {t("detail.bounceBanner.hard")}
-          </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
-            {t.rich("detail.bounceBanner.suppressed", {
-              link: (chunks) => (
-                <Link href="/emails/suppressions" className="ms-link">
-                  {chunks}
-                </Link>
-              ),
-            })}
-          </span>
-        </div>
+          {t.rich("detail.bounceBanner.suppressed", {
+            link: (chunks) => (
+              <Link href="/emails/suppressions" className="ms-link">
+                {chunks}
+              </Link>
+            ),
+          })}
+        </GradientBanner>
       ) : null}
 
       <div
@@ -912,25 +829,10 @@ export default function EmailDetailPage() {
             {t("detail.noEvents")}
           </p>
         ) : (
-          <div
-            style={{
-              marginTop: 12,
-              border: "1px solid var(--ms-line)",
-              borderRadius: 14,
-              padding: "30px 26px",
-              backgroundImage: "radial-gradient(var(--ms-line) 1px, transparent 1px)",
-              backgroundSize: "18px 18px",
-              backgroundPosition: "center",
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 6,
-              overflowX: "auto",
-            }}
-          >
+          <div className="ms-events">
             {groups.map((group, index) => {
               const { type, first } = group;
               const count = group.occurrences.length;
-              const latest = index === groups.length - 1;
               const previous = index > 0 ? groups[index - 1] : undefined;
               // Connector deltas run between first occurrences — the group's
               // anchor — so the strip stays chronological even when a later
@@ -946,7 +848,11 @@ export default function EmailDetailPage() {
                 type === "bounced" || type === "suppressed" || type === "unsubscribed"
                   ? first
                   : (group.occurrences[count - 1] ?? first);
-              const detail = eventDetail(type, first.data);
+              // A delay's reason and expiry belong with the time the node shows.
+              const detail = eventDetail(
+                type,
+                (type === "delivery_delayed" ? stamped : first).data,
+              );
               const opens =
                 type === "bounced" && bounceOf(first.data)
                   ? ("bounced" as const)
@@ -957,156 +863,41 @@ export default function EmailDetailPage() {
                       : count > 1
                         ? ("group" as const)
                         : null;
-              // Icon-tile node: glyph tile, status pill, timestamp, detail —
-              // the connector line meets the tiles at their vertical center.
-              const card = (
-                <>
-                  <span style={{ position: "relative", display: "inline-flex" }}>
-                    <EventIconTile type={type} />
-                    {latest && type !== "prefetched" ? (
-                      <span
-                        style={{
-                          position: "absolute",
-                          top: -3,
-                          right: -3,
-                          width: 7,
-                          height: 7,
-                          borderRadius: "50%",
-                          background: EVENT_COLOR[type],
-                          animation: "ms-pulse 2s infinite",
-                        }}
-                      />
-                    ) : null}
-                  </span>
-                  <span
-                    title={type === "prefetched" ? t("detail.prefetchedHint") : undefined}
-                    style={{
-                      marginTop: 10,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 5,
-                      padding: "3px 9px",
-                      borderRadius: "var(--ms-r-chip)",
-                      // Dashed: it happened, and it does not count.
-                      border: `1px ${type === "prefetched" ? "dashed" : "solid"} color-mix(in srgb, ${EVENT_COLOR[type]} 35%, var(--ms-line))`,
-                      background: `color-mix(in srgb, ${EVENT_COLOR[type]} ${type === "prefetched" ? 4 : 10}%, var(--ms-panel))`,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: EVENT_COLOR[type],
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {eventLabel(type)}
-                    {count > 1 ? (
-                      <span className="ms-mono" style={{ fontSize: 10, fontWeight: 500 }}>
-                        ×{count}
-                      </span>
-                    ) : null}
-                    {opens ? <span aria-hidden="true">›</span> : null}
-                  </span>
-                  <span
-                    title={formatUtcTimestampMs(stamped.occurredAt)}
-                    style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 7 }}
-                  >
-                    {formatDayTime(stamped.occurredAt, locale)}
-                  </span>
-                  {detail ? (
-                    <span
-                      className="ms-mono"
-                      style={{
-                        fontSize: 11,
-                        color: "var(--ms-muted)",
-                        marginTop: 3,
-                        maxWidth: 220,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {detail}
-                    </span>
-                  ) : null}
-                </>
-              );
-              const cardStyle: React.CSSProperties = {
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                textAlign: "center",
-                background: "none",
-                border: 0,
-                padding: 0,
-                flex: "none",
-              };
               return (
                 <div key={first.id} style={{ display: "contents" }}>
-                  {delta != null ? (
-                    <div
-                      style={{
-                        flex: "none",
-                        minWidth: 56,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: 4,
-                        padding: "0 6px",
-                        alignSelf: "flex-start",
-                        marginTop: 0,
-                      }}
-                    >
-                      <span
-                        className="ms-mono"
-                        style={{ fontSize: 10.5, color: "var(--ms-muted)" }}
-                      >
-                        +{formatDurationShort(delta)}
-                      </span>
-                      <span
-                        style={{ height: 1, background: "var(--ms-line-strong)", width: "100%" }}
-                      />
-                    </div>
-                  ) : null}
-                  {opens ? (
-                    <button
-                      type="button"
-                      style={{ ...cardStyle, color: "inherit", font: "inherit", cursor: "pointer" }}
-                      onClick={() =>
-                        opens === "group" ? setGroupDrawer(first.id) : setDrawer(opens)
-                      }
-                    >
-                      {card}
-                    </button>
-                  ) : (
-                    <div style={cardStyle}>{card}</div>
-                  )}
+                  {delta != null ? <EventGap ms={delta} /> : null}
+                  <EventNode
+                    type={type}
+                    label={
+                      <>
+                        {eventLabel(type)}
+                        {count > 1 ? (
+                          <span className="ms-mono" style={{ fontSize: 10, fontWeight: 500 }}>
+                            ×{count}
+                          </span>
+                        ) : null}
+                        {opens ? <span aria-hidden="true">›</span> : null}
+                      </>
+                    }
+                    hint={type === "prefetched" ? t("detail.prefetchedHint") : undefined}
+                    at={stamped.occurredAt}
+                    detail={detail}
+                    // Wraps instead of clipping: its last part is when SES stops retrying.
+                    wrapDetail={type === "delivery_delayed"}
+                    latest={index === groups.length - 1}
+                    onClick={
+                      opens
+                        ? () => (opens === "group" ? setGroupDrawer(first.id) : setDrawer(opens))
+                        : undefined
+                    }
+                  />
                 </div>
               );
             })}
             {eventsStalled ? (
               <>
-                <div
-                  style={{
-                    flex: "none",
-                    minWidth: 56,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "0 6px",
-                    alignSelf: "flex-start",
-                  }}
-                >
-                  <span className="ms-mono" style={{ fontSize: 10.5 }}>
-                    &nbsp;
-                  </span>
-                  <span
-                    style={{
-                      height: 0,
-                      borderTop: "1px dashed var(--ms-line-strong)",
-                      width: "100%",
-                    }}
-                  />
-                </div>
-                <div style={{ flex: "none" }}>
+                <EventGap ms={null} dashed />
+                <div className="ms-events-node">
                   <Tooltip text={t("detail.eventsStalled")}>
                     <span
                       aria-hidden="true"
@@ -1142,6 +933,7 @@ export default function EmailDetailPage() {
             insights: email.insights,
             bodyPurgedAt: email.bodyPurgedAt,
             hiddenBySupportView: email.hiddenBySupportView,
+            suppressedAtAccept: suppressedAtAccept(email.events),
           }}
         />
       </div>
@@ -1172,7 +964,7 @@ export default function EmailDetailPage() {
             <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
               {t("bouncedDrawer.smtpResponse")}
             </div>
-            <CodeBlock value={bounceDiag} />
+            <CopyBlock value={bounceDiag} />
           </>
         ) : null}
         <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
@@ -1249,36 +1041,45 @@ export default function EmailDetailPage() {
         onClose={() => setDrawer(null)}
         title={t("suppressedDrawer.title")}
       >
-        <div className="ms-wrap-row" style={{ display: "flex", gap: 32, marginTop: 16 }}>
-          <div>
-            <Microlabel>{t("suppressedDrawer.origin")}</Microlabel>
-            <div style={{ fontSize: 14, marginTop: 4 }}>
-              {suppressionRow
-                ? [
-                    t(`suppressions.reason.${suppressionRow.reason}`),
-                    ...(suppressionRow.reason === "hard_bounce" && bounce?.bounceType
-                      ? [bounce.bounceType.toLowerCase()]
-                      : []),
-                  ].join(" — ")
-                : "—"}
+        {/* One block per suppression a recipient matches; dashes while loading or when none does. */}
+        {(suppressionRows.length > 0 ? suppressionRows : [null]).map((row, index) => (
+          <div
+            key={row?.id ?? "none"}
+            style={index > 0 ? { marginTop: 18, borderTop: "1px solid var(--ms-line)" } : undefined}
+          >
+            <div className="ms-wrap-row" style={{ display: "flex", gap: 32, marginTop: 16 }}>
+              <div>
+                <Microlabel>{t("suppressedDrawer.origin")}</Microlabel>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {row
+                    ? t(
+                        row.fullMailbox
+                          ? "suppressions.fullMailbox"
+                          : `suppressions.reason.${row.reason}`,
+                      )
+                    : "—"}
+                </div>
+              </div>
+              <div>
+                <Microlabel>{t("suppressedDrawer.added")}</Microlabel>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {row ? formatRelative(row.createdAt, locale) : "—"}
+                </div>
+              </div>
             </div>
+            {row ? (
+              <div style={{ marginTop: 12 }}>
+                <Microlabel>{t("suppressedDrawer.recipient")}</Microlabel>
+                <div className="ms-mono" style={{ fontSize: 13, marginTop: 5 }}>
+                  {/* An erased row matches by its hash alone and keeps its address unknown. */}
+                  {row.email ?? <span style={{ color: "var(--ms-faint)" }}>—</span>}
+                </div>
+              </div>
+            ) : null}
+            {suppressionRows.length > 1 ? removeButton(row, 14) : null}
           </div>
-          <div>
-            <Microlabel>{t("suppressedDrawer.added")}</Microlabel>
-            <div style={{ fontSize: 14, marginTop: 4 }}>
-              {suppressionRow ? formatRelative(suppressionRow.createdAt, locale) : "—"}
-            </div>
-          </div>
-        </div>
-        {recipient ? (
-          <div style={{ marginTop: 12 }}>
-            <Microlabel>{t("suppressedDrawer.recipient")}</Microlabel>
-            <div className="ms-mono" style={{ fontSize: 13, marginTop: 5 }}>
-              {recipient}
-            </div>
-          </div>
-        ) : null}
-        <div style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6, marginTop: 14 }}>
+        ))}
+        <div style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6, marginTop: 16 }}>
           {t.rich("suppressedDrawer.blocked", {
             code: (chunks) => (
               <span className="ms-mono" style={{ fontSize: 12, color: "var(--ms-bone)" }}>
@@ -1294,18 +1095,8 @@ export default function EmailDetailPage() {
           <StepRow index={1} text={t("suppressedDrawer.step1")} />
           <StepRow index={2} text={t("suppressedDrawer.step2")} last />
         </div>
-        <button
-          type="button"
-          className="ms-btn ms-btn-destructive"
-          style={{ width: "100%", justifyContent: "center", marginTop: 16 }}
-          disabled={!suppressionRow || removeMutation.isPending}
-          onClick={() => {
-            if (suppressionRow) removeMutation.mutate({ id: suppressionRow.id });
-          }}
-        >
-          <BtnSpinner on={removeMutation.isPending} />
-          {t("suppressedDrawer.remove")}
-        </button>
+        {/* Remove follows the steps that say to confirm first; several matches each need their own. */}
+        {suppressionRows.length > 1 ? null : removeButton(suppressionRows[0] ?? null, 16)}
       </Drawer>
 
       <Drawer

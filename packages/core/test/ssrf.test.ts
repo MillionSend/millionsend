@@ -1,7 +1,15 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, describe, expect, it } from "vitest";
-import { isBlockedIp, postFailureCode, postJson } from "../src/ssrf.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  getBytes,
+  getImage,
+  IMAGE_FETCH_MAX_BYTES,
+  IMAGE_FETCH_TIMEOUT_MS,
+  isBlockedIp,
+  postFailureCode,
+  postJson,
+} from "../src/ssrf.js";
 
 describe("isBlockedIp", () => {
   it.each([
@@ -96,6 +104,18 @@ describe("postJson guard", () => {
   });
 });
 
+describe("getBytes guard", () => {
+  it("refuses http, private literals and names that resolve to them", async () => {
+    await expect(getBytes("http://example.com/list", { maxBytes: 10 })).rejects.toThrow(/https/);
+    await expect(getBytes("https://10.0.0.1/list", { maxBytes: 10 })).rejects.toThrow(
+      /blocked address/,
+    );
+    await expect(getBytes("https://localhost/list", { maxBytes: 10 })).rejects.toThrow(
+      /blocked address/,
+    );
+  });
+});
+
 describe("postJson delivery (allowLocalhost)", () => {
   let server: Server;
   afterAll(() => new Promise<void>((r) => server.close(() => r())));
@@ -123,6 +143,15 @@ describe("postJson delivery (allowLocalhost)", () => {
     });
     expect(res.status).toBe(200);
     expect(res.body).toBe("ok");
+  });
+
+  it("answers a NUL byte in the body as U+FFFD, which Postgres text can hold", async () => {
+    const base = await listen((_req, res) => {
+      res.writeHead(500);
+      res.end(Buffer.from([0x6f, 0x6b, 0x00, 0x21]));
+    });
+    const res = await postJson(`${base}/hook`, { body: "{}", headers: {}, allowLocalhost: true });
+    expect(res.body).toBe("ok\uFFFD!");
   });
 
   it("POSTs, returns status, does not follow redirects, caps the body", async () => {
@@ -181,5 +210,99 @@ describe("postFailureCode", () => {
     [new Error("something else"), "delivery_failed"],
   ] as const)("maps %s to a fixed code", (err, code) => {
     expect(postFailureCode(err)).toBe(code);
+  });
+});
+
+describe("getImage", () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  let server: Server;
+  let base = "";
+  let seen: IncomingHttpHeaders = {};
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const send = (status: number, headers: Record<string, string>, body?: Buffer | string) => {
+        res.writeHead(status, headers);
+        res.end(body);
+      };
+      switch (req.url) {
+        case "/hop":
+          return send(302, { location: "/png" });
+        case "/png":
+          seen = req.headers;
+          return send(200, { "content-type": "image/png; charset=binary" }, png);
+        case "/private":
+          return send(302, { location: "http://169.254.169.254/latest/meta-data" });
+        case "/loop":
+          return send(302, { location: "/loop" });
+        case "/big-header":
+          res.writeHead(200, {
+            "content-type": "image/png",
+            "content-length": String(IMAGE_FETCH_MAX_BYTES + 1),
+          });
+          return res.end();
+        case "/big-stream":
+          res.writeHead(200, { "content-type": "image/png" });
+          res.write(png);
+          return res.end(Buffer.alloc(IMAGE_FETCH_MAX_BYTES));
+        case "/html":
+          return send(200, { "content-type": "image/png" }, "<html><body>hi</body></html>");
+        case "/slow":
+          setTimeout(() => send(200, { "content-type": "image/png" }, png), 1_000);
+          return;
+        default:
+          return send(404, {});
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  const local = { allowLocalhost: true };
+
+  it("refuses metadata, v4-mapped loopback and unique-local addresses before connecting", async () => {
+    for (const url of [
+      "http://169.254.169.254/latest/meta-data",
+      "http://[::ffff:127.0.0.1]/logo.png",
+      "https://[fc00::1]/logo.png",
+    ]) {
+      await expect(getImage(url), url).rejects.toThrow(/blocked address/);
+    }
+  });
+
+  it("refuses ports other than 80 and 443, and schemes other than http(s)", async () => {
+    await expect(getImage("http://example.com:8080/logo.png")).rejects.toThrow(/port/);
+    await expect(getImage("ftp://example.com/logo.png")).rejects.toThrow(/http or https/);
+  });
+
+  it("follows a redirect as a desktop browser, with no cookie or referer", async () => {
+    const image = await getImage(`${base}/hop`, local);
+    expect(image).toEqual({ bytes: png, contentType: "image/png" });
+    expect(seen["user-agent"]).toMatch(/^Mozilla\/5\.0 \(Windows NT/);
+    expect(seen.cookie).toBeUndefined();
+    expect(seen.referer).toBeUndefined();
+  });
+
+  it("checks every hop again: a redirect to a private address is refused", async () => {
+    await expect(getImage(`${base}/private`, local)).rejects.toThrow(/blocked address/);
+    await expect(getImage(`${base}/loop`, local)).rejects.toThrow(/too many/);
+  });
+
+  it("refuses an image over 5 MB, by its header or by its stream", async () => {
+    await expect(getImage(`${base}/big-header`, local)).rejects.toThrow(/over/);
+    await expect(getImage(`${base}/big-stream`, local)).rejects.toThrow(/over/);
+  });
+
+  it("refuses bytes that are not the image the header claims", async () => {
+    await expect(getImage(`${base}/html`, local)).rejects.toThrow(
+      /something other than image\/png/,
+    );
+  });
+
+  it("gives up on a slow host", async () => {
+    expect(IMAGE_FETCH_TIMEOUT_MS).toBe(3_000);
+    const failure = await getImage(`${base}/slow`, { ...local, timeoutMs: 100 }).catch((e) => e);
+    expect(postFailureCode(failure)).toBe("timeout");
   });
 });

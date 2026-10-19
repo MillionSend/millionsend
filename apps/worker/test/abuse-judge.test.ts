@@ -13,12 +13,13 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { desc, eq } from "drizzle-orm";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import {
   JUDGE_THROTTLE_RETRIES,
   type JudgeDeps,
   judgeSample,
 } from "../src/handlers/abuse-judge.js";
+import { createSystemMailer } from "../src/system-mail.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -54,7 +55,7 @@ afterAll(() => close());
 
 async function insertEmail(
   html: string,
-  opts: { attachments?: boolean; team?: string } = {},
+  opts: { attachments?: boolean; team?: string; from?: string } = {},
 ): Promise<string> {
   const id = randomUUID();
   const team = opts.team ?? teamId;
@@ -63,7 +64,7 @@ async function insertEmail(
   await db.insert(schema.emails).values({
     id,
     teamId: team,
-    from: "Acme <hi@acme.dev>",
+    from: opts.from ?? "Acme <hi@acme.dev>",
     to: ["victim@example.org"],
     replyTo: ["reply@example.net"],
     subject: "Your account",
@@ -143,7 +144,7 @@ it("judges an email sample from its decrypted body, never showing the recipient,
   expect(block).toContain("  acme.dev -> acme-login.example");
   expect(block).toContain("Attachments: boleto.pdf (application/pdf)");
   expect(block).not.toContain("victim@example.org");
-  expect(block).not.toContain("ignore this reviewer");
+  expect(block).toContain("Hidden text (not shown to the reader):\n  ignore this reviewer");
   expect(await sample(id)).toMatchObject({
     status: "judged",
     score: 82,
@@ -277,9 +278,10 @@ it("emails the operator on the alert and on the pause, in that team's review lin
   expect(sends.find((s) => s.kind === "monitor.alert")?.text).toContain(
     `https://app.example.test/console/safety/${fresh}`,
   );
-  expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.subject).toContain(
-    "fresh-team",
+  expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.subject).toBe(
+    "Content monitor paused a team's broadcasts",
   );
+  expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.text).toContain("fresh-team");
   const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, fresh));
   expect(team?.broadcastsPausedByOperatorAt).toEqual(NOW);
   const [audit] = await db
@@ -288,4 +290,118 @@ it("emails the operator on the alert and on the pause, in that team's review lin
     .where(eq(schema.auditLog.teamId, fresh))
     .orderBy(desc(schema.auditLog.createdAt));
   expect(audit).toMatchObject({ action: "monitor.broadcasts_paused", actorId: "system" });
+});
+
+it("names the team's tier in the operator's language, never by its key", async () => {
+  await db.update(schema.user).set({ locale: "pt-BR" }).where(eq(schema.user.id, "op"));
+  try {
+    // On probation: past its first window and ramp, inside its first 30 days.
+    const settled = await createTeam(db, "settled-team");
+    await db.insert(schema.teamMonitor).values({
+      teamId: settled,
+      sentTotal: 5_000,
+      firstSendAt: new Date(NOW.getTime() - 10 * 86_400_000),
+    });
+    const judge = fakeJudge(async () => ({ score: 100 }));
+    for (let i = 0; i < 6; i += 1) {
+      const [row] = await db
+        .insert(schema.monitorSamples)
+        .values({
+          teamId: settled,
+          emailId: await insertEmail("<p>pay here</p>", { team: settled }),
+          kind: "tier",
+          createdAt: NOW,
+        })
+        .returning({ id: schema.monitorSamples.id });
+      await judgeSample(db, deps(judge), { sampleId: row?.id ?? "" });
+    }
+    const alert = sends.find((s) => s.kind === "monitor.alert" && s.text.includes(settled));
+    expect(alert?.text).toContain("(nível em observação,");
+    expect(alert?.text).not.toContain("probation");
+  } finally {
+    await db.update(schema.user).set({ locale: null }).where(eq(schema.user.id, "op"));
+  }
+});
+
+it("still emails the operator about a suspended team, through the system mailer", async () => {
+  vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "MillionSend <notify@mail.system.test>");
+  try {
+    const system = await createTeam(db, "system");
+    await db.insert(schema.domains).values({
+      teamId: system,
+      name: "mail.system.test",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: NOW,
+    });
+    const suspended = await createTeam(db, "suspended-team");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: NOW, suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, suspended));
+    await db.insert(schema.teamMonitor).values({
+      teamId: suspended,
+      sentTotal: 2,
+      firstSendAt: new Date(NOW.getTime() - 3600_000),
+    });
+    const judge = fakeJudge(async () => ({ score: 100 }));
+    const systemMailer = createSystemMailer({ db, keyring, enqueueSend: async () => {} });
+    for (let i = 0; i < 12; i += 1) {
+      const [row] = await db
+        .insert(schema.monitorSamples)
+        .values({
+          teamId: suspended,
+          emailId: await insertEmail("<p>pay here</p>", { team: suspended }),
+          kind: "first_sends",
+          createdAt: NOW,
+        })
+        .returning({ id: schema.monitorSamples.id });
+      await judgeSample(db, deps(judge, { mailer: systemMailer }), { sampleId: row?.id ?? "" });
+    }
+    const mailed = await db
+      .select({ to: schema.emails.to, tags: schema.emails.tags })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, system));
+    expect(mailed).toHaveLength(2);
+    expect(mailed).toEqual(
+      expect.arrayContaining([
+        { to: ["op@example.com"], tags: { millionsend_system: "monitor.alert" } },
+        { to: ["op@example.com"], tags: { millionsend_system: "monitor.broadcasts_paused" } },
+      ]),
+    );
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it("holds a new team on one phishing verdict from 80 on its shared-domain mail, as on a young domain's", async () => {
+  const team = await createTeam(db, "shared-sender");
+  await db.insert(schema.teamMonitor).values({ teamId: team, sentTotal: 1, firstSendAt: NOW });
+  const emailId = await insertEmail("<p>Confirm your card</p>", {
+    team,
+    from: "Agent <agent@shared-sender.agents.example>",
+  });
+  const id = await insertSample({ teamId: team, emailId });
+  const phishing: AbuseJudge = {
+    provider: "typesafe",
+    model: "fake-model",
+    judge: async () => ({
+      score: 81,
+      verdict: "abuse",
+      categories: ["payment_redirect"],
+      reasons: [],
+      impersonatedBrand: null,
+      language: "en",
+    }),
+  };
+  expect(
+    await judgeSample(db, deps(phishing, { sharedInboxDomain: "agents.example" }), {
+      sampleId: id,
+    }),
+  ).toBe("judged");
+  const [held] = await db
+    .select({ reason: schema.teams.suspensionReason })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, team));
+  expect(held?.reason).toBe("review");
 });

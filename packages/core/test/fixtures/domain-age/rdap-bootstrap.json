@@ -1,0 +1,10 @@
+{
+  "description": "RDAP bootstrap file for Domain Name System registrations",
+  "publication": "2026-09-30T23:00:03Z",
+  "services": [
+    [["br"], ["https://rdap.registro.br/"]],
+    [["com"], ["https://rdap.verisign.com/com/v1/"]],
+    [["net"], ["https://rdap.verisign.com/net/v1/"]]
+  ],
+  "version": "1.0"
+}

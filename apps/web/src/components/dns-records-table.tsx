@@ -15,18 +15,20 @@ import {
 import { abbreviateDkim } from "@/lib/format";
 import { zoneRelativeName } from "@/lib/zone";
 
-const GROUPS = ["verification", "sending", "dmarc", "tracking"] as const;
+const GROUPS = ["verification", "sending", "dmarc", "tracking", "receiving"] as const;
 
 /**
- * Rows per group as dnsRecordsForDomain emits them (packages/ses). Tracking is
- * 0 here: the branded-tracking CNAME only exists once a subdomain is set, so it
- * never appears in the loading skeleton.
+ * Rows per group as dnsRecordsForDomain emits them (packages/ses). Tracking and
+ * receiving are 0 here: the branded-tracking CNAME only exists once a subdomain
+ * is set and the Receiving MX once receiving is on, so neither appears in the
+ * loading skeleton.
  */
 const GROUP_ROWS: Record<(typeof GROUPS)[number], number> = {
   verification: 1,
   sending: 2,
   dmarc: 1,
   tracking: 0,
+  receiving: 0,
 };
 
 export type DnsRecord = {
@@ -76,6 +78,7 @@ const GROUP_HAS_PRIORITY: Record<(typeof GROUPS)[number], boolean> = {
   sending: true,
   dmarc: false,
   tracking: false,
+  receiving: true,
 };
 
 const IP_RE = /^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:]+)$/i;
@@ -110,8 +113,11 @@ function RecordsTable({
   return (
     /* tableLayout fixed so the pill cells can end-ellipsize long values; the
        min width makes the wrapper scroll on phones instead of collapsing the
-       Value column to nothing. */
-    <Table className="ms-mono dense" style={{ fontSize: 13, tableLayout: "fixed", minWidth: 720 }}>
+       Value column to nothing, and the Priority column gets its own room. */
+    <Table
+      className="ms-mono dense"
+      style={{ fontSize: 13, tableLayout: "fixed", minWidth: showPriority ? 820 : 720 }}
+    >
       <thead>
         <tr className="ms-mono">
           <th style={{ width: 64 }}>{t("detail.columns.type")}</th>
@@ -128,8 +134,9 @@ function RecordsTable({
 }
 
 /**
- * The grouped DNS-record tables (Domain verification / Enable sending / DMARC)
- * shared by the domain-detail page and the add-domain wizard's step 02.
+ * The grouped DNS-record tables (Domain verification / Enable sending / DMARC /
+ * tracking / Enable receiving) shared by the domain-detail page and the
+ * add-domain wizard's step 02.
  * The Name pill shows and copies the zone-relative name (what a DNS
  * provider's Name field expects); the full hostname rides in the title.
  * Content pills end-ellipsize; the full value is copied.
@@ -142,6 +149,7 @@ export function DnsRecordsTable({
   forceGroups = [],
   groupExtras = {},
   emptyNotes = {},
+  groupFooters = {},
 }: {
   records: DnsRecord[];
   /** The domain the records belong to; omitted, names render absolute. */
@@ -154,10 +162,12 @@ export function DnsRecordsTable({
   /** Right-aligned header content per group (e.g. a toggle). */
   groupExtras?: Partial<Record<(typeof GROUPS)[number], React.ReactNode>>;
   emptyNotes?: Partial<Record<(typeof GROUPS)[number], string>>;
+  /** Content under a group's records (a setting that belongs to the group). */
+  groupFooters?: Partial<Record<(typeof GROUPS)[number], React.ReactNode>>;
 }) {
   const t = useTranslations("domains");
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {GROUPS.map((group) => {
         const rows = records.filter((r) => r.group === group);
         const showPriority = rows.some((r) => r.priority !== undefined);
@@ -246,6 +256,7 @@ export function DnsRecordsTable({
                 })}
               </RecordsTable>
             )}
+            {groupFooters[group] ?? null}
           </div>
         );
       })}
@@ -257,7 +268,7 @@ export function DnsRecordsTable({
 export function DnsRecordsTableSkeleton({ showStatus = false }: { showStatus?: boolean }) {
   const t = useTranslations("domains");
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {GROUPS.filter((group) => GROUP_ROWS[group] > 0).map((group) => (
         <div key={group} style={{ maxWidth: 1000 }}>
           <p className="ms-microlabel" style={{ margin: "0 0 8px" }}>

@@ -1,6 +1,6 @@
 {
   "name": "@millionsend/cli",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "description": "Migrate an email account to MillionSend: contacts, segments, topics, templates, webhooks, domains and suppressions — read from the source provider, written to your MillionSend instance, re-run safe",
   "license": "MIT",
   "type": "module",
@@ -31,15 +31,15 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.1.1",
+    "@hono/node-server": "^2.1.5",
     "@millionsend/api": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
     "@millionsend/test-utils": "workspace:*",
-    "@types/node": "^22.20.2",
-    "drizzle-orm": "^0.45.2",
+    "@types/node": "^22.20.5",
+    "drizzle-orm": "^0.45.4",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.4"
   }
 }

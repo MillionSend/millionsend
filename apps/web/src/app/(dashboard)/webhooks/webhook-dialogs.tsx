@@ -1,8 +1,9 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
+import { ChipMultiSelect } from "@/components/chip-multi-select";
 import { CopyChip } from "@/components/copy-chip";
 import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import { Modal } from "@/components/modal";
@@ -19,12 +20,29 @@ import {
   type WebhookEventType,
 } from "@/lib/webhook-events";
 
+const MAIL_GROUPS: readonly string[] = ["receiving", "inboxes"];
+
+/** What the picker offers: received mail and inbox events only where the instance takes mail. */
+export function offeredEvents(receiving: boolean) {
+  return {
+    types: receiving
+      ? WEBHOOK_EVENT_TYPES
+      : WEBHOOK_EVENT_TYPES.filter(
+          (value) => !MAIL_GROUPS.includes(WEBHOOK_EVENT_META[value].group),
+        ),
+    groups: WEBHOOK_EVENT_GROUPS.filter((key) => receiving || !MAIL_GROUPS.includes(key)),
+  };
+}
+
 /** Shared dot + human-label option list for the event picker, derived from meta. */
 function useWebhookEventOptions() {
   const t = useTranslations("webhooks");
+  const trpc = useTRPC();
+  const receiving = useQuery(trpc.system.features.queryOptions()).data?.receiving === true;
+  const { types, groups } = offeredEvents(receiving);
   return {
-    groups: WEBHOOK_EVENT_GROUPS.map((key) => ({ key, label: t(`eventGroup.${key}`) })),
-    options: WEBHOOK_EVENT_TYPES.map((value) => ({
+    groups: groups.map((key) => ({ key, label: t(`eventGroup.${key}`) })),
+    options: types.map((value) => ({
       value,
       label: t(`eventLabel.${value}`),
       group: WEBHOOK_EVENT_META[value].group,
@@ -81,6 +99,49 @@ export function EventTypesPicker({
   );
 }
 
+/**
+ * "Only these inboxes": empty means every inbox. Offered where the instance
+ * takes mail and the team has an inbox to pick.
+ */
+export function InboxFilterField({
+  value,
+  onChange,
+  disabled,
+  id,
+}: {
+  value: string[];
+  onChange: (value: string[]) => void;
+  disabled: boolean;
+  id: string;
+}) {
+  const t = useTranslations("webhooks");
+  const ti = useTranslations("inboxes");
+  const trpc = useTRPC();
+  const receiving = useQuery(trpc.system.features.queryOptions()).data?.receiving === true;
+  const inboxes = useQuery(trpc.inboxes.list.queryOptions({ limit: 100 }, { enabled: receiving }));
+  const options = (inboxes.data?.items ?? []).map((inbox) => ({
+    value: inbox.id,
+    label: inbox.email_address,
+  }));
+  if (!receiving || options.length === 0) return null;
+  return (
+    <div className="ms-field">
+      <label htmlFor={id}>{t("onlyInboxes")}</label>
+      <ChipMultiSelect
+        id={id}
+        value={value}
+        onChange={onChange}
+        options={options}
+        placeholder={ti("received.filter.allInboxes")}
+        ariaLabel={t("onlyInboxes")}
+        removeLabel={(label) => ti("safety.remove", { value: label })}
+        disabled={disabled}
+      />
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>{t("inboxOptIn")}</p>
+    </div>
+  );
+}
+
 const isKnownEvent = (value: string): value is WebhookEventType =>
   (WEBHOOK_EVENT_TYPES as readonly string[]).includes(value);
 
@@ -90,6 +151,8 @@ export interface EditableWebhook {
   description: string | null;
   /** null = every event. */
   eventTypes: string[] | null;
+  /** null = every inbox. */
+  inboxIds: string[] | null;
 }
 
 /** URL, description and events. The secret changes only through rotation. */
@@ -108,6 +171,7 @@ export function WebhookEditModal({
   const [description, setDescription] = useState("");
   const [allEvents, setAllEvents] = useState(true);
   const [selected, setSelected] = useState<WebhookEventType[]>([]);
+  const [inboxIds, setInboxIds] = useState<string[]>([]);
 
   // The form mirrors whichever webhook is handed in, so opening it for
   // another one starts from that one's values.
@@ -118,6 +182,7 @@ export function WebhookEditModal({
     const events = (webhook.eventTypes ?? []).filter(isKnownEvent);
     setAllEvents(events.length === 0);
     setSelected(events);
+    setInboxIds(webhook.inboxIds ?? []);
   }, [webhook]);
 
   const mutation = useMutation(
@@ -147,6 +212,7 @@ export function WebhookEditModal({
       url: url.trim(),
       description: description.trim() || null,
       eventTypes: allEvents ? [] : selected,
+      inboxIds: inboxIds.length > 0 ? inboxIds : null,
     });
   };
 
@@ -197,6 +263,12 @@ export function WebhookEditModal({
             onChange={setSelected}
           />
         </div>
+        <InboxFilterField
+          id="webhook-edit-inboxes"
+          value={inboxIds}
+          onChange={setInboxIds}
+          disabled={mutation.isPending}
+        />
         <ModalFooter>
           <button type="button" className="ms-btn ms-btn-secondary" onClick={close}>
             {common("cancel")} <span className="ms-keycap">Esc</span>

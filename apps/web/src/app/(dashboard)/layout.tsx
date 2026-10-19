@@ -1,3 +1,4 @@
+import { receivingEnabled } from "@millionsend/config";
 import { getDb } from "@millionsend/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -5,7 +6,6 @@ import { AppShell } from "@/components/app-shell";
 import { ConfirmDialogHost } from "@/components/confirm-dialog";
 import { DeliverabilityBanner } from "@/components/deliverability-banner";
 import { EventsHealthBanner } from "@/components/events-health-banner";
-import { RegionBreakerBanner } from "@/components/region-breaker-banner";
 import { SupportViewBanner } from "@/components/support-view-banner";
 import { TeamStandingBanner } from "@/components/team-standing-banner";
 import { ToastHost } from "@/components/toast";
@@ -36,6 +36,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
       teamName={team.teamName}
       teamLogoUrl={team.logoUrl}
       userEmail={session.user.email}
+      receiving={receivingEnabled()}
+      role={membership?.role}
       banner={
         view ? (
           <SupportViewBanner
@@ -51,7 +53,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <main className="ms-main" style={{ flex: 1, minWidth: 0, padding: "32px 40px" }}>
         <div style={{ maxWidth: 1120, margin: "0 auto" }}>
           <TeamStandingBanner />
-          <RegionBreakerBanner />
           <EventsHealthBanner />
           <DeliverabilityBanner />
           {children}
@@ -59,7 +60,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </main>
       <ConfirmDialogHost />
       {/* The dashboard raises toasts too (a refused mutation under a support
-          view, the Support access card); without a host they are dropped. */}
+          view); without a host they are dropped. */}
       <ToastHost />
     </AppShell>
   );

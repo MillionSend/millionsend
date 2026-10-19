@@ -1,6 +1,14 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { axisLabels } from "@/lib/chart-axis";
+import {
+  type ChartPointer,
+  placeChartTip,
+  trackedPointer,
+  viewportSize,
+} from "@/lib/panel-placement";
 
 export interface LineChartSeries {
   key: string;
@@ -16,6 +24,8 @@ export interface LineChartSeries {
    own padding; the right edge reserves a gutter sized to the widest y tick
    label so the axis never overlaps the series. */
 const PAD = { top: 12, bottom: 24, left: 0 };
+/** Axis labels are 10px mono: about this wide per glyph. */
+const GLYPH_W = 6.2;
 
 /** 1/2/5×10^k ceiling so gridline ticks land on round numbers. */
 function niceStep(raw: number): number {
@@ -25,42 +35,54 @@ function niceStep(raw: number): number {
 }
 
 /**
- * Floating hover panel shared by the line chart and the metrics rate bars:
- * absolutely positioned inside a position:relative container, following the
- * pointer offset by 14px and clamped inside the given bounds (flipping left
- * of the pointer when the right edge would clip). Measured after render,
- * like tooltip.tsx. pointer-events: none keeps hover tracking simple.
+ * Floating hover panel shared by every chart (the line chart, both
+ * sparklines, the metrics rate bars). It never covers the pointer or the
+ * hovered point: placeChartTip sets it above the plot, centred on the
+ * pointer, and keeps it off a finger (panel-placement.ts). Portaled
+ * and fixed like tooltip.tsx, so no card or dialog clips it; measured after
+ * render and re-placed on scroll. pointer-events: none keeps hover tracking
+ * simple.
  */
 export function ChartTip({
-  x,
-  y,
-  width,
-  height,
+  plot,
+  pointer,
   children,
 }: {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  /** The element the pointer is tracked on; the tip keeps clear of it. */
+  plot: React.RefObject<HTMLElement | null>;
+  /** Relative to the plot's box (trackedPointer). */
+  pointer: ChartPointer;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const tip = ref.current;
-    if (!tip) return;
-    const flipped = x + 14 + tip.offsetWidth > width - 2;
-    const left = flipped ? x - 14 - tip.offsetWidth : x + 14;
-    tip.style.left = `${Math.max(2, left)}px`;
-    tip.style.top = `${Math.min(Math.max(2, y + 14), Math.max(2, height - tip.offsetHeight - 2))}px`;
+    const box = plot.current;
+    if (!tip || !box) return;
+    const place = () => {
+      const rect = box.getBoundingClientRect();
+      const placed = placeChartTip(
+        rect,
+        { x: rect.left + pointer.x, y: rect.top + pointer.y, touch: pointer.touch },
+        { width: tip.offsetWidth, height: tip.offsetHeight },
+        viewportSize(),
+      );
+      tip.style.left = `${placed.left}px`;
+      tip.style.top = `${placed.top}px`;
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    return () => window.removeEventListener("scroll", place, true);
   });
-  return (
+  return createPortal(
     <div
       ref={ref}
       style={{
-        position: "absolute",
+        position: "fixed",
         left: 0,
         top: 0,
-        zIndex: 2,
+        // Above a chart dialog: ties with its overlay resolve by DOM order, as for .ms-tooltip.
+        zIndex: "var(--ms-z-modal)",
         background: "var(--ms-panel)",
         border: "1px solid var(--ms-line-strong)",
         borderRadius: 8,
@@ -71,7 +93,8 @@ export function ChartTip({
       }}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -105,7 +128,7 @@ export function LineChart({
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const [hover, setHover] = useState<{ index: number; px: number; py: number } | null>(null);
+  const [hover, setHover] = useState<{ index: number; pointer: ChartPointer } | null>(null);
 
   useLayoutEffect(() => {
     const el = wrapRef.current;
@@ -125,8 +148,8 @@ export function LineChart({
   const top = step * Math.ceil(peak / step);
   const ticks = Array.from({ length: Math.round(top / step) }, (_, i) => (i + 1) * step);
 
-  // Right gutter sized to the widest tick label (10px mono ≈ 6.2px/glyph).
-  const gutter = Math.ceil(8 + Math.max(...ticks.map((t) => formatValue(t).length)) * 6.2);
+  // Right gutter sized to the widest tick label.
+  const gutter = Math.ceil(8 + Math.max(...ticks.map((t) => formatValue(t).length)) * GLYPH_W);
   const plotW = width - PAD.left - gutter;
   const plotEnd = PAD.left + plotW;
 
@@ -136,17 +159,15 @@ export function LineChart({
 
   // Thin from the right so the newest day always keeps its label. The slot
   // width follows the widest label: hourly grains print far wider than days.
-  const labelW = 12 + Math.max(0, ...days.map((d) => formatDay(d).length)) * 6.2;
+  const labelW = 12 + Math.max(0, ...days.map((d) => formatDay(d).length)) * GLYPH_W;
   const labelStep = Math.max(1, Math.ceil((n * labelW) / Math.max(1, plotW)));
 
   function track(event: React.PointerEvent<HTMLDivElement>) {
     if (n === 0 || plotW <= 0) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const px = event.clientX - rect.left;
-    const py = event.clientY - rect.top;
-    const frac = n <= 1 ? 0 : (px - PAD.left) / plotW;
+    const pointer = trackedPointer(event);
+    const frac = n <= 1 ? 0 : (pointer.x - PAD.left) / plotW;
     const index = Math.min(n - 1, Math.max(0, Math.round(frac * (n - 1))));
-    setHover({ index, px, py });
+    setHover({ index, pointer });
   }
 
   return (
@@ -206,23 +227,22 @@ export function LineChart({
             y2={baseline}
             stroke="var(--ms-line-strong)"
           />
-          {days.map((day, i) =>
-            (n - 1 - i) % labelStep === 0 ? (
-              <text
-                key={day}
-                x={x(i)}
-                y={height - 6}
-                fontSize={10}
-                fontFamily="var(--ms-font-mono)"
-                fill="var(--ms-faint)"
-                // Edge labels anchor inward so the full-bleed plot never
-                // clips them at the card padding.
-                textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
-              >
-                {formatDay(day)}
-              </text>
-            ) : null,
-          )}
+          {axisLabels(n, labelStep, x, (i) => formatDay(days[i] ?? "").length * GLYPH_W, {
+            start: PAD.left,
+            end: plotEnd,
+          }).map(({ index, x: labelX, anchor }) => (
+            <text
+              key={days[index]}
+              x={labelX}
+              y={height - 6}
+              fontSize={10}
+              fontFamily="var(--ms-font-mono)"
+              fill="var(--ms-faint)"
+              textAnchor={anchor}
+            >
+              {formatDay(days[index] ?? "")}
+            </text>
+          ))}
           {series.map((s) =>
             s.area ? (
               <path
@@ -278,7 +298,7 @@ export function LineChart({
         </svg>
       ) : null}
       {hover ? (
-        <ChartTip x={hover.px} y={hover.py} width={width} height={height}>
+        <ChartTip plot={wrapRef} pointer={hover.pointer}>
           <div
             className="ms-mono"
             style={{ fontSize: 11, color: "var(--ms-muted)", marginBottom: 4 }}

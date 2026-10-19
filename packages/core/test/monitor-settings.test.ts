@@ -47,7 +47,41 @@ describe("resolveMonitorSettings", () => {
   it("orders the thresholds and knows every key", () => {
     expect(monitorThresholdsOrdered(MONITOR_SETTING_DEFAULTS)).toBe(true);
     expect(monitorThresholdsOrdered({ flagRisk: 0.7, alertRisk: 0.7, pauseRisk: 0.9 })).toBe(false);
-    expect(MONITOR_SETTING_KEYS).toHaveLength(18);
+    expect(MONITOR_SETTING_KEYS).toHaveLength(30);
+  });
+
+  it("leaves shared inbox sending as it was until the console or the env changes it", () => {
+    expect(resolveMonitorSettings(null, { IS_CLOUD: "true" }).settings).toMatchObject({
+      sharedInboxSend: true,
+      sharedInboxOpen: false,
+      sharedInboxTenants: false,
+      sharedInboxTeamDailyCap: 1000,
+    });
+    const fromEnv = resolveMonitorSettings(null, {
+      SHARED_INBOX_SEND: "0",
+      SHARED_INBOX_OPEN: "true",
+      SHARED_INBOX_TENANTS: "1",
+      SHARED_INBOX_TEAM_DAILY_CAP: "250",
+    });
+    expect(fromEnv.settings).toMatchObject({
+      sharedInboxSend: false,
+      sharedInboxOpen: true,
+      sharedInboxTenants: true,
+      sharedInboxTeamDailyCap: 250,
+    });
+    expect(fromEnv.sources.sharedInboxTeamDailyCap).toBe("env");
+  });
+
+  it("turns the warm-up on by default for the cloud only", () => {
+    expect(resolveMonitorSettings(null, {}).settings.warmupEnabled).toBe(false);
+    const cloud = resolveMonitorSettings(null, { IS_CLOUD: "true" });
+    expect(cloud.settings.warmupEnabled).toBe(true);
+    expect(cloud.sources.warmupEnabled).toBe("default");
+    expect(
+      resolveMonitorSettings(null, { IS_CLOUD: "true", WARMUP_ENABLED: "false" }).settings
+        .warmupEnabled,
+    ).toBe(false);
+    expect(resolveMonitorSettings({ warmupEnabled: true }, {}).settings.warmupEnabled).toBe(true);
   });
 });
 

@@ -1,7 +1,8 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { sha256Hex } from "./hash.js";
+import { GMAIL_DOMAINS } from "./mailbox-providers.js";
 import { parseMailbox } from "./sender-address.js";
 
 /**
@@ -25,6 +26,24 @@ export function extractAddrSpec(recipient: string): string {
  */
 export function normalizeAddress(address: string): string {
   return address.normalize("NFKC").toLowerCase().replace(/\.$/, "");
+}
+
+/**
+ * The mailbox an address reaches, to compare people rather than strings:
+ * lowercase, "+tag" dropped, and at Gmail the dots too, since
+ * a.b+x@gmail.com is delivered to ab@gmail.com.
+ */
+export function mailboxIdentity(email: string): string {
+  const address = normalizeAddress(email.trim());
+  const at = address.lastIndexOf("@");
+  if (at < 1) return address;
+  let local = address.slice(0, at).split("+")[0] ?? "";
+  let domain = address.slice(at + 1);
+  if (GMAIL_DOMAINS.has(domain)) {
+    local = local.replaceAll(".", "");
+    domain = "gmail.com";
+  }
+  return `${local}@${domain}`;
 }
 
 /**
@@ -102,6 +121,26 @@ export async function findSuppressed(
 }
 
 /**
+ * The team's suppression rows for any of `recipients`, newest first, matched
+ * by hash as findSuppressed matches them, whatever the reason. An erased row
+ * still matches and reads a null email.
+ */
+export async function findSuppressionsFor(
+  db: Db,
+  teamId: string,
+  recipients: readonly string[],
+): Promise<{ id: string; email: string | null; reason: SuppressionReason; createdAt: Date }[]> {
+  if (recipients.length === 0) return [];
+  const t = schema.suppressions;
+  const hashes = recipients.flatMap((r) => suppressionHashesFor(r));
+  return db
+    .select({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt })
+    .from(t)
+    .where(and(eq(t.teamId, teamId), inArray(t.emailHash, hashes)))
+    .orderBy(desc(t.createdAt), desc(t.id));
+}
+
+/**
  * Drops the retained one-click opt-out for an address. Only an explicit
  * re-subscribe by the tenant (contact update with unsubscribed=false) calls
  * this; creating or importing the same address again never does, so the
@@ -111,7 +150,15 @@ export async function clearUnsubscribeSuppression(
   db: Db,
   teamId: string,
   email: string,
-): Promise<{ id: string; email: string | null; reason: SuppressionReason; createdAt: Date }[]> {
+): Promise<
+  {
+    id: string;
+    email: string | null;
+    reason: SuppressionReason;
+    sourceEmailId: string | null;
+    createdAt: Date;
+  }[]
+> {
   const t = schema.suppressions;
   return db
     .delete(t)
@@ -122,5 +169,11 @@ export async function clearUnsubscribeSuppression(
         inArray(t.emailHash, suppressionHashesFor(email)),
       ),
     )
-    .returning({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt });
+    .returning({
+      id: t.id,
+      email: t.email,
+      reason: t.reason,
+      sourceEmailId: t.sourceEmailId,
+      createdAt: t.createdAt,
+    });
 }

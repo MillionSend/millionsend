@@ -1,8 +1,11 @@
+import { mailPreferenceOf } from "@millionsend/core/mail-preferences";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { createCaller } from "@/server/routers";
+import en from "../messages/en/settings.json";
+import ptBR from "../messages/pt-BR/settings.json";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -32,4 +35,11 @@ it("every notice starts on; a switch turned off twice is off once, and turning i
   expect(await prefs.set({ key: "broadcast.sent", enabled: true })).toEqual({ optOuts: ["quota"] });
   // Mail that is always sent has no switch to turn.
   await expect(prefs.set({ key: "api_key.created" as never, enabled: false })).rejects.toBeTruthy();
+});
+
+it("the deliverability switch's note names the warm-up mail it also covers", () => {
+  expect(mailPreferenceOf("warmup.paused")).toBe("deliverability");
+  expect(mailPreferenceOf("warmup.done")).toBe("deliverability");
+  expect(en.notifications.items.deliverability.note).toContain("warm-up paused or done");
+  expect(ptBR.notifications.items.deliverability.note).toContain("aquecimento");
 });

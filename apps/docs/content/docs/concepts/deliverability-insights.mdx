@@ -113,7 +113,9 @@ The account score is a rolling 30-day view, built from two sub-scores:
   points lost across 0.1%–0.3%, down to 10 across 0.3%–1%. Hard bounces cost
   0 to 4 points across 2%–5%, up to 6 across 5%–10%. Under 100 sends in the
   window the outcome sub-score is withheld as "not enough data" rather than
-  fabricated from a tiny sample.
+  fabricated from a tiny sample. The complaint rate is complaints over sends
+  to providers that report them, and it costs points only once the window
+  holds 100 such sends.
 
 The headline score is `min(0.4·C + 0.6·O, O + 1.5)`. The second term is a
 governor: immaculate content lint can never mask a real complaint problem.
@@ -121,13 +123,16 @@ When one sub-score is unavailable, the headline is the other alone.
 
 The [sending guardrail](/concepts/broadcasts#guardrails) additionally caps
 the headline — at 6.9 while in warning, at 4.9 while paused — so the score
-and a sending pause can never disagree.
+and a sending pause can never disagree. It reads the complaint rate the same
+way, so complaints count toward a warning or a pause only from 100 such
+sends.
 
 <Callout type="warn">
-Amazon SES provides no Gmail feedback loop, so the complaint rate here
-structurally excludes Gmail — your real Gmail complaint rate can be worse
-than the number shown. [Google Postmaster
-Tools](https://postmaster.google.com) has the Gmail-side view.
+Gmail, Apple Mail and t-online never report complaints, so the complaint
+rate leaves their mail out and counts complaints over sends to the providers
+that do. Your spam rate at Gmail can still be worse than anything shown here.
+[Google Postmaster Tools](https://postmaster.google.com) has the Gmail-side
+view.
 </Callout>
 
 ## API and MCP

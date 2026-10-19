@@ -1,29 +1,25 @@
 import { randomBytes } from "node:crypto";
-import { env, supportViewEnabled } from "@millionsend/config";
+import { env } from "@millionsend/config";
 import {
   ALL_TEAMS_GRANT,
-  endSupportView,
   fetchBestOwnedPlan,
   fetchTeamStanding,
-  liveSupportViewForTeam,
+  flagImitatedBrand,
+  linkTeam,
   PLAN_TEAM_LIMIT,
+  slugify,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
-import { slugify } from "@/lib/slug";
 import { recordAudit } from "../audit";
+import { settleTeamSubdomain } from "../inboxes";
 import { listMemberships } from "../membership";
-import {
-  type AuthSession,
-  adminProcedure,
-  type Context,
-  protectedProcedure,
-  router,
-  teamProcedure,
-} from "../trpc";
+import { belongsToSilentlySuspendedTeam, suspensionLockError } from "../suspension-lock";
+import { teamNameSchema } from "../team-name";
+import { type AuthSession, type Context, protectedProcedure, router, teamProcedure } from "../trpc";
 
 /**
  * Records the active-team selection in both places that read it: the cookie
@@ -71,35 +67,6 @@ export const teamBootstrapRouter = router({
       : { ...standing, pendingReview };
   }),
 
-  /** The operator's read-only look at the active team, for the owner's Support access card. */
-  supportView: router({
-    current: adminProcedure.query(async ({ ctx }) => {
-      const enabled = supportViewEnabled();
-      const live = enabled ? await liveSupportViewForTeam(ctx.db, ctx.teamId) : null;
-      return {
-        enabled,
-        live: live
-          ? {
-              id: live.id,
-              operator: live.operator,
-              reason: live.reason,
-              reference: live.reference,
-              startedAt: live.createdAt,
-              expiresAt: live.expiresAt,
-            }
-          : null,
-      };
-    }),
-
-    /** The owner (or an admin) ends the session; the grant records who did. */
-    end: adminProcedure.mutation(async ({ ctx }) => {
-      const live = await liveSupportViewForTeam(ctx.db, ctx.teamId);
-      if (!live) return { ended: false };
-      await endSupportView(ctx.db, live, { by: "owner", userId: ctx.session.user.id });
-      return { ended: true };
-    }),
-  }),
-
   /**
    * Selects an active team. The cookie is a selection, not authorization:
    * the target must be one of the caller's own memberships, and every later
@@ -141,8 +108,11 @@ export const teamBootstrapRouter = router({
     }),
 
   createTeam: protectedProcedure
-    .input(z.object({ name: z.string().trim().min(1).max(80) }))
+    .input(z.object({ name: teamNameSchema }))
     .mutation(async ({ ctx, input }) => {
+      if (await belongsToSilentlySuspendedTeam(ctx.db, ctx.session.user.id)) {
+        throw await suspensionLockError("unavailable");
+      }
       if (env.IS_CLOUD) {
         const userId = ctx.session.user.id;
         const [memberships, bestPlan] = await Promise.all([
@@ -155,10 +125,12 @@ export const teamBootstrapRouter = router({
         }
       }
       const base = slugify(input.name) || "team";
-      for (let attempt = 0; attempt < 3; attempt++) {
+      let created: { teamId: string } | undefined;
+      // Only the insert retries: a unique violation after it would add a second team.
+      for (let attempt = 0; attempt < 3 && !created; attempt++) {
         const slug = attempt === 0 ? base : `${base}-${randomBytes(3).toString("hex")}`;
         try {
-          const created = await ctx.db.transaction(async (tx) => {
+          created = await ctx.db.transaction(async (tx) => {
             const [team] = await tx
               .insert(schema.teams)
               .values({ name: input.name.trim(), slug })
@@ -171,21 +143,26 @@ export const teamBootstrapRouter = router({
             });
             return { teamId: team.id };
           });
-          // A freshly created team becomes the active one.
-          await selectTeam(ctx, created.teamId);
-          await recordAudit(
-            { ...ctx, teamId: created.teamId },
-            {
-              action: "team.created",
-              target: { type: "team", id: created.teamId },
-              metadata: { name: input.name.trim() },
-            },
-          );
-          return created;
         } catch (error) {
           if (!isUniqueViolation(error)) throw error;
         }
       }
-      throw new TRPCError({ code: "CONFLICT", message: "could not allocate a unique team slug" });
+      if (!created) {
+        throw new TRPCError({ code: "CONFLICT", message: "could not allocate a unique team slug" });
+      }
+      // A freshly created team becomes the active one.
+      await selectTeam(ctx, created.teamId);
+      await recordAudit(
+        { ...ctx, teamId: created.teamId },
+        {
+          action: "team.created",
+          target: { type: "team", id: created.teamId },
+          metadata: { name: input.name.trim() },
+        },
+      );
+      await linkTeam(ctx.db, { teamId: created.teamId, trigger: "team" });
+      await flagImitatedBrand(ctx.db, created.teamId, input.name.trim());
+      await settleTeamSubdomain(ctx.db, created.teamId);
+      return created;
     }),
 });

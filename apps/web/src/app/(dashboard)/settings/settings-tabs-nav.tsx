@@ -1,16 +1,16 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useTRPC } from "@/lib/trpc";
 import { useActiveTabInView } from "@/lib/use-active-tab-in-view";
+import { useTeamRole } from "@/lib/use-team-role";
 
 const TABS = [
   { key: "settings", href: "/settings" },
   { key: "usage", href: "/settings/usage" },
   { key: "billing", href: "/settings/billing" },
   { key: "ses", href: "/settings/ses" },
+  { key: "receiving", href: "/settings/receiving" },
   { key: "smtp", href: "/settings/smtp" },
   { key: "mcp", href: "/settings/mcp" },
   { key: "connectedApps", href: "/settings/connected-apps" },
@@ -25,26 +25,29 @@ export function SettingsTabsNav({
   showBilling,
   showSes,
   showSmtp,
+  showReceiving,
 }: {
   showBilling: boolean;
   showSes: boolean;
   showSmtp: boolean;
+  /** The instance takes mail and the viewer is its operator. */
+  showReceiving: boolean;
 }) {
   const t = useTranslations("settings.tabs");
+  const ti = useTranslations("inboxes");
   const router = useRouter();
   const pathname = usePathname();
-  const tabsRef = useActiveTabInView(pathname);
-  const trpc = useTRPC();
-  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const role = useTeamRole();
   // Unlisted keys are always shown; each page gates itself too, so a hidden
   // tab is a missing route rather than a hidden link.
   const visible: Partial<Record<TabKey, boolean>> = {
     billing: showBilling,
     ses: showSes,
     smtp: showSmtp,
+    receiving: showReceiving,
     audit: role === "owner" || role === "admin",
   };
+  const tabsRef = useActiveTabInView(pathname);
   return (
     <div ref={tabsRef} className="ms-tabs bleed" style={{ marginBottom: 24 }}>
       {TABS.filter((tab) => visible[tab.key] ?? true).map(({ key, href }) => (
@@ -54,7 +57,7 @@ export function SettingsTabsNav({
           className={pathname === href ? "active" : ""}
           onClick={() => router.push(href)}
         >
-          {t(key)}
+          {key === "receiving" ? ti("settingsReceiving.title") : t(key)}
         </button>
       ))}
     </div>

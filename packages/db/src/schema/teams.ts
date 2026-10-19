@@ -37,12 +37,17 @@ export const unsubscribeLogoRadiusEnum = pgEnum("unsubscribe_logo_radius", [
   "circle",
 ]);
 
-/** Why an operator suspended a team; owners hear about every reason but phishing. */
+/**
+ * Why a team is suspended; owners hear about every reason but phishing and
+ * review. `review` is the content monitor's own hold on a new team, pending
+ * an operator's release or phishing suspension.
+ */
 export const suspensionReasonEnum = pgEnum("suspension_reason", [
   "manual",
   "reputation",
   "phishing",
   "non_payment",
+  "review",
 ]);
 
 export const teams = pgTable(
@@ -68,6 +73,11 @@ export const teams = pgTable(
     // The rung a scheduled downgrade moves to when the period renews; null
     // while none is pending. Mirrors the Stripe subscription schedule.
     pendingRung: text("pending_rung"),
+    // A move up waiting on its payment: when Stripe drops it unpaid
+    // (pending_update.expires_at); null while none waits. Overage reports
+    // hold meanwhile, since Stripe bills nothing reported on the old price
+    // between the request and the payment.
+    moveUpPendingUntil: timestamp("move_up_pending_until", { withTimezone: true }),
     planStatus: planStatusEnum("plan_status").notNull().default("none"),
     // The Stripe billing period: monthly quotas count sends from its start.
     currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
@@ -100,6 +110,10 @@ export const teams = pgTable(
     // Public URL of the uploaded team logo (S3-compatible storage), including a
     // ?v= cache-buster stamped at upload. Null = the initial-letter tile.
     logoUrl: text("logo_url"),
+    // When the dashboard sent the team's one onboarding email from
+    // ONBOARDING_EMAIL_FROM. Kept here, not read from emails: those rows
+    // expire with retention, and the email must never go out twice.
+    onboardingEmailSentAt: timestamp("onboarding_email_sent_at", { withTimezone: true }),
     // Operator overrides (instance console). A ceiling caps the team's UTC
     // day under its plan's limit (min of the two), on monthly plans too.
     dailySendCeiling: integer("daily_send_ceiling"),
@@ -112,6 +126,8 @@ export const teams = pgTable(
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     suspensionReason: suspensionReasonEnum("suspension_reason"),
     suspensionNote: text("suspension_note"),
+    // Operator override: none of the team's domains warm up.
+    warmupTrustedAt: timestamp("warmup_trusted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

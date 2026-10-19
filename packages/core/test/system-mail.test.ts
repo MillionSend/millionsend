@@ -3,17 +3,27 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { SYSTEM_MAIL_TAG } from "../src/accept-email.js";
+import { ACCOUNT_MAIL_KINDS } from "../src/account-mail.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { hashRecipient } from "../src/suppressions.js";
 import {
   findSenderDomainOwner,
+  RECIPIENT_MAIL_PER_DAY,
+  RECIPIENT_MAIL_PER_HOUR,
+  SENT_WHILE_SUSPENDED,
   type SenderDomainOwner,
-  SYSTEM_MAIL_TAG,
+  type SystemMailKind,
   type SystemMailMessage,
   SystemMailRefused,
   sendSystemMail,
 } from "../src/system-mail.js";
+import {
+  SILENT_SUSPENSIONS,
+  SUSPENSION_REASONS,
+  type SuspensionReason,
+} from "../src/team-standing.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -200,5 +210,126 @@ describe("sendSystemMail", () => {
     // region its identity is verified in.
     expect(d.rawOwners).toEqual([{ teamId: ownerTeam, domainId, region: "us-east-1" }]);
     expect(d.enqueued).toHaveLength(0);
+  });
+});
+
+describe("suspended teams", () => {
+  const suspend = (team: string, reason: SuspensionReason | null) =>
+    db
+      .update(schema.teams)
+      .set({ suspendedAt: reason ? new Date() : null, suspensionReason: reason })
+      .where(eq(schema.teams.id, team));
+
+  it("lists the notices a suspended team still gets", () => {
+    expect([...SENT_WHILE_SUSPENDED].sort()).toEqual([
+      "api_key.created",
+      "billing.cancel_reminder",
+      "billing.cancel_scheduled",
+      "billing.downgraded",
+      "billing.payment_failed",
+      "billing.plan_activated",
+      "billing.plan_changed",
+      "member.joined",
+      "team.reinstated",
+      "team.suspended",
+      "webhook.secret_rotated",
+    ]);
+  });
+
+  it("mutes every other notice about the team, and all of them under a silent suspension", async () => {
+    const team = await createTeam(db, "suspended");
+    const kinds: SystemMailKind[] = [
+      ...ACCOUNT_MAIL_KINDS,
+      "invitation",
+      "quota.warning",
+      "quota.reached",
+      "quota.paused",
+      "deliverability.warning",
+      "deliverability.paused",
+      "region.paused",
+      "region.resumed",
+      "webhook.failing",
+      "webhook.auto_disabled",
+      "webhook.backlog",
+    ];
+    const silent: readonly string[] = ["phishing", "review"];
+    expect(SILENT_SUSPENSIONS).toEqual(silent);
+    const d = deps();
+    for (const reason of SUSPENSION_REASONS) {
+      await suspend(team, reason);
+      for (const kind of kinds) {
+        expect(
+          await sendSystemMail(d.deps, message({ kind, aboutTeamId: team })),
+          `${reason} ${kind}`,
+        ).toBe(!silent.includes(reason) && SENT_WHILE_SUSPENDED.has(kind) ? "pipeline" : "muted");
+      }
+    }
+  });
+
+  it("never mutes mail that names no team, or another team", async () => {
+    const team = await createTeam(db, "silenced");
+    await suspend(team, "phishing");
+    const d = deps();
+    for (const kind of [
+      "password_reset",
+      "email_verification",
+      "updates.confirm",
+      "welcome",
+      "password_changed",
+      "monitor.alert",
+      "monitor.team_held",
+      "quota.paused",
+    ] as const) {
+      expect(await sendSystemMail(d.deps, message({ kind })), kind).toBe("pipeline");
+    }
+    expect(
+      await sendSystemMail(d.deps, message({ kind: "domain.verified", aboutTeamId: otherTeam })),
+    ).toBe("pipeline");
+
+    await suspend(team, null);
+    expect(
+      await sendSystemMail(d.deps, message({ kind: "domain.verified", aboutTeamId: team })),
+    ).toBe("pipeline");
+  });
+});
+
+describe("the per-recipient cap", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("caps verification, invitation and product-update mail to one address across kinds, by the hour and the day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-11T08:00:00Z"));
+    const d = deps();
+    const send = (kind: SystemMailKind, to = "capped@example.com") =>
+      sendSystemMail(d.deps, message({ kind, to, from: "no-reply@unowned.example.com" }));
+    const refused = { reason: "recipient_capped" };
+    const capped = ["email_verification", "invitation", "updates.confirm"] as const;
+    for (let i = 0; i < RECIPIENT_MAIL_PER_HOUR; i += 1) {
+      expect(await send(capped[i % capped.length] ?? "invitation")).toBe("raw");
+    }
+    await expect(send("invitation")).rejects.toMatchObject(refused);
+    // The same mailbox however it is written.
+    await expect(send("email_verification", "Capped <CAPPED@Example.com>")).rejects.toMatchObject(
+      refused,
+    );
+    await expect(send("invitation", "capped+again@example.com")).rejects.toMatchObject(refused);
+    // Another address, and mail the address's own account asked for, still go.
+    expect(await send("email_verification", "other@example.com")).toBe("raw");
+    expect(await send("password_reset")).toBe("raw");
+
+    vi.setSystemTime(new Date("2026-10-11T09:00:00Z"));
+    for (let i = RECIPIENT_MAIL_PER_HOUR; i < RECIPIENT_MAIL_PER_DAY; i += 1) {
+      expect(await send("email_verification")).toBe("raw");
+    }
+    vi.setSystemTime(new Date("2026-10-11T10:00:00Z"));
+    await expect(send("email_verification")).rejects.toMatchObject(refused);
+
+    vi.setSystemTime(new Date("2026-10-12T00:00:00Z"));
+    expect(await send("invitation")).toBe("raw");
+    expect(d.raw.filter((m) => m.to === "capped@example.com")).toHaveLength(
+      RECIPIENT_MAIL_PER_DAY + 2,
+    );
   });
 });

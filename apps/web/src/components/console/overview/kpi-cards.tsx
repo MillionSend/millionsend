@@ -23,7 +23,7 @@ import {
 const KPIS: { kind: KpiKind; initial: PeriodKey }[] = [
   { kind: "sent", initial: "24h" },
   { kind: "delivered", initial: "24h" },
-  { kind: "bounced", initial: "7d" },
+  { kind: "hardBounced", initial: "7d" },
   { kind: "complained", initial: "7d" },
 ];
 
@@ -72,11 +72,11 @@ function KpiCard({ kind, initial }: { kind: KpiKind; initial: PeriodKey }) {
               delivered: fmt.format(totals.delivered),
               sent: fmt.format(totals.sent),
             })
-          : kind === "bounced"
-            ? t("kpi.hardOf", {
+          : kind === "hardBounced"
+            ? t("kpi.withTransient", {
                 rate:
                   totals.sent > 0
-                    ? formatPercent(totals.hardBounced / totals.sent, locale, KPI_DECIMALS.bounced)
+                    ? formatPercent(totals.bounced / totals.sent, locale, KPI_DECIMALS.hardBounced)
                     : common("none"),
               })
             : t("kpi.complaintLines");
@@ -108,7 +108,10 @@ function KpiCard({ kind, initial }: { kind: KpiKind; initial: PeriodKey }) {
           }
         }}
       >
-        <div className="ms-microlabel">{t(`kpi.${kind}`)}</div>
+        {/* The right padding keeps a long label from running under the period trigger. */}
+        <div className="ms-microlabel" style={{ paddingRight: 64 }}>
+          {t(`kpi.${kind}`)}
+        </div>
         {/* Out of flow, so the microlabel sits at the card padding instead of centring
             against the taller trigger. */}
         <div className="ms-kpi-period" style={{ position: "absolute", top: 14, right: 20 }}>

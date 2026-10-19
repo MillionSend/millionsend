@@ -2,17 +2,26 @@ import { randomBytes } from "node:crypto";
 import {
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   EnvKeyring,
+  forgetPhishingPrints,
   generateApiKey,
   hashApiKey,
   PLAN_DOMAIN_LIMIT,
+  SUSPENSION_REASONS,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type ApiDeps, createApi } from "../src/app.js";
+
+// Inbox deletion is the inbox module's; here only that the domain delete asks for it.
+const deleteInboxes = vi.hoisted(() => vi.fn());
+vi.mock("@millionsend/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@millionsend/core")>()),
+  deleteInboxes,
+}));
 
 let db: Db;
 let close: () => Promise<void>;
@@ -81,6 +90,9 @@ function makeApp(opts: {
   authEmailFrom?: string;
   tenants?: { configurationSet?: string | undefined };
   regions?: string[];
+  receiving?: ApiDeps["receiving"];
+  sharedInboxDomain?: string;
+  enqueueWebhookDeliveries?: ApiDeps["enqueueWebhookDeliveries"];
 }) {
   const deps: ApiDeps = {
     db,
@@ -89,6 +101,9 @@ function makeApp(opts: {
     enqueueEmailSend: async () => {},
     appBaseUrl: opts.appBaseUrl,
     trackingSubdomains: opts.trackingSubdomains,
+    receiving: opts.receiving,
+    sharedInboxDomain: opts.sharedInboxDomain,
+    enqueueWebhookDeliveries: opts.enqueueWebhookDeliveries,
     ses: {
       clientForRegion: () => opts.client,
       dns: opts.dns ?? fakeDns(),
@@ -1033,7 +1048,7 @@ describe("PATCH /domains/{id}", () => {
     expect(disable.status).toBe(200);
   });
 
-  it("422s tls and capabilities as unsupported", async () => {
+  it("422s tls, disabling sending, and receiving on an instance that receives no mail", async () => {
     const app = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
     const { id } = await createDomain(app, "tls.example.com");
 
@@ -1041,10 +1056,30 @@ describe("PATCH /domains/{id}", () => {
     expect(tls.status).toBe(422);
     expect(await tls.json()).toMatchObject({ message: expect.stringContaining("tls") });
 
-    const capabilities = await call(app, fullKey, "PATCH", `/domains/${id}`, {
-      capabilities: { sending: "enabled" },
+    const sendingOff = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { sending: "disabled" },
     });
-    expect(capabilities.status).toBe(422);
+    expect(sendingOff.status).toBe(422);
+    expect(await sendingOff.json()).toMatchObject({
+      message: expect.stringContaining("receive-only domains are not supported"),
+    });
+
+    const receivingOn = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "enabled" },
+    });
+    expect(receivingOn.status).toBe(422);
+    expect(await receivingOn.json()).toMatchObject({
+      message: expect.stringContaining("RECEIVING_MX_HOST"),
+    });
+
+    // What is already true is not an error.
+    const unchanged = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { sending: "enabled", receiving: "disabled" },
+    });
+    expect(unchanged.status).toBe(200);
+    expect(await unchanged.json()).toMatchObject({
+      capabilities: { sending: "enabled", receiving: "disabled" },
+    });
   });
 });
 
@@ -1117,6 +1152,42 @@ describe("DELETE /domains/{id}", () => {
     expect(events).toEqual([{ type: "failed" }]);
   });
 
+  it("fires email.failed for the emails the delete fails, handed to the queue after it commits", async () => {
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.failed"]);
+    const domainLeft: boolean[] = [];
+    const enqueued: string[] = [];
+    const app = makeApp({
+      client: fakeSes().client,
+      enqueueWebhookDeliveries: async (rows) => {
+        enqueued.push(...rows.map((r) => r.id));
+        const rowsLeft = await db
+          .select({ id: schema.domains.id })
+          .from(schema.domains)
+          .where(eq(schema.domains.name, "hooks.example.com"));
+        domainLeft.push(rowsLeft.length > 0);
+      },
+    });
+    const { id } = await createDomain(app, "hooks.example.com");
+    const [queued] = await db
+      .insert(schema.emails)
+      .values({ teamId, domainId: id, from: "a@hooks.example.com", to: ["r@x.com"], subject: "s" })
+      .returning({ id: schema.emails.id });
+
+    expect((await call(app, fullKey, "DELETE", `/domains/${id}`)).status).toBe(200);
+
+    const deliveries = await db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+    expect(deliveries.map((d) => d.emailId)).toEqual([queued?.id]);
+    expect(deliveries[0]?.payload).toMatchObject({
+      type: "email.failed",
+      data: { email_id: queued?.id, failed: { reason: "domain_deleted" } },
+    });
+    expect(enqueued).toEqual([deliveries[0]?.id]);
+    expect(domainLeft).toEqual([false]);
+  });
+
   it("tolerates an identity already gone from SES", async () => {
     const app = makeApp(
       fakeSes({
@@ -1129,6 +1200,49 @@ describe("DELETE /domains/{id}", () => {
     expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(0);
   });
 
+  it.each(SUSPENSION_REASONS)(
+    "403s a team suspended for %s before SES is touched; the key still authenticates",
+    async (reason) => {
+      const { client, calls } = fakeSes();
+      const app = makeApp({ client });
+      const { id } = await createDomain(app, `held-${reason.replace("_", "-")}.example.com`);
+      const suspend = (on: boolean) =>
+        db
+          .update(schema.teams)
+          .set(
+            on
+              ? { suspendedAt: new Date(), suspensionReason: reason }
+              : { suspendedAt: null, suspensionReason: null },
+          )
+          .where(eq(schema.teams.id, teamId));
+      await suspend(true);
+      const before = calls.length;
+      try {
+        const res = await call(app, fullKey, "DELETE", `/domains/${id}`);
+        expect(res.status).toBe(403);
+        const body = await res.json();
+        if (["phishing", "review"].includes(reason)) {
+          // Neither the error's name nor its message tells the team it is suspended.
+          expect(body).toEqual({
+            statusCode: 403,
+            name: "forbidden",
+            message:
+              "This isn't available for this team right now. Contact support if you need help.",
+          });
+        } else {
+          expect(body).toMatchObject({ statusCode: 403, name: "team_suspended" });
+        }
+        expect(calls.length).toBe(before);
+        expect(
+          await db.select().from(schema.domains).where(eq(schema.domains.id, id)),
+        ).toHaveLength(1);
+      } finally {
+        await suspend(false);
+      }
+      expect((await call(app, fullKey, "DELETE", `/domains/${id}`)).status).toBe(200);
+    },
+  );
+
   it("404s a foreign team's domain without touching SES", async () => {
     const { client, calls } = fakeSes();
     const app = makeApp({ client });
@@ -1138,6 +1252,160 @@ describe("DELETE /domains/{id}", () => {
     expect(res.status).toBe(404);
     expect(calls.length).toBe(before);
     expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(1);
+  });
+});
+
+describe("capabilities.receiving", () => {
+  const receiving = { mxHost: "mx.millionsend.test", ingestSecret: "s".repeat(32) };
+  const verify = (id: string) =>
+    db.update(schema.domains).set({ status: "verified" }).where(eq(schema.domains.id, id));
+  const receivingRecord = (body: { records: { record: string }[] }) =>
+    body.records.find((r) => r.record === "Receiving");
+
+  it("is refused on create, before SES is touched: a new domain is not verified yet", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, receiving });
+    const res = await call(app, fullKey, "POST", "/domains", {
+      name: "inbound-create.example.com",
+      capabilities: { receiving: "enabled" },
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ message: expect.stringContaining("verified") });
+    expect(calls).toEqual([]);
+  });
+
+  it("switches on for a verified domain and adds the Receiving MX, checked live", async () => {
+    const name = "inbound.example.com";
+    let mx: { priority: number; exchange: string }[] = [];
+    const app = makeApp({
+      ...fakeSes(),
+      receiving,
+      dns: fakeDns({ resolveMx: async (host) => (host === name ? mx : []) }),
+    });
+    const { id } = await createDomain(app, name);
+
+    const unverified = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "enabled" },
+    });
+    expect(unverified.status).toBe(422);
+    expect(await unverified.json()).toMatchObject({
+      message: expect.stringContaining("only on a verified domain"),
+    });
+
+    await verify(id);
+    const enabled = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "enabled" },
+    });
+    expect(enabled.status).toBe(200);
+    const body = (await enabled.json()) as { capabilities: unknown; records: { record: string }[] };
+    expect(body.capabilities).toEqual({ sending: "enabled", receiving: "enabled" });
+    expect(receivingRecord(body)).toEqual({
+      record: "Receiving",
+      name,
+      type: "MX",
+      ttl: "Auto",
+      status: "not_started",
+      value: "mx.millionsend.test",
+      priority: 10,
+      live: "missing",
+      detail: "No MX record at this name.",
+    });
+
+    // Another MX ahead of ours means mail never reaches it.
+    mx = [
+      { priority: 5, exchange: "aspmx.l.google.com" },
+      { priority: 10, exchange: "mx.millionsend.test" },
+    ];
+    const shadowed = (await (await call(app, fullKey, "GET", `/domains/${id}`)).json()) as {
+      records: { record: string }[];
+    };
+    expect(receivingRecord(shadowed)).toMatchObject({
+      status: "failed",
+      live: "mismatch",
+      detail: expect.stringContaining("5 aspmx.l.google.com, 10 mx.millionsend.test"),
+    });
+
+    mx = [{ priority: 10, exchange: "MX.millionsend.test." }];
+    const live = (await (await call(app, fullKey, "POST", `/domains/${id}/verify`)).json()) as {
+      records: { record: string }[];
+    };
+    expect(receivingRecord(live)).toMatchObject({ status: "verified", live: "found" });
+
+    const list = (await (await call(app, fullKey, "GET", "/domains?limit=100")).json()) as {
+      data: { id: string; capabilities: unknown }[];
+    };
+    expect(list.data.find((d) => d.id === id)?.capabilities).toEqual({
+      sending: "enabled",
+      receiving: "enabled",
+    });
+
+    const disabled = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "disabled" },
+    });
+    const off = (await disabled.json()) as { capabilities: unknown; records: { record: string }[] };
+    expect(off.capabilities).toEqual({ sending: "enabled", receiving: "disabled" });
+    expect(receivingRecord(off)).toBeUndefined();
+    const [row] = await db
+      .select({ on: schema.domains.receivingEnabled, at: schema.domains.receivingEnabledAt })
+      .from(schema.domains)
+      .where(eq(schema.domains.id, id));
+    expect(row).toEqual({ on: false, at: null });
+
+    // A repeat of the current state changes nothing, so it audits nothing.
+    await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "disabled" },
+    });
+    const audit = await db
+      .select({ action: schema.auditLog.action, data: schema.auditLog.data })
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.target, `domain:${id}`))
+      .orderBy(schema.auditLog.createdAt);
+    expect(audit.filter((a) => a.action.startsWith("domain.receiving_"))).toEqual([
+      { action: "domain.receiving_enabled", data: { name } },
+      { action: "domain.receiving_disabled", data: { name } },
+    ]);
+  });
+
+  it("409s a name another team already receives, and a refusal applies nothing else", async () => {
+    const name = "shared-inbound.example.com";
+    const app = makeApp({ ...fakeSes(), receiving, appBaseUrl: "https://app.example.dev" });
+    await db.insert(schema.domains).values({
+      teamId: otherTeamId,
+      name,
+      region: "sa-east-1",
+      status: "verified",
+      receivingEnabled: true,
+    });
+    const { id } = await createDomain(app, name);
+    await verify(id);
+    const res = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      open_tracking: true,
+      capabilities: { receiving: "enabled" },
+    });
+    expect(res.status).toBe(409);
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row).toMatchObject({ receivingEnabled: false, openTracking: false });
+  });
+
+  it("reads disabled, with no Receiving record, on an instance that stopped receiving", async () => {
+    const name = "was-inbound.example.com";
+    const app = makeApp({ ...fakeSes(), receiving });
+    const { id } = await createDomain(app, name);
+    await verify(id);
+    await call(app, fullKey, "PATCH", `/domains/${id}`, { capabilities: { receiving: "enabled" } });
+
+    const off = makeApp(fakeSes());
+    const body = (await (await call(off, fullKey, "GET", `/domains/${id}`)).json()) as {
+      capabilities: unknown;
+      records: { record: string }[];
+    };
+    expect(body.capabilities).toEqual({ sending: "enabled", receiving: "disabled" });
+    expect(receivingRecord(body)).toBeUndefined();
+    // Turning it off is always allowed.
+    const disable = await call(off, fullKey, "PATCH", `/domains/${id}`, {
+      capabilities: { receiving: "disabled" },
+    });
+    expect(disable.status).toBe(200);
   });
 });
 
@@ -1168,5 +1436,435 @@ describe("permission confinement", () => {
     });
     const res = await call(bare, fullKey, "GET", "/domains");
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /domains and teams suspended for phishing", () => {
+  it("records, without holding, a new team whose added domain is a return's", async () => {
+    const phisher = await createTeam(db, "facture-vexto");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, phisher));
+    await db.insert(schema.campaignFingerprints).values({
+      teamId: phisher,
+      teamName: "facture-vexto",
+      kind: "sending_domain",
+      value: "vexto-cadeaux.example",
+    });
+    forgetPhishingPrints(db);
+    const team = await createTeam(db, "newcomer-api");
+    const token = await insertKey(team);
+    const res = await call(makeApp({ client: fakeSes().client }), token, "POST", "/domains", {
+      name: "cadeaux-vexto.example",
+    });
+    expect(res.status).toBe(200);
+    const [row] = await db
+      .select({ reason: schema.teams.suspensionReason })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, team));
+    expect(row).toEqual({ reason: null });
+    const links = await db
+      .select({ held: schema.teamLinks.held, trigger: schema.teamLinks.trigger })
+      .from(schema.teamLinks)
+      .where(eq(schema.teamLinks.teamId, team));
+    expect(links).toEqual([{ held: false, trigger: "domain" }]);
+  });
+});
+
+describe("receiving_catch_all", () => {
+  const receiving = { mxHost: "mx.millionsend.test", ingestSecret: "s".repeat(32) };
+  const receivingDomain = async (app: ReturnType<typeof createApi>, name: string) => {
+    const { id } = await createDomain(app, name);
+    await db
+      .update(schema.domains)
+      .set({ status: "verified", receivingEnabled: true })
+      .where(eq(schema.domains.id, id));
+    return id;
+  };
+  const setPlan = (plan: "free" | "pro") =>
+    db.update(schema.teams).set({ plan }).where(eq(schema.teams.id, teamId));
+
+  it("needs a paid plan on the cloud to turn on, and receiving enabled (S30)", async () => {
+    // Domains are added on a self-host app: the cloud's domain cap is not under test here.
+    const local = makeApp({ ...fakeSes(), receiving });
+    const app = makeApp({ ...fakeSes(), receiving, isCloud: true });
+    const id = await receivingDomain(local, "catchall.example.com");
+    await setPlan("free");
+    const free = await call(app, fullKey, "PATCH", `/domains/${id}`, { receiving_catch_all: true });
+    expect(free.status).toBe(403);
+    expect(await free.json()).toMatchObject({
+      name: "plan_limit_reached",
+      message: "Catch-all receiving needs a paid plan",
+    });
+    await setPlan("pro");
+    const on = await call(app, fullKey, "PATCH", `/domains/${id}`, { receiving_catch_all: true });
+    expect(on.status).toBe(200);
+    expect(await on.json()).toMatchObject({ receiving_catch_all: true });
+    // A stored true outlives a downgrade.
+    await setPlan("free");
+    const again = await call(app, fullKey, "PATCH", `/domains/${id}`, {
+      receiving_catch_all: true,
+    });
+    expect(again.status).toBe(200);
+    const off = await call(app, fullKey, "PATCH", `/domains/${id}`, { receiving_catch_all: false });
+    expect(await off.json()).toMatchObject({ receiving_catch_all: false });
+    const audit = await db
+      .select({ action: schema.auditLog.action })
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.target, `domain:${id}`));
+    expect(audit.map((a) => a.action).filter((a) => a.startsWith("domain.catch_all"))).toEqual([
+      "domain.catch_all_enabled",
+      "domain.catch_all_disabled",
+    ]);
+    const sending = await createDomain(local, "sending-only.example.com");
+    await setPlan("pro");
+    const refused = await call(app, fullKey, "PATCH", `/domains/${sending.id}`, {
+      receiving_catch_all: true,
+    });
+    expect(refused.status).toBe(422);
+    await setPlan("free");
+  });
+
+  it("deletes the domain's inboxes with it, their scoped keys revoked first", async () => {
+    deleteInboxes.mockImplementation(
+      async (database: Db, _deps: unknown, p: { inboxIds: string[] }) => {
+        for (const inboxId of p.inboxIds) {
+          await database
+            .update(schema.apiKeys)
+            .set({ revokedAt: new Date(), inboxId: null })
+            .where(eq(schema.apiKeys.inboxId, inboxId));
+          await database.delete(schema.inboxes).where(eq(schema.inboxes.id, inboxId));
+        }
+        return p.inboxIds.length;
+      },
+    );
+    const app = makeApp({ ...fakeSes(), receiving });
+    const id = await receivingDomain(app, "inboxes-gone.example.com");
+    const [inbox] = await db
+      .insert(schema.inboxes)
+      .values({
+        teamId,
+        kind: "agent",
+        emailAddress: "bot@inboxes-gone.example.com",
+        localPart: "bot",
+        domainId: id,
+        name: "Bot",
+        safety: {
+          accept_from: "verified",
+          allowlist: [],
+          owner_addresses: [],
+          screening: true,
+          extract_codes: true,
+          send_policy: "reply_only",
+          require_approval: false,
+          private_codes: true,
+          send_cap: 200,
+          forward_to: [],
+        },
+      })
+      .returning({ id: schema.inboxes.id });
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId,
+      name: "inbox",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+      inboxId: inbox?.id ?? null,
+    });
+    const res = await call(app, fullKey, "DELETE", `/domains/${id}`);
+    expect(res.status).toBe(200);
+    expect(deleteInboxes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ receivingEnabled: true }),
+      expect.objectContaining({ teamId, inboxIds: [inbox?.id], reason: "domain_deleted" }),
+    );
+    const [revoked] = await db
+      .select()
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.keyHash, key.keyHash));
+    expect(revoked).toMatchObject({ inboxId: null });
+    expect(revoked?.revokedAt).not.toBeNull();
+  });
+});
+
+describe("the team's subdomain of the shared domain", () => {
+  const SHARED = "agents.example.test";
+  // Pinned created_at, so own domains list in a known order.
+  const day = (n: number) => new Date(Date.UTC(2026, 0, n));
+  type Team = Awaited<ReturnType<typeof sharedTeam>>;
+  type WireRow = { id: string; shared: boolean } & Record<string, unknown>;
+
+  /** A team with its subdomain label, a full-access key and `own` verified domains, oldest first. */
+  async function sharedTeam(slug: string, own: number, plan: "free" | "pro" = "pro") {
+    const id = await createTeam(db, slug, { sharedInboxDomain: SHARED });
+    await db.update(schema.teams).set({ plan }).where(eq(schema.teams.id, id));
+    const domains = [];
+    for (let n = 1; n <= own; n++) {
+      const [row] = await db
+        .insert(schema.domains)
+        .values({
+          teamId: id,
+          name: `d${n}.${slug}.example.com`,
+          region: "sa-east-1",
+          status: "verified",
+          createdAt: day(n),
+        })
+        .returning({ id: schema.domains.id });
+      domains.push(row?.id as string);
+    }
+    const [label] = await db
+      .select()
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, id));
+    return {
+      id,
+      key: await insertKey(id),
+      own: domains,
+      sharedId: label?.id as string,
+      sharedName: label?.name as string,
+    };
+  }
+
+  const sharedApp = (extra: { isCloud?: boolean } = {}) =>
+    makeApp({ ...fakeSes(), ...extra, sharedInboxDomain: SHARED });
+  async function list(app: ReturnType<typeof createApi>, team: Team, query = "") {
+    const res = await call(app, team.key, "GET", `/domains${query}`);
+    expect(res.status, query).toBe(200);
+    return (await res.json()) as { data: WireRow[]; has_more: boolean };
+  }
+  const page = async (app: ReturnType<typeof createApi>, team: Team, query = "") => {
+    const body = await list(app, team, query);
+    return { ids: body.data.map((row) => row.id), more: body.has_more };
+  };
+
+  let t: Team;
+  beforeAll(async () => {
+    t = await sharedTeam("shared-rows", 3);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("is the last row, read-only and verified, after the team's own rows with shared: false", async () => {
+    const body = await list(sharedApp(), t);
+    const [d1, d2, d3] = t.own;
+    expect(body.data.map((row) => row.id)).toEqual([d3, d2, d1, t.sharedId]);
+    expect(body.has_more).toBe(false);
+    for (const row of body.data.slice(0, 3)) {
+      expect(row.shared).toBe(false);
+      expect(row).not.toHaveProperty("sending_mode");
+    }
+    expect(body.data[3]).toEqual({
+      id: t.sharedId,
+      name: "shared-rows.agents.example.test",
+      status: "verified",
+      created_at: expect.any(String),
+      region: "sa-east-1",
+      open_tracking: false,
+      click_tracking: false,
+      tracking_subdomain: null,
+      capabilities: { sending: "enabled", receiving: "enabled" },
+      receiving_catch_all: false,
+      shared: true,
+      sending_mode: "reply_only",
+      sending_mode_reason: "instance",
+    });
+  });
+
+  it("carries the team's sending mode, and reads sending disabled while the instance pauses it", async () => {
+    const shared = async (app: ReturnType<typeof createApi>, team = t) =>
+      (await list(app, team)).data.at(-1);
+    vi.stubEnv("SHARED_INBOX_OPEN", "true");
+    vi.stubEnv("ABUSE_JUDGE", "typesafe");
+    expect(await shared(sharedApp())).toMatchObject({
+      sending_mode: "open",
+      sending_mode_reason: null,
+      capabilities: { sending: "enabled", receiving: "enabled" },
+    });
+    const free = await sharedTeam("shared-mode-free", 0, "free");
+    expect(await shared(sharedApp({ isCloud: true }), free)).toMatchObject({
+      sending_mode: "reply_only",
+      sending_mode_reason: "plan",
+      capabilities: { sending: "enabled" },
+    });
+    vi.stubEnv("SHARED_INBOX_SEND", "false");
+    expect(await shared(sharedApp())).toMatchObject({
+      sending_mode: "receive_only",
+      sending_mode_reason: "instance",
+      capabilities: { sending: "disabled", receiving: "enabled" },
+    });
+  });
+
+  describe("paging", () => {
+    it("lists own domains first, newest first, then the shared row", async () => {
+      const [d1, d2, d3] = t.own;
+      const app = sharedApp();
+      expect(await page(app, t, "?limit=2")).toEqual({ ids: [d3, d2], more: true });
+      expect(await page(app, t, `?limit=2&after=${d2}`)).toEqual({
+        ids: [d1, t.sharedId],
+        more: false,
+      });
+    });
+
+    it("answers has_more when own domains fill the page, and the next page holds only the shared row", async () => {
+      const [d1, d2, d3] = t.own;
+      const app = sharedApp();
+      expect(await page(app, t, "?limit=3")).toEqual({ ids: [d3, d2, d1], more: true });
+      expect(await page(app, t, `?limit=3&after=${d1}`)).toEqual({
+        ids: [t.sharedId],
+        more: false,
+      });
+    });
+
+    it("answers an empty page after the shared id, in either case", async () => {
+      for (const id of [t.sharedId, t.sharedId.toUpperCase()]) {
+        expect(await page(sharedApp(), t, `?after=${id}`)).toEqual({ ids: [], more: false });
+      }
+    });
+
+    it("gives the oldest own domains before the shared id, with has_more while newer ones remain", async () => {
+      const [d1, d2, d3] = t.own;
+      const app = sharedApp();
+      expect(await page(app, t, `?limit=2&before=${t.sharedId}`)).toEqual({
+        ids: [d2, d1],
+        more: true,
+      });
+      expect(await page(app, t, `?before=${t.sharedId.toUpperCase()}`)).toEqual({
+        ids: [d3, d2, d1],
+        more: false,
+      });
+    });
+
+    it("never includes the shared row before an own id", async () => {
+      const [d1, d2, d3] = t.own;
+      const app = sharedApp();
+      expect(await page(app, t, `?before=${d1}`)).toEqual({ ids: [d3, d2], more: false });
+      expect(await page(app, t, `?limit=1&before=${d3}`)).toEqual({ ids: [], more: false });
+    });
+
+    it("lets the catch-up (before= the first id of page 1) see a domain added later, also with no own domains", async () => {
+      const app = sharedApp();
+      for (const own of [2, 0]) {
+        const team = await sharedTeam(`shared-catch-up-${own}`, own);
+        const [first] = (await page(app, team)).ids;
+        expect(first).toBe(own > 0 ? team.own.at(-1) : team.sharedId);
+        const [added] = await db
+          .insert(schema.domains)
+          .values({
+            teamId: team.id,
+            name: `added.shared-catch-up-${own}.example.com`,
+            region: "sa-east-1",
+            createdAt: day(10),
+          })
+          .returning({ id: schema.domains.id });
+        expect(await page(app, team, `?before=${first}`)).toEqual({
+          ids: [added?.id],
+          more: false,
+        });
+      }
+    });
+  });
+
+  it("reads by id, in either case, with no records and no SES call", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, sharedInboxDomain: SHARED });
+    for (const id of [t.sharedId, t.sharedId.toUpperCase()]) {
+      const res = await call(app, t.key, "GET", `/domains/${id}`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        object: "domain",
+        id: t.sharedId,
+        name: t.sharedName,
+        status: "verified",
+        shared: true,
+        sending_mode: "reply_only",
+        records: [],
+      });
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses PATCH, verify and DELETE with 403, in either case, before any other check or SES call", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, sharedInboxDomain: SHARED });
+    for (const id of [t.sharedId, t.sharedId.toUpperCase()]) {
+      for (const [method, path, body] of [
+        // tls answers 422 on an own domain: the 403 comes first.
+        ["PATCH", `/domains/${id}`, { tls: "enforced" }],
+        ["PATCH", `/domains/${id}`, { open_tracking: true }],
+        ["POST", `/domains/${id}/verify`],
+        ["DELETE", `/domains/${id}`],
+      ] as [string, string, unknown?][]) {
+        const res = await call(app, t.key, method, path, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await res.json()).toEqual({
+          statusCode: 403,
+          name: "forbidden",
+          message: `${t.sharedName} is your team's subdomain of the shared domain: it can't be changed or deleted`,
+        });
+      }
+    }
+    expect(calls).toEqual([]);
+    expect((await list(app, t)).data.at(-1)?.id).toBe(t.sharedId);
+  });
+
+  it("is no API key scope: POST /api-keys domain_id takes the team's own domains only", async () => {
+    const res = await call(sharedApp(), t.key, "POST", "/api-keys", {
+      name: "scoped",
+      domain_id: t.sharedId,
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      statusCode: 422,
+      name: "validation_error",
+      message:
+        "domain_id must be a verified domain of this team: a GET /domains row with shared: false",
+    });
+  });
+
+  it("is left out without a shared inbox domain: every row has shared: false", async () => {
+    const app = makeApp(fakeSes());
+    const body = await list(app, t);
+    expect(body.data.map((row) => row.id)).toEqual([...t.own].reverse());
+    for (const row of body.data) {
+      expect(row.shared).toBe(false);
+      expect(row).not.toHaveProperty("sending_mode");
+    }
+    expect((await call(app, t.key, "GET", `/domains/${t.sharedId}`)).status).toBe(404);
+  });
+
+  it("leaves the plan's domain limit to own domains: a Free team with two may add a third", async () => {
+    expect(PLAN_DOMAIN_LIMIT.free).toBe(3);
+    const free = await sharedTeam("shared-limit", 2, "free");
+    const res = await call(sharedApp({ isCloud: true }), free.key, "POST", "/domains", {
+      name: "third.shared-limit.example.com",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("documents shared and the sending mode fields, generated without a shared domain", async () => {
+    const doc = (await (await makeApp(fakeSes()).request("/openapi.json")).json()) as {
+      components: {
+        schemas: Record<
+          string,
+          {
+            properties: Record<string, unknown> & {
+              data?: { items: { properties: Record<string, unknown> } };
+            };
+          }
+        >;
+      };
+    };
+    const { GetDomainResponse, ListDomainsResponse } = doc.components.schemas;
+    for (const properties of [
+      GetDomainResponse?.properties,
+      ListDomainsResponse?.properties.data?.items.properties,
+    ]) {
+      expect(Object.keys(properties ?? {})).toEqual(
+        expect.arrayContaining(["shared", "sending_mode", "sending_mode_reason"]),
+      );
+    }
   });
 });

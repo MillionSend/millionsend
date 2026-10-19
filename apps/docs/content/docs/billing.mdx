@@ -15,7 +15,8 @@ past it. Free holds up to 1,000 contacts; segments and topics are unlimited
 everywhere, and so are contacts from Starter up. Sending domains are capped
 at 3 on Free and 10 on Starter, unlimited above. At either cap the API
 answers `403 plan_limit_reached` ("Your plan allows up to 1000 contacts")
-and the dashboard shows the same sentence.
+and the dashboard shows the same sentence. Inboxes are capped at 3 on Free
+and 25 on Starter, unlimited above (see [Inboxes](#inboxes)).
 
 | Rung | Plan | Price | Included | Cap | Overage per 1,000 |
 | --- | --- | --- | --- | --- | --- |
@@ -43,7 +44,11 @@ park as `queued_quota` and the 15-minute `quota.drain` job releases them after
 midnight UTC. The API answers `429 daily_quota_exceeded` only when the parked
 backlog is full. Owners hear `quota.warning` at 80% of the cap,
 `quota.reached` at the cap and `quota.paused` when parking begins, once per
-UTC day; a plan upgrade releases parked mail within minutes.
+UTC day; a plan upgrade releases parked mail within minutes. A scheduled send
+counts against the UTC day it goes out: its own, or today for a
+`scheduled_at` already past (it sends at once). Rescheduling it to another day
+counts it against that day too, while the day it leaves keeps its count; if
+that day is full, the email parks until the drain finds room.
 
 ### Monthly volumes (Pro, Scale)
 
@@ -53,11 +58,11 @@ included volume depends on the **overage** switch in Billing, on by default
 (the customer turns it off there):
 
 - **Overage off**: the API refuses with `429 monthly_quota_exceeded`
-  ("Monthly sending quota exceeded with overage off; the period renews on
-  `<date>`"); nothing parks through the API. Broadcasts
-  still park their overflow as `queued_quota`, and the drain re-checks it
-  against the period each run: it goes out when the period renews, when
-  overage is turned on, or when the plan moves up.
+  ("Monthly sending quota exceeded with overage off or paused for a past-due
+  payment; the period renews on `<date>`"); nothing parks through the API.
+  Broadcasts still park their overflow as `queued_quota`, and the drain
+  re-checks it against the period each run: it goes out when the period
+  renews, when overage is turned on, or when the plan moves up.
 - **Overage on**: sends past the included volume are reported to a Stripe
   meter and billed per 1,000 at the rung's rate on the next invoice (see
   [the overage cron](#the-overage-cron)) — up to a hard cap of 5× the
@@ -67,10 +72,87 @@ included volume depends on the **overage** switch in Billing, on by default
   sends stop at 5 times the included volume even with overage on; the period
   renews on `<date>`") until the period renews.
 
+While a renewal payment is past due, overage pauses whatever the switch says:
+the team keeps its included volume through Stripe's retries, and sends past
+it are refused or park as with overage off until the failed invoice is paid.
+The payment-failed mail, the billing page and the quota mails say so, and the
+paid invoice releases parked broadcasts within minutes.
+
 Owners hear `quota.warning` at 80% and `quota.reached` at 100% of the included
 volume, once per period; the reached mail says whether sends now bill overage
 or are refused. There is no `quota.paused` on monthly plans. A scheduled send
 counts against the period it is accepted in.
+
+On every plan, a sending domain under 30 days old also has its own daily cap
+(see [Domains](/concepts/domains#new-domain-limit)). A plan change never
+lifts it, and mail it holds parks as `queued_quota` without counting against
+the plan until the drain releases it.
+
+### Received mail
+
+Teams that [receive mail](/concepts/receiving) are counted once per message,
+not per recipient, in `usage_counters.received` and
+`usage_counters_hourly.received` and, on a monthly plan,
+`usage_periods.received`. What it costs comes from
+`receivingRule` in `packages/core/src/receiving/rcpt.ts`:
+
+- **Free**: received mail spends the day's sending counter
+  (`usage_counters.accepted`), so sends and received mail share the cap and
+  its 50% tolerance, and the quota notices count both. At the ceiling the MX
+  defers new mail with `452 4.2.2` until midnight UTC.
+- **Starter**: free up to twice the daily cap (3,000) per UTC day, counted
+  apart from sends; past it, `452`.
+- **Pro, Scale**: free up to twice the included volume per period. Past that,
+  every tenth received message adds one email to `usage_periods.accepted`,
+  which the [overage cron](#the-overage-cron) bills like a send. Past the
+  allowance, received mail is deferred once `accepted` reaches the period's
+  ceiling: 5× the volume with overage on, the volume itself with it off or
+  paused for a past-due payment.
+
+The MX asks at every `RCPT TO`, so a team out of room is deferred before the
+message is sent; the sender retries. Self-hosted instances count received
+mail and never cap it.
+
+### Inboxes
+
+[Inboxes](/concepts/inboxes) cost nothing themselves; what they receive is
+counted as above. The plan caps how many a team keeps and how fast it creates
+them, from `PLAN_INBOX_LIMIT` and `INBOX_CREATES_PER_HOUR` in
+`packages/core/src/inboxes/limits.ts`:
+
+| Plan | Inboxes | Created per hour | Catch-all | Shared addresses |
+| --- | --- | --- | --- | --- |
+| Free | 3 | 10 | No | Reply only |
+| Starter | 25 | 60 | Yes | Start conversations |
+| Pro, Scale | Unlimited | 600 | Yes | Start conversations |
+
+- At the inbox cap, `POST /inboxes` answers `403 validation_error` with
+  Resend's message, "You have reached the inbox limit of your plan. Upgrade
+  to add more.", and the dashboard disables **Create inbox** with the same
+  advice. Past the hourly rate it answers `429 rate_limit_exceeded` with
+  `retry-after`. The rate counts inboxes created, so deleting them doesn't
+  reset it.
+- Catch-all receiving (`receiving_catch_all` on a domain) needs Starter or
+  above: on Free, turning it on answers `403 plan_limit_reached` ("Catch-all
+  receiving needs a paid plan"). It stays on through a downgrade, and every
+  domain that received mail before inboxes existed was switched on.
+- Addresses on the [shared domain](/concepts/inboxes#shared-domain) start
+  conversations on a paid plan, where the instance allows it, and only reply
+  inside their threads on Free. The plan is read at every send: after a
+  downgrade a stored `open` rule reads as reply-only, without being
+  rewritten, and applies again after an upgrade. Shared inboxes count toward
+  the inbox cap until they're deleted, by you or after 90 days unused.
+- `GET /usage` reports the cap as `limits.inboxes` (`null` when unlimited),
+  and the billing card shows it as "6 of 25".
+- Screening received mail for prompt injection keeps its own count
+  (`usage_counters.inbound_judged`), apart from the samples of outbound
+  content monitoring, under the same daily values: 600 per team and 50,000
+  per instance, plus 200 per inbox. Received mail never spends the outbound
+  sampling caps.
+
+Self-hosted instances have no inbox cap or creation rate, catch-all is open
+to every domain, and every team counts as paid for shared addresses: the
+operator's settings decide what they send.
 
 ## The Stripe model
 
@@ -92,7 +174,8 @@ configuration. A subscription on a monthly rung carries the rung's price and
 its metered price as a second item from Checkout on (the item's id is stored
 in `teams.stripe_overage_item_id`); the metered item bills only what the
 worker reports, so the customer's **overage** switch is a plain row flag,
-`teams.overage_enabled`, which is what every send surface reads.
+`teams.overage_enabled`, which is what every send surface reads, paused
+while `teams.plan_status` is `past_due`.
 
 ## The flow
 
@@ -108,16 +191,26 @@ worker reports, so the customer's **overage** switch is a plain row flag,
    signature on the raw body, records the event id (duplicates are
    acknowledged and ignored), re-fetches the subscription from Stripe, and
    only then writes `teams.plan`, `plan_quota`, `current_period_start`,
-   `current_period_end`, `stripe_overage_item_id` and `pending_rung`.
+   `current_period_end`, `stripe_overage_item_id`, `pending_rung` and
+   `move_up_pending_until`.
 4. **Switching rung** happens in the dashboard (`billing.changePlan`), and
    the direction decides when:
-   - **Up** applies now: the subscription's items are updated — the plan
-     item to the new rung's price, the metered item re-priced for a monthly
-     rung or dropped for a daily one after its usage is reported — with the
-     difference prorated on the next invoice, and the webhook that follows
-     re-applies the same state. Sends already accepted inside the old volume
-     are marked settled on the period row, so the new rung never bills them
-     as overage.
+   - **Up** waits for its own payment: the subscription's items are
+     updated — the plan item to the new rung's price, the metered item
+     re-priced for a monthly rung after its usage is reported — with
+     `proration_behavior: always_invoice` and `payment_behavior:
+     pending_if_incomplete`, so the prorated difference and the overage so
+     far are invoiced and charged at once, and the new volume applies only
+     once that invoice is paid. When the bank declines or asks for
+     authentication the rung stays as it is, though a move down scheduled
+     before is already dropped: Stripe holds the update for 23 hours,
+     the dashboard sends the customer to the invoice's hosted page, and
+     paying it there applies the move (the webhook writes the row);
+     otherwise Stripe voids the invoice. Another move up, or a team delete,
+     voids a waiting invoice before it reports anything, so that invoice
+     cannot be paid later. Sends already accepted inside the
+     old volume are marked settled on the period row, so the new rung never
+     bills them as overage.
    - **Down** applies at the period end, with no proration and no refund: a
      Stripe subscription schedule is created from the subscription (or the
      pending one reused) with two phases — the current items until
@@ -136,6 +229,28 @@ worker reports, so the customer's **overage** switch is a plain row flag,
    cancellation reason). Plan changes are not offered there: Stripe's portal
    cannot update a subscription with more than one item, and a monthly rung
    has two.
+
+Deleting a team cancels its subscription at once with a final invoice
+(`invoice_now`): the period's overage is reported first, and the invoice
+bills it with any proration still pending. Stripe keeps that invoice a draft
+for about an hour, so a meter event still being processed lands on it, and
+retries a failed charge on its usual schedule. The unused time is not
+refunded. A team suspended for fraud is the exception: its subscription ends
+with no final invoice, since everything it paid in the last 120 days is
+refunded.
+
+A team cannot buy or move up while it is suspended (for any reason) or
+holds an open Trust & safety flag that the safety job opened for abuse
+(`monitor`, `guardrail` or `complaints`) or that an operator opened or
+reopened, whatever its kind: `billing.checkout`, a move up in
+`billing.changePlan` and switching overage on answer `FORBIDDEN`
+(`upgrades_held`), and the billing page says upgrades are unavailable,
+without saying why. Reinstating a team clears the flag its suspension
+opened and leaves any other open flag as it is. Moving down,
+keeping the current rung, switching overage off and **Manage billing**
+(where cancelling lives) stay open. The configuration `--portal` provisions
+offers no plan switch at all; the account's default configuration may, so
+set `STRIPE_PORTAL_CONFIG`.
 
 The plan columns are written from a subscription fetched from Stripe — by
 the webhook handler and by the two dashboard procedures above — never from a
@@ -157,7 +272,7 @@ The subscription's non-metered item names the rung, tried in this order:
 | Re-fetched subscription status | `plan`, `plan_quota` | `plan_status` |
 | --- | --- | --- |
 | `active`, `trialing` | The rung's plan and included volume (`plan_quota` is null on a daily rung). Unknown price: logged, nothing changes. | same |
-| `past_due` | Unchanged (payment grace; Stripe keeps retrying) | `past_due` |
+| `past_due` | Unchanged (payment grace; Stripe keeps retrying); overage pauses until the invoice is paid | `past_due` |
 | `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, anything else | `free`, null | `unpaid` / `canceled` / `incomplete` / `canceled` |
 
 Additional rules:
@@ -177,7 +292,8 @@ Additional rules:
 - `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
   `current_period_end`, `stripe_overage_item_id` and `pending_rung` (the rung
   of a pending schedule's last phase when it differs from the current one)
-  are stored alongside the plan. A metered item priced for another rung is
+  and `move_up_pending_until` (when Stripe drops a move up still waiting on
+  its payment) are stored alongside the plan. A metered item priced for another rung is
   re-pointed to the rung's metered price as it is applied.
 
 ## The overage cron
@@ -204,9 +320,26 @@ Usage of a period that already ended is stamped one second inside that
 period, where Stripe invoices it (the invoice stays a draft for about an hour
 after the period closes; rows older than 35 days can no longer be metered and
 are logged).
+While a move up waits on its payment, the team's running period is skipped
+(an ended period's invoice cannot wait): Stripe bills nothing reported on the
+old price between the request and the payment, so the wait's sends are
+reported once the move applies (against the new volume) or once Stripe drops
+it unpaid after 23 hours (against the old one).
 The same report runs before the switch turns off, before a move up (sends
-made under the old rung settle at its rate) and when the metered item leaves
-the subscription, so nothing unbilled is lost.
+made under the old rung settle at its rate), before a team is deleted (its
+cancellation carries a final invoice) and when the metered item leaves the
+subscription; the last three run during a wait too, since each ends it.
+Stripe drops a meter event it has not counted by the time a
+move up re-prices the metered item, and counting takes about a minute, so a
+move up first compares the period's reported overage with Stripe's meter
+summaries: while more than 1% of the volume (at least 1,000 emails) is
+still uncounted, or a step the meter rejected still waits to be sent again,
+`billing.changePlan` refuses with `CONFLICT` (`overage_in_flight`) and the
+dashboard asks to try again in a minute. Each attempt first reports what was
+sent since the last report, so while a team sends more than that margin each
+minute, the move waits for sending to slow. A team delete refuses the same
+way when the meter rejects the report it makes, since the cancel would delete
+the rows that owe it.
 
 ## Environment
 

@@ -22,7 +22,11 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
         height={22}
         style={{ marginBottom: 28 }}
       />
-      <div className="ms-card" style={{ width: 380, maxWidth: "100%", padding: 28 }}>
+      {/* Border-box so the 100% cap holds the padding too; 438 = a 380px content box. */}
+      <div
+        className="ms-card"
+        style={{ width: 438, maxWidth: "100%", padding: 28, boxSizing: "border-box" }}
+      >
         {children}
       </div>
     </main>

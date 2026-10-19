@@ -10,7 +10,7 @@ import { useTRPC } from "@/lib/trpc";
 /** Message ids cannot carry dots: "broadcast.held_quota" reads as "broadcast_held_quota". */
 const itemId = (key: MailPreferenceKey) => key.replace(/\./g, "_");
 
-export function NotificationsView({ cloud }: { cloud: boolean }) {
+export function NotificationsView({ cloud, receiving }: { cloud: boolean; receiving: boolean }) {
   const t = useTranslations("settings.notifications");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -26,7 +26,9 @@ export function NotificationsView({ cloud }: { cloud: boolean }) {
   return (
     <div style={{ maxWidth: 640, display: "grid", gap: 16 }}>
       <p style={{ margin: 0, fontSize: 13, color: "var(--ms-muted)" }}>{t("intro")}</p>
-      {MAIL_PREFERENCE_GROUPS.filter((group) => cloud || !group.cloudOnly).map((group) => (
+      {MAIL_PREFERENCE_GROUPS.filter(
+        (group) => (cloud || !group.cloudOnly) && (receiving || group.group !== "inboxes"),
+      ).map((group) => (
         <section key={group.group} className="ms-card" style={{ padding: 24 }}>
           <h2
             className="ms-display"

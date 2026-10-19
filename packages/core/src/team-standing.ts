@@ -1,9 +1,41 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { recordAudit } from "./audit.js";
+import { recordContactActivity } from "./contact-activities.js";
+import {
+  type DeliverabilityReason,
+  fetchDeliverabilityHealth,
+  PAUSE_BOUNCE_RATE,
+  PAUSE_COMPLAINT_RATE,
+} from "./deliverability.js";
+import { OPERATOR_PARK_REASONS } from "./screening.js";
+import { unsubscribeSuspendedMembers } from "./system-contacts.js";
 
 export type SuspensionReason = (typeof schema.suspensionReasonEnum.enumValues)[number];
 export const SUSPENSION_REASONS = schema.suspensionReasonEnum.enumValues;
+
+/**
+ * Suspensions the team must not learn of: no automated mail about it goes
+ * out, billing included, and its people cannot start another team.
+ */
+export const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
+
+/**
+ * Suspensions over the rules (abuse), which take the team's people off the
+ * instance's own contact list and keep their sign-up records 12 months past
+ * their deletion. A review hold is still pending a verdict, and non_payment
+ * is a billing state.
+ */
+export const ABUSE_SUSPENSIONS: readonly SuspensionReason[] = ["manual", "reputation", "phishing"];
+
+/** Whether the team row is under a silent suspension. */
+export function isSilentlySuspended(team: {
+  suspendedAt: Date | null;
+  suspensionReason: string | null;
+}): boolean {
+  return team.suspendedAt !== null && SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "");
+}
 
 /** The operator overrides on a team that every send surface honours. */
 export interface TeamStanding {
@@ -38,6 +70,15 @@ export function teamStandingOf(row: {
   };
 }
 
+/**
+ * Whether the team's links in mail already delivered stop leading anywhere:
+ * tracked clicks, and the hosted unsubscribe page's hop to the team's site.
+ * An unpaid invoice says nothing about the mail, so it leaves them working.
+ */
+export function linksDisabled(standing: TeamStanding): boolean {
+  return standing.suspended !== null && standing.suspended.reason !== "non_payment";
+}
+
 /** A team's operator overrides; null when the team does not exist. */
 export async function fetchTeamStanding(db: Db, teamId: string): Promise<TeamStanding | null> {
   const [row] = await db
@@ -57,4 +98,174 @@ export async function isTeamSuspended(db: Db, teamId: string): Promise<boolean> 
     .from(schema.teams)
     .where(eq(schema.teams.id, teamId));
   return row?.suspendedAt != null;
+}
+
+/**
+ * Suspends a team; every send surface reads the row per send. A standing
+ * suspension keeps its original suspended_at and takes the new reason,
+ * unless `ifNotSuspended` leaves it as it is. True when the row changed; the
+ * audit, mail, flag and SES tenant are the caller's.
+ *
+ * Moving into a suspension over the rules unsubscribes the team's people in
+ * the same transaction, so a retry after a failure never finds the team
+ * suspended and its people still subscribed. A suspension already over the
+ * rules has done it once: a person who opted back in since stays in.
+ *
+ * Any suspension but a review hold cancels the mail parked for an operator
+ * or for a review hold, in the same transaction and audited, so a later
+ * reinstatement never drains lures held before it.
+ */
+export async function suspendTeam(
+  db: Db,
+  input: {
+    teamId: string;
+    reason: SuspensionReason;
+    note?: string | null | undefined;
+    now?: Date | undefined;
+    ifNotSuspended?: boolean | undefined;
+  },
+): Promise<boolean> {
+  const t = schema.teams;
+  const timeline = await db.transaction(async (tx) => {
+    const [before] = await tx
+      .select({ reason: t.suspensionReason })
+      .from(t)
+      .where(eq(t.id, input.teamId))
+      .for("update");
+    const changed = await tx
+      .update(t)
+      .set({
+        suspendedAt: sql`coalesce(${t.suspendedAt}, ${input.now ?? new Date()})`,
+        suspensionReason: input.reason,
+        suspensionNote: input.note ?? null,
+      })
+      .where(and(eq(t.id, input.teamId), input.ifNotSuspended ? isNull(t.suspendedAt) : undefined))
+      .returning({ id: t.id });
+    if (changed.length === 0) return null;
+    const e = schema.emails;
+    const canceled =
+      input.reason === "review"
+        ? []
+        : await tx
+            .update(e)
+            .set({ latestStatus: "canceled" })
+            .where(
+              and(
+                eq(e.teamId, input.teamId),
+                eq(e.latestStatus, "queued_quota"),
+                isNull(e.sentAt),
+                inArray(e.parkReason, ["review", ...OPERATOR_PARK_REASONS]),
+              ),
+            )
+            .returning({ id: e.id });
+    if (!ABUSE_SUSPENSIONS.includes(input.reason))
+      return { activity: [], canceled: canceled.length };
+    // Marked here, not left to the hourly sweep: a member who leaves or is
+    // deleted before it runs keeps the longer retention.
+    const m = schema.teamMembers;
+    await tx
+      .update(schema.accountSignups)
+      .set({ abuseSuspended: true })
+      .where(
+        inArray(
+          schema.accountSignups.userId,
+          tx.select({ userId: m.userId }).from(m).where(eq(m.teamId, input.teamId)),
+        ),
+      );
+    return {
+      activity:
+        before?.reason && ABUSE_SUSPENSIONS.includes(before.reason)
+          ? []
+          : await unsubscribeSuspendedMembers(tx as unknown as Db, input.teamId),
+      canceled: canceled.length,
+    };
+  });
+  if (!timeline) return false;
+  await recordContactActivity(db, timeline.activity);
+  if (timeline.canceled > 0) {
+    await recordAudit(db, {
+      teamId: input.teamId,
+      actor: "system",
+      action: "screening.canceled",
+      target: { type: "team", id: input.teamId },
+      metadata: { emails: timeline.canceled, reason: input.reason },
+    });
+  }
+  return true;
+}
+
+/**
+ * What a refused API or SMTP send says while the team is suspended. A review
+ * hold reads as a neutral pause: the team may be innocent, and a phisher
+ * learns nothing about what was judged.
+ */
+export function suspendedSendRefusal(reason: SuspensionReason): {
+  code: "team_suspended" | "sending_paused";
+  message: string;
+} {
+  return reason === "review"
+    ? {
+        code: "sending_paused",
+        message:
+          "Sending is paused pending review. Sends are refused until the review is complete.",
+      }
+    : {
+        code: "team_suspended",
+        message:
+          "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
+      };
+}
+
+/** Why a team may not take new mail right now. */
+export type SendRefusal =
+  | { reason: "team_suspended"; suspension: SuspensionReason }
+  | { reason: "sending_paused"; pause: DeliverabilityReason };
+
+/**
+ * The team-level admission every accept path applies (acceptEmail, and
+ * broadcast initiation beside its broadcast-only holds): an operator
+ * suspension, then the deliverability pause, a trailing rate at SES's own
+ * review line ("warning" never blocks). Null when the team may send.
+ */
+export async function sendRefusal(db: Db, teamId: string): Promise<SendRefusal | null> {
+  const suspended = (await fetchTeamStanding(db, teamId))?.suspended;
+  if (suspended) return { reason: "team_suspended", suspension: suspended.reason };
+  const health = await fetchDeliverabilityHealth(db, teamId);
+  const pause = health.reasons.find((r) => r.tier === "paused");
+  return pause ? { reason: "sending_paused", pause } : null;
+}
+
+/**
+ * The refusal as the API and the SMTP relay word it (a review hold as a
+ * neutral pause, see suspendedSendRefusal); the dashboard words it from its
+ * catalogs.
+ */
+export function sendRefusalError(refusal: SendRefusal): {
+  code: "team_suspended" | "sending_paused";
+  message: string;
+} {
+  if (refusal.reason === "team_suspended") return suspendedSendRefusal(refusal.suspension);
+  const { metric, rate, windowDays } = refusal.pause;
+  const limit = metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
+  return {
+    code: "sending_paused",
+    message: `Sending is paused: your ${metric === "bounce" ? "hard bounce" : "complaint"} rate of ${(rate * 100).toFixed(2)}% over the last ${windowDays} days is at or above the ${(limit * 100).toFixed(2)}% limit. Lower it before sending again.`,
+  };
+}
+
+/**
+ * Whether the deliverability pause holds mail a team already has waiting,
+ * at send time and in the drain: what was accepted before the team crossed
+ * the line (a schedule can sit 30 days) must not reach SES while it is past
+ * it. Account mail must go out whatever the rates: the instance's own
+ * (system) team is exempt here, and callers pass any row carrying
+ * SYSTEM_MAIL_TAG, whatever its team, without asking.
+ */
+export async function deliverabilityHold(db: Db, teamId: string): Promise<boolean> {
+  const [team] = await db
+    .select({ plan: schema.teams.plan })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, teamId));
+  if (!team || team.plan === "system") return false;
+  return (await fetchDeliverabilityHealth(db, teamId)).status === "paused";
 }

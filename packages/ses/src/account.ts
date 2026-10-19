@@ -13,6 +13,13 @@ export interface SesAccountClient {
 }
 
 /**
+ * The reads that probe a region (GetAccount, the reputation metrics) sit on
+ * the dashboard's and the worker's hot paths: a region that does not answer
+ * must fail in seconds, not at the OS connect timeout times the SDK's retries.
+ */
+export const PROBE_REQUEST_HANDLER = { connectionTimeout: 3_000, requestTimeout: 10_000 };
+
+/**
  * Real SESv2 client typed for GetAccount. Mirrors createSesv2Client in
  * domain-identity.ts, whose SesIdentityClient return type cannot carry
  * GetAccountCommand; omitting credentials falls back to the SDK default
@@ -26,10 +33,7 @@ export function createSesAccountClient(options: {
   const { region, accessKeyId, secretAccessKey } = options;
   return new SESv2Client({
     region,
-    // GetAccount is a probe on the dashboard's and the worker's hot paths: a
-    // region that does not answer must fail in seconds, not at the OS
-    // connect timeout times the SDK's retries.
-    requestHandler: { connectionTimeout: 3_000, requestTimeout: 10_000 },
+    requestHandler: PROBE_REQUEST_HANDLER,
     ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
   });
 }

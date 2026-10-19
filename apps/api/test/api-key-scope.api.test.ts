@@ -151,6 +151,16 @@ describe("domain-scoped keys may only send from their domain", () => {
     const ok = await call(domainKey, "POST", "/emails/batch", [fromAcme, fromAcme]);
     expect(ok.status).toBe(200);
   });
+
+  it("mints keys that are held to the same domain", async () => {
+    const minted = await call(domainKey, "POST", "/api-keys", { name: "child" });
+    expect(minted.status).toBe(200);
+    const { token } = (await minted.json()) as { token: string };
+    const res = await call(token, "POST", "/emails", fromOther);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
+    expect((await call(token, "POST", "/emails", fromAcme)).status).toBe(200);
+  });
 });
 
 describe("full_access, unrestricted keys are unaffected", () => {

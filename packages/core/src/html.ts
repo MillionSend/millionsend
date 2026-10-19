@@ -26,6 +26,89 @@ export function unescapeHtml(value: string): string {
 }
 
 /**
+ * Named character references a mail body uses: the markup ones; the
+ * invisible ones, which decode to their characters so they are counted and
+ * stripped like them; and the punctuation a URL can be spelled with
+ * (https&colon;&sol;&sol;), which a browser decodes in an href.
+ */
+const ENTITIES = new Map([
+  ["amp", "&"],
+  ["lt", "<"],
+  ["gt", ">"],
+  ["quot", '"'],
+  ["apos", "'"],
+  ["nbsp", " "],
+  ["zwnj", "\u200c"],
+  ["zwj", "\u200d"],
+  ["shy", "\u00ad"],
+  ["lrm", "\u200e"],
+  ["rlm", "\u200f"],
+  ["zerowidthspace", "\u200b"],
+  ["colon", ":"],
+  ["sol", "/"],
+  ["bsol", "\\"],
+  ["period", "."],
+  ["comma", ","],
+  ["quest", "?"],
+  ["equals", "="],
+  ["num", "#"],
+  ["percnt", "%"],
+  ["commat", "@"],
+  ["excl", "!"],
+  ["dollar", "$"],
+  ["plus", "+"],
+  ["ast", "*"],
+  ["semi", ";"],
+  ["lpar", "("],
+  ["rpar", ")"],
+  ["lsqb", "["],
+  ["rsqb", "]"],
+  ["lbrack", "["],
+  ["rbrack", "]"],
+  ["lcub", "{"],
+  ["rcub", "}"],
+  ["lbrace", "{"],
+  ["rbrace", "}"],
+  ["lowbar", "_"],
+  ["grave", "`"],
+  ["verbar", "|"],
+  ["vert", "|"],
+  ["tab", "\t"],
+  ["newline", "\n"],
+]);
+
+/** Numeric character references and the named ones above, decoded; names match without case. */
+export function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, body: string) => {
+    if (body[0] === "#") {
+      const code =
+        body[1]?.toLowerCase() === "x" ? Number.parseInt(body.slice(2), 16) : Number(body.slice(1));
+      return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : m;
+    }
+    return ENTITIES.get(body.toLowerCase()) ?? m;
+  });
+}
+
+/** Whether `s` holds a named reference decodeEntities leaves as written: a browser may still decode it. */
+export function hasUnknownReference(s: string): boolean {
+  for (const m of s.matchAll(/&([a-z][a-z0-9]*);/gi)) {
+    if (!ENTITIES.has((m[1] as string).toLowerCase())) return true;
+  }
+  return false;
+}
+
+// `[^<>]`, not `[^>]`: an unclosed tag then stops the scan at the next `<`
+// instead of rescanning to the end from every one, quadratic on a crafted
+// body. An unclosed style/script swallows the rest, as a browser does.
+export function visibleText(html: string): string {
+  return html
+    .replace(/<(style|script)\b(?:[\s\S]*?<\/\1\s*>|[\s\S]*)/gi, "")
+    .replace(/<[^<>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Wordmarks for system emails, hosted by the product site rather than the
  * instance: most self-hosted deployments sit on private or loopback hosts
  * that recipients' mail clients cannot fetch from. Ink glyphs for the light

@@ -6,14 +6,17 @@ import {
   EnvKeyring,
   generateApiKey,
   hashRecipient,
+  MAX_SUBJECT_LENGTH,
   OVERAGE_HARD_CAP,
+  undeliverableRecipientMessage,
+  utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import nodemailer from "nodemailer";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSmtpServer,
   MAX_CONNECTIONS_PER_IP,
@@ -30,10 +33,10 @@ let server: ReturnType<typeof createSmtpServer>;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 const enqueued: { emailId: string; startAfter?: Date }[] = [];
 
-const transport = (auth?: { user: string; pass: string }) =>
+const transport = (auth?: { user: string; pass: string }, atPort = port) =>
   nodemailer.createTransport({
     host: "127.0.0.1",
-    port,
+    port: atPort,
     secure: false,
     ignoreTLS: true,
     ...(auth ? { auth } : {}),
@@ -68,6 +71,7 @@ const serverDeps = () => ({
   keyring,
   isCloud: true,
   allowInsecureAuth: true,
+  onboardingEmailFrom: "MillionSend <hello@ms.example>",
   enqueueEmailSend: async (emailId: string, opts?: { startAfter?: Date }) => {
     enqueued.push({ emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) });
   },
@@ -208,10 +212,16 @@ describe("smtp relay", () => {
       transport({ user: SMTP_USERNAME, pass: token }).sendMail({
         from: "a@acme.dev",
         to: "dead@example.com",
-        subject: "s",
+        subject: "smtp-refused",
         text: "t",
       }),
     ).rejects.toMatchObject({ responseCode: 550 });
+    // The relay refuses without keeping a suppressed email.
+    const rows = await db
+      .select()
+      .from(schema.emails)
+      .where(eq(schema.emails.subject, "smtp-refused"));
+    expect(rows).toHaveLength(0);
   });
 
   it("confines a domain-scoped key to its domain (550 from another)", async () => {
@@ -265,6 +275,34 @@ describe("smtp relay", () => {
     ).rejects.toMatchObject({ responseCode: 554 });
   });
 
+  it("refuses the instance's onboarding sender with 550, even from the team holding its domain", async () => {
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "ms.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const auth = { user: SMTP_USERNAME, pass: token };
+    for (const from of ["MillionSend <hello@ms.example>", "HELLO@ms.example"]) {
+      await expect(
+        transport(auth).sendMail({ from, to: "r@example.com", subject: "s", text: "t" }),
+      ).rejects.toMatchObject({
+        responseCode: 550,
+        response: expect.stringContaining(
+          "hello@ms.example is reserved for MillionSend's own onboarding email. Add and verify a domain to send your own emails: https://docs.millionsend.com/concepts/domains",
+        ),
+      });
+    }
+    const ok = await transport(auth).sendMail({
+      from: "news@ms.example",
+      to: "r@example.com",
+      subject: "s",
+      text: "t",
+    });
+    expect(ok.response).toContain("Queued as");
+  });
+
   it("stores display names canonically quoted", async () => {
     const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail({
       from: { name: "Doe, John", address: "a@acme.dev" },
@@ -286,6 +324,38 @@ describe("smtp relay", () => {
         text: "t",
       }),
     ).rejects.toMatchObject({ responseCode: 553 });
+  });
+
+  it("refuses a Subject with control characters with 554, as POST /emails does", async () => {
+    for (const subject of ["a\u0000b", "a\u0007b"]) {
+      await expect(
+        transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+          from: "a@acme.dev",
+          to: "r@example.com",
+          subject,
+          text: "t",
+        }),
+      ).rejects.toMatchObject({
+        responseCode: 554,
+        response: expect.stringContaining("Subject must not contain control characters"),
+      });
+    }
+  });
+
+  it("refuses a Subject past MAX_SUBJECT_LENGTH characters with 554, as POST /emails does", async () => {
+    const send = (subject: string) =>
+      transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+        from: "a@acme.dev",
+        to: "r@example.com",
+        subject,
+        text: "t",
+      });
+    await expect(send("s".repeat(MAX_SUBJECT_LENGTH + 1))).rejects.toMatchObject({
+      responseCode: 554,
+      response: expect.stringContaining(`Subject must be at most ${MAX_SUBJECT_LENGTH} characters`),
+    });
+    const row = await emailRow((await send("s".repeat(MAX_SUBJECT_LENGTH))).response ?? "");
+    expect(row.subject).toHaveLength(MAX_SUBJECT_LENGTH);
   });
 
   it("delivers to the envelope only: header-only recipients are dropped, envelope extras are BCC", async () => {
@@ -312,6 +382,63 @@ describe("smtp relay", () => {
     });
     expect(info.accepted).toHaveLength(MAX_RCPT_TO);
     expect(info.rejected).toEqual([rcpts[MAX_RCPT_TO]]);
+  });
+
+  describe("recipient domains", () => {
+    beforeEach(() => {
+      vi.stubEnv("RECIPIENT_DOMAIN_CHECK", "on");
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("refuses an impossible recipient at RCPT TO with 550 5.1.2 and queues the message for the rest", async () => {
+      const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+        from: "a@acme.dev",
+        to: "success@simulator.amazonses.com",
+        cc: "someone@test.invalid",
+        subject: "s",
+        text: "t",
+      });
+      expect(info.accepted).toEqual(["success@simulator.amazonses.com"]);
+      expect(info.rejected).toEqual(["someone@test.invalid"]);
+      expect(info.rejectedErrors).toMatchObject([
+        {
+          responseCode: 550,
+          response: `550 5.1.2 ${undeliverableRecipientMessage(
+            { address: "someone@test.invalid", reason: "reserved_name" },
+            { forSend: true },
+          )}`,
+        },
+      ]);
+      const row = await emailRow(info.response ?? "");
+      expect(row).toMatchObject({
+        to: ["success@simulator.amazonses.com"],
+        cc: null,
+        bcc: null,
+        latestStatus: "queued",
+      });
+      expect(enqueued.map((e) => e.emailId)).toContain(row.id);
+    });
+
+    it("drops the session with 421 once MAX_RCPT_TO recipients were refused", async () => {
+      const auth = `AUTH PLAIN ${Buffer.from(`\0${SMTP_USERNAME}\0${token}`).toString("base64")}`;
+      const refused = Array.from({ length: MAX_RCPT_TO }, (_, i) => `RCPT TO:<r${i}@foo.test>`);
+      const replies = await dialogue([
+        "EHLO client.test",
+        auth,
+        "MAIL FROM:<a@acme.dev>",
+        ...refused,
+        "RCPT TO:<success@simulator.amazonses.com>",
+        "NOOP",
+      ]);
+      // After the greeting, EHLO, AUTH and MAIL replies.
+      const rcptReplies = replies.slice(4);
+      expect(rcptReplies.slice(0, MAX_RCPT_TO).every((r) => r.startsWith("550 5.1.2 "))).toBe(true);
+      expect(rcptReplies[MAX_RCPT_TO]).toMatch(/^421/);
+      // The server hung up: NOOP got no reply.
+      expect(rcptReplies).toHaveLength(MAX_RCPT_TO + 1);
+    });
   });
 
   it("drops the connection after repeated AUTH failures", async () => {
@@ -370,16 +497,23 @@ describe("smtp relay", () => {
     }
   });
 
-  it("rejects attachments with 554", async () => {
-    await expect(
-      transport({ user: SMTP_USERNAME, pass: token }).sendMail({
-        from: "a@acme.dev",
-        to: "r@example.com",
-        subject: "s",
-        text: "t",
-        attachments: [{ filename: "x.txt", content: "attached" }],
-      }),
-    ).rejects.toMatchObject({ responseCode: 554 });
+  it("rejects attachments with 554, program files and PDFs alike", async () => {
+    for (const attachment of [
+      { filename: "x.txt", content: "attached" },
+      { filename: "invoice.exe", content: Buffer.from("MZ") },
+      { filename: "fatura.pdf", content: Buffer.from("%PDF-1.7 statement") },
+    ]) {
+      await expect(
+        transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+          from: "a@acme.dev",
+          to: "r@example.com",
+          subject: "s",
+          text: "t",
+          attachments: [attachment],
+        }),
+        attachment.filename,
+      ).rejects.toMatchObject({ responseCode: 554 });
+    }
   });
 
   it("refuses a monthly plan at its included volume with 452 until overage is on", async () => {
@@ -428,5 +562,236 @@ describe("smtp relay", () => {
     await setAccepted(cap - 1);
     const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail(mail);
     expect(info.response).toContain("Queued as");
+  });
+});
+
+describe("rate limits", () => {
+  let limitTeam: string;
+  const servers: ReturnType<typeof createSmtpServer>[] = [];
+  const mail = { from: "a@limits.example", to: "r@example.com", subject: "s", text: "t" };
+
+  beforeAll(async () => {
+    limitTeam = await createTeam(db, "smtp-limits");
+    await db.insert(schema.domains).values({
+      teamId: limitTeam,
+      name: "limits.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+  });
+  // The key's bucket counts in fixed minutes of the database clock; calls
+  // straddling a boundary would see a fresh window. Wait out the last
+  // seconds of one.
+  beforeEach(async () => {
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 3_000) await new Promise((resolve) => setTimeout(resolve, left));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  afterAll(async () => {
+    await Promise.all(servers.map((s) => new Promise<void>((resolve) => s.close(resolve))));
+  });
+
+  async function addKey() {
+    const key = generateApiKey();
+    const [row] = await db
+      .insert(schema.apiKeys)
+      .values({
+        teamId: limitTeam,
+        name: "limited",
+        tokenPrefix: key.tokenPrefix,
+        keyHash: key.keyHash,
+        last4: key.last4,
+      })
+      .returning({ id: schema.apiKeys.id });
+    if (!row) throw new Error("key insert failed");
+    return { id: row.id, auth: { user: SMTP_USERNAME, pass: key.token } };
+  }
+
+  async function listen(limits: { rateLimitPerMinute?: number; teamRateLimitPerMinute?: number }) {
+    const limited = createSmtpServer({ ...serverDeps(), ...limits });
+    servers.push(limited);
+    await new Promise<void>((resolve) => limited.listen(0, "127.0.0.1", resolve));
+    return (limited.server.address() as AddressInfo).port;
+  }
+
+  const teamEmails = async () =>
+    (await db.select().from(schema.emails).where(eq(schema.emails.teamId, limitTeam))).length;
+
+  it("refuses a message past its key's per-minute budget, kept in the API's bucket, with 451 4.7.1 at MAIL FROM until the next minute", async () => {
+    const key = await addKey();
+    const limitedPort = await listen({ rateLimitPerMinute: 2 });
+    const bucket = async () =>
+      (
+        await db
+          .select()
+          .from(schema.apiRateLimits)
+          .where(eq(schema.apiRateLimits.apiKeyId, key.id))
+      )[0];
+
+    const before = await teamEmails();
+    const plain = Buffer.from(`\0${key.auth.user}\0${key.auth.pass}`).toString("base64");
+    const replies = await dialogue(
+      [
+        "EHLO client.test",
+        "MAIL FROM:<a@limits.example>",
+        `AUTH PLAIN ${plain}`,
+        "MAIL FROM:<a@limits.example>",
+        "RSET",
+        "MAIL FROM:<a@limits.example>",
+        "RSET",
+        "MAIL FROM:<a@limits.example>",
+      ],
+      limitedPort,
+    );
+    await expect(transport(key.auth, limitedPort).sendMail(mail)).rejects.toMatchObject({
+      responseCode: 451,
+      command: "MAIL FROM",
+      response: expect.stringMatching(/^451 4\.7\.1 /),
+    });
+    // After the greeting and EHLO: a MAIL before AUTH never reaches the
+    // count, and every MAIL after RSET is counted again.
+    expect(replies.slice(2)).toEqual([
+      expect.stringMatching(/^530 /),
+      expect.stringMatching(/^235 /),
+      expect.stringMatching(/^250 /),
+      expect.stringMatching(/^250 /),
+      expect.stringMatching(/^250 /),
+      expect.stringMatching(/^250 /),
+      expect.stringMatching(/^451 4\.7\.1 Too many messages, try again in \d+s$/),
+    ]);
+    expect((await bucket())?.count).toBe(4);
+    expect(await teamEmails()).toBe(before);
+
+    // The bucket's window follows the database clock: move it a minute back.
+    await db
+      .update(schema.apiRateLimits)
+      .set({ windowStart: sql`${schema.apiRateLimits.windowStart} - interval '1 minute'` })
+      .where(eq(schema.apiRateLimits.apiKeyId, key.id));
+    const info = await transport(key.auth, limitedPort).sendMail(mail);
+    expect(info.response).toContain("Queued as");
+    expect((await bucket())?.count).toBe(1);
+  });
+
+  it("caps a team across all of its keys with 451 4.7.1 at MAIL FROM until the next minute", async () => {
+    const first = await addKey();
+    const second = await addKey();
+    const limitedPort = await listen({ teamRateLimitPerMinute: 2 });
+    const now = Date.now();
+    const minute = now - (now % 60_000);
+    vi.useFakeTimers({ now: minute, toFake: ["Date"] });
+    const send = (auth: { user: string; pass: string }) =>
+      transport(auth, limitedPort).sendMail(mail);
+
+    expect((await send(first.auth)).response).toContain("Queued as");
+    expect((await send(second.auth)).response).toContain("Queued as");
+    const before = await teamEmails();
+    await expect(send(first.auth)).rejects.toMatchObject({
+      responseCode: 451,
+      command: "MAIL FROM",
+      response: "451 4.7.1 Too many messages, try again in 60s",
+    });
+    expect(await teamEmails()).toBe(before);
+
+    vi.setSystemTime(minute + 60_000);
+    expect((await send(second.auth)).response).toContain("Queued as");
+  });
+});
+
+describe("new-domain warm-up", () => {
+  // One instant per test: the warm-up counts per UTC day, and a rollover
+  // between seeding a counter and sending would read a fresh day.
+  const NOW = new Date("2026-10-09T10:00:00Z");
+  beforeAll(async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  });
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A Free team sending from young domains, with an SMTP key. */
+  async function warmTeam(slug: string, names: string[]) {
+    const warm = await createTeam(db, slug);
+    const domains = await db
+      .insert(schema.domains)
+      .values(
+        names.map((name) => ({
+          teamId: warm,
+          name,
+          region: "us-east-1",
+          status: "verified" as const,
+          verifiedAt: NOW,
+          registeredAt: new Date(NOW.getTime() - 3600_000),
+        })),
+      )
+      .returning({ id: schema.domains.id });
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId: warm,
+      name: "smtp",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    const send = (from: string, to: string | string[] = "r@example.com") =>
+      transport({ user: SMTP_USERNAME, pass: key.token }).sendMail({
+        from,
+        to,
+        subject: "s",
+        text: "t",
+      });
+    return { warm, domains, send };
+  }
+
+  it("parks a young domain's mail past its cap, then answers 452 naming the warm-up once the backlog is full", async () => {
+    const { warm, domains, send: sendFrom } = await warmTeam("smtp-warm", ["fresh-smtp.com"]);
+    const domain = domains[0];
+    if (!domain) throw new Error("domain insert failed");
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "fresh-smtp.com", day: utcDay(NOW), accepted: 100 });
+    const send = () => sendFrom("a@fresh-smtp.com");
+
+    const info = await send();
+    expect(await emailRow(info.response ?? "")).toMatchObject({
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
+    // Free's backlog: three days of its 100 a day.
+    await db.insert(schema.emails).values(
+      Array.from({ length: 299 }, () => ({
+        teamId: warm,
+        domainId: domain.id,
+        from: "a@fresh-smtp.com",
+        to: ["r@example.com"],
+        subject: "s",
+        latestStatus: "queued_quota" as const,
+        parkReason: "warmup" as const,
+      })),
+    );
+    await expect(send()).rejects.toMatchObject({
+      responseCode: 452,
+      response: expect.stringContaining("New domain warm-up"),
+    });
+  });
+
+  it("holds a team's second young domain once their shared day is spent", async () => {
+    const { send } = await warmTeam("smtp-pool", ["pool-one-smtp.com", "pool-two-smtp.com"]);
+    const fifty = (prefix: string) =>
+      Array.from({ length: 50 }, (_, i) => `${prefix}${i}@example.com`);
+    for (const prefix of ["a", "b"]) {
+      const info = await send("a@pool-one-smtp.com", fifty(prefix));
+      expect(await emailRow(info.response ?? "")).toMatchObject({ latestStatus: "queued" });
+    }
+    const info = await send("a@pool-two-smtp.com");
+    expect(await emailRow(info.response ?? "")).toMatchObject({
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
   });
 });

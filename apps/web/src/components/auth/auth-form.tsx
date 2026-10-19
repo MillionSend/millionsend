@@ -1,11 +1,13 @@
 "use client";
 
+import { CUSTOMER_TEXT_MAX } from "@millionsend/core/customer-text";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
+import { typedEmail } from "@/lib/email-input";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
 import styles from "./auth.module.css";
@@ -292,6 +294,7 @@ export function AuthForm({
                 autoComplete="name"
                 placeholder={t("namePlaceholder")}
                 required
+                maxLength={CUSTOMER_TEXT_MAX}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -307,7 +310,7 @@ export function AuthForm({
               placeholder={t("emailPlaceholder")}
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => setEmail(typedEmail(e.target.value))}
             />
           </div>
           {passwordShown ? (

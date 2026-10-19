@@ -1,10 +1,14 @@
 "use client";
 
 import { AUDIT_ACTIONS } from "@millionsend/core/audit-actions";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { CopyChip } from "@/components/copy-chip";
+import { DotParts } from "@/components/dot-parts";
+import { KvRow } from "@/components/kv-row";
+import { ListFooter } from "@/components/list-footer";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -15,11 +19,12 @@ import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
-import { formatDayTime, formatRelative } from "@/lib/format";
+import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamActions } from "../team-actions";
+import { LinkedTeams } from "../teams/linked-teams";
 import {
   CardHead,
   LoadErrorCard,
@@ -28,12 +33,12 @@ import {
   usePercent,
   usePlanLabel,
 } from "./parts";
-import { RevealCell, useContentReveal } from "./reveal";
+import { RevealCell, type RevealTeam, useContentReveal } from "./reveal";
+import { WaitingList } from "./waiting-list";
 
 const TILE: React.CSSProperties = { padding: "16px 20px" };
 // The monitoring rows are sentences, not figures: sans, left, the body size.
 const KV_VALUE: React.CSSProperties = {
-  textAlign: "left",
   fontFamily: "var(--ms-font-sans)",
   fontSize: 13,
 };
@@ -99,12 +104,14 @@ export function ReviewView({ teamId }: { teamId: string }) {
         plan: data.team.plan,
         planQuota: data.team.planQuota,
         suspendedAt: data.team.suspendedAt,
+        suspensionReason: data.team.suspensionReason,
         broadcastsPausedByOperatorAt: data.team.broadcastsPausedByOperatorAt,
       });
     },
   });
   const [flagDialog, setFlagDialog] = useState(false);
   const [note, setNote] = useState("");
+  const [emailTab, setEmailTab] = useState<"flagged" | "all">("flagged");
   const closeFlagDialog = useCallback(() => {
     setFlagDialog(false);
     setNote("");
@@ -141,6 +148,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
     plan: team.plan,
     planQuota: team.planQuota,
     suspendedAt: team.suspendedAt,
+    suspensionReason: team.suspensionReason,
     broadcastsPausedByOperatorAt: team.broadcastsPausedByOperatorAt,
   };
   const owner = team.owners[0]?.email ?? common("none");
@@ -152,10 +160,16 @@ export function ReviewView({ teamId }: { teamId: string }) {
     domains: team.domains,
     owner,
   };
-  const subtitle =
-    flag?.status === "open"
-      ? t("proof", { ...proofValues, since: formatRelative(flag.openedAt, locale) })
-      : t("proofNoFlag", proofValues);
+  const subtitle = (
+    <DotParts
+      text={
+        flag?.status === "open"
+          ? t("proof", { ...proofValues, since: formatRelative(flag.openedAt, locale) })
+          : t("proofNoFlag", proofValues)
+      }
+      tail={<CopyChip value={team.id} wrap />}
+    />
+  );
   const flagOpen = flag?.status === "open";
   const submitFlag = () => {
     if (!note.trim() || open.isPending) return;
@@ -171,13 +185,16 @@ export function ReviewView({ teamId }: { teamId: string }) {
     );
   };
 
-  const standingBadge = team.suspendedAt
-    ? ["danger", t("badges.suspended")]
-    : standing.guardrail === "paused"
-      ? ["danger", t("badges.guardrailPaused")]
-      : standing.guardrail === "warning"
-        ? ["warn", t("badges.guardrailWarning")]
-        : ["neutral", t("badges.guardrailOk")];
+  const heldForReview = team.suspensionReason === "review";
+  const standingBadge = heldForReview
+    ? ["warn", t("badges.heldForReview")]
+    : team.suspendedAt
+      ? ["danger", t("badges.suspended")]
+      : standing.guardrail === "paused"
+        ? ["danger", t("badges.guardrailPaused")]
+        : standing.guardrail === "warning"
+          ? ["warn", t("badges.guardrailWarning")]
+          : ["neutral", t("badges.guardrailOk")];
 
   return (
     <>
@@ -190,7 +207,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         }
         title={team.name}
         subtitle={subtitle}
-        actions={
+        badges={
           <>
             <span className={`ms-badge ms-badge-${standingBadge[0]}`}>{standingBadge[1]}</span>
             {team.broadcastsPausedByOperatorAt ? (
@@ -201,6 +218,10 @@ export function ReviewView({ teamId }: { teamId: string }) {
                 {t(flagOpen ? "badges.flagOpen" : "badges.flagCleared")}
               </span>
             ) : null}
+          </>
+        }
+        actions={
+          <>
             <RequestAccessButton
               on={contentReveal}
               disabled={!contentReveal || flaggedEmails.length === 0}
@@ -228,7 +249,9 @@ export function ReviewView({ teamId }: { teamId: string }) {
                     ? "menu.reopenTip"
                     : flag.reason === "manual"
                       ? "menu.clearManualTip"
-                      : "menu.clearTip",
+                      : flag.reason === "brand"
+                        ? "menu.clearBrandTip"
+                        : "menu.clearTip",
                 )}
               >
                 <button
@@ -249,23 +272,37 @@ export function ReviewView({ teamId }: { teamId: string }) {
                 </button>
               </Tooltip>
             ) : null}
-            <PopoverMenu
-              boxed
-              ariaLabel={common("actions")}
-              items={[
-                team.suspendedAt
-                  ? { label: safety("menu.reinstate"), onSelect: () => actions.reinstate(target) }
-                  : {
-                      label: safety("menu.suspend"),
+          </>
+        }
+        menu={
+          <PopoverMenu
+            boxed
+            ariaLabel={common("actions")}
+            items={[
+              ...(heldForReview
+                ? [
+                    { label: safety("menu.release"), onSelect: () => actions.reinstate(target) },
+                    {
+                      label: safety("menu.convert"),
                       danger: true,
                       onSelect: () => actions.suspend(target),
                     },
-                ...(flagOpen
-                  ? []
-                  : [{ label: t("openFlag"), onSelect: () => setFlagDialog(true) }]),
-              ]}
-            />
-          </>
+                  ]
+                : [
+                    team.suspendedAt
+                      ? {
+                          label: safety("menu.reinstate"),
+                          onSelect: () => actions.reinstate(target),
+                        }
+                      : {
+                          label: safety("menu.suspend"),
+                          danger: true,
+                          onSelect: () => actions.suspend(target),
+                        },
+                  ]),
+              ...(flagOpen ? [] : [{ label: t("openFlag"), onSelect: () => setFlagDialog(true) }]),
+            ]}
+          />
         }
       />
 
@@ -305,6 +342,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         <Tile label={t("tiles.sent7d")}>{nf.format(standing.sent7d)}</Tile>
         <Tile label={t("tiles.contacts")}>{nf.format(team.contacts)}</Tile>
       </div>
+      <LinkedTeams teamId={team.id} framed />
 
       <div className="ms-card" style={{ padding: 20, marginBottom: 16 }}>
         <div
@@ -371,71 +409,62 @@ export function ReviewView({ teamId }: { teamId: string }) {
           <p style={{ margin: 0, fontSize: 13, color: "var(--ms-muted)" }}>{monitorT("exempt")}</p>
         ) : (
           <>
-            <dl
-              className="ms-kv"
-              style={{ gridTemplateColumns: "max-content 1fr", marginBottom: 16 }}
-            >
-              <dt>{monitorT("tier")}</dt>
-              <dd style={KV_VALUE}>
-                {monitorT("tierValue", {
-                  tier: tiers(monitor.tier),
-                  rate: percentRate(monitor.decision.rate),
-                })}
-                {monitor.decision.elevated.length > 0
-                  ? ` · ${monitor.decision.elevated.map((e) => monitorT(`elevated.${e}`)).join(" · ")}`
-                  : ""}
-              </dd>
-              <dt>{monitorT("samples")}</dt>
-              <dd style={KV_VALUE}>
+            <dl className="ms-kv ms-kv-cols" style={{ marginBottom: 16 }}>
+              <KvRow label={monitorT("tier")} valueStyle={KV_VALUE}>
+                {[
+                  monitorT("tierValue", {
+                    tier: tiers(monitor.tier),
+                    rate: percentRate(monitor.decision.rate),
+                  }),
+                  ...monitor.decision.elevated.map((e) => monitorT(`elevated.${e}`)),
+                ].join(" · ")}
+              </KvRow>
+              <KvRow label={monitorT("samples")} valueStyle={KV_VALUE}>
                 {monitorT("samplesValue", {
                   samples: monitor.samples7d,
                   flagged: monitor.flagged7d,
                   unjudged: monitor.unjudged7d,
                 })}
-              </dd>
-              <dt>{monitorT("verdicts")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("verdicts")} valueStyle={KV_VALUE}>
                 {monitor.topReasons.length > 0
                   ? monitorT.rich("verdictsReasons", {
                       clean: monitor.judged7d - monitor.flagged7d,
                       flagged: monitor.flagged7d,
+                      part: (chunks) => <span className="ms-part">{chunks}</span>,
                       reasons: () => <ReasonCodes codes={monitor.topReasons} />,
                     })
                   : monitorT("verdictsValue", {
                       clean: monitor.judged7d - monitor.flagged7d,
                       flagged: monitor.flagged7d,
                     })}
-              </dd>
-              <dt>{monitorT("lastSample")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("lastSample")} valueStyle={KV_VALUE}>
                 {monitor.lastSampleAt ? (
                   <RelativeTime date={monitor.lastSampleAt} />
                 ) : (
                   common("none")
                 )}
-              </dd>
-              <dt>{monitorT("model")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("model")} valueStyle={KV_VALUE}>
                 {monitor.judge.on
                   ? `${monitor.judge.provider} · ${monitor.judge.model}`
                   : monitorT("modelOff")}
-              </dd>
-              <dt>{monitorT("override")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("override")} valueStyle={KV_VALUE}>
                 {monitor.override
                   ? monitorT("overrideValue", {
                       until: formatDayTime(monitor.override.until, locale),
                     })
                   : monitorT("overrideNone")}
-              </dd>
-              <dt>{monitorT("pause")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("pause")} valueStyle={KV_VALUE}>
                 {monitor.broadcastsPausedAt
                   ? monitorT("pauseValue", {
                       since: formatDayTime(monitor.broadcastsPausedAt, locale),
                     })
                   : monitorT("pauseNone")}
-              </dd>
+              </KvRow>
             </dl>
             <CardHead title={monitorT("samplesTitle")} subtitle={monitorT("samplesSubtitle")} />
             <Table>
@@ -538,7 +567,12 @@ export function ReviewView({ teamId }: { teamId: string }) {
                 <span>{emails(`insights.check.${check.id}.title`)}</span>
                 <span
                   className="ms-mono"
-                  style={{ marginLeft: "auto", fontSize: 12, color: "var(--ms-muted)" }}
+                  style={{
+                    marginLeft: "auto",
+                    fontSize: 12,
+                    color: "var(--ms-muted)",
+                    whiteSpace: "nowrap",
+                  }}
                 >
                   {t("checks.count", { emails: check.emails })}
                 </span>
@@ -548,91 +582,148 @@ export function ReviewView({ teamId }: { teamId: string }) {
         </div>
       </div>
 
+      <WaitingList teamId={team.id} onChanged={refetch} />
+
       <div className="ms-card" style={{ padding: 0, marginBottom: 16 }}>
-        <CardHead
-          inset
-          title={t("emails.title", { count: flaggedEmails.length })}
-          subtitle={t("emails.subtitle")}
-        />
-        <Table>
-          <thead>
-            <tr>
-              <th>{t("emails.sent")}</th>
-              <th>{t("emails.from")}</th>
-              <th className="right">{t("emails.recipients")}</th>
-              <th>{t("emails.insight")}</th>
-              <th>{t("emails.monitor")}</th>
-              <th className="right">{t("emails.content")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {flaggedEmails.length === 0 ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap",
+            padding: "16px 20px 12px",
+            borderBottom: "1px solid var(--ms-line)",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <CardHead
+              flush
+              title={t("emails.cardTitle")}
+              subtitle={emailTab === "flagged" ? t("emails.subtitle") : t("emails.allSubtitle")}
+            />
+          </div>
+          <div className="ms-tabs" role="tablist" aria-label={t("emails.cardTitle")}>
+            <button
+              type="button"
+              aria-pressed={emailTab === "flagged"}
+              className={emailTab === "flagged" ? "active" : undefined}
+              onClick={() => setEmailTab("flagged")}
+            >
+              {t("emails.tabs.flagged")}
+              <span className="count">{flaggedEmails.length}</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={emailTab === "all"}
+              className={emailTab === "all" ? "active" : undefined}
+              onClick={() => setEmailTab("all")}
+            >
+              {t("emails.tabs.all")}
+            </button>
+          </div>
+        </div>
+        {emailTab === "flagged" ? (
+          <Table>
+            <thead>
               <tr>
-                <td colSpan={6} style={{ color: "var(--ms-muted)" }}>
-                  {t("emails.none")}
-                </td>
+                <th>{t("emails.sent")}</th>
+                <th>{t("emails.from")}</th>
+                <th className="right">{t("emails.recipients")}</th>
+                <th>{t("emails.insight")}</th>
+                <th>{t("emails.monitor")}</th>
+                <th className="right">{t("emails.content")}</th>
               </tr>
-            ) : (
-              flaggedEmails.map((email) => (
-                <tr key={email.id}>
-                  <td style={{ color: "var(--ms-muted)" }}>
-                    {email.sentAt ? <RelativeTime date={email.sentAt} /> : common("none")}
-                  </td>
-                  <td className="ms-mono">{email.from}</td>
-                  <td className="right ms-digits">{nf.format(email.recipients)}</td>
-                  <td>
-                    {email.check ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <Tooltip
-                          inline
-                          text={emails(`insights.check.${email.check.id}.description`)}
-                        >
-                          <span
-                            className={`ms-badge ms-badge-${email.check.severity === "critical" ? "danger" : "warn"}`}
-                          >
-                            {emails(`insights.check.${email.check.id}.title`)}
-                          </span>
-                        </Tooltip>
-                        {email.failingCount > 1 ? (
-                          <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-                            {t("emails.more", { count: email.failingCount - 1 })}
-                          </span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      common("none")
-                    )}
-                  </td>
-                  <td style={{ fontSize: 12, color: "var(--ms-muted)", whiteSpace: "normal" }}>
-                    {!email.model
-                      ? common("none")
-                      : email.model.status === "judged" && email.model.score !== null
-                        ? t.rich("emails.modelScore", {
-                            score: email.model.score,
-                            detail: modelDetail(
-                              email.model.score >= monitor.flagScore ? email.model.reasons : null,
-                            ),
-                          })
-                        : email.model.status === "pending"
-                          ? monitorT("pending")
-                          : t("emails.modelUnjudged", { error: email.model.errorClass ?? "" })}
-                  </td>
-                  <td className="right">
-                    <RevealCell
-                      grant={grantFor(email.id)}
-                      disabled={!contentReveal}
-                      onReveal={revealRequest(email)}
-                      onOpen={(grantId) =>
-                        reveal.view({ id: team.id, name: team.name }, grantId, email.id)
-                      }
-                    />
+            </thead>
+            <tbody>
+              {flaggedEmails.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ color: "var(--ms-muted)" }}>
+                    {t("emails.none")}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </Table>
+              ) : (
+                flaggedEmails.map((email) => (
+                  <tr key={email.id}>
+                    <td style={{ color: "var(--ms-muted)" }}>
+                      {email.sentAt ? <RelativeTime date={email.sentAt} /> : common("none")}
+                    </td>
+                    <td className="ms-mono">{email.from}</td>
+                    <td className="right ms-digits">{nf.format(email.recipients)}</td>
+                    <td>
+                      {email.check ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <Tooltip
+                            inline
+                            text={emails(`insights.check.${email.check.id}.description`)}
+                          >
+                            <span
+                              className={`ms-badge ms-badge-${email.check.severity === "critical" ? "danger" : "warn"}`}
+                            >
+                              {emails(`insights.check.${email.check.id}.title`)}
+                            </span>
+                          </Tooltip>
+                          {email.failingCount > 1 ? (
+                            <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
+                              {t("emails.more", { count: email.failingCount - 1 })}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : (
+                        common("none")
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        fontSize: 12,
+                        color: "var(--ms-muted)",
+                        whiteSpace: "normal",
+                        minWidth: 260,
+                      }}
+                    >
+                      {!email.model
+                        ? common("none")
+                        : email.model.status === "judged" && email.model.score !== null
+                          ? t.rich("emails.modelScore", {
+                              score: email.model.score,
+                              detail: modelDetail(
+                                email.model.score >= monitor.flagScore ? email.model.reasons : null,
+                              ),
+                            })
+                          : email.model.status === "pending"
+                            ? monitorT("pending")
+                            : t("emails.modelUnjudged", { error: email.model.errorClass ?? "" })}
+                    </td>
+                    <td className="right">
+                      <RevealCell
+                        grant={grantFor(email.id)}
+                        disabled={!contentReveal}
+                        onReveal={revealRequest(email)}
+                        onOpen={(grantId) =>
+                          reveal.view({ id: team.id, name: team.name }, grantId, email.id)
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </Table>
+        ) : (
+          <TeamEmailsTable
+            team={{ id: team.id, name: team.name }}
+            grants={grants}
+            contentReveal={contentReveal}
+            reveal={reveal}
+            flagLabel={safety(`reasons.${flag?.reason ?? "manual"}`)}
+          />
+        )}
       </div>
+
+      <WarmupCard
+        team={{ id: team.id, name: team.name }}
+        warmup={query.data.warmup}
+        onChanged={refetch}
+      />
 
       <div className="ms-card" style={{ padding: 0 }}>
         <CardHead inset title={t("audit.title")} subtitle={t("audit.subtitle")} />
@@ -726,20 +817,288 @@ export function ReviewView({ teamId }: { teamId: string }) {
   );
 }
 
+/**
+ * The review page's "All emails" tab: every message of the team, newest
+ * first, paginated like the console's other lists. Metadata only — the body
+ * is read only under a grant, through the same Reveal control as the flagged
+ * list. Mounted only while the tab is open.
+ */
+function TeamEmailsTable({
+  team,
+  grants,
+  contentReveal,
+  reveal,
+  flagLabel,
+}: {
+  team: RevealTeam;
+  grants: { id: string; emailIds: string[]; expiresAt: Date }[];
+  contentReveal: boolean;
+  reveal: ReturnType<typeof useContentReveal>;
+  flagLabel: string;
+}) {
+  const t = useTranslations("console.safety.review");
+  const common = useTranslations("console.common");
+  const locale = useLocale();
+  const nf = new Intl.NumberFormat(locale);
+  const trpc = useTRPC();
+  const [limit, setLimit] = useState(25);
+  const query = useInfiniteQuery(
+    trpc.console.safety.teamEmails.infiniteQueryOptions(
+      { teamId: team.id, limit },
+      { getNextPageParam: (page) => page.nextCursor },
+    ),
+  );
+  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const first = query.data?.pages[0];
+  const grantFor = (emailId: string) => grants.find((g) => g.emailIds.includes(emailId));
+
+  return (
+    <>
+      <Table>
+        <thead>
+          <tr>
+            <th>{t("emails.at")}</th>
+            <th>{t("emails.from")}</th>
+            <th className="right">{t("emails.recipients")}</th>
+            <th className="right">{t("emails.content")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {query.isPending ? (
+            <tr>
+              <td colSpan={4} style={{ color: "var(--ms-muted)" }}>
+                …
+              </td>
+            </tr>
+          ) : items.length === 0 ? (
+            <tr>
+              <td colSpan={4} style={{ color: "var(--ms-muted)" }}>
+                {t("emails.allNone")}
+              </td>
+            </tr>
+          ) : (
+            items.map((email) => (
+              <tr key={email.id}>
+                <td style={{ color: "var(--ms-muted)" }}>
+                  <RelativeTime date={email.sentAt ?? email.createdAt} />
+                </td>
+                <td className="ms-mono">{email.from}</td>
+                <td className="right ms-digits">{nf.format(email.recipients)}</td>
+                <td className="right">
+                  <RevealCell
+                    grant={grantFor(email.id)}
+                    disabled={!contentReveal}
+                    onReveal={() =>
+                      reveal.request({
+                        team,
+                        email: {
+                          id: email.id,
+                          from: email.from,
+                          sentAt: email.sentAt,
+                          recipients: email.recipients,
+                        },
+                        flaggedCount: 0,
+                        flagLabel,
+                      })
+                    }
+                    onOpen={(grantId) => reveal.view(team, grantId, email.id)}
+                  />
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </Table>
+      {first ? (
+        <div style={{ padding: "0 20px 16px" }}>
+          <ListFooter
+            left={t("emails.allCount", { shown: items.length, total: first.total ?? items.length })}
+            size={limit}
+            onSize={setLimit}
+            sizeLabel={(size) => common("perPage", { n: size })}
+            singlePage={!query.hasNextPage && query.data?.pages.length === 1}
+            loadMore={
+              query.hasNextPage
+                ? {
+                    label: common("loadMore"),
+                    onClick: () => query.fetchNextPage(),
+                    loading: query.isFetchingNextPage,
+                  }
+                : undefined
+            }
+          />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+type WarmupOverview = {
+  enabled: boolean;
+  trustedAt: Date | string | null;
+  domains: {
+    id: string;
+    name: string;
+    registeredAt: Date | string | null;
+    ageSource: string | null;
+    ageCheckedAt: Date | string | null;
+    trustedAt: Date | string | null;
+    today: { cap: number; used: number; fullAt: Date | string | null } | null;
+  }[];
+  pool: { cap: number; used: number } | null;
+};
+
+/** The team's domains under the new-domain warm-up, and the operator's trust over it. */
+function WarmupCard({
+  team,
+  warmup,
+  onChanged,
+}: {
+  team: { id: string; name: string };
+  warmup: WarmupOverview;
+  onChanged: () => void;
+}) {
+  const t = useTranslations("console.safety.review.warmup");
+  const common = useTranslations("console.common");
+  const locale = useLocale();
+  const nf = new Intl.NumberFormat(locale);
+  const trpc = useTRPC();
+  const trust = useMutation(trpc.console.safety.setWarmupTrust.mutationOptions());
+  const set = (trusted: boolean, domain?: { id: string; name: string }) =>
+    trust.mutate(
+      { teamId: team.id, trusted, ...(domain ? { domainId: domain.id } : {}) },
+      {
+        onSuccess: () => {
+          toast(
+            t(trusted ? "toast.trusted" : "toast.untrusted", { name: domain?.name ?? team.name }),
+          );
+          onChanged();
+        },
+      },
+    );
+  const teamTrusted = warmup.trustedAt !== null;
+  return (
+    <div className="ms-card" style={{ padding: 0, marginBottom: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+          padding: "20px 20px 0",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <CardHead
+            title={t("title")}
+            subtitle={
+              !warmup.enabled
+                ? t("off")
+                : teamTrusted
+                  ? t("teamTrusted", { date: formatDayTime(warmup.trustedAt ?? 0, locale) })
+                  : t("subtitle")
+            }
+          />
+        </div>
+        <button
+          type="button"
+          className="ms-btn ms-btn-secondary"
+          disabled={trust.isPending}
+          onClick={() => set(!teamTrusted)}
+        >
+          <BtnSpinner on={trust.isPending} />
+          {t(teamTrusted ? "untrustTeam" : "trustTeam")}
+        </button>
+      </div>
+      {warmup.pool ? (
+        <div style={{ padding: "8px 20px 0", fontSize: 13, color: "var(--ms-muted)" }}>
+          {t("pool", { used: nf.format(warmup.pool.used), cap: nf.format(warmup.pool.cap) })}
+        </div>
+      ) : null}
+      <Table>
+        <thead>
+          <tr>
+            <th>{t("cols.domain")}</th>
+            <th>{t("cols.registered")}</th>
+            <th>{t("cols.today")}</th>
+            <th className="right">{t("cols.trust")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {warmup.domains.length === 0 ? (
+            <tr>
+              <td colSpan={4} style={{ color: "var(--ms-muted)" }}>
+                {common("none")}
+              </td>
+            </tr>
+          ) : (
+            warmup.domains.map((domain) => (
+              <tr key={domain.id}>
+                <td className="ms-mono">{domain.name}</td>
+                <td style={{ color: "var(--ms-muted)" }}>
+                  {domain.registeredAt
+                    ? t("registered", {
+                        date: formatDay(domain.registeredAt, locale),
+                        source: t(`sources.${domain.ageSource ?? "unknown"}`),
+                      })
+                    : t(domain.ageCheckedAt ? "unknownAge" : "notChecked")}
+                </td>
+                <td>
+                  {domain.trustedAt
+                    ? t("trusted")
+                    : domain.today
+                      ? t(domain.today.fullAt ? "today" : "todayNoDate", {
+                          used: nf.format(domain.today.used),
+                          cap: nf.format(domain.today.cap),
+                          date: domain.today.fullAt ? formatDay(domain.today.fullAt, locale) : "",
+                        })
+                      : t("full")}
+                </td>
+                <td className="right">
+                  <button
+                    type="button"
+                    className="ms-link"
+                    style={{
+                      font: "inherit",
+                      padding: 0,
+                      background: "none",
+                      border: 0,
+                      cursor: "pointer",
+                    }}
+                    disabled={trust.isPending}
+                    onClick={() => set(!domain.trustedAt, domain)}
+                  >
+                    {t(domain.trustedAt ? "untrustDomain" : "trustDomain")}
+                  </button>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </Table>
+    </div>
+  );
+}
+
 /** Reason codes, each explained on hover; a code this build has no text for stays plain. */
 function ReasonCodes({ codes }: { codes: string[] }) {
   const monitorT = useTranslations("console.safety.review.monitor");
+  // The comma is kept on its code's line: the tooltip trigger is an inline
+  // box, so a bare ", " after it could start the next line.
   return codes.map((code, i) => (
-    <span key={code}>
-      {i > 0 ? ", " : null}
-      {monitorT.has(`reasonCodes.${code}`) ? (
-        <Tooltip inline text={monitorT(`reasonCodes.${code}`)} triggerClassName="ms-reason-code">
-          {code}
-        </Tooltip>
-      ) : (
-        code
-      )}
-    </span>
+    <Fragment key={code}>
+      {i > 0 ? " " : null}
+      <span style={{ whiteSpace: "nowrap" }}>
+        {monitorT.has(`reasonCodes.${code}`) ? (
+          <Tooltip inline text={monitorT(`reasonCodes.${code}`)} triggerClassName="ms-reason-code">
+            {code}
+          </Tooltip>
+        ) : (
+          code
+        )}
+        {i < codes.length - 1 ? "," : null}
+      </span>
+    </Fragment>
   ));
 }
 
@@ -781,9 +1140,11 @@ function Tile({
   children: React.ReactNode;
 }) {
   return (
-    <div className="ms-card" style={TILE}>
+    // A label that wraps pushes only its own value down: values share the
+    // row's bottom line.
+    <div className="ms-card" style={{ ...TILE, display: "flex", flexDirection: "column" }}>
       <div className="ms-microlabel">{label}</div>
-      <div className="ms-digits" style={{ fontSize: 26, marginTop: 2, color }}>
+      <div className="ms-digits" style={{ fontSize: 26, marginTop: "auto", paddingTop: 2, color }}>
         {children}
       </div>
     </div>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { LANG_META, LangIcon } from "@/components/api-sheet";
+import { KeepHyphenated } from "@/components/breakable";
 import { CodeHighlight } from "@/components/code-highlight";
 import { CopyGlyph } from "@/components/copy-chip";
 import { DeliveredOdometer } from "@/components/delivered-odometer";
@@ -112,21 +113,37 @@ function StepCard({
 function StampRow({ children, at }: { children: React.ReactNode; at?: Date | string | undefined }) {
   const locale = useLocale();
   return (
+    // The time drops under the sentence when the two do not share a line;
+    // an address in the sentence breaks rather than run past the card.
     <div
       style={{
         display: "flex",
+        flexWrap: "wrap",
         justifyContent: "space-between",
         alignItems: "baseline",
-        gap: 12,
+        gap: "2px 12px",
         padding: "8px 2px",
         borderBottom: "1px solid var(--ms-line)",
         fontSize: 13.5,
         color: "var(--ms-muted)",
       }}
     >
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>{children}</span>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          minWidth: 0,
+          overflowWrap: "anywhere",
+        }}
+      >
+        {children}
+      </span>
       {at ? (
-        <span style={{ fontSize: 11, color: "var(--ms-faint)" }} title={formatUtcTimestamp(at)}>
+        <span
+          style={{ fontSize: 11, color: "var(--ms-faint)", whiteSpace: "nowrap" }}
+          title={formatUtcTimestamp(at)}
+        >
           {formatDayTime(at, locale)}
         </span>
       ) : null}
@@ -243,11 +260,11 @@ export function OnboardingSteps({
 
   const snippetBase = {
     apiUrl,
-    // The shared sender runs as written; otherwise the team's own domain.
-    from: sender ?? (verifiedDomain ? `onboarding@${verifiedDomain}` : t("step2.fromPlaceholder")),
+    from: verifiedDomain ? `onboarding@${verifiedDomain}` : t("step2.fromPlaceholder"),
     to: userEmail,
     subject: t("step2.subject"),
-    html: t("step2.html"),
+    // Literal markup for the snippet: t() would parse its tags as rich-text placeholders.
+    html: t.raw("step2.html") as string,
   };
   // Honest key handling: only while the real token is in memory may the
   // snippet promise (and deliver) the real key on copy. Otherwise both the
@@ -344,7 +361,7 @@ export function OnboardingSteps({
     return (
       <div>
         <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h1)", margin: 0 }}>
-          {t("title")}
+          <KeepHyphenated text={t("title")} />
         </h1>
         <div style={{ marginTop: 32, display: "grid", gap: 20 }}>
           <Skeleton width="100%" height={132} radius="var(--ms-r-card)" />
@@ -486,19 +503,21 @@ export function OnboardingSteps({
             {verifying || sendFirst.isPending ? t("step2.sending") : t("step2.sendCta")}
           </button>
           {turnstile.slot}
-          {sendFirst.isSuccess ? (
+          {sendFirst.data?.sent ? (
             <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>
-              {t("step2.sentTo", { to: userEmail })}
+              {t("step2.sentTo", { to: sendFirst.data.to })}
             </span>
+          ) : sendFirst.data ? (
+            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("step2.alreadySent")}</span>
           ) : captchaFailed || sendFirst.error?.data?.code === "FORBIDDEN" ? (
             <span style={{ fontSize: 13, color: "var(--ms-danger)" }}>
               {t("step2.captchaFailed")}
             </span>
-          ) : sendFirst.error?.data?.code === "TOO_MANY_REQUESTS" ? (
-            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("step2.sendLimited")}</span>
           ) : sendFirst.isError ? (
             <span style={{ fontSize: 13, color: "var(--ms-danger)" }}>{t("step2.sendError")}</span>
-          ) : null}
+          ) : (
+            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("step2.sendHint")}</span>
+          )}
         </div>
       ) : null}
     </div>
@@ -507,7 +526,7 @@ export function OnboardingSteps({
   return (
     <div style={{ overflow: "hidden" }}>
       <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h1)", margin: 0 }}>
-        {t("title")}
+        <KeepHyphenated text={t("title")} />
       </h1>
       <div style={{ fontSize: 14, color: "var(--ms-muted)", marginTop: 6 }}>{t("subtitle")}</div>
 

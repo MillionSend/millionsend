@@ -30,7 +30,7 @@ beforeAll(async () => {
   const teamId = await createTeam(h.db, "tracking-ask");
   await h.db.insert(schema.domains).values({
     teamId,
-    name: "dinzo.com.br",
+    name: "acme.com.br",
     region: "sa-east-1",
     status: "verified",
     trackingSubdomain: "links",
@@ -40,12 +40,12 @@ afterAll(() => close());
 
 describe("GET /internal/tracking-host-allowed", () => {
   it("authorizes a configured tracking host with the right secret", async () => {
-    const res = await ask({ token: h.secret, domain: "links.dinzo.com.br" });
+    const res = await ask({ token: h.secret, domain: "links.acme.com.br" });
     expect(res.status).toBe(200);
   });
 
   it("is case-insensitive on the host", async () => {
-    expect((await ask({ token: h.secret, domain: "LINKS.DINZO.COM.BR" })).status).toBe(200);
+    expect((await ask({ token: h.secret, domain: "LINKS.ACME.COM.BR" })).status).toBe(200);
   });
 
   it("denies a hostname no team has configured", async () => {
@@ -53,7 +53,7 @@ describe("GET /internal/tracking-host-allowed", () => {
   });
 
   it("denies a wrong or missing secret before touching the db", async () => {
-    expect((await ask({ token: "wrong", domain: "links.dinzo.com.br" })).status).toBe(403);
-    expect((await ask({ domain: "links.dinzo.com.br" })).status).toBe(403);
+    expect((await ask({ token: "wrong", domain: "links.acme.com.br" })).status).toBe(403);
+    expect((await ask({ domain: "links.acme.com.br" })).status).toBe(403);
   });
 });

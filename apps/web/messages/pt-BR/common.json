@@ -2,16 +2,18 @@
   "appName": "MillionSend",
   "meta": {
     "title": "MillionSend · A plataforma de e-mail open-source",
-    "description": "API de e-mail open-source compatível com a Resend, sobre AWS SES. Self-host grátis ou nuvem: 100 e-mails por dia grátis, sem cartão. Migre da Resend com duas variáveis de ambiente."
+    "description": "API de e-mail open-source compatível com o Resend, sobre AWS SES. Self-host grátis ou nuvem: 100 e-mails por dia grátis, sem cartão. Migre do Resend com duas variáveis de ambiente."
   },
   "copy": "Copiar",
   "copied": "Copiado",
   "close": "Fechar",
+  "refresh": "Atualizar",
   "info": "Mais informações",
   "exportCsv": "Exportar CSV",
   "cancel": "Cancelar",
   "openNav": "Abrir navegação",
   "signOut": "Sair",
+  "nameRule": "Nomes não podem ter links, endereços de e-mail, números de telefone, quebras de linha nem caracteres invisíveis, e podem ter até {max} caracteres.",
   "accountMenu": {
     "onboarding": "Onboarding",
     "appearance": "Aparência",
@@ -23,13 +25,13 @@
     "languageSaveFailed": "Não foi possível salvar o idioma. Tente novamente."
   },
   "teamSwitcher": {
-    "teams": "Times",
-    "switch": "Trocar de time",
-    "create": "Criar time",
-    "nameLabel": "Nome do time",
+    "teams": "Equipes",
+    "switch": "Trocar de equipe",
+    "create": "Criar equipe",
+    "nameLabel": "Nome da equipe",
     "submit": "Criar",
-    "error": "Falha ao criar o time. Tente de novo.",
-    "limit": "Você já é proprietário do número máximo de times para o seu plano."
+    "error": "Falha ao criar a equipe. Tente de novo.",
+    "limit": "Você já é proprietário do número máximo de equipes para o seu plano."
   },
   "select": {
     "searchPlaceholder": "Buscar…",
@@ -95,6 +97,13 @@
     "retry": "Tentar de novo",
     "cta": "Ir para o painel"
   },
+  "trackedLink": {
+    "disabledTitle": "Este link foi desativado.",
+    "disabledBody": "Ele veio em um e-mail enviado pelo MillionSend e não leva mais a lugar nenhum.",
+    "confirmTitle": "Confira para onde este link vai.",
+    "confirmBody": "Ele veio em um e-mail enviado pelo MillionSend e leva para {host}. Não é mais possível confirmar quem o enviou, então continue só se você confia nesse site.",
+    "confirmCta": "Continuar para {host}"
+  },
   "confirmWord": "EXCLUIR",
   "typeToConfirm": "Digite {word} para confirmar",
   "loadError": {
@@ -109,5 +118,12 @@
     "end": "Encerrar sessão",
     "back": "Voltar ao console",
     "readOnly": "Modo de suporte somente leitura: nada pode ser alterado aqui."
-  }
+  },
+  "suspensionLock": {
+    "deleteTeam": "Esta equipe está suspensa e não pode ser excluída. Fale com o suporte.",
+    "deleteDomain": "Esta equipe está suspensa, então os domínios dela não podem ser excluídos. Fale com o suporte.",
+    "invite": "Esta equipe está suspensa, então ninguém novo pode entrar nela. Fale com o suporte.",
+    "unavailable": "Isso não está disponível para esta equipe no momento. Fale com o suporte se precisar de ajuda."
+  },
+  "beta": "Beta"
 }

@@ -29,7 +29,10 @@
     "domain": "Domain",
     "domainAny": "Any domain",
     "submit": "Create key",
-    "permissionTooltip": "Full access can manage everything over the API — domains, contacts, broadcasts, keys.\n\nSending access can only send emails."
+    "permissionTooltip": "Full access can manage everything over the API — domains, contacts, broadcasts, keys.\n\nSending access can only send emails.",
+    "restrictInbox": "Restrict to an inbox",
+    "restrictInboxHint": "The key reads and sends from that inbox only.",
+    "inboxAny": "Not restricted"
   },
   "reveal": {
     "title": "API key created",

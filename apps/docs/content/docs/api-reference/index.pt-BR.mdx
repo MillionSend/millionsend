@@ -27,8 +27,9 @@ local, ou onde você expôs a porta 3001 (ex.: `https://api.acme.dev`). Veja
 
 ## Autenticação
 
-Todo endpoint (exceto o webhook de ingestão de eventos do SES) exige uma
-chave de API criada no painel:
+Todo endpoint exige uma chave de API criada no painel, exceto o webhook de
+ingestão de eventos do SES e os links de download assinados dos
+[e-mails recebidos](/pt-BR/concepts/receiving#downloads):
 
 ```
 Authorization: Bearer ms_...
@@ -38,9 +39,22 @@ Chaves têm um nível de permissão: chaves de **acesso total** podem usar todos
 os endpoints, chaves de **somente envio** ficam confinadas a `/emails*`
 (qualquer outra coisa retorna `403 restricted_api_key`) — e mesmo ali,
 `GET /emails`, `GET /emails/{id}` e `DELETE /emails/{id}` exigem acesso
-total, já que as leituras devolvem os corpos armazenados e todo o arquivo do
-time. Uma chave também pode ficar restrita a um único domínio, limitando de
-quais endereços `from` ela pode enviar.
+total, já que as leituras devolvem os corpos armazenados e todo o arquivo da
+equipe, e o mesmo vale para todo endpoint `/emails/receiving`. Uma chave
+também pode ficar restrita a um único domínio, limitando de quais endereços
+`from` ela pode enviar e quais e-mails recebidos ela lê.
+
+Uma chave de acesso total pode, em vez disso, ficar restrita a uma
+[caixa de entrada](/pt-BR/concepts/inboxes) (`inbox_id`): ela só lê e
+trabalha nessa caixa, só envia pelo endereço dela e recebe
+`403 restricted_api_key` em todas as outras rotas, inclusive a de criar
+chaves. Veja
+[Chaves de API restritas a uma caixa](/pt-BR/concepts/inboxes#chaves-de-api-restritas-a-uma-caixa).
+
+Uma chave criada com `POST /api-keys` nunca é mais ampla que a chave que a
+criou. Uma chave restrita a um domínio cria chaves restritas ao mesmo domínio:
+um `domain_id` omitido ou nulo herda esse domínio, e qualquer outro domínio
+retorna `403 restricted_api_key`.
 
 ## Compatibilidade com Resend
 
@@ -51,49 +65,114 @@ endpoints como um teste de conformidade. As poucas diferenças restantes são
 deliberadas e explícitas:
 
 - Anexos aceitam apenas `content` em base64 inline — uma URL em `path` é
-  rejeitada com `422` (nunca é buscada), assim como `content_id` (imagens
-  inline).
-- Contatos são globais ao time — os endpoints de audience são servidos como
+  rejeitada com `422` (nunca é buscada). Um anexo com `content_id` é uma
+  imagem inline que o HTML referencia como `cid:<content_id>`, e pode deixar
+  `filename` de fora ou nulo. Os anexos podem somar até 10 MiB por e-mail (no
+  Resend, 40 MB), e o e-mail inteiro precisa caber nos 40 MB do SES do jeito
+  que sai; um maior é recusado com `422`. Arquivos de programa também são recusados;
+  veja [Anexos](#anexos).
+- O recebimento é suportado (beta): `GET /emails/receiving`,
+  `GET /emails/receiving/{id}` com `html_format`, os endpoints de anexos, os
+  links de download assinados de uma hora, o webhook `email.received` e
+  `capabilities.receiving` com um registro `Receiving` nos domínios — então
+  `resend.emails.receiving.*`, `forward()` incluído, funciona sem mudanças.
+  O `capabilities.sending` de um domínio é `enabled` (pedir para
+  desligá-lo dá `422`), menos no subdomínio compartilhado abaixo enquanto a
+  instância pausa o envio pelo domínio compartilhado. O recebimento exige um
+  domínio verificado, então
+  `POST /domains` com `capabilities.receiving: "enabled"` dá `422`: verifique
+  o domínio e depois ligue o recebimento com `PATCH /domains/{id}`.
+  `GET /emails/receiving` sem `limit` devolve 20 e-mails, não todos, e um HTML
+  que passaria de 40 MB com as imagens inline (no Resend, 100 MB) vem com as
+  referências `cid:` (`html_format: "cid"`). Diferente do Resend, um domínio
+  de recebimento só recebe nos endereços das caixas de entrada dele, a não ser
+  que o pega-tudo esteja ligado (`receiving_catch_all`, um recurso pago na
+  nuvem); os outros endereços são recusados durante a conversa SMTP. Os
+  e-mails recebidos ganham campos de extensão (`screening`, `spam_verdict`,
+  `virus_verdict`, `extracted_text`, `extracted` e outros), o `text` vem sem
+  caracteres invisíveis, e o e-mail infectado fica retido, com os downloads
+  respondendo `410 email_blocked`. O MillionSend acrescenta long-polling
+  (`?wait=`), `POST /emails/receiving/{id}/reply` e `/forward` pelo servidor,
+  e `DELETE /emails/receiving/{id}`. Veja
+  [Recebimento](/pt-BR/concepts/receiving).
+- As caixas de entrada são suportadas (beta): os 26 endpoints do
+  pré-lançamento das Inboxes do Resend, em `/inboxes`, com os mesmos caminhos
+  e formatos, então `resend.inboxes.*` do `resend@6.32.1-preview-inboxes.6`
+  funciona. Criar uma caixa ou um rascunho devolve o objeto inteiro; o
+  `email_address` pode ficar de fora para um endereço no domínio
+  compartilhado; o `kind` padrão é `agent`; as configurações do agente
+  hospedado devolvem um agente
+  vazio no `GET` e `422` no `PATCH`; a busca de conversas só procura nos
+  assuntos, nos remetentes e nos destinatários; e uma resposta, um
+  encaminhamento ou um envio de rascunho que as regras da caixa retêm responde
+  `202` com o rascunho em vez de `200` com o e-mail. As extensões são só campos e endpoints extras, nunca
+  valores novos nos enums do Resend. Veja
+  [Caixas de entrada → Compatibilidade com o Resend](/pt-BR/concepts/inboxes#compatibilidade-com-o-resend).
+- Numa instância com domínio compartilhado das caixas, o `GET /domains`
+  termina com o subdomínio da sua equipe nele. Todo domínio traz o `shared`,
+  e essa linha vem com `shared: true`, mais o `sending_mode` (`open`,
+  `reply_only` ou `receive_only`) e o `sending_mode_reason` (`plan`,
+  `instance` ou `null`); o `capabilities.sending` dela vem `disabled`
+  enquanto a instância pausa o envio pelo domínio compartilhado. Ela é só de
+  leitura: `PATCH`, verificação e `DELETE` respondem `403 forbidden`. Como
+  ela vem por último, um cliente que pega o primeiro domínio verificado para
+  o `from` continua pegando um domínio da própria equipe sempre que a equipe
+  tem um verificado. Para uma equipe sem nenhum domínio próprio verificado,
+  ela é o primeiro domínio verificado da lista, e só o endereço de uma caixa
+  envia por ela, então um cliente assim deve pular as linhas com
+  `shared: true`. O `POST /inboxes` aceita o id dela como `domain_id`. Veja
+  [Domínios → Subdomínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado).
+- Contatos são globais à equipe — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
 - `POST /domains` aceita um `region` opcional, que precisa ser uma das regiões
   do SES que a instalação atende — os valores que o schema da requisição lista,
   a primeira sendo a padrão — e é recusado com `422` caso contrário. Um domínio
   tem uma região: para mudá-la, exclua o domínio e adicione de novo.
-- Broadcasts suportam `canceled`, um status fora da união do Resend, e o
-  envio de broadcast, `POST /emails` e `POST /emails/batch` podem retornar
+- Transmissões (`/broadcasts`) suportam `canceled`, um status fora da união do Resend, e o
+  envio de transmissão, `POST /emails` e `POST /emails/batch` podem retornar
   `403 sending_paused` quando sua taxa de bounce ou reclamação cruza os
-  limites de enforcement do SES. Só o envio de broadcast também pode retornar
+  limites a partir dos quais o SES age, e o envio de transmissão também enquanto
+  o envio da equipe está pausado aguardando revisão. Só o envio de transmissão
+  também pode retornar
   `403 broadcasts_paused` enquanto a taxa agregada da plataforma na região SES
   do remetente se recupera; é por região, não afeta e-mail transacional e
-  libera sozinho.
-- O envio de um broadcast responde com `finishes_at` (o instante estimado em
+  se resolve sozinho.
+- O envio de uma transmissão responde com `finishes_at` (o instante estimado em
   que o último e-mail sai, ou `null`), `estimated: true` e, quando a audiência
   passa da capacidade disponível agora, um `warning` (`paced` ou
-  `queued_behind`, com `days` e uma mensagem). As leituras de broadcast trazem
-  `sent_count` e um `finishes_at` ao vivo; um cancelamento responde com
-  `canceled_remaining`. Uma audiência que precisa de mais de 24 dias de
-  capacidade é recusada com `422 broadcast_too_large`. Veja
-  [Broadcasts](/pt-BR/concepts/broadcasts#ritmo-de-envio).
+  `queued_behind`, com `days` e uma mensagem). De um domínio com o
+  [aquecimento](/pt-BR/concepts/domains#aquecimento) ligado, o `warning` é
+  `warming_up`, com `days: 0` enquanto o aquecimento está pausado. As
+  leituras de transmissão trazem `sent_count` e um `finishes_at` ao vivo, e um
+  cancelamento responde com `canceled_remaining`. Uma audiência que precisa
+  de mais de 24 dias de capacidade, ou de aquecimento do domínio, é recusada
+  com `422 broadcast_too_large`. Veja
+  [Transmissões](/pt-BR/concepts/broadcasts#ritmo-de-envio).
 - `POST /emails` e `POST /emails/batch` retornam `429 daily_quota_exceeded`
   em um plano diário (Free, Starter) quando a cota diária de envio acabou e a
   fila de espera está cheia — tente de novo depois da virada do dia em UTC — e
   `429 monthly_quota_exceeded` em um plano mensal (Pro, Scale) no volume
-  incluído com o excedente desligado; ative o excedente em Cobrança ou espere
-  o período renovar (a mensagem informa a data). Um lote é aceito ou recusado
-  por inteiro.
+  incluído com o excedente desligado, ou enquanto um pagamento está pendente
+  (o excedente fica pausado até a fatura ser paga); ative o excedente ou pague
+  a fatura em Cobrança, ou espere o período renovar (a mensagem informa a
+  data). Um lote é aceito ou recusado por inteiro. Em qualquer plano, um
+  domínio ainda sob o
+  [limite de domínio novo](/pt-BR/concepts/domains#limite-de-domínio-novo)
+  responde o mesmo `429 daily_quota_exceeded`, com uma mensagem que cita esse
+  limite, quando já há muito e-mail aguardando.
 - `POST /contacts`, `POST /contacts/batch` e o alias de audience retornam
-  `403 plan_limit_reached` quando um contato novo levaria o time além do
+  `403 plan_limit_reached` quando um contato novo levaria a equipe além do
   limite de contatos do plano (1.000 no Free; planos pagos são ilimitados).
   Contatos existentes continuam sendo atualizados; em um lote só os novos
   falham.
 - `GET /usage` existe (o Resend não tem endpoint de uso): o plano efetivo,
   seus limites (`emails_per_day` em planos diários, `emails_per_month` em
-  planos mensais, `domains`, `contacts`), o total aceito hoje e, em um plano mensal, um
+  planos mensais, `domains`, `contacts`, `inboxes`), o total aceito hoje e, em um plano mensal, um
   objeto `period` — `emails_sent`, `included`, `overage_enabled`,
   `overage_usd_per_1k`, `starts_at`, `ends_at`. Instâncias auto-hospedadas
   reportam `cloud: false` com plano, limites e period nulos.
-- `DELETE /emails/{id}` existe (o Resend não tem exclusão de emails).
+- `DELETE /emails/{id}` existe (o Resend não tem exclusão de e-mails).
 - `headers` personalizados seguem uma lista de permitidos: qualquer nome
   `X-*` (exceto `X-SES-*` e `X-MillionSend-*`) mais `In-Reply-To`,
   `References`, `Importance`, `Priority`, `Comments`, `Keywords`,
@@ -107,14 +186,108 @@ deliberadas e explícitas:
   do MillionSend.
 - Um envio em que todos os destinatários de `to` estão na lista de supressão ou
   saíram do `topic_id` é recusado com `422 all_recipients_suppressed` (mensagem
-  `All recipients are suppressed`); destinatários removidos de um envio que
-  ainda tem alguém são simplesmente omitidos.
+  `All recipients are suppressed`), e não com o `200` do Resend; destinatários
+  removidos de um envio que ainda tem alguém são simplesmente omitidos. Quando
+  a lista de supressão sozinha deixa `to` vazio, o `POST /emails` guarda um
+  e-mail `suppressed` só com os metadados e, como no Resend, dispara o
+  `email.suppressed`; cada nova tentativa com o mesmo `Idempotency-Key` deixa
+  mais um. Se quem deixa `to` vazio é a saída do tópico, ou se a recusa vem de
+  um item de lote ou do relay SMTP, nada fica guardado. Entradas de
+  descadastro só contam em envios com `topic_id`; bounces, reclamações e
+  entradas manuais contam sempre.
 - `to`, `cc` e `bcc` juntos não podem passar de 50 destinatários, e cada
   endereço precisa ser uma única caixa postal — um nome de exibição contendo
   `@` é rejeitado, e endereços aceitos voltam na forma canônica
   `Nome <usuario@host>`.
+- `subject` aceita até 998 caracteres, o limite de linha da RFC 5322, em
+  `POST /emails`, `POST /emails/batch`, transmissões e templates: um assunto
+  maior é recusado com `422 validation_error`, e o
+  [relay SMTP](/pt-BR/self-hosting#relay-smtp) responde `554`. O Resend não
+  documenta limite nesses casos. Respostas, encaminhamentos e rascunhos das
+  caixas aceitam até 2.000, como no Resend.
+- Um destinatário cujo domínio nunca recebe e-mail, como `x@example.com`,
+  `x@foo.test` ou `x@gmail.con`, é recusado com `422 validation_error`, tanto
+  nos envios quanto nos contatos novos; veja [Erros](#erros).
+- O remetente de onboarding da instância (`ONBOARDING_EMAIL_FROM`;
+  `hello@mail.millionsend.com` na nuvem) leva só o e-mail de onboarding do
+  próprio MillionSend: como `from` em `POST /emails`, `POST /emails/batch` ou
+  no envio de uma transmissão ele é recusado com `422 reserved_sender`, com
+  qualquer caixa de letras e qualquer nome de exibição. Envie de um domínio que
+  você [verificou](/pt-BR/concepts/domains).
+- Nomes de tag que começam com `millionsend_`, com qualquer caixa de letras,
+  são do próprio MillionSend: uma entrada de `tags` com um deles em
+  `POST /emails` ou `POST /emails/batch` é recusada com `422 validation_error`.
 - Qualquer coisa não suportada é rejeitada com `422` em vez de descartada em
   silêncio (ex.: `tls` na atualização de domínio).
+
+## Anexos
+
+Alguns arquivos são recusados para todas as equipes, com
+`422 validation_error` e uma mensagem com o nome do arquivo e o motivo:
+
+- Um tipo que o SES ou o Gmail recusam. Vale a última extensão, em
+  maiúsculas ou minúsculas e sem pontos ou espaços no fim, e também a de
+  dentro de um arquivo compactado (`fatura.exe.gz` conta como `.exe`):
+
+  ```
+  ade adp apk app appx appxbundle asp bas bat cab cer chm cmd com cpl crt
+  csh der diagcab diagcfg diagpkg dll dmg ex ex_ exe fxp gadget hlp hta img
+  inf ins iso isp its jar jnlp js jse ksh lib lnk mad maf mag mam maq mar
+  mas mat mau mav maw mda mdb mde mdt mdw mdz mjs msc msh msh1 msh1xml msh2
+  msh2xml mshxml msi msix msixbundle msp mst nsh ops pcd pif plg prf prg ps1
+  ps1xml ps2 ps2xml psc1 psc2 reg scf scr sct shb shs sys tmp url vb vbe vbs
+  vhd vps vsmacros vss vst vsw vxd ws wsc wsf wsh xll xnk
+  ```
+
+- Um programa com qualquer nome: um executável de Windows, Linux ou macOS,
+  ou um atalho do Windows.
+- Um ZIP, inclusive arquivos do Office, que contenha um arquivo com uma
+  dessas extensões.
+- Um `content_type` de programa:
+
+  ```
+  application/x-msdownload application/x-msdos-program application/x-dosexec
+  application/x-ms-dos-executable
+  application/vnd.microsoft.portable-executable application/x-executable
+  application/x-elf application/x-mach-binary application/x-msi
+  application/x-ms-installer application/x-ms-shortcut
+  application/x-mswinurl application/hta application/x-bat application/x-csh
+  application/javascript application/x-javascript text/javascript
+  application/ecmascript text/ecmascript text/vbscript
+  application/java-archive application/x-java-archive
+  application/x-java-jnlp-file application/vnd.android.package-archive
+  application/x-apple-diskimage application/x-iso9660-image
+  application/vnd.ms-cab-compressed application/x-msaccess
+  application/vnd.ms-htmlhelp
+  ```
+
+- Um nome de arquivo com um caractere que muda a direção do texto (U+202A a
+  U+202E, U+2066 a U+2069, U+200E, U+200F, U+061C), como o que inverte o
+  texto e faz um `.exe` aparecer como `.pdf`. Outros caracteres invisíveis,
+  como os que unem letras em nomes persas e em emoji, são aceitos.
+
+Enquanto a equipe é nova (nos primeiros 1.000 envios ou 72 horas, ou abaixo
+de 10.000 envios nos 7 dias seguintes ao primeiro), um e-mail com qualquer
+um destes é aceito, mas fica em espera até ser revisado antes do envio:
+
+- Páginas web e imagens SVG (`htm html shtml xhtml xht mht mhtml svg svgz`),
+  pelo nome, pelo `content_type` ou pelo conteúdo.
+- Arquivos compactados (`zip zipx rar 7z gz tgz bz2 tbz tbz2 xz txz tar zst
+  lz lzh lha arj ace z cpio`), e conteúdo compactado com qualquer nome.
+- Imagens de disco `vhdx`; arquivos do Office com macros (`docm dotm xlsm
+  xltm xlam xlsb pptm potm ppam ppsm sldm`) e qualquer arquivo do Office com
+  um projeto VBA; OneNote (`one onepkg`), `rtf` e e-mails anexados (`eml
+  msg`).
+- Um arquivo cujo nome não bate com o conteúdo, como um `.pdf` que na
+  verdade é um ZIP ou uma página web.
+- Um PDF que pede senha para abrir, ou que traz scripts, ações que abrem
+  programas, arquivos embutidos ou formulários XFA; itens criptografados
+  dentro de um arquivo compactado, e compactados dentro de compactados.
+- Um arquivo que não dá para ler: danificado, com mais de 50 páginas ou com
+  mais de 50 megapixels.
+
+Equipes mais antigas enviam os mesmos arquivos sem espera; os e-mails delas
+são avaliados com mais frequência.
 
 ## Erros
 
@@ -124,14 +297,137 @@ Erros usam o formato do Resend:
 { "statusCode": 422, "name": "validation_error", "message": "..." }
 ```
 
+Um corpo que não é JSON válido recebe `400 invalid_parameter`, e um corpo
+enviado com `Content-Type` diferente de `application/json` recebe `415`.
+
+Um caminho que a API não tem, ou um método que o caminho não aceita, recebe
+`404 not_found` com a mensagem `The requested endpoint does not exist.` (o
+Resend responde `405 method_not_allowed` a um método errado). Um método errado
+num caminho que também bate com uma rota que leva um id cai nessa rota:
+`GET /emails/batch` vira `GET /emails/{id}` com o id `batch` e recebe
+`422 validation_error`.
+
+Um caractere NUL (U+0000) num texto que o banco de dados guarda, como um nome,
+uma propriedade, um filtro ou um id na URL, e uma data fora dos anos 1 a 9999
+recebem `422 validation_error`: o banco de dados não consegue guardar esses
+valores. O `html` e o `text` de um e-mail ficam guardados criptografados, então
+podem ter esse caractere.
+
+Um destinatário cujo domínio nunca recebe e-mail é recusado com
+`422 validation_error`, e a mensagem cita o endereço:
+
+```json
+{
+  "statusCode": 422,
+  "name": "validation_error",
+  "message": "x@gmail.con can never receive mail: .con is not a top-level domain. To test sending without emailing anyone, use success@simulator.amazonses.com."
+}
+```
+
+- **Nomes reservados:** um domínio terminado em `.test`, `.invalid`,
+  `.example`, `.localhost`, `.local`, `.onion`, `.alt` ou `.internal`, e o
+  `home.arpa` com os subdomínios dele.
+- **Domínios de documentação:** `example.com`, `example.net` e
+  `example.org`, com os subdomínios deles.
+- **TLDs que não existem,** como `.con`, ou um TLD só de números. O
+  MillionSend conhece os TLDs reais pela Public Suffix List e consulta
+  qualquer outro na raiz do DNS; se essa consulta falha ou demora demais, o
+  endereço passa, então um problema de DNS nunca recusa um destinatário.
+
+Os envios pela API, pelo servidor MCP, pelas caixas de entrada e pelo
+[relay SMTP](/pt-BR/self-hosting#relay-smtp) checam `to`, `cc` e `bcc`, mas
+nunca o `reply_to`: um item de lote falha como qualquer item inválido, um
+rascunho de caixa de entrada é checado quando é enviado, e o relay responde
+`550 5.1.2` no `RCPT TO`. `POST /contacts`, `POST /contacts/batch` e o alias
+de audience recusam os mesmos endereços para um contato novo. Nada do que já
+está salvo muda: contatos e e-mails na fila ou agendados continuam como
+estão. Uma transmissão vai para os contatos salvos sem checar os endereços
+deles.
+
+Além dos nomes do Resend, os [e-mails recebidos](/pt-BR/concepts/receiving),
+as [caixas de entrada](/pt-BR/concepts/inboxes) e o
+[subdomínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado)
+respondem estes:
+
+| Status, nome | Quando |
+| --- | --- |
+| `403 restricted_api_key` | Uma chave restrita a uma caixa fora da caixa dela, ou enviando de outro endereço; `include_quarantined` vindo de uma chave restrita ou do servidor MCP. |
+| `403 inbox_send_policy` | As regras de uma caixa recusam um envio: um endereço do domínio compartilhado começando uma conversa quando só pode responder (no plano Free, ou pela configuração da instância), qualquer envio por um deles enquanto a instância os pausa, um envio pelo endereço de uma caixa de agente no `POST /emails`, no `POST /emails/batch` ou no relay SMTP que as regras reteriam, ou uma transmissão por um endereço do domínio compartilhado. A mensagem diz a regra, ou lista os motivos de um envio retido. |
+| `429 inbox_send_cap_reached` | O limite diário de envios da caixa acabou, ou o limite diário da equipe para e-mails do domínio compartilhado; o `retry-after` conta até a meia-noite UTC. |
+| `503 name_review_unavailable` | Não deu para revisar agora um `username` escolhido ou um `from_name` no domínio compartilhado (`retry-after: 60`), ou o subdomínio da sua equipe no domínio compartilhado ainda espera a revisão de nomes e, até lá, nenhum endereço pode ser criado nele (`retry-after: 300`). |
+| `403 approval_required` | Um agente enviando um rascunho que espera aprovação. |
+| `403 email_quarantined` | Um agente lendo, respondendo ou encaminhando um e-mail retido, ou qualquer encaminhamento de e-mail infectado. |
+| `409 held_by_screening` | Uma liberação em que a análise achou injeção de prompt ou phishing: o e-mail continua na quarentena. |
+| `403 trust_not_allowed` | `trust_sender` na liberação de qualquer coisa que não seja um e-mail retido como `not_allowlisted` de um remetente verificado. |
+| `503 screening_unavailable` | A liberação feita por um cliente MCP quando a análise não pode rodar: a instância não tem avaliador, o avaliador falhou ou demorou demais, ou o limite diário de análises acabou. `retry-after: 60`, ou até a meia-noite UTC quando o limite acabou. |
+| `410 email_blocked` | Um download de e-mail infectado. |
+| `429 too_many_waits` | Long-polls demais ao mesmo tempo de uma equipe; `retry-after: 1`. |
+| `403 validation_error` | O limite de caixas do plano, com a mensagem do Resend. |
+| `403 plan_limit_reached` | Pega-tudo no plano Free. |
+| `403 forbidden` | Uma mudança, verificação ou exclusão do subdomínio compartilhado da sua equipe, que é só de leitura; um cliente MCP liberando e-mail retido por injeção de prompt, phishing, vírus ou falha na autenticação. |
+| `404 not_found` | Uma caixa, conversa, etiqueta, rascunho ou cursor de paginação desconhecido, com as mensagens do Resend (`Inbox not found.`). |
+
 ## Idempotência
 
-`POST /emails` e `POST /emails/batch` aceitam um header `Idempotency-Key`.
-Repetir com a mesma chave e o mesmo payload retorna a resposta original em
-vez de enviar de novo; a mesma chave com payload diferente retorna `409`.
+`POST /emails` e `POST /emails/batch` aceitam um header `Idempotency-Key`, e
+os envios dos e-mails recebidos e das caixas também: respostas,
+encaminhamentos e envios de rascunho das caixas, e
+`POST /emails/receiving/{id}/reply` e `/forward`. Repetir com a mesma chave e
+o mesmo payload retorna a resposta original em vez de enviar de novo; a mesma
+chave com payload diferente retorna `409`. Um envio que ficou retido para
+aprovação responde à repetição com o mesmo rascunho, como `202`. Um
+`POST /emails` recusado não prende a chave: a repetição roda de novo e,
+quando a lista de supressão sozinha deixa `to` vazio, fica guardado mais um
+e-mail `suppressed`.
 
 ## Paginação
 
 Endpoints de listagem aceitam `limit` (1–100, padrão 20) e cursores `after` /
 `before` carregando o id de um item de uma página anterior. As respostas
-incluem `has_more`.
+incluem `has_more`. As listagens vêm do mais novo para o mais antigo, como no
+Resend: o `after` recebe o último id de uma página e avança para itens mais
+antigos, o `before` recebe o primeiro id e volta para os mais novos, e o
+`has_more` diz se ainda há mais itens nessa direção. Para buscar o que foi
+criado desde a sua última leitura, passe no `before` o id mais novo que você
+guardou e, depois, o primeiro id de cada página enquanto o `has_more` for
+`true`. Com `wait`, o `/emails/receiving` devolve os e-mails mais novos, e
+não os que vêm logo depois do cursor; veja
+[Esperar por e-mails novos](/pt-BR/concepts/receiving#esperar-por-e-mails-novos).
+Estas listagens seguem outra ordem:
+
+| Listagem | Ordem |
+| --- | --- |
+| `GET /inboxes/{id}/threads` e `/threads/search` | Da atividade mais recente para a mais antiga. |
+| `GET /inboxes/{id}/threads/{thread_id}/emails` | Do mais antigo para o mais novo: o `after` avança para e-mails mais novos. |
+| `GET /inboxes/{id}/drafts` | Dos atualizados mais recentemente para os mais antigos. |
+| `GET /inboxes/{id}/labels` | Das mais antigas para as mais novas, todas de uma vez, sem `has_more`. |
+| `GET /topics` e `/contacts/{id}/topics` | Dos mais antigos para os mais novos, todos de uma vez; o `has_more` é sempre `false`. |
+| `GET /emails/receiving/{id}/attachments` | Na ordem em que estão no e-mail, todos de uma vez, a não ser que você passe `limit`. |
+
+O `GET /domains` coloca o
+[subdomínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado)
+da sua equipe depois de todos os seus domínios, como se ele fosse o mais
+antigo, e o id dele é um cursor como qualquer outro: um `after` com ele
+devolve uma página vazia, e um `before` com ele devolve os seus domínios
+mais antigos, a página logo acima dele. Buscar o que é novo funciona do
+mesmo jeito.
+
+Um cursor que não aponta nenhum item da listagem responde
+`422 validation_error`; em `/inboxes`, responde `404`, como no Resend. Isso
+vale também quando o item do id que você guardou foi apagado ou revogado
+depois e, em `/emails/receiving`, quando ele não bate mais com os seus
+filtros: para retomar, leia de novo do começo, sem cursor, até chegar aos
+itens que você já tem.
+
+## Links de download assinados
+
+E-mails recebidos trazem links de download em vez dos bytes:
+`raw.download_url` em `GET /emails/receiving/{id}` e `download_url` em cada
+anexo que os endpoints de anexos devolvem. São URLs `GET` comuns na origem
+da API, `/receiving/raw/{email_id}` e
+`/receiving/attachments/{email_id}/{attachment_id}`, com `expires` (segundos
+Unix) e `signature` na query. Não precisam de chave de API, valem por uma
+hora (`expires_at`) para um e-mail e um anexo de uma equipe, e respondem `403`
+depois de expirar ou se forem alterados; peça links novos à API. Uma mensagem
+com vírus responde `410 email_blocked` no lugar, para sempre. Veja
+[Recebimento → Downloads](/pt-BR/concepts/receiving#downloads).

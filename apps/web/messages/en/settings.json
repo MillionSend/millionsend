@@ -137,14 +137,6 @@
       "bannerAction": "Open SES settings",
       "lastEvent": "Last event received",
       "never": "never"
-    },
-    "breaker": {
-      "paused": "Broadcasts are paused in {region}: the platform's {metric} rate is {rate}%, near SES's review line for the whole account. Transactional email continues; broadcasts resume on their own once the rate recovers.",
-      "metric": {
-        "bounce": "hard-bounce",
-        "complaint": "complaint"
-      },
-      "held": "Broadcasts are paused in {region} by the instance operator. Transactional email continues; broadcasts resume when the operator releases the hold."
     }
   },
   "team": {
@@ -202,6 +194,17 @@
       "role": "Role",
       "submit": "Create invite",
       "error": "Could not create the invitation."
+    },
+    "refused": {
+      "daily": "This team reached its limit of {limit} invitations a day. Try again tomorrow.",
+      "dailyMember": "You reached your limit of {limit} invitations a day. Try again tomorrow.",
+      "hourly": "Too many invitations this hour. Try again later.",
+      "duplicate": "This address already has a pending invitation. Resend or revoke it from the list.",
+      "cooldown": "This invitation was just sent. Wait a couple of minutes before resending.",
+      "maxSends": "This invitation was already sent {max} times. Revoke it and invite again.",
+      "noSender": "No email sender is configured; share the invitation link instead.",
+      "sendFailed": "The invitation email could not be sent. Try again in a moment.",
+      "disposable": "Invite a permanent email address. Temporary inboxes can't join a team."
     },
     "created": {
       "title": "Invitation link",
@@ -272,7 +275,14 @@
     "bounced": "Bounced",
     "complained": "Complained",
     "sentThisPeriod": "Emails sent this period",
-    "renewsOn": "Renews on {date}"
+    "renewsOn": "Renews on {date}",
+    "receivedToday": "Emails received today",
+    "receivedThisPeriod": "Emails received this period",
+    "sentAndReceivedToday": "Emails sent and received today",
+    "receivedShared": "Counts toward the same daily limit as sending. Resets at midnight UTC.",
+    "receivedDay": "Free up to {allowance} a day; past that, senders retry later. Resets at midnight UTC.",
+    "receivedMonth": "Free up to {allowance} this period; past that, every {per} count as 1 email.",
+    "received": "Received"
   },
   "billing": {
     "plan": "Plan",
@@ -294,6 +304,8 @@
     "readOnly": "Only owners and admins can change billing.",
     "systemNotice": "This is the instance's own team: it sends the account mail and product updates, is never billed and has no sending cap. Its plan is set by the operator.",
     "pastDue": "Payment failed — update your card to keep your plan.",
+    "pastDueMonthly": "Payment failed — update your card to keep your plan. Until the payment goes through, overage is paused and sends stop at the included volume.",
+    "overagePaused": "Paused until the failed payment goes through.",
     "updateCard": "Update payment method",
     "usageTitle": "Usage",
     "overage": "Overage",
@@ -317,7 +329,11 @@
     "stayOn": "You stay on {plan}.",
     "keepPlan": "Keep {plan}",
     "switchAtPeriodEnd": "Switch at period end",
-    "changeHint": "Moving up applies now, with the difference prorated on your next invoice. Moving down applies when the period renews.",
+    "changeHint": "Moving up charges the prorated difference and any overage so far now, and applies as soon as that is paid; it also drops a scheduled move down. Moving down applies when the period renews.",
+    "paymentRequired": "The charge for {plan} did not go through, so your plan is unchanged. Update your card in the billing portal and try again.",
+    "overageCounting": "Stripe is still counting your latest overage. Try the move again in a minute, or once a large send has finished.",
+    "upgradesHeld": "Upgrades are unavailable for this team right now. Contact support if you need help.",
+    "upgradesHeldLive": "Upgrades are unavailable for this team right now. You can still cancel or move to a smaller plan. Contact support if you need help.",
     "features": {
       "domains": "{n, plural, one {# sending domain} other {# sending domains}}",
       "domainsUnlimited": "Unlimited sending domains",
@@ -363,16 +379,18 @@
       "user": "Authorized by",
       "scopes": "Permissions",
       "granted": "Granted",
+      "expires": "Expires",
       "menu": "Grant actions"
     },
     "you": "you",
     "allTeams": "All teams",
+    "untilDisconnected": "Until you disconnect it",
     "scopesCount": "{count, plural, one {# permission} other {# permissions}}",
     "revoke": "Revoke access",
     "revokeAllTeamsForbidden": "This grant also covers teams you do not administer. Only its holder can revoke it.",
     "revokeConfirm": {
       "title": "Revoke access",
-      "body": "{name} loses access to this team at its next token refresh, within 15 minutes.",
+      "body": "{name} loses access to this team at its next token refresh, within an hour.",
       "confirm": "Revoke access"
     }
   },
@@ -380,6 +398,7 @@
     "title": "Danger zone",
     "deleteTeam": "Delete team",
     "deleteTeamBody": "Permanently delete {name} with all its contacts, emails, domains, API keys, templates, broadcasts and members. This cannot be undone.",
+    "deleteTeamBodyBilled": "Permanently delete {name} with all its contacts, emails, domains, API keys, templates, broadcasts and members. A paid plan ends now, with a final invoice for this period's overage; the unused time is not refunded. This cannot be undone.",
     "deleteAccount": "Delete my account",
     "deleteAccountBody": "Permanently delete your account and sign you out everywhere. Teams you are the only owner of must be deleted or handed over first. This cannot be undone.",
     "deleteAccountError": "Could not delete the account. Delete or hand over the teams you own, sign in again, and retry.",
@@ -397,6 +416,7 @@
       "oauth": "Connected app",
       "stripe": "Stripe",
       "system": "System",
+      "operator": "MillionSend",
       "deletedUser": "Deleted user"
     },
     "actions": {
@@ -406,6 +426,16 @@
       "domain_created": "Added domain",
       "domain_verified": "Verified domain",
       "domain_deleted": "Deleted domain",
+      "domain_receiving_enabled": "Enabled receiving",
+      "domain_receiving_disabled": "Disabled receiving",
+      "domain_catch_all_enabled": "Catch-all turned on",
+      "domain_catch_all_disabled": "Catch-all turned off",
+      "inbox_created": "Inbox created",
+      "inbox_deleted": "Inbox deleted",
+      "inbox_safety_updated": "Inbox safety rules changed",
+      "inbox_email_released": "Email released from quarantine",
+      "inbox_draft_approved": "Draft approved and sent",
+      "received_email_deleted": "Received email deleted",
       "webhook_created": "Created webhook",
       "webhook_updated": "Updated webhook",
       "webhook_secret_rotated": "Rotated webhook signing secret",
@@ -431,6 +461,11 @@
       "team_broadcasts_resumed": "Resumed broadcasts",
       "team_suspended": "Suspended team",
       "team_reinstated": "Reinstated team",
+      "team_held_for_review": "Sending paused pending review",
+      "team_ses_tenant_updated": "Updated SES tenant status",
+      "team_ses_tenant_update_failed": "SES tenant status update failed",
+      "team_fraud_refunded": "Canceled subscription and refunded as fraud",
+      "team_fraud_refund_failed": "Stripe cancel and refund failed",
       "console_flag_opened": "Flagged team",
       "console_flag_cleared": "Cleared flag",
       "console_flag_reopened": "Reopened flag",
@@ -443,6 +478,10 @@
       "monitor_override_cleared": "Cleared monitor sampling override",
       "monitor_broadcasts_paused": "Content monitor paused broadcasts",
       "monitor_broadcasts_resumed": "Resumed broadcasts after monitor pause",
+      "warmup_trust_granted": "Lifted new-domain warm-up",
+      "warmup_trust_revoked": "Restored new-domain warm-up",
+      "screening_released": "Released emails waiting for review",
+      "screening_canceled": "Canceled emails waiting for review",
       "content_revealed": "Read message content",
       "content_accessed": "An operator read message content",
       "support_view_started": "Support view started",
@@ -464,6 +503,7 @@
       "broadcasts": "Broadcasts",
       "sending": "Sending health",
       "webhooks": "Webhooks",
+      "inboxes": "Inboxes",
       "billing": "Billing"
     },
     "items": {
@@ -488,8 +528,8 @@
         "note": "Part of a broadcast is parked over the quota."
       },
       "broadcast_held": {
-        "label": "Broadcast on hold",
-        "note": "Sending from its region is paused across the platform."
+        "label": "Broadcast delayed",
+        "note": "A broadcast is waiting to send and resumes on its own."
       },
       "quota": {
         "label": "Sending quota",
@@ -497,7 +537,7 @@
       },
       "deliverability": {
         "label": "Deliverability",
-        "note": "Bounce or complaint rates at risk, or sending paused."
+        "note": "Bounce or complaint rates at risk, sending paused, and a domain's warm-up paused or done."
       },
       "webhook_failing": {
         "label": "Webhook endpoint failing",
@@ -510,6 +550,10 @@
       "webhook_backlog": {
         "label": "Webhook backlog",
         "note": "Deliveries to an endpoint are queuing up."
+      },
+      "inbox_attention": {
+        "label": "Inbox alerts",
+        "note": "Quarantine, drafts to approve and refused sends, at most once a day."
       },
       "billing_payment_failed": {
         "label": "Payment failed",
@@ -536,23 +580,5 @@
         "note": "The paid plan ended."
       }
     }
-  },
-  "supportAccess": {
-    "title": "Support access",
-    "intro": "At your request, an instance operator may open this dashboard read-only for up to 30 minutes. The content of sent emails, exports and secrets stay hidden, and the session is recorded in the audit log.",
-    "none": "No support session is live on {team}.",
-    "operator": "Operator",
-    "started": "Started",
-    "expires": "Ends",
-    "reason": "Reason",
-    "reference": "Reference",
-    "reasons": {
-      "support_ticket": "Support ticket",
-      "billing_dispute": "Billing dispute",
-      "other": "Other"
-    },
-    "end": "End session",
-    "ended": "Support session ended",
-    "error": "Could not end the session: {reason}"
   }
 }

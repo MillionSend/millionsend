@@ -1,8 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { EllipsisGlyph } from "./icons/nav-icons.js";
+import {
+  PANEL_MAX_WIDTH,
+  type PanelPlacement,
+  placePanel,
+  viewportSize,
+} from "@/lib/panel-placement";
+import { ChevronGlyph, EllipsisGlyph } from "./icons/nav-icons.js";
 import { Spinner } from "./spinner";
 
 /** Closes an open popover when the pointer goes down outside `ref`. */
@@ -25,6 +31,8 @@ export function useDismiss(
 export interface PopoverMenuItem {
   label: string;
   onSelect: () => void;
+  /** Leading glyph, muted beside the label. */
+  icon?: React.ReactNode;
   danger?: boolean;
   disabled?: boolean;
   /** Native tooltip, for a disabled item to say why it is. */
@@ -51,6 +59,8 @@ const GAP = 8;
  *
  * `boxed` draws the trigger as a full icon button (matching sibling buttons in a
  * detail header); the default is the bare glyph, quieter for a table row.
+ * `label` draws it as a secondary button that names its menu, glyph first and
+ * a chevron after, for an action menu in a row of buttons.
  */
 export function PopoverMenu({
   ariaLabel,
@@ -58,12 +68,14 @@ export function PopoverMenu({
   align = "right",
   triggerGlyph,
   boxed = false,
+  label,
 }: {
   ariaLabel: string;
   items: (PopoverMenuItem | null)[];
   align?: "left" | "right";
   triggerGlyph?: React.ReactNode | ((open: boolean) => React.ReactNode);
   boxed?: boolean;
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -146,42 +158,69 @@ export function PopoverMenu({
     wasBusy.current = anyBusy;
   }, [anyBusy]);
 
-  // Read at render (the trigger is already mounted when `open` flips true), as
-  // in tooltip.tsx — a menu is transient, so no scroll/resize tracking is kept.
-  // Offsets resolve against the layout viewport (documentElement.client*), not
-  // window.inner* — the latter includes a classic scrollbar and would shift
-  // right-aligned panels by its width.
-  const rect = open ? triggerRef.current?.getBoundingClientRect() : undefined;
-  let position: React.CSSProperties | undefined;
-  if (rect) {
-    const viewportW = document.documentElement.clientWidth;
-    const viewportH = document.documentElement.clientHeight;
-    const estHeight = items.length * 32 + 12;
-    const flipUp = rect.bottom + GAP + estHeight > viewportH && rect.top > viewportH - rect.bottom;
-    position = {
-      position: "fixed",
-      ...(flipUp ? { bottom: viewportH - rect.top + GAP } : { top: rect.bottom + GAP }),
-      ...(align === "right" ? { right: viewportW - rect.right } : { left: rect.left }),
-      width: "max-content",
-    };
-  }
+  // Placed once the panel has rendered and can be measured, before it paints:
+  // hung from the trigger's edge, flipped above when it does not fit below,
+  // and shifted to stay inside the viewport. A menu is transient (any scroll
+  // or resize closes it), so it is not tracked afterwards.
+  const [placed, setPlaced] = useState<PanelPlacement | null>(null);
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    if (!open || !trigger || !panel) return;
+    setPlaced(
+      placePanel(
+        trigger.getBoundingClientRect(),
+        { width: panel.offsetWidth, height: panel.offsetHeight },
+        viewportSize(),
+        { align: align === "right" ? "end" : "start", gap: GAP },
+      ),
+    );
+    return () => setPlaced(null);
+  }, [open, align]);
+  // The first render hangs under the trigger unmeasured; it is corrected
+  // before paint, and stays visible so the focus moved in on open lands.
+  const rect = open && !placed ? triggerRef.current?.getBoundingClientRect() : undefined;
+  const position: React.CSSProperties = {
+    position: "fixed",
+    width: "max-content",
+    maxWidth: PANEL_MAX_WIDTH,
+    ...(placed
+      ? { left: placed.left, top: placed.top, maxHeight: placed.maxHeight, overflowY: "auto" }
+      : { left: rect?.left ?? 0, top: (rect?.bottom ?? 0) + GAP }),
+  };
+
+  const glyph = typeof triggerGlyph === "function" ? triggerGlyph(open) : triggerGlyph;
 
   return (
     <>
       <button
         ref={triggerRef}
         type="button"
-        className={boxed ? "ms-btn ms-btn-icon" : "ms-menu-trigger-bare"}
+        className={
+          label !== undefined
+            ? "ms-btn ms-btn-secondary"
+            : boxed
+              ? "ms-btn ms-btn-icon"
+              : "ms-menu-trigger-bare"
+        }
         aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        {(typeof triggerGlyph === "function" ? triggerGlyph(open) : triggerGlyph) ?? (
-          <EllipsisGlyph />
+        {label !== undefined ? (
+          <>
+            {glyph}
+            {label}
+            <span style={{ display: "flex", color: "var(--ms-faint)" }}>
+              <ChevronGlyph direction={open ? "up" : "down"} />
+            </span>
+          </>
+        ) : (
+          (glyph ?? <EllipsisGlyph />)
         )}
       </button>
-      {open && position
+      {open
         ? createPortal(
             <div
               ref={panelRef}
@@ -209,7 +248,16 @@ export function PopoverMenu({
                       item.onSelect();
                     }}
                   >
-                    {item.label}
+                    {item.icon ? (
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ display: "flex", color: "var(--ms-muted)" }}>
+                          {item.icon}
+                        </span>
+                        {item.label}
+                      </span>
+                    ) : (
+                      item.label
+                    )}
                     {item.busy ? <Spinner size={11} /> : null}
                     {item.trailing ? (
                       <span style={{ color: "var(--ms-muted)" }} aria-hidden="true">

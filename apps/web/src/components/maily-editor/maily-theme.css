@@ -27,13 +27,20 @@
 }
 
 /* ---- container ---------------------------------------------------------- */
+/* Maily's placeholder and link rules (id selectors, so no class override
+   wins) read their colors from these variables; its link default is
+   near-black, unreadable on the dark panel. */
 .ms-maily {
+  --placeholder-color: var(--ms-faint);
+  --mly-link-color: var(--ms-bone);
   display: flex;
   flex-direction: column;
 }
 
 /* ---- toolbar ------------------------------------------------------------ */
+/* Positioned: the link box hangs from the toolbar, inside the editor's width. */
 .ms-maily-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -77,6 +84,14 @@
   gap: 6px;
   padding: 0 10px;
   font: 500 12.5px var(--ms-font-sans);
+  white-space: nowrap;
+}
+/* Maily portals a selected block's menu above every layer, so a modal opened
+   over the page's editor would show it floating on top. A modal holding an
+   editor of its own keeps its menus. */
+body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
+[data-radix-popper-content-wrapper] {
+  display: none;
 }
 .ms-maily-sep {
   width: 1px;
@@ -119,6 +134,37 @@
   color: var(--ms-bone);
   font: 400 var(--ms-fs-ui) / 1.6 var(--ms-font-sans);
 }
+/* A message body: shorter, and past 45vh it scrolls inside itself rather than
+   push a dialog's footer or a thread's buttons off the screen. Two classes, so
+   the phone gutter below (for the block handle it has none of) never applies. */
+.ms-maily.ms-maily-compact .ProseMirror {
+  min-height: 120px;
+  max-height: 45vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+/* Tiptap mounts a frame after its frame does: the empty frame keeps the body's
+   height meanwhile, as after a send, when a remount clears the editor. */
+.ms-maily-compact .ms-maily-surface {
+  min-height: 120px;
+}
+/* A text field marks focus with its caret alone. Tiptap gives the body
+   tabindex="0", which the global [tabindex="0"] ring would otherwise box. */
+.ms-maily .ProseMirror:focus-visible {
+  box-shadow: none;
+}
+/* Maily's selection bubble offers headings, alignment, colors and its footer
+   block, all of which a message body leaves out; the toolbar has the rest. */
+.ms-maily-compact [data-tippy-root] {
+  display: none;
+}
+/* Maily mounts those bubble menus in flow for a moment, wider than a phone:
+   they would widen the thread pane, and the phone would zoom the page out to
+   fit and lose its scroll position. The body keeps its width to itself. */
+.ms-maily-compact .ms-maily-wrap {
+  contain: inline-size;
+  overflow-x: clip;
+}
 /* Maily's prose styles pin their palette via --mly-tw-prose-* custom props
    defined ON the content element (near-black headings/body) — invisible on the
    dark theme. Re-declare them with our tokens; unlayered, so this wins over
@@ -148,10 +194,6 @@
 }
 .ms-maily .ProseMirror:focus {
   outline: none;
-}
-/* Placeholder text uses our faint token, not Maily's baked gray. */
-.ms-maily .ProseMirror p.is-editor-empty:first-child::before {
-  color: var(--ms-faint);
 }
 
 /* ---- in-content variable pill ------------------------------------------- */
@@ -218,9 +260,6 @@
   border-radius: 7px;
   padding: 5px 8px;
   outline: none;
-}
-.ms-varpop-input:focus {
-  border-color: var(--ms-line-strong);
 }
 .ms-varpop-input::placeholder {
   color: var(--ms-faint);
@@ -368,10 +407,6 @@
 .ms-maily-picker-search input::placeholder {
   color: var(--ms-faint);
 }
-/* The popover is the focus surface; the global input ring would draw a box inside it. */
-.ms-maily-picker-search input:focus-visible {
-  box-shadow: none;
-}
 .ms-maily-picker-list {
   max-height: 320px;
   overflow-y: auto;
@@ -441,9 +476,6 @@
   font-size: 12px;
   outline: none;
 }
-.ms-maily-picker-fallback:focus {
-  border-color: var(--ms-line-strong);
-}
 .ms-maily-picker-fallback::placeholder {
   color: var(--ms-faint);
 }
@@ -454,6 +486,7 @@
   top: calc(100% + 6px);
   left: 0;
   z-index: var(--ms-z-popover);
+  box-sizing: border-box;
   display: flex;
   gap: 6px;
   padding: 8px;
@@ -465,6 +498,7 @@
 }
 .ms-maily-linkbox input {
   width: 240px;
+  min-width: 0;
   padding: 6px 9px;
   border: 1px solid var(--ms-line);
   border-radius: 7px;
@@ -472,9 +506,6 @@
   color: var(--ms-bone);
   font-size: 12.5px;
   outline: none;
-}
-.ms-maily-linkbox input:focus {
-  border-color: var(--ms-line-strong);
 }
 
 /* ---- Maily's tippy popups (slash + variable suggestions) --------------- */
@@ -521,4 +552,30 @@
    is its only sibling. */
 [data-tippy-root] #slash-command + div {
   display: none;
+}
+
+/* Maily's block toolbars (the button block's runs 586px wide) wrap onto a
+   second row inside a phone screen instead of running off its edge; Maily
+   positions the toolbar from its measured size. */
+@media (max-width: 639px) {
+  .ms-maily [class~="mly:w-max"][class~="mly:rounded-lg"] {
+    max-width: calc(100vw - 24px);
+    margin-inline: 12px;
+  }
+  .ms-maily [class~="mly:w-max"][class~="mly:rounded-lg"] > [class~="mly:items-stretch"] {
+    flex-wrap: wrap;
+  }
+}
+/* The block handle hangs left of the block, in a gutter that the 16px
+   content padding below 900px does not leave: without its "+" (the slash
+   menu adds blocks too) it fits on screen, keeping the ⠿ menu, and the
+   wider text inset seats it inside the editor's frame, clear of the
+   screen's 12px margin. */
+@media (max-width: 899px) {
+  .ms-maily .tippy-box[data-placement^="left"] [class~="mly:pr-1.5"] > :first-child {
+    display: none;
+  }
+  .ms-maily .ProseMirror {
+    padding-left: 30px;
+  }
 }

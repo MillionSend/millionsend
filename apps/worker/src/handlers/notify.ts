@@ -13,11 +13,16 @@ import {
   effectivePlan,
   enqueueTeamWebhookDeliveries,
   fetchDeliverabilityHealth,
+  formatMailAge,
   formatMailDate,
   formatMailDateTime,
+  formatMailPercent,
   freeCapText,
+  type MailContent,
   type MailLocale,
+  mailCountList,
   nextUtcDayStart,
+  OVERAGE_HARD_CAP,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   type PlanSnapshot,
@@ -26,6 +31,7 @@ import {
   planLabel,
   planMove,
   QUOTA_COLUMNS,
+  QUOTA_TOLERANCE,
   resultRows,
   type SystemMailKind,
   teamQuota,
@@ -53,19 +59,6 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import {
-  deliverabilityPausedMail,
-  deliverabilityWarningMail,
-  type MailContent,
-  quotaMonthlyReachedMail,
-  quotaMonthlyWarningMail,
-  quotaPausedMail,
-  quotaReachedMail,
-  quotaWarningMail,
-  webhookAutoDisabledMail,
-  webhookBacklogMail,
-  webhookFailingMail,
-} from "../notifications/templates.js";
 import { mailOwners as mailTeamOwners, type SystemMailer } from "../system-mail.js";
 import { COUNTED_SETTLED_SQL, WEBHOOK_AUTO_DISABLE_AFTER } from "./deliver-webhook.js";
 
@@ -257,7 +250,7 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
     teamId: string,
     type: Exclude<NotificationType, `webhook.${string}`>,
     data: Record<string, unknown>,
-    mail: MailContent,
+    mail: (locale: MailLocale) => MailContent,
   ) => {
     await attempt(teamId, type, "webhook", () =>
       enqueueTeamWebhookDeliveries(db, {
@@ -301,7 +294,8 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
   };
   for (const e of await endpointStandings(db)) {
     const teamId = e.team_id;
-    const input = { team: e.team, endpoint: e.url, url: `${base}/webhooks/${e.id}` };
+    const path = `/webhooks/${e.id}`;
+    const endpoint = { team: e.team, url: e.url };
     const failingKind = `webhook.failing:${e.id}`;
     const disabledKind = `webhook.auto_disabled:${e.id}`;
     if (e.status === "auto_disabled") {
@@ -309,7 +303,10 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
         await mailOwners(
           teamId,
           "webhook.auto_disabled",
-          webhookAutoDisabledMail({ ...input, after: WEBHOOK_AUTO_DISABLE_AFTER }),
+          account("webhook.auto_disabled", path, () => ({
+            ...endpoint,
+            after: String(WEBHOOK_AUTO_DISABLE_AFTER),
+          })),
         );
       }
       continue;
@@ -324,11 +321,11 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       await mailOwners(
         teamId,
         "webhook.failing",
-        webhookFailingMail({
-          ...input,
-          streak: WEBHOOK_FAILING_STREAK,
-          disableAfter: WEBHOOK_AUTO_DISABLE_AFTER,
-        }),
+        account("webhook.failing", path, () => ({
+          ...endpoint,
+          streak: String(WEBHOOK_FAILING_STREAK),
+          disableAfter: String(WEBHOOK_AUTO_DISABLE_AFTER),
+        })),
       );
     }
     const oldestAgeMs = e.oldest_ms === null ? 0 : now.getTime() - e.oldest_ms;
@@ -339,13 +336,27 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       await mailOwners(
         teamId,
         "webhook.backlog",
-        webhookBacklogMail({ ...input, queued: e.queued, cap: WEBHOOK_BACKLOG_COUNT, oldestAgeMs }),
+        account("webhook.backlog", path, (locale) => ({
+          ...endpoint,
+          // The count stopped one row past the cap: past it the mail says "more than".
+          queued:
+            e.queued > WEBHOOK_BACKLOG_COUNT
+              ? accountMailPhrase({
+                  locale,
+                  kind: "webhook.backlog",
+                  key: "moreThan",
+                  values: { n: WEBHOOK_BACKLOG_COUNT.toLocaleString(locale) },
+                })
+              : e.queued.toLocaleString(locale),
+          age: formatMailAge(oldestAgeMs),
+        })),
       );
     }
   }
 
   if (deps.isCloud) {
-    const url = `${base}/settings/billing`;
+    const billingPath = "/settings/billing";
+    const url = `${base}${billingPath}`;
     // Daily plans: the day's counter against the plan's limit and its ceiling.
     // A monthly plan's daily counter is uncapped and judged below instead.
     const rows = await db
@@ -376,7 +387,6 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       if (!kind) continue;
       if (!(await claimNotification(db, { teamId: row.teamId, kind, periodKey: today }))) continue;
       const resetsAt = nextUtcDayStart(now.getTime());
-      const input = { team: row.name, used: row.accepted, limit, ceiling, resetsAt, url };
       await notify(
         row.teamId,
         kind,
@@ -388,11 +398,14 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
           resets_at: resetsAt.toISOString(),
           dashboard_url: url,
         },
-        kind === "quota.paused"
-          ? quotaPausedMail(input)
-          : kind === "quota.reached"
-            ? quotaReachedMail(input)
-            : quotaWarningMail(input),
+        account(kind, billingPath, (locale) => ({
+          team: row.name,
+          used: row.accepted.toLocaleString(locale),
+          limit: limit.toLocaleString(locale),
+          headroom: Math.max(0, ceiling - row.accepted).toLocaleString(locale),
+          tolerance: `${Math.round(QUOTA_TOLERANCE * 100)}%`,
+          resetsAt: `${resetsAt.toISOString().slice(11, 16)} UTC`,
+        })),
       );
     }
     // Monthly plans: the period's counter against the included volume, once
@@ -433,14 +446,7 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       if (!kind) continue;
       const periodKey = quota.periodStart.toISOString();
       if (!(await claimNotification(db, { teamId: row.teamId, kind, periodKey }))) continue;
-      const input = {
-        team: row.name,
-        used: row.accepted,
-        limit,
-        renewsAt: quota.periodEnd,
-        overage: quota.overage,
-        url,
-      };
+      const mailKind = kind === "quota.reached" ? "quota.monthly_reached" : "quota.monthly_warning";
       await notify(
         row.teamId,
         kind,
@@ -452,7 +458,25 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
           resets_at: quota.periodEnd.toISOString(),
           dashboard_url: url,
         },
-        kind === "quota.reached" ? quotaMonthlyReachedMail(input) : quotaMonthlyWarningMail(input),
+        account(mailKind, billingPath, (locale) => {
+          const renewsAt = formatMailDate(locale, quota.periodEnd);
+          return {
+            team: row.name,
+            used: row.accepted.toLocaleString(locale),
+            limit: limit.toLocaleString(locale),
+            renewsAt,
+            advice: accountMailPhrase({
+              locale,
+              kind: mailKind,
+              key: quota.overage ? "overage" : quota.overagePaused ? "overagePaused" : "noOverage",
+              values: {
+                renewsAt,
+                hardCap: String(OVERAGE_HARD_CAP),
+                stopAt: (limit * OVERAGE_HARD_CAP).toLocaleString(locale),
+              },
+            }),
+          };
+        }),
       );
     }
   }
@@ -493,28 +517,28 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
     });
     if (!claimed) continue;
     const limit = lineFor(reason);
-    const url = `${base}/metrics`;
-    const input = {
-      team: team.name,
-      metric: reason.metric,
-      rate: reason.rate,
-      limit,
-      windowDays: reason.windowDays,
-      url,
-    };
+    const kind = health.status === "paused" ? "deliverability.paused" : "deliverability.warning";
     await notify(
       team.teamId,
-      health.status === "paused" ? "deliverability.paused" : "deliverability.warning",
+      kind,
       {
         metric: reason.metric,
         rate: reason.rate,
         limit,
         window_days: reason.windowDays,
-        dashboard_url: url,
+        dashboard_url: `${base}/metrics`,
       },
-      health.status === "paused"
-        ? deliverabilityPausedMail(input)
-        : deliverabilityWarningMail(input),
+      account(kind, "/metrics", (locale) => ({
+        team: team.name,
+        metric: accountMailPhrase({ locale, kind, key: reason.metric }),
+        days: String(reason.windowDays),
+        rate: formatMailPercent(locale, reason.rate),
+        limit: formatMailPercent(locale, limit),
+        advice:
+          kind === "deliverability.warning"
+            ? accountMailPhrase({ locale, kind, key: `${reason.metric}Advice` })
+            : "",
+      })),
     );
   }
 
@@ -569,6 +593,61 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       const path = d.status === "failed" ? "/domains" : `/domains/${d.id}`;
       await mailOwners(d.teamId, kind, account(kind, path, values));
     }
+  }
+
+  // Inboxes that need a person today: mail held in quarantine, sends waiting
+  // for approval, sends the rules refused. Counts only: sender addresses and
+  // subjects are a stranger's words and never reach this mail.
+  const dayStart = new Date(`${today}T00:00:00.000Z`);
+  const m = schema.receivedEmailInboxes;
+  const drafts = schema.inboxDrafts;
+  const activity = schema.inboxActivity;
+  const attention = resultRows<{
+    team_id: string;
+    quarantined: number;
+    drafts: number;
+    refused: number;
+  }>(
+    await db.execute(sql`
+      select team_id, sum(quarantined)::int as quarantined, sum(drafts)::int as drafts, sum(refused)::int as refused
+      from (
+        select ${m.teamId} as team_id, count(*) as quarantined, 0 as drafts, 0 as refused
+        from ${m} where ${m.quarantinedAt} >= ${dayStart} group by ${m.teamId}
+        union all
+        select ${drafts.teamId}, 0, count(*), 0
+        from ${drafts} where ${drafts.status} = 'pending_approval' and ${drafts.updatedAt} >= ${dayStart}
+        group by ${drafts.teamId}
+        union all
+        select ${activity.teamId}, 0, 0, count(*)
+        from ${activity} where ${activity.action} = 'email.refused' and ${activity.createdAt} >= ${dayStart}
+        group by ${activity.teamId}
+      ) counts
+      group by team_id
+    `),
+  );
+  for (const row of attention) {
+    if (
+      !(await claimNotification(db, {
+        teamId: row.team_id,
+        kind: "inbox.attention",
+        periodKey: today,
+      }))
+    ) {
+      continue;
+    }
+    await attempt(row.team_id, "inbox.attention", "mail", () =>
+      mailOwners(
+        row.team_id,
+        "inbox.attention",
+        account("inbox.attention", "/inboxes", (locale) => ({
+          counts: mailCountList(locale, "inbox.attention", {
+            quarantined: row.quarantined,
+            drafts: row.drafts,
+            refused: row.refused,
+          }),
+        })),
+      ),
+    );
   }
 
   // Security receipts off the audit trail, one per row. A row for a team

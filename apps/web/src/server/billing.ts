@@ -63,6 +63,7 @@ export async function mailPlanMove(
         locale: owner.locale,
         path: BILLING_PATH,
         values: move.values(owner.locale, team.name),
+        aboutTeamId: team.id,
       }),
     );
   }

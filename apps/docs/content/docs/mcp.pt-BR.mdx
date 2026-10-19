@@ -7,7 +7,7 @@ Toda implantação do MillionSend inclui um servidor MCP (Model Context
 Protocol), para que agentes de IA como Claude Code, Claude Desktop, Cursor e
 VS Code possam enviar e-mails e gerenciar sua audiência. As chamadas de
 ferramenta passam exatamente pelo mesmo pipeline da API REST — domínios
-verificados, supressões, opt-outs de tópico, cotas e escopo de time se
+verificados, supressões, opt-outs de tópico, cotas e escopo de equipe se
 aplicam sem alteração.
 
 ## URL do servidor
@@ -23,7 +23,7 @@ O endpoint MCP (Streamable HTTP) fica em `/mcp` na origem da API:
 <DeploymentTab deployment="self-hosted">
 
 A origem da API da sua instância mais `/mcp` — ex.: `https://api.acme.dev/mcp`,
-ou `http://localhost:3001/mcp` em um compose local. O dashboard mostra a URL
+ou `http://localhost:3001/mcp` em um compose local. O painel mostra a URL
 exata em **Configurações → MCP**.
 
 </DeploymentTab>
@@ -101,34 +101,43 @@ da sua instância, mostrada acima.
 ## Autenticação
 
 O servidor MCP usa OAuth, não chaves de API. Na primeira conexão o cliente
-abre seu navegador: entre no MillionSend, escolha o **time** em que o cliente
-pode agir — um time específico ou **Todos os times** — e desmarque as
-**permissões** que não quiser conceder. Nada é copiado ou colado — nenhum
+abre seu navegador: entre no MillionSend, escolha a **equipe** em que o cliente
+pode agir — uma equipe específica ou **Todas as equipes** —, desmarque as
+**permissões** que não quiser conceder e, em **Manter conectado**, escolha por
+quanto tempo o cliente fica conectado. Nada é copiado ou colado — nenhum
 segredo fica na configuração do cliente.
 
-- Uma concessão vinculada a um time só age naquele time. Uma concessão
-  **Todos os times** cobre todos os times dos quais você participa,
-  incluindo times futuros: cada ferramenta ganha um argumento opcional
-  `team_id` (o padrão é seu time mais antigo) e a ferramenta `list_teams`
+- Uma autorização vinculada a uma equipe só age naquela equipe. Uma autorização
+  **Todas as equipes** cobre todas as equipes das quais você participa,
+  incluindo equipes futuras: cada ferramenta ganha um argumento opcional
+  `team_id` (o padrão é sua equipe mais antiga) e a ferramenta `list_teams`
   aparece para consultar os ids.
 - Permissões desmarcadas no consentimento simplesmente não são concedidas —
   o cliente não vê as ferramentas que elas cobrem.
-- As concessões ficam em **Configurações → Aplicativos conectados** no
-  dashboard. Você pode revogar as suas; owners e admins podem revogar as de
-  qualquer pessoa. A revogação vale a partir da próxima renovação de token do
-  cliente, em até uma hora. Os clientes recebem um refresh token, então uma
-  sessão de trabalho não termina quando o access token expira.
-- Um membro removido do time perde o acesso MCP imediatamente, mesmo antes de
+- Todo cliente recebe um refresh token, então uma sessão de trabalho não
+  termina quando o access token, que dura uma hora, expira. **Manter
+  conectado** define quanto tempo a autorização dura: até você desconectar
+  (o padrão), 1 ano, 90 dias ou 30 dias. Quando esse prazo acaba, o cliente
+  pede para você entrar de novo.
+- As autorizações ficam em **Configurações → Aplicativos conectados** no
+  painel, com a validade de cada uma. Você pode revogar as suas; proprietários
+  e administradores podem revogar as de qualquer pessoa. A revogação vale a
+  partir da próxima renovação de token do cliente, em até uma hora.
+- Um membro removido da equipe perde o acesso MCP imediatamente, mesmo antes de
   o token expirar.
-- Seu papel no time vale aqui também: as ferramentas que gerenciam domínios,
-  webhooks e chaves de API só são oferecidas a owners e admins, como no dashboard. Um
-  **membro** com essas permissões concedidas ainda recebe as listagens somente
-  leitura de domínios, webhooks e chaves de API. Em uma concessão **Todos os times** as ferramentas aparecem se
-  você for admin em algum time, e chamadas em um time onde você é membro são
-  recusadas.
+- Sua função na equipe vale aqui também, como no painel: só proprietários e administradores
+  gerenciam domínios, webhooks e chaves de API, removem supressões, excluem
+  contatos em massa, apagam um contato (`delete_contact` com `erase`) ou
+  excluem uma caixa de entrada (`delete_inbox`). As
+  ferramentas marcadas com **admin** abaixo não são oferecidas a membros, e a
+  função é verificada de novo a cada chamada. Um **membro** com essas
+  permissões concedidas ainda recebe as listagens somente leitura de
+  domínios, webhooks e chaves de API. Em uma autorização **Todas as equipes** as
+  ferramentas aparecem se você for administrador em alguma equipe, e chamadas em uma equipe
+  onde você é membro são recusadas.
 - Chamadas MCP compartilham o limite por minuto da API.
 - Nenhuma ferramenta retorna uma credencial: chaves de API são criadas, e
-  segredos de assinatura de webhook lidos ou rotacionados, só no dashboard ou
+  segredos de assinatura de webhook lidos ou rotacionados, só no painel ou
   pela API REST.
 - O servidor MCP está disponível em todos os planos, inclusive o Free.
 
@@ -139,42 +148,80 @@ Dúvidas ou problemas ao conectar um cliente: [support@millionsend.com](mailto:s
 Cada ferramenta exige uma permissão (escopo OAuth). Os clientes só veem as
 ferramentas cobertas pelas permissões concedidas. `broadcasts:write` também
 cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
-**admin** só são oferecidas a owners e admins.
+**admin** só são oferecidas a proprietários e administradores.
+
+Os [e-mails recebidos](/pt-BR/concepts/receiving) e as
+[caixas de entrada](/pt-BR/concepts/inboxes) têm três permissões próprias, e
+nenhuma inclui a outra: `receiving:read` para ler e-mails, esperar por eles,
+ler códigos e listar caixas, conversas, etiquetas e rascunhos;
+`receiving:reply` para responder, encaminhar e organizar conversas; e
+`receiving:manage` para criar, mudar e excluir caixas e para listar e liberar
+e-mails da quarentena. Elas vieram depois da maioria das autorizações: um
+cliente autorizado antes de uma delas existir só a ganha quando você entra de
+novo pelo cliente e a concede. As ferramentas delas só existem numa instância
+que recebe e-mail.
+
+Um cliente MCP lê os e-mails como um agente lê: nunca vê o que uma caixa
+retém na quarentena ou ainda está analisando, e o texto das mensagens vem
+marcado como não confiável (veja
+[Resultados das ferramentas](#resultados-das-ferramentas)). Ele não aprova
+rascunhos nem muda as configurações de segurança de uma caixa; o
+`create_inbox` só cria caixas de agente e aceita o `accept_from` e nenhuma
+outra configuração de segurança. O `release_email` nunca libera e-mail retido
+por injeção de prompt, phishing, vírus ou falha na autenticação, que uma
+pessoa revisa no painel, e nunca confia num remetente. Os outros e-mails
+retidos ele só libera com a avaliação da análise: a análise lê o e-mail em
+toda liberação, o e-mail continua na quarentena com 80 ou mais e, enquanto a
+análise não pode rodar, nada é liberado (`screening_unavailable`). Veja
+[Segurança de agentes](/pt-BR/concepts/agent-safety#quarentena).
 
 | Ferramenta | Permissão | Descrição |
 | --- | --- | --- |
 | `list_emails` | `emails:read` | Lista e-mails enviados, na fila e agendados. |
 | `get_email` | `emails:read` | Busca um e-mail com o status de entrega. |
 | `get_usage` | `emails:read` | Plano, limite de envio (diário no Free e Starter, mensal no Pro e Scale), limite de domínios, o total aceito hoje e, em planos mensais, o uso do período de cobrança — consulte antes de trabalho em massa. |
+| `list_received_emails` | `receiving:read` | Lista os e-mails recebidos nos seus [domínios de recebimento](/pt-BR/concepts/receiving), do mais novo para o mais antigo; filtra por caixa, remetente, destinatário ou não lidos. |
+| `get_received_email` | `receiving:read` | Busca um e-mail recebido. O `format` escolhe o conteúdo: `extracted` (o padrão: remetente, confiança, análise e o texto limpo da resposta), `text`, `html` ou `raw` (só um link de download). Com `html`, o `html_format` é `cid` por padrão, para as imagens inline não incharem o resultado. |
+| `list_received_email_attachments` | `receiving:read` | Lista os anexos de um e-mail recebido com os links de download. |
+| `get_received_email_attachment` | `receiving:read` | Busca um anexo de um e-mail recebido com o link de download. |
+| `wait_for_received_email` | `receiving:read` | Espera até 50 segundos (45 por padrão) por um e-mail novo para uma caixa ou um endereço, opcionalmente de um remetente ou com um assunto. Responde `received` com o e-mail, `timeout`, ou `quarantined` com o id e o motivo da quarentena quando um e-mail que bateu ficou retido. |
+| `get_verification_code` | `receiving:read` | O código de verificação ou o link de acesso de um e-mail, ou o mais recente que uma caixa recebeu, opcionalmente de um remetente, recebido depois de um horário (`received_after`, como o `received_at` de um código já usado) e esperando até 50 segundos. |
+| `list_inboxes` | `receiving:read` | Lista as [caixas de entrada](/pt-BR/concepts/inboxes), opcionalmente de um tipo. |
+| `get_inbox` | `receiving:read` | Busca uma caixa pelo id ou pelo endereço. |
+| `list_threads` | `receiving:read` | Lista as conversas de uma caixa por pasta, etiqueta ou se estão lidas. |
+| `get_thread` | `receiving:read` | Busca uma conversa e os e-mails dela, do mais antigo para o mais novo, cada um com a confiança no remetente e o texto delimitado; até 48.000 caracteres, os e-mails mais novos inteiros e os mais antigos cortados em 2.000. |
+| `list_labels` | `receiving:read` | Lista as etiquetas de uma caixa. |
+| `get_draft` | `receiving:read` | Busca um rascunho com o status, os motivos de aprovação e o texto delimitado. |
+| `list_quarantined_emails` | `receiving:manage` | Lista os e-mails em quarentena de uma caixa com os motivos e as notas, sem o conteúdo. |
 | `list_contacts` | `audience:read` | Lista contatos, opcionalmente os membros de um segmento. |
 | `get_contact` | `audience:read` | Busca um contato por id ou endereço de e-mail. |
 | `get_contact_topics` | `audience:read` | Cada tópico com a inscrição efetiva do contato e se ela foi explícita. |
-| `list_segments` | `audience:read` | Lista segmentos — os alvos dos broadcasts. |
+| `list_segments` | `audience:read` | Lista segmentos — os alvos das transmissões. |
 | `get_segment` | `audience:read` | Busca um segmento com o filtro ou a lista manual. |
 | `list_topics` | `audience:read` | Lista tópicos de inscrição. |
 | `get_topic` | `audience:read` | Busca um tópico de inscrição. |
-| `list_contact_properties` | `audience:read` | Lista as propriedades customizadas de contato. |
+| `list_contact_properties` | `audience:read` | Lista as propriedades personalizadas de contato. |
 | `list_suppressions` | `audience:read` | Lista endereços suprimidos, opcionalmente por `origin` (bounce, complaint, manual, unsubscribe). |
 | `get_suppression` | `audience:read` | Busca uma supressão por id ou endereço de e-mail. |
-| `list_broadcasts` | `broadcasts:read` | Lista broadcasts com o status. |
-| `get_broadcast` | `broadcasts:read` | Busca um broadcast. |
+| `list_broadcasts` | `broadcasts:read` | Lista transmissões com o status. |
+| `get_broadcast` | `broadcasts:read` | Busca uma transmissão. |
 | `list_templates` | `templates:read` | Lista templates de e-mail. |
 | `get_template` | `templates:read` | Busca um template por id ou alias, com assunto, html e texto. |
 | `list_webhooks` | `webhooks:write` | Lista os webhooks (linhas de lista nunca trazem o segredo de assinatura). |
 | `get_webhook` | `webhooks:write` | Busca um webhook: URL, eventos e status. |
 | `list_api_keys` | `api-keys:write` | Lista as chaves de API ativas (nunca os tokens). |
-| `list_domains` | `domains:read` | Lista domínios de envio com o status de verificação. |
-| `get_domain` | `domains:read` | Busca um domínio com os registros DNS. |
+| `list_domains` | `domains:read` | Lista até 100 domínios da equipe com o status de verificação. O subdomínio da equipe no [domínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado) é a última linha (`shared: true`): só de leitura, com o `sending_mode` dele, e só os endereços das caixas dele enviam por ele. |
+| `get_domain` | `domains:read` | Busca um domínio com os registros DNS; o subdomínio compartilhado não tem nenhum. |
 | `send_email` | `emails:send` | Envia ou agenda um e-mail transacional. |
 | `send_email_batch` | `emails:send` | Envia até 100 e-mails em uma chamada. |
 | `update_email` | `emails:send` | Reagenda um e-mail agendado. |
 | `cancel_email` | `emails:send` | Cancela um e-mail agendado. |
 | `create_contact` | `audience:write` | Cria um contato, com segmentos e inscrições em tópicos. |
 | `create_contact_batch` | `audience:write` | Cria até 1.000 contatos em uma chamada; `on_conflict` skip/upsert, `validation` strict/permissive. |
-| `update_contact` | `audience:write` | Atualiza nome, propriedades ou o cancelamento de um contato. |
+| `update_contact` | `audience:write` | Atualiza nome, propriedades ou o descadastro de um contato. |
 | `update_contact_topics` | `audience:write` | Define as inscrições por tópico de um contato. |
-| `delete_contact` | `audience:write` | Exclui um contato. |
-| `delete_contacts` | `audience:write` | Exclui até 1.000 contatos por ids ou e-mails. |
+| `delete_contact` | `audience:write` | Exclui um contato; `erase` (só **admin**) também o apaga do histórico de e-mails. |
+| `delete_contacts` | `audience:write` | **admin** Exclui até 1.000 contatos por ids ou e-mails. |
 | `create_contact_preferences_link` | `audience:write` | Gera a URL da central de preferências de um contato. |
 | `add_contact_to_segment` | `audience:write` | Adiciona um contato a um segmento manual. |
 | `remove_contact_from_segment` | `audience:write` | Remove um contato de um segmento manual. |
@@ -184,35 +231,42 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `create_topic` | `audience:write` | Cria um tópico de inscrição. |
 | `update_topic` | `audience:write` | Atualiza nome, descrição ou visibilidade de um tópico. |
 | `delete_topic` | `audience:write` | Exclui um tópico. |
-| `create_contact_property` | `audience:write` | Define uma propriedade customizada de contato. |
+| `create_contact_property` | `audience:write` | Define uma propriedade personalizada de contato. |
 | `update_contact_property` | `audience:write` | Atualiza a definição de uma propriedade. |
 | `delete_contact_property` | `audience:write` | Exclui a definição de uma propriedade. |
 | `add_suppressions` | `audience:write` | Bloqueia até 1.000 endereços, registrando um `origin` (bounce, complaint, manual ou unsubscribe) nas linhas novas. |
-| `remove_suppressions` | `audience:write` | Desbloqueia até 1.000 endereços por e-mails ou ids. |
-| `delete_suppression` | `audience:write` | Remove uma supressão por id ou e-mail. |
-| `create_broadcast` | `broadcasts:write` | Cria um rascunho de broadcast (ou envia na hora). |
-| `update_broadcast` | `broadcasts:write` | Atualiza um rascunho de broadcast. |
-| `send_broadcast` | `broadcasts:write` | Envia ou agenda um rascunho de broadcast. |
-| `cancel_broadcast` | `broadcasts:write` | Cancela um broadcast na fila, agendado ou já saindo; e-mails já enviados não voltam. |
-| `delete_broadcast` | `broadcasts:write` | Exclui um rascunho de broadcast. |
+| `remove_suppressions` | `audience:write` | **admin** Desbloqueia até 1.000 endereços por e-mails ou ids. |
+| `delete_suppression` | `audience:write` | **admin** Remove uma supressão por id ou e-mail. |
+| `create_broadcast` | `broadcasts:write` | Cria um rascunho de transmissão (ou envia na hora). |
+| `update_broadcast` | `broadcasts:write` | Atualiza um rascunho de transmissão. |
+| `send_broadcast` | `broadcasts:write` | Envia ou agenda um rascunho de transmissão. |
+| `cancel_broadcast` | `broadcasts:write` | Cancela uma transmissão na fila, agendada ou já saindo; e-mails já enviados não voltam. |
+| `delete_broadcast` | `broadcasts:write` | Exclui um rascunho de transmissão. |
 | `create_template` | `templates:write` | Cria um template de e-mail (ativo na hora). |
 | `update_template` | `templates:write` | Altera nome, assunto, html, texto ou alias de um template. |
-| `delete_template` | `templates:write` | Exclui um template; os broadcasts mantêm a própria cópia. |
+| `delete_template` | `templates:write` | Exclui um template; as transmissões mantêm a própria cópia. |
 | `create_webhook` | `webhooks:write` | **admin** Cria um webhook. |
 | `update_webhook` | `webhooks:write` | **admin** Atualiza URL, eventos ou status de um webhook. |
 | `delete_webhook` | `webhooks:write` | **admin** Exclui um webhook. |
 | `revoke_api_key` | `api-keys:write` | **admin** Revoga uma chave de API. |
 | `create_domain` | `domains:write` | **admin** Adiciona um domínio de envio e retorna os registros DNS; configurações de rastreamento opcionais valem já na criação. |
-| `update_domain` | `domains:write` | **admin** Muda as configurações de rastreamento de um domínio; o `tracking_subdomain` é o que gera o CNAME de rastreamento (obrigatório no Cloud). |
-| `verify_domain` | `domains:write` | **admin** Reverifica o DNS e a verificação SES de um domínio. |
-| `delete_domain` | `domains:write` | **admin** Remove um domínio e a identidade SES dele. |
+| `update_domain` | `domains:write` | **admin** Muda as configurações de rastreamento de um domínio, liga e desliga o [recebimento](/pt-BR/concepts/receiving) com `capabilities.receiving` ou o pega-tudo com `receiving_catch_all`; o `tracking_subdomain` é o que gera o CNAME de rastreamento (obrigatório no MillionSend Cloud). O subdomínio compartilhado responde `403`. |
+| `verify_domain` | `domains:write` | **admin** Reverifica o DNS e a verificação SES de um domínio; o subdomínio compartilhado responde `403`. |
+| `delete_domain` | `domains:write` | **admin** Remove um domínio e a identidade SES dele; o subdomínio compartilhado responde `403`. |
+| `reply_to_received_email` | `receiving:reply` | Responde a um e-mail recebido pela caixa dele. Devolve `sent` com o e-mail e a conversa, ou `draft` com os motivos quando as regras da caixa seguram a resposta para uma pessoa. |
+| `forward_received_email` | `receiving:reply` | Encaminha um e-mail recebido, citado no corpo ou anexado como `.eml`; com os mesmos resultados de `reply_to_received_email`. |
+| `update_thread` | `receiving:reply` | Marca uma conversa como lida ou não lida, muda de pasta ou coloca uma etiqueta. |
+| `create_inbox` | `receiving:manage` | Cria uma caixa de agente (as caixas de pessoas são criadas no painel); o `accept_from` é a única configuração de segurança que ela aceita, e o `username` dá nome a um endereço no domínio compartilhado. O `domain_id` aceita uma linha do `list_domains`: o subdomínio compartilhado da equipe (`shared: true`), ou um dos domínios dela, com o `username` como a parte antes do @. Enquanto o subdomínio da equipe espera a revisão de nomes, ela responde `503`. |
+| `update_inbox` | `receiving:manage` | Muda o nome, o nome de remetente ou a validade de uma caixa; fazer ela vencer antes exige o papel de responsável ou de admin. |
+| `delete_inbox` | `receiving:manage` | **admin** Exclui uma caixa com as conversas e os rascunhos dela; as chaves de API dela são revogadas. |
+| `release_email` | `receiving:manage` | Libera um e-mail da quarentena para a caixa, só com a avaliação da análise: ele continua retido quando a análise acha injeção de prompt ou phishing (`held_by_screening`), e nada é liberado enquanto a análise não pode rodar (`screening_unavailable`); o retido pelo conteúdo ou por falha na autenticação responde `forbidden`. |
 
 ## Resultados das ferramentas
 
 Toda ferramenta retorna um único bloco de texto JSON, e os mesmos erros de
 validação da API REST se aplicam — um domínio remetente não verificado falha
 em `send_email` exatamente como falha em `POST /emails`. A resposta REST vem
-embrulhada em um envelope que a marca como dado não confiável:
+dentro de um envelope que a marca como dado não confiável:
 
 ```json
 {
@@ -222,9 +276,30 @@ embrulhada em um envelope que a marca como dado não confiável:
 ```
 
 Nomes e propriedades de contatos, assuntos e corpos de e-mail, nomes e corpos
-de templates, endereços suprimidos e os nomes de segmentos, tópicos, webhooks,
-domínios e chaves de API são todos escritos pelos seus usuários finais ou por
-terceiros. O envelope permite ao agente separá-los da
+de templates, endereços suprimidos, os nomes de segmentos, tópicos, webhooks,
+domínios e chaves de API, e todos os campos de um e-mail recebido (remetente,
+assunto, cabeçalhos, corpos, nomes de anexos) são escritos pelos seus
+usuários finais ou por terceiros. O envelope permite ao agente separá-los da
 saída da ferramenta, para que um contato cujo nome parece uma instrução não
 seja seguido como tal. Leia `untrusted_data` para obter o payload; um
 resultado com `isError` traz o corpo de erro da REST no mesmo lugar.
+
+O e-mail recebido ganha mais uma marcação. Todo texto de mensagem que uma
+ferramenta devolve (`get_received_email`, `wait_for_received_email`,
+`get_thread`, `get_draft`) fica num campo `untrusted_text`, entre duas
+linhas de marcação com um valor aleatório a cada chamada:
+
+```
+-----BEGIN UNTRUSTED EMAIL CONTENT 95253f15-----
+Hi! Your order shipped today.
+-----END UNTRUSTED EMAIL CONTENT 95253f15-----
+```
+
+Uma linha de marcação escrita dentro da mensagem é alterada antes,
+então uma mensagem não consegue encerrar a própria marcação. Antes disso, o texto
+perde tudo o que uma pessoa não veria (veja
+[Segurança de agentes](/pt-BR/concepts/agent-safety#texto-oculto-e-extracted_text)),
+menos o que o `get_received_email` devolve com `format: "html"` ou
+`format: "text"`: essas são as partes da própria mensagem, como foram enviadas.
+Uma espera que termina sem e-mail responde `timeout`, e uma busca de código
+sem nada para achar, `none`: resultados normais, não erros.

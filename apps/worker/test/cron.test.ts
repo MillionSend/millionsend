@@ -1,8 +1,8 @@
-import { DAY_MS, dailyCeiling, teamRung, utcDay } from "@millionsend/core";
+import { DAY_MS, dailyCeiling, SYSTEM_MAIL_TAG, teamRung, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq, sql } from "drizzle-orm";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   drainQuotaParked,
@@ -256,7 +256,8 @@ it("a failed page enqueue ends the run instead of walking the remaining pages", 
 });
 
 it("drain passes a scheduled email's due time through to the queue", async () => {
-  const due = new Date(Date.now() + DAY_MS);
+  const now = new Date(`${today()}T00:00:00Z`);
+  const due = new Date(now.getTime() + 3_600_000);
   const [row] = await db
     .insert(schema.emails)
     .values({
@@ -273,6 +274,7 @@ it("drain passes a scheduled email's due time through to the queue", async () =>
   const enqueued: { id: string; startAfter?: Date }[] = [];
   await drainQuotaParked(db, {
     isCloud: false,
+    now,
     enqueueSends: async (batch) => {
       for (const j of batch) {
         enqueued.push({ id: j.emailId, ...(j.startAfter ? { startAfter: j.startAfter } : {}) });
@@ -513,6 +515,105 @@ it("reconcile fails a claim that never reached SES (worker killed mid-send) with
   expect(events.map((e) => [e.type, e.data?.reason])).toEqual([["failed", "send_interrupted"]]);
 });
 
+it("the stalled-claim sweep fires email.failed once per interrupted row, to each row's own team", async () => {
+  const now = new Date();
+  const old = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const otherTeam = await createTeam(db, "cron-other");
+  const mine = await createWebhookEndpoint(db, teamId, null);
+  const theirs = await createWebhookEndpoint(db, otherTeam, ["email.failed"]);
+  const base = {
+    from: "a@acme.dev",
+    to: ["r@example.com"],
+    subject: "s",
+    latestStatus: "queued" as const,
+    createdAt: old(60),
+    sentAt: old(30),
+  };
+  const [ours, other, taken] = await db
+    .insert(schema.emails)
+    .values([
+      { ...base, teamId },
+      { ...base, teamId: otherTeam },
+      // SES took it and no event joined yet: its events own its fate.
+      { ...base, teamId, sesMessageId: "cron-mid-taken" },
+    ])
+    .returning({ id: schema.emails.id });
+  if (!ours || !other || !taken) throw new Error("insert failed");
+  const enqueued: string[] = [];
+  const sweep = () =>
+    reconcileStalledSends(db, {
+      enqueueSends: async () => {},
+      enqueueWebhookDelivery: async (rows) => {
+        enqueued.push(...rows.map((r) => r.id));
+      },
+      now,
+    });
+
+  await sweep();
+  await sweep();
+
+  const deliveries = await db.select().from(schema.webhookDeliveries);
+  expect(deliveries.map((d) => [d.endpointId, d.emailId]).sort()).toEqual(
+    [
+      [mine, ours.id],
+      [theirs, other.id],
+    ].sort(),
+  );
+  for (const d of deliveries) {
+    expect(d.payload).toMatchObject({
+      type: "email.failed",
+      data: { failed: { reason: "send_interrupted" } },
+    });
+  }
+  expect(enqueued.sort()).toEqual(deliveries.map((d) => d.id).sort());
+  expect(await statusOf(taken.id)).toBe("queued");
+});
+
+it("a delivery row that can't be written rolls the stalled-claim sweep back whole", async () => {
+  const now = new Date();
+  const old = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const endpointId = await createWebhookEndpoint(db, teamId, null);
+  const [interrupted] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued",
+      createdAt: old(60),
+      sentAt: old(30),
+    })
+    .returning({ id: schema.emails.id });
+  if (!interrupted) throw new Error("insert failed");
+  const sweep = () => reconcileStalledSends(db, { enqueueSends: async () => {}, now });
+  const events = () =>
+    db.select().from(schema.emailEvents).where(eq(schema.emailEvents.emailId, interrupted.id));
+  const deliveries = () =>
+    db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+  await db.execute(sql`
+    create function refuse_delivery() returns trigger language plpgsql as $$
+    begin raise exception 'deliveries unavailable'; end $$`);
+  await db.execute(
+    sql`create trigger refuse_delivery before insert on webhook_deliveries for each row execute function refuse_delivery()`,
+  );
+
+  await expect(sweep()).rejects.toThrow();
+
+  expect(await statusOf(interrupted.id)).toBe("queued");
+  expect(await events()).toEqual([]);
+  expect(await deliveries()).toEqual([]);
+
+  // The next sweep ends it once.
+  await db.execute(sql`drop trigger refuse_delivery on webhook_deliveries`);
+  await sweep();
+  expect(await statusOf(interrupted.id)).toBe("failed");
+  expect(await deliveries()).toHaveLength(1);
+});
+
 it("metadata purge deletes whole expired rows (events cascade) and old deliveries, keeping fresh and future-scheduled ones", async () => {
   const now = new Date("2026-08-14T00:00:00Z");
   const base = { teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" };
@@ -641,6 +742,82 @@ it("payload strip nulls expired event data and drops delivery data/response on t
   expect(row?.payload).toEqual({ type: "email.bounced", test: "true" });
   expect(row?.lastResponseBody).toBeNull();
   // Already-stripped rows are not rewritten on the next run.
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 0,
+    deliveries: 0,
+  });
+});
+
+it("payload strip keeps a suppressed event's source and reason, which name no one", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" })
+    .returning({ id: schema.emails.id });
+  if (!email) throw new Error("insert failed");
+  const old = new Date("2026-07-01T00:00:00Z");
+  await db.insert(schema.emailEvents).values([
+    {
+      emailId: email.id,
+      type: "suppressed",
+      occurredAt: old,
+      data: { source: "api", reason: "recipient_suppressed" },
+    },
+    { emailId: email.id, type: "failed", occurredAt: old, data: { eventType: "Reject" } },
+  ]);
+
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 1,
+    deliveries: 0,
+  });
+  const events = await db
+    .select({ type: schema.emailEvents.type, data: schema.emailEvents.data })
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, email.id));
+  expect(events).toEqual(
+    expect.arrayContaining([
+      { type: "suppressed", data: { source: "api", reason: "recipient_suppressed" } },
+      { type: "failed", data: null },
+    ]),
+  );
+});
+
+it("payload strip walks past more kept suppressed events than one batch and strips every eligible one", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" })
+    .returning({ id: schema.emails.id });
+  if (!email) throw new Error("insert failed");
+  const kept = '{"source":"worker","reason":"recipient_suppressed"}';
+  // 1,500 kept rows older than every eligible one, then 2,500 eligible rows
+  // and 10 more kept ones at one instant: the batches split that tie by id
+  // alone.
+  await db.execute(sql`
+    insert into ${schema.emailEvents} (email_id, type, occurred_at, data)
+    select ${email.id}::uuid, 'suppressed', timestamptz '2026-06-01 00:00:00+00' + g * interval '1 second', ${kept}::jsonb
+    from generate_series(1, 1500) g
+  `);
+  await db.execute(sql`
+    insert into ${schema.emailEvents} (email_id, type, occurred_at, data)
+    select ${email.id}::uuid, case when g <= 10 then 'suppressed'::email_event_type else 'delivered' end,
+      timestamptz '2026-07-01 00:00:00+00',
+      case when g <= 10 then ${kept}::jsonb else '{"eventType":"Delivery"}'::jsonb end
+    from generate_series(1, 2510) g
+  `);
+  const left = () =>
+    db
+      .select({ type: schema.emailEvents.type, n: sql<number>`count(*)::int` })
+      .from(schema.emailEvents)
+      .where(isNotNull(schema.emailEvents.data))
+      .groupBy(schema.emailEvents.type)
+      .orderBy(schema.emailEvents.type);
+
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 2500,
+    deliveries: 0,
+  });
+  expect(await left()).toEqual([{ type: "suppressed", n: 1510 }]);
   expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
     events: 0,
     deliveries: 0,
@@ -1005,6 +1182,137 @@ it("drain leaves a suspended team's rows parked until the operator reinstates it
   expect(enqueued).toEqual([parked]);
 });
 
+it("drain leaves a row due on a later UTC day parked until that day comes", async () => {
+  const tomorrow = new Date(`${utcDay(Date.now() + DAY_MS)}T12:00:00Z`);
+  const later = await insertParked(new Date("2026-08-13T01:00:00Z"), "later", {
+    scheduledAt: tomorrow,
+  });
+  const enqueued: string[] = [];
+  const deps = {
+    isCloud: true,
+    enqueueSends: async (batch: readonly { emailId: string }[]) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  };
+  // Today has the whole free cap to spare, and still nothing moves.
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 0, stillParked: 1 });
+  expect(await statusOf(later)).toBe("queued_quota");
+
+  expect(
+    await drainQuotaParked(db, { ...deps, now: new Date(`${utcDay(tomorrow)}T00:05:00Z`) }),
+  ).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([later]);
+});
+
+it("drain releases nothing of a team past the deliverability pause line until its rates recover", async () => {
+  // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: today(), sent: 200, hardBounced: 20 });
+  const [bc] = await db
+    .insert(schema.broadcasts)
+    .values({
+      teamId,
+      from: "a@acme.dev",
+      subject: "s",
+      status: "sending",
+      scheduledAt: new Date(),
+    })
+    .returning({ id: schema.broadcasts.id });
+  const plain = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const bulk = await insertParked(new Date("2026-08-13T00:30:00Z"), "bulk", {
+    broadcastId: bc?.id,
+  });
+  const enqueued: string[] = [];
+  const deps = {
+    isCloud: true,
+    enqueueSends: async (batch: readonly { emailId: string }[]) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  };
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 0, stillParked: 2 });
+  expect(enqueued).toEqual([]);
+
+  await db
+    .update(schema.usageCounters)
+    .set({ hardBounced: 0 })
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 2, stillParked: 0 });
+  expect(enqueued.sort()).toEqual([plain, bulk].sort());
+});
+
+it("drain holds a young domain's warm-up mail while its team is past the pause line", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "news.paused-warmup.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date("2026-10-09T09:00:00Z"),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  const held = await insertParked(new Date("2026-10-09T10:00:00Z"), "warming", {
+    domainId: domain.id,
+    parkReason: "warmup",
+  });
+  // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: today(), sent: 200, hardBounced: 20 });
+  const enqueued: string[] = [];
+  const deps = {
+    isCloud: false,
+    now: new Date("2026-10-10T00:15:00Z"),
+    enqueueSends: async (batch: readonly { emailId: string }[]) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  };
+  // The warm-up has room on its second day; the pause alone holds the row.
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 0, stillParked: 1 });
+  expect(await statusOf(held)).toBe("queued_quota");
+
+  await db
+    .update(schema.usageCounters)
+    .set({ hardBounced: 0 })
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([held]);
+});
+
+it("drain releases the account mail of a team past the pause line, off the System plan, and holds the rest", async () => {
+  // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: today(), sent: 200, hardBounced: 20 });
+  const account = { tags: { [SYSTEM_MAIL_TAG]: "password_reset" } };
+  const first = await insertParked(new Date("2026-08-13T00:00:00Z"), "reset", account);
+  // More than a page of the team's other mail between the two, so the last
+  // reset comes on a page whose query already leaves the held team out.
+  await db.insert(schema.emails).values(
+    Array.from({ length: 500 }, (_, i) => ({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "held",
+      latestStatus: "queued_quota" as const,
+      createdAt: new Date(Date.parse("2026-08-13T01:00:00Z") + i * 1000),
+    })),
+  );
+  const last = await insertParked(new Date("2026-08-14T00:00:00Z"), "reset", account);
+  const enqueued: string[] = [];
+  const result = await drainQuotaParked(db, {
+    isCloud: false,
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  });
+  expect(result).toEqual({ drained: 2, stillParked: 500 });
+  expect(enqueued).toEqual([first, last]);
+});
+
 it("drain holds a paused team's broadcast rows and releases its transactional ones", async () => {
   const [bc] = await db
     .insert(schema.broadcasts)
@@ -1256,4 +1564,186 @@ it("drain gives a throttled team one cadence of rows per run, spaced on the rows
   expect(rows.map((r) => r.scheduledAt?.getTime())).toEqual(
     jobs.map((j) => j.startAfter?.getTime()),
   );
+});
+
+it("drain releases a young domain's parked mail only as its warm-up allows, whatever parked it", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "news.fresh-drain.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date("2026-10-09T09:00:00Z"),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  // The registration day's 100 already went out.
+  await db
+    .insert(schema.domainWarmupUsage)
+    .values({ registrableDomain: "fresh-drain.com", day: "2026-10-09", accepted: 100 });
+  const warmupParked: string[] = [];
+  for (let i = 0; i < 150; i++) {
+    warmupParked.push(
+      await insertParked(new Date(Date.UTC(2026, 9, 9, 10, 0, i)), "held", {
+        domainId: domain.id,
+        parkReason: "warmup",
+      }),
+    );
+  }
+  // Parked by the plan, not the warm-up: its release still passes the warm-up.
+  const planParked = await insertParked(new Date("2026-10-09T11:00:00Z"), "plan", {
+    domainId: domain.id,
+  });
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  expect(await drain("2026-10-09T15:00:00Z")).toEqual({ drained: 0, stillParked: 151 });
+  // A new UTC day, still under 24 hours old: another 100, oldest first.
+  expect(await drain("2026-10-10T00:15:00Z")).toEqual({ drained: 100, stillParked: 51 });
+  expect(enqueued).toEqual(warmupParked.slice(0, 100));
+  // Past 24 hours the same day's cap is 300: the rest goes.
+  expect(await drain("2026-10-10T09:15:00Z")).toEqual({ drained: 51, stillParked: 0 });
+  expect(enqueued.slice(100)).toEqual([...warmupParked.slice(100), planParked]);
+  const reasons = await db
+    .select({ reason: schema.emails.parkReason })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, teamId));
+  expect(reasons.every((r) => r.reason === null)).toBe(true);
+}, 60_000);
+
+it("drain leaves a young domain's mail due on a later day to that day's warm-up", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "news.stacked-drain.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date("2026-10-09T09:00:00Z"),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  // Over its delivery day's cap at accept: the earlier days' room must not
+  // carry it, or their caps would all land on that one instant.
+  const due = await insertParked(new Date("2026-10-09T10:00:00Z"), "scheduled", {
+    domainId: domain.id,
+    parkReason: "warmup",
+    scheduledAt: new Date("2026-10-11T12:00:00Z"),
+  });
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  expect(await drain("2026-10-09T15:00:00Z")).toEqual({ drained: 0, stillParked: 1 });
+  expect(await drain("2026-10-10T15:00:00Z")).toEqual({ drained: 0, stillParked: 1 });
+  expect(await drain("2026-10-11T00:15:00Z")).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([due]);
+  expect(
+    await db
+      .select({ day: schema.domainWarmupUsage.day, accepted: schema.domainWarmupUsage.accepted })
+      .from(schema.domainWarmupUsage),
+  ).toEqual([{ day: "2026-10-11", accepted: 1 }]);
+});
+
+it("drain releases a team's warm-up mail oldest first across its young domains, within their shared limit", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const domains = await db
+    .insert(schema.domains)
+    .values(
+      ["news.pool-one.com", "news.pool-two.com"].map((name) => ({
+        teamId,
+        name,
+        region: "us-east-1",
+        status: "verified" as const,
+        registeredAt: new Date("2026-10-09T09:00:00Z"),
+      })),
+    )
+    .returning({ id: schema.domains.id });
+  const parked: string[] = [];
+  for (let i = 0; i < 150; i++) {
+    parked.push(
+      await insertParked(new Date(Date.UTC(2026, 9, 9, 10, 0, i)), "held", {
+        domainId: domains[i % 2]?.id,
+        parkReason: "warmup",
+      }),
+    );
+  }
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  // A new UTC day, both still under 24 hours old: one day's 100 between them.
+  expect(await drain("2026-10-10T00:15:00Z")).toEqual({ drained: 100, stillParked: 50 });
+  expect(enqueued).toEqual(parked.slice(0, 100));
+  // Past 24 hours the shared limit is 300: the rest goes.
+  expect(await drain("2026-10-10T09:15:00Z")).toEqual({ drained: 50, stillParked: 0 });
+  expect(enqueued.slice(100)).toEqual(parked.slice(100));
+}, 60_000);
+
+it("drain holds a young domain at its own cap while the team's older warming domain goes on, within their shared limit", async () => {
+  // Small caps: 2 a day on the registration day, 5 from day 7.
+  await db.insert(schema.instanceSettings).values({
+    id: 1,
+    warmupEnabled: true,
+    warmupCapFirstDay: 2,
+    warmupCapFirstMonth: 5,
+  });
+  const domains = await db
+    .insert(schema.domains)
+    .values(
+      [
+        ["news.cap-fresh.com", "2026-10-09T23:00:00Z"],
+        ["news.cap-older.com", "2026-09-30T00:00:00Z"],
+      ].map(([name, registeredAt]) => ({
+        teamId,
+        name: name ?? "",
+        region: "us-east-1",
+        status: "verified" as const,
+        registeredAt: new Date(registeredAt ?? ""),
+      })),
+    )
+    .returning({ id: schema.domains.id });
+  const parked: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    parked.push(
+      await insertParked(new Date(Date.UTC(2026, 9, 9, 10, 0, i)), "held", {
+        domainId: domains[i % 2]?.id,
+        parkReason: "warmup",
+      }),
+    );
+  }
+  const enqueued: string[] = [];
+  expect(
+    await drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date("2026-10-10T00:15:00Z"),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    }),
+  ).toEqual({ drained: 5, stillParked: 5 });
+  // The fresh domain's own 2, then the older one's rows up to the shared 5.
+  expect(enqueued).toEqual([0, 1, 2, 3, 5].map((i) => parked[i]));
 });

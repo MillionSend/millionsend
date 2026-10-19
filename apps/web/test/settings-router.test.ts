@@ -1,14 +1,45 @@
-import { DAY_MS, utcDay } from "@millionsend/core";
+import { DAY_MS, SUSPENSION_REASONS, settleSharedSubdomain, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { SES_REGIONS } from "@millionsend/ses";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, REFUSED_NAMES } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { createSettingsRouter, type TeamDeletionDeps } from "@/server/routers/settings";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
+
+const enqueueSharedSubdomain = vi.hoisted(() =>
+  vi.fn(async (_teamId: string, _since: Date, _startAfter?: Date) => {}),
+);
+vi.mock("@/server/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/queue")>()),
+  enqueueSharedSubdomain,
+}));
+
+const SHARED = "agents.example.com";
+
+/** The team's label and whether it is locked; undefined without one. */
+const labelOf = async (teamId: string) =>
+  (
+    await db
+      .select({
+        name: schema.sharedInboxDomains.name,
+        lockedAt: schema.sharedInboxDomains.lockedAt,
+      })
+      .from(schema.sharedInboxDomains)
+      .where(eq(schema.sharedInboxDomains.teamId, teamId))
+  )[0];
+
+/** A configured name review that can't answer, as fetch sees it. */
+function judgeDown() {
+  vi.stubEnv("ABUSE_JUDGE", "typesafe");
+  vi.stubEnv("ABUSE_JUDGE_API_KEY", "test-key");
+  const judge = vi.fn(() => Promise.reject(new Error("judge down")));
+  vi.stubGlobal("fetch", judge);
+  return judge;
+}
 
 // SKIP_ENV_VALIDATION leaves env reads live, so stubbing IS_CLOUD here
 // switches the routers between cloud and self-host behavior per test.
@@ -29,6 +60,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  enqueueSharedSubdomain.mockClear();
   await close();
 });
 
@@ -69,6 +102,19 @@ describe("settings.team", () => {
     expect(team?.name).toBe("Acme Corp");
   });
 
+  it("rename refuses a name that could read as a link or hide characters", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    for (const name of REFUSED_NAMES) {
+      await expect(
+        callerFor("u1", teamId, "owner").settings.team.rename({ name }),
+        name,
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+    expect(team?.name).toBe("acme");
+  });
+
   it("rename is forbidden for role member", async () => {
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "member");
@@ -77,6 +123,82 @@ describe("settings.team", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
     expect(team?.name).toBe("acme");
+  });
+
+  it("rename to a brand's name keeps the name and flags the team, once per new name", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const rename = (name: string) =>
+      callerFor("u1", teamId, "owner").settings.team.rename({ name });
+    const flags = () =>
+      db.select().from(schema.teamFlags).where(eq(schema.teamFlags.teamId, teamId));
+    await rename("Acme Corp");
+    expect(await flags()).toEqual([]);
+    await expect(rename("Centra1 Mercado Pago")).resolves.toEqual({ name: "Centra1 Mercado Pago" });
+    expect(await flags()).toMatchObject([
+      { reason: "brand", status: "open", detail: { brand: "Mercado Pago" } },
+    ]);
+    // An operator clears it; saving the same name again is no rename and opens nothing.
+    await db
+      .update(schema.teamFlags)
+      .set({ status: "cleared", clearedAt: new Date(), clearedBy: "op" })
+      .where(eq(schema.teamFlags.teamId, teamId));
+    await rename("Centra1 Mercado Pago");
+    expect((await flags()).filter((f) => f.status === "open")).toEqual([]);
+    await rename("Mercado Pago Help");
+    expect((await flags()).filter((f) => f.status === "open")).toMatchObject([
+      { reason: "brand", detail: { brand: "Mercado Pago" } },
+    ]);
+  });
+});
+
+describe("settings.team.rename and the team's shared subdomain", () => {
+  async function owned(slug: string) {
+    const teamId = await createTeam(db, slug, { sharedInboxDomain: SHARED });
+    await addMember(teamId, `${slug}-owner`, "owner");
+    return {
+      teamId,
+      rename: (name: string) =>
+        callerFor(`${slug}-owner`, teamId, "owner").settings.team.rename({ name }),
+    };
+  }
+
+  it("moves an unlocked label to the new name, and leaves a locked one", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    const { teamId, rename } = await owned("acme");
+    await rename("Acme Corp");
+    expect(await labelOf(teamId)).toEqual({ name: `acme-corp.${SHARED}`, lockedAt: null });
+    await db
+      .update(schema.sharedInboxDomains)
+      .set({ lockedAt: new Date() })
+      .where(eq(schema.sharedInboxDomains.teamId, teamId));
+    await rename("Other Name");
+    expect((await labelOf(teamId))?.name).toBe(`acme-corp.${SHARED}`);
+  });
+
+  it("spends no review on a rename to the same slug, which would only redraw a suffixed label", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    const judge = judgeDown();
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.sharedInboxDomains).values({ teamId, name: `acme-1a2b.${SHARED}` });
+    await addMember(teamId, "u1", "owner");
+    await callerFor("u1", teamId, "owner").settings.team.rename({ name: "ACME" });
+    expect(judge).not.toHaveBeenCalled();
+    expect(enqueueSharedSubdomain).not.toHaveBeenCalled();
+    expect((await labelOf(teamId))?.name).toBe(`acme-1a2b.${SHARED}`);
+  });
+
+  it("keeps the old label while the review can't answer, and has the worker retry from 5 minutes on", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    const judge = judgeDown();
+    const { teamId, rename } = await owned("acme");
+    await expect(rename("Acme Corp")).resolves.toEqual({ name: "Acme Corp" });
+    expect(judge).toHaveBeenCalled();
+    expect((await labelOf(teamId))?.name).toBe(`acme.${SHARED}`);
+    expect(enqueueSharedSubdomain).toHaveBeenCalledTimes(1);
+    const [queuedFor, since, startAfter] = enqueueSharedSubdomain.mock.calls[0] ?? [];
+    expect(queuedFor).toBe(teamId);
+    expect((startAfter?.getTime() ?? 0) - (since?.getTime() ?? 0)).toBe(5 * 60_000);
   });
 });
 
@@ -293,6 +415,78 @@ describe("settings.team.delete", () => {
     expect(await db.select().from(schema.broadcasts)).toEqual([]);
     expect((await db.select().from(schema.oauthConsent)).map((c) => c.id)).toEqual(["there"]);
   });
+
+  it("frees an unlocked label for another team, and keeps a locked one as a tombstone", async () => {
+    vi.stubEnv("SHARED_INBOX_DOMAIN", SHARED);
+    const quiet: TeamDeletionDeps = {
+      cancelSubscription: async () => {},
+      deleteSesIdentity: async () => {},
+      deleteSesTenant: async () => {},
+      deleteLogo: async () => {},
+    };
+    const unused = await createTeam(db, "unused", { sharedInboxDomain: SHARED });
+    const used = await createTeam(db, "used", { sharedInboxDomain: SHARED });
+    await db
+      .update(schema.sharedInboxDomains)
+      .set({ lockedAt: new Date() })
+      .where(eq(schema.sharedInboxDomains.teamId, used));
+    await addMember(unused, "alice", "owner");
+    await addMember(used, "bob", "owner");
+    await deletionCaller("alice", unused, "owner", quiet).settings.team.delete();
+    await deletionCaller("bob", used, "owner", quiet).settings.team.delete();
+    const byName = async (name: string) =>
+      (
+        await db
+          .select({ teamId: schema.sharedInboxDomains.teamId })
+          .from(schema.sharedInboxDomains)
+          .where(eq(schema.sharedInboxDomains.name, `${name}.${SHARED}`))
+      )[0];
+    expect(await byName("unused")).toBeUndefined();
+    expect(await byName("used")).toEqual({ teamId: null });
+    const teamId = await createTeam(db, "unused");
+    await settleSharedSubdomain(db, {
+      teamId,
+      sharedInboxDomain: SHARED,
+      review: undefined,
+      now: new Date(),
+    });
+    expect((await labelOf(teamId))?.name).toBe(`unused.${SHARED}`);
+  });
+
+  it.each(SUSPENSION_REASONS)(
+    "refuses the owner of a team suspended for %s before anything is cancelled or removed",
+    async (reason) => {
+      stubCloud();
+      const teamId = await createTeam(db, "held");
+      await addMember(teamId, "alice", "owner");
+      await db.insert(schema.domains).values({ teamId, name: "held.test", region: "us-east-1" });
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      const calls: string[] = [];
+      const deps: TeamDeletionDeps = {
+        cancelSubscription: async () => void calls.push("stripe"),
+        deleteSesIdentity: async () => void calls.push("ses"),
+        deleteSesTenant: async () => void calls.push("tenant"),
+        deleteLogo: async () => void calls.push("logo"),
+      };
+
+      await expect(
+        deletionCaller("alice", teamId, "owner", deps).settings.team.delete(),
+      ).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        // A team suspended for phishing or held for review is never told it is suspended.
+        message: ["phishing", "review"].includes(reason)
+          ? "This isn't available for this team right now. Contact support if you need help."
+          : "This team is suspended and can't be deleted. Contact support.",
+      });
+      expect(calls).toEqual([]);
+      expect(await db.select().from(schema.teams)).toHaveLength(1);
+      expect(await db.select().from(schema.teamMembers)).toHaveLength(1);
+      expect(await db.select().from(schema.domains)).toHaveLength(1);
+    },
+  );
 });
 
 describe("settings.locale", () => {
@@ -567,7 +761,14 @@ describe("settings.usage", () => {
     await addMember(teamId, "u1", "owner");
     const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
     expect(usage.today.limit).toBeNull();
-    expect(usage.period).toEqual({ accepted: 777, included: 500_000, start, end, overage: true });
+    expect(usage.period).toEqual({
+      accepted: 777,
+      included: 500_000,
+      start,
+      end,
+      overage: true,
+      overagePaused: false,
+    });
   });
 
   it("reports no limit and no period on self-host, where plans are not enforced", async () => {
@@ -588,5 +789,90 @@ describe("settings.usage", () => {
     const usage = await callerFor("alice", teamA, "owner").settings.usage.recent();
     expect(usage.rows).toEqual([]);
     expect(usage.today.accepted).toBe(0);
+  });
+});
+
+describe("settings.usage receiving", () => {
+  beforeEach(() => {
+    vi.stubEnv("RECEIVING_MX_HOST", "mx.receiving.test");
+  });
+
+  async function insertCounter(teamId: string, day: string, accepted: number, received: number) {
+    await db.insert(schema.usageCounters).values({ teamId, day, accepted, received });
+  }
+
+  it("has no receiving figures on an instance that takes no mail", async () => {
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    const teamId = await createTeam(db, "acme");
+    expect((await callerFor("u1", teamId, "owner").settings.usage.recent()).receiving).toBeNull();
+  });
+
+  it("on Free, counts received mail inside the daily limit sending uses", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme");
+    await insertCounter(teamId, dayAgo(0), 30, 12);
+    await insertCounter(teamId, dayAgo(1), 3, 3);
+    const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
+    expect(usage.receiving).toEqual({
+      kind: "shared_day",
+      received: 12,
+      allowance: 100,
+      perBilledEmail: 10,
+    });
+    expect(usage.rows.map((r) => [r.day, r.accepted, r.received])).toEqual([
+      [dayAgo(0), 30, 12],
+      [dayAgo(1), 3, 3],
+    ]);
+  });
+
+  it("on Starter, allows twice the daily cap apart from sending", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme");
+    await db
+      .update(schema.teams)
+      .set({ plan: "starter", currentPeriodEnd: new Date(Date.now() + 20 * DAY_MS) })
+      .where(eq(schema.teams.id, teamId));
+    await insertCounter(teamId, dayAgo(0), 0, 7);
+    expect((await callerFor("u1", teamId, "owner").settings.usage.recent()).receiving).toEqual({
+      kind: "day",
+      received: 7,
+      allowance: 3_000,
+      perBilledEmail: 10,
+    });
+  });
+
+  it("on a monthly plan, counts the billing period against twice its volume", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme");
+    const start = new Date(Date.now() - 10 * DAY_MS);
+    await db
+      .update(schema.teams)
+      .set({
+        plan: "scale",
+        planQuota: 500_000,
+        currentPeriodStart: start,
+        currentPeriodEnd: new Date(Date.now() + 20 * DAY_MS),
+      })
+      .where(eq(schema.teams.id, teamId));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: start, accepted: 10, received: 1_234 });
+    expect((await callerFor("u1", teamId, "owner").settings.usage.recent()).receiving).toEqual({
+      kind: "month",
+      received: 1_234,
+      allowance: 1_000_000,
+      perBilledEmail: 10,
+    });
+  });
+
+  it("never caps it on self-host", async () => {
+    const teamId = await createTeam(db, "acme");
+    await insertCounter(teamId, dayAgo(0), 0, 5);
+    expect((await callerFor("u1", teamId, "owner").settings.usage.recent()).receiving).toEqual({
+      kind: "none",
+      received: 5,
+      allowance: null,
+      perBilledEmail: 10,
+    });
   });
 });

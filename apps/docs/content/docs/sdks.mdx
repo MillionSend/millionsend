@@ -10,6 +10,8 @@ repositories under the [MillionSend GitHub org](https://github.com/MillionSend).
 
 Since the API is Resend wire-compatible, the official Resend SDKs also work —
 point them at MillionSend via their base-URL option (e.g. `RESEND_BASE_URL`).
+From 0.9.0, every MillionSend SDK also covers
+[received mail and inboxes](#receiving-and-inboxes).
 
 ## Base URL
 
@@ -55,7 +57,7 @@ const ms = new MillionSend("ms_123", { baseUrl: "https://api.millionsend.com" })
 
 const { data, error } = await ms.emails.send({
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@example.com",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>",
 });
@@ -77,7 +79,7 @@ millionsend.base_url = "https://api.millionsend.com"
 
 email = millionsend.Emails.send({
     "from": "Acme <onboarding@acme.dev>",
-    "to": "delivered@example.com",
+    "to": "success@simulator.amazonses.com",
     "subject": "Hello from MillionSend",
     "html": "<strong>It works!</strong>",
 })
@@ -97,7 +99,7 @@ client.BaseURL = "https://api.millionsend.com"
 
 sent, err := client.Emails.Send(&millionsend.SendEmailRequest{
     From:    "Acme <onboarding@acme.dev>",
-    To:      []string{"delivered@example.com"},
+    To:      []string{"success@simulator.amazonses.com"},
     Subject: "Hello from MillionSend",
     Html:    "<strong>It works!</strong>",
 })
@@ -119,7 +121,7 @@ Millionsend.base_url = "https://api.millionsend.com"
 
 email = Millionsend::Emails.send(
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@example.com",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>"
 )
@@ -140,7 +142,7 @@ $ms = MillionSend::client('ms_123', 'https://api.millionsend.com');
 
 $email = $ms->emails->send([
     'from' => 'Acme <onboarding@acme.dev>',
-    'to' => 'delivered@example.com',
+    'to' => 'success@simulator.amazonses.com',
     'subject' => 'Hello from MillionSend',
     'html' => '<strong>It works!</strong>',
 ]);
@@ -153,7 +155,7 @@ $email = $ms->emails->send([
 
 ```toml
 [dependencies]
-millionsend = "0.2"
+millionsend = "0.9"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -164,7 +166,7 @@ let ms = MillionSend::with_base_url("ms_123", "https://api.millionsend.com");
 
 let sent = ms.emails.send(&SendEmailOptions {
     from: "Acme <onboarding@acme.dev>".into(),
-    to: "delivered@example.com".into(),
+    to: "success@simulator.amazonses.com".into(),
     subject: "Hello from MillionSend".into(),
     html: Some("<strong>It works!</strong>".into()),
     ..Default::default()
@@ -179,7 +181,7 @@ let sent = ms.emails.send(&SendEmailOptions {
 <dependency>
   <groupId>com.millionsend</groupId>
   <artifactId>millionsend-java</artifactId>
-  <version>0.2.0</version>
+  <version>0.9.0</version>
 </dependency>
 ```
 
@@ -189,7 +191,7 @@ MillionSend ms = new MillionSend("ms_123", "https://api.millionsend.com");
 CreateEmailResponse sent = ms.emails().send(
     CreateEmailOptions.builder()
         .from("Acme <onboarding@acme.dev>")
-        .to("delivered@example.com")
+        .to("success@simulator.amazonses.com")
         .subject("Hello from MillionSend")
         .html("<strong>It works!</strong>")
         .build());
@@ -211,7 +213,7 @@ var client = new MillionSendClient("ms_123", "https://api.millionsend.com");
 var res = await client.EmailSendAsync(new EmailMessage
 {
     From = "Acme <onboarding@acme.dev>",
-    To = "delivered@example.com",
+    To = "success@simulator.amazonses.com",
     Subject = "Hello from MillionSend",
     Html = "<strong>It works!</strong>",
 });
@@ -224,7 +226,7 @@ var res = await client.EmailSendAsync(new EmailMessage
 ```elixir
 # mix.exs
 def deps do
-  [{:millionsend, "~> 0.2"}]
+  [{:millionsend, "~> 0.9"}]
 end
 ```
 
@@ -236,8 +238,51 @@ config :millionsend, MillionSend.Client,
 {:ok, email} =
   MillionSend.Emails.send(%{
     from: "Acme <onboarding@acme.dev>",
-    to: "delivered@example.com",
+    to: "success@simulator.amazonses.com",
     subject: "Hello from MillionSend",
     html: "<strong>It works!</strong>"
   })
 ```
+
+## Receiving and inboxes
+
+From 0.9.0, every SDK reads [received mail](/concepts/receiving) and works
+with [inboxes](/concepts/inboxes), with the same tree in each language's
+idiom (the names below are Node's):
+
+| Resource | Methods |
+| --- | --- |
+| `emails.receiving` | `list` (with `wait`, `since`, `inboxId`, `to`, `from`, `subjectContains`, `unread`, `includeQuarantined`), `get`, `reply`, `forward`, `remove` |
+| `emails.receiving.attachments` | `list`, `get` |
+| `inboxes` | `create`, `list`, `get` (by id or address), `update`, `remove` |
+| `inboxes.safety` | `get`, `update` |
+| `inboxes.codes` | `latest` (with `from`, `wait`, `maxAge`) |
+| `inboxes.quarantine` | `list`, `release` (with `trustSender`) |
+| `inboxes.labels` | `list`, `create`, `update`, `remove` |
+| `inboxes.threads` | `list`, `search`, `get`, `update`, `remove` |
+| `inboxes.threads.emails` | `list`, `get`, `reply`, `forward` |
+| `inboxes.drafts` | `list`, `create`, `get`, `update`, `remove`, `send`, `reject` |
+
+```ts
+import { MillionSend } from "millionsend";
+
+const ms = new MillionSend("ms_123");
+
+// Wait up to 30 seconds for the next email delivered to an inbox.
+const { data: page } = await ms.emails.receiving.list({ inboxId: "7eeb9517-aed7-40d7-ad65-500be42ed147", wait: 30 });
+
+// The newest verification code or sign-in link it received.
+const { data: code } = await ms.inboxes.codes.latest("7eeb9517-aed7-40d7-ad65-500be42ed147", { wait: 30 });
+```
+
+- Reply, forward and draft sends take an idempotency key (in Node
+  `{ idempotencyKey }`, in Go `WithIdempotencyKey`, and each language's
+  equivalent). Pass one to make a retry safe: the SDK sends none on its own.
+- A reply or forward the inbox's rules hold answers a draft instead of the
+  sent email, and the SDKs say which: in Node the result carries
+  `kind: "sent"` or `kind: "draft"`, and each language has its equivalent.
+- Unknown fields and enum values are kept or ignored, never an error, so a
+  newer API doesn't break an older SDK.
+- Domains gain `receiving_catch_all`, API keys `inbox_id`, webhooks
+  `inbox_ids`, and the webhook event types `email.received` and the inbox
+  events.

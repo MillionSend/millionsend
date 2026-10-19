@@ -1,10 +1,10 @@
-import { type PlanRung, type PlanRungKey, rungByKey } from "@millionsend/core";
+import { DAY_MS, type PlanRung, type PlanRungKey, rungByKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import type { BillingDeps } from "./checkout.js";
-import { reportOverage } from "./overage.js";
+import { assertOverageCounted, reportOverage } from "./overage.js";
 import {
   overageLookupKey,
   pendingRungOf,
@@ -132,7 +132,7 @@ export async function applySubscription(
   // what it has not billed yet must reach the meter while the row still
   // names the item, inside Stripe's draft window for the closing period.
   if (stripe && team.stripeOverageItemId && overageItemId === null) {
-    await reportOverage({ db: tx, stripe, log }, { teamId: team.id });
+    await reportOverage({ db: tx, stripe, log }, { teamId: team.id, throughHold: true });
   }
   await tx
     .update(schema.teams)
@@ -143,6 +143,7 @@ export async function applySubscription(
       stripeSubscriptionId: sub.id,
       stripeOverageItemId: overageItemId,
       pendingRung: entitled ? pendingRungOf(sub, rung) : null,
+      moveUpPendingUntil: stamp(sub.pending_update?.expires_at),
       currentPeriodStart: stamp(base?.current_period_start),
       currentPeriodEnd: stamp(base?.current_period_end),
       cancelAt: stamp(sub.cancel_at),
@@ -210,6 +211,34 @@ async function applyLocked(deps: BillingDeps, customerId: string, subscriptionId
   });
 }
 
+/**
+ * Voids the invoice of a move up still waiting on payment, which drops that
+ * move. Once that invoice is paid, nothing reported on the old price in the
+ * meantime bills, so a caller about to report through the wait ends it first
+ * instead of leaving the invoice payable when it stops partway.
+ */
+async function endMoveUpWait(
+  deps: BillingDeps,
+  teamId: string,
+  sub: Stripe.Subscription,
+): Promise<void> {
+  if (!sub.pending_update) return;
+  const { data } = await deps.stripe.invoices.list({
+    subscription: sub.id,
+    status: "open",
+    limit: 10,
+  });
+  for (const invoice of data) {
+    if (invoice.billing_reason === "subscription_update" && invoice.id) {
+      await deps.stripe.invoices.voidInvoice(invoice.id);
+    }
+  }
+  await deps.db
+    .update(schema.teams)
+    .set({ moveUpPendingUntil: null })
+    .where(eq(schema.teams.id, teamId));
+}
+
 /** Drops a pending downgrade: the subscription keeps its current items. */
 async function releaseSchedule(deps: BillingDeps, sub: Stripe.Subscription): Promise<void> {
   const id = idOf(sub.schedule);
@@ -232,21 +261,33 @@ async function rungItems(
 export type RungChange =
   | { applied: "now" }
   | { applied: "period_end"; at: Date }
-  | { applied: "unscheduled" };
+  | { applied: "unscheduled" }
+  /** Nothing moved yet: paying the invoice behind `url` applies the move. */
+  | { applied: "payment_required"; url: string | null };
 
 /**
- * Moves a live subscription to another rung. Up (or across): at once, with
- * prorations on the next invoice, and any pending downgrade dropped. Down: a
- * subscription schedule swaps the items when the current period ends, with
- * no proration, so the paid volume is kept to the day it was paid for; a
- * later move up releases the schedule. Choosing the current rung while a
- * downgrade is pending drops it. Stripe's customer portal cannot switch
- * plans on a subscription carrying more than one item, so this is the one
- * place plan changes happen; the webhook that follows re-applies the state.
+ * Moves a live subscription to another rung. Up: the prorated difference
+ * and the overage so far are invoiced and charged at once, any pending
+ * downgrade is dropped, and the new volume applies only once that invoice
+ * is paid. When the bank declines or asks for authentication the rung stays
+ * (the pending downgrade is already gone): Stripe holds the change for 23
+ * hours, paying the invoice on its hosted page applies it, and otherwise the
+ * invoice is voided. Down: a subscription
+ * schedule swaps the items when the current period ends, with no proration,
+ * so the paid volume is kept to the day it was paid for; a later move up
+ * releases the schedule. Choosing the current rung while a downgrade is
+ * pending drops it. Stripe's customer portal cannot switch plans on a
+ * subscription carrying more than one item, so this is the one place plan
+ * changes happen; the webhook that follows re-applies the state.
  */
 export async function changeRung(
   deps: BillingDeps,
-  input: { teamId: string; rung: PlanRungKey },
+  input: {
+    teamId: string;
+    rung: PlanRungKey;
+    /** Runs before a move up, judged against the live subscription; throwing refuses the move. */
+    beforeMoveUp?: (() => Promise<void>) | undefined;
+  },
 ): Promise<RungChange> {
   const rung = rungByKey(input.rung);
   if (rung.priceCents <= 0) throw new Error(`rung ${input.rung} is not for sale`);
@@ -286,9 +327,21 @@ export async function changeRung(
     });
     result = { applied: "period_end", at: new Date(periodEnd * 1000) };
   } else {
-    await releaseSchedule(deps, sub);
+    await input.beforeMoveUp?.();
+    await endMoveUpWait(deps, input.teamId, sub);
     // Sends made under the old rung settle at its rate before the move.
-    if (overage) await reportOverage(deps, { teamId: input.teamId });
+    if (overage) {
+      await reportOverage(deps, { teamId: input.teamId, throughHold: true });
+      if (current.period === "month" && base.current_period_start) {
+        await assertOverageCounted(deps, {
+          teamId: input.teamId,
+          customerId,
+          periodStart: new Date(base.current_period_start * 1000),
+          included: current.included,
+        });
+      }
+    }
+    await releaseSchedule(deps, sub);
     const items: Stripe.SubscriptionUpdateParams.Item[] = [
       { id: base.id, price: await resolvePriceId(deps.stripe, rungLookupKey(rung)) },
     ];
@@ -298,10 +351,17 @@ export async function changeRung(
     } else if (overage) {
       items.push({ id: overage.id, deleted: true });
     }
-    await deps.stripe.subscriptions.update(sub.id, {
+    const updated = await deps.stripe.subscriptions.update(sub.id, {
       items,
-      proration_behavior: "create_prorations",
+      proration_behavior: "always_invoice",
+      payment_behavior: "pending_if_incomplete",
+      expand: ["latest_invoice"],
     });
+    if (updated.pending_update) {
+      const invoice = typeof updated.latest_invoice === "object" ? updated.latest_invoice : null;
+      await applyLocked(deps, customerId, sub.id);
+      return { applied: "payment_required", url: invoice?.hosted_invoice_url ?? null };
+    }
     // What was accepted inside the old volume is never re-judged as overage
     // under the new one: the period row counts it as already settled.
     if (rung.period === "month" && base.current_period_start) {
@@ -354,16 +414,42 @@ export async function setOverage(
 }
 
 /**
- * Cancels the team's subscription immediately (no final invoice) and clears
- * its plan; used when the team itself goes away. No-op without a live
- * subscription.
+ * Cancels the team's subscription immediately and clears its plan; used when
+ * the team itself goes away. A final invoice bills the overage the period
+ * has accrued and any proration still pending: the usage reaches the meter
+ * first, and Stripe keeps that invoice a draft for about an hour, so a meter
+ * event still being processed lands on it. The unused time is not refunded.
+ * No-op without a live subscription.
  */
 export async function cancelTeamSubscription(deps: BillingDeps, teamId: string): Promise<void> {
+  await endSubscription(deps, teamId, true);
+}
+
+async function endSubscription(
+  deps: BillingDeps,
+  teamId: string,
+  finalInvoice: boolean,
+): Promise<void> {
   const team = await loadBillingColumns(deps.db, teamId);
   if (!team?.stripeSubscriptionId) return;
   const sub = await deps.stripe.subscriptions.retrieve(team.stripeSubscriptionId);
   if (sub.status !== "canceled" && sub.status !== "incomplete_expired") {
-    await deps.stripe.subscriptions.cancel(sub.id, { invoice_now: false, prorate: false });
+    if (finalInvoice) {
+      await endMoveUpWait(deps, teamId, sub);
+      // A second early: the final invoice takes events stamped before the
+      // cancel, which can land in the same second as the report.
+      const { failed } = await reportOverage(deps, {
+        teamId,
+        now: new Date(Date.now() - 1000),
+        throughHold: true,
+      });
+      // A step Stripe refused here would go away with the team's rows once
+      // the cancel succeeds. An older pin no run sends again does not count.
+      if (failed > 0) {
+        throw new Error(`team ${teamId}: overage not reported; the subscription stays`);
+      }
+    }
+    await deps.stripe.subscriptions.cancel(sub.id, { invoice_now: finalInvoice, prorate: false });
   }
   await deps.db
     .update(schema.teams)
@@ -375,9 +461,72 @@ export async function cancelTeamSubscription(deps: BillingDeps, teamId: string):
       stripeOverageItemId: null,
       overageEnabled: false,
       pendingRung: null,
+      moveUpPendingUntil: null,
       currentPeriodStart: null,
       currentPeriodEnd: null,
       cancelAt: null,
     })
     .where(eq(schema.teams.id, teamId));
+}
+
+/** Card networks take disputes for about 120 days after a payment; an older one cannot return. */
+const FRAUD_REFUND_WINDOW_MS = 120 * DAY_MS;
+
+export interface FraudRefund {
+  /** The subscription canceled; null when the team had none. */
+  canceled: string | null;
+  /** The payments refunded, each in full, in minor units of its currency. */
+  refunds: { charge: string; amount: number; currency: string }[];
+  /** Why Stripe stopped partway; what is listed above was done before it. */
+  failed: string | null;
+}
+
+/**
+ * Ends the billing of a team suspended for fraud: its subscription is
+ * canceled at once with no proration and no final invoice, whose charge
+ * would land about an hour later, after the refunds, on a card already
+ * judged fraudulent. Then every payment of the last 120 days is refunded in
+ * full as fraudulent, which also puts the card and email on Radar's block
+ * lists. A disputed payment is left to its dispute and a refunded one is
+ * skipped; the rest of a partly refunded one goes back, since a partial
+ * refund can still be disputed in full. Each refund is keyed by its charge,
+ * so a retry never refunds twice. A Stripe failure is returned, never
+ * thrown: the suspension before it stands.
+ */
+export async function cancelAndRefundFraud(
+  deps: BillingDeps,
+  teamId: string,
+  now = new Date(),
+): Promise<FraudRefund> {
+  const team = await loadBillingColumns(deps.db, teamId);
+  const outcome: FraudRefund = { canceled: null, refunds: [], failed: null };
+  if (!team?.stripeCustomerId) return outcome;
+  try {
+    if (team.stripeSubscriptionId) {
+      await endSubscription(deps, teamId, false);
+      outcome.canceled = team.stripeSubscriptionId;
+    }
+    const charges = deps.stripe.charges.list({
+      customer: team.stripeCustomerId,
+      created: { gte: Math.floor((now.getTime() - FRAUD_REFUND_WINDOW_MS) / 1000) },
+      limit: 100,
+    });
+    for await (const charge of charges) {
+      if (charge.status !== "succeeded" || charge.disputed || charge.refunded) continue;
+      const refund = {
+        charge: charge.id,
+        amount: charge.amount - charge.amount_refunded,
+        currency: charge.currency,
+      };
+      await deps.stripe.refunds.create(
+        { charge: charge.id, reason: "fraudulent" },
+        { idempotencyKey: `fraud-refund:${charge.id}` },
+      );
+      outcome.refunds.push(refund);
+    }
+  } catch (err) {
+    outcome.failed = String(err);
+    (deps.log ?? console.warn)(`fraud refund for team ${teamId} stopped: ${outcome.failed}`);
+  }
+  return outcome;
 }

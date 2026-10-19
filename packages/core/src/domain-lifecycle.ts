@@ -1,18 +1,28 @@
+import { sharedInboxDomain } from "@millionsend/config";
 import { type Db, schema } from "@millionsend/db";
-import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { parseSingleSender } from "./sender-address.js";
+import { endQueuedEmails } from "./status.js";
+import type { WebhookEnqueue } from "./webhooks.js";
 
-/** Consumer mailbox providers no tenant can own; refused on every deployment. */
-const PUBLIC_MAILBOX_DOMAINS = [
+/**
+ * Consumer mailbox providers: no tenant can own one as a sender, on every
+ * deployment, and no disposable-domain list can block one.
+ */
+export const PUBLIC_MAILBOX_DOMAINS = [
   "gmail.com",
   "googlemail.com",
   "yahoo.com",
+  "yahoo.com.br",
   "outlook.com",
+  "outlook.com.br",
   "hotmail.com",
+  "hotmail.com.br",
   "live.com",
   "msn.com",
   "icloud.com",
   "me.com",
+  "mac.com",
   "aol.com",
   "proton.me",
   "protonmail.com",
@@ -23,6 +33,7 @@ const PUBLIC_MAILBOX_DOMAINS = [
   "uol.com.br",
   "bol.com.br",
   "terra.com.br",
+  "ig.com.br",
 ] as const;
 
 /** The hosted product's own domain; a cloud tenant must never hold its SES identity. */
@@ -33,9 +44,9 @@ export const DOMAIN_CREATE_LIMIT_PER_HOUR = 10;
 
 /**
  * Whether `name` (or a subdomain of it) may not be registered as a sender
- * identity: public mailbox providers everywhere, plus in cloud the platform
- * domain and the operator's AUTH_EMAIL_FROM / ONBOARDING_EMAIL_FROM /
- * NOTIFICATIONS_EMAIL_FROM domains —
+ * identity: public mailbox providers and the shared inbox domain everywhere,
+ * plus in cloud the platform domain and the operator's AUTH_EMAIL_FROM /
+ * ONBOARDING_EMAIL_FROM / NOTIFICATIONS_EMAIL_FROM domains —
  * SES identities are account-wide, so a tenant registering them would take
  * over system mail.
  */
@@ -47,10 +58,17 @@ export function isReservedSenderDomain(
     onboardingEmailFrom?: string | null | undefined;
     notificationsEmailFrom?: string | null | undefined;
     isOperator?: boolean;
+    /** Defaults to SHARED_INBOX_DOMAIN. */
+    sharedInboxDomain?: string | null | undefined;
   },
 ): boolean {
   // Consumer mailbox providers are refused to everyone — nobody owns them.
   const reserved: string[] = [...PUBLIC_MAILBOX_DOMAINS];
+  // The shared inbox domain's subdomains are handed to teams' inboxes; a
+  // domain row there, even the operator's, would compete for their mail.
+  const shared =
+    opts.sharedInboxDomain === undefined ? sharedInboxDomain() : opts.sharedInboxDomain;
+  if (shared) reserved.push(shared);
   // The platform domain and the system-mail domain are the operator's own, so
   // the operator may send from them (dogfooding); a tenant registering them
   // would take over account-wide system mail.
@@ -108,41 +126,26 @@ export async function isIdentitySharedByOtherDomains(
 
 /**
  * Terminally fails every not-yet-claimed queued email of a domain about to
- * be deleted, with a `failed` event carrying the reason. Must run in the
- * same transaction as the row delete: emails.domain_id is ON DELETE SET
- * NULL, so afterwards the rows can no longer be found by domain, and a
- * still-queued row would make the worker retry a sender that no longer
- * exists. Claimed rows (sent_at set) are left to the send handler.
+ * be deleted, with a `failed` event carrying the reason and email.failed.
+ * Must run in the same transaction as the row delete: emails.domain_id is
+ * ON DELETE SET NULL, so afterwards the rows can no longer be found by
+ * domain, and a still-queued row would make the worker retry a sender that
+ * no longer exists. Claimed rows (sent_at set) are left to the send
+ * handler. `enqueue` collects the webhook rows for the caller to hand to
+ * the queue once its transaction commits (webhookBatch).
  */
 export async function failQueuedEmailsForDomain(
   db: Db,
-  params: { teamId: string; domainId: string },
+  params: { teamId: string; domainId: string; enqueue: WebhookEnqueue },
 ): Promise<number> {
   const e = schema.emails;
-  const failed = await db
-    .update(e)
-    .set({ latestStatus: "failed" })
-    .where(
-      and(
-        eq(e.teamId, params.teamId),
-        eq(e.domainId, params.domainId),
-        inArray(e.latestStatus, ["queued", "queued_quota"]),
-        isNull(e.sentAt),
-      ),
-    )
-    .returning({ id: e.id });
-  if (failed.length > 0) {
-    const occurredAt = new Date();
-    await db.insert(schema.emailEvents).values(
-      failed.map((row) => ({
-        emailId: row.id,
-        type: "failed" as const,
-        occurredAt,
-        data: { reason: "domain_deleted" },
-      })),
-    );
-  }
-  return failed.length;
+  return endQueuedEmails(db, {
+    status: "failed",
+    where: and(eq(e.teamId, params.teamId), eq(e.domainId, params.domainId), isNull(e.sentAt)),
+    data: { reason: "domain_deleted" },
+    now: new Date(),
+    enqueue: params.enqueue,
+  });
 }
 
 /**

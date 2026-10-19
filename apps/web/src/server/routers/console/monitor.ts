@@ -8,6 +8,7 @@ import {
   MONITOR_SETTINGS,
   type MonitorSettingKey,
   monitorDayCounts,
+  monitorSettingDefault,
   monitorThresholdsOrdered,
   resolveMonitorSettings,
   resumeMonitorPause,
@@ -17,6 +18,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { MONITOR_COUNT_MAX } from "@/lib/monitor-settings";
 import { judgeStatus } from "../../console/monitor";
 import { operatorProcedure, router } from "../../trpc";
 import { auditOperator, kickQuotaDrain, loadTeam } from "./shared";
@@ -63,7 +65,7 @@ export const consoleMonitorRouter = router({
           key,
           value: settings[key],
           source: sources[key],
-          default: MONITOR_SETTINGS[key].default,
+          default: monitorSettingDefault(key, envValues()),
           fallback: fallback[key],
           kind: MONITOR_SETTINGS[key].kind,
         })),
@@ -79,7 +81,8 @@ export const consoleMonitorRouter = router({
       .input(
         z.partialRecord(
           z.enum(MONITOR_SETTING_KEYS),
-          z.union([z.number(), z.boolean()]).nullable(),
+          // Binds the int4 counts; the other kinds stay far below it.
+          z.union([z.number().max(MONITOR_COUNT_MAX), z.boolean()]).nullable(),
         ),
       )
       .mutation(async ({ ctx, input }) => {

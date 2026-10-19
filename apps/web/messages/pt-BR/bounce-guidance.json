@@ -6,9 +6,9 @@
       "action": "Autentique seu domínio de envio (SPF + DKIM alinhados) e registre-o no postmaster do iCloud da Apple, depois reenvie."
     },
     "googleBulk": {
-      "title": "O Google recusou por autenticação de remetente em massa",
+      "title": "O Google recusou por falha na autenticação de remetente em massa",
       "body": "O Google exige autenticação de remetentes em massa: alinhamento de SPF ou DKIM mais um registro DMARC no domínio de envio.",
-      "action": "Publique um registro DMARC e confirme que SPF ou DKIM alinha com seu domínio do From, depois reenvie."
+      "action": "Publique um registro DMARC e confirme que o SPF ou o DKIM está alinhado ao domínio do remetente, depois reenvie."
     },
     "microsoftBlock": {
       "title": "O SmartScreen da Microsoft bloqueou esta mensagem",
@@ -19,7 +19,7 @@
   "code": {
     "noMailbox": {
       "title": "Caixa postal inexistente",
-      "body": "O servidor do destinatário informou que o endereço não existe. Um erro de digitação causa a maioria destes.",
+      "body": "O servidor do destinatário informou que o endereço não existe. Na maioria das vezes, é erro de digitação.",
       "action": "Confirme o endereço exato com o destinatário antes de enviar de novo."
     },
     "badDomain": {
@@ -40,7 +40,7 @@
     "messageTooLarge": {
       "title": "Mensagem grande demais",
       "body": "O servidor do destinatário recusou a mensagem por exceder o limite de tamanho.",
-      "action": "Reduza a mensagem ou hospede anexos grandes atrás de um link, depois reenvie."
+      "action": "Reduza a mensagem ou troque anexos grandes por um link, depois reenvie."
     },
     "dnsRouting": {
       "title": "O domínio não resolve",
@@ -60,13 +60,13 @@
     "greylisted": {
       "title": "Greylisting ou limite de taxa",
       "body": "O servidor do destinatário adiou a mensagem temporariamente. O SES tentou de novo enquanto pôde e depois reportou este bounce.",
-      "action": "Nada tenta de novo depois disso. Envie de novo; uma tentativa mais tarde costuma passar."
+      "action": "Não há novas tentativas depois disso. Envie de novo; uma tentativa mais tarde costuma passar."
     }
   },
   "subtype": {
     "permanentGeneral": {
       "title": "Bounce permanente",
-      "body": "O servidor do destinatário recusou a mensagem em definitivo. Este endereço continuará devolvendo.",
+      "body": "O servidor do destinatário recusou a mensagem em definitivo. Este endereço vai continuar dando bounce.",
       "action": "Confirme se o endereço está correto; ele fica suprimido até você fazer isso."
     },
     "noEmail": {
@@ -76,7 +76,7 @@
     },
     "suppressed": {
       "title": "Na lista de supressão do SES",
-      "body": "Este endereço devolveu ou recebeu reclamação recentemente na plataforma e foi suprimido globalmente.",
+      "body": "Este endereço deu bounce ou gerou uma reclamação recentemente e foi suprimido globalmente.",
       "action": "Só reenvie se tiver confirmado que a caixa postal voltou a ser válida."
     },
     "onAccountSuppressionList": {
@@ -87,7 +87,7 @@
     "transientGeneral": {
       "title": "Bounce temporário",
       "body": "O servidor do destinatário continuou adiando a mensagem; o SES tentou de novo por um tempo e depois desistiu.",
-      "action": "Nada tenta de novo depois disso. Envie de novo mais tarde se a mensagem ainda importar — o endereço não é suprimido e isto não conta na sua taxa de bounce."
+      "action": "Não há novas tentativas depois disso. Envie de novo mais tarde se a mensagem ainda importar — o endereço não é suprimido e isto não conta na sua taxa de bounce."
     },
     "mailboxFull": {
       "title": "Caixa postal cheia",
@@ -97,7 +97,7 @@
     "messageTooLarge": {
       "title": "Mensagem grande demais",
       "body": "O servidor do destinatário recusou a mensagem por exceder o limite de tamanho.",
-      "action": "Reduza a mensagem ou hospede anexos grandes atrás de um link, depois reenvie."
+      "action": "Reduza a mensagem ou troque anexos grandes por um link, depois reenvie."
     },
     "contentRejected": {
       "title": "Conteúdo recusado",
@@ -124,7 +124,7 @@
     "transient": {
       "title": "Bounce temporário",
       "body": "O servidor do destinatário continuou adiando a mensagem; o SES tentou de novo por um tempo e depois desistiu.",
-      "action": "Nada tenta de novo depois disso. Envie de novo mais tarde se a mensagem ainda importar — o endereço não é suprimido e isto não conta na sua taxa de bounce."
+      "action": "Não há novas tentativas depois disso. Envie de novo mais tarde se a mensagem ainda importar — o endereço não é suprimido e isto não conta na sua taxa de bounce."
     },
     "undetermined": {
       "title": "Motivo do bounce indeterminado",
@@ -144,7 +144,7 @@
       "action": "Não reenvie; reveja como este destinatário entrou na sua lista."
     },
     "authFailure": {
-      "title": "Reclamação de autenticação",
+      "title": "Reclamação por falha de autenticação",
       "body": "A denúncia cita uma falha de autenticação de e-mail (SPF, DKIM ou DMARC).",
       "action": "Corrija o alinhamento de SPF, DKIM e DMARC do seu domínio."
     },
@@ -154,13 +154,13 @@
       "action": "Não reenvie; reveja o conteúdo da mensagem e a origem do envio."
     },
     "notSpam": {
-      "title": "Marcada como não spam",
+      "title": "Marcada como \"não é spam\"",
       "body": "O destinatário tirou esta mensagem do spam. É um sinal positivo.",
       "action": "Nenhuma ação necessária."
     },
     "virus": {
       "title": "Denunciada por conter vírus",
-      "body": "O destinatário denunciou esta mensagem como portadora de malware.",
+      "body": "O destinatário denunciou que esta mensagem contém malware.",
       "action": "Não reenvie; verifique seu conteúdo e anexos."
     },
     "other": {

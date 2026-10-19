@@ -3,7 +3,7 @@ title: Domínios
 description: Verifique domínios de envio com DNS guiado, BYODKIM e configuração por domínio.
 ---
 
-Todo email precisa sair de um domínio que seu time **verificou** — a API
+Todo e-mail precisa sair de um domínio que sua equipe **verificou** — a API
 rejeita qualquer outro endereço em `from` com `422`. Domínios são adicionados
 e verificados no painel.
 
@@ -22,15 +22,15 @@ Dois sinais de verificação aparecem lado a lado:
 - **Status no SES** — o que o SES reporta. O SES faz cache da verificação e
   pode atrasar depois que você muda registros.
 - **Checagem de DNS ao vivo** — o MillionSend resolve cada registro por conta
-  própria e reporta Encontrado / Faltando / Divergente imediatamente.
+  própria e reporta Encontrado / Ausente / Divergente imediatamente.
 
 A API (`GET /domains/{id}`, `POST /domains/{id}/verify` e as ferramentas MCP
 `get_domain` / `verify_domain`) reporta o mesmo quadro por registro em
 `records[]`. O `status` usa o vocabulário do Resend: para DKIM e MAIL FROM ele
 combina a checagem ao vivo com o SES — encontrado no DNS mas ainda não
-confirmado pelo SES lê `pending`, um valor publicado diferente lê `failed`,
-nenhum registro lê `not_started`. Só essas linhas condicionam o envio. A linha
-DMARC segue a descoberta da RFC 7489: lê `verified` quando uma política cobre o
+confirmado pelo SES aparece como `pending`, um valor publicado diferente aparece como `failed`,
+nenhum registro aparece como `not_started`. Só essas linhas condicionam o envio. A linha
+DMARC segue a descoberta da RFC 7489: aparece como `verified` quando uma política cobre o
 domínio, inclusive o registro do domínio pai para um subdomínio remetente —
 nesse caso `inherited_from` nomeia o registro `_dmarc` que respondeu e `policy`
 traz o seu `p=` — e `not_started` quando nenhuma cobre. Todo registro também
@@ -42,7 +42,7 @@ dizendo por quê.
 
 Uma instalação provisiona identidades nas regiões do SES que atende — a sua
 `AWS_REGIONS`, ou a única região em `AWS_REGION`; o MillionSend Cloud atende
-`sa-east-1` (São Paulo) hoje. O formulário de novo domínio do dashboard lista
+`sa-east-1` (São Paulo) hoje. O formulário de novo domínio do painel lista
 as regiões atendidas, segura uma que ainda está no sandbox do SES enquanto
 outra tem acesso de produção, e usa por padrão a primeira região em produção.
 O campo opcional `region` da API (inclusive na ferramenta MCP `create_domain`)
@@ -55,7 +55,169 @@ enviaria nem reportaria eventos.
 Um domínio tem exatamente uma região. Para mudá-la, exclua o domínio e
 adicione de novo na outra região — os registros DNS mudam, já que as
 identidades do SES são por região. No MillionSend Cloud, um nome de domínio
-que outro time já tem está tomado em todas as regiões.
+que outra equipe já tem está tomado em todas as regiões.
+
+## Limite de domínio novo
+
+No MillionSend Cloud, um domínio registrado há pouco tempo envia aos poucos
+enquanto constrói reputação com os provedores de e-mail. A idade é a do
+domínio registrado (`acme.com` para `mail.acme.com`; um nome de um serviço
+gratuito de subdomínios, como `shop.eu.org`, conta como domínio próprio),
+lida de dados públicos quando o domínio é adicionado, e o limite conta por
+dia UTC:
+
+| Idade do domínio | E-mails por dia |
+| --- | --- |
+| Menos de 24 horas | 100 |
+| De 1 a 7 dias | 300 |
+| De 7 a 30 dias | 2.000 |
+| 30 dias ou mais | só o limite do seu plano |
+
+Um domínio que envia de forma limpa (poucos bounces, nenhuma reclamação de
+spam) sobe um degrau antes. O limite vale além do seu plano, e mudar de plano
+não o libera. Enquanto ele vale, a página do domínio mostra "Limite de
+domínio novo: N/dia hoje · volume total a partir de …".
+
+Os domínios novos da sua equipe compartilham um único volume diário, o maior
+entre os limites deles, e cada um continua dentro do seu: adicionar outro
+domínio novo não acrescenta volume. Domínios com 30 dias ou mais ficam de
+fora. Quando mais de um domínio seu está sob esse limite, a página do domínio
+avisa que o volume é compartilhado.
+
+O que passa do limite do dia nunca é recusado nem perdido: é aceito, aparece
+como **Aguardando** e sai conforme o limite permite, do mais antigo para o
+mais novo. Só quando já há muita coisa aguardando um envio responde
+`429 daily_quota_exceeded` (SMTP `452`) com uma mensagem que cita esse
+limite. Tente de novo depois da virada do dia UTC.
+
+Esse limite é automático e separado do [aquecimento](#aquecimento) opcional
+abaixo. Quando os dois valem, uma transmissão sai dentro do menor deles.
+
+## Aquecimento
+
+Os provedores de e-mail confiam um pouco mais em um remetente novo a cada dia
+de bom comportamento. O aquecimento (beta) aproveita isso: enquanto ele está
+ligado em um domínio, as transmissões desse domínio saem com um volume diário
+que começa pequeno e cresce a cada dia de entrega saudável, com os contatos
+mais ativos primeiro. Ele vem desligado e vale para um domínio de cada vez.
+Seus e-mails transacionais nunca ficam retidos.
+
+Ligue pelo painel: na aba **Aquecimento** do domínio, ao adicionar o domínio
+(respondendo "Não, é novo" a "Este domínio já enviou e-mails?") ou na janela
+**Enviar transmissão**, que oferece o aquecimento quando uma transmissão é bem
+maior que tudo o que o domínio já enviou em um dia.
+
+### Quando usar
+
+Ligue para um domínio ou subdomínio novo antes do primeiro envio grande, ou
+antes de um envio bem maior que tudo o que o domínio já enviou em um dia.
+
+Deixe desligado para um domínio que já envia esse volume por outro provedor.
+Ele mantém a reputação que já tem lá. Um domínio que envia menos em outro
+lugar ainda pode aquecer a partir do que envia todo dia: aumente o volume
+inicial para esse número.
+
+### Como funciona
+
+- O dia 1 envia o volume inicial: 1.500, ou o dobro do dia de maior envio do
+  domínio nos últimos 30 dias, se for maior. Você pode definir de 100 a
+  1.000.000.
+- Cada dia saudável aumenta o volume em 1,5×, até a meta diária, o máximo que
+  você pretende enviar em um dia. A meta começa no número de contatos
+  inscritos, no mínimo 10.000, e você pode definir de 1.000 a 10.000.000. O
+  aquecimento termina depois de um dia saudável na meta.
+- O volume de um dia sai em partes de 1/48, uma a cada 15 minutos, então leva
+  pelo menos 12 horas. Os dias são dias UTC, e cada um só começa depois que o dia
+  anterior é verificado.
+- O que passar do volume do dia espera o dia seguinte, na mesma ordem, e
+  aparece como **Aguardando**, enquanto o conteúdo dos e-mails for guardado
+  (veja abaixo).
+- Só as transmissões esperam. E-mails enviados com `POST /emails`, em lote ou
+  pelo SMTP nunca ficam retidos.
+- Um dia que envia menos da metade do volume não o aumenta. Dias sem envio
+  não contam, e depois de 30 seguidos o volume recomeça do início.
+
+### Quem recebe primeiro
+
+O volume de cada dia vai para os contatos com mais chance de abrir, pela
+atividade mais recente entre estes sinais. Você escolhe quais contam na aba
+**Aquecimento**.
+
+- A última abertura ou o último clique. Um pré-carregamento feito por máquina
+  nunca conta.
+- O último e-mail transacional que o contato recebeu da sua equipe nos
+  últimos 30 dias.
+- Uma propriedade do contato que você escolhe, lida como data, como o último
+  login. Ela aceita uma data ou data e hora ISO 8601, ou um timestamp Unix em
+  segundos ou milissegundos.
+
+Um contato cujo sinal mais recente tem 90 dias ou mais está inativo. Por
+padrão, o aquecimento pula os contatos inativos: eles não recebem a
+transmissão, e a página da transmissão mostra quantos ficaram de fora.
+Escolha **Enviar por último** para colocá-los no fim da fila. Um contato sem
+nenhum sinal não conta como inativo: ele recebe depois dos ativos.
+
+### A verificação diária
+
+No começo de cada dia UTC, o dia anterior é verificado em cinco sinais, lidos
+dos e-mails de transmissão do domínio naquele dia. O Gmail é medido à parte
+das outras caixas.
+
+| Sinal | O que mede | Limite | Grave |
+| --- | --- | --- | --- |
+| Atrasos na entrega | E-mails para o Gmail que o Gmail atrasou | abaixo de 5% | 20% ou mais |
+| Aberturas, Gmail vs. outras | A taxa de abertura no Gmail como fração da taxa das outras caixas | pelo menos metade | abaixo de um quarto |
+| Hard bounces | Endereços que deram bounce permanente | abaixo de 2% | 5% ou mais |
+| Caixas cheias ou inativas | Caixas que responderam que estão cheias ou inativas | abaixo de 2% | 5% ou mais |
+| Denúncias de spam | Denúncias sobre os e-mails para provedores que as informam | abaixo de 0,05% | 0,1% ou mais |
+
+Um sinal que passa do limite fica **Fora**. O Gmail não avisa os remetentes
+sobre denúncias de spam, então as denúncias vêm dos outros provedores, e sua
+taxa de spam no Gmail fica no
+[Google Postmaster Tools](https://postmaster.google.com). As aberturas só são
+lidas com o [rastreamento de aberturas](#configuração-por-domínio) ligado, e
+um pré-carregamento feito por máquina nunca conta como abertura. Um sinal com
+poucos e-mails por trás (menos de 100, ou 200 nas denúncias) aparece como
+**Poucos e-mails** e nunca conta contra o dia. É preciso ter pelo menos duas
+denúncias para passar do limite de denúncias e três para ficar grave.
+
+Depois da verificação:
+
+- Todos os sinais dentro do limite: o volume cresce 1,5×.
+- Um sinal fora: o volume se mantém.
+- Dois ou mais fora: o volume cai 30%.
+- Um sinal grave: o aquecimento pausa e os proprietários da equipe recebem um
+  e-mail.
+
+### Pausar, retomar ou desligar
+
+- **Pausar aquecimento** segura as transmissões do domínio. Os e-mails delas
+  esperam na ordem. Um sinal grave pausa o aquecimento do mesmo jeito.
+- **Retomar** recomeça a partir de hoje com metade do volume que ele tinha.
+- **Desligar** encerra o aquecimento, e os e-mails que estavam esperando saem
+  na velocidade normal. Um dia grande de um domínio com pouco histórico tende
+  a cair no spam, então o painel pergunta antes.
+- Depois que o aquecimento termina, as transmissões do domínio saem na
+  velocidade normal. **Aquecer de novo** recomeça do volume inicial.
+
+Os e-mails que estão esperando mantêm o lugar enquanto o conteúdo dos e-mails
+é guardado, contando a partir do envio da transmissão: 30 dias no MillionSend
+Cloud, ou a retenção de e-mails da instância na auto-hospedagem. O que ainda
+estiver esperando depois disso não é enviado.
+
+Os proprietários da equipe recebem um e-mail quando um sinal grave pausa o
+aquecimento, com os sinais que ficaram fora e quantos e-mails estão
+esperando, e outro quando o aquecimento termina. Eles escolhem esses avisos em
+**Entregabilidade**, em **Configurações → Notificações**.
+
+### Devo trocar para um subdomínio novo?
+
+Não. Os provedores de e-mail julgam a reputação pelo domínio organizacional
+(`example.com` para `news.example.com`) e pelas pessoas para quem você envia,
+então um subdomínio novo não começa do zero. Trocar de domínio o tempo todo
+parece snowshoeing, o truque de spammers que espalha os envios por muitos
+domínios, e os provedores ficam de olho nisso. Aqueça o domínio que você já
+tem.
 
 ## Configuração por domínio
 
@@ -68,7 +230,8 @@ Depois de verificado, a aba **Configuração** de um domínio controla:
 - **Rastreamento de aberturas** — desligado por padrão. Ligado, um pixel 1×1
   servido por esse mesmo subdomínio de rastreamento registra eventos
   `email.opened`. O rastreamento é na camada do app e roda no seu próprio
-  domínio — nunca a reescrita de links do SES.
+  domínio — nunca a reescrita de links do SES. E-mails de caixas de pessoas
+  nunca são rastreados, como em qualquer programa de e-mail.
 - **Modo TLS** — `opportunistic` (padrão) ou `enforced`, aplicado via
   configuration set do SES do domínio.
 
@@ -80,8 +243,8 @@ domínio: informe `tracking_subdomain` (um rótulo como `links`) e o `records[]`
 da resposta ganha um CNAME de rastreamento, cujo status passa a `verified` assim
 que ele resolve. No MillionSend Cloud, ligar qualquer um dos dois sem um
 subdomínio é recusado com 422. Enquanto o CNAME não resolve, os links não passam
-por ele — o Cloud os envia limpos, o self-host recorre ao host do app — e o
-domínio aparece como **Parcial** no dashboard: verificado para enviar, com o
+por ele — o MillionSend Cloud os envia limpos, uma instância auto-hospedada recorre ao host do app — e o
+domínio aparece como **Parcial** no painel: verificado para enviar, com o
 rastreamento ainda não ativo. No Cloudflare, o registro de rastreamento precisa
 ficar como **somente DNS** (nuvem cinza): um CNAME com proxy responde com os
 endereços do Cloudflare em vez do alvo, o que a tabela de registros mostra como
@@ -110,8 +273,8 @@ apresente. Um clique registrado antes de o resto da rajada chegar é desfeito �
 linha, abertura inferida, contadores, status e qualquer entrega ainda não
 enviada.
 
-Um clique também é uma abertura. Ninguém clica num link de uma mensagem que
-nunca renderizou, então um clique num e-mail ainda sem abertura registra também
+Um clique também é uma abertura. Ninguém clica em um link de uma mensagem que
+nunca renderizou, então um clique em um e-mail ainda sem abertura registra também
 a abertura, marcada logo antes do clique e com `reason: "click"`. Para um
 destinatário cujas imagens vêm do cache do Apple Mail essa é a única abertura
 que pode ser registrada, então públicos com muitos usuários de Apple Mail
@@ -128,7 +291,101 @@ de aberturas desligado: o pixel adiciona um elemento com cara de rastreamento
 que alguns filtros pesam contra a entrega na caixa de entrada, por uma métrica
 em que você não pode confiar totalmente de todo modo.
 
+## Recebimento
+
+Um domínio verificado também pode [receber e-mails](/pt-BR/concepts/receiving)
+(beta). Toda resposta de domínio traz o objeto `capabilities` do Resend:
+`sending` é `enabled` (pedir para desligá-lo dá `422`; só o
+[subdomínio compartilhado](#subdomínio-compartilhado) pode vir `disabled`),
+e `receiving` é `enabled` ou `disabled`. Ligue ou desligue o recebimento em
+**Ativar recebimento**, na página do domínio, ou mande
+`{ "capabilities": { "receiving": "enabled" } }` (ou `"disabled"`) para
+`PATCH /domains/{id}`. Só um domínio verificado pode ativá-lo, e é por isso
+que `POST /domains` recusa `"receiving": "enabled"` com `422`: adicione o
+domínio, verifique e depois ligue o recebimento. Um nome de domínio recebe em
+uma equipe só: um nome em que outra equipe já recebe responde `409`. Numa
+instância que não recebe e-mail nenhum, todo domínio informa `disabled` e
+ativar o recebimento é recusado com `422`.
+
+Com o recebimento ligado, `records[]` inclui uma linha `Receiving`: um
+registro MX no próprio nome do domínio apontando para
+`mx.millionsend-dns.com` (na auto-hospedagem, o `RECEIVING_MX_HOST` da
+instância), prioridade `10`.
+
+```json
+{
+  "record": "Receiving",
+  "name": "inbound.example.com",
+  "type": "MX",
+  "ttl": "Auto",
+  "status": "verified",
+  "value": "mx.millionsend-dns.com",
+  "priority": 10,
+  "live": "found"
+}
+```
+
+A linha é checada ao vivo como as outras: `verified` quando esse host está
+entre os registros MX do nome com o menor número de prioridade, `failed`
+enquanto outro registro MX do nome tiver um número menor (`detail` lista o
+que está publicado) e `not_started` sem nenhum registro MX. Um registro MX
+com número menor leva os e-mails no lugar dele, e é por isso que o MX deve
+ficar num subdomínio como `inbound.example.com` quando o domínio já recebe
+e-mail em outro lugar. A linha nunca condiciona o envio.
+
+O `receiving_catch_all` diz se o domínio recebe em qualquer endereço
+(`true`) ou só nos endereços das [caixas de entrada](/pt-BR/concepts/inboxes)
+dele (`false`, o padrão; os outros endereços são recusados). Donos e admins
+ligam e desligam no **Pega-tudo** da página do domínio ou com
+`PATCH /domains/{id}` e `{ "receiving_catch_all": true }`; no MillionSend
+Cloud ele exige um plano pago. Veja
+[Quais endereços recebem](/pt-BR/concepts/receiving#quais-endereços-recebem).
+Excluir um domínio exclui as caixas dele, com as conversas e os rascunhos, e
+revoga as chaves de API delas.
+
+## Subdomínio compartilhado
+
+Numa instância com um
+[domínio compartilhado das caixas](/pt-BR/concepts/inboxes#domínio-compartilhado),
+o `GET /domains` termina com mais uma linha: o subdomínio da sua equipe
+nele, como `acme.agents.example`, onde as suas caixas compartilhadas ganham
+os endereços; uma equipe cujo subdomínio espera a revisão de nomes ainda
+não tem essa linha. Toda linha traz o `shared`, e essa é a que vem com
+`shared: true`. Ela aparece como `verified`, na região padrão da instância,
+com o recebimento ligado, o pega-tudo e o rastreamento desligados, e com
+dois campos só dela:
+
+- `sending_mode`: o que os endereços nela podem enviar agora: `open`
+  (começar conversas), `reply_only` (responder dentro das próprias
+  conversas) ou `receive_only` (nada sai, e o `capabilities.sending` vem
+  `disabled`). Uma caixa cujo endereço ou `from_name` parece o de uma
+  marca conhecida só responde, mesmo com o modo `open` (veja
+  [Domínio compartilhado](/pt-BR/concepts/inboxes#domínio-compartilhado)).
+- `sending_mode_reason`: por que o envio não está `open`: `plan` (o plano
+  da equipe) ou `instance` (a configuração da instância); `null` quando
+  está `open`.
+
+A linha é só de leitura: o `GET /domains/{id}` devolve essa linha com
+`records: []`, porque não há nada para configurar, e `PATCH`,
+`POST /domains/{id}/verify` e `DELETE` respondem `403 forbidden`. Ela não
+conta no limite de domínios do seu plano, e o id dela continua o mesmo
+quando uma mudança de nome da equipe muda o nome dela. Mesmo verificada, ela
+só envia pelo próprio endereço de cada caixa nela, e o `POST /api-keys`
+recusa o id dela como `domain_id` com `422 validation_error`. Para criar uma
+caixa nela, mande o id dela como `domain_id` no `POST /inboxes`. A página
+**Domínios** do painel mostra essa linha primeiro, marcada como
+**Compartilhado**.
+
 ## Chaves de API e domínios
 
 Uma chave de API pode ficar restrita a um único domínio; essa chave só envia
-a partir daquele domínio (outros domínios retornam `403 restricted_api_key`).
+a partir daquele domínio (outros domínios retornam `403 restricted_api_key`)
+e só lê os e-mails [recebidos](/pt-BR/concepts/receiving) nele. As chaves que
+ela cria pela API ficam restritas ao mesmo domínio: um
+`domain_id` omitido herda esse domínio, e qualquer outro domínio retorna
+`403 restricted_api_key`.
+
+Uma chave também pode ficar restrita a uma
+[caixa de entrada](/pt-BR/concepts/inboxes#chaves-de-api-restritas-a-uma-caixa),
+o que a limita ainda mais: os e-mails dessa caixa, e envios só pelo endereço
+dela.

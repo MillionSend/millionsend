@@ -103,10 +103,38 @@ export function subscription(
   } as unknown as Stripe.Subscription;
 }
 
+/** A succeeded $20 card payment by `customer`, created at `created` (Stripe seconds). */
+export function charge(
+  id: string,
+  customer: string,
+  created: number,
+  extra: Partial<Pick<Stripe.Charge, "amount" | "amount_refunded" | "currency">> & {
+    status?: Stripe.Charge.Status;
+    disputed?: boolean;
+    refunded?: boolean;
+  } = {},
+): Stripe.Charge {
+  return {
+    id,
+    object: "charge",
+    customer,
+    created,
+    amount: 2000,
+    amount_refunded: 0,
+    currency: "usd",
+    status: "succeeded",
+    disputed: false,
+    refunded: false,
+    ...extra,
+  } as unknown as Stripe.Charge;
+}
+
 /**
  * In-memory BillingStripe: subscriptions are plain fixtures the tests seed
  * and mutate; item, subscription and schedule updates edit them in place so
  * a re-fetch sees the change, and every write is recorded in `state`.
+ * Charges are seeded the same way; a refund marks its charge refunded, and a
+ * charge named in `refundErrors` fails its refund with that error.
  */
 export function fakeStripe() {
   const state = {
@@ -116,6 +144,11 @@ export function fakeStripe() {
     retrieveParams: undefined as Stripe.SubscriptionRetrieveParams | undefined,
     listParams: undefined as Stripe.SubscriptionListParams | undefined,
     cancels: [] as string[],
+    cancelParams: undefined as Stripe.SubscriptionCancelParams | undefined,
+    charges: [] as Stripe.Charge[],
+    chargeListParams: undefined as Stripe.ChargeListParams | undefined,
+    refunds: [] as [Stripe.RefundCreateParams, Stripe.RequestOptions | undefined][],
+    refundErrors: {} as Record<string, Error>,
     updates: [] as [string, Stripe.SubscriptionUpdateParams][],
     itemCreates: [] as Stripe.SubscriptionItemCreateParams[],
     itemUpdates: [] as [string, Stripe.SubscriptionItemUpdateParams | undefined][],
@@ -125,6 +158,12 @@ export function fakeStripe() {
     scheduleReleases: [] as string[],
     meterEvents: [] as Stripe.Billing.MeterEventCreateParams[],
     meterError: null as Error | null,
+    /** The bank declines (or wants confirmed) the charge a pending_if_incomplete update makes. */
+    declineUpdates: false,
+    /** What the meter's summaries have counted; null counts every event sent, as if Stripe were instant. */
+    meterCounted: null as number | null,
+    summaryParams: [] as [string, Stripe.Billing.MeterListEventSummariesParams][],
+    invoiceVoids: [] as string[],
     customers: [] as Stripe.CustomerCreateParams[],
     checkouts: [] as Stripe.Checkout.SessionCreateParams[],
   };
@@ -186,6 +225,23 @@ export function fakeStripe() {
         state.calls.push("subscriptions.update");
         state.updates.push([id, params]);
         const s = sub(id);
+        // Like Stripe's pending updates: nothing changes until the invoice is paid.
+        if (state.declineUpdates && params.payment_behavior === "pending_if_incomplete") {
+          s.pending_update = {
+            expires_at: PERIOD_START + 82_800,
+          } as Stripe.Subscription.PendingUpdate;
+          return {
+            ...s,
+            latest_invoice: {
+              id: "in_pending",
+              object: "invoice",
+              status: "open",
+              hosted_invoice_url: "https://invoice.stripe.com/i/in_pending",
+            },
+          };
+        }
+        // An update that goes through voids any change still waiting on payment.
+        s.pending_update = null;
         for (const change of params.items ?? []) {
           if (!change.id) {
             if (change.price) {
@@ -204,10 +260,33 @@ export function fakeStripe() {
         }
         return s;
       },
-      async cancel(id: string) {
+      async cancel(id: string, params?: Stripe.SubscriptionCancelParams) {
         state.calls.push("subscriptions.cancel");
         state.cancels.push(id);
+        state.cancelParams = params;
         return { ...sub(id), status: "canceled" };
+      },
+    },
+    charges: {
+      // Newest first, the customer's created in the window only, like Stripe.
+      async *list(params: Stripe.ChargeListParams) {
+        state.calls.push("charges.list");
+        state.chargeListParams = params;
+        const since = typeof params.created === "object" ? (params.created.gte ?? 0) : 0;
+        yield* state.charges
+          .filter((c) => c.customer === params.customer && c.created >= since)
+          .sort((a, b) => b.created - a.created);
+      },
+    },
+    refunds: {
+      async create(p: Stripe.RefundCreateParams, options?: Stripe.RequestOptions) {
+        state.calls.push("refunds.create");
+        const error = state.refundErrors[p.charge ?? ""];
+        if (error) throw error;
+        state.refunds.push([p, options]);
+        const refunded = state.charges.find((c) => c.id === p.charge);
+        if (refunded) Object.assign(refunded, { amount_refunded: refunded.amount, refunded: true });
+        return { id: `re_${state.refunds.length}`, object: "refund", charge: p.charge };
       },
     },
     subscriptionItems: {
@@ -290,6 +369,39 @@ export function fakeStripe() {
           state.meterEvents.push(p);
           return p;
         },
+      },
+      meters: {
+        async list() {
+          state.calls.push("billing.meters.list");
+          return { data: [{ id: "mtr_1", event_name: "emails_over_quota" }] };
+        },
+        async listEventSummaries(id: string, p: Stripe.Billing.MeterListEventSummariesParams) {
+          state.calls.push("billing.meters.listEventSummaries");
+          state.summaryParams.push([id, p]);
+          const counted =
+            state.meterCounted ??
+            state.meterEvents.reduce((sum, e) => sum + Number(e.payload.value), 0);
+          return { data: [{ aggregated_value: counted }] };
+        },
+      },
+    },
+    invoices: {
+      async list(p: Stripe.InvoiceListParams) {
+        state.calls.push("invoices.list");
+        const s = p.subscription ? state.subscriptions[p.subscription] : undefined;
+        const waiting = s?.pending_update && p.status === "open";
+        return {
+          data: waiting
+            ? [{ id: "in_pending", object: "invoice", billing_reason: "subscription_update" }]
+            : [],
+        };
+      },
+      /** Like Stripe: voiding a waiting move up's invoice drops the move. */
+      async voidInvoice(id: string) {
+        state.calls.push("invoices.voidInvoice");
+        state.invoiceVoids.push(id);
+        for (const s of Object.values(state.subscriptions)) s.pending_update = null;
+        return { id, object: "invoice", status: "void" };
       },
     },
     checkout: {

@@ -1,0 +1,49 @@
+% IANA WHOIS server
+% for more information on IANA, visit http://www.iana.org
+% This query returned 1 object
+
+domain:       GG
+
+organisation: Island Networks Ltd.
+address:      Maison Postel
+address:      Ollivier St
+address:      Alderney GY9 3JZ
+address:      Guernsey
+
+contact:      administrative
+name:         Nigel Roberts
+organisation: Island Networks Ltd
+address:      Maison Postel
+address:      Ollivier St
+address:      Alderney GY9 3JZ
+address:      Guernsey
+phone:        +44 7781 426912
+e-mail:       hostmaster2016@iana-contact.gg
+
+contact:      technical
+name:         GG-Hostmaster
+organisation: Island Networks Limited
+address:      Maison Postel
+address:      Ollivier St
+address:      Alderney GY9 3JZ
+address:      Guernsey
+phone:        +44 7781 426912
+e-mail:       hostmaster2016@iana-contact.gg
+
+nserver:      C.CI-SERVERS.ORG 194.146.106.86 2001:67c:1010:22:0:0:0:53
+nserver:      DNS1.NOMINETDNS.UK 213.248.219.254 2a01:618:403:0:0:0:0:254
+nserver:      DNS2.NOMINETDNS.UK 103.49.83.254 2401:fd80:403:0:0:0:0:254
+nserver:      DNS3.NOMINETDNS.UK 213.248.223.254 2a01:618:407:0:0:0:0:254
+nserver:      DNS4.NOMINETDNS.UK 2401:fd80:407:0:0:0:0:254 43.230.51.254
+nserver:      E.CI-SERVERS.NET 2001:500:14:6074:ad:0:0:1 204.61.216.74
+ds-rdata:     4975 8 2 6b95da44b57bf3bdfce8e9cf6d28df4b0ff999a374eff7909e095ab1c7000630
+
+whois:        whois.gg
+
+status:       ACTIVE
+remarks:      Registration information: http://www.nic.gg
+
+created:      1996-08-07
+changed:      2025-07-07
+source:       IANA
+

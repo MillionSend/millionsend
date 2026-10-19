@@ -1,4 +1,4 @@
-import { env } from "@millionsend/config";
+import { env, receivingEnabled } from "@millionsend/config";
 import { getDb } from "@millionsend/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -26,6 +26,8 @@ export default async function OnboardingPage() {
       teamName={membership.teamName}
       teamLogoUrl={membership.logoUrl}
       userEmail={session.user.email}
+      receiving={receivingEnabled()}
+      role={membership.role}
     >
       <main className="ms-main" style={{ flex: 1, minWidth: 0, padding: "34px 40px" }}>
         <OnboardingSteps

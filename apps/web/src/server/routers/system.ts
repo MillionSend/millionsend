@@ -3,17 +3,13 @@ import {
   EMAIL_RETENTION_DAYS_DEFAULT,
   env,
   isCloudDeployment,
+  receivingEnabled,
   SES_MAX_SEND_RATE_DEFAULT,
   SES_TRANSACTIONAL_RESERVE_DEFAULT,
   servedRegions,
   trackingSubdomainsSupported,
 } from "@millionsend/config";
-import {
-  committedDailyVolume,
-  getInstanceSettings,
-  pausedRegions,
-  sesEventsHealth,
-} from "@millionsend/core";
+import { committedDailyVolume, getInstanceSettings, sesEventsHealth } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import {
   createSesAccountClient,
@@ -96,9 +92,9 @@ const PRODUCTION_PROBE_TTL_MS = 60_000;
 
 export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
   // Production access per served region, for the add-domain form: one
-  // GetAccount per region at most once a minute — features runs on every
-  // dashboard page and the non-send SES API is throttled at one request per
-  // second per region. Only a region's first probe is awaited (bounded by
+  // GetAccount per region at most once a minute — features backs several
+  // screens and the non-send SES API is throttled at one request per second
+  // per region. Only a region's first probe is awaited (bounded by
   // the client's timeouts); an expired answer is served at once while the
   // probe refreshes it, so a region that stops answering never stalls the
   // screens. A failed probe keeps the last answer; without credentials
@@ -157,8 +153,10 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       trackingSubdomainsSupported: trackingSubdomainsSupported(),
       // Why cloud domains without a tracking subdomain ship untracked links.
       trackingRequiresSubdomain: isCloudDeployment(),
-      // The shared first-email sender the onboarding snippet and button use; null hides the button.
+      // The sender of the onboarding button's fixed email; null hides the button.
       onboardingSender: env.ONBOARDING_EMAIL_FROM ?? null,
+      // Inbound mail exists only with RECEIVING_MX_HOST; off, no receiving screen shows.
+      receiving: receivingEnabled(),
     })),
 
     /**
@@ -181,22 +179,6 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
         console.error("SES events health probe failed", error);
         return null;
       }
-    }),
-
-    /**
-     * Regions where the platform breaker holds broadcasts, for the dashboard
-     * banner; null when none are paused or the caller may not see instance
-     * facts (cloud tenants — only the operator can act on it there).
-     */
-    platformBreakers: teamProcedure.query(async ({ ctx }) => {
-      if (isCloudDeployment() && !(await isInstanceOperator(ctx.db, ctx.session.user.id))) {
-        return null;
-      }
-      const paused = await pausedRegions(ctx.db);
-      // The hold reason is the operator's own note; tenants learn only that it is a hold.
-      return paused.length > 0
-        ? paused.map(({ manualReason, ...row }) => ({ ...row, held: manualReason !== null }))
-        : null;
     }),
 
     /** Env-side SES settings the setup page reports alongside awsReadiness. */

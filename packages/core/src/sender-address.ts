@@ -1,3 +1,5 @@
+import { asciiHostname } from "./org-domain.js";
+
 export interface Mailbox {
   name?: string | undefined;
   address: string;
@@ -139,4 +141,18 @@ function parseAddrSpec(spec: string): string | null {
   const domain = rest.slice(1);
   if (!DOMAIN.test(domain)) return null;
   return `${local}@${domain}`;
+}
+
+/**
+ * An address as inbound routing reads it: local@domain with the domain as
+ * DNS compares it (lowercase, IDNA-encoded) and the local part as written.
+ * Null for anything else, and for controls, whitespace or angle brackets
+ * anywhere, which only ever reach a header or a log as injection.
+ */
+export function routableAddress(input: string): { address: string; domain: string } | null {
+  const value = input.trim();
+  const at = value.lastIndexOf("@");
+  if (at < 1 || value.length > 320 || /[\p{Cc}\s<>]/u.test(value)) return null;
+  const domain = asciiHostname(value.slice(at + 1));
+  return domain ? { address: `${value.slice(0, at)}@${domain}`, domain } : null;
 }

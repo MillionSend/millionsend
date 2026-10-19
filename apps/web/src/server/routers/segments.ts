@@ -146,11 +146,15 @@ export const segmentsRouter = router({
 
   update: teamProcedure
     .input(
-      z.object({
-        id: z.uuid(),
-        name: nameSchema.optional(),
-        filter: filterInputSchema.optional(),
-      }),
+      z
+        .object({
+          id: z.uuid(),
+          name: nameSchema.optional(),
+          filter: filterInputSchema.optional(),
+        })
+        .refine((v) => v.name !== undefined || v.filter !== undefined, {
+          message: "nothing to update",
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       await assertSegment(ctx, input.id);

@@ -4,10 +4,12 @@ import {
   createCheckoutSession,
   createPortalSession,
   hasLiveSubscription,
+  OverageInFlightError,
   setOverage as setSubscriptionOverage,
 } from "@millionsend/billing";
-import { env } from "@millionsend/config";
+import { env, receivingEnabled } from "@millionsend/config";
 import {
+  PLAN_INBOX_LIMIT,
   PLAN_RUNG_KEYS,
   type Plan,
   QUOTA_COLUMNS,
@@ -17,6 +19,7 @@ import {
   type TeamQuota,
   teamQuota,
   teamRung,
+  upgradesHeld,
   utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -24,9 +27,11 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { OVERAGE_IN_FLIGHT, UPGRADES_HELD } from "@/lib/trpc-error";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe, mailPlanMove } from "../billing";
+import { planUsage } from "../inboxes";
 import { getQueue } from "../queue";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
@@ -64,6 +69,13 @@ function assertBillable(team: { plan: Plan }): void {
       code: "FORBIDDEN",
       message: "The system team is never billed; its plan is set by the operator.",
     });
+  }
+}
+
+/** Buying and moving up wait out a suspension, an abuse flag or an operator's flag; cancelling and moving down never do. */
+async function assertNotHeld(db: Db, teamId: string): Promise<void> {
+  if (await upgradesHeld(db, teamId)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: UPGRADES_HELD });
   }
 }
 
@@ -114,9 +126,16 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         planStatus: team.planStatus,
         currentPeriodEnd: team.currentPeriodEnd,
         quota,
+        // The switch shows the customer's choice; quota.overage is what applies (off while past due).
+        overageEnabled: team.overageEnabled,
         usage: await readUsage(ctx.db, ctx.teamId, quota),
         hasCustomer: team.stripeCustomerId !== null,
         hasLiveSubscription: live,
+        upgradesHeld: await upgradesHeld(ctx.db, ctx.teamId),
+        // Each plan's inbox cap, and how many the team holds; null where no mail is received.
+        inboxes: receivingEnabled()
+          ? { limits: PLAN_INBOX_LIMIT, used: (await planUsage(ctx.db, ctx.teamId)).used }
+          : null,
       };
     }),
 
@@ -131,6 +150,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         if (hasLiveSubscription(team.planStatus)) {
           throw new TRPCError({ code: "PRECONDITION_FAILED" });
         }
+        await assertNotHeld(ctx.db, ctx.teamId);
         const url = await createCheckoutSession(
           { db: ctx.db, stripe: deps.stripe() },
           {
@@ -165,8 +185,18 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         }
         const change = await changeRung(
           { db: ctx.db, stripe: deps.stripe() },
-          { teamId: ctx.teamId, rung: input.rung },
-        );
+          {
+            teamId: ctx.teamId,
+            rung: input.rung,
+            // Up is judged against Stripe: a dropped webhook can leave the row on a higher rung.
+            beforeMoveUp: () => assertNotHeld(ctx.db, ctx.teamId),
+          },
+        ).catch((err: unknown) => {
+          if (err instanceof OverageInFlightError) {
+            throw new TRPCError({ code: "CONFLICT", message: OVERAGE_IN_FLIGHT });
+          }
+          throw err;
+        });
         await recordAudit(ctx, {
           action: "billing.plan_changed",
           target: { type: "team", id: ctx.teamId },
@@ -196,6 +226,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         ) {
           throw new TRPCError({ code: "PRECONDITION_FAILED" });
         }
+        if (input.enabled) await assertNotHeld(ctx.db, ctx.teamId);
         await setSubscriptionOverage(
           { db: ctx.db, stripe: deps.stripe() },
           { teamId: ctx.teamId, enabled: input.enabled },

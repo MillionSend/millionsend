@@ -14,20 +14,20 @@
     "@millionsend/db": "workspace:*",
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "mailparser": "^3.9.26",
-    "smtp-server": "^3.19.12",
-    "tsx": "^4.23.13",
-    "zod": "^4.6.3"
+    "drizzle-orm": "^0.45.4",
+    "mailparser": "^3.9.38",
+    "smtp-server": "^3.19.21",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
-    "@types/mailparser": "^3.4.6",
-    "@types/node": "^22.20.2",
+    "@types/mailparser": "^3.9.0",
+    "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.1",
     "@types/smtp-server": "^3.5.13",
-    "nodemailer": "^10.0.3",
+    "nodemailer": "^10.1.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.4"
   }
 }

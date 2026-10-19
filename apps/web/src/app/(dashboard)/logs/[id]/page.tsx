@@ -73,15 +73,13 @@ function JsonSection({
           </p>
         ) : (
           <pre
-            className="ms-mono ms-hl"
+            className="ms-mono ms-hl ms-json"
             style={{
               margin: 0,
               padding: "14px 16px",
               fontSize: 12,
               lineHeight: 1.7,
               color: "var(--ms-bone)",
-              whiteSpace: "pre-wrap",
-              overflowWrap: "anywhere",
             }}
           >
             <JsonView value={value} requestPath={requestPath} />

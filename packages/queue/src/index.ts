@@ -22,6 +22,21 @@ export interface JobPayloads {
   // The content monitor's judge call for one pending sample; the sample row
   // names the email, the job carries nothing else.
   "abuse.judge": { sampleId: string };
+  // Retry of a team's SES tenant status the console could not set; the
+  // handler applies whatever the team's standing is when it runs.
+  "tenant.status": { teamId: string };
+  // The registration date of a domain's registrable name (RDAP, WHOIS, CT),
+  // looked up when the domain is added and again when it verifies.
+  "domain.age": { domainId: string };
+  // The inbound judge for one pending inbox membership.
+  "received.screen": { receivedEmailId: string; inboxId: string };
+  // A delivered message passed on to its inbox's forward_to owners.
+  "inbox.forward": { receivedEmailId: string; inboxId: string };
+  // A team's subdomain label on the shared inbox domain, settled once its
+  // name review answers. `since` (ISO) is when the first job was queued:
+  // each successor carries it, and a team without a label takes a random
+  // one a day after it.
+  "shared.subdomain": { teamId: string; since: string };
 }
 
 /** ParsedSesEvent with occurredAt as ISO string (JSON-safe). */
@@ -56,6 +71,12 @@ export type EmailSendPriority = (typeof EMAIL_SEND_PRIORITY)[keyof typeof EMAIL_
 /** The priority an existing email row re-enqueues with: broadcast rows are bulk, everything else transactional. */
 export const emailSendPriority = (email: { broadcastId: string | null }): EmailSendPriority =>
   email.broadcastId ? EMAIL_SEND_PRIORITY.bulk : EMAIL_SEND_PRIORITY.transactional;
+
+/**
+ * Fetch order inside the abuse.judge queue: a sample that mail waits on
+ * before SES goes ahead of the samples judged after sending.
+ */
+export const JUDGE_PRIORITY = { screening: 1, sample: 0 } as const;
 
 /** One email.send in a batch enqueue; the wiring supplies the default priority. */
 export interface EmailSendRequest {
@@ -92,6 +113,10 @@ export const DEAD_LETTER_QUEUES = {
   "webhook.drain": "webhook.drain.dead",
   "recipient.erase": "recipient.erase.dead",
   "abuse.judge": "abuse.judge.dead",
+  "tenant.status": "tenant.status.dead",
+  "domain.age": "domain.age.dead",
+  "received.screen": "received.screen.dead",
+  "inbox.forward": "inbox.forward.dead",
 } as const;
 
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
@@ -103,6 +128,11 @@ const JOB_QUEUES = [
   "webhook.drain",
   "recipient.erase",
   "abuse.judge",
+  "tenant.status",
+  "domain.age",
+  "received.screen",
+  "inbox.forward",
+  "shared.subdomain",
 ] as const;
 // Compile-time check that every JobPayloads key is listed above.
 const _everyJobQueueListed: Record<Exclude<JobName, (typeof JOB_QUEUES)[number]>, never> = {};
@@ -118,6 +148,17 @@ const NOTIFY_QUEUES: ReadonlySet<string> = new Set<JobName>([
   "broadcast.send",
   "ses.event",
   "webhook.drain",
+  // A domain verified minutes ago may send now; its age should be known first.
+  "domain.age",
+  // Polling, not the model, made a verdict's latency: a burst's later
+  // messages went out while earlier ones waited for the next fetch.
+  "abuse.judge",
+  // A held team's SES tenant is disabled within seconds, not a poll later.
+  "tenant.status",
+  // An agent waiting on a sign-in code waits on its screening, and owners
+  // on their forwards.
+  "received.screen",
+  "inbox.forward",
 ]);
 const SLOW_POLL_SECONDS = 30;
 
@@ -191,9 +232,10 @@ export const CRON_JOBS = {
   // Every 10 min: the content monitor's sample count and unjudged share as
   // probes, and the operator's notice when the judge keeps failing.
   "monitor.health": "*/10 * * * *",
-  // Daily: the seven-day disclosure of break-glass content access — the
-  // team's audit row and its owners' notice. No-op with none due.
-  "safety.reveal_notices": "40 4 * * *",
+  // Daily: third-party reference data (the disposable-domain list, and the
+  // DB-IP databases, monthly files) is refreshed where it is switched on; a
+  // failed download keeps the last copy.
+  "reference.refresh": "10 5 * * *",
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;
@@ -381,6 +423,43 @@ export class Queue {
     );
   }
 
+  /** The inbound judge for one membership held pending. */
+  async enqueueScreening(p: JobPayloads["received.screen"]): Promise<void> {
+    // ponytail: fairness per inbox, the payload names no team; carry the team
+    // id if one team's many inboxes ever starve the lanes.
+    await this.send("received.screen", p, {
+      dedupeKey: `${p.receivedEmailId}:${p.inboxId}`,
+      group: p.inboxId,
+    });
+  }
+
+  /**
+   * A delivered message's pass to its inbox's forward_to owners; `startAfter`
+   * runs it again later. The running job may enqueue its own successor: the
+   * short policy only collapses a key while a job is still created.
+   */
+  async enqueueInboxForward(p: JobPayloads["inbox.forward"], startAfter?: Date): Promise<void> {
+    await this.send("inbox.forward", p, {
+      dedupeKey: `${p.receivedEmailId}:${p.inboxId}`,
+      startAfter,
+    });
+  }
+
+  /**
+   * Settles each team's shared subdomain label; `startAfter` runs them later.
+   * Keyed by the team: a job still waiting absorbs a new one and keeps its
+   * older `since`, while a job already running may queue its successor.
+   */
+  async enqueueSharedSubdomains(
+    jobs: readonly JobPayloads["shared.subdomain"][],
+    startAfter?: Date,
+  ): Promise<void> {
+    await this.sendMany(
+      "shared.subdomain",
+      jobs.map((payload) => ({ payload, dedupeKey: payload.teamId, startAfter })),
+    );
+  }
+
   /**
    * Enqueue many jobs of one queue in a single statement: a webhook fan-out
    * writes one job per endpoint, and a broadcast one per contact page.
@@ -519,6 +598,12 @@ export class Queue {
         { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
         () => this.#reported(name, handlers[name]),
       );
+    }
+    // Drop schedules this build no longer defines, so a cron that was removed
+    // from CRON_JOBS stops firing instead of enqueueing daily to a queue
+    // nothing serves.
+    for (const schedule of await this.#producer.getSchedules()) {
+      if (!(schedule.name in CRON_JOBS)) await this.#producer.unschedule(schedule.name);
     }
   }
 

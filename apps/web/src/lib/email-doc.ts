@@ -20,6 +20,21 @@ export function isMailyDoc(value: unknown): value is MailyDoc {
 }
 
 /**
+ * True when a Maily document holds nothing the user wrote: no content, or
+ * only paragraphs without text or inline nodes — the shape a fresh editor
+ * emits. An image, a button or a divider on its own is content.
+ */
+export function isEmptyMailyDoc(value: unknown): boolean {
+  if (!isMailyDoc(value)) return false;
+  const nodes = value.content ?? [];
+  return nodes.every((node) => {
+    if (typeof node !== "object" || node === null) return false;
+    const { type, content } = node as { type?: unknown; content?: unknown[] };
+    return type === "paragraph" && (content === undefined || content.length === 0);
+  });
+}
+
+/**
  * Permissive input guard for the stored `document`: any Tiptap doc node passes
  * and rides through unchanged (z.unknown keeps every key for storage); a legacy
  * BlockDoc or other shape is rejected so only Maily JSON reaches the renderer.

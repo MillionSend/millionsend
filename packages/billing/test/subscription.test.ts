@@ -4,9 +4,16 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { OverageInFlightError } from "../src/overage.js";
 import type { BillingStripe } from "../src/stripe.js";
-import { applySubscription, changeRung, setOverage } from "../src/subscription.js";
 import {
+  applySubscription,
+  cancelAndRefundFraud,
+  changeRung,
+  setOverage,
+} from "../src/subscription.js";
+import {
+  charge,
   fakeStripe,
   legacyProduct,
   PERIOD_END,
@@ -65,6 +72,22 @@ async function reportedOverage(teamId: string): Promise<number | undefined> {
   return row?.reportedOverage;
 }
 
+/** Records a move up waiting on payment for the next hour, as the row would show it. */
+async function holdReports(teamId: string): Promise<void> {
+  await db
+    .update(schema.teams)
+    .set({ moveUpPendingUntil: new Date(Date.now() + 3_600_000) })
+    .where(eq(schema.teams.id, teamId));
+}
+
+async function moveUpPendingUntil(teamId: string): Promise<Date | null | undefined> {
+  const [row] = await db
+    .select({ until: schema.teams.moveUpPendingUntil })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, teamId));
+  return row?.until;
+}
+
 const callOrder = (first: string, second: string) =>
   expect(state.calls.indexOf(first)).toBeLessThan(state.calls.indexOf(second));
 
@@ -82,7 +105,9 @@ describe("changeRung up", () => {
             { id: "si_sub_1", price: priceId("millionsend_pro_200k_monthly") },
             { id: "si_sub_1_overage", price: priceId("millionsend_pro_200k_overage") },
           ],
-          proration_behavior: "create_prorations",
+          proration_behavior: "always_invoice",
+          payment_behavior: "pending_if_incomplete",
+          expand: ["latest_invoice"],
         },
       ],
     ]);
@@ -136,6 +161,129 @@ describe("changeRung up", () => {
       planQuota: 200_000,
       stripeOverageItemId: "si_sub_1_overage",
     });
+  });
+
+  it("moves nothing while the charge waits on the bank, and hands back the invoice that applies it", async () => {
+    const teamId = await subscribedTeam(
+      withOverage("millionsend_pro_100k_monthly", "millionsend_pro_100k_overage", {
+        schedule: schedule([price("millionsend_starter_monthly")]),
+      }),
+      450_000,
+    );
+    state.declineUpdates = true;
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({
+      applied: "payment_required",
+      url: "https://invoice.stripe.com/i/in_pending",
+    });
+    // The overage so far reached the meter under the old rung, for that invoice to bill.
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["350000"]);
+    // The downgrade went with the request to move up; the volume stays the paid one.
+    expect(state.scheduleReleases).toEqual(["sched_0"]);
+    expect(await team(teamId)).toMatchObject({
+      plan: "pro",
+      planQuota: 100_000,
+      pendingRung: null,
+    });
+    // Reports wait with the move, until Stripe drops it unpaid or the payment applies it.
+    expect(await moveUpPendingUntil(teamId)).toEqual(new Date((PERIOD_START + 82_800) * 1000));
+    const lapsed = state.subscriptions.sub_1;
+    if (!lapsed) throw new Error("fixture missing");
+    lapsed.pending_update = null;
+    await applySubscription(db, lapsed, () => {});
+    expect(await moveUpPendingUntil(teamId)).toBeNull();
+  });
+
+  it("ends a move up still waiting on payment before reporting, so a refused retry leaves nothing payable", async () => {
+    const teamId = await subscribedTeam(withOverage(), 350_000);
+    state.declineUpdates = true;
+    expect((await changeRung(deps(), { teamId, rung: "pro_200k" })).applied).toBe(
+      "payment_required",
+    );
+    // Sends during the wait; Stripe has counted only what came before it.
+    await db
+      .update(schema.usagePeriods)
+      .set({ accepted: 400_000 })
+      .where(eq(schema.usagePeriods.teamId, teamId));
+    state.meterCounted = 250_000;
+    await expect(changeRung(deps(), { teamId, rung: "pro_200k" })).rejects.toBeInstanceOf(
+      OverageInFlightError,
+    );
+    expect(state.invoiceVoids).toEqual(["in_pending"]);
+    expect(state.calls.indexOf("invoices.voidInvoice")).toBeLessThan(
+      state.calls.lastIndexOf("billing.meterEvents.create"),
+    );
+    // The wait's sends reached the meter on the old price, which the renewal bills.
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["250000", "50000"]);
+    expect(await moveUpPendingUntil(teamId)).toBeNull();
+  });
+
+  it("reports through a wait the row still records after Stripe ended it", async () => {
+    const teamId = await subscribedTeam(withOverage(), 400_000);
+    await holdReports(teamId);
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({ applied: "now" });
+    expect(state.invoiceVoids).toEqual([]);
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["300000"]);
+  });
+
+  it("reports through a wait when the metered item leaves with the subscription", async () => {
+    const teamId = await subscribedTeam(withOverage(), 100_500);
+    await holdReports(teamId);
+    await applySubscription(
+      db,
+      subscription("sub_1", "cus_1", "canceled", undefined, {
+        overageKey: "millionsend_pro_100k_overage",
+      }),
+      () => {},
+      stripe,
+    );
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["500"]);
+    expect(await team(teamId)).toMatchObject({ plan: "free", stripeOverageItemId: null });
+  });
+
+  it("waits while a step Stripe refused is still pinned, and sends it again on the retry", async () => {
+    const teamId = await subscribedTeam(withOverage(), 400_000);
+    state.meterError = new Error("Stripe is down");
+    await expect(changeRung(deps(), { teamId, rung: "pro_200k" })).rejects.toBeInstanceOf(
+      OverageInFlightError,
+    );
+    expect(state.updates).toEqual([]);
+    expect(await reportedOverage(teamId)).toBe(0);
+
+    state.meterError = null;
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({ applied: "now" });
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["300000"]);
+    expect(await reportedOverage(teamId)).toBe(300_000);
+  });
+
+  it("waits while Stripe has not counted a large overage step, and moves nothing", async () => {
+    const teamId = await subscribedTeam(
+      withOverage("millionsend_pro_100k_monthly", "millionsend_pro_100k_overage", {
+        schedule: schedule([price("millionsend_starter_monthly")]),
+      }),
+      400_000,
+    );
+    state.meterCounted = 0;
+    await expect(changeRung(deps(), { teamId, rung: "pro_200k" })).rejects.toBeInstanceOf(
+      OverageInFlightError,
+    );
+    // The burst reached the meter, but nothing re-priced it and the downgrade stands.
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["300000"]);
+    expect(state.summaryParams[0]?.[0]).toBe("mtr_1");
+    expect(state.summaryParams[0]?.[1]).toMatchObject({ customer: "cus_1" });
+    expect(state.updates).toEqual([]);
+    expect(state.scheduleReleases).toEqual([]);
+    expect(await team(teamId)).toMatchObject({ planQuota: 100_000, pendingRung: "starter" });
+
+    // Once counted, the same move goes through.
+    state.meterCounted = null;
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({ applied: "now" });
+  });
+
+  it("lets a small uncounted step through: it is at most a minute of overage", async () => {
+    const teamId = await subscribedTeam(withOverage(), 100_900);
+    state.meterCounted = 0;
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({ applied: "now" });
+    expect(state.calls).not.toContain("billing.meters.listEventSummaries");
   });
 
   it("refuses a rung that is not for sale", async () => {
@@ -265,6 +413,14 @@ describe("setOverage", () => {
     });
   });
 
+  it("off leaves the usage to the run after a move up's wait, which would otherwise drop it", async () => {
+    const teamId = await subscribedTeam(withOverage(), 100_500);
+    await holdReports(teamId);
+    await setOverage(deps(), { teamId, enabled: false });
+    expect(state.meterEvents).toEqual([]);
+    expect(await team(teamId)).toMatchObject({ overageEnabled: false });
+  });
+
   it("is refused on a daily plan", async () => {
     const teamId = await subscribedTeam(
       subscription("sub_1", "cus_1", "active", "millionsend_starter_monthly"),
@@ -274,5 +430,110 @@ describe("setOverage", () => {
     );
     expect(state.itemCreates).toEqual([]);
     expect((await team(teamId))?.overageEnabled).toBe(true);
+  });
+});
+
+describe("cancelAndRefundFraud", () => {
+  const NOW = new Date("2026-10-11T12:00:00Z");
+  const ago = (days: number) => Math.floor(NOW.getTime() / 1000) - days * 86_400;
+  const refunded = () => state.refunds.map(([params]) => params.charge);
+
+  it("cancels at once, then refunds each payment of the last 120 days in full as fraud under its own key", async () => {
+    const teamId = await subscribedTeam(withOverage(), 100_500);
+    state.charges = [
+      charge("ch_old", "cus_1", ago(119), { amount: 900 }),
+      charge("ch_new", "cus_1", ago(2)),
+      charge("ch_stale", "cus_1", ago(121)),
+      charge("ch_elsewhere", "cus_2", ago(1)),
+    ];
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: "sub_1",
+      refunds: [
+        { charge: "ch_new", amount: 2000, currency: "usd" },
+        { charge: "ch_old", amount: 900, currency: "usd" },
+      ],
+      failed: null,
+    });
+    expect(state.cancels).toEqual(["sub_1"]);
+    // No final invoice: its charge would land after the refunds, on the same card.
+    expect(state.cancelParams).toEqual({ invoice_now: false, prorate: false });
+    expect(state.meterEvents).toEqual([]);
+    callOrder("subscriptions.cancel", "charges.list");
+    expect(state.chargeListParams).toEqual({
+      customer: "cus_1",
+      created: { gte: ago(120) },
+      limit: 100,
+    });
+    expect(state.refunds).toEqual([
+      [{ charge: "ch_new", reason: "fraudulent" }, { idempotencyKey: "fraud-refund:ch_new" }],
+      [{ charge: "ch_old", reason: "fraudulent" }, { idempotencyKey: "fraud-refund:ch_old" }],
+    ]);
+    expect(await team(teamId)).toMatchObject({
+      plan: "free",
+      planQuota: null,
+      planStatus: "canceled",
+      stripeCustomerId: "cus_1",
+      stripeSubscriptionId: null,
+    });
+  });
+
+  it("leaves disputed, refunded and failed payments alone, and returns the rest of a partly refunded one", async () => {
+    const teamId = await subscribedTeam(withOverage());
+    state.charges = [
+      charge("ch_disputed", "cus_1", ago(10), { disputed: true }),
+      charge("ch_refunded", "cus_1", ago(20), { amount_refunded: 2000, refunded: true }),
+      charge("ch_failed", "cus_1", ago(30), { status: "failed" }),
+      charge("ch_partly", "cus_1", ago(40), { amount_refunded: 500 }),
+    ];
+    const { refunds, failed } = await cancelAndRefundFraud(deps(), teamId, NOW);
+    expect(refunds).toEqual([{ charge: "ch_partly", amount: 1500, currency: "usd" }]);
+    expect(refunded()).toEqual(["ch_partly"]);
+    expect(failed).toBeNull();
+  });
+
+  it("returns a Stripe failure with what was done before it, and a retry never refunds twice", async () => {
+    const teamId = await subscribedTeam(withOverage());
+    state.charges = [charge("ch_a", "cus_1", ago(1)), charge("ch_b", "cus_1", ago(2))];
+    state.refundErrors.ch_b = new Error("Stripe is down");
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: "sub_1",
+      refunds: [{ charge: "ch_a", amount: 2000, currency: "usd" }],
+      failed: "Error: Stripe is down",
+    });
+
+    delete state.refundErrors.ch_b;
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: null,
+      refunds: [{ charge: "ch_b", amount: 2000, currency: "usd" }],
+      failed: null,
+    });
+    expect(refunded()).toEqual(["ch_a", "ch_b"]);
+    expect(state.cancels).toEqual(["sub_1"]);
+  });
+
+  it("refunds nothing when the cancel fails", async () => {
+    const teamId = await createTeam(db);
+    await db
+      .update(schema.teams)
+      .set({ stripeCustomerId: "cus_1", stripeSubscriptionId: "sub_gone", plan: "pro" })
+      .where(eq(schema.teams.id, teamId));
+    state.charges = [charge("ch_a", "cus_1", ago(1))];
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: null,
+      refunds: [],
+      failed: "Error: No such subscription: sub_gone",
+    });
+    expect(state.calls).not.toContain("charges.list");
+    expect((await team(teamId))?.plan).toBe("pro");
+  });
+
+  it("touches nothing in Stripe for a team that never had a customer", async () => {
+    const teamId = await createTeam(db);
+    expect(await cancelAndRefundFraud(deps(), teamId, NOW)).toEqual({
+      canceled: null,
+      refunds: [],
+      failed: null,
+    });
+    expect(state.calls).toEqual([]);
   });
 });

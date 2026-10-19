@@ -14,6 +14,7 @@ export function Table({
 }) {
   return (
     <div
+      className={gutter ? "ms-table-gutter" : undefined}
       style={{ overflowX: "auto", paddingLeft: gutter, marginLeft: gutter ? -gutter : undefined }}
     >
       <table className={className ? `ms-table ${className}` : "ms-table"} style={style}>

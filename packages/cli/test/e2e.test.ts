@@ -235,7 +235,13 @@ describe("millionsend (built bundle)", () => {
       expect(item("broadcasts", "Launch day")?.action).toBe("skip");
       expect(item("webhooks", WEBHOOK_ENDPOINTS[1])).toMatchObject({
         payload: {
-          events: ["email.opened", "email.clicked", "contact.created", "contact.updated"],
+          events: [
+            "email.opened",
+            "email.clicked",
+            "email.received",
+            "contact.created",
+            "contact.updated",
+          ],
           signingSecret: "copy",
         },
       });
@@ -529,6 +535,7 @@ describe("millionsend (built bundle)", () => {
           expect(hook.events).toEqual([
             "email.opened",
             "email.clicked",
+            "email.received",
             "contact.created",
             "contact.updated",
           ]);

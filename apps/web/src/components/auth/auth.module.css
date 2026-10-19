@@ -75,6 +75,9 @@
   width: 360px;
   max-width: 100%;
   display: grid;
+  /* A shrinkable track: an auto one grows to its widest nowrap child (the
+     consent page's team select) and pushes the column off a phone screen. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   justify-items: center;
 }
@@ -126,6 +129,7 @@
 .form {
   width: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 

@@ -1,0 +1,735 @@
+---
+title: Receiving
+description: Receive email on your own domain, read it through the Resend-compatible API, wait for it, reply to it, and get an email.received webhook for every message. Beta.
+---
+
+Receiving turns a domain you verified into a place that takes mail. Mail sent
+to its addresses reaches MillionSend's mail server, is stored encrypted, and
+comes back to you through the API, the `email.received` webhook, the
+dashboard (**Inboxes → All received**) and the [MCP server](/mcp). The API
+is Resend's receiving API, so the official Resend SDKs work against
+MillionSend unchanged, `forward()` included.
+
+Which addresses take mail is up to you: the address of each
+[inbox](/concepts/inboxes) you create, which keeps its mail in threads with
+replies, drafts and safety rules for an AI agent or for people, and, with
+**catch-all** on, every other address of the domain.
+
+<Callout type="info">
+Receiving is in public beta and marked **Beta** in the dashboard. Every
+message gets a spam score and a sender trust tier, and a virus scan where the
+instance runs a scanner. Infected mail is held; mail at a catch-all address
+is otherwise stored as it came, with those results for your code to act on.
+</Callout>
+
+## How it works
+
+Mail reaches you the way it reaches any mailbox: the sending server looks up
+the MX record of the recipient's domain and delivers to the host it names.
+
+1. The sender's server reads your domain's MX record and connects to
+   MillionSend's MX.
+2. For each recipient (`RCPT TO`), the MX checks that the domain receives
+   here and that the address has an inbox, unless the domain's catch-all is
+   on. An address at any other domain is refused, so the MX never relays mail
+   anywhere.
+3. The message streams in (40 MB at most). The MX checks SPF, DKIM, DMARC and
+   ARC; MillionSend scans it for viruses where the instance runs a scanner,
+   scores it for spam, and stores it before the MX answers `250`. From that
+   moment the message is yours, and the sending server's job is done.
+4. `email.received` fires, and the message shows in the API and the
+   dashboard. Mail an inbox holds, in quarantine or while it is screened,
+   fires once it is delivered or released.
+
+Every refusal happens during that SMTP conversation, so the sending server
+still holds the message and decides what to do with it. MillionSend never
+sends a bounce of its own.
+
+| Reply | When | The sending server |
+| --- | --- | --- |
+| `550 5.1.1` | The domain doesn't receive here: unknown, or receiving is off. | Returns the message to its sender. |
+| `550 5.1.1` | The address has no inbox, or its inbox expired, and the domain's catch-all is off ("No such recipient here"). | Returns the message to its sender. |
+| `550 5.7.1` | The team that owns the domain is suspended. | Returns the message to its sender. |
+| `552 5.3.4` | The message is larger than 40 MB. | Returns the message to its sender. |
+| `452 4.2.2` | The team's receiving allowance is used up (see [pricing](#pricing)), or the inbox took more mail than it may in an hour (200 messages for an agent inbox, 2,000 for a people inbox). | Keeps the message and tries again later. |
+| Other `4xx`, such as `451 4.3.0` | A temporary problem on MillionSend's side, or more recipients than one delivery takes (50). | Keeps the message and tries again, for days if needed. |
+
+## Set up
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+Receiving domains point their MX record at `mx.millionsend-dns.com`.
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+Receiving exists on an instance once its operator runs the MX process and
+sets `RECEIVING_MX_HOST` (see
+[Self-hosting → Receiving](/self-hosting#receiving-beta)); receiving domains
+point their MX record at that host. Until then the dashboard shows no
+receiving at all, every domain reports `capabilities.receiving: "disabled"`,
+and turning it on is refused with `422`.
+
+</DeploymentTab>
+</DeploymentTabs>
+
+### 1. Pick a subdomain
+
+Senders deliver to the MX record with the lowest priority number on the
+recipient's domain, so the receiving MX record takes over every address on
+the name it is published on. Publish it on a name that receives no mail yet,
+such as `inbound.example.com`: your mailboxes at `example.com` stay with your
+current provider. Receive on a root domain only when nothing else receives
+mail there.
+
+### 2. Add and verify it
+
+Receiving belongs to one exact domain name, and only to a domain your team
+verified. To receive at `inbound.example.com`, add `inbound.example.com`
+itself under **Domains** (or with `POST /domains`) and verify it with its own
+DKIM and MAIL FROM records, as for [sending](/concepts/domains#verification).
+Verifying `example.com` does not cover its subdomains. Once verified, the
+subdomain can send too, so replies can go out from the same addresses.
+
+### 3. Turn receiving on
+
+Open the domain and switch on **Enable receiving**, or use the API:
+
+```sh
+curl -X PATCH "https://api.millionsend.com/domains/{id}" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "capabilities": { "receiving": "enabled" } }'
+```
+
+Every domain response reports it, for example `{ "sending": "enabled",
+"receiving": "enabled" }`. A domain name receives in one team only: a name
+another team already receives on is refused with `409`.
+
+### 4. Publish the MX record
+
+The domain's records gain a Receiving row, under **Enable receiving** on the
+domain page (`record: "Receiving"` in the API). Add it at your DNS provider:
+
+| Type | Name | Value | Priority |
+| --- | --- | --- | --- |
+| MX | `inbound.example.com` | `mx.millionsend-dns.com` | `10` |
+
+The row turns verified once public DNS lists `mx.millionsend-dns.com` among
+the name's MX records with the lowest priority number. The number itself is
+only a suggestion; what matters is that no other MX record on that name has a
+lower one. The check runs live and never affects the domain's sending status.
+Self-hosted, the value is your instance's `RECEIVING_MX_HOST`.
+
+### 5. Choose which addresses receive
+
+[Create an inbox](/concepts/inboxes#create-an-inbox) for each address that
+should take mail, or switch on **Catch-all** on the domain page to take mail
+at every address (see [Which addresses receive](#which-addresses-receive)).
+With neither, the domain refuses all mail.
+
+### 6. Send a test
+
+From any mailbox, send a message to one of those addresses, such as
+`hello@inbound.example.com`. It shows under **Inboxes → All received**
+within seconds, and every webhook endpoint subscribed to `email.received`
+gets a delivery.
+
+To stop receiving, switch it off (`"receiving": "disabled"`). New mail is
+refused within a minute; what already arrived stays until
+[retention](#limits) removes it. Remove the MX record as well.
+
+## Which addresses receive
+
+A receiving domain takes mail for:
+
+- the address of each [inbox](/concepts/inboxes) on it, and its `+tag`
+  variants: `orders+4821@` reaches the inbox of `orders@`;
+- with **catch-all** on, every other address too. `support@`, `invoices@`,
+  `reply+ticket-4821@`: any local part works, with nothing to create first;
+  route each message in your code by the address it came to.
+
+With catch-all off, any other address is refused during the SMTP session with
+`550 5.1.1 No such recipient here`, so the sending server returns the message
+to its sender and nothing is stored. Mail to an inbox shows in that inbox's
+threads and in **All received**; mail to a catch-all address shows in
+**All received** only.
+
+Owners and admins switch catch-all on the domain page, or with
+`PATCH /domains/{id}` and `{ "receiving_catch_all": true }`; domain responses
+carry `receiving_catch_all`. It starts off, and was switched on for every
+domain that received mail before inboxes existed. On MillionSend Cloud it
+needs a paid plan (Free answers `403 plan_limit_reached`); once on, it stays
+on after a downgrade.
+
+- `received_for` lists the addresses at your domains that the sending server
+  actually delivered to (the SMTP envelope recipients), Bcc recipients
+  included. `to` and `cc` are what the message's headers claim and can name
+  anyone, so route on `received_for`.
+- A message is stored once per team. Sent to three of your addresses, it is
+  one received email with all three in `received_for`, one webhook delivery
+  and one message counted. A sending server's retry is recognized and stored
+  once too. When the same message arrives again for more of your addresses
+  (a sending server splits its recipients over several deliveries, for
+  example past 50), they are added to `received_for`, and one more
+  `email.received` for the same `email_id` names only them.
+- Only the exact name receives: mail to `x@eu.inbound.example.com` is refused
+  unless that subdomain receives as well.
+- When one message reaches the receiving domains of two teams, each team gets
+  its own copy, listing only its own recipients.
+
+## Limits
+
+| Limit | Value |
+| --- | --- |
+| Message size | 40 MB (41,943,040 bytes) for the whole message as sent: headers, text, HTML and attachments encoded for email. Base64 encoding makes attachments about a third larger, so roughly 30 MB of files fit. A larger message is refused with `552 5.3.4` while it streams in. |
+| Retention | 30 days on Cloud. Self-hosted, the content follows the instance's email retention (**Settings → Instance**, 30 days by default), and the sender, recipients and subject follow `EMAIL_METADATA_RETENTION_DAYS` (30 by default). |
+| Filtering | Infected mail is held. Mail at a catch-all address is otherwise stored as it came: check `authentication`, `screening` and `spam_verdict` before trusting a sender. Inboxes add [their own rules](/concepts/agent-safety). |
+
+When the content's retention ends, `html`, `text`, `headers` and `raw`
+read `null`, `attachments` is empty and the download links stop working; the
+sender, recipients and subject stay until the row itself is deleted.
+
+## Pricing
+
+Received mail counts once per message per team, however many of your
+addresses it was sent to, in its own usage counter next to your sends. What
+it costs depends on the plan:
+
+| Plan | Free receiving | Past it |
+| --- | --- | --- |
+| Free | Shares the daily sending cap of 100 | Deferred with `452 4.2.2` until midnight UTC |
+| Starter | 3,000 per UTC day (twice the 1,500 daily cap), counted apart from sends | Deferred with `452 4.2.2` until midnight UTC |
+| Pro, Scale | Twice the plan's monthly volume per billing period (200,000 on Pro 100K) | Each received email counts as a tenth of an email toward the volume and overage |
+
+- **Free**: received mail and sends fill the same daily count, with the same
+  50% tolerance sends get, so new mail is deferred once the two together
+  reach 150 in a UTC day. Inbound mail can therefore use up the day: sends
+  past the cap wait until midnight UTC like any others, and received mail
+  moves the [quota notices](/concepts/webhooks#event-types) too.
+- **Pro and Scale**: past the free allowance, every tenth received email adds
+  one email to the billing period's count, so 1,000 more received emails
+  count as 100 emails: inside your included volume they use it up, past it
+  they bill at your plan's overage rate. Past the allowance, received mail is
+  deferred with `452 4.2.2` once the period's count reaches 5 times the
+  included volume with overage on, or the included volume with overage off
+  or paused for a past-due payment.
+- A deferral is temporary: the sending server keeps the message and retries,
+  usually for several days, so it arrives once there is room again.
+
+**Settings → Usage** shows received mail and the free allowance. A
+self-hosted instance counts received mail and never caps it. Inboxes
+themselves are free.
+
+## Reading received mail
+
+Use a [MillionSend SDK](/sdks) from 0.9.0 (`emails.receiving`), the official
+Resend SDK pointed at MillionSend (`RESEND_BASE_URL`), or plain HTTP. Every
+endpoint below needs a **full access** key; a sending-only key gets
+`403 restricted_api_key`. A key scoped to a domain reads only mail received
+at that domain, and a key scoped to an inbox only mail delivered into that
+inbox.
+
+```ts
+import { Resend } from "resend";
+
+// RESEND_API_KEY=ms_...  RESEND_BASE_URL=https://api.millionsend.com
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+const { data: page } = await resend.emails.receiving.list({ limit: 20 });
+const { data: email } = await resend.emails.receiving.get(page.data[0].id);
+const { data: files } = await resend.emails.receiving.attachments.list({ emailId: email.id });
+```
+
+### List
+
+`GET /emails/receiving` lists newest first, as Resend does: `after` pages
+toward older mail, `before` back toward newer. It takes `limit` (1–100,
+default 20; Resend returns every email when `limit` is left out) and an
+`after` or `before` cursor, like every [list](/api-reference#pagination),
+plus these filters:
+
+| Parameter | Lists |
+| --- | --- |
+| `inbox_id` | Mail delivered into that inbox. An inbox the key can't reach answers `404`, before any `wait`; an inbox-scoped key naming another inbox gets `403 restricted_api_key`. |
+| `to` | Mail with that address in `received_for`. |
+| `from` | Mail from that address, or from a domain and its subdomains. |
+| `subject_contains` | Mail whose subject contains the text (up to 200 characters). |
+| `since` | Mail received after that time (ISO 8601). |
+| `unread` | `true` or `false`, with `inbox_id` (an inbox-scoped key needs none). |
+| `wait` | See [Waiting for new mail](#waiting-for-new-mail). |
+| `include_quarantined=true` | Held mail too. |
+| `quarantined=true` | Held mail only. |
+
+```sh
+curl "https://api.millionsend.com/emails/receiving?limit=20" \
+  -H "Authorization: Bearer ms_..."
+```
+
+```json
+{
+  "object": "list",
+  "has_more": false,
+  "data": [
+    {
+      "id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+      "to": ["support@inbound.example.com"],
+      "from": "ada@example.org",
+      "created_at": "2026-10-11T14:37:40.951Z",
+      "subject": "Order #1042",
+      "bcc": [],
+      "cc": [],
+      "reply_to": [],
+      "received_for": ["support@inbound.example.com"],
+      "message_id": "<CAF1x7Qm9@mail.example.org>",
+      "attachments": [
+        {
+          "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+          "filename": "invoice.pdf",
+          "content_type": "application/pdf",
+          "content_id": null,
+          "content_disposition": "attachment",
+          "size": 48213
+        }
+      ],
+      "inbox_id": null,
+      "thread_id": null,
+      "inboxes": [],
+      "screening": { "verdict": "clean", "sender_trust": "external" },
+      "spam_verdict": "pass",
+      "virus_verdict": "pass",
+      "extracted": { "kinds": [] }
+    }
+  ]
+}
+```
+
+The list shows mail at catch-all addresses and mail delivered into an inbox;
+held mail stays out unless asked for. Items carry MillionSend's fields after
+Resend's:
+
+- `inbox_id` and `thread_id`: the inbox the message was delivered into (with
+  an inbox-scoped key, its own), else `null`. `inboxes` lists every inbox it
+  reached, with `inbox_id`, `thread_id` and `verdict`, on full-access reads.
+- `screening`: `verdict` and `sender_trust` (see
+  [Agent safety](/concepts/agent-safety#sender-trust)).
+- `spam_verdict`, `virus_verdict`: see
+  [Spam, virus and trust](#spam-virus-and-trust).
+- `extracted.kinds`: `code` and `link` when the message carries a
+  verification code or a sign-in link; the values themselves are only on
+  [Get one](#get-one).
+- `read`, when the read is about one inbox (`inbox_id`, or an inbox-scoped
+  key).
+
+`include_quarantined` and `quarantined` need a full-access key that isn't
+restricted to an inbox; an inbox-scoped key, and the MCP server, get
+`403 restricted_api_key`.
+
+### Waiting for new mail
+
+`wait` (1–50 seconds) holds the request until matching mail arrives, then
+answers at once; at the deadline it answers an empty list. It combines with
+the filters above, so an agent can wait for the next message to one inbox,
+from one sender:
+
+```sh
+curl "https://api.millionsend.com/emails/receiving?inbox_id=7eeb9517-aed7-40d7-ad65-500be42ed147&from=example.org&wait=30" \
+  -H "Authorization: Bearer ms_..."
+```
+
+- It returns mail newer than `before`, this list's cursor toward newer mail,
+  or newer than `since`. With neither, the last 60 seconds count, so a
+  message that landed just before the call isn't missed.
+- With more matches than `limit`, it answers the newest `limit` and
+  `has_more: true`. To read every match, list without `wait`: pass the same
+  `before`, then the first id of each page while `has_more` is `true`.
+- The answer adds `held`: matching messages held since then, as
+  `{ id, inbox_id, reason, quarantine_reason, created_at }` and nothing more,
+  so an agent knows to stop waiting and tell a person. For an inbox-scoped key
+  or an MCP client, `subject_contains` doesn't filter `held`: held mail is
+  never matched on what it says.
+- A timeout answers `200` with `{ "object": "list", "has_more": false, "data": [], "held": [] }`.
+- One team holds 20 waits at once on each API process, and all teams 200;
+  one more answers `429 too_many_waits` with `retry-after: 1`.
+
+50 seconds stays under the 60-second limits of MCP clients and of common
+proxies, such as nginx's default `proxy_read_timeout`.
+
+### Get one
+
+`GET /emails/receiving/{id}` adds the content, the authentication results and
+a download link for the original message:
+
+```json
+{
+  "object": "email",
+  "id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+  "to": ["support@inbound.example.com"],
+  "from": "ada@example.org",
+  "created_at": "2026-10-11T14:37:40.951Z",
+  "subject": "Order #1042",
+  "html": "<p>Hi! The invoice is attached.</p>",
+  "html_format": "data_uri",
+  "text": "Hi! The invoice is attached.",
+  "headers": {
+    "from": "Ada Lovelace <ada@example.org>",
+    "to": "support@inbound.example.com",
+    "subject": "Order #1042",
+    "mime-version": "1.0"
+  },
+  "bcc": [],
+  "cc": [],
+  "reply_to": [],
+  "received_for": ["support@inbound.example.com"],
+  "authentication": { "spf": "pass", "dkim": "pass", "dmarc": "pass" },
+  "message_id": "<CAF1x7Qm9@mail.example.org>",
+  "raw": {
+    "download_url": "https://api.millionsend.com/receiving/raw/4ef9a417-02e9-4d39-ad75-9611e0fcc33c?expires=1791733061&signature=…",
+    "expires_at": "2026-10-11T15:37:41.000Z"
+  },
+  "attachments": [
+    {
+      "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+      "filename": "invoice.pdf",
+      "content_type": "application/pdf",
+      "content_id": null,
+      "content_disposition": "attachment",
+      "size": 48213
+    }
+  ],
+  "inbox_id": null,
+  "thread_id": null,
+  "inboxes": [],
+  "screening": {
+    "verdict": "clean",
+    "sender_trust": "external",
+    "quarantine_reason": null,
+    "reasons": [],
+    "injection_score": null,
+    "phishing_score": null,
+    "hidden_text_removed": false
+  },
+  "spam_verdict": "pass",
+  "spam_score": 0,
+  "virus_verdict": "pass",
+  "virus_signature": null,
+  "extracted_text": "Hi! The invoice is attached.",
+  "extracted": {
+    "kinds": [],
+    "code": null,
+    "link": null,
+    "link_domain_matches_sender": null,
+    "ambiguous": false
+  }
+}
+```
+
+- `html_format`: `data_uri`, the default, replaces the HTML's `cid:` image
+  references with the inline images themselves. `?html_format=cid` keeps the
+  references; match them to the attachments' `content_id`. Any other value is
+  a `422`. When inlining would take the HTML past 40 MB (typically a long
+  thread quoting the same image over and over), the references stay and
+  `html_format` reads `cid` whatever you asked for, as Resend does past
+  100 MB: check `html_format` rather than assume it.
+- `from` is the bare address; the display name is in `headers.from`.
+- `headers` holds the top-level headers with lowercase names, one value per
+  name; a repeated header such as `received` has its values joined by line
+  breaks. When the message carries no `Return-Path`, `return-path` holds the
+  envelope sender the sending server gave, `<>` for a bounce.
+- `html` or `text` is `null` when the message has no such part. A message
+  whose MIME doesn't parse is still stored and listed; whatever can't be read
+  from it is `null` (`headers` too, when no header parses), and `raw` has it
+  whole.
+- `html` is exactly as received. `text` comes without invisible characters
+  (zero-width and text-direction characters, Unicode tags), line breaks kept.
+- `message_id` comes from the message's `Message-ID` header. When it has
+  none, MillionSend makes one up as `<id@received.invalid>`.
+- `extracted_text` is the reply part of the message, cleaned of text a person
+  can't see, with quoted history and signatures set apart (see
+  [Agent safety](/concepts/agent-safety#hidden-text-and-extracted_text)).
+- `extracted` carries the message's verification `code` or sign-in `link`
+  (with `link_domain_matches_sender`), or `ambiguous: true` when two are
+  equally likely. They are never served from held mail or from a sender that
+  failed authentication, and every read of one is recorded in the inbox's
+  activity.
+
+Held mail answers `403 email_quarantined` ("This email is quarantined; a
+person can release it in the dashboard") to inbox-scoped keys and MCP
+clients, and mail still being screened answers them `404`.
+
+`authentication` reports SPF, DKIM and DMARC in Resend's words:
+
+| Value | Means | Check results |
+| --- | --- | --- |
+| `pass` | The check passed. | `pass` |
+| `fail` | The check failed. | `fail` |
+| `gray` | No verdict: no record or signature to check, or a neutral result. | `none`, `neutral`, `policy`, `softfail` |
+| `processing_failed` | The check couldn't finish, for example on a DNS error or a broken record. | `temperror`, `permerror` |
+| `unknown` | Not checked. | |
+
+As on Resend, DKIM passes only for a signature from the domain in `from` (or
+another domain of the same organization): a valid signature from any other
+domain reads `gray`, and `policy` in the dashboard. DMARC reads `gray` when
+the domain in `from` publishes `p=none` and SPF or DKIM passed, `none` in the
+dashboard.
+
+`dmarc: "pass"` means the domain in `from` authorized the message. Anything
+else means `from` may be forged, though `gray` also covers genuine mail from
+a domain that asks receivers not to enforce DMARC.
+
+The MX also records the details behind these words: the DMARC result before
+it is summarized, the policy the sender's domain publishes, the domains whose
+DKIM signatures aligned, and the domain SPF checked. The API keeps Resend's
+words; the dashboard uses the details to explain each gray result, and the
+[sender trust](/concepts/agent-safety#sender-trust) tier is built from them:
+
+| Gray result | What it means |
+| --- | --- |
+| DMARC, the message passed | It passed DMARC, but the sender's domain publishes `p=none`, so receivers aren't asked to block mail that fails. |
+| DMARC, the message failed | It failed DMARC, and the sender's domain publishes `p=none`, which doesn't ask receivers to block it. |
+| DMARC, no record | The sender's domain has no DMARC policy. |
+| DKIM `policy` | A valid signature from another domain, not from the From domain, so it doesn't prove who wrote the message. |
+| SPF `softfail` | The sending server isn't listed by the sender's domain, which asks only for a soft fail. |
+| SPF `neutral` or `none` | The sender's domain doesn't say which servers may send for it. |
+
+`processing_failed` means the check couldn't run: a DNS timeout or a
+malformed record.
+
+### Spam, virus and trust
+
+Each message carries three more results:
+
+- **`spam_verdict`**: `pass`, `gray` or `fail`, from `spam_score`, a local
+  score built from authentication, the sending server's greeting, missing
+  headers, a display name that shows another address, a Reply-To at another
+  organization, hidden text, link shorteners and IP-address links, links
+  whose text names another domain, and program or script attachments. 50 or
+  more fails, 25 to 49 is gray. No outside blocklist is consulted. In an
+  inbox, failing mail goes to the `spam` folder; at a catch-all address it is
+  only reported.
+- **`virus_verdict`**: `pass`, `fail` (with `virus_signature`, the malware
+  found), `processing_failed` (the scanner couldn't finish; the message is
+  delivered, with a warning) or `null` (the instance doesn't scan). Infected
+  mail is held: in an inbox it is quarantined, and at a catch-all address it
+  leaves the list and fires no `email.received` until a person releases it
+  in the dashboard. Its `raw` reads `null`, its downloads answer
+  `410 email_blocked`, and the server-side forward refuses it, even after a
+  release.
+- **`screening.sender_trust`**: how far the sender is proven, from `owner`
+  down to `failed`; see [Agent safety](/concepts/agent-safety#sender-trust).
+
+Messages received before these results existed read `null`.
+
+### Attachments
+
+`GET /emails/receiving/{email_id}/attachments` lists all of an email's
+attachments at once, as Resend does (pass `limit` to page through them), and
+`GET /emails/receiving/{email_id}/attachments/{id}` returns one, each with a
+fresh download link:
+
+```json
+{
+  "object": "attachment",
+  "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+  "filename": "invoice.pdf",
+  "size": 48213,
+  "content_type": "application/pdf",
+  "content_disposition": "attachment",
+  "download_url": "https://api.millionsend.com/receiving/attachments/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/b344102e-962e-8943-aef6-271c7743e1dd?expires=1791733061&signature=…",
+  "expires_at": "2026-10-11T15:37:41.000Z"
+}
+```
+
+`filename` and `content_id` are left out when the part has none. Attachment
+ids never change for the life of the email. Filenames are cleaned before they
+reach you: control characters are removed, and `/` and `\` become `_`.
+
+### Downloads
+
+`raw.download_url` and each attachment's `download_url` work without an API
+key: the link itself is the credential.
+
+- A link is signed for one email and one attachment (or the raw message) of
+  one team, and stops working at its `expires_at`, one hour after the API
+  answered; after that, or once altered, it answers `403`. Anyone holding it
+  can download until then, so don't log it or pass it around. Each call to
+  the endpoints above signs fresh links.
+- The raw download is the message exactly as the sending server transmitted
+  it (`message/rfc822`), byte for byte. An attachment download is the
+  attachment's decoded bytes, always as `application/octet-stream`; the
+  type the sender declared is in `content_type`.
+- Downloads are always served as files (`Content-Disposition: attachment`),
+  never rendered in a browser tab.
+- A message carrying a virus answers `410 email_blocked` ("This email carries
+  malware; downloads are blocked") before anything is decrypted.
+
+## Forwarding and replying
+
+`resend.emails.receiving.forward()` works as it does on Resend: it reads the
+email, downloads `raw.download_url` and sends the message again through
+`POST /emails`.
+
+```ts
+await resend.emails.receiving.forward({
+  emailId: "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+  from: "Support <support@inbound.example.com>",
+  to: "success@simulator.amazonses.com",
+});
+```
+
+By default the forward carries the original subject, text, HTML, inline
+images and attachments; with `passthrough: false` and your own `text` or
+`html`, the original travels as an attached `forwarded_message.eml` under a
+`Fwd:` subject. A forward is an ordinary send: `from` must be on a verified
+domain, and it counts against your sending quota. `POST /emails` takes inline
+images (`content_id`), so the default forward keeps them. A send carries up to
+10 MiB of attachments, though (Resend allows 40 MB): the default forward works
+when the original's attachments fit in 10 MiB, and a wrapped forward, which
+attaches the whole message, when the message itself does. A larger forward is
+refused with `422` before anything is queued.
+
+To reply in the same thread, send with `In-Reply-To` and `References` set to
+the received `message_id`:
+
+```ts
+await resend.emails.send({
+  from: "Support <support@inbound.example.com>",
+  to: email.from,
+  subject: `Re: ${email.subject}`,
+  text: "Thanks, we're on it.",
+  headers: { "In-Reply-To": email.message_id, References: email.message_id },
+});
+```
+
+### Reply and forward from the server
+
+`POST /emails/receiving/{id}/reply` and `POST /emails/receiving/{id}/forward`
+do it in one call, with the threading headers set for you:
+
+```sh
+curl -X POST "https://api.millionsend.com/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/reply" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-1042-reply" \
+  -d '{ "text": "Thanks, we are on it." }'
+```
+
+- **Reply** takes `text` or `html`, `subject`, `cc`, `bcc` and `reply_all`.
+  It goes to the message's `Reply-To`, or else its sender; `reply_all` adds
+  its other recipients as `cc`, and `bcc` is never copied.
+- **Forward** takes `to` (required), `cc`, `bcc`, a note in `text` or
+  `html`, `subject`, and `mode`: `inline`, the default, quotes the original
+  under a `---------- Forwarded message ---------` line with its
+  attachments; `attachment` attaches the whole message as
+  `forwarded_message.eml`. Either counts against the 10 MiB of attachments a
+  send carries.
+- `from` is any address on a verified domain of your team; by default, the
+  address of the inbox the message reached, else the first address in
+  `received_for`. `inbox_id` picks among the inboxes the message reached.
+- `requires_approval: true` holds the send for a person.
+
+They answer `200` with `{ "object": "email", "id", "thread_id", "inbox_id" }`;
+`202` with a draft when the inbox's rules hold the send; `403` for held or
+infected mail (`email_quarantined`), the inbox's rules
+(`inbox_send_policy`) or an inbox-scoped key outside its inbox
+(`restricted_api_key`); `404`; `409` for a reused `Idempotency-Key`; `422`;
+and `429 inbox_send_cap_reached`. Mail at a catch-all address is sent as any
+send: no inbox rules apply, unless `from` is an inbox's address. See
+[Inboxes → Reply and forward](/concepts/inboxes#reply-and-forward).
+
+## Deleting received mail
+
+`DELETE /emails/receiving/{id}` erases a received email now, rather than at
+the end of its retention: the message, its attachments and its place in
+inboxes and threads (a thread left empty goes with it). It answers
+`{ "object": "email", "id": "…", "deleted": true }`. It needs a full-access
+key that isn't restricted to an inbox, and in the dashboard an owner or admin
+(**Delete now**). Webhook deliveries already made keep their metadata-only
+copy until the delivery log's own retention.
+
+## Webhook
+
+`email.received` fires once for every message stored for your team, to
+endpoints subscribed to it or to all events, as soon as the message is
+visible: at once for a catch-all address, and on delivery for an inbox. Mail
+an inbox holds, in quarantine or while it is screened, and infected mail
+fire it only once delivered or released, even when a copy also went to a
+catch-all address. Like Resend's, it carries metadata
+only: fetch the content with `GET /emails/receiving/{email_id}`. When a
+later delivery of the same message reaches more of your addresses, one more
+`email.received` arrives for the same `email_id`, and its `received_for`
+lists only the added addresses, so each address is announced once.
+
+```json
+{
+  "type": "email.received",
+  "created_at": "2026-10-11T14:37:40.951Z",
+  "data": {
+    "email_id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+    "created_at": "2026-10-11T14:37:40.951Z",
+    "from": "ada@example.org",
+    "to": ["support@inbound.example.com"],
+    "bcc": [],
+    "cc": [],
+    "received_for": ["support@inbound.example.com"],
+    "message_id": "<CAF1x7Qm9@mail.example.org>",
+    "subject": "Order #1042",
+    "attachments": [
+      {
+        "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+        "filename": "invoice.pdf",
+        "content_type": "application/pdf",
+        "content_disposition": "attachment",
+        "content_id": null
+      }
+    ]
+  }
+}
+```
+
+An endpoint limited to some inboxes (`inbox_ids`) gets `email.received` only
+for mail delivered into one of them. Signatures, retries and the delivery
+log work as for every other event; see [Webhooks](/concepts/webhooks).
+
+## Dashboard
+
+**Inboxes → All received** lists everything your domains received, with its
+sender, inbox, subject and time, a chip when it carries a code or a link, and
+a badge when it is quarantined or spam; filter it by inbox (or catch-all
+only) and by result. Opening a message shows its HTML in a sandbox, with
+scripts and remote images blocked and inline images shown, plus the text
+version, the headers and the raw message; the authentication results, each
+gray one explained; the sender's trust, the spam and virus results and
+whether hidden text was removed; the extracted code or link, with a copy
+button; a timeline from arrival to delivery, release, reply or forward; and
+the actions **Reply**, **Forward**, **Release** for held mail, and
+**Delete now** for owners and admins. Old links to **Emails → Receiving**
+lead there.
+
+On a self-hosted instance, **Settings → Receiving** shows the operator the
+MX host, the last message received, the day's count, virus scanning and the
+shared inbox domain.
+
+## MCP
+
+The [MCP server](/mcp#tools) reads received mail under the `receiving:read`
+permission: `list_received_emails`, `get_received_email`,
+`list_received_email_attachments`, `get_received_email_attachment`,
+`wait_for_received_email` and `get_verification_code`, along with the inbox
+reads. `get_received_email` answers the cleaned reply text by default
+(`format: "extracted"`), and `text`, `html` or `raw` on request. Replying and
+forwarding take `receiving:reply`, and inboxes and quarantine
+`receiving:manage`. `update_domain` switches receiving and catch-all on or
+off. Grants made before a permission existed don't include it: sign in again
+from the client to grant it.
+
+## Treat received mail as untrusted
+
+Anyone can send mail to a receiving domain. HTML can carry scripts and
+tracking images, links can lead to phishing pages, attachments can carry
+malware, and `from` can be forged; `authentication` and
+`screening.sender_trust` tell you how far to trust it. An AI agent reading
+received mail should treat it as data, never as instructions: the MCP tools
+fence it that way, and an [agent inbox](/concepts/agent-safety) adds
+quarantine, screening and send rules on top.

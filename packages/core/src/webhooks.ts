@@ -19,17 +19,26 @@ import type { Keyring } from "./crypto/keyring.js";
  */
 
 export const WEBHOOK_EVENT_TYPES = [
+  "email.scheduled",
   "email.sent",
   "email.delivered",
   "email.delivery_delayed",
   "email.bounced",
   "email.complained",
+  // An email that will not go out, or that SES refused after it did:
+  // data.failed or data.suppressed says why (failedEmailExtras,
+  // suppressedEmailExtras). Not opt-in: Resend's SDKs know both names.
+  "email.failed",
+  "email.suppressed",
   "email.opened",
   "email.clicked",
   // Opt-in: a tracking-image fetch classified as automated (see
   // open-classifier). Never delivered to an endpoint subscribed to "all
   // events" — naming it is the consent; see endpointSubscribes.
   "email.prefetched",
+  // Inbound mail stored for the team: Resend's email.received payload, whose
+  // email_id is a received email (GET /emails/receiving/{id}).
+  "email.received",
   // Team-level standing events: no email in the payload.
   "deliverability.warning",
   "deliverability.paused",
@@ -48,6 +57,22 @@ export const WEBHOOK_EVENT_TYPES = [
   "contact.topic_opt_out",
   "suppression.added",
   "suppression.removed",
+  // Inbox events, every one opt-in (OPT_IN_EVENT_TYPES). Resend's names and
+  // payloads; inbox.expired and inbox.email.quarantined are MillionSend's.
+  "inbox.created",
+  "inbox.updated",
+  "inbox.deleted",
+  "inbox.expired",
+  "inbox.thread.created",
+  "inbox.thread.folder.updated",
+  "inbox.thread.labels.updated",
+  "inbox.email.received",
+  "inbox.email.sent",
+  "inbox.email.quarantined",
+  "inbox.draft.created",
+  "inbox.draft.updated",
+  "inbox.draft.sent",
+  "inbox.draft.deleted",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -56,8 +81,15 @@ export function isWebhookEventType(value: string): value is WebhookEventType {
   return (WEBHOOK_EVENT_TYPES as readonly string[]).includes(value);
 }
 
-/** Event types an endpoint receives only by naming them; "all events" (null) skips them. */
-const OPT_IN_EVENT_TYPES: ReadonlySet<string> = new Set<WebhookEventType>(["email.prefetched"]);
+/**
+ * Event types an endpoint receives only by naming them; "all events" (null)
+ * skips them. Inbox events are among them: SDKs with closed event enums (the
+ * .NET webhook parser among them) throw on a category they do not know.
+ */
+const OPT_IN_EVENT_TYPES: ReadonlySet<string> = new Set<WebhookEventType>([
+  "email.prefetched",
+  ...WEBHOOK_EVENT_TYPES.filter((type) => type.startsWith("inbox.")),
+]);
 
 export function endpointSubscribes(
   events: readonly string[] | null,
@@ -196,6 +228,82 @@ export function buildWebhookPayload(
       ...extras,
     },
   };
+}
+
+const PUBLIC_FAILURE_REASONS: ReadonlyMap<string, string> = new Map([
+  ["domain_not_verified", "domain_not_verified"],
+  ["domain_deleted", "domain_deleted"],
+  ["body_missing", "body_missing"],
+  ["body_unreadable", "body_unreadable"],
+  ["retries_exhausted", "retries_exhausted"],
+  ["send_interrupted", "send_interrupted"],
+  ["ses_MessageRejected", "message_rejected"],
+  ["ses_BadRequestException", "message_rejected"],
+  // SES's Reject event: it took the message, then refused to deliver it.
+  ["ses_Reject", "message_rejected"],
+  ["ses_MailFromDomainNotVerifiedException", "domain_not_verified"],
+]);
+
+/**
+ * The code an email.failed payload carries for an internal failure reason.
+ * Any other code, today's or a future one, reads provider_error: platform
+ * state such as the SES account's own standing never reaches a customer.
+ */
+export function publicFailureReason(internal: string): string {
+  return PUBLIC_FAILURE_REASONS.get(internal) ?? "provider_error";
+}
+
+/**
+ * Resend's data.suppressed `type` and `message` for each reason an email
+ * ends suppressed; any other reason, "ineligible" included, reads as the
+ * fallback below.
+ */
+export const SUPPRESSED_EMAIL_DETAILS: ReadonlyMap<string, { type: string; message: string }> =
+  new Map([
+    [
+      "recipient_suppressed",
+      { type: "OnAccountSuppressionList", message: "The recipient is on your suppression list." },
+    ],
+    [
+      "contact_unsubscribed",
+      { type: "Unsubscribed", message: "The contact unsubscribed from your emails." },
+    ],
+    [
+      "topic_unsubscribed",
+      { type: "Unsubscribed", message: "The recipient opted out of this email's topic." },
+    ],
+    [
+      "contact_missing",
+      { type: "Ineligible", message: "The contact was deleted before the email was sent." },
+    ],
+    [
+      "contact_recipient_mismatch",
+      { type: "Ineligible", message: "The contact's address changed before the email was sent." },
+    ],
+    [
+      "broadcast_missing",
+      { type: "Ineligible", message: "The broadcast was deleted before the email was sent." },
+    ],
+    [
+      "topic_missing",
+      { type: "Ineligible", message: "The email's topic was deleted before it was sent." },
+    ],
+  ]);
+
+const SUPPRESSED_EMAIL_FALLBACK = {
+  type: "Ineligible",
+  message: "The email was no longer eligible to send.",
+} as const;
+
+/** email.failed's extras: `data.failed.reason`, always a public code. */
+export function failedEmailExtras(internalReason: string): Record<string, unknown> {
+  return { failed: { reason: publicFailureReason(internalReason) } };
+}
+
+/** email.suppressed's extras: `data.suppressed`, three strings, as Resend's SDKs require. */
+export function suppressedEmailExtras(reason: string): Record<string, unknown> {
+  const { type, message } = SUPPRESSED_EMAIL_DETAILS.get(reason) ?? SUPPRESSED_EMAIL_FALLBACK;
+  return { suppressed: { type, message, reason } };
 }
 
 /** Svix-style backoff between attempts; length is the attempt cap. */
@@ -441,13 +549,45 @@ export async function enqueueWebhookDeliveries(
     enqueue: WebhookEnqueue;
   },
 ): Promise<void> {
-  await insertDeliveries(db, {
-    teamId: params.teamId,
-    emailId: params.email.emailId,
-    type: params.type,
-    payload: buildWebhookPayload(params.type, params.email, params.occurredAt, params.extras),
-    enqueue: params.enqueue,
+  const { teamId, enqueue, ...event } = params;
+  await enqueueEmailWebhookEvents(db, { teamId, events: [event], enqueue });
+}
+
+export interface EmailWebhookEvent {
+  type: WebhookEventType;
+  email: WebhookEmailFacts;
+  occurredAt: Date;
+  extras?: Record<string, unknown> | undefined;
+}
+
+/**
+ * Several email events of one team at once (a domain delete fails its whole
+ * queue): the endpoints are read once, each payload is built once, and the
+ * delivery rows land in bounded slices.
+ */
+export async function enqueueEmailWebhookEvents(
+  db: Db,
+  params: {
+    teamId: string;
+    events: readonly EmailWebhookEvent[];
+    enqueue: WebhookEnqueue;
+  },
+): Promise<void> {
+  if (params.events.length === 0) return;
+  const endpoints = await enabledEndpoints(db, params.teamId);
+  const values = params.events.flatMap((event) => {
+    const matching = endpoints.filter((e) => endpointSubscribes(e.events, event.type));
+    if (matching.length === 0) return [];
+    const payload = buildWebhookPayload(event.type, event.email, event.occurredAt, event.extras);
+    return matching.map((endpoint) => ({
+      endpointId: endpoint.id,
+      emailId: event.email.emailId,
+      messageId: `msg_${randomUUID()}`,
+      eventType: event.type,
+      payload: payload as unknown as Record<string, unknown>,
+    }));
   });
+  await insertDeliveryRows(db, values, params.enqueue);
 }
 
 /**
@@ -475,6 +615,38 @@ export interface TeamWebhookEvent {
   type: WebhookEventType;
   occurredAt: Date;
   data: Record<string, unknown>;
+  /**
+   * The inboxes the event is about, for endpoints filtered to some inboxes
+   * (webhook_endpoints.inbox_ids); an empty list reaches unfiltered endpoints
+   * only, and an absent one every endpoint. A routing hint: never serialized.
+   */
+  inboxIds?: readonly string[] | undefined;
+}
+
+/** Whether an endpoint filtered to `endpointInboxIds` (null = every inbox) takes an event about `eventInboxIds`. */
+function endpointCoversInboxes(
+  endpointInboxIds: readonly string[] | null,
+  eventInboxIds: readonly string[] | undefined,
+): boolean {
+  if (endpointInboxIds === null || eventInboxIds === undefined) return true;
+  return eventInboxIds.some((id) => endpointInboxIds.includes(id));
+}
+
+/** Whether an enabled endpoint of the team would take any of these events about these inboxes. */
+export async function endpointsTake(
+  db: Db,
+  p: {
+    teamId: string;
+    types: readonly WebhookEventType[];
+    inboxIds?: readonly string[] | undefined;
+  },
+): Promise<boolean> {
+  const endpoints = await enabledEndpoints(db, p.teamId);
+  return endpoints.some(
+    (e) =>
+      p.types.some((type) => endpointSubscribes(e.events, type)) &&
+      endpointCoversInboxes(e.inboxIds, p.inboxIds),
+  );
 }
 
 /**
@@ -494,7 +666,11 @@ export async function enqueueTeamWebhookEvents(
   const endpoints = await enabledEndpoints(db, params.teamId);
   const values = params.events.flatMap((event) =>
     endpoints
-      .filter((e) => endpointSubscribes(e.events, event.type))
+      .filter(
+        (e) =>
+          endpointSubscribes(e.events, event.type) &&
+          endpointCoversInboxes(e.inboxIds, event.inboxIds),
+      )
       .map((endpoint) => ({
         endpointId: endpoint.id,
         emailId: null,
@@ -508,6 +684,30 @@ export async function enqueueTeamWebhookEvents(
       })),
   );
   await insertDeliveryRows(db, values, params.enqueue);
+}
+
+/**
+ * Webhook rows written inside a transaction and handed to the queue after
+ * it commits: `collect` is the enqueue a fan-out inside the transaction
+ * takes, `flush` runs after the commit. A failed hand-off, or no `enqueue`
+ * at all, leaves the committed rows to the webhooks.reconcile sweep.
+ */
+export function webhookBatch(enqueue: WebhookEnqueue | undefined) {
+  const rows: QueuedWebhookDelivery[] = [];
+  const collect: WebhookEnqueue = async (queued) => {
+    rows.push(...queued);
+  };
+  return {
+    collect,
+    emit: (db: Db, teamId: string, events: TeamWebhookEvent[]) =>
+      enqueueTeamWebhookEvents(db, { teamId, events, enqueue: collect }),
+    flush: async () => {
+      if (rows.length === 0 || !enqueue) return;
+      await enqueue(rows).catch((err: unknown) => {
+        console.warn("webhook enqueue failed; the reconcile sweep will send", err);
+      });
+    },
+  };
 }
 
 type DeliveryInsert = typeof schema.webhookDeliveries.$inferInsert;
@@ -537,7 +737,11 @@ async function insertDeliveryRows(
 
 function enabledEndpoints(db: Db, teamId: string) {
   return db
-    .select({ id: schema.webhookEndpoints.id, events: schema.webhookEndpoints.events })
+    .select({
+      id: schema.webhookEndpoints.id,
+      events: schema.webhookEndpoints.events,
+      inboxIds: schema.webhookEndpoints.inboxIds,
+    })
     .from(schema.webhookEndpoints)
     .where(
       and(
@@ -545,29 +749,4 @@ function enabledEndpoints(db: Db, teamId: string) {
         eq(schema.webhookEndpoints.status, "enabled"),
       ),
     );
-}
-
-async function insertDeliveries(
-  db: Db,
-  params: {
-    teamId: string;
-    emailId: string | null;
-    type: WebhookEventType;
-    payload: WebhookPayload;
-    enqueue: WebhookEnqueue;
-  },
-): Promise<void> {
-  const endpoints = await enabledEndpoints(db, params.teamId);
-  const matching = endpoints.filter((e) => endpointSubscribes(e.events, params.type));
-  await insertDeliveryRows(
-    db,
-    matching.map((endpoint) => ({
-      endpointId: endpoint.id,
-      emailId: params.emailId,
-      messageId: `msg_${randomUUID()}`,
-      eventType: params.type,
-      payload: params.payload as unknown as Record<string, unknown>,
-    })),
-    params.enqueue,
-  );
 }

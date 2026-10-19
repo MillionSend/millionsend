@@ -7,36 +7,39 @@ import { DAY_MS } from "./utc-day.js";
 /**
  * The instance health probes the worker samples every minute. `bad` probes
  * mean the instance is not doing its job when they fail (the database, the
- * worker, KMS, SES events); `warn` ones are worth a look.
+ * worker, KMS, SES events); `warn` ones are worth a look. `aggregate` is how
+ * a history bucket folds its readings into one point: counts, sizes and
+ * times draw the highest reading, so every point is one the worker took and
+ * a spike stays visible; rates draw the average.
  */
 export const PROBES = {
-  pg_latency_ms: "bad",
-  pg_size_bytes: "warn",
-  worker_heartbeat: "bad",
-  boss_waiting: "warn",
-  boss_failed: "warn",
-  ses_events_lag_s: "bad",
+  pg_latency_ms: { severity: "bad", aggregate: "max" },
+  pg_size_bytes: { severity: "warn", aggregate: "max" },
+  worker_heartbeat: { severity: "bad", aggregate: "max" },
+  boss_waiting: { severity: "warn", aggregate: "max" },
+  boss_failed: { severity: "warn", aggregate: "max" },
+  ses_events_lag_s: { severity: "bad", aggregate: "max" },
   // A transactional row parked at the SES quota line: the reserve was too
   // small for the day, and a password reset waited behind the drain.
-  ses_transactional_parked: "bad",
-  webhook_success_rate: "warn",
-  webhook_tripped: "warn",
-  kms_wrap_ms: "bad",
-  stripe_last_event_s: "warn",
-  retention_purged: "warn",
-  teams_total: "warn",
-  contacts_total: "warn",
-  contacts_unsubscribed: "warn",
-  domains_verified: "warn",
-  queue_waiting: "warn",
-  queue_quota_held: "warn",
-  queue_oldest_s: "warn",
-  monitor_samples_1h: "warn",
-  monitor_unjudged_rate: "warn",
-} as const;
+  ses_transactional_parked: { severity: "bad", aggregate: "max" },
+  webhook_success_rate: { severity: "warn", aggregate: "avg" },
+  webhook_tripped: { severity: "warn", aggregate: "max" },
+  kms_wrap_ms: { severity: "bad", aggregate: "max" },
+  stripe_last_event_s: { severity: "warn", aggregate: "max" },
+  retention_purged: { severity: "warn", aggregate: "max" },
+  teams_total: { severity: "warn", aggregate: "max" },
+  contacts_total: { severity: "warn", aggregate: "max" },
+  contacts_unsubscribed: { severity: "warn", aggregate: "max" },
+  domains_verified: { severity: "warn", aggregate: "max" },
+  queue_waiting: { severity: "warn", aggregate: "max" },
+  queue_quota_held: { severity: "warn", aggregate: "max" },
+  queue_oldest_s: { severity: "warn", aggregate: "max" },
+  monitor_samples_1h: { severity: "warn", aggregate: "max" },
+  monitor_unjudged_rate: { severity: "warn", aggregate: "avg" },
+} as const satisfies Record<string, { severity: "bad" | "warn"; aggregate: "max" | "avg" }>;
 
 export type ProbeKey = keyof typeof PROBES;
-export type ProbeSeverity = (typeof PROBES)[ProbeKey];
+export type ProbeSeverity = (typeof PROBES)[ProbeKey]["severity"];
 export const PROBE_KEYS = Object.keys(PROBES) as ProbeKey[];
 
 export function isProbeKey(value: unknown): value is ProbeKey {
@@ -105,11 +108,14 @@ export interface ProbePoint {
   t: Date;
   value: number | null;
   ok: boolean;
+  /** How many readings the bucket folded into the point. */
+  readings: number;
 }
 
 /**
- * One probe's history between `from` and `to`, averaged per bucket of
- * `bucketSeconds`; a bucket with any failing sample reads as not ok.
+ * One probe's history between `from` and `to`, one point per bucket of
+ * `bucketSeconds` folded by the probe's aggregate; a bucket with any failing
+ * sample reads as not ok.
  */
 export async function probeHistory(
   db: Db,
@@ -117,9 +123,11 @@ export async function probeHistory(
 ): Promise<ProbePoint[]> {
   const p = schema.instanceProbes;
   const bucket = sql`to_timestamp(floor(extract(epoch from ${p.takenAt}) / ${opts.bucketSeconds}) * ${opts.bucketSeconds})`;
-  const rows = resultRows<{ t: string; value: number | null; ok: boolean }>(
+  const value =
+    PROBES[opts.probe].aggregate === "max" ? sql`max(${p.value})` : sql`avg(${p.value})`;
+  const rows = resultRows<{ t: string; value: number | null; ok: boolean; readings: number }>(
     await db.execute(sql`
-      select ${bucket} as t, avg(${p.value})::float8 as value, bool_and(${p.ok}) as ok
+      select ${bucket} as t, ${value}::float8 as value, bool_and(${p.ok}) as ok, count(*)::int as readings
       from ${p}
       where ${and(sql`${p.probe} = ${opts.probe}`, gte(p.takenAt, opts.from), lte(p.takenAt, opts.to))}
       group by 1
@@ -130,5 +138,6 @@ export async function probeHistory(
     t: new Date(r.t),
     value: r.value === null ? null : Number(r.value),
     ok: r.ok,
+    readings: Number(r.readings),
   }));
 }

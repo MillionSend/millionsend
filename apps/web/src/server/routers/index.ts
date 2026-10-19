@@ -9,9 +9,11 @@ import { consoleRouter } from "./console";
 import { domainsRouter } from "./domains";
 import { emailRouter } from "./email";
 import { emailsRouter } from "./emails";
+import { inboxesRouter } from "./inboxes";
 import { logsRouter } from "./logs";
 import { metricsRouter } from "./metrics";
 import { onboardingRouter } from "./onboarding";
+import { receivingRouter } from "./receiving";
 import { segmentsRouter } from "./segments";
 import { settingsRouter } from "./settings";
 import { supportRouter } from "./support";
@@ -32,9 +34,11 @@ export const appRouter = router({
   emails: emailsRouter,
   domains: domainsRouter,
   apiKeys: apiKeysRouter,
+  inboxes: inboxesRouter,
   logs: logsRouter,
   metrics: metricsRouter,
   onboarding: onboardingRouter,
+  receiving: receivingRouter,
   segments: segmentsRouter,
   settings: settingsRouter,
   support: supportRouter,

@@ -15,6 +15,9 @@ const workers: { name: string; opts: Record<string, unknown>; handler: Handler; 
 const inserted: { name: string; job: Record<string, unknown> }[] = [];
 const updated: { name: string; opts: Record<string, unknown> }[] = [];
 const scheduled: string[] = [];
+// pg-boss's schedule table, and the names scheduleCrons reconciled away.
+const scheduleTable = new Set<string>();
+const unscheduled: string[] = [];
 const bosses: { options: Record<string, unknown>; events: string[]; stopped: boolean }[] = [];
 // Shutdown ordering as seen from the mock: "stop:<boss index>" plus whatever a test pushes.
 const order: string[] = [];
@@ -71,6 +74,14 @@ vi.mock("pg-boss", () => ({
     }
     async schedule(name: string): Promise<void> {
       scheduled.push(name);
+      scheduleTable.add(name);
+    }
+    async getSchedules(): Promise<{ name: string }[]> {
+      return [...scheduleTable].map((name) => ({ name }));
+    }
+    async unschedule(name: string): Promise<void> {
+      unscheduled.push(name);
+      scheduleTable.delete(name);
     }
     async work(name: string, opts: Record<string, unknown>, handler: Handler): Promise<string> {
       workers.push({ name, opts, handler, boss: this.#index });
@@ -90,6 +101,8 @@ beforeEach(() => {
   inserted.length = 0;
   updated.length = 0;
   scheduled.length = 0;
+  scheduleTable.clear();
+  unscheduled.length = 0;
   bosses.length = 0;
   order.length = 0;
   createQueueError = undefined;
@@ -136,10 +149,12 @@ it("the worker starts a migrating, listening consumer first and a producer secon
     "webhook.drain",
     "recipient.erase",
     "abuse.judge",
+    "tenant.status",
+    "shared.subdomain",
   ]) {
     expect(queues.get(name)).toEqual({
       policy: "short",
-      notify: name !== "recipient.erase" && name !== "abuse.judge",
+      notify: name !== "recipient.erase" && name !== "shared.subdomain",
     });
   }
   for (const name of Object.values(DEAD_LETTER_QUEUES)) {
@@ -262,6 +277,8 @@ it("cron and dead-letter workers poll slowly; crons are scheduled through the pr
     opts: { batchSize: 1, pollingIntervalSeconds: 30 },
     boss: 0,
   });
+  // A schedule left by an earlier build whose cron this one no longer defines.
+  scheduleTable.add("safety.reveal_notices");
   const handlers = Object.fromEntries(
     Object.keys(CRON_JOBS).map((name) => [name, async () => {}]),
   ) as Parameters<Queue["scheduleCrons"]>[0];
@@ -270,6 +287,8 @@ it("cron and dead-letter workers poll slowly; crons are scheduled through the pr
   const cronWorkers = workers.slice(1);
   expect(cronWorkers.map((w) => w.name)).toEqual(Object.keys(CRON_JOBS));
   expect(cronWorkers.every((w) => w.opts.pollingIntervalSeconds === 30 && w.boss === 0)).toBe(true);
+  // The retired cron's schedule is dropped; the current ones are left alone.
+  expect(unscheduled).toEqual(["safety.reveal_notices"]);
 });
 
 it("creates job queues with the dedupe-enforcing policy", async () => {
@@ -419,6 +438,35 @@ it("a batch of sends carries the same options as a single send: key, priority, d
     retryDelay: 5,
   });
   expect(inserted[0]?.job).not.toHaveProperty("startAfter");
+});
+
+it("defers a forward_to pass it runs again, under the same key", async () => {
+  const queue = await Queue.start("postgres://unused");
+  const at = new Date(1_000);
+  await queue.enqueueInboxForward({ receivedEmailId: "r1", inboxId: "i1" });
+  await queue.enqueueInboxForward({ receivedEmailId: "r1", inboxId: "i1" }, at);
+  expect(sent.map((s) => s.name)).toEqual(["inbox.forward", "inbox.forward"]);
+  expect(sent[0]?.opts).not.toHaveProperty("startAfter");
+  expect(sent[1]?.opts).toMatchObject({ singletonKey: "r1:i1", startAfter: at });
+});
+
+it("settles each team's shared subdomain under the team's key, later when asked, with no dead letter", async () => {
+  const queue = await Queue.start("postgres://unused");
+  const at = new Date(1_000);
+  const since = "2026-01-01T00:00:00.000Z";
+  await queue.enqueueSharedSubdomains([
+    { teamId: "t1", since },
+    { teamId: "t2", since },
+  ]);
+  await queue.enqueueSharedSubdomains([{ teamId: "t1", since }], at);
+  expect(inserted.map((i) => i.job)).toEqual([
+    expect.objectContaining({ data: { teamId: "t1", since }, singletonKey: "t1" }),
+    expect.objectContaining({ data: { teamId: "t2", since }, singletonKey: "t2" }),
+    expect.objectContaining({ singletonKey: "t1", startAfter: at }),
+  ]);
+  expect(inserted[0]?.job).not.toHaveProperty("startAfter");
+  expect(inserted[0]?.job).not.toHaveProperty("deadLetter");
+  expect(queues.get("shared.subdomain")).toEqual({ policy: "short", notify: false });
 });
 
 it("arms one drain per distinct endpoint, keyed and grouped by the endpoint so a created one absorbs the rest and passes run one at a time", async () => {

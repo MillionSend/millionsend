@@ -11,6 +11,8 @@
 # Optional services sit behind compose profiles — COMPOSE_PROFILES in .env:
 #   docs    the documentation site on DOCS_PORT
 #   smtp    the SMTP relay; mount a STARTTLS keypair first (SELF_HOSTING.md)
+#   mx      inbound mail on port 25; needs RECEIVING_MX_HOST (SELF_HOSTING.md)
+#   clamav  virus scanning of received mail; set CLAMAV_HOST=clamav:3310
 #   backup  scheduled pg_dump to S3-compatible storage; needs S3_BACKUP_BUCKET
 services:
   postgres:
@@ -25,6 +27,7 @@ services:
       POSTGRES_DB: millionsend
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U millionsend -d millionsend"]
       interval: 5s
@@ -105,14 +108,64 @@ services:
       - /app/apps/docs/.next/cache
       - /app/apps/docs/.source
 
+  mx:
+    image: "${MILLIONSEND_IMAGE:-ghcr.io/millionsend/millionsend:latest}"
+    # Its own variables only, not env_file: the MX faces the internet and has
+    # no use for the app's keys.
+    environment:
+      PROCESS: mx
+      MX_INGEST_URL: "http://millionsend:${PORT:-3001}/internal/mx"
+      MX_INGEST_SECRET: "${MX_INGEST_SECRET:-}"
+      MX_HOSTNAME: "${MX_HOSTNAME:-${RECEIVING_MX_HOST:-}}"
+      MX_TLS_CERT_PATH: /tls/fullchain.pem
+      MX_TLS_KEY_PATH: /tls/privkey.pem
+    ports:
+      # Public by design: other mail servers deliver here. IPv4 only: over
+      # IPv6, Docker's proxy would replace each client's address with its own.
+      - "0.0.0.0:25:2525"
+    volumes:
+      # A certbot deploy hook copies the keypair here; STARTTLS follows it.
+      - ./mx-tls:/tls:ro
+    # The keypair is root:1000 0640 on the host; this group lets the image's
+    # non-root user read it.
+    group_add: ["1000"]
+    profiles: ["mx"]
+    restart: unless-stopped
+    # Above the supervisor's 35 s child-exit budget (scripts/start.mjs).
+    stop_grace_period: 45s
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  clamav:
+    # ClamAV's Debian build: the Alpine-based clamav/clamav image is published
+    # for amd64 only, and this stack also runs on arm64.
+    image: clamav/clamav-debian:1.4
+    # clamd keeps its signatures in memory; ClamAV recommends 4 GiB of RAM. No
+    # host port: clamd's protocol has neither authentication nor encryption.
+    profiles: ["clamav"]
+    volumes:
+      # Without it, every restart downloads the whole signature set again.
+      - clamav-db:/var/lib/clamav
+    restart: unless-stopped
+    # No cap_drop or read_only here: the image's entrypoint chowns the
+    # database and creates /run/clamav as root before dropping to its own user.
+    security_opt:
+      - no-new-privileges:true
+
   backup:
     # Published from scripts/backup on the same tags as the app.
     image: "${MILLIONSEND_BACKUP_IMAGE:-ghcr.io/millionsend/backup:latest}"
     env_file: .env
-    # Stays a no-op (prints a hint, exits 0, restart "no") until
-    # S3_BACKUP_BUCKET and the S3_* credentials are set in .env.
+    # Stays a no-op (prints a hint, then idles: an exit would restart-loop it)
+    # until S3_BACKUP_BUCKET and the S3_* credentials are set in .env.
     profiles: ["backup"]
-    restart: "no"
+    restart: unless-stopped
     init: true
     security_opt:
       - no-new-privileges:true
@@ -130,3 +183,4 @@ services:
 volumes:
   pgdata:
   backup-scratch:
+  clamav-db:

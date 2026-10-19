@@ -1,8 +1,14 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  PANEL_MAX_WIDTH,
+  type PanelPlacement,
+  placePanel,
+  viewportSize,
+} from "@/lib/panel-placement";
 import { ChevronGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
 
@@ -27,23 +33,13 @@ export interface SelectOption {
 /* Search input appears only when the list is long enough for scanning to hurt. */
 const SEARCH_THRESHOLD = 10;
 const TYPEAHEAD_RESET_MS = 500;
-/* Popover placement: breathing room to the viewport edge, the minimum
-   below-space worth keeping before flipping the panel above the trigger, and
-   the panel's width cap (max-content up to this). */
-const VIEWPORT_MARGIN = 16;
+/* Popover placement: the minimum below-space worth keeping before flipping
+   the panel above the trigger, the panel's width cap (max-content up to
+   this), and the list height before the panel is measured. */
 const FLIP_THRESHOLD = 200;
 const MENU_MAX_WIDTH = 320;
 const MENU_GAP = 6;
-
-/** Fixed placement of the portaled panel, measured from the trigger on open. */
-interface Placement {
-  maxHeight: number;
-  minWidth: number;
-  top?: number;
-  bottom?: number;
-  left?: number;
-  right?: number;
-}
+const UNPLACED_LIST_HEIGHT = 264;
 
 /**
  * Replacement for native <select>: compact .ms-input trigger + .ms-menu
@@ -77,7 +73,8 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const [placement, setPlacement] = useState<Placement>({ maxHeight: 264, minWidth: 0 });
+  const [minWidth, setMinWidth] = useState(0);
+  const [placed, setPlaced] = useState<PanelPlacement | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const dismissRefs = useMemo(() => [rootRef, menuRef], []);
@@ -120,32 +117,35 @@ export function Select({
     setQuery("");
     const selectedIndex = options.findIndex((o) => o.value === value);
     setActiveIndex(selectedIndex < 0 ? 0 : selectedIndex);
-    // The panel is portaled and fixed, so a scrolling table or card cannot
-    // clip it. Size to the real viewport gap instead of a fixed cap: the list
-    // grows to the space under the trigger, flipping above only when below is
-    // cramped and above has more room. A panel that could not grow to its
-    // full width rightward hangs from the trigger's right edge instead, so a
-    // filter at the end of a row never pushes the page into horizontal
-    // scroll. Offsets resolve against the layout viewport (documentElement),
-    // not window.inner*, which includes a classic scrollbar. Measured on
-    // open; a resize while open is rare enough that reopening is the recovery.
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) {
-      const viewportW = document.documentElement.clientWidth;
-      const viewportH = document.documentElement.clientHeight;
-      const below = viewportH - rect.bottom - VIEWPORT_MARGIN;
-      const above = rect.top - VIEWPORT_MARGIN;
-      const flip = below < FLIP_THRESHOLD && above > below;
-      const alignRight = rect.left + MENU_MAX_WIDTH > viewportW - VIEWPORT_MARGIN;
-      setPlacement({
-        maxHeight: Math.max(120, flip ? above : below),
-        minWidth: rect.width,
-        ...(flip ? { bottom: viewportH - rect.top + MENU_GAP } : { top: rect.bottom + MENU_GAP }),
-        ...(alignRight ? { right: viewportW - rect.right } : { left: rect.left }),
-      });
-    }
+    setMinWidth(triggerRef.current?.offsetWidth ?? 0);
     setOpen(true);
   }
+
+  // The panel is portaled and fixed, so a scrolling table or card cannot
+  // clip it. Placed once it has rendered and can be measured, before it
+  // paints: the list grows to the space under the trigger, flipping above
+  // only when below is cramped and above has more room, and a panel that
+  // cannot hang rightward from the trigger hangs from its right edge or
+  // shifts inside the viewport. Measured on open; a resize while open is rare
+  // enough that reopening is the recovery.
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const menu = menuRef.current;
+    if (!open || !trigger || !menu) return;
+    setPlaced(
+      placePanel(
+        trigger.getBoundingClientRect(),
+        { width: menu.offsetWidth, height: menu.offsetHeight },
+        viewportSize(),
+        { gap: MENU_GAP, minRoom: FLIP_THRESHOLD },
+      ),
+    );
+    return () => setPlaced(null);
+  }, [open]);
+  // Unmeasured, the first render hangs under the trigger; it is corrected
+  // before paint and stays visible, so the search input's autofocus lands.
+  const rect = open && !placed ? triggerRef.current?.getBoundingClientRect() : undefined;
+  const listMaxHeight = placed ? Math.max(120, placed.maxHeight) : UNPLACED_LIST_HEIGHT;
 
   function closeMenu() {
     setOpen(false);
@@ -291,13 +291,15 @@ export function Select({
               className="ms-menu"
               style={{
                 position: "fixed",
-                top: placement.top,
-                bottom: placement.bottom,
-                left: placement.left,
-                right: placement.right,
-                minWidth: placement.minWidth,
+                ...(placed
+                  ? {
+                      left: placed.left,
+                      ...(placed.above ? { bottom: placed.bottom } : { top: placed.top }),
+                    }
+                  : { left: rect?.left ?? 0, top: (rect?.bottom ?? 0) + MENU_GAP }),
+                minWidth,
                 width: "max-content",
-                maxWidth: MENU_MAX_WIDTH,
+                maxWidth: `min(${MENU_MAX_WIDTH}px, ${PANEL_MAX_WIDTH})`,
                 zIndex: "var(--ms-z-menu)",
                 // Rows must scroll to the panel edge and clip on the radius —
                 // panel padding would crop them mid-item at the scroll boundary.
@@ -328,7 +330,7 @@ export function Select({
                 role="listbox"
                 style={{
                   // Panel chrome around the list: 12px padding, plus the search row.
-                  maxHeight: placement.maxHeight - (searchable ? 40 : 0),
+                  maxHeight: listMaxHeight - (searchable ? 40 : 0),
                   overflowY: "auto",
                   padding: 4,
                   boxSizing: "border-box",

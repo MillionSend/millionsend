@@ -1,4 +1,8 @@
 {
+  "held": {
+    "label": "Delayed",
+    "body": "Delivery is paused for now and resumes automatically. You don't need to do anything."
+  },
   "list": {
     "title": "Emails",
     "suppressionList": "Suppression list",
@@ -32,7 +36,8 @@
       "queued": "{count} emails queued — they'll send in {duration}.",
       "upgrade": "Upgrade for a higher cap →",
       "reachedMonth": "Monthly quota of {limit} emails reached.",
-      "queuedMonth": "{count} emails queued — they'll send when the period renews on {date}, or as soon as overage is on."
+      "queuedMonth": "{count} emails queued — they'll send when the period renews on {date}, or as soon as overage is on.",
+      "queuedMonthPaused": "{count} emails queued — they'll send once the failed payment goes through, or when the period renews on {date}."
     },
     "allDomains": "All domains",
     "when": "When",
@@ -86,6 +91,19 @@
       "burst": "two links within a quarter second"
     },
     "suppressedLine": "future sends blocked",
+    "delayType": {
+      "InternalFailure": "internal SES failure",
+      "General": "SMTP failure",
+      "MailboxFull": "mailbox full",
+      "SpamDetected": "spam detected",
+      "RecipientServerError": "recipient server error",
+      "IPFailure": "sending IP blocked or throttled",
+      "TransientCommunicationFailure": "connection failure",
+      "BYOIPHostNameLookupUnavailable": "hostname lookup failed (BYOIP)",
+      "Undetermined": "reason undetermined",
+      "SendingDeferral": "deferred by SES"
+    },
+    "retriesUntil": "retries until {time}",
     "bounceBanner": {
       "hard": "Hard bounce — this address can't receive mail.",
       "suppressed": "It was added to your <link>suppression list</link>."
@@ -96,6 +114,7 @@
     "formatted": "Formatted",
     "insights": "Insights",
     "bodyPurged": "Body purged after retention window.",
+    "bodyNotStored": "Not sent: every To recipient is suppressed, so no content was stored.",
     "noHtml": "No HTML body.",
     "noText": "No plain-text body.",
     "previewLight": "Light",
@@ -120,8 +139,16 @@
       "estimate": "estimate",
       "notSentYet": "Not sent yet. Delivery events show up here as soon as the provider answers.",
       "waiting": "Waiting to send",
-      "waitingBody": "Goes out as soon as sending capacity frees up."
-    }
+      "waitingBody": "Goes out as soon as sending capacity frees up.",
+      "warmup": "Waiting for the domain's warm-up",
+      "warmupBody": "This domain sends a little more each day, most active contacts first. This email goes out as the day's volume allows.",
+      "warmupPaused": "Waiting for the warm-up to resume",
+      "warmupPausedBody": "The domain's warm-up is paused. This email goes out after it resumes.",
+      "newDomainLimit": "Waiting for the domain's daily volume",
+      "newDomainLimitBody": "Newly registered domains send a little more each day. This email goes out as the day's volume allows."
+    },
+    "headers": "Headers",
+    "noHeaders": "No headers."
   },
   "insights": {
     "outOfTen": "/ 10",
@@ -281,7 +308,7 @@
     "origin": "Origin",
     "added": "Added",
     "recipient": "Recipient",
-    "blocked": "Sends to this address are blocked to protect your domain reputation. The API returns <code>422 suppressed_recipient</code>.",
+    "blocked": "A bounce, complaint or manual entry drops the address from every send; an unsubscribe only from topic sends and broadcasts. If no <code>to</code> recipient is left, the API refuses the send with <code>422 all_recipients_suppressed</code>.",
     "suggestedActions": "Suggested actions",
     "step1": "Confirm the mailbox exists now — removing early usually re-bounces.",
     "step2": "Then remove the suppression; the next send goes through normally.",
@@ -327,6 +354,7 @@
       "manual": "Manual",
       "one_click_unsubscribe": "Unsubscribe"
     },
+    "fullMailbox": "Full or inactive mailbox",
     "detail": {
       "breadcrumb": "Suppression details",
       "notFound": "Suppression not found.",
@@ -334,7 +362,8 @@
       "recipient": "Recipient",
       "added": "Added",
       "details": "Details",
-      "removeNote": "Removing an address that bounced permanently will likely bounce again — remove it only after the mailbox is fixed."
+      "removeNote": "An address that bounced permanently will likely bounce again. Remove it only after the mailbox is fixed.",
+      "removeNoteFull": "This mailbox answered full or inactive. Remove it once you know it takes mail again."
     },
     "removeDialog": {
       "title": "Remove email address",

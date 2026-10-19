@@ -10,8 +10,10 @@ export function purgedEmailBodyColumns(at: Date) {
     bodyIv: null,
     bodyWrappedDek: null,
     bodyKeyVersion: null,
-    // Attachments are content on the same retention clock as the body.
+    // Attachments, and what screening read from them, are content on the
+    // same retention clock as the body.
     attachments: null,
+    media: null,
     bodyPurgedAt: at,
   };
 }

@@ -11,8 +11,8 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
-import { type Env, errorBody, keysetPage } from "../app.js";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { type Env, errorBody, KEYSET_LIST_DESCRIPTION, keysetPage } from "../app.js";
 import {
   batchAddSuppressionsRequestSchema,
   batchAddSuppressionsResponseSchema,
@@ -120,6 +120,7 @@ export function registerSuppressionRoutes(
           emailHash: s.emailHash,
           email: s.email,
           reason: s.reason,
+          sourceEmailId: s.sourceEmailId,
           createdAt: s.createdAt,
           // A row this statement inserted has xmax 0; one it reached through
           // the conflict update does not. Only the former are new to the list.
@@ -216,7 +217,13 @@ export function registerSuppressionRoutes(
       const rows = await db
         .delete(s)
         .where(and(eq(s.teamId, auth.teamId), match))
-        .returning({ id: s.id, email: s.email, reason: s.reason, createdAt: s.createdAt });
+        .returning({
+          id: s.id,
+          email: s.email,
+          reason: s.reason,
+          sourceEmailId: s.sourceEmailId,
+          createdAt: s.createdAt,
+        });
       await removed(auth.teamId, rows);
       return c.json(
         {
@@ -266,6 +273,7 @@ export function registerSuppressionRoutes(
     createRoute({
       method: "get",
       path: "/suppressions",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listSuppressionsQuerySchema },
       responses: {
         200: {
@@ -294,14 +302,12 @@ export function registerSuppressionRoutes(
               .from(s)
               .where(and(eq(s.id, id), eq(s.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(s)
             .where(and(scope, cond))
-            .orderBy(
-              ...(descending ? [desc(s.createdAt), desc(s.id)] : [asc(s.createdAt), asc(s.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -363,7 +369,13 @@ export function registerSuppressionRoutes(
       const [row] = await db
         .delete(s)
         .where(byIdOrEmail(auth.teamId, c.req.valid("param").id))
-        .returning({ id: s.id, email: s.email, reason: s.reason, createdAt: s.createdAt });
+        .returning({
+          id: s.id,
+          email: s.email,
+          reason: s.reason,
+          sourceEmailId: s.sourceEmailId,
+          createdAt: s.createdAt,
+        });
       if (!row) return c.json(errorBody(404, "not_found", "Suppression not found"), 404);
       await removed(auth.teamId, [row]);
       return c.json({ object: "suppression" as const, id: row.id, deleted: true as const }, 200);

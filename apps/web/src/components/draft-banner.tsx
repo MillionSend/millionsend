@@ -38,27 +38,30 @@ export function DraftBanner({
       }}
     >
       {common("draftRecovered", { time: formatRelative(savedAt, locale) })}{" "}
-      <button type="button" style={linkButtonStyle} onClick={onRestore}>
-        {common("draftRestore")}
-      </button>
-      <span aria-hidden="true"> · </span>
-      <button
-        type="button"
-        style={linkButtonStyle}
-        onClick={() => {
-          // Discarding is irreversible — the draft is the only copy.
-          void confirmDialog({
-            local: true,
-            message: common("draftDiscardConfirm"),
-            confirmLabel: common("draftDiscard"),
-            danger: true,
-          }).then((ok) => {
-            if (ok) onDiscard();
-          });
-        }}
-      >
-        {common("draftDiscard")}
-      </button>
+      {/* The two actions wrap as a pair, never split across lines. */}
+      <span style={{ whiteSpace: "nowrap" }}>
+        <button type="button" style={linkButtonStyle} onClick={onRestore}>
+          {common("draftRestore")}
+        </button>
+        <span aria-hidden="true"> · </span>
+        <button
+          type="button"
+          style={linkButtonStyle}
+          onClick={() => {
+            // Discarding is irreversible — the draft is the only copy.
+            void confirmDialog({
+              local: true,
+              message: common("draftDiscardConfirm"),
+              confirmLabel: common("draftDiscard"),
+              danger: true,
+            }).then((ok) => {
+              if (ok) onDiscard();
+            });
+          }}
+        >
+          {common("draftDiscard")}
+        </button>
+      </span>
     </p>
   );
 }

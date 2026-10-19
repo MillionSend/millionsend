@@ -1,18 +1,29 @@
-import { INVITE_MAX_SENDS, INVITE_TTL_MS } from "@millionsend/core";
+import { DAY_MS, INVITE_MAX_SENDS, INVITE_TTL_MS, SUSPENSION_REASONS } from "@millionsend/core";
+import { unescapeHtml } from "@millionsend/core/html";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SimpleEmail } from "@millionsend/ses";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, readable } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { createSettingsRouter } from "@/server/routers/settings";
+import { teamBootstrapRouter } from "@/server/routers/team-bootstrap";
 import { buildInvitationEmail, type SystemMailDeps } from "@/server/system-mail";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
 
 let db: Db;
 let close: () => Promise<void>;
+
+// The dashboard language a request carries, as the NEXT_LOCALE cookie.
+const dashboard = vi.hoisted(() => ({ locale: undefined as string | undefined }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) =>
+      name === "NEXT_LOCALE" && dashboard.locale ? { name, value: dashboard.locale } : undefined,
+  }),
+}));
 
 beforeEach(async () => {
   // signInviteToken/verifyInviteToken HMAC over this secret.
@@ -22,6 +33,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  dashboard.locale = undefined;
   await close();
 });
 
@@ -65,6 +77,17 @@ function mailCaller(
     role,
   };
   return { caller: factory(ctx), sent };
+}
+
+async function verifyEmail(userId: string): Promise<void> {
+  await db.update(schema.user).set({ emailVerified: true }).where(eq(schema.user.id, userId));
+}
+
+/** Past the monitor's "new" tier: its first window and ramp behind it, on probation. */
+async function settleTeam(teamId: string): Promise<void> {
+  await db
+    .insert(schema.teamMonitor)
+    .values({ teamId, sentTotal: 2_000, firstSendAt: new Date(Date.now() - 10 * DAY_MS) });
 }
 
 function stubSender(): void {
@@ -113,6 +136,30 @@ describe("settings.invitations.create", () => {
     await expect(
       caller.settings.invitations.create({ email: "DUP@example.com" }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("refuses a temporary inbox, subdomains included, where disposable addresses are blocked", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "owner1", "owner");
+    const caller = callerFor("owner1", teamId, "owner");
+    vi.stubEnv("BLOCK_DISPOSABLE_EMAILS", "true");
+    for (const email of ["new@mailinator.com", "new@sub.mailinator.com"]) {
+      await expect(caller.settings.invitations.create({ email }), email).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Invite a permanent email address. Temporary inboxes can't join a team.",
+      });
+    }
+    dashboard.locale = "pt-BR";
+    await expect(
+      caller.settings.invitations.create({ email: "new@mailinator.com" }),
+    ).rejects.toMatchObject({
+      message:
+        "Convide um e-mail permanente. Endereços temporários não podem entrar em uma equipe.",
+    });
+    expect(await db.select().from(schema.teamInvitations)).toEqual([]);
+
+    vi.stubEnv("BLOCK_DISPOSABLE_EMAILS", "false");
+    await caller.settings.invitations.create({ email: "new@mailinator.com" });
   });
 });
 
@@ -250,22 +297,30 @@ describe("settings.invitations email + resend", () => {
     await caller.settings.invitations.create({ email: "ana@example.com" });
     await caller.settings.invitations.create({ email: "new@example.com" });
     expect(sent.map((m) => m.subject)).toEqual([
-      "owner1 convidou você para acme no MillionSend",
-      "owner1 invited you to acme on MillionSend",
+      "Você recebeu um convite para uma equipe no MillionSend",
+      "You've been invited to a team on MillionSend",
     ]);
+    expect(sent[0]?.text).toContain(
+      "Você recebeu um convite para entrar em uma equipe no MillionSend como membro.",
+    );
   });
 
   it("emails the invitee at create, naming the team and carrying the accept link", async () => {
     stubSender();
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "owner1", "owner");
+    await verifyEmail("owner1");
+    await settleTeam(teamId);
     const { caller, sent } = mailCaller("owner1", teamId, "owner");
     const created = await caller.settings.invitations.create({ email: "new@example.com" });
     expect(created.emailed).toBe(true);
     expect(sent).toHaveLength(1);
     expect(sent[0]?.to).toBe("new@example.com");
     expect(sent[0]?.from).toContain("no-reply@mail.example.com");
-    expect(sent[0]?.subject).toContain("acme");
+    expect(sent[0]?.subject).toBe("You've been invited to a team on MillionSend");
+    expect(readable(sent[0]?.text)).toContain(
+      "owner1@example.com invited you to join acme on MillionSend as a member.",
+    );
     expect(sent[0]?.html).toContain(created.acceptUrl);
     expect(sent[0]?.text).toContain(created.acceptUrl);
     const [row] = await db
@@ -353,6 +408,51 @@ describe("settings.invitations email + resend", () => {
   });
 });
 
+describe("settings.invitations email content", () => {
+  /** The one invitation the owner of a team named Zebra Labs sends, as a reader sees it. */
+  async function invitation(opts: { verified: boolean; settled: boolean }): Promise<string> {
+    stubSender();
+    const teamId = await createTeam(db, "zebra");
+    await db.update(schema.teams).set({ name: "Zebra Labs" }).where(eq(schema.teams.id, teamId));
+    await addMember(teamId, "owner1", "owner");
+    // A display name stored before names refused phone numbers.
+    await db
+      .update(schema.user)
+      .set({ name: "Ana, call 0800 555 0199" })
+      .where(eq(schema.user.id, "owner1"));
+    if (opts.verified) await verifyEmail("owner1");
+    if (opts.settled) await settleTeam(teamId);
+    const { caller, sent } = mailCaller("owner1", teamId, "owner");
+    await caller.settings.invitations.create({ email: "new@example.com" });
+    expect(sent).toHaveLength(1);
+    const mail = sent[0];
+    const read = readable(`${mail?.subject}\n${mail?.text}\n${unescapeHtml(mail?.html ?? "")}`);
+    expect(read).not.toMatch(/Ana|0800/);
+    return read;
+  }
+
+  it("names a new team's inviter by verified address, and the team by no name", async () => {
+    const read = await invitation({ verified: true, settled: false });
+    expect(read).toContain(
+      "owner1@example.com invited you to join a team on MillionSend as a member.",
+    );
+    expect(read).not.toContain("Zebra");
+  });
+
+  it("names the team once it is past the new tier", async () => {
+    const read = await invitation({ verified: true, settled: true });
+    expect(read).toContain(
+      "owner1@example.com invited you to join Zebra Labs on MillionSend as a member.",
+    );
+  });
+
+  it("names neither when the inviter's address is unverified", async () => {
+    const read = await invitation({ verified: false, settled: true });
+    expect(read).toContain("You've been invited to join a team on MillionSend as a member.");
+    expect(read).not.toMatch(/owner1|Zebra/);
+  });
+});
+
 describe("settings.invitations send accounting", () => {
   it("two concurrent resends email exactly once: the cooldown is enforced by the update itself", async () => {
     stubSender();
@@ -410,7 +510,7 @@ describe("settings.invitations send accounting", () => {
     const failing = mailCaller("owner1", teamId, "owner", { failing: true });
     await expect(
       failing.caller.settings.invitations.resend({ id: created.id }),
-    ).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     const [row] = await db
       .select()
       .from(schema.teamInvitations)
@@ -422,17 +522,161 @@ describe("settings.invitations send accounting", () => {
   it("names with $ sequences render verbatim and every placeholder is filled", () => {
     const mail = buildInvitationEmail({
       to: "new@example.com",
-      inviterName: "Bob $'",
+      inviterEmail: "bob+$'@example.com",
       teamName: "Acme $$ Co",
       role: "member",
       url: "https://app.example.com/invite/tok",
       expiresInDays: 3,
       locale: "en",
     });
-    expect(mail.text).toContain("Bob $'");
+    expect(mail.text).toContain("bob+$'@");
     expect(mail.text).toContain("Acme $$ Co");
     expect(mail.text).not.toMatch(/\{(inviter|team|role|days|email)\}/);
-    expect(mail.subject).toContain("Acme $$ Co");
+    expect(mail.subject).toBe("You've been invited to a team on MillionSend");
+  });
+});
+
+describe("settings.invitations limits", () => {
+  it("caps the invitations a team starts in a day, revoked ones included", async () => {
+    vi.stubEnv("INVITES_PER_TEAM_PER_DAY", "3");
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "owner1", "owner");
+    const caller = callerFor("owner1", teamId, "owner");
+    const first = await caller.settings.invitations.create({ email: "a@example.com" });
+    await caller.settings.invitations.create({ email: "b@example.com" });
+    // Revoking deletes the row but gives nothing back for the day.
+    await caller.settings.invitations.revoke({ id: first.id });
+    await caller.settings.invitations.create({ email: "c@example.com" });
+    await expect(
+      caller.settings.invitations.create({ email: "d@example.com" }),
+    ).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+      message: "This team reached its limit of 3 invitations a day. Try again tomorrow.",
+    });
+    expect((await caller.settings.invitations.list()).map((invite) => invite.email).sort()).toEqual(
+      ["b@example.com", "c@example.com"],
+    );
+
+    // Another team keeps its own count.
+    const other = await createTeam(db, "other");
+    await addMember(other, "owner2", "owner");
+    await expect(
+      callerFor("owner2", other, "owner").settings.invitations.create({ email: "d@example.com" }),
+    ).resolves.toMatchObject({ email: "d@example.com" });
+
+    // A day on, the count starts over.
+    vi.useFakeTimers({ now: Date.now() + DAY_MS + 60_000, toFake: ["Date"] });
+    try {
+      await expect(
+        caller.settings.invitations.create({ email: "d@example.com" }),
+      ).resolves.toMatchObject({ email: "d@example.com" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("caps the invitations one member starts across teams, deleted teams included", async () => {
+    vi.stubEnv("INVITES_PER_TEAM_PER_DAY", "2");
+    await createUser("owner1");
+    const quiet = async () => {};
+    const factory = createCallerFactory(
+      router({
+        team: teamBootstrapRouter,
+        settings: createSettingsRouter({
+          cancelSubscription: quiet,
+          deleteSesIdentity: quiet,
+          deleteSesTenant: quiet,
+          deleteLogo: quiet,
+        }),
+      }),
+    );
+    const session = { user: { id: "owner1", email: "owner1@example.com", name: "owner1" } };
+    const as = (teamId: string | null) =>
+      factory({ db, session, teamId, role: teamId ? ("owner" as const) : null });
+    const refused = {
+      code: "TOO_MANY_REQUESTS",
+      message: "You reached your limit of 2 invitations a day. Try again tomorrow.",
+    };
+
+    const { teamId: first } = await as(null).team.createTeam({ name: "First" });
+    await as(first).settings.invitations.create({ email: "a@example.com" });
+    const { teamId: second } = await as(null).team.createTeam({ name: "Second" });
+    await as(second).settings.invitations.create({ email: "b@example.com" });
+    await expect(
+      as(second).settings.invitations.create({ email: "c@example.com" }),
+    ).rejects.toMatchObject(refused);
+
+    // Deleting the teams takes their invitation rows along, and gives nothing back.
+    await as(first).settings.team.delete();
+    await as(second).settings.team.delete();
+    const { teamId: third } = await as(null).team.createTeam({ name: "Third" });
+    await expect(
+      as(third).settings.invitations.create({ email: "c@example.com" }),
+    ).rejects.toMatchObject(refused);
+
+    // Another admin of the team has a count of their own.
+    await addMember(third, "admin1", "admin");
+    const admin = callerFor("admin1", third, "admin");
+    await expect(
+      admin.settings.invitations.create({ email: "c@example.com" }),
+    ).resolves.toMatchObject({ email: "c@example.com" });
+    // An invitation whose email is still going out has no audit row yet, and counts.
+    const fourth = await createTeam(db, "fourth");
+    await db.insert(schema.teamMembers).values({ teamId: fourth, userId: "admin1", role: "owner" });
+    await db.insert(schema.teamInvitations).values({
+      teamId: fourth,
+      email: "d@example.com",
+      invitedByUserId: "admin1",
+      expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+    });
+    await expect(
+      admin.settings.invitations.create({ email: "e@example.com" }),
+    ).rejects.toMatchObject(refused);
+    dashboard.locale = "pt-BR";
+    await expect(
+      admin.settings.invitations.create({ email: "e@example.com" }),
+    ).rejects.toMatchObject({
+      message: "Você atingiu o seu limite de 2 convites por dia. Tente de novo amanhã.",
+    });
+  });
+
+  it("refuses over the cap, a second pending invitation and an early resend in the dashboard's language", async () => {
+    vi.stubEnv("INVITES_PER_TEAM_PER_DAY", "2");
+    stubSender();
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "owner1", "owner");
+    const { caller } = mailCaller("owner1", teamId, "owner");
+    const created = await caller.settings.invitations.create({ email: "a@example.com" });
+
+    await expect(
+      caller.settings.invitations.create({ email: "A@example.com" }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "This address already has a pending invitation. Resend or revoke it from the list.",
+    });
+    await expect(caller.settings.invitations.resend({ id: created.id })).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+      message: "This invitation was just sent. Wait a couple of minutes before resending.",
+    });
+
+    dashboard.locale = "pt-BR";
+    await expect(
+      caller.settings.invitations.create({ email: "a@example.com" }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Este endereço já tem um convite pendente. Reenvie ou revogue o convite pela lista.",
+    });
+    await expect(caller.settings.invitations.resend({ id: created.id })).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+      message: "Este convite acabou de ser enviado. Espere alguns minutos antes de reenviar.",
+    });
+    await caller.settings.invitations.create({ email: "b@example.com" });
+    await expect(
+      caller.settings.invitations.create({ email: "c@example.com" }),
+    ).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+      message: "Esta equipe atingiu o limite de 2 convites por dia. Tente de novo amanhã.",
+    });
   });
 });
 
@@ -503,4 +747,48 @@ describe("settings.invitations.preview", () => {
       caller.settings.invitations.preview({ token: tokenFromUrl(acceptUrl) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+});
+
+describe("settings.invitations while the team is suspended", () => {
+  it.each(SUSPENSION_REASONS)(
+    "for %s refuses new invitations, resends and accepts; the pending invite stays as it was",
+    async (reason) => {
+      const teamId = await createTeam(db, "acme");
+      await addMember(teamId, "owner1", "owner");
+      await createUser("newbie");
+      const owner = callerFor("owner1", teamId, "owner");
+      const pending = await owner.settings.invitations.create({ email: "newbie@example.com" });
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      const locked = {
+        code: "PRECONDITION_FAILED",
+        // A team suspended for phishing or held for review is never told it is suspended.
+        message: ["phishing", "review"].includes(reason)
+          ? "This isn't available for this team right now. Contact support if you need help."
+          : "This team is suspended, so no one new can join it. Contact support.",
+      };
+
+      await expect(
+        owner.settings.invitations.create({ email: "other@example.com" }),
+      ).rejects.toMatchObject(locked);
+      await expect(owner.settings.invitations.resend({ id: pending.id })).rejects.toMatchObject(
+        locked,
+      );
+      await expect(
+        callerFor("newbie", null, null).settings.invitations.accept({
+          token: tokenFromUrl(pending.acceptUrl),
+        }),
+      ).rejects.toMatchObject(locked);
+
+      const members = await db
+        .select({ userId: schema.teamMembers.userId })
+        .from(schema.teamMembers)
+        .where(eq(schema.teamMembers.teamId, teamId));
+      expect(members).toEqual([{ userId: "owner1" }]);
+      const invites = await db.select().from(schema.teamInvitations);
+      expect(invites).toMatchObject([{ id: pending.id, acceptedAt: null, sendCount: 0 }]);
+    },
+  );
 });

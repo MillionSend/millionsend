@@ -33,6 +33,10 @@ export const contacts = pgTable(
     // When the contact unsubscribed (null while subscribed) — feeds the
     // audience growth chart alongside createdAt.
     unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
+    // Last real open or click on one of the team's emails (prefetches never count).
+    lastEngagedAt: timestamp("last_engaged_at", { withTimezone: true }),
+    // First "mailbox full" answer; a second one a day or more later suppresses the address.
+    mailboxFullAt: timestamp("mailbox_full_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

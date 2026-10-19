@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { DraftBanner } from "@/components/draft-banner";
 import { FromField } from "@/components/from-field";
+import { MailyEditor } from "@/components/maily-editor/lazy";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -18,12 +18,12 @@ import { MarkerRail, MobileStepBar, StepRail } from "@/components/stepper";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { statusGlow } from "@/lib/status-glow";
-import { bodyEditorMode } from "@/lib/template-mode";
+import { bodyEditorMode, followingText } from "@/lib/template-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ConvertBlocksDialog, HtmlAuthoredBanner, HtmlCodeMode } from "../templates/html-mode";
-import { ContentPreview, SendPlanSummary } from "./parts";
+import { ContentPreview, type SendPace, SendPlanSummary, sendsByWarmup } from "./parts";
 
 /** Everything a crash would lose — mirrored into the local draft. */
 interface ComposerDraft {
@@ -37,13 +37,6 @@ interface ComposerDraft {
   text: string;
   document: unknown;
 }
-
-// Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
-// must not render on the server. The ghost holds the field's height meanwhile.
-const MailyEditor = dynamic(() => import("@/components/maily-editor").then((m) => m.default), {
-  ssr: false,
-  loading: () => <Skeleton width="100%" height={340} radius="var(--ms-r-input)" />,
-});
 
 export interface ComposerInitial {
   id: string;
@@ -121,6 +114,10 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [convertOpen, setConvertOpen] = useState(false);
   const [guardOpen, setGuardOpen] = useState(false);
   const [schedule, setSchedule] = useState("");
+  // The guard's warm-up choices; skipInactive stays undefined until changed,
+  // so the domain's own setting holds.
+  const [pace, setPace] = useState<SendPace>("warmup");
+  const [skipInactive, setSkipInactive] = useState<boolean | undefined>(undefined);
   const [templateId, setTemplateId] = useState("");
   // Editing an existing draft lands on step 2 (targeting is a recap there);
   // a new broadcast starts at step 1: targeting + name.
@@ -270,8 +267,10 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     savedDoc.current = "__applied__";
     setDirty(true);
   }
-  // The plan behind the guard: the count and, when capacity or the plan
-  // paces the send, how it goes out. Re-read when the schedule moves.
+  // The plan behind the guard: the count and, when capacity, the plan or the
+  // domain's warm-up paces the send, how it goes out. Re-read when the
+  // schedule or the inactive choice moves, the dialog kept while the choice
+  // re-plans.
   const sendPlan = useQuery(
     trpc.broadcasts.sendPlan.queryOptions(
       {
@@ -279,11 +278,21 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         segmentId: segmentId || null,
         from: from.trim(),
         ...(schedule ? { scheduledAt: new Date(schedule) } : {}),
+        ...(skipInactive === undefined ? {} : { skipInactive }),
       },
-      { enabled: guardOpen },
+      {
+        enabled: guardOpen,
+        ...(skipInactive === undefined ? {} : { placeholderData: (previous) => previous }),
+      },
     ),
   );
-  const sendBlocked = sendPlan.data?.count === 0 || sendPlan.data?.estimate?.blocked === true;
+  const warmup = sendPlan.data?.warmup ?? null;
+  const byWarmup = sendsByWarmup(warmup, pace);
+  // Offered while off: the send turns the domain's warm-up on.
+  const enablesWarmup = byWarmup && warmup?.status !== "warming" && warmup?.status !== "paused";
+  const sendBlocked =
+    sendPlan.data?.count === 0 ||
+    (byWarmup ? warmup?.blocked === true : sendPlan.data?.estimate?.blocked === true);
 
   const createMutation = useMutation(trpc.broadcasts.create.mutationOptions());
   const updateMutation = useMutation(trpc.broadcasts.update.mutationOptions());
@@ -384,6 +393,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       await sendMutation.mutateAsync({
         id,
         ...(schedule ? { scheduledAt: new Date(schedule) } : {}),
+        ...(enablesWarmup ? { warmup: true } : {}),
+        ...(byWarmup && skipInactive !== undefined ? { skipInactive } : {}),
       });
       invalidate();
       router.push(`/broadcasts/${id}`);
@@ -473,6 +484,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               disabled={!complete}
               onClick={() => {
                 sendMutation.reset();
+                setPace("warmup");
+                setSkipInactive(undefined);
                 setGuardOpen(true);
               }}
             >
@@ -615,11 +628,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                   padding: "12px 16px",
                   boxSizing: "border-box",
                   display: "flex",
+                  flexWrap: "wrap",
                   alignItems: "center",
                   gap: 12,
                 }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
+                {/* "Change" drops under the recap before the recap gets narrower than this. */}
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <div
                     style={{
                       fontSize: 14,
@@ -648,6 +663,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                 <button
                   type="button"
                   className="ms-btn ms-btn-secondary"
+                  style={{ marginLeft: "auto" }}
                   onClick={() => setStep(1)}
                 >
                   {t("composer.stepChange")}
@@ -781,12 +797,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                     id="bc-html"
                     html={html}
                     onChange={(next) => {
+                      setText(followingText(text, html, next));
                       setHtml(next);
                       setDirty(next !== savedHtml.current);
                     }}
                     mergeFields={mergeFields}
                     previewSamples={previewSamples}
-                    hasText={text !== ""}
+                    text={text}
                   />
                 ) : (
                   <>
@@ -864,6 +881,11 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               estimate={sendPlan.data.estimate}
               cloud={sendPlan.data.cloud}
               locale={locale}
+              warmup={warmup}
+              pace={pace}
+              onPace={setPace}
+              onSkipInactive={setSkipInactive}
+              scheduled={schedule !== ""}
             />
           ) : (
             <p
@@ -899,7 +921,12 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               disabled={sending || sendBlocked}
             >
               <BtnSpinner on={sending} />
-              {schedule ? t("guard.schedule") : t("guard.sendNow")} <ConfirmKeycap />
+              {enablesWarmup
+                ? t("guard.sendWithWarmup")
+                : schedule
+                  ? t("guard.schedule")
+                  : t("guard.sendNow")}{" "}
+              <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

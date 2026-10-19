@@ -6,25 +6,52 @@ import type { SourceBroadcast, SourceDomain, SourceTemplate } from "./model.js";
  * imported: keep them identical to their sources.
  */
 
-/** Mirror of packages/core/src/webhooks.ts WEBHOOK_EVENT_TYPES. */
 /**
- * Resend webhook event names MillionSend also emits, so a subscription carries
- * over as-is. Resend's other names (domain.*, email.suppressed, …) have no
- * counterpart here and are dropped per webhook, listed in the plan.
+ * The Resend webhook event names among packages/core/src/webhooks.ts
+ * WEBHOOK_EVENT_TYPES, in its order: a subscription to these carries over
+ * as-is. Resend's other names (domain.*, topic.*, contact.topics.updated, …)
+ * have no counterpart here and are dropped per webhook, listed in the plan.
  */
 export const TARGET_WEBHOOK_EVENTS = [
+  "email.scheduled",
   "email.sent",
   "email.delivered",
   "email.delivery_delayed",
   "email.bounced",
   "email.complained",
+  "email.failed",
+  "email.suppressed",
   "email.opened",
   "email.clicked",
+  "email.received",
   "contact.created",
   "contact.updated",
   "contact.deleted",
+  "suppression.added",
+  "suppression.removed",
+  "inbox.created",
+  "inbox.updated",
+  "inbox.deleted",
+  "inbox.thread.created",
+  "inbox.thread.folder.updated",
+  "inbox.thread.labels.updated",
+  "inbox.email.received",
+  "inbox.email.sent",
+  "inbox.draft.created",
+  "inbox.draft.updated",
+  "inbox.draft.sent",
+  "inbox.draft.deleted",
 ] as const;
 export type TargetWebhookEvent = (typeof TARGET_WEBHOOK_EVENTS)[number];
+
+/**
+ * What a target endpoint subscribed to every event (events null) receives:
+ * inbox events are opt-in on MillionSend, delivered only to endpoints that
+ * name them (OPT_IN_EVENT_TYPES in packages/core/src/webhooks.ts).
+ */
+export const TARGET_ALL_EVENTS: readonly TargetWebhookEvent[] = TARGET_WEBHOOK_EVENTS.filter(
+  (event) => !event.startsWith("inbox."),
+);
 
 /** Mirror of apps/web/src/lib/merge-fields.ts MERGE_NAME_RE — the token grammar the send worker resolves. */
 const MERGE_NAME_RE = /^[A-Za-z0-9_]+$/;

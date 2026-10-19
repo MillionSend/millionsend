@@ -6,11 +6,11 @@ import {
   CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
   type ContentRevealReason,
-  type RevealSpan,
 } from "@millionsend/core/content-reveal";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useId, useState } from "react";
+import { DotParts } from "@/components/dot-parts";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
@@ -20,6 +20,8 @@ import { Tooltip } from "@/components/tooltip";
 import { formatDayTime, formatMmSs } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { useCountdown } from "@/lib/use-countdown";
+import { MediaPanel } from "./media-panel";
+import { RevealText } from "./parts";
 
 /** The team a grant is about, as both console screens carry it. */
 export interface RevealTeam {
@@ -49,25 +51,30 @@ export interface RevealRequest {
   flaggedCount: number;
   /** The flag's own label, which opens the justification for the operator. */
   flagLabel: string;
+  /** Once granted, open what screening read from the email's images and attachments, not its text. */
+  media?: boolean;
 }
 
 export interface ContentReveal {
   request(input: RevealRequest): void;
   view(team: RevealTeam, grantId: string, emailId: string): void;
-  /** Render once per screen: the dialog and the revealed view. */
+  /** The media panel of one email a live grant names. */
+  media(team: RevealTeam, grantId: string, emailId: string): void;
+  /** Render once per screen: the dialog, the revealed view and the media panel. */
   dialogs: React.ReactNode;
 }
 
 type Stage =
   | { kind: "dialog"; request: RevealRequest }
-  | { kind: "view"; team: RevealTeam; grantId: string; emailId: string };
+  | { kind: "view" | "media"; team: RevealTeam; grantId: string; emailId: string };
 
 /**
- * Break-glass content access, behind one hook so the review page and the
- * Trust & safety list open the same two dialogs. `onChanged` re-fetches the
- * caller's data after a grant; `onClearFlag` is the review page's own
- * clearFlag, and `onSuspend` its suspend dialog — a screen that has neither
- * leaves them out and the revealed view shows only Close.
+ * Break-glass content access, behind one hook so the review page, the
+ * Trust & safety list and the review list open the same dialogs. `onChanged`
+ * re-fetches the caller's data after a grant or a release from the media
+ * panel; `onClearFlag` is the review page's own clearFlag, and `onSuspend`
+ * its suspend dialog — a screen that has neither leaves them out and the
+ * revealed view shows only Close.
  */
 export function useContentReveal(opts: {
   onChanged: () => void;
@@ -107,7 +114,12 @@ export function useContentReveal(opts: {
           opts.onChanged();
           const first = granted.emailIds[0];
           if (first) {
-            setStage({ kind: "view", team: input.team, grantId: granted.grantId, emailId: first });
+            setStage({
+              kind: input.media ? "media" : "view",
+              team: input.team,
+              grantId: granted.grantId,
+              emailId: first,
+            });
           } else {
             close();
           }
@@ -128,6 +140,7 @@ export function useContentReveal(opts: {
   return {
     request: (input) => setStage({ kind: "dialog", request: input }),
     view: (team, grantId, emailId) => setStage({ kind: "view", team, grantId, emailId }),
+    media: (team, grantId, emailId) => setStage({ kind: "media", team, grantId, emailId }),
     dialogs:
       stage === null ? null : stage.kind === "dialog" ? (
         <RevealDialog
@@ -135,6 +148,14 @@ export function useContentReveal(opts: {
           pending={request.isPending}
           onClose={close}
           onSubmit={(values) => submit(stage.request, values)}
+        />
+      ) : stage.kind === "media" ? (
+        <MediaPanel
+          team={stage.team}
+          grantId={stage.grantId}
+          emailId={stage.emailId}
+          onClose={close}
+          onChanged={opts.onChanged}
         />
       ) : (
         <RevealedView
@@ -179,6 +200,7 @@ function RevealDialog({
   }) => void;
 }) {
   const t = useTranslations("console.safety.reveal.dialog");
+  const mediaT = useTranslations("console.safety.media");
   const common = useTranslations("console.common");
   const locale = useLocale();
   const id = useId();
@@ -218,14 +240,18 @@ function RevealDialog({
         }}
       >
         <p style={{ margin: "6px 0 16px", color: "var(--ms-muted)", fontSize: 13.5 }}>
-          {email
-            ? t("lead", {
+          {email ? (
+            <DotParts
+              text={t("lead", {
                 team: request.team.name,
                 from: email.from,
                 sent: email.sentAt ? formatDayTime(email.sentAt, locale) : common("none"),
                 recipients: email.recipients,
-              })
-            : t("leadTeam", { team: request.team.name })}
+              })}
+            />
+          ) : (
+            t("leadTeam", { team: request.team.name })
+          )}
         </p>
         <div className="ms-field" style={{ marginBottom: 14 }}>
           <label htmlFor={`${id}-reason`}>{t("reason")}</label>
@@ -288,7 +314,9 @@ function RevealDialog({
                 />
                 <span>
                   {t("scopeEmail")}
-                  <div className="sub">{t("scopeEmailSub")}</div>
+                  <div className="sub">
+                    {request.media ? mediaT("scopeSub") : t("scopeEmailSub")}
+                  </div>
                 </span>
               </label>
               {request.flaggedCount > 1 && !oneMessage ? (
@@ -316,7 +344,7 @@ function RevealDialog({
           </div>
           <div>
             <div className="ms-microlabel">{t("recorded")}</div>
-            {t("recordedValue")}
+            <DotParts text={t("recordedValue")} />
           </div>
         </div>
         <p style={{ margin: 0, fontSize: 12.5, color: "var(--ms-muted)" }}>{t("note")}</p>
@@ -351,16 +379,6 @@ function verdictLine(
     : `${verdict.score ?? "—"}`;
 }
 
-/** Where a span starts: the body is one immutable string, so an offset is identity. */
-function keyedSpans(spans: RevealSpan[]): { key: string; span: RevealSpan }[] {
-  let offset = 0;
-  return spans.map((span) => {
-    const key = String(offset);
-    offset += span.text.length;
-    return { key, span };
-  });
-}
-
 /**
  * The revealed view: subject and redacted rendered text, a live countdown to
  * the grant's own expiry, and the two decisions that end a review. The query
@@ -387,11 +405,11 @@ function RevealedView({
   const trpc = useTRPC();
   const query = useQuery({
     ...trpc.console.safety.revealed.queryOptions({ grantId, emailId }),
-    // Every view is counted on the grant, so a focus refetch must not inflate
-    // the record — and nothing of the body outlives the closed dialog, which
-    // also makes reopening it the second view it is.
-    staleTime: Number.POSITIVE_INFINITY,
-    refetchOnWindowFocus: false,
+    // Every view is counted on the grant, so no refetch (focus, reconnect, an
+    // app-wide invalidation) may inflate the record — and nothing of the body
+    // outlives the closed dialog, which also makes reopening it the second
+    // view it is.
+    staleTime: "static",
     gcTime: 0,
     retry: false,
   });
@@ -439,11 +457,7 @@ function RevealedView({
             {t("subject")}
           </div>
           <div style={{ fontWeight: 600, marginBottom: 12 }}>
-            {keyedSpans(query.data.subject).map(({ key, span }) => (
-              <span key={key} className={span.redacted ? "ms-redact" : undefined}>
-                {span.text}
-              </span>
-            ))}
+            <RevealText spans={query.data.subject} />
           </div>
           <div className="ms-microlabel" style={{ marginBottom: 4 }}>
             {t("body")}
@@ -452,11 +466,7 @@ function RevealedView({
             {query.data.spans.length === 0 ? (
               <span style={{ color: "var(--ms-muted)" }}>{t("empty")}</span>
             ) : (
-              keyedSpans(query.data.spans).map(({ key, span }) => (
-                <span key={key} className={span.redacted ? "ms-redact" : undefined}>
-                  {span.text}
-                </span>
-              ))
+              <RevealText spans={query.data.spans} />
             )}
           </div>
           <p style={{ margin: "12px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>

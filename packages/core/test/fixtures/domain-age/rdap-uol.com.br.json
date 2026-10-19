@@ -1,0 +1,112 @@
+{
+  "objectClassName": "domain",
+  "handle": "uol.com.br",
+  "ldhName": "uol.com.br",
+  "nameservers": [
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "eliot.uol.com.br",
+      "ipAddresses": {
+        "v4": ["172.64.52.216"]
+      },
+      "events": [
+        {
+          "eventAction": "delegation check",
+          "eventDate": "2026-10-09T08:00:23Z",
+          "status": ["ns aa"]
+        },
+        {
+          "eventAction": "last correct delegation check",
+          "eventDate": "2026-10-09T08:00:23Z"
+        }
+      ]
+    },
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "borges.uol.com.br",
+      "ipAddresses": {
+        "v4": ["172.64.53.68"]
+      },
+      "events": [
+        {
+          "eventAction": "delegation check",
+          "eventDate": "2026-10-09T08:00:23Z",
+          "status": ["ns aa"]
+        },
+        {
+          "eventAction": "last correct delegation check",
+          "eventDate": "2026-10-09T08:00:23Z"
+        }
+      ]
+    },
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "charles.uol.com.br",
+      "ipAddresses": {
+        "v4": ["172.64.52.59"]
+      },
+      "events": [
+        {
+          "eventAction": "delegation check",
+          "eventDate": "2026-10-09T08:00:23Z",
+          "status": ["ns aa"]
+        },
+        {
+          "eventAction": "last correct delegation check",
+          "eventDate": "2026-10-09T08:00:23Z"
+        }
+      ]
+    }
+  ],
+  "secureDNS": {
+    "delegationSigned": false
+  },
+  "links": [
+    {
+      "value": "https://rdap.registro.br/domain/uol.com.br",
+      "rel": "self",
+      "href": "https://rdap.registro.br/domain/uol.com.br",
+      "type": "application/rdap+json"
+    },
+    {
+      "value": "https://rdap.registro.br/domain/uol.com.br",
+      "rel": "archives",
+      "href": "https://rdap.registro.br/domain/uol.com.br?ticket=7137",
+      "type": "application/rdap+json"
+    }
+  ],
+  "events": [
+    {
+      "eventAction": "registration",
+      "eventDate": "1996-04-24T12:00:00Z"
+    },
+    {
+      "eventAction": "last changed",
+      "eventDate": "2024-08-27T08:21:19Z"
+    },
+    {
+      "eventAction": "expiration",
+      "eventDate": "2034-04-24T12:00:00Z"
+    }
+  ],
+  "status": ["active"],
+  "notices": [
+    {
+      "title": "Use and Privacy Policy",
+      "description": [
+        "Copyright (c) Nic.br - Use of this data is governed by the Use and Privacy Policy. Distribution, commercialization, reproduction, and use for advertising or similar purposes are expressly prohibited.",
+        "2026-10-09T12:31:25-03:00 - 2804:7f4:c009:7dc5:9d4f:c442:becf:8bbf"
+      ],
+      "links": [
+        {
+          "value": "https://rdap.registro.br/domain/uol.com.br",
+          "rel": "alternate",
+          "href": "https://registro.br/upp",
+          "type": "text/html"
+        }
+      ]
+    }
+  ],
+  "rdapConformance": ["rdap_level_0", "nicbr_level_0"],
+  "port43": "whois.registro.br"
+}

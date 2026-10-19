@@ -180,20 +180,22 @@ export function TopicDetail({ id }: { id: string }) {
             >
               {t("editTitle")}
             </button>
-            <PopoverMenu
-              boxed
-              ariaLabel={t("detail.moreActions")}
-              items={[
-                { label: t("copyId"), onSelect: () => copy(data.id) },
-                null,
-                {
-                  label: t("delete"),
-                  danger: true,
-                  onSelect: () => setDeleteTarget({ id: data.id, name: data.name }),
-                },
-              ]}
-            />
           </>
+        }
+        menu={
+          <PopoverMenu
+            boxed
+            ariaLabel={t("detail.moreActions")}
+            items={[
+              { label: t("copyId"), onSelect: () => copy(data.id) },
+              null,
+              {
+                label: t("delete"),
+                danger: true,
+                onSelect: () => setDeleteTarget({ id: data.id, name: data.name }),
+              },
+            ]}
+          />
         }
       />
 

@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { MONITOR_FLAG_RISK_DEFAULT, monitorSamplesByTeam, riskAt } from "./abuse-monitor.js";
 import { fetchAccountScore } from "./account-score.js";
 import {
@@ -11,6 +11,8 @@ import {
   GUARDRAIL_WINDOW_DAYS,
   MIN_GUARDRAIL_VOLUME,
 } from "./deliverability.js";
+import { imitatedBrandIn } from "./imitated-brands.js";
+import { fetchTeamStanding } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 export type TeamFlagReason = (typeof schema.teamFlagReasonEnum.enumValues)[number];
@@ -20,7 +22,8 @@ export const TEAM_FLAG_REASONS = schema.teamFlagReasonEnum.enumValues;
 /**
  * The automatic trust & safety triggers, on the 7-day rates the guardrail
  * shows the team itself. Complaints flag at SES's own review line, hard
- * bounces at its 5% line, both only past the guardrail's volume floor so a
+ * bounces at its 5% line, each only past the guardrail's volume floor over
+ * its own denominator (complaints: the sends that could draw one) so a
  * handful of sends cannot flag a team; a score under 5 is the "at risk"
  * band of the account score.
  */
@@ -38,6 +41,8 @@ export interface TeamStandingRow {
   complaintRate7d: number;
   hardBounceRate7d: number;
   sent7d: number;
+  /** The week's sends that could draw a complaint; kept in memory only, like monitorSamples. */
+  complaintSent7d: number;
   sent30d: number;
   /** The content monitor's risk and the judged samples of the last week; null and 0 when it never drew. */
   monitorRisk: number | null;
@@ -97,6 +102,7 @@ export async function computeTeamStandings(
       complaintRate7d: health.complaintRate,
       hardBounceRate7d: health.bounceRate,
       sent7d: health.sent,
+      complaintSent7d: health.complaintSent,
       sent30d: team.sent30d,
       monitorRisk: risks.get(team.teamId) ?? null,
       monitorSamples: samples.get(team.teamId) ?? 0,
@@ -120,7 +126,12 @@ export async function saveTeamStandings(
   if (rows.length === 0) return;
   await db
     .insert(schema.teamStandings)
-    .values(rows.map(({ monitorSamples: _samples, ...r }) => ({ ...r, computedAt: now })))
+    .values(
+      rows.map(({ monitorSamples: _samples, complaintSent7d: _complaintSent, ...r }) => ({
+        ...r,
+        computedAt: now,
+      })),
+    )
     .onConflictDoUpdate({
       target: schema.teamStandings.teamId,
       set: {
@@ -174,13 +185,11 @@ export function flagTrigger(s: TeamStandingRow, opts: FlagTriggerOptions = {}): 
       },
     };
   }
-  if (s.sent7d >= MIN_GUARDRAIL_VOLUME) {
-    if (s.complaintRate7d >= FLAG_COMPLAINT_RATE) {
-      return { reason: "complaints", detail: { metric: "complaint", rate: s.complaintRate7d } };
-    }
-    if (s.hardBounceRate7d >= FLAG_HARD_BOUNCE_RATE) {
-      return { reason: "complaints", detail: { metric: "hard_bounce", rate: s.hardBounceRate7d } };
-    }
+  if (s.complaintSent7d >= MIN_GUARDRAIL_VOLUME && s.complaintRate7d >= FLAG_COMPLAINT_RATE) {
+    return { reason: "complaints", detail: { metric: "complaint", rate: s.complaintRate7d } };
+  }
+  if (s.sent7d >= MIN_GUARDRAIL_VOLUME && s.hardBounceRate7d >= FLAG_HARD_BOUNCE_RATE) {
+    return { reason: "complaints", detail: { metric: "hard_bounce", rate: s.hardBounceRate7d } };
   }
   if (
     s.monitorRisk !== null &&
@@ -197,32 +206,45 @@ export function flagTrigger(s: TeamStandingRow, opts: FlagTriggerOptions = {}): 
   return null;
 }
 
+/** The reasons flagTrigger reads off a standing: the only flags syncTeamFlags opens and clears. */
+const STANDING_REASONS: TeamFlagReason[] = ["monitor", "complaints", "guardrail", "score"];
+
 /**
  * Bring the automatic flags in line with the standings. A team with a
  * trigger and no open flag gets one, unless an operator cleared a flag for
  * the same reason and the trigger has held since (their call stands; a
  * trigger that lapsed and came back is a new finding, judged against the
  * previous run's standings, so `previous` must be the rows saved before this
- * run's); an open automatic flag whose trigger is gone is cleared; an
- * operator's manual flag is never touched. `opened_at` of an open flag is
- * left alone so the list's "since" holds still.
+ * run's); an open automatic flag whose trigger is gone is cleared, unless
+ * the team is held for review, which waits on an operator; an operator's
+ * manual flag, and brand and linkage flags, which no standing triggers, are
+ * never touched. `opened_at` of an open flag is left alone so the list's "since"
+ * holds still.
  */
 export async function syncTeamFlags(
   db: Db,
   standings: readonly TeamStandingRow[],
   now: Date = new Date(),
-  previous?: readonly (Omit<TeamStandingRow, "monitorSamples"> & { monitorSamples?: number })[],
+  previous?: readonly (Omit<TeamStandingRow, "monitorSamples" | "complaintSent7d"> & {
+    monitorSamples?: number;
+    complaintSent7d?: number;
+    computedAt?: Date;
+  })[],
   opts: FlagTriggerOptions = {},
 ): Promise<{ opened: number; cleared: number }> {
   const f = schema.teamFlags;
   const open = await db.select().from(f).where(eq(f.status, "open"));
+  const priorRows = previous ?? (await db.select().from(schema.teamStandings));
   const before = new Map(
-    (previous ?? (await db.select().from(schema.teamStandings))).map((row) => [
+    priorRows.map((row) => [
       row.teamId,
-      // A stored row has no sample count; the trigger only reads the risk off it.
-      { monitorSamples: 0, ...row } as TeamStandingRow,
+      // A stored row has no sample count; the trigger only reads the risk off
+      // it. Nor a count of the sends that could draw a complaint: its sends
+      // bound that from above, so a trigger that held never reads as lapsed.
+      { monitorSamples: 0, complaintSent7d: row.sent7d, ...row } as TeamStandingRow,
     ]),
   );
+  const lastRunAt = priorRows.reduce((at, row) => Math.max(at, row.computedAt?.getTime() ?? 0), 0);
   const openByTeam = new Map(open.map((row) => [row.teamId, row]));
   const triggered = new Map(
     standings.flatMap((s) => {
@@ -235,7 +257,11 @@ export async function syncTeamFlags(
   for (const [teamId, trigger] of triggered) {
     const current = openByTeam.get(teamId);
     if (current) {
-      if (current.openedBy === null && current.reason !== trigger.reason) {
+      if (
+        current.openedBy === null &&
+        current.reason !== trigger.reason &&
+        STANDING_REASONS.includes(current.reason)
+      ) {
         await db
           .update(f)
           .set({ reason: trigger.reason, detail: trigger.detail })
@@ -244,13 +270,17 @@ export async function syncTeamFlags(
       continue;
     }
     const [latest] = await db
-      .select({ reason: f.reason, clearedBy: f.clearedBy })
+      .select({ reason: f.reason, clearedBy: f.clearedBy, openedAt: f.openedAt })
       .from(f)
       .where(eq(f.teamId, teamId))
       .orderBy(desc(f.openedAt))
       .limit(1);
     const prior = before.get(teamId);
-    const held = prior !== undefined && flagTrigger(prior, opts)?.reason === trigger.reason;
+    // A flag opened since the last run (the review hold's) was never weighed
+    // by one, so an operator's clear of it stands as if the trigger had held.
+    const held =
+      (prior !== undefined && flagTrigger(prior, opts)?.reason === trigger.reason) ||
+      (lastRunAt > 0 && latest !== undefined && latest.openedAt.getTime() > lastRunAt);
     if (held && latest?.clearedBy && latest.reason === trigger.reason) continue;
     await db.insert(f).values({
       teamId,
@@ -260,7 +290,21 @@ export async function syncTeamFlags(
     });
     opened += 1;
   }
-  const stale = open.filter((row) => row.openedBy === null && !triggered.has(row.teamId));
+  const held = new Set(
+    (
+      await db
+        .select({ id: schema.teams.id })
+        .from(schema.teams)
+        .where(eq(schema.teams.suspensionReason, "review"))
+    ).map((row) => row.id),
+  );
+  const stale = open.filter(
+    (row) =>
+      row.openedBy === null &&
+      STANDING_REASONS.includes(row.reason) &&
+      !triggered.has(row.teamId) &&
+      !held.has(row.teamId),
+  );
   if (stale.length > 0) {
     await db
       .update(f)
@@ -281,3 +325,51 @@ export async function syncTeamFlags(
 
 /** The guardrail window the automatic rates are measured over. */
 export const FLAG_WINDOW_DAYS = GUARDRAIL_WINDOW_DAYS;
+
+// The safety cron's abuse signals; a low score alone is not one.
+const CRON_HOLD_REASONS: TeamFlagReason[] = ["monitor", "guardrail", "complaints"];
+
+/**
+ * Whether the team is barred from buying or moving up: suspended for any
+ * reason, or holding an open flag that is one of the cron's abuse signals or
+ * an operator's call of any kind (opened or reopened by hand). While an
+ * operator's flag is open the cron opens none of its own, one open flag per
+ * team, so that flag is all that holds the team. Cancelling and moving down
+ * stay open.
+ */
+export async function upgradesHeld(db: Db, teamId: string): Promise<boolean> {
+  if ((await fetchTeamStanding(db, teamId))?.suspended) return true;
+  const f = schema.teamFlags;
+  const [flag] = await db
+    .select({ id: f.id })
+    .from(f)
+    .where(
+      and(
+        eq(f.teamId, teamId),
+        eq(f.status, "open"),
+        or(isNotNull(f.openedBy), inArray(f.reason, CRON_HOLD_REASONS)),
+      ),
+    );
+  return flag !== undefined;
+}
+
+/**
+ * Flags a team whose name borrows an imitated brand, for the operator's
+ * list; the name itself stands. Called when a team is created or renamed. A
+ * team that already has an open flag keeps that one, since a team holds one
+ * open flag at a time. Returns the brand matched.
+ */
+export async function flagImitatedBrand(
+  db: Db,
+  teamId: string,
+  name: string,
+): Promise<string | null> {
+  const brand = imitatedBrandIn(name);
+  if (brand) {
+    await db
+      .insert(schema.teamFlags)
+      .values({ teamId, reason: "brand", detail: { brand } })
+      .onConflictDoNothing();
+  }
+  return brand;
+}

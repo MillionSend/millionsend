@@ -1,22 +1,41 @@
+import { API_RATE_LIMIT_PER_MINUTE_DEFAULT } from "@millionsend/config";
 import {
   type AcceptEmailDeps,
   type ApiKeyAuth,
   acceptEmail,
   authenticateApiKey,
+  countApiKeyRequest,
+  customHeaderIssues,
+  findLiveInbox,
+  fixedWindowCounter,
   formatMailbox,
-  isTeamSuspended,
+  hasHeaderControlChar,
+  INBOX_KEY_FROM_MESSAGE,
+  isSharedInboxSender,
+  MAX_SUBJECT_LENGTH,
   monthlyQuotaMessage,
+  msgIds,
   parseMailbox,
+  parseSingleSender,
+  reservedSenderRefusal,
+  SES_MAX_MESSAGE_BYTES,
+  SHARED_REPLY_ONLY_MESSAGE,
+  sendRefusalError,
+  TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT,
+  type UndeliverableReason,
+  undeliverableRecipientMessage,
+  undeliverableRecipients,
+  unstorableValueMessage,
   verifySenderDomain,
 } from "@millionsend/core";
-import { type AddressObject, simpleParser } from "mailparser";
+import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { SMTPServer, type SMTPServerDataStream, type SMTPServerSession } from "smtp-server";
 
 /** Mirrors Resend's SMTP contract: fixed username, an API key as password. */
 export const SMTP_USERNAME = "millionsend";
 
-// SESv2 rejects raw messages over 40 MB, and nothing larger can ever send.
-export const MAX_MESSAGE_BYTES = 40 * 1024 * 1024;
+// Nothing larger than SES takes can ever send.
+export const MAX_MESSAGE_BYTES = SES_MAX_MESSAGE_BYTES;
 
 /** Same per-field cap as POST /emails, applied to the envelope. */
 export const MAX_RCPT_TO = 50;
@@ -32,17 +51,38 @@ export interface SmtpDeps extends AcceptEmailDeps {
   allowInsecureAuth?: boolean | undefined;
   /** Defaults to MAX_MESSAGE_BYTES; lowered only by tests. */
   maxMessageBytes?: number | undefined;
+  /** ONBOARDING_EMAIL_FROM: refused as a From like on the HTTP API. */
+  onboardingEmailFrom?: string | undefined;
+  /** Messages a minute per API key, from the same budget as the key's API requests. */
+  rateLimitPerMinute?: number | undefined;
+  /** Messages a minute per team across all of its keys, counted by this process alone. */
+  teamRateLimitPerMinute?: number | undefined;
 }
 
 function smtpError(responseCode: number, message: string): Error {
   return Object.assign(new Error(message), { responseCode });
 }
 
-/** Unexpected failures become a 451 so internals never leak to the client. */
+/**
+ * Unexpected failures become a 451 so internals never leak to the client. A
+ * value the database cannot store fails on every retry, so it is a 554.
+ */
 function toSmtpError(err: unknown): Error {
   if (err instanceof Error && "responseCode" in err) return err;
+  const unstorable = unstorableValueMessage(err);
+  if (unstorable) return smtpError(554, unstorable);
   console.error("smtp internal error", err);
   return smtpError(451, "Temporary local error, please retry");
+}
+
+/** 5.1.2: bad destination system address (RFC 3463). */
+function undeliverableError(hit: { address: string; reason: UndeliverableReason }): Error {
+  return smtpError(550, `5.1.2 ${undeliverableRecipientMessage(hit, { forSend: true })}`);
+}
+
+/** A 451, so the client keeps the message and retries once the minute rolls over. */
+function rateLimitedError(retryAfterSec: number): Error {
+  return smtpError(451, `4.7.1 Too many messages, try again in ${retryAfterSec}s`);
 }
 
 /**
@@ -70,8 +110,25 @@ const addrKey = (mailbox: string): string =>
   (parseMailbox(mailbox)?.address ?? mailbox).toLowerCase();
 
 /**
+ * In-Reply-To and References as msg-ids, through the same header rules as
+ * POST /emails, so a reply over SMTP threads like one over the API.
+ */
+function threadingHeaders(parsed: ParsedMail): Record<string, string> | undefined {
+  const inReplyTo = msgIds(parsed.inReplyTo)[0];
+  const references = msgIds(parsed.references);
+  const headers: Record<string, string> = {
+    ...(inReplyTo ? { "In-Reply-To": inReplyTo } : {}),
+    ...(references.length > 0 ? { References: references.join(" ") } : {}),
+  };
+  const [issue] = customHeaderIssues(headers);
+  if (issue) throw smtpError(554, issue.message);
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+/**
  * MIME message → the shared accept pipeline. Throws errors carrying SMTP
- * response codes: 553/554 validation, 550 all-suppressed.
+ * response codes: 553/554 validation, 550 all-suppressed or suspended, 451
+ * while the team's sending is paused.
  */
 async function handleMessage(
   deps: SmtpDeps,
@@ -106,22 +163,34 @@ async function handleMessage(
 
   const subject = parsed.subject;
   if (!subject) throw smtpError(553, "A non-empty Subject header is required");
+  if (hasHeaderControlChar(subject)) {
+    throw smtpError(554, "Subject must not contain control characters");
+  }
+  if (subject.length > MAX_SUBJECT_LENGTH) {
+    throw smtpError(554, `Subject must be at most ${MAX_SUBJECT_LENGTH} characters`);
+  }
   const html = parsed.html === false ? undefined : parsed.html;
   const text = parsed.text;
   if (html === undefined && text === undefined) {
     throw smtpError(554, "Either an HTML or a text body is required");
   }
 
-  // Read per message, as the HTTP API does: a suspension lands on the next
-  // message of an open session, not on its next AUTH.
-  if (await isTeamSuspended(deps.db, auth.teamId)) {
-    throw smtpError(
-      550,
-      "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
-    );
+  // SECURITY: an inbox-scoped key sends from its inbox address and no other.
+  if (auth.inboxId !== null) {
+    const inbox = await findLiveInbox(deps.db, { teamId: auth.teamId, inboxId: auth.inboxId });
+    if (parseSingleSender(from)?.address.toLowerCase() !== inbox?.emailAddress) {
+      throw smtpError(550, `5.7.1 ${INBOX_KEY_FROM_MESSAGE}`);
+    }
   }
+  const headers = threadingHeaders(parsed);
+
   // The authenticated key's team decides which senders are allowed — the
   // MAIL FROM envelope identity is never trusted.
+  const reserved = reservedSenderRefusal(from, deps.onboardingEmailFrom);
+  if (reserved) throw smtpError(550, reserved.message);
+  if (isSharedInboxSender(from, deps.sharedInboxDomain)) {
+    throw smtpError(550, `5.7.1 ${SHARED_REPLY_ONLY_MESSAGE}`);
+  }
   const domain = await verifySenderDomain(deps.db, auth.teamId, from);
   if (!domain.ok) {
     throw smtpError(
@@ -135,25 +204,64 @@ async function handleMessage(
     throw smtpError(550, "This API key can only send from its assigned domain");
   }
 
-  const result = await acceptEmail(deps, auth, {
-    from,
-    to,
-    cc: cc.length > 0 ? cc : undefined,
-    bcc: bcc.length > 0 ? bcc : undefined,
-    replyTo: replyTo.length > 0 ? replyTo : undefined,
-    subject,
-    html,
-    text,
-    domainId: domain.domainId,
-  });
+  const result = await acceptEmail(
+    deps,
+    auth,
+    {
+      from,
+      to,
+      cc: cc.length > 0 ? cc : undefined,
+      bcc: bcc.length > 0 ? bcc : undefined,
+      replyTo: replyTo.length > 0 ? replyTo : undefined,
+      subject,
+      html,
+      text,
+      headers,
+      domainId: domain.domainId,
+    },
+    {
+      // A refusal would bounce the message at the client's server: a hold
+      // that ends in a release must not have lost it.
+      parkUnderReview: true,
+      // Every recipient here is an envelope recipient, checked at RCPT TO.
+      recipientsChecked: true,
+    },
+  );
+  // acceptEmail reads the team's admission per message, as the HTTP API
+  // does: a suspension or a pause lands on the next message of an open
+  // session, not on its next AUTH.
   if (!result.ok) {
+    // The pause lifts by itself as the trailing rates fall, so the client
+    // keeps the message and retries; a suspension waits on the operator.
+    if (result.reason === "sending_paused") {
+      throw smtpError(451, `4.7.1 ${sendRefusalError(result).message}`);
+    }
+    if (result.reason === "team_suspended") {
+      throw smtpError(550, sendRefusalError(result).message);
+    }
     if (result.reason === "quota_backlog_full") {
       throw smtpError(452, "Daily quota exceeded and the parked backlog is full");
+    }
+    if (result.reason === "warmup_backlog_full") {
+      throw smtpError(452, "New domain warm-up: enough mail is already waiting");
     }
     if (result.reason === "monthly_quota_exceeded") {
       throw smtpError(452, monthlyQuotaMessage(result));
     }
     if (result.reason === "attachments_too_large") throw smtpError(552, "Attachments too large");
+    if (result.reason === "inbox_scope") throw smtpError(550, `5.7.1 ${INBOX_KEY_FROM_MESSAGE}`);
+    if (result.reason === "inbox_send_policy") {
+      throw smtpError(
+        550,
+        `5.7.1 The sending inbox's rules hold this email${result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : ""}; create it as a draft for a person to approve`,
+      );
+    }
+    if (result.reason === "inbox_send_cap_reached") {
+      throw smtpError(452, "4.3.1 Daily send limit for this inbox reached");
+    }
+    if (result.reason === "undeliverable_recipient") {
+      throw undeliverableError({ address: result.address, reason: result.why });
+    }
     throw smtpError(550, "All recipients are suppressed");
   }
   return `Queued as ${result.id}`;
@@ -166,10 +274,16 @@ async function handleMessage(
  */
 export function createSmtpServer(deps: SmtpDeps): SMTPServer {
   const maxMessageBytes = deps.maxMessageBytes ?? MAX_MESSAGE_BYTES;
+  const rateLimitPerMinute = deps.rateLimitPerMinute ?? API_RATE_LIMIT_PER_MINUTE_DEFAULT;
+  const teamRateLimitPerMinute = deps.teamRateLimitPerMinute ?? TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT;
+  const countTeamMessage = fixedWindowCounter();
   const connectionsByIp = new Map<string, number>();
   // Sessions admitted by onConnect; onClose also fires for rejected ones.
   const admitted = new Set<string>();
   const authFailures = new Map<string, number>();
+  // Refused recipients never enter the envelope, so the envelope cap can't
+  // bound how many domain checks one session drives.
+  const rcptRefusals = new Map<string, number>();
   return new SMTPServer({
     // Without a keypair STARTTLS is withdrawn. Plaintext AUTH requires an
     // explicit opt-in; smtp-server otherwise rejects it before onAuth.
@@ -191,6 +305,7 @@ export function createSmtpServer(deps: SmtpDeps): SMTPServer {
     },
     onClose(session) {
       authFailures.delete(session.id);
+      rcptRefusals.delete(session.id);
       if (!admitted.delete(session.id)) return;
       const open = (connectionsByIp.get(session.remoteAddress) ?? 1) - 1;
       if (open <= 0) connectionsByIp.delete(session.remoteAddress);
@@ -217,12 +332,48 @@ export function createSmtpServer(deps: SmtpDeps): SMTPServer {
         );
       });
     },
-    onRcptTo(_address, session, callback) {
+    // Counted at MAIL FROM, before any of the message arrives, and again for
+    // every transaction a session opens after RSET.
+    onMailFrom(_address, session, callback) {
+      void (async () => {
+        // smtp-server answers MAIL before AUTH with its own 530.
+        const auth = session.user as unknown as ApiKeyAuth | undefined;
+        if (!auth?.apiKeyId) throw smtpError(530, "Authentication required");
+        const key = await countApiKeyRequest(deps.db, auth.apiKeyId);
+        if (key.count > rateLimitPerMinute) throw rateLimitedError(key.retryAfterSec);
+        const team = countTeamMessage(auth.teamId);
+        if (team.count > teamRateLimitPerMinute) throw rateLimitedError(team.retryAfterSec);
+      })().then(
+        () => callback(),
+        (err) => callback(toSmtpError(err)),
+      );
+    },
+    onRcptTo(address, session, callback) {
+      if ((rcptRefusals.get(session.id) ?? 0) >= MAX_RCPT_TO) {
+        // 421 makes smtp-server close the connection after the reply.
+        callback(smtpError(421, "Too many refused recipients"));
+        return;
+      }
       if (session.envelope.rcptTo.length >= MAX_RCPT_TO) {
         callback(smtpError(452, "Too many recipients"));
         return;
       }
-      callback();
+      void (async () => {
+        const [hit] = await undeliverableRecipients([address.address]);
+        if (!hit) return null;
+        // A check that settles after the client hung up must not outlive onClose.
+        if (admitted.has(session.id)) {
+          rcptRefusals.set(session.id, (rcptRefusals.get(session.id) ?? 0) + 1);
+        }
+        return undeliverableError(hit);
+      })().then(
+        (refusal) => callback(refusal),
+        // A failed check never refuses a recipient.
+        (err) => {
+          console.error("smtp recipient check failed", err);
+          callback();
+        },
+      );
     },
     onData(stream: SMTPServerDataStream, session, callback) {
       const chunks: Buffer[] = [];

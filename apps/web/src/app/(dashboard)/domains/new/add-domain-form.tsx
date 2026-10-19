@@ -20,7 +20,6 @@ import { codeRichTags } from "@/lib/code-rich-tags";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
-import { AwsCredentialsBanner } from "../aws-credentials-banner";
 import { regionFlag, regionName } from "../regions";
 import { TrackingSetup } from "../tracking-setup";
 
@@ -52,17 +51,13 @@ function createErrorKey(
 }
 
 /** Wizard step 02: the created domain's DNS records, rendered in-page after create. */
-function DnsRecordsStep({ id }: { id: string }) {
+function DnsRecordsStep({ id, trackingStep }: { id: string; trackingStep: boolean }) {
   const t = useTranslations("domains");
   const router = useRouter();
   const trpc = useTRPC();
   const domain = useQuery(trpc.domains.get.queryOptions({ id }));
   const records = useQuery(trpc.domains.records.queryOptions({ id }));
-  const features = useQuery(trpc.system.features.queryOptions());
   const provider = records.data?.provider ?? null;
-  // Branded tracking is an optional middle step here; deployments that can't
-  // serve it collapse straight to the DNS records, keeping the two-step shape.
-  const trackingStep = features.data?.trackingSubdomainsSupported ?? false;
   const dnsMarker = trackingStep ? "03" : "02";
   return (
     <div className="ms-step-col" style={{ display: "flex", flexDirection: "column" }}>
@@ -229,7 +224,17 @@ function DnsRecordsStep({ id }: { id: string }) {
   );
 }
 
-export function AddDomainForm({ userEmail }: { userEmail: string }) {
+export function AddDomainForm({
+  userEmail,
+  trackingStep,
+  awsBanner,
+}: {
+  userEmail: string;
+  /** Branded tracking is an optional middle step after create; deployments
+   * that can't serve it collapse straight to the DNS records. */
+  trackingStep: boolean;
+  awsBanner: React.ReactNode;
+}) {
   const t = useTranslations("domains");
   const router = useRouter();
   const trpc = useTRPC();
@@ -247,6 +252,7 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
     }
   }, [served, region]);
   const [returnPath, setReturnPath] = useState("send");
+  const [sentBefore, setSentBefore] = useState<"yes" | "no">("yes");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [touched, setTouched] = useState(false);
@@ -269,16 +275,16 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
     event.preventDefault();
     setTouched(true);
     if (!nameValid || create.isPending || region === "") return;
-    create.mutate({ name, region, mailFromSubdomain: returnPath });
+    create.mutate({ name, region, mailFromSubdomain: returnPath, warmup: sentBefore === "no" });
   }
 
-  if (createdId) return <DnsRecordsStep id={createdId} />;
+  if (createdId) return <DnsRecordsStep id={createdId} trackingStep={trackingStep} />;
 
   const errorKey = create.isError ? createErrorKey(create.error) : null;
 
   return (
     <>
-      <AwsCredentialsBanner />
+      {awsBanner}
       <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
         <MobileStepBar steps={[t("new.steps.one"), t("new.steps.two")]} active={1} />
         <StepRail current={1} />
@@ -347,6 +353,27 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
             />
           </div>
 
+          <fieldset className="ms-field" style={{ border: 0, padding: 0, margin: "14px 0 0" }}>
+            <legend>{t("new.sentBefore.question")}</legend>
+            <div style={{ display: "grid", gap: 6 }}>
+              {(["yes", "no"] as const).map((value) => (
+                <label key={value} className="ms-radio-card">
+                  <input
+                    type="radio"
+                    name="sent-before"
+                    checked={sentBefore === value}
+                    disabled={create.isPending}
+                    onChange={() => setSentBefore(value)}
+                  />
+                  <span>
+                    {t(`new.sentBefore.${value}`)}
+                    <div className="sub">{t(`new.sentBefore.${value}Hint`)}</div>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
           <details
             style={{
               marginTop: 18,
@@ -414,7 +441,7 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
           </button>
         </form>
 
-        <div className="ms-stepper-side" style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: "1 1 260px", minWidth: 0 }}>
           <p className="ms-microlabel" style={{ margin: "0 0 10px" }}>
             {t("new.preview.title")}
           </p>

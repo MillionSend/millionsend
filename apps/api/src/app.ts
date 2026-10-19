@@ -1,5 +1,6 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { API_RATE_LIMIT_PER_MINUTE_DEFAULT } from "@millionsend/config";
 import {
   type AcceptEmailPayload,
   type AcceptEmailResult,
@@ -7,6 +8,7 @@ import {
   acceptEmail,
   authenticateApiKey,
   beginIdempotent,
+  broadcastAudience,
   broadcastSendSpacingMs,
   buildUnsubscribeUrl,
   CONTACT_PROPERTY_MAX_KEYS,
@@ -21,12 +23,17 @@ import {
   contactPropertiesChange,
   contactRoom,
   contactSnapshotColumns,
+  countApiKeyRequest,
+  countDistinctRecipients,
+  countParked,
   DAY_MS,
   decryptEmailBody,
   emitContactEvents,
   emitSuppressionEvents,
+  enforceDomainWarmup,
   eraseRecipient,
-  estimateAttachmentBytes,
+  errorClassAndCode,
+  exceededSendSize,
   extractTokenPrefix,
   fetchAccountScore,
   fetchDeliverabilityHealth,
@@ -35,36 +42,71 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
-  isTeamSuspended,
+  fixedWindowCounter,
+  getWarmup,
+  INBOX_KEY_FROM_MESSAGE,
+  INBOX_KEY_SCOPE_MESSAGE,
+  type InboxKeys,
+  inboxKeyAllows,
+  isAdminRole,
+  isSharedInboxSender,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
+  type MonitorSettings,
+  MX_DELIVER_PATH,
+  MX_INGEST_PATH,
   makeUnsubscribeToken,
   markSegmentsStale,
   monthlyQuotaMessage,
-  PAUSE_BOUNCE_RATE,
-  PAUSE_COMPLAINT_RATE,
+  PACING_HORIZON_MAX_RETENTION_DAYS,
   PLAN_CONTACT_LIMIT,
+  pacingHorizonDays,
   parseScheduledAt,
   planCaps,
   planRegionSend,
   QUOTA_BACKLOG_DAYS,
+  quotaChargeAt,
   quotaRoom,
   quotaUsage,
   recordContactActivity,
   recountSegment,
   regionPause,
   releaseIdempotent,
+  releasePeriodCount,
+  releaseQuota,
+  reserveDailyQuota,
+  reservedSenderRefusal,
   reserveQuota,
+  reviewBacklogLimit,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
+  type SendRefusal,
+  SHARED_REFUSALS,
   scoreBand,
   segmentContactsWhere,
   segmentFilterSchema,
   sendingBroadcasts,
+  sendRefusal,
+  sendRefusalError,
+  sesMessageIdHeader,
+  sharedModeReason,
+  TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT,
   teamQuota,
-  verifyOnboardingSender,
+  teamSharedSending,
+  transitionQueueState,
+  type UndeliverableRecipient,
+  undeliverableRecipientMessage,
+  undeliverableRecipients,
+  unstorableValueMessage,
+  utcDay,
+  type VirusResult,
   verifySenderDomain,
   type WebhookEnqueue,
+  warmupBroadcastPlans,
+  warmupPastHorizon,
+  warmupSendPreview,
+  webhookBatch,
+  wireLastEvent,
 } from "@millionsend/core";
 import { captureError } from "@millionsend/core/error-tracking-node";
 import type { Db } from "@millionsend/db";
@@ -97,6 +139,7 @@ import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
+import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { INTERNAL_AUTH, registerMcp } from "./mcp.js";
@@ -104,6 +147,9 @@ import { loggedBody, maskEmailPathSegments } from "./request-log.js";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
 import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
+import { registerInboxSendRoutes } from "./routes/inbox-send.js";
+import { registerInboxRoutes } from "./routes/inboxes.js";
+import { registerMxIngestRoutes, registerReceivingRoutes } from "./routes/receiving.js";
 import { registerSuppressionRoutes } from "./routes/suppressions.js";
 import { registerTemplateRoutes } from "./routes/templates.js";
 import { registerUsageRoutes } from "./routes/usage.js";
@@ -186,12 +232,10 @@ export interface ApiDeps {
   keyring: Keyring;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
-  /** ONBOARDING_EMAIL_FROM: the shared first-email sender (core verifyOnboardingSender). */
+  /** ONBOARDING_EMAIL_FROM: no customer send may use it (core reservedSenderRefusal). */
   onboardingEmailFrom?: string | undefined;
   /** OPENAI_APPS_CHALLENGE_TOKEN: served at /.well-known/openai-apps-challenge. */
   openaiAppsChallengeToken?: string | undefined;
-  /** Whether the shared sender reaches only members who verified their address (the instance verifies). */
-  requireVerifiedMembers?: boolean | undefined;
   /**
    * Hands an accepted email to the send queue. REQUIRED: accepting mail
    * without a producer would strand it in "queued" forever.
@@ -217,11 +261,49 @@ export interface ApiDeps {
    */
   enqueueRecipientErase?: ((teamId: string, address: string) => Promise<void>) | undefined;
   /**
+   * Looks up a domain's registration date in the worker (the warm-up's
+   * input), on create and on verification. Optional: the worker's sweep
+   * asks for any domain that was never looked up.
+   */
+  enqueueDomainAge?: ((domainId: string) => Promise<void>) | undefined;
+  /**
    * The key the hosted unsubscribe page verifies tokens with (core
    * deriveUnsubscribeKey over MASTER_ENCRYPTION_KEY). With appBaseUrl it lets
    * POST /contacts/{id}/preferences-link mint links; omitted → that route 422s.
    */
   unsubscribeSecretKey?: Buffer | undefined;
+  /**
+   * Inbound mail on this instance (RECEIVING_MX_HOST set): the host receiving
+   * domains point their MX at, and the bearer secret the MX presents
+   * (MX_INGEST_SECRET). Omitted → the internal MX endpoints do not exist
+   * (404), domains report receiving disabled and enabling it is a 422.
+   */
+  receiving?: { mxHost: string; ingestSecret: string } | undefined;
+  /**
+   * Signs received mail's download links (core deriveReceivedDownloadKey over
+   * MASTER_ENCRYPTION_KEY). Kept apart from `receiving`: mail stored before
+   * an instance stopped receiving stays readable until retention removes it.
+   */
+  receivedDownloadKey?: Buffer | undefined;
+  /** Thread-token and received-secret keys (core deriveInboxKeys over MASTER_ENCRYPTION_KEY). */
+  inboxKeys?: InboxKeys | undefined;
+  /** SHARED_INBOX_DOMAIN; omitted → no inbox gets an address on the shared domain. */
+  sharedInboxDomain?: string | undefined;
+  /** The trust & safety settings reader (monitorSettingsReader); omitted → sends read the row. */
+  monitorSettings?: (() => Promise<MonitorSettings>) | undefined;
+  /** clamd's scan of received mail (CLAMAV_HOST); omitted → nothing is scanned. */
+  scanVirus?: ((raw: Buffer) => Promise<VirusResult>) | undefined;
+  /**
+   * Hands a membership waiting for the inbound judge to the worker. Optional:
+   * the sends.reconcile sweep re-enqueues memberships left pending.
+   */
+  enqueueScreening?:
+    | ((p: { receivedEmailId: string; inboxId: string }) => Promise<void>)
+    | undefined;
+  /** Hands a delivered message to its inbox's forward_to job. */
+  enqueueInboxForward?:
+    | ((p: { receivedEmailId: string; inboxId: string }) => Promise<void>)
+    | undefined;
   /** SES event ingestion; omitted → the endpoint does not exist (404). */
   sns?: SnsIngestDeps | undefined;
   /** SES identity management; omitted → the /domains routes do not exist (404). */
@@ -286,9 +368,11 @@ export function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
 }
 
-/** Wire message for a failed schema parse: `path: issue; path: issue`. */
+/** Wire message for a failed schema parse: `path: issue; path: issue`, a whole-object issue bare. */
 export function validationMessage(error: z.ZodError): string {
-  return error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+  return error.issues
+    .map((i) => (i.path.length > 0 ? `${i.path.join(".")}: ${i.message}` : i.message))
+    .join("; ");
 }
 
 /**
@@ -300,7 +384,7 @@ function keyForbidsSendingDomain(auth: ApiKeyAuth, domainId: string): boolean {
   return auth.domainId !== null && auth.domainId !== domainId;
 }
 
-const RESTRICTED_DOMAIN_MESSAGE = "This API key can only send from its assigned domain";
+export const RESTRICTED_DOMAIN_MESSAGE = "This API key can only send from its assigned domain";
 
 /**
  * SECURITY: which of the team's emails a key may cancel, reschedule or
@@ -317,8 +401,12 @@ function emailScopeConditions(auth: ApiKeyAuth): SQL[] {
   return conditions;
 }
 
-/** Wire status + body for an accept the pipeline refused. */
-function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
+/** Wire status + body for an accept the pipeline refused; retryAfterSec goes out as retry-after. */
+function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
+  status: 403 | 422 | 429;
+  body: ReturnType<typeof errorBody>;
+  retryAfterSec?: number;
+} {
   switch (result.reason) {
     case "quota_backlog_full":
       return {
@@ -327,6 +415,15 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
           429,
           "daily_quota_exceeded",
           "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
+        ),
+      };
+    case "warmup_backlog_full":
+      return {
+        status: 429 as const,
+        body: errorBody(
+          429,
+          "daily_quota_exceeded",
+          "New domain warm-up: this sending domain ramps up gradually and enough emails are already waiting; retry after the UTC day rolls over",
         ),
       };
     case "monthly_quota_exceeded":
@@ -340,7 +437,9 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
         body: errorBody(
           422,
           "validation_error",
-          `Attachments exceed ${Math.floor(result.maxBytes / (1024 * 1024))} MiB in total`,
+          result.maxBytes === MAX_ATTACHMENT_BYTES
+            ? `Attachments exceed ${result.maxBytes / MiB} MiB in total`
+            : `The email exceeds ${result.maxBytes / MiB} MiB once encoded for sending; base64 makes attachments about a third larger`,
         ),
       };
     case "all_suppressed":
@@ -348,42 +447,96 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
         status: 422 as const,
         body: errorBody(422, "all_recipients_suppressed", "All recipients are suppressed"),
       };
+    case "team_suspended":
+    case "sending_paused":
+      return { status: 403 as const, body: refusalBody(result) };
+    case "inbox_send_policy":
+      return {
+        status: 403,
+        body: errorBody(
+          403,
+          "inbox_send_policy",
+          `The sending inbox's rules hold this email${result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : ""}; create it as a draft with POST /inboxes/{inbox_id}/drafts for a person to approve`,
+        ),
+      };
+    case "shared_paused":
+    case "shared_plan":
+    case "shared_domain":
+    case "shared_recipients": {
+      const { status, name, message } = SHARED_REFUSALS[result.reason];
+      return { status, body: errorBody(status, name, message) };
+    }
+    case "shared_team_cap": {
+      const { status, name, message } = SHARED_REFUSALS.shared_team_cap;
+      return {
+        status,
+        body: errorBody(status, name, message),
+        retryAfterSec: result.retryAfterSec,
+      };
+    }
+    case "shared_from":
+      return { status: 422, body: errorBody(422, "validation_error", result.message) };
+    case "inbox_send_cap_reached":
+      return {
+        status: 429,
+        body: errorBody(
+          429,
+          "inbox_send_cap_reached",
+          "The sending inbox reached its daily send limit; retry after the UTC day rolls over",
+        ),
+        retryAfterSec: result.retryAfterSec,
+      };
+    case "inbox_scope":
+      return {
+        status: 403,
+        body: errorBody(403, "restricted_api_key", INBOX_KEY_FROM_MESSAGE),
+      };
+    case "undeliverable_recipient":
+      return {
+        status: 422,
+        body: errorBody(
+          422,
+          "validation_error",
+          undeliverableRecipientMessage(
+            { address: result.address, reason: result.why },
+            { forSend: true },
+          ),
+        ),
+      };
   }
 }
 
+// Shared-domain addresses have no domains row, so they would otherwise fail
+// sender verification with a 422 before the inbox rails could refuse them.
+const sharedSenderRefusal = acceptRejection({ ok: false, reason: "shared_domain" });
+
 /**
- * Server-authoritative deliverability guardrail on every send surface: a raw
- * API client must not bypass what the dashboard enforces. If the team's
- * trailing-window bounce or complaint rate has crossed SES's own pause line,
- * new sends are refused so we stop before SES pauses the whole account.
- * `sending_paused` is a MillionSend-specific error outside Resend's SDK
- * union (see docs/resend-compatibility.md, known deltas). Returns the error
- * body, or null when sending may proceed.
+ * POST /emails's answer to a shared-domain From before anything else runs,
+ * or null when it goes on to the inbox rails: those addresses send there in
+ * open mode only, and never under a key held to one of the team's domains.
  */
-async function sendingPausedError(
-  deps: Pick<ApiDeps, "db">,
-  auth: ApiKeyAuth,
-): Promise<ReturnType<typeof errorBody> | null> {
-  // An operator suspension outranks the rates: keys still authenticate so
-  // the caller learns why, but nothing leaves.
-  if (await isTeamSuspended(deps.db, auth.teamId)) {
-    return errorBody(
-      403,
-      "team_suspended",
-      "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
-    );
+async function sharedFromRefusal(deps: ApiDeps, auth: ApiKeyAuth) {
+  const sending = await teamSharedSending(deps.db, deps, auth.plan);
+  if (sending.mode !== "open") {
+    return acceptRejection({ ok: false, reason: sharedModeReason(sending) });
   }
-  const health = await fetchDeliverabilityHealth(deps.db, auth.teamId);
-  const paused = health.reasons.find((r) => r.tier === "paused");
-  if (!paused) return null;
-  const limit = paused.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
-  const metric = paused.metric === "bounce" ? "hard bounce" : "complaint";
-  const pct = (r: number) => `${(r * 100).toFixed(2)}%`;
-  return errorBody(
-    403,
-    "sending_paused",
-    `Sending is paused: your ${metric} rate of ${pct(paused.rate)} over the last ${paused.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending again.`,
-  );
+  if (auth.domainId !== null) {
+    return {
+      status: 403 as const,
+      body: errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE),
+    };
+  }
+  return null;
+}
+
+/**
+ * Wire body for a team sendRefusal holds; keys still authenticate so the
+ * caller learns why. `sending_paused` is a MillionSend-specific error outside
+ * Resend's SDK union (see docs/resend-compatibility.md, known deltas).
+ */
+function refusalBody(refusal: SendRefusal) {
+  const { code, message } = sendRefusalError(refusal);
+  return errorBody(403, code, message);
 }
 
 /** Refusal from acceptEmail inside a caller-owned batch transaction. */
@@ -422,9 +575,10 @@ function toAcceptPayload(body: SendEmailRequest, domainId: string | null): Accep
   // `content` is guaranteed by the schema's superRefine; the `?? ""` only
   // satisfies the optional wire type.
   const attachments = body.attachments?.map((a) => ({
-    filename: a.filename,
+    ...(a.filename ? { filename: a.filename } : {}),
     content: a.content ?? "",
     ...(a.content_type ? { contentType: a.content_type } : {}),
+    ...(a.content_id ? { contentId: a.content_id } : {}),
   }));
   return {
     from: body.from,
@@ -534,32 +688,14 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
   if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
 }
 
-const RATE_WINDOW_MS = 60_000;
-const RATE_COUNTER_SWEEP_SIZE = 10_000;
 const AUTH_FAILURES_PER_MINUTE = 20;
 
-/**
- * Fixed-window hit counter. Returns the count for `key` in the current
- * window after this hit, plus the seconds until the window rolls over.
- * ponytail: per-process; the DB bucket table is keyed by api_key uuid, so
- * move these there (text key) if the API ever runs more than one replica.
- */
-function fixedWindowCounter() {
-  const hits = new Map<string, { windowStart: number; count: number }>();
-  return (key: string, now = Date.now()): { count: number; retryAfterSec: number } => {
-    const windowStart = now - (now % RATE_WINDOW_MS);
-    if (hits.size > RATE_COUNTER_SWEEP_SIZE) {
-      for (const [k, v] of hits) if (v.windowStart !== windowStart) hits.delete(k);
-    }
-    const current = hits.get(key);
-    const count = current?.windowStart === windowStart ? current.count + 1 : 1;
-    hits.set(key, { windowStart, count });
-    return {
-      count,
-      retryAfterSec: Math.max(1, Math.ceil((windowStart + RATE_WINDOW_MS - now) / 1000)),
-    };
-  };
-}
+const MiB = 1024 * 1024;
+export const DEFAULT_BODY_LIMIT_BYTES = 25 * MiB;
+const MX_DELIVER_URL_PATH = `${MX_INGEST_PATH}${MX_DELIVER_PATH}`;
+
+const bodyTooLarge = (maxBytes: number) => (c: Context) =>
+  c.json(errorBody(413, "payload_too_large", `Request body exceeds ${maxBytes / MiB} MiB`), 413);
 
 /**
  * Cloud sits behind Cloudflare only (the origin firewall admits nothing
@@ -576,34 +712,73 @@ function clientIp(c: Context, isCloud: boolean): string | null {
   }
 }
 
+/** Page size of a Resend list when the request has no limit. */
+export const DEFAULT_PAGE_LIMIT = 20;
+
+export const KEYSET_LIST_DESCRIPTION =
+  "Newest first, as on Resend, with cursor pagination: `after` takes the last id of a page and pages toward older items, `before` takes the first id and pages back toward newer ones.";
+
 /**
  * Keyset pagination for the Resend list endpoints: limit 1-100 (default 20),
- * `after`/`before` cursors are item ids, rows ordered by (created_at, id).
+ * `after`/`before` cursors are item ids, rows newest first by (created_at, id)
+ * as on Resend: `after` pages toward older items, `before` back toward newer.
  */
 export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
-  /** Resolves a cursor id to its sort key, scoped to the caller's team. */
-  loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | undefined>;
-  loadRows: (cond: SQL | undefined, descending: boolean, take: number) => Promise<R[]>;
+  /**
+   * Resolves a cursor id to its sort key, scoped to the caller's team. "end"
+   * is a cursor below every row: after it the page is empty, and before it
+   * the page starts at the oldest row.
+   */
+  loadCursor: (id: string) => Promise<{ createdAt: Date; id: string } | "end" | undefined>;
+  loadRows: (cond: SQL | undefined, orderBy: SQL[], take: number) => Promise<R[]>;
 }): Promise<{ rows: R[]; hasMore: boolean } | "bad_cursor"> {
   const { query } = opts;
-  const limit = query.limit ?? 20;
+  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
   const cursorId = query.before ?? query.after;
+  const towardNewer = Boolean(query.before);
   let cond: SQL | undefined;
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
     if (!cur) return "bad_cursor";
-    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, query.before ? "before" : "after");
+    if (cur !== "end") {
+      cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, towardNewer ? "after" : "before");
+    } else if (!towardNewer) {
+      return { rows: [], hasMore: false };
+    }
   }
+  const dir = towardNewer ? asc : desc;
   // One extra row decides has_more without a count query.
-  const fetched = await opts.loadRows(cond, Boolean(query.before), limit + 1);
+  const fetched = await opts.loadRows(cond, [dir(opts.createdAt), dir(opts.id)], limit + 1);
   const hasMore = fetched.length > limit;
   const rows = fetched.slice(0, limit);
-  // `before` pages are fetched newest-first; responses stay oldest-first.
+  // `before` pages are fetched outward from the cursor; responses keep the list's order.
   if (query.before) rows.reverse();
   return { rows, hasMore };
+}
+
+/** keysetPage's contract over a list already in memory, kept in its own order. */
+export function arrayPage<T extends { id: string }>(
+  items: readonly T[],
+  query: ListQuery,
+): { rows: T[]; hasMore: boolean } | "bad_cursor" {
+  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
+  const cursorId = query.before ?? query.after;
+  let start = 0;
+  let end = items.length;
+  if (cursorId) {
+    const at = items.findIndex((item) => item.id === cursorId);
+    if (at < 0) return "bad_cursor";
+    if (query.before) end = at;
+    else start = at + 1;
+  }
+  if (query.before) {
+    const from = Math.max(start, end - limit);
+    return { rows: items.slice(from, end), hasMore: from > start };
+  }
+  return { rows: items.slice(start, start + limit), hasMore: start + limit < end };
 }
 
 /**
@@ -995,6 +1170,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       name: "not_found",
       message,
     });
+    // Checked once, outside the retries: it may wait on DNS. Only a new
+    // contact is refused; a stored one still skips or upserts.
+    const candidates = [...rows.values()];
+    const undeliverable = new Map<BatchContactRow, UndeliverableRecipient>();
+    for (const hit of await undeliverableRecipients(candidates.map((r) => r.email))) {
+      const row = candidates[hit.index];
+      if (row) undeliverable.set(row, hit);
+    }
 
     for (let attempt = 0; ; attempt++) {
       const pending = [...rows.values()].filter((r) => results[r.indices[0] ?? -1] === undefined);
@@ -1036,7 +1219,16 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           fail(row, notFound("Topic not found"));
         } else {
           const found = existingByKey.get(row.key);
-          if (!found) inserts.push(row);
+          // Refused before the plan-room check, so it never uses up room.
+          const hit = found ? undefined : undeliverable.get(row);
+          if (hit) {
+            fail(row, {
+              ok: false,
+              status: 422,
+              name: "validation_error",
+              message: undeliverableRecipientMessage(hit),
+            });
+          } else if (!found) inserts.push(row);
           else if (onConflict === "error") {
             fail(row, {
               ok: false,
@@ -1569,7 +1761,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         }
       }
       const data: z.infer<typeof batchContactsResponseSchema>["data"] = [];
-      const errors: { index: number; message: string }[] = [];
+      const errors: { index: number; statusCode: number; name: string; message: string }[] = [];
       const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
       for (const [index, r] of results.entries()) {
         if (!r) throw new Error(`contact batch left item ${index} unresolved`);
@@ -1577,7 +1769,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           data.push({ object: "contact", index, id: r.id, status: r.status });
           counts[r.status]++;
         } else {
-          errors.push({ index, message: r.message });
+          errors.push({ index, statusCode: r.status, name: r.name, message: r.message });
           counts.failed++;
         }
       }
@@ -1589,6 +1781,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/contacts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listContactsQuerySchema },
       responses: {
         200: {
@@ -1612,14 +1805,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .from(t)
               .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(t)
             .where(and(eq(t.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -1811,14 +2002,16 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     async (c) => {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
-      const entries = c.req.valid("json");
+      // One entry per topic, the last one winning: an upsert may not reach
+      // the same row twice.
+      const entries = [...new Map(c.req.valid("json").map((e) => [e.id, e])).values()];
       const contact = await findContact(auth.teamId, id);
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       if (entries.length === 0) return c.json({ id: contact.id }, 200);
 
       // Topics are teamId-scoped: a subscription may only target one this
       // team owns, or a caller could write rows against another team's topic.
-      const topicIds = [...new Set(entries.map((e) => e.id))];
+      const topicIds = entries.map((e) => e.id);
       const topicInfo = await ownsTopics(auth.teamId, topicIds);
       if (!topicInfo) {
         return c.json(errorBody(404, "not_found", "Topic not found"), 404);
@@ -1869,7 +2062,6 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             data: { topicId: e.id, name: topic.name },
           });
         }
-        prior.set(e.id, next);
       }
       await recordContactActivity(db, changed, contactEvents);
       return c.json({ id: contact.id }, 200);
@@ -2347,6 +2539,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -2369,14 +2562,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(s)
               .where(and(eq(s.id, id), eq(s.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(s)
             .where(and(eq(s.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(s.createdAt), desc(s.id)] : [asc(s.createdAt), asc(s.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2424,6 +2615,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments/{id}/contacts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { params: idParam, query: listContactsQuerySchema },
       responses: {
         200: {
@@ -2455,14 +2647,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .from(ct)
               .where(and(eq(ct.id, id), eq(ct.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(ct)
             .where(and(eq(ct.teamId, auth.teamId), inSegment, cond))
-            .orderBy(
-              ...(descending ? [desc(ct.createdAt), desc(ct.id)] : [asc(ct.createdAt), asc(ct.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -2507,6 +2697,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
+      if (body.name === undefined && body.filter === undefined) {
+        return c.json(
+          errorBody(422, "validation_error", "Provide at least one of name or filter"),
+          422,
+        );
+      }
       // undefined = keep; null = clear (the segment becomes manual-only).
       let filter: SegmentFilter | null | undefined;
       if (body.filter === null) {
@@ -2570,37 +2766,15 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
   );
 }
 
-/** Contacts the fan-out would walk: subscribed, in the segment, and subscribed to the topic. */
+/** Contacts the fan-out would walk, by the audience predicate it reads itself. */
 async function countBroadcastAudience(
   db: Db,
   teamId: string,
   broadcast: { segmentId: string | null; topicId: string | null },
 ): Promise<number> {
-  const c = schema.contacts;
-  const conditions: (SQL | undefined)[] = [eq(c.teamId, teamId), eq(c.unsubscribed, false)];
-  if (broadcast.segmentId) {
-    const [segment] = await db
-      .select()
-      .from(schema.segments)
-      .where(and(eq(schema.segments.id, broadcast.segmentId), eq(schema.segments.teamId, teamId)));
-    if (segment) conditions.push(segmentContactsWhere(c, segment));
-  }
-  if (broadcast.topicId) {
-    const [topic] = await db
-      .select({ defaultSubscribed: schema.topics.defaultSubscribed })
-      .from(schema.topics)
-      .where(eq(schema.topics.id, broadcast.topicId));
-    const s = schema.contactTopicSubscriptions;
-    conditions.push(
-      topic?.defaultSubscribed
-        ? sql`not exists (select 1 from ${s} where ${s.contactId} = ${c.id} and ${s.topicId} = ${broadcast.topicId} and ${s.subscribed} = false)`
-        : sql`exists (select 1 from ${s} where ${s.contactId} = ${c.id} and ${s.topicId} = ${broadcast.topicId} and ${s.subscribed} = true)`,
-    );
-  }
-  const [row] = await db
-    .select({ n: count() })
-    .from(c)
-    .where(and(...conditions));
+  const where = await broadcastAudience(db, teamId, broadcast);
+  if (!where) return 0;
+  const [row] = await db.select({ n: count() }).from(schema.contacts).where(where);
   return row?.n ?? 0;
 }
 
@@ -2663,10 +2837,18 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         "APP_BASE_URL is not set. Unsubscribe links are built from it. Set it, restart, send again.",
       );
     }
-    const paused = await sendingPausedError(deps, auth);
-    if (paused) return { ok: false as const, status: 403 as const, body: paused };
+    const refusal = await sendRefusal(db, auth.teamId);
+    if (refusal) return { ok: false as const, status: 403 as const, body: refusalBody(refusal) };
     // Same boundary as /emails: only a verified team domain may appear as
     // the sender.
+    const reserved = reservedSenderRefusal(broadcast.from, deps.onboardingEmailFrom);
+    if (reserved) return fail(422, reserved.name, reserved.message);
+    // As batch and SMTP answer it, before a "not verified" 422 that the
+    // shared row's verified status in GET /domains would contradict.
+    if (isSharedInboxSender(broadcast.from, deps.sharedInboxDomain)) {
+      const { name, message } = sharedSenderRefusal.body;
+      return fail(403, name, message);
+    }
     const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
     if (!domain.ok) {
       return fail(
@@ -2682,18 +2864,14 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return fail(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE);
     }
-    // Platform breaker: the account-wide rate in this SES region is near
-    // SES's review line, so broadcasts wait; /emails is deliberately not
-    // gated by it.
-    const regionHold = await regionPause(db, domain.region);
-    if (regionHold) {
-      const metric = regionHold.reason?.metric === "bounce" ? "hard-bounce" : "complaint";
+    // Platform breaker or the operator's hold on this SES region: broadcasts
+    // wait; /emails is deliberately not gated by it. The caller is never
+    // told why: the platform's rates are not the customer's to see.
+    if (await regionPause(db, domain.region)) {
       return fail(
         403,
         "broadcasts_paused",
-        regionHold.manualReason
-          ? `Broadcast sending is paused in ${domain.region} by the instance operator. Transactional email is unaffected. Try again later.`
-          : `Broadcast sending is paused in ${domain.region} while the platform's ${metric} rate recovers. Transactional email is unaffected. Try again later.`,
+        "Broadcasts can't be sent right now. Sending resumes automatically; try again later. Transactional email is unaffected.",
       );
     }
     // The operator's pause is the team's own hold, transactional mail aside.
@@ -2709,9 +2887,38 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     // satisfies the type); relative forms ("in 2 days") resolve against now.
     const scheduledAt =
       (scheduledAtInput ? parseScheduledAt(scheduledAtInput) : null) ?? new Date();
+    // A domain warming up its reputation sends by the warm-up's day, not by
+    // the region's room, so its own plan says when the send finishes.
+    const ramp = await getWarmup(db, auth.teamId, domain.domainId);
+    const warmup =
+      ramp?.status === "warming" || ramp?.status === "paused"
+        ? await warmupSendPreview(db, {
+            teamId: auth.teamId,
+            domainId: domain.domainId,
+            segmentId: broadcast.segmentId,
+            topicId: broadcast.topicId,
+            at: scheduledAt,
+          })
+        : null;
+    // The warm-up's own plan meets the same horizon a paced send does; a
+    // paused warm-up has no finish, and its send waits.
+    if (warmup?.plan) {
+      const horizonDays = deps.pacing
+        ? await deps.pacing.horizonDays()
+        : pacingHorizonDays(PACING_HORIZON_MAX_RETENTION_DAYS);
+      if (warmupPastHorizon(warmup.plan, horizonDays)) {
+        return fail(
+          422,
+          "broadcast_too_large",
+          `At this warm-up's pace this broadcast needs more than ${horizonDays} days. Raise the daily target or send to a smaller segment.`,
+        );
+      }
+    }
     // The planner says when the send finishes and refuses one that would
     // not finish inside the horizon; without SES's numbers it says nothing.
-    const estimate = await estimateSend(auth.teamId, broadcast, domain.region, scheduledAt);
+    const estimate = warmup?.plan
+      ? null
+      : await estimateSend(auth.teamId, broadcast, domain.region, scheduledAt);
     if (estimate?.blocked) {
       return fail(
         422,
@@ -2736,10 +2943,28 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     }
     const body: SendBody = {
       id: row.id,
-      finishes_at: estimate?.finishesAt?.toISOString() ?? null,
+      finishes_at: (warmup?.plan ?? estimate)?.finishesAt?.toISOString() ?? null,
       estimated: true,
     };
-    if (estimate?.finishesAt && estimate.startsAt && estimate.first === 0 && !estimate.planHold) {
+    if (warmup?.status === "paused") {
+      body.warning = {
+        code: "warming_up",
+        days: 0,
+        message: "This domain's warm-up is paused, so this broadcast waits until it resumes.",
+      };
+    } else if (warmup?.plan?.finishesAt) {
+      const { days } = warmup.plan;
+      body.warning = {
+        code: "warming_up",
+        days,
+        message: `This domain is warming up, so this broadcast goes out over about ${days === 1 ? "1 day" : `${days} days`}, most active contacts first.`,
+      };
+    } else if (
+      estimate?.finishesAt &&
+      estimate.startsAt &&
+      estimate.first === 0 &&
+      !estimate.planHold
+    ) {
       body.warning = {
         code: "queued_behind",
         days: estimate.days,
@@ -2796,12 +3021,17 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     return mine ? { ...mine, count, horizonDays } : null;
   };
 
-  /** finishes_at per broadcast of the team still going out: one planner run per region, under the team's own caps. */
+  /**
+   * finishes_at per broadcast of the team still going out: a warming
+   * domain's from its warm-up's plan, the rest from one planner run per
+   * region, under the team's own caps.
+   */
   const liveFinishes = async (teamId: string): Promise<Map<string, Date | null>> => {
     const out = new Map<string, Date | null>();
-    if (!deps.pacing) return out;
     const mine = await sendingBroadcasts(db, { teamId });
-    const regions = new Set(mine.flatMap((b) => (b.region ? [b.region] : [])));
+    for (const [id, plan] of await warmupBroadcastPlans(db, mine)) out.set(id, plan.finishesAt);
+    if (!deps.pacing) return out;
+    const regions = new Set(mine.flatMap((b) => (b.region && !b.warmup ? [b.region] : [])));
     if (regions.size === 0) return out;
     const [reservePercent, rateCeiling, horizonDays, quota] = await Promise.all([
       deps.pacing.reservePercent(),
@@ -2868,7 +3098,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast created (and scheduled when send: true)",
         },
         400: jsonErr("Broadcast state conflict"),
-        403: jsonErr("Restricted API key or sending paused"),
+        403: jsonErr("Restricted API key, sending paused, or a From on the shared inbox domain"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },
@@ -2932,6 +3162,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/broadcasts",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -2955,14 +3186,12 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .from(b)
               .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(b)
             .where(and(eq(b.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(b.createdAt), desc(b.id)] : [asc(b.createdAt), asc(b.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -3165,7 +3394,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast scheduled; finishes_at and warning say when it goes out",
         },
         400: jsonErr("Not a draft"),
-        403: jsonErr("Sending paused"),
+        403: jsonErr("Sending paused, or a From on the shared inbox domain"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },
@@ -3260,9 +3489,23 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return next();
   });
 
-  // Uncaught throws must still speak Resend's error format — SDK clients
-  // parse the body as JSON.
+  // Uncaught throws and unmatched routes must still speak Resend's error
+  // format — SDK clients parse the body as JSON. The 404 never echoes the
+  // path: it can carry an address, and the request log keeps response bodies.
+  app.notFound((c) =>
+    c.json(errorBody(404, "not_found", "The requested endpoint does not exist."), 404),
+  );
   app.onError((err, c) => {
+    // The request validators refuse a malformed JSON body (400) or one that
+    // isn't JSON (415) by throwing: the caller's mistake, not ours to report.
+    if (err instanceof HTTPException && err.status < 500) {
+      return c.json(errorBody(err.status, "invalid_parameter", err.message), err.status);
+    }
+    // A value the database cannot store, from the body, path or query, is
+    // the caller's mistake too. Not on /ses/events: that data is AWS's, and
+    // a 500 is reported here and retried by SNS.
+    const unstorable = c.req.path.startsWith("/ses/") ? null : unstorableValueMessage(err);
+    if (unstorable) return c.json(errorBody(422, "validation_error", unstorable), 422);
     console.error("unhandled api error", err);
     void captureError(err, { teamId: c.get("auth")?.teamId, tags: { route: routePath(c, -1) } });
     return c.json(errorBody(500, "internal_server_error", "An unexpected error occurred"), 500);
@@ -3281,13 +3524,17 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       maxAge: 86400,
     }),
   );
-  app.use(
-    "*",
-    bodyLimit({
-      maxSize: 25 * 1024 * 1024,
-      onError: (c) =>
-        c.json(errorBody(413, "payload_too_large", "Request body exceeds 25 MiB"), 413),
-    }),
+  // The MX's deliveries carry more than this: their route applies its own
+  // limit once the caller is authenticated, so an anonymous request never gets
+  // the larger allowance buffered.
+  const defaultBodyLimit = bodyLimit({
+    maxSize: DEFAULT_BODY_LIMIT_BYTES,
+    onError: bodyTooLarge(DEFAULT_BODY_LIMIT_BYTES),
+  });
+  app.use("*", (c, next) =>
+    c.req.method === "POST" && deps.receiving && c.req.path === MX_DELIVER_URL_PATH
+      ? next()
+      : defaultBodyLimit(c, next),
   );
   app.use("*", secureHeaders());
 
@@ -3341,18 +3588,22 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         requestBytes: requestLength == null ? null : Number(requestLength),
         responseBytes: responseLength == null ? null : Number(responseLength),
         requestBody: await loggedBody(path, c.req.header("content-type"), requestLength, () =>
-          c.req.json(),
+          c.req.text(),
         ),
-        responseBody: await loggedBody(path, responseType, responseLength, () => resClone.json()),
+        responseBody: await loggedBody(path, responseType, responseLength, () => resClone.text()),
       });
-    })().catch((err) => console.error("api request log failed", err));
+    })().catch((err: unknown) => {
+      // A failed insert's message quotes the row, request and response bodies
+      // included, so only its class and SQLSTATE reach the process log.
+      console.error("api request log failed", ...errorClassAndCode(err));
+    });
   });
 
   // Failed authentications are counted per client IP: every attempt costs a
   // prefix-indexed key lookup, and nothing else throttles a caller that has
   // no key to bucket on.
   const countAuthFailure = fixedWindowCounter();
-  const authFailure = (c: Context, name: string, message: string) => {
+  const authFailure = (c: Context, name: string, message: string, status: 401 | 403 = 401) => {
     const ip = clientIp(c, deps.isCloud);
     if (ip) {
       const failures = countAuthFailure(`ip:${ip}`);
@@ -3364,7 +3615,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         );
       }
     }
-    return c.json(errorBody(401, name, message), 401);
+    return c.json(errorBody(status, name, message), status);
   };
 
   const requireApiKey = createMiddleware<Env>(async (c, next) => {
@@ -3381,6 +3632,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       return authFailure(c, "invalid_api_key", "API key is invalid");
     }
     c.set("auth", auth);
+    // SECURITY: an inbox-scoped key reaches only the allow-listed routes of its
+    // own inbox; every other route, and any route added later, is refused.
+    if (auth.inboxId && !inboxKeyAllows(c.req.method, c.req.path, auth.inboxId)) {
+      return c.json(errorBody(403, "restricted_api_key", INBOX_KEY_SCOPE_MESSAGE), 403);
+    }
     await next();
   });
 
@@ -3395,6 +3651,35 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return next();
   });
 
+  // SECURITY: the dashboard's adminProcedure line. Only an MCP call carries a
+  // role (ApiKeyAuth.role), so a member's agent is refused here whichever
+  // tool reached the route.
+  const requireAdmin = createMiddleware<Env>(async (c, next) => {
+    const role = c.get("auth")?.role;
+    if (role && !isAdminRole(role)) {
+      return c.json(
+        errorBody(403, "forbidden", "This action requires the owner or admin role"),
+        403,
+      );
+    }
+    return next();
+  });
+  // Every write to sending domains, webhooks and API keys; in the audience,
+  // lifting suppressions, bulk deletes and erasure (a plain delete is not).
+  app.on(
+    ["POST", "PATCH", "DELETE"],
+    ["/domains", "/domains/*", "/webhooks", "/webhooks/*", "/api-keys", "/api-keys/*"],
+    requireAdmin,
+  );
+  app.on("POST", ["/suppressions/batch/remove", "/contacts/batch/remove"], requireAdmin);
+  // Inbox exposure: deleting an inbox, its safety rules, erasing received mail.
+  app.on("DELETE", ["/inboxes/:id", "/emails/receiving/:id"], requireAdmin);
+  app.on("PATCH", "/inboxes/:id/safety", requireAdmin);
+  app.on("DELETE", "/suppressions/:id", requireAdmin);
+  app.on("DELETE", ["/contacts/:id", "/audiences/:audienceId/contacts/:id"], (c, next) =>
+    c.req.query("erase") === "true" ? requireAdmin(c, next) : next(),
+  );
+
   const countTeamRequest = fixedWindowCounter();
   const enforceRateLimit = createMiddleware<Env>(async (c, next) => {
     // Exact + wildcard middleware registrations can both match one request.
@@ -3404,30 +3689,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // OAuth (MCP) callers have no api_keys row to bucket on; the /mcp gate
     // rate-limits them per user instead.
     if (!auth || auth.apiKeyId === null) return next();
-    const bucket = schema.apiRateLimits;
-    const windowStart = sql<Date>`date_trunc('minute', now())`;
-    const [row] = await deps.db
-      .insert(bucket)
-      .values({ apiKeyId: auth.apiKeyId, windowStart, count: 1 })
-      .onConflictDoUpdate({
-        target: bucket.apiKeyId,
-        set: {
-          windowStart,
-          count: sql`case when ${bucket.windowStart} = ${windowStart} then ${bucket.count} + 1 else 1 end`,
-        },
-      })
-      .returning({
-        count: bucket.count,
-        retryAfter: sql<number>`greatest(1, ceil(extract(epoch from (${bucket.windowStart} + interval '1 minute' - now()))))::int`,
-      });
-    const limit = deps.rateLimitPerMinute ?? 600;
-    if ((row?.count ?? 0) > limit) {
-      c.header("retry-after", String(row?.retryAfter ?? 60));
+    const key = await countApiKeyRequest(deps.db, auth.apiKeyId);
+    if (key.count > (deps.rateLimitPerMinute ?? API_RATE_LIMIT_PER_MINUTE_DEFAULT)) {
+      c.header("retry-after", String(key.retryAfterSec));
       return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
     }
     // The team bucket spans every key, so minting keys cannot multiply the cap.
     const team = countTeamRequest(`team:${auth.teamId}`);
-    if (team.count > (deps.teamRateLimitPerMinute ?? 3000)) {
+    if (team.count > (deps.teamRateLimitPerMinute ?? TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT)) {
       c.header("retry-after", String(team.retryAfterSec));
       return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
     }
@@ -3485,6 +3754,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.use("/usage", requireApiKey, enforceRateLimit, requireFullAccess);
   registerUsageRoutes(app, deps);
 
+  app.use("/inboxes", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/inboxes/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  registerInboxRoutes(app, deps, { requireFullAccess });
+  registerInboxSendRoutes(app, deps, { requireFullAccess });
+
   const sendRoute = createRoute({
     method: "post",
     path: "/emails",
@@ -3529,51 +3803,30 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       return c.json(errorBody(404, "not_found", "Topic not found"), 404);
     }
 
-    // The shared onboarding sender needs no verified domain but may only
-    // reach the team's own inboxes; anything else is the verified-domain rule.
-    const onboarding = await verifyOnboardingSender(
-      deps.db,
-      auth.teamId,
-      body.from,
-      [...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])],
-      deps.onboardingEmailFrom,
-      { requireVerified: deps.requireVerifiedMembers ?? true },
-    );
-    if (onboarding && !onboarding.ok) {
-      return c.json(
-        errorBody(
+    const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
+    if (reserved) return c.json(errorBody(422, reserved.name, reserved.message), 422);
+    let domainId: string | null = null;
+    if (isSharedInboxSender(body.from, deps.sharedInboxDomain)) {
+      const refusal = await sharedFromRefusal(deps, auth);
+      if (refusal) return c.json(refusal.body, refusal.status);
+    } else {
+      const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
+      if (!domain.ok) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            domain.reason === "invalid_sender"
+              ? 'from must be a single address like ada@example.com or "Ada Lovelace" <ada@example.com>; quote a display name that contains a comma'
+              : `The ${domain.fromDomain} domain is not verified for this team`,
+          ),
           422,
-          "validation_error",
-          onboarding.reason === "recipient_not_verified"
-            ? "The onboarding sender can only send to members who verified their email"
-            : "The onboarding sender can only send to your team's own members",
-        ),
-        422,
-      );
-    }
-    // The shared sender goes out exactly as configured: a caller's display
-    // name on the instance's own address would let it pose as the platform.
-    const from = onboarding ? (deps.onboardingEmailFrom ?? body.from) : body.from;
-    const domain = onboarding ?? (await verifySenderDomain(deps.db, auth.teamId, body.from));
-    if (!domain.ok) {
-      return c.json(
-        errorBody(
-          422,
-          "validation_error",
-          domain.reason === "invalid_sender"
-            ? 'from must be a single address like ada@example.com or "Ada Lovelace" <ada@example.com>; quote a display name that contains a comma'
-            : `The ${domain.fromDomain} domain is not verified for this team`,
-        ),
-        422,
-      );
-    }
-    // A domain-restricted key is confined to its domain, the shared sender included.
-    if (
-      domain.domainId === null
-        ? auth.domainId !== null
-        : keyForbidsSendingDomain(auth, domain.domainId)
-    ) {
-      return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
+        );
+      }
+      if (keyForbidsSendingDomain(auth, domain.domainId)) {
+        return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
+      }
+      domainId = domain.domainId;
     }
 
     // Idempotency FIRST: a replay must return the stored response even if
@@ -3616,33 +3869,26 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
 
     try {
-      const paused = await sendingPausedError(deps, auth);
-      if (paused) {
-        if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
-        return c.json(paused, 403);
-      }
-      const result = await acceptEmail(
-        deps,
-        auth,
-        toAcceptPayload({ ...body, from }, domain.domainId),
-        {
-          completeInTx: idemKey
-            ? async (tx, emailId) => {
-                const recorded = await completeIdempotent(tx, {
-                  teamId: auth.teamId,
-                  key: idemKey,
-                  emailIds: [emailId],
-                });
-                // Another owner took over and recorded its own response:
-                // abort so this branch produces no second email.
-                if (!recorded) throw new IdempotencyTakeoverError();
-              }
-            : undefined,
-        },
-      );
+      const result = await acceptEmail(deps, auth, toAcceptPayload(body, domainId), {
+        parkUnderReview: true,
+        recordSuppressed: true,
+        completeInTx: idemKey
+          ? async (tx, emailId) => {
+              const recorded = await completeIdempotent(tx, {
+                teamId: auth.teamId,
+                key: idemKey,
+                emailIds: [emailId],
+              });
+              // Another owner took over and recorded its own response:
+              // abort so this branch produces no second email.
+              if (!recorded) throw new IdempotencyTakeoverError();
+            }
+          : undefined,
+      });
       if (!result.ok) {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         const rejection = acceptRejection(result);
+        if (rejection.retryAfterSec) c.header("retry-after", String(rejection.retryAfterSec));
         return c.json(rejection.body, rejection.status);
       }
       return c.json({ id: result.id }, 200);
@@ -3693,21 +3939,27 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     },
   });
 
-  // One batch item's full validation (wire shape + business rules), no
-  // writes. A failure carries the strict-mode status so strict can answer
-  // with it verbatim while permissive downgrades it to a per-index error.
+  // One parsed batch item's business rules, no writes; `undeliverable` is
+  // its first recipient the batch-wide domain check refused. A failure
+  // carries the strict-mode status so strict can answer with it verbatim
+  // while permissive downgrades it to a per-index error.
   type BatchItemVerdict =
     | { payload: AcceptEmailPayload }
     | { status: 403 | 404 | 422; name: string; message: string };
 
-  const validateBatchItem = async (auth: ApiKeyAuth, raw: unknown): Promise<BatchItemVerdict> => {
-    const parsed = sendEmailRequestSchema.safeParse(raw);
-    if (!parsed.success) {
-      return { status: 422, name: "validation_error", message: validationMessage(parsed.error) };
-    }
-    const body = parsed.data;
+  const validateBatchItem = async (
+    auth: ApiKeyAuth,
+    body: SendEmailRequest,
+    undeliverable: UndeliverableRecipient | undefined,
+  ): Promise<BatchItemVerdict> => {
     if (body.topic_id != null && !(await findTeamTopic(deps.db, auth.teamId, body.topic_id))) {
       return { status: 404, name: "not_found", message: "Topic not found" };
+    }
+    const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
+    if (reserved) return { status: 422, ...reserved };
+    if (isSharedInboxSender(body.from, deps.sharedInboxDomain)) {
+      const { name, message } = sharedSenderRefusal.body;
+      return { status: 403, name, message };
     }
     const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
@@ -3723,13 +3975,22 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return { status: 403, name: "restricted_api_key", message: RESTRICTED_DOMAIN_MESSAGE };
     }
-    if (estimateAttachmentBytes(body.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
+    const payload = toAcceptPayload(body, domain.domainId);
+    const maxBytes = exceededSendSize(payload);
+    if (maxBytes !== null) {
       const { body: rejected } = acceptRejection({
         ok: false,
         reason: "attachments_too_large",
-        maxBytes: MAX_ATTACHMENT_BYTES,
+        maxBytes,
       });
       return { status: 422, name: "validation_error", message: rejected.message };
+    }
+    if (undeliverable) {
+      return {
+        status: 422,
+        name: "validation_error",
+        message: undeliverableRecipientMessage(undeliverable, { forSend: true }),
+      };
     }
     // Suppression (and topic opt-outs, which drop identically) is resolved
     // up front too, so an all-suppressed item fails at validation instead of
@@ -3749,7 +4010,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         message: "All recipients are suppressed",
       };
     }
-    return { payload: toAcceptPayload(body, domain.domainId) };
+    return { payload };
   };
 
   app.openapi(batchRoute, async (c) => {
@@ -3760,23 +4021,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // and reports the rest as per-index errors.
     const permissive = c.req.header("x-batch-validation")?.toLowerCase() === "permissive";
 
-    // Pass 1 — validate every item with no writes.
-    const payloads: { payload: AcceptEmailPayload; index: number }[] = [];
-    const itemErrors: { index: number; message: string }[] = [];
-    for (const [i, raw] of items.entries()) {
-      const verdict = await validateBatchItem(auth, raw);
-      if ("payload" in verdict) {
-        payloads.push({ payload: verdict.payload, index: i });
-      } else if (permissive) {
-        itemErrors.push({ index: i, message: verdict.message });
-      } else {
-        return c.json(
-          errorBody(verdict.status, verdict.name, `emails.${i}: ${verdict.message}`),
-          verdict.status,
-        );
-      }
-    }
-
+    // Idempotency first, as in single send: a replay must return the stored
+    // response even if a recipient was suppressed or refused after the
+    // original batch.
     const idemKey = c.req.header("idempotency-key") ?? null;
     if (idemKey) {
       const begin = await beginIdempotent(deps.db, {
@@ -3809,18 +4056,49 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       }
     }
 
-    // Pass 2 — accept every validated item in ONE transaction so the batch is
-    // all-or-nothing, like single-send: a failure after item k rolls back
-    // items 1..k, so a retry can never re-send what a prior attempt already
-    // committed. Idempotency completion is recorded in the same transaction;
-    // enqueue happens only after commit (reconcile re-enqueues any lost job).
     try {
-      const paused = await sendingPausedError(deps, auth);
-      if (paused) {
-        if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
-        return c.json(paused, 403);
+      // Pass 1 — validate every item with no writes. Every item is parsed
+      // first, so one recipient-domain check covers the whole batch.
+      const parsed = items.map((raw) => sendEmailRequestSchema.safeParse(raw));
+      const recipients = parsed.flatMap((p, index) =>
+        p.success
+          ? [...p.data.to, ...(p.data.cc ?? []), ...(p.data.bcc ?? [])].map((address) => ({
+              index,
+              address,
+            }))
+          : [],
+      );
+      const undeliverable = new Map<number, UndeliverableRecipient>();
+      for (const hit of await undeliverableRecipients(recipients.map((r) => r.address))) {
+        const index = recipients[hit.index]?.index;
+        if (index !== undefined && !undeliverable.has(index)) undeliverable.set(index, hit);
       }
+      const payloads: { payload: AcceptEmailPayload; index: number }[] = [];
+      const itemErrors: { index: number; message: string }[] = [];
+      for (const [i, p] of parsed.entries()) {
+        const verdict: BatchItemVerdict = p.success
+          ? await validateBatchItem(auth, p.data, undeliverable.get(i))
+          : { status: 422, name: "validation_error", message: validationMessage(p.error) };
+        if ("payload" in verdict) {
+          payloads.push({ payload: verdict.payload, index: i });
+        } else if (permissive) {
+          itemErrors.push({ index: i, message: verdict.message });
+        } else {
+          if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
+          return c.json(
+            errorBody(verdict.status, verdict.name, `emails.${i}: ${verdict.message}`),
+            verdict.status,
+          );
+        }
+      }
+
+      // Pass 2 — accept every validated item in ONE transaction so the batch is
+      // all-or-nothing, like single-send: a failure after item k rolls back
+      // items 1..k, so a retry can never re-send what a prior attempt already
+      // committed. Idempotency completion is recorded in the same transaction;
+      // enqueue happens only after commit (reconcile re-enqueues any lost job).
       const quota = teamQuota(auth.billing, deps.isCloud);
+      const webhooks = webhookBatch(deps.enqueueWebhookDeliveries);
       const accepted = await deps.db.transaction(async (dbTx) => {
         const txDb = dbTx as unknown as Db;
         const out: {
@@ -3829,17 +4107,29 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           startAfter?: Date;
           index: number;
           day: string;
+          at: Date;
           recipientCount: number;
+          domainId: string | null;
         }[] = [];
+        let underReview = false;
         for (const { payload, index } of payloads) {
-          const result = await acceptEmail(deps, auth, payload, { tx: txDb, quota: "deferred" });
+          const result = await acceptEmail(deps, auth, payload, {
+            tx: txDb,
+            quota: "deferred",
+            parkUnderReview: true,
+            webhooks: webhooks.collect,
+            recipientsChecked: true,
+          });
           if (!result.ok) throw new AcceptRejectedError(result, index);
+          underReview ||= result.underReview;
           out.push({
             id: result.id,
             parked: false,
             index,
             day: result.day,
+            at: result.at,
             recipientCount: result.recipientCount,
+            domainId: payload.domainId,
             ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
           });
         }
@@ -3859,7 +4149,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           if (!first) continue;
           // Items in one group share a delivery day; the first one's instant
           // places the hourly mirror like a single send's would.
-          const at = first.startAfter ?? new Date();
+          const { at } = first;
           const reservation = await reserveQuota(txDb, {
             teamId: auth.teamId,
             count: items.reduce((n, o) => n + o.recipientCount, 0),
@@ -3932,6 +4222,58 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             );
           for (const o of toPark) o.parked = true;
         }
+        if (underReview) {
+          // A review hold parks the batch as it parks a single send: charged
+          // above, so a cap refuses it as usual, then handed back, since a
+          // parked row holds no reservation; the drain charges it on release.
+          for (const o of out) {
+            if (o.parked) continue;
+            await releaseQuota(txDb, {
+              teamId: auth.teamId,
+              count: o.recipientCount,
+              quota,
+              day: o.day,
+              at: o.at,
+            });
+            o.parked = true;
+          }
+          await txDb
+            .update(schema.emails)
+            .set({ latestStatus: "queued_quota", parkReason: "review", parkedAt: new Date() })
+            .where(
+              inArray(
+                schema.emails.id,
+                out.map((o) => o.id),
+              ),
+            );
+          if ((await countParked(txDb, auth.teamId)) > reviewBacklogLimit(quota)) {
+            throw new AcceptRejectedError(
+              { ok: false, reason: "quota_backlog_full" },
+              out[0]?.index ?? 0,
+            );
+          }
+        }
+        // The warm-up after the plan, each item as its own send would meet it.
+        for (const o of out) {
+          if (o.parked) continue;
+          const warmup = await enforceDomainWarmup(txDb, {
+            teamId: auth.teamId,
+            domainId: o.domainId,
+            count: o.recipientCount,
+            quota,
+            day: o.day,
+            at: o.at,
+          });
+          if (warmup === "send") continue;
+          if (warmup === "backlog_full") {
+            throw new AcceptRejectedError({ ok: false, reason: "warmup_backlog_full" }, o.index);
+          }
+          await txDb
+            .update(schema.emails)
+            .set({ latestStatus: "queued_quota", parkReason: "warmup" })
+            .where(eq(schema.emails.id, o.id));
+          o.parked = true;
+        }
         if (idemKey) {
           const recorded = await completeIdempotent(txDb, {
             teamId: auth.teamId,
@@ -3954,6 +4296,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           console.error("batch email.send enqueue failed; reconcile sweep will recover", err);
         }
       }
+      await webhooks.flush();
       return c.json(
         {
           data: accepted.map((o) => ({ id: o.id })),
@@ -3984,8 +4327,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       }
       if (err instanceof AcceptRejectedError) {
         const rejection = acceptRejection(err.result);
+        if (rejection.retryAfterSec) c.header("retry-after", String(rejection.retryAfterSec));
+        // The team's admission refuses the whole batch, not the item it met first.
+        const teamRefusal =
+          err.result.reason === "team_suspended" || err.result.reason === "sending_paused";
         return c.json(
-          { ...rejection.body, message: `emails.${err.index}: ${rejection.body.message}` },
+          teamRefusal
+            ? rejection.body
+            : { ...rejection.body, message: `emails.${err.index}: ${rejection.body.message}` },
           rejection.status,
         );
       }
@@ -4077,7 +4426,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const { id } = c.req.valid("param");
     const body = c.req.valid("json");
     const [email] = await deps.db
-      .select({ id: schema.emails.id, createdAt: schema.emails.createdAt })
+      .select({
+        id: schema.emails.id,
+        createdAt: schema.emails.createdAt,
+        scheduledAt: schema.emails.scheduledAt,
+        to: schema.emails.to,
+        cc: schema.emails.cc,
+        bcc: schema.emails.bcc,
+      })
       .from(schema.emails)
       .where(
         and(
@@ -4113,19 +4469,65 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // Same state gate as cancel: only a scheduled email nothing has claimed
     // can move — a reschedule racing the send loses cleanly (the WHERE no
     // longer matches once the sender claims sentAt).
-    const [row] = await deps.db
-      .update(schema.emails)
-      .set({ scheduledAt })
-      .where(
-        and(
-          eq(schema.emails.id, id),
-          eq(schema.emails.teamId, auth.teamId),
-          inArray(schema.emails.latestStatus, ["queued", "queued_quota"]),
-          isNull(schema.emails.sentAt),
-          isNotNull(schema.emails.scheduledAt),
-        ),
-      )
-      .returning({ id: schema.emails.id, latestStatus: schema.emails.latestStatus });
+    const row = await deps.db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      const [moved] = await txDb
+        .update(schema.emails)
+        .set({ scheduledAt })
+        .where(
+          and(
+            eq(schema.emails.id, id),
+            eq(schema.emails.teamId, auth.teamId),
+            inArray(schema.emails.latestStatus, ["queued", "queued_quota"]),
+            isNull(schema.emails.sentAt),
+            isNotNull(schema.emails.scheduledAt),
+          ),
+        )
+        .returning({ id: schema.emails.id, latestStatus: schema.emails.latestStatus });
+      // A move onto another UTC day is charged to that day too: left
+      // uncharged, rows charged across many days could all go out on one.
+      // No day is ever refunded. The row does not record which day holds
+      // its charge, and while its first job waits the queue drops the new
+      // one, so a move back earlier still sends at the first time: a refund
+      // there would let one day's cap be spent twice.
+      if (moved?.latestStatus !== "queued") return moved;
+      const now = new Date();
+      const after = quotaChargeAt(scheduledAt, now);
+      const sameDay =
+        email.scheduledAt !== null &&
+        email.scheduledAt > now &&
+        utcDay(email.scheduledAt) === utcDay(after);
+      const quota = teamQuota(auth.billing, deps.isCloud);
+      // Only a day's cap is at stake: a monthly period counted the email at accept.
+      if (
+        sameDay ||
+        quota.kind === "none" ||
+        (quota.kind === "month" && quota.dailyCeiling == null)
+      ) {
+        return moved;
+      }
+      const units = countDistinctRecipients(email.to, email.cc, email.bcc);
+      const reservation = await reserveDailyQuota(txDb, {
+        teamId: auth.teamId,
+        count: units,
+        limit: quota.kind === "day" ? quota.limit : null,
+        hardLimit: quota.dailyCeiling ?? null,
+        day: utcDay(after),
+        at: after,
+      });
+      if (reservation.reserved) return moved;
+      // The day is full: parked like an over-cap accept. The drain charges
+      // it again on release, the billing period included.
+      if (quota.kind === "month") {
+        await releasePeriodCount(txDb, {
+          teamId: auth.teamId,
+          count: units,
+          periodStart: quota.periodStart,
+        });
+      }
+      await transitionQueueState(txDb, moved.id, { from: "queued", to: "queued_quota" });
+      return { ...moved, latestStatus: "queued_quota" as const };
+    });
     if (!row) {
       return c.json(
         errorBody(
@@ -4150,6 +4552,15 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
     return c.json({ object: "email" as const, id: row.id }, 200);
   });
+
+  // Before GET /emails/{id}: Hono tries routes in registration order, and
+  // that route would claim /emails/receiving as an id.
+  registerReceivingRoutes(app, deps, {
+    requireFullAccess,
+    refuseDownload: (c) =>
+      authFailure(c, "invalid_download_link", "This download link is invalid or has expired", 403),
+  });
+  if (deps.receiving) registerMxIngestRoutes(app, deps, deps.receiving);
 
   // SECURITY: reads return decrypted bodies and the whole team archive, so
   // they are management surface — a sending_access key gets a 403 here even
@@ -4218,17 +4629,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         text,
         created_at: email.createdAt.toISOString(),
         scheduled_at: email.scheduledAt?.toISOString() ?? null,
-        // SES returns a bare message id; the RFC 5322 Message-ID header SES
-        // writes is '<id@<region>.amazonses.com>'. Unsent emails get a
-        // placeholder so the field (required by the SDK) is always present.
+        // Unsent emails get a placeholder so the field (required by the SDK)
+        // is always present.
         message_id: email.sesMessageId
-          ? email.sesMessageId.startsWith("<")
-            ? email.sesMessageId
-            : `<${email.sesMessageId}@email.amazonses.com>`
+          ? sesMessageIdHeader(email.sesMessageId)
           : `<${email.id}@unsent.millionsend>`,
-        // Internal quota-parking is invisible on the wire: the SDK's
-        // last_event union has no 'queued_quota'.
-        last_event: email.latestStatus === "queued_quota" ? "queued" : email.latestStatus,
+        last_event: wireLastEvent(email.latestStatus),
         score: insights ? insights.scoreTenths / 10 : null,
       },
       200,
@@ -4326,6 +4732,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const listEmailsRoute = createRoute({
     method: "get",
     path: "/emails",
+    description: KEYSET_LIST_DESCRIPTION,
     middleware: [requireFullAccess],
     request: { query: listQuerySchema },
     responses: {
@@ -4355,14 +4762,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             .from(t)
             .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
         )[0],
-      loadRows: (cond, descending, take) =>
+      loadRows: (cond, orderBy, take) =>
         deps.db
           .select()
           .from(t)
           .where(and(eq(t.teamId, auth.teamId), cond))
-          .orderBy(
-            ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
-          )
+          .orderBy(...orderBy)
           .limit(take),
     });
     if (page === "bad_cursor") {
@@ -4388,8 +4793,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           subject: email.subject,
           created_at: email.createdAt.toISOString(),
           scheduled_at: email.scheduledAt?.toISOString() ?? null,
-          // Internal quota-parking is invisible on the wire (same as GET /emails/{id}).
-          last_event: email.latestStatus === "queued_quota" ? "queued" : email.latestStatus,
+          last_event: wireLastEvent(email.latestStatus),
         })),
         has_more: page.hasMore,
       },

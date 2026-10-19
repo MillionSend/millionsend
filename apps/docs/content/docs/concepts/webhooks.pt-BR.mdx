@@ -1,9 +1,9 @@
 ---
 title: Webhooks
-description: Entregas de eventos assinadas para o ciclo de vida do email, seguindo a especificação Standard Webhooks.
+description: Entregas de eventos assinadas para o ciclo de vida do e-mail, seguindo a especificação Standard Webhooks.
 ---
 
-Webhooks enviam eventos do ciclo de vida do email aos seus endpoints conforme
+Webhooks enviam eventos do ciclo de vida do e-mail aos seus endpoints conforme
 acontecem. Crie endpoints no painel, escolha quais tipos de evento cada um
 recebe e inspecione cada entrega (payload, resposta, tentativas) no log de
 entregas por endpoint.
@@ -12,42 +12,277 @@ entregas por endpoint.
 
 | Evento | Disparado quando |
 | --- | --- |
+| `email.scheduled` | Um e-mail foi aceito com um `scheduled_at` no futuro; leia esse horário com `GET /emails/{id}`. Mudar o horário com `PATCH /emails/{id}` não dispara nada. Veja [o payload](#e-mails-agendados-com-falha-e-suprimidos) abaixo. |
 | `email.sent` | O SES aceitou a mensagem para entrega. |
 | `email.delivered` | O servidor do destinatário a aceitou. |
 | `email.delivery_delayed` | A entrega está sendo repetida (ex.: caixa cheia, greylisting). |
-| `email.bounced` | A mensagem teve hard bounce. O endereço também é [suprimido](/pt-BR/concepts/suppressions). |
+| `email.bounced` | A mensagem voltou (bounce). `data.bounce.type` diz como: `Permanent` é um hard bounce, e o endereço também é [suprimido](/pt-BR/concepts/suppressions); `Transient` ou `Undetermined` quer dizer que o SES desistiu depois de tentar de novo (caixa cheia, um domínio que não existe), e o endereço não é suprimido. |
 | `email.complained` | O destinatário marcou como spam. Também suprimido. |
-| `email.opened` | Uma pessoa carregou o pixel de rastreamento (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). `data.open` traz `ipAddress`, `userAgent` e `timestamp` da busca. Um clique numa mensagem ainda sem abertura também registra uma, com `data.open.reason: "click"`: ninguém clica no que nunca renderizou, e para leitores do Apple Mail é a única abertura que pode ser vista. |
-| `email.clicked` | Uma pessoa clicou num link reescrito (exige rastreamento de cliques). `data.click` traz `link`, `ipAddress`, `userAgent` e `timestamp`, como no Resend. Um link que uma máquina seguiu — gateway de segurança, pré-visualização de link, busca segundos após a entrega — é registrado como `email.prefetched`. |
-| `email.prefetched` | O pixel foi buscado, ou um link seguido, por uma máquina — o Mail Privacy Protection da Apple, o pré-carregamento do Gmail, um scanner de segurança, uma identidade de navegador que nenhum navegador real envia, uma busca segundos após a entrega ou todos os links da mensagem em um segundo; `data.open.reason` ou `data.click.reason` diz qual (veja [precisão da taxa de abertura](/pt-BR/concepts/domains#precisão-da-taxa-de-abertura)). Um clique registrado antes de o resto da rajada chegar é registrado de novo aqui com o mesmo `data.click.timestamp` que seu `email.clicked` levou: trate isso como a retratação do clique e de qualquer `email.opened` com `data.open.reason: "click"` marcado um milissegundo antes dele. Opt-in: entregue só a endpoints que o listam, nunca a "todos os eventos". |
+| `email.failed` | O e-mail falhou de vez: não vai ser enviado, ou o SES o recusou depois do `email.sent`; `data.failed.reason` diz o motivo. Veja [os motivos](#e-mails-agendados-com-falha-e-suprimidos) abaixo. |
+| `email.suppressed` | O e-mail não vai ser enviado. A lista de supressão, um descadastro ou a saída do tópico barrou o envio, ou o contato, a transmissão ou o tópico dele foi excluído ou mudou antes do envio; `data.suppressed` diz qual. Veja [os motivos](#e-mails-agendados-com-falha-e-suprimidos) abaixo. |
+| `email.opened` | Uma pessoa carregou o pixel de rastreamento (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). `data.open` traz `ipAddress`, `userAgent` e `timestamp` da busca. Um clique em uma mensagem ainda sem abertura também registra uma, com `data.open.reason: "click"`: ninguém clica no que nunca renderizou, e para leitores do Apple Mail é a única abertura que pode ser vista. |
+| `email.clicked` | Uma pessoa clicou em um link reescrito (exige rastreamento de cliques). `data.click` traz `link`, `ipAddress`, `userAgent` e `timestamp`, como no Resend. Um link que uma máquina seguiu — gateway de segurança, pré-visualização de link, busca segundos após a entrega — é registrado como `email.prefetched`. |
+| `email.prefetched` | O pixel foi buscado, ou um link seguido, por uma máquina — o Mail Privacy Protection da Apple, o pré-carregamento do Gmail, um scanner de segurança, uma identidade de navegador que nenhum navegador real envia, uma busca segundos após a entrega ou todos os links da mensagem em um segundo; `data.open.reason` ou `data.click.reason` diz qual (veja [precisão da taxa de abertura](/pt-BR/concepts/domains#precisão-da-taxa-de-abertura)). Um clique registrado antes de o resto da rajada chegar é registrado de novo aqui com o mesmo `data.click.timestamp` que seu `email.clicked` levou: trate isso como o clique sendo desfeito, junto com qualquer `email.opened` com `data.open.reason: "click"` marcado um milissegundo antes dele. Opt-in: entregue só a endpoints que o listam, nunca a "todos os eventos". |
+| `email.received` | Uma mensagem chegou a um dos seus [domínios de recebimento](/pt-BR/concepts/receiving) e foi guardada, uma vez por mensagem, assim que fica visível: o e-mail que uma [caixa de entrada](/pt-BR/concepts/inboxes) retém na quarentena ou durante a análise, e o e-mail infectado, só disparam depois de entregues ou liberados. `data.email_id` é um e-mail recebido: leia com `GET /emails/receiving/{id}`. Veja [o payload](#e-mails-recebidos) abaixo. |
 
-Eventos de conta não carregam email; `data` descreve a situação do time:
+Eventos de conta não carregam e-mail; `data` descreve a situação da equipe:
 
 | Evento | Disparado quando | `data` |
 | --- | --- | --- |
-| `deliverability.warning` | A taxa de hard bounce ou de reclamação do time cruzou a linha de risco (uma vez por episódio). | `{ metric, rate, limit, window_days, dashboard_url }` |
-| `deliverability.paused` | A taxa cruzou a linha de pausa; novos envios são recusados até se recuperar. | igual ao anterior |
-| `quota.warning` | 80% da cota foi usada: a cota diária de hoje no Free e no Starter, o volume incluído do período de cobrança no Pro e no Scale (uma vez por dia UTC ou por período, só na nuvem). | `{ used, limit, period, resets_at, dashboard_url }` — `period` é `"day"` ou `"month"`; `resets_at` é a próxima meia-noite UTC ou o fim do período. No dia, `ceiling` é onde os envios começam a estacionar; no mês, `overage` diz se os envios além de `limit` são cobrados ou recusados. |
-| `quota.reached` | A cota foi usada. Planos diários passam até 50% a mais e depois estacionam até a meia-noite UTC; planos mensais cobram excedente quando ele está ativo e, senão, recusam envios pela API e estacionam broadcasts até o período renovar. | igual ao anterior |
-| `quota.paused` | Só em planos diários: 50% além da cota, novos envios ficam estacionados até a meia-noite UTC, ou até um upgrade de plano liberá-los (uma vez por dia UTC, só na nuvem). | igual ao anterior, sempre `period: "day"` |
+| `deliverability.warning` | A taxa de hard bounce ou de reclamação da equipe cruzou o limite de risco (uma vez por episódio). | `{ metric, rate, limit, window_days, dashboard_url }` |
+| `deliverability.paused` | A taxa cruzou o limite de pausa; novos envios são recusados até se recuperar. | igual ao anterior |
+| `quota.warning` | 80% da cota foi usada: a cota diária de hoje no Free e no Starter, o volume incluído do período de cobrança no Pro e no Scale (uma vez por dia UTC ou por período, só na nuvem). | `{ used, limit, period, resets_at, dashboard_url }` — `period` é `"day"` ou `"month"`; `resets_at` é a próxima meia-noite UTC ou o fim do período. No dia, `ceiling` é onde os envios começam a ficar em espera; no mês, `overage` diz se os envios além de `limit` são cobrados ou recusados. |
+| `quota.reached` | A cota foi usada. Planos diários passam até 50% a mais e depois deixam os envios em espera até a meia-noite UTC; planos mensais cobram excedente quando ele está ativo e, senão, recusam envios pela API e deixam as transmissões em espera até o período renovar. | igual ao anterior |
+| `quota.paused` | Só em planos diários: 50% além da cota, novos envios ficam em espera até a meia-noite UTC, ou até um upgrade de plano liberá-los (uma vez por dia UTC, só na nuvem). | igual ao anterior, sempre `period: "day"` |
 
 Eventos de audiência disparam quando um contato ou a lista de supressão muda,
 seja quem for que mudou. `data` traz o contato no formato do Resend — `id`,
 `email`, `first_name`, `last_name`, `unsubscribed`, `created_at`, `updated_at`
 — mais `source`: `api`, `dashboard`, `hosted_page` (a central de preferências)
-ou `one_click` (um POST de header RFC 8058). O Resend emite apenas
-`contact.created`, `contact.updated` e `contact.deleted`; os demais são
-extensões do MillionSend.
+ou `one_click` (um POST de header RFC 8058). Dos eventos abaixo, o Resend
+emite `contact.created`, `contact.updated`, `contact.deleted`,
+`suppression.added` e `suppression.removed`; os demais são extensões do
+MillionSend. O MillionSend não envia o `contact.topics.updated` do Resend:
+escolha `contact.topic_opt_in` e `contact.topic_opt_out` no lugar dele.
 
 | Evento | Disparado quando | `data` extra |
 | --- | --- | --- |
 | `contact.created` | Um contato foi adicionado: API, lote, importação CSV ou painel. | |
 | `contact.updated` | Nome, propriedades ou o flag de descadastro mudaram pela API ou pelo painel. Uma escrita que repete os valores já guardados (uma reimportação completa, por exemplo) não emite nada e deixa `updated_at` intacto. | |
-| `contact.deleted` | Um contato foi excluído. Depois de um apagamento (`erase=true` na API, ou a ação de apagar do dashboard) o `email` guardado vem como `[erased]`; use o `id`. | |
+| `contact.deleted` | Um contato foi excluído. Depois de um apagamento (`erase=true` na API, ou a ação de apagar do painel) o `email` guardado vem como `[erased]`; use o `id`. | |
 | `contact.unsubscribed` | O contato saiu de todo e-mail de marketing. | |
 | `contact.resubscribed` | Uma reinscrição explícita (`unsubscribed: false`). | |
 | `contact.topic_opt_in` / `contact.topic_opt_out` | A inscrição efetiva do contato em um tópico mudou. | `topic_id`, `topic_name` |
-| `suppression.added` / `suppression.removed` | Um endereço entrou ou saiu da [lista de supressão](/pt-BR/concepts/suppressions). Linhas de bounce e reclamação vêm do SES, com `source: null`. | `data` é `{ id, email, origin, source, created_at }` |
+| `suppression.added` / `suppression.removed` | Um endereço entrou ou saiu da [lista de supressão](/pt-BR/concepts/suppressions). Linhas de bounce e reclamação vêm do SES, com `source: null`; `source_id` é o e-mail cujo bounce ou reclamação criou a entrada, ou `null`. | `data` é `{ id, email, origin, source, source_id, created_at }` |
+
+### E-mails agendados, com falha e suprimidos
+
+Como todo evento de um e-mail que você envia, esses três trazem `email_id`,
+`from`, `to`, `subject` e `created_at`, a hora do evento.
+
+```json title="email.scheduled"
+{
+  "type": "email.scheduled",
+  "created_at": "2026-10-13T09:30:12.084Z",
+  "data": {
+    "email_id": "b10f77bb-a99a-48c9-bd0a-a5d2cb1ba4a1",
+    "from": "Acme <hello@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your trial ends tomorrow",
+    "created_at": "2026-10-13T09:30:12.084Z"
+  }
+}
+```
+
+`email.failed` e `email.suppressed` disparam uma vez por e-mail que termina
+como `failed` ou `suppressed`, e acrescentam um objeto que diz o motivo.
+
+```json title="email.failed"
+{
+  "type": "email.failed",
+  "created_at": "2026-10-13T10:00:02.317Z",
+  "data": {
+    "email_id": "3f7b2c71-5274-4246-82f3-57bc1563c276",
+    "from": "Acme <billing@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your receipt",
+    "created_at": "2026-10-13T10:00:02.317Z",
+    "failed": {
+      "reason": "domain_not_verified"
+    }
+  }
+}
+```
+
+| `failed.reason` | O que aconteceu |
+| --- | --- |
+| `domain_not_verified` | O domínio de envio, ou o subdomínio de MAIL FROM dele, não estava verificado na hora do envio. |
+| `domain_deleted` | O domínio de envio foi excluído enquanto o e-mail esperava para sair. |
+| `body_missing` | O conteúdo guardado do e-mail não estava lá na hora do envio. |
+| `body_unreadable` | Não deu para descriptografar o conteúdo guardado do e-mail. |
+| `message_rejected` | O SES recusou a mensagem: na hora do envio, ou depois do `email.sent`, por ela ter vírus. |
+| `retries_exhausted` | Todas as tentativas de envio falharam por erros temporários, e não sobrou nenhuma. |
+| `send_interrupted` | Um envio foi interrompido antes de o SES confirmar, então o e-mail pode ter saído ou não. Não há nova tentativa de envio. |
+| `provider_error` | Qualquer outro erro que impediu o envio. |
+
+```json title="email.suppressed"
+{
+  "type": "email.suppressed",
+  "created_at": "2026-10-14T09:30:00.912Z",
+  "data": {
+    "email_id": "b10f77bb-a99a-48c9-bd0a-a5d2cb1ba4a1",
+    "from": "Acme <hello@example.com>",
+    "to": ["ada@example.org"],
+    "subject": "Your trial ends tomorrow",
+    "created_at": "2026-10-14T09:30:00.912Z",
+    "suppressed": {
+      "type": "OnAccountSuppressionList",
+      "message": "The recipient is on your suppression list.",
+      "reason": "recipient_suppressed"
+    }
+  }
+}
+```
+
+| `suppressed.reason` | `type` | `message` |
+| --- | --- | --- |
+| `recipient_suppressed` | `OnAccountSuppressionList` | `The recipient is on your suppression list.` |
+| `contact_unsubscribed` | `Unsubscribed` | `The contact unsubscribed from your emails.` |
+| `topic_unsubscribed` | `Unsubscribed` | `The recipient opted out of this email's topic.` |
+| `contact_missing` | `Ineligible` | `The contact was deleted before the email was sent.` |
+| `contact_recipient_mismatch` | `Ineligible` | `The contact's address changed before the email was sent.` |
+| `broadcast_missing` | `Ineligible` | `The broadcast was deleted before the email was sent.` |
+| `topic_missing` | `Ineligible` | `The email's topic was deleted before it was sent.` |
+| `ineligible` ou qualquer outro | `Ineligible` | `The email was no longer eligible to send.` |
+
+`OnAccountSuppressionList` é o valor do Resend; `Unsubscribed` e `Ineligible`
+são do próprio MillionSend.
+
+- Um `POST /emails` que a lista de supressão sozinha recusa com
+  `422 all_recipients_suppressed` guarda um e-mail `suppressed`, que também
+  dispara o `email.suppressed`; veja
+  [Supressões](/pt-BR/concepts/suppressions#o-que-a-supressão-faz).
+- Remover só alguns destinatários, quando a API recebe o envio ou na hora de
+  enviar, não dispara o `email.suppressed`: o e-mail vai para os outros.
+- Cancelar uma transmissão não dispara nada para os e-mails que deixam de
+  sair.
+
+### E-mails recebidos
+
+`email.received` traz o payload do Resend, só com metadados: sem corpo, sem
+cabeçalhos e sem tamanho dos anexos, e `from` é só o endereço.
+`received_for` lista os endereços dos seus domínios para os quais a mensagem
+foi entregue, incluindo quem estava em Cco. Quando uma entrega posterior da
+mesma mensagem chega a mais endereços seus, outro `email.received` com o
+mesmo `email_id` lista só esses.
+
+```json title="email.received"
+{
+  "type": "email.received",
+  "created_at": "2026-10-11T14:37:40.951Z",
+  "data": {
+    "email_id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+    "created_at": "2026-10-11T14:37:40.951Z",
+    "from": "ada@example.org",
+    "to": ["support@inbound.example.com"],
+    "bcc": [],
+    "cc": [],
+    "received_for": ["support@inbound.example.com"],
+    "message_id": "<CAF1x7Qm9@mail.example.org>",
+    "subject": "Order #1042",
+    "attachments": [
+      {
+        "id": "b344102e-962e-8943-aef6-271c7743e1dd",
+        "filename": "invoice.pdf",
+        "content_type": "application/pdf",
+        "content_disposition": "attachment",
+        "content_id": null
+      }
+    ]
+  }
+}
+```
+
+### Eventos de caixas de entrada
+
+As [caixas de entrada](/pt-BR/concepts/inboxes) emitem os eventos `inbox.*`
+do Resend, mais dois do próprio MillionSend. Eles são **opt-in**: um endpoint
+só os recebe quando os escolhe pelo nome, nunca por "todos os eventos".
+
+| Evento | Disparado quando | `data`, além de `source` e `inbox_id` |
+| --- | --- | --- |
+| `inbox.created` | Uma caixa foi criada. | `inbox` |
+| `inbox.updated` | O nome, o nome de remetente, a validade ou as configurações de segurança de uma caixa mudaram. | `inbox` |
+| `inbox.deleted` | Uma caixa foi excluída, por uma pessoa, pela API, por ter expirado, por ser uma caixa compartilhada sem uso há 90 dias ou porque o domínio dela foi excluído. | |
+| `inbox.expired` | Uma caixa chegou ao `expires_at`, ou uma caixa do domínio compartilhado ficou 90 dias sem uso; o `inbox.deleted` vem em seguida. Do MillionSend. | `inbox`, como estava |
+| `inbox.thread.created` | Uma conversa ganhou a primeira mensagem: a primeira entregue ou liberada, ou a primeira que a caixa enviou. | `thread_id`, `email_id`, `thread`, `email` |
+| `inbox.thread.folder.updated` | Uma conversa mudou de pasta, à mão ou porque um e-mail novo a trouxe de volta para `inbox`. | `from`, `to`, `thread_id`, `thread` |
+| `inbox.thread.labels.updated` | Uma etiqueta entrou ou saiu de uma conversa; uma etiqueta por evento. | `added`, `removed`, `thread_id`, `thread` |
+| `inbox.email.received` | Uma mensagem recebida foi entregue ou liberada numa conversa. | `thread_id`, `email_id`, `thread`, `email` |
+| `inbox.email.sent` | Um envio da caixa foi aceito. | `thread_id`, `email_id`, `thread`, `email` |
+| `inbox.email.quarantined` | Uma mensagem recebida foi para a quarentena. Do MillionSend. | `thread_id`, `email_id`, `reason`, `sender_trust`, `from`, `subject`, `received_at` |
+| `inbox.draft.created` | Um rascunho foi criado, inclusive um envio retido para aprovação. | `draft_id`, `draft`; `thread_id` e `thread` nos rascunhos de resposta |
+| `inbox.draft.updated` | Um rascunho mudou. | igual ao de criação |
+| `inbox.draft.sent` | Um rascunho foi enviado; dispara antes do `inbox.email.sent`. | `thread_id`, `email_id`, `draft_id`, `thread`, `draft` |
+| `inbox.draft.deleted` | Um rascunho foi excluído, recusado ou expirou. | `draft_id`; `thread_id` e `thread` nos rascunhos de resposta |
+
+- O `source` é `api` (uma chave de API ou um cliente MCP), `dashboard` ou
+  `system` (e-mails chegando, envios, caixas expirando). Nunca é `agent`.
+- `inbox` é o [objeto da caixa](/pt-BR/concepts/inboxes#criar-uma-caixa-de-entrada),
+  `thread` é `{ object, id, subject, folder, labels, read }`, `email` é um
+  e-mail de conversa e `draft`, um rascunho. `email` e `draft` nunca trazem
+  `html`, `text`, `extracted_text`, códigos ou links: busque o conteúdo pela
+  API.
+- Os objetos são capturados quando o evento acontece, não quando ele é
+  entregue, então uma segunda mudança rápida não reescreve o primeiro evento.
+- Chaves que não se aplicam ficam de fora, nunca vêm como `null`.
+
+```json title="inbox.email.received"
+{
+  "type": "inbox.email.received",
+  "created_at": "2026-10-12T14:03:12.301Z",
+  "data": {
+    "source": "system",
+    "inbox_id": "7eeb9517-aed7-40d7-ad65-500be42ed147",
+    "thread_id": "b9e1837b-c150-45c6-a055-73b02ec9f1dc",
+    "email_id": "155252fb-e93e-45ee-8c19-5080a929c28b",
+    "thread": {
+      "object": "inbox_thread",
+      "id": "b9e1837b-c150-45c6-a055-73b02ec9f1dc",
+      "subject": "Where is my order?",
+      "folder": "inbox",
+      "labels": [],
+      "read": false
+    },
+    "email": {
+      "id": "155252fb-e93e-45ee-8c19-5080a929c28b",
+      "direction": "inbound",
+      "from": "Maria Silva <maria@example.org>",
+      "to": ["orders@inbound.example.com"],
+      "cc": [],
+      "bcc": [],
+      "reply_to": [],
+      "subject": "Where is my order?",
+      "message_id": "<CAF7c1f0a2e5d3b@mail.example.org>",
+      "attachments": [],
+      "read": false,
+      "received_at": "2026-10-12T14:03:11.229Z"
+    }
+  }
+}
+```
+
+```json title="inbox.email.quarantined"
+{
+  "type": "inbox.email.quarantined",
+  "created_at": "2026-10-12T14:05:40.017Z",
+  "data": {
+    "source": "system",
+    "inbox_id": "7eeb9517-aed7-40d7-ad65-500be42ed147",
+    "thread_id": "6581da0f-148e-49c7-8ba3-b1c2fcabc5ef",
+    "email_id": "6166ec82-4ea7-481a-a78d-42c6f84af265",
+    "reason": "injection",
+    "sender_trust": "external",
+    "from": "billing@example.net",
+    "subject": "Invoice overdue",
+    "received_at": "2026-10-12T14:05:38.442Z"
+  }
+}
+```
+
+**Só algumas caixas.** `POST /webhooks` e `PATCH /webhooks/{id}` aceitam
+`inbox_ids`, até 100 caixas da equipe (`null`, o padrão, quer dizer todas), e
+os objetos de webhook o devolvem. Um endpoint assim só recebe os eventos de
+caixas e o `email.received` dessas caixas, então os e-mails de endereços do
+pega-tudo não chegam a ele. No painel: **Só estas caixas**.
+
+<Callout type="warn">
+Os SDKs de .NET e de Rust do Resend não conhecem os tipos de evento
+`inbox.*`: ler um webhook inscrito em algum deles pelo `GET /webhooks` falha
+nos dois, e o leitor de webhooks do .NET dá erro com esses payloads. Os
+próprios eventos de caixas do Resend fazem o mesmo hoje. Leia esses endpoints
+e as entregas deles com um SDK do MillionSend ou por HTTP direto.
+</Callout>
 
 ## Assinaturas (Standard Webhooks)
 
@@ -136,7 +371,7 @@ curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
 
 Uma entrega é bem-sucedida em qualquer resposta 2xx. Cada endpoint tem a
 própria fila, iniciada na ordem de vencimento com até oito requisições em
-voo a até **50 requisições por segundo**; uma rajada de eventos espera na fila em vez de
+andamento a até **50 requisições por segundo**; uma rajada de eventos espera na fila em vez de
 atingir o receptor de uma vez.
 
 Uma tentativa que falha (não-2xx, timeout, erro de conexão) é repetida em um
@@ -148,7 +383,7 @@ como `exhausted`, sem nova tentativa.
 
 Após **20 entregas esgotadas consecutivas** o endpoint é desativado
 automaticamente e não recebe mais nada até você reativá-lo na página dele;
-os eventos do intervalo não são reenviados. Os donos do time recebem um
+os eventos do intervalo não são reenviados. Os proprietários da equipe recebem um
 e-mail quando as entregas de um endpoint começam a falhar (as últimas dez
 entregas encerradas todas esgotadas), quando ele é desativado e — no máximo
 uma vez por dia — quando a fila dele tem mais de seis horas de atraso. O painel
@@ -159,7 +394,7 @@ Um job de reconciliação rearma filas perdidas em quedas, então a entrega é
 pelo-menos-uma-vez — torne seus handlers idempotentes, chaveados por
 `webhook-id`. As linhas de entrega (payload, resposta, tentativas) são
 mantidas por `WEBHOOK_DELIVERY_RETENTION_DAYS` (padrão 30) e depois
-expurgadas.
+apagadas.
 
 Inscreva cada endpoint só nos eventos de que ele precisa. Uma reimportação
 completa de contatos não emite nada para os contatos que não mudaram, mas

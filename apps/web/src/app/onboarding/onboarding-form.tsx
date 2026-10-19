@@ -1,5 +1,6 @@
 "use client";
 
+import { CUSTOMER_TEXT_MAX } from "@millionsend/core/customer-text";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -13,6 +14,7 @@ import { useTRPC } from "@/lib/trpc";
 
 export function OnboardingForm({ logoUploadsEnabled = false }: { logoUploadsEnabled?: boolean }) {
   const t = useTranslations("onboarding.team");
+  const common = useTranslations("common");
   const router = useRouter();
   const trpc = useTRPC();
   const [name, setName] = useState("");
@@ -118,7 +120,7 @@ export function OnboardingForm({ logoUploadsEnabled = false }: { logoUploadsEnab
             className="ms-input"
             style={{ width: "100%" }}
             required
-            maxLength={80}
+            maxLength={CUSTOMER_TEXT_MAX}
             disabled={busy}
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -126,7 +128,9 @@ export function OnboardingForm({ logoUploadsEnabled = false }: { logoUploadsEnab
         </div>
         {createTeam.isError ? (
           <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
-            {t("error")}
+            {createTeam.error.data?.code === "BAD_REQUEST"
+              ? common("nameRule", { max: CUSTOMER_TEXT_MAX })
+              : t("error")}
           </p>
         ) : null}
         <button

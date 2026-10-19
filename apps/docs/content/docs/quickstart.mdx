@@ -92,7 +92,7 @@ curl -X POST https://api.millionsend.com/emails \
   -H "Content-Type: application/json" \
   -d '{
     "from": "Acme <onboarding@acme.dev>",
-    "to": ["delivered@example.com"],
+    "to": ["success@simulator.amazonses.com"],
     "subject": "Hello from MillionSend",
     "html": "<strong>It works!</strong>"
   }'
@@ -107,7 +107,7 @@ const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" })
 
 const { data, error } = await ms.emails.send({
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@example.com",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>",
 });
@@ -129,6 +129,28 @@ On Cloud they flow automatically.
 Already on Resend? Point the official Resend SDK at MillionSend instead — set
 `RESEND_BASE_URL` to your base URL and use your `ms_` key. The wire format is
 identical.
+
+## Testing
+
+- To test end to end without emailing anyone, send to
+  `success@simulator.amazonses.com`, as the examples above do: SES simulates
+  the delivery, and the email shows as `delivered`, with the `email.sent` and
+  `email.delivered` webhooks (no opens or clicks: nobody reads it). Labels
+  work too: `success+signup@simulator.amazonses.com`.
+- SES doesn't count simulator mail toward its own sending quota or bounce and
+  complaint rates, but on Cloud each send still counts toward your plan's
+  quota like any other email. On a self-hosted instance, the simulator works
+  even while your AWS account is in the SES sandbox, and AWS still bills each
+  message.
+- The simulator's `bounce@`, `complaint@` and `suppressionlist@` addresses
+  produce bounces and complaints that MillionSend treats as real: the address
+  goes on your team's [suppression list](/concepts/suppressions) and counts
+  toward your bounce or complaint rate, which can pause sending. Use them by
+  hand, not in automated test runs. Each address is suppressed after its first
+  use, so add a label for a fresh one: `bounce+2@simulator.amazonses.com`.
+- Addresses at `example.com`, or under `.test` or `.invalid`, can't receive
+  mail, so a send to one is refused with a `422` (see
+  [Errors](/api-reference#errors)).
 
 ## Next steps
 

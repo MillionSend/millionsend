@@ -5,14 +5,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
+import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { CopyGlyph } from "@/components/copy-chip";
+import { CopyBlock } from "@/components/copy-chip";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { formatDayTime, formatUtcTimestamp } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+import { useTeamRole } from "@/lib/use-team-role";
 
 type BounceData = {
   bounceType?: string;
@@ -106,8 +108,7 @@ export default function SuppressionDetailPage() {
   const queryClient = useQueryClient();
 
   const query = useQuery(trpc.emails.suppressions.get.queryOptions({ id }, { retry: false }));
-  const teamList = useQuery(trpc.team.list.queryOptions());
-  const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
+  const role = useTeamRole();
   const canRemove = role === "owner" || role === "admin";
   const removeMutation = useMutation(
     trpc.emails.suppressions.remove.mutationOptions({
@@ -137,12 +138,14 @@ export default function SuppressionDetailPage() {
   const row = query.data;
   const bounce = (row.bounce as BounceData | null) ?? null;
   const diagnostic = bounce?.bouncedRecipients?.[0]?.diagnosticCode ?? null;
-  const origin = [
-    t(`suppressions.reason.${row.reason}`),
-    ...(row.reason === "hard_bounce" && bounce?.bounceType
-      ? [bounce.bounceType.toLowerCase()]
-      : []),
-  ].join(" — ");
+  const origin = row.fullMailbox
+    ? t("suppressions.fullMailbox")
+    : [
+        t(`suppressions.reason.${row.reason}`),
+        ...(row.reason === "hard_bounce" && bounce?.bounceType
+          ? [bounce.bounceType.toLowerCase()]
+          : []),
+      ].join(" · ");
   // ponytail: complaint feedbackType isn't fetched here, so complaints resolve
   // to the generic "complaint.other" guidance; pull the complaint event's
   // feedbackType into suppressions.get if per-type complaint copy is needed.
@@ -214,7 +217,7 @@ export default function SuppressionDetailPage() {
             {t("suppressions.detail.recipient")}
           </div>
           <div className="ms-mono" style={{ fontSize: 13, marginTop: 5, overflowWrap: "anywhere" }}>
-            {row.email ?? "—"}
+            {row.email ? <Breakable text={row.email} /> : "—"}
           </div>
         </div>
         <div>
@@ -232,32 +235,7 @@ export default function SuppressionDetailPage() {
           <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
             {t("suppressions.detail.details")}
           </div>
-          <div
-            style={{
-              position: "relative",
-              background: "var(--ms-inset)",
-              border: "1px solid var(--ms-line)",
-              borderRadius: 10,
-              padding: "14px 16px",
-            }}
-          >
-            <pre
-              className="ms-mono"
-              style={{
-                margin: 0,
-                fontSize: 12,
-                lineHeight: 1.7,
-                color: "var(--ms-bone)",
-                whiteSpace: "pre-wrap",
-                overflowWrap: "anywhere",
-              }}
-            >
-              {diagnostic}
-            </pre>
-            <span style={{ position: "absolute", top: 10, right: 12 }}>
-              <CopyGlyph value={diagnostic} />
-            </span>
-          </div>
+          <CopyBlock value={diagnostic} />
         </>
       ) : null}
 
@@ -272,7 +250,11 @@ export default function SuppressionDetailPage() {
 
       {row.reason === "hard_bounce" ? (
         <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 12 }}>
-          {t("suppressions.detail.removeNote")}
+          {t(
+            row.fullMailbox
+              ? "suppressions.detail.removeNoteFull"
+              : "suppressions.detail.removeNote",
+          )}
         </div>
       ) : null}
     </>

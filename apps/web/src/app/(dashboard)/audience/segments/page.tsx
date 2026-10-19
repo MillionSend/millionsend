@@ -159,21 +159,19 @@ export default function SegmentsPage() {
       <PageHeader
         title={t("title")}
         actions={
-          <>
-            <button
-              type="button"
-              className="ms-btn ms-btn-primary"
-              onClick={() => {
-                createMutation.reset();
-                setCreateOpen(true);
-              }}
-            >
-              <PlusGlyph size={14} />
-              {t("create")}
-            </button>
-            <ResourceApiButton resource="segments" />
-          </>
+          <button
+            type="button"
+            className="ms-btn ms-btn-primary"
+            onClick={() => {
+              createMutation.reset();
+              setCreateOpen(true);
+            }}
+          >
+            <PlusGlyph size={14} />
+            {t("create")}
+          </button>
         }
+        menu={<ResourceApiButton resource="segments" />}
       />
       <AudienceTabs />
 

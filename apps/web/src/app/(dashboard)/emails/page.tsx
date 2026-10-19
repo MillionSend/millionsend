@@ -9,6 +9,7 @@ import { ApiDocsButton } from "@/components/api-sheet";
 import { EmailsTable } from "@/components/emails-table";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
+import { GradientBanner } from "@/components/gradient-banner";
 import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import { PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
@@ -17,9 +18,9 @@ import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDay, formatHoursMinutes } from "@/lib/format";
 import { manyOf } from "@/lib/list-param";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
-import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
 
 // Keep in enum order (packages/db schema.emailStatusEnum) — the router input
@@ -84,7 +85,11 @@ export default function EmailsPage() {
   };
   const query = useInfiniteQuery(
     trpc.emails.list.infiniteQueryOptions(
-      { limit, ...filterInput, ...(source !== "all" ? { source } : {}) },
+      {
+        limit,
+        ...filterInput,
+        ...(source === "transactional" || source === "broadcast" ? { source } : {}),
+      },
       { getNextPageParam: (page) => page.nextCursor },
     ),
   );
@@ -97,15 +102,15 @@ export default function EmailsPage() {
   const usage = useQuery(trpc.settings.usage.recent.queryOptions({}));
   const apiKeys = useQuery(trpc.apiKeys.list.queryOptions());
   const domains = useQuery(trpc.domains.list.queryOptions());
-  const teamList = useQuery(trpc.team.list.queryOptions());
-  const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
+  const role = useTeamRole();
   const canExport = role === "owner" || role === "admin";
 
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
   const sourceTotals = counts.data ?? null;
-  // A team that never sent a broadcast gets no tabs at all.
-  const showSources = source !== "transactional" || stats.data?.hasBroadcasts === true;
+  // A team that never sent a broadcast gets no tab row at all.
+  const showSources =
+    source === "broadcast" || source === "all" || stats.data?.hasBroadcasts === true;
   const hiddenBroadcasts = source === "transactional" ? (sourceTotals?.broadcast ?? 0) : 0;
 
   // The cap that can stop sends: the billing period's included volume on a
@@ -163,7 +168,7 @@ export default function EmailsPage() {
     ...(range !== "all" ? [t(`list.range.${range}`)] : []),
   ].join(" · ");
 
-  return (
+  const top = (
     <>
       <PageHeader
         title={t("list.title")}
@@ -177,58 +182,49 @@ export default function EmailsPage() {
             <Link className="ms-btn ms-btn-secondary" href="/emails/suppressions">
               {t("list.suppressionList")}
             </Link>
-            <ApiDocsButton />
           </>
         }
+        menu={<ApiDocsButton />}
       />
 
       {capReached && cap ? (
-        <div
-          className="ms-wrap-row"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            backgroundColor: "var(--ms-ground)",
-            backgroundImage: statusGlow("warn"),
-            border: "1px solid var(--ms-warn-border)",
-            borderRadius: 12,
-            padding: "12px 16px",
-            marginBottom: 20,
-          }}
+        <GradientBanner
+          variant="warn"
+          title={t(cap.monthly ? "list.capBanner.reachedMonth" : "list.capBanner.reached", {
+            limit: nf.format(cap.limit),
+          })}
+          action={
+            // A daily limit exists only on the hosted cloud, so the billing page always exists here.
+            <Link
+              href="/settings/billing"
+              style={{
+                color: "var(--ms-bone)",
+                textDecoration: "underline dotted var(--ms-muted)",
+                textUnderlineOffset: 3,
+              }}
+            >
+              {t("list.capBanner.upgrade")}
+            </Link>
+          }
+          style={{ marginBottom: 20 }}
         >
-          <span style={{ fontSize: 13.5, color: "var(--ms-warn)" }}>
-            {t(cap.monthly ? "list.capBanner.reachedMonth" : "list.capBanner.reached", {
-              limit: nf.format(cap.limit),
-            })}
-          </span>
-          {stats.data && stats.data.queuedQuota > 0 ? (
-            <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
-              {cap.monthly && usage.data?.period
-                ? t("list.capBanner.queuedMonth", {
+          {stats.data && stats.data.queuedQuota > 0
+            ? cap.monthly && usage.data?.period
+              ? t(
+                  usage.data.period.overagePaused
+                    ? "list.capBanner.queuedMonthPaused"
+                    : "list.capBanner.queuedMonth",
+                  {
                     count: nf.format(stats.data.queuedQuota),
                     date: formatDay(usage.data.period.end, locale),
-                  })
-                : t("list.capBanner.queued", {
-                    count: nf.format(stats.data.queuedQuota),
-                    duration: formatHoursMinutes(msToUtcMidnight()),
-                  })}
-            </span>
-          ) : null}
-          {/* A daily limit exists only on the hosted cloud, so the billing page always exists here. */}
-          <Link
-            href="/settings/billing"
-            style={{
-              marginLeft: "auto",
-              fontSize: 13.5,
-              color: "var(--ms-bone)",
-              textDecoration: "underline dotted var(--ms-muted)",
-              textUnderlineOffset: 3,
-            }}
-          >
-            {t("list.capBanner.upgrade")}
-          </Link>
-        </div>
+                  },
+                )
+              : t("list.capBanner.queued", {
+                  count: nf.format(stats.data.queuedQuota),
+                  duration: formatHoursMinutes(msToUtcMidnight()),
+                })
+            : null}
+        </GradientBanner>
       ) : null}
 
       {showSources ? (
@@ -248,19 +244,19 @@ export default function EmailsPage() {
               onClick={() => setSource(key)}
             >
               {t(`list.source.${key}`)}
-              {sourceTotals && key !== "all" ? (
-                <span
-                  className="ms-digits"
-                  style={{ marginLeft: 7, fontWeight: 500, color: "var(--ms-faint)" }}
-                >
-                  {nf.format(sourceTotals[key])}
-                </span>
+              {sourceTotals && (key === "transactional" || key === "broadcast") ? (
+                <span className="count">{nf.format(sourceTotals[key])}</span>
               ) : null}
             </button>
           ))}
         </div>
       ) : null}
+    </>
+  );
 
+  return (
+    <>
+      {top}
       <div
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
@@ -276,7 +272,7 @@ export default function EmailsPage() {
         <GroupedMultiSelect
           value={statuses}
           onChange={setStatuses}
-          width={156}
+          width="max-content"
           ariaLabel={t("list.status")}
           summary={
             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>

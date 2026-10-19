@@ -16,15 +16,17 @@ import {
 } from "../src/deliverability.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
-const counts = (sent: number, hardBounced = 0, complained = 0): WindowCounts => ({
-  sent,
-  hardBounced,
-  complained,
-});
+/** Every send could draw a complaint unless `complaintSent` says otherwise. */
+const counts = (
+  sent: number,
+  hardBounced = 0,
+  complained = 0,
+  complaintSent = sent,
+): WindowCounts => ({ sent, complaintSent, hardBounced, complained });
 /** The same counts in both windows: everything happened today. */
-const today = (sent: number, hardBounced = 0, complained = 0) => ({
-  warn: counts(sent, hardBounced, complained),
-  pause: counts(sent, hardBounced, complained),
+const today = (sent: number, hardBounced = 0, complained = 0, complaintSent = sent) => ({
+  warn: counts(sent, hardBounced, complained, complaintSent),
+  pause: counts(sent, hardBounced, complained, complaintSent),
 });
 
 describe("evaluateDeliverability", () => {
@@ -143,6 +145,18 @@ describe("evaluateDeliverability", () => {
     ]);
   });
 
+  it("judges complaints over the sends that could draw one, floor included", () => {
+    // 2 complaints in 10,000 sends is 0.02%, but 8,000 went where no one can
+    // report: 0.1% of the 2,000 left.
+    const r = evaluateDeliverability(today(10_000, 0, 2, 2_000));
+    expect(r.complaintRate).toBe(0.001);
+    expect(r.reasons).toEqual([
+      { metric: "complaint", rate: 0.001, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS },
+    ]);
+    // Five complaints under the floor of sends that could draw one, whatever the total.
+    expect(evaluateDeliverability(today(10_000, 0, 5, MIN_GUARDRAIL_VOLUME - 1)).status).toBe("ok");
+  });
+
   it("is zero-send safe (no divide-by-zero)", () => {
     const r = evaluateDeliverability(today(0));
     expect(r.bounceRate).toBe(0);
@@ -196,6 +210,7 @@ describe("fetchDeliverabilityHealth", () => {
     expect(health.bounceRate).toBeCloseTo(0.03);
     expect(health.pause).toEqual({
       sent: 5_000,
+      complaintSent: 5_000,
       hardBounced: 300,
       complained: 0,
       windowDays: PAUSE_WINDOW_DAYS,
@@ -245,16 +260,51 @@ describe("fetchDeliverabilityHealth", () => {
     expect(health.pause.sent).toBe(0);
   });
 
+  it("computes a Gmail-heavy team's complaint rate over the sends that could draw one", async () => {
+    const teamId = await createTeam(db, "deliverability-gmail-heavy");
+    // 3 complaints in 10,000 sends is 0.03%, under every line. 8,000 of them
+    // went to Gmail, which never reports one: 0.15% of the 2,000 left.
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(nowMs),
+      sent: 10_000,
+      sentNoFeedback: 8_000,
+      complained: 3,
+    });
+    const health = await fetchDeliverabilityHealth(db, teamId, { now });
+    expect(health.sent).toBe(10_000);
+    expect(health.complaintSent).toBe(2_000);
+    expect(health.complaintRate).toBe(0.0015);
+    expect(health.pause).toEqual({
+      sent: 10_000,
+      complaintSent: 2_000,
+      hardBounced: 0,
+      complained: 3,
+      windowDays: PAUSE_WINDOW_DAYS,
+    });
+    expect(health.status).toBe("paused");
+    expect(health.reasons).toEqual([
+      { metric: "complaint", rate: 0.0015, tier: "paused", windowDays: PAUSE_WINDOW_DAYS },
+    ]);
+  });
+
   it("returns ok with zero rates for a team that has never sent", async () => {
     const teamId = await createTeam(db, "deliverability-empty");
     expect(await fetchDeliverabilityHealth(db, teamId, { now })).toEqual({
       sent: 0,
+      complaintSent: 0,
       windowDays: GUARDRAIL_WINDOW_DAYS,
       bounceRate: 0,
       complaintRate: 0,
       status: "ok",
       reasons: [],
-      pause: { sent: 0, hardBounced: 0, complained: 0, windowDays: PAUSE_WINDOW_DAYS },
+      pause: {
+        sent: 0,
+        complaintSent: 0,
+        hardBounced: 0,
+        complained: 0,
+        windowDays: PAUSE_WINDOW_DAYS,
+      },
     });
   });
 });

@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { AuthShell } from "@/components/auth-shell";
+import { Breakable } from "@/components/breakable";
 import { BtnSpinner } from "@/components/spinner";
 import { authClient } from "@/lib/auth-client";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage } from "@/lib/trpc-error";
 
 const muted = { margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" } as const;
 
@@ -34,7 +36,7 @@ export default function AcceptInvitePage() {
 
   return (
     <AuthShell>
-      <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
         <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h2)", margin: 0 }}>
           {t("invitations.accept.title")}
         </h1>
@@ -63,7 +65,9 @@ export default function AcceptInvitePage() {
           <>
             <p style={muted}>{t("invitations.accept.signInPrompt")}</p>
             {invite ? (
-              <p style={muted}>{t("invitations.accept.forEmail", { email: invite.email })}</p>
+              <p style={muted}>
+                <Breakable text={t("invitations.accept.forEmail", { email: invite.email })} />
+              </p>
             ) : null}
             <div style={{ display: "flex", gap: 10 }}>
               <Link
@@ -86,11 +90,13 @@ export default function AcceptInvitePage() {
           <p style={{ ...muted, color: "var(--ms-danger)" }}>
             {accept.error.data?.code === "FORBIDDEN"
               ? t("invitations.accept.emailMismatch")
-              : t("invitations.accept.invalid")}
+              : guardMessage(accept.error, t("invitations.accept.invalid"))}
           </p>
         ) : (
           <>
-            <p style={muted}>{t("invitations.accept.body", { email: session.user.email })}</p>
+            <p style={muted}>
+              <Breakable text={t("invitations.accept.body", { email: session.user.email })} />
+            </p>
             <button
               type="button"
               className="ms-btn ms-btn-primary"

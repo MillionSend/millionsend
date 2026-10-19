@@ -248,6 +248,61 @@ describe("emails.list sources", () => {
     expect(stats.hasBroadcasts).toBe(true);
   });
 
+  it("shows a row the new domain limit holds as waiting for it, apart from the plan's backlog", async () => {
+    const team = await createTeam(db, "team-a");
+    // The plan is spent today: a warm-up row still never reads as held by it.
+    await db.insert(schema.usageCounters).values({ teamId: team, day: utcDay(), accepted: 500 });
+    const warming = await insertEmail({
+      ...baseEmail(team),
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
+    await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
+    expect((await caller(team).emails.get({ id: warming })).pending).toEqual({
+      kind: "newDomainLimit",
+    });
+    expect((await caller(team).emails.stats()).queuedQuota).toBe(1);
+  });
+
+  it("tells a broadcast copy waiting on its domain's warm-up from one under the new domain limit", async () => {
+    const team = await createTeam(db, "team-a");
+    const broadcastId = await broadcastFor(team);
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId: team, name: "acme.test", region: "sa-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    const parked = {
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+      domainId: domain.id,
+    } as const;
+    const copy = await insertEmail({ ...baseEmail(team), ...parked, broadcastId });
+    // Transactional mail never waits on the warm-up, only on the age-based limit.
+    const tx = await insertEmail({ ...baseEmail(team), ...parked });
+    const pending = async (id: string) => (await caller(team).emails.get({ id })).pending;
+
+    expect(await pending(copy)).toEqual({ kind: "newDomainLimit" });
+    await db.insert(schema.domainWarmups).values({
+      domainId: domain.id,
+      teamId: team,
+      volume: 1_500,
+      startVolume: 1_500,
+      dailyTarget: 10_000,
+    });
+    expect(await pending(copy)).toEqual({ kind: "warmup" });
+    expect(await pending(tx)).toEqual({ kind: "newDomainLimit" });
+    await db.update(schema.domainWarmups).set({ status: "paused" });
+    expect(await pending(copy)).toEqual({ kind: "warmupPaused" });
+    await db.update(schema.domainWarmups).set({ status: "off" });
+    expect(await pending(copy)).toEqual({ kind: "newDomainLimit" });
+
+    // Another team's warm-up row for the same id never answers for this one.
+    const other = await createTeam(db, "team-b");
+    await db.update(schema.domainWarmups).set({ status: "warming", teamId: other });
+    expect(await pending(copy)).toEqual({ kind: "newDomainLimit" });
+  });
+
   it("says what an unsent row waits for, and names its broadcast", async () => {
     const team = await createTeam(db, "team-a");
     const broadcastId = await broadcastFor(team);
@@ -277,6 +332,58 @@ describe("emails.list sources", () => {
     const done = await caller(team).emails.get({ id: sent });
     expect(done.pending).toBeNull();
     expect(done.broadcast).toBeNull();
+  });
+
+  it("shows a broadcast's waiting copies in a held region as delayed, never its other mail", async () => {
+    const team = await createTeam(db, "team-a");
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId: team, name: "acme.test", region: "sa-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    const broadcastId = await broadcastFor(team);
+    const copy = (to: string, over: Partial<typeof schema.emails.$inferInsert>) =>
+      insertEmail({ ...baseEmail(team), to: [to], domainId: domain.id, broadcastId, ...over });
+    const parked = await copy("a@example.com", { latestStatus: "queued_quota" });
+    const queued = await copy("b@example.com", { latestStatus: "queued" });
+    const delivered = await copy("c@example.com", {
+      latestStatus: "delivered",
+      sentAt: new Date(),
+    });
+    const tx = await insertEmail({
+      ...baseEmail(team),
+      domainId: domain.id,
+      latestStatus: "queued_quota",
+    });
+    await db.insert(schema.regionBreakers).values({
+      region: "sa-east-1",
+      paused: true,
+      reason: {
+        metric: "bounce",
+        rate: 0.05,
+        limit: 0.05,
+        windowHours: 24,
+        sent: 2000,
+        events: 100,
+      },
+      pausedAt: new Date(),
+    });
+
+    const held = async () =>
+      Object.fromEntries((await caller(team).emails.list({})).items.map((r) => [r.id, r.held]));
+    expect(await held()).toEqual({
+      [parked]: true,
+      [queued]: true,
+      [delivered]: false,
+      [tx]: false,
+    });
+    expect((await caller(team).emails.get({ id: parked })).pending).toEqual({ kind: "held" });
+    expect((await caller(team).emails.get({ id: queued })).pending).toEqual({ kind: "held" });
+    expect((await caller(team).emails.get({ id: tx })).pending).toEqual({ kind: "waiting" });
+
+    await db.update(schema.regionBreakers).set({ paused: false });
+    expect(Object.values(await held()).some(Boolean)).toBe(false);
+    expect((await caller(team).emails.get({ id: queued })).pending).toEqual({ kind: "queued" });
   });
 });
 
@@ -583,6 +690,75 @@ describe("emails.suppressions", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("marks a hard bounce a full or inactive mailbox left, in the list, the detail and an email's matches", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const bouncedEmail = async (teamId: string, to: string, bounceType: string) => {
+      const id = await insertEmail({ ...baseEmail(teamId), to: [to], latestStatus: "bounced" });
+      await db.insert(schema.emailEvents).values({
+        emailId: id,
+        type: "bounced",
+        occurredAt: new Date("2026-08-01T10:00:02Z"),
+        bounceType,
+        data: { bounce: { bounceType, bounceSubType: "General" } },
+      });
+      return id;
+    };
+    const suppress = async (
+      email: string,
+      reason: "hard_bounce" | "complaint",
+      sourceEmailId: string | null,
+    ) => {
+      const [row] = await db
+        .insert(schema.suppressions)
+        .values({ teamId: teamA, email, emailHash: hashRecipient(email), reason, sourceEmailId })
+        .returning({ id: schema.suppressions.id });
+      if (!row) throw new Error("suppression insert failed");
+      return row.id;
+    };
+    const full = await suppress(
+      "full@example.com",
+      "hard_bounce",
+      await bouncedEmail(teamA, "full@example.com", "Transient"),
+    );
+    const gone = await suppress(
+      "gone@example.com",
+      "hard_bounce",
+      await bouncedEmail(teamA, "gone@example.com", "Permanent"),
+    );
+    const complained = await suppress("spam@example.com", "complaint", null);
+    // A source id that is another team's email reads nothing of its events.
+    const stray = await suppress(
+      "stray@example.com",
+      "hard_bounce",
+      await bouncedEmail(teamB, "stray@example.com", "Transient"),
+    );
+
+    const list = await caller(teamA).emails.suppressions.list({});
+    expect(Object.fromEntries(list.items.map((r) => [r.id, r.fullMailbox]))).toEqual({
+      [full]: true,
+      [gone]: false,
+      [complained]: false,
+      [stray]: false,
+    });
+    // The API's reason is unchanged.
+    expect(list.items.find((r) => r.id === full)?.reason).toBe("hard_bounce");
+    expect((await caller(teamA).emails.suppressions.get({ id: full })).fullMailbox).toBe(true);
+    expect((await caller(teamA).emails.suppressions.get({ id: gone })).fullMailbox).toBe(false);
+
+    const emailId = await insertEmail({
+      ...baseEmail(teamA),
+      to: ["full@example.com", "gone@example.com", "spam@example.com"],
+      latestStatus: "suppressed",
+    });
+    const matches = await caller(teamA).emails.suppressions.forEmail({ emailId });
+    expect(Object.fromEntries(matches.map((r) => [r.id, r.fullMailbox]))).toEqual({
+      [full]: true,
+      [gone]: false,
+      [complained]: false,
+    });
+  });
+
   it("is idempotent on duplicate adds", async () => {
     const teamA = await createTeam(db, "team-a");
     const first = await caller(teamA).emails.suppressions.add({
@@ -597,5 +773,71 @@ describe("emails.suppressions", () => {
 
     const list = await caller(teamA).emails.suppressions.list({});
     expect(list.items).toHaveLength(1);
+  });
+
+  describe("forEmail", () => {
+    async function insertSuppression(
+      teamId: string,
+      address: string,
+      values: Partial<typeof schema.suppressions.$inferInsert> = {},
+    ): Promise<string> {
+      const [row] = await db
+        .insert(schema.suppressions)
+        .values({
+          teamId,
+          email: address,
+          emailHash: hashRecipient(address),
+          reason: "manual",
+          ...values,
+        })
+        .returning({ id: schema.suppressions.id });
+      if (!row) throw new Error("suppression insert failed");
+      return row.id;
+    }
+
+    it("matches every recipient the way sends do, display names and case aside", async () => {
+      const teamA = await createTeam(db, "team-a");
+      const emailId = await insertEmail({
+        ...baseEmail(teamA),
+        to: ["Ada <Ada@Example.com>", "fine@example.com"],
+        cc: ["GRACE@example.com"],
+        bcc: ["Erased <erased@example.com>"],
+        latestStatus: "suppressed",
+      });
+      const ada = await insertSuppression(teamA, "ada@example.com", {
+        reason: "hard_bounce",
+        createdAt: new Date("2026-08-01T10:00:00Z"),
+      });
+      const grace = await insertSuppression(teamA, "grace@example.com", {
+        reason: "one_click_unsubscribe",
+        createdAt: new Date("2026-08-02T10:00:00Z"),
+      });
+      // Erasure nulls the address and keeps the hash, which still matches.
+      const erased = await insertSuppression(teamA, "erased@example.com", {
+        email: null,
+        reason: "complaint",
+        createdAt: new Date("2026-08-03T10:00:00Z"),
+      });
+      await insertSuppression(teamA, "unrelated@example.com");
+
+      const rows = await caller(teamA, "member").emails.suppressions.forEmail({ emailId });
+      expect(rows.map(({ id, email, reason }) => ({ id, email, reason }))).toEqual([
+        { id: erased, email: null, reason: "complaint" },
+        { id: grace, email: "grace@example.com", reason: "one_click_unsubscribe" },
+        { id: ada, email: "ada@example.com", reason: "hard_bounce" },
+      ]);
+    });
+
+    it("never matches another team's suppression or reads another team's email", async () => {
+      const teamA = await createTeam(db, "team-a");
+      const teamB = await createTeam(db, "team-b");
+      const emailId = await insertEmail({ ...baseEmail(teamA), latestStatus: "suppressed" });
+      await insertSuppression(teamB, "ada@example.com");
+
+      expect(await caller(teamA).emails.suppressions.forEmail({ emailId })).toEqual([]);
+      await expect(caller(teamB).emails.suppressions.forEmail({ emailId })).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+    });
   });
 });

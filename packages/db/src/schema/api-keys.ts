@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   index,
@@ -8,6 +9,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { domains } from "./domains.js";
+import { inboxes } from "./inboxes.js";
 import { teams } from "./teams.js";
 
 export const apiKeyPermissionEnum = pgEnum("api_key_permission", ["full_access", "sending_access"]);
@@ -34,6 +36,10 @@ export const apiKeys = pgTable(
     // restrict, never set-null: deleting a domain must not silently widen a
     // scoped key into an all-domains key — the delete flow revokes such keys first.
     domainId: uuid("domain_id").references(() => domains.id, { onDelete: "restrict" }),
+    // Null = not inbox-scoped; set = the key reads and sends for that one
+    // inbox only. Restrict for the same reason as domain_id: inbox deletion
+    // revokes such keys first.
+    inboxId: uuid("inbox_id").references(() => inboxes.id, { onDelete: "restrict" }),
     // Which API key minted this one (null for dashboard-created keys): a
     // leaked key can mint descendants, and this is the trail to revoke them.
     createdByApiKeyId: uuid("created_by_api_key_id").references((): AnyPgColumn => apiKeys.id, {
@@ -43,5 +49,8 @@ export const apiKeys = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
-  (t) => [index("api_keys_token_prefix_idx").on(t.tokenPrefix)],
+  (t) => [
+    index("api_keys_token_prefix_idx").on(t.tokenPrefix),
+    index("api_keys_inbox_idx").on(t.inboxId).where(sql`${t.inboxId} is not null`),
+  ],
 );

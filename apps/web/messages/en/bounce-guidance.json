@@ -76,7 +76,7 @@
     },
     "suppressed": {
       "title": "On the SES suppression list",
-      "body": "This address recently bounced or complained across the platform and was suppressed globally.",
+      "body": "This address recently bounced or complained and was suppressed globally.",
       "action": "Only resend if you have confirmed the mailbox is valid again."
     },
     "onAccountSuppressionList": {

@@ -70,7 +70,7 @@ function callerFor(
 const operator = () => callerFor(OPERATOR);
 const member = () => callerFor(MEMBER, teamId, "owner");
 
-/** What the team's own audit shows of one grant — nothing, until day 7. */
+/** What the team's own audit shows of one grant — nothing, ever. */
 async function teamContentRows(grantId?: string) {
   const { items } = await member().audit.list({ limit: 50 });
   return items.filter(
@@ -222,7 +222,7 @@ describe("console.safety.requestAccess", () => {
       scope: "email",
       viewCount: 0,
       approvedBy: null,
-      noticeSentAt: null,
+      noticeSentAt: expect.any(Date),
       teamVisibleAt: null,
     });
 
@@ -238,7 +238,7 @@ describe("console.safety.requestAccess", () => {
     expect(await teamContentRows(granted.grantId)).toEqual([]);
   });
 
-  it("refuses an email outside the team's flagged window", async () => {
+  it("refuses an email of another team, but grants on any message of this one, flagged or not", async () => {
     const other = await createTeam(db, "other");
     const [stray] = await db
       .insert(schema.emails)
@@ -251,6 +251,43 @@ describe("console.safety.requestAccess", () => {
       })
       .returning({ id: schema.emails.id });
     await expect(grantFor(stray?.id ?? teamId)).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // An ordinary, never-flagged message of this team: no insights row, no
+    // monitor sample. The operator may still open it under a grant.
+    const keyring = EnvKeyring.fromBase64(TEST_KEK);
+    const [plain] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        from: "hello@acme.example",
+        to: ["c@example.com"],
+        subject: "Monthly update",
+        latestStatus: "delivered",
+        sentAt: new Date(),
+      })
+      .returning({ id: schema.emails.id });
+    if (!plain) throw new Error("email missing");
+    const sealed = await encryptEmailBody({ html: "<p>Nothing to see.</p>", text: null }, keyring, {
+      teamId,
+      rowId: plain.id,
+    });
+    await db
+      .update(schema.emails)
+      .set({
+        bodyCiphertext: sealed.ciphertext,
+        bodyIv: sealed.iv,
+        bodyWrappedDek: sealed.wrappedDek,
+        bodyKeyVersion: sealed.keyVersion,
+      })
+      .where(eq(schema.emails.id, plain.id));
+
+    const granted = await grantFor(plain.id);
+    expect(granted.emailIds).toEqual([plain.id]);
+    const view = await operator().console.safety.revealed({
+      grantId: granted.grantId,
+      emailId: plain.id,
+    });
+    expect(view.spans.map((s) => s.text).join("")).toContain("Nothing to see.");
   });
 
   it("refuses a purged body and covers the window when the scope is the window", async () => {
@@ -297,6 +334,8 @@ describe("console.safety.revealed", () => {
     const [grant] = await db.select().from(schema.contentAccessGrants);
     expect(grant?.viewCount).toBe(2);
     expect(grant?.lastViewedAt).toBeInstanceOf(Date);
+    // Text alone: mediaViewedAt stays null.
+    expect(grant?.mediaViewedAt).toBeNull();
   });
 
   it("refuses after the window closes, off the grant, and for anyone else", async () => {
@@ -349,5 +388,51 @@ describe("console.safety.revealed", () => {
     expect(review.grants).toMatchObject([{ id: grantId, emailIds: [emailId], viewCount: 0 }]);
     const list = await operator().console.safety.list({ status: "all" });
     expect(list.counts.revealsThisWeek).toBe(1);
+  });
+});
+
+describe("console.safety.teamEmails", () => {
+  it("lists the team's emails newest first, metadata only, paginated", async () => {
+    await flaggedEmail();
+    const sent = (from: string, subject: string, secondsLater: number) =>
+      db.insert(schema.emails).values({
+        teamId,
+        from,
+        to: ["a@example.com", "b@example.com"],
+        subject,
+        latestStatus: "delivered",
+        sentAt: new Date(),
+        createdAt: new Date(Date.now() + secondsLater * 1000),
+      });
+    await sent("x@acme.example", "zzqq-1", 1);
+    await sent("x@acme.example", "zzqq-2", 2);
+    const page = await operator().console.safety.teamEmails({ teamId, limit: 2 });
+    expect(page.items).toHaveLength(2);
+    expect(page.total).toBe(3);
+    expect(page.nextCursor).not.toBeNull();
+    expect(page.items[0]).toMatchObject({ recipients: 2 });
+    expect(page.items[0]?.from).toBe("x@acme.example");
+    // Metadata only: never a subject, never a body.
+    const payload = JSON.stringify(page);
+    expect(payload).not.toContain("zzqq");
+    expect(payload).not.toContain("Sua conta");
+    expect(payload).not.toContain("subject");
+
+    // Mail the team sends meanwhile neither repeats nor skips a row on the next page.
+    await sent("late@acme.example", "zzqq-3", 3);
+    const next = await operator().console.safety.teamEmails({
+      teamId,
+      limit: 2,
+      cursor: page.nextCursor ?? undefined,
+    });
+    expect(next.items.map((email) => email.from)).toEqual(["billing@acme.example"]);
+    expect(next.nextCursor).toBeNull();
+    expect(next.total).toBeNull();
+  });
+
+  it("is the operator's alone", async () => {
+    await expect(member().console.safety.teamEmails({ teamId })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
   });
 });

@@ -17,6 +17,7 @@ import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
+import { consoleReviewHref } from "@/lib/nav";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -33,10 +34,20 @@ import {
   usePercent,
 } from "./parts";
 import { useContentReveal } from "./reveal";
+import { WaitingList } from "./waiting-list";
 
 const STATUSES = ["open", "cleared", "suspended", "all"] as const;
 // The team_flag_reason enum; tsc checks it against the router's input.
-const REASONS = ["monitor", "complaints", "guardrail", "score", "report", "manual"] as const;
+const REASONS = [
+  "monitor",
+  "complaints",
+  "guardrail",
+  "score",
+  "report",
+  "manual",
+  "brand",
+  "linked",
+] as const;
 const SORTS = ["name", "type", "risk", "score", "guardrail", "reason", "status", "since"] as const;
 const DIRS = ["asc", "desc"] as const;
 const COLUMNS = 12;
@@ -75,9 +86,10 @@ export function SafetyList() {
     ...(region !== "all" ? { region } : {}),
   };
   // Offset paging: the router pages by offset, which tRPC's cursor-only
-  // infiniteQueryOptions cannot express, so the pages are fetched by hand.
+  // infiniteQueryOptions cannot express, so the pages are fetched by hand. The
+  // suffix keeps the pages apart from a plain query of the same input.
   const query = useInfiniteQuery({
-    queryKey: trpc.console.safety.list.queryKey(input),
+    queryKey: [...trpc.console.safety.list.queryKey(input), "infinite"],
     queryFn: ({ pageParam }) => client.console.safety.list.query({ ...input, offset: pageParam }),
     initialPageParam: 0,
     getNextPageParam: (page) => page.nextOffset ?? undefined,
@@ -132,11 +144,12 @@ export function SafetyList() {
           </Link>
         }
       />
+      <WaitingList onChanged={refetch} />
       <div
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
       >
-        <div style={{ flex: 1, minWidth: 160 }}>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
           <input
             type="text"
             className="ms-input"
@@ -240,7 +253,7 @@ export function SafetyList() {
                       suspendedAt: row.suspendedAt,
                       broadcastsPausedByOperatorAt: row.broadcastsPausedByOperatorAt,
                     };
-                    const href = `/console/safety/${row.teamId}`;
+                    const href = consoleReviewHref(row.teamId);
                     const standing = row.guardrail !== null;
                     return (
                       <tr

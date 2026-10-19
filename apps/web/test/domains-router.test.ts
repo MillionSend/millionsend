@@ -1,9 +1,14 @@
 import { createPublicKey } from "node:crypto";
-import { PLAN_DOMAIN_LIMIT } from "@millionsend/core";
+import {
+  DAY_MS,
+  PLAN_DOMAIN_LIMIT,
+  SUSPENSION_REASONS,
+  type WebhookEnqueue,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDomainsRouter, type DomainsSesDeps } from "@/server/routers/domains";
@@ -95,6 +100,7 @@ function callerFor(
   teamId: string,
   deps: DomainsSesDeps,
   role: "owner" | "admin" | "member" = "owner",
+  enqueueWebhookDeliveries?: WebhookEnqueue,
 ) {
   const factory = createCallerFactory(router({ domains: createDomainsRouter(deps) }));
   const ctx: Context = {
@@ -102,6 +108,7 @@ function callerFor(
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
     role,
+    ...(enqueueWebhookDeliveries ? { enqueueWebhookDeliveries } : {}),
   };
   return factory(ctx);
 }
@@ -795,9 +802,72 @@ describe("domains.get", () => {
     const domain = await caller.domains.get({ id });
     expect(domain.sentCount).toBe(0);
   });
+
+  it("asks for the domain's age when it is added and shows its warm-up while one applies", async () => {
+    const teamId = await createTeam(db);
+    const asked: string[] = [];
+    const caller = callerFor(teamId, {
+      ...fakeSes().deps,
+      enqueueDomainAge: async (domainId) => {
+        asked.push(domainId);
+      },
+    });
+    const { id } = await caller.domains.create({ name: "news.brand-new.com", region: "us-east-1" });
+    expect(asked).toEqual([id]);
+    // Off on a self-hosted instance until the operator turns it on.
+    expect((await caller.domains.get({ id })).warmup).toBeNull();
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    const registeredAt = new Date(Date.now() - 2 * 86_400_000);
+    await db
+      .update(schema.domains)
+      .set({ registeredAt, ageSource: "rdap" })
+      .where(eq(schema.domains.id, id));
+    expect((await caller.domains.get({ id })).warmup).toEqual({
+      perDay: 300,
+      fullAt: new Date(registeredAt.getTime() + 30 * 86_400_000),
+      shared: false,
+    });
+    // A second young domain the team can send from: the day's volume is shared.
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "news.brand-newer.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date(Date.now() - 3_600_000),
+      ageSource: "rdap",
+    });
+    expect((await caller.domains.get({ id })).warmup).toMatchObject({ perDay: 300, shared: true });
+  });
 });
 
 describe("domains.delete", () => {
+  it.each(SUSPENSION_REASONS)(
+    "refuses an admin of a team suspended for %s before SES is touched",
+    async (reason) => {
+      const teamId = await createTeam(db);
+      const { deps, calls } = fakeSes();
+      const caller = callerFor(teamId, deps, "admin");
+      const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      const before = calls.length;
+
+      await expect(caller.domains.delete({ id })).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        // A team suspended for phishing or held for review is never told it is suspended.
+        message: ["phishing", "review"].includes(reason)
+          ? "This isn't available for this team right now. Contact support if you need help."
+          : "This team is suspended, so its domains can't be deleted. Contact support.",
+      });
+      expect(calls).toHaveLength(before);
+      expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(
+        1,
+      );
+    },
+  );
+
   it("deletes the SES identity and the row", async () => {
     const teamId = await createTeam(db);
     const { deps, calls } = fakeSes();
@@ -848,6 +918,41 @@ describe("domains.delete", () => {
       .from(schema.emailEvents)
       .where(eq(schema.emailEvents.emailId, queued?.id ?? ""));
     expect(events).toEqual([{ type: "failed" }]);
+  });
+
+  it("fires email.failed for the emails the delete fails, handed to the queue after it commits", async () => {
+    const teamId = await createTeam(db, "team-hooks");
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.failed"]);
+    const { deps } = fakeSes();
+    const domainLeft: boolean[] = [];
+    const enqueued: string[] = [];
+    const caller = callerFor(teamId, deps, "owner", async (rows) => {
+      enqueued.push(...rows.map((r) => r.id));
+      const rowsLeft = await db
+        .select({ id: schema.domains.id })
+        .from(schema.domains)
+        .where(eq(schema.domains.teamId, teamId));
+      domainLeft.push(rowsLeft.length > 0);
+    });
+    const { id } = await caller.domains.create({ name: "hooks.example.com", region: "us-east-1" });
+    const [queued] = await db
+      .insert(schema.emails)
+      .values({ teamId, domainId: id, from: "a@hooks.example.com", to: ["r@x.com"], subject: "s" })
+      .returning({ id: schema.emails.id });
+
+    await caller.domains.delete({ id });
+
+    const deliveries = await db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId));
+    expect(deliveries.map((d) => d.emailId)).toEqual([queued?.id]);
+    expect(deliveries[0]?.payload).toMatchObject({
+      type: "email.failed",
+      data: { failed: { reason: "domain_deleted" } },
+    });
+    expect(enqueued).toEqual([deliveries[0]?.id]);
+    expect(domainLeft).toEqual([false]);
   });
 
   it("revokes and unscopes domain-scoped keys so the restrict FK cannot block the delete", async () => {
@@ -1039,5 +1144,353 @@ describe("domains.updateConfiguration", () => {
     await caller.domains.updateConfiguration({ id, trackingSubdomain: "links" });
     const [ok] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(ok?.trackingSubdomain).toBe("links");
+  });
+});
+
+describe("domains receiving", () => {
+  const MX = "mx.receiving.test";
+
+  beforeEach(() => {
+    vi.stubEnv("RECEIVING_MX_HOST", MX);
+  });
+
+  /** example.com as create leaves it, then verified the way a passing check marks it. */
+  async function verifiedDomain(teamId: string): Promise<{ id: string; dkimPublicKey: string }> {
+    const dkimPublicKey = await seedAndPublicKey(teamId);
+    const [row] = await db
+      .update(schema.domains)
+      .set({ status: "verified" })
+      .where(eq(schema.domains.teamId, teamId))
+      .returning({ id: schema.domains.id });
+    if (!row) throw new Error("no domain");
+    return { id: row.id, dkimPublicKey };
+  }
+
+  it("is refused with 422 on an instance that takes no mail", async () => {
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    const teamId = await createTeam(db);
+    const { id } = await verifiedDomain(teamId);
+    await expect(
+      callerFor(teamId, fakeSes().deps).domains.setReceiving({ id, enabled: true }),
+    ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
+  });
+
+  it("turns on only for a verified domain, and only for owners and admins", async () => {
+    const teamId = await createTeam(db);
+    await seedAndPublicKey(teamId);
+    const [seed] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
+    const id = seed?.id ?? "";
+    const owner = callerFor(teamId, fakeSes().deps);
+    await expect(owner.domains.setReceiving({ id, enabled: true })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    });
+
+    await db.update(schema.domains).set({ status: "verified" }).where(eq(schema.domains.id, id));
+    await expect(
+      callerFor(teamId, fakeSes().deps, "member").domains.setReceiving({ id, enabled: true }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await owner.domains.setReceiving({ id, enabled: true })).toEqual({
+      receivingEnabled: true,
+    });
+    expect((await owner.domains.get({ id })).receivingEnabled).toBe(true);
+    expect(await owner.domains.setReceiving({ id, enabled: false })).toEqual({
+      receivingEnabled: false,
+    });
+  });
+
+  it("refuses a name another team already receives, and another team's domain", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const [a, b] = await db
+      .insert(schema.domains)
+      .values(
+        [teamA, teamB].map((teamId) => ({
+          teamId,
+          name: "shared.example.com",
+          region: "us-east-1",
+          status: "verified" as const,
+        })),
+      )
+      .returning({ id: schema.domains.id });
+    if (!a || !b) throw new Error("no domains");
+    await callerFor(teamA, fakeSes().deps).domains.setReceiving({ id: a.id, enabled: true });
+    await expect(
+      callerFor(teamB, fakeSes().deps).domains.setReceiving({ id: b.id, enabled: true }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      callerFor(teamB, fakeSes().deps).domains.setReceiving({ id: a.id, enabled: false }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("lists the live-checked Receiving MX while receiving is on, never gating the sending status", async () => {
+    const teamId = await createTeam(db);
+    const { id, dkimPublicKey } = await verifiedDomain(teamId);
+    const published = publishedDns(dkimPublicKey);
+    const withApexMx = (rows: { priority: number; exchange: string }[]) =>
+      fakeSes({
+        dkimStatus: "SUCCESS",
+        verifiedForSending: true,
+        dns: {
+          ...published,
+          resolveMx: async (name: string) =>
+            name === "example.com" ? rows : published.resolveMx(name),
+        },
+      }).deps;
+    const receivingRows = async (deps: DomainsSesDeps) =>
+      (await callerFor(teamId, deps).domains.records({ id })).records.filter(
+        (r) => r.group === "receiving",
+      );
+
+    // Off: no row, whatever the zone says.
+    expect(await receivingRows(withApexMx([{ priority: 10, exchange: MX }]))).toEqual([]);
+
+    await callerFor(teamId, fakeSes().deps).domains.setReceiving({ id, enabled: true });
+    expect(await receivingRows(withApexMx([{ priority: 10, exchange: `${MX}.` }]))).toEqual([
+      {
+        group: "receiving",
+        type: "MX",
+        name: "example.com",
+        value: MX,
+        priority: 10,
+        status: null,
+        live: "found",
+      },
+    ]);
+    // A lower-numbered MX elsewhere takes the mail first.
+    expect(
+      await receivingRows(
+        withApexMx([
+          { priority: 10, exchange: MX },
+          { priority: 1, exchange: "aspmx.l.google.com" },
+        ]),
+      ),
+    ).toMatchObject([{ live: "mismatch", found: `1 aspmx.l.google.com\n10 ${MX}` }]);
+
+    // The check DNS pass reads it too, and a missing MX leaves the domain verified.
+    const result = await callerFor(teamId, withApexMx([])).domains.verify({ id });
+    expect(result.status).toBe("verified");
+    expect(result.liveDns).toContainEqual({
+      type: "MX",
+      name: "example.com",
+      value: MX,
+      priority: 10,
+      status: "missing",
+    });
+
+    // An instance that stops taking mail stops listing the record.
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    expect(await receivingRows(withApexMx([{ priority: 10, exchange: MX }]))).toEqual([]);
+  });
+});
+
+describe("domain warm-up", () => {
+  const NOW = new Date("2026-10-18T10:00:00Z");
+  const YESTERDAY = "2026-10-17";
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** A verified domain row of a fresh team, made without SES. */
+  async function warmupDomain(slug = "acme") {
+    const teamId = await createTeam(db, slug);
+    const [row] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: `news.${slug}.example.com`, region: "us-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!row) throw new Error("no domain");
+    return { teamId, id: row.id };
+  }
+
+  /** `n` broadcast rows of the domain parked for its warm-up, created at `createdAt`. */
+  async function parkRows(teamId: string, domainId: string, n: number, createdAt: Date) {
+    const [broadcast] = await db
+      .insert(schema.broadcasts)
+      .values({ teamId, from: "hi@news.example.com", subject: "s", status: "sending" })
+      .returning({ id: schema.broadcasts.id });
+    await db.insert(schema.emails).values(
+      Array.from({ length: n }, (_, i) => ({
+        teamId,
+        domainId,
+        broadcastId: broadcast?.id ?? null,
+        from: "hi@news.example.com",
+        to: [`r${i}@example.com`],
+        subject: "s",
+        latestStatus: "queued_quota" as const,
+        parkReason: "warmup" as const,
+        createdAt,
+      })),
+    );
+  }
+
+  it("keeps every procedure to the team's own domains", async () => {
+    const { id } = await warmupDomain("owner");
+    const stranger = callerFor(await createTeam(db, "other"), fakeSes().deps);
+    await expect(stranger.domains.warmup({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(stranger.domains.setWarmup({ id, action: "on" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      stranger.domains.updateWarmup({ id, settings: { dailyTarget: 5_000 } }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await db.select().from(schema.domainWarmups)).toEqual([]);
+  });
+
+  it("lets members read it, and only owners and admins change it", async () => {
+    const { teamId, id } = await warmupDomain();
+    const member = callerFor(teamId, fakeSes().deps, "member");
+    expect(await member.domains.warmup({ id })).toMatchObject({ status: "off", canManage: false });
+    await expect(member.domains.setWarmup({ id, action: "on" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(
+      member.domains.updateWarmup({ id, settings: { skipInactive: false } }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await callerFor(teamId, fakeSes().deps, "admin").domains.warmup({ id })).toMatchObject({
+      canManage: true,
+    });
+  });
+
+  it("turns on for a domain new to sending, and stays off by default", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const fresh = await caller.domains.create({
+      name: "new.example.com",
+      region: "us-east-1",
+      warmup: true,
+    });
+    const moved = await caller.domains.create({ name: "moved.example.com", region: "us-east-1" });
+    expect(await caller.domains.warmup({ id: fresh.id })).toMatchObject({
+      status: "warming",
+      volume: 1_500,
+      today: { day: "2026-10-18", allowance: 1_500, sent: 0, checked: true },
+    });
+    expect(await caller.domains.warmup({ id: moved.id })).toMatchObject({ status: "off" });
+    // The domain's own read says so too, without reading the whole warm-up.
+    expect((await caller.domains.get({ id: fresh.id })).warmupStatus).toBe("warming");
+    expect((await caller.domains.get({ id: moved.id })).warmupStatus).toBe("off");
+  });
+
+  it("moves through on, pause, resume and off", async () => {
+    const { teamId, id } = await warmupDomain();
+    const caller = callerFor(teamId, fakeSes().deps);
+    const status = async () => (await caller.domains.warmup({ id })).status;
+    await caller.domains.setWarmup({ id, action: "on" });
+    expect(await status()).toBe("warming");
+    expect(await caller.domains.setWarmup({ id, action: "pause" })).toEqual({ changed: true });
+    expect(await status()).toBe("paused");
+    expect(await caller.domains.setWarmup({ id, action: "pause" })).toEqual({ changed: false });
+    await caller.domains.setWarmup({ id, action: "resume" });
+    expect(await status()).toBe("warming");
+    await caller.domains.setWarmup({ id, action: "off" });
+    expect(await status()).toBe("off");
+  });
+
+  it("checks settings at the boundary and against the stored other half", async () => {
+    const { teamId, id } = await warmupDomain();
+    const caller = callerFor(teamId, fakeSes().deps);
+    for (const settings of [{ dailyTarget: 999 }, { startVolume: 2.5 }]) {
+      await expect(caller.domains.updateWarmup({ id, settings })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+    await caller.domains.updateWarmup({
+      id,
+      settings: { dailyTarget: 5_000, orderProperty: " last_login_at " },
+    });
+    await expect(
+      caller.domains.updateWarmup({ id, settings: { startVolume: 6_000 } }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "warmup_settings_out_of_range" });
+    expect(await caller.domains.warmup({ id })).toMatchObject({
+      status: "off",
+      settings: { dailyTarget: 5_000, startVolume: 1_500, orderProperty: "last_login_at" },
+    });
+  });
+
+  it("previews a send to everyone while off, and lists the keys contacts carry", async () => {
+    const { teamId, id } = await warmupDomain();
+    await db.insert(schema.contacts).values([
+      { teamId, email: "a@example.com", properties: { plan: "pro", last_login_at: "2026-10-01" } },
+      { teamId, email: "b@example.com", properties: { plan: "" } },
+      { teamId, email: "c@example.com" },
+    ]);
+    const warmup = await callerFor(teamId, fakeSes().deps).domains.warmup({ id });
+    expect(warmup.preview).toEqual([{ day: "2026-10-18", count: 3 }]);
+    expect(warmup.properties).toEqual(["last_login_at", "plan"]);
+    expect(warmup.limits.dailyTarget).toEqual({ min: 1_000, max: 10_000_000 });
+  });
+
+  it("paces today from what went out, and dates the waiting mail by retention", async () => {
+    const { teamId, id } = await warmupDomain();
+    const caller = callerFor(teamId, fakeSes().deps);
+    await caller.domains.setWarmup({ id, action: "on" });
+    await db
+      .insert(schema.domainWarmupDays)
+      .values({ domainId: id, day: "2026-10-18", allowance: 4_800, sent: 1_200 });
+    await parkRows(teamId, id, 3, new Date("2026-10-17T12:00:00Z"));
+    await db.insert(schema.instanceSettings).values({ id: 1, emailRetentionDays: 10 });
+    const warmup = await caller.domains.warmup({ id });
+    // A 48th of 4,800 per 15-minute run: 1,200 took twelve runs, the 3 waiting take one.
+    expect(warmup.todayWindow).toEqual({
+      startsAt: new Date("2026-10-18T07:00:00Z"),
+      endsAt: new Date("2026-10-18T10:15:00Z"),
+    });
+    expect(warmup.waiting).toBe(3);
+    expect(warmup.waitingExpiresAt).toEqual(new Date("2026-10-27T12:00:00Z"));
+  });
+
+  it("reads the day that paused it, and nothing when the team paused it", async () => {
+    const { teamId, id } = await warmupDomain();
+    const caller = callerFor(teamId, fakeSes().deps);
+    await caller.domains.setWarmup({ id, action: "on" });
+    const signals = {
+      sent: { gmail: 600, other: 900 },
+      delays: { gmail: 0.3, other: 0.01, result: "severe" as const },
+      opens: { gmail: null, other: null, result: "unknown" as const },
+      hardBounces: { gmail: 0.01, other: 0.005, result: "within" as const },
+      mailboxFull: { gmail: 0, other: 0, result: "within" as const },
+      complaints: { gmail: null, other: 0, result: "within" as const },
+    };
+    const w = schema.domainWarmups;
+    await db
+      .update(w)
+      .set({
+        status: "paused",
+        startedAt: new Date(NOW.getTime() - 2 * DAY_MS),
+        pausedAt: NOW,
+        pauseSignals: signals,
+        sendingDays: 1,
+      })
+      .where(eq(w.domainId, id));
+    await db.insert(schema.domainWarmupDays).values({
+      domainId: id,
+      day: YESTERDAY,
+      allowance: 1_500,
+      sent: 1_500,
+      outcome: "paused",
+      signals,
+      checkedAt: NOW,
+    });
+    const warmup = await caller.domains.warmup({ id });
+    expect(warmup.health).toMatchObject({ day: YESTERDAY, sent: 1_500, yesterday: true });
+    expect(warmup.health?.signals[0]).toEqual({
+      key: "delays",
+      result: "severe",
+      figure: 0.3,
+      gmail: 0.3,
+      other: 0.01,
+    });
+    expect(warmup.pauseSignals?.map((s) => s.key)).toEqual([
+      "delays",
+      "opens",
+      "hardBounces",
+      "mailboxFull",
+      "complaints",
+    ]);
+    expect(warmup.resumeVolume).toBe(750);
+    await db.update(w).set({ pauseSignals: null }).where(eq(w.domainId, id));
+    expect((await caller.domains.warmup({ id })).health).toBeNull();
   });
 });

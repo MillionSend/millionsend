@@ -5,6 +5,7 @@ const h = vi.hoisted(() => ({
   captureError: vi.fn(async () => {}),
   sdk: { start: vi.fn(), captureException: vi.fn() },
   contextError: undefined as Error | undefined,
+  queryError: undefined as Error | undefined,
 }));
 
 vi.mock("@millionsend/core/error-tracking-node", () => ({
@@ -18,7 +19,19 @@ vi.mock("@/server/trpc", async (importOriginal) => {
     ...actual,
     createContext: async () => {
       if (h.contextError) throw h.contextError;
-      return { db: null as never, session: null, teamId: null, role: null };
+      const { queryError } = h;
+      if (!queryError) return { db: null as never, session: null, teamId: null, role: null };
+      // A signed-in owner whose every query fails with queryError.
+      return {
+        db: {
+          select: () => {
+            throw queryError;
+          },
+        } as never,
+        session: { user: { id: "user-1", email: "owner@example.com", name: "Owner" } },
+        teamId: "team-1",
+        role: "owner" as const,
+      };
     },
   };
 });
@@ -35,12 +48,15 @@ const { POST: tunnel } = await import("@/app/api/client-errors/route");
 const { default: RootLayout } = await import("@/app/layout");
 const { ErrorTracking } = await import("@/components/error-tracking");
 const { reportClientError, startClientErrorTracking } = await import("@/lib/client-errors");
+const { FAULT_MESSAGE } = await import("@/server/trpc");
+const { unstorableValueMessage } = await import("@millionsend/core");
 
 const DSN = "https://public@errors.example.com/7";
 
 beforeEach(() => {
   h.captureError.mockClear();
   h.contextError = undefined;
+  h.queryError = undefined;
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -73,12 +89,45 @@ describe("server errors", () => {
     expect((await call()).status).toBe(401);
     expect(h.captureError).not.toHaveBeenCalled();
 
+    vi.spyOn(console, "error").mockImplementation(() => {});
     h.contextError = new Error("connection refused");
     expect((await call()).status).toBe(500);
     expect(h.captureError).toHaveBeenCalledExactlyOnceWith(h.contextError, {
       teamId: undefined,
       tags: { procedure: "apiKeys.list" },
     });
+  });
+
+  it("answers a procedure's fault in general words, logging and reporting the error itself", async () => {
+    vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    h.queryError = new Error('Failed query: select "secret" from "keys" where "team_id" = $1');
+    const res = await trpcGet(new Request("https://app.example.com/api/trpc/apiKeys.list"));
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(body).not.toContain("Failed query");
+    expect(body).not.toContain("secret");
+    expect(JSON.parse(body)).toMatchObject({
+      error: { json: { message: FAULT_MESSAGE, data: { code: "INTERNAL_SERVER_ERROR" } } },
+    });
+    expect(h.captureError).toHaveBeenCalledExactlyOnceWith(h.queryError, {
+      teamId: "team-1",
+      tags: { procedure: "apiKeys.list" },
+    });
+    expect(log.mock.calls.flat()).toContain(h.queryError);
+  });
+
+  it("passes a refusal's own message on, unreported", async () => {
+    vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+    h.queryError = Object.assign(new Error("invalid byte sequence"), { code: "22021" });
+    const res = await trpcGet(new Request("https://app.example.com/api/trpc/apiKeys.list"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: {
+        json: { message: unstorableValueMessage(h.queryError), data: { code: "BAD_REQUEST" } },
+      },
+    });
+    expect(h.captureError).not.toHaveBeenCalled();
   });
 });
 

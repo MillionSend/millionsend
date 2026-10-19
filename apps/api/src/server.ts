@@ -1,17 +1,25 @@
 import { serve } from "@hono/node-server";
 import {
-  accountMailDeliverable,
+  clamavHost,
   env,
+  receivingMxHost,
   servedRegions,
   sesTenantsEnabled,
+  sharedInboxDomain,
   trackingSubdomainsSupported,
   unsubscribeBaseUrl,
 } from "@millionsend/config";
 import {
+  CLAMAV_MAX_BYTES,
+  CLAMAV_TIMEOUT_MS,
+  deriveInboxKeys,
+  deriveReceivedDownloadKey,
   deriveUnsubscribeKey,
   getInstanceSettings,
   hashRecipient,
+  monitorSettingsReader,
   pacingHorizonDays,
+  scanWithClamd,
 } from "@millionsend/core";
 import { initErrorTracking } from "@millionsend/core/error-tracking-node";
 import { getDb } from "@millionsend/db";
@@ -71,6 +79,10 @@ const accountCache = createRegionAccountCache({
     }),
 });
 const settings = () => getInstanceSettings(db);
+const masterKey = Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64");
+// Boot validation requires the secret whenever the host is set.
+const mxHost = receivingMxHost();
+const clamav = clamavHost();
 
 const app = createApi({
   db,
@@ -89,15 +101,36 @@ const app = createApi({
   isCloud: env.IS_CLOUD,
   onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
   openaiAppsChallengeToken: env.OPENAI_APPS_CHALLENGE_TOKEN,
-  requireVerifiedMembers: accountMailDeliverable(),
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   revision: env.MILLIONSEND_REVISION,
   appBaseUrl: env.APP_BASE_URL,
   unsubscribeBaseUrl: unsubscribeBaseUrl(),
   publicApiUrl: env.PUBLIC_API_URL,
-  unsubscribeSecretKey: deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64")),
+  unsubscribeSecretKey: deriveUnsubscribeKey(masterKey),
+  receivedDownloadKey: deriveReceivedDownloadKey(masterKey),
+  ...(mxHost && env.MX_INGEST_SECRET
+    ? { receiving: { mxHost, ingestSecret: env.MX_INGEST_SECRET } }
+    : {}),
+  inboxKeys: deriveInboxKeys(masterKey),
+  sharedInboxDomain: sharedInboxDomain(),
+  monitorSettings: monitorSettingsReader(db, env as unknown as Record<string, unknown>),
+  ...(clamav
+    ? {
+        scanVirus: (raw: Buffer) =>
+          scanWithClamd(raw, {
+            host: clamav,
+            timeoutMs: CLAMAV_TIMEOUT_MS,
+            maxBytes: CLAMAV_MAX_BYTES,
+          }),
+      }
+    : {}),
+  enqueueScreening: (p) => queue.enqueueScreening(p),
+  enqueueInboxForward: (p) => queue.enqueueInboxForward(p),
   enqueueWebhookDeliveries: async (deliveries) => {
     await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
+  },
+  enqueueDomainAge: async (domainId) => {
+    await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
   },
   enqueueRecipientErase: async (teamId, address) => {
     await queue.send(

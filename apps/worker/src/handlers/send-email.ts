@@ -1,44 +1,68 @@
+import { sharedInboxDomain } from "@millionsend/config";
 import {
   applyStatusCas,
   buildUnsubscribeHeaders,
   buildUnsubscribeUrl,
   bumpHourlyUsage,
   CREDENTIAL_MAIL_KINDS,
+  countDistinctRecipients,
   decryptEmailBody,
+  deliverabilityHold,
   type EmailAttachment,
   type EmailBody,
+  endQueuedEmails,
   enqueueWebhookDeliveries,
   evaluateEmailInsights,
   extractAddrSpec,
   fetchTeamQuota,
   fetchTeamStanding,
   findSuppressed,
+  findTopicOptOuts,
   hashRecipient,
   isOnboardingSender,
+  isSharedInboxSender,
   isSubscribedToTopic,
+  judgeAfterSend,
   type Keyring,
+  linkTeam,
   MONITOR_ANOMALY_CHECKS,
   type MonitorDeps,
+  type MonitorSettings,
   makeUnsubscribeToken,
+  noteAcceptedSend,
+  noteConsoleCodeUndelivered,
+  opaqueFacts,
   openAttachments,
   parseSingleSender,
   purgedEmailBodyColumns,
+  recordMonitorSample,
   releaseQuota,
   rewriteForTracking,
   SCORE_VERSION,
+  type SendMedia,
+  SHARED_PAUSED_RETRY_MS,
   SYSTEM_MAIL_TAG,
   sampleAcceptedEmail,
+  screenBeforeSend,
+  screeningTeam,
+  sentContentType,
+  sentWithoutComplaintFeedback,
   substituteUnsubscribeUrl,
   transitionQueueState,
   utcDay,
   type WebhookEnqueue,
+  webhookBatch,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
+import { MediaPoolError } from "../media/pool.js";
+import { saveMediaReview } from "../media/read.js";
+import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
 import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-quota.js";
+import { clearSharedTenant, isTenantNotAssociated } from "./tenants.js";
 
 /**
  * Sends one queued email through SES. The SES client is injected (tests use
@@ -47,6 +71,10 @@ import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-
  */
 
 export interface SesSender {
+  /**
+   * Rejects with an AbortError when its deadline passes before SES answers:
+   * SES may still have taken the message.
+   */
   sendRaw(params: {
     raw: Buffer;
     /** Server-owned fallback join key copied into an SES message tag. */
@@ -61,7 +89,7 @@ export interface SesSender {
     configurationSetName?: string;
     /** SES region the sending identity is verified in; sender default when absent. */
     region?: string;
-    /** The team's SES tenant; only set once the domain's resources are associated with it. */
+    /** The team's SES tenant; only set once the send's identity and set are associated with it. */
     tenantName?: string;
   }): Promise<{ messageId: string }>;
 }
@@ -71,8 +99,19 @@ export interface SendDeps {
   ses: SesSender;
   /** Deployment-wide SES configuration set, used when the domain has none. */
   defaultConfigurationSet?: string | undefined;
-  /** ONBOARDING_EMAIL_FROM: sends from it carry no team domain (see core isOnboardingSender). */
+  /** ONBOARDING_EMAIL_FROM: the fixed onboarding email carries no team domain (see core isOnboardingSender). */
   onboardingEmailFrom?: string | undefined;
+  /** SHARED_INBOX_DOMAIN, whose inbox replies carry no team domain either; the environment's when absent. */
+  sharedInboxDomain?: string | null | undefined;
+  /** The instance settings reader: every shared-domain send reads the shared switches. Defaults when absent. */
+  settings?: (() => Promise<MonitorSettings>) | undefined;
+  /**
+   * The team's SES tenant for a shared-domain send, associated on first use;
+   * undefined sends without one. Wired only while SES tenants are on.
+   */
+  sharedTenant?:
+    | ((teamId: string, configurationSet: string | undefined) => Promise<string | undefined>)
+    | undefined;
   /**
    * Awaited right before the send claim, after every check that can still
    * skip or fail the email — a token spent on a row that never reaches SES
@@ -86,7 +125,7 @@ export interface SendDeps {
     | undefined;
   /** SES's 24-hour quota and the broadcast share; absent in tests that never reach it. */
   sesQuota?: SendQuotaControls | undefined;
-  /** Arms the webhook drain for the endpoints written; email.sent webhooks are skipped when absent. */
+  /** Arms the webhook drain for the rows written; absent, the reconcile sweep sends them. */
   enqueueWebhookDelivery?: WebhookEnqueue | undefined;
   /**
    * RFC 8058 one-click unsubscribe config for broadcast emails. Broadcast
@@ -102,10 +141,15 @@ export interface SendDeps {
    * it — the worker always provides it, since the master key is always present.
    */
   /**
-   * The content monitor's draw on an accepted send. Absent when the judge is
-   * off (and in tests that never reach it): no rows, no jobs, no state.
+   * The content monitor: the screening before SES and the draw on an
+   * accepted send. Absent when the judge is off (and in tests that never
+   * reach it): no rows, no jobs, no state, no wait.
    */
   monitor?: MonitorDeps | undefined;
+  /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
+  platformDomains?: ReadonlySet<string> | undefined;
+  /** The parsing threads and cache the file scan uses; the process's own when absent. */
+  media?: MediaDeps | undefined;
   tracking?:
     | {
         secretKey: Buffer;
@@ -143,7 +187,10 @@ interface SendEligibility {
   eligible: boolean;
   topicId: string | null;
   reason?: string;
-  /** Recipients suppressed since accept; the send drops them (accept-time strip semantics). */
+  /**
+   * Recipients suppressed or opted out of the topic since accept; the send
+   * drops them (accept-time strip semantics).
+   */
   strip?: Set<string>;
 }
 
@@ -152,18 +199,25 @@ async function checkSendEligibility(
   email: typeof schema.emails.$inferSelect,
 ): Promise<SendEligibility> {
   if (!email.contactId) {
-    // Bounces and complaints recorded after accept (a scheduled or
+    // Suppressions and topic opt-outs recorded after accept (a scheduled or
     // quota-parked row can wait days) are honored the way accept does:
     // strip the hit, refuse only when no primary recipient is left.
     const recipients = [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])];
     const suppressed = await findSuppressed(db, email.teamId, recipients, {
       transactional: email.topicId === null,
     });
-    if (suppressed.size === 0) return { eligible: true, topicId: null };
-    if (email.to.every((r) => suppressed.has(r))) {
-      return { eligible: false, topicId: null, reason: "recipient_suppressed" };
+    const optedOut = email.topicId
+      ? await findTopicOptOuts(db, email.teamId, email.topicId, recipients)
+      : new Set<string>();
+    const strip = new Set([...suppressed, ...optedOut]);
+    if (strip.size === 0) return { eligible: true, topicId: null };
+    if (email.to.every((r) => strip.has(r))) {
+      const reason = email.to.every((r) => suppressed.has(r))
+        ? "recipient_suppressed"
+        : "topic_unsubscribed";
+      return { eligible: false, topicId: null, reason };
     }
-    return { eligible: true, topicId: null, strip: suppressed };
+    return { eligible: true, topicId: null, strip };
   }
 
   const [contact] = await db
@@ -220,29 +274,47 @@ async function checkSendEligibility(
   return { eligible: true, topicId: broadcast.topicId };
 }
 
-async function suppressQueuedEmail(db: Db, emailId: string, reason: string): Promise<boolean> {
-  const [updated] = await db
-    .update(schema.emails)
-    .set({ latestStatus: "suppressed" })
-    .where(
-      and(
-        eq(schema.emails.id, emailId),
-        eq(schema.emails.latestStatus, "queued"),
-        isNull(schema.emails.sentAt),
+/**
+ * Ends a still-queued email as failed or suppressed with its event and
+ * webhook, in one transaction, and hands the delivery rows to the queue
+ * once that commits. False when the row already left "queued" (sent,
+ * canceled, ended), SES already took it, or a send claim it does not hold
+ * is on it: nothing to end then.
+ */
+async function endQueuedEmail(
+  db: Db,
+  emailId: string,
+  status: "failed" | "suppressed",
+  reason: string,
+  enqueue: WebhookEnqueue | undefined,
+  claimHeld = false,
+): Promise<boolean> {
+  const e = schema.emails;
+  const hooks = webhookBatch(enqueue);
+  const ended = await db.transaction((tx) =>
+    endQueuedEmails(tx as unknown as Db, {
+      status,
+      // A claimed row may already be with SES, its message id not yet
+      // written: only the lane holding the claim, which SES refused, ends
+      // it. Anyone else leaves it to SES's events or the stalled-claim sweep.
+      where: and(
+        eq(e.id, emailId),
+        eq(e.latestStatus, "queued"),
+        claimHeld ? undefined : isNull(e.sentAt),
       ),
-    )
-    .returning({ id: schema.emails.id });
-  if (!updated) return false;
-  await db.insert(schema.emailEvents).values({
-    emailId,
-    type: "suppressed",
-    occurredAt: new Date(),
-    data: { source: "worker", reason },
-  });
-  return true;
+      data: { source: "worker", reason },
+      now: new Date(),
+      enqueue: hooks.collect,
+    }),
+  );
+  await hooks.flush();
+  return ended > 0;
 }
 
-/** Drops suppressed recipients from the row (and the in-memory copy the MIME is built from). */
+/**
+ * Drops suppressed or opted-out recipients from the row (and the in-memory
+ * copy the MIME is built from).
+ */
 async function stripRecipients(
   db: Db,
   email: typeof schema.emails.$inferSelect,
@@ -259,24 +331,20 @@ async function stripRecipients(
 }
 
 /**
- * Terminal failure for a still-queued email: releases any send claim, moves
- * the row to "failed" and records why. Returns false when the row already
- * left "queued" (sent, canceled, suppressed) — nothing to fail then.
+ * Terminal failure for a still-queued email: moves the row to "failed",
+ * records why and fires email.failed. Only the send lane holding the claim
+ * passes `claimHeld`, and the claim is released with the row. Returns false
+ * when the row already left "queued" (sent, canceled, suppressed), SES took
+ * it, or it is claimed and `claimHeld` is not set — nothing to fail then.
  */
-export async function failQueuedEmail(db: Db, emailId: string, reason: string): Promise<boolean> {
-  const [updated] = await db
-    .update(schema.emails)
-    .set({ latestStatus: "failed", sentAt: null })
-    .where(and(eq(schema.emails.id, emailId), eq(schema.emails.latestStatus, "queued")))
-    .returning({ id: schema.emails.id });
-  if (!updated) return false;
-  await db.insert(schema.emailEvents).values({
-    emailId,
-    type: "failed",
-    occurredAt: new Date(),
-    data: { source: "worker", reason },
-  });
-  return true;
+export async function failQueuedEmail(
+  db: Db,
+  emailId: string,
+  reason: string,
+  enqueue?: WebhookEnqueue,
+  claimHeld = false,
+): Promise<boolean> {
+  return endQueuedEmail(db, emailId, "failed", reason, enqueue, claimHeld);
 }
 
 /**
@@ -289,6 +357,7 @@ async function parkQueued(
   db: Db,
   email: { id: string; teamId: string },
   why: string,
+  reason: (typeof schema.emailParkReasonEnum.enumValues)[number] | null = null,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
@@ -297,11 +366,23 @@ async function parkQueued(
       to: "queued_quota",
     });
     if (!moved) return;
-    // Against the same counter accept charged: on a monthly plan that is the
-    // billing period, which the drain will charge again on release. The cap
-    // itself is irrelevant here, so the row is read as Cloud reads it.
+    const [row] = await txDb
+      .update(schema.emails)
+      .set({ parkReason: reason, parkedAt: new Date() })
+      .where(eq(schema.emails.id, email.id))
+      .returning({ to: schema.emails.to, cc: schema.emails.cc, bcc: schema.emails.bcc });
+    // Against the same counter accept charged, one unit per recipient as the
+    // drain charges again on release: on a monthly plan that is the billing
+    // period. The cap itself is irrelevant here, so the row is read as Cloud
+    // reads it.
     const quota = await fetchTeamQuota(txDb, email.teamId, true);
-    if (quota) await releaseQuota(txDb, { teamId: email.teamId, count: 1, quota });
+    if (quota && row) {
+      await releaseQuota(txDb, {
+        teamId: email.teamId,
+        count: countDistinctRecipients(row.to, row.cc, row.bcc),
+        quota,
+      });
+    }
   });
   console.warn(`email.send: ${why}, parked ${email.id}`);
 }
@@ -384,15 +465,21 @@ async function broadcastCanceled(db: Db, broadcastId: string): Promise<boolean> 
 /** An ineligible row: canceled with its broadcast, suppressed for any other reason. */
 async function refuse(
   db: Db,
+  deps: SendDeps,
   email: { id: string; teamId: string },
   reason: string | undefined,
 ): Promise<SendOutcome> {
   if (reason === "broadcast_canceled") {
     return (await cancelQueuedEmail(db, email)) ? "canceled" : "skipped";
   }
-  return (await suppressQueuedEmail(db, email.id, reason ?? "ineligible"))
-    ? "suppressed"
-    : "skipped";
+  const ended = await endQueuedEmail(
+    db,
+    email.id,
+    "suppressed",
+    reason ?? "ineligible",
+    deps.enqueueWebhookDelivery,
+  );
+  return ended ? "suppressed" : "skipped";
 }
 
 export async function sendEmail(
@@ -404,9 +491,42 @@ export async function sendEmail(
     .select()
     .from(schema.emails)
     .where(eq(schema.emails.id, payload.emailId));
-  // Only queued emails are sendable: quota-parked, already-sent, and failed
-  // rows are skipped no matter how the job arrived.
-  if (email?.latestStatus !== "queued") return "skipped";
+  // Only queued, unclaimed emails are sendable: quota-parked, already-sent,
+  // and failed rows are skipped no matter how the job arrived, and so is a
+  // claimed one, which SES took or may have taken.
+  if (email?.latestStatus !== "queued" || email.sentAt) return "skipped";
+  let outcome: SendOutcome;
+  try {
+    outcome = await sendQueued(db, deps, email);
+  } catch (err) {
+    // A retry may still send it, too late for a one-time code. A claim that
+    // stands is one SES took or may have taken (the bookkeeping after it
+    // failed, or the send ran past its deadline): that code may be on its
+    // way. The send's own error is the one the job reports.
+    if (email.tags?.[SYSTEM_MAIL_TAG] === "console_code") {
+      try {
+        const [row] = await db
+          .select({ sentAt: schema.emails.sentAt })
+          .from(schema.emails)
+          .where(eq(schema.emails.id, email.id));
+        if (!row?.sentAt) await noteConsoleCodeUndelivered(db, email);
+      } catch (noteErr) {
+        console.error(`email.send: console code fallback not marked for ${email.id}`, noteErr);
+      }
+    }
+    throw err;
+  }
+  if (outcome === "failed" || outcome === "suppressed" || outcome === "parked") {
+    await noteConsoleCodeUndelivered(db, email);
+  }
+  return outcome;
+}
+
+async function sendQueued(
+  db: Db,
+  deps: SendDeps,
+  email: typeof schema.emails.$inferSelect,
+): Promise<SendOutcome> {
   if (email.scheduledAt && email.scheduledAt.getTime() > Date.now()) {
     // Returning without re-enqueueing would ack the job and strand the
     // email forever; hand it back to the queue for its due time.
@@ -419,7 +539,23 @@ export async function sendEmail(
   // next row, not the next fan-out.
   const standing = await fetchTeamStanding(db, email.teamId);
   if (standing?.suspended || (email.broadcastId && standing?.broadcastsPausedByOperatorAt)) {
-    await parkQueued(db, email, standing.suspended ? "team suspended" : "broadcasts paused");
+    await parkQueued(
+      db,
+      email,
+      standing.suspended ? "team suspended" : "broadcasts paused",
+      standing.suspended?.reason === "review" ? "review" : null,
+    );
+    return "parked";
+  }
+  // Account mail (core sendSystemMail); acceptEmail keeps this mark on no
+  // other path, so a customer row cannot carry it.
+  const systemMail = email.tags?.[SYSTEM_MAIL_TAG] !== undefined;
+  // Transactional mail accepted before the team crossed the deliverability
+  // pause line parks the same way, all but account mail, which must go out
+  // whatever the rates; a broadcast row parks below, once a stop has been
+  // honored.
+  if (!email.broadcastId && !systemMail && (await deliverabilityHold(db, email.teamId))) {
+    await parkQueued(db, email, "sending paused");
     return "parked";
   }
 
@@ -464,7 +600,14 @@ export async function sendEmail(
     // Before any park: a row of a stopped broadcast must end canceled, never
     // parked where no sweep looks again.
     if (email.broadcastId && (await broadcastCanceled(db, email.broadcastId))) {
-      return refuse(db, email, "broadcast_canceled");
+      return refuse(db, deps, email, "broadcast_canceled");
+    }
+    // Past the pause line a broadcast row waits for the drain, which releases
+    // it once the rates recover. Rows the fan-out queued while the team was
+    // healthy carry no drip and would otherwise go out at full speed.
+    if (await deliverabilityHold(db, email.teamId)) {
+      await parkQueued(db, email, "sending paused");
+      return "parked";
     }
     if (deps.sesQuota?.bulkExhausted?.(region) || deps.sesQuota?.paused?.(region)) {
       await parkQueued(
@@ -480,36 +623,51 @@ export async function sendEmail(
     return "parked";
   }
 
+  // Terminal: "skipped" when the row was no longer this attempt's to fail.
+  const fail = async (reason: string, claimHeld = false): Promise<SendOutcome> =>
+    (await failQueuedEmail(db, email.id, reason, deps.enqueueWebhookDelivery, claimHeld))
+      ? "failed"
+      : "skipped";
+
   let eligibility = await checkSendEligibility(db, email);
-  if (!eligibility.eligible) return refuse(db, email, eligibility.reason);
+  if (!eligibility.eligible) return refuse(db, deps, email, eligibility.reason);
   if (eligibility.strip) await stripRecipients(db, email, eligibility.strip);
 
-  // SES rejects a tenant send whose identity or configuration set is not
-  // associated, so the tenant rides along only once the row is marked.
-  // The shared onboarding sender is an identity of this instance's own SES
-  // account: no team domain, the default region and configuration set.
-  const platformSend = !email.domainId && isOnboardingSender(email.from, deps.onboardingEmailFrom);
-  if (!platformSend && domain?.status !== "verified") {
+  // The shared onboarding sender and the shared inbox domain are identities
+  // of this instance's own SES account: no team domain, the default region
+  // and configuration set. Only the onboarding email is the platform's own
+  // content; shared-domain mail is a customer's, screened like any and sent
+  // under the team's tenant once associated.
+  const onboarding = !email.domainId && isOnboardingSender(email.from, deps.onboardingEmailFrom);
+  const sharedSend =
+    !email.domainId &&
+    !onboarding &&
+    isSharedInboxSender(
+      email.from,
+      deps.sharedInboxDomain === undefined ? sharedInboxDomain() : deps.sharedInboxDomain,
+    );
+  if (!onboarding && !sharedSend && domain?.status !== "verified") {
     // Terminal, not retried: a domain demoted or deleted after accept does
     // not come back on its own, and the row would otherwise ride the retry
     // and reconcile loops until its body is purged.
-    await failQueuedEmail(db, email.id, "domain_not_verified");
-    return "failed";
+    return fail("domain_not_verified");
+  }
+  // Read per send so the operator's switch also holds mail queued before it
+  // was turned off: that mail waits in the queue until sending resumes.
+  const sharedSettings = sharedSend ? await deps.settings?.() : undefined;
+  if (sharedSettings?.sharedInboxSend === false) {
+    await deps.reschedule?.(
+      email.id,
+      new Date(Date.now() + SHARED_PAUSED_RETRY_MS),
+      emailSendPriority(email),
+    );
+    return "deferred";
   }
   const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
-  // TenantName rides only when the set this send names is the one associated
-  // with the tenant: SES rejects a tenant send referencing an unassociated set.
-  const tenantName =
-    domain?.sesTenantAssociatedAt &&
-    domain.sesTenantName &&
-    (domain.sesTenantConfigSet ?? null) === (configurationSet ?? null)
-      ? domain.sesTenantName
-      : undefined;
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
   if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
-    await failQueuedEmail(db, email.id, "body_missing");
-    return "failed";
+    return fail("body_missing");
   }
   let body: EmailBody;
   let attachments: EmailAttachment[] | null;
@@ -531,8 +689,71 @@ export async function sendEmail(
       : null;
   } catch (err) {
     if (isTransientError(err)) throw err;
-    await failQueuedEmail(db, email.id, "body_unreadable");
-    return "failed";
+    return fail("body_unreadable");
+  }
+
+  // Screening before SES: mail with a reason to be judged first waits for
+  // the verdict queued, and the send lane moves on; the judge queues the send
+  // again once it answers. The team's hold or pause the verdict brings was
+  // read above, on this pass. Account mail and the fixed onboarding email are
+  // never customer content, so they never wait.
+  let screened: { id: string; unjudged: boolean } | null = null;
+  let probation = false;
+  let media: SendMedia | null = null;
+  if (deps.monitor && !systemMail && !onboarding) {
+    // Read once for the linkage check and the gate.
+    const settings = await deps.monitor.settings().catch(() => null);
+    const team = settings ? await screeningTeam(db, settings, email.teamId, new Date()) : undefined;
+    // A team in its first window that shares people, domains or this message
+    // with a team suspended for phishing is held before it sends anything.
+    if (team?.firstWindow && !email.broadcastId) {
+      const linked = await linkTeam(db, {
+        teamId: email.teamId,
+        trigger: "send",
+        message: { from: email.from, subject: email.subject, html: body.html, text: body.text },
+        tier: team.tier,
+      });
+      if (linked?.held) {
+        await parkQueued(db, email, "team linked to a team suspended for phishing", "review");
+        return "parked";
+      }
+    }
+    const files = attachments ?? [];
+    const scan = files.length > 0 ? await scanAttachments(files, deps.media) : null;
+    // Threads too busy to read a file say nothing about it: the job tries
+    // again through the queue's backoff instead of parking or sending blind.
+    if (scan?.busy) throw new MediaPoolError("busy");
+    media = {
+      attachments: files.length,
+      opaque: opaqueFacts({ html: body.html, text: body.text, attachments: files.length }).opaque,
+      links: scan?.links.map((link) => link.url) ?? [],
+      unsafe: scan !== null && (scan.risky || scan.unreadable || scan.refused),
+    };
+    const gate = await screenBeforeSend(db, deps.monitor, {
+      email,
+      body: { html: body.html, text: body.text },
+      media,
+      ignore: deps.platformDomains,
+      team,
+      now: new Date(),
+    });
+    if (gate.action === "wait") {
+      if (gate.until) await deps.reschedule?.(email.id, gate.until, emailSendPriority(email));
+      return "deferred";
+    }
+    if (gate.action === "park") {
+      await parkQueued(db, email, `screening parked it (${gate.reason})`, gate.reason);
+      if (gate.reason === "media" && scan) {
+        try {
+          await saveMediaReview(db, deps.keyring, email, scanReview(scan), { keep: true });
+        } catch (err) {
+          console.error(`email.send: media review for ${email.id} not saved`, err);
+        }
+      }
+      return "parked";
+    }
+    screened = gate.sample;
+    probation = gate.probation === true;
   }
 
   // App-layer engagement tracking: when the domain has click or open tracking
@@ -542,9 +763,11 @@ export async function sendEmail(
   // Account mail (core sendSystemMail) carries live credentials — reset and
   // verification links — so its anchors are never rewritten through the
   // redirect and no pixel rides along, whatever the domain's toggles say.
-  const systemMail = email.tags?.[SYSTEM_MAIL_TAG] !== undefined;
-  const click = (domain?.clickTracking ?? false) && !systemMail;
-  const open = (domain?.openTracking ?? false) && !systemMail;
+  // A people inbox is a mailbox: its mail goes out untracked too, as from any
+  // mail client.
+  const inboxKind = await inboxKindOf(db, email.inboxId);
+  const click = (domain?.clickTracking ?? false) && !systemMail && inboxKind !== "human";
+  const open = (domain?.openTracking ?? false) && !systemMail && inboxKind !== "human";
   let html = body.html;
   let text = body.text;
 
@@ -632,6 +855,7 @@ export async function sendEmail(
           : undefined;
       html = rewriteForTracking(html, {
         emailId: email.id,
+        teamId: email.teamId,
         trackingBaseUrl,
         click,
         open,
@@ -678,9 +902,13 @@ export async function sendEmail(
   }
   // Bulk-mail class signals (RFC 2919 List-Id, RFC 3834 Auto-Submitted, and
   // Precedence) so mailbox providers file broadcasts as list mail. Only for
-  // broadcast rows — transactional sends must not carry them.
+  // broadcast rows — transactional sends must not carry them. The List-Id
+  // names the list, not the send: one per topic, one for the rest, so every
+  // broadcast to the same people builds the same list's reputation.
   if (email.broadcastId && email.contactId) {
-    if (domain?.name) headers["List-Id"] = `<${email.broadcastId}.${domain.name}>`;
+    if (domain?.name) {
+      headers["List-Id"] = `<${eligibility.topicId ?? "broadcasts"}.${domain.name}>`.toLowerCase();
+    }
     headers.Precedence = "bulk";
     headers["Auto-Submitted"] = "auto-generated";
   }
@@ -698,17 +926,32 @@ export async function sendEmail(
     headers,
   });
 
+  // SES rejects a tenant send whose identity or configuration set is not
+  // associated, so TenantName rides only when the recorded association
+  // matches the set this send names. Shared mail associates here: after
+  // screening, so mail that waits or parks costs no SES calls, and before the
+  // claim, so a crash mid-association never leaves a claimed, unsent row.
+  const tenantName = domain
+    ? domain.sesTenantAssociatedAt &&
+      domain.sesTenantName &&
+      (domain.sesTenantConfigSet ?? null) === (configurationSet ?? null)
+      ? domain.sesTenantName
+      : undefined
+    : sharedSettings?.sharedInboxTenants
+      ? await deps.sharedTenant?.(email.teamId, configurationSet)
+      : undefined;
+
   // The rate-limit wait comes before the final re-check so that check stays
   // immediately ahead of the claim.
   await deps.throttle?.(domain?.region);
 
   // Re-check immediately before the atomic claim: quota delays and throttling
   // can leave a row queued long enough for a recipient to opt out after the
-  // broadcast fan-out first selected them. A recipient suppressed in the
-  // meantime invalidates the MIME already built, so the row is stripped and
-  // handed straight back to the queue.
+  // broadcast fan-out first selected them. A recipient suppressed or opted
+  // out in the meantime invalidates the MIME already built, so the row is
+  // stripped and handed straight back to the queue.
   eligibility = await checkSendEligibility(db, email);
-  if (!eligibility.eligible) return refuse(db, email, eligibility.reason);
+  if (!eligibility.eligible) return refuse(db, deps, email, eligibility.reason);
   if (eligibility.strip) {
     await stripRecipients(db, email, eligibility.strip);
     await deps.reschedule?.(email.id, new Date(), emailSendPriority(email));
@@ -732,9 +975,22 @@ export async function sendEmail(
     .returning({ id: schema.emails.id });
   if (claimed.length === 0) return "skipped";
 
-  let messageId: string;
-  try {
-    ({ messageId } = await deps.ses.sendRaw({
+  // Credential-bearing account mail loses its body the moment SES holds it,
+  // or may hold it: a reset link is live for thirty minutes, and the row's
+  // body is otherwise readable by every member of the owning team, any
+  // full-access key and any connected app until the retention purge.
+  // Recipient, subject, status, events and counters stay. Other system kinds
+  // carry only dashboard links and keep their body for the normal retention
+  // window.
+  const purgeCredential = async () => {
+    if (!systemMail || !CREDENTIAL_MAIL_KINDS.has(email.tags?.[SYSTEM_MAIL_TAG] ?? "")) return;
+    await db
+      .update(schema.emails)
+      .set(purgedEmailBodyColumns(new Date()))
+      .where(eq(schema.emails.id, email.id));
+  };
+  const send = (tenant: string | undefined) =>
+    deps.ses.sendRaw({
       raw: mime,
       emailId: email.id,
       to: email.to,
@@ -742,18 +998,34 @@ export async function sendEmail(
       bcc: email.bcc,
       ...(configurationSet ? { configurationSetName: configurationSet } : {}),
       ...(domain?.region ? { region: domain.region } : {}),
-      ...(tenantName ? { tenantName } : {}),
+      ...(tenant ? { tenantName: tenant } : {}),
+    });
+  let messageId: string;
+  try {
+    ({ messageId } = await send(tenantName).catch(async (err: unknown) => {
+      // An association removed outside the app: forgotten, so the team's
+      // next shared send associates again, and this one goes out once more
+      // without the tenant.
+      if (!sharedSend || !tenantName || !isTenantNotAssociated(err)) throw err;
+      await clearSharedTenant(db, email.teamId);
+      return send(undefined);
     }));
   } catch (err) {
-    // sendRaw threw ⇒ the SDK exhausted its own retries without an accept.
-    // A permanent refusal ends the email here; anything else releases the
-    // claim so the job retry can send. (After a SUCCESSFUL sendRaw the claim
-    // is never released — a bookkeeping failure then leaves the row claimed
-    // rather than risking a duplicate delivery.)
+    // sendRaw threw ⇒ the SDK exhausted its own retries without an accept,
+    // unless the send deadline cut it off: SES may hold that one, so its
+    // claim stands and the job retry skips the row, leaving it to SES's
+    // events or the stalled-claim sweep. A permanent refusal ends the email
+    // here; anything else releases the claim so the job retry can send.
+    // (After a SUCCESSFUL sendRaw the claim is never released — a
+    // bookkeeping failure then leaves the row claimed rather than risking a
+    // duplicate delivery.)
     const name = (err as { name?: string }).name ?? "";
     if (TERMINAL_SES_ERRORS.has(name)) {
-      await failQueuedEmail(db, email.id, `ses_${name}`);
-      return "failed";
+      return fail(`ses_${name}`, true);
+    }
+    if (name === "AbortError") {
+      await purgeCredential();
+      throw err;
     }
     await db
       .update(schema.emails)
@@ -788,28 +1060,22 @@ export async function sendEmail(
   });
   const counter = schema.usageCounters;
   const sentAt = new Date();
+  const recipients = [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])];
+  const noFeedback = sentWithoutComplaintFeedback(recipients) ? 1 : 0;
   await db
     .insert(counter)
-    .values({ teamId: email.teamId, day: utcDay(sentAt), sent: 1 })
+    .values({ teamId: email.teamId, day: utcDay(sentAt), sent: 1, sentNoFeedback: noFeedback })
     .onConflictDoUpdate({
       target: [counter.teamId, counter.day],
-      set: { sent: sql`${counter.sent} + 1` },
+      set: {
+        sent: sql`${counter.sent} + 1`,
+        sentNoFeedback: sql`${counter.sentNoFeedback} + ${noFeedback}`,
+      },
     });
   await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
   if (bulk) deps.sesQuota?.noteBulkSent?.(region);
-  // Credential-bearing account mail loses its body the moment SES holds it: a
-  // reset link is live for thirty minutes, and the row's body is otherwise
-  // readable by every member of the owning team, any full-access key and
-  // any connected app until the retention purge. Recipient, subject, status,
-  // events and counters stay; insights below evaluate the in-memory body.
-  // Other system kinds carry only dashboard links and keep their body for the
-  // normal retention window.
-  if (systemMail && CREDENTIAL_MAIL_KINDS.has(email.tags?.[SYSTEM_MAIL_TAG] ?? "")) {
-    await db
-      .update(schema.emails)
-      .set(purgedEmailBodyColumns(new Date()))
-      .where(eq(schema.emails.id, email.id));
-  }
+  // Insights below evaluate the in-memory body.
+  await purgeCredential();
   // Insights are best-effort bookkeeping on an already-accepted send: a bug
   // here must never fail (and so retry) the delivery.
   let insights: ReturnType<typeof evaluateEmailInsights> | undefined;
@@ -878,35 +1144,69 @@ export async function sendEmail(
   }
   // The content monitor's draw, the same best-effort rule: the send is done,
   // a failure here is logged and changes nothing. The instance's own account
-  // mail is never customer content, so it is never drawn.
-  if (deps.monitor && !systemMail) {
+  // mail and the fixed onboarding email are never customer content, so they
+  // are never drawn.
+  if (deps.monitor && !systemMail && !onboarding) {
     try {
-      await sampleAcceptedEmail(db, deps.monitor, {
-        teamId: email.teamId,
-        emailId: email.id,
-        broadcast: email.broadcastId !== null,
-        anomalies:
-          insights?.checks.filter(
-            (c) =>
-              c.status === "fail" && (MONITOR_ANOMALY_CHECKS as readonly string[]).includes(c.id),
-          ).length ?? 0,
-      });
+      if (screened) {
+        // Judged before it went out: counted, never drawn again, which would
+        // count its verdict twice toward the repeat hold.
+        await noteAcceptedSend(db, email.teamId, new Date());
+        if (screened.unjudged) {
+          await judgeAfterSend(db, deps.monitor, { id: screened.id, teamId: email.teamId });
+        }
+      } else if (email.firstContact && inboxKind === "agent") {
+        // An agent writing to someone new is always judged, and its verdict
+        // folds into the team's hold policy like any outbound sample.
+        const now = new Date();
+        await noteAcceptedSend(db, email.teamId, now);
+        await recordMonitorSample(db, deps.monitor, await deps.monitor.settings(), {
+          teamId: email.teamId,
+          emailId: email.id,
+          broadcastId: null,
+          kind: "agent_first_contact",
+          now,
+        });
+      } else {
+        // An opaque email and one with files each add an anomaly: both
+        // together draw it at every tier.
+        await sampleAcceptedEmail(db, deps.monitor, {
+          teamId: email.teamId,
+          emailId: email.id,
+          broadcast: email.broadcastId !== null,
+          probation,
+          anomalies:
+            (insights?.checks.filter(
+              (c) =>
+                c.status === "fail" && (MONITOR_ANOMALY_CHECKS as readonly string[]).includes(c.id),
+            ).length ?? 0) +
+            (media?.opaque ? 1 : 0) +
+            (media && media.attachments > 0 ? 1 : 0),
+        });
+      }
     } catch (err) {
       console.error(`email.send: monitor draw failed for ${email.id}`, err);
     }
   }
   // The sentAt claim above makes this path single-shot per email, so the
   // email.sent fan-out cannot double-fire on a job retry.
-  if (deps.enqueueWebhookDelivery) {
-    await enqueueWebhookDeliveries(db, {
-      teamId: email.teamId,
-      email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
-      type: "email.sent",
-      occurredAt: new Date(),
-      enqueue: deps.enqueueWebhookDelivery,
-    });
-  }
+  await enqueueWebhookDeliveries(db, {
+    teamId: email.teamId,
+    email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+    type: "email.sent",
+    occurredAt: new Date(),
+    enqueue: deps.enqueueWebhookDelivery ?? (async () => {}),
+  });
   return "sent";
+}
+
+async function inboxKindOf(db: Db, inboxId: string | null): Promise<"agent" | "human" | null> {
+  if (!inboxId) return null;
+  const [inbox] = await db
+    .select({ kind: schema.inboxes.kind })
+    .from(schema.inboxes)
+    .where(eq(schema.inboxes.id, inboxId));
+  return inbox?.kind ?? null;
 }
 
 interface MimeInput {
@@ -935,12 +1235,20 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
     ...(input.text ? { text: input.text } : {}),
     ...(input.attachments
       ? {
-          attachments: input.attachments.map((a) => ({
-            filename: a.filename,
-            content: a.content,
-            encoding: "base64" as const,
-            ...(a.contentType ? { contentType: a.contentType } : {}),
-          })),
+          attachments: input.attachments.map((a) => {
+            const contentType = sentContentType(a.contentType);
+            return {
+              filename: a.filename,
+              content: a.content,
+              encoding: "base64" as const,
+              ...(contentType ? { contentType } : {}),
+              // nodemailer would send a message/* part (a forwarded .eml) inline;
+              // only a part the html references by content id is.
+              ...(a.contentId
+                ? { cid: a.contentId }
+                : { contentDisposition: "attachment" as const }),
+            };
+          }),
         }
       : {}),
     headers: input.headers,

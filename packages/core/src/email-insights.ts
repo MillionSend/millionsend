@@ -1,6 +1,9 @@
-import { ANCHOR_HREF, anchorHrefParts } from "./link-tracking.js";
+import { visibleText } from "./html.js";
+import { extractLinks, UNRESOLVED_DESTINATION } from "./links.js";
 import { isRootDomainSend, registrableDomain } from "./org-domain.js";
 import { parseMailbox } from "./sender-address.js";
+
+export { visibleText };
 
 /**
  * Pure email-insights check/score engine. No I/O, no DB, no clock — staleness
@@ -62,8 +65,13 @@ export interface EmailCheckResult {
   detail?: Record<string, unknown>;
 }
 
-/** Link-shortener hosts (matched exact or as a parent of the link host). */
+/**
+ * Link-shortener hosts (matched exact or as a parent of the link host),
+ * and the stand-in screening records for a link it cannot read, which hides
+ * where it leads just as a shortener does: neither is ever cleared.
+ */
 export const SHORTENER_HOSTS = new Set([
+  UNRESOLVED_DESTINATION,
   "youtu.be",
   "bit.ly",
   "tinyurl.com",
@@ -120,8 +128,14 @@ export interface EmailInsightsInput {
   now: Date;
 }
 
+/**
+ * Under this many visible characters a body has no text of its own: the
+ * line for image_text_ratio, and for the content judge's opaque email.
+ */
+export const MIN_BODY_TEXT_CHARS = 100;
+
 /** Gmail clips messages whose HTML exceeds ~100KB (community-measured). */
-const GMAIL_CLIP_BYTES = 102400;
+export const GMAIL_CLIP_BYTES = 102400;
 const DMARC_STALE_MS = 24 * 60 * 60 * 1000;
 const MINOR_CAP_HUNDREDTHS = 150;
 
@@ -142,8 +156,13 @@ const NO_REPLY_LOCAL = /^(no-?reply|do-?not-?reply|nao-?responda)/i;
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 export interface Anchor {
+  /**
+   * The http(s) URL a client opens for it, read as a browser reads it but
+   * not through redirect wrappers; else the value as written, references
+   * decoded.
+   */
   href: string;
-  /** Visible inner text, tags stripped, whitespace collapsed. */
+  /** Visible inner text (an area's alt), tags stripped, whitespace collapsed. */
   text: string;
   /** Char offset of the anchor in preTrackingHtml (clip-point math). */
   index: number;
@@ -155,28 +174,11 @@ interface Link extends Anchor {
   protocol: string;
 }
 
-// `[^<>]`, not `[^>]`: an unclosed tag then stops the scan at the next `<`
-// instead of rescanning to the end from every one, quadratic on a crafted
-// body. An unclosed style/script swallows the rest, as a browser does.
-export function visibleText(html: string): string {
-  return html
-    .replace(/<(style|script)\b(?:[\s\S]*?<\/\1\s*>|[\s\S]*)/gi, "")
-    .replace(/<[^<>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
+/** The links of <a> and <area>, the ones a reader clicks. */
 export function extractAnchors(html: string): Anchor[] {
-  const lower = html.toLowerCase();
-  const anchors: Anchor[] = [];
-  for (const m of html.matchAll(ANCHOR_HREF)) {
-    const openEnd = html.indexOf(">", m.index + m[0].length);
-    if (openEnd === -1) continue;
-    const close = lower.indexOf("</a", openEnd + 1);
-    const inner = html.slice(openEnd + 1, close === -1 ? html.length : close);
-    anchors.push({ href: anchorHrefParts(m).value, text: visibleText(inner), index: m.index });
-  }
-  return anchors;
+  return extractLinks(html, null)
+    .filter((link) => link.source === "a" || link.source === "area")
+    .map((link) => ({ href: link.href ?? link.raw, text: link.text, index: link.index }));
 }
 
 function toLink(a: Anchor): Link | null {
@@ -369,7 +371,7 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
         return { status: input.hasAttachments ? "fail" : "pass" };
       case "image_text_ratio": {
         if (images.length === 0) return { status: "not_applicable" };
-        if (bodyText.length < 100) {
+        if (bodyText.length < MIN_BODY_TEXT_CHARS) {
           return {
             status: "fail",
             detail: { visibleTextChars: bodyText.length, imageCount: images.length },

@@ -1,5 +1,6 @@
 import { en, enPhrases } from "./account-mail/en.js";
 import { ptBR, ptBRPhrases } from "./account-mail/pt-BR.js";
+import { fillMailTemplate } from "./customer-text.js";
 import { accountMailCard, fillTemplate } from "./html.js";
 import { type Plan, planLabel, teamRung } from "./plans.js";
 
@@ -26,6 +27,19 @@ export const ACCOUNT_MAIL_KINDS = [
   "broadcast.sending",
   "broadcast.held_quota",
   "broadcast.held",
+  "quota.warning",
+  "quota.reached",
+  "quota.paused",
+  "quota.monthly_warning",
+  "quota.monthly_reached",
+  "deliverability.warning",
+  "deliverability.paused",
+  "warmup.paused",
+  "warmup.done",
+  "webhook.failing",
+  "webhook.auto_disabled",
+  "webhook.backlog",
+  "inbox.attention",
   "billing.payment_failed",
   "billing.plan_activated",
   "billing.plan_changed",
@@ -37,8 +51,12 @@ export const ACCOUNT_MAIL_KINDS = [
   "team.reinstated",
   "monitor.alert",
   "monitor.broadcasts_paused",
+  "monitor.team_held",
+  "monitor.team_linked",
   "monitor.degraded",
-  "content.access_notice",
+  "monitor.destination_parked",
+  "monitor.media_blocked",
+  "monitor.destination_revoked",
 ] as const;
 export type AccountMailKind = (typeof ACCOUNT_MAIL_KINDS)[number];
 
@@ -166,6 +184,22 @@ export function planMove(
   return null;
 }
 
+/** A rate as the mails print it, to two decimals: "5.00%" / "5,00%". */
+export function formatMailPercent(locale: MailLocale, rate: number): string {
+  return new Intl.NumberFormat(locale, {
+    style: "percent",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(rate);
+}
+
+/** How long something has waited, coarsely: "3 h", or "12 min" under an hour. */
+export function formatMailAge(ms: number): string {
+  return ms >= 3_600_000
+    ? `${Math.floor(ms / 3_600_000)} h`
+    : `${Math.max(1, Math.floor(ms / 60_000))} min`;
+}
+
 /** A moment in the reader's language, said in UTC so two readers agree on it. */
 export function formatMailDateTime(locale: MailLocale, date: Date): string {
   const at = new Intl.DateTimeFormat(locale, {
@@ -185,7 +219,31 @@ export function accountMailPhrase(input: {
 }): string {
   const phrase = CATALOGS[input.locale][input.kind].extra?.[input.key];
   if (phrase === undefined) throw new Error(`no phrase ${input.key} for ${input.kind}`);
-  return fillTemplate(phrase, input.values ?? {});
+  return fillMailTemplate(phrase, input.values ?? {});
+}
+
+/**
+ * Counts as one list for a sentence, zeros left out: "1 email in quarantine and
+ * 2 sends refused…", each from the entry's `<name>.one` or `<name>.other` phrase.
+ */
+export function mailCountList(
+  locale: MailLocale,
+  kind: AccountMailKind,
+  counts: Record<string, number>,
+): string {
+  const items = Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .map(([name, n]) =>
+      accountMailPhrase({
+        locale,
+        kind,
+        // Not Intl.PluralRules: it answers "many" for pt-BR millions. With zeros
+        // left out, 1 is the only singular in both languages.
+        key: `${name}.${n === 1 ? "one" : "other"}`,
+        values: { n: n.toLocaleString(locale) },
+      }),
+    );
+  return new Intl.ListFormat(locale, { type: "conjunction" }).format(items);
 }
 
 /** Renders one kind in one language on the shared card; `url` is the button's target. */
@@ -196,14 +254,14 @@ export function buildAccountMail(input: {
   values?: Record<string, string>;
 }): MailContent {
   const entry = CATALOGS[input.locale][input.kind];
-  const values = input.values ?? {};
+  const fill = (template: string) => fillMailTemplate(template, input.values ?? {});
   return {
-    subject: fillTemplate(entry.subject, values),
+    subject: fill(entry.subject),
     ...accountMailCard({
-      paragraphs: entry.body.map((p) => fillTemplate(p, values)),
-      button: fillTemplate(entry.button, values),
+      paragraphs: entry.body.map(fill),
+      button: fill(entry.button),
       url: input.url,
-      muted: (entry.muted ?? []).map((m) => fillTemplate(m, values)),
+      muted: (entry.muted ?? []).map(fill),
     }),
   };
 }

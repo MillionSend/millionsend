@@ -1,7 +1,9 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useMemo } from "react";
+import { useMemo } from "react";
+import { CopyChip } from "@/components/copy-chip";
+import { KvRow } from "@/components/kv-row";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
 import { Skeleton } from "@/components/skeleton";
@@ -11,6 +13,8 @@ import { formatDayTime, formatMmSs, formatRelative } from "@/lib/format";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useCountdown } from "@/lib/use-countdown";
 import { GuardrailLabel, RegionLabel, usePlanName } from "./cells";
+import { LinkedTeams } from "./linked-teams";
+import { MembersSection } from "./members-section";
 import type { TeamDetail } from "./types";
 
 function Figure({ label, value }: { label: string; value: React.ReactNode }) {
@@ -36,12 +40,14 @@ function LiveViewLine({ expiresAt }: { expiresAt: Date }) {
 
 /** Everything the console knows about one team, with Adjust limits as the way out. */
 export function TeamDialog({
+  id,
   name,
   detail,
   onClose,
   onAdjustLimits,
   onViewAsOwner,
 }: {
+  id: string;
   name: string;
   detail: TeamDetail | undefined;
   onClose: () => void;
@@ -56,7 +62,14 @@ export function TeamDialog({
   const none = common("none");
 
   const owner = detail?.members.find((m) => m.role === "owner") ?? detail?.members[0];
+  const viewOff = detail?.supportViewEnabled ? null : "viewOff";
   const memberEmails = detail?.members.map((m) => m.email).join(", ") ?? "";
+  // Known before the detail loads, so it never waits behind a skeleton.
+  const idRow = (
+    <KvRow label={t("detail.id")}>
+      <CopyChip value={id} wrap />
+    </KvRow>
+  );
 
   return (
     <Modal open onClose={onClose} onConfirm={onAdjustLimits} title={name} size="wide">
@@ -82,7 +95,7 @@ export function TeamDialog({
             />
             <Figure
               label={t("detail.domains")}
-              value={t("detail.domainsValue", { count: nf.format(detail.domains) })}
+              value={t("detail.domainsValue", { count: detail.domains })}
             />
           </>
         ) : (
@@ -98,12 +111,12 @@ export function TeamDialog({
       {detail ? (
         <>
           <dl className="ms-kv">
-            <dt>{t("detail.type")}</dt>
-            <dd>{planLabel(planName(detail.plan), detail.planQuota)}</dd>
-            <dt>{t("detail.owner")}</dt>
-            <dd>{owner?.email ?? none}</dd>
-            <dt>{t("detail.members")}</dt>
-            <dd>
+            {idRow}
+            <KvRow label={t("detail.type")}>
+              {planLabel(planName(detail.plan), detail.planQuota)}
+            </KvRow>
+            <KvRow label={t("detail.owner")}>{owner?.email ?? none}</KvRow>
+            <KvRow label={t("detail.members")}>
               {memberEmails ? (
                 <Tooltip inline text={memberEmails}>
                   {nf.format(detail.members.length)}
@@ -111,23 +124,19 @@ export function TeamDialog({
               ) : (
                 nf.format(0)
               )}
-            </dd>
-            <dt>{t("detail.region")}</dt>
-            <dd>
+            </KvRow>
+            <KvRow label={t("detail.region")}>
               <RegionLabel region={detail.region} />
-            </dd>
-            <dt>{t("detail.guardrail")}</dt>
-            <dd>
+            </KvRow>
+            <KvRow label={t("detail.guardrail")}>
               <GuardrailLabel
                 guardrail={detail.guardrail}
                 suspendedAt={detail.suspendedAt}
                 broadcastsPausedByOperatorAt={detail.broadcastsPausedByOperatorAt}
               />
-            </dd>
-            <dt>{t("detail.created")}</dt>
-            <dd>{formatDayTime(detail.createdAt, locale)}</dd>
-            <dt>{t("detail.stripe")}</dt>
-            <dd>
+            </KvRow>
+            <KvRow label={t("detail.created")}>{formatDayTime(detail.createdAt, locale)}</KvRow>
+            <KvRow label={t("detail.stripe")}>
               {detail.stripeSubscriptionId
                 ? t.rich("detail.stripeSub", {
                     id: detail.stripeSubscriptionId,
@@ -147,13 +156,12 @@ export function TeamDialog({
                       ),
                   })
                 : t("detail.stripeNone")}
-            </dd>
-            <dt>{t("detail.ceiling")}</dt>
-            <dd>
+            </KvRow>
+            <KvRow label={t("detail.ceiling")}>
               {detail.dailySendCeiling === null
                 ? t("detail.ceilingNone")
                 : nf.format(detail.dailySendCeiling)}
-            </dd>
+            </KvRow>
           </dl>
           {detail.standingAt ? (
             <p style={{ margin: "12px 0 0", color: "var(--ms-muted)", fontSize: 12 }}>
@@ -163,34 +171,29 @@ export function TeamDialog({
         </>
       ) : (
         <dl className="ms-kv">
+          {idRow}
           {["type", "owner", "members", "region", "guardrail", "created", "stripe", "ceiling"].map(
             (key) => (
-              <Fragment key={key}>
-                <dt>{t(`detail.${key}`)}</dt>
-                <dd>
-                  <Skeleton width={120} />
-                </dd>
-              </Fragment>
+              <KvRow key={key} label={t(`detail.${key}`)}>
+                <Skeleton width={120} />
+              </KvRow>
             ),
           )}
         </dl>
       )}
+      <LinkedTeams teamId={id} />
+      <MembersSection teamId={id} />
       <ModalFooter>
         <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
           {common("close")} <span className="ms-keycap">Esc</span>
         </button>
-        {detail && !detail.supportViewEnabled ? (
+        {detail && viewOff ? (
           // Inline, so the trigger is a span: the default trigger is itself a
           // button, and a button inside a button is invalid nesting the
           // browser may reparent. The span is focusable, so the reason
           // reaches a keyboard user too.
-          <Tooltip inline text={t("menu.viewOff")}>
-            <button
-              type="button"
-              className="ms-btn ms-btn-secondary"
-              disabled
-              style={{ pointerEvents: "none" }}
-            >
+          <Tooltip inline text={t(`menu.${viewOff}`)}>
+            <button type="button" className="ms-btn ms-btn-secondary" disabled>
               {t("menu.view")}
             </button>
           </Tooltip>

@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { placePanel, viewportSize } from "@/lib/panel-placement";
 
 const ANCHOR_GAP = 8;
 
@@ -52,23 +53,22 @@ export function Tooltip({
   const panelId = useId();
   const open = hover || pinned;
 
-  // Placed after measuring: fixed-position auto width shrinks to a sliver
-  // against the right viewport edge, so the center is clamped back into view;
-  // and the panel sits above the anchor unless its measured height would run
+  // Placed after measuring: centred on the trigger and shifted to stay inside
+  // the viewport, above the trigger unless its measured height would run
   // past the viewport top, in which case it hangs below instead.
   useLayoutEffect(() => {
     const panel = panelRef.current;
     const anchor = triggerRef.current;
     if (!panel || !anchor) return;
-    const margin = 12;
-    const half = panel.offsetWidth / 2;
-    const anchorRect = anchor.getBoundingClientRect();
-    const center = anchorRect.left + anchorRect.width / 2;
-    const clamped = Math.min(Math.max(center, margin + half), window.innerWidth - margin - half);
-    panel.style.left = `${clamped}px`;
-    const above = anchorRect.top - ANCHOR_GAP - panel.offsetHeight >= margin;
-    panel.style.top = `${above ? anchorRect.top - ANCHOR_GAP : anchorRect.bottom + ANCHOR_GAP}px`;
-    panel.style.transform = above ? "translate(-50%, -100%)" : "translateX(-50%)";
+    const placed = placePanel(
+      anchor.getBoundingClientRect(),
+      { width: panel.offsetWidth, height: panel.offsetHeight },
+      viewportSize(),
+      { align: "center", prefer: "above", gap: ANCHOR_GAP },
+    );
+    panel.style.left = `${placed.left}px`;
+    panel.style.top = `${placed.top}px`;
+    panel.style.transform = "none";
   });
 
   useEffect(() => {

@@ -79,12 +79,19 @@ export function ApiKeysView() {
 
   const domainsQuery = useQuery(trpc.domains.list.queryOptions());
   const verifiedDomains = (domainsQuery.data ?? []).filter((d) => d.status === "verified");
+  const receiving = useQuery(trpc.system.features.queryOptions()).data?.receiving === true;
+  const inboxesQuery = useQuery(
+    trpc.inboxes.list.queryOptions({ limit: 100 }, { enabled: receiving && canExport }),
+  );
+  const inboxes = inboxesQuery.data?.items ?? [];
 
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [permission, setPermission] = useState<"full_access" | "sending_access">("full_access");
   // "" = any verified domain; otherwise a domain id the key is scoped to.
   const [domainId, setDomainId] = useState("");
+  // "" = not restricted; otherwise the one inbox the key reads and sends from.
+  const [inboxId, setInboxId] = useState("");
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null);
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
@@ -128,6 +135,7 @@ export function ApiKeysView() {
     setName("");
     setPermission("full_access");
     setDomainId("");
+    setInboxId("");
     resetCreate();
   }, [resetCreate]);
   const closeRevoke = useCallback(() => setRevokeTarget(null), []);
@@ -140,7 +148,12 @@ export function ApiKeysView() {
       return;
     }
     if (name.trim().length === 0 || createMutation.isPending) return;
-    createMutation.mutate({ name, permission, domainId: domainId || null });
+    createMutation.mutate({
+      name,
+      permission,
+      domainId: domainId || null,
+      ...(inboxId ? { inboxId } : {}),
+    });
   };
   const confirmRevoke = () => {
     if (!revokeTarget || revokeMutation.isPending) return;
@@ -173,9 +186,9 @@ export function ApiKeysView() {
               <PlusGlyph size={14} />
               {t("createKey")}
             </button>
-            <ResourceApiButton resource="apiKeys" />
           </>
         }
+        menu={<ResourceApiButton resource="apiKeys" />}
       />
 
       {listQuery.isPending ? <KeysSkeleton /> : null}
@@ -217,8 +230,11 @@ export function ApiKeysView() {
                     <span
                       style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
                     >
-                      <NavTile name="api-keys" color={TONE_COLOR.neutral} />
-                      {key.name}
+                      {/* The tile never wraps away from the name; the badges may. */}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <NavTile name="api-keys" color={TONE_COLOR.neutral} />
+                        {key.name}
+                      </span>
                       <span
                         className={`ms-badge ms-badge-${
                           key.permission === "sending_access" ? "info" : "neutral"
@@ -227,7 +243,20 @@ export function ApiKeysView() {
                         {t(key.permission === "sending_access" ? "scope.sending" : "scope.full")}
                       </span>
                       {key.domainName ? (
-                        <span className="ms-badge ms-badge-neutral">{key.domainName}</span>
+                        <span
+                          className="ms-badge ms-badge-neutral ms-badge-clip"
+                          title={key.domainName}
+                        >
+                          {key.domainName}
+                        </span>
+                      ) : null}
+                      {key.inboxAddress ? (
+                        <span
+                          className="ms-badge ms-badge-info ms-badge-clip"
+                          title={key.inboxAddress}
+                        >
+                          {key.inboxAddress}
+                        </span>
                       ) : null}
                     </span>
                   </td>
@@ -324,7 +353,7 @@ export function ApiKeysView() {
                 id="api-key-permission"
                 width="100%"
                 value={permission}
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || inboxId !== ""}
                 onChange={(value) =>
                   setPermission(value === "sending_access" ? "sending_access" : "full_access")
                 }
@@ -341,7 +370,7 @@ export function ApiKeysView() {
                 id="api-key-domain"
                 width="100%"
                 value={domainId}
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || inboxId !== ""}
                 onChange={setDomainId}
                 ariaLabel={t("create.domain")}
                 options={[
@@ -350,6 +379,33 @@ export function ApiKeysView() {
                 ]}
               />
             </div>
+            {inboxes.length > 0 ? (
+              <div className="ms-field">
+                <div className="ms-label-row">
+                  <label htmlFor="api-key-inbox">{t("create.restrictInbox")}</label>
+                  <Tooltip text={t("create.restrictInboxHint")} />
+                </div>
+                <Select
+                  id="api-key-inbox"
+                  width="100%"
+                  value={inboxId}
+                  disabled={createMutation.isPending}
+                  onChange={(value) => {
+                    setInboxId(value);
+                    // An inbox key is a full-access key bound to no domain.
+                    if (value) {
+                      setPermission("full_access");
+                      setDomainId("");
+                    }
+                  }}
+                  ariaLabel={t("create.restrictInbox")}
+                  options={[
+                    { value: "", label: t("create.inboxAny") },
+                    ...inboxes.map((inbox) => ({ value: inbox.id, label: inbox.email_address })),
+                  ]}
+                />
+              </div>
+            ) : null}
             {createError ? (
               <div
                 className="ms-field-error"

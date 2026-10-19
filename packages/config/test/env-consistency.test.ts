@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   assertEnvConsistency,
   type Env,
+  invitesPerTeamPerDay,
   notificationsEmailFrom,
   sesTenantsEnabled,
 } from "../src/env.js";
@@ -113,6 +114,13 @@ it("requires the Turnstile keys together", () => {
   expect(() =>
     assertEnvConsistency(fakeEnv({ TURNSTILE_SITE_KEY: "0x4AAA", TURNSTILE_SECRET_KEY: "0x4BBB" })),
   ).not.toThrow();
+});
+
+it("caps a team at 50 invitations a day unless the setting names another whole number", () => {
+  expect(invitesPerTeamPerDay(fakeEnv({}))).toBe(50);
+  expect(invitesPerTeamPerDay(fakeEnv({ INVITES_PER_TEAM_PER_DAY: "7" }))).toBe(7);
+  expect(invitesPerTeamPerDay(fakeEnv({ INVITES_PER_TEAM_PER_DAY: "0" }))).toBe(50);
+  expect(invitesPerTeamPerDay(fakeEnv({ INVITES_PER_TEAM_PER_DAY: "many" }))).toBe(50);
 });
 
 it("rejects an AUTH_EMAIL_FROM that does not parse, accepts both valid forms", () => {

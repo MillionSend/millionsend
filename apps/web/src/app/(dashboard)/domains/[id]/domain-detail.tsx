@@ -1,15 +1,20 @@
 "use client";
 
+import { registrableDomain } from "@millionsend/core/org-domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
+import { BetaPill } from "@/components/beta-pill";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import {
   type DnsRecord,
   DnsRecordsTable,
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
+import { GradientBanner } from "@/components/gradient-banner";
 import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
@@ -20,51 +25,22 @@ import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
+import { toast } from "@/components/toast";
 import { WarnCard } from "@/components/warn-card";
 import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
-import { formatRelative, formatUtcMinute } from "@/lib/format";
-import { statusGlow } from "@/lib/status-glow";
+import { formatDay, formatRelative, formatUtcMinute } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
+import { oneOf, useUrlState } from "@/lib/url-state";
 import { zoneRelativeName } from "@/lib/zone";
 import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
 import { RegionLabel } from "../region-label";
 import { useTrackingToggle } from "../use-tracking-toggle";
+import { ConfigSection, StatusRow } from "./parts";
+import { WarmupStatus, WarmupTab } from "./warmup-tab";
 
-/**
- * Status-tinted gradient banner (canvas: near-black ground, glow rising from
- * the left edge). The rgba glows are the canvas values verbatim — the token
- * palette only carries their hex bases.
- */
-function GradientBanner({
-  variant,
-  children,
-}: {
-  variant: "success" | "warn";
-  children: React.ReactNode;
-}) {
-  const glow = statusGlow(variant, variant === "success" ? 15 : 14);
-  return (
-    <div
-      role="status"
-      className="ms-wrap-row"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        backgroundColor: "var(--ms-ground)",
-        backgroundImage: glow,
-        border: `1px solid var(--ms-${variant}-border)`,
-        borderRadius: 12,
-        padding: "11px 16px",
-        marginTop: 24,
-        maxWidth: 1000,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+const TABS = ["records", "configuration", "warmup"] as const;
 
 /** Party-popper (Lucide, MIT) — the celebratory mark on the verified banner. */
 function TadaIcon() {
@@ -91,28 +67,6 @@ function TadaIcon() {
       <path d="m11 2 .33.82c.34.86-.2 1.82-1.11 1.98C9.52 4.9 9 5.52 9 6.23V7" />
       <path d="M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z" />
     </svg>
-  );
-}
-
-function ConfigSection({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="ms-config-section">
-      <h3 style={{ fontSize: 14, fontWeight: 500, color: "var(--ms-bone)", margin: 0 }}>{title}</h3>
-      {description ? (
-        <p style={{ fontSize: 12.5, color: "var(--ms-muted)", margin: "6px 0 0", lineHeight: 1.5 }}>
-          {description}
-        </p>
-      ) : null}
-      <div style={{ marginTop: 12 }}>{children}</div>
-    </section>
   );
 }
 
@@ -422,6 +376,17 @@ export function DomainDetail({ id }: { id: string }) {
   const records = useQuery(
     trpc.domains.records.queryOptions({ id }, { enabled: domain.isSuccess }),
   );
+  // In the URL so the warm-up mails can open their tab; replaceState never scrolls.
+  const [tabParam, setTab] = useUrlState("tab", "records");
+  const tab = oneOf(TABS, tabParam, "records");
+  // The whole warm-up reads the team's audience: only while its tab is open
+  // or the status rows above the tabs show it.
+  const warmup = useQuery(
+    trpc.domains.warmup.queryOptions(
+      { id },
+      { enabled: tab === "warmup" || (domain.data?.warmupStatus ?? "off") !== "off" },
+    ),
+  );
 
   // Persist the last live-DNS result across re-checks. Reading it straight off
   // the verify mutation would blank out while a re-check is pending, so a row
@@ -476,6 +441,42 @@ export function DomainDetail({ id }: { id: string }) {
       },
     }),
   );
+  const receivingOn = features.data?.receiving === true;
+  const setReceiving = useMutation(
+    trpc.domains.setReceiving.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
+      },
+      onError: (error) => {
+        const code = trpcErrorCode(error);
+        const name = domain.data?.name ?? "";
+        toast(
+          code === "PRECONDITION_FAILED"
+            ? t("detail.receiving.errorNotVerified")
+            : code === "CONFLICT"
+              ? t("detail.receiving.errorTaken", { domain: name })
+              : t("detail.receiving.error"),
+          "danger",
+        );
+      },
+    }),
+  );
+
+  const setCatchAll = useMutation(
+    trpc.domains.setCatchAll.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
+      },
+      onError: (error) =>
+        toast(
+          trpcErrorCode(error) === "PRECONDITION_FAILED"
+            ? t("detail.receiving.catchAllPaid")
+            : t("detail.receiving.catchAllError"),
+          "danger",
+        ),
+    }),
+  );
 
   // A verify round-trip can return in well under a human blink; holding the
   // pending state for a floor keeps the Check DNS button's spinner visible so
@@ -486,7 +487,6 @@ export function DomainDetail({ id }: { id: string }) {
   // second spinner the user never triggered.
   const [checkTick, setCheckTick] = useState(0);
   const [copiedKey, setCopiedKey] = useState<"instructions" | "prompt" | null>(null);
-  const [tab, setTab] = useState<"records" | "configuration">("records");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   // Stable identity: Modal's focus effect depends on onClose, and a fresh
@@ -602,10 +602,11 @@ export function DomainDetail({ id }: { id: string }) {
         >
           <Skeleton width={280} height="1lh" />
         </div>
-        {/* Records | Configuration tab bar. */}
+        {/* Records | Configuration | Warm-up tab bar. */}
         <div className="ms-tabs bleed" style={{ marginTop: 26 }}>
           <Skeleton width={64} height={30} radius="var(--ms-r-input)" />
           <Skeleton width={96} height={30} radius="var(--ms-r-input)" />
+          <Skeleton width={110} height={30} radius="var(--ms-r-input)" />
         </div>
         <section style={{ marginTop: 24, maxWidth: 1000 }}>
           <DnsRecordsTableSkeleton showStatus />
@@ -616,6 +617,7 @@ export function DomainDetail({ id }: { id: string }) {
 
   const data = domain.data;
   const provider = records.data?.provider ?? null;
+  const warmupOn = warmup.data?.status === "off" ? undefined : warmup.data;
   // Live DNS statuses keyed by record identity, from the persisted result so a
   // re-check doesn't blank the badges mid-flight.
   const liveByKey = new Map(liveDns.map((r) => [`${r.type}\t${r.name}\t${r.value}`, r]));
@@ -633,7 +635,11 @@ export function DomainDetail({ id }: { id: string }) {
   // everything is green there is nothing to re-read, so the header button
   // hides and the action moves into the ⋯ menu for the rare manual re-check.
   const trackingRow = rows.find((r) => r.group === "tracking");
-  const needsDnsCheck = status !== "verified" || (!!trackingRow && trackingRow.live !== "found");
+  const receivingRow = rows.find((r) => r.group === "receiving");
+  const needsDnsCheck =
+    status !== "verified" ||
+    (!!trackingRow && trackingRow.live !== "found") ||
+    (!!receivingRow && receivingRow.live !== "found");
   // The header badge reads the live row: a verified identity whose tracking
   // CNAME is not resolving is partial until a check sees it.
   const shownStatus = displayDomainStatus(
@@ -650,6 +656,38 @@ export function DomainDetail({ id }: { id: string }) {
   }
   function aiPrompt(): string {
     return t("detail.aiPrompt", { domain: data.name, records: recordsText() });
+  }
+
+  // Receiving at a registrable domain (acme.com, not inbound.acme.com) takes
+  // over the mail its existing mailboxes get.
+  const receivingApex = data.name === registrableDomain(data.name);
+  async function toggleReceiving(enabled: boolean) {
+    const state = enabled ? "Enable" : "Disable";
+    const ok = await confirmDialog({
+      title: t(`detail.receiving.confirm${state}Title`),
+      message: t(
+        enabled && receivingApex
+          ? "detail.receiving.confirmEnableApex"
+          : `detail.receiving.confirm${state}`,
+        { domain: data.name },
+      ),
+      confirmLabel: t(`detail.receiving.confirm${state}Cta`),
+      danger: !enabled,
+    });
+    if (ok) setReceiving.mutate({ id, enabled });
+  }
+
+  async function toggleCatchAll(enabled: boolean) {
+    // Off refuses mail to every address without an inbox, so it asks first.
+    const ok =
+      enabled ||
+      (await confirmDialog({
+        title: t("detail.receiving.catchAllOffTitle"),
+        message: t("detail.receiving.catchAllOffConfirm", { domain: data.name }),
+        confirmLabel: t("detail.receiving.catchAllOffCta"),
+        danger: true,
+      }));
+    if (ok) setCatchAll.mutate({ id, enabled });
   }
 
   async function copyToClipboard(text: string, key: "instructions" | "prompt") {
@@ -669,92 +707,88 @@ export function DomainDetail({ id }: { id: string }) {
           </>
         }
         actions={
+          needsDnsCheck ? (
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              title={t("detail.checkDnsTooltip")}
+              disabled={verify.isPending || minSpin}
+              onClick={runCheck}
+            >
+              <BtnSpinner on={verify.isPending || minSpin} />
+              {t("detail.checkDns")}
+            </button>
+          ) : null
+        }
+        menu={
           <>
-            {needsDnsCheck ? (
-              <button
-                type="button"
-                className="ms-btn ms-btn-primary"
-                title={t("detail.checkDnsTooltip")}
-                disabled={verify.isPending || minSpin}
-                onClick={runCheck}
+            <PopoverMenu
+              boxed
+              ariaLabel={t("detail.moreActions")}
+              items={[
+                // The header Check DNS button hides once everything is
+                // verified; keep a manual re-check reachable here for the
+                // rare case a record was removed and SES has not caught up.
+                ...(needsDnsCheck
+                  ? []
+                  : [{ label: t("detail.recheckDns"), onSelect: runCheck }, null]),
+                {
+                  label: t("detail.forwardInstructions"),
+                  onSelect: () => {
+                    window.location.href = `mailto:?subject=${encodeURIComponent(
+                      t("detail.forwardSubject", { domain: data.name }),
+                    )}&body=${encodeURIComponent(recordsText())}`;
+                  },
+                },
+                {
+                  label: t("detail.copyInstructions"),
+                  disabled: !records.isSuccess,
+                  onSelect: () => void copyToClipboard(recordsText(), "instructions"),
+                },
+                {
+                  label: t("detail.copyAsPrompt"),
+                  disabled: !records.isSuccess,
+                  onSelect: () => void copyToClipboard(aiPrompt(), "prompt"),
+                },
+                null,
+                ...(
+                  [
+                    ["openInCursor", "cursor://anysphere.cursor-deeplink/prompt?text="],
+                    ["openInClaude", "https://claude.ai/new?q="],
+                    ["openInChatgpt", "https://chatgpt.com/?q="],
+                  ] as const
+                ).map(([key, base]) => ({
+                  label: t(`detail.${key}`),
+                  trailing: "↗",
+                  onSelect: () => {
+                    window.open(`${base}${encodeURIComponent(aiPrompt())}`, "_blank", "noreferrer");
+                  },
+                })),
+                null,
+                {
+                  label: t("detail.deleteDomain"),
+                  danger: true,
+                  onSelect: () => {
+                    setConfirmText("");
+                    setConfirmingDelete(true);
+                  },
+                },
+              ]}
+            />
+            {copiedKey ? (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  right: 0,
+                  whiteSpace: "nowrap",
+                  color: "var(--ms-muted)",
+                  fontSize: "var(--ms-fs-label)",
+                }}
               >
-                <BtnSpinner on={verify.isPending || minSpin} />
-                {t("detail.checkDns")}
-              </button>
+                ✓ {common("copied")}
+              </span>
             ) : null}
-            <div style={{ position: "relative" }}>
-              <PopoverMenu
-                boxed
-                ariaLabel={t("detail.moreActions")}
-                items={[
-                  // The header Check DNS button hides once everything is
-                  // verified; keep a manual re-check reachable here for the
-                  // rare case a record was removed and SES has not caught up.
-                  ...(needsDnsCheck
-                    ? []
-                    : [{ label: t("detail.recheckDns"), onSelect: runCheck }, null]),
-                  {
-                    label: t("detail.forwardInstructions"),
-                    onSelect: () => {
-                      window.location.href = `mailto:?subject=${encodeURIComponent(
-                        t("detail.forwardSubject", { domain: data.name }),
-                      )}&body=${encodeURIComponent(recordsText())}`;
-                    },
-                  },
-                  {
-                    label: t("detail.copyInstructions"),
-                    disabled: !records.isSuccess,
-                    onSelect: () => void copyToClipboard(recordsText(), "instructions"),
-                  },
-                  {
-                    label: t("detail.copyAsPrompt"),
-                    disabled: !records.isSuccess,
-                    onSelect: () => void copyToClipboard(aiPrompt(), "prompt"),
-                  },
-                  null,
-                  ...(
-                    [
-                      ["openInCursor", "cursor://anysphere.cursor-deeplink/prompt?text="],
-                      ["openInClaude", "https://claude.ai/new?q="],
-                      ["openInChatgpt", "https://chatgpt.com/?q="],
-                    ] as const
-                  ).map(([key, base]) => ({
-                    label: t(`detail.${key}`),
-                    trailing: "↗",
-                    onSelect: () => {
-                      window.open(
-                        `${base}${encodeURIComponent(aiPrompt())}`,
-                        "_blank",
-                        "noreferrer",
-                      );
-                    },
-                  })),
-                  null,
-                  {
-                    label: t("detail.deleteDomain"),
-                    danger: true,
-                    onSelect: () => {
-                      setConfirmText("");
-                      setConfirmingDelete(true);
-                    },
-                  },
-                ]}
-              />
-              {copiedKey ? (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 6px)",
-                    right: 0,
-                    whiteSpace: "nowrap",
-                    color: "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-label)",
-                  }}
-                >
-                  ✓ {common("copied")}
-                </span>
-              ) : null}
-            </div>
           </>
         }
       />
@@ -782,30 +816,60 @@ export function DomainDetail({ id }: { id: string }) {
         <MetaItem label={t("detail.region")}>
           <RegionLabel region={data.region} variant="meta" />
         </MetaItem>
+        {receivingOn && data.receivingEnabled ? (
+          <MetaItem label={t("detail.receiving.summaryLabel")}>
+            <Link href="/inboxes" className="ms-link">
+              {t(
+                data.receivingCatchAll
+                  ? "detail.receiving.summaryCatchAll"
+                  : "detail.receiving.summary",
+                { count: data.inboxCount },
+              )}
+            </Link>
+          </MetaItem>
+        ) : null}
       </div>
 
-      {checking ? (
-        <GradientBanner variant="warn">
-          <Spinner size={16} />
-          <span style={{ fontSize: 13.5, color: "var(--ms-warn)" }}>
-            {t("detail.bannerLooking")}
-          </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
-            {provider
-              ? t("detail.bannerLookingBody", { provider: provider.name })
-              : t("detail.bannerLookingBodyGeneric")}
-          </span>
-        </GradientBanner>
-      ) : status === "verified" ? (
-        <GradientBanner variant="success">
-          <TadaIcon />
-          <span style={{ fontSize: 13.5, color: "var(--ms-success)" }}>
-            {t("detail.bannerVerified")}
-          </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
-            {t("detail.bannerVerifiedBody")}
-          </span>
-        </GradientBanner>
+      {checking || status === "verified" || warmupOn ? (
+        <div style={{ display: "grid", gap: 12, marginTop: 24, maxWidth: 1000 }}>
+          {checking ? (
+            <GradientBanner
+              variant="warn"
+              icon={<Spinner size={16} />}
+              title={t("detail.bannerLooking")}
+            >
+              {provider
+                ? t("detail.bannerLookingBody", { provider: provider.name })
+                : t("detail.bannerLookingBodyGeneric")}
+            </GradientBanner>
+          ) : status === "verified" ? (
+            <GradientBanner
+              variant="success"
+              icon={<TadaIcon />}
+              title={t("detail.bannerVerified")}
+            >
+              {t("detail.bannerVerifiedBody")}
+            </GradientBanner>
+          ) : null}
+          {warmupOn ? <WarmupStatus data={warmupOn} /> : null}
+          {status === "verified" && data.warmup ? (
+            // The new-domain cap by registration age, on top of any warm-up.
+            <StatusRow
+              text={t(
+                data.warmup.fullAt ? "detail.newDomainLimit.line" : "detail.newDomainLimit.today",
+                {
+                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
+                  date: data.warmup.fullAt ? formatDay(data.warmup.fullAt, locale) : "",
+                },
+              )}
+              note={t(
+                data.warmup.shared
+                  ? "detail.newDomainLimit.bodyShared"
+                  : "detail.newDomainLimit.body",
+              )}
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {/* Tracking and TLS settings are stored regardless of status and apply
@@ -825,9 +889,23 @@ export function DomainDetail({ id }: { id: string }) {
         >
           {t("detail.tabs.configuration")}
         </button>
+        <button
+          type="button"
+          className={tab === "warmup" ? "active" : ""}
+          onClick={() => setTab("warmup")}
+        >
+          {t("detail.tabs.warmup")}
+          <BetaPill />
+        </button>
       </div>
 
-      {tab === "configuration" ? (
+      {tab === "warmup" ? (
+        <WarmupTab
+          id={id}
+          query={warmup}
+          live={data.warmupStatus === "warming" || data.warmupStatus === "paused"}
+        />
+      ) : tab === "configuration" ? (
         <div style={{ marginTop: 24 }}>
           <ConfigurationPanel
             id={id}
@@ -885,7 +963,7 @@ export function DomainDetail({ id }: { id: string }) {
                   domain={data.name}
                   showStatus
                   highlightGroup={highlightTracking ? "tracking" : null}
-                  forceGroups={["tracking"]}
+                  forceGroups={receivingOn ? ["tracking", "receiving"] : ["tracking"]}
                   groupExtras={{
                     // Same enable gesture as the Configuration tab, right on the
                     // group header.
@@ -897,12 +975,62 @@ export function DomainDetail({ id }: { id: string }) {
                         ariaLabel={t("detail.tracking.enable")}
                       />
                     ),
+                    receiving: (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                        <BetaPill />
+                        <Switch
+                          checked={data.receivingEnabled}
+                          // Turning it off stays possible whatever the status.
+                          disabled={
+                            setReceiving.isPending ||
+                            (!data.receivingEnabled && status !== "verified")
+                          }
+                          onChange={(enabled) => void toggleReceiving(enabled)}
+                          ariaLabel={t("detail.receiving.enable")}
+                        />
+                      </span>
+                    ),
                   }}
-                  emptyNotes={
+                  groupFooters={{
+                    receiving:
+                      receivingOn && data.receivingEnabled ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: 16,
+                            marginTop: 12,
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <span style={{ display: "block", fontSize: "var(--ms-fs-label)" }}>
+                              {t("detail.receiving.catchAll")}
+                            </span>
+                            <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
+                              {data.catchAllAllowed || data.receivingCatchAll
+                                ? t("detail.receiving.catchAllHint")
+                                : t("detail.receiving.catchAllPaid")}
+                            </span>
+                          </div>
+                          <Switch
+                            checked={data.receivingCatchAll}
+                            // A stored on survives a downgrade and can always be turned off.
+                            disabled={
+                              setCatchAll.isPending ||
+                              (!data.receivingCatchAll && !data.catchAllAllowed)
+                            }
+                            onChange={(enabled) => void toggleCatchAll(enabled)}
+                            ariaLabel={t("detail.receiving.catchAll")}
+                          />
+                        </div>
+                      ) : null,
+                  }}
+                  emptyNotes={{
                     // Cloud has no shared host, so an unconfigured group needs no
                     // note — the switch is the affordance. Self-host keeps the
                     // default-host explainer.
-                    trackingRequiresSubdomain
+                    ...(trackingRequiresSubdomain
                       ? {}
                       : {
                           tracking: t(
@@ -910,8 +1038,15 @@ export function DomainDetail({ id }: { id: string }) {
                               ? "detail.groups.trackingNote"
                               : "detail.groups.trackingNoteDefaultOnly",
                           ),
-                        }
-                  }
+                        }),
+                    receiving:
+                      status !== "verified"
+                        ? t("detail.receiving.notVerified")
+                        : t(receivingApex ? "detail.receiving.noteApex" : "detail.receiving.note", {
+                            domain: data.name,
+                            example: `inbound.${data.name}`,
+                          }),
+                  }}
                 />
               ) : (
                 <DnsRecordsTableSkeleton showStatus />
@@ -971,7 +1106,7 @@ export function DomainDetail({ id }: { id: string }) {
           <p
             style={{ margin: "8px 0 0", color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}
           >
-            {t("detail.deleteError")}
+            {guardMessage(deleteDomain.error, t("detail.deleteError"))}
           </p>
         ) : null}
         <ModalFooter>

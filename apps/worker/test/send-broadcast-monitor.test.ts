@@ -36,11 +36,15 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
+// The draw alone, with the hold (and the screening it turns on for a new
+// team) off; send-broadcast-screening.test.ts covers the screening.
+const DRAW_ONLY = { ...MONITOR_SETTING_DEFAULTS, autoHold: false };
+
 it("samples the skeleton once and the rendered copies by the keyed draw", async () => {
   const queued: string[] = [];
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
-    settings: async () => MONITOR_SETTING_DEFAULTS,
+    settings: async () => DRAW_ONLY,
     enqueueJudge: async (id) => void queued.push(id),
   };
   const deps: BroadcastDeps = {
@@ -93,7 +97,7 @@ it("samples the skeleton once and the rendered copies by the keyed draw", async 
   ).toHaveLength(4);
 });
 
-it("fans out untouched when the monitor fails", async () => {
+it("fails the fan-out while the monitor fails, writing no row to go out unscreened", async () => {
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
     settings: async () => {
@@ -120,13 +124,11 @@ it("fans out untouched when the monitor fails", async () => {
       status: "scheduled",
     })
     .returning({ id: schema.broadcasts.id });
-  expect(await sendBroadcast(db, deps, { broadcastId: broadcast?.id ?? "" })).toBe("sent");
-  expect(enqueued).toHaveLength(3);
+  const broadcastId = broadcast?.id ?? "";
+  await expect(sendBroadcast(db, deps, { broadcastId })).rejects.toThrow("down");
+  expect(enqueued).toEqual([]);
   expect(
-    await db
-      .select()
-      .from(schema.monitorSamples)
-      .where(eq(schema.monitorSamples.broadcastId, broadcast?.id ?? "")),
+    await db.select().from(schema.emails).where(eq(schema.emails.broadcastId, broadcastId)),
   ).toEqual([]);
 });
 
@@ -134,7 +136,7 @@ it("counts the audience with the topic rule so an opt-in topic still gets its co
   const queued: string[] = [];
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
-    settings: async () => ({ ...MONITOR_SETTING_DEFAULTS, broadcastCopiesNew: 1 }),
+    settings: async () => ({ ...DRAW_ONLY, broadcastCopiesNew: 1 }),
     enqueueJudge: async (id) => void queued.push(id),
   };
   const [topic] = await db

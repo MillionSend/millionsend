@@ -4,34 +4,57 @@ import {
   CONTENT_REVEAL_FIELDS,
   CONTENT_REVEAL_JUSTIFICATION_MAX,
   CONTENT_REVEAL_JUSTIFICATION_MIN,
+  CONTENT_REVEAL_MEDIA_FIELDS,
   CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
   CONTENT_REVEAL_SCOPES,
+  cancelWaitingEmails,
   contentRevealExpiry,
   decryptEmailBody,
   fetchAccountScore,
   fetchContentFactors,
   fetchDeliverabilityHealth,
   getMonitorSettingsRow,
+  isHoldVerdict,
+  OPERATOR_PARK_REASONS,
+  openMediaReview,
   parseAuditActor,
   recentMonitorSamples,
   redactRevealedText,
+  releaseWaitingEmails,
   renderRevealedBody,
+  renderRevealedMedia,
   resolveMonitorSettings,
   TEAM_FLAG_REASONS,
   teamMonitorOverview,
+  teamWarmupOverview,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, ilike, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
-import { judgeStatus } from "../../console/monitor";
+import { judgeStatus, monitorSettingsNow } from "../../console/monitor";
 import { getKeyring } from "../../keyring";
+import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../../keyset";
+import { enqueueEmailSend } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
-import { auditOperator, loadTeam } from "./shared";
+import { auditOperator, kickQuotaDrain, loadTeam, type OperatorCtx } from "./shared";
 
 const f = schema.teamFlags;
 const t = schema.teams;
@@ -76,19 +99,24 @@ function flaggedSince(now: Date): Date {
 }
 
 /**
- * The flagged emails of a team's window: one row per email, a broadcast's
- * recipients sharing its insights row. The review page lists these and a
- * grant may only ever name ids from here.
+ * The flagged emails of a team's window: one row per sent email with a
+ * failing check, a broadcast's recipients sharing its insights row, then the
+ * unsent ones a phishing-type verdict stopped before SES, which have no
+ * insights yet, and the held ones screening kept a media review of, however
+ * long they have waited. The review page lists these and a grant may only
+ * ever name ids from here.
  */
-function flaggedEmails(db: Db, teamId: string, since: Date) {
+async function flaggedEmails(db: Db, teamId: string, since: Date, holdLine: number) {
   const e = schema.emails;
   const i = schema.emailInsights;
-  return db
+  const ms = schema.monitorSamples;
+  const recipients = sql<number>`jsonb_array_length(${e.to})`;
+  const sent = await db
     .select({
       id: e.id,
       sentAt: e.sentAt,
       from: e.from,
-      recipients: sql<number>`jsonb_array_length(${e.to})`,
+      recipients,
       broadcastId: e.broadcastId,
       checks: i.checks,
     })
@@ -106,12 +134,316 @@ function flaggedEmails(db: Db, teamId: string, since: Date) {
     )
     .orderBy(desc(e.sentAt))
     .limit(50);
+  const held = await db
+    .select({
+      id: e.id,
+      sentAt: e.sentAt,
+      from: e.from,
+      recipients,
+      broadcastId: e.broadcastId,
+      score: ms.score,
+      verdict: ms.verdict,
+      categories: ms.categories,
+      reasons: ms.reasons,
+    })
+    .from(e)
+    .innerJoin(ms, eq(ms.emailId, e.id))
+    .where(
+      and(
+        eq(e.teamId, teamId),
+        isNull(e.sentAt),
+        inArray(e.latestStatus, ["queued", "queued_quota"]),
+        eq(ms.status, "judged"),
+        sql`${ms.judgedAt} >= ${since}`,
+        sql`${ms.score} >= ${holdLine}`,
+      ),
+    )
+    .orderBy(desc(e.createdAt))
+    .limit(50);
+  const withMedia = await db
+    .select({ id: e.id, sentAt: e.sentAt, from: e.from, recipients, broadcastId: e.broadcastId })
+    .from(e)
+    .where(
+      and(
+        eq(e.teamId, teamId),
+        isNull(e.sentAt),
+        eq(e.latestStatus, "queued_quota"),
+        isNotNull(e.media),
+      ),
+    )
+    .orderBy(desc(e.createdAt))
+    .limit(50);
+  const unsent = held.filter((row) => isHoldVerdict(row, holdLine));
+  const listed = new Set(unsent.map((row) => row.id));
+  return [
+    ...[...unsent, ...withMedia.filter((row) => !listed.has(row.id))].map((row) => ({
+      id: row.id,
+      sentAt: row.sentAt,
+      from: row.from,
+      recipients: row.recipients,
+      broadcastId: row.broadcastId,
+      checks: [] as schema.EmailInsightCheck[],
+    })),
+    ...sent,
+  ];
+}
+
+/** Waiting emails the review list shows per team; a group's actions reach every one of them. */
+const WAITING_SHOWN_PER_TEAM = 20;
+
+/** Why an email waits, as the review list words it. */
+type WaitingWhy = "held" | "verdict" | "outage" | "destination" | "media" | "recipient";
+
+/** A queued row without a park reason waits out a verdict's short wait. */
+function waitingWhy(parkReason: string | null): WaitingWhy {
+  return parkReason === "review"
+    ? "held"
+    : parkReason === "screening"
+      ? "outage"
+      : parkReason === "destination"
+        ? "destination"
+        : parkReason === "media"
+          ? "media"
+          : parkReason === "recipient"
+            ? "recipient"
+            : "verdict";
+}
+
+/**
+ * The review list: every unsent email screening stopped before SES, newest
+ * first, grouped by team. Parked for an operator (a judge that kept failing
+ * on a young domain, content it could not read), parked behind a review
+ * hold still pending, or waiting out a phishing-type verdict's short wait.
+ */
+async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
+  const e = schema.emails;
+  const ms = schema.monitorSamples;
+  const fields = {
+    id: e.id,
+    teamId: e.teamId,
+    createdAt: e.createdAt,
+    from: e.from,
+    recipients: sql<number>`jsonb_array_length(${e.to}) + coalesce(jsonb_array_length(${e.cc}), 0) + coalesce(jsonb_array_length(${e.bcc}), 0)`,
+    broadcastId: e.broadcastId,
+    parkReason: e.parkReason,
+    score: ms.score,
+    verdict: ms.verdict,
+    categories: ms.categories,
+    reasons: ms.reasons,
+    destinations: ms.destinations,
+    media: sql<boolean>`${e.media} is not null`,
+  };
+  const parked = and(
+    teamId ? eq(e.teamId, teamId) : undefined,
+    eq(e.latestStatus, "queued_quota"),
+    isNull(e.sentAt),
+    or(
+      inArray(e.parkReason, [...OPERATOR_PARK_REASONS]),
+      and(eq(e.parkReason, "review"), eq(t.suspensionReason, "review")),
+    ),
+  );
+  const parkedRows = await db
+    .select(fields)
+    .from(e)
+    .innerJoin(t, eq(t.id, e.teamId))
+    .leftJoin(ms, and(eq(ms.emailId, e.id), eq(ms.screening, true)))
+    .where(parked)
+    .orderBy(desc(e.createdAt))
+    .limit(500);
+  const parkedTotals = await db
+    .select({ teamId: e.teamId, n: sql<number>`count(*)::int` })
+    .from(e)
+    .innerJoin(t, eq(t.id, e.teamId))
+    .where(parked)
+    .groupBy(e.teamId);
+  // A verdict's short wait lasts minutes: few rows, read whole.
+  const waitingRows = (
+    await db
+      .select(fields)
+      .from(e)
+      .innerJoin(ms, and(eq(ms.emailId, e.id), eq(ms.screening, true)))
+      .where(
+        and(
+          teamId ? eq(e.teamId, teamId) : undefined,
+          eq(e.latestStatus, "queued"),
+          isNull(e.sentAt),
+          isNull(e.screenReleasedAt),
+          eq(ms.status, "judged"),
+          sql`${ms.score} >= ${holdLine}`,
+        ),
+      )
+  ).filter((row) => isHoldVerdict(row, holdLine));
+  const shown = [...parkedRows, ...waitingRows].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+  );
+  const totalOf = (id: string) =>
+    (parkedTotals.find((row) => row.teamId === id)?.n ?? 0) +
+    waitingRows.filter((row) => row.teamId === id).length;
+  const teamIds = [...new Set(shown.map((row) => row.teamId))];
+  const teams =
+    teamIds.length === 0
+      ? []
+      : await db
+          .select({
+            id: t.id,
+            name: t.name,
+            logoUrl: t.logoUrl,
+            plan: sql<string>`${t.plan}::text`,
+            planQuota: t.planQuota,
+            suspendedAt: t.suspendedAt,
+            suspensionReason: t.suspensionReason,
+            broadcastsPausedByOperatorAt: t.broadcastsPausedByOperatorAt,
+          })
+          .from(t)
+          .where(inArray(t.id, teamIds));
+  return teams
+    .map((team) => {
+      const emails = shown.filter((row) => row.teamId === team.id);
+      return {
+        team,
+        total: totalOf(team.id),
+        newestAt: emails[0]?.createdAt ?? new Date(0),
+        emails: emails.slice(0, WAITING_SHOWN_PER_TEAM).map((row) => ({
+          id: row.id,
+          createdAt: row.createdAt,
+          from: row.from,
+          recipients: row.recipients,
+          broadcastId: row.broadcastId,
+          why: waitingWhy(row.parkReason),
+          score: row.verdict === null ? null : row.score,
+          reasons: row.reasons ?? [],
+          destinations: row.destinations ?? [],
+          media: row.media,
+        })),
+      };
+    })
+    .sort((a, b) => b.newestAt.getTime() - a.newestAt.getTime());
 }
 
 /** Every content procedure refuses the same way while the feature is off. */
 function assertContentRevealOn(): void {
   if (!contentRevealOn()) throw new TRPCError({ code: "FORBIDDEN", message: "off" });
 }
+
+/**
+ * The email a live grant of this operator names, for one view of its
+ * content. Someone else's grant reads as no grant at all.
+ */
+async function grantedEmail(ctx: OperatorCtx, input: { grantId: string; emailId: string }) {
+  assertContentRevealOn();
+  const [grant] = await ctx.db.select().from(g).where(eq(g.id, input.grantId));
+  if (!grant || grant.operatorUserId !== ctx.operator.id) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+  const now = new Date();
+  if (grant.expiresAt <= now) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "expired" });
+  }
+  if (!grant.emailIds.includes(input.emailId)) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "not_in_grant" });
+  }
+  const [email] = await ctx.db
+    .select()
+    .from(schema.emails)
+    .where(and(eq(schema.emails.id, input.emailId), eq(schema.emails.teamId, grant.teamId)));
+  if (!email) throw new TRPCError({ code: "NOT_FOUND" });
+  return { grant, email, now };
+}
+
+/** Counts one view on the grant, which is the record of how often the content was read. */
+async function countView(
+  ctx: OperatorCtx,
+  grant: { id: string; viewCount: number },
+  now: Date,
+): Promise<number> {
+  const [counted] = await ctx.db
+    .update(g)
+    .set({ viewCount: sql`${g.viewCount} + 1`, lastViewedAt: now })
+    .where(eq(g.id, grant.id))
+    .returning({ viewCount: g.viewCount });
+  return counted?.viewCount ?? grant.viewCount + 1;
+}
+
+/** The digest sealMediaReview keeps beside a review's ciphertext. */
+const mediaDigest = sql<string | null>`(${schema.emails.media}::jsonb ->> 'digest')`;
+
+/**
+ * The team's emails parked for an operator that screening read the same
+ * images and files from as this one (a blast's copies), itself included
+ * while it waits; none when it has no media review.
+ */
+async function sameMediaParked(
+  db: Db,
+  teamId: string,
+  emailId: string,
+  parkedBefore?: Date,
+): Promise<string[]> {
+  const e = schema.emails;
+  const [own] = await db
+    .select({ digest: mediaDigest })
+    .from(e)
+    .where(and(eq(e.id, emailId), eq(e.teamId, teamId)));
+  if (!own?.digest) return [];
+  // ponytail: parses every parked review of the team on each call; an indexed
+  // digest column if held blasts grow past a few thousand emails.
+  const rows = await db
+    .select({ id: e.id })
+    .from(e)
+    .where(
+      and(
+        eq(e.teamId, teamId),
+        eq(e.latestStatus, "queued_quota"),
+        isNull(e.sentAt),
+        inArray(e.parkReason, [...OPERATOR_PARK_REASONS]),
+        sql`${mediaDigest} = ${own.digest}`,
+        parkedBefore ? or(isNull(e.parkedAt), lte(e.parkedAt, parkedBefore)) : undefined,
+      ),
+    );
+  return rows.map((row) => row.id);
+}
+
+/**
+ * The review list's Release and its instance audit row: these emails of
+ * the team, or every one parked by `parkedBefore`, when the operator was
+ * shown the list. A team held for review is released with its hold, from
+ * its review page.
+ */
+async function releaseEmails(
+  ctx: OperatorCtx,
+  team: { id: string; name: string; suspendedAt: Date | null },
+  pick: { emailIds: string[] } | { parkedBefore: Date },
+): Promise<{ released: number }> {
+  if (team.suspendedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "held" });
+  if ("emailIds" in pick && pick.emailIds.length === 0) return { released: 0 };
+  const released = await releaseWaitingEmails(ctx.db, {
+    teamId: team.id,
+    ...pick,
+    holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+  });
+  for (const emailId of released.queued) await enqueueEmailSend(emailId);
+  if (released.parked > 0) await kickQuotaDrain();
+  const count = released.parked + released.queued.length;
+  if (count > 0) {
+    await auditOperator(ctx, {
+      teamId: null,
+      action: "screening.released",
+      target: { type: "team", id: team.id },
+      metadata: { team: team.name, emails: count },
+    });
+  }
+  return { released: count };
+}
+
+/** Which waiting emails an action takes: the ones named, or all parked by a time the operator saw. */
+const waitingPick = z
+  .object({
+    teamId: z.uuid(),
+    emailIds: z.array(z.uuid()).min(1).max(500).optional(),
+    parkedBefore: z.date().optional(),
+  })
+  .refine((input) => (input.emailIds === undefined) !== (input.parkedBefore === undefined), {
+    message: "emails_or_parked_before",
+  });
 
 export const consoleSafetyRouter = router({
   list: operatorProcedure
@@ -237,6 +569,7 @@ export const consoleSafetyRouter = router({
       monitor,
       samples,
       grants,
+      warmup,
     ] = await Promise.all([
       ctx.db.select().from(f).where(eq(f.teamId, team.id)).orderBy(desc(f.openedAt)).limit(10),
       fetchDeliverabilityHealth(ctx.db, team.id, { now }),
@@ -261,7 +594,7 @@ export const consoleSafetyRouter = router({
         .from(schema.contacts)
         .where(eq(schema.contacts.teamId, team.id))
         .then((r) => r[0]?.n ?? 0),
-      flaggedEmails(ctx.db, team.id, since),
+      flaggedEmails(ctx.db, team.id, since, monitorSettings.holdRepeatScore),
       ctx.db
         .select({
           id: schema.auditLog.id,
@@ -272,7 +605,13 @@ export const consoleSafetyRouter = router({
           createdAt: schema.auditLog.createdAt,
         })
         .from(schema.auditLog)
-        .where(eq(schema.auditLog.teamId, team.id))
+        .where(
+          or(
+            eq(schema.auditLog.teamId, team.id),
+            // The instance's rows about the team, which its own audit never lists.
+            and(isNull(schema.auditLog.teamId), eq(schema.auditLog.target, `team:${team.id}`)),
+          ),
+        )
         .orderBy(desc(schema.auditLog.createdAt))
         .limit(20),
       teamMonitorOverview(ctx.db, team.id, monitorSettings, now),
@@ -290,6 +629,7 @@ export const consoleSafetyRouter = router({
         .from(g)
         .where(and(eq(g.teamId, team.id), sql`${g.expiresAt} > ${now}`))
         .orderBy(desc(g.createdAt)),
+      teamWarmupOverview(ctx.db, team.id, now),
     ]);
     // The judge's answer for each flagged email, when it was drawn; the verdict fields only.
     const ms = schema.monitorSamples;
@@ -395,6 +735,7 @@ export const consoleSafetyRouter = router({
         flagRisk: monitorSettings.flagRisk,
         alertRisk: monitorSettings.alertRisk,
       },
+      warmup: { enabled: monitorSettings.warmupEnabled, ...warmup },
       audit: audit.map((row) => {
         const actor = parseAuditActor(row.actorId);
         return {
@@ -407,9 +748,85 @@ export const consoleSafetyRouter = router({
   }),
 
   /**
+   * Every email of a team, newest first, paginated, for the review page's
+   * "All emails" list. Metadata only (sender, when, recipient count): the
+   * subject is withheld and the body stays encrypted until a grant names the
+   * message.
+   */
+  teamEmails: operatorProcedure
+    .input(
+      z.object({
+        teamId: z.uuid(),
+        limit: z.number().int().min(1).max(100).default(25),
+        cursor: cursorSchema.optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const e = schema.emails;
+      const ofTeam = eq(e.teamId, input.teamId);
+      const recipients = sql<number>`jsonb_array_length(${e.to}) + coalesce(jsonb_array_length(${e.cc}), 0) + coalesce(jsonb_array_length(${e.bcc}), 0)`;
+      const [rows, [count]] = await Promise.all([
+        ctx.db
+          .select({
+            id: e.id,
+            from: e.from,
+            recipients,
+            sentAt: e.sentAt,
+            createdAt: e.createdAt,
+            cursorCreatedAt: createdAtCursorField(e),
+          })
+          .from(e)
+          .where(and(ofTeam, input.cursor ? beforeCursor(e, input.cursor) : undefined))
+          .orderBy(desc(e.createdAt), desc(e.id))
+          .limit(input.limit + 1),
+        // Counted for the first page only: a scroll costs one count, not one per page.
+        input.cursor
+          ? [null]
+          : ctx.db.select({ total: sql<number>`count(*)::int` }).from(e).where(ofTeam),
+      ]);
+      return { ...paginate(rows, input.limit), total: count?.total ?? null };
+    }),
+
+  /**
+   * The warm-up override: a trusted team, or one trusted domain of it, sends
+   * at its plan's volume from day one. The audit row is the instance's, as
+   * the owner's own log never shows trust & safety levers.
+   */
+  setWarmupTrust: operatorProcedure
+    .input(z.object({ teamId: z.uuid(), domainId: z.uuid().optional(), trusted: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      const trustedAt = input.trusted ? new Date() : null;
+      let domain: string | undefined;
+      if (input.domainId) {
+        const d = schema.domains;
+        const [row] = await ctx.db
+          .update(d)
+          .set({ warmupTrustedAt: trustedAt })
+          .where(and(eq(d.id, input.domainId), eq(d.teamId, team.id)))
+          .returning({ name: d.name });
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        domain = row.name;
+      } else {
+        await ctx.db.update(t).set({ warmupTrustedAt: trustedAt }).where(eq(t.id, team.id));
+      }
+      await auditOperator(ctx, {
+        teamId: null,
+        action: input.trusted ? "warmup.trust_granted" : "warmup.trust_revoked",
+        target: { type: "team", id: team.id },
+        metadata: { team: team.name, ...(domain ? { domain } : {}) },
+      });
+      // Mail the warm-up held goes out now rather than at the next drain.
+      if (input.trusted) await kickQuotaDrain();
+      return { trusted: input.trusted };
+    }),
+
+  /**
    * Break-glass: a time-boxed grant to read the subject and rendered text of
-   * flagged messages, for a named security reason. Nothing decrypts here —
-   * the grant row and its audit exist before any content can be asked for.
+   * a team's messages, for a named security reason. Scope "email" names any
+   * one message of the team, flagged or not; "flagged_window" covers the
+   * review page's flagged set. Nothing decrypts here — the grant row and its
+   * operator audit exist before any content can be asked for.
    */
   requestAccess: operatorProcedure
     .input(
@@ -440,22 +857,37 @@ export const consoleSafetyRouter = router({
       assertContentRevealOn();
       const team = await loadTeam(ctx.db, input.teamId);
       const now = new Date();
-      const flagged = await flaggedEmails(ctx.db, team.id, flaggedSince(now));
-      const wanted =
-        input.scope === "email" ? flagged.filter((row) => row.id === input.emailId) : flagged;
-      if (wanted.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "not_flagged" });
+      // Scope "email" names any one message of the team; "flagged_window" the
+      // flagged set. Either way a grant only ever names ids that belong here.
+      let candidateIds: string[];
+      if (input.scope === "email") {
+        const emailId = input.emailId;
+        if (!emailId) throw new TRPCError({ code: "BAD_REQUEST" });
+        const [email] = await ctx.db
+          .select({ id: schema.emails.id })
+          .from(schema.emails)
+          .where(and(eq(schema.emails.id, emailId), eq(schema.emails.teamId, team.id)));
+        if (!email) throw new TRPCError({ code: "NOT_FOUND", message: "not_found" });
+        candidateIds = [email.id];
+      } else {
+        const flagged = await flaggedEmails(
+          ctx.db,
+          team.id,
+          flaggedSince(now),
+          (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+        );
+        if (flagged.length === 0) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "not_flagged" });
+        }
+        candidateIds = flagged.map((row) => row.id);
+      }
       // A purged body cannot be revealed by anyone: retention already took it.
       const bodies = await ctx.db
         .select({ id: schema.emails.id, purgedAt: schema.emails.bodyPurgedAt })
         .from(schema.emails)
-        .where(
-          inArray(
-            schema.emails.id,
-            wanted.map((row) => row.id),
-          ),
-        );
+        .where(inArray(schema.emails.id, candidateIds));
       const purged = new Set(bodies.filter((row) => row.purgedAt !== null).map((row) => row.id));
-      const emailIds = wanted.map((row) => row.id).filter((id) => !purged.has(id));
+      const emailIds = candidateIds.filter((id) => !purged.has(id));
       const refused = [...purged].map((emailId) => ({ emailId, status: "purged" as const }));
       if (emailIds.length === 0) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "purged" });
@@ -471,11 +903,13 @@ export const consoleSafetyRouter = router({
           emailIds,
           createdAt: now,
           expiresAt: contentRevealExpiry(now),
+          // A withheld disclosure (see the column): an older build's job skips it.
+          noticeSentAt: now,
         })
         .returning({ id: g.id, expiresAt: g.expiresAt });
       if (!grant) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      // teamId null: the instance's own row, which the team's audit query
-      // can never reach. Its own row arrives seven days later, from the cron.
+      // teamId null: the operator's own record, which the team's audit query
+      // can never reach. The team is not notified of the access.
       await auditOperator(ctx, {
         teamId: null,
         action: "content.revealed",
@@ -499,24 +933,7 @@ export const consoleSafetyRouter = router({
   revealed: operatorProcedure
     .input(z.object({ grantId: z.uuid(), emailId: z.uuid() }))
     .query(async ({ ctx, input }) => {
-      assertContentRevealOn();
-      const [grant] = await ctx.db.select().from(g).where(eq(g.id, input.grantId));
-      // Someone else's grant reads as no grant at all.
-      if (!grant || grant.operatorUserId !== ctx.operator.id) {
-        throw new TRPCError({ code: "NOT_FOUND" });
-      }
-      const now = new Date();
-      if (grant.expiresAt <= now) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "expired" });
-      }
-      if (!grant.emailIds.includes(input.emailId)) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "not_in_grant" });
-      }
-      const [email] = await ctx.db
-        .select()
-        .from(schema.emails)
-        .where(and(eq(schema.emails.id, input.emailId), eq(schema.emails.teamId, grant.teamId)));
-      if (!email) throw new TRPCError({ code: "NOT_FOUND" });
+      const { grant, email, now } = await grantedEmail(ctx, input);
       if (
         email.bodyPurgedAt ||
         !email.bodyCiphertext ||
@@ -552,20 +969,159 @@ export const consoleSafetyRouter = router({
         .where(eq(ms.emailId, email.id))
         .orderBy(desc(ms.createdAt))
         .limit(1);
-      const [counted] = await ctx.db
-        .update(g)
-        .set({ viewCount: sql`${g.viewCount} + 1`, lastViewedAt: now })
-        .where(eq(g.id, grant.id))
-        .returning({ viewCount: g.viewCount });
       return {
         subject: subject.spans,
         spans: content.spans,
         redactions: content.redactions + subject.redactions,
         verdict: verdict ?? null,
         expiresAt: grant.expiresAt,
-        viewCount: counted?.viewCount ?? grant.viewCount + 1,
+        viewCount: await countView(ctx, grant, now),
       };
     }),
+
+  /**
+   * What screening read from a held email's images and attachments, under a
+   * live grant as its text is: redacted like the body, previews only as the
+   * worker's re-encoded JPEGs, link domains with the age the screening cache
+   * knows. Never the files themselves.
+   */
+  media: operatorProcedure
+    .input(z.object({ grantId: z.uuid(), emailId: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { grant, email, now } = await grantedEmail(ctx, input);
+      if (email.bodyPurgedAt) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "purged" });
+      }
+      if (!email.media) throw new TRPCError({ code: "NOT_FOUND", message: "no_media" });
+      const team = await loadTeam(ctx.db, email.teamId);
+      // A grant's first look at the media is its own instance audit row, written
+      // before anything decrypts; the stamp records that this grant opened the media.
+      const [first] = await ctx.db
+        .update(g)
+        .set({ mediaViewedAt: now })
+        .where(and(eq(g.id, grant.id), isNull(g.mediaViewedAt)))
+        .returning({ id: g.id });
+      if (first) {
+        await auditOperator(ctx, {
+          teamId: null,
+          action: "content.revealed",
+          target: { type: "team", id: team.id },
+          metadata: {
+            grantId: grant.id,
+            team: team.name,
+            reason: grant.reason,
+            emails: 1,
+            fields: CONTENT_REVEAL_MEDIA_FIELDS,
+          },
+        });
+      }
+      const view = renderRevealedMedia(
+        await openMediaReview(email.media, getKeyring(), { teamId: email.teamId, rowId: email.id }),
+      );
+      const la = schema.linkDomainAges;
+      const domains = [...new Set(view.links.map((link) => link.domain).filter(Boolean))];
+      const ages = new Map(
+        domains.length === 0
+          ? []
+          : (
+              await ctx.db
+                .select({ domain: la.domain, registeredAt: la.registeredAt })
+                .from(la)
+                .where(inArray(la.domain, domains))
+            ).map((row) => [row.domain, row.registeredAt]),
+      );
+      const sameMedia = await sameMediaParked(ctx.db, team.id, email.id);
+      return {
+        ...view,
+        why: email.parkReason && waitingWhy(email.parkReason),
+        links: view.links.map((link) => ({
+          ...link,
+          registeredAt: ages.get(link.domain) ?? null,
+        })),
+        sameMedia: sameMedia.length,
+        asOf: now,
+        releasable: team.suspendedAt === null,
+        expiresAt: grant.expiresAt,
+        viewCount: await countView(ctx, grant, now),
+      };
+    }),
+
+  /** The review list, across teams or for one: what screening stopped before SES. */
+  waiting: operatorProcedure
+    .input(z.object({ teamId: z.uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      const groups = await waitingEmails(
+        ctx.db,
+        (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+        input.teamId,
+      );
+      const teamIds = groups.map((group) => group.team.id);
+      // This operator's own live grants: a media panel opens under one without asking again.
+      const grants =
+        teamIds.length === 0
+          ? []
+          : await ctx.db
+              .select({ id: g.id, emailIds: g.emailIds, expiresAt: g.expiresAt })
+              .from(g)
+              .where(
+                and(
+                  eq(g.operatorUserId, ctx.operator.id),
+                  inArray(g.teamId, teamIds),
+                  sql`${g.expiresAt} > now()`,
+                ),
+              );
+      // A Release or Cancel of "all" takes only what was parked by now.
+      return { groups, grants, contentReveal: contentRevealOn(), asOf: new Date() };
+    }),
+
+  /**
+   * Release: the emails go out without being screened again: the ones
+   * named, or every one parked by `parkedBefore`, the moment the list was
+   * read (its `asOf`). A team held for review is released with its hold,
+   * from its review page.
+   */
+  releaseWaiting: operatorProcedure
+    .input(waitingPick)
+    .mutation(async ({ ctx, input }) =>
+      releaseEmails(
+        ctx,
+        await loadTeam(ctx.db, input.teamId),
+        input.emailIds
+          ? { emailIds: input.emailIds }
+          : { parkedBefore: input.parkedBefore as Date },
+      ),
+    ),
+
+  /**
+   * Release every email of the team parked with the same media as this one
+   * by `parkedBefore` (when the panel was read), so a held blast clears in
+   * one step: the same release, the same audit row.
+   */
+  releaseSameMedia: operatorProcedure
+    .input(z.object({ teamId: z.uuid(), emailId: z.uuid(), parkedBefore: z.date() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      const emailIds = await sameMediaParked(ctx.db, team.id, input.emailId, input.parkedBefore);
+      return releaseEmails(ctx, team, { emailIds });
+    }),
+
+  /** Cancel: the emails never go out: the ones named, or every one parked by `parkedBefore`. */
+  cancelWaiting: operatorProcedure.input(waitingPick).mutation(async ({ ctx, input }) => {
+    const team = await loadTeam(ctx.db, input.teamId);
+    const canceled = await cancelWaitingEmails(ctx.db, {
+      ...input,
+      holdLine: (await monitorSettingsNow(ctx.db)).holdRepeatScore,
+    });
+    if (canceled > 0) {
+      await auditOperator(ctx, {
+        teamId: null,
+        action: "screening.canceled",
+        target: { type: "team", id: team.id },
+        metadata: { team: team.name, emails: canceled },
+      });
+    }
+    return { canceled };
+  }),
 
   clearFlag: operatorProcedure
     /** `afterGrantId` marks the clear as the verdict of a content reveal. */
@@ -600,12 +1156,15 @@ export const consoleSafetyRouter = router({
         .from(f)
         .where(and(eq(f.teamId, flag.teamId), eq(f.status, "open")));
       if (open) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "already_open" });
+      // Reopened, a suspension's flag is the operator's own call, which no
+      // reinstatement clears.
+      const { suspension: _, ...detail } = flag.detail ?? {};
       const [reopened] = await ctx.db
         .insert(f)
         .values({
           teamId: flag.teamId,
           reason: flag.reason,
-          detail: flag.detail,
+          detail: flag.detail && detail,
           note: flag.note,
           openedBy: ctx.operator.id,
         })

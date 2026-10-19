@@ -2,8 +2,10 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { Fragment, useMemo, useState } from "react";
-import { DOMAIN_REGIONS, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { useMemo, useState } from "react";
+import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
+import { KvRow } from "@/components/kv-row";
+import { NoticeStrip } from "@/components/notice-strip";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { SortableTh, type SortDir } from "@/components/sortable-th";
@@ -12,12 +14,13 @@ import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
-import { formatFinishAbout, withinLastDay } from "@/lib/format";
+import { formatFinishAbout } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { QuotaBar, RegionBadge, RegionMenu, type ServedRegion } from "../region-actions";
 import { AddRegionPanel } from "./add-region-panel";
 import { useRegionFormats } from "./formatters";
+import { BroadcastsCell, mutedDash, RegionLabel } from "./region-cells";
 import { QuotaDialog } from "./region-dialogs";
 import { ReserveCard } from "./reserve-card";
 
@@ -36,29 +39,12 @@ type Column = (typeof COLUMNS)[number];
 const RIGHT: readonly Column[] = ["domains", "sent24h", "bounce7d", "complaints7d"];
 const STATUS_ORDER = { serving: 0, sandbox: 1, unreachable: 2 } as const;
 
-const mutedDash = (
-  <span className="ms-mono" style={{ color: "var(--ms-muted)" }}>
-    —
-  </span>
-);
 const cardTitle: React.CSSProperties = {
   margin: "0 0 4px",
   fontSize: "var(--ms-fs-section)",
   fontWeight: 600,
 };
 const cardSub: React.CSSProperties = { margin: 0, fontSize: 13, color: "var(--ms-muted)" };
-
-function RegionLabel({ region, tip }: { region: string; tip: string }) {
-  const domains = useTranslations("domains");
-  return (
-    <>
-      {regionFlag(region)}{" "}
-      <Tooltip inline text={tip}>
-        {domains(`regions.${region}`)}
-      </Tooltip>
-    </>
-  );
-}
 
 function SkeletonRows() {
   return (
@@ -246,38 +232,29 @@ export function RegionsView() {
       ) : (
         <>
           {oversold && oversold.share !== null && committed !== null ? (
-            <div role="status" className="ms-notice-strip ms-notice-strip-warn ms-wrap-row">
-              <span>
-                {t("sold.text", {
-                  committed: f.n(committed),
-                  share: f.n(oversold.share),
-                  region: oversold.region,
-                })}
-                {oversold.bulkParked > 0
-                  ? t("sold.backlog", {
-                      waiting: f.n(oversold.bulkParked),
-                      clears: oversold.lastFinishesAt
-                        ? f.clearsAbout(oversold.lastFinishesAt)
-                        : "—",
-                    })
-                  : null}
-              </span>
-              <button
-                type="button"
-                className="ms-notice-strip-action"
-                style={{
-                  background: "none",
-                  border: 0,
-                  padding: 0,
-                  cursor: "pointer",
-                  font: "inherit",
-                  color: "inherit",
-                }}
-                onClick={() => setQuotaFor(oversold)}
-              >
-                {t("sold.action")} →
-              </button>
-            </div>
+            <NoticeStrip
+              tone="warn"
+              text={
+                <>
+                  {t.rich("sold.text", {
+                    committed: f.n(committed),
+                    share: f.n(oversold.share),
+                    region: oversold.region,
+                    nowrap: (chunks) => <span style={{ whiteSpace: "nowrap" }}>{chunks}</span>,
+                  })}
+                  {oversold.bulkParked > 0
+                    ? t("sold.backlog", {
+                        waiting: f.n(oversold.bulkParked),
+                        clears: oversold.lastFinishesAt
+                          ? f.clearsAbout(oversold.lastFinishesAt)
+                          : "—",
+                      })
+                    : null}
+                </>
+              }
+              action={t("sold.action")}
+              onAction={() => setQuotaFor(oversold)}
+            />
           ) : null}
           {quotaFor ? (
             <QuotaDialog
@@ -346,44 +323,22 @@ export function RegionsView() {
                           {r.week ? f.pct2(r.week.hardBounceRate) : mutedDash}
                         </td>
                         <td className="right num">
-                          {r.week ? f.pct3(r.week.complaintRate) : mutedDash}
-                        </td>
-                        <td>
-                          {sandbox ? (
-                            mutedDash
+                          {r.week ? (
+                            <Tooltip inline text={tr("complaintEstimate")}>
+                              {f.pct3(r.week.complaintRate)}
+                            </Tooltip>
                           ) : (
-                            <>
-                              <span
-                                className="ms-dot"
-                                style={{
-                                  background: r.breaker ? "var(--ms-danger)" : "var(--ms-success)",
-                                  marginRight: 6,
-                                }}
-                              />
-                              {r.breaker === null
-                                ? tr("breakerClosed")
-                                : r.breaker.manualReason !== null
-                                  ? tr("breakerManual")
-                                  : r.breaker.reason
-                                    ? tr("breakerOpen", {
-                                        metric: tr(`metric.${r.breaker.reason.metric}`),
-                                        rate: f.pct2(r.breaker.reason.rate),
-                                      })
-                                    : tr("breakerManual")}
-                              {withinLastDay(r.txParkedAt) ? (
-                                <span style={{ marginLeft: 10 }}>
-                                  <span
-                                    className="ms-dot"
-                                    style={{ background: "var(--ms-danger)", marginRight: 6 }}
-                                  />
-                                  {tr("txParkedChip")}
-                                </span>
-                              ) : null}
-                            </>
+                            mutedDash
                           )}
                         </td>
+                        <td>
+                          <BroadcastsCell
+                            region={r}
+                            complaintLine={list.data.complaintLines.breaker}
+                          />
+                        </td>
                         <td className="right" style={{ width: 40 }}>
-                          <RegionMenu region={r} onChanged={refetch} boxed={false} />
+                          <RegionMenu region={r} onChanged={refetch} />
                         </td>
                       </tr>
                     );
@@ -432,7 +387,9 @@ export function RegionsView() {
                           <div
                             style={{
                               display: "flex",
+                              flexWrap: "wrap",
                               justifyContent: "space-between",
+                              gap: "0 12px",
                               fontSize: "var(--ms-fs-label)",
                               padding: "0 20px 4px",
                             }}
@@ -442,7 +399,11 @@ export function RegionsView() {
                             </span>
                             <span
                               className="ms-mono ms-digits"
-                              style={{ color: "var(--ms-muted)", fontSize: 12 }}
+                              style={{
+                                color: "var(--ms-muted)",
+                                fontSize: 12,
+                                whiteSpace: "nowrap",
+                              }}
                             >
                               {t("sparks.total", {
                                 count: f.n(r.daily.reduce((sum, p) => sum + p.sent, 0)),
@@ -491,10 +452,9 @@ export function RegionsView() {
                       "postgres",
                     ] as const
                   ).map((row) => (
-                    <Fragment key={row}>
-                      <dt>{t(`perRegion.rows.${row}`)}</dt>
-                      <dd>{t(`perRegion.rows.${row}Value`)}</dd>
-                    </Fragment>
+                    <KvRow key={row} label={t(`perRegion.rows.${row}`)}>
+                      {t(`perRegion.rows.${row}Value`)}
+                    </KvRow>
                   ))}
                 </dl>
               </div>

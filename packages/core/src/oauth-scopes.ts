@@ -20,14 +20,23 @@ export const MCP_SCOPES = [
   // stay valid.
   "webhooks:write",
   "api-keys:write",
+  // Inbound mail is third-party content: its own scope, which no other grant implies.
+  "receiving:read",
+  // Neither implies the other nor receiving:read. Reply covers replying,
+  // forwarding and organizing threads; manage covers creating, updating and
+  // deleting inboxes and releasing quarantined mail. No scope changes an
+  // inbox's safety rules or approves a held send.
+  "receiving:reply",
+  "receiving:manage",
 ] as const;
 
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 /**
- * Scopes whose tools are owner/admin only (the dashboard's adminProcedure
- * line): the consent page withholds them from members and the MCP server
- * refuses their tools for a member's token regardless of what it carries.
+ * Scopes whose every write is owner/admin only (the dashboard's
+ * adminProcedure line): the consent page withholds them from members and the
+ * MCP server refuses their write tools for a member's token regardless of
+ * what it carries. Admin actions inside other scopes are flagged per tool.
  */
 export const ADMIN_MCP_SCOPES = [
   "domains:write",

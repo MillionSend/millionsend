@@ -3,7 +3,8 @@
 Scale stated as numbers that keep counting. Black void, bone type, one steel
 accent per view. **Dark theme only.** All values live in `src/styles/` as
 `--ms-*` custom properties; components apply the `ms-*` classes from
-`components.css`. Do not invent new colors, radii, or font sizes.
+`components.css`. Do not invent new colors, radii, or font sizes; the one
+sanctioned exception is the touch text-field size (Controls).
 
 ## The five rules
 
@@ -45,9 +46,15 @@ code (mono), `→` follow-through. The drawn icons are the 10 nav glyphs in
 stroke 1.4, currentColor, each with a semantic hover micro-animation driven
 by `motion` (≤500ms on `--ms-ease`, disabled under
 `prefers-reduced-motion`) and triggered by the parent nav item's hover. The
-command palette and page action buttons may reuse these glyphs. Do not add
-other icon fonts or icon libraries. Logos in
-`public/logo/` are never redrawn.
+command palette and page action buttons may reuse these glyphs. Static
+button glyphs (`PlusGlyph`, `MenuGlyph`, `RefreshGlyph`) live in the same
+file; a list's refresh is a 30×30 `.ms-btn-icon` whose glyph turns into the
+spinner while a click's reload runs. A thread's actions draw five static
+lucide glyphs from `icons/mail-icons.tsx` (folder-input, archive,
+octagon-alert, trash-2, tag) at 14px on the nav glyphs' exported `Svg` frame
+and stroke; the Inbox folder reuses the nav's inbox glyph. A new drawn icon
+goes on that `Svg`, never on a private copy of it. Do not add other icon fonts
+or icon libraries. Logos in `public/logo/` are never redrawn.
 
 ## Fonts
 
@@ -68,24 +75,75 @@ the canvas overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height
 contacts or emails fits a laptop viewport; the shared `ListFooter` holds the
 page-size chooser and then "Load more" at the right, both drawn as secondary
 buttons, and any secondary action under a table or section is right-aligned.
-Modals
-are **centered in the viewport** (both axes), overlay `rgba(0,0,0,.72)`, no
-blur.
+The inbox thread list (`.ms-thread-*`) is a mail list on the same type,
+rules and row height: one line per thread (unread dot, sender with a
+`.ms-count`, pills, subject and a muted snippet, time). Unread is weight 600
+plus a bone dot, never a status color; a row carries only the pills that ask
+for action. Under 560px of list width (beside an open thread, phones) a row
+takes two lines, by container query.
+Modals are **centered in the viewport** (both axes), overlay
+`rgba(0,0,0,.72)`, no blur.
+
+**Page header** (`PageHeader`). The H1 carries its **status badges** in the
+`badges` slot, right after the title's last word on its line; they wrap
+under it as a group and never sit among the actions. The mono meta line
+under it is " · "-joined parts and breaks only between them. The actions
+share the title's row only while the title block keeps its natural width;
+otherwise they take their own row under the meta line, at any viewport
+width. The trailing icon action ("…" overflow, `</>` API) goes in the
+`menu` slot and never starts a row alone.
+
+**Label/value lists** (`.ms-kv` with `KvRow`: region cards, the team
+dialog, settings). A value sits right-aligned on its label's line when the
+whole of it fits there, and otherwise takes the line under the label at full
+width; a " · "-joined value breaks only between its parts, in balanced
+lines.
+
+**Strips and dialogs.** A notice strip's action stays beside the text while
+the text keeps 18rem, and otherwise takes its own line under it; the support
+strip's two buttons share the full width on a phone. Dialog footers are
+**not sticky**: the footer is the last thing in a dialog and scrolls with
+its content; nothing renders after it. A dialog title, like the meta line,
+breaks only between its " · " parts ("Ajustar limites · <team>"), and a
+dialog's text wraps a long URL or address rather than widen the dialog.
+
+**Floating panels** — menus, selects, pickers, anchored panels, tooltips,
+chart hover tips — measure themselves after rendering and stay inside the
+viewport with a 12px margin: they flip above or below, shift sideways, and
+cap their size (`src/lib/panel-placement.ts`). A **chart tip** never covers
+the pointer or the hovered point: it sits above the plot, centred on the
+pointer. Without room above, a mouse's tip drops below the plot; a touch's
+never does (the hand would hide it) but rises from above the fingertip,
+beside the touched column.
+
+**Narrow desktop (900–1199px).** Beside the sidebar the content column is
+under 880px: the console's 4-up grids go 2-up and its 2/1 splits stack, a
+detail page's meta grid lays out as many columns as keep each value 11rem
+wide, and no meta value widens its column (a long chip ellipsizes). In a
+list a long address wraps at its "@" and dots (`Breakable`) rather than push
+the list sideways. Filter rows, wrap rows and steppers wrap at every width
+rather than overflow.
 
 **Mobile (breakpoint 900px).** Below 900px the sidebar becomes an off-canvas
 drawer behind a 48px sticky topbar (hamburger `.ms-btn-icon` + wordmark on
 panel bg, hairline bottom); the drawer slides over content with the modal
 scrim, closes on nav/scrim/Esc, and locks body scroll while open. Content
-padding collapses to 16px. Page headers and filter rows wrap (search takes
-the full first line); meta/stat grids drop to 2-up then 1-up (<480px);
-side-by-side KPI cards stack; the console's 6-up stat tile strip drops to
-3-up then 2-up (<640px); stepper rails hide or shrink under 640px. Modals go
-`calc(100vw - 24px)` under 480px and their footers wrap — buttons share the
-width, keycaps hidden under 640px; `.ms-menu` popovers clamp to the
-viewport. Tables scroll horizontally **inside their own wrapper** (the shared
-`<Table>`) — the page itself never scrolls horizontally. All rules live in
-the delimited responsive section at the end of `components.css` (media
-queries only; desktop ≥900px is untouched).
+padding collapses to 16px. Header actions take the full width under the
+title, each button sharing its row; the search takes the full first line of
+a filter row and the selects share the lines under it (one per line under
+480px); meta grids drop to 2-up then 1-up (<640px), while stat strips stay
+2-up; side-by-side KPI cards stack; the console's 6-up stat tile strip drops
+to 3-up then 2-up (<640px); stepper rails hide or shrink under 640px. Modals
+go `calc(100vw - 24px)` under 480px and their footer buttons share the width.
+Toasts drop from under the topbar (<640px) so they never cover a dialog's
+footer. Tables scroll horizontally **inside their own wrapper** (the shared
+`<Table>`) — the page itself never scrolls horizontally — and a list's row
+menu ("…") column sticks to the wrapper's right edge at any width. An email's
+events strip reads top to bottom. On touch screens
+keycaps are hidden, small glyph controls (✕, ⓘ, a chip's copy button) get a
+finger-sized hit area, and bulk-select checkboxes show in a column of their
+own. The narrow-desktop and phone rules live in the delimited responsive
+section of `components.css`; every rule above it holds at every width.
 
 ## Controls
 
@@ -97,15 +155,61 @@ queries only; desktop ≥900px is untouched).
   only — a11y non-negotiable. Everything else — dialog panels, chart/svg
   containers, anything focused programmatically via `tabindex="-1"` — gets
   `outline: none`. No browser-blue outline anywhere, ever.
+- **Text fields on touch screens:** under `(pointer: coarse)` every text
+  input, textarea, the `<Select>` trigger and the email editor's body runs at
+  16px (`--ms-fs-input-touch`), the only size outside the type scale: iOS
+  Safari zooms the page into any field under 16px when it takes focus.
+  Desktop keeps 14px.
 - **Select:** never render native `<select>`. Use `<Select>` from
   `src/components/select.tsx` — compact `.ms-input` trigger with a `.ms-chev`
   chevron, `.ms-menu` listbox popover, built-in search when there are more
   than 6 options, full keyboard + ARIA combobox support, ✓ on the selected
   row. Options are `{ value, label, hint? }`; controlled `value` +
   `onChange`.
+- **Tabs** (`.ms-tabs`): inactive tabs are plain muted text that turns bone
+  on hover; the active one takes the `--ms-panel-raised` fill of the
+  sidebar's current item. A strip stays on one line and scrolls sideways in
+  its own box, never wrapping: the cut-off last tab is the cue. A count after
+  a label is a `.count` span (tabular, faint). A strip that filters a list
+  (inbox folders) has the same look with `aria-pressed` buttons, since there
+  is no tab panel.
+- **Radios** never show the browser's widget: every radio sits in a
+  `.ms-radio-card`, whose radio is `.ms-checkbox`'s box, declared with it, in
+  a circle (inset ground, line-strong border, bone with a ground dot when
+  chosen), and the chosen card lifts to `--ms-panel-raised` with a
+  line-strong border.
+- **Number fields** never show stepper arrows (one global
+  `input[type="number"]` rule), and a `textarea.ms-input` takes its height
+  from `rows`.
+- **Token inputs** (`<ChipMultiSelect>`): chips sit inside one 30px
+  `.ms-input` frame at 20px, so the first chip never grows the field; the
+  frame takes the focus ring and the bare input inside draws none. With
+  `onCreate`, Enter or leaving the field adds what was typed, so a list of
+  addresses needs no separate Add button and a save never drops an entry.
+- **A warning inside a form** is a `WarnCard` (warn border, a warn glow from
+  the left), never a warn-colored hint line. In a gap-spaced stack, such as
+  a dialog's form grid, it takes `flush` so the gap spaces it like any field.
 - **Menus/popovers** use the `.ms-menu` grammar (canvas "…" dropdowns): panel
   bg, 1px `--ms-line-strong`, 14px radius, 6px padding; 13px item rows at
   7px 12px that raise to `--ms-panel-raised` (8px radius); `.ms-menu-sep`
   hairline separators. `<PopoverMenu>` in `src/components/popover-menu.tsx`
-  is the "…" overflow menu.
+  is the "…" overflow menu; with `label` its trigger is a secondary button
+  (glyph, label, a chevron that flips while open) for an action menu in a row
+  of buttons, like a thread's Mover, and an item's `icon` sits muted before
+  its label. Actions go in a menu, values in a `Select`. A checkable list that
+  stays open between picks (a thread's Etiquetas) is a `GroupedMultiSelect`
+  with `button`; its `onCreate` ends the list with a "Criar …" row when the
+  search names no option.
+- **Message bodies** (a thread's reply, Enviar e-mail) use the broadcasts
+  editor in compact mode (`MessageEditor`, `components/maily-editor/lazy.tsx`):
+  bold, italic, underline, strike, lists, link and clear formatting; no
+  headings, alignment, variables, "/" menu or selection bubble. The body
+  starts at 120px and scrolls past 45vh, its frame takes the focus ring, ⌘↵
+  sends, and the send carries the editor's html with an `htmlToText` text
+  part.
+- **Empty and blocked states:** a page with nothing in it yet is the tiled
+  `EmptyState`; an empty tab, folder or filtered list is a `StateCard` (no
+  tile, at most one action), never a bare muted line. A disabled button says
+  why: an inline `Tooltip` around it carries the reason to hover and to
+  keyboard focus.
 - Search inputs carry no "/" keycap for now (removed in visual QA).

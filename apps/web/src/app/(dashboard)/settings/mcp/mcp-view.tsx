@@ -86,7 +86,18 @@ function SnippetBlock({ code, language }: { code: string; language: HighlightLan
       >
         <CodeHighlight code={code} language={language} />
       </pre>
-      <span style={{ position: "absolute", top: 10, right: 12 }}>
+      {/* Opaque, so a line scrolled under it never shows through the glyph. */}
+      <span
+        style={{
+          position: "absolute",
+          top: 6,
+          right: 7,
+          padding: 4,
+          borderRadius: 6,
+          background: "var(--ms-inset)",
+          display: "flex",
+        }}
+      >
         <CopyGlyph value={code} />
       </span>
     </div>

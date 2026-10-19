@@ -1,6 +1,6 @@
 {
   "subject": "Verify your MillionSend email",
-  "greeting": "Hi {name},",
+  "greeting": "Hi,",
   "body": "Confirm this address to finish setting up your account. Click the button below.",
   "button": "Verify email",
   "linkFallback": "Or copy this link into your browser:",

@@ -199,6 +199,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
         id: schema.suppressions.id,
         email: schema.suppressions.email,
         reason: schema.suppressions.reason,
+        sourceEmailId: schema.suppressions.sourceEmailId,
         createdAt: schema.suppressions.createdAt,
       });
     if (suppression) {

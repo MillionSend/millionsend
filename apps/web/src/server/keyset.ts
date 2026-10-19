@@ -31,6 +31,23 @@ export function createdAtCursorField(t: { createdAt: AnyPgColumn }): SQL<string>
 }
 
 /**
+ * A core inbox list (Resend's keyset: `after` an item id) as an infinite
+ * query's page, the last item's id being the next cursor.
+ */
+export function idPage<T extends { id: string }>(result: {
+  data: T[];
+  hasMore: boolean;
+}): {
+  items: T[];
+  nextCursor: string | null;
+} {
+  return {
+    items: result.data,
+    nextCursor: result.hasMore ? (result.data[result.data.length - 1]?.id ?? null) : null,
+  };
+}
+
+/**
  * Splits a limit+1 fetch into the page and its next-page cursor. Rows must
  * already be ordered on (createdAt desc, id desc); the cursorCreatedAt field
  * feeds the cursor and is stripped from the returned items.

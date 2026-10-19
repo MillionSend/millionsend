@@ -29,6 +29,7 @@ import { CONTACT_STATUSES } from "@/lib/contact-status";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
 import { formatDayUtc } from "@/lib/format";
+import { shortcutBlocked } from "@/lib/keyboard";
 import { migrateCommand } from "@/lib/migrate-command";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -44,8 +45,9 @@ const BULK_BATCH = 100;
 
 // Fixed layout: column shares hold and long cells truncate instead of pushing
 // the trailing columns past the page edge. The floor keeps the status badge
-// readable at its 15% share; narrower viewports scroll the Table box.
-const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 720 };
+// readable at its 15% share, and the email about 240px once the date column
+// takes its fixed width below 1200px; narrower viewports scroll the Table box.
+const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 860 };
 
 function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
   const t = useTranslations("audience");
@@ -53,10 +55,12 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
     <thead>
       <tr>
         <th className="ms-check-cell">{selectAll}</th>
-        <th style={{ width: "40%" }}>{t("contacts.email")}</th>
+        <th className="ms-col-lead" style={{ width: "40%" }}>
+          {t("contacts.email")}
+        </th>
         <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
         <th style={{ width: "15%" }}>{t("contacts.status")}</th>
-        <th className="right">{t("contacts.added")}</th>
+        <th className="right ms-col-date">{t("contacts.added")}</th>
         <th className="right" style={{ width: 40 }} />
       </tr>
     </thead>
@@ -315,6 +319,10 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
         setEraseOpen(false);
         setEraseEmail("");
         invalidate();
+        // Dropped, not invalidated: a stale copy would show the erased address until refetched.
+        queryClient.removeQueries(trpc.emails.pathFilter());
+        queryClient.removeQueries(trpc.logs.pathFilter());
+        queryClient.removeQueries(trpc.webhooks.deliveries.pathFilter());
       },
     }),
   );
@@ -416,15 +424,9 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
     if (selected.size === 0) return;
     function onKey(event: KeyboardEvent) {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target as HTMLElement | null;
-      // A focused row checkbox is not "typing" — E/⌫/Esc must still work
-      // right after a click selects a row.
-      const typing =
-        (target instanceof HTMLInputElement && target.type !== "checkbox") ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement ||
-        (target?.isContentEditable ?? false);
-      if (typing || anyModalOpen) return;
+      // A focused row checkbox doesn't block the keys, so E/⌫/Esc work right
+      // after a click selects a row.
+      if (shortcutBlocked(event.target) || anyModalOpen) return;
       if (event.key === "Escape") {
         if (bulkMenuOpen) setBulkMenuOpen(false);
         else clearSelection();
@@ -505,14 +507,14 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
               onCsv={() => setImportOpen(true)}
               onMigrate={() => setMigrateOpen(true)}
             />
-            <ResourceApiButton resource="contacts" />
           </>
         }
+        menu={<ResourceApiButton resource="contacts" />}
       />
       <AudienceTabs />
 
       <div
-        className="ms-meta-grid"
+        className="ms-meta-grid ms-stat-strip"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr) auto",

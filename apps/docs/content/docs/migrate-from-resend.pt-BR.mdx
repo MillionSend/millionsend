@@ -1,18 +1,18 @@
 ---
 title: Migrar do Resend
-description: Um comando move sua conta do Resend; duas linhas de ambiente movem seu código — o formato de wire é idêntico.
+description: Um comando move sua conta do Resend; duas linhas de ambiente movem seu código — o formato da API é idêntico.
 ---
 
-A API REST do MillionSend é compatível no wire com a do Resend: mesmos
+A API REST do MillionSend é compatível com a do Resend: mesmos
 endpoints, mesmos formatos de requisição e resposta. Migrar é uma mudança de
 configuração, não uma reescrita. Os dados da conta — contatos, segmentos,
 tópicos, templates, webhooks, domínios, supressões — vêm com um comando.
 
-## Entregue a um agente
+## Passe para um agente
 
 A migração inteira — inventário, movimentação da conta, mudanças de código,
 DNS, virada — está escrita como um único prompt que um agente pode seguir de
-ponta a ponta, incluindo as salvaguardas (Resend somente leitura, chaves nunca
+ponta a ponta, incluindo as proteções (Resend somente leitura, chaves nunca
 em arquivos, perguntar antes de aplicar).
 
 <CopyPrompt href="/pt-BR/prompts/migrate-from-resend.md" copied="Copiado">Copiar o prompt de migração</CopyPrompt>
@@ -42,15 +42,15 @@ O que ele faz:
 - **O Resend é apenas lido.** Toda requisição ao Resend é um `GET` a um
   endpoint documentado; nada lá é criado, alterado ou excluído. A CLI mostra
   ao conectar o limite de taxa que o Resend informa e se mantém abaixo dele:
-  8 requisições por segundo por padrão (o limite do time no Resend é 10,
-  compartilhado com o seu envio em produção), recuando pelos cabeçalhos
+  8 requisições por segundo por padrão (o limite da equipe no Resend é 10,
+  compartilhado com o seu envio em produção), reduzindo o ritmo conforme os cabeçalhos
   `ratelimit-*` e a cada `429`. `--rps` muda o ritmo.
 - **Suas chaves nunca saem da sua máquina.** A ferramenta fala apenas com
   `api.resend.com` e com a sua API do MillionSend. As chaves ficam em memória
-  durante a execução, nunca são gravadas em arquivo e são redigidas de toda
+  durante a execução, nunca são gravadas em arquivo e são mascaradas em toda
   linha de log. Sem telemetria, sem verificação de atualização.
 - **Virada primeiro, enriquecimento depois.** A passagem 1 cria propriedades,
-  tópicos, segmentos, domínios, webhooks, templates, broadcasts e supressões e
+  tópicos, segmentos, domínios, webhooks, templates, transmissões e supressões e
   faz upsert dos contatos com suas associações a segmentos e o `unsubscribed`.
   Ela termina em minutos, e a CLI então imprime **Cutover ready** com os
   registros DNS e a linha do `RESEND_BASE_URL`: o envio transacional já pode
@@ -58,7 +58,7 @@ O que ele faz:
   propriedades de contato — lê então cada contato uma vez por faceta, primeiro
   as inscrições em tópicos (para os opt-outs chegarem antes das propriedades),
   depois as propriedades, com ritmo e tempo restante ao vivo. Segure envios
-  por tópico e broadcasts até ele terminar. As duas passagens retomam de onde
+  por tópico e transmissões até ele terminar. As duas passagens retomam de onde
   pararam após um Ctrl-C e uma nova execução, e `--skip enrichment` as deixa
   de fora.
 - **Rode de novo antes da virada.** Cada execução é um diff: linhas existentes
@@ -69,7 +69,7 @@ O que ele faz:
   inteiro de enriquecimento; `--only enrichment` roda só as duas passagens
   sobre contatos que já estão no destino, e `--only properties,enrichment`
   roda só a passagem de propriedades. Contas migradas com a CLI 0.1.x não
-  receberam valores de propriedades (o formato do fio foi lido errado); esse
+  receberam valores de propriedades (o formato da API foi lido errado); esse
   único comando os preenche. Um contato que surgiu no Resend desde a última
   execução é criado por essa passagem com o `unsubscribed` e os nomes, e fica
   registrado para o rollback como qualquer outro. O checklist de virada só é
@@ -78,7 +78,7 @@ O que ele faz:
 ### Antes de uma migração grande
 
 O enriquecimento domina: dois `GET`s por contato contra um limite
-compartilhado com o envio que o seu app faz no mesmo time do Resend. A
+compartilhado com o envio que o seu app faz na mesma equipe do Resend. A
 estimativa que o plano imprime segue de `contatos × facetas ÷ ritmo`:
 
 | Contatos | Facetas | A 8 req/s | A 10 req/s | A 50 req/s |
@@ -90,11 +90,11 @@ estimativa que o plano imprime segue de `contatos × facetas ÷ ritmo`:
 Três coisas encurtam isso:
 
 - **Peça ao Resend um aumento temporário.** A documentação do Resend diz que o
-  limite do time "pode ser aumentado para remetentes confiáveis sob pedido"
+  limite da equipe "pode ser aumentado para remetentes confiáveis sob pedido"
   (Settings → Usage mostra o atual). Passe o ritmo concedido explicitamente —
   `--rps 50` — a CLI aceita valores acima de 10 e avisa quando o ritmo passa
   do limite que detectou.
-- **Rode fora do horário de pico.** O limite é por time, então o
+- **Rode fora do horário de pico.** O limite é por equipe, então o
   enriquecimento compete com os envios da sua produção; os `429` caem nos
   dois lados. Uma segunda chave de API não ajuda.
 - **Deixe folga.** Quando a CLI detecta um limite acima de 10 e `--rps` não
@@ -105,15 +105,16 @@ Três coisas encurtam isso:
 | Contatos | E-mail, nomes, `unsubscribed`, propriedades, inscrições em tópicos, associações a segmentos. Descadastros são preservados; ninguém é reinscrito. |
 | Segmentos, tópicos, propriedades | Casados por nome / nome / chave: criados quando faltam, atualizados quando diferem. |
 | Templates | Nome, alias, assunto, html, texto. `from`, `reply_to` e `variables` não podem ser armazenados — listados como passos manuais. |
-| Webhooks | Endpoint e eventos. O segredo de assinatura é copiado, então o receptor que você já roda continua verificando (as entregas carregam os headers `svix-*`). `--fresh-webhook-secrets` gera segredos novos. Eventos que o MillionSend também emite são levados junto — os sete tipos `email.*` mais `contact.created`, `contact.updated` e `contact.deleted`; os demais (`domain.*`, `email.suppressed`) são descartados por webhook e listados. |
+| Webhooks | Endpoint e eventos. O segredo de assinatura é copiado, então o receptor que você já roda continua verificando (as entregas carregam os headers `svix-*`). `--fresh-webhook-secrets` gera segredos novos. Eventos que o MillionSend também emite são levados junto — todos os onze tipos `email.*`, `contact.created`, `contact.updated` e `contact.deleted`, `suppression.added` e `suppression.removed`, e os doze tipos `inbox.*` que o MillionSend envia; os demais (`contact.topics.updated`, `domain.*`, `topic.*`, `inbox.thread.assigned`, `inbox.thread.unassigned`) são descartados por webhook e listados. `email.scheduled`, `email.failed` e `email.suppressed` só são levados para uma instância que emite esses eventos (o `GET /openapi.json` dela lista os três). Uma instância mais antiga recusa esses webhooks com 422: para migrar para ela, use `npx @millionsend/cli@0.2.3`, que descarta os três junto com `suppression.added` e `suppression.removed` e lista os cinco; depois, adicione os dois de novo ao webhook, pelo painel ou com `PATCH /webhooks/{id}` enviando a lista `events` completa (o PATCH substitui a lista). |
 | Supressões | Bounces, reclamações e entradas manuais, com sua origem. |
-| Domínios | Criados com return path e configurações de rastreamento, na única região do SES atendida pela sua instância do MillionSend (MillionSend Cloud: `sa-east-1`) — a região do Resend não é levada junto. No MillionSend Cloud, os toggles de rastreamento só vêm junto com um subdomínio de rastreamento; sem ele, o relatório os lista para você configurar no painel. Os registros DNS precisam ser adicionados de novo — veja o passo 3. |
-| Broadcasts | Rascunhos e agendados entram como rascunhos. Enviados são pulados, a menos que `--include-sent`. |
+| Domínios | Criados com return path e configurações de rastreamento, na única região do SES atendida pela sua instância do MillionSend (MillionSend Cloud: `sa-east-1`) — a região do Resend não é levada junto. No MillionSend Cloud, as opções de rastreamento só vêm junto com um subdomínio de rastreamento; sem ele, o relatório as lista para você configurar no painel. Os registros DNS precisam ser adicionados de novo — veja o passo 3. |
+| Transmissões | Rascunhos e transmissões agendadas entram como rascunhos. As já enviadas são puladas, a menos que `--include-sent`. |
 
 O que não vem: **chaves de API** (o Resend expõe apenas os nomes — o relatório
-as lista como pendência), **registros DKIM/DNS** (as chaves são por provedor) e
-o **histórico de e-mails enviados**. Audiências, descontinuadas no Resend, são
-puladas — segmentos as cobrem.
+as lista como pendência), **registros DKIM/DNS** (as chaves são por provedor),
+**caixas de entrada** com as conversas e os rascunhos delas (crie de novo; veja
+o passo 3) e o **histórico de e-mails**, enviados ou recebidos. Audiências,
+descontinuadas no Resend, são puladas — segmentos as cobrem.
 
 Flags, variáveis de ambiente, arquivos, códigos de saída e uso em CI estão na
 [referência da CLI](/pt-BR/cli).
@@ -130,7 +131,7 @@ RESEND_BASE_URL=https://api.millionsend.com
 
 Auto-hospedado, use a origem da API da sua instância.
 
-Três detalhes que diferem do que uma integração com o Resend pode assumir:
+Cinco detalhes que diferem do que uma integração com o Resend pode assumir:
 
 - Os campos de remetente e destinatário aceitam exatamente uma caixa postal
   cada, nas formas da RFC 5322 `ada@example.com`, `Ada <ada@example.com>` ou
@@ -146,8 +147,25 @@ Três detalhes que diferem do que uma integração com o Resend pode assumir:
   `POST /contacts/batch?on_conflict=upsert` em JSON, até 1.000 por chamada, com
   `x-batch-validation: permissive` para manter as linhas válidas quando algumas
   falham.
+- Um destinatário cujo domínio nunca recebe e-mail, como `x@example.com`,
+  `x@foo.test` ou `x@gmail.con`, é recusado com `422 validation_error`, e um
+  contato novo num endereço assim também: a migração lista esses contatos
+  entre as falhas em vez de trazê-los. Veja
+  [Erros](/pt-BR/api-reference#erros).
+- Um envio em que todos os destinatários de `to` estão suprimidos é recusado
+  com `422 all_recipients_suppressed`; o Resend aceita esse envio, registra o
+  e-mail como `suppressed` e envia o evento `email.suppressed`. Aqui, o
+  `POST /emails` também guarda um e-mail `suppressed` só com os metadados e
+  envia o evento `email.suppressed`, mas responde 422 em vez de 200. A
+  migração copia os bounces, as reclamações e as entradas manuais do Resend,
+  então o seu código pode estar enviando para endereços que já estão na
+  lista: trate esse erro como "não enviado", e não como uma falha para tentar
+  de novo. No `POST /emails/batch`, um item assim rejeita o lote inteiro; com
+  `x-batch-validation: permissive`, os outros itens são aceitos e esse item
+  aparece em `errors`. Veja
+  [Supressões](/pt-BR/concepts/suppressions#o-que-a-supressão-faz).
 
-Prefere clientes de primeira parte? Os [SDKs do MillionSend](/pt-BR/sdks)
+Prefere usar um SDK oficial? Os [SDKs do MillionSend](/pt-BR/sdks)
 cobrem nove linguagens com a mesma superfície:
 
 ```ts
@@ -171,12 +189,36 @@ O resumo termina com um checklist. Três itens sempre estão nele:
 
 Mais dois aparecem quando se aplicam: valores de `from` / `reply_to` de
 templates para definir por envio, e tipos de evento de webhook que o
-MillionSend não emite. Corpos de broadcast não precisam de mudança:
+MillionSend não emite. Corpos de transmissão não precisam de mudança:
 `{{{RESEND_UNSUBSCRIBE_URL}}}` é um alias suportado de
 `{{{UNSUBSCRIBE_URL}}}`.
 
-Envie um email pela nova base URL e veja-o chegar a **Entregue** na página de
-Emails — a migração é isso.
+Também recebe e-mails pelo Resend? Ative o recebimento do domínio aqui depois
+que ele estiver verificado (**Ativar recebimento**, na página dele) e escolha
+quais endereços recebem. O Resend recebe em qualquer endereço do domínio;
+aqui isso é o **Pega-tudo**, na mesma página (um plano pago no MillionSend
+Cloud), ou então uma [caixa de entrada](/pt-BR/concepts/inboxes) por
+endereço. Depois troque o registro MX do domínio, do que o Resend passou para
+`mx.millionsend-dns.com` (na auto-hospedagem: o `RECEIVING_MX_HOST` da sua
+instância). O e-mail vai para o registro MX com o menor número de prioridade,
+então essa troca é a virada; o que o Resend já recebeu fica lá. Código que
+chama `resend.emails.receiving.*` e handlers de `email.received` não precisam
+de mudança. Veja [Recebimento](/pt-BR/concepts/receiving).
+
+Usa o pré-lançamento das Inboxes do Resend? Aponte o
+`resend@6.32.1-preview-inboxes.6` para o MillionSend como qualquer outro SDK
+do Resend, e crie de novo cada caixa com o mesmo endereço (`POST /inboxes`,
+ou **Caixas de entrada → Criar caixa de entrada**); as conversas e os
+rascunhos ficam no Resend. Uma caixa criada por um SDK do Resend é uma caixa
+de agente, com as proteções do MillionSend ligadas: o e-mail de remetentes
+que o próprio domínio não garante, por exemplo, espera na quarentena. Crie as
+caixas lidas por pessoas como `kind: "human"`, no painel ou por HTTP direto.
+O `forwarding: true` dá um `receiving_address` no domínio compartilhado das
+caixas da instância, então exige um. Veja
+[Caixas de entrada → Compatibilidade com o Resend](/pt-BR/concepts/inboxes#compatibilidade-com-o-resend).
+
+Envie um e-mail pela nova URL base e veja-o chegar a **Entregue** na página de
+E-mails — a migração é isso.
 
 ---
 

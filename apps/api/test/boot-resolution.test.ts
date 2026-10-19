@@ -1,12 +1,12 @@
-// Pins the production boot path: scripts/start.mjs spawns each entrypoint via
-// its package-local tsx bin because tsx resolves NodeNext ".js" specifiers to
-// .ts sources, which `node --experimental-strip-types` cannot
+// Pins the production boot path: scripts/start.mjs runs each entrypoint in
+// node with its package-local tsx loader because tsx resolves NodeNext ".js"
+// specifiers to .ts sources, which `node --experimental-strip-types` cannot
 // (ERR_MODULE_NOT_FOUND at load). Vitest's own resolver would mask that, so
-// these tests spawn the real bins the supervisor uses.
+// these tests spawn the entrypoints the way the supervisor does.
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
@@ -25,23 +25,27 @@ const ENTRYPOINTS = [
   { pkg: "apps/worker", entry: "apps/worker/src/server.ts" },
   { pkg: "apps/smtp", entry: "apps/smtp/src/server.ts" },
   { pkg: "packages/db", entry: "packages/db/src/migrate.ts" },
+  { pkg: "apps/mx", entry: "apps/mx/src/server.ts" },
 ];
 
 function boot(pkg: string, entry: string, extraEnv: Record<string, string> = {}): string {
-  const bin = join(root, pkg, "node_modules/.bin/tsx");
-  expect(existsSync(bin), `${pkg} must depend on tsx (bin missing)`).toBe(true);
-  const result = spawnSync(bin, [join(root, entry)], {
-    cwd: root,
-    env: { ...env, ...extraEnv },
-    encoding: "utf8",
-    timeout: 60_000,
-  });
+  const loader = createRequire(join(root, pkg, "package.json")).resolve("tsx");
+  const result = spawnSync(
+    process.execPath,
+    ["--import", pathToFileURL(loader).href, join(root, entry)],
+    {
+      cwd: root,
+      env: { ...env, ...extraEnv },
+      encoding: "utf8",
+      timeout: 60_000,
+    },
+  );
   return `${result.stdout}\n${result.stderr}`;
 }
 
 describe("tsx boot resolution (start.mjs spawn contract)", () => {
   for (const { pkg, entry } of ENTRYPOINTS) {
-    it(`${entry} loads under the ${pkg} tsx bin without module-resolution errors`, () => {
+    it(`${entry} loads under the ${pkg} tsx loader without module-resolution errors`, () => {
       expect(boot(pkg, entry)).not.toMatch(/ERR_MODULE_NOT_FOUND|Cannot find module/);
     }, 90_000);
   }

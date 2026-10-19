@@ -26,6 +26,19 @@ const config: NextConfig = {
         destination: "https://docs.millionsend.com/llms-full.txt",
         permanent: true,
       },
+      // Received mail moved from the Emails page to Inboxes; old links and
+      // bookmarks still land on it.
+      {
+        source: "/emails",
+        has: [{ type: "query", key: "source", value: "receiving" }],
+        destination: "/inboxes/received",
+        permanent: false,
+      },
+      {
+        source: "/emails/receiving/:id",
+        destination: "/inboxes/received/:id",
+        permanent: false,
+      },
     ];
   },
   async headers() {

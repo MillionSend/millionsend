@@ -1,7 +1,8 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { legacyClickToken } from "@millionsend/test-utils";
 import { describe, expect, it } from "vitest";
 import {
   deriveTrackingKey,
@@ -12,33 +13,47 @@ import {
 } from "../src/tracking.js";
 
 const key = randomBytes(32);
-const emailId = "b7f9c9a2-1234-4cde-9f00-0123456789ab";
+const emailId = randomUUID();
+const teamId = randomUUID();
 const url = "https://example.com/path?a=1&b=2#frag";
 
 describe("click tokens", () => {
-  it("round-trips emailId and the signed destination url", () => {
-    const token = makeClickToken({ emailId, url, secretKey: key });
-    expect(verifyClickToken(token, key)).toEqual({ emailId, url });
+  it("round-trips emailId, the team and the signed destination url", () => {
+    const token = makeClickToken({ emailId, teamId, url, secretKey: key });
+    expect(verifyClickToken(token, key)).toEqual({ emailId, teamId, url });
   });
 
   it("preserves urls containing newlines-free arbitrary characters (dots, query, fragment)", () => {
     const tricky = "https://a.b.c.example.com/x.y.z?q=1.2.3&r=a.b#s.t";
-    const token = makeClickToken({ emailId, url: tricky, secretKey: key });
-    expect(verifyClickToken(token, key)).toEqual({ emailId, url: tricky });
+    const token = makeClickToken({ emailId, teamId, url: tricky, secretKey: key });
+    expect(verifyClickToken(token, key)).toEqual({ emailId, teamId, url: tricky });
+  });
+
+  it("still verifies a token minted before the team was signed, naming no team", () => {
+    expect(verifyClickToken(legacyClickToken({ emailId, url, secretKey: key }), key)).toEqual({
+      emailId,
+      teamId: null,
+      url,
+    });
+    // A newline inside an old token's url never reads as a team boundary.
+    const split = `https://example.com/a\n${teamId}\nhttps://evil.example/`;
+    expect(
+      verifyClickToken(legacyClickToken({ emailId, url: split, secretKey: key }), key),
+    ).toEqual({ emailId, teamId: null, url: split });
   });
 
   it("REJECTS a token whose signed url was tampered — the open-redirect defense", () => {
     // Forge a payload swapping the destination to an attacker host, reusing the
     // original mac. Verification must reject it: only a URL we signed is ever
     // returned, so the redirect can never be pointed elsewhere.
-    const token = makeClickToken({ emailId, url, secretKey: key });
+    const token = makeClickToken({ emailId, teamId, url, secretKey: key });
     const mac = token.slice(token.indexOf(".") + 1);
     const evil = Buffer.from(`${emailId}\nhttps://evil.example`, "utf8").toString("base64url");
     expect(verifyClickToken(`${evil}.${mac}`, key)).toBeNull();
   });
 
   it("verifyClickToken only ever returns a URL we signed", () => {
-    const token = makeClickToken({ emailId, url, secretKey: key });
+    const token = makeClickToken({ emailId, teamId, url, secretKey: key });
     const result = verifyClickToken(token, key);
     expect(result?.url).toBe(url);
     // A different key never validates the same token.
@@ -46,7 +61,7 @@ describe("click tokens", () => {
   });
 
   it("rejects a tampered mac and garbage without throwing", () => {
-    const token = makeClickToken({ emailId, url, secretKey: key });
+    const token = makeClickToken({ emailId, teamId, url, secretKey: key });
     const at = token.indexOf(".") + 3;
     const flipped = token.slice(0, at) + (token[at] === "A" ? "B" : "A") + token.slice(at + 1);
     expect(flipped).not.toBe(token);
@@ -58,7 +73,7 @@ describe("click tokens", () => {
 
   it("rejects a non-canonical final mac char (padding-bit malleability)", () => {
     const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    const token = makeClickToken({ emailId, url, secretKey: key });
+    const token = makeClickToken({ emailId, teamId, url, secretKey: key });
     const last = token[token.length - 1] as string;
     const tampered = token.slice(0, -1) + alphabet[alphabet.indexOf(last) | 1];
     expect(tampered).not.toBe(token);

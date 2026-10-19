@@ -3,11 +3,15 @@ import {
   type AccountMailKind,
   accountMailPhrase,
   applyMergeFields,
+  broadcastAudienceWhere,
+  broadcastScreen,
   broadcastSendSpacingMs,
   buildAccountMail,
   buildUnsubscribeHeaders,
   cancelBroadcastRows,
   claimNotification,
+  contactActivity,
+  contactPropertyDateSql,
   drawBroadcastCopy,
   encryptEmailBody,
   fetchDeliverabilityHealth,
@@ -16,32 +20,46 @@ import {
   findSuppressed,
   formatMailDate,
   formatMailDateTime,
+  getWarmup,
   injectPreheader,
+  isInactiveContact,
   isSubscribedToTopic,
   type Keyring,
+  linkTeam,
   type MailLocale,
   type MonitorDeps,
   makeUnsubscribeToken,
+  NOVEL_DESTINATIONS_MAX,
   nextUtcDayStart,
   PACING_HORIZON_MAX_RETENTION_DAYS,
   pacingHorizonDays,
   parseSingleSender,
   planBroadcastSamples,
   planCaps,
+  planDomainWarmup,
   planRegionSend,
   quotaUsage,
   type RegionCapacity,
+  recentTransactionalByAddress,
   recordMonitorSample,
   regionPause,
+  releaseQuota,
   reserveQuota,
+  reserveWarmup,
   roundUpToSlot,
+  type ScreenParkReason,
+  screeningTeam,
   segmentContactsWhere,
   substituteUnsubscribeUrl,
+  teamDestinationStanding,
+  utcDay,
+  warmupCap,
+  warmupSendOrder,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { EmailSendRequest, EnqueueEmailSends } from "@millionsend/queue";
-import { and, asc, eq, gt, inArray, isNotNull, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { mailOwners, type SystemMailer } from "../system-mail.js";
 
 /**
@@ -88,6 +106,8 @@ export interface BroadcastDeps {
   appBaseUrl?: string | undefined;
   /** The content monitor: the skeleton sample at fan-out start and the copies drawn per recipient. */
   monitor?: MonitorDeps | undefined;
+  /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
+  platformDomains?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -215,15 +235,31 @@ export async function sendBroadcast(
         broadcast,
         "broadcast.held",
         `/broadcasts/${broadcast.id}`,
-        (_, team) => ({
-          name: broadcast.name ?? broadcast.subject,
-          region: domain.region,
-          team,
-        }),
+        (_, team) => ({ name: broadcast.name ?? broadcast.subject, team }),
       );
     }
     await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
     return "deferred";
+  }
+  // A team in its first window that shares people, domains or this
+  // broadcast with a team suspended for phishing is held before it fans
+  // out: the standing read below then parks the fan-out.
+  if (deps.monitor) {
+    const s = await deps.monitor.settings().catch(() => null);
+    const team = s ? await screeningTeam(db, s, broadcast.teamId, new Date()) : null;
+    if (team?.firstWindow) {
+      await linkTeam(db, {
+        teamId: broadcast.teamId,
+        trigger: "send",
+        message: {
+          from: broadcast.from,
+          subject: broadcast.subject,
+          html: broadcast.html,
+          text: broadcast.text,
+        },
+        tier: team.tier,
+      });
+    }
   }
   // An operator's pause or suspension parks the fan-out the way a region
   // hold does; the owners heard about it when the operator acted.
@@ -256,102 +292,141 @@ export async function sendBroadcast(
   // Topic-scoped send: fetch the topic's default once (it gates every contact
   // with no explicit override) and hydrate per-batch override rows below. A
   // null topicId is a global send and skips all of this.
-  let topicDefault: boolean | null = null;
-  if (broadcast.topicId) {
-    const [topic] = await db
-      .select({ defaultSubscribed: schema.topics.defaultSubscribed })
-      .from(schema.topics)
-      .where(eq(schema.topics.id, broadcast.topicId));
-    if (!topic) throw new Error(`broadcast ${broadcast.id}: topic ${broadcast.topicId} not found`);
-    topicDefault = topic.defaultSubscribed;
+  const [topic = null] = broadcast.topicId
+    ? await db
+        .select({ id: schema.topics.id, defaultSubscribed: schema.topics.defaultSubscribed })
+        .from(schema.topics)
+        .where(eq(schema.topics.id, broadcast.topicId))
+    : [];
+  if (broadcast.topicId && !topic) {
+    throw new Error(`broadcast ${broadcast.id}: topic ${broadcast.topicId} not found`);
   }
+  const topicDefault = topic?.defaultSubscribed ?? null;
 
   // Graduated throttle: a team over the deliverability risk line (warning or
   // paused) drips its fan-out so reputation can recover, instead of bursting.
   // A broadcast that reaches fan-out already "paused" (scheduled while healthy,
   // degraded since) is throttled here, not hard-halted — the initiation guards
   // (tRPC + API) are what block NEW paused sends; the fan-out's only job is to
-  // avoid the burst. Evaluated once so the whole campaign shares one drip base.
-  const health = await fetchDeliverabilityHealth(db, broadcast.teamId);
-  const spacingMs = broadcastSendSpacingMs(health.status);
-  const startMs = Date.now();
+  // avoid the burst. Health is read at every page edge, so a team that crosses
+  // the line mid-walk drips the rest from that page on. The drip never loosens
+  // within a walk, since the slots it handed out are still ahead, and a
+  // tighter one starts after the last of them instead of on top. While the
+  // team stays paused, the send handler parks each row as it comes due.
+  let spacingMs = 0;
+  let nextSendMs = 0;
   let emitted = 0;
 
   // Optional segment: AND the shared resolver (filter matches plus manual
   // members) into the contact scan. The segment must belong to this
   // broadcast's team — a mismatch is a tampered/foreign reference, so refuse
   // rather than mail the wrong people.
-  let segmentPredicate: SQL | undefined;
-  if (broadcast.segmentId) {
-    const [segment] = await db
-      .select({ id: schema.segments.id, filter: schema.segments.filter })
-      .from(schema.segments)
-      .where(
-        and(
-          eq(schema.segments.id, broadcast.segmentId),
-          eq(schema.segments.teamId, broadcast.teamId),
-        ),
-      );
-    if (!segment) {
-      throw new Error(
-        `broadcast ${broadcast.id}: segment ${broadcast.segmentId} not found for its team`,
-      );
-    }
-    segmentPredicate = segmentContactsWhere(schema.contacts, segment);
+  const [segment = null] = broadcast.segmentId
+    ? await db
+        .select({ id: schema.segments.id, filter: schema.segments.filter })
+        .from(schema.segments)
+        .where(
+          and(
+            eq(schema.segments.id, broadcast.segmentId),
+            eq(schema.segments.teamId, broadcast.teamId),
+          ),
+        )
+    : [];
+  if (broadcast.segmentId && !segment) {
+    throw new Error(
+      `broadcast ${broadcast.id}: segment ${broadcast.segmentId} not found for its team`,
+    );
   }
+  const segmentPredicate = segment ? segmentContactsWhere(schema.contacts, segment) : undefined;
 
   // The audience over the same predicate the walk pages over, with the
   // topic rule the walk applies so it holds for an opt-in topic too. An
   // upper bound: the suppressed and topic-unsubscribed contacts the walk
   // skips make the real count run a little under. It sizes the admission
   // into the region's broadcast share and the monitor's draw.
-  const subs = schema.contactTopicSubscriptions;
-  const topicRule = !broadcast.topicId
-    ? undefined
-    : topicDefault
-      ? sql`not exists (select 1 from ${subs} where ${subs.contactId} = ${schema.contacts.id} and ${subs.topicId} = ${broadcast.topicId} and ${subs.subscribed} = false)`
-      : sql`exists (select 1 from ${subs} where ${subs.contactId} = ${schema.contacts.id} and ${subs.topicId} = ${broadcast.topicId} and ${subs.subscribed} = true)`;
   const [audience] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.contacts)
-    .where(
-      and(
-        eq(schema.contacts.teamId, broadcast.teamId),
-        eq(schema.contacts.unsubscribed, false),
-        segmentPredicate,
-        topicRule,
-      ),
-    );
+    .where(broadcastAudienceWhere(broadcast.teamId, segment, topic));
   const audienceCount = audience?.n ?? 0;
   await db
     .update(schema.broadcasts)
     .set({ audienceCount })
     .where(eq(schema.broadcasts.id, broadcast.id));
-  // Admission: the first `admitted` rows this walk writes get a job now; the
-  // rest park for the drain. A resumed walk takes again against the count,
-  // which already holds the rows it wrote before.
-  const admitted =
-    deps.sesQuota?.take(domain.region, broadcast.id, audienceCount) ?? Number.POSITIVE_INFINITY;
 
   // The monitor judges the broadcast's own HTML once and a few rendered
   // copies: the expected count is `copies`, so the draw needs the audience
-  // size. Every step is best-effort.
+  // size. For a new team, or HTML that sends readers somewhere the team has
+  // not cleared, with the hold on, the walk writes no row until the HTML has
+  // its verdict; a new team's first copy waits for its own too: a contact
+  // field can carry a whole link. HTML with more new destinations than a
+  // verdict can vouch for parks every row for an operator unjudged. A
+  // failure here fails the walk, which is retried: never fanned out
+  // unscreened.
   let monitorCopies = 0;
   let monitorAudience = 0;
+  let screenFirstCopy = false;
+  let screenParked: ScreenParkReason | null = null;
   if (deps.monitor) {
-    try {
+    const standing = await teamDestinationStanding(db, {
+      teamId: broadcast.teamId,
+      html: broadcast.html,
+      text: broadcast.text,
+      replyTo: broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null,
+      ignore: deps.platformDomains,
+      now: new Date(),
+    });
+    if (standing.novel.length > NOVEL_DESTINATIONS_MAX) {
+      screenParked = "destination";
+    } else {
       const plan = await planBroadcastSamples(db, deps.monitor, {
         teamId: broadcast.teamId,
         broadcastId: broadcast.id,
+        novel: standing.novel.length > 0,
+        probation: standing.probation.length > 0,
       });
       if (plan.copies > 0) {
         monitorAudience = audienceCount;
         monitorCopies = plan.copies;
       }
-    } catch (err) {
-      console.error(`broadcast ${broadcast.id}: monitor skeleton skipped`, err);
+      if (plan.screen && plan.skeletonSampleId) {
+        const gate = await broadcastScreen(db, deps.monitor, {
+          skeletonSampleId: plan.skeletonSampleId,
+          domainId: domain.id,
+          now: new Date(),
+        });
+        // The judge queues the fan-out again once the HTML has its verdict.
+        if (gate.action === "wait") return "deferred";
+        if (gate.action === "park") screenParked = gate.reason;
+        screenFirstCopy =
+          screenParked === null &&
+          plan.tier === "new" &&
+          !(await firstCopyScreened(db, broadcast.id));
+      }
     }
   }
+  // A domain warming up its reputation, or paused in it, admits nothing now:
+  // every row parks in line by its contact's activity, and the drain lets
+  // them out by the warm-up's day.
+  const walkStart = new Date();
+  const ramp = await getWarmup(db, broadcast.teamId, domain.id);
+  const warming = ramp?.status === "warming" || ramp?.status === "paused" ? ramp : null;
+  const transactional = warming?.orderByTransactional
+    ? await recentTransactionalByAddress(db, broadcast.teamId, walkStart)
+    : null;
+  // The sender's choice in the send dialog, else the warm-up's own setting.
+  const skipInactive = broadcast.warmupSkipInactive ?? warming?.skipInactive ?? false;
+  // Inactive contacts left out on the page just walked: persisted with the
+  // cursor that moves past that page, so a resumed walk never counts twice.
+  let skipped = 0;
+  const skippedSet = () =>
+    skipped > 0 ? { warmupSkipped: sql`${schema.broadcasts.warmupSkipped} + ${skipped}` } : {};
+  // Admission: the first `admitted` rows this walk writes get a job now; the
+  // rest park for the drain. A resumed walk takes again against the count,
+  // which already holds the rows it wrote before.
+  const admitted = warming
+    ? 0
+    : (deps.sesQuota?.take(domain.region, broadcast.id, audienceCount) ?? Number.POSITIVE_INFINITY);
   const replyTo = broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null;
   // The preheader is per-broadcast, so it is injected once here; merge tokens
   // inside it still personalize per contact below.
@@ -377,6 +452,15 @@ export async function sendBroadcast(
       // A billing period can renew under a long walk (the daily counter follows
       // the clock by itself); each page reserves against the period current now.
       quota = (await fetchTeamQuota(db, broadcast.teamId, deps.isCloud)) ?? quota;
+      // The sending domain's warm-up and the team's shared one, read per page
+      // like the quota: once either day is spent, the rest of the page parks
+      // at insert behind it.
+      const warmup = await warmupCap(db, {
+        teamId: broadcast.teamId,
+        domainId: domain.id,
+        at: new Date(),
+      });
+      let warmupFull = false;
       const contacts = await db
         .select({
           id: schema.contacts.id,
@@ -384,6 +468,10 @@ export async function sendBroadcast(
           firstName: schema.contacts.firstName,
           lastName: schema.contacts.lastName,
           properties: schema.contacts.properties,
+          lastEngagedAt: schema.contacts.lastEngagedAt,
+          propertyAt: warming?.orderProperty
+            ? contactPropertyDateSql(warming.orderProperty)
+            : sql<Date | null>`null`,
         })
         .from(schema.contacts)
         .where(
@@ -403,13 +491,14 @@ export async function sendBroadcast(
       // finished the broadcast, or a cancel.
       const [alive] = await db
         .update(schema.broadcasts)
-        .set({ updatedAt: new Date(), fanOutCursor: cursor })
+        .set({ updatedAt: new Date(), fanOutCursor: cursor, ...skippedSet() })
         .where(and(eq(schema.broadcasts.id, broadcast.id), eq(schema.broadcasts.status, "sending")))
         .returning({ id: schema.broadcasts.id });
       if (!alive) {
         await stopIfCanceled(db, broadcast);
         return "skipped";
       }
+      skipped = 0;
       deps.sesQuota?.progress(broadcast.id, emitted);
       // A suspension or pause landing mid-walk stops the fan-out at the page
       // edge; the resumed walk skips the contacts already inserted.
@@ -417,6 +506,13 @@ export async function sendBroadcast(
       if (standingNow?.suspended || standingNow?.broadcastsPausedByOperatorAt) {
         await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
         return "deferred";
+      }
+      const pageSpacingMs = broadcastSendSpacingMs(
+        (await fetchDeliverabilityHealth(db, broadcast.teamId)).status,
+      );
+      if (pageSpacingMs > spacingMs) {
+        spacingMs = pageSpacingMs;
+        nextSendMs = Math.max(nextSendMs, Date.now());
       }
 
       // Suppression mirrors the API accept path: a bounced or complained
@@ -455,6 +551,23 @@ export async function sendBroadcast(
         ) {
           continue;
         }
+        let sendOrder: number | null = null;
+        if (warming) {
+          const activity = contactActivity(
+            warming,
+            {
+              engagedAt: contact.lastEngagedAt,
+              transactionalAt: transactional?.get(contact.email.toLowerCase()) ?? null,
+              propertyAt: contact.propertyAt,
+            },
+            walkStart,
+          );
+          if (skipInactive && isInactiveContact(activity, walkStart)) {
+            skipped += 1;
+            continue;
+          }
+          sendOrder = warmupSendOrder(activity, walkStart);
+        }
         // The row id is minted before the body so the unsubscribe link can name
         // the email it sits in.
         const emailId = randomUUID();
@@ -485,13 +598,18 @@ export async function sendBroadcast(
         // Only rows this run actually enqueues advance the drip — re-run
         // conflicts (accepted === null) don't, so a resumed fan-out keeps
         // spacing tight instead of leaving gaps for already-queued contacts.
-        const startAfter = spacingMs > 0 ? new Date(startMs + emitted * spacingMs) : undefined;
+        const startAfter = spacingMs > 0 ? new Date(nextSendMs) : undefined;
         // Past the share's room the row parks at once: no reservation and no
         // job, the drain reserves on release (the existing parking contract).
-        const paced = emitted >= admitted;
+        // While the judge cannot answer for a young domain's broadcast, every
+        // row waits for an operator instead.
+        const paced = emitted >= admitted && screenParked === null;
+        const held = !paced && screenParked === null && warmupFull;
         // Quota reservation and email insert commit atomically (the quota
         // contract), same as the API accept path — a broadcast must not
         // bypass the plan's cap.
+        const firstCopy = screenFirstCopy;
+        const judgeNow: string[] = [];
         const accepted = await db.transaction(async (tx) => {
           // Insert before reserving: a conflict means a previous run already
           // fanned this contact out (and reserved quota for it), so a re-run
@@ -508,11 +626,14 @@ export async function sendBroadcast(
               to: [contact.email],
               replyTo,
               subject: applyMergeFields(broadcast.subject, contact, { html: false }),
-              latestStatus: paced ? "queued_quota" : "queued",
+              latestStatus: paced || held || screenParked ? "queued_quota" : "queued",
+              parkReason: screenParked ?? (held || warming ? "warmup" : null),
+              parkedAt: screenParked ? new Date() : null,
+              sendOrder,
               // The drip lives on the row: the send handler defers to it and
               // the reconcile sweep leaves a not-yet-due row alone instead of
               // re-enqueueing every throttled send each pass.
-              scheduledAt: paced ? null : (startAfter ?? null),
+              scheduledAt: paced || screenParked ? null : (startAfter ?? null),
               bodyCiphertext: encrypted.ciphertext,
               bodyIv: encrypted.iv,
               bodyWrappedDek: encrypted.wrappedDek,
@@ -524,13 +645,44 @@ export async function sendBroadcast(
             })
             .returning({ id: schema.emails.id });
           if (!row) return null;
-          if (paced) return { id: row.id, parked: true };
-          const reservation = await reserveQuota(tx as unknown as Db, {
+          // The copy that waits for its own verdict is written with its
+          // sample or not at all: without one it would go out unscreened.
+          if (firstCopy && deps.monitor) {
+            await recordMonitorSample(
+              tx as unknown as Db,
+              { ...deps.monitor, enqueueJudge: async (id) => void judgeNow.push(id) },
+              await deps.monitor.settings(),
+              {
+                teamId: broadcast.teamId,
+                emailId: row.id,
+                broadcastId: broadcast.id,
+                kind: "broadcast_copy",
+                now: new Date(),
+                screening: true,
+              },
+            );
+          }
+          if (paced || held || screenParked) return { id: row.id, parked: true };
+          const txDb = tx as unknown as Db;
+          const reservation = await reserveQuota(txDb, {
             teamId: broadcast.teamId,
             count: 1,
             quota,
           });
-          if (reservation.reserved) return { id: row.id, parked: false };
+          if (reservation.reserved) {
+            if (!warmup || (await reserveWarmup(txDb, warmup, 1, utcDay())).reserved) {
+              return { id: row.id, parked: false };
+            }
+            // Over the warm-up: the plan's unit goes back, the row parks for
+            // the drain, which charges them all again on release.
+            await releaseQuota(txDb, { teamId: broadcast.teamId, count: 1, quota });
+            await tx
+              .update(schema.emails)
+              .set({ latestStatus: "queued_quota", parkReason: "warmup" })
+              .where(eq(schema.emails.id, row.id));
+            warmupFull = true;
+            return { id: row.id, parked: true };
+          }
           // Over the plan cap: park as queued_quota — accepted but not
           // enqueued; the quota drain moves it to queued once the cap has
           // room again (the UTC rollover, the period renewal, overage on).
@@ -544,9 +696,18 @@ export async function sendBroadcast(
         // already queued (or the sends.reconcile sweep recovers it).
         if (accepted && !accepted.parked) {
           emitted += 1;
+          nextSendMs += spacingMs;
           batch.push({ emailId: accepted.id, startAfter });
         }
-        if (
+        if (accepted && firstCopy && deps.monitor) {
+          screenFirstCopy = false;
+          for (const sampleId of judgeNow) {
+            await deps.monitor.enqueueJudge(sampleId, {
+              teamId: broadcast.teamId,
+              screening: true,
+            });
+          }
+        } else if (
           accepted &&
           deps.monitor &&
           monitorCopies > 0 &&
@@ -594,6 +755,7 @@ export async function sendBroadcast(
         // Counted once here off the fan-out's own unique index, so lists never
         // join the emails table to size a broadcast.
         recipientCount: sql`(select count(*)::int from ${schema.emails} where ${schema.emails.broadcastId} = ${broadcast.id})`,
+        ...skippedSet(),
       })
       .where(and(eq(schema.broadcasts.id, broadcast.id), eq(schema.broadcasts.status, "sending")))
       .returning({ recipientCount: schema.broadcasts.recipientCount });
@@ -606,9 +768,26 @@ export async function sendBroadcast(
     return "skipped";
   }
   if (!(await finalizeBroadcast(db, deps, broadcast.id))) {
-    await reportWalkEnd(db, deps, broadcast, domain.region, walked.recipientCount ?? 0, quota);
+    if (warming) {
+      await reportWarmupWalkEnd(db, deps, broadcast, { id: domain.id, name: fromDomain });
+    } else {
+      await reportWalkEnd(db, deps, broadcast, domain.region, walked.recipientCount ?? 0, quota);
+    }
   }
   return "sent";
+}
+
+/** Whether a fan-out already rendered the copy that waits for its own verdict. */
+async function firstCopyScreened(db: Db, broadcastId: string): Promise<boolean> {
+  const ms = schema.monitorSamples;
+  const [row] = await db
+    .select({ id: ms.id })
+    .from(ms)
+    .where(
+      and(eq(ms.broadcastId, broadcastId), eq(ms.kind, "broadcast_copy"), eq(ms.screening, true)),
+    )
+    .limit(1);
+  return row !== undefined;
 }
 
 /**
@@ -716,6 +895,8 @@ async function reportWalkEnd(
   quota: NonNullable<Awaited<ReturnType<typeof fetchTeamQuota>>>,
 ): Promise<void> {
   if (!deps.mailer) return;
+  // Rows a domain's warm-up holds are left out: neither the plan nor the
+  // platform's capacity is why they wait, and the domain page says when.
   const [{ parked } = { parked: 0 }] = await db
     .select({ parked: sql<number>`count(*)::int` })
     .from(schema.emails)
@@ -723,6 +904,7 @@ async function reportWalkEnd(
       and(
         eq(schema.emails.broadcastId, broadcast.id),
         eq(schema.emails.latestStatus, "queued_quota"),
+        isNull(schema.emails.parkReason),
       ),
     );
   if (parked === 0) return;
@@ -750,7 +932,7 @@ async function reportWalkEnd(
           ? accountMailPhrase({
               locale,
               kind,
-              key: "releaseMonthly",
+              key: quota.overagePaused ? "releasePaused" : "releaseMonthly",
               values: { date: formatMailDate(locale, quota.periodEnd) },
             })
           : accountMailPhrase({
@@ -785,28 +967,76 @@ async function reportWalkEnd(
   // The rest goes out within the day: the completion report is news enough.
   if (mine.days <= 1) return;
   const finishesAt = roundUpToSlot(mine.finishesAt);
-  if (
-    !(await claimNotification(db, {
-      teamId: broadcast.teamId,
+  await reportSending(db, deps, broadcast, mine.days, (locale) =>
+    accountMailPhrase({
+      locale,
       kind: "broadcast.sending",
-      periodKey: broadcast.id,
-    }))
-  ) {
-    return;
-  }
-  await report(
-    db,
-    deps,
-    broadcast,
-    "broadcast.sending",
-    `/broadcasts/${broadcast.id}`,
-    (locale, team) => ({
-      name,
-      team,
-      days: String(mine.days),
-      first: (count - parked).toLocaleString(locale),
-      count: count.toLocaleString(locale),
-      finishesAt: formatMailDateTime(locale, finishesAt),
+      key: "wave",
+      values: {
+        first: (count - parked).toLocaleString(locale),
+        count: count.toLocaleString(locale),
+        finishesAt: formatMailDateTime(locale, finishesAt),
+      },
     }),
   );
+}
+
+/**
+ * The walk-end note for a warming domain's broadcast, from the warm-up's
+ * own plan rather than the platform's capacity: none while the warm-up is
+ * paused, nor when the rest goes out within the day.
+ */
+async function reportWarmupWalkEnd(
+  db: Db,
+  deps: BroadcastDeps,
+  broadcast: { id: string; teamId: string; name: string | null; subject: string },
+  domain: { id: string; name: string },
+): Promise<void> {
+  if (!deps.mailer) return;
+  const [{ waiting } = { waiting: 0 }] = await db
+    .select({ waiting: sql<number>`count(*)::int` })
+    .from(schema.emails)
+    .where(
+      and(
+        eq(schema.emails.broadcastId, broadcast.id),
+        eq(schema.emails.latestStatus, "queued_quota"),
+        eq(schema.emails.parkReason, "warmup"),
+      ),
+    );
+  if (waiting === 0) return;
+  const plan = await planDomainWarmup(db, {
+    teamId: broadcast.teamId,
+    domainId: domain.id,
+    count: waiting,
+    broadcastId: broadcast.id,
+  });
+  if (!plan?.finishesAt || plan.days <= 1) return;
+  const finishesAt = roundUpToSlot(plan.finishesAt);
+  await reportSending(db, deps, broadcast, plan.days, (locale) =>
+    accountMailPhrase({
+      locale,
+      kind: "broadcast.sending",
+      key: "warmup",
+      values: { domain: domain.name, finishesAt: formatMailDateTime(locale, finishesAt) },
+    }),
+  );
+}
+
+/** The note that a send takes `days`, claimed once per broadcast; `progress` says how it goes out. */
+async function reportSending(
+  db: Db,
+  deps: BroadcastDeps,
+  broadcast: { id: string; teamId: string; name: string | null; subject: string },
+  days: number,
+  progress: (locale: MailLocale) => string,
+): Promise<void> {
+  const kind = "broadcast.sending";
+  if (!(await claimNotification(db, { teamId: broadcast.teamId, kind, periodKey: broadcast.id }))) {
+    return;
+  }
+  await report(db, deps, broadcast, kind, `/broadcasts/${broadcast.id}`, (locale, team) => ({
+    team,
+    days: String(days),
+    progress: progress(locale),
+  }));
 }

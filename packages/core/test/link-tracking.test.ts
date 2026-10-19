@@ -1,17 +1,18 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { rewriteForTracking } from "../src/link-tracking.js";
-import { verifyClickToken, verifyOpenToken } from "../src/tracking.js";
+import { makeClickToken, verifyClickToken, verifyOpenToken } from "../src/tracking.js";
 
 const key = randomBytes(32);
-const emailId = "b7f9c9a2-1234-4cde-9f00-0123456789ab";
+const emailId = randomUUID();
+const teamId = randomUUID();
 const trackingBaseUrl = "https://track.example.com";
 const html =
   '<html><body><p>Hi</p><a href="https://acme.example/welcome">Welcome</a>' +
   '<a href="https://acme.example/docs?x=1&amp;y=2">Docs</a></body></html>';
 
 function opts(over: Partial<Parameters<typeof rewriteForTracking>[1]> = {}) {
-  return { emailId, trackingBaseUrl, click: false, open: false, secretKey: key, ...over };
+  return { emailId, teamId, trackingBaseUrl, click: false, open: false, secretKey: key, ...over };
 }
 
 describe("rewriteForTracking — clean-links guarantee", () => {
@@ -29,12 +30,14 @@ describe("rewriteForTracking — click", () => {
     expect(tokens).toHaveLength(2);
     expect(verifyClickToken(tokens[0] as string, key)).toEqual({
       emailId,
+      teamId,
       url: "https://acme.example/welcome",
     });
     // The signed destination is the URL a browser would follow: the
     // attribute's "&amp;" is one "&", not a second query parameter named "amp;y".
     expect(verifyClickToken(tokens[1] as string, key)).toEqual({
       emailId,
+      teamId,
       url: "https://acme.example/docs?x=1&y=2",
     });
     // The raw destination is gone from the body — the redirect owns it now.
@@ -54,10 +57,74 @@ describe("rewriteForTracking — click", () => {
     expect(out).toMatch(/<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">b<\/a>/);
   });
 
+  it("tracks an unquoted or spaced href and writes the tracked one back quoted", () => {
+    const src =
+      "<a href=https://acme.example/a?x=1&amp;y=2>a</a>" +
+      '<a class=btn href = "https://acme.example/b">b</a>' +
+      "<a href=https://acme.example/c/>c</a>";
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://acme.example/a?x=1&y=2",
+      "https://acme.example/b",
+      "https://acme.example/c/",
+    ]);
+    expect(out).toMatch(/^<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">a<\/a>/);
+    expect(out).toMatch(/<a class=btn href = "https:\/\/track\.example\.com\/t\/c\/[^"]+">b<\/a>/);
+    expect(out).toMatch(/<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">c<\/a>$/);
+  });
+
+  it("changes nothing but the href's value, byte for byte", () => {
+    const url = "https://acme.example/welcome?a=1&b=2";
+    const token = makeClickToken({ emailId, teamId, url, secretKey: key });
+    expect(
+      rewriteForTracking(
+        '<p><a class="btn" href="https://acme.example/welcome?a=1&amp;b=2" style="color:red">Hi</a></p>',
+        opts({ click: true }),
+      ),
+    ).toBe(
+      `<p><a class="btn" href="https://track.example.com/t/c/${token}" style="color:red">Hi</a></p>`,
+    );
+  });
+
+  it("rewrites a real <a> or <area> href only: never a decoy inside another attribute, nor a form", () => {
+    const decoy = `title=" href='https://www.team.dev/' "`;
+    const src =
+      `<a ${decoy} href="https://evil.example/x">a</a>` +
+      '<form action="https://acme.example/post"><button formaction="https://acme.example/f">b</button></form>' +
+      "<a/href=https://acme.example/slash>c</a>" +
+      '<map><area href="https://acme.example/area" alt="d"></map>';
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://evil.example/x",
+      "https://acme.example/slash",
+      "https://acme.example/area",
+    ]);
+    expect(out).toContain(`<a ${decoy} href="https://track.example.com/t/c/`);
+    expect(out).toContain('action="https://acme.example/post"');
+    expect(out).toContain('formaction="https://acme.example/f"');
+    expect(out).toMatch(/<a\/href="https:\/\/track\.example\.com\/t\/c\/[^"]+">c<\/a>/);
+  });
+
+  it("tracks the links of Outlook's conditional markup and leaves commented-out ones alone", () => {
+    const src =
+      '<!--[if mso]><a href="https://acme.example/outlook">o</a><![endif]-->' +
+      '<!-- <a href="https://acme.example/old">x</a> -->';
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://acme.example/outlook",
+    ]);
+    expect(out).toContain('<!-- <a href="https://acme.example/old">x</a> -->');
+  });
+
   it("walks a crafted body of repeated unclosed hrefs in linear time", () => {
     // The vitest timeout is the guard: a backtracking regex takes seconds here.
     const src = `<a${' href="='.repeat(20_000)}`;
     expect(rewriteForTracking(src, opts({ click: true }))).toBe(src);
+    const spaced = `<a${" href = ".repeat(20_000)}`;
+    expect(rewriteForTracking(spaced, opts({ click: true }))).toBe(spaced);
   });
 
   it("leaves mailto:, tel:, relative, and unexpanded {{{...}}} hrefs intact", () => {
@@ -82,6 +149,7 @@ describe("rewriteForTracking — click", () => {
     const token = out.match(/t\/c\/([^"']+)/)?.[1];
     expect(verifyClickToken(token as string, key)).toEqual({
       emailId,
+      teamId,
       url: "https://acme.example/go?a=1&b=2'",
     });
   });

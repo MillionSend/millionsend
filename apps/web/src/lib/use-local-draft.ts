@@ -55,42 +55,56 @@ export function useLocalDraft<T>({
     }
   }, [storageKey]);
 
-  // Debounced write on every state change.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the effect is keyed on the state identity; the body reads through a ref so the timeout always sees the latest
-  useEffect(() => {
-    const id = setTimeout(() => {
-      if (recoveredPendingRef.current) return; // don't clobber an unanswered offer
-      // Saves are refused under a support view, so a mirrored draft would never
-      // be cleared and the customer's content would stay in the operator's browser.
-      if (isReadOnly()) return;
-      try {
-        const snapshot = JSON.stringify(stateRef.current);
-        if (snapshot === baselineRef.current) {
-          localStorage.removeItem(storageKey);
-        } else {
-          localStorage.setItem(
-            storageKey,
-            JSON.stringify({ savedAt: Date.now(), data: stateRef.current }),
-          );
-        }
-      } catch {
-        // Storage full/unavailable — drafts are best-effort.
+  const keyRef = useRef(storageKey);
+  keyRef.current = storageKey;
+  // Reads only refs, so the timer and the unmount both write what is current.
+  const writeRef = useRef(() => {
+    if (recoveredPendingRef.current) return; // don't clobber an unanswered offer
+    // Saves are refused under a support view, so a mirrored draft would never
+    // be cleared and the customer's content would stay in the operator's browser.
+    if (isReadOnly()) return;
+    try {
+      const snapshot = JSON.stringify(stateRef.current);
+      if (snapshot === baselineRef.current) {
+        localStorage.removeItem(keyRef.current);
+      } else {
+        localStorage.setItem(
+          keyRef.current,
+          JSON.stringify({ savedAt: Date.now(), data: stateRef.current }),
+        );
       }
-    }, 800);
+    } catch {
+      // Storage full/unavailable — drafts are best-effort.
+    }
+  });
+
+  // Debounced write on every state change.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the effect is keyed on the state identity; the write reads through refs so the timeout always sees the latest
+  useEffect(() => {
+    const id = setTimeout(writeRef.current, 800);
     return () => clearTimeout(id);
   }, [state, storageKey]);
+  // Unmounted (a reply composer closing with its thread), the write still
+  // pending happens now rather than never.
+  useEffect(() => () => writeRef.current(), []);
 
-  /** After a successful persist: the current state becomes the baseline. */
-  const markSaved = useCallback(() => {
-    baselineRef.current = JSON.stringify(stateRef.current);
-    recoveredPendingRef.current = false;
-    setRecovered(null);
-    try {
-      localStorage.removeItem(storageKey);
-    } catch {
-      /* best-effort */
-    }
-  }, [storageKey]);
+  /**
+   * After a successful persist: the current state becomes the baseline, or
+   * `saved` for a form that resets as it persists (a composer empties on send).
+   */
+  const markSaved = useCallback(
+    (saved: T = stateRef.current) => {
+      baselineRef.current = JSON.stringify(saved);
+      recoveredPendingRef.current = false;
+      setRecovered(null);
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {
+        /* best-effort */
+      }
+    },
+    [storageKey],
+  );
 
   /** The user declined the recovered draft — forget it. */
   const discardRecovered = useCallback(() => {

@@ -50,57 +50,70 @@ export function PeriodBar({
   });
   if (custom) {
     return (
+      // The range and its two buttons wrap as groups, never a button alone.
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-        <input
-          type="date"
-          className="ms-input"
-          aria-label={t("from")}
-          value={from}
-          max={to}
-          onChange={(e) => setFrom(e.target.value)}
-          style={{ height: 26, fontSize: 12, padding: "2px 8px", width: "auto" }}
-        />
-        <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>{t("to")}</span>
-        <input
-          type="date"
-          className="ms-input"
-          aria-label={t("to")}
-          value={to}
-          min={from}
-          max={isoDay(new Date())}
-          onChange={(e) => setTo(e.target.value)}
-          style={{ height: 26, fontSize: 12, padding: "2px 8px", width: "auto" }}
-        />
-        <button
-          type="button"
-          style={btn(true)}
-          disabled={!from || !to || from > to}
-          onClick={() => onChange({ from, to })}
-        >
-          {t("apply")}
-        </button>
-        <button
-          type="button"
-          style={btn(false)}
-          onClick={() => {
-            setCustom(false);
-            onChange("30d");
-          }}
-        >
-          {t("presets")}
-        </button>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="date"
+            className="ms-input"
+            aria-label={t("from")}
+            value={from}
+            max={to}
+            onChange={(e) => setFrom(e.target.value)}
+            style={{ height: 26, fontSize: 12, padding: "2px 8px", width: "auto" }}
+          />
+          <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>{t("to")}</span>
+          <input
+            type="date"
+            className="ms-input"
+            aria-label={t("to")}
+            value={to}
+            min={from}
+            max={isoDay(new Date())}
+            onChange={(e) => setTo(e.target.value)}
+            style={{ height: 26, fontSize: 12, padding: "2px 8px", width: "auto" }}
+          />
+        </span>
+        <span style={{ display: "inline-flex", gap: 6 }}>
+          <button
+            type="button"
+            style={btn(true)}
+            disabled={!from || !to || from > to}
+            onClick={() => onChange({ from, to })}
+          >
+            {t("apply")}
+          </button>
+          <button
+            type="button"
+            style={btn(false)}
+            onClick={() => {
+              setCustom(false);
+              onChange("30d");
+            }}
+          >
+            {t("presets")}
+          </button>
+        </span>
       </div>
     );
   }
   return (
+    // A custom range that does not fit beside the presets takes the next
+    // line at its end, a control of its own rather than a stray preset.
     <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
-      {PERIOD_KEYS.map((key) => (
-        <button key={key} type="button" style={btn(value === key)} onClick={() => onChange(key)}>
-          {t(`periodShort.${key}`)}
-        </button>
-      ))}
+      <span style={{ display: "inline-flex", gap: 4 }}>
+        {PERIOD_KEYS.map((key) => (
+          <button key={key} type="button" style={btn(value === key)} onClick={() => onChange(key)}>
+            {t(`periodShort.${key}`)}
+          </button>
+        ))}
+      </span>
       {allowCustom ? (
-        <button type="button" style={btn(false)} onClick={() => setCustom(true)}>
+        <button
+          type="button"
+          style={{ ...btn(false), marginLeft: "auto" }}
+          onClick={() => setCustom(true)}
+        >
           {t("custom")}
         </button>
       ) : null}

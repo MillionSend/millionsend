@@ -43,3 +43,8 @@ export function pickActive(pathname: string, hrefs: readonly string[]): string |
 export function consoleTeamHref(teamId: string): string {
   return `/console/teams?q=${encodeURIComponent(teamId)}`;
 }
+
+/** A team's Trust & safety review page, which serves any team, flagged or not. */
+export function consoleReviewHref(teamId: string): string {
+  return `/console/safety/${teamId}`;
+}

@@ -53,31 +53,28 @@ export const session = pgTable("session", {
   activeTeamId: text("active_team_id"),
 });
 
-export const account = pgTable(
-  "account",
-  {
-    id: text("id").primaryKey(),
-    // Better Auth keys external identities on (issuer, accountId):
-    // `local:credential` for passwords, `local:oauth:<providerId>` for the
-    // built-in social providers (the migration backfills the same values).
-    issuer: text("issuer").notNull(),
-    accountId: text("account_id").notNull(),
-    providerId: text("provider_id").notNull(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    accessToken: text("access_token"),
-    refreshToken: text("refresh_token"),
-    idToken: text("id_token"),
-    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
-    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
-    scope: text("scope"),
-    password: text("password"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [uniqueIndex("account_issuer_account_id_idx").on(t.issuer, t.accountId)],
-);
+export const account = pgTable("account", {
+  id: text("id").primaryKey(),
+  // Written only by Better Auth 1.7.0-1.7.2, which keyed accounts on
+  // (issuer, accountId); 1.7.3+ keys them on (providerId, accountId) and
+  // refuses to boot on a NOT NULL column it never writes. Kept, nullable,
+  // so a rollback to 1.7.2 still has the column it writes.
+  issuer: text("issuer"),
+  accountId: text("account_id").notNull(),
+  providerId: text("provider_id").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  idToken: text("id_token"),
+  accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+  scope: text("scope"),
+  password: text("password"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const verification = pgTable("verification", {
   id: text("id").primaryKey(),
@@ -264,6 +261,10 @@ export const oauthConsent = pgTable(
     scopes: text("scopes").array().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }),
+    // When the grant ends, from the lifetime picked on the consent screen;
+    // null lasts until the user disconnects it. Set and enforced by the web
+    // app's auth config, not by the OAuth provider.
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
   },
   (t) => [
     index("oauth_consent_client_id_idx").on(t.clientId),

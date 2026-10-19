@@ -1,7 +1,13 @@
-import { ABUSE_JUDGE_POLICY, ABUSE_JUDGE_QUESTIONS } from "@millionsend/core";
+import {
+  ABUSE_JUDGE_POLICY,
+  ABUSE_JUDGE_QUESTIONS,
+  createTypesafeJudge,
+  type FetchLike,
+  INBOUND_JUDGE_POLICY,
+  INBOUND_JUDGE_QUESTIONS,
+} from "@millionsend/core";
 import { expect, it } from "vitest";
 import { createAbuseJudge } from "../src/abuse-judge/index.js";
-import { createTypesafeJudge, type FetchLike } from "../src/abuse-judge/typesafe.js";
 
 const answers = {
   is_abuse: { type: "noul", noul: 0.88 },
@@ -164,4 +170,57 @@ it("createAbuseJudge is null when off and TypeSafe when on", () => {
       timeoutMs: 20_000,
     }),
   ).toMatchObject({ provider: "typesafe", model: "jev-latest" });
+});
+
+it("screens received mail with the inbound question set on the same client", async () => {
+  let posted: Record<string, unknown> | undefined;
+  const judge = createTypesafeJudge({
+    model: "jev-latest",
+    baseUrl: "https://api.typesafe.ai/",
+    apiKey: "k",
+    fetch: async (_url, init) => {
+      posted = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({
+        model: "jev-1.13.0",
+        answers: {
+          is_injection: { type: "noul", noul: 0.4 },
+          override: { type: "noul", noul: 0.9 },
+          exfiltration: { type: "noul", noul: 0.2 },
+          is_phishing: { type: "noul", noul: 0.1 },
+          credential_lure: { type: "noul", noul: 0.85 },
+          is_spam: { type: "noul", noul: 0.3 },
+          concealed: { type: "noul", noul: 0.6 },
+          category: { type: "choice", choice: "prompt_injection" },
+          language: { type: "choice", choice: "pt-BR" },
+        },
+      });
+    },
+  });
+  expect(
+    await judge.screen?.("Inbox: agent inbox", { signal: new AbortController().signal }),
+  ).toEqual({
+    injectionScore: 80,
+    phishingScore: 80,
+    spamScore: 30,
+    reasons: ["override", "concealed", "credential_lure"],
+    category: "prompt_injection",
+    language: "pt-BR",
+    model: "jev-1.13.0",
+  });
+  expect(posted).toMatchObject({
+    model: "jev-latest",
+    questions: INBOUND_JUDGE_QUESTIONS,
+    state: { policy: INBOUND_JUDGE_POLICY, email: "Inbox: agent inbox" },
+  });
+  const missing = createTypesafeJudge({
+    model: "m",
+    baseUrl: "https://api.typesafe.ai",
+    apiKey: "k",
+    fetch: async () => Response.json({ answers: { is_phishing: { type: "noul", noul: 0.9 } } }),
+  });
+  await expect(
+    missing.screen?.("x", { signal: new AbortController().signal }),
+  ).rejects.toMatchObject({
+    class: "parse_error",
+  });
 });

@@ -174,6 +174,22 @@ describe("POST /webhooks", () => {
     }
   });
 
+  it("subscribes to email.received on create and on update", async () => {
+    const created = await createWebhook({
+      endpoint: "https://example.com/hooks/inbound",
+      events: ["email.received"],
+    });
+    const patched = await call(fullKey, "PATCH", `/webhooks/${created.id}`, {
+      events: ["email.received", "email.delivered"],
+    });
+    expect(patched.status).toBe(200);
+    const got = (await (await call(fullKey, "GET", `/webhooks/${created.id}`)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(got.events).toEqual(["email.received", "email.delivered"]);
+  });
+
   it("422s http endpoints, unknown events, and empty events", async () => {
     for (const body of [
       { endpoint: "http://example.com/hooks", events: ["email.sent"] },
@@ -202,6 +218,7 @@ describe("GET /webhooks and GET /webhooks/{id}", () => {
       endpoint: "https://example.com/hooks/get",
       status: "enabled",
       events: ["email.opened"],
+      inbox_ids: null,
       created_at: expect.any(String),
       signing_secret: created.signing_secret,
       previous_secret_expires_at: null,
@@ -221,6 +238,7 @@ describe("GET /webhooks and GET /webhooks/{id}", () => {
       "endpoint",
       "events",
       "id",
+      "inbox_ids",
       "status",
     ]);
     expect(JSON.stringify(listBody)).not.toContain(created.signing_secret);

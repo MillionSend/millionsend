@@ -3,14 +3,17 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { FOCUSABLE } from "@/lib/keyboard";
 import { refusedAsReadOnly } from "@/lib/read-only";
 import { useScrollLock } from "@/lib/use-scroll-lock";
+import { DotParts } from "./dot-parts";
 
 function CloseGlyph({ onClose }: { onClose: () => void }) {
   const t = useTranslations("common");
   return (
     <button
       type="button"
+      className="ms-modal-close"
       onClick={onClose}
       aria-label={t("close")}
       style={{
@@ -27,10 +30,6 @@ function CloseGlyph({ onClose }: { onClose: () => void }) {
     </button>
   );
 }
-
-/** Tab stops inside a panel that runs its own focus loop (dialogs, anchored editors). */
-export const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Modal({
   open,
@@ -74,6 +73,9 @@ export function Modal({
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         if (onConfirm) {
           event.preventDefault();
+          // The dialog owns ⌘↵. A page shortcut on window would run next and
+          // find no dialog, since React commits the close in between.
+          event.stopPropagation();
           // The one confirm path no button carries, so nothing a read-only
           // view dims can stop it.
           if (!refusedAsReadOnly()) onConfirm();
@@ -131,7 +133,9 @@ export function Modal({
               gap: 12,
             }}
           >
-            <h2>{title}</h2>
+            <h2>
+              <DotParts text={title} />
+            </h2>
             <CloseGlyph onClose={onClose} />
           </div>
         ) : null}

@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -37,6 +37,57 @@ jobs:
         run: |
           pnpm db:generate
           git diff --exit-code -- packages/db/drizzle
+
+  # `next build` (web, and docs, whose MDX compiles nowhere else) and the
+  # Dockerfiles would otherwise first run after merge, in `build`. amd64 only,
+  # nothing pushed; the app image is loaded locally to boot it. Reads main's
+  # layer cache but never writes one: PR-scoped entries would crowd main's out
+  # of the repository's cache quota.
+  image:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env:
+          POSTGRES_USER: millionsend
+          POSTGRES_PASSWORD: millionsend
+        ports: ["5432:5432"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: millionsend:ci
+          cache-from: type=gha,scope=app-amd64
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: scripts/backup
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=backup-amd64
+      # Runs the image as the compose files do: read-only rootfs, non-root,
+      # and Docker's default tmpfs (noexec) at the same paths. A dependency
+      # that writes or executes anywhere else fails here instead of on deploy.
+      - name: Image boots read-only
+        run: |
+          docker run -d --name app --network host --init --read-only --user millionsend \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp --tmpfs /app/apps/web/.next/cache \
+            --tmpfs /app/apps/docs/.next/cache --tmpfs /app/apps/docs/.source \
+            -e DATABASE_URL=postgres://millionsend:millionsend@localhost:5432/millionsend \
+            -e MASTER_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+            -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+            -e APP_BASE_URL=http://localhost:3000 \
+            millionsend:ci
+          for _ in $(seq 60); do
+            curl -fs -o /dev/null localhost:3000/login && curl -fs -o /dev/null localhost:3001/health && exit 0
+            [ "$(docker inspect -f '{{.State.Running}}' app)" = true ] || break
+            sleep 2
+          done
+          docker logs app
+          exit 1
 
   # Whole-history secret scan with the pinned gitleaks image (the GitHub
   # action needs a license key for organization repos; the CLI does not).
@@ -91,7 +142,7 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -103,7 +154,7 @@ jobs:
         id: meta
         with:
           images: ${{ env.APP_IMAGE }}
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: app
         with:
           context: .
@@ -117,7 +168,7 @@ jobs:
           cache-to: type=gha,scope=app-${{ matrix.slug }},mode=max
       # The backup sidecar (pg_dump + rclone) ships on the same tags so the
       # standalone compose file needs no build context.
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: backup
         with:
           context: scripts/backup
@@ -135,7 +186,7 @@ jobs:
         run: |
           mkdir -p /tmp/digests/app /tmp/digests/backup
           touch "/tmp/digests/app/${APP_DIGEST#sha256:}" "/tmp/digests/backup/${BACKUP_DIGEST#sha256:}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: digests-${{ matrix.slug }}
           path: /tmp/digests/*
@@ -149,12 +200,12 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io

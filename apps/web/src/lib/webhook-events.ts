@@ -5,14 +5,18 @@
  * apps/web/test/webhooks-router.test.ts.
  */
 export const WEBHOOK_EVENT_TYPES = [
+  "email.scheduled",
   "email.sent",
   "email.delivered",
   "email.delivery_delayed",
   "email.bounced",
   "email.complained",
+  "email.failed",
+  "email.suppressed",
   "email.opened",
   "email.clicked",
   "email.prefetched",
+  "email.received",
   "deliverability.warning",
   "deliverability.paused",
   "quota.warning",
@@ -27,6 +31,20 @@ export const WEBHOOK_EVENT_TYPES = [
   "contact.topic_opt_out",
   "suppression.added",
   "suppression.removed",
+  "inbox.created",
+  "inbox.updated",
+  "inbox.deleted",
+  "inbox.expired",
+  "inbox.thread.created",
+  "inbox.thread.folder.updated",
+  "inbox.thread.labels.updated",
+  "inbox.email.received",
+  "inbox.email.sent",
+  "inbox.email.quarantined",
+  "inbox.draft.created",
+  "inbox.draft.updated",
+  "inbox.draft.sent",
+  "inbox.draft.deleted",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -38,6 +56,8 @@ export const WEBHOOK_EVENT_GROUPS = [
   "problems",
   "account",
   "audience",
+  "receiving",
+  "inboxes",
 ] as const;
 export type WebhookEventGroup = (typeof WEBHOOK_EVENT_GROUPS)[number];
 
@@ -53,14 +73,18 @@ export const WEBHOOK_EVENT_META: Record<
   // picker leaves it unchecked under "All" because "all events" never carries it.
   { group: WebhookEventGroup; dot: string; optIn?: true }
 > = {
+  "email.scheduled": { group: "delivery", dot: "var(--ms-dot-queued)" },
   "email.sent": { group: "delivery", dot: "var(--ms-dot-sent)" },
   "email.delivered": { group: "delivery", dot: "var(--ms-dot-delivered)" },
   "email.delivery_delayed": { group: "delivery", dot: "var(--ms-dot-delivery-delayed)" },
   "email.opened": { group: "engagement", dot: "var(--ms-dot-opened)" },
   "email.clicked": { group: "engagement", dot: "var(--ms-dot-clicked)" },
   "email.prefetched": { group: "engagement", dot: "var(--ms-dot-queued)", optIn: true },
+  "email.received": { group: "receiving", dot: "var(--ms-dot-delivered)" },
   "email.bounced": { group: "problems", dot: "var(--ms-dot-bounced)" },
   "email.complained": { group: "problems", dot: "var(--ms-dot-complained)" },
+  "email.failed": { group: "problems", dot: "var(--ms-dot-failed)" },
+  "email.suppressed": { group: "problems", dot: "var(--ms-dot-suppressed)" },
   "deliverability.warning": { group: "account", dot: "var(--ms-dot-account)" },
   "deliverability.paused": { group: "account", dot: "var(--ms-dot-account)" },
   "quota.warning": { group: "account", dot: "var(--ms-dot-account)" },
@@ -75,6 +99,20 @@ export const WEBHOOK_EVENT_META: Record<
   "contact.topic_opt_out": { group: "audience", dot: "var(--ms-dot-queued)" },
   "suppression.added": { group: "audience", dot: "var(--ms-dot-suppressed)" },
   "suppression.removed": { group: "audience", dot: "var(--ms-dot-sent)" },
+  "inbox.created": { group: "inboxes", dot: "var(--ms-dot-delivered)", optIn: true },
+  "inbox.updated": { group: "inboxes", dot: "var(--ms-dot-sent)", optIn: true },
+  "inbox.deleted": { group: "inboxes", dot: "var(--ms-dot-failed)", optIn: true },
+  "inbox.expired": { group: "inboxes", dot: "var(--ms-dot-queued)", optIn: true },
+  "inbox.thread.created": { group: "inboxes", dot: "var(--ms-dot-delivered)", optIn: true },
+  "inbox.thread.folder.updated": { group: "inboxes", dot: "var(--ms-dot-sent)", optIn: true },
+  "inbox.thread.labels.updated": { group: "inboxes", dot: "var(--ms-dot-opened)", optIn: true },
+  "inbox.email.received": { group: "inboxes", dot: "var(--ms-dot-delivered)", optIn: true },
+  "inbox.email.sent": { group: "inboxes", dot: "var(--ms-dot-sent)", optIn: true },
+  "inbox.email.quarantined": { group: "inboxes", dot: "var(--ms-dot-complained)", optIn: true },
+  "inbox.draft.created": { group: "inboxes", dot: "var(--ms-dot-queued)", optIn: true },
+  "inbox.draft.updated": { group: "inboxes", dot: "var(--ms-dot-sent)", optIn: true },
+  "inbox.draft.sent": { group: "inboxes", dot: "var(--ms-dot-delivered)", optIn: true },
+  "inbox.draft.deleted": { group: "inboxes", dot: "var(--ms-dot-failed)", optIn: true },
 };
 
 /** "whsec_••••••••abcd" — scheme plus last 4, nothing recoverable. */

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
+import { Breakable } from "@/components/breakable";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
@@ -20,11 +21,12 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
+import { shortcutBlocked } from "@/lib/keyboard";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage } from "@/lib/trpc-error";
 import { useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, StateCard } from "../emails/list-parts";
-import { AwsCredentialsBanner } from "./aws-credentials-banner";
 import {
   DOMAIN_TONE,
   type DomainStatus,
@@ -33,7 +35,7 @@ import {
 } from "./domain-status";
 import { RegionLabel } from "./region-label";
 
-/** Mirrors the loaded rows: mono domain link, status badge, region label, relative time. */
+/** Mirrors the loaded rows: mono domain link, status badge, region label, relative time, action. */
 function SkeletonRows() {
   const widths = [180, 120, 90];
   return (
@@ -52,6 +54,9 @@ function SkeletonRows() {
           <td className="right">
             <Skeleton width={48} />
           </td>
+          <td className="right" style={{ width: 40 }}>
+            <Skeleton width={28} height={28} radius={8} />
+          </td>
         </tr>
       ))}
     </tbody>
@@ -61,7 +66,7 @@ function SkeletonRows() {
 const shown = (d: { status: string; trackingPending: boolean }) =>
   displayDomainStatus(d.status as DomainStatus, d.trackingPending);
 
-export function DomainsView() {
+export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
   const t = useTranslations("domains");
   const common = useTranslations("common");
   const trpc = useTRPC();
@@ -113,8 +118,7 @@ export function DomainsView() {
   // "/" focuses search from anywhere on the page.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement;
-      if (event.key !== "/" || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (event.key !== "/" || shortcutBlocked(event.target)) return;
       event.preventDefault();
       searchRef.current?.focus();
     }
@@ -123,6 +127,7 @@ export function DomainsView() {
   }, []);
 
   const rows = domains.data ?? [];
+  const settled = domains.isSuccess;
   const regions = useMemo(() => [...new Set(rows.map((d) => d.region))], [rows]);
 
   // URL params are untrusted: unknown values fall back to "all".
@@ -151,12 +156,12 @@ export function DomainsView() {
               <PlusGlyph size={14} />
               {t("list.addDomain")}
             </Link>
-            <ResourceApiButton resource="domains" />
           </>
         }
+        menu={<ResourceApiButton resource="domains" />}
       />
 
-      <AwsCredentialsBanner />
+      {awsBanner}
 
       {domains.isError ? (
         <div
@@ -174,70 +179,50 @@ export function DomainsView() {
             {t("list.retry")}
           </button>
         </div>
-      ) : domains.isSuccess && rows.length === 0 ? (
-        <EmptyState
-          area="domains"
-          headline={t("list.empty")}
-          body={t("list.emptyBody")}
-          cta={
-            <Link href="/domains/new" className="ms-btn ms-btn-primary">
-              <PlusGlyph />
-              {t("list.addDomain")}
-            </Link>
-          }
-        />
       ) : (
         <>
-          <div
-            className="ms-filter-row"
-            style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
-          >
-            {/* Search stretches to fill the filter row; the selects keep fixed widths. */}
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <input
-                ref={searchRef}
-                type="text"
-                className="ms-input"
-                style={{ width: "100%" }}
-                placeholder={t("list.searchPlaceholder")}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+          {settled && rows.length === 0 ? null : (
+            <div
+              className="ms-filter-row"
+              style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
+            >
+              {/* Search stretches to fill the filter row; the selects keep fixed widths. */}
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <input
+                  ref={searchRef}
+                  type="text"
+                  className="ms-input"
+                  style={{ width: "100%" }}
+                  placeholder={t("list.searchPlaceholder")}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              <Select
+                value={status}
+                onChange={setStatus}
+                ariaLabel={t("list.allStatuses")}
+                options={[
+                  { value: "all", label: t("list.allStatuses") },
+                  ...(["verified", "partial", "pending", "failed"] as const).map((key) => ({
+                    value: key,
+                    label: common(`status.${key}`),
+                  })),
+                ]}
+              />
+              <Select
+                value={region}
+                onChange={setRegion}
+                ariaLabel={t("list.allRegions")}
+                options={[
+                  { value: "all", label: t("list.allRegions") },
+                  ...regions.map((code) => ({ value: code, label: code })),
+                ]}
               />
             </div>
-            <Select
-              value={status}
-              onChange={setStatus}
-              ariaLabel={t("list.allStatuses")}
-              options={[
-                { value: "all", label: t("list.allStatuses") },
-                ...(["verified", "partial", "pending", "failed"] as const).map((key) => ({
-                  value: key,
-                  label: common(`status.${key}`),
-                })),
-              ]}
-            />
-            <Select
-              value={region}
-              onChange={setRegion}
-              ariaLabel={t("list.allRegions")}
-              options={[
-                { value: "all", label: t("list.allRegions") },
-                ...regions.map((code) => ({ value: code, label: code })),
-              ]}
-            />
-          </div>
+          )}
 
-          {domains.isSuccess && filtered.length === 0 ? (
-            <StateCard
-              headline={t("list.noMatch")}
-              actionLabel={t("list.clearFilters")}
-              onAction={() => {
-                setSearch("");
-                setStatus("all");
-                setRegion("all");
-              }}
-            />
-          ) : (
+          {settled && filtered.length === 0 ? null : (
             <>
               <Table>
                 <thead>
@@ -248,11 +233,11 @@ export function DomainsView() {
                     <th className="right" style={{ width: "13%" }}>
                       {t("list.columns.created")}
                     </th>
+                    {/* Overflow-action column — no header label. */}
+                    <th className="right" />
                   </tr>
                 </thead>
-                {domains.isPending ? (
-                  <SkeletonRows />
-                ) : (
+                {settled ? (
                   <tbody>
                     {filtered.map((domain) => (
                       <tr key={domain.id}>
@@ -262,7 +247,9 @@ export function DomainsView() {
                               name="domains"
                               color={TONE_COLOR[DOMAIN_TONE[shown(domain)]]}
                             />
-                            <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
+                            <Link href={`/domains/${domain.id}`}>
+                              <Breakable text={domain.name} />
+                            </Link>
                           </span>
                         </td>
                         <td>
@@ -271,55 +258,50 @@ export function DomainsView() {
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RegionLabel region={domain.region} />
                         </td>
-                        <td className="right">
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 10,
-                              justifyContent: "flex-end",
-                            }}
-                          >
-                            <RelativeTime date={domain.createdAt} />
-                            <PopoverMenu
-                              ariaLabel={t("detail.moreActions")}
-                              items={[
-                                {
-                                  label: t("list.rowDetails"),
-                                  onSelect: () => router.push(`/domains/${domain.id}`),
-                                },
-                                ...(domain.status !== "verified" && canManage
-                                  ? [
-                                      {
-                                        label: t("detail.checkDns"),
-                                        busy: checkingId === domain.id,
-                                        keepOpen: true,
-                                        onSelect: () => {
-                                          setCheckingId(domain.id);
-                                          verifyMutation.mutate({ id: domain.id });
-                                        },
+                        <td className="right" style={{ color: "var(--ms-muted)" }}>
+                          <RelativeTime date={domain.createdAt} />
+                        </td>
+                        <td className="right" style={{ width: 40 }}>
+                          <PopoverMenu
+                            ariaLabel={t("detail.moreActions")}
+                            items={[
+                              {
+                                label: t("list.rowDetails"),
+                                onSelect: () => router.push(`/domains/${domain.id}`),
+                              },
+                              ...(domain.status !== "verified" && canManage
+                                ? [
+                                    {
+                                      label: t("detail.checkDns"),
+                                      busy: checkingId === domain.id,
+                                      keepOpen: true,
+                                      onSelect: () => {
+                                        setCheckingId(domain.id);
+                                        verifyMutation.mutate({ id: domain.id });
                                       },
-                                    ]
-                                  : []),
-                                null,
-                                {
-                                  label: t("detail.deleteDomain"),
-                                  danger: true,
-                                  onSelect: () => {
-                                    setConfirmText("");
-                                    setDeleteTarget({ id: domain.id, name: domain.name });
-                                  },
+                                    },
+                                  ]
+                                : []),
+                              null,
+                              {
+                                label: t("detail.deleteDomain"),
+                                danger: true,
+                                onSelect: () => {
+                                  setConfirmText("");
+                                  setDeleteTarget({ id: domain.id, name: domain.name });
                                 },
-                              ]}
-                            />
-                          </span>
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
                   </tbody>
+                ) : (
+                  <SkeletonRows />
                 )}
               </Table>
-              {domains.isSuccess ? (
+              {settled && filtered.length > 0 ? (
                 <ListFooter
                   left={t("list.pageOf", { pages: 1, total: filtered.length })}
                   singlePage
@@ -327,6 +309,34 @@ export function DomainsView() {
               ) : null}
             </>
           )}
+
+          {settled && filtered.length === 0 ? (
+            <div>
+              {rows.length === 0 ? (
+                <EmptyState
+                  area="domains"
+                  headline={t("list.empty")}
+                  body={t("list.emptyBody")}
+                  cta={
+                    <Link href="/domains/new" className="ms-btn ms-btn-primary">
+                      <PlusGlyph />
+                      {t("list.addDomain")}
+                    </Link>
+                  }
+                />
+              ) : (
+                <StateCard
+                  headline={t("list.noMatch")}
+                  actionLabel={t("list.clearFilters")}
+                  onAction={() => {
+                    setSearch("");
+                    setStatus("all");
+                    setRegion("all");
+                  }}
+                />
+              )}
+            </div>
+          ) : null}
         </>
       )}
 
@@ -376,7 +386,7 @@ export function DomainsView() {
                 fontSize: "var(--ms-fs-label)",
               }}
             >
-              {t("detail.deleteError")}
+              {guardMessage(deleteMutation.error, t("detail.deleteError"))}
             </p>
           ) : null}
           <ModalFooter>

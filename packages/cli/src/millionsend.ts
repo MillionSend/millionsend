@@ -14,7 +14,7 @@ import type {
   TargetUsage,
   TargetWebhook,
 } from "./model.js";
-import { TARGET_WEBHOOK_EVENTS } from "./translate.js";
+import { TARGET_ALL_EVENTS } from "./translate.js";
 import { chunk } from "./utils.js";
 
 /** POST /contacts/batch and /suppressions/batch/* accept at most this many items. */
@@ -44,13 +44,14 @@ export interface BatchOutcome {
   /** Indices refer to the full input array, not the chunk. */
   data: { index: number; id: string; status: "created" | "updated" | "skipped" }[];
   counts: { created: number; updated: number; skipped: number; failed: number };
-  errors: { index: number; message: string }[];
+  /** Instances that predate per-row status codes send no `statusCode`. */
+  errors: { index: number; statusCode?: number | undefined; message: string }[];
 }
 
 export interface SuppressionsOutcome {
   /** One id per distinct address the API accepted, existing rows included. */
   ids: string[];
-  errors: { index: number; message: string }[];
+  errors: { index: number; statusCode: number; message: string }[];
 }
 
 interface ListPage<T> {
@@ -167,16 +168,25 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
     return { id: body.id, records: body.records };
   };
 
+  /**
+   * Oldest first, whatever order the instance lists in: the plan takes the
+   * first row matching a name or endpoint, and a re-run must pick the same one.
+   */
   async function listAll<T extends { id: string }>(path: string): Promise<T[]> {
-    const rows: T[] = [];
+    type Row = T & { created_at: string };
+    const rows: Row[] = [];
     let after: string | undefined;
     const guard = cursorGuard(path);
     for (;;) {
-      const { body } = await api.get<ListPage<T>>(path, { query: { limit: 100, after } });
+      const { body } = await api.get<ListPage<Row>>(path, { query: { limit: 100, after } });
       guard(body.data, after);
       rows.push(...body.data);
       const last = body.data.at(-1);
-      if (!body.has_more || !last) return rows;
+      if (!body.has_more || !last) {
+        return rows.sort(
+          (a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),
+        );
+      }
       after = last.id;
     }
   }
@@ -233,7 +243,7 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       broadcasts,
       firstContact,
     ] = await Promise.all([
-      listAll<{ id: string }>("/domains"),
+      listAll<{ id: string; shared?: boolean }>("/domains"),
       listAll<TargetProperty>("/contact-properties"),
       listAll<TopicWire>("/topics"),
       listAll<TargetSegment>("/segments"),
@@ -243,7 +253,9 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       api.get<ListPage<{ id: string }>>("/contacts", { query: { limit: 1 } }),
     ]);
     const domains: TargetDomain[] = [];
-    for (const { id } of domainRows) {
+    // The team's subdomain of the shared inbox domain is no domain of its own:
+    // it takes no slot of limits.domains.
+    for (const { id } of domainRows.filter((row) => row.shared !== true)) {
       const { body } = await api.get<DomainWire>(`/domains/${id}`);
       domains.push({
         id: body.id,
@@ -285,7 +297,7 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
         (w): TargetWebhook => ({
           id: w.id,
           endpoint: w.endpoint,
-          events: w.events ?? [...TARGET_WEBHOOK_EVENTS],
+          events: w.events ?? [...TARGET_ALL_EVENTS],
           status: w.status,
         }),
       ),
@@ -322,13 +334,17 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       }));
       if (!result.ok) {
         log.warn(`contacts batch ${n + 1}/${chunks.length} failed: ${result.message}`);
-        for (const i of slice.keys()) out.errors.push({ index: base + i, message: result.message });
+        for (const i of slice.keys()) {
+          out.errors.push({ index: base + i, statusCode: result.status, message: result.message });
+        }
         out.counts.failed += slice.length;
         continue;
       }
       const { body } = result;
       for (const row of body.data) out.data.push({ ...row, index: base + row.index });
-      for (const row of body.errors ?? []) out.errors.push({ ...row, index: base + row.index });
+      for (const { index, statusCode, message } of body.errors ?? []) {
+        out.errors.push({ index: base + index, statusCode, message });
+      }
       for (const key of Object.keys(out.counts) as (keyof BatchOutcome["counts"])[]) {
         out.counts[key] += body.counts[key];
       }
@@ -352,7 +368,11 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       if (!result.ok) {
         log.warn(`${path} ${n + 1}/${chunks.length} failed: ${result.message}`);
         for (const i of slice.keys()) {
-          out.errors.push({ index: n * BATCH_MAX + i, message: result.message });
+          out.errors.push({
+            index: n * BATCH_MAX + i,
+            statusCode: result.status,
+            message: result.message,
+          });
         }
         continue;
       }

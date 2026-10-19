@@ -2,18 +2,22 @@ import { env, isCloudDeployment } from "@millionsend/config";
 import {
   acceptEmail,
   applyMergeFields,
+  broadcastProviderBreakdown,
   cancelBroadcastRows,
   DAY_MS,
   emailInsightsView,
+  enableWarmup,
   fetchBroadcastInsights,
-  fetchDeliverabilityHealth,
   fetchTeamStanding,
   injectPreheader,
+  MAX_SUBJECT_LENGTH,
   type MergeContact,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   parseSingleSender,
   regionPause,
+  reservedSenderRefusal,
+  sendRefusal,
   splitPersonName,
   substituteUnsubscribeUrl,
   verifySenderDomain,
@@ -29,9 +33,16 @@ import enDeliverability from "../../../messages/en/deliverability.json";
 import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
 import type { AppLocale } from "../../i18n/request";
 import { fetchQuotaRow } from "../billing";
-import { planBroadcastSend, planHoldUntil, sendingProgress } from "../broadcast-plan";
+import {
+  broadcastWarmup,
+  heldBroadcastIds,
+  planBroadcastSend,
+  planHoldUntil,
+  sendingProgress,
+  warmupSendPlan,
+} from "../broadcast-plan";
 import { resolveEditorSave } from "../email-content";
-import { getKeyring } from "../keyring";
+import { inboxSendDeps, userActor } from "../inboxes";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { activeLocale } from "../locale";
 import { router, teamProcedure } from "../trpc";
@@ -53,12 +64,6 @@ const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
   "pt-BR": ptBRDeliverability,
 };
 
-/**
- * PRECONDITION_FAILED when the team's trailing-window rates crossed a SES
- * enforcement line (fetchDeliverabilityHealth === "paused"); null otherwise.
- * "warning" never blocks. The message names the offending metric, its rate,
- * and the limit it passed, in the caller's locale.
- */
 async function sendGuardTranslator() {
   const locale = await activeLocale();
   return {
@@ -71,56 +76,42 @@ async function sendGuardTranslator() {
   };
 }
 
-async function deliverabilityGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
-  const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId);
-  const reason =
-    health.status === "paused" ? health.reasons.find((r) => r.tier === "paused") : null;
-  if (!reason) return null;
+/**
+ * PRECONDITION_FAILED while the team may not send (core sendRefusal: an
+ * operator suspension, or trailing rates past SES's pause line) or the
+ * operator paused its broadcasts; read per call so the action bites at once.
+ * The message is in the caller's locale.
+ */
+async function sendGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
+  const refusal = await sendRefusal(ctx.db, ctx.teamId);
+  const operatorPaused =
+    !refusal && (await fetchTeamStanding(ctx.db, ctx.teamId))?.broadcastsPausedByOperatorAt;
+  if (!refusal && !operatorPaused) return null;
   const { t, pct } = await sendGuardTranslator();
-  const limit = reason.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
-  return new TRPCError({
-    code: "PRECONDITION_FAILED",
-    message: t(`sendGuard.${reason.metric}`, {
-      rate: pct.format(reason.rate),
-      limit: pct.format(limit),
-      days: reason.windowDays,
-    }),
-  });
+  const message = !refusal
+    ? t("sendGuard.operatorPaused")
+    : refusal.reason === "team_suspended"
+      ? t(refusal.suspension === "review" ? "sendGuard.pendingReview" : "sendGuard.suspended")
+      : t(`sendGuard.${refusal.pause.metric}`, {
+          rate: pct.format(refusal.pause.rate),
+          limit: pct.format(
+            refusal.pause.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE,
+          ),
+          days: refusal.pause.windowDays,
+        });
+  return new TRPCError({ code: "PRECONDITION_FAILED", message });
 }
 
 /**
- * PRECONDITION_FAILED while the platform breaker holds broadcasts in the
- * sender domain's SES region (the account-wide rate is near SES's review
- * line, or the operator held it); transactional mail is not affected, so
- * only broadcasts check this.
+ * PRECONDITION_FAILED while broadcasts are held in the sender domain's SES
+ * region (the platform breaker, or the operator's hold); transactional mail
+ * is not affected, so only broadcasts check this. The message never says
+ * why: the platform's rates are not the customer's to see.
  */
 async function regionGuard(db: Db, region: string): Promise<TRPCError | null> {
-  const pause = await regionPause(db, region);
-  if (!pause) return null;
+  if (!(await regionPause(db, region))) return null;
   const { t } = await sendGuardTranslator();
-  return new TRPCError({
-    code: "PRECONDITION_FAILED",
-    message: pause.manualReason
-      ? t("sendGuard.regionHeld", { region })
-      : t("sendGuard.regionPaused", {
-          region,
-          metric: t(`metric.${pause.reason?.metric ?? "complaint"}`),
-        }),
-  });
-}
-
-/**
- * PRECONDITION_FAILED while the instance operator suspended the team or
- * paused its broadcasts; read per call so the action bites at once.
- */
-async function standingGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
-  const standing = await fetchTeamStanding(ctx.db, ctx.teamId);
-  if (!standing?.suspended && !standing?.broadcastsPausedByOperatorAt) return null;
-  const { t } = await sendGuardTranslator();
-  return new TRPCError({
-    code: "PRECONDITION_FAILED",
-    message: t(standing.suspended ? "sendGuard.suspended" : "sendGuard.operatorPaused"),
-  });
+  return new TRPCError({ code: "PRECONDITION_FAILED", message: t("sendGuard.regionHeld") });
 }
 
 /**
@@ -151,6 +142,15 @@ async function horizonGuard(
   });
 }
 
+/** The horizon refusal for a send whose domain's warm-up, not capacity, sets its pace. */
+async function warmupHorizonError(horizonDays: number): Promise<TRPCError> {
+  const { t } = await sendGuardTranslator();
+  return new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: t("sendGuard.warmupTooLong", { days: horizonDays }),
+  });
+}
+
 const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
 // SECURITY: a stored broadcast `from` is emitted verbatim by the worker
 // fan-out, so it is the same trust boundary as the API's — it must parse as
@@ -163,7 +163,7 @@ const fromSchema = z
   .refine((v) => parseSingleSender(v) !== null, {
     message: "From must be a single address like ada@example.com or Ada <ada@example.com>",
   });
-const subjectSchema = z.string().trim().min(1).max(998);
+const subjectSchema = z.string().trim().min(1).max(MAX_SUBJECT_LENGTH);
 // "" clears the field — stored as null, never as an empty string.
 const nameSchema = z.string().trim().max(200);
 const bodySchema = z.string().max(500_000);
@@ -283,6 +283,7 @@ export const broadcastsRouter = router({
           id: b.id,
           name: b.name,
           subject: b.subject,
+          from: b.from,
           status: b.status,
           segmentId: b.segmentId,
           topicId: b.topicId,
@@ -307,12 +308,14 @@ export const broadcastsRouter = router({
       const progress = page.items.some((row) => row.status === "sending")
         ? await sendingProgress(ctx.db, ctx.teamId)
         : new Map<string, never>();
+      const held = await heldBroadcastIds(ctx.db, ctx.teamId, page.items);
       return {
         ...page,
         items: page.items.map((row) => {
           const p = progress.get(row.id);
           return {
             ...row,
+            held: held.has(row.id),
             sentCount: p?.sentCount ?? null,
             parkedCount: p?.parkedCount ?? null,
             finishesAt: p?.finishesAt ?? null,
@@ -352,17 +355,20 @@ export const broadcastsRouter = router({
     // Opened likewise includes clicked; both count people only, since a
     // prefetch never lifts the status (see the tracking recorder).
     const ev = schema.emailEvents;
+    // Nested: a single-table select writes the columns it holds directly
+    // unqualified, and a bare "id" in the subquery would be the event's own.
+    const ofEmail = sql`${ev.emailId} = ${e.id}`;
     const [stats] = await ctx.db
       .select({
         total: sql<number>`count(*)::int`,
         delivered: sql<number>`count(*) filter (where ${e.latestStatus} in ('delivered', 'opened', 'clicked'))::int`,
         opened: sql<number>`count(*) filter (where ${e.latestStatus} in ('opened', 'clicked'))::int`,
         clicked: sql<number>`count(*) filter (where ${e.latestStatus} = 'clicked')::int`,
-        prefetched: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ev.emailId} = ${e.id} and ${ev.type} = 'prefetched'))::int`,
+        prefetched: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ofEmail} and ${ev.type} = 'prefetched'))::int`,
         bounced: sql<number>`count(*) filter (where ${e.latestStatus} = 'bounced')::int`,
         complained: sql<number>`count(*) filter (where ${e.latestStatus} = 'complained')::int`,
         // Recipients who opted out through this email's link, from everything or from its topic.
-        unsubscribed: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ev.emailId} = ${e.id} and ${ev.type} = 'unsubscribed'))::int`,
+        unsubscribed: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ofEmail} and ${ev.type} = 'unsubscribed'))::int`,
       })
       .from(e)
       .where(and(eq(e.broadcastId, row.id), eq(e.teamId, ctx.teamId)));
@@ -374,13 +380,21 @@ export const broadcastsRouter = router({
     // Parked rows with no room under the team's own cap wait for its reset, not for capacity.
     const planHold =
       progress && progress.parkedCount > 0 ? await planHoldUntil(ctx.db, ctx.teamId) : null;
+    // The planner knows nothing of a region hold: its forecast would be wrong while one lasts.
+    const held = (await heldBroadcastIds(ctx.db, ctx.teamId, [row])).has(row.id);
+    const warmup =
+      progress?.warmup && progress.parkedCount > 0
+        ? await broadcastWarmup(ctx.db, ctx.teamId, progress.warmup, row.scheduledAt)
+        : null;
     return {
       ...row,
       hiddenBySupportView,
+      held,
+      warmup: warmup && { ...warmup, domain: parseSingleSender(row.from)?.domain ?? null },
       sentCount: progress?.sentCount ?? null,
       parkedCount: progress?.parkedCount ?? null,
-      finishesAt: progress?.finishesAt ?? null,
-      releases: progress?.releases ?? [],
+      finishesAt: held ? null : (progress?.finishesAt ?? null),
+      releases: held ? [] : (progress?.releases ?? []),
       sent: progress?.sent ?? [],
       startedAt: row.status === "sending" ? row.scheduledAt : null,
       planHold: planHold ? { resumesAt: planHold } : null,
@@ -521,9 +535,19 @@ export const broadcastsRouter = router({
    * enqueue is best-effort: the broadcasts.reconcile sweep re-enqueues
    * scheduled broadcasts whose job was lost, and the fan-out is idempotent
    * per contact via the emails (broadcastId, contactId) unique index.
+   * `warmup` turns the sender domain's warm-up on first, which any member
+   * may as part of sending; `skipInactive` is this send's own choice for
+   * its inactive contacts, never the domain's setting.
    */
   send: teamProcedure
-    .input(z.object({ id: z.uuid(), scheduledAt: z.date().optional() }))
+    .input(
+      z.object({
+        id: z.uuid(),
+        scheduledAt: z.date().optional(),
+        warmup: z.boolean().optional(),
+        skipInactive: z.boolean().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const row = await getOwnBroadcast(ctx, input.id);
       if (row.status !== "draft") {
@@ -543,6 +567,8 @@ export const broadcastsRouter = router({
       // verified team domain may appear as the sender. The worker re-checks
       // at fan-out, but failing there leaves the broadcast stuck in
       // "scheduled" with no user-visible reason.
+      const reserved = reservedSenderRefusal(row.from, env.ONBOARDING_EMAIL_FROM);
+      if (reserved) throw new TRPCError({ code: "PRECONDITION_FAILED", message: reserved.message });
       const sender = await verifySenderDomain(ctx.db, ctx.teamId, row.from);
       if (!sender.ok) {
         throw new TRPCError({
@@ -556,10 +582,7 @@ export const broadcastsRouter = router({
       // Deliverability pause is enforced here, before anything is committed or
       // enqueued: a paused account must not schedule a new fan-out. "warning"
       // does not block.
-      const guardError =
-        (await standingGuard(ctx)) ??
-        (await deliverabilityGuard(ctx)) ??
-        (await regionGuard(ctx.db, sender.region));
+      const guardError = (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
       if (guardError) throw guardError;
       const scheduledAt = input.scheduledAt ?? new Date();
       // Same horizon as the API: a body must not sit out the retention purge.
@@ -569,19 +592,38 @@ export const broadcastsRouter = router({
           message: `Broadcasts can be scheduled at most ${MAX_SCHEDULE_AHEAD_DAYS} days ahead.`,
         });
       }
-      const horizonError = await horizonGuard(
-        ctx,
-        sender.region,
-        await countAudience(ctx, row),
-        scheduledAt,
-      );
-      if (horizonError) throw horizonError;
+      const count = await countAudience(ctx, row);
+      const ramp = await warmupSendPlan(ctx.db, {
+        teamId: ctx.teamId,
+        domainId: sender.domainId,
+        segmentId: row.segmentId,
+        topicId: row.topicId,
+        count,
+        at: scheduledAt,
+        skipInactive: input.skipInactive,
+        enabling: input.warmup,
+      });
+      const live = ramp?.status === "warming" || ramp?.status === "paused";
+      const byWarmup = ramp !== null && (live || input.warmup === true);
+      // A warm-up's send goes out by its day, never on capacity: its own plan meets the horizon.
+      if (byWarmup) {
+        if (ramp.blocked) throw await warmupHorizonError(ramp.horizonDays);
+        if (!live) await enableWarmup(ctx.db, { teamId: ctx.teamId, domainId: sender.domainId });
+      } else {
+        const horizonError = await horizonGuard(ctx, sender.region, count, scheduledAt);
+        if (horizonError) throw horizonError;
+      }
       const b = schema.broadcasts;
       // status filter re-checked in the UPDATE so two concurrent sends cannot
       // both flip the row.
       const [updated] = await ctx.db
         .update(b)
-        .set({ status: "scheduled", scheduledAt, updatedAt: new Date() })
+        .set({
+          status: "scheduled",
+          scheduledAt,
+          updatedAt: new Date(),
+          warmupSkipInactive: byWarmup ? (input.skipInactive ?? null) : null,
+        })
         .where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId), eq(b.status, "draft")))
         .returning({ id: b.id });
       if (!updated) {
@@ -607,7 +649,7 @@ export const broadcastsRouter = router({
     .input(
       z.object({
         from: z.string().trim().min(1),
-        subject: z.string().trim().min(1),
+        subject: subjectSchema,
         html: z.string().max(500_000).nullable(),
         text: z.string().nullable(),
         previewText: z.string().nullable().optional(),
@@ -620,6 +662,8 @@ export const broadcastsRouter = router({
       if (!input.html && !input.text) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Write some content first." });
       }
+      const reserved = reservedSenderRefusal(input.from, env.ONBOARDING_EMAIL_FROM);
+      if (reserved) throw new TRPCError({ code: "PRECONDITION_FAILED", message: reserved.message });
       const sender = await verifySenderDomain(ctx.db, ctx.teamId, input.from);
       if (!sender.ok) {
         throw new TRPCError({
@@ -630,10 +674,7 @@ export const broadcastsRouter = router({
               : `The ${sender.fromDomain} domain is not verified for this team.`,
         });
       }
-      const guardError =
-        (await standingGuard(ctx)) ??
-        (await deliverabilityGuard(ctx)) ??
-        (await regionGuard(ctx.db, sender.region));
+      const guardError = (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
       if (guardError) throw guardError;
       const e = schema.emails;
       const [recent] = await ctx.db
@@ -666,13 +707,7 @@ export const broadcastsRouter = router({
           ? injectPreheader(input.html, input.previewText)
           : input.html;
       const result = await acceptEmail(
-        {
-          db: ctx.db,
-          keyring: getKeyring(),
-          isCloud: env.IS_CLOUD,
-          // Absent in tests: the reconcile sweep re-enqueues accepted rows.
-          enqueueEmailSend: ctx.enqueueEmailSend ?? (async () => {}),
-        },
+        inboxSendDeps(ctx),
         {
           teamId: ctx.teamId,
           billing: await fetchQuotaRow(ctx.db, ctx.teamId),
@@ -688,6 +723,7 @@ export const broadcastsRouter = router({
           tags: { [TEST_SEND_TAG]: "1" },
           domainId: sender.domainId,
         },
+        { actor: userActor(ctx) },
       );
       if (!result.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: result.reason });
       return { to };
@@ -743,7 +779,10 @@ export const broadcastsRouter = router({
   /**
    * The send dialog's plan: the audience count and, when SES has answered,
    * how the send goes out (first wave, later days, the finish, a plan hold).
-   * Advisory: the send mutation runs the same planner for the refusal.
+   * With the sender domain warming up (or paused, or a send far past its
+   * best day), what its warm-up would do, `skipInactive` overriding its
+   * inactive skip. Advisory: the send mutation runs the same planners for
+   * the refusal.
    */
   sendPlan: teamProcedure
     .input(
@@ -752,18 +791,44 @@ export const broadcastsRouter = router({
         segmentId: z.uuid().nullable().optional(),
         from: z.string().trim().max(320),
         scheduledAt: z.date().optional(),
+        skipInactive: z.boolean().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
       const cloud = isCloudDeployment();
       const count = await countAudience(ctx, input);
       const sender = await verifySenderDomain(ctx.db, ctx.teamId, input.from);
-      if (!sender.ok || count === 0) return { count, cloud, estimate: null };
-      const plan = await planBroadcastSend(ctx.db, {
+      if (!sender.ok || count === 0) return { count, cloud, estimate: null, warmup: null };
+      const at = input.scheduledAt ?? new Date();
+      const warmup = await warmupSendPlan(ctx.db, {
         teamId: ctx.teamId,
-        region: sender.region,
-        newSend: { count, at: input.scheduledAt ?? new Date() },
+        domainId: sender.domainId,
+        segmentId: input.segmentId ?? null,
+        topicId: input.topicId ?? null,
+        count,
+        at,
+        skipInactive: input.skipInactive,
       });
-      return { count, cloud, estimate: plan?.estimate ?? null };
+      // A live warm-up sets the pace alone; a risky send offers both.
+      const live = warmup?.status === "warming" || warmup?.status === "paused";
+      const plan = live
+        ? null
+        : await planBroadcastSend(ctx.db, {
+            teamId: ctx.teamId,
+            region: sender.region,
+            newSend: { count, at },
+          });
+      return {
+        count,
+        cloud,
+        estimate: plan?.estimate ?? null,
+        warmup: warmup && { ...warmup, domain: sender.fromDomain },
+      };
     }),
+
+  /** The broadcast's sends by recipient mailbox provider, for the detail page's table. */
+  providers: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
+    await getOwnBroadcast(ctx, input.id);
+    return broadcastProviderBreakdown(ctx.db, { teamId: ctx.teamId, broadcastId: input.id });
+  }),
 });

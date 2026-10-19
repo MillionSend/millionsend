@@ -6,6 +6,19 @@ export const AUDIT_ACTIONS = [
   "domain.created",
   "domain.verified",
   "domain.deleted",
+  "domain.receiving_enabled",
+  "domain.receiving_disabled",
+  "domain.catch_all_enabled",
+  "domain.catch_all_disabled",
+  // Inboxes: dashboard creates and deletes only (an API key creates inboxes
+  // by the thousand; its trail is inbox_activity), safety changes, and a
+  // person's release or approval. Never per-message rows: this table is never purged.
+  "inbox.created",
+  "inbox.deleted",
+  "inbox.safety_updated",
+  "inbox.email_released",
+  "inbox.draft_approved",
+  "received_email.deleted",
   "webhook.created",
   "webhook.updated",
   "webhook.secret_rotated",
@@ -25,9 +38,17 @@ export const AUDIT_ACTIONS = [
   "team.broadcasts_resumed",
   "team.suspended",
   "team.reinstated",
+  // The content monitor's review hold: a suspension the team reads as a pause.
+  "team.held_for_review",
+  "team.ses_tenant_updated",
+  "team.ses_tenant_update_failed",
+  // A suspension's cancel and refund in Stripe, an instance row like the tenant's.
+  "team.fraud_refunded",
+  "team.fraud_refund_failed",
   // The instance side of a break-glass content access (team_id null, so the
-  // team's own audit can never show it); "content.accessed" is the row the
-  // team gains seven days later, dated at the access.
+  // team's own audit can never show it); "content.accessed" is the team-side
+  // row older builds wrote seven days after an access, kept so those rows
+  // still render.
   "content.revealed",
   "content.accessed",
   "console.flag_opened",
@@ -43,6 +64,12 @@ export const AUDIT_ACTIONS = [
   "monitor.override_cleared",
   "monitor.broadcasts_paused",
   "monitor.broadcasts_resumed",
+  "warmup.trust_granted",
+  "warmup.trust_revoked",
+  // The review list's verdict on mail screening stopped before SES; the
+  // instance's rows, as every trust & safety lever.
+  "screening.released",
+  "screening.canceled",
   "support.view_started",
   "support.view_ended",
   "billing.checkout_started",

@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/skeleton";
 import { CircleInfoGlyph } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDayUtc } from "@/lib/format";
+import { type ChartPointer, trackedPointer } from "@/lib/panel-placement";
 import { BAND_TONE, formatScoreTenths } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
@@ -60,15 +61,15 @@ type Bar = {
   /** Under the guardrail's floor: a day this small could not trip the warning on its own. */
   underFloor: boolean;
 };
-type DayCounts = { day: string; sent: number; hardBounced: number; complained: number };
+/** One day of a rate card: its events over the sends that rate divides by. */
+type RateDay = { day: string; count: number; sent: number };
 type EngagementDay = { day: string; delivered: number; opened: number; clicked: number };
 
 function rateBars(
-  days: DayCounts[],
-  count: (d: DayCounts) => number,
+  days: RateDay[],
   geometry: { threshold: number; lineTop: number },
   /** The guardrail's floor for one day's worth of this metric. */
-  belowFloor: (d: DayCounts, c: number) => boolean,
+  belowFloor: (d: RateDay) => boolean,
   fmtPct: Intl.NumberFormat,
   ofSent: (count: number, sent: number) => string,
   formatDay: (day: string) => string,
@@ -76,15 +77,14 @@ function rateBars(
 ): Bar[] {
   const pxPerThreshold = BAR_AREA - geometry.lineTop;
   return days.map((d) => {
-    const c = count(d);
-    const rate = d.sent > 0 ? c / d.sent : 0;
+    const rate = d.sent > 0 ? d.count / d.sent : 0;
     return {
       day: d.day,
       height: Math.min(BAR_AREA, Math.round((rate / geometry.threshold) * pxPerThreshold)),
       dayLabel: formatDay(d.day),
-      detail: `${fmtPct.format(rate)} · ${ofSent(c, d.sent)}`,
+      detail: `${fmtPct.format(rate)} · ${ofSent(d.count, d.sent)}`,
       partial: d.day === today,
-      underFloor: c > 0 && belowFloor(d, c),
+      underFloor: d.count > 0 && belowFloor(d),
     };
   });
 }
@@ -148,7 +148,7 @@ function RateCard(props: {
   secondary?: { label: string; note: string; hint: string; count: string; pct: string } | undefined;
 }) {
   const areaRef = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<{ index: number; pointer: ChartPointer } | null>(null);
   const hoveredBar = hover ? props.bars[hover.index] : undefined;
 
   // Same mechanics as the line chart: track the pointer over the whole bar
@@ -156,19 +156,21 @@ function RateCard(props: {
   // bars flex to fill the card, so the pitch comes from the measured width.
   function track(event: React.PointerEvent<HTMLDivElement>) {
     if (props.bars.length === 0) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const pitch = rect.width / props.bars.length;
-    const index = Math.min(props.bars.length - 1, Math.max(0, Math.floor(x / pitch)));
-    setHover({ index, x, y: event.clientY - rect.top });
+    const pointer = trackedPointer(event);
+    const pitch = pointer.width / props.bars.length;
+    const index = Math.min(props.bars.length - 1, Math.max(0, Math.floor(pointer.x / pitch)));
+    setHover({ index, pointer });
   }
 
   return (
     <div className="ms-kpi-card" style={{ flex: 1 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "2px 8px" }}>
         <div className="ms-microlabel">{props.label}</div>
         {props.note ? (
-          <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+          <span
+            className="ms-mono"
+            style={{ fontSize: 10, color: "var(--ms-faint)", whiteSpace: "nowrap" }}
+          >
             {props.note}
           </span>
         ) : null}
@@ -237,12 +239,7 @@ function RateCard(props: {
           ))}
         </div>
         {hover && hoveredBar ? (
-          <ChartTip
-            x={hover.x}
-            y={hover.y}
-            width={areaRef.current?.clientWidth ?? 0}
-            height={BAR_AREA}
-          >
+          <ChartTip plot={areaRef} pointer={hover.pointer}>
             <div className="ms-mono" style={{ fontSize: 11, color: "var(--ms-muted)" }}>
               {hoveredBar.dayLabel}
               {hoveredBar.partial ? ` · ${props.partialNote}` : ""}
@@ -438,7 +435,7 @@ function AccountScoreSkeleton() {
         <Skeleton width={110} height="1lh" />
       </div>
       <div
-        className="ms-kpi-row"
+        className="ms-kpi-row ms-score-row"
         style={{
           display: "flex",
           gap: 56,
@@ -477,10 +474,14 @@ export default function MetricsPage() {
   // The headline of the two risk cards is the guardrail's own seven-day
   // rate — the number that warns and pauses — never the chart window's.
   const health = useQuery(trpc.metrics.health.queryOptions());
-  const guardrailRate = (rate: number | undefined, format: Intl.NumberFormat) =>
+  const guardrailRate = (
+    rate: number | undefined,
+    sends: number | undefined,
+    format: Intl.NumberFormat,
+  ) =>
     health.data === undefined
       ? "…"
-      : health.data.sent > 0 && rate !== undefined
+      : sends !== undefined && sends > 0 && rate !== undefined
         ? format.format(rate)
         : "—";
   const ofSent = (count: number, sent: number) =>
@@ -581,13 +582,30 @@ export default function MetricsPage() {
             <AccountScoreSkeleton />
           ) : (
             <div className="ms-kpi-card" style={{ marginTop: 18 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "baseline",
+                  gap: "2px 8px",
+                }}
+              >
                 <div className="ms-microlabel">{t("score.title")}</div>
-                <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+                <span
+                  className="ms-mono"
+                  style={{ fontSize: 10, color: "var(--ms-faint)", whiteSpace: "nowrap" }}
+                >
                   {t("score.window")}
                 </span>
               </div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "baseline",
+                  gap: "4px 10px",
+                }}
+              >
                 <div
                   className="ms-digits"
                   style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1, marginTop: 6 }}
@@ -598,7 +616,10 @@ export default function MetricsPage() {
                     "—"
                   )}
                 </div>
-                <span className="ms-digits" style={{ fontSize: 15, color: "var(--ms-muted)" }}>
+                <span
+                  className="ms-digits"
+                  style={{ fontSize: 15, color: "var(--ms-muted)", whiteSpace: "nowrap" }}
+                >
                   {t("score.outOfTen")}
                 </span>
                 {scoreQuery.data.band ? (
@@ -613,7 +634,7 @@ export default function MetricsPage() {
                 ) : null}
               </div>
               <div
-                className="ms-kpi-row"
+                className="ms-kpi-row ms-score-row"
                 style={{
                   display: "flex",
                   gap: 56,
@@ -705,7 +726,7 @@ export default function MetricsPage() {
             <RateCard
               label={t("bounce.title")}
               note={t("guardrail.window", { days: GUARDRAIL_WINDOW_DAYS })}
-              headline={guardrailRate(health.data?.bounceRate, pct1)}
+              headline={guardrailRate(health.data?.bounceRate, health.data?.sent, pct1)}
               risk={{
                 label: t("bounce.risk", { rate: riskPct.format(WARN_BOUNCE_RATE) }),
                 lineTop: BOUNCE.lineTop,
@@ -714,8 +735,7 @@ export default function MetricsPage() {
               partialNote={t("chart.soFar")}
               floorNote={t("chart.belowFloor")}
               bars={rateBars(
-                data.days,
-                (d) => d.hardBounced,
+                data.days.map((d) => ({ day: d.day, count: d.hardBounced, sent: d.sent })),
                 BOUNCE,
                 (d) => d.sent < MIN_GUARDRAIL_VOLUME,
                 pct2,
@@ -729,10 +749,11 @@ export default function MetricsPage() {
                 data.totals.sent > 0 ? pct2.format(data.totals.hardBounced / data.totals.sent) : "—"
               }
             />
+            {/* Rates over the sends that could draw a complaint, per UTC day like the guardrail's. */}
             <RateCard
               label={t("complaint.title")}
-              note={t("guardrail.window", { days: GUARDRAIL_WINDOW_DAYS })}
-              headline={guardrailRate(health.data?.complaintRate, pct2)}
+              note={t("complaint.window", { days: GUARDRAIL_WINDOW_DAYS })}
+              headline={guardrailRate(health.data?.complaintRate, health.data?.complaintSent, pct2)}
               risk={{
                 label: t("complaint.risk", { rate: riskPct.format(WARN_COMPLAINT_RATE) }),
                 lineTop: COMPLAINT.lineTop,
@@ -741,19 +762,39 @@ export default function MetricsPage() {
               partialNote={t("chart.soFar")}
               floorNote={t("chart.belowFloor")}
               bars={rateBars(
-                data.days,
-                (d) => d.complained,
+                data.complaints.days.map((d) => ({
+                  day: d.day,
+                  count: d.complained,
+                  sent: d.complaintSent,
+                })),
                 COMPLAINT,
-                (d, c) => d.sent < MIN_GUARDRAIL_VOLUME || c < MIN_WARN_COMPLAINTS,
+                (d) => d.sent < MIN_GUARDRAIL_VOLUME || d.count < MIN_WARN_COMPLAINTS,
                 pct2,
-                ofSent,
+                (count, sent) =>
+                  t("complaint.ofReportable", { count: fmt.format(count), sent: fmt.format(sent) }),
                 dayLabel,
-                data.today,
+                data.complaints.today,
               )}
               rowLabel={t("complaint.complained")}
-              rowCount={fmt.format(data.totals.complained)}
+              rowCount={fmt.format(data.complaints.complained)}
               rowPct={
-                data.totals.sent > 0 ? pct2.format(data.totals.complained / data.totals.sent) : "—"
+                data.complaints.complaintSent > 0
+                  ? pct2.format(data.complaints.complained / data.complaints.complaintSent)
+                  : "—"
+              }
+              secondary={
+                data.complaints.sent > data.complaints.complaintSent
+                  ? {
+                      label: t("complaint.noReports"),
+                      note: t("complaint.notCounted"),
+                      hint: t("complaint.noReportsHint"),
+                      count: fmt.format(data.complaints.sent - data.complaints.complaintSent),
+                      pct: pct1.format(
+                        (data.complaints.sent - data.complaints.complaintSent) /
+                          data.complaints.sent,
+                      ),
+                    }
+                  : undefined
               }
             />
           </div>

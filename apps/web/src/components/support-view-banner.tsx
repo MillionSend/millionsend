@@ -17,8 +17,9 @@ import { useCountdown } from "@/lib/use-countdown";
  * The strip over a dashboard opened in a support view: which team, that it
  * is read-only, and how long is left. Ending clears the grant and returns
  * to the console. The countdown running out does the same, and so does a
- * poll that finds the grant gone: the owner can end a session from their
- * side, and nothing else would tell a tab already under the banner.
+ * poll that finds the grant gone: a session can end from elsewhere (another
+ * tab, or expiry seen by the server), and nothing else would tell a tab
+ * already under the banner.
  */
 export function SupportViewBanner({
   grantId,
@@ -44,8 +45,8 @@ export function SupportViewBanner({
     if (leftMs === 0) leave();
   }, [leftMs, leave]);
 
-  // The owner can end the session from their side, and the server would then
-  // quietly serve this tab its own team under a banner that still names the
+  // The session can end from another tab, and the server would then quietly
+  // serve this tab its own team under a banner that still names the
   // customer's. Asking after the grant is the only thing that notices.
   const live = useQuery(
     trpc.support.current.queryOptions(undefined, { refetchInterval: 15_000, staleTime: 0 }),
@@ -103,12 +104,14 @@ export function SupportViewBanner({
       className="ms-notice-strip ms-notice-strip-warn ms-support-strip"
       style={{ margin: 0, borderRadius: 0, borderWidth: "0 0 1px" }}
     >
-      <span>
+      <span className="ms-notice-strip-text">
         {t("banner", { team: teamName })} ·{" "}
         {/* The clock runs on the client: the server's second and the browser's differ. */}
-        <span suppressHydrationWarning>{t("endsIn", { left: formatMmSs(leftMs) })}</span>
+        <span suppressHydrationWarning style={{ whiteSpace: "nowrap" }}>
+          {t("endsIn", { left: formatMmSs(leftMs) })}
+        </span>
       </span>
-      <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8, alignItems: "center" }}>
+      <span className="ms-notice-strip-actions">
         <Link href={back} className="ms-btn ms-btn-secondary">
           {t("back")}
         </Link>

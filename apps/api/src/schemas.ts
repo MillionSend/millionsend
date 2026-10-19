@@ -1,16 +1,27 @@
 import { z } from "@hono/zod-openapi";
 import {
+  attachmentVerdict,
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
+  customHeaderIssues,
   DAY_MS,
   formatMailbox,
+  hasHeaderControlChar,
+  isReservedTagName,
+  LONG_POLL_MAX_SECONDS,
+  MAX_SUBJECT_LENGTH,
+  MEDIA_TYPE_TOKEN,
   parseMailbox,
   parseScheduledAt,
   parseSingleSender,
+  QUARANTINE_REASONS,
+  RESERVED_TAG_PREFIX,
   SCHEDULED_AT_FORMS,
+  SCREENING_VERDICTS,
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
+  SENDER_TRUSTS,
   WEBHOOK_EVENT_TYPES,
   WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
   WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,
@@ -58,11 +69,12 @@ const recipientList = z
 /** SES rejects a message with more destinations than this, across to+cc+bcc. */
 export const MAX_RECIPIENTS_PER_EMAIL = 50;
 
-// Strict base64: canonical alphabet, correct padding, no whitespace.
-const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+// Strict base64 with the length check below: canonical alphabet, correct
+// padding, no whitespace. No nested quantifier: grouping by four made V8's
+// backtracking overflow the stack on attachments of a few MiB.
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 // RFC 7231 media type: type "/" subtype, optional ; token=token|"quoted" parameters.
-const MEDIA_TYPE_TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
 const MEDIA_TYPE_RE = new RegExp(
   `^${MEDIA_TYPE_TOKEN}/${MEDIA_TYPE_TOKEN}(?:\\s*;\\s*${MEDIA_TYPE_TOKEN}=(?:${MEDIA_TYPE_TOKEN}|"[^"\\r\\n]*"))*$`,
 );
@@ -71,21 +83,41 @@ const MEDIA_TYPE_RE = new RegExp(
  * Wire shape from resend's parseEmailToApiOptions. Only inline base64
  * `content` is supported: a `path` URL would have the server fetch an
  * attacker-chosen location (SSRF), so it is rejected and never fetched.
+ * `filename` may be null, false or absent and `content_id` names an inline
+ * part: emails.receiving.forward() re-sends a received message's parts that
+ * way, and postal-mime reads an unnamed part's filename as null. Program
+ * files are refused here for every team (attachmentVerdict), so the sender
+ * hears it now instead of from a send that fails at SES later.
  */
 const attachmentSchema = z
   .object({
-    filename: z.string().min(1),
+    filename: z
+      .union([z.string().min(1).max(1000), z.literal(false)])
+      .nullable()
+      .optional(),
     content: z.string().optional(),
     content_type: z.string().optional(),
-    content_id: z.string().optional(),
+    content_id: z
+      .string()
+      .min(1)
+      .max(255)
+      .optional()
+      .describe('Inline part: the HTML shows it with <img src="cid:<content_id>">'),
     path: z.string().optional(),
   })
   .superRefine((a, ctx) => {
-    if (hasHeaderControlChar(a.filename)) {
+    if (typeof a.filename === "string" && hasHeaderControlChar(a.filename)) {
       ctx.addIssue({
         code: "custom",
         path: ["filename"],
         message: "filename must not contain control characters",
+      });
+    }
+    if (a.content_id !== undefined && hasHeaderControlChar(a.content_id)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["content_id"],
+        message: "content_id must not contain control characters",
       });
     }
     if (a.content_type !== undefined && !MEDIA_TYPE_RE.test(a.content_type)) {
@@ -103,14 +135,6 @@ const attachmentSchema = z
       });
       return;
     }
-    if (a.content_id !== undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["content_id"],
-        message: "content_id (inline attachments) is not supported",
-      });
-      return;
-    }
     if (!a.content) {
       ctx.addIssue({
         code: "custom",
@@ -119,127 +143,23 @@ const attachmentSchema = z
       });
       return;
     }
-    if (!BASE64_RE.test(a.content)) {
+    if (a.content.length % 4 !== 0 || !BASE64_RE.test(a.content)) {
       ctx.addIssue({ code: "custom", path: ["content"], message: "content must be valid base64" });
+      return;
+    }
+    const verdict = attachmentVerdict({
+      filename: typeof a.filename === "string" ? a.filename : undefined,
+      contentType: a.content_type,
+      bytes: Buffer.from(a.content, "base64"),
+    });
+    if (verdict.action === "reject") {
+      ctx.addIssue({ code: "custom", path: ["filename"], message: verdict.reason });
     }
   });
 
-/**
- * Custom headers are allowlisted, not denylisted: mail leaves through a
- * shared SES identity, so a tenant must not be able to forge authentication
- * verdicts (Authentication-Results, ARC-*, Received-SPF), alternate senders
- * (Resent-*, Sender, Return-Path), read-receipt targets
- * (Disposition-Notification-To, Return-Receipt-To, Errors-To) or list
- * headers the transport owns. Allowed: any X-* header except the X-SES-* and
- * X-MillionSend-* families, plus this vetted set of threading/priority
- * headers. Matched case-insensitively; the worker still reassigns its own
- * headers last (defense in depth).
- */
-const ALLOWED_HEADERS = new Set([
-  "in-reply-to",
-  "references",
-  "importance",
-  "priority",
-  "comments",
-  "keywords",
-  "organization",
-  // RFC 2369/8058 one-click unsubscribe pair: a sender running its own opt-out
-  // endpoint may point recipients at it. Values are checked below so only
-  // https/mailto targets go out; on a topic send they replace the generated pair.
-  "list-unsubscribe",
-  "list-unsubscribe-post",
-]);
-
-// RFC 2369: one or more <https://…> or <mailto:…> targets, comma-separated.
-const LIST_UNSUBSCRIBE_RE =
-  /^\s*<(?:https:\/\/|mailto:)[^<>\s]+>(?:\s*,\s*<(?:https:\/\/|mailto:)[^<>\s]+>)*\s*$/i;
-const LIST_UNSUBSCRIBE_POST_VALUE = "List-Unsubscribe=One-Click";
-
-/** Value rule for the two unsubscribe headers; null when the value is acceptable. */
-function unsubscribeHeaderIssue(name: string, value: string): string | null {
-  const lower = name.toLowerCase();
-  if (lower === "list-unsubscribe" && !LIST_UNSUBSCRIBE_RE.test(value)) {
-    return "List-Unsubscribe must be one or more <https://…> or <mailto:…> targets";
-  }
-  if (
-    lower === "list-unsubscribe-post" &&
-    value.trim().toLowerCase() !== LIST_UNSUBSCRIBE_POST_VALUE.toLowerCase()
-  ) {
-    return `List-Unsubscribe-Post must be "${LIST_UNSUBSCRIBE_POST_VALUE}"`;
-  }
-  return null;
-}
-
-const ALLOWED_HEADERS_HINT = `X-* (except X-SES-*) or ${[...ALLOWED_HEADERS].join(", ")}`;
-
-function isAllowedHeaderName(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (lower.startsWith("x-")) {
-    return !lower.startsWith("x-ses-") && !lower.startsWith("x-millionsend-");
-  }
-  return ALLOWED_HEADERS.has(lower);
-}
-
-// RFC 5322 field name: printable US-ASCII except colon.
-const HEADER_NAME_RE = /^[!-9;-~]+$/;
-
-/** True when the value carries a control char that could smuggle a header. */
-function hasHeaderControlChar(value: string): boolean {
-  for (const ch of value) {
-    const code = ch.charCodeAt(0);
-    if ((code < 0x20 && code !== 0x09) || code === 0x7f) return true;
-  }
-  return false;
-}
-
 const customHeadersSchema = z.record(z.string(), z.string()).superRefine((headers, ctx) => {
-  for (const [name, value] of Object.entries(headers)) {
-    if (!HEADER_NAME_RE.test(name)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" is not a valid header name`,
-      });
-    } else if (!isAllowedHeaderName(name)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" is not an allowed header; use ${ALLOWED_HEADERS_HINT}`,
-      });
-    }
-    if (hasHeaderControlChar(value)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" value must not contain control characters`,
-      });
-    }
-    const unsubscribeIssue = unsubscribeHeaderIssue(name, value);
-    if (unsubscribeIssue) ctx.addIssue({ code: "custom", path: [name], message: unsubscribeIssue });
-  }
-  // RFC 8058: one-click needs both headers and an https target. Half a pair
-  // would either ship without one-click or, on a topic send, collide with the
-  // generated pair — so the two come together or not at all.
-  const names = Object.keys(headers).map((n) => n.toLowerCase());
-  const hasList = names.includes("list-unsubscribe");
-  const hasPost = names.includes("list-unsubscribe-post");
-  if (hasList !== hasPost) {
-    ctx.addIssue({
-      code: "custom",
-      path: [hasList ? "List-Unsubscribe" : "List-Unsubscribe-Post"],
-      message: "List-Unsubscribe and List-Unsubscribe-Post must be sent together",
-    });
-  }
-  const listValue = Object.entries(headers).find(
-    ([n]) => n.toLowerCase() === "list-unsubscribe",
-  )?.[1];
-  if (listValue !== undefined && !/<https:\/\//i.test(listValue)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["List-Unsubscribe"],
-      message:
-        "List-Unsubscribe must include an <https://…> target (RFC 8058); mailto may only accompany it",
-    });
+  for (const issue of customHeaderIssues(headers)) {
+    ctx.addIssue({ code: "custom", path: [issue.header], message: issue.message });
   }
 });
 
@@ -277,10 +197,11 @@ export const sendEmailRequestSchema = z
       .openapi({ example: "Acme <onboarding@acme.dev>" }),
     to: recipientList
       .describe("Recipient address or list of up to 50")
-      .openapi({ example: ["delivered@resend.dev"] }),
+      .openapi({ example: ["success@simulator.amazonses.com"] }),
     subject: z
       .string()
       .min(1)
+      .max(MAX_SUBJECT_LENGTH)
       .refine((v) => !hasHeaderControlChar(v), {
         message: "subject must not contain control characters",
       })
@@ -296,9 +217,21 @@ export const sendEmailRequestSchema = z
         `Deliver later: ISO 8601 with offset, or relative like "in 2 hours" (${SCHEDULED_AT_FORMS}); max 30 days ahead`,
       ),
     tags: z
-      .array(z.object({ name: z.string().min(1), value: z.string() }))
+      .array(
+        z.object({
+          name: z
+            .string()
+            .min(1)
+            .refine((name) => !isReservedTagName(name), {
+              message: `tag names starting with ${RESERVED_TAG_PREFIX} are reserved for MillionSend`,
+            }),
+          value: z.string(),
+        }),
+      )
       .optional()
-      .describe("Key/value labels attached to the email for filtering"),
+      .describe(
+        `Key/value labels attached to the email for filtering; names starting with ${RESERVED_TAG_PREFIX}, in any letter case, are reserved`,
+      ),
     // Topic-scoped send: recipients opted out of the topic (explicit
     // subscription row, else the topic's default) are dropped at accept
     // exactly like suppression-list hits.
@@ -414,6 +347,209 @@ export const getEmailResponseSchema = emailListItemSchema
   })
   .openapi("GetEmailResponse");
 
+/**
+ * Received mail (Resend's emails.receiving surface). Every string in it came
+ * from whoever sent the message; addresses are bare, cleaned of controls.
+ */
+const inboundAttachmentSchema = z.object({
+  id: z.uuid(),
+  filename: z.string().nullable(),
+  content_type: z.string(),
+  content_id: z.string().nullable(),
+  content_disposition: z.string().nullable(),
+  size: z.number().int(),
+});
+
+const receivedEmailListItemSchema = z.object({
+  id: z.uuid(),
+  to: z.array(z.string()),
+  from: z
+    .string()
+    .describe("Bare address from the From header; the display name is in headers.from"),
+  created_at: z.string(),
+  subject: z.string(),
+  bcc: z.array(z.string()),
+  cc: z.array(z.string()),
+  reply_to: z.array(z.string()),
+  received_for: z
+    .array(z.string())
+    .describe("The team's envelope recipients: the addresses the message was delivered to here"),
+  message_id: z.string(),
+  attachments: z.array(inboundAttachmentSchema),
+});
+
+const screeningVerdictSchema = z.enum(SCREENING_VERDICTS);
+const senderTrustSchema = z.enum(SENDER_TRUSTS);
+const spamVerdictSchema = z.enum(["pass", "gray", "fail"]);
+const virusVerdictSchema = z.enum(["pass", "fail", "processing_failed"]);
+
+/** MillionSend's keys on a received email: Resend's fields are untouched, these come after them. */
+const receivedExtensionFields = {
+  inbox_id: z
+    .uuid()
+    .nullable()
+    .describe(
+      "MillionSend extension: the inbox this read is about (an inbox-scoped key's own, the inbox_id filter's, else the oldest inbox the email reached); null for mail no inbox took",
+    ),
+  thread_id: z.uuid().nullable().describe("MillionSend extension: that inbox's thread"),
+  inboxes: z
+    .array(z.object({ inbox_id: z.uuid(), thread_id: z.uuid(), verdict: screeningVerdictSchema }))
+    .optional()
+    .describe(
+      "MillionSend extension, full access keys only: every inbox the email reached and its screening verdict there",
+    ),
+  spam_verdict: spamVerdictSchema
+    .nullable()
+    .describe(
+      "MillionSend extension: the local spam score's verdict; null for mail from before it existed",
+    ),
+  virus_verdict: virusVerdictSchema
+    .nullable()
+    .describe(
+      "MillionSend extension: clamd's verdict (fail blocks every download for good); null when nothing scanned it",
+    ),
+  read: z
+    .boolean()
+    .optional()
+    .describe("MillionSend extension, with an inbox in context: whether that inbox marked it read"),
+};
+
+const receivedListItemExtensions = receivedEmailListItemSchema.extend({
+  ...receivedExtensionFields,
+  screening: z
+    .object({ verdict: screeningVerdictSchema, sender_trust: senderTrustSchema })
+    .describe("MillionSend extension: the screening verdict and the sender's trust tier"),
+  extracted: z
+    .object({ kinds: z.array(z.enum(["code", "link"])) })
+    .describe(
+      "MillionSend extension: whether a verification code or sign-in link was found; the values come with GET of one email",
+    ),
+});
+
+export const listReceivedEmailsResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    has_more: z.boolean(),
+    data: z.array(receivedListItemExtensions),
+    held: z
+      .array(
+        z.object({
+          id: z.uuid(),
+          inbox_id: z.uuid().nullable(),
+          reason: z.enum(["pending", "quarantined"]),
+          quarantine_reason: z.enum(QUARANTINE_REASONS).nullable(),
+          created_at: z.string(),
+        }),
+      )
+      .optional()
+      .describe(
+        "MillionSend extension, with wait only: matching mail that arrived but is held (being screened or quarantined), ids and why only",
+      ),
+  })
+  .openapi("ListReceivedEmailsResponse");
+
+export const getReceivedEmailQuerySchema = z.object({
+  html_format: z
+    .enum(["data_uri", "cid"])
+    .optional()
+    .describe(
+      "data_uri (default) inlines images the HTML references by cid: as data: URIs; cid leaves the cid: references, the parts being in attachments",
+    ),
+});
+
+export const getReceivedEmailResponseSchema = receivedEmailListItemSchema
+  .extend({
+    ...receivedExtensionFields,
+    screening: z
+      .object({
+        verdict: screeningVerdictSchema,
+        sender_trust: senderTrustSchema,
+        quarantine_reason: z.enum(QUARANTINE_REASONS).nullable(),
+        reasons: z.array(z.string()),
+        injection_score: z.number().int().nullable(),
+        phishing_score: z.number().int().nullable(),
+        hidden_text_removed: z.boolean(),
+      })
+      .describe(
+        "MillionSend extension: the screening verdict, the sender's trust tier, why it was held, the inbound judge's reasons and scores (0-100), and whether hidden text was removed from what agents read",
+      ),
+    spam_score: z
+      .number()
+      .int()
+      .nullable()
+      .describe("MillionSend extension: the local spam score, 0-100"),
+    virus_signature: z
+      .string()
+      .nullable()
+      .describe("MillionSend extension: clamd's signature name when it failed"),
+    extracted_text: z
+      .string()
+      .nullable()
+      .describe(
+        "MillionSend extension: what a person sees of the reply, as text with light markdown: hidden text, invisible characters, quoted history and signature taken out. null once the content retention removed it",
+      ),
+    extracted: z
+      .object({
+        kinds: z.array(z.enum(["code", "link"])),
+        code: z.string().nullable(),
+        link: z.string().nullable(),
+        link_domain_matches_sender: z.boolean().nullable(),
+        ambiguous: z.boolean(),
+      })
+      .describe(
+        "MillionSend extension: the verification code or sign-in link, served only from delivered mail of a sender that did not fail authentication, in an inbox that extracts codes. Links are never fetched.",
+      ),
+    object: z.literal("email"),
+    html: z.string().nullable(),
+    html_format: z.enum(["data_uri", "cid"]),
+    text: z.string().nullable(),
+    headers: z
+      .record(z.string(), z.string())
+      .nullable()
+      .describe(
+        "Top-level headers, lowercase names; a repeated header's values joined by newlines",
+      ),
+    authentication: z
+      .object({ spf: z.string(), dkim: z.string(), dmarc: z.string() })
+      .describe("pass, fail, gray, processing_failed or unknown, checked when the message arrived"),
+    raw: z
+      .object({ download_url: z.string(), expires_at: z.string() })
+      .nullable()
+      .describe(
+        "The original RFC 822 message: a signed link valid for one hour that needs no API key. null once the content retention period removed the message.",
+      ),
+  })
+  .openapi("GetReceivedEmailResponse");
+
+export const deleteReceivedEmailResponseSchema = z
+  .object({ object: z.literal("email"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("DeleteReceivedEmailResponse");
+
+const receivedAttachmentDataSchema = z.object({
+  id: z.uuid(),
+  filename: z.string().optional(),
+  size: z.number().int(),
+  content_type: z.string(),
+  content_disposition: z.enum(["inline", "attachment"]),
+  content_id: z.string().optional(),
+  download_url: z
+    .string()
+    .describe("Signed link to the file's bytes, valid for one hour; it needs no API key"),
+  expires_at: z.string(),
+});
+
+export const listReceivedAttachmentsResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    has_more: z.boolean(),
+    data: z.array(receivedAttachmentDataSchema),
+  })
+  .openapi("ListReceivedAttachmentsResponse");
+
+export const getReceivedAttachmentResponseSchema = receivedAttachmentDataSchema
+  .extend({ object: z.literal("attachment") })
+  .openapi("GetReceivedAttachmentResponse");
+
 const scoreBandEnum = z.enum(["excellent", "good", "needs_attention", "at_risk"]);
 
 // GET /emails/{id}/insights: the pre-send best-practice report computed when
@@ -493,6 +629,11 @@ export const usageResponseSchema = z
         .int()
         .nullable()
         .describe("Contacts the team may hold; null = unlimited or self-hosted"),
+      inboxes: z
+        .number()
+        .int()
+        .nullable()
+        .describe("Inboxes the team may hold at once; null = unlimited or self-hosted"),
     }),
     today: z.object({
       emails_sent: z.number().int().describe("Emails accepted so far this UTC day"),
@@ -519,6 +660,12 @@ export const usageResponseSchema = z
   })
   .openapi("UsageResponse");
 
+// Order-neutral: lists that don't run newest first share these fields too.
+export const AFTER_CURSOR_DESCRIPTION =
+  "Cursor: id of the last item of the current page; returns the next page. Must be an id this list returned; there is no sentinel value.";
+export const BEFORE_CURSOR_DESCRIPTION =
+  "Cursor: id of the first item of the current page; returns the previous page; same rule as after.";
+
 /**
  * Resend SDK pagination (buildPaginationQuery): ?limit=&after= / ?before=,
  * limit 1-100 (default 20), cursors are item ids, after and before are
@@ -532,24 +679,70 @@ const listQueryFields = z.object({
     .max(100)
     .optional()
     .describe("Page size, 1-100 (default 20)"),
-  after: z
-    .uuid()
-    .optional()
-    .describe(
-      "Cursor: id of the last item of the previous page. Must be an id this list returned; there is no sentinel value.",
-    ),
-  before: z
-    .uuid()
-    .optional()
-    .describe(
-      "Cursor: id of the first item of the next page (page backwards); same rule as after.",
-    ),
+  after: z.uuid().optional().describe(AFTER_CURSOR_DESCRIPTION),
+  before: z.uuid().optional().describe(BEFORE_CURSOR_DESCRIPTION),
 });
 const oneCursor = <T extends z.ZodObject>(fields: T) =>
   fields.refine((q) => !(q.after && q.before), {
     message: "after and before cannot be used together",
   });
 export const listQuerySchema = oneCursor(listQueryFields);
+
+const booleanQuery = z.enum(["true", "false"]);
+
+export const listReceivedEmailsQuerySchema = oneCursor(
+  listQueryFields.extend({
+    wait: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(LONG_POLL_MAX_SECONDS)
+      .optional()
+      .describe(
+        `MillionSend extension: hold the request up to this many seconds (0-${LONG_POLL_MAX_SECONDS}) until matching mail newer than the cursor arrives; an empty list with 200 when none did`,
+      ),
+    since: z.iso
+      .datetime({ offset: true })
+      .optional()
+      .describe(
+        "MillionSend extension: only mail received after this instant; with wait and no cursor it defaults to one minute before the request",
+      ),
+    inbox_id: z
+      .uuid()
+      .optional()
+      .describe("MillionSend extension: only mail delivered into this inbox"),
+    to: z
+      .string()
+      .max(320)
+      .optional()
+      .describe("MillionSend extension: only mail with this address in received_for"),
+    from: z
+      .string()
+      .max(320)
+      .optional()
+      .describe(
+        "MillionSend extension: a sender address, or a domain matching itself and its subdomains",
+      ),
+    subject_contains: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("MillionSend extension: case-insensitive subject substring"),
+    unread: booleanQuery
+      .optional()
+      .describe(
+        "MillionSend extension, with an inbox in context (inbox_id, or an inbox-scoped key): read state in that inbox",
+      ),
+    include_quarantined: booleanQuery
+      .optional()
+      .describe(
+        "MillionSend extension, full access keys only: list held mail too, flagged by screening",
+      ),
+    quarantined: booleanQuery
+      .optional()
+      .describe("MillionSend extension, full access keys only: list held mail only"),
+  }),
+);
 
 export const CONTACT_INCLUDES = ["properties", "topics"] as const;
 export type ContactInclude = (typeof CONTACT_INCLUDES)[number];
@@ -842,9 +1035,19 @@ export const batchContactsResponseSchema = z
       })
       .describe("Per-status totals over the request items; they sum to the request length"),
     errors: z
-      .array(z.object({ index: z.number().int(), message: z.string() }))
+      .array(
+        z.object({
+          index: z.number().int(),
+          statusCode: z.number().int(),
+          name: z.string(),
+          message: z.string(),
+        }),
+      )
       .optional()
-      .describe("Permissive mode only: the failed items by request index"),
+      .describe(
+        "Permissive mode only: the failed items by request index, each with the statusCode and " +
+          "name strict mode would answer for it",
+      ),
   })
   .openapi("BatchContactsResponse");
 
@@ -922,11 +1125,12 @@ export const createBroadcastRequestSchema = z
       .optional()
       .describe("Segment to send to; omitted means every contact of the team"),
     from: fromAddress.describe(
-      'Sender, "Name <user@domain>"; the domain must be verified for the team',
+      'Sender, "Name <user@domain>"; the domain must be one of the team\'s own verified domains when the broadcast is sent: sending from an address on the shared inbox domain answers 403',
     ),
     subject: z
       .string()
       .min(1)
+      .max(MAX_SUBJECT_LENGTH)
       .describe("Subject line; supports {{{FIRST_NAME|there}}} merge fields"),
     html: z
       .string()
@@ -965,7 +1169,7 @@ export const updateBroadcastRequestSchema = z
     name: z.string().optional(),
     segment_id: z.uuid().optional(),
     from: fromAddress.optional(),
-    subject: z.string().min(1).optional(),
+    subject: z.string().min(1).max(MAX_SUBJECT_LENGTH).optional(),
     html: z.string().optional(),
     text: z.string().optional(),
     reply_to: replyToList.optional(),
@@ -1006,11 +1210,14 @@ export const sendBroadcastResponseSchema = z
     warning: z
       .object({
         code: z
-          .enum(["paced", "queued_behind"])
+          .enum(["paced", "queued_behind", "warming_up"])
           .describe(
-            "paced: more than the capacity available now; queued_behind: other sends go first",
+            "paced: more than the capacity available now; queued_behind: other sends go first; warming_up: the sender domain's warm-up spreads the send over days, most active contacts first, or holds it while paused",
           ),
-        days: z.number().int().describe("Days the send spans"),
+        days: z
+          .number()
+          .int()
+          .describe("Days the send spans; 0 while the domain's warm-up is paused"),
         message: z.string(),
       })
       .optional(),
@@ -1220,6 +1427,23 @@ const OPEN_TRACKING_DESC =
 const TRACKING_SUBDOMAIN_DESC =
   'DNS label of the branded tracking host, e.g. "links" for links.<domain>. Setting it adds a Tracking CNAME to records[]; links are tracked through it once that CNAME resolves. Required on MillionSend Cloud to turn tracking on.';
 
+const capabilityStatusSchema = z.enum(["enabled", "disabled"]);
+
+const domainCapabilitiesRequestSchema = z
+  .object({
+    sending: capabilityStatusSchema
+      .optional()
+      .describe(
+        "Only enabled is accepted: a domain of your own can't be receive-only, so disabled is a 422.",
+      ),
+    receiving: capabilityStatusSchema
+      .optional()
+      .describe(
+        "Inbound mail for every address at the domain (a catch-all), readable at /emails/receiving and announced by the email.received webhook. Enabling needs a verified domain on an instance that receives mail, and adds a Receiving MX record to records[]. A domain that already has mailboxes is best received on a subdomain (inbound.example.com): the Receiving MX would take their mail.",
+      ),
+  })
+  .describe("Resend's domain capabilities; omitted fields keep their value.");
+
 /**
  * Built per deployment so `region` lists only what it serves (the default
  * first): SES configuration sets, SNS topics and tenants are all regional, so
@@ -1256,6 +1480,9 @@ export const createDomainRequestSchema = (regions: readonly [string, ...string[]
         .refine((v) => SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
         .optional()
         .describe(TRACKING_SUBDOMAIN_DESC),
+      // A new domain is never verified yet, so receiving: "enabled" is a 422
+      // here; it is switched on with PATCH once the domain verifies.
+      capabilities: domainCapabilitiesRequestSchema.optional(),
     })
     .openapi("CreateDomainRequest");
 
@@ -1274,7 +1501,13 @@ export const updateDomainRequestSchema = z
     // Accepted by the SDK but unsupported here; the handler answers 422
     // instead of silently ignoring a security-relevant setting.
     tls: z.unknown().optional(),
-    capabilities: z.unknown().optional(),
+    capabilities: domainCapabilitiesRequestSchema.optional(),
+    receiving_catch_all: z
+      .boolean()
+      .optional()
+      .describe(
+        "MillionSend extension: store mail to addresses without an inbox (true) or refuse it at RCPT (false). Turning it on needs receiving enabled and, on MillionSend Cloud, a paid plan.",
+      ),
   })
   .openapi("UpdateDomainRequest");
 
@@ -1282,7 +1515,7 @@ const domainRecordSchema = z.object({
   record: z
     .string()
     .describe(
-      "Which record this is: DKIM, SPF (the MAIL FROM MX and TXT rows), DMARC, or Tracking (the branded tracking CNAME, present once a tracking subdomain is set). Only the DKIM and SPF rows gate sending.",
+      "Which record this is: DKIM, SPF (the MAIL FROM MX and TXT rows), DMARC, Tracking (the branded tracking CNAME, present once a tracking subdomain is set) or Receiving (the MX inbound mail needs, present while receiving is enabled; it reads verified only when it is among the domain's lowest-numbered MX records). Only the DKIM and SPF rows gate sending.",
     ),
   name: z.string(),
   type: z.string(),
@@ -1327,8 +1560,41 @@ const domainSchema = z.object({
   open_tracking: z.boolean(),
   click_tracking: z.boolean(),
   tracking_subdomain: z.string().nullable(),
-  // Sending-only platform; present for SDK-shape parity.
-  capabilities: z.object({ sending: z.string(), receiving: z.string() }),
+  capabilities: z.object({
+    sending: z
+      .string()
+      .describe(
+        "enabled; on the shared row, disabled while the instance pauses sending from the shared domain",
+      ),
+    receiving: z
+      .string()
+      .describe(
+        "enabled while the domain receives mail; always disabled on an instance that does not",
+      ),
+  }),
+  receiving_catch_all: z
+    .boolean()
+    .describe(
+      "MillionSend extension: whether mail to an address without an inbox is stored (true) or refused at RCPT (false)",
+    ),
+  shared: z
+    .boolean()
+    .describe(
+      "MillionSend extension: true on the team's subdomain of the shared inbox domain, a read-only row listed after the team's own domains (403 on changes) that POST /inboxes domain_id takes; false on the team's own domains",
+    ),
+  sending_mode: z
+    .enum(["open", "reply_only", "receive_only"])
+    .optional()
+    .describe(
+      "MillionSend extension, on the shared row only: what its inboxes' addresses may send. open starts conversations, reply_only replies inside their threads, receive_only sends nothing. Holds on names still apply per send: an address whose username or from_name imitates a brand, or one on an older label that does, replies only, even when the mode is open.",
+    ),
+  sending_mode_reason: z
+    .enum(["plan", "instance"])
+    .nullable()
+    .optional()
+    .describe(
+      "MillionSend extension, on the shared row only: what holds sending below open: the team's plan or the instance; null when open",
+    ),
 });
 
 export const createDomainResponseSchema = domainSchema
@@ -1374,10 +1640,15 @@ const webhookEndpointUrl = z
     message: "endpoint must be an https:// URL",
   });
 
+const INBOX_IDS_DESC =
+  "MillionSend extension: inbox events and email.received reach this endpoint only for these inboxes of the team (at most 100). null means every inbox.";
+const webhookInboxIds = z.array(z.uuid()).max(100).nullable();
+
 export const createWebhookRequestSchema = z
   .object({
     endpoint: webhookEndpointUrl,
     events: z.array(webhookEventSchema).min(1),
+    inbox_ids: webhookInboxIds.optional().describe(`${INBOX_IDS_DESC} Omitted: every inbox.`),
     signing_secret: z
       .string()
       .optional()
@@ -1392,6 +1663,7 @@ export const updateWebhookRequestSchema = z
     endpoint: webhookEndpointUrl.optional(),
     events: z.array(webhookEventSchema).min(1).optional(),
     status: webhookWireStatusSchema.optional(),
+    inbox_ids: webhookInboxIds.optional().describe(`${INBOX_IDS_DESC} Omitted: unchanged.`),
   })
   .openapi("UpdateWebhookRequest");
 
@@ -1403,6 +1675,7 @@ const webhookListItemSchema = z.object({
   created_at: z.string(),
   status: webhookWireStatusSchema,
   events: z.array(z.string()).nullable(),
+  inbox_ids: z.array(z.string()).nullable().describe(INBOX_IDS_DESC),
 });
 
 export const createWebhookResponseSchema = z
@@ -1412,7 +1685,12 @@ export const createWebhookResponseSchema = z
 export const getWebhookResponseSchema = webhookListItemSchema
   .extend({
     object: z.literal("webhook"),
-    signing_secret: z.string(),
+    signing_secret: z
+      .string()
+      .optional()
+      .describe(
+        "Not returned to a team member's MCP call; the dashboard shows members only its last 4 characters",
+      ),
     previous_secret_expires_at: z
       .string()
       .nullable()
@@ -1473,8 +1751,25 @@ export const createApiKeyRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
     permission: z.enum(["full_access", "sending_access"]).default("full_access"),
-    // Omitted = any verified domain; a uuid scopes the key to one domain.
-    domain_id: z.uuid().nullish(),
+    domain_id: z
+      .uuid()
+      .nullish()
+      .describe(
+        "Restricts the key to sending from this one verified domain of the team: a GET /domains " +
+          "row with shared: false. Omitted or null, the key " +
+          "inherits the calling key's scope: all domains, or the calling key's domain if it is " +
+          "domain-scoped. A domain-scoped calling key cannot name any other domain " +
+          "(403 restricted_api_key).",
+      ),
+    inbox_id: z
+      .uuid()
+      .nullish()
+      .describe(
+        "MillionSend extension: restricts the key to one inbox of the team. It reads that inbox's " +
+          "threads, drafts and received mail and sends only from its address; every other route " +
+          "answers 403 restricted_api_key. Needs full_access, can't be combined with domain_id, " +
+          "and an inbox holds at most 5 active keys (outside the team's 25).",
+      ),
   })
   .openapi("CreateApiKeyRequest");
 
@@ -1491,6 +1786,10 @@ export const listApiKeysResponseSchema = z
         name: z.string(),
         created_at: z.string(),
         last_used_at: z.string().nullable(),
+        inbox_id: z
+          .uuid()
+          .nullable()
+          .describe("MillionSend extension: the one inbox the key is restricted to, or null"),
       }),
     ),
     has_more: z.boolean(),
@@ -1666,7 +1965,7 @@ const templateNameSchema = z.string().trim().min(1).max(200);
 const templateSubjectSchema = z
   .string()
   .trim()
-  .max(998)
+  .max(MAX_SUBJECT_LENGTH)
   .nullable()
   .describe('"" or null clears the subject');
 const templateBodySchema = z.string().max(500_000);

@@ -1,0 +1,446 @@
+---
+title: Segurança de agentes
+description: Como uma caixa de agente protege o agente de IA que a lê e as pessoas para quem ele escreve, com confiança no remetente, quarentena, análise de injeção de prompt, remoção de texto oculto, códigos privados e regras de envio.
+---
+
+Qualquer pessoa pode escrever para uma caixa de entrada, e um agente de IA
+que lê e-mails pode ser convencido a fazer coisas: uma mensagem pode trazer
+instruções escondidas das pessoas, se passar pelo dono do agente ou pedir
+que ele encaminhe um link de redefinição de senha. Uma
+[caixa de agente](/pt-BR/concepts/inboxes) responde a isso em camadas. O
+agente só lê o e-mail que passa pelas regras da caixa; o que ele lê vem sem
+texto oculto e marcado como não confiável; e o que ele envia passa por regras
+que transformam envios arriscados em rascunhos para uma pessoa.
+
+Nada disso torna o e-mail recebido confiável. A análise é um sinal, não uma
+garantia: o seu agente ainda deve tratar toda mensagem como dado, nunca como
+instrução (veja
+[O que o seu agente ainda deve fazer](#o-que-o-seu-agente-ainda-deve-fazer)).
+
+## Visão geral
+
+| Camada | O que faz | Numa caixa de agente |
+| --- | --- | --- |
+| Checagem do destinatário | E-mail para endereços sem caixa é recusado, a não ser que o pega-tudo do domínio esteja ligado; uma caixa inundada de e-mails responde "tente mais tarde". | Sempre |
+| Antivírus | E-mail infectado vai para a quarentena, e os downloads dele ficam bloqueados para sempre. | Quando a instância roda um antivírus |
+| Nota de spam | Uma nota local a partir da autenticação, dos cabeçalhos, dos links e dos anexos. O e-mail reprovado vai para a pasta `spam`. | Sempre |
+| [Confiança no remetente](#confiança-no-remetente) | Classifica cada remetente, dos endereços da sua própria equipe até a autenticação que falhou. | Sempre |
+| [Regras de entrada](#o-que-chega-ao-agente) | E-mail de remetentes que a caixa não aceita vai para a quarentena. | `accept_from: verified` |
+| [Análise](#análise-de-injeção-de-prompt) | Dá notas de injeção de prompt e phishing a e-mails de remetentes de fora; notas altas vão para a quarentena. | `screening: true` |
+| [Texto oculto](#texto-oculto-e-extracted_text) | O texto que uma pessoa não vê sai de todo texto que um agente ou um modelo lê. | Sempre |
+| Delimitação | Os resultados do MCP colocam o texto das mensagens entre marcadores de conteúdo não confiável. | Sempre |
+| [Códigos](#códigos-de-verificação-e-links-de-acesso) | Códigos e links de acesso são extraídos para o agente e não podem ser repassados para estranhos. | `extract_codes`, `private_codes` |
+| [Regras de envio](#o-que-o-agente-pode-enviar) | Respostas só dentro das conversas, limite diário, aumento gradual de destinatários novos, proteção contra loops; envios arriscados viram rascunhos. | `send_policy: reply_only`, `send_cap: 200` |
+| Atividade | Toda ação e decisão fica registrada, e os responsáveis ficam sabendo do que está esperando. | Sempre |
+
+## Confiança no remetente
+
+Toda mensagem recebida ganha um `sender_trust`, que aparece em `screening`
+nas leituras e como **Confiança** no painel. A primeira linha que bater
+vale:
+
+| `sender_trust` | O remetente |
+| --- | --- |
+| `failed` | Falhou na autenticação, e o domínio pede para colocar em quarentena ou rejeitar esse tipo de e-mail; ou o domínio não publica política DMARC e falha no SPF sem nenhuma assinatura DKIM própria. Essa linha passa na frente de todas, então um responsável falsificado nunca entra. |
+| `owner` | Um dos endereços de login das pessoas da sua equipe, ou um endereço dos `owner_addresses` da caixa (nunca no domínio compartilhado), e o domínio garante. |
+| `allowlisted` | Bate com a lista de permitidos da caixa, também no domínio compartilhado, e o domínio garante. |
+| `known_thread` | Responde numa conversa em que a caixa escreveu, a partir de um endereço para o qual a caixa escreveu, comprovado pelo token da conversa no `References` ou por um `In-Reply-To` que aponta uma mensagem enviada pela caixa. Não precisa de autenticação, então um remetente pequeno sem DKIM ainda consegue responder. |
+| `external` | Qualquer outro remetente que o próprio domínio garante, inclusive outros endereços dos seus domínios. |
+| `unauthenticated` | Todo o resto: o domínio não garante o endereço do From, ou a mensagem aponta mais de um remetente. |
+
+Um domínio **garante** o endereço do From quando o DMARC passa, ou, para um
+domínio sem política DMARC, quando há uma assinatura DKIM dele ou um SPF
+aprovado para a organização dele. Um domínio que publica `p=none` e falha no
+DMARC fica `unauthenticated`, não `failed`: ele não pediu para ninguém
+aplicar a política dele.
+
+- Só os endereços de login das pessoas da sua equipe e os
+  `owner_addresses` da caixa são responsáveis. Todo o resto no domínio da sua
+  empresa é `external`, então o endereço de um colega, ou um sistema que
+  envia como o seu domínio, não consegue dar ordens ao agente nem receber os
+  códigos privados dele.
+- Uma mensagem com dois campos From, ou dois endereços num só, nunca fica
+  acima de `unauthenticated`.
+- O nível é definido quando a mensagem chega e não muda. Uma mudança na lista
+  de permitidos vale para os e-mails que chegarem depois; o que já está
+  retido é [liberado](#quarentena) à mão.
+- Os selos ARC de serviços de encaminhamento não contam como prova, então o
+  e-mail que passa por algumas listas de e-mail e encaminhadores fica
+  `external` para o domínio da lista, ou `unauthenticated`.
+
+## O que chega ao agente
+
+O `accept_from` decide, por nível:
+
+| `sender_trust` | `anyone` | `verified` (padrão) | `allowlist` |
+| --- | --- | --- | --- |
+| `owner`, `allowlisted` | entregue | entregue | entregue |
+| `known_thread` | entregue | entregue | entregue |
+| `external` | analisado | analisado | quarentena, `not_allowlisted` |
+| `unauthenticated` | analisado | quarentena, `unauthenticated_sender` | quarentena, `not_allowlisted`; `unauthenticated_sender` quando o From é um responsável ou está na lista de permitidos |
+| `failed` | quarentena, `failed_auth` | quarentena, `failed_auth` | quarentena, `failed_auth` |
+
+O e-mail **analisado** é entregue, a não ser que a
+[análise](#análise-de-injeção-de-prompt) o mande para a quarentena; com o
+`screening` desligado, ou numa instância sem avaliador, ele é entregue. Além
+da tabela:
+
+- Um vírus manda a mensagem para a quarentena em qualquer caixa, seja qual
+  for o remetente (`virus`).
+- E-mail de responsáveis ou da lista de permitidos que encaminha a mensagem
+  de outra pessoa também é analisado: conteúdo encaminhado não herda
+  confiança.
+- E-mail entregue que é reprovado na nota de spam vai para a pasta `spam`,
+  que as listagens de conversas deixam de fora, a não ser que você peça.
+- E-mail entregue vem com `screening.verdict: "suspicious"` quando o
+  remetente é `unauthenticated` ou `failed`, a nota de spam é cinza, o
+  antivírus não terminou ou a análise achou algo abaixo da linha de corte; se
+  não, `clean`. Uma linha de prévia escondida, que a maioria das newsletters
+  usa, nunca deixa um e-mail suspeito sozinha.
+
+Uma caixa `human` aceita `anyone` por padrão: tudo é entregue, menos vírus, e
+o e-mail de um remetente `failed` vai para a pasta `spam` em vez de ficar
+retido. Escolha `verified` ou `allowlist` para ela e a tabela vale, com
+"analisado" querendo dizer entregue: a análise só roda em caixas de agente.
+
+## Quarentena
+
+O e-mail em quarentena fica guardado pelo mesmo tempo que qualquer e-mail
+recebido, listado, e pode ser liberado; nunca é descartado nem devolvido ao
+remetente.
+
+| `quarantine_reason` | Retido porque |
+| --- | --- |
+| `failed_auth` | O remetente falhou na autenticação. |
+| `unauthenticated_sender` | O domínio do remetente não o garante, e a caixa aceita remetentes verificados ou tem o endereço como responsável ou na lista de permitidos. |
+| `not_allowlisted` | A caixa só aceita a lista de permitidos. |
+| `injection` | A análise deu 80 ou mais para injeção de prompt. |
+| `phishing` | A análise deu 80 ou mais para phishing. |
+| `virus` | O antivírus achou malware. |
+| `unscreened` | A mensagem precisava de análise e o avaliador não respondeu. |
+| `screening_cap` | A mensagem precisava de análise depois do limite diário de análises. |
+
+**Os agentes nunca veem e-mail retido.** Chaves restritas a uma caixa e toda
+chamada MCP são visões de agente: as listagens e os e-mails das conversas
+pulam as mensagens retidas, ler uma responde `403 email_quarantined`, um
+long-poll informa só o id dela (em `held`), e nenhum código sai dela.
+Enquanto a análise roda, normalmente em segundos, a mensagem fica pendente:
+as visões de agente também não a veem, e o id dela responde `404`. As pessoas
+no painel veem tudo, sinalizado, e uma chave de acesso total da equipe vê o
+e-mail retido quando pede (`include_quarantined=true`,
+`GET /inboxes/{id}/quarantine`).
+
+**Nenhum webhook anuncia e-mail retido.** O `email.received` e o
+`inbox.email.received` disparam quando a mensagem é entregue ou liberada,
+então um agente acordado por um webhook nunca recebe um id retido; o
+`inbox.email.quarantined` avisa os endpoints que se inscrevem nele.
+
+**Liberar.** Qualquer pessoa da equipe libera pelo painel: na aba **Precisa
+de revisão** da caixa, na mensagem dentro da conversa ou na página do e-mail
+recebido. Todos abrem a mesma janela, com o motivo da retenção, o que a
+liberação dispara e o texto do e-mail; o que ficou retido por `injection`,
+`phishing`, `virus` ou `failed_auth` só é liberado depois que a pessoa marca
+que leu. Uma chave de acesso total da equipe libera com
+[`POST /inboxes/{id}/quarantine/{email_id}/release`](/pt-BR/concepts/inboxes#quarentena),
+e um cliente MCP com `release_email`, sob `receiving:manage`, menos esses
+quatro motivos: esse e-mail tem o agente como alvo, então uma pessoa revisa
+no painel (`403 forbidden`). Uma chave restrita a uma caixa nunca libera.
+
+- **Analisado antes.** O e-mail retido antes da análise (`not_allowlisted`,
+  `unauthenticated_sender`, `failed_auth`) é analisado na hora de liberar,
+  numa caixa de agente com o `screening` ligado, pelo mesmo avaliador e com a
+  mesma linha de corte do e-mail que chega. Com 80 ou mais, ele continua na
+  quarentena, agora como `injection` ou `phishing`, com as notas
+  (`409 held_by_screening` na API). Quando o avaliador não responde, ou a
+  instância não tem um, a liberação feita por uma pessoa ou por uma chave da
+  equipe segue sem análise.
+- **Confiar no remetente.** O `trust_sender` (**Confiar também** na janela)
+  coloca o endereço do remetente na lista de permitidos da caixa. Ele só vale
+  para e-mail retido como `not_allowlisted` de um remetente que passou na
+  autenticação (`external`), o único caso em que a lista de permitidos
+  deixaria o e-mail entrar, e só para donos e admins ou uma chave de acesso
+  total da equipe, que podem mudar a própria lista; qualquer outro caso
+  responde `403 trust_not_allowed`. Clientes MCP nunca confiam num
+  remetente.
+- Uma mensagem liberada é entregue como se tivesse acabado de chegar, com
+  webhooks e cópias do `forward_to`, e não é analisada de novo. Vírus
+  continua sendo vírus: liberar um mostra o texto, nenhuma cópia encaminhada
+  sai, e os anexos e a mensagem original continuam bloqueados.
+
+**Clientes MCP liberando.** Um cliente MCP libera em nome de um agente, que
+é justamente quem o e-mail tem como alvo. Por isso, a liberação dele sempre
+depende da avaliação, nunca só da decisão do agente:
+
+- O e-mail retido como `not_allowlisted`, `unauthenticated_sender`,
+  `unscreened` ou `screening_cap` é analisado em toda liberação, em qualquer
+  caixa, pelo mesmo avaliador, com a mesma linha de corte e o mesmo limite
+  diário do e-mail que chega. Abaixo de 80, ele é liberado; com 80 ou mais,
+  continua na quarentena (`409 held_by_screening`).
+- Quando o avaliador não responde, a instância não tem um ou o limite diário
+  de análises acabou, nada é liberado: a resposta é
+  `503 screening_unavailable`, com um `retry-after` que conta até a
+  meia-noite UTC quando o limite acabou. Tente de novo mais tarde, ou peça
+  para uma pessoa revisar o e-mail no painel.
+
+Os responsáveis recebem um e-mail por dia, **Suas caixas de entrada precisam
+de atenção**, enquanto houver mensagens na quarentena, rascunhos esperando
+aprovação ou envios barrados, com os números e um link; nunca remetentes ou
+assuntos. É a opção **Alertas das caixas** em **Configurações →
+Notificações**.
+
+## Análise de injeção de prompt
+
+Numa caixa de agente com o `screening` ligado, o e-mail de remetentes
+`external` e `unauthenticated` que as regras entregariam é analisado antes de
+o agente poder vê-lo, e o conteúdo encaminhado por responsáveis e pela lista
+de permitidos também. O avaliador lê a mensagem do jeito que ela aparece,
+com o texto oculto que foi removido separado:
+
+- o remetente, a autenticação dele e o Reply-To;
+- o assunto e o texto visível, primeiro a resposta e depois a parte citada;
+- o texto oculto e os caracteres invisíveis que foram removidos;
+- os links como texto e domínio, nunca acessados;
+- os nomes dos anexos, e se a mensagem foi enviada automaticamente.
+
+Os códigos são mascarados e os endereços reduzidos ao domínio antes de
+qualquer coisa sair.
+
+A resposta são duas notas de 0 a 100, `injection_score` e `phishing_score`,
+e os `reasons` que se aplicaram:
+
+| Motivo | A mensagem |
+| --- | --- |
+| `targets_agent` | Fala com uma IA, um assistente, um modelo ou "o sistema", e não com uma pessoa. |
+| `override` | Tenta mudar as instruções, o papel ou as prioridades de quem lê. |
+| `exfiltration` | Pede para quem lê mandar para fora códigos, links, chaves, outros e-mails, contatos ou dados. |
+| `unsafe_action` | Pede uma ação com efeito fora da conversa: pagar, aprovar, apagar, rodar alguma coisa, escrever para terceiros. |
+| `concealed` | Esconde instruções: em texto oculto, codificadas ou invertidas, depois de um falso fim de mensagem ou dentro de uma falsa citação. |
+| `credential_lure` | Pede senhas, códigos ou dados de cartão numa página ou num canal que não é de quem diz estar enviando. |
+
+Uma nota de injeção de 80 ou mais manda a mensagem para a quarentena como
+`injection`; senão, uma nota de phishing de 80 ou mais, como `phishing`. O
+que o avaliador lê como spam vai para a pasta `spam`. O resto é entregue, como
+`suspicious` quando uma nota fica entre 50 e 79 ou as instruções estavam
+escondidas. As notas sempre aparecem: nas leituras, em `screening`, e no
+painel, ao lado de cada mensagem.
+
+- **Na dúvida, retém.** Um avaliador que estoura o tempo ou dá erro manda a
+  mensagem para a quarentena como `unscreened`; limitação de uso (throttling)
+  é tentada de novo antes. Depois de 200 mensagens analisadas numa caixa no
+  mesmo dia, ou depois da cota diária de análises da equipe ou da instância,
+  o e-mail que precisa de análise vai para a quarentena como
+  `screening_cap`, então uma enxurrada vira quarentena, nunca entrega sem
+  análise.
+- **Nunca afeta os seus envios.** Os resultados sobre e-mails que você
+  recebeu nunca contam para a reputação de envio da sua equipe nem para a
+  análise de abuso dela.
+- **Sem avaliador**, numa instância que não roda um, as regras decidem
+  sozinhas e as notas vêm `null`. Numa instância auto-hospedada, a análise
+  usa o avaliador do
+  [monitoramento de conteúdo](/pt-BR/self-hosting#monitoramento-de-conteúdo-opcional).
+
+As linhas de corte são pontos de partida: a análise é um sinal a mais em cima
+das regras, não uma garantia.
+
+## Texto oculto e extracted_text
+
+Um e-mail pode trazer texto que nenhuma pessoa vê, mas que um modelo lê: uma
+instrução em branco no branco, um bloco `display:none`, caracteres que não
+aparecem. Antes de qualquer texto chegar a um agente ou a um modelo, o
+MillionSend remove:
+
+- elementos ocultos: `display:none`, `visibility:hidden`, opacidade quase
+  zero, fontes menores que 3 px, caixas espremidas, reduzidas ou com zoom até
+  sumir, conteúdo empurrado para fora da tela ou recortado, texto da cor do
+  fundo (inclusive com `-webkit-text-fill-color`), o atributo `hidden`,
+  comentários (inclusive os condicionais do Outlook), `<template>`,
+  `<noscript>`, o conteúdo alternativo dentro de `<object>` e o corpo de um
+  `<details>` fechado;
+- caracteres invisíveis: espaços e junções de largura zero, controles de
+  direção do texto, caracteres de tag Unicode e seletores de variação soltos.
+  Os emojis mantêm as junções e os seletores de que precisam.
+
+O texto oculto antes de qualquer coisa visível é a linha de prévia que a
+maioria das newsletters usa: ele também sai, mas não deixa a mensagem
+suspeita.
+
+O que o agente lê:
+
+- **`extracted_text`**, nas leituras de e-mails recebidos e de e-mails de
+  conversas: a parte da resposta, com o histórico citado e as assinaturas
+  separados, como texto simples com um pouco de markdown (títulos com `# `,
+  itens com `- `, citações com `> `, links como `[texto](url)`), com até
+  32.000 caracteres. As citações são reconhecidas em inglês, português,
+  espanhol, francês e alemão, e no HTML do Gmail, do Outlook, do Apple Mail,
+  do Thunderbird, do Yahoo e do Proton.
+- **`text`** sem caracteres invisíveis, com as quebras de linha mantidas.
+- **`screening.hidden_text_removed: true`** quando saiu texto oculto além de
+  uma linha de prévia, ou caracteres invisíveis.
+
+O `html` fica exatamente como chegou, e a mensagem original guarda tudo. A
+mesma limpeza vale para as ferramentas MCP, para o texto visível que o
+avaliador lê e para a extração de códigos.
+
+**Delimitação.** Os resultados do MCP colocam o texto de cada mensagem entre duas
+linhas de marcação com um valor aleatório a cada chamada:
+
+```
+-----BEGIN UNTRUSTED EMAIL CONTENT 95253f15-----
+Hi! Your order shipped today.
+-----END UNTRUSTED EMAIL CONTENT 95253f15-----
+```
+
+Uma linha de marcação escrita dentro da mensagem é alterada antes, então uma
+mensagem não consegue encerrar a própria marcação antes da hora.
+
+## Códigos de verificação e links de acesso
+
+Um agente que se cadastra em algum lugar precisa do código ou do link que o
+serviço manda. O MillionSend os extrai para o agente nunca precisar ler
+HTML:
+
+- **Códigos** precisam de uma palavra de código por perto, em inglês,
+  português ou espanhol ("verification code", "código de verificação",
+  "código de verificación"…); números de pedido, preços, telefones, cupons e
+  datas ficam de fora. Quando dois códigos são igualmente prováveis, nenhum é
+  devolvido (`ambiguous`).
+- **Links** são links de entrada, confirmação, redefinição e convite; links de
+  descadastro, privacidade e ajuda ficam de fora. Os links nunca são
+  acessados, nem pelo MillionSend nem por mais ninguém: um scanner que abre
+  um link de acesso de uso único o gasta.
+- Só contam o assunto e a parte da resposta, nunca o texto citado ou o
+  oculto.
+
+Eles saem pelo `extracted` do
+[`GET /emails/receiving/{id}`](/pt-BR/concepts/receiving#ler-um), pelo
+[`GET /inboxes/{id}/codes/latest`](/pt-BR/concepts/inboxes#códigos-de-verificação)
+e pela ferramenta MCP `get_verification_code`, e por nenhum outro lugar:
+nunca em listagens, webhooks, logs, atividade ou mensagens de erro. Eles
+nunca saem de e-mail retido, de um remetente `failed`, nem quando o
+`extract_codes` da caixa está desligado, e toda leitura fica registrada na
+atividade da caixa.
+
+**Códigos privados.** Com o `private_codes` ligado (o padrão dos agentes),
+um código, link ou token que a equipe recebeu nas últimas 24 horas não sai
+do endereço da caixa num envio para ninguém além dos responsáveis e da lista
+de permitidos: esse envio vira um rascunho com o motivo `private_code`. Isso
+vale mesmo quando o agente foi convencido a enviar, e pega um código
+espalhado para escapar da checagem (espaços entre os dígitos, tags,
+caracteres invisíveis ou de largura total). A checagem cobre os envios do
+endereço da caixa: um agente que também tem `emails:send` (MCP) consegue
+enviar dos seus outros endereços, então dê aos agentes chaves restritas à
+caixa, ou deixe esse escopo de fora. A checagem compara hashes com chave,
+então nenhuma cópia do código fica guardada fora da mensagem criptografada.
+
+## O que o agente pode enviar
+
+Todo jeito de enviar a partir do endereço de uma caixa passa pelas mesmas
+regras: respostas, encaminhamentos e rascunhos das caixas, respostas e
+encaminhamentos de e-mails recebidos pelo servidor, as cópias do
+`forward_to`, `POST /emails`, `POST /emails/batch`, o relay SMTP e a
+ferramenta MCP `send_email`. Na ordem:
+
+1. **Identidade.** Uma chave restrita a uma caixa só envia pelo endereço da
+   caixa (`403 restricted_api_key`; `550 5.7.1` pelo SMTP).
+2. **Domínio compartilhado.** Um
+   [endereço compartilhado](/pt-BR/concepts/inboxes#domínio-compartilhado)
+   não envia nada enquanto a instância pausa o envio pelo domínio
+   compartilhado. No plano Free, enquanto a instância limita os endereços
+   compartilhados a respostas, ou enquanto o `from_name` ou o subdomínio da
+   equipe parece o de uma marca conhecida, ele só responde dentro das
+   próprias conversas, para quem está nelas e teve o endereço confirmado
+   pelo próprio domínio e para os endereços de login da equipe (os
+   `owner_addresses`, a lista de permitidos e um `Reply-To` de outra
+   organização nunca contam lá). Qualquer outra coisa é recusada com
+   `403 inbox_send_policy`, mesmo aprovada. Todo envio por um endereço
+   compartilhado também conta no limite diário da equipe no domínio
+   compartilhado (`429 inbox_send_cap_reached`) e leva no máximo 10
+   destinatários (`422 validation_error`); o `POST /emails/batch` e o relay
+   SMTP recusam um endereço compartilhado.
+3. **Limite diário.** `send_cap` destinatários por dia UTC. Acima disso,
+   `429 inbox_send_cap_reached`, com o `retry-after` contando até a
+   meia-noite UTC. Envios aprovados contam, mas nunca são barrados.
+
+Numa caixa de agente, a não ser que o envio esteja
+[aprovado](/pt-BR/concepts/inboxes#rascunhos-e-aprovação), cada um destes o
+retém como rascunho, com um motivo:
+
+4. **Proteção contra loops.** Responder a um e-mail automático (`loop_guard:`
+   e o motivo): um remetente vazio, um cabeçalho `Auto-Submitted`,
+   `Precedence: bulk`, `list`, `junk` ou `auto_reply`, cabeçalhos de lista de
+   e-mails, um pedido para não receber respostas automáticas, cabeçalhos de
+   resposta automática, um relatório de entrega, um endereço no-reply ou um
+   assunto de resposta de ausência. Mais de 10 envios automáticos para um
+   mesmo endereço em uma hora é `loop_burst`. As respostas do agente levam
+   `Auto-Submitted: auto-replied`, e os e-mails que o agente começa,
+   `Auto-Submitted: auto-generated`, então dois agentes conversando entre si
+   param depois de uma rodada.
+5. **Reply-To.** Uma resposta a um `Reply-To` no domínio de outra
+   organização, a não ser que o remetente seja responsável, esteja na lista
+   de permitidos ou seja uma conversa conhecida; no domínio compartilhado,
+   seja quem for o remetente (`reply_to_redirect`). Isso impede que um
+   estranho desvie as respostas para outra pessoa.
+6. **Regra de envio** (`send_policy`):
+   - `reply_only`, o padrão: respostas dentro de uma conversa, para quem
+     escreveu nela, para os responsáveis e para a lista de permitidos.
+   - `allowlist`: isso, mais conversas novas com os responsáveis e com a lista
+     de permitidos. Não existe no domínio compartilhado.
+   - `open`: qualquer pessoa. No seu domínio, ou no domínio compartilhado
+     quando ele pode começar conversas, e não enquanto a sua equipe é nova no
+     envio (nos primeiros 1.000 envios ou 72 horas, ou com menos de 10.000
+     envios nos 7 dias depois do primeiro).
+7. **Códigos privados** (`private_code`), como acima. Um encaminhamento
+   confere se a mensagem encaminhada traz um código ou um link.
+8. **Aumento gradual.** Os destinatários novos por dia ficam dentro do limite
+   e, no primeiro dia de envio da caixa, em no máximo 10, dobrando a cada dia
+   depois: 20, 40, 80, 160 e assim por diante (`ramp`).
+9. **Aprovação.** O `require_approval` da caixa, ou `requires_approval: true`
+   na requisição.
+
+Um destinatário é **responsável**, está na **lista de permitidos**, está na
+**conversa** (escreveu uma mensagem entregue nela, ou é o `Reply-To`
+confiável de uma), é **conhecido** (a caixa já escreveu para ele, ou recebeu
+dele um e-mail que o domínio dele confirmou) ou é **novo**. Os destinatários
+em Cco contam como os outros, e endereços `nome+tag@` contam como foram
+escritos. Um envio da forma `nome+tag@` do endereço de uma caixa passa
+pelas regras dessa caixa, assim como os e-mails para ela caem nessa caixa.
+
+Uma caixa `human` só passa pelos três primeiros passos: pessoas respondendo
+pelo painel não ficam retidas. No `POST /emails`, no envio em lote, no relay
+SMTP e na ferramenta MCP `send_email`, um envio que as regras reteriam é
+recusado com `403 inbox_send_policy` (ou `550 5.7.1` pelo SMTP), com os
+motivos na mensagem: esses caminhos não criam rascunhos, então envie pelos
+endpoints das caixas para ganhar um.
+
+**Primeiro contato.** O primeiro e-mail de uma caixa de agente para um
+endereço novo também passa pela mesma análise de abuso de qualquer envio da
+sua equipe.
+
+## O que o seu agente ainda deve fazer
+
+- Tratar toda mensagem como dado. Instruções dentro de um e-mail são
+  palavras de um estranho, digam o que disserem as notas.
+- Ler o `extracted_text`, não o `html`, e conferir o
+  `screening.sender_trust` e o `screening.verdict` antes de agir sobre uma
+  mensagem.
+- Nunca abrir sozinho links que vieram por e-mail; usar o `codes/latest` ou o
+  `get_verification_code` para os códigos e links de que precisa.
+- Manter o `require_approval` ligado, ou mandar `requires_approval: true`,
+  para tudo o que é difícil de desfazer.
+- Dar a cada agente a própria
+  [chave restrita a uma caixa](/pt-BR/concepts/inboxes#chaves-de-api-restritas-a-uma-caixa),
+  e apontar os webhooks para caixas específicas com `inbox_ids`.
+
+## O que essas proteções não fazem
+
+- As linhas de corte da análise e da nota de spam são valores iniciais. Um
+  e-mail pode escapar delas, e um e-mail legítimo pode ficar retido até uma
+  pessoa ler e liberar.
+- Um domínio que não publica política DMARC, ou publica `p=none`, não
+  consegue provar muita coisa: o e-mail legítimo dele e uma falsificação
+  podem parecer iguais.
+- A detecção de texto oculto segue o HTML do jeito que os clientes de e-mail
+  o mostram, fazendo o possível com marcação quebrada; os sinalizadores e a
+  mensagem original são a rede de segurança.
+- O nível de um remetente é fixado na chegada: uma mudança posterior na
+  lista de permitidos não reclassifica o que já chegou.

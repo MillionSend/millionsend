@@ -256,7 +256,7 @@
     {
       "id": "479e3145-dd38-476b-932c-529ceb705947",
       "endpoint": "https://webhook.example.com/handler",
-      "events": ["email.sent", "email.delivered", "email.bounced", "email.suppressed"],
+      "events": ["email.sent", "email.delivered", "email.bounced", "domain.created"],
       "status": "enabled",
       "signingSecret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
     },

@@ -7,6 +7,7 @@ export type ContactActivityType =
   | "topic_opt_in"
   | "topic_opt_out"
   | "unsubscribed"
+  | "unsubscribed_team_suspended"
   | "resubscribed"
   | "segment_added"
   | "segment_removed";

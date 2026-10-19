@@ -7,12 +7,14 @@ import {
   fetchAccountScoreInput,
   fetchContentFactors,
   fetchDeliverabilityHealth,
+  MIN_OUTCOME_SENDS,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   utcDay,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
 } from "@millionsend/core";
+import { counterComplaintSent } from "@millionsend/core/deliverability";
 import { schema } from "@millionsend/db";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -78,13 +80,17 @@ export const metricsRouter = router({
         utcDay(Date.parse(today) - (windowDays - 1 - i) * DAY_MS),
       );
       const firstDay = dayList[0] ?? today;
+      const utcToday = utcDay(now);
+      const utcDayList = Array.from({ length: windowDays }, (_, i) =>
+        utcDay(now - (windowDays - 1 - i) * DAY_MS),
+      );
 
       const h = schema.usageCountersHourly;
       const c = schema.usageCounters;
       // Grouped by position: the same expression bound twice would carry two
       // parameter numbers and read as two different expressions.
       const localDate = sql`((${h.hour} at time zone ${tz}::text)::date)::text`;
-      const [rows, [allTime]] = await Promise.all([
+      const [rows, [allTime], complaintRows] = await Promise.all([
         ctx.db
           .select({
             day: sql<string>`${localDate}`,
@@ -115,6 +121,18 @@ export const metricsRouter = router({
           .select({ delivered: sql<string>`coalesce(sum(${c.delivered}), 0)::bigint` })
           .from(c)
           .where(eq(c.teamId, ctx.teamId)),
+        // The complaint card divides by the sends that could draw a
+        // complaint, as the guardrail does, and only the daily table counts
+        // them: its days are UTC days.
+        ctx.db
+          .select({
+            day: c.day,
+            sent: c.sent,
+            complaintSent: sql<number>`(${counterComplaintSent})::int`,
+            complained: c.complained,
+          })
+          .from(c)
+          .where(and(eq(c.teamId, ctx.teamId), gte(c.day, utcDayList[0] ?? utcToday))),
       ]);
 
       // Zero-fill so the chart always renders one bar per calendar day.
@@ -136,6 +154,10 @@ export const metricsRouter = router({
         { ...COUNTS },
       );
 
+      const complaintsByDay = new Map(complaintRows.map((r) => [r.day, r]));
+      const sum = (key: "sent" | "complaintSent" | "complained") =>
+        complaintRows.reduce((acc, r) => acc + r[key], 0);
+
       // The window always ends on the viewer's current day, which is still
       // being counted: charts draw it as in progress.
       return {
@@ -143,6 +165,17 @@ export const metricsRouter = router({
         totals,
         allTimeDelivered: Number(allTime?.delivered ?? 0),
         today,
+        complaints: {
+          days: utcDayList.map((day) => ({
+            day,
+            complaintSent: complaintsByDay.get(day)?.complaintSent ?? 0,
+            complained: complaintsByDay.get(day)?.complained ?? 0,
+          })),
+          sent: sum("sent"),
+          complaintSent: sum("complaintSent"),
+          complained: sum("complained"),
+          today: utcToday,
+        },
       };
     }),
 
@@ -179,6 +212,7 @@ export const metricsRouter = router({
     ]);
     return {
       ...computeAccountScore(input),
+      complaintsJudged: input.complaintSent >= MIN_OUTCOME_SENDS,
       checksTotal: CHECKS.length,
       factors: factors.map((factor) => ({
         id: factor.id,

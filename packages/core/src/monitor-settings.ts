@@ -1,3 +1,4 @@
+import { type Env, env, isCloudDeployment } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 
@@ -82,6 +83,74 @@ export const MONITOR_SETTINGS = {
   pauseRisk: { column: "monitorPauseRisk", env: "MONITOR_PAUSE_RISK", kind: "rate", default: 0.85 },
   autoPause: { column: "monitorAutoPause", env: "MONITOR_AUTO_PAUSE", kind: "bool", default: true },
   flagScore: { column: "monitorFlagScore", env: "MONITOR_FLAG_SCORE", kind: "score", default: 70 },
+  autoHold: { column: "monitorAutoHold", env: "MONITOR_AUTO_HOLD", kind: "bool", default: true },
+  holdScore: { column: "monitorHoldScore", env: "MONITOR_HOLD_SCORE", kind: "score", default: 90 },
+  holdRepeatCount: {
+    column: "monitorHoldRepeatCount",
+    env: "MONITOR_HOLD_REPEAT_COUNT",
+    kind: "count",
+    default: 5,
+  },
+  holdRepeatScore: {
+    column: "monitorHoldRepeatScore",
+    env: "MONITOR_HOLD_REPEAT_SCORE",
+    kind: "score",
+    default: 80,
+  },
+  // The new-domain warm-up: on for the cloud, off for self-host, and the
+  // daily cap of each age tier (see domain-warmup.ts).
+  warmupEnabled: {
+    column: "warmupEnabled",
+    env: "WARMUP_ENABLED",
+    kind: "bool",
+    default: false,
+    cloudDefault: true,
+  },
+  warmupCapFirstDay: {
+    column: "warmupCapFirstDay",
+    env: "WARMUP_CAP_FIRST_DAY",
+    kind: "count",
+    default: 100,
+  },
+  warmupCapFirstWeek: {
+    column: "warmupCapFirstWeek",
+    env: "WARMUP_CAP_FIRST_WEEK",
+    kind: "count",
+    default: 300,
+  },
+  warmupCapFirstMonth: {
+    column: "warmupCapFirstMonth",
+    env: "WARMUP_CAP_FIRST_MONTH",
+    kind: "count",
+    default: 2000,
+  },
+  // Sending from the shared inbox domain (see shared-mode.ts), whether that
+  // mail carries the team's SES tenant, and the recipients a team may reach
+  // from it per UTC day.
+  sharedInboxSend: {
+    column: "sharedInboxSend",
+    env: "SHARED_INBOX_SEND",
+    kind: "bool",
+    default: true,
+  },
+  sharedInboxOpen: {
+    column: "sharedInboxOpen",
+    env: "SHARED_INBOX_OPEN",
+    kind: "bool",
+    default: false,
+  },
+  sharedInboxTenants: {
+    column: "sharedInboxTenants",
+    env: "SHARED_INBOX_TENANTS",
+    kind: "bool",
+    default: false,
+  },
+  sharedInboxTeamDailyCap: {
+    column: "sharedInboxTeamDailyCap",
+    env: "SHARED_INBOX_TEAM_DAILY_CAP",
+    kind: "count",
+    default: 1000,
+  },
 } as const satisfies Record<
   string,
   {
@@ -89,6 +158,8 @@ export const MONITOR_SETTINGS = {
     env: string;
     kind: "count" | "rate" | "multiplier" | "bool" | "score";
     default: number | boolean;
+    /** The built-in default on the cloud, where it differs from self-host's. */
+    cloudDefault?: boolean;
   }
 >;
 
@@ -145,6 +216,15 @@ function parseEnv(kind: Kind, raw: unknown): number | boolean | undefined {
 
 export type MonitorSettingSource = "db" | "env" | "default";
 
+/** A key's built-in default for this deployment (`env` as resolveMonitorSettings takes it). */
+export function monitorSettingDefault(
+  key: MonitorSettingKey,
+  env: Record<string, unknown>,
+): number | boolean {
+  const meta: (typeof MONITOR_SETTINGS)[MonitorSettingKey] = MONITOR_SETTINGS[key];
+  return "cloudDefault" in meta && isCloudDeployment(env as Env) ? meta.cloudDefault : meta.default;
+}
+
 /**
  * The effective settings and where each came from. `env` may be the
  * validated config or a raw process.env-like object: both forms parse.
@@ -166,7 +246,7 @@ export function resolveMonitorSettings(
       settings[key] = fromEnv;
       sources[key] = "env";
     } else {
-      settings[key] = meta.default;
+      settings[key] = monitorSettingDefault(key, env);
       sources[key] = "default";
     }
   }
@@ -190,6 +270,18 @@ export async function getMonitorSettingsRow(db: Db): Promise<MonitorSettingsRow 
       row[k as keyof typeof schema.monitorSettingColumns],
     ]),
   ) as MonitorSettingsRow;
+}
+
+/** The instance's trust & safety settings: the process's reader when it has one, else a read. */
+export async function instanceSettings(
+  db: Db,
+  deps: { monitorSettings?: (() => Promise<MonitorSettings>) | undefined } = {},
+): Promise<MonitorSettings> {
+  if (deps.monitorSettings) return deps.monitorSettings();
+  return resolveMonitorSettings(
+    await getMonitorSettingsRow(db),
+    env as unknown as Record<string, unknown>,
+  ).settings;
 }
 
 export const MONITOR_SETTINGS_TTL_MS = 60_000;

@@ -12,6 +12,7 @@ export const USAGE_COUNTERS = [
   "opened",
   "clicked",
   "prefetched",
+  "received",
 ] as const;
 export type UsageCounter = (typeof USAGE_COUNTERS)[number];
 

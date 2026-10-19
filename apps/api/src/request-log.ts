@@ -12,8 +12,10 @@ export const LOGGED_JSON_MAX_BYTES = 64 * 1024;
 /** Above this declared size a body is never read back for the log; the marker carries the size. */
 export const LOGGED_BODY_READ_MAX_BYTES = 1024 * 1024;
 
-const CONTENT_KEYS = new Set(["html", "text"]);
+const CONTENT_KEYS = new Set(["html", "text", "extracted_text"]);
 const SECRET_KEYS = new Set(["token", "secret", "password"]);
+/** A received email's verification code and sign-in link, as its reads serve them. */
+const CODE_KEYS = new Set(["code", "link", "url"]);
 const JSON_CONTENT_TYPE = /\bjson\b/i;
 
 export function maskEmailPathSegments(path: string): string {
@@ -46,10 +48,13 @@ function contentMarker(kind: string, value: unknown): string {
  * Deep copy of a JSON body with content fields replaced by "[kind, size]"
  * markers and secrets by "[redacted]". `path` is the request path: a
  * preferences-link response's `url` is a capability URL, so it is a secret
- * there and a plain value everywhere else.
+ * there and a plain value everywhere else. A received email's headers are
+ * its content (a send's custom headers are settings, and stay).
  */
 export function redactLoggedBody(path: string, value: unknown): unknown {
   const urlIsSecret = path.endsWith("/preferences-link");
+  const headersAreContent = path.startsWith("/emails/receiving");
+  const codesAreSecret = headersAreContent || path.endsWith("/codes/latest");
   const walk = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(walk);
     if (node === null || typeof node !== "object") return node;
@@ -57,9 +62,17 @@ export function redactLoggedBody(path: string, value: unknown): unknown {
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(node)) {
       if (v == null) out[key] = v;
-      else if (CONTENT_KEYS.has(key)) out[key] = contentMarker(key, v);
+      else if (CONTENT_KEYS.has(key) || (headersAreContent && key === "headers"))
+        out[key] = contentMarker(key, v);
       else if (isAttachment && key === "content") out[key] = contentMarker("attachment content", v);
-      else if (SECRET_KEYS.has(key) || key.endsWith("_secret") || (urlIsSecret && key === "url"))
+      else if (
+        SECRET_KEYS.has(key) ||
+        key.endsWith("_secret") ||
+        // Signed received-mail links: anyone holding one downloads the file.
+        key === "download_url" ||
+        (urlIsSecret && key === "url") ||
+        (codesAreSecret && CODE_KEYS.has(key))
+      )
         out[key] = "[redacted]";
       else out[key] = walk(v);
     }
@@ -81,15 +94,16 @@ export function capLoggedJson(value: unknown): unknown {
 
 /**
  * One side's loggable body: null unless it is JSON, a size-only marker when
- * the declared length is over the read guard (`read` is never called, so a
- * multi-megabyte upload is not re-serialized), otherwise redacted and capped.
+ * its length is over the read guard (declared: `read` is never called, so a
+ * multi-megabyte upload is not re-serialized; undeclared, as on c.json
+ * responses: measured before it is parsed), otherwise redacted and capped.
  * A failing read logs null rather than failing the caller.
  */
 export async function loggedBody(
   path: string,
   contentType: string | null | undefined,
   contentLength: string | null | undefined,
-  read: () => Promise<unknown>,
+  read: () => Promise<string>,
 ): Promise<unknown> {
   if (!contentType || !JSON_CONTENT_TYPE.test(contentType)) return null;
   const declared = contentLength == null ? null : Number(contentLength);
@@ -98,7 +112,10 @@ export async function loggedBody(
   }
   let body: unknown;
   try {
-    body = await read();
+    const text = await read();
+    const bytes = Buffer.byteLength(text, "utf8");
+    if (bytes > LOGGED_BODY_READ_MAX_BYTES) return { truncated: true, bytes };
+    body = JSON.parse(text);
   } catch {
     return null;
   }

@@ -28,12 +28,13 @@ means changing two environment variables, not rewriting your integration.
 | Templates + merge fields | ✅ | Reusable templates with per-contact merge fields; `/templates` API with per-team aliases. |
 | API request logs | ✅ | Every API request recorded with request/response bodies, secrets redacted. |
 | SMTP relay | ✅ | Drop-in SMTP on port 2587; authenticate with an API key. |
+| Receiving | Beta | Mail to any address on a verified domain, through an MX the instance runs (`PROCESS=mx`); Resend's `emails.receiving` API, `forward()` included, and the `email.received` webhook. |
 | Dashboard (en/pt-BR) | ✅ | Full dashboard in English and Brazilian Portuguese. |
 | Self-host (Docker) | ✅ | Compose file plus a setup wizard; sends through your own AWS SES. |
 | Migrate from Resend | ✅ | `npx @millionsend/cli migrate --from resend` moves contacts, segments, topics, templates, webhooks, domains and suppressions; read-only against Resend, safe to re-run before cutover. |
 | Content monitoring | ✅ | Optional outbound judge via [TypeSafe Jev](https://typesafe.ai). Off by default on self-host. |
 
-The hosted monitor uses [TypeSafe](https://typesafe.ai)'s Jev, a System One model built for typed decisions in software. After SES accepts a message, a sample is scored in the background; sending never waits on it. Self-hosters leave it off unless they set `ABUSE_JUDGE=typesafe`.
+The hosted monitor uses [TypeSafe](https://typesafe.ai)'s Jev, a System One model built for typed decisions in software. A new team's mail in its first window and its broadcasts, and any team's mail to a destination it has never used, are scored before SES takes them and wait for the verdict, about half a second; everything else is sampled after it is sent, and sending never waits on it. Self-hosters leave it off unless they set `ABUSE_JUDGE=typesafe`.
 
 ## Run it locally
 

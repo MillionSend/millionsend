@@ -14,6 +14,8 @@
   },
   "allEvents": "All",
   "optInHint": "Not included in All",
+  "inboxOptIn": "Inbox events go only to endpoints that pick them.",
+  "onlyInboxes": "Only these inboxes",
   "eventsCount": "{count, plural, one {# event} other {# events}}",
   "loadMore": "Load more",
   "pageOf": "Page 1 – {pages} of {total} webhooks",
@@ -23,18 +25,24 @@
     "engagement": "Engagement",
     "problems": "Problems",
     "account": "Account",
-    "audience": "Audience"
+    "audience": "Audience",
+    "receiving": "Receiving",
+    "inboxes": "Inboxes"
   },
   "eventLabel": {
     "email": {
+      "scheduled": "Email scheduled",
       "sent": "Email sent",
       "delivered": "Email delivered",
       "delivery_delayed": "Delivery delayed",
       "opened": "Email opened",
       "clicked": "Link clicked",
       "prefetched": "Email prefetched",
+      "received": "Email received",
       "bounced": "Email bounced",
-      "complained": "Marked as spam"
+      "complained": "Marked as spam",
+      "failed": "Email failed",
+      "suppressed": "Email suppressed"
     },
     "deliverability": {
       "warning": "Deliverability at risk",
@@ -57,6 +65,32 @@
     "suppression": {
       "added": "Address suppressed",
       "removed": "Suppression removed"
+    },
+    "inbox": {
+      "created": "Inbox created",
+      "updated": "Inbox updated",
+      "deleted": "Inbox deleted",
+      "expired": "Inbox expired",
+      "thread": {
+        "created": "New thread",
+        "folder": {
+          "updated": "Thread moved"
+        },
+        "labels": {
+          "updated": "Thread labels changed"
+        }
+      },
+      "email": {
+        "received": "Email received in an inbox",
+        "sent": "Email sent from an inbox",
+        "quarantined": "Email quarantined"
+      },
+      "draft": {
+        "created": "Draft created",
+        "updated": "Draft updated",
+        "sent": "Draft sent",
+        "deleted": "Draft deleted"
+      }
     }
   },
   "status": {

@@ -42,6 +42,11 @@ export function formatDayUtc(day: string, locale: string): string {
   }).format(new Date(`${day}T00:00:00Z`));
 }
 
+/** Calendar date with its year ("Nov 14, 2026" / "14 de nov. de 2026"). */
+export function formatDate(date: Date | string | number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(date));
+}
+
 /** Natural day+time stamp ("Aug 16, 8:12 PM" / "16 de ago., 20:12"). */
 export function formatDayTime(date: Date | string | number, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
@@ -109,6 +114,14 @@ export function formatHoursMinutes(ms: number): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+/** Time left as one compact unit, rounded: "45m", "23h", "29d". */
+export function formatTimeLeft(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
+}
+
 /** A countdown as mm:ss, floored at 00:00. */
 export function formatMmSs(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -125,17 +138,40 @@ export function formatDurationShort(ms: number): string {
 }
 
 /** Cents as US dollars with a bare "$" in every locale ("$20", "$0.30", pt-BR "$0,30"
-    rather than "US$ 0,30"): whole dollars drop the decimals. */
-export function formatUsd(cents: number, locale: string): string {
+    rather than "US$ 0,30"): whole dollars drop the decimals. A price per
+    thousand passes 3 digits to keep a tenth of a cent ("$0.105"). */
+export function formatUsd(cents: number, locale: string, maxFractionDigits = 2): string {
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: maxFractionDigits,
   })
     .formatToParts(cents / 100)
     .map((part) => (part.type === "currency" ? "$" : part.type === "literal" ? "" : part.value))
     .join("");
+}
+
+/**
+ * Amounts in minor units (Stripe's), summed per currency: US dollars as
+ * formatUsd writes them, any other currency as the locale does ("$40",
+ * "$40 + R$ 98,00").
+ */
+export function formatMoneyTotals(
+  items: readonly { amount: number; currency: string }[],
+  locale: string,
+): string {
+  const totals = new Map<string, number>();
+  for (const { amount, currency } of items) {
+    totals.set(currency, (totals.get(currency) ?? 0) + amount);
+  }
+  return [...totals]
+    .map(([currency, minor]) => {
+      if (currency.toLowerCase() === "usd") return formatUsd(minor, locale);
+      const format = new Intl.NumberFormat(locale, { style: "currency", currency });
+      return format.format(minor / 10 ** (format.resolvedOptions().maximumFractionDigits ?? 2));
+    })
+    .join(" + ");
 }
 
 /** Payload size label ("512 B", "12.4 KB", "1.2 MB"): 1024-based, trailing zeros trimmed. */
@@ -155,15 +191,35 @@ export function maskApiKey(tokenPrefix: string, last4: string): string {
 }
 
 /**
- * URL for display surfaces (chips, table cells, headings): the scheme is
- * noise there — endpoints are https-only, so it carries no information.
- * Copy affordances must still copy the full URL; pass this only as the
- * visible text.
+ * The bare address inside a From header value: `Acme <a@acme.dev>` → `a@acme.dev`.
+ * Read from the end: a quoted display name may carry an address of its own
+ * (`"Bank <alerts@bank.example>" <x@attacker.example>`).
  */
-/** The bare address inside a From header value: `Acme <a@acme.dev>` → `a@acme.dev`. */
 export function addrSpec(from: string): string {
-  const inner = /<([^>]+)>/.exec(from);
+  const inner = /<([^<>]*)>\s*$/.exec(from);
   return (inner?.[1] ?? from).trim();
+}
+
+/** A From value as a person reads it: the display name, else the bare address. */
+export function senderName(from: string | null): string {
+  if (!from) return "";
+  const open = from.lastIndexOf("<");
+  const name =
+    open > 0
+      ? from
+          .slice(0, open)
+          .trim()
+          .replace(/^"(.*)"$/, "$1")
+      : "";
+  return name || addrSpec(from);
+}
+
+/** The flag of an ISO 3166 alpha-2 country code ("FR" → 🇫🇷); "" for anything else. */
+export function countryFlag(code: string): string {
+  if (!/^[A-Za-z]{2}$/.test(code)) return "";
+  return String.fromCodePoint(
+    ...[...code.toUpperCase()].map((letter) => 0x1f1e6 + letter.charCodeAt(0) - 65),
+  );
 }
 
 /** The domain part of an address, lowercased; "" when there is none. */
@@ -177,8 +233,37 @@ export function mailDomain(address: string): string {
         .toLowerCase();
 }
 
+/**
+ * URL for display surfaces (chips, table cells, headings): the scheme is
+ * noise there — endpoints are https-only, so it carries no information.
+ * Copy affordances must still copy the full URL; pass this only as the
+ * visible text.
+ */
 export function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//, "");
+}
+
+/**
+ * An address, URL or domain name rather than prose or a figure: one token,
+ * with an "@" or a "/" in it, or dot-separated labels with a letter in them.
+ */
+export function isAddressLike(text: string): boolean {
+  if (/[ \t\n]/.test(text)) return false;
+  return /[@/]/.test(text) || (/^[\w-]+(\.[\w-]+)+$/.test(text) && /[a-z]/i.test(text));
+}
+
+/**
+ * A " · "-joined value cut into its parts, each but the last keeping its "·"
+ * behind a no-break space, so the dot never starts a line.
+ */
+export function dotParts(text: string): string[] {
+  const parts = text.split(" · ");
+  return parts.map((part, i) => (i < parts.length - 1 ? `${part}\u00a0·` : part));
+}
+
+/** A lower-case label made to lead a line ("prompt injection" → "Prompt injection"). */
+export function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 const QUARTER_HOUR_MS = 15 * 60_000;

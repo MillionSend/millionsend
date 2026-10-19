@@ -5,6 +5,7 @@ import {
   decryptWebhookSecret,
   encryptWebhookSecret,
   generateWebhookSecret,
+  isAdminRole,
   type Keyring,
   parseWebhookSecret,
   rotatedWebhookSecretColumns,
@@ -13,8 +14,8 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, desc, eq } from "drizzle-orm";
-import { type Env, errorBody, keysetPage } from "../app.js";
+import { and, eq, inArray } from "drizzle-orm";
+import { type Env, errorBody, KEYSET_LIST_DESCRIPTION, keysetPage } from "../app.js";
 import {
   createWebhookRequestSchema,
   createWebhookResponseSchema,
@@ -43,6 +44,31 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
   const wireStatus = (status: (typeof w.$inferSelect)["status"]): "enabled" | "disabled" =>
     status === "enabled" ? "enabled" : "disabled";
 
+  /**
+   * SECURITY: an endpoint filters on the team's own inboxes only. Lowercased
+   * and deduplicated; the first id that is not one of them, if any.
+   */
+  const inboxFilter = async (
+    teamId: string,
+    ids: readonly string[],
+  ): Promise<{ ids: string[] } | { unknown: string }> => {
+    const wanted = [...new Set(ids.map((id) => id.toLowerCase()))];
+    if (wanted.length === 0) return { ids: [] };
+    const i = schema.inboxes;
+    const found = new Set(
+      (
+        await db
+          .select({ id: i.id })
+          .from(i)
+          .where(and(eq(i.teamId, teamId), inArray(i.id, wanted)))
+      ).map((row) => row.id),
+    );
+    const unknown = wanted.find((id) => !found.has(id));
+    return unknown === undefined ? { ids: wanted } : { unknown };
+  };
+  const unknownInbox = (id: string) =>
+    errorBody(422, "validation_error", `inbox_ids: "${id}" is not an inbox of this team`);
+
   const wire = (row: typeof w.$inferSelect) => ({
     id: row.id,
     endpoint: row.url,
@@ -50,6 +76,7 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
     status: wireStatus(row.status),
     // null = subscribed to all events (dashboard-created endpoints).
     events: row.events,
+    inbox_ids: row.inboxIds,
   });
 
   app.openapi(
@@ -80,6 +107,8 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
           422,
         );
       }
+      const filter = body.inbox_ids ? await inboxFilter(auth.teamId, body.inbox_ids) : null;
+      if (filter && "unknown" in filter) return c.json(unknownInbox(filter.unknown), 422);
       const secret = body.signing_secret ?? generateWebhookSecret();
       const id = randomUUID();
       const encrypted = await encryptWebhookSecret(secret, keyring, {
@@ -98,6 +127,7 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
           secretKeyVersion: encrypted.keyVersion,
           secretLast4: secret.slice(-4),
           events: [...new Set(body.events)],
+          inboxIds: filter?.ids ?? null,
         })
         .returning({ id: w.id });
       if (!row) throw new Error("webhook insert returned no row");
@@ -109,6 +139,7 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
     createRoute({
       method: "get",
       path: "/webhooks",
+      description: KEYSET_LIST_DESCRIPTION,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -131,14 +162,12 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
               .from(w)
               .where(and(eq(w.id, id), eq(w.teamId, auth.teamId)))
           )[0],
-        loadRows: (cond, descending, take) =>
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(w)
             .where(and(eq(w.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(w.createdAt), desc(w.id)] : [asc(w.createdAt), asc(w.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -179,17 +208,21 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
         .where(and(eq(w.id, c.req.valid("param").id), eq(w.teamId, auth.teamId)));
       if (!row) return c.json(errorBody(404, "not_found", "Webhook not found"), 404);
       // Secrets are retrievable by design (SDK wire exposes signing_secret on
-      // get) — envelope-encrypted at rest, decrypted per request.
-      const secret = await decryptWebhookSecret(
-        {
-          ciphertext: row.secretCiphertext,
-          iv: row.secretIv,
-          wrappedDek: row.secretWrappedDek,
-          keyVersion: row.secretKeyVersion,
-        },
-        keyring,
-        { teamId: row.teamId, rowId: row.id },
-      );
+      // get) — envelope-encrypted at rest, decrypted per request. SECURITY:
+      // never for a member, whom the dashboard shows only the last 4.
+      const secret =
+        auth.role && !isAdminRole(auth.role)
+          ? undefined
+          : await decryptWebhookSecret(
+              {
+                ciphertext: row.secretCiphertext,
+                iv: row.secretIv,
+                wrappedDek: row.secretWrappedDek,
+                keyVersion: row.secretKeyVersion,
+              },
+              keyring,
+              { teamId: row.teamId, rowId: row.id },
+            );
       return c.json(
         {
           ...wire(row),
@@ -293,6 +326,11 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
       if (body.endpoint !== undefined) set.url = body.endpoint;
       if (body.events !== undefined) set.events = [...new Set(body.events)];
       if (body.status !== undefined) set.status = body.status;
+      if (body.inbox_ids !== undefined) {
+        const filter = body.inbox_ids ? await inboxFilter(auth.teamId, body.inbox_ids) : null;
+        if (filter && "unknown" in filter) return c.json(unknownInbox(filter.unknown), 422);
+        set.inboxIds = filter?.ids ?? null;
+      }
       const scope = and(eq(w.id, id), eq(w.teamId, auth.teamId));
       // An empty PATCH body is a valid no-op, like the other resources.
       const [row] =

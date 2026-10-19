@@ -8,12 +8,12 @@ import {
   sesTenantsEnabled,
 } from "@millionsend/config";
 import {
+  BREAKER_SES_COMPLAINT_RATE,
   bulkShare,
   clampReserve,
   committedDailyVolume,
   getInstanceSettings,
   holdRegion,
-  latestProbes,
   pacingHorizonDays,
   pausedRegions,
   planRegionSend,
@@ -22,10 +22,13 @@ import {
   regionDailyPeaks,
   regionWindowCounts,
   releaseRegion,
+  SES_COMPLAINT_PAUSE_RATE,
+  SES_COMPLAINT_REVIEW_RATE,
   SES_TRANSACTIONAL_RESERVE_MAX,
   SES_TRANSACTIONAL_RESERVE_MIN,
   sendingBroadcasts,
-  sesEventsHealth,
+  sesComplaintReadings,
+  transactionalSent24h,
   usableReserve,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
@@ -41,7 +44,7 @@ import { z } from "zod";
 import { type RegionAccountDeps, servedRegionAccounts } from "../../console/ses-regions";
 import { operatorProcedure, router } from "../../trpc";
 import { effectiveSetting } from "../system";
-import { emptyDaily, emptyHourly, regionDailySends, regionHourlySends } from "./series";
+import { emptyDaily, regionDailySends } from "./series";
 import { auditOperator } from "./shared";
 
 /** SES list prices per 1,000 emails, in cents, by pricing plan; tenants add their own line. */
@@ -104,14 +107,12 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         month,
         paused,
         domains,
-        hourly,
         daily,
-        events,
-        probes,
         peaks,
         bulk,
         sending,
         committedPerDay,
+        sesReadings,
       ] = await Promise.all([
         accounts(),
         getInstanceSettings(ctx.db),
@@ -124,10 +125,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
           .from(d)
           .where(eq(d.status, "verified"))
           .groupBy(d.region),
-        regionHourlySends(ctx.db, { now, hours: 24 }),
         regionDailySends(ctx.db, { now, days: 7 }),
-        env.SNS_TOPIC_ARNS?.length ? sesEventsHealth(ctx.db, now) : Promise.resolve(null),
-        latestProbes(ctx.db),
         Promise.all(
           served.map(
             async (region) =>
@@ -137,6 +135,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         regionBulkCounts(ctx.db, now),
         sendingBroadcasts(ctx.db),
         isCloudDeployment() ? committedDailyVolume(ctx.db, now) : Promise.resolve(null),
+        sesComplaintReadings(ctx.db, now),
       ]);
       // Env values are raw strings when validation is skipped (tests), hence Number().
       const horizonDays = pacingHorizonDays(
@@ -159,13 +158,6 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
       const tenants = sesTenantsEnabled();
       const domainsByRegion = new Map(domains.map((r) => [r.region, r.n]));
       const breakers = new Map(paused.map((p) => [p.region, p]));
-      // The worker's memory of a transactional row parking at the quota line,
-      // one value for the instance: the probe carries seconds since.
-      const txParkedProbe = probes.get("ses_transactional_parked");
-      const txParkedAt =
-        txParkedProbe && !txParkedProbe.ok && txParkedProbe.value !== null
-          ? new Date(txParkedProbe.takenAt.getTime() - txParkedProbe.value * 1000)
-          : null;
       // One planner run per region with a broadcast still going out: when
       // the last of them finishes, for the queue row and the notice.
       const lastFinishes = new Map(
@@ -212,15 +204,17 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
             share,
             usableReserve: quota === null ? null : usableReserve(quota, reserve.value),
             bulkSent24h,
-            // SES's own number minus ours: whatever else sends counts as transactional.
             txSent24h: account.ok
-              ? Math.max(0, account.overview.quota.sentLast24h - bulkSent24h)
+              ? transactionalSent24h({
+                  sesSentLast24h: account.overview.quota.sentLast24h,
+                  allSent24h: bulk.get(region)?.allSent24h ?? 0,
+                  bulkSent24h,
+                })
               : null,
             room: share === null ? null : Math.max(0, share - bulkSent24h - bulkQueued),
             bulkParked: inRegion.reduce((n, b) => n + b.parked, 0),
             waitingBroadcasts: inRegion.filter((b) => b.parked > 0).length,
             lastFinishesAt: lastFinishes.get(region) ?? null,
-            txParkedAt,
             txPeak7d: peaks.get(region)?.txPeak ?? 0,
             bulkPeak7d: peaks.get(region)?.bulkPeak ?? 0,
             status: !account.ok
@@ -232,18 +226,21 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
             latencyMs: account.ok ? account.latencyMs : null,
             error: account.ok ? null : account.message,
             account: account.ok ? account.overview : null,
-            // What the worker's bucket runs at: the SES rate, capped by the
-            // instance setting, shared between replicas.
-            effectiveRate: account.ok
-              ? Math.min(account.overview.quota.maxSendRate, ceiling) / env.WORKER_REPLICAS
-              : null,
             domainsVerified: domainsByRegion.get(region) ?? 0,
             sent24h: counts24?.sent ?? 0,
+            // SES's own complaint rate as the breaker judges it; null while it
+            // judges our own count instead, `read` telling a failed read from
+            // SES publishing no rate.
+            sesComplaintRate: sesReadings.get(region)?.rate ?? null,
+            sesComplaintRead: sesReadings.get(region)?.read ?? false,
             week: counts7
               ? {
                   sent: counts7.sent,
                   hardBounceRate: counts7.sent > 0 ? counts7.hardBounced / counts7.sent : 0,
-                  complaintRate: counts7.sent > 0 ? counts7.complained / counts7.sent : 0,
+                  // Our estimate of SES's rate, the one the breaker judges while
+                  // SES's own can't be read.
+                  complaintRate:
+                    counts7.complaintSent > 0 ? counts7.complained / counts7.complaintSent : 0,
                 }
               : null,
             breaker: breaker
@@ -254,7 +251,6 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
                   pausedAt: breaker.pausedAt,
                 }
               : null,
-            hourly: hourly.get(region) ?? emptyHourly(now, 24),
             daily: daily.get(region) ?? emptyDaily(now, 7),
             cost: {
               sentThisMonth: sentMonth,
@@ -279,9 +275,11 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
             suggested: suggestedReserve(defaultQuota, defaultPeak),
           },
         },
-        eventsHealth: events,
-        // The SQS pipeline is one queue for every region; the lag the worker measured applies to all.
-        eventsLagSeconds: probes.get("ses_events_lag_s")?.value ?? null,
+        complaintLines: {
+          sesReview: SES_COMPLAINT_REVIEW_RATE,
+          sesPause: SES_COMPLAINT_PAUSE_RATE,
+          breaker: BREAKER_SES_COMPLAINT_RATE,
+        },
         cloud: isCloudDeployment(),
         defaultRegion: served[0] ?? env.AWS_REGION,
         envRegions: env.AWS_REGIONS ?? null,
@@ -333,7 +331,7 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
         sent24h: day.get(input.region)?.sent ?? 0,
         peak30d: Math.max(0, ...(daily.get(input.region) ?? []).map((p) => p.sent)),
         hardBounceRate7d: w && w.sent > 0 ? w.hardBounced / w.sent : 0,
-        complaintRate7d: w && w.sent > 0 ? w.complained / w.sent : 0,
+        complaintRate7d: w && w.complaintSent > 0 ? w.complained / w.complaintSent : 0,
         domainsVerified: aligned.total,
         domainsWithDmarc: aligned.dmarc,
       };

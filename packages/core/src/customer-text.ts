@@ -1,0 +1,289 @@
+import { fillTemplate } from "./html.js";
+
+/**
+ * Text a customer typed (a team, person, key or broadcast name, a domain, a
+ * webhook URL, an address) as the mail we send from our own domains prints
+ * it. Recipients and mailbox providers trust those domains, and some of that
+ * mail reaches any address (an invitation, a sign-up's verification link), so
+ * a customer's words must never become a link there.
+ */
+
+/** The longest team or display name accepted, and the most of any customer value a system email prints. */
+export const CUSTOMER_TEXT_MAX = 64;
+
+/**
+ * U+200A HAIR SPACE, set after every ".", "@", ":" and "\". Mail clients
+ * link by scanning text (Gmail's linkifier, Apple Mail's data detectors,
+ * Outlook, the plain-text part), so markup does not stop them, and a
+ * zero-width character is no break to all of them: linkify-it counts it as a
+ * letter, and IDNA's mapping deletes it. Whitespace ends every scheme, host
+ * and address grammar, and NFKC turns a hair space into a space, which still
+ * ends them. It is about 1/24 em wide, so "acme.dev" reads as acme.dev.
+ */
+const BREAK = "\u200a";
+const SEPARATORS = new Set([".", ":", "@", "\\"]);
+
+/**
+ * Zero-width, bidi and the other format and default-ignorable characters,
+ * except the joiners and presentation selectors that writing uses.
+ */
+const INVISIBLE = /(?!\u200c|\u200d|\ufe0e|\ufe0f)[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+/**
+ * Those stay only where writing puts them: a presentation selector right
+ * after an emoji (the U+FE0F of a red heart), a joiner inside an emoji
+ * sequence (the U+200D between a person and a laptop) or between letters
+ * of a script that shapes with it (Persian ZWNJ, Indic ZWJ). Anywhere else
+ * they go.
+ */
+const STRAY_SELECTOR = /(?<!\p{Extended_Pictographic})(?:\ufe0e|\ufe0f)/gu;
+const STRAY_JOINER =
+  /(?<![\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Lo}\p{M}])(?:\u200c|\u200d)|(?:\u200c|\u200d)(?![\p{Extended_Pictographic}\p{Lo}])/gu;
+/** Controls (newlines, tabs) and line or paragraph separators. */
+const LINE_BREAKING = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
+/**
+ * Combining marks past the fourth in a row: real writing stays under that,
+ * and a flood of them is one character the length cap would never cut.
+ */
+const MARK_FLOOD = /(\p{M}{4})\p{M}+/gu;
+/**
+ * Digits joined only by spaces and punctuation, the way phone numbers are
+ * written and the way iOS Mail's data detectors and the Gmail and Outlook
+ * apps find numbers to call; a modifier letter joins them too, as
+ * libphonenumber reads the katakana prolonged sound mark (U+30FC). A run of
+ * seven or more (a local number's length) keeps its first four, and the rest
+ * print as "•", unless it is exactly one date or span of years (isDateOrYears).
+ */
+const DIGIT_RUN = /\p{N}(?:[^\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N}]*\p{N})*/gu;
+/**
+ * A joined chain (emoji linked by zero-width joiners, Indic consonants linked
+ * by viramas) segments as one grapheme however long it runs, so the cut also
+ * stops at this many code points; 64 characters of real writing stay well
+ * under it.
+ */
+const CODE_POINT_MAX = CUSTOMER_TEXT_MAX * 4;
+
+/** What dropInvisible took out, by kind: the read pipeline records these as hidden-text flags. */
+export type InvisibleClass =
+  | "unicode_tags"
+  | "variation_selectors"
+  | "bidi"
+  | "zero_width"
+  | "other_invisible";
+
+function invisibleClass(ch: string): InvisibleClass {
+  const cp = ch.codePointAt(0) ?? 0;
+  if (cp >= 0xe0000 && cp <= 0xe007f) return "unicode_tags";
+  if ((cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef)) {
+    return "variation_selectors";
+  }
+  if (
+    cp === 0x061c ||
+    cp === 0x200e ||
+    cp === 0x200f ||
+    (cp >= 0x202a && cp <= 0x202e) ||
+    (cp >= 0x2066 && cp <= 0x2069)
+  ) {
+    return "bidi";
+  }
+  if ((cp >= 0x200b && cp <= 0x200d) || cp === 0x2060 || cp === 0xfeff || cp === 0x180e) {
+    return "zero_width";
+  }
+  return "other_invisible";
+}
+
+/**
+ * Invisible characters out, line breaks and the joiners and selectors
+ * writing uses kept. `counts`, when given, tallies each removal by class.
+ */
+export function dropInvisible(
+  value: string,
+  counts?: Partial<Record<InvisibleClass, number>>,
+): string {
+  // Every character the set holds lies outside ASCII.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the ASCII range is the test
+  if (!/[^\x00-\x7f]/.test(value)) return value;
+  if (!counts) {
+    return value.replace(INVISIBLE, "").replace(STRAY_SELECTOR, "").replace(STRAY_JOINER, "");
+  }
+  const drop = (m: string) => {
+    for (const ch of m) {
+      const k = invisibleClass(ch);
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return "";
+  };
+  return value.replace(INVISIBLE, drop).replace(STRAY_SELECTOR, drop).replace(STRAY_JOINER, drop);
+}
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching controls is the point
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
+
+/**
+ * Multi-line text with line feeds as its only line breaks and no other C0 or
+ * C1 control, so an escape sequence in a malformed part can't drive the
+ * terminal an agent prints it to. Tabs stay.
+ */
+export function dropControls(value: string): string {
+  return value.replace(/\r\n?/g, "\n").replace(CONTROL, "");
+}
+
+/** How many characters dropInvisible would take out of `value`. */
+export function countInvisible(value: string): number {
+  const counts: Partial<Record<InvisibleClass, number>> = {};
+  dropInvisible(value, counts);
+  return Object.values(counts).reduce((a, b) => a + b, 0);
+}
+
+/** One line of visible text: line breaks and controls become spaces, invisible characters go. */
+export function stripInvisible(value: string): string {
+  return dropInvisible(value.replace(LINE_BREAKING, " ")).replace(/\s+/g, " ").trim();
+}
+
+/** stripInvisible, cut to at most `max` code points (never inside a surrogate pair). */
+export function visibleLine(value: string, max: number): string {
+  const line = stripInvisible(value);
+  return line.length <= max ? line : Array.from(line).slice(0, max).join("");
+}
+
+/**
+ * ".", ":", "@" or "\", or a character whose compatibility form is one ("．"
+ * "＠" "﹕"), or the ideographic full stop, which IDNA reads as a dot.
+ */
+function isSeparator(c: string): boolean {
+  return SEPARATORS.has(c.normalize("NFKC").replace("\u3002", "."));
+}
+
+/**
+ * Whether a digit run is exactly one date in ASCII digits with one separator
+ * throughout ("09/10/2026" either way round, "9.10.2026", "2026-10-09"; years
+ * 1900–2099) or one span of up to ten years ("2025-2026", "2025–2026",
+ * "2025/2026"). Names and subjects carry them, and the shape fixes too many
+ * digits to spell a chosen number.
+ */
+function isDateOrYears(run: string): boolean {
+  const dayMonth = /^(\d\d?)([/.-])(\d\d?)\2(?:19|20)\d\d$/.exec(run);
+  if (dayMonth) {
+    const [low = 0, high = 0] = [Number(dayMonth[1]), Number(dayMonth[3])].sort((a, b) => a - b);
+    return low >= 1 && low <= 12 && high <= 31;
+  }
+  const yearFirst = /^(?:19|20)\d\d([/.-])(\d\d?)\1(\d\d?)$/.exec(run);
+  if (yearFirst) {
+    const [month, day] = [Number(yearFirst[2]), Number(yearFirst[3])];
+    return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+  }
+  const years = /^((?:19|20)\d\d)[-\u2013/]((?:19|20)\d\d)$/.exec(run);
+  const span = Number(years?.[2]) - Number(years?.[1]);
+  return span >= 1 && span <= 10;
+}
+
+/** A digit run (DIGIT_RUN) of at least `digits` digits that is no date or span of years. */
+function isNumberRun(run: string, digits: number): boolean {
+  return (run.match(/\p{N}/gu)?.length ?? 0) >= digits && !isDateOrYears(run);
+}
+
+function maskNumbers(text: string): string {
+  return text.replace(DIGIT_RUN, (run) => {
+    if (!isNumberRun(run, 7)) return run;
+    let kept = 0;
+    return run.replace(/\p{N}/gu, (digit) => (++kept > 4 ? "•" : digit));
+  });
+}
+
+/**
+ * Customer text for a system email's body, the same string in the HTML and
+ * the plain-text part (the card escapes it for HTML): one line, at most
+ * CUSTOMER_TEXT_MAX characters, nothing a mail client turns into a link or
+ * offers to call. Look-alike separators break like the ASCII ones and keep
+ * their form, so "ｅｖｉｌ．ｃｏｍ" and "evil。com" link no more than evil.com
+ * does, and "市场部：华东区" reads as typed.
+ */
+export function inertText(value: string): string {
+  const text = maskNumbers(stripInvisible(value).replace(MARK_FLOOD, "$1"));
+  // Cut on grapheme boundaries, so an emoji or an accented letter stays whole.
+  const parts =
+    text.length > CUSTOMER_TEXT_MAX
+      ? Array.from(new Intl.Segmenter().segment(text), (s) => s.segment)
+      : [];
+  const cut =
+    parts.length > CUSTOMER_TEXT_MAX
+      ? `${parts
+          .slice(0, CUSTOMER_TEXT_MAX - 1)
+          .join("")
+          .trimEnd()}…`
+      : text;
+  const points = Array.from(cut);
+  const capped =
+    points.length > CODE_POINT_MAX
+      ? `${points
+          .slice(0, CODE_POINT_MAX - 1)
+          .join("")
+          .replace(STRAY_JOINER, "")}…`
+      : cut;
+  // A cut through a date can leave seven of its digits, which are no date.
+  return maskNumbers(capped).replace(/[^\p{L}\p{N}\s]/gu, (c) =>
+    isSeparator(c) ? `${c}${BREAK}` : c,
+  );
+}
+
+/**
+ * Template slots that carry customer text in every system email catalog;
+ * fillMailTemplate prints them through inertText. No subject names one.
+ */
+export const CUSTOMER_SLOTS: ReadonlySet<string> = new Set([
+  "team",
+  "name",
+  "inviter",
+  "actor",
+  "email",
+  "app",
+  "domain",
+  "host",
+  "url",
+  "subject",
+  "note",
+]);
+
+/** fillTemplate for system email: the customer slots print inert. */
+export function fillMailTemplate(template: string, values: Record<string, string>): string {
+  return fillTemplate(
+    template,
+    Object.fromEntries(
+      Object.entries(values).map(([key, value]) => [
+        key,
+        CUSTOMER_SLOTS.has(key) ? inertText(value) : value,
+      ]),
+    ),
+  );
+}
+
+/**
+ * Any "scheme://", or a scheme that links without slashes when something
+ * follows the colon ("mailto:x", "tel:+1"); "Data: Sales" is a name.
+ */
+const URL_SCHEME =
+  /[a-z][a-z\d+.-]*:\/\/|\b(?:mailto|tel|sms|callto|javascript|data|file|ftp|https?):(?!\s)/i;
+const NOT_PLAIN = /[@\p{Cc}\p{Zl}\p{Zp}]/u;
+/**
+ * The digits of the shortest number a name may not carry: a local number
+ * with its area code. Years, dates, "Studio 54" and short order numbers stay
+ * under it.
+ */
+const NAME_NUMBER_DIGITS = 8;
+
+/**
+ * Whether a team or display name may be stored: one line of visible text, at
+ * most `max` characters, no "@", no URL scheme and no run of digits a phone
+ * number fits in, judged on the NFKC form so fullwidth look-alikes count. A
+ * name that only looks like a domain ("acme.dev") is a company's name and
+ * passes; system mail prints every name through inertText anyway.
+ */
+export function isPlainName(value: string, max = CUSTOMER_TEXT_MAX): boolean {
+  const folded = value.normalize("NFKC");
+  return (
+    value.length <= max &&
+    !NOT_PLAIN.test(folded) &&
+    dropInvisible(folded) === folded &&
+    !URL_SCHEME.test(folded) &&
+    !(folded.match(DIGIT_RUN) ?? []).some((run) => isNumberRun(run, NAME_NUMBER_DIGITS))
+  );
+}

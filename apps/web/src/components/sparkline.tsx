@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { type ChartPointer, trackedPointer } from "@/lib/panel-placement";
 import { ChartTip } from "./line-chart";
 
 /**
@@ -29,9 +30,8 @@ export function Sparkline({
   /** Ceiling of the y axis, for small multiples that share one scale; the series peak when omitted. */
   max?: number;
 }) {
-  const [hover, setHover] = useState<{ index: number; px: number; py: number; w: number } | null>(
-    null,
-  );
+  const plotRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<{ index: number; pointer: ChartPointer } | null>(null);
   const W = 300;
   const n = values.length;
   const top = (max ?? Math.max(...values, 0)) * 1.05 || 1;
@@ -46,15 +46,15 @@ export function Sparkline({
 
   function track(event: React.PointerEvent<HTMLDivElement>) {
     if (n === 0) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const px = event.clientX - rect.left;
-    const index = Math.min(n - 1, Math.max(0, Math.round((px / rect.width) * (n - 1))));
-    setHover({ index, px, py: event.clientY - rect.top, w: rect.width });
+    const pointer = trackedPointer(event);
+    const index = Math.min(n - 1, Math.max(0, Math.round((pointer.x / pointer.width) * (n - 1))));
+    setHover({ index, pointer });
   }
   const hovered = hover ? values[hover.index] : undefined;
 
   return (
     <div
+      ref={plotRef}
       style={{ position: "relative", width: "100%", height, touchAction: "pan-y" }}
       onPointerMove={track}
       onPointerDown={track}
@@ -94,7 +94,7 @@ export function Sparkline({
         ) : null}
       </svg>
       {hover && hovered !== undefined ? (
-        <ChartTip x={hover.px} y={hover.py} width={hover.w} height={height}>
+        <ChartTip plot={plotRef} pointer={hover.pointer}>
           <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-muted)" }}>
             {labels[hover.index]}
           </span>

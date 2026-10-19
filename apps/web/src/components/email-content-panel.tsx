@@ -6,9 +6,10 @@ import { useMemo, useState } from "react";
 import { CodeHighlight } from "@/components/code-highlight";
 import { CopyButton, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
+import { MailFrame } from "@/components/mail-frame";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import { Switch } from "@/components/switch";
-import { emulateEmailScheme } from "@/lib/email-preview";
+import { emulateEmailScheme, isForwardSubject, PREVIEW_CANVAS } from "@/lib/email-preview";
 import { formatDayTime } from "@/lib/format";
 import { formatHtml } from "@/lib/html";
 import { BAND_TONE, checkGlyph, formatScoreTenths } from "@/lib/score-band";
@@ -40,7 +41,9 @@ function HtmlSource({ html, formatted }: { html: string; formatted: boolean }) {
 }
 
 const TAB_KEYS = ["preview", "text", "html", "insights"] as const;
-type Tab = (typeof TAB_KEYS)[number];
+// Received mail has no insights report; its headers take that tab.
+const RECEIVED_TAB_KEYS = ["preview", "text", "html", "headers"] as const;
+type Tab = (typeof TAB_KEYS)[number] | (typeof RECEIVED_TAB_KEYS)[number];
 
 export interface EmailInsights {
   scoreTenths: number;
@@ -284,10 +287,12 @@ function InsightsSection({
 /**
  * The message as sent, one panel for every surface that holds a message:
  * preview as a light or dark mail client, plain text, source, and the
- * insights report. Email and broadcast detail render this same panel.
+ * insights report. Email and broadcast detail render this same panel, and so
+ * does a received email, with its headers instead of insights.
  */
 export function EmailContentPanel({
   email,
+  received,
 }: {
   email: {
     id: string;
@@ -298,17 +303,36 @@ export function EmailContentPanel({
     bodyPurgedAt?: Date | null | undefined;
     /** The body was never decrypted: the request ran under a support view. */
     hiddenBySupportView?: boolean | undefined;
+    /** Refused at accept with every recipient suppressed: there never was a body. */
+    suppressedAtAccept?: boolean | undefined;
+  };
+  /**
+   * A received message: written by a stranger, so its preview loads nothing
+   * from the network unasked.
+   */
+  received?: {
+    headers: Record<string, string> | null;
+    /** The From address's domain, and whether authentication ties the message to it. */
+    domain: string;
+    authenticated: boolean;
   };
 }) {
   const t = useTranslations("emails");
   const [tab, setTab] = useState<Tab>("preview");
   const [scheme, setScheme] = usePreviewScheme();
   const [htmlFormatted, setHtmlFormatted] = useState(true);
+  // One "name: value" line per header; a repeated header (Received) keeps every value.
+  const headersText = received?.headers
+    ? Object.entries(received.headers)
+        .flatMap(([name, value]) => value.split("\n").map((line) => `${name}: ${line}`))
+        .join("\n")
+    : null;
   const tabContent: Record<Tab, string | null> = {
     preview: email.html,
     text: email.text,
     html: email.html,
     insights: null,
+    headers: headersText,
   };
   const currentContent = tabContent[tab];
   const tabLabels: Record<Tab, string> = {
@@ -316,6 +340,7 @@ export function EmailContentPanel({
     text: t("detail.plainText"),
     html: t("detail.html"),
     insights: t("detail.insights"),
+    headers: t("detail.headers"),
   };
 
   return (
@@ -329,42 +354,45 @@ export function EmailContentPanel({
     >
       {/* The tab bar outlives the body purge: insights are content-derived
         metadata and deliberately survive it, so the purge message replaces
-        only the preview/text/html panels. */}
+        only the preview/text/html panels. Its tabs scroll sideways as one line
+        (a tab wrapped under its neighbours reads as a different control); the
+        tools drop to a line of their own when they do not fit beside them. */}
       <div
-        className="ms-scroll-x"
         style={{
           display: "flex",
+          flexWrap: "wrap",
           alignItems: "center",
           gap: 6,
           padding: "10px 12px",
           borderBottom: "1px solid var(--ms-line)",
-          // One line that scrolls sideways on a phone: a tab that wraps
-          // under its neighbours reads as a different control.
-          overflowX: "auto",
-          flexWrap: "nowrap",
         }}
       >
-        {TAB_KEYS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            style={{
-              flex: "none",
-              whiteSpace: "nowrap",
-              fontSize: 13,
-              padding: "5px 11px",
-              borderRadius: 8,
-              border: 0,
-              cursor: "pointer",
-              background: tab === key ? "var(--ms-panel-raised)" : "none",
-              color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-              font: "inherit",
-            }}
-            onClick={() => setTab(key)}
-          >
-            {tabLabels[key]}
-          </button>
-        ))}
+        <div
+          className="ms-scroll-x"
+          style={{ display: "flex", gap: 6, overflowX: "auto", flex: "0 1 auto", minWidth: 0 }}
+        >
+          {(received ? RECEIVED_TAB_KEYS : TAB_KEYS).map((key) => (
+            <button
+              key={key}
+              type="button"
+              style={{
+                flex: "none",
+                whiteSpace: "nowrap",
+                fontSize: 13,
+                padding: "5px 11px",
+                borderRadius: 8,
+                border: 0,
+                cursor: "pointer",
+                background: tab === key ? "var(--ms-panel-raised)" : "none",
+                color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
+                font: "inherit",
+              }}
+              onClick={() => setTab(key)}
+            >
+              {tabLabels[key]}
+            </button>
+          ))}
+        </div>
         {currentContent ? (
           <span
             style={{
@@ -419,7 +447,7 @@ export function EmailContentPanel({
             </p>
           </div>
         )
-      ) : email.hiddenBySupportView || email.bodyPurgedAt ? (
+      ) : email.suppressedAtAccept || email.hiddenBySupportView || email.bodyPurgedAt ? (
         <p
           style={{
             margin: 0,
@@ -428,12 +456,28 @@ export function EmailContentPanel({
             fontSize: "var(--ms-fs-ui)",
           }}
         >
-          {t(email.hiddenBySupportView ? "detail.hiddenBySupportView" : "detail.bodyPurged")}
+          {t(
+            email.suppressedAtAccept
+              ? "detail.bodyNotStored"
+              : email.hiddenBySupportView
+                ? "detail.hiddenBySupportView"
+                : "detail.bodyPurged",
+          )}
         </p>
       ) : (
         <>
           {tab === "preview" &&
-            (email.html ? (
+            (email.html && received ? (
+              <MailFrame
+                panel
+                html={email.html}
+                title={t("detail.preview")}
+                scheme={scheme}
+                domain={received.domain}
+                authenticated={received.authenticated}
+                foldQuote={!isForwardSubject(email.subject)}
+              />
+            ) : email.html ? (
               // Edge to edge: the message lays itself out inside the frame,
               // as it would in a mail client.
               <iframe
@@ -446,7 +490,7 @@ export function EmailContentPanel({
                   height: 640,
                   border: 0,
                   borderRadius: "0 0 12px 12px",
-                  background: scheme === "dark" ? "#111113" : "#ffffff",
+                  background: PREVIEW_CANVAS[scheme],
                 }}
               />
             ) : (
@@ -500,6 +544,34 @@ export function EmailContentPanel({
                 }}
               >
                 {t("detail.noHtml")}
+              </p>
+            ))}
+          {tab === "headers" &&
+            (headersText ? (
+              <pre
+                className="ms-mono"
+                style={{
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                  margin: 0,
+                  padding: "16px 18px",
+                  fontSize: 12,
+                  lineHeight: 1.7,
+                  color: "var(--ms-bone)",
+                }}
+              >
+                {headersText}
+              </pre>
+            ) : (
+              <p
+                style={{
+                  margin: 0,
+                  padding: "16px 18px",
+                  color: "var(--ms-muted)",
+                  fontSize: "var(--ms-fs-ui)",
+                }}
+              >
+                {t("detail.noHeaders")}
               </p>
             ))}
         </>

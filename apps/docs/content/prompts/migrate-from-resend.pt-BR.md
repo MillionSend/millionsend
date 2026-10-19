@@ -1,10 +1,10 @@
 # Migre este projeto do Resend para o MillionSend
 
-Você está migrando uma aplicação do Resend para o MillionSend. A API REST do MillionSend é compatível no wire com a do Resend — mesmos endpoints, mesmos formatos de requisição e resposta — então isto é uma mudança de configuração mais uma migração dos dados da conta, não uma reescrita. Siga os passos na ordem. Pare e pergunte antes de qualquer ação irreversível. Nunca imprima, registre em log ou commite uma chave de API.
+Você está migrando uma aplicação do Resend para o MillionSend. A API REST do MillionSend é compatível com a do Resend — mesmos endpoints, mesmos formatos de requisição e resposta — então isto é uma mudança de configuração mais uma migração dos dados da conta, não uma reescrita. Siga os passos na ordem. Pare e pergunte antes de qualquer ação irreversível. Nunca imprima, registre em log ou commite uma chave de API.
 
 ## Fatos em que você pode confiar
 
-- URL base da API Cloud: `https://api.millionsend.com`. Auto-hospedado: a origem da API da própria instância (pergunte se não estiver no repositório).
+- URL base da API do MillionSend Cloud: `https://api.millionsend.com`. Auto-hospedado: a origem da API da própria instância (pergunte se não estiver no repositório).
 - Chaves de API começam com `ms_` e são criadas no painel em **Chaves de API**. Use uma chave de acesso total para a migração e chaves de acesso de envio para os remetentes de produção.
 - Documentação: https://docs.millionsend.com — acrescente `.md` à URL de qualquer página para obter markdown, `/llms-full.txt` é tudo em um arquivo, `/openapi.json` é a especificação OpenAPI 3.1. O guia de migração está em https://docs.millionsend.com/pt-BR/migrate-from-resend.md e a referência da CLI em https://docs.millionsend.com/pt-BR/cli.md.
 - A CLI de migração (`@millionsend/cli`) só lê do Resend (requisições `GET`), mantém as chaves em memória, não as grava em arquivo algum e não envia telemetria.
@@ -19,10 +19,12 @@ Encontre todo ponto de contato com o Resend antes de mudar qualquer coisa e most
 - Receptores de webhook que verificam os cabeçalhos de assinatura `svix-*`, e as URLs de endpoint registradas no Resend.
 - Ids ou aliases de audiências, segmentos, tópicos e templates referenciados em código ou configuração.
 - Corpos de broadcast ou template que usam `{{{RESEND_UNSUBSCRIBE_URL}}}` (continua funcionando no MillionSend como alias de `{{{UNSUBSCRIBE_URL}}}`).
+- Recebimento: chamadas a `resend.emails.receiving.*`, handlers de `email.received` e quais endereços de cada domínio de recebimento o código usa.
+- Caixas de entrada (pré-lançamento do Resend): o pacote `resend@*-preview-inboxes.*`, chamadas a `resend.inboxes.*`, os endereços de caixa que elas usam e handlers de eventos de webhook `inbox.*`.
 
 ## Passo 2 — Mova a conta
 
-Peça ao usuário uma chave do Resend com acesso total, uma chave do MillionSend com acesso total e se o destino é o Cloud ou uma URL auto-hospedada. Passe as chaves por variáveis de ambiente, nunca como argumentos de linha de comando.
+Peça ao usuário uma chave do Resend com acesso total, uma chave do MillionSend com acesso total e se o destino é o MillionSend Cloud ou uma URL auto-hospedada. Passe as chaves por variáveis de ambiente, nunca como argumentos de linha de comando.
 
 Primeiro o plano (somente leitura; código de saída 2 significa que há mudanças, 0 nada a fazer, 1 erro):
 
@@ -40,7 +42,7 @@ Mostre ao usuário o resumo do plano, incluindo avisos de limite do plano (por e
 npx @millionsend/cli migrate apply plan.json --yes
 ```
 
-Flags que valem conhecer: `--rps <n>` reduz a taxa de leitura contra o Resend (padrão 8; o Resend permite 10 por time, compartilhados com o envio em produção); `--skip enrichment` pula a segunda passagem por contato para propriedades e tópicos; `--include-sent` importa também broadcasts enviados como rascunhos; `--fresh-webhook-secrets` gera novos segredos de webhook em vez de copiá-los; `--on-conflict skip|error` muda como contatos já existentes são tratados (padrão upsert).
+Flags que valem conhecer: `--rps <n>` reduz a taxa de leitura contra o Resend (padrão 8; o Resend permite 10 por equipe, compartilhados com o envio em produção); `--skip enrichment` pula a segunda passagem por contato para propriedades e tópicos; `--include-sent` importa também broadcasts enviados como rascunhos; `--fresh-webhook-secrets` gera novos segredos de webhook em vez de copiá-los; `--on-conflict skip|error` muda como contatos já existentes são tratados (padrão upsert).
 
 Depois leia `.millionsend/migrate-report.md`: contagens por recurso, o checklist de itens manuais, os registros DNS por domínio e o mapa de ids. A ferramenta acrescenta `.millionsend/` ao `.gitignore` quando existe um; confirme que fez isso.
 
@@ -61,12 +63,17 @@ Então resolva o que o relatório lista:
 
 - Atualize ids de tópicos e segmentos em código e configuração usando o mapa de ids do relatório.
 - Templates: templates do MillionSend não armazenam `from` nem `reply_to`; passe-os em cada envio.
-- Webhooks: endpoint, eventos e segredo de assinatura foram copiados, então o receptor existente continua verificando os cabeçalhos `svix-*`. Tipos de evento fora dos sete tipos `email.*` do MillionSend foram descartados por webhook e estão listados; remova ou substitua os handlers deles.
+- Webhooks: endpoint, eventos e segredo de assinatura foram copiados, então o receptor existente continua verificando os cabeçalhos `svix-*`. Tipos de evento que o MillionSend não envia (`contact.topics.updated`, `domain.*`, `topic.*`, `inbox.thread.assigned`, `inbox.thread.unassigned`) foram descartados por webhook e estão listados; remova ou substitua os handlers deles. O MillionSend só envia eventos `inbox.*` para endpoints que os escolhem pelo nome, nunca para "todos os eventos".
+- Supressões: a migração copiou os bounces, as reclamações e as entradas manuais do Resend. O Resend aceita um envio em que todos os destinatários de `to` estão suprimidos e registra o e-mail como `suppressed`; o MillionSend recusa esse envio com `422 all_recipients_suppressed` (o `POST /emails` ainda guarda o e-mail como `suppressed` e envia o evento `email.suppressed`), e no `POST /emails/batch` um item assim rejeita o lote inteiro, a não ser que a requisição envie o cabeçalho `x-batch-validation: permissive`. Faça o código tratar esse erro como "não enviado", e não como uma falha para tentar de novo. Documentação: https://docs.millionsend.com/pt-BR/concepts/suppressions.md.
 - Chaves de API não podem ser migradas (o Resend expõe apenas os nomes). Crie uma para cada nome que o relatório lista, no painel, e coloque-as nos ambientes correspondentes.
+- Recebimento: aqui um domínio de recebimento só recebe nos endereços das caixas de entrada dele, a não ser que o **Pega-tudo** esteja ligado (página do domínio, ou `PATCH /domains/{id}` com `{"receiving_catch_all": true}`; um plano pago na nuvem). Se o código recebe em endereços quaisquer, como no Resend, o usuário liga o pega-tudo antes de trocar o MX; senão, cada endereço precisa de uma caixa. Pergunte qual. Documentação: https://docs.millionsend.com/pt-BR/concepts/receiving.md.
+- Caixas de entrada: a migração da conta não cria caixas. Crie de novo cada caixa que o código usa, com o mesmo endereço (`POST /inboxes`), depois que o domínio dela recebe aqui. As caixas criadas por um SDK do Resend têm `kind: "agent"` por padrão (quarentena, análise, envio só em respostas); as caixas lidas por pessoas precisam de `kind: "human"`, definido por HTTP direto ou no painel. Uma resposta, um encaminhamento ou um envio de rascunho pode responder `202` com um rascunho (`object: "inbox_draft"`) quando as regras da caixa o retêm: faça o código tratar isso. Documentação: https://docs.millionsend.com/pt-BR/concepts/inboxes.md.
 
 ## Passo 4 — DNS, feito pelo usuário
 
 O MillionSend usa seu próprio par de chaves DKIM, então todo domínio precisa de novos registros DNS mesmo que já envie pelo Resend. Os registros estão no relatório e em **Domínios** no painel. Os dois provedores podem ficar verificados lado a lado. Não mude o tráfego até cada domínio aparecer como **Verificado**.
+
+Um domínio que recebe e-mails muda junto com o registro MX: depois que o recebimento estiver ligado aqui e o pega-tudo ou as caixas estiverem prontos (passo 3), o usuário aponta o MX para `mx.millionsend-dns.com` (na auto-hospedagem: o `RECEIVING_MX_HOST` da instância). Essa troca é a virada do recebimento; o que o Resend já recebeu fica lá.
 
 ## Passo 5 — Faça a virada e verifique
 

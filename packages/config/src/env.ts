@@ -36,7 +36,10 @@ export const SES_TRANSACTIONAL_RESERVE_MIN = 5;
 export const SES_TRANSACTIONAL_RESERVE_MAX = 90;
 export const AWS_REGION_DEFAULT = "us-east-1";
 export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
+export const EMAIL_METADATA_RETENTION_DAYS_DEFAULT = 30;
 export const OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT = 10;
+export const INVITES_PER_TEAM_PER_DAY_DEFAULT = 50;
+export const API_RATE_LIMIT_PER_MINUTE_DEFAULT = 600;
 
 /** Break-glass content access in the console; "off" is the default everywhere. */
 export const CONTENT_REVEAL_MODES = ["off", "on"] as const;
@@ -48,6 +51,44 @@ export type AbuseJudgeProvider = (typeof ABUSE_JUDGE_PROVIDERS)[number];
 export const ABUSE_JUDGE_BASE_URL_DEFAULT = "https://api.typesafe.ai";
 export const ABUSE_JUDGE_MODEL_DEFAULT = "jev-1.13.0";
 export const ABUSE_JUDGE_TIMEOUT_MS_DEFAULT = 20_000;
+
+/** Who reads the text in an email's images for the judge; "off" is the default everywhere. */
+export const ABUSE_VISION_PROVIDERS = ["off", "bedrock"] as const;
+export type AbuseVisionProvider = (typeof ABUSE_VISION_PROVIDERS)[number];
+/** Claude Haiku 5.5's foundation model id on Amazon Bedrock. */
+export const ABUSE_VISION_MODEL = "anthropic.claude-haiku-5-5";
+export const ABUSE_VISION_REGION_DEFAULT = "us-east-1";
+/**
+ * The regions Haiku 5.5 is called from, by the prefix of the geographic
+ * inference profile that serves each: Bedrock offers the model there only
+ * through cross-region profiles, and a geographic one reads images only in
+ * its geography's regions. The global profile, which may read them
+ * anywhere, is never used.
+ */
+const ABUSE_VISION_GEOGRAPHIES: Record<"us" | "eu" | "au" | "jp", string[]> = {
+  us: ["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ca-central-1", "ca-west-1"],
+  eu: [
+    "eu-central-1",
+    "eu-central-2",
+    "eu-north-1",
+    "eu-south-1",
+    "eu-south-2",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-west-3",
+  ],
+  au: ["ap-southeast-2", "ap-southeast-4"],
+  jp: ["ap-northeast-1", "ap-northeast-3"],
+};
+
+/** The profile a region calls Haiku 5.5 through (us.anthropic.claude-haiku-5-5), or null. */
+export function abuseVisionProfile(region: string): string | null {
+  const geo = Object.entries(ABUSE_VISION_GEOGRAPHIES).find(([, regions]) =>
+    regions.includes(region),
+  );
+  return geo ? `${geo[0]}.${ABUSE_VISION_MODEL}` : null;
+}
+
 const SENTRY_ENVIRONMENT_DEFAULT = "production";
 /** MILLIONSEND_REVISION outside an image built with a GIT_SHA. */
 const REVISION_UNKNOWN = "unknown";
@@ -95,7 +136,11 @@ export const env = createEnv({
     // Git SHA baked into the image (Dockerfile ARG GIT_SHA); reported by the
     // API's /health so a running deployment can be matched to a commit.
     MILLIONSEND_REVISION: z.string().default(REVISION_UNKNOWN),
-    API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(600),
+    API_RATE_LIMIT_PER_MINUTE: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(API_RATE_LIMIT_PER_MINUTE_DEFAULT),
     DATABASE_URL: z.url(),
 
     IS_CLOUD: boolFromString,
@@ -206,7 +251,11 @@ export const env = createEnv({
     // window; bodies leave earlier on EMAIL_RETENTION_DAYS. Thirty days is the
     // industry norm (Resend keeps email data 30 days) and what the metadata
     // tables are sized for; daily counters and broadcast results outlive it.
-    EMAIL_METADATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
+    EMAIL_METADATA_RETENTION_DAYS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(EMAIL_METADATA_RETENTION_DAYS_DEFAULT),
     // A tracking-image fetch within this many seconds of delivery (or before
     // it) is recorded as prefetched, not opened: security gateways scan a
     // message within seconds, while a person reading a push notification
@@ -217,8 +266,10 @@ export const env = createEnv({
       .min(0)
       .default(OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT),
 
-    // Optional content monitor: TypeSafe Jev judges a sample of accepted
-    // mail after SES took it. Off by default; sending never waits on it.
+    // Optional content monitor: TypeSafe Jev judges a new team's mail, and
+    // any team's mail to a destination it has never used, before SES takes
+    // it, and a sample of the rest after. Off by default; with it off nothing
+    // waits on it.
     // ABUSE_JUDGE=typesafe needs ABUSE_JUDGE_API_KEY. Sampling rates and
     // thresholds are instance settings (console → Trust & safety →
     // Monitoring settings); the MONITOR_* values below are their bootstrap
@@ -232,10 +283,23 @@ export const env = createEnv({
       .int()
       .min(1000)
       .default(ABUSE_JUDGE_TIMEOUT_MS_DEFAULT),
+    // Optional image reading for the judge: Claude Haiku 5.5 on Amazon
+    // Bedrock writes down the text and brands in an email's images and in
+    // attachment pages that are images, with the worker's AWS credentials,
+    // called from ABUSE_VISION_REGION through its geography's inference
+    // profile (abuseVisionProfile), so images are read within that
+    // geography. Off by default; refusing program files, holding risky files
+    // and reading PDFs, Office files and QR codes all work without it.
+    ABUSE_VISION: z.enum(ABUSE_VISION_PROVIDERS).default("off"),
+    ABUSE_VISION_REGION: z
+      .string()
+      .regex(/^[a-z]{2}(?:-[a-z]+)+-\d+$/, "must be an AWS region like us-east-1")
+      .default(ABUSE_VISION_REGION_DEFAULT),
     // Break-glass: with this on, an operator can read the subject and
-    // rendered text of a flagged team's messages for a recorded security
-    // reason, for 30 minutes, disclosed to the team after 7 days. The cloud
-    // keeps it off until its terms and privacy notice say so.
+    // rendered text of any team's messages for a recorded security reason,
+    // for 30 minutes. The read is kept in the operator audit, never shown to
+    // the team. The cloud keeps it off until its terms and privacy notice
+    // say so.
     CONTENT_REVEAL: z.enum(CONTENT_REVEAL_MODES).default("off"),
     MONITOR_FIRST_SENDS: z.coerce.number().int().min(0).optional(),
     MONITOR_FIRST_HOURS: z.coerce.number().int().min(0).optional(),
@@ -255,6 +319,30 @@ export const env = createEnv({
     MONITOR_PAUSE_RISK: z.coerce.number().min(0).max(1).optional(),
     MONITOR_AUTO_PAUSE: z.enum(["true", "false", "1", "0"]).optional(),
     MONITOR_FLAG_SCORE: z.coerce.number().int().min(0).max(100).optional(),
+    MONITOR_AUTO_HOLD: z.enum(["true", "false", "1", "0"]).optional(),
+    MONITOR_HOLD_SCORE: z.coerce.number().int().min(0).max(100).optional(),
+    MONITOR_HOLD_REPEAT_COUNT: z.coerce.number().int().min(0).optional(),
+    MONITOR_HOLD_REPEAT_SCORE: z.coerce.number().int().min(0).max(100).optional(),
+    // New-domain warm-up: a daily cap per sending domain by registration age
+    // (unset follows IS_CLOUD). Instance settings in the same console page
+    // override these, like the MONITOR_* values above.
+    WARMUP_ENABLED: z.enum(["true", "false", "1", "0"]).optional(),
+    WARMUP_CAP_FIRST_DAY: z.coerce.number().int().min(0).optional(),
+    WARMUP_CAP_FIRST_WEEK: z.coerce.number().int().min(0).optional(),
+    WARMUP_CAP_FIRST_MONTH: z.coerce.number().int().min(0).optional(),
+
+    // Sign-up, invitations and email changes refuse addresses on the
+    // disposable-email-domains list (sub.mailinator.com counts as mailinator.com);
+    // existing accounts keep working. The app ships the list and the worker
+    // refreshes it daily while this is on. Unset follows IS_CLOUD; read
+    // through disposableEmailsBlocked().
+    BLOCK_DISPOSABLE_EMAILS: z.enum(["true", "false", "1", "0"]).optional(),
+
+    // Network and country of the IPs the console shows, from DB-IP's free
+    // databases: the worker downloads them monthly and every lookup stays on
+    // this instance. Unset follows IS_CLOUD; read through
+    // ipGeolocationEnabled().
+    IP_GEOLOCATION: z.enum(["true", "false", "1", "0"]).optional(),
 
     // Read-only support view: the instance operator may open a team's
     // dashboard as its owner sees it, for 30 minutes, with a reason and a
@@ -262,6 +350,11 @@ export const env = createEnv({
     // (the owner is not mailed). Off by default; read through
     // supportViewEnabled().
     SUPPORT_VIEW: z.enum(["off", "on"]).default("off"),
+
+    // Test seam, not operator configuration: "off" lets suites send to the
+    // reserved domains tests must use. Read through
+    // recipientDomainCheckEnabled().
+    RECIPIENT_DOMAIN_CHECK: z.enum(["on", "off"]).default("on"),
 
     // Optional error tracking through a Sentry SDK. Unset DSN: the SDK is
     // never loaded. SENTRY_DSN serves web, api and worker; SENTRY_BROWSER_DSN
@@ -320,6 +413,13 @@ export const env = createEnv({
     // team owners) and team invitation emails, same forms as AUTH_EMAIL_FROM,
     // which it falls back to.
     NOTIFICATIONS_EMAIL_FROM: z.string().optional(),
+    // Invitations one team, and one member across all their teams, may
+    // create in a rolling day. Read through invitesPerTeamPerDay().
+    INVITES_PER_TEAM_PER_DAY: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(INVITES_PER_TEAM_PER_DAY_DEFAULT),
 
     // Dashboard session signing secret (`openssl rand -base64 32`).
     // Required only by the web process, which asserts it at boot.
@@ -345,6 +445,30 @@ export const env = createEnv({
     // Shared secret the tracking edge sends when asking whether a hostname is
     // a configured tracking subdomain (gates on-demand certificate issuance).
     TRACKING_ASK_SECRET: z.string().optional(),
+
+    // Inbound mail. Receiving exists on this instance only when this names
+    // the MX host customers point their MX records at (the cloud's is
+    // mx.millionsend-dns.com); unset, every receiving surface is hidden and
+    // the internal MX endpoints answer 404. Read through receivingMxHost().
+    RECEIVING_MX_HOST: z.string().optional(),
+    // Bearer secret the MX (PROCESS=mx) sends to the internal MX endpoints.
+    // Required whenever RECEIVING_MX_HOST is set, at least 32 characters.
+    MX_INGEST_SECRET: z.string().optional(),
+    // Agent inboxes on a shared domain: customers get addresses on per-team
+    // subdomains of it with no DNS of their own. Its own registrable domain,
+    // with an MX and a wildcard MX at RECEIVING_MX_HOST. Read through sharedInboxDomain().
+    SHARED_INBOX_DOMAIN: z.string().optional(),
+    // Whether shared addresses send at all, whether paid teams' may start
+    // conversations, whether that mail carries the team's SES tenant, and the
+    // recipients a team may reach from them per UTC day. Instance settings on
+    // the console's Trust & safety page override these, like MONITOR_*.
+    SHARED_INBOX_SEND: z.enum(["true", "false", "1", "0"]).optional(),
+    SHARED_INBOX_OPEN: z.enum(["true", "false", "1", "0"]).optional(),
+    SHARED_INBOX_TENANTS: z.enum(["true", "false", "1", "0"]).optional(),
+    SHARED_INBOX_TEAM_DAILY_CAP: z.coerce.number().int().min(0).optional(),
+    // clamd over TCP (host[:port], 3310 by default) scanning received mail
+    // for viruses; unset, nothing is scanned. Read through clamavHost().
+    CLAMAV_HOST: z.string().optional(),
 
     // Social login for the dashboard. A provider's sign-in button appears
     // only when BOTH its client id and secret are set.
@@ -426,9 +550,29 @@ export function sesTenantsEnabled(e: Env = env): boolean {
   return envFlag(flag);
 }
 
+/** Whether disposable addresses are refused: explicit BLOCK_DISPOSABLE_EMAILS wins, else the cloud default. */
+export function disposableEmailsBlocked(e: Env = env): boolean {
+  const flag = e.BLOCK_DISPOSABLE_EMAILS as unknown;
+  if (flag === undefined || flag === "") return isCloudDeployment(e);
+  return envFlag(flag);
+}
+
+/** Whether IPs are looked up in the DB-IP databases: explicit IP_GEOLOCATION wins, else the cloud default. */
+export function ipGeolocationEnabled(e: Env = env): boolean {
+  const flag = e.IP_GEOLOCATION as unknown;
+  if (flag === undefined || flag === "") return isCloudDeployment(e);
+  return envFlag(flag);
+}
+
 /** The sender for account notifications; undefined when no system sender is configured. */
 export function notificationsEmailFrom(e: Env = env): string | undefined {
   return e.NOTIFICATIONS_EMAIL_FROM ?? e.AUTH_EMAIL_FROM;
+}
+
+/** The daily invitation cap per team; under SKIP_ENV_VALIDATION the proxy carries the raw string. */
+export function invitesPerTeamPerDay(e: Env = env): number {
+  const value = Number(e.INVITES_PER_TEAM_PER_DAY);
+  return Number.isInteger(value) && value >= 1 ? value : INVITES_PER_TEAM_PER_DAY_DEFAULT;
 }
 
 /**
@@ -489,9 +633,47 @@ export function abuseJudgeConfig(e: Env = env): AbuseJudgeConfig | null {
   };
 }
 
+export interface AbuseVisionConfig {
+  region: string;
+  /** The region's geographic inference profile id, what the reader calls. */
+  model: string;
+  accessKeyId: string | undefined;
+  secretAccessKey: string | undefined;
+}
+
+/**
+ * The image reader the worker builds, or null when it is off; raw-string safe
+ * as abuseJudgeConfig is. Throws for a region with no geographic profile.
+ */
+export function abuseVisionConfig(e: Env = env): AbuseVisionConfig | null {
+  if (((e.ABUSE_VISION as unknown as string | undefined) || "off") === "off") return null;
+  const region = e.ABUSE_VISION_REGION || ABUSE_VISION_REGION_DEFAULT;
+  const model = abuseVisionProfile(region);
+  if (!model) {
+    const regions = Object.values(ABUSE_VISION_GEOGRAPHIES).flat().join(", ");
+    throw new Error(
+      `ABUSE_VISION_REGION=${region} has no geographic inference profile for Claude Haiku 5.5 that image reading can use; use one of ${regions}`,
+    );
+  }
+  return {
+    region,
+    model,
+    accessKeyId: e.AWS_ACCESS_KEY_ID,
+    secretAccessKey: e.AWS_SECRET_ACCESS_KEY,
+  };
+}
+
 /** Whether the operator may open a team's dashboard read-only; raw-string safe under SKIP_ENV_VALIDATION. */
 export function supportViewEnabled(e: Env = env): boolean {
   return (e.SUPPORT_VIEW as unknown) === "on";
+}
+
+/**
+ * Whether sends and new contacts refuse domains that can never receive mail.
+ * On unless set to "off": under SKIP_ENV_VALIDATION no default applies.
+ */
+export function recipientDomainCheckEnabled(e: Env = env): boolean {
+  return (e.RECIPIENT_DOMAIN_CHECK as unknown) !== "off";
 }
 
 export interface ErrorTrackingConfig {
@@ -563,6 +745,37 @@ export function trackingCnameTarget(appBaseUrl: string, e: Env = env): string {
   return e.TRACKING_EDGE_HOST ?? new URL(appBaseUrl).host;
 }
 
+/** The host receiving domains point their MX record at; undefined when this instance does not receive mail. */
+export function receivingMxHost(e: Env = env): string | undefined {
+  return e.RECEIVING_MX_HOST || undefined;
+}
+
+/** Whether inbound mail exists on this instance at all. */
+export function receivingEnabled(e: Env = env): boolean {
+  return receivingMxHost(e) !== undefined;
+}
+
+/** The domain whose per-team subdomains hold shared inbox addresses; undefined hides it. */
+export function sharedInboxDomain(e: Env = env): string | undefined {
+  return e.SHARED_INBOX_DOMAIN || undefined;
+}
+
+/** Where clamd listens (host[:port]); undefined when received mail is not scanned. */
+export function clamavHost(e: Env = env): string | undefined {
+  return e.CLAMAV_HOST || undefined;
+}
+
+// PLATFORM_DOMAIN mirrors packages/core/src/domain-lifecycle.ts (this
+// package cannot import core); millionsend-dns.com holds the cloud's MX and
+// tracking hosts.
+const PLATFORM_DOMAINS = ["millionsend.com", "millionsend-dns.com"] as const;
+
+// Mirrors MX_INGEST_SECRET_MIN_LENGTH in packages/core/src/receiving/protocol.ts
+// (this package cannot import core).
+const MX_INGEST_SECRET_MIN_LENGTH = 32;
+
+const MX_HOST_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
 const S3_CREDENTIAL_KEYS = ["S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const;
 
 const S3_BUCKET_KEYS = ["S3_STORAGE_BUCKET", "S3_BACKUP_BUCKET"] as const;
@@ -615,11 +828,48 @@ export function assertEnvConsistency(e: Env): void {
       throw new Error(`${key} requires S3_BACKUP_BUCKET`);
     }
   }
+  // Receiving half-configured would either publish an MX record whose mail
+  // the app then refuses, or leave a secret nothing uses: both are drift.
+  if (e.RECEIVING_MX_HOST && !MX_HOST_RE.test(e.RECEIVING_MX_HOST)) {
+    throw new Error("RECEIVING_MX_HOST must be a lowercase hostname such as mx.example.com");
+  }
+  if (Boolean(e.RECEIVING_MX_HOST) !== Boolean(e.MX_INGEST_SECRET)) {
+    throw new Error("RECEIVING_MX_HOST and MX_INGEST_SECRET must be set together");
+  }
+  if (e.MX_INGEST_SECRET && e.MX_INGEST_SECRET.length < MX_INGEST_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `MX_INGEST_SECRET must be at least ${MX_INGEST_SECRET_MIN_LENGTH} characters (openssl rand -hex 32)`,
+    );
+  }
+  // Shared addresses go to any team that asks: under the platform's own
+  // domains their mail would ride the platform's reputation and read as its own.
+  if (e.SHARED_INBOX_DOMAIN) {
+    const shared = e.SHARED_INBOX_DOMAIN;
+    if (!MX_HOST_RE.test(shared)) {
+      throw new Error(
+        "SHARED_INBOX_DOMAIN must be a lowercase hostname such as agents.example.com",
+      );
+    }
+    if (!e.RECEIVING_MX_HOST) {
+      throw new Error("SHARED_INBOX_DOMAIN requires RECEIVING_MX_HOST");
+    }
+    if (
+      isCloudDeployment(e) &&
+      PLATFORM_DOMAINS.some((d) => shared === d || shared.endsWith(`.${d}`))
+    ) {
+      throw new Error(
+        `SHARED_INBOX_DOMAIN must be its own registrable domain, not under ${PLATFORM_DOMAINS.join(" or ")}`,
+      );
+    }
+  }
   // A judge switched on without its key would fail every sample as
   // "no credentials" forever, silently; refuse the boot instead.
   if (e.ABUSE_JUDGE && e.ABUSE_JUDGE !== "off" && !e.ABUSE_JUDGE_API_KEY) {
     throw new Error(`ABUSE_JUDGE=${e.ABUSE_JUDGE} requires ABUSE_JUDGE_API_KEY`);
   }
+  // Image reading from a region with no geographic profile would fail every
+  // read: abuseVisionConfig throws for it, which refuses the boot here.
+  abuseVisionConfig(e);
   if (e.IS_CLOUD) {
     for (const key of [
       "KMS_KEY_ID",

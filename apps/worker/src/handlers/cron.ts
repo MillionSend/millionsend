@@ -1,26 +1,45 @@
 import {
   broadcastSendSpacingMs,
+  buildAccountMail,
+  checkWarmups,
+  claimNotification,
   countDistinctRecipients,
   DAY_MS,
   DRAIN_MAX_PER_RUN,
+  deliverabilityHold,
+  endQueuedEmails,
   failQueuedEmailsForDomain,
   fetchDeliverabilityHealth,
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
+  nextUtcDayStart,
+  OPERATOR_PARK_REASONS,
   type PlanSnapshot,
   purgedEmailBodyColumns,
   QUOTA_COLUMNS,
   type QuotaTeamRow,
+  RECEIVED_SECRET_WINDOW,
   recordAudit,
   releaseQuota,
   reserveQuota,
+  reserveWarmup,
+  reserveWarmupDay,
   SES_QUOTA_SLOT_MS,
+  SYSTEM_MAIL_TAG,
   type TeamQuota,
   teamQuota,
   transitionQueueState,
+  utcDay,
+  type WarmupCap,
+  type WarmupEvent,
+  type WarmupRelease,
   WEBHOOK_BACKLOG_AGE_MS,
   WEBHOOK_MAX_AGE_MS,
   type WebhookEnqueue,
+  warmupCap,
+  warmupMailValues,
+  warmupRelease,
+  webhookBatch,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { affectedRows, keysetCursorWhere, schema } from "@millionsend/db";
@@ -50,6 +69,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { mailOwners, type SystemMailer } from "../system-mail.js";
 import { exhaustOpenDeliveries } from "./deliver-webhook.js";
 
 /**
@@ -172,6 +192,10 @@ export interface DrainDeps {
     | undefined;
   /** Called for every broadcast the bulk pass touched; flips it to sent once nothing of it remains. */
   finalize?: ((broadcastId: string) => Promise<unknown>) | undefined;
+  /** Owners hear when a domain's warm-up pauses or finishes; absent = silent (tests). */
+  mailer?: SystemMailer | undefined;
+  /** Dashboard origin for the links in those mails. */
+  appBaseUrl?: string | undefined;
   now?: Date | undefined;
 }
 
@@ -183,14 +207,40 @@ export interface DrainResult {
 /** Sentinel: the row left queued_quota concurrently; roll the reservation back. */
 class DrainRaced extends Error {}
 
+/**
+ * Sentinel: the sending domain's warm-up, the team's shared one, or the
+ * domain's reputation warm-up ("ramp") is spent for the day; roll the
+ * plan's reservation back.
+ */
+class WarmupHeld extends Error {
+  constructor(readonly full: "domain" | "pool" | "ramp") {
+    super(`warm-up ${full} full`);
+  }
+}
+
 /** Parked rows loaded per page; the backlog is unbounded (see acceptEmail). */
 const DRAIN_PAGE = 500;
 
 /** What one drain run carries between its passes. */
 interface DrainRun {
   now: Date;
-  /** Teams found at their cap this run leave every later page query. */
-  exhaustedTeams: Set<string>;
+  /** Teams found at their cap leave every later page query. */
+  heldTeams: Set<string>;
+  /** Teams already asked whether the deliverability pause holds them. */
+  checkedTeams: Set<string>;
+  /** Teams the pause holds: only their account mail stays in later page queries. */
+  pausedTeams: Set<string>;
+  /** The warm-up cap per sending domain row, read once per run. */
+  warmups: Map<string, WarmupCap | null>;
+  /**
+   * Registrable domains whose warm-up day is spent, teams whose shared one
+   * is, and the domain rows that leave the page query with them.
+   */
+  warmupFull: Set<string>;
+  poolFull: Set<string>;
+  heldDomains: Set<string>;
+  /** Each sending domain's reputation warm-up, read once per run, with what the run released against it. */
+  ramps: Map<string, (WarmupRelease & { released: number }) | null>;
   failures: unknown[];
 }
 
@@ -212,15 +262,33 @@ interface DrainRun {
  * sweep leaves them alone. A broadcast whose last parked row went is
  * finalized at the end of the run.
  *
+ * A domain warming up its reputation releases its broadcasts by the
+ * warm-up's day, judged each run between the two passes (checkWarmups), so
+ * a long check never holds transactional mail: nothing until yesterday is
+ * checked, the most active contacts first, never more in a run than a 48th
+ * of the day's allowance, and nothing while it is paused.
+ *
  * Reserve + transition commit atomically per email (no crash window that
  * burns quota or half-moves a row). One email's failure never blocks the
  * rest — errors are collected and rethrown at the end so the cron retries.
  */
 export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainResult> {
+  const now = deps.now ?? new Date();
   await deps.sesQuota?.recount?.();
   const regions = deps.sesQuota?.regions ?? [];
   const held = regions.filter((region) => deps.sesQuota?.exhausted(region));
-  const run: DrainRun = { now: deps.now ?? new Date(), exhaustedTeams: new Set(), failures: [] };
+  const run: DrainRun = {
+    now,
+    heldTeams: new Set(),
+    checkedTeams: new Set(),
+    pausedTeams: new Set(),
+    warmups: new Map(),
+    warmupFull: new Set(),
+    poolFull: new Set(),
+    heldDomains: new Set(),
+    ramps: new Map(),
+    failures: [],
+  };
   let drained = 0;
   if (regions.length === 0 || held.length < regions.length) {
     const released = await releaseParkedRows(db, deps, run, {
@@ -237,11 +305,18 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       );
     }
   }
+  await mailWarmupEvents(db, deps, await checkWarmups(db, now));
   let budget = DRAIN_MAX_PER_RUN - drained;
   if (budget > 0) {
     const b = schema.broadcasts;
     const waiting = await db
-      .select({ id: b.id, teamId: b.teamId })
+      .select({
+        id: b.id,
+        teamId: b.teamId,
+        domainId: sql<
+          string | null
+        >`(select e.domain_id from emails e where e.broadcast_id = broadcasts.id and e.latest_status = 'queued_quota' limit 1)`,
+      })
       .from(b)
       .where(
         and(
@@ -254,7 +329,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       .orderBy(asc(b.scheduledAt), asc(b.createdAt), asc(b.id));
     // Only broadcasts that can move this run share the slices, and a slice
     // is split among the peers of the same region (the room is per region).
-    const eligible: { id: string; teamId: string; region: string }[] = [];
+    const eligible: { id: string; teamId: string; domainId: string | null; region: string }[] = [];
     for (const broadcast of waiting) {
       const region = (await parkedRegion(db, broadcast.id)) ?? regions[0] ?? "";
       if (deps.sesQuota && (deps.sesQuota.paused?.(region) || deps.sesQuota.exhausted(region))) {
@@ -288,6 +363,8 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
         budget: grant,
         held: [],
         spacingMs,
+        bySendOrder: true,
+        sender: broadcast,
       });
       drained += released.total;
       budget -= released.total;
@@ -318,94 +395,175 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
  * Keyset pages over (createdAt, id): a row that stays parked (exhausted
  * team, failed enqueue) can never be re-read into an infinite loop, and
  * teams found exhausted leave the page query so one capped team's backlog
- * is never walked row by row.
+ * is never walked row by row. `bySendOrder` first walks the rows a warm-up
+ * put in line, by (sendOrder, id), then the rest oldest first. One
+ * broadcast's rows share a team and a domain (`sender`): once the run holds
+ * either, the rest of its backlog is never read only to be skipped.
  */
 async function releaseParkedRows(
   db: Db,
   deps: DrainDeps,
   run: DrainRun,
-  opts: { where: SQL; budget: number; held: readonly string[]; spacingMs: number },
+  opts: {
+    where: SQL;
+    budget: number;
+    held: readonly string[];
+    spacingMs: number;
+    bySendOrder?: boolean;
+    sender?: { teamId: string; domainId: string | null };
+  },
 ): Promise<{ total: number; byRegion: Map<string, number> }> {
+  const { sender } = opts;
+  const senderHeld = () =>
+    sender !== undefined &&
+    (run.heldTeams.has(sender.teamId) ||
+      run.pausedTeams.has(sender.teamId) ||
+      (sender.domainId !== null && run.heldDomains.has(sender.domainId)));
   const regions = deps.sesQuota?.regions ?? [];
   const region = sql<string>`coalesce(${schema.domains.region}, ${regions[0] ?? ""})`;
+  const systemMail = sql<boolean>`coalesce(${schema.emails.tags} ? ${SYSTEM_MAIL_TAG}, false)`;
   const byRegion = new Map<string, number>();
   let total = 0;
-  let cursorId: string | undefined;
-  while (total < opts.budget) {
-    const page = await db
-      .select({
-        id: schema.emails.id,
-        teamId: schema.emails.teamId,
-        broadcastId: schema.emails.broadcastId,
-        ...QUOTA_COLUMNS,
-        scheduledAt: schema.emails.scheduledAt,
-        to: schema.emails.to,
-        cc: schema.emails.cc,
-        bcc: schema.emails.bcc,
-        region,
-      })
-      .from(schema.emails)
-      .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
-      .leftJoin(schema.domains, eq(schema.emails.domainId, schema.domains.id))
-      .where(
-        and(
-          eq(schema.emails.latestStatus, "queued_quota"),
-          opts.where,
-          // The operator's holds: a suspended team releases nothing, a paused
-          // team releases only its transactional rows.
-          isNull(schema.teams.suspendedAt),
-          or(isNull(schema.emails.broadcastId), isNull(schema.teams.broadcastsPausedByOperatorAt)),
-          run.exhaustedTeams.size > 0
-            ? notInArray(schema.emails.teamId, [...run.exhaustedTeams])
-            : undefined,
-          opts.held.length > 0 ? notInArray(region, [...opts.held]) : undefined,
-          cursorId
-            ? keysetCursorWhere(schema.emails.createdAt, schema.emails.id, cursorId)
-            : undefined,
-        ),
-      )
-      .orderBy(asc(schema.emails.createdAt), asc(schema.emails.id))
-      .limit(DRAIN_PAGE);
-    const last = page.at(-1);
-    if (!last) break;
-    cursorId = last.id;
-    const moved: MovedEmail[] = [];
-    for (const email of page) {
-      if (total + moved.length >= opts.budget) break;
-      const throttleAt =
-        opts.spacingMs > 0
-          ? new Date(run.now.getTime() + (total + moved.length) * opts.spacingMs)
-          : null;
-      const released = await releaseParked(db, deps, email, run, throttleAt);
-      if (released) moved.push(released);
-    }
-    if (moved.length === 0) continue;
-    try {
-      await deps.enqueueSends(
-        moved.map((m) => ({
-          emailId: m.id,
-          startAfter: m.scheduledAt ?? undefined,
-          priority: emailSendPriority(m),
-        })),
-      );
-      total += moved.length;
-      for (const m of moved) byRegion.set(m.region, (byRegion.get(m.region) ?? 0) + 1);
-    } catch (err) {
-      // The page's enqueue is one statement, so it failed whole: "queued"
-      // emails with no job would only be picked up by the reconcile sweep;
-      // re-park them so the drain retry handles them sooner.
-      run.failures.push(err);
-      for (const m of moved) {
-        // A row a racing send lane already claimed keeps its reservation:
-        // refunding it here would credit the team for a send that happened.
-        if (await transitionQueueState(db, m.id, { from: "queued", to: "queued_quota" })) {
-          await releaseQuota(db, { teamId: m.teamId, count: m.units, quota: m.quota });
-        }
+  const e = schema.emails;
+  const passes = opts.bySendOrder
+    ? [
+        { order: e.sendOrder, where: isNotNull(e.sendOrder) },
+        { order: e.createdAt, where: isNull(e.sendOrder) },
+      ]
+    : [{ order: e.createdAt, where: undefined }];
+  for (const pass of passes) {
+    let cursorId: string | undefined;
+    while (total < opts.budget && !senderHeld()) {
+      const page = await db
+        .select({
+          id: schema.emails.id,
+          teamId: schema.emails.teamId,
+          domainId: schema.emails.domainId,
+          broadcastId: schema.emails.broadcastId,
+          ...QUOTA_COLUMNS,
+          scheduledAt: schema.emails.scheduledAt,
+          to: schema.emails.to,
+          cc: schema.emails.cc,
+          bcc: schema.emails.bcc,
+          region,
+          systemMail,
+        })
+        .from(schema.emails)
+        .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
+        .leftJoin(schema.domains, eq(schema.emails.domainId, schema.domains.id))
+        .where(
+          and(
+            eq(schema.emails.latestStatus, "queued_quota"),
+            opts.where,
+            pass.where,
+            // The operator's holds: a suspended team releases nothing, a paused
+            // team releases only its transactional rows, and what screening
+            // parked waits for the review list.
+            isNull(schema.teams.suspendedAt),
+            or(
+              isNull(schema.emails.broadcastId),
+              isNull(schema.teams.broadcastsPausedByOperatorAt),
+            ),
+            or(
+              isNull(schema.emails.parkReason),
+              notInArray(schema.emails.parkReason, [...OPERATOR_PARK_REASONS]),
+            ),
+            // A row due on a later UTC day is charged on that day, its warm-up
+            // included, when it comes: reserved against today, days of the cap
+            // could all go out at one future instant.
+            or(
+              isNull(schema.emails.scheduledAt),
+              lt(schema.emails.scheduledAt, nextUtcDayStart(run.now)),
+            ),
+            run.heldTeams.size > 0
+              ? notInArray(schema.emails.teamId, [...run.heldTeams])
+              : undefined,
+            run.pausedTeams.size > 0
+              ? or(notInArray(schema.emails.teamId, [...run.pausedTeams]), systemMail)
+              : undefined,
+            run.heldDomains.size > 0
+              ? or(
+                  isNull(schema.emails.domainId),
+                  notInArray(schema.emails.domainId, [...run.heldDomains]),
+                )
+              : undefined,
+            opts.held.length > 0 ? notInArray(region, [...opts.held]) : undefined,
+            cursorId ? keysetCursorWhere(pass.order, schema.emails.id, cursorId) : undefined,
+          ),
+        )
+        .orderBy(asc(pass.order), asc(schema.emails.id))
+        .limit(DRAIN_PAGE);
+      const last = page.at(-1);
+      if (!last) break;
+      cursorId = last.id;
+      const moved: MovedEmail[] = [];
+      for (const email of page) {
+        if (total + moved.length >= opts.budget) break;
+        const throttleAt =
+          opts.spacingMs > 0
+            ? new Date(run.now.getTime() + (total + moved.length) * opts.spacingMs)
+            : null;
+        const released = await releaseParked(db, deps, email, run, throttleAt);
+        if (released) moved.push(released);
       }
-      break;
+      if (moved.length === 0) continue;
+      try {
+        await deps.enqueueSends(
+          moved.map((m) => ({
+            emailId: m.id,
+            startAfter: m.scheduledAt ?? undefined,
+            priority: emailSendPriority(m),
+          })),
+        );
+        total += moved.length;
+        for (const m of moved) byRegion.set(m.region, (byRegion.get(m.region) ?? 0) + 1);
+      } catch (err) {
+        // The page's enqueue is one statement, so it failed whole: "queued"
+        // emails with no job would only be picked up by the reconcile sweep;
+        // re-park them so the drain retry handles them sooner.
+        run.failures.push(err);
+        for (const m of moved) {
+          // A row a racing send lane already claimed keeps its reservation:
+          // refunding it here would credit the team for a send that happened.
+          if (await transitionQueueState(db, m.id, { from: "queued", to: "queued_quota" })) {
+            await releaseQuota(db, { teamId: m.teamId, count: m.units, quota: m.quota });
+          }
+        }
+        return { total, byRegion };
+      }
     }
   }
   return { total, byRegion };
+}
+
+/**
+ * The owners hear when a domain's warm-up paused itself or finished, once
+ * per episode; a mail that fails is logged and never fails the drain.
+ */
+async function mailWarmupEvents(db: Db, deps: DrainDeps, events: WarmupEvent[]): Promise<void> {
+  const { mailer } = deps;
+  if (!mailer) return;
+  for (const event of events) {
+    try {
+      const claimed = await claimNotification(db, {
+        teamId: event.teamId,
+        kind: `${event.kind}:${event.domainId}`,
+        periodKey: event.episode,
+      });
+      if (!claimed) continue;
+      const tab = event.kind === "warmup.paused" ? "?tab=warmup" : "";
+      await mailOwners(db, mailer, event.teamId, event.kind, (locale) =>
+        buildAccountMail({
+          kind: event.kind,
+          locale,
+          url: `${deps.appBaseUrl ?? ""}/domains/${event.domainId}${tab}`,
+          values: warmupMailValues(event, locale),
+        }),
+      );
+    } catch (err) {
+      console.error(`${event.kind} mail for domain ${event.domainId} skipped`, err);
+    }
+  }
 }
 
 async function countParked(db: Db): Promise<number> {
@@ -473,26 +631,87 @@ async function releaseParked(
   email: QuotaTeamRow & {
     id: string;
     teamId: string;
+    domainId: string | null;
     broadcastId: string | null;
     scheduledAt: Date | null;
     region: string;
     to: string[];
     cc: string[] | null;
     bcc: string[] | null;
+    systemMail: boolean;
   },
   run: DrainRun,
   throttleAt: Date | null,
 ): Promise<MovedEmail | null> {
-  if (run.exhaustedTeams.has(email.teamId)) return null;
+  if (run.heldTeams.has(email.teamId)) return null;
   const quota = teamQuota(email, deps.isCloud);
   // Charged the way accept charged it: one unit per distinct mailbox.
   const units = countDistinctRecipients(email.to, email.cc, email.bcc);
+  const { domainId } = email;
   try {
+    // Past the deliverability pause line nothing of the team leaves the
+    // drain but its account mail, which goes out whatever the rates: its
+    // other transactional rows would only park again at send time, and its
+    // broadcast backlog waits for the rates to recover.
+    if (!email.systemMail) {
+      if (!run.checkedTeams.has(email.teamId)) {
+        const held = await deliverabilityHold(db, email.teamId);
+        run.checkedTeams.add(email.teamId);
+        if (held) run.pausedTeams.add(email.teamId);
+      }
+      if (run.pausedTeams.has(email.teamId)) return null;
+    }
+    // Every release passes the sending domain's warm-up too, whatever parked
+    // the row: the plan's midnight must not let a young domain burst.
+    let warmup: WarmupCap | null = null;
+    if (domainId) {
+      if (!run.warmups.has(domainId)) {
+        run.warmups.set(
+          domainId,
+          await warmupCap(db, { teamId: email.teamId, domainId, at: run.now }),
+        );
+      }
+      warmup = run.warmups.get(domainId) ?? null;
+      if (warmup && (run.warmupFull.has(warmup.key) || run.poolFull.has(warmup.teamId))) {
+        run.heldDomains.add(domainId);
+        return null;
+      }
+    }
+    // A domain warming up its reputation lets its broadcasts out by the
+    // warm-up's day; transactional mail never waits on it.
+    let ramp: (WarmupRelease & { released: number }) | null = null;
+    if (domainId && email.broadcastId) {
+      if (!run.ramps.has(domainId)) {
+        const state = await warmupRelease(db, { teamId: email.teamId, domainId, now: run.now });
+        run.ramps.set(domainId, state && { ...state, released: 0 });
+      }
+      ramp = run.ramps.get(domainId) ?? null;
+      if (ramp && (ramp.status === "paused" || !ramp.ready || ramp.released + units > ramp.slice)) {
+        run.heldDomains.add(domainId);
+        return null;
+      }
+    }
     const outcome = await db
       .transaction(async (tx) => {
         const txDb = tx as unknown as Db;
         const reservation = await reserveQuota(txDb, { teamId: email.teamId, count: units, quota });
         if (!reservation.reserved) return "exhausted" as const;
+        if (warmup) {
+          const held = await reserveWarmup(txDb, warmup, units, utcDay(run.now));
+          if (!held.reserved) throw new WarmupHeld(held.full);
+        }
+        if (
+          ramp &&
+          domainId &&
+          !(await reserveWarmupDay(txDb, {
+            domainId,
+            day: utcDay(run.now),
+            volume: ramp.volume,
+            count: units,
+          }))
+        ) {
+          throw new WarmupHeld("ramp");
+        }
         const moved = await transitionQueueState(txDb, email.id, {
           from: "queued_quota",
           to: "queued",
@@ -508,13 +727,21 @@ async function releaseParked(
       })
       .catch((err) => {
         if (err instanceof DrainRaced) return "raced" as const;
+        if (err instanceof WarmupHeld) return `${err.full}_full` as const;
         throw err;
       });
     if (outcome === "exhausted") {
-      run.exhaustedTeams.add(email.teamId);
+      run.heldTeams.add(email.teamId);
+      return null;
+    }
+    if (outcome === "domain_full" || outcome === "pool_full" || outcome === "ramp_full") {
+      if (warmup && outcome === "pool_full") run.poolFull.add(warmup.teamId);
+      else if (warmup && outcome === "domain_full") run.warmupFull.add(warmup.key);
+      if (domainId) run.heldDomains.add(domainId);
       return null;
     }
     if (outcome === "raced") return null;
+    if (ramp) ramp.released += units;
     const { id, teamId, broadcastId, region } = email;
     return {
       id,
@@ -545,39 +772,33 @@ const RECONCILE_MAX_PER_RUN = 20_000;
  * by the queue's dead-letter path, which fails the row after its retries.
  *
  * A claim (sentAt set) that never recorded an SES MessageId is a send
- * interrupted between claim and accept (worker killed mid-flight). Nothing
- * else ever picks such a row up, so after a generous window it is failed
- * with an event rather than left queued forever.
+ * interrupted between claim and accept (worker killed mid-flight, or the
+ * send cut off at its deadline). Nothing else ever picks such a row up, so
+ * after a generous window it is failed with an event and email.failed
+ * rather than left queued forever.
  */
 export async function reconcileStalledSends(
   db: Db,
-  deps: { enqueueSends: EnqueueEmailSends; now?: Date },
+  deps: {
+    enqueueSends: EnqueueEmailSends;
+    enqueueWebhookDelivery?: WebhookEnqueue | undefined;
+    now?: Date;
+  },
 ): Promise<number> {
   const now = deps.now ?? new Date();
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
-  const interrupted = await db
-    .update(schema.emails)
-    .set({ latestStatus: "failed", sentAt: null })
-    .where(
-      and(
-        eq(schema.emails.latestStatus, "queued"),
-        isNotNull(schema.emails.sentAt),
-        isNull(schema.emails.sesMessageId),
-        lt(schema.emails.sentAt, staleBefore),
-      ),
-    )
-    .returning({ id: schema.emails.id });
-  if (interrupted.length > 0) {
-    await db.insert(schema.emailEvents).values(
-      interrupted.map((email) => ({
-        emailId: email.id,
-        type: "failed" as const,
-        occurredAt: now,
-        data: { source: "worker", reason: "send_interrupted" },
-      })),
-    );
-  }
   const e = schema.emails;
+  const hooks = webhookBatch(deps.enqueueWebhookDelivery);
+  await db.transaction((tx) =>
+    endQueuedEmails(tx as unknown as Db, {
+      status: "failed",
+      where: and(eq(e.latestStatus, "queued"), isNotNull(e.sentAt), lt(e.sentAt, staleBefore)),
+      data: { source: "worker", reason: "send_interrupted" },
+      now,
+      enqueue: hooks.collect,
+    }),
+  );
+  await hooks.flush();
   // A row scheduled for later is waiting by design, not lost; its job is due
   // with it and would only be re-enqueued every sweep until then.
   const stalled = and(
@@ -665,6 +886,85 @@ export async function purgeExpiredEmailBodies(
 }
 
 /**
+ * Received mail on the content clock (the email bodies' window: instance
+ * setting > env default): the sealed raw message and attachment list go,
+ * contentPurgedAt is stamped, and the metadata row stays for its own window.
+ * After this a received email reads `raw: null`, which is what makes Resend's
+ * forward() report the raw content as unavailable.
+ */
+export async function purgeExpiredReceivedContent(
+  db: Db,
+  params: { defaultRetentionDays: number; now?: Date },
+): Promise<number> {
+  const { emailRetentionDays } = await getInstanceSettings(db);
+  const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
+  const now = params.now ?? new Date();
+  const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
+  const r = schema.receivedEmails;
+  let purged = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db
+        .update(r)
+        .set({
+          rawCiphertext: null,
+          rawIv: null,
+          rawWrappedDek: null,
+          rawKeyVersion: null,
+          attachments: null,
+          extracted: null,
+          contentPurgedAt: now,
+        })
+        .where(
+          inArray(
+            r.id,
+            db
+              .select({ id: r.id })
+              .from(r)
+              .where(and(lt(r.createdAt, cutoff), isNull(r.contentPurgedAt)))
+              .orderBy(asc(r.createdAt))
+              .limit(PURGE_BATCH),
+          ),
+        ),
+    );
+    purged += batch;
+    if (batch < PURGE_BATCH) break;
+  }
+  return purged;
+}
+
+/** Received mail on the metadata clock: whole rows past EMAIL_METADATA_RETENTION_DAYS, in batches. */
+export async function purgeExpiredReceivedMetadata(
+  db: Db,
+  params: { retentionDays: number; now?: Date },
+): Promise<number> {
+  const now = params.now ?? new Date();
+  const cutoff = new Date(now.getTime() - params.retentionDays * DAY_MS);
+  const r = schema.receivedEmails;
+  let deleted = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db
+        .delete(r)
+        .where(
+          inArray(
+            r.id,
+            db
+              .select({ id: r.id })
+              .from(r)
+              .where(lt(r.createdAt, cutoff))
+              .orderBy(asc(r.createdAt))
+              .limit(PURGE_BATCH),
+          ),
+        ),
+    );
+    deleted += batch;
+    if (batch < PURGE_BATCH) break;
+  }
+  return deleted;
+}
+
+/**
  * Deletes api_requests rows past the SAME effective retention window as
  * email bodies (instance setting > env default): request logs carry
  * request/response payload fragments, so they age out with content.
@@ -709,6 +1009,8 @@ const REVERIFY_BATCH = 100;
 export interface ReverifyDomainsDeps {
   clientForRegion: (region: string) => SesIdentityClient;
   resolver: DnsResolver;
+  /** The domain.age job, asked again when a domain verifies. */
+  enqueueDomainAge?: ((domainId: string) => Promise<void>) | undefined;
   now?: Date;
   batchSize?: number;
 }
@@ -747,6 +1049,7 @@ export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promis
       dkimSelector: schema.domains.dkimSelector,
       dkimPublicKey: schema.domains.dkimPublicKey,
       trackingSubdomain: schema.domains.trackingSubdomain,
+      status: schema.domains.status,
       verifiedAt: schema.domains.verifiedAt,
     })
     .from(schema.domains)
@@ -784,6 +1087,11 @@ export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promis
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(eq(schema.domains.id, domain.id));
+      if (status === "verified" && domain.status !== "verified") {
+        await deps.enqueueDomainAge?.(domain.id).catch((err) => {
+          console.warn(`domains.reverify: ${domain.name} age lookup not queued`, err);
+        });
+      }
     } catch (err) {
       if ((err as { name?: string }).name === "NotFoundException") {
         // The SES identity is gone (deleted outside the app): the stored
@@ -816,6 +1124,8 @@ class ReapRaced extends Error {}
 
 export interface ReapUnverifiedDomainsDeps {
   clientForRegion: (region: string) => SesIdentityClient;
+  /** Arms the webhook drain for the failed emails' rows; absent, the reconcile sweep sends them. */
+  enqueueWebhookDelivery?: WebhookEnqueue | undefined;
   now?: Date;
 }
 
@@ -886,10 +1196,15 @@ export async function reapUnverifiedDomains(
           if ((err as { name?: string }).name !== "NotFoundException") throw err;
         }
       }
+      const hooks = webhookBatch(deps.enqueueWebhookDelivery);
       const deleted = await db
         .transaction(async (tx) => {
           const txDb = tx as unknown as Db;
-          await failQueuedEmailsForDomain(txDb, { teamId: domain.teamId, domainId: domain.id });
+          await failQueuedEmailsForDomain(txDb, {
+            teamId: domain.teamId,
+            domainId: domain.id,
+            enqueue: hooks.collect,
+          });
           await txDb
             .update(schema.apiKeys)
             .set({ revokedAt: now, domainId: null })
@@ -908,6 +1223,7 @@ export async function reapUnverifiedDomains(
           throw err;
         });
       if (!deleted) continue;
+      await hooks.flush();
       await recordAudit(db, {
         teamId: domain.teamId,
         actor: "system",
@@ -1086,9 +1402,11 @@ export async function purgeExpiredEmailMetadata(
  * Content-window strip for provider and webhook payloads, on the SAME
  * effective window as email bodies. email_events.data is the raw SES subset
  * (recipient addresses, diagnostics, remote MTAs) and is dropped whole — the
- * typed `type` column keeps the timeline readable. Webhook deliveries keep
- * their envelope (type, created_at, test marker) and lose `data` and the
- * captured response body.
+ * typed `type` column keeps the timeline readable. A `suppressed` event keeps
+ * its data: it is only {source, reason}, no personal data, and the dashboard
+ * reads its source to tell a refusal at accept, which never stored a body.
+ * Webhook deliveries keep their envelope (type, created_at, test marker) and
+ * lose `data` and the captured response body.
  */
 export async function stripExpiredEventPayloads(
   db: Db,
@@ -1100,25 +1418,40 @@ export async function stripExpiredEventPayloads(
   const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
   const ev = schema.emailEvents;
   let events = 0;
+  // Each batch resumes after the last row the batch before took, so a kept
+  // suppressed row is read once a run rather than once a batch.
+  // ponytail: kept rows stay in the unstripped index, so every run still
+  // walks them once; a partial index that leaves them out is the upgrade.
+  let cursorId: string | undefined;
   for (;;) {
-    const batch = affectedRows(
+    const page = await db
+      .select({ id: ev.id })
+      .from(ev)
+      .where(
+        and(
+          lt(ev.occurredAt, cutoff),
+          isNotNull(ev.data),
+          ne(ev.type, "suppressed"),
+          cursorId ? keysetCursorWhere(ev.occurredAt, ev.id, cursorId) : undefined,
+        ),
+      )
+      .orderBy(asc(ev.occurredAt), asc(ev.id))
+      .limit(PURGE_BATCH);
+    const last = page.at(-1);
+    if (!last) break;
+    cursorId = last.id;
+    events += affectedRows(
       await db
         .update(ev)
         .set({ data: null })
         .where(
           inArray(
             ev.id,
-            db
-              .select({ id: ev.id })
-              .from(ev)
-              .where(and(lt(ev.occurredAt, cutoff), isNotNull(ev.data)))
-              .orderBy(asc(ev.occurredAt))
-              .limit(PURGE_BATCH),
+            page.map((row) => row.id),
           ),
         ),
     );
-    events += batch;
-    if (batch < PURGE_BATCH) break;
+    if (page.length < PURGE_BATCH) break;
   }
   const d = schema.webhookDeliveries;
   let deliveries = 0;
@@ -1235,4 +1568,99 @@ export async function reconcileBillingPlans(
     }
   }
   return { reconciled: teams.length - failed, failed };
+}
+
+/** Daily inbox usage kept: the dashboard reads the last 30 days. */
+const INBOX_USAGE_DAYS = 35;
+
+/** Deletes `table` rows matching `where` in PURGE_BATCH slices; how many went. */
+async function deleteInBatches(
+  db: Db,
+  table: typeof schema.inboxActivity | typeof schema.inboxDrafts | typeof schema.inboxThreads,
+  where: SQL,
+): Promise<number> {
+  let deleted = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db.execute(sql`
+        delete from ${table} where id in (select id from ${table} where ${where} limit ${PURGE_BATCH})
+      `),
+    );
+    deleted += batch;
+    if (batch < PURGE_BATCH) return deleted;
+  }
+}
+
+/**
+ * The inbox data steps of retention.purge, after the received metadata
+ * purge (whose deletes cascade to memberships): threads left empty, draft
+ * bodies on the content clock and draft rows on the metadata clock, the
+ * activity trail and correspondents on the metadata clock, daily inbox
+ * usage past the 30 days the dashboard reads, and received-secret MACs
+ * after their day. Counts by step name.
+ */
+export async function purgeInboxData(
+  db: Db,
+  p: { contentDays: number; metadataDays: number; now?: Date | undefined },
+): Promise<Record<string, number>> {
+  const now = p.now ?? new Date();
+  const contentCutoff = new Date(now.getTime() - p.contentDays * DAY_MS);
+  const metadataCutoff = new Date(now.getTime() - p.metadataDays * DAY_MS);
+  const t = schema.inboxThreads;
+  const d = schema.inboxDrafts;
+  const emptyThreads = await deleteInBatches(
+    db,
+    t,
+    sql`not exists (select 1 from ${schema.receivedEmailInboxes} m where m.thread_id = ${t.id})
+      and not exists (select 1 from ${schema.emails} e where e.thread_id = ${t.id})
+      and not exists (select 1 from ${d} x where x.thread_id = ${t.id} and x.status in ('draft', 'pending_approval'))`,
+  );
+  let draftBodies = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db
+        .update(d)
+        .set({
+          bodyCiphertext: null,
+          bodyIv: null,
+          bodyWrappedDek: null,
+          bodyKeyVersion: null,
+          bodyPurgedAt: now,
+        })
+        .where(
+          inArray(
+            d.id,
+            db
+              .select({ id: d.id })
+              .from(d)
+              .where(and(isNull(d.bodyPurgedAt), lt(d.updatedAt, contentCutoff)))
+              .limit(PURGE_BATCH),
+          ),
+        ),
+    );
+    draftBodies += batch;
+    if (batch < PURGE_BATCH) break;
+  }
+  const drafts = await deleteInBatches(db, d, sql`${d.updatedAt} < ${metadataCutoff}`);
+  const a = schema.inboxActivity;
+  const activity = await deleteInBatches(db, a, sql`${a.createdAt} < ${metadataCutoff}`);
+  const c = schema.inboxCorrespondents;
+  const correspondents = affectedRows(await db.delete(c).where(lt(c.lastSeenAt, metadataCutoff)));
+  const u = schema.inboxUsageDaily;
+  const usage = affectedRows(
+    await db.delete(u).where(lt(u.day, utcDay(now.getTime() - INBOX_USAGE_DAYS * DAY_MS))),
+  );
+  const rs = schema.receivedSecrets;
+  const secrets = affectedRows(
+    await db.delete(rs).where(lt(rs.createdAt, new Date(now.getTime() - RECEIVED_SECRET_WINDOW))),
+  );
+  return {
+    inboxEmptyThreads: emptyThreads,
+    inboxDraftBodies: draftBodies,
+    inboxDrafts: drafts,
+    inboxActivity: activity,
+    inboxCorrespondents: correspondents,
+    inboxUsage: usage,
+    receivedSecrets: secrets,
+  };
 }

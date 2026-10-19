@@ -52,7 +52,11 @@ const EVENT_TYPES: readonly SesEventType[] = [
 
 export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
   if (raw === null || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
+  // Remote mail servers write some of this text (a bounce's diagnostic code),
+  // and the jsonb it is queued and stored as cannot hold U+0000.
+  const obj = JSON.parse(JSON.stringify(raw), (_key, value: unknown) =>
+    typeof value === "string" ? value.replaceAll("\0", "\uFFFD") : value,
+  ) as Record<string, unknown>;
   // Event publishing uses eventType; legacy notifications use notificationType.
   const eventType = (obj.eventType ?? obj.notificationType) as SesEventType | undefined;
   if (!eventType || !EVENT_TYPES.includes(eventType)) return null;
@@ -118,6 +122,9 @@ export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
         : {}),
     };
     parsed.data.delivery = d;
+  }
+  if (eventType === "DeliveryDelay") {
+    parsed.data.deliveryDelay = obj.deliveryDelay;
   }
   if (eventType === "Click") {
     const k = obj.click as Record<string, unknown> | undefined;

@@ -5,9 +5,13 @@ import {
   buildWebhookPayload,
   decryptWebhookSecret,
   encryptWebhookSecret,
+  failedEmailExtras,
   generateWebhookSecret,
   parseWebhookSecret,
+  publicFailureReason,
+  SUPPRESSED_EMAIL_DETAILS,
   signWebhook,
+  suppressedEmailExtras,
   verifyWebhookSignature,
 } from "../src/webhooks.js";
 
@@ -124,6 +128,75 @@ describe("payload shape", () => {
     });
     expect(p.data.bounce).toEqual({ type: "Permanent", sub_type: "General" });
     expect(p.data.email_id).toBe("e-1");
+  });
+
+  it("pins the email.failed and email.suppressed wire contracts, row by row", () => {
+    // Every internal code that ends a row failed, then codes it must never pass on.
+    const failed: [internal: string, reason: string][] = [
+      ["domain_not_verified", "domain_not_verified"],
+      ["domain_deleted", "domain_deleted"],
+      ["body_missing", "body_missing"],
+      ["body_unreadable", "body_unreadable"],
+      ["retries_exhausted", "retries_exhausted"],
+      ["send_interrupted", "send_interrupted"],
+      ["ses_MessageRejected", "message_rejected"],
+      ["ses_BadRequestException", "message_rejected"],
+      ["ses_MailFromDomainNotVerifiedException", "domain_not_verified"],
+      ["ses_AccountSuspendedException", "provider_error"],
+      ["ses_Reject", "message_rejected"],
+      ["ses_SomethingNew", "provider_error"],
+      ["toString", "provider_error"],
+      ["", "provider_error"],
+    ];
+    for (const [internal, reason] of failed) {
+      expect(publicFailureReason(internal), internal).toBe(reason);
+      expect(failedEmailExtras(internal), internal).toEqual({ failed: { reason } });
+    }
+
+    const suppressed = {
+      recipient_suppressed: {
+        type: "OnAccountSuppressionList",
+        message: "The recipient is on your suppression list.",
+      },
+      contact_unsubscribed: {
+        type: "Unsubscribed",
+        message: "The contact unsubscribed from your emails.",
+      },
+      topic_unsubscribed: {
+        type: "Unsubscribed",
+        message: "The recipient opted out of this email's topic.",
+      },
+      contact_missing: {
+        type: "Ineligible",
+        message: "The contact was deleted before the email was sent.",
+      },
+      contact_recipient_mismatch: {
+        type: "Ineligible",
+        message: "The contact's address changed before the email was sent.",
+      },
+      broadcast_missing: {
+        type: "Ineligible",
+        message: "The broadcast was deleted before the email was sent.",
+      },
+      topic_missing: {
+        type: "Ineligible",
+        message: "The email's topic was deleted before it was sent.",
+      },
+    };
+    expect(Object.fromEntries(SUPPRESSED_EMAIL_DETAILS)).toEqual(suppressed);
+    const fallback = { type: "Ineligible", message: "The email was no longer eligible to send." };
+    const rows = [
+      ...Object.entries(suppressed),
+      ...["ineligible", "something_new", "constructor"].map(
+        (reason) => [reason, fallback] as const,
+      ),
+    ];
+    for (const [reason, { type, message }] of rows) {
+      // Three strings in Resend's order: stringified, so the order counts too.
+      expect(JSON.stringify(suppressedEmailExtras(reason)), reason).toBe(
+        JSON.stringify({ suppressed: { type, message, reason } }),
+      );
+    }
   });
 });
 

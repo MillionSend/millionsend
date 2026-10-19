@@ -1,4 +1,11 @@
-import { recordSupportViewRead, type WebhookEnqueue } from "@millionsend/core";
+import { env, receivingEnabled } from "@millionsend/config";
+import {
+  type MonitorSettings,
+  monitorSettingsReader,
+  recordSupportViewRead,
+  unstorableValueMessage,
+  type WebhookEnqueue,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { getDb } from "@millionsend/db";
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -58,7 +65,15 @@ export interface Context {
    * webhooks.reconcile sweep sends rows nobody enqueued.
    */
   enqueueWebhookDeliveries?: WebhookEnqueue;
+  /**
+   * The trust & safety settings, cached for a minute (monitorSettingsReader,
+   * one per process as in the API and the worker). Absent in tests, where
+   * each read goes to the row.
+   */
+  monitorSettings?: () => Promise<MonitorSettings>;
 }
+
+let monitorSettings: (() => Promise<MonitorSettings>) | undefined;
 
 const enqueueBroadcastSend = async (
   broadcastId: string,
@@ -78,9 +93,11 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
   if (!session) return { db, session: null, teamId: null, role: null };
   const cookieStore = await cookies();
   const secure = process.env.NODE_ENV === "production";
+  monitorSettings ??= monitorSettingsReader(db, env as unknown as Record<string, unknown>);
   const shared = {
     db,
     session,
+    monitorSettings,
     enqueueBroadcastSend,
     enqueueEmailSend,
     enqueueWebhookDeliveries,
@@ -124,7 +141,22 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
   return { ...shared, teamId: membership?.teamId ?? null, role: membership?.role ?? null };
 }
 
-const t = initTRPC.context<Context>().create({ transformer: superjson });
+/** What the browser reads for a fault (INTERNAL_SERVER_ERROR) in place of its own text. */
+export const FAULT_MESSAGE =
+  "Something went wrong. Try again, or contact support if it keeps happening.";
+
+// A fault's text can carry SQL, table and column names and query parameters,
+// so its message and stack reach the browser only under `next dev`; the
+// route's onError logs and reports it whole. Passed to tRPC too: its default
+// (any NODE_ENV but production) would send the stack in tests.
+const isDev = process.env.NODE_ENV === "development";
+
+const t = initTRPC.context<Context>().create({
+  transformer: superjson,
+  isDev,
+  errorFormatter: ({ shape, error }) =>
+    error.code === "INTERNAL_SERVER_ERROR" && !isDev ? { ...shape, message: FAULT_MESSAGE } : shape,
+});
 
 export const router = t.router;
 export const createCallerFactory = t.createCallerFactory;
@@ -160,7 +192,15 @@ const supportViewGuard = t.middleware(async ({ ctx, type, path, next }) => {
   return next();
 });
 
-export const publicProcedure = t.procedure.use(supportViewGuard);
+/** A value the database cannot store is the caller's mistake, not a fault. */
+const unstorableValues = t.middleware(async ({ next }) => {
+  const result = await next();
+  const message = result.ok ? null : unstorableValueMessage(result.error);
+  if (message) throw new TRPCError({ code: "BAD_REQUEST", message });
+  return result;
+});
+
+export const publicProcedure = t.procedure.use(unstorableValues).use(supportViewGuard);
 
 export const protectedProcedure = publicProcedure.use(({ ctx, next }) => {
   if (!ctx.session) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -187,6 +227,14 @@ export const adminProcedure = teamProcedure.use(({ ctx, next }) => {
   if (ctx.role !== "owner" && ctx.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
   return next();
 });
+
+/** Without RECEIVING_MX_HOST the instance takes no mail, and these read as routes that do not exist. */
+export const receivingOnly = t.middleware(({ next }) => {
+  if (!receivingEnabled()) throw new TRPCError({ code: "NOT_FOUND" });
+  return next();
+});
+
+export const receivingProcedure = teamProcedure.use(receivingOnly);
 
 /**
  * The instance console: only the first registered user, re-checked on every

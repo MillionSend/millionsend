@@ -11,7 +11,7 @@
   "list": {
     "title": "Domínios",
     "addDomain": "Adicionar domínio",
-    "empty": "Nenhum domínio ainda.",
+    "empty": "Nenhum domínio próprio ainda.",
     "emptyBody": "Adicione um domínio para começar a enviar.",
     "error": "Não foi possível carregar os domínios.",
     "retry": "Tentar novamente",
@@ -20,7 +20,7 @@
     "allRegions": "Todas as regiões",
     "rowDetails": "Detalhes do domínio",
     "pageOf": "Página 1 – {pages} de {total} domínios",
-    "noMatch": "Nenhum domínio corresponde aos filtros.",
+    "noMatch": "Nenhum dos seus domínios corresponde aos filtros.",
     "clearFilters": "Limpar filtros",
     "columns": {
       "domain": "Domínio",
@@ -39,7 +39,7 @@
       "tracking": "Rastreamento"
     },
     "cardTitle": "Domínio",
-    "recapSubtitle": "Adicionado ao seu time.",
+    "recapSubtitle": "Adicionado à sua equipe.",
     "recordsTitle": "Preencha seus registros DNS",
     "recordsTitleProvider": "Preencha seus registros DNS em {provider}",
     "addedRecords": "Já adicionei os registros",
@@ -51,16 +51,23 @@
     "recommended": "Recomendado",
     "regionHint": "Os domínios são provisionados em uma das regiões do SES que esta instalação atende. Cada domínio tem uma região: para mudá-la, exclua o domínio e adicione de novo.",
     "regionSandbox": "sandbox — sem acesso de produção",
+    "sentBefore": {
+      "question": "Este domínio já enviou e-mails?",
+      "yes": "Sim, por outro provedor",
+      "yesHint": "Sem aquecimento. Ele mantém a reputação que já tem.",
+      "no": "Não, é novo",
+      "noHint": "Envios grandes começam pequenos e crescem a cada dia enquanto a entrega estiver saudável. Dá para mudar depois."
+    },
     "advanced": "Opções avançadas",
     "returnPath": "Return-Path personalizado",
-    "returnPathHint": "Usado para autenticação SPF, alinhamento DMARC e devoluções. Evite valores que minem a credibilidade (ex.: <code>testing</code>) — eles podem ficar visíveis aos destinatários.",
+    "returnPathHint": "Usado para autenticação SPF, alinhamento DMARC e bounces. Evite valores que prejudiquem a credibilidade (ex.: <code>testing</code>) — eles podem ficar visíveis aos destinatários.",
     "preview": {
       "title": "O que os destinatários verão",
       "user": "pedidos",
       "toMe": "para mim",
       "subject": "Pedido #4821 confirmado",
-      "snippet": "Olá Ana, recebemos seu pedido…",
-      "caption": "Prévia ao vivo — composta a partir do domínio enquanto você digita.",
+      "snippet": "Olá, Ana, recebemos seu pedido…",
+      "caption": "Prévia em tempo real — muda conforme você digita o domínio.",
       "details": {
         "from": "de:",
         "to": "para:",
@@ -78,7 +85,7 @@
     "error": "Não foi possível adicionar o domínio.",
     "credentialsError": "A AWS rejeitou as credenciais da requisição — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>. Veja <code>SELF_HOSTING.md</code>.",
     "trackingTitle": "Configurar rastreamento (opcional)",
-    "trackingSubtitle": "Sirva o rastreamento de cliques e aberturas pelo seu próprio subdomínio. Você pode pular e configurar depois nas configurações do domínio."
+    "trackingSubtitle": "Use o seu próprio subdomínio para o rastreamento de cliques e aberturas. Você pode pular esta etapa e fazer isso depois nas configurações do domínio."
   },
   "detail": {
     "eyebrow": "Detalhes do domínio",
@@ -87,7 +94,8 @@
     "region": "Região",
     "tabs": {
       "records": "Registros",
-      "configuration": "Configuração"
+      "configuration": "Configuração",
+      "warmup": "Aquecimento"
     },
     "recordsHeading": "Adicione estes registros em {provider}",
     "recordsHeadingGeneric": "Adicione estes registros no seu provedor de DNS",
@@ -97,11 +105,12 @@
       "dmarc": "DMARC (recomendado)",
       "tracking": "Rastreamento de aberturas e cliques",
       "trackingNote": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário. Defina um subdomínio em Configuração para servi-los do seu próprio domínio.",
-      "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário."
+      "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário.",
+      "receiving": "Habilitar recebimento"
     },
     "tracking": {
       "open": "Ativar rastreamento de aberturas",
-      "openHint": "Injeta um pixel 1×1 transparente com uma referência única, servido pelo seu subdomínio de rastreamento, para que uma pessoa renderizá-lo conte como abertura. Buscas que um cliente de email ou scanner de segurança fez antes de alguém ler são registradas como pré-carregadas e nunca contam; imagens bloqueadas e envios só-texto continuam sem contar.",
+      "openHint": "Injeta um pixel 1×1 transparente com uma referência única, servido pelo seu subdomínio de rastreamento, para que conte como abertura quando uma pessoa abrir o e-mail. Acessos feitos por um cliente de e-mail ou scanner de segurança antes de alguém ler são registrados como pré-carregados e nunca contam; imagens bloqueadas e envios só em texto continuam sem contar.",
       "click": "Ativar rastreamento de cliques",
       "clickHint": "Reescreve cada link para redirecionar pelo seu subdomínio de rastreamento e depois encaminha o destinatário para a URL de destino original.",
       "subdomain": "Subdomínio de rastreamento",
@@ -109,9 +118,9 @@
       "subdomainPlaceholder": "links",
       "subdomainError": "Use um único rótulo DNS em minúsculas.",
       "subdomainReturnPathClash": "O subdomínio de rastreamento deve ser diferente do subdomínio de return-path.",
-      "subdomainUnavailable": "Esta instalação não consegue servir links de rastreamento pelo seu próprio domínio no momento, então o subdomínio abaixo não está em uso — os emails saem com os links originais e sem pixel de abertura. Limpe-o para remover a configuração.",
+      "subdomainUnavailable": "Esta instalação não consegue servir links de rastreamento pelo seu próprio domínio no momento, então o subdomínio abaixo não está em uso — os e-mails saem com os links originais e sem pixel de abertura. Limpe-o para remover a configuração.",
       "localWarning": "O rastreamento precisa de uma URL acessível publicamente. A APP_BASE_URL desta instalação é local, então os destinatários nunca conseguem acessar os links rastreados nem o pixel de abertura — os controles ficam desativados até uma URL pública ser configurada.",
-      "cloudRequiresSubdomain": "Aqui os links rastreados são servidos apenas pelo seu próprio subdomínio de rastreamento — um host compartilhado é o que bloqueadores de anúncio e filtros de spam aprendem a bloquear. Sem um, os emails saem com os links originais e sem pixel de abertura.",
+      "cloudRequiresSubdomain": "Aqui os links rastreados são servidos apenas pelo seu próprio subdomínio de rastreamento — um host compartilhado é o que bloqueadores de anúncio e filtros de spam aprendem a bloquear. Sem esse subdomínio, os e-mails saem com os links originais e sem pixel de abertura.",
       "kindClick": "de cliques",
       "kindOpen": "de aberturas",
       "confirmEnableTitle": "Ativar rastreamento {kind}?",
@@ -121,7 +130,7 @@
       "confirmEnableCta": "Ativar rastreamento {kind}",
       "confirmDisableCta": "Desativar rastreamento {kind}",
       "openLearnMore": "Saiba mais",
-      "kindBoth": "cliques e aberturas",
+      "kindBoth": "de cliques e aberturas",
       "enable": "Ativar rastreamento"
     },
     "configuration": {
@@ -146,7 +155,7 @@
     },
     "ttlAuto": "Auto",
     "checkDns": "Checar DNS",
-    "checkDnsTooltip": "Relê o DNS ao vivo de cada registro e atualiza o status de verificação do SES. Os resultados ao vivo detectam um registro que você acabou de remover; o SES pode demorar para desverificar um domínio cujos registros já não existem.",
+    "checkDnsTooltip": "Consulta o DNS de cada registro em tempo real e atualiza o status de verificação do SES. A consulta em tempo real detecta um registro que você acabou de remover; o SES pode demorar para retirar a verificação de um domínio cujos registros já não existem.",
     "recordStatus": {
       "missing": "Ausente",
       "mismatch": "Divergente",
@@ -156,8 +165,8 @@
     "mismatchFound": "O DNS responde com:\n{found}",
     "proxiedHint": "Este nome responde com endereços em vez do CNAME:\n{found}\nNo Cloudflare isso é a nuvem laranja (proxy). Mude o registro para somente DNS.",
     "dnsOnly": "Somente DNS",
-    "dnsOnlyHint": "No Cloudflare, mantenha o proxy desligado neste registro (nuvem cinza, \"DNS only\"). Um CNAME com proxy responde com os endereços do Cloudflare em vez deste alvo, e o TLS deste host é servido pelo MillionSend.",
-    "inheritedDmarc": "Nenhum registro neste nome. Os destinatários recorrem a <code>{from}</code> (<code>p={policy}</code>), que já cobre este subdomínio.",
+    "dnsOnlyHint": "No Cloudflare, mantenha o proxy desligado neste registro (nuvem cinza, \"Somente DNS\"). Um CNAME com proxy responde com os endereços do Cloudflare em vez deste alvo, e o TLS deste host é servido pelo MillionSend.",
+    "inheritedDmarc": "Nenhum registro neste nome. Os servidores de destino recorrem a <code>{from}</code> (<code>p={policy}</code>), que já cobre este subdomínio.",
     "foundAwaitingProvider": "Registro encontrado no DNS; aguardando a confirmação do provedor (normalmente minutos, até 72 horas).",
     "goToProvider": "Ir para {provider}",
     "moreActions": "Mais ações",
@@ -173,7 +182,13 @@
     "bannerLookingBody": "Isso pode levar algumas horas, dependendo do tempo de propagação de {provider}.",
     "bannerLookingBodyGeneric": "Isso pode levar algumas horas, dependendo do tempo de propagação do seu provedor de DNS.",
     "bannerVerified": "Domínio verificado.",
-    "bannerVerifiedBody": "Pronto para enviar emails.",
+    "bannerVerifiedBody": "Pronto para enviar e-mails.",
+    "newDomainLimit": {
+      "line": "Limite de domínio novo: {perDay}/dia hoje · volume total a partir de {date}",
+      "today": "Limite de domínio novo: {perDay}/dia hoje",
+      "body": "Domínios registrados há pouco enviam um pouco mais a cada dia.",
+      "bodyShared": "Domínios registrados há pouco enviam um pouco mais a cada dia. Os domínios novos da sua equipe dividem esse volume diário."
+    },
     "deleteDomain": "Excluir domínio",
     "deleteBody": "Isso exclui permanentemente o domínio e sua configuração DNS. O envio a partir dele para imediatamente.",
     "deleteConfirmLabel": "Digite o domínio para confirmar",
@@ -184,14 +199,40 @@
     "recheckDns": "Verificar DNS novamente",
     "setup": {
       "title": "Configurar rastreamento",
-      "subtitle": "Os eventos de clique e abertura são servidos por um subdomínio do seu próprio domínio, para que bloqueadores de anúncios e filtros de spam não reconheçam um host de rastreamento compartilhado. Adicione o CNAME e verifique-o.",
+      "subtitle": "O rastreamento de cliques e aberturas passa por um subdomínio do seu próprio domínio, para que bloqueadores de anúncios e filtros de spam não reconheçam um host de rastreamento compartilhado. Adicione o CNAME e verifique-o.",
       "options": "Opções de rastreamento",
       "save": "Salvar e mostrar registro DNS",
       "cancel": "Cancelar",
       "change": "Alterar subdomínio",
       "add": "Adicionar um subdomínio personalizado"
     },
-    "notFound": "Domínio não encontrado."
+    "notFound": "Domínio não encontrado.",
+    "receiving": {
+      "enable": "Ativar recebimento",
+      "note": "Recebe e-mails nos endereços das caixas de entrada e, com o Pega-tudo ligado, em qualquer outro endereço de {domain}. Veja em Caixas de entrada, pela API ou pelo webhook email.received.",
+      "noteApex": "Recebe e-mails nos endereços das caixas de entrada (em qualquer endereço, com o Pega-tudo ligado), e o registro MX dele traz todos os e-mails do domínio para cá. Se alguém já recebe e-mail em {domain}, use um subdomínio como {example} para as caixas de entrada atuais continuarem como estão.",
+      "notVerified": "Disponível assim que o domínio for verificado.",
+      "confirmEnableTitle": "Ativar recebimento?",
+      "confirmEnable": "Quando o registro MX apontar para cá, os e-mails para os endereços das caixas de entrada de {domain} passam a ser aceitos e guardados aqui. Os outros endereços são recusados até você ligar o Pega-tudo.",
+      "confirmEnableApex": "Quando o registro MX apontar para cá, os e-mails para os endereços das caixas de entrada de {domain} passam a ser aceitos e guardados aqui, e os e-mails do domínio deixam de chegar às caixas de entrada que os recebem hoje. Os outros endereços são recusados até você ligar o Pega-tudo.",
+      "confirmEnableCta": "Ativar recebimento",
+      "confirmDisableTitle": "Desativar recebimento?",
+      "confirmDisable": "Os e-mails enviados para {domain} passam a ser recusados. Os que já chegaram continuam aqui até o fim da janela de retenção.",
+      "confirmDisableCta": "Desativar recebimento",
+      "errorNotVerified": "Verifique o domínio antes de ativar o recebimento.",
+      "errorTaken": "Outra equipe já recebe os e-mails de {domain}.",
+      "error": "Não foi possível alterar o recebimento. Tente novamente.",
+      "summaryLabel": "Recebimento",
+      "summary": "{count, plural, one {# caixa de entrada} other {# caixas de entrada}}",
+      "summaryCatchAll": "{count, plural, one {# caixa de entrada} other {# caixas de entrada}} + pega-tudo",
+      "catchAll": "Pega-tudo",
+      "catchAllHint": "E-mails para endereços sem caixa de entrada caem em Todos os recebidos. Desligado: esses endereços são recusados.",
+      "catchAllPaid": "O pega-tudo precisa de um plano pago.",
+      "catchAllError": "Não foi possível alterar o pega-tudo. Tente de novo.",
+      "catchAllOffTitle": "Desligar o pega-tudo?",
+      "catchAllOffConfirm": "E-mails para endereços em {domain} sem caixa de entrada passam a ser recusados. Os endereços das caixas continuam recebendo.",
+      "catchAllOffCta": "Desligar pega-tudo"
+    }
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Abrir configuração do SES",
@@ -203,13 +244,13 @@
   },
   "trackingSetup": {
     "title": "Novo subdomínio de rastreamento",
-    "subtitle": "Sirva o rastreamento de cliques e aberturas pelo seu próprio subdomínio.",
+    "subtitle": "Use o seu próprio subdomínio para o rastreamento de cliques e aberturas.",
     "steps": {
       "details": "Detalhes",
       "dns": "Registro DNS"
     },
     "detailsTitle": "Detalhes",
-    "detailsSubtitle": "Todos os links rastreados são servidos por este subdomínio do seu domínio antes de chegar ao destino.",
+    "detailsSubtitle": "Todos os links rastreados passam por este subdomínio do seu domínio antes de chegar ao destino.",
     "dnsTitle": "Registro DNS",
     "dnsSubtitle": "Adicione este CNAME no seu provedor de DNS e verifique-o. Até resolver, os links rastreados ainda não são servidos.",
     "dnsPending": "Adicione um subdomínio acima para obter o registro DNS.",

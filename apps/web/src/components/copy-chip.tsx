@@ -61,15 +61,21 @@ export function CopyMark({ copied, size = 13 }: { copied: boolean; size?: number
   );
 }
 
-/** Mono chip with a copy→check affordance. `display` masks what's shown; the full `value` is copied. */
+/**
+ * Mono chip with a copy→check affordance. `display` masks what's shown; the
+ * full `value` is copied. `wrap` breaks a value that must always show whole
+ * (an id) across lines instead of ellipsizing it.
+ */
 export function CopyChip({
   value,
   display,
   title,
+  wrap,
 }: {
   value: string;
   display?: React.ReactNode;
   title?: string;
+  wrap?: boolean;
 }) {
   const { copied, copy, label } = useCopy(value);
   return (
@@ -78,7 +84,11 @@ export function CopyChip({
           minWidth 0 lets this flex item shrink below the nowrap value's min-content,
           otherwise it overflows the chip's max-width instead of ellipsizing. */}
       <span
-        style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        style={
+          wrap
+            ? { minWidth: 0, overflowWrap: "anywhere" }
+            : { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+        }
       >
         {display ?? value}
       </span>
@@ -123,5 +133,40 @@ export function CopyGlyph({ value }: { value: string }) {
     >
       <CopyMark copied={copied} />
     </button>
+  );
+}
+
+/**
+ * Mono code block with a copy glyph in its top-right corner (SMTP responses,
+ * bounce diagnostics). The right padding keeps the first line clear of it.
+ */
+export function CopyBlock({ value }: { value: string }) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        background: "var(--ms-inset)",
+        border: "1px solid var(--ms-line)",
+        borderRadius: 10,
+        padding: "14px 40px 14px 16px",
+      }}
+    >
+      <pre
+        className="ms-mono"
+        style={{
+          margin: 0,
+          fontSize: 12,
+          lineHeight: 1.7,
+          color: "var(--ms-bone)",
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+        }}
+      >
+        {value}
+      </pre>
+      <span style={{ position: "absolute", top: 10, right: 12 }}>
+        <CopyGlyph value={value} />
+      </span>
+    </div>
   );
 }

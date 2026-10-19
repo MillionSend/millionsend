@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { env } from "@millionsend/config";
+import { env, sharedInboxDomain } from "@millionsend/config";
+import { deriveInboxKeys } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { EMAIL_SEND_PRIORITY, Queue } from "@millionsend/queue";
 import { createKeyringFromEnv } from "@millionsend/ses";
@@ -39,6 +40,10 @@ const server = createSmtpServer({
     ? { tls: { cert: readFileSync(certPath), key: readFileSync(keyPath) } }
     : {}),
   allowInsecureAuth: env.SMTP_ALLOW_INSECURE_AUTH,
+  onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+  rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
+  inboxKeys: deriveInboxKeys(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64")),
+  sharedInboxDomain: sharedInboxDomain(),
 });
 
 server.on("error", (err) => {

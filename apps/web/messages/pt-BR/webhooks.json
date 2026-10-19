@@ -2,7 +2,7 @@
   "addWebhook": "Adicionar webhook",
   "empty": {
     "headline": "Nenhum webhook ainda.",
-    "body": "Adicione um endpoint para receber eventos de email."
+    "body": "Adicione um endpoint para receber eventos de e-mail."
   },
   "table": {
     "url": "URL",
@@ -14,6 +14,8 @@
   },
   "allEvents": "Todos",
   "optInHint": "Não incluído em Todos",
+  "inboxOptIn": "Eventos de caixas só vão para endpoints que escolherem esses eventos.",
+  "onlyInboxes": "Só estas caixas",
   "eventsCount": "{count, plural, one {# evento} other {# eventos}}",
   "loadMore": "Carregar mais",
   "pageOf": "Página 1 – {pages} de {total} webhooks",
@@ -23,18 +25,24 @@
     "engagement": "Engajamento",
     "problems": "Problemas",
     "account": "Conta",
-    "audience": "Audiência"
+    "audience": "Audiência",
+    "receiving": "Recebimento",
+    "inboxes": "Caixas de entrada"
   },
   "eventLabel": {
     "email": {
-      "sent": "Email enviado",
-      "delivered": "Email entregue",
+      "scheduled": "E-mail agendado",
+      "sent": "E-mail enviado",
+      "delivered": "E-mail entregue",
       "delivery_delayed": "Entrega atrasada",
-      "opened": "Email aberto",
+      "opened": "E-mail aberto",
       "clicked": "Link clicado",
-      "prefetched": "Email pré-carregado",
-      "bounced": "Email rejeitado",
-      "complained": "Marcado como spam"
+      "prefetched": "E-mail pré-carregado",
+      "received": "E-mail recebido",
+      "bounced": "E-mail devolvido",
+      "complained": "Marcado como spam",
+      "failed": "Falha no envio",
+      "suppressed": "E-mail suprimido"
     },
     "deliverability": {
       "warning": "Entregabilidade em risco",
@@ -57,6 +65,32 @@
     "suppression": {
       "added": "Endereço suprimido",
       "removed": "Supressão removida"
+    },
+    "inbox": {
+      "created": "Caixa criada",
+      "updated": "Caixa atualizada",
+      "deleted": "Caixa excluída",
+      "expired": "Caixa expirou",
+      "thread": {
+        "created": "Nova conversa",
+        "folder": {
+          "updated": "Conversa movida"
+        },
+        "labels": {
+          "updated": "Etiquetas da conversa alteradas"
+        }
+      },
+      "email": {
+        "received": "E-mail recebido em uma caixa",
+        "sent": "E-mail enviado de uma caixa",
+        "quarantined": "E-mail em quarentena"
+      },
+      "draft": {
+        "created": "Rascunho criado",
+        "updated": "Rascunho atualizado",
+        "sent": "Rascunho enviado",
+        "deleted": "Rascunho excluído"
+      }
     }
   },
   "status": {
@@ -68,7 +102,7 @@
     "queued": "{count} na fila",
     "oldest": "mais antiga",
     "next": "próxima tentativa",
-    "stale": "{count} entregas aguardando; a mais antiga está vencida há {age}. O receptor está lento ou falhando.",
+    "stale": "{count} entregas aguardando; a mais antiga está atrasada há {age}. O receptor está lento ou falhando.",
     "autoDisabled": "Desativado automaticamente após falhas repetidas. Corrija o receptor e ative-o de novo; os eventos do intervalo não são reenviados."
   },
   "enable": "Ativar",
@@ -159,7 +193,7 @@
     "pending": "Pendente",
     "success": "Sucesso",
     "failed": "Falhou",
-    "exhausted": "Esgotado"
+    "exhausted": "Tentativas esgotadas"
   },
   "apiSheet": {
     "title": "API de Webhooks",

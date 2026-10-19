@@ -29,7 +29,10 @@
     "domain": "Domínio",
     "domainAny": "Qualquer domínio",
     "submit": "Criar chave",
-    "permissionTooltip": "Acesso total gerencia tudo pela API — domínios, contatos, transmissões, chaves.\n\nAcesso de envio só pode enviar e-mails."
+    "permissionTooltip": "Acesso total gerencia tudo pela API — domínios, contatos, transmissões, chaves.\n\nAcesso de envio só pode enviar e-mails.",
+    "restrictInbox": "Restringir a uma caixa de entrada",
+    "restrictInboxHint": "A chave só lê e envia por essa caixa.",
+    "inboxAny": "Sem restrição"
   },
   "reveal": {
     "title": "Chave de API criada",

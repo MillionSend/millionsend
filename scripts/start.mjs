@@ -1,33 +1,34 @@
 // Self-host process supervisor. PROCESS selects what runs in this container:
-// api | worker | web | smtp | docs | all (default all). Migrations run first
-// so a fresh database is usable on first boot — except for docs-only
-// containers, which have no database at all. "all" excludes smtp and docs —
-// both are opt-in via their own compose services.
+// api | worker | web | smtp | docs | mx | all (default all). Migrations run
+// first so a fresh database is usable on first boot — except for docs and mx
+// containers, which have no database at all. "all" excludes smtp, docs and
+// mx — each is opt-in via its own compose service.
 import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 // ponytail: tsx at runtime is the ceiling here — it resolves NodeNext ".js"
 // specifiers to .ts sources, which node --experimental-strip-types cannot.
 // Precompiled dist images are the upgrade path if boot time or image size hurts.
-// Per-package .bin paths because pnpm links tsx into each dependent package,
-// not the workspace root.
+// Node runs each entry with its package's tsx loader (pnpm links tsx into each
+// dependent package, not the workspace root). Not tsx's CLI: its parent process
+// SIGKILLs the entry when a relayed SIGTERM isn't acknowledged within 30 ms,
+// so a process busy at that moment would be killed instead of draining.
+function tsxEntry(pkg, entry) {
+  const loader = createRequire(join(root, pkg, "package.json")).resolve("tsx");
+  return {
+    command: process.execPath,
+    args: ["--import", pathToFileURL(loader).href, join(root, entry)],
+  };
+}
+
 const PROCESSES = {
-  api: {
-    command: join(root, "apps/api/node_modules/.bin/tsx"),
-    args: [join(root, "apps/api/src/server.ts")],
-    cwd: root,
-    env: {},
-  },
-  worker: {
-    command: join(root, "apps/worker/node_modules/.bin/tsx"),
-    args: [join(root, "apps/worker/src/server.ts")],
-    cwd: root,
-    env: {},
-  },
+  api: { ...tsxEntry("apps/api", "apps/api/src/server.ts"), cwd: root, env: {} },
+  worker: { ...tsxEntry("apps/worker", "apps/worker/src/server.ts"), cwd: root, env: {} },
   web: {
     command: join(root, "apps/web/node_modules/.bin/next"),
     args: ["start"],
@@ -35,12 +36,7 @@ const PROCESSES = {
     // PORT belongs to the api (default 3001); the web process is fixed at 3000.
     env: { PORT: "3000" },
   },
-  smtp: {
-    command: join(root, "apps/smtp/node_modules/.bin/tsx"),
-    args: [join(root, "apps/smtp/src/server.ts")],
-    cwd: root,
-    env: {},
-  },
+  smtp: { ...tsxEntry("apps/smtp", "apps/smtp/src/server.ts"), cwd: root, env: {} },
   docs: {
     command: join(root, "apps/docs/node_modules/.bin/next"),
     args: ["start"],
@@ -48,7 +44,14 @@ const PROCESSES = {
     // DOCS_PORT remaps only the host side; the docs process is fixed at 3002.
     env: { PORT: "3002" },
   },
+  // The inbound MX: hands every message to the app over HTTPS, so it holds
+  // no database and boots with only its MX_* variables.
+  mx: { ...tsxEntry("apps/mx", "apps/mx/src/server.ts"), cwd: root, env: {} },
 };
+
+// Processes that never touch the database: a container running only these
+// boots without DATABASE_URL and skips migrations.
+const DATABASE_FREE = new Set(["docs", "mx"]);
 
 const ALL_PROCESSES = ["api", "worker", "web"];
 
@@ -58,20 +61,17 @@ const ALL_PROCESSES = ["api", "worker", "web"];
 // writes .env in the working directory, so -w decides where that is; the
 // script path is absolute and resolves the same from any cwd.
 if (process.argv[2] === "setup") {
-  const cli = spawnSync(
-    join(root, "packages/db/node_modules/.bin/tsx"),
-    [join(root, "scripts/aws-setup/index.ts"), ...process.argv.slice(3)],
-    { cwd: process.cwd(), stdio: "inherit" },
-  );
+  const { command, args } = tsxEntry("packages/db", "scripts/aws-setup/index.ts");
+  const cli = spawnSync(command, [...args, ...process.argv.slice(3)], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+  });
   process.exit(cli.status ?? 1);
 }
 
 function runMigrations() {
-  return spawnSync(
-    join(root, "packages/db/node_modules/.bin/tsx"),
-    [join(root, "packages/db/src/migrate.ts")],
-    { cwd: root, stdio: "inherit" },
-  );
+  const { command, args } = tsxEntry("packages/db", "packages/db/src/migrate.ts");
+  return spawnSync(command, args, { cwd: root, stdio: "inherit" });
 }
 
 // "migrate" argv mode runs pending migrations and exits without starting any
@@ -90,15 +90,13 @@ const names = selection === "all" ? ALL_PROCESSES : [selection];
 for (const name of names) {
   if (!PROCESSES[name]) {
     console.error(
-      `start: unknown PROCESS "${selection}" (expected api | worker | web | smtp | docs | all)`,
+      `start: unknown PROCESS "${selection}" (expected api | worker | web | smtp | docs | mx | all)`,
     );
     process.exit(1);
   }
 }
 
-// The docs site is static content with no database; a docs-only container
-// must boot without DATABASE_URL (its compose service has no postgres).
-if (names.some((name) => name !== "docs")) {
+if (names.some((name) => !DATABASE_FREE.has(name))) {
   const migrate = runMigrations();
   if (migrate.status !== 0) {
     console.error("start: migrations failed, not starting processes");

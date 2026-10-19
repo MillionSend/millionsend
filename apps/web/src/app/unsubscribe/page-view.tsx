@@ -128,7 +128,10 @@ function SuccessCheck() {
 
 function BrandHeading({ name }: { name: string }) {
   return (
-    <span className="ms-display" style={{ fontSize: 22, fontWeight: 600, color: "var(--ms-bone)" }}>
+    <span
+      className="ms-display"
+      style={{ fontSize: 22, fontWeight: 600, color: "var(--ms-bone)", textAlign: "center" }}
+    >
       {name}
     </span>
   );
@@ -307,7 +310,7 @@ export function UnsubscribePageView({
                   </div>
                 </form>
                 <form method="post" action={formAction} id="ms-unsub-all" />
-                <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
+                <div className="ms-actions" style={{ justifyContent: "center", marginTop: 20 }}>
                   <button type="submit" form="ms-unsub-all" className="ms-btn ms-btn-secondary">
                     {m.button}
                   </button>

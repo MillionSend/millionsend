@@ -14,8 +14,15 @@ import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
 import { useSwitchLocale } from "@/lib/use-switch-locale";
 
 // Canvas nav order (Row 1 chrome): Settings lives in the main list.
-export const NAV_ITEMS: ReadonlyArray<{ key: string; href: string; icon: NavIconName }> = [
+export const NAV_ITEMS: ReadonlyArray<{
+  key: string;
+  href: string;
+  icon: NavIconName;
+  /** Only on an instance that takes mail (receivingEnabled()). */
+  receiving?: true;
+}> = [
   { key: "emails", href: "/emails", icon: "emails" },
+  { key: "inboxes", href: "/inboxes", icon: "inboxes", receiving: true },
   { key: "broadcasts", href: "/broadcasts", icon: "broadcasts" },
   { key: "templates", href: "/templates", icon: "templates" },
   { key: "audience", href: "/audience", icon: "audience" },
@@ -51,6 +58,11 @@ function NavItem({
       {label}
     </Link>
   );
+}
+
+/** The nav items an instance offers: Inboxes only where it takes mail. */
+export function navItemsFor(receiving: boolean) {
+  return NAV_ITEMS.filter((item) => receiving || !item.receiving);
 }
 
 /* Language row — the same segmented pill with the two language codes. */
@@ -146,12 +158,14 @@ export function Sidebar({
   teamName,
   teamLogoUrl,
   userEmail,
+  receiving,
   className,
   onNavigate,
 }: {
   teamName: string;
   teamLogoUrl?: string | null | undefined;
   userEmail: string;
+  receiving: boolean;
   /** Hook for the responsive drawer treatment (see components.css .ms-sidebar). */
   className?: string;
   /** Fired when a nav link is chosen, so the mobile drawer can close. */
@@ -160,6 +174,7 @@ export function Sidebar({
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
+  const navItems = navItemsFor(receiving);
   const [menuOpen, setMenuOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   useDismiss(accountRef, menuOpen, () => setMenuOpen(false));
@@ -217,7 +232,7 @@ export function Sidebar({
             : undefined
         }
       >
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavItem
             key={item.key}
             item={item}

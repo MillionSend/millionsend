@@ -20,7 +20,9 @@ const handler = (req: Request) => {
     // procedure chose. The input never goes along.
     onError: ({ error, path, ctx }) => {
       if (error.code !== "INTERNAL_SERVER_ERROR") return;
-      void captureError(error.cause ?? error, {
+      const fault = error.cause ?? error;
+      console.error("unhandled trpc error", path, fault);
+      void captureError(fault, {
         teamId: ctx?.teamId,
         tags: path ? { procedure: path } : {},
       });

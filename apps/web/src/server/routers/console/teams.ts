@@ -1,28 +1,58 @@
-import { isLiveKey } from "@millionsend/billing";
-import { env, isCloudDeployment, supportViewEnabled } from "@millionsend/config";
+import {
+  type BillingStripe,
+  cancelAndRefundFraud,
+  hasLiveSubscription,
+  isLiveKey,
+} from "@millionsend/billing";
+import { env, isCloudDeployment, sesTenantsEnabled, supportViewEnabled } from "@millionsend/config";
 import {
   accountMailPhrase,
   fetchAccountScore,
   fetchDeliverabilityHealth,
+  forgetAbuseRecords,
+  isSilentlySuspended,
   liveSupportViewForTeam,
   PLAN_RUNGS,
   type Plan,
   raisesQuota,
+  recordPhishingFingerprints,
+  recordTenantStatus,
+  resumeMonitorPause,
+  SILENT_SUSPENSIONS,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
   startSupportView,
+  suspendTeam,
+  syncTenantSendingStatus,
+  type TenantStatusOutcome,
   teamQuota,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
+import { createSesv2Client, type SesTenantClient, setTenantSendingStatus } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ilike, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { isUniqueViolation } from "@/lib/db-errors";
+import { formatMoneyTotals } from "@/lib/format";
 import { escapeLike } from "@/lib/sql";
+import { getStripe } from "../../billing";
+import {
+  consoleCodeVerifiedUntil,
+  consoleStepUp,
+  sendConsoleCode,
+  signedInRecently,
+} from "../../console-code";
+import { FINGERPRINT_SOURCES } from "../../linkage";
+import { getQueue } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
-import { auditOperator, kickQuotaDrain, loadTeam, mailTeamOwners } from "./shared";
+import {
+  auditOperator,
+  kickQuotaDrain,
+  loadTeam,
+  mailTeamOwners,
+  type OperatorCtx,
+} from "./shared";
 
 const SORT_KEYS = [
   "name",
@@ -134,6 +164,77 @@ function reasonText(
     : phrase;
 }
 
+/** SES and Stripe access for a suspension; tests swap them with setConsoleTeamsDeps. */
+export interface ConsoleTeamsDeps {
+  tenantClient(region: string): SesTenantClient;
+  /** Hands a failed update to the worker's tenant.status job, which retries it with backoff. */
+  retryTenantStatus(teamId: string): Promise<void>;
+  stripe(): BillingStripe;
+}
+
+const defaultDeps: ConsoleTeamsDeps = {
+  tenantClient: (region) =>
+    createSesv2Client({
+      region,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    }),
+  retryTenantStatus: async (teamId) => {
+    await (await getQueue()).send("tenant.status", { teamId }, { dedupeKey: teamId });
+  },
+  stripe: getStripe,
+};
+
+let deps = defaultDeps;
+
+/** Tests: swap the SES client, the retry hand-off or Stripe instead of stubbing their SDKs. */
+export function setConsoleTeamsDeps(next: Partial<ConsoleTeamsDeps> | null): void {
+  deps = { ...defaultDeps, ...next };
+}
+
+/**
+ * Brings the team's SES tenant in line with the standing just written. An
+ * AWS failure never fails the action: it is audited, handed to the worker's
+ * retry and returned for the console to show. Null without tenants.
+ */
+async function syncTenant(ctx: OperatorCtx, teamId: string): Promise<TenantStatusOutcome | null> {
+  if (!sesTenantsEnabled()) return null;
+  const outcome = await syncTenantSendingStatus(ctx.db, {
+    teamId,
+    setStatus: (region, status) =>
+      setTenantSendingStatus(deps.tenantClient(region), { tenantName: teamId, status }),
+  });
+  if (!outcome) return null;
+  if (outcome.failed.length > 0) await deps.retryTenantStatus(teamId);
+  await recordTenantStatus(ctx.db, { teamId, actor: { userId: ctx.operator.id }, outcome });
+  return outcome;
+}
+
+/**
+ * Cancels the team's subscription and refunds its last 120 days as fraud,
+ * once the suspension is saved. A Stripe failure never fails the action: it
+ * is audited and returned for the console to show, and the operator finishes
+ * in the Stripe dashboard. The audit row is the operator's alone, as the
+ * tenant's is: a phishing suspension is silent.
+ */
+async function refundFraud(ctx: OperatorCtx, team: { id: string; name: string }) {
+  const outcome = await cancelAndRefundFraud({ db: ctx.db, stripe: deps.stripe() }, team.id);
+  await auditOperator(ctx, {
+    teamId: null,
+    action: outcome.failed ? "team.fraud_refund_failed" : "team.fraud_refunded",
+    target: { type: "team", id: team.id },
+    metadata: {
+      team: team.name,
+      subscription: outcome.canceled,
+      refunded: outcome.refunds.length,
+      amount: formatMoneyTotals(outcome.refunds, "en") || null,
+      charges: outcome.refunds.map((r) => r.charge).join(", ") || null,
+      failed: outcome.failed,
+    },
+  });
+  return outcome;
+}
+
 export const consoleTeamsRouter = router({
   list: operatorProcedure
     .input(
@@ -179,9 +280,8 @@ export const consoleTeamsRouter = router({
           .leftJoin(st, eq(st.teamId, t.id))
           .where(where),
       ]);
-      const items = rows.slice(0, input.limit);
       return {
-        items,
+        items: rows.slice(0, input.limit),
         total: count?.total ?? 0,
         nextOffset: rows.length > input.limit ? input.offset + input.limit : null,
         rungs: operatorRungs(),
@@ -228,11 +328,48 @@ export const consoleTeamsRouter = router({
   }),
 
   /**
+   * The plan a live Stripe subscription bills the team for, which Suspend
+   * offers to cancel and refund; null without one.
+   */
+  subscription: operatorProcedure
+    .input(z.object({ id: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.id);
+      return team.stripeSubscriptionId && hasLiveSubscription(team.planStatus)
+        ? { plan: team.plan, planQuota: team.planQuota }
+        : null;
+    }),
+
+  /**
+   * The first step of View as owner: a one-time code to the operator's own
+   * address. When it cannot go out, the answer says why and whether the
+   * operator's sign-in is recent enough to stand in for it.
+   */
+  sendSupportViewCode: operatorProcedure.mutation(async ({ ctx }) => {
+    if (!supportViewEnabled()) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_off" });
+    }
+    const sent = await sendConsoleCode(ctx.db, ctx.operator);
+    if (sent.sent) return sent;
+    return {
+      ...sent,
+      signedInRecently: signedInRecently(ctx.session),
+      minutes: SUPPORT_VIEW_SIGN_IN_MINUTES,
+    };
+  }),
+
+  /** Until when a code confirmed on this session lets View as owner start without a new one. */
+  supportViewVerified: operatorProcedure.query(async ({ ctx }) => ({
+    until: await consoleCodeVerifiedUntil(ctx.db, ctx.session),
+  })),
+
+  /**
    * Opens the team's dashboard as its owner sees it, read-only, for 30
    * minutes: a grant on the operator's own session (never a session for the
-   * owner), named by a cookie the context re-checks on every request. No mail
-   * goes out: the team's audit trail carries the start at once, written with
-   * the grant, and the owner can end the view from Settings.
+   * owner), named by a cookie the context re-checks on every request. A view
+   * the operator still holds, from a closed tab included, ends first. Nothing
+   * reaches the team: no mail, and the start is the instance's audit row,
+   * written with the grant.
    */
   startSupportView: operatorProcedure
     .input(
@@ -241,22 +378,15 @@ export const consoleTeamsRouter = router({
         reason: z.enum(SUPPORT_VIEW_REASONS),
         reference: z.string().trim().max(200).optional(),
         note: z.string().trim().max(1000).optional(),
+        code: z
+          .string()
+          .regex(/^\d{6}$/)
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       if (!supportViewEnabled()) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_off" });
-      }
-      // No nesting: a live view is left through its banner, not replaced from inside.
-      if (ctx.supportView) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_live" });
-      }
-      const signedInAt = ctx.session.session?.createdAt;
-      if (
-        !signedInAt ||
-        Date.now() - signedInAt.getTime() > SUPPORT_VIEW_SIGN_IN_MINUTES * 60_000
-      ) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "sign_in_again" });
       }
       const team = await loadTeam(ctx.db, input.id);
       const [own] = await ctx.db
@@ -275,21 +405,14 @@ export const consoleTeamsRouter = router({
       if (!reference) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "reference_required" });
       }
-      let grant: Awaited<ReturnType<typeof startSupportView>>;
-      try {
-        grant = await startSupportView(ctx.db, {
-          teamId: team.id,
-          operatorUserId: ctx.operator.id,
-          reason: input.reason,
-          reference,
-          note: input.note || null,
-        });
-      } catch (error) {
-        // The one-live-view-per-operator index, tripped by two starts racing:
-        // the other one won, so this reads as a view already being live.
-        if (!isUniqueViolation(error)) throw error;
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_live" });
-      }
+      await consoleStepUp(ctx.db, ctx.session, input.code);
+      const grant = await startSupportView(ctx.db, {
+        teamId: team.id,
+        operatorUserId: ctx.operator.id,
+        reason: input.reason,
+        reference,
+        note: input.note || null,
+      });
       ctx.setSupportViewCookie?.({ id: grant.id, expiresAt: grant.expiresAt });
       return { grantId: grant.id, expiresAt: grant.expiresAt };
     }),
@@ -396,7 +519,9 @@ export const consoleTeamsRouter = router({
           target: { type: "team", id: team.id },
           metadata: { name: team.name, reason: "manual" },
         });
-        if (input.broadcastsPaused) {
+        // A suspended team is not told: the notice says transactional mail
+        // keeps flowing, which the suspension stops, and phishing stays silent.
+        if (input.broadcastsPaused && !team.suspendedAt) {
           await mailTeamOwners(ctx.db, team, "team.broadcasts_paused", "/broadcasts", (locale) => ({
             reason: reasonText(locale, "team.broadcasts_paused", "manual", undefined),
           }));
@@ -436,6 +561,8 @@ export const consoleTeamsRouter = router({
         .update(t)
         .set({ broadcastsPausedByOperatorAt: new Date() })
         .where(eq(t.id, team.id));
+      // Same rule as adjustLimits: a suspended team is not told.
+      const notify = input.notify && !team.suspendedAt;
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.broadcasts_paused",
@@ -444,10 +571,10 @@ export const consoleTeamsRouter = router({
           name: team.name,
           reason: input.reason,
           note: input.note ?? null,
-          notified: input.notify,
+          notified: notify,
         },
       });
-      if (input.notify) {
+      if (notify) {
         await mailTeamOwners(ctx.db, team, "team.broadcasts_paused", "/broadcasts", (locale) => ({
           reason: reasonText(locale, "team.broadcasts_paused", input.reason, input.note),
         }));
@@ -479,27 +606,36 @@ export const consoleTeamsRouter = router({
       await kickQuotaDrain();
     }),
 
-  /** Every send refused until reinstated; owners hear about it unless it is phishing. */
+  /**
+   * Every send refused until reinstated, the team's SES tenant disabled too;
+   * owners hear about it unless it is phishing. `refund` also cancels the
+   * subscription and refunds its last 120 days as fraud.
+   */
   suspend: operatorProcedure
     .input(
-      z.object({
-        id: z.uuid(),
-        reason: z.enum(SUSPENSION_REASONS),
-        note: z.string().trim().max(1000).optional(),
-        notify: z.boolean().default(true),
-      }),
+      z
+        .object({
+          id: z.uuid(),
+          // A review hold comes only from the content monitor, which also stamps held_at.
+          reason: z.enum(SUSPENSION_REASONS).exclude(["review"]),
+          note: z.string().trim().max(1000).optional(),
+          notify: z.boolean().default(true),
+          refund: z.boolean().default(false),
+        })
+        // Nothing was paid on non-payment, so nothing goes back.
+        .refine((input) => !(input.refund && input.reason === "non_payment"), {
+          message: "refund_non_payment",
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.id);
-      await ctx.db
-        .update(t)
-        .set({
-          suspendedAt: team.suspendedAt ?? new Date(),
-          suspensionReason: input.reason,
-          suspensionNote: input.note ?? null,
-        })
-        .where(eq(t.id, team.id));
-      const notify = input.notify && input.reason !== "phishing";
+      await suspendTeam(ctx.db, { teamId: team.id, reason: input.reason, note: input.note });
+      await recordPhishingFingerprints(
+        ctx.db,
+        { teamId: team.id, reason: input.reason },
+        FINGERPRINT_SOURCES,
+      );
+      const notify = input.notify && !SILENT_SUSPENSIONS.includes(input.reason);
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.suspended",
@@ -517,7 +653,8 @@ export const consoleTeamsRouter = router({
         }));
       }
       // The trust & safety list is the register of suspended teams, so a
-      // suspension without a flag opens a manual one.
+      // suspension without a flag opens a manual one, marked as its own so
+      // the reinstatement clears it.
       await ctx.db
         .insert(schema.teamFlags)
         .values({
@@ -525,8 +662,14 @@ export const consoleTeamsRouter = router({
           reason: "manual",
           note: input.note ?? null,
           openedBy: ctx.operator.id,
+          detail: { suspension: true },
         })
         .onConflictDoNothing();
+      const tenant = await syncTenant(ctx, team.id);
+      return {
+        tenant,
+        refund: input.refund && team.stripeCustomerId ? await refundFraud(ctx, team) : null,
+      };
     }),
 
   reinstate: operatorProcedure
@@ -537,15 +680,70 @@ export const consoleTeamsRouter = router({
         .update(t)
         .set({ suspendedAt: null, suspensionReason: null, suspensionNote: null })
         .where(eq(t.id, team.id));
+      await forgetAbuseRecords(ctx.db, team.id);
+      // The flag the suspension opened goes with it; any other stays open.
+      const f = schema.teamFlags;
+      const [flag] = await ctx.db
+        .update(f)
+        .set({ status: "cleared", clearedAt: new Date(), clearedBy: ctx.operator.id })
+        .where(
+          and(
+            eq(f.teamId, team.id),
+            eq(f.status, "open"),
+            sql`${f.detail} @> '{"suspension": true}'::jsonb`,
+          ),
+        )
+        .returning({ id: f.id, reason: f.reason });
+      if (flag) {
+        await auditOperator(ctx, {
+          teamId: team.id,
+          action: "console.flag_cleared",
+          target: { type: "team_flag", id: flag.id },
+          metadata: { reason: flag.reason },
+        });
+      }
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.reinstated",
         target: { type: "team", id: team.id },
         metadata: { name: team.name, reason: team.suspensionReason },
       });
-      if (team.suspendedAt && team.suspensionReason !== "phishing") {
+      if (team.suspendedAt && !isSilentlySuspended(team)) {
         await mailTeamOwners(ctx.db, team, "team.reinstated", "/emails", () => ({}));
       }
+      if (team.suspensionReason === "review") {
+        // Releasing a hold clears the monitor flag it kept open, in the
+        // operator's name, which the safety cron does not reopen while the
+        // same trigger holds; left open, it would keep a released team flagged.
+        const tf = schema.teamFlags;
+        const [holdFlag] = await ctx.db
+          .update(tf)
+          .set({ status: "cleared", clearedAt: new Date(), clearedBy: ctx.operator.id })
+          .where(
+            and(
+              eq(tf.teamId, team.id),
+              eq(tf.status, "open"),
+              eq(tf.reason, "monitor"),
+              isNull(tf.openedBy),
+            ),
+          )
+          .returning({ id: tf.id });
+        if (holdFlag) {
+          // An instance row: the team's own audit never lists its flags.
+          await auditOperator(ctx, {
+            teamId: null,
+            action: "console.flag_cleared",
+            target: { type: "team", id: team.id },
+            metadata: { team: team.name, flagId: holdFlag.id, reason: "monitor" },
+          });
+        }
+        // A broadcast pause the monitor applied before the hold goes with it,
+        // as the review page's Resume lifts it; an operator's own pause stays.
+        await resumeMonitorPause(ctx.db, { teamId: team.id, actor: { userId: ctx.operator.id } });
+      }
+      // Before the drain: SES refuses a disabled tenant's sends.
+      const tenant = await syncTenant(ctx, team.id);
       await kickQuotaDrain();
+      return { tenant };
     }),
 });

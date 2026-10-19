@@ -1,4 +1,4 @@
-import { handleWebhook, isLiveKey } from "@millionsend/billing";
+import { cardFingerprints, handleWebhook, isLiveKey } from "@millionsend/billing";
 import { accountEmailFrom, env, notificationsEmailFrom } from "@millionsend/config";
 import {
   type AccountMailKind,
@@ -7,8 +7,10 @@ import {
   claimNotification,
   clearNotifications,
   DAY_MS,
+  errorSummary,
   formatMailDate,
   freeCapText,
+  linkTeam,
   listTeamOwners,
   type MailLocale,
   planCapPhrase,
@@ -87,6 +89,15 @@ export async function POST(request: Request) {
       } catch (err) {
         console.error("billing webhook: owner mail skipped", err);
       }
+      // A team's card is known once it first pays; linkage compares it with
+      // the cards of teams suspended for phishing.
+      if (before.plan === "free" && after.plan !== "free") {
+        const cards = await cardFingerprints(getStripe(), event.customerId).catch((err) => {
+          console.error(`billing webhook: cards not read for linkage: ${errorSummary(err)}`);
+          return [];
+        });
+        await linkTeam(db, { teamId: after.id, trigger: "payment", cards });
+      }
     }
   }
   return new Response(null, { status });
@@ -101,6 +112,7 @@ interface BillingEvent {
     attemptCount: number;
     nextAttempt: Date | null;
     hostedUrl: string | null;
+    billingReason: string | null;
   } | null;
 }
 
@@ -117,6 +129,7 @@ function parseEvent(rawBody: string): BillingEvent | null {
           attempt_count?: unknown;
           next_payment_attempt?: unknown;
           hosted_invoice_url?: unknown;
+          billing_reason?: unknown;
         };
       };
     };
@@ -140,6 +153,7 @@ function parseEvent(rawBody: string): BillingEvent | null {
                 : null,
             hostedUrl:
               typeof object.hosted_invoice_url === "string" ? object.hosted_invoice_url : null,
+            billingReason: typeof object.billing_reason === "string" ? object.billing_reason : null,
           }
         : null;
     return { type, customerId, invoice };
@@ -195,12 +209,21 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
           path: BILLING_PATH,
           url,
           values: values(owner.locale),
+          aboutTeamId: after.id,
         }),
       );
     }
   };
 
-  if (event.type === "invoice.payment_failed" && event.invoice && after.planStatus === "past_due") {
+  // A move up's own invoice failing leaves the plan where it was; the
+  // dashboard already sent the owner to pay it, and this mail is about the
+  // renewal that put the team past due.
+  if (
+    event.type === "invoice.payment_failed" &&
+    event.invoice &&
+    event.invoice.billingReason !== "subscription_update" &&
+    after.planStatus === "past_due"
+  ) {
     const { id, attemptCount, nextAttempt, hostedUrl } = event.invoice;
     if (await claim("billing.payment_failed", `${id}:${attemptCount}`)) {
       await send(
@@ -209,6 +232,10 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
           team,
           plan: planLabel(after.plan, after.planQuota),
           cap: planCapPhrase(locale, after.plan, after.planQuota),
+          overage:
+            after.overageEnabled && teamQuota(after, true).kind === "month"
+              ? accountMailPhrase({ locale, kind: "billing.payment_failed", key: "overagePaused" })
+              : "",
           freeCap: freeCapText(locale),
           retry: nextAttempt
             ? accountMailPhrase({

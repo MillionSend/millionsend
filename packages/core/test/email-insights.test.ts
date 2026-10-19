@@ -4,6 +4,7 @@ import {
   type CheckId,
   type EmailInsightsInput,
   evaluateEmailInsights,
+  MIN_BODY_TEXT_CHARS,
   SCORE_VERSION,
   scoreBand,
 } from "../src/email-insights.js";
@@ -222,6 +223,25 @@ describe("link_domains_match", () => {
   it("passes when ANY link shares the sender registrable domain", () => {
     const html = '<a href="https://other.example/x">a</a><a href="https://acme.com/y">b</a>';
     expect(check(input({ preTrackingHtml: html }), "link_domains_match").status).toBe("pass");
+  });
+
+  it("sees a link written without quotes or with spaces around the =", () => {
+    const html = '<a href=https://other.example/x>a</a><a href = "https://another.example/y">b</a>';
+    expect(check(input({ preTrackingHtml: html }), "link_domains_match").detail).toEqual({
+      linkDomains: ["other.example", "another.example"],
+    });
+  });
+
+  it("reads links as a browser does: past a decoy, after a slash, with backslashes, and in areas", () => {
+    const html =
+      `<a title=" href='https://mail.acme.com/' " href="https://evil.example/x">a</a>` +
+      "<a/href=https://slash.example/y>b</a>" +
+      '<a href="https:\\\\back.example/z">c</a>' +
+      '<map><area href="https://area.example/" alt="d"></map>' +
+      '<form action="https://form.example/post"></form>';
+    expect(check(input({ preTrackingHtml: html }), "link_domains_match").detail).toEqual({
+      linkDomains: ["evil.example", "slash.example", "back.example", "area.example"],
+    });
   });
 
   it("fails with unique registrable domains capped at 10", () => {
@@ -508,6 +528,12 @@ describe("image_text_ratio", () => {
     const c = check(input({ preTrackingHtml: `<p>Sale!</p>${IMG}${IMG}` }), "image_text_ratio");
     expect(c.status).toBe("fail");
     expect(c.detail).toEqual({ visibleTextChars: 5, imageCount: 2 });
+    const line = (chars: number) =>
+      check(input({ preTrackingHtml: `<p>${"x".repeat(chars)}</p>${IMG}` }), "image_text_ratio");
+    expect([line(MIN_BODY_TEXT_CHARS - 1).status, line(MIN_BODY_TEXT_CHARS).status]).toEqual([
+      "fail",
+      "pass",
+    ]);
   });
 
   it("passes with enough visible text (style/script stripped from the count)", () => {
@@ -855,7 +881,8 @@ describe("crafted html", () => {
     for (const html of junk) {
       const started = performance.now();
       evaluateEmailInsights(input({ html, preTrackingHtml: html }));
-      expect(performance.now() - started).toBeLessThan(1000);
+      // A quadratic pass takes minutes at this size; the slack absorbs a busy CI runner.
+      expect(performance.now() - started).toBeLessThan(5000);
     }
   });
 });

@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
 import type { BillingStripe } from "@millionsend/billing";
 import {
   DAY_MS,
+  defaultSafety,
+  PLAN_INBOX_LIMIT,
   PLAN_RUNGS,
   type PlanRungKey,
   rungByKey,
@@ -42,6 +45,8 @@ let calls: {
   meterEvents: Stripe.Billing.MeterEventCreateParams[];
 };
 let onCustomerCreate: (() => Promise<void>) | undefined;
+/** The bank declines (or wants confirmed) the charge a move up makes, so Stripe holds the update. */
+let declineUpdates = false;
 
 // Stripe stamps whole seconds; rows and the fake agree from the start.
 const wholeSeconds = (ms: number) => new Date(Math.floor(ms / 1000) * 1000);
@@ -109,6 +114,13 @@ const stripe = {
     retrieve: async () => sub,
     update: async (_id: string, params: Stripe.SubscriptionUpdateParams) => {
       calls.updates.push(params);
+      if (declineUpdates && params.payment_behavior === "pending_if_incomplete") {
+        return {
+          ...sub,
+          pending_update: { expires_at: seconds(PERIOD_END) },
+          latest_invoice: { id: "in_1", hosted_invoice_url: "https://invoice.stripe.com/i/in_1" },
+        };
+      }
       const kept = sub.items.data.filter(
         (i) => !params.items?.some((u) => u.id === i.id && u.deleted),
       );
@@ -169,6 +181,11 @@ const stripe = {
         calls.meterEvents.push(params);
         return {};
       },
+    },
+    meters: {
+      list: async () => ({ data: [{ id: "mtr_1", event_name: "emails_over_quota" }] }),
+      // Stripe has counted nothing yet: every reported step is still in flight.
+      listEventSummaries: async () => ({ data: [] }),
     },
   },
   checkout: {
@@ -270,6 +287,7 @@ beforeEach(async () => {
   };
   schedule = null;
   onCustomerCreate = undefined;
+  declineUpdates = false;
   vi.stubEnv("IS_CLOUD", "true");
   vi.stubEnv("APP_BASE_URL", "https://app.example.com");
 });
@@ -310,9 +328,41 @@ describe("billing router", () => {
       planStatus: "none",
       currentPeriodEnd: null,
       quota: { kind: "day", plan: "free", limit: 100 },
+      overageEnabled: true,
       usage: { accepted: 0, reportedOverage: 0 },
       hasCustomer: false,
       hasLiveSubscription: false,
+      upgradesHeld: false,
+      // No mail is received here, so no plan line counts inboxes.
+      inboxes: null,
+    });
+  });
+
+  it("status reports each plan's inbox cap and the team's count where mail is received", async () => {
+    vi.stubEnv("RECEIVING_MX_HOST", "mx.example.net");
+    const teamId = await createTeam(db);
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: "in.billing.test", region: "us-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("no domain");
+    const inbox = (localPart: string, expiresAt: Date | null) => ({
+      teamId,
+      kind: "agent" as const,
+      emailAddress: `${localPart}@in.billing.test`,
+      localPart,
+      domainId: domain.id,
+      name: localPart,
+      safety: defaultSafety("agent", false),
+      expiresAt,
+    });
+    // An expired inbox no longer counts against the cap.
+    await db
+      .insert(schema.inboxes)
+      .values([inbox("live", null), inbox("gone", new Date(Date.now() - 1000))]);
+    expect((await callerFor(teamId, "member").billing.status()).inboxes).toEqual({
+      limits: PLAN_INBOX_LIMIT,
+      used: 1,
     });
   });
 
@@ -448,7 +498,7 @@ describe("billing router", () => {
     });
   });
 
-  it("changePlan moves up at once with prorations, re-pricing the metered item, and drains on a raise", async () => {
+  it("changePlan moves up once the prorated charge is paid, re-pricing the metered item, and drains on a raise", async () => {
     const teamId = await subscribedTeam("pro_100k");
     const owner = callerFor(teamId, "owner");
     expect(await owner.billing.changePlan({ rung: "scale_500k" })).toEqual({ applied: "now" });
@@ -458,7 +508,9 @@ describe("billing router", () => {
           { id: "si_base", price: "price_scale_500k" },
           { id: "si_overage", price: "price_scale_500k_overage" },
         ],
-        proration_behavior: "create_prorations",
+        proration_behavior: "always_invoice",
+        payment_behavior: "pending_if_incomplete",
+        expand: ["latest_invoice"],
       },
     ]);
     expect(calls.scheduleCreates).toEqual([]);
@@ -472,6 +524,38 @@ describe("billing router", () => {
     expect(await auditRows()).toEqual([
       { action: "billing.plan_changed", data: { rung: "scale_500k", applied: "now" } },
     ]);
+  });
+
+  it("changePlan hands back the invoice page when the charge waits on the bank, moving nothing", async () => {
+    const teamId = await subscribedTeam("pro_100k");
+    declineUpdates = true;
+    const owner = callerFor(teamId, "owner");
+    expect(await owner.billing.changePlan({ rung: "scale_500k" })).toEqual({
+      applied: "payment_required",
+      url: "https://invoice.stripe.com/i/in_1",
+    });
+    expect(await teamRow(teamId)).toMatchObject({ plan: "pro", planQuota: 100_000 });
+    // Nothing moved, so nothing drains and no one hears of a move yet.
+    expect(h.runCronNow).not.toHaveBeenCalled();
+    expect(h.sent).toEqual([]);
+    expect(await auditRows()).toEqual([
+      {
+        action: "billing.plan_changed",
+        data: { rung: "scale_500k", applied: "payment_required" },
+      },
+    ]);
+  });
+
+  it("changePlan refuses a move up with CONFLICT while Stripe is still counting a large overage step", async () => {
+    const teamId = await subscribedTeam("pro_100k", { overage: true });
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: PERIOD_START, accepted: 400_000 });
+    await expect(
+      callerFor(teamId, "owner").billing.changePlan({ rung: "pro_200k" }),
+    ).rejects.toMatchObject({ code: "CONFLICT", message: "overage_in_flight" });
+    expect(calls.updates).toEqual([]);
+    expect(await teamRow(teamId)).toMatchObject({ planQuota: 100_000 });
   });
 
   it("changePlan adds the metered item a subscription from before the ladder lacks", async () => {
@@ -558,7 +642,7 @@ describe("billing router", () => {
     const owner = callerFor(teamId, "owner");
     await owner.billing.changePlan({ rung: "scale_500k" });
     expect(h.sent.map((m) => [m.kind, m.to, m.subject])).toEqual([
-      ["billing.plan_changed", "ada@example.com", "acme moved from Pro 100K to Scale 500K"],
+      ["billing.plan_changed", "ada@example.com", "Your team moved from Pro 100K to Scale 500K"],
     ]);
     expect(h.sent[0]?.from).toBe("MillionSend <notices@mail.example.com>");
     expect(h.sent[0]?.text).toContain("https://app.example.com/settings/billing");
@@ -572,8 +656,8 @@ describe("billing router", () => {
     await owner.billing.changePlan({ rung: "scale_1m" });
     expect(calls.scheduleReleases).toEqual(["sub_sched_1"]);
     expect(h.sent.map((m) => m.subject)).toEqual([
-      "acme moved from Pro 100K to Scale 500K",
-      "acme moved from Scale 500K to Scale 1M",
+      "Your team moved from Pro 100K to Scale 500K",
+      "Your team moved from Scale 500K to Scale 1M",
     ]);
     expect((await teamRow(teamId))?.pendingRung).toBeNull();
   });
@@ -671,6 +755,129 @@ describe("billing router", () => {
     vi.stubEnv("STRIPE_PORTAL_CONFIG", "bpc_1");
     await owner.billing.portal();
     expect(calls.portals[1]).toMatchObject({ configuration: "bpc_1" });
+  });
+});
+
+describe("a suspended or flagged team", () => {
+  /**
+   * Suspends the team as the operator console does, or opens a flag of that
+   * kind: one of the safety cron's abuse signals, or else an operator's call.
+   */
+  async function hold(
+    teamId: string,
+    by: "suspension" | "monitor" | "guardrail" | "complaints" | "manual" | "score" | "report",
+  ) {
+    if (by === "suspension") {
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+        .where(eq(schema.teams.id, teamId));
+    } else {
+      const cron = by === "monitor" || by === "guardrail" || by === "complaints";
+      await db
+        .insert(schema.teamFlags)
+        .values({ teamId, reason: by, openedBy: cron ? null : "op1" });
+    }
+  }
+  const held = { code: "FORBIDDEN", message: "upgrades_held" };
+
+  it("cannot start a checkout; status says so", async () => {
+    // An operator's flag holds whatever its kind: a reopened score flag, a report.
+    for (const by of [
+      "suspension",
+      "monitor",
+      "guardrail",
+      "complaints",
+      "manual",
+      "score",
+      "report",
+    ] as const) {
+      const teamId = await createTeam(db, `held-${by}`);
+      await hold(teamId, by);
+      const owner = callerFor(teamId, "owner");
+      expect((await owner.billing.status()).upgradesHeld).toBe(true);
+      await expect(owner.billing.checkout({ rung: "pro_100k" })).rejects.toMatchObject(held);
+    }
+    expect(calls.customers).toEqual([]);
+    expect(calls.checkouts).toEqual([]);
+    expect(await auditRows()).toEqual([]);
+  });
+
+  it("is told upgrades are unavailable, never why", () => {
+    for (const locale of ["en", "pt-BR"]) {
+      const { billing } = JSON.parse(
+        readFileSync(new URL(`../messages/${locale}/settings.json`, import.meta.url), "utf8"),
+      );
+      for (const key of ["upgradesHeld", "upgradesHeldLive"]) {
+        expect(billing[key], `${locale} ${key}`).not.toMatch(/suspen|review|revis|flag|sinaliz/i);
+      }
+    }
+  });
+
+  it("the cron's own score or report flag, or a cleared flag, holds nothing", async () => {
+    const flags = [
+      { reason: "score" },
+      { reason: "report" },
+      { reason: "manual", openedBy: "op1", status: "cleared", clearedAt: new Date() },
+      { reason: "monitor", status: "cleared", clearedAt: new Date() },
+    ] as const;
+    for (const [i, flag] of flags.entries()) {
+      const teamId = await createTeam(db, `flagged-${i}`);
+      await db.insert(schema.teamFlags).values({ teamId, ...flag });
+      expect((await callerFor(teamId, "owner").billing.status()).upgradesHeld).toBe(false);
+    }
+  });
+
+  it("cannot move up or turn overage on", async () => {
+    const teamId = await subscribedTeam("pro_100k");
+    await hold(teamId, "monitor");
+    const owner = callerFor(teamId, "owner");
+    await expect(owner.billing.changePlan({ rung: "pro_200k" })).rejects.toMatchObject(held);
+    await expect(owner.billing.changePlan({ rung: "scale_2_5m" })).rejects.toMatchObject(held);
+    await expect(owner.billing.setOverage({ enabled: true })).rejects.toMatchObject(held);
+    expect(calls.updates).toEqual([]);
+    expect(calls.itemCreates).toEqual([]);
+    expect(h.runCronNow).not.toHaveBeenCalled();
+    expect(await teamRow(teamId)).toMatchObject({
+      plan: "pro",
+      planQuota: 100_000,
+      overageEnabled: false,
+    });
+    expect(await auditRows()).toEqual([]);
+  });
+
+  it("is judged against Stripe, not a row a dropped webhook left on the old higher rung", async () => {
+    const teamId = await subscribedTeam("pro_100k");
+    await db
+      .update(schema.teams)
+      .set({ plan: "scale", planQuota: 500_000 })
+      .where(eq(schema.teams.id, teamId));
+    await hold(teamId, "guardrail");
+    await expect(
+      callerFor(teamId, "owner").billing.changePlan({ rung: "scale_500k" }),
+    ).rejects.toMatchObject(held);
+    expect(calls.updates).toEqual([]);
+    expect(await auditRows()).toEqual([]);
+  });
+
+  it("can still move down, keep its plan, turn overage off and open the portal to cancel", async () => {
+    const teamId = await subscribedTeam("scale_500k", { overage: true });
+    await hold(teamId, "suspension");
+    const owner = callerFor(teamId, "owner");
+    expect((await owner.billing.status()).upgradesHeld).toBe(true);
+    expect(await owner.billing.changePlan({ rung: "pro_100k" })).toEqual({
+      applied: "period_end",
+      at: PERIOD_END,
+    });
+    expect(await owner.billing.changePlan({ rung: "scale_500k" })).toEqual({
+      applied: "unscheduled",
+    });
+    await owner.billing.setOverage({ enabled: false });
+    expect((await teamRow(teamId))?.overageEnabled).toBe(false);
+    expect(await owner.billing.portal()).toEqual({ url: "https://billing.stripe.com/p/1" });
+    expect(calls.portals).toEqual([
+      { customer: "cus_1", return_url: "https://app.example.com/settings/billing" },
+    ]);
   });
 });
 

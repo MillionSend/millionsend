@@ -15,11 +15,11 @@
   },
   "dependencies": {
     "@t3-oss/env-core": "^0.13.11",
-    "zod": "^4.6.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^22.20.2",
+    "@types/node": "^22.20.5",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.4"
   }
 }

@@ -11,7 +11,7 @@
   "list": {
     "title": "Domains",
     "addDomain": "Add domain",
-    "empty": "No domains yet.",
+    "empty": "No domains of your own yet.",
     "emptyBody": "Add a domain to start sending.",
     "error": "Couldn't load domains.",
     "retry": "Retry",
@@ -20,7 +20,7 @@
     "allRegions": "All regions",
     "rowDetails": "Domain details",
     "pageOf": "Page 1 – {pages} of {total} domains",
-    "noMatch": "No domains match the filters.",
+    "noMatch": "None of your domains match the filters.",
     "clearFilters": "Clear filters",
     "columns": {
       "domain": "Domain",
@@ -51,6 +51,13 @@
     "recommended": "Recommended",
     "regionHint": "Domains are provisioned in one of the SES regions this deployment serves. A domain has one region: to move it, delete it and add it again.",
     "regionSandbox": "sandbox — no production access",
+    "sentBefore": {
+      "question": "Has this domain sent email before?",
+      "yes": "Yes, through another provider",
+      "yesHint": "No warm-up. It keeps the reputation it already has.",
+      "no": "No, it's new to sending",
+      "noHint": "Big sends start small and grow each day while delivery stays healthy. You can change this later."
+    },
     "advanced": "Advanced options",
     "returnPath": "Custom Return-Path",
     "returnPathHint": "Used for SPF authentication, DMARC alignment, and bounces. Avoid values that undermine credibility (e.g. <code>testing</code>) — they may be exposed to recipients.",
@@ -87,7 +94,8 @@
     "region": "Region",
     "tabs": {
       "records": "Records",
-      "configuration": "Configuration"
+      "configuration": "Configuration",
+      "warmup": "Warm-up"
     },
     "recordsHeading": "Add these records at {provider}",
     "recordsHeadingGeneric": "Add these records at your DNS provider",
@@ -97,7 +105,8 @@
       "dmarc": "DMARC (recommended)",
       "tracking": "Open & click tracking",
       "trackingNote": "Tracking links use the default host — no DNS records needed. Set a custom subdomain in Configuration to serve them from your own domain.",
-      "trackingNoteDefaultOnly": "Tracking links use the default host — no DNS records needed."
+      "trackingNoteDefaultOnly": "Tracking links use the default host — no DNS records needed.",
+      "receiving": "Enable receiving"
     },
     "tracking": {
       "open": "Enable open tracking",
@@ -174,6 +183,12 @@
     "bannerLookingBodyGeneric": "This may take a few hours depending on your DNS provider's propagation time.",
     "bannerVerified": "Domain verified.",
     "bannerVerifiedBody": "Ready to send emails.",
+    "newDomainLimit": {
+      "line": "New domain limit: {perDay}/day today · full volume from {date}",
+      "today": "New domain limit: {perDay}/day today",
+      "body": "Newly registered domains send a little more each day.",
+      "bodyShared": "Newly registered domains send a little more each day. Your team's new domains share this daily volume."
+    },
     "deleteDomain": "Delete domain",
     "deleteBody": "This permanently deletes the domain and its DNS configuration. Sending from it stops immediately.",
     "deleteConfirmLabel": "Type the domain to confirm",
@@ -191,7 +206,33 @@
       "change": "Change subdomain",
       "add": "Add a custom subdomain"
     },
-    "notFound": "Domain not found."
+    "notFound": "Domain not found.",
+    "receiving": {
+      "enable": "Enable receiving",
+      "note": "Receives mail for the addresses of its inboxes and, with Catch-all on, for every other address at {domain}. Read it under Inboxes, through the API or with the email.received webhook.",
+      "noteApex": "Receives mail for the addresses of its inboxes (every address with Catch-all on), and its MX record brings all of the domain's mail here. If people already get email at {domain}, use a subdomain such as {example} so their mailboxes stay as they are.",
+      "notVerified": "Available once the domain is verified.",
+      "confirmEnableTitle": "Enable receiving?",
+      "confirmEnable": "Once the MX record points here, mail to the addresses of the inboxes at {domain} is accepted and stored here. Other addresses are refused until you turn on Catch-all.",
+      "confirmEnableApex": "Once the MX record points here, mail to the addresses of the inboxes at {domain} is accepted and stored here, and the domain's mail stops reaching the mailboxes that get it today. Other addresses are refused until you turn on Catch-all.",
+      "confirmEnableCta": "Enable receiving",
+      "confirmDisableTitle": "Disable receiving?",
+      "confirmDisable": "Mail sent to {domain} is refused from now on. Emails already received stay until the retention window removes them.",
+      "confirmDisableCta": "Disable receiving",
+      "errorNotVerified": "Verify the domain before turning on receiving.",
+      "errorTaken": "Another team already receives mail for {domain}.",
+      "error": "Couldn't change receiving. Try again.",
+      "summaryLabel": "Receiving",
+      "summary": "{count, plural, one {# inbox} other {# inboxes}}",
+      "summaryCatchAll": "{count, plural, one {# inbox} other {# inboxes}} + catch-all",
+      "catchAll": "Catch-all",
+      "catchAllHint": "Mail to addresses without an inbox lands in All received. Off: those addresses are refused.",
+      "catchAllPaid": "Catch-all needs a paid plan.",
+      "catchAllError": "Couldn't change catch-all. Try again.",
+      "catchAllOffTitle": "Turn off catch-all?",
+      "catchAllOffConfirm": "Mail to addresses at {domain} that have no inbox is refused from now on. Inbox addresses keep receiving.",
+      "catchAllOffCta": "Turn off catch-all"
+    }
   },
   "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Open SES setup",

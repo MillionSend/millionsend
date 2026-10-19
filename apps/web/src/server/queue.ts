@@ -38,6 +38,14 @@ export const enqueueWebhookDeliveries: WebhookEnqueue = async (deliveries) => {
   await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
 
+/** Forward a message released from quarantine to its inbox's forward_to addresses, in the worker. */
+export async function enqueueInboxForward(p: {
+  receivedEmailId: string;
+  inboxId: string;
+}): Promise<void> {
+  await (await getQueue()).enqueueInboxForward(p);
+}
+
 /** Scrub one address from the team's history in the worker, after its contact row is gone. */
 export async function enqueueRecipientErase(teamId: string, address: string): Promise<void> {
   const queue = await getQueue();
@@ -46,4 +54,35 @@ export async function enqueueRecipientErase(teamId: string, address: string): Pr
     { teamId, address },
     { dedupeKey: `${teamId}:${hashRecipient(address)}` },
   );
+}
+
+/**
+ * Look up a domain's registration date in the worker, best-effort: the
+ * worker's sweep asks for any domain this misses.
+ */
+export async function enqueueDomainAge(domainId: string): Promise<void> {
+  try {
+    await (await getQueue()).send("domain.age", { domainId }, { dedupeKey: domainId });
+  } catch (err) {
+    console.warn("domain.age enqueue failed; the worker's sweep asks later", err);
+  }
+}
+
+/**
+ * Settle a team's shared subdomain label in the worker, best-effort: the
+ * worker's sweep queues any team still without one.
+ */
+export async function enqueueSharedSubdomain(
+  teamId: string,
+  since: Date,
+  startAfter?: Date,
+): Promise<void> {
+  try {
+    await (await getQueue()).enqueueSharedSubdomains(
+      [{ teamId, since: since.toISOString() }],
+      startAfter,
+    );
+  } catch (err) {
+    console.warn("shared.subdomain enqueue failed; the worker's sweep asks later", err);
+  }
 }

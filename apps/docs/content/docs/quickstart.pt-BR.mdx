@@ -1,6 +1,6 @@
 ---
 title: Início rápido
-description: Obtenha o MillionSend e envie seu primeiro email em poucos minutos.
+description: Obtenha o MillionSend e envie seu primeiro e-mail em poucos minutos.
 ---
 
 O MillionSend funciona igual no [MillionSend Cloud](https://millionsend.com)
@@ -59,7 +59,7 @@ O MillionSend só envia a partir de domínios que você verificou.
    (ex.: `acme.dev`).
 2. Adicione os registros DNS exibidos — um registro TXT de DKIM e os
    registros de MAIL FROM — no seu provedor de DNS.
-3. Clique em **Verificar registros DNS**. O MillionSend também resolve os
+3. Clique em **Checar DNS**. O MillionSend também resolve os
    registros ao vivo, então você vê na hora quais ainda faltam.
 
 ## 3. Crie uma chave de API
@@ -68,7 +68,7 @@ Vá em **Chaves de API** e crie uma. O token `ms_` é exibido uma única vez —
 copie agora. Chaves podem ter acesso total ou somente envio, e opcionalmente
 ficar restritas a um único domínio.
 
-## 4. Envie um email
+## 4. Envie um e-mail
 
 Sua URL base da API:
 
@@ -96,7 +96,7 @@ curl -X POST https://api.millionsend.com/emails \
   -H "Content-Type: application/json" \
   -d '{
     "from": "Acme <onboarding@acme.dev>",
-    "to": ["delivered@example.com"],
+    "to": ["success@simulator.amazonses.com"],
     "subject": "Hello from MillionSend",
     "html": "<strong>It works!</strong>"
   }'
@@ -111,7 +111,7 @@ const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" })
 
 const { data, error } = await ms.emails.send({
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@example.com",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>",
 });
@@ -120,8 +120,8 @@ if (error) console.error(error.name, error.message);
 else console.log("sent", data.id);
 ```
 
-Ambos retornam `{ "id": "..." }`. Acompanhe o email indo de `queued` a
-`delivered` na página **Emails**.
+Ambos retornam `{ "id": "..." }`. Acompanhe o e-mail indo de `queued` a
+`delivered` na página **E-mails**.
 
 <Callout type="info">
 Em uma instância auto-hospedada, eventos de entrega (entregue, bounce,
@@ -132,13 +132,36 @@ Na Nuvem eles fluem automaticamente.
 </Callout>
 
 Já usa o Resend? Aponte o SDK oficial do Resend para o MillionSend — defina
-`RESEND_BASE_URL` com a sua URL base e use sua chave `ms_`. O formato de
-comunicação é idêntico.
+`RESEND_BASE_URL` com a sua URL base e use sua chave `ms_`. O formato da
+API é idêntico.
+
+## Testes
+
+- Para testar de ponta a ponta sem mandar e-mail para ninguém, envie para
+  `success@simulator.amazonses.com`, como nos exemplos acima: o SES simula a
+  entrega, e o e-mail aparece como `delivered`, com os webhooks `email.sent` e
+  `email.delivered` (sem aberturas nem cliques: ninguém lê o e-mail). Endereços
+  com `+` também funcionam: `success+cadastro@simulator.amazonses.com`.
+- O SES não conta os e-mails do simulador na própria cota de envio nem nas
+  taxas de bounce e reclamação, mas na Nuvem cada envio ainda conta na cota do
+  seu plano, como qualquer outro e-mail. Em uma instância auto-hospedada, o
+  simulador funciona mesmo com a sua conta AWS ainda no sandbox do SES, e a AWS
+  cobra cada mensagem normalmente.
+- Os endereços `bounce@`, `complaint@` e `suppressionlist@` do simulador geram
+  bounces e reclamações que o MillionSend trata como reais: o endereço entra na
+  [lista de supressão](/pt-BR/concepts/suppressions) da sua equipe e pesa na
+  sua taxa de bounce ou de reclamação, o que pode pausar seus envios. Use esses
+  endereços manualmente, não em testes automatizados. Cada endereço fica
+  suprimido depois do primeiro uso; para repetir o teste, use um `+`:
+  `bounce+2@simulator.amazonses.com`.
+- Endereços em `example.com`, ou terminados em `.test` ou `.invalid`, não
+  recebem e-mail, então um envio para um deles é recusado com `422` (veja
+  [Erros](/pt-BR/api-reference#erros)).
 
 ## Próximos passos
 
 - [Conceitos](/pt-BR/concepts/contacts) para contatos, segmentos, tópicos e
-  broadcasts.
+  transmissões.
 - [SDKs](/pt-BR/sdks) para as nove bibliotecas oficiais.
 - [Referência da API](/pt-BR/api-reference) para todos os endpoints.
 - [Auto-hospedagem](/pt-BR/self-hosting) para implantação em produção,

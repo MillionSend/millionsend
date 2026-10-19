@@ -73,7 +73,7 @@ export function Drawer({
           </h3>
           <button
             type="button"
-            className="ms-btn ms-btn-ghost"
+            className="ms-btn ms-btn-ghost ms-modal-close"
             style={{ padding: 0 }}
             aria-label={common("close")}
             onClick={onClose}

@@ -6,13 +6,24 @@ import {
   clearTrackingClock,
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
+  deleteInboxes,
   failQueuedEmailsForDomain,
+  fetchTeamStanding,
+  inboxActorFromAuth,
   isIdentitySharedByOtherDomains,
   isLoopbackUrl,
   isOperatorTeam,
   isReservedSenderDomain,
+  isSharedDomainId,
+  linkTeam,
   PLAN_DOMAIN_LIMIT,
   recordAudit,
+  type SharedSending,
+  SILENT_SUSPENSIONS,
+  setDomainReceiving,
+  teamSharedDomain,
+  teamSharedSending,
+  webhookBatch,
 } from "@millionsend/core";
 import {
   combineRecordStatus,
@@ -23,6 +34,7 @@ import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
 import {
   checkDnsRecordsDetailed,
+  checkReceivingMx,
   computeDomainVerification,
   createDomainIdentity,
   DKIM_SELECTOR,
@@ -33,14 +45,25 @@ import {
   disassociateIdentity,
   dnsChecklist,
   generateDkimKeyPair,
+  type LiveDnsCheck,
   nodeDnsResolver,
   provisionDomainTenant,
+  receivingDnsRecord,
   SES_REGIONS,
   type SesIdentityClient,
   verificationDbPatch,
 } from "@millionsend/ses";
-import { and, asc, count, desc, eq } from "drizzle-orm";
-import { type ApiDeps, type Env, errorBody, isUniqueViolation, keysetPage } from "../app.js";
+import { and, count, eq, inArray } from "drizzle-orm";
+import type { Context } from "hono";
+import {
+  type ApiDeps,
+  DEFAULT_PAGE_LIMIT,
+  type Env,
+  errorBody,
+  isUniqueViolation,
+  KEYSET_LIST_DESCRIPTION,
+  keysetPage,
+} from "../app.js";
 import {
   createDomainRequestSchema,
   createDomainResponseSchema,
@@ -185,7 +208,40 @@ function wireRecords(rows: DnsChecklistRow[], domainName: string, checked: boole
   });
 }
 
-const toWire = (row: DomainRow) => ({
+/**
+ * The Receiving record (Resend's ReceivingRecord) as its live MX check reads.
+ * It never gates sending; `found` means senders try this MX first.
+ */
+function receivingWireRecord(domainName: string, mxHost: string, live: LiveDnsCheck) {
+  const record = receivingDnsRecord(domainName, mxHost);
+  const detail =
+    live.status === "mismatch" && live.found
+      ? `Senders try a lower-numbered MX first, so mail does not reach this one. Published: ${live.found.split("\n").join(", ")}`
+      : live.status === "missing"
+        ? "No MX record at this name."
+        : undefined;
+  return {
+    record: "Receiving",
+    name: record.name,
+    type: record.type,
+    ttl: "Auto",
+    status:
+      live.status === "found"
+        ? "verified"
+        : live.status === "mismatch"
+          ? "failed"
+          : live.status === "missing"
+            ? "not_started"
+            : "pending",
+    value: record.value,
+    priority: record.priority,
+    live: live.status,
+    ...(detail ? { detail } : {}),
+  };
+}
+
+/** `receives`: this instance receives mail at all (RECEIVING_MX_HOST); otherwise no domain does. */
+const toWire = (row: DomainRow, receives: boolean) => ({
   id: row.id,
   name: row.name,
   status: wireDomainStatus(row.status),
@@ -194,9 +250,30 @@ const toWire = (row: DomainRow) => ({
   open_tracking: row.openTracking,
   click_tracking: row.clickTracking,
   tracking_subdomain: row.trackingSubdomain,
-  // Sending-only platform; present for SDK-shape parity.
-  capabilities: { sending: "enabled", receiving: "disabled" },
+  capabilities: {
+    sending: "enabled",
+    receiving: receives && row.receivingEnabled ? "enabled" : "disabled",
+  },
+  receiving_catch_all: row.receivingCatchAll,
+  shared: false,
 });
+
+/**
+ * The 422 message for a capabilities value this deployment refuses, or null.
+ * Sending is always on, and receiving needs an instance that receives mail.
+ */
+function capabilitiesError(
+  deps: Pick<ApiDeps, "receiving">,
+  capabilities: { sending?: string | undefined; receiving?: string | undefined } | undefined,
+): string | null {
+  if (capabilities?.sending === "disabled") {
+    return "capabilities.sending cannot be disabled: receive-only domains are not supported";
+  }
+  if (capabilities?.receiving === "enabled" && !deps.receiving) {
+    return "Receiving is not available on this instance (RECEIVING_MX_HOST is not set)";
+  }
+  return null;
+}
 
 /**
  * The guardrails on tracking settings, shared by create (no stored row: every
@@ -273,6 +350,7 @@ export function registerDomainRoutes(
   ses: DomainsSesDeps,
 ): void {
   const db = deps.db;
+  const receives = deps.receiving !== undefined;
   const jsonErr = (description: string) => ({
     content: { "application/json": { schema: errorSchema } },
     description,
@@ -293,10 +371,68 @@ export function registerDomainRoutes(
         .where(and(eq(d.id, id), eq(d.teamId, teamId)))
     )[0];
 
+  /** The team's subdomain of the shared inbox domain, listed read-only after its own domains. */
+  const sharedRow = (teamId: string) =>
+    deps.sharedInboxDomain ? teamSharedDomain(db, teamId) : Promise.resolve(null);
+  const sharedRowById = async (teamId: string, id: string) => {
+    const row = await sharedRow(teamId);
+    return isSharedDomainId(row, id) ? row : null;
+  };
+
+  /** The shared row on the wire; the shared identity lives in the default region. */
+  const sharedWire = (
+    row: { id: string; name: string; createdAt: Date },
+    sending: SharedSending,
+  ) => ({
+    id: row.id,
+    name: row.name,
+    status: "verified",
+    created_at: row.createdAt.toISOString(),
+    region: regions[0],
+    open_tracking: false,
+    click_tracking: false,
+    tracking_subdomain: null,
+    capabilities: {
+      sending: sending.mode === "receive_only" ? "disabled" : "enabled",
+      receiving: "enabled",
+    },
+    receiving_catch_all: false,
+    shared: true,
+    sending_mode: sending.mode,
+    sending_mode_reason: sending.cause,
+  });
+
+  /**
+   * The 403 for a change to the team's shared row, or null for any other id.
+   * Its handlers ask first, so the row never reaches a body check, the
+   * suspension lock or SES, where it has no identity of its own.
+   */
+  const refuseShared = async (c: Context<Env>, id: string) => {
+    const row = await sharedRowById(c.get("auth").teamId, id);
+    return row
+      ? c.json(
+          errorBody(
+            403,
+            "forbidden",
+            `${row.name} is your team's subdomain of the shared domain: it can't be changed or deleted`,
+          ),
+          403,
+        )
+      : null;
+  };
+
   // Identity creation is the one route that provisions a shared AWS resource;
   // cloud caps it per team so one tenant cannot burn the account's
   // CreateEmailIdentity throttle for everyone.
   const createLimited = createFixedWindowLimiter(DOMAIN_CREATE_LIMIT_PER_HOUR, 3_600_000);
+
+  const queueDomainAge = async (domainId: string) => {
+    try {
+      await deps.enqueueDomainAge?.(domainId);
+    } catch (err) {
+      console.warn("domain.age enqueue failed; the worker's sweep asks later", err);
+    }
+  };
 
   // Engagement tracking is app-layer: the branded CNAME points at THIS app
   // host, not SES — so it only exists once APP_BASE_URL names a real host, and
@@ -322,9 +458,11 @@ export function registerDomainRoutes(
   async function liveChecklist(domain: DomainRow) {
     const resolver = ses.dns ?? nodeDnsResolver;
     const tracking = trackingCname(domain);
-    const [result, trackingCheck] = await Promise.all([
+    const mxHost = domain.receivingEnabled ? deps.receiving?.mxHost : undefined;
+    const [result, trackingCheck, receivingCheck] = await Promise.all([
       computeDomainVerification(ses.clientForRegion(domain.region), resolver, domain),
       tracking ? checkDnsRecordsDetailed([tracking], resolver).then(([check]) => check) : undefined,
+      mxHost ? checkReceivingMx(domain.name, mxHost, resolver) : undefined,
     ]);
     const rows = dnsChecklist({
       domain,
@@ -337,7 +475,12 @@ export function registerDomainRoutes(
     });
     return {
       result,
-      records: wireRecords(rows, domain.name, true),
+      records: [
+        ...wireRecords(rows, domain.name, true),
+        ...(mxHost && receivingCheck
+          ? [receivingWireRecord(domain.name, mxHost, receivingCheck)]
+          : []),
+      ],
       trackingFound: trackingCheck?.status === "found",
     };
   }
@@ -376,6 +519,19 @@ export function registerDomainRoutes(
       ) {
         return c.json(
           errorBody(422, "validation_error", "This domain cannot be added as a sender"),
+          422,
+        );
+      }
+      // Checked before the SES identity exists, like tracking below.
+      const capabilityError = capabilitiesError(deps, body.capabilities);
+      if (capabilityError) return c.json(errorBody(422, "validation_error", capabilityError), 422);
+      if (body.capabilities?.receiving === "enabled") {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "Receiving needs a verified domain, and a new domain is not verified yet: add it, verify it, then set capabilities.receiving to enabled with PATCH /domains/{id}",
+          ),
           422,
         );
       }
@@ -491,9 +647,11 @@ export function registerDomainRoutes(
         target: { type: "domain", id: row.id },
         metadata: { name: row.name, region },
       });
+      await queueDomainAge(row.id);
+      await linkTeam(db, { teamId: auth.teamId, trigger: "domain" });
       return c.json(
         {
-          ...toWire(row),
+          ...toWire(row, receives),
           records: wireRecords(
             dnsChecklist({ domain: row, verification: null, tracking: trackingCname(row) }),
             row.name,
@@ -509,6 +667,7 @@ export function registerDomainRoutes(
     createRoute({
       method: "get",
       path: "/domains",
+      description: `${KEYSET_LIST_DESCRIPTION} The team's subdomain of the shared domain, when it has one, is the last row (\`shared: true\`).`,
       request: { query: listQuerySchema },
       responses: {
         200: {
@@ -520,25 +679,28 @@ export function registerDomainRoutes(
     }),
     async (c) => {
       const auth = c.get("auth");
+      const query = c.req.valid("query");
+      const shared = await sharedRow(auth.teamId);
       const page = await keysetPage({
-        query: c.req.valid("query"),
+        query,
         createdAt: d.createdAt,
         id: d.id,
+        // The shared row sorts below every own domain.
         loadCursor: async (id) =>
-          (
-            await db
-              .select({ createdAt: d.createdAt, id: d.id })
-              .from(d)
-              .where(and(eq(d.id, id), eq(d.teamId, auth.teamId)))
-          )[0],
-        loadRows: (cond, descending, take) =>
+          isSharedDomainId(shared, id)
+            ? "end"
+            : (
+                await db
+                  .select({ createdAt: d.createdAt, id: d.id })
+                  .from(d)
+                  .where(and(eq(d.id, id), eq(d.teamId, auth.teamId)))
+              )[0],
+        loadRows: (cond, orderBy, take) =>
           db
             .select()
             .from(d)
             .where(and(eq(d.teamId, auth.teamId), cond))
-            .orderBy(
-              ...(descending ? [desc(d.createdAt), desc(d.id)] : [asc(d.createdAt), asc(d.id)]),
-            )
+            .orderBy(...orderBy)
             .limit(take),
       });
       if (page === "bad_cursor") {
@@ -551,10 +713,22 @@ export function registerDomainRoutes(
           422,
         );
       }
-      return c.json(
-        { object: "list" as const, data: page.rows.map(toWire), has_more: page.hasMore },
-        200,
+      const data: (ReturnType<typeof toWire> | ReturnType<typeof sharedWire>)[] = page.rows.map(
+        (row) => toWire(row, receives),
       );
+      let hasMore = page.hasMore;
+      // Own domains ran out on a page that follows them: the shared row comes
+      // next, on this page when it has room, else alone on the next one.
+      const ranOut =
+        !page.hasMore && !query.before && !(query.after && isSharedDomainId(shared, query.after));
+      if (shared && ranOut) {
+        if (data.length < (query.limit ?? DEFAULT_PAGE_LIMIT)) {
+          data.push(sharedWire(shared, await teamSharedSending(db, deps, auth.plan)));
+        } else {
+          hasMore = true;
+        }
+      }
+      return c.json({ object: "list" as const, data, has_more: hasMore }, 200);
     },
   );
 
@@ -566,14 +740,25 @@ export function registerDomainRoutes(
       responses: {
         200: {
           content: { "application/json": { schema: getDomainResponseSchema } },
-          description: "Domain with its DNS records",
+          description:
+            "Domain with its DNS records; the team's shared subdomain has none (records: [])",
         },
         404: jsonErr("Not found"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
-      const domain = await findDomain(auth.teamId, c.req.valid("param").id);
+      const { id } = c.req.valid("param");
+      const shared = await sharedRowById(auth.teamId, id);
+      if (shared) {
+        // Nothing to set up, and no SES identity of its own to ask.
+        const sending = await teamSharedSending(db, deps, auth.plan);
+        return c.json(
+          { object: "domain" as const, ...sharedWire(shared, sending), records: [] },
+          200,
+        );
+      }
+      const domain = await findDomain(auth.teamId, id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
       // A read reports the fresh verdict without persisting the domain status —
       // verify and the reverify sweep own that. The tracking clock is the one
@@ -581,7 +766,7 @@ export function registerDomainRoutes(
       // row reads verified while sends still ship untracked.
       const { records, trackingFound } = await liveChecklist(domain);
       if (trackingFound) await clearTrackingClock(db, domain);
-      return c.json({ object: "domain" as const, ...toWire(domain), records }, 200);
+      return c.json({ object: "domain" as const, ...toWire(domain, receives), records }, 200);
     },
   );
 
@@ -595,11 +780,14 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: getDomainResponseSchema } },
           description: "Verification result: the domain with per-record status",
         },
+        403: jsonErr("The team's subdomain of the shared domain, which is read-only"),
         404: jsonErr("Not found"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
+      const refused = await refuseShared(c, c.req.valid("param").id);
+      if (refused) return refused;
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
       const { result, records, trackingFound } = await liveChecklist(domain);
@@ -623,10 +811,14 @@ export function registerDomainRoutes(
           target: { type: "domain", id: domain.id },
           metadata: { name: domain.name },
         });
+        await queueDomainAge(domain.id);
       }
       // Full object with per-record status — the promised "fresh status"
       // without a get_domain round-trip. Additive over the SDK's { id }.
-      return c.json({ object: "domain" as const, ...toWire({ ...domain, status }), records }, 200);
+      return c.json(
+        { object: "domain" as const, ...toWire({ ...domain, status }, receives), records },
+        200,
+      );
     },
   );
 
@@ -643,19 +835,24 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: getDomainResponseSchema } },
           description: "Domain updated; full object with records",
         },
+        403: jsonErr(
+          "Catch-all receiving needs a paid plan, or the team's subdomain of the shared domain, which is read-only",
+        ),
         404: jsonErr("Not found"),
+        409: jsonErr("Another team receives mail for this domain"),
         422: jsonErr("Validation error"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
+      const refused = await refuseShared(c, c.req.valid("param").id);
+      if (refused) return refused;
       const body = c.req.valid("json");
       if (body.tls !== undefined) {
         return c.json(errorBody(422, "validation_error", "tls is not supported"), 422);
       }
-      if (body.capabilities !== undefined) {
-        return c.json(errorBody(422, "validation_error", "capabilities is not supported"), 422);
-      }
+      const capabilityError = capabilitiesError(deps, body.capabilities);
+      if (capabilityError) return c.json(errorBody(422, "validation_error", capabilityError), 422);
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
 
@@ -675,6 +872,69 @@ export function registerDomainRoutes(
       );
       if (trackingError) {
         return c.json(errorBody(422, "validation_error", trackingError), 422);
+      }
+      const wantReceiving = body.capabilities?.receiving;
+      const wantCatchAll = body.receiving_catch_all;
+      if (wantCatchAll === true && !domain.receivingCatchAll) {
+        const receivingAfter =
+          wantReceiving !== undefined ? wantReceiving === "enabled" : domain.receivingEnabled;
+        if (!receives || !receivingAfter) {
+          return c.json(
+            errorBody(422, "validation_error", "Catch-all needs receiving enabled on this domain"),
+            422,
+          );
+        }
+        // A stored true outlives a downgrade; only turning it on needs the plan.
+        if (deps.isCloud && auth.plan === "free") {
+          return c.json(
+            errorBody(403, "plan_limit_reached", "Catch-all receiving needs a paid plan"),
+            403,
+          );
+        }
+      }
+
+      // Before the tracking write: the receiving switch is the one change here
+      // that can still be refused, and a refusal must leave nothing applied.
+      let receiving: Pick<DomainRow, "receivingEnabled" | "receivingEnabledAt"> | undefined;
+      if (wantReceiving !== undefined) {
+        const result = await setDomainReceiving(db, {
+          teamId: auth.teamId,
+          domainId: domain.id,
+          enabled: wantReceiving === "enabled",
+        });
+        if (!result.ok) {
+          if (result.reason === "not_found") {
+            return c.json(errorBody(404, "not_found", "Domain not found"), 404);
+          }
+          return result.reason === "taken"
+            ? c.json(
+                errorBody(409, "conflict", "Another team already receives mail for this domain"),
+                409,
+              )
+            : c.json(
+                errorBody(
+                  422,
+                  "validation_error",
+                  "Receiving can be enabled only on a verified domain; verify the domain first",
+                ),
+                422,
+              );
+        }
+        if (result.changed) {
+          await recordAudit(db, {
+            teamId: auth.teamId,
+            actor: apiRequestActor(auth),
+            action: result.receivingEnabled
+              ? "domain.receiving_enabled"
+              : "domain.receiving_disabled",
+            target: { type: "domain", id: domain.id },
+            metadata: { name: domain.name },
+          });
+        }
+        receiving = {
+          receivingEnabled: result.receivingEnabled,
+          receivingEnabledAt: result.receivingEnabledAt,
+        };
       }
 
       const set: Partial<
@@ -702,11 +962,28 @@ export function registerDomainRoutes(
           .set(set)
           .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
       }
+      const catchAllChanged =
+        wantCatchAll !== undefined && wantCatchAll !== domain.receivingCatchAll;
+      if (catchAllChanged) {
+        await db
+          .update(d)
+          .set({ receivingCatchAll: wantCatchAll })
+          .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
+        await recordAudit(db, {
+          teamId: auth.teamId,
+          actor: apiRequestActor(auth),
+          action: wantCatchAll ? "domain.catch_all_enabled" : "domain.catch_all_disabled",
+          target: { type: "domain", id: domain.id },
+          metadata: { name: domain.name },
+        });
+      }
       // Full object so the caller sees the settings it just changed —
       // additive over the SDK's { id }. Records are read the same way GET
       // reads them, for the subdomain that was just set.
       const updated = {
         ...domain,
+        ...receiving,
+        receivingCatchAll: catchAllChanged ? wantCatchAll : domain.receivingCatchAll,
         openTracking: set.openTracking ?? domain.openTracking,
         clickTracking: set.clickTracking ?? domain.clickTracking,
         trackingSubdomain:
@@ -717,7 +994,7 @@ export function registerDomainRoutes(
             : domain.trackingSubdomainSetAt,
       };
       const { records } = await liveChecklist(updated);
-      return c.json({ object: "domain" as const, ...toWire(updated), records }, 200);
+      return c.json({ object: "domain" as const, ...toWire(updated, receives), records }, 200);
     },
   );
 
@@ -731,11 +1008,34 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: removeDomainResponseSchema } },
           description: "Domain deleted",
         },
+        403: jsonErr(
+          "Team suspended, not available for this team, or the team's subdomain of the shared domain, which is read-only",
+        ),
         404: jsonErr("Not found"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
+      const refused = await refuseShared(c, c.req.valid("param").id);
+      if (refused) return refused;
+      // Same lock as the dashboard delete: a suspended team keeps its domains.
+      const suspended = (await fetchTeamStanding(db, auth.teamId))?.suspended;
+      if (suspended) {
+        return c.json(
+          SILENT_SUSPENSIONS.includes(suspended.reason)
+            ? errorBody(
+                403,
+                "forbidden",
+                "This isn't available for this team right now. Contact support if you need help.",
+              )
+            : errorBody(
+                403,
+                "team_suspended",
+                "This team is suspended by the instance operator. Its domains cannot be deleted until it is reinstated; contact support.",
+              ),
+          403,
+        );
+      }
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
       // The SES identity is shared by every row with the same (name, region):
@@ -760,9 +1060,52 @@ export function registerDomainRoutes(
           if ((error as { name?: string }).name !== "NotFoundException") throw error;
         }
       }
+      // The domain's inboxes go first, each with its keys revoked and its
+      // inbox.deleted event (api_keys.inbox_id is restrict, never widened).
+      const i = schema.inboxes;
+      const inboxIds = (
+        await db
+          .select({ id: i.id })
+          .from(i)
+          .where(and(eq(i.teamId, auth.teamId), eq(i.domainId, domain.id)))
+      ).map((row) => row.id);
+      if (inboxIds.length > 0) {
+        await deleteInboxes(
+          db,
+          {
+            sharedInboxDomain: deps.sharedInboxDomain ?? null,
+            receivingEnabled: receives,
+            enqueueWebhookDeliveries: deps.enqueueWebhookDeliveries,
+          },
+          {
+            teamId: auth.teamId,
+            inboxIds,
+            actor: inboxActorFromAuth(auth),
+            reason: "domain_deleted",
+          },
+        );
+      }
+      const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
       await db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
-        await failQueuedEmailsForDomain(txDb, { teamId: auth.teamId, domainId: domain.id });
+        await failQueuedEmailsForDomain(txDb, {
+          teamId: auth.teamId,
+          domainId: domain.id,
+          enqueue: hooks.collect,
+        });
+        // An inbox created since the step above: its keys must not block the cascade.
+        await txDb
+          .update(schema.apiKeys)
+          .set({ revokedAt: new Date(), inboxId: null })
+          .where(
+            and(
+              eq(schema.apiKeys.teamId, auth.teamId),
+              inArray(
+                schema.apiKeys.inboxId,
+                txDb.select({ id: i.id }).from(i).where(eq(i.domainId, domain.id)),
+              ),
+            ),
+          );
         // api_keys.domainId is ON DELETE restrict (a scoped key must never
         // silently widen to all domains): revoke every scoped key and drop its
         // FK first — a revoked key never authenticates, and clearing domainId
@@ -775,6 +1118,7 @@ export function registerDomainRoutes(
           );
         await txDb.delete(d).where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
       });
+      await hooks.flush();
       await recordAudit(db, {
         teamId: auth.teamId,
         actor: apiRequestActor(auth),

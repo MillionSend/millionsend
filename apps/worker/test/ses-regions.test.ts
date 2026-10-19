@@ -106,7 +106,7 @@ describe("per-region send controls", () => {
 const R = "sa-east-1";
 
 describe("the broadcast share and its room ledger", () => {
-  it("splits the quota by the reserve and reads the transactional volume off SES's own number", async () => {
+  it("splits the quota by the reserve and reads the bulk volume off the count", async () => {
     const h = harness({ [R]: { max24h: 100_000, sentLast24h: 12_000, maxSendRate: 14 } }, 14, {
       counts: { [R]: { sent24h: 10_000, queued: 5_000 } },
     });
@@ -120,7 +120,6 @@ describe("the broadcast share and its room ledger", () => {
     });
     expect(h.controls.rate(R)).toBe(14);
     expect(h.controls.bulkSent24h(R)).toBe(10_000);
-    expect(h.controls.txSent24h(R)).toBe(2_000);
     expect(h.controls.room(R)).toBe(55_000);
     expect(h.controls.bulkExhausted(R)).toBe(false);
     expect(h.controls.paused(R)).toBe(false);

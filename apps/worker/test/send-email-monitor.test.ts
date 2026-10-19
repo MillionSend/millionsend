@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  acceptEmail,
   EnvKeyring,
   encryptEmailBody,
   MONITOR_SETTING_DEFAULTS,
@@ -61,11 +62,15 @@ async function insertEmail(over: Partial<typeof schema.emails.$inferInsert> = {}
 const samplesFor = (emailId: string) =>
   db.select().from(schema.monitorSamples).where(eq(schema.monitorSamples.emailId, emailId));
 
+// The draw after the send, with the hold (and the screening before SES it
+// turns on) off; send-email-screening.test.ts covers the screening.
+const DRAW_ONLY = { ...MONITOR_SETTING_DEFAULTS, autoHold: false };
+
 it("draws an accepted send into a pending sample and queues the judge", async () => {
   const queued: string[] = [];
   const monitor: MonitorDeps = {
     samplingKey: Buffer.alloc(32, 7),
-    settings: async () => MONITOR_SETTING_DEFAULTS,
+    settings: async () => DRAW_ONLY,
     enqueueJudge: async (id) => void queued.push(id),
   };
   const emailId = await insertEmail();
@@ -105,4 +110,79 @@ it("keeps the send's outcome when the draw throws, and draws nothing without the
   expect(await sendEmail(db, { keyring, ses, monitor }, { emailId: system })).toBe("sent");
   expect(await samplesFor(system)).toEqual([]);
   expect(queued).toEqual([]);
+});
+
+it("never draws the fixed onboarding email, nor counts it as the team's first send", async () => {
+  const onboardingEmailFrom = "MillionSend <hello@ms.example>";
+  const fresh = await createTeam(db, "onboarding-only");
+  const queued: string[] = [];
+  const monitor: MonitorDeps = {
+    samplingKey: Buffer.alloc(32, 7),
+    settings: async () => MONITOR_SETTING_DEFAULTS,
+    enqueueJudge: async (id) => void queued.push(id),
+  };
+  const emailId = await insertEmail({
+    teamId: fresh,
+    domainId: null,
+    from: onboardingEmailFrom,
+    subject: "It works.",
+  });
+  expect(await sendEmail(db, { keyring, ses, monitor, onboardingEmailFrom }, { emailId })).toBe(
+    "sent",
+  );
+  expect(await samplesFor(emailId)).toEqual([]);
+  expect(queued).toEqual([]);
+  expect(
+    await db.select().from(schema.teamMonitor).where(eq(schema.teamMonitor.teamId, fresh)),
+  ).toEqual([]);
+});
+
+it("draws a customer's send that carried the system-mail tag like any other", async () => {
+  const customer = await createTeam(db, "tag-borrower");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: customer,
+      name: "borrower.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const accepted = await acceptEmail(
+    { db, keyring, isCloud: true, enqueueEmailSend: async () => {} },
+    {
+      teamId: customer,
+      billing: {
+        plan: "free",
+        planQuota: null,
+        planStatus: "none",
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        overageEnabled: false,
+      },
+      apiKeyId: null,
+    },
+    {
+      from: "Borrower <a@borrower.dev>",
+      to: ["r@example.com"],
+      subject: "Reset your password",
+      html: "<p>hello</p>",
+      tags: { [SYSTEM_MAIL_TAG]: "password_reset" },
+      domainId: domain?.id ?? null,
+    },
+  );
+  if (!accepted.ok) throw new Error(accepted.reason);
+  const queued: string[] = [];
+  const monitor: MonitorDeps = {
+    samplingKey: Buffer.alloc(32, 7),
+    settings: async () => DRAW_ONLY,
+    enqueueJudge: async (id) => void queued.push(id),
+  };
+  expect(await sendEmail(db, { keyring, ses, monitor }, { emailId: accepted.id })).toBe("sent");
+  const samples = await samplesFor(accepted.id);
+  expect(samples).toMatchObject([{ teamId: customer, status: "pending" }]);
+  expect(queued).toEqual([samples[0]?.id]);
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, accepted.id));
+  expect(row?.bodyCiphertext).not.toBeNull();
 });

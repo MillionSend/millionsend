@@ -1,0 +1,25 @@
+{
+  "name": "@millionsend/mx",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@millionsend/core": "workspace:*",
+    "mailauth": "^7.3.0",
+    "smtp-server": "^3.19.21",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/nodemailer": "^8.0.1",
+    "@types/smtp-server": "^3.5.13",
+    "nodemailer": "^10.1.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}

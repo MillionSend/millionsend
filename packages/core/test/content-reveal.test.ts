@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
+import type { MediaReview } from "../src/abuse-judge/media.js";
 import {
   CONTENT_REVEAL_TEXT_MAX_CHARS,
   CONTENT_REVEAL_WINDOW_MS,
   contentRevealExpiry,
   type RevealedContent,
 } from "../src/content-reveal.js";
-import { redactRevealedText, renderRevealedBody } from "../src/content-reveal-render.js";
+import {
+  redactRevealedText,
+  renderRevealedBody,
+  renderRevealedMedia,
+} from "../src/content-reveal-render.js";
 import { maskEmailLocalParts } from "../src/mask.js";
 
 const plain = (content: RevealedContent) => content.spans.map((s) => s.text).join("");
@@ -110,6 +115,28 @@ describe("redactRevealedText", () => {
     ]);
   });
 
+  it("masks a CPF or CNPJ only when its check digits hold", () => {
+    expect(
+      plain(
+        redactRevealedText(
+          "CPF 529.982.247-25, 52998224725; CNPJ 11.222.333/0001-81, 11222333000181, 12.ABC.345/01DE-35.",
+        ),
+      ),
+    ).toBe("CPF ••••••, ••••••; CNPJ ••••••, ••••••, ••••••.");
+    const lookalikes =
+      "Order 529.982.247-26, 111.111.111-11, 11.222.333/0001-82, 12.ABC.345/01DE-36, 12345678901, ref 052998224725.";
+    expect(redactRevealedText(lookalikes)).toEqual({
+      spans: [{ text: lookalikes }],
+      redactions: 0,
+    });
+  });
+
+  it("masks a CPF a link path carries", () => {
+    expect(plain(redactRevealedText("Boleto: https://pay.example/b/52998224725"))).toBe(
+      "Boleto: https://pay.example/b/••••••",
+    );
+  });
+
   it("keeps a bare address as the host: there is no domain to reduce it to", () => {
     expect(plain(redactRevealedText("go http://10.0.0.7/login/now"))).toBe(
       "go http://10.0.0.7/login/now",
@@ -159,6 +186,86 @@ describe("renderRevealedBody", () => {
 
   it("holds an empty body without spans", () => {
     expect(renderRevealedBody({ html: null, text: null })).toEqual({ spans: [], redactions: 0 });
+  });
+});
+
+describe("renderRevealedMedia", () => {
+  const text = (spans: { text: string }[]) => spans.map((s) => s.text).join("");
+  const jpeg = (n: number) => Buffer.from([0xff, 0xd8, 0xff, 0xe0, n]).toString("base64");
+  const review: MediaReview = {
+    text: [
+      {
+        source: "image 1, remote, cdn.lure.example",
+        text: "Seu código é 448122. Entre em https://login.m365-verify.example/session/abcdefghijklmnopqrstuvwxyz",
+      },
+    ],
+    links: [
+      {
+        source: "QR code",
+        url: "https://login.m365-verify.example/s?t=8sJ2k",
+        domain: "m365-verify.example",
+      },
+    ],
+    pix: [],
+    files: [
+      {
+        filename: "boleto 529.982.247-25.pdf",
+        kind: "pdf",
+        size: 182_000,
+        pages: 2,
+        flags: ["pdf_actions"],
+      },
+    ],
+    previews: [
+      { label: "image 1, remote, cdn.lure.example", jpeg: jpeg(1) },
+      { label: "attachment a.svg", jpeg: Buffer.from("<svg onload=alert(1)>").toString("base64") },
+      { label: "attachment b.html", jpeg: Buffer.from("<html><script>").toString("base64") },
+      {
+        label: "attachment c.png",
+        jpeg: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64"),
+      },
+      { label: "attachment boleto 529.982.247-25.pdf page 1", jpeg: jpeg(2) },
+      { label: "image 2, inline", jpeg: jpeg(3) },
+      { label: "image 3, inline", jpeg: jpeg(4) },
+      { label: "image 4, inline", jpeg: jpeg(5) },
+    ],
+    issues: ["qr_undecoded"],
+  };
+
+  it("redacts what was read as the body is, file names and labels included", () => {
+    const media = renderRevealedMedia(review);
+    expect(text(media.text[0]?.spans ?? [])).toBe(
+      "Seu código é ••••••. Entre em https://m365-verify.example/session/abcdefghijklmno…",
+    );
+    expect(text(media.text[0]?.source ?? [])).toBe("image 1, remote, cdn.lure.example");
+    expect(media.links).toEqual([
+      {
+        source: "QR code",
+        link: [{ text: "https://m365-verify.example/s…", redacted: true }],
+        domain: "m365-verify.example",
+      },
+    ]);
+    expect(media.files).toEqual([
+      {
+        name: [{ text: "boleto " }, { text: "••••••", redacted: true }, { text: ".pdf" }],
+        kind: "pdf",
+        size: 182_000,
+        pages: 2,
+        flags: ["pdf_actions"],
+      },
+    ]);
+    expect(media.issues).toEqual(["qr_undecoded"]);
+  });
+
+  it("passes previews only as JPEG data URLs, four at most", () => {
+    const media = renderRevealedMedia(review);
+    expect(media.previews.map((p) => p.src)).toEqual(
+      [1, 2, 3, 4].map((n) => `data:image/jpeg;base64,${jpeg(n)}`),
+    );
+    expect(text(media.previews[1]?.label ?? [])).toBe("attachment boleto ••••••.pdf page 1");
+    expect(JSON.stringify(media)).not.toMatch(/svg|html|image\/png/);
+    // The code and the link in the text, the link, and the CPF in the name and the page's label.
+    expect(media.redactions).toBe(5);
   });
 });
 

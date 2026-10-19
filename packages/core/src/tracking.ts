@@ -9,11 +9,15 @@ import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
  * where mac = HMAC-SHA256 over the base64url payload string. The signing key is
  * HKDF-derived from the master key so the KEK never signs directly.
  *
- * Click payload raw bytes: `emailId "\n" url`. The url is INSIDE the signed
- * payload, so a tampered destination fails verification — the redirect can only
- * ever follow a URL we signed at send time (no open redirect). emailId is a
- * UUID and never contains a newline, so splitting on the first "\n" recovers
- * both fields no matter what the url holds.
+ * Click payload raw bytes: `emailId "\n" teamId "\n" url`. The url is INSIDE
+ * the signed payload, so a tampered destination fails verification — the
+ * redirect can only ever follow a URL we signed at send time (no open
+ * redirect). The team lets the endpoint check the sender's standing after the
+ * email row has aged out. Tokens minted before the team was signed carry
+ * `emailId "\n" url` and still verify, naming no team: a signed url always
+ * starts with http(s):// and a team id never does, so neither shape reads as
+ * the other. Neither id contains a newline, so the url is whatever follows
+ * them.
  *
  * Open payload raw bytes: `emailId` alone.
  */
@@ -52,21 +56,27 @@ function unseal(token: string, secretKey: Buffer): string | null {
 
 export function makeClickToken(params: {
   emailId: string;
+  teamId: string;
   url: string;
   secretKey: Buffer;
 }): string {
-  return seal(`${params.emailId}\n${params.url}`, params.secretKey);
+  return seal(`${params.emailId}\n${params.teamId}\n${params.url}`, params.secretKey);
 }
 
 export function verifyClickToken(
   token: string,
   secretKey: Buffer,
-): { emailId: string; url: string } | null {
+): { emailId: string; teamId: string | null; url: string } | null {
   const raw = unseal(token, secretKey);
   if (raw === null) return null;
   const nl = raw.indexOf("\n");
   if (nl < 1) return null;
-  return { emailId: raw.slice(0, nl), url: raw.slice(nl + 1) };
+  const emailId = raw.slice(0, nl);
+  const rest = raw.slice(nl + 1);
+  if (/^https?:\/\//i.test(rest)) return { emailId, teamId: null, url: rest };
+  const teamEnd = rest.indexOf("\n");
+  if (teamEnd < 1) return null;
+  return { emailId, teamId: rest.slice(0, teamEnd), url: rest.slice(teamEnd + 1) };
 }
 
 export function makeOpenToken(params: { emailId: string; secretKey: Buffer }): string {

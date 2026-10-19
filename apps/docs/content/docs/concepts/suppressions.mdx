@@ -22,22 +22,42 @@ marked you as spam.
 Bounces and complaints arrive as SES events and suppress the address
 automatically. Suppressions are per team.
 
+When a receiving server answers that a mailbox is inactive, the address is
+suppressed at once. When it answers twice, a day to 30 days apart, that a
+contact's mailbox is full, the address is suppressed too. Both are listed as
+hard bounces (`origin: "bounce"`) but don't count toward your bounce rate.
+
 ## What suppression does
 
 - **Transactional sends** (`POST /emails` and the SMTP relay, without a
   `topic_id`): recipients suppressed for a bounce, a complaint or a manual
   entry are stripped from `to`/`cc`/`bcc`. If *every* `to` recipient is
   suppressed, the send is rejected with `422 all_recipients_suppressed`
-  (message `All recipients are suppressed`). An **unsubscribe** entry does not
-  apply here: someone who opted out of marketing still receives password
-  resets, receipts and other account mail — the same meaning Resend gives
-  `unsubscribed` ("unsubscribed from all Broadcasts").
+  (message `All recipients are suppressed`; the SMTP relay answers `550` with
+  that message). An **unsubscribe** entry does not apply here: someone who
+  opted out of marketing still receives password resets, receipts and other
+  account mail — the same meaning Resend gives `unsubscribed` ("unsubscribed
+  from all Broadcasts").
 - **Topic sends** (`POST /emails` with a `topic_id`) and **broadcasts**: every
   entry applies, unsubscribes included, plus the recipient's opt-out of that
   topic; broadcasts skip such contacts during fan-out.
 
 A list imported with `origin: "unsubscribe"` therefore blocks topic sends and
 broadcasts only. Import with `manual` to block every send.
+
+When the suppression list alone leaves a `POST /emails` with no `to`
+recipient, with or without a `topic_id`, a metadata-only email with status
+`suppressed` is kept (no content, not counted toward your quota), and each
+retry with the same `Idempotency-Key` keeps another. Each email kept this way
+fires [`email.suppressed`](/concepts/webhooks#scheduled-failed-and-suppressed-email).
+Nothing is kept when topic opt-outs empty `to`, for a batch item, or on the
+SMTP relay.
+
+An email that waits before it goes out, such as a scheduled one, is checked
+again when it does. Recipients suppressed in the meantime are dropped, and on
+a topic send or a broadcast, so are those who opted out of the topic. If no
+`to` recipient is left, the email ends `suppressed` without being sent and
+fires [`email.suppressed`](/concepts/webhooks#scheduled-failed-and-suppressed-email).
 
 Every change to the list publishes a `suppression.added` or
 `suppression.removed` [webhook event](/concepts/webhooks#event-types).
@@ -68,8 +88,8 @@ Resend SDK's `suppressions.*` methods work as-is. Each entry reads as
 `complaint`, `manual` or `unsubscribe` and `source_id` is the email whose
 bounce or complaint created it.
 
-- `GET /suppressions?origin=bounce` — keyset-paginated list, optionally
-  filtered by origin.
+- `GET /suppressions?origin=bounce` — keyset-paginated list, newest first,
+  optionally filtered by origin.
 - `GET /suppressions/{id}` and `DELETE /suppressions/{id}` — the path
   segment is the suppression id or the email address.
 - `POST /suppressions` with `{ "email": "...", "origin": "manual" }` — blocks

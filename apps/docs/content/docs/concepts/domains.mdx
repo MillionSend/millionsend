@@ -55,6 +55,157 @@ the other region — its DNS records change, since SES identities are per
 region. On MillionSend Cloud a domain name another team holds is taken in
 every region.
 
+## New domain limit
+
+On MillionSend Cloud a domain registered recently sends gradually while it
+builds a reputation with mailbox providers. The age is the registered domain's
+(`acme.com` for `mail.acme.com`; a name from a free subdomain service, such as
+`shop.eu.org`, counts as its own domain), read from public data when the
+domain is added, and the cap counts per UTC day:
+
+| Domain age | Emails per day |
+| --- | --- |
+| Under 24 hours | 100 |
+| 1 to 7 days | 300 |
+| 7 to 30 days | 2,000 |
+| 30 days or older | your plan's limit only |
+
+A domain that sends cleanly (few bounces, no spam complaints) moves up a step
+sooner. The cap applies on top of your plan and a plan upgrade does not lift
+it. While it applies, the domain page shows "New domain limit: N/day today ·
+full volume from …".
+
+Your team's new domains share one daily volume, the highest of their caps,
+and each still stays within its own: adding another new domain does not add
+volume. Domains 30 days or older are not part of it. When more than one of
+your domains is under this limit, the domain page says the volume is shared.
+
+Mail over the day's cap is never refused or lost: it is accepted, shows as
+**Waiting**, and goes out as the cap allows, oldest first. Only when a lot
+of mail is already waiting does a send answer `429 daily_quota_exceeded`
+(SMTP `452`) with a message naming this limit. Retry after the UTC day rolls
+over.
+
+This limit is automatic and separate from the opt-in [warm-up](#warm-up)
+below. When both apply, a broadcast goes out within the lower of the two.
+
+## Warm-up
+
+Mailbox providers trust a new sender a little more each day it behaves.
+Warm-up (beta) builds on that: while it is on for a domain, the domain's
+broadcasts go out under a daily volume that starts small and grows each day
+delivery stays healthy, most active contacts first. It is off by default and
+applies to one domain at a time. Your transactional email is never held.
+
+Turn it on in the dashboard: on the domain's **Warm-up** tab, when you add
+the domain (answer "No, it's new to sending" to "Has this domain sent email
+before?"), or in the **Send broadcast** dialog, which offers it when a
+broadcast is far bigger than anything the domain has sent in a day.
+
+### When to use it
+
+Turn it on for a new domain or subdomain before its first big send, or
+before a send far bigger than anything the domain has sent in a day.
+
+Leave it off for a domain that already sends this volume through another
+provider. It keeps the reputation it has there. A domain that sends less
+elsewhere can still warm up from what it sends every day: raise the starting
+volume to match.
+
+### How it works
+
+- Day 1 sends the starting volume: 1,500, or twice the domain's busiest day
+  of the last 30 days when that is more. You can set it from 100 to
+  1,000,000.
+- Each healthy day grows the volume 1.5×, up to the daily target, the most
+  you plan to send in a day. The target starts at your number of subscribed
+  contacts, at least 10,000, and you can set it from 1,000 to 10,000,000.
+  The warm-up ends after a healthy day at the target.
+- A day's volume goes out a 48th at a time, every 15 minutes, so it takes at
+  least 12 hours. Days are UTC days, and each one starts only after the day
+  before it is checked.
+- Mail over the day's volume waits for the next day, in the same order, and
+  shows as **Waiting**, for as long as email content is kept (see below).
+- Only broadcasts wait. Email sent with `POST /emails`, in a batch or
+  through SMTP is never held.
+- A day that sends less than half its volume doesn't grow it. Days without a
+  send don't count, and after 30 of them in a row the volume starts over.
+
+### Who goes first
+
+Each day's volume goes to the contacts most likely to open it, ranked by the
+newest of these signals. You choose which ones count on the **Warm-up** tab.
+
+- Their last open or click. A machine's prefetch never counts.
+- The last transactional email they got from your team in the last 30 days.
+- A contact property you pick, read as a date, such as a last login. It
+  takes an ISO 8601 date or date-time, or Unix time in seconds or
+  milliseconds.
+
+A contact whose newest signal is 90 days old or more is inactive. By default
+the warm-up skips inactive contacts: they don't get the broadcast, and the
+broadcast page shows how many were skipped. Choose **Send them last** to put
+them at the end of the line instead. A contact with no signal at all is not
+inactive: it goes after the active ones.
+
+### The daily check
+
+Early each UTC day, the day before is checked on five signals, read from the
+domain's broadcast mail of that day. Gmail is measured apart from other
+inboxes.
+
+| Signal | What it reads | Line | Severe |
+| --- | --- | --- | --- |
+| Delivery delays | Gmail mail that Gmail delayed | under 5% | 20% or more |
+| Opens, Gmail vs. others | Gmail's open rate as a share of other inboxes' | at least half | under a quarter |
+| Hard bounces | Addresses that bounced for good | under 2% | 5% or more |
+| Full or inactive mailboxes | Mailboxes that answered full or inactive | under 2% | 5% or more |
+| Spam complaints | Complaints over mail to providers that report them | under 0.05% | 0.1% or more |
+
+A signal past its line is missed. Gmail never tells senders about spam
+reports, so complaints come from the other providers, and your Gmail spam
+rate is in [Google Postmaster Tools](https://postmaster.google.com). Opens
+are read only while [open tracking](#per-domain-configuration) is on, and a
+machine's prefetch never counts as one. A signal with too little mail behind
+it (fewer than 100 emails, or 200 for complaints) reads **Not enough mail**
+and never counts against the day. It takes two complaints to miss the
+complaint line and three to make it severe.
+
+After the check:
+
+- Every signal within its line: the volume grows 1.5×.
+- One missed signal: the volume holds.
+- Two or more missed: the volume drops by 30%.
+- A severe signal: the warm-up pauses and the team's owners get an email.
+
+### Pause, resume or turn off
+
+- **Pause warm-up** stops the domain's broadcasts. Their mail waits in order.
+  A severe signal pauses the warm-up the same way.
+- **Resume** starts again from today at half the volume it had.
+- **Turn off** ends the warm-up, and the mail that was waiting goes out at
+  normal speed. A big day from a domain with little history is likely to land
+  in spam, so the dashboard asks first.
+- Once the warm-up is done, the domain's broadcasts go out at normal speed.
+  **Warm up again** starts over from the starting volume.
+
+Waiting mail keeps its place for as long as email content is kept, counted
+from when the broadcast was sent: 30 days on Cloud, the instance's email
+retention when self-hosted. Mail still waiting after that is not sent.
+
+The team's owners get an email when a severe signal pauses the warm-up, with
+the signals that missed and how many emails are waiting, and another when the
+warm-up is done. Owners choose these under **Deliverability** in
+**Settings → Notifications**.
+
+### Should I switch to a new subdomain instead?
+
+No. Mailbox providers judge reputation by the organizational domain
+(`example.com` for `news.example.com`) and by the people you send to, so a
+new subdomain doesn't start clean. Rotating domains looks like snowshoeing,
+the spammer trick of spreading mail over many domains, and providers watch
+for it. Warm up the domain you have.
+
 ## Per-domain configuration
 
 Once verified, a domain's **Configuration** tab controls:
@@ -64,7 +215,8 @@ Once verified, a domain's **Configuration** tab controls:
   the recipient on to the original URL. When off, your links ship untouched.
 - **Open tracking** — off by default. When on, a 1×1 pixel served from that same
   tracking subdomain records `email.opened` events. Tracking is app-layer and
-  runs on your own domain — never SES's link rewriting.
+  runs on your own domain — never SES's link rewriting. Mail from a people
+  inbox is never tracked, as from any mail client.
 - **TLS mode** — `opportunistic` (default) or `enforced`, applied via the
   domain's SES configuration set.
 
@@ -120,7 +272,92 @@ receipts, password resets — consider leaving open tracking off: the pixel adds
 tracking-shaped element some filters weigh against inbox placement, for a metric
 you can't fully trust anyway.
 
+## Receiving
+
+A verified domain can also [receive mail](/concepts/receiving) (beta). Every
+domain response carries Resend's `capabilities` object: `sending` is
+`enabled` (asking to disable it is a `422`; only the
+[shared subdomain](#shared-subdomain) can read `disabled`), and `receiving`
+is `enabled` or `disabled`. Switch receiving with **Enable receiving** on
+the domain page, or send `{ "capabilities": { "receiving": "enabled" } }`
+(or `"disabled"`) to `PATCH /domains/{id}`. Only a verified domain can turn
+it on, which is why
+`POST /domains` refuses `"receiving": "enabled"` with a `422`: add the domain,
+verify it, then switch receiving on. A domain name receives in one team only:
+a name another team already receives on answers `409`. On an instance that
+doesn't receive mail at all, every domain reads `disabled` and turning it on
+is refused with `422`.
+
+While receiving is on, `records[]` includes a `Receiving` row: an MX record
+at the domain's own name pointing at `mx.millionsend-dns.com` (self-hosted,
+the instance's `RECEIVING_MX_HOST`), priority `10`.
+
+```json
+{
+  "record": "Receiving",
+  "name": "inbound.example.com",
+  "type": "MX",
+  "ttl": "Auto",
+  "status": "verified",
+  "value": "mx.millionsend-dns.com",
+  "priority": 10,
+  "live": "found"
+}
+```
+
+The row is checked live like the others: `verified` once that host is among
+the name's MX records with the lowest priority number, `failed` while another
+MX record on the name has a lower number (`detail` lists what is published),
+and `not_started` with no MX record at all. A lower-numbered MX record takes
+the mail instead, which is why the MX belongs on a subdomain such as
+`inbound.example.com` when the domain already receives mail elsewhere. The
+row never gates sending.
+
+`receiving_catch_all` says whether the domain takes mail at every address
+(`true`) or only at its [inboxes'](/concepts/inboxes) addresses (`false`,
+the default; other addresses are refused). Owners and admins switch it with
+**Catch-all** on the domain page or `PATCH /domains/{id}` with
+`{ "receiving_catch_all": true }`; on MillionSend Cloud it needs a paid plan.
+See [Which addresses receive](/concepts/receiving#which-addresses-receive).
+Deleting a domain deletes its inboxes, with their threads and drafts, and
+revokes their API keys.
+
+## Shared subdomain
+
+On an instance with a [shared inbox domain](/concepts/inboxes#shared-domain),
+`GET /domains` ends with one more row: your team's subdomain of it, such as
+`acme.agents.example`, where your shared inboxes get their addresses; a
+team whose subdomain still waits for its name review has none yet. Every
+row carries `shared`, and this is the one with `shared: true`. It reads
+`verified`, in the instance's default region, with receiving on, catch-all
+and tracking off, and two fields of its own:
+
+- `sending_mode`: what addresses on it may send now: `open` (start
+  conversations), `reply_only` (reply inside their threads) or
+  `receive_only` (nothing goes out, and `capabilities.sending` reads
+  `disabled`). An inbox whose address or `from_name` looks like a
+  well-known brand only replies, even when the mode is `open` (see
+  [Shared domain](/concepts/inboxes#shared-domain)).
+- `sending_mode_reason`: why it is below `open`: `plan` (the team's plan)
+  or `instance` (the instance's settings); `null` when open.
+
+The row is read-only: `GET /domains/{id}` answers it with `records: []`,
+since there is nothing to set up, and `PATCH`, `POST /domains/{id}/verify`
+and `DELETE` answer `403 forbidden`. It doesn't count toward your plan's
+domain limit, and its id stays the same when a rename changes its name.
+Though verified, it sends only from your inboxes' own addresses, and
+`POST /api-keys` refuses its id as `domain_id` with `422 validation_error`.
+To create an inbox on it, send its id as `domain_id` to `POST /inboxes`.
+The dashboard's **Domains** page shows it first, marked **Shared**.
+
 ## API keys and domains
 
 An API key can be scoped to a single domain; such a key can only send from
-that domain (other domains return `403 restricted_api_key`).
+that domain (other domains return `403 restricted_api_key`), and reads only
+the mail [received](/concepts/receiving) at it. Keys it creates
+through the API are scoped to the same domain: an omitted `domain_id` inherits
+it, and any other domain returns `403 restricted_api_key`.
+
+A key can be scoped to one [inbox](/concepts/inboxes#inbox-scoped-api-keys)
+instead, which narrows it further: that inbox's mail, and sends from its
+address only.

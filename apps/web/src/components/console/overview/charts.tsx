@@ -6,15 +6,15 @@ import { useLocale, useTranslations } from "next-intl";
 import type { Period } from "@/components/console/chart-dialog";
 import { LineChart } from "@/components/line-chart";
 import { Skeleton } from "@/components/skeleton";
-import { formatHourMinute, formatPercent, periodDayKeys } from "@/lib/console-format";
+import { durationUnit, formatHourMinute, formatPercent, periodDayKeys } from "@/lib/console-format";
 import { formatDayTime, formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
-export type KpiKind = "sent" | "delivered" | "bounced" | "complained";
+export type KpiKind = "sent" | "delivered" | "hardBounced" | "complained";
 
 export const KPI_DECIMALS: Record<Exclude<KpiKind, "sent">, number> = {
   delivered: 1,
-  bounced: 2,
+  hardBounced: 2,
   complained: 3,
 };
 
@@ -25,7 +25,6 @@ export function kpiColor(kind: KpiKind): string {
 interface Counters {
   sent: number;
   delivered: number;
-  bounced: number;
   hardBounced: number;
   complained: number;
 }
@@ -134,7 +133,11 @@ export function KpiChart({ kind, period }: { kind: KpiKind; period: Period }) {
   );
 }
 
-/** One probe's bucketed history; `scale` plots a ratio probe per million (see RATE_SCALE). */
+/**
+ * One probe's bucketed history; `scale` plots a ratio probe per million (see
+ * RATE_SCALE). When a point folds several readings, the note under the chart
+ * says how: the bucket's highest reading, or its average for a rate.
+ */
 export function ProbeChart({
   probe,
   period,
@@ -148,6 +151,8 @@ export function ProbeChart({
   formatValue: (value: number) => string;
   scale?: number;
 }) {
+  const t = useTranslations("console.overview.charts");
+  const common = useTranslations("console.common");
   const locale = useLocale();
   const trpc = useTRPC();
   const query = useQuery(trpc.console.overview.history.queryOptions({ probe, period }));
@@ -161,22 +166,32 @@ export function ProbeChart({
       : data.bucketSeconds < 86_400
         ? formatDayTime(iso, locale)
         : formatDayUtc(iso.slice(0, 10), locale);
+  const bucket = durationUnit(data.bucketSeconds);
   return (
-    <LineChart
-      days={data.points.map((p) => new Date(p.t).toISOString())}
-      height={CHART_HEIGHT}
-      series={[
-        {
-          key: probe,
-          label,
-          color: "var(--ms-steel)",
-          values: data.points.map((p) => (p.value ?? 0) * scale),
-          area: true,
-        },
-      ]}
-      formatDay={formatDay}
-      formatValue={(v) => formatValue(v / scale)}
-    />
+    <>
+      <LineChart
+        days={data.points.map((p) => new Date(p.t).toISOString())}
+        height={CHART_HEIGHT}
+        series={[
+          {
+            key: probe,
+            label,
+            color: "var(--ms-steel)",
+            values: data.points.map((p) => (p.value ?? 0) * scale),
+            area: true,
+          },
+        ]}
+        formatDay={formatDay}
+        formatValue={(v) => formatValue(v / scale)}
+      />
+      {data.points.some((p) => p.readings > 1) ? (
+        <ChartNote>
+          {t(`point.${data.aggregate}`, {
+            window: common(`duration.${bucket.unit}`, { n: bucket.n }),
+          })}
+        </ChartNote>
+      ) : null}
+    </>
   );
 }
 

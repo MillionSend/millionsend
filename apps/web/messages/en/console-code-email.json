@@ -1,0 +1,6 @@
+{
+  "subject": "Your MillionSend console code",
+  "body": "Enter this code in the MillionSend console to start a support view.",
+  "expiry": "It works once, for {minutes} minutes.",
+  "ignore": "Didn't ask for it? Someone else may be signed in to your account: reset your password, which signs out every session."
+}

@@ -2,9 +2,18 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { loopTab } from "@/lib/keyboard";
+import { PANEL_MAX_WIDTH } from "@/lib/panel-placement";
 import { useAnchoredPanel } from "./anchored-panel";
-import { ChevronGlyph } from "./icons/nav-icons";
+import { PencilIcon } from "./icons/mail-icons";
+import { ChevronGlyph, PlusGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
+
+/**
+ * A button trigger is narrower than its panel's search placeholder; at this
+ * width the placeholder fits and typing a name doesn't widen the panel.
+ */
+const BUTTON_PANEL_MIN_WIDTH = 250;
 
 export interface GroupedOption {
   value: string;
@@ -37,6 +46,17 @@ export interface OptionGroup {
  * "all" off and narrows to just that row. `exclusive` keeps the member rows
  * unchecked under it, for a filter where "all" means "no filter" rather than
  * "each of these". A group with an empty label draws no heading.
+ *
+ * With `onCreate`, a search that names no option exactly ends the list with a
+ * row that creates it (`createLabel` words that row); Enter reaches it like
+ * any row. `createExtra` adds controls under that row (how the new option is
+ * made); while the panel holds controls besides the search, Tab cycles
+ * through them instead of leaving.
+ *
+ * With `renderEdit`, the hovered or arrowed-to row shows a pencil, and → on
+ * it (past the end of the typed text) does the same: the panel swaps to the
+ * row's edit view until it calls `back`, or Esc. Each row tells assistive
+ * tech about → with `editHint`, since the pencil is hidden from it.
  */
 export function GroupedMultiSelect({
   value,
@@ -51,6 +71,15 @@ export function GroupedMultiSelect({
   width,
   disabled = false,
   id,
+  button = false,
+  onCreate,
+  createLabel,
+  createExtra,
+  editLabel,
+  editHint,
+  renderEdit,
+  panelMinWidth,
+  maxLength,
 }: {
   value: string[];
   onChange: (value: string[]) => void;
@@ -72,17 +101,37 @@ export function GroupedMultiSelect({
   disabled?: boolean;
   /** Forwarded to the trigger so an ms-field <label htmlFor> can target it. */
   id?: string;
+  /** Trigger drawn as a secondary button instead of an input, as Select's. */
+  button?: boolean;
+  /** A returned promise keeps the name typed until it settles, and after a refusal, so the reason can show beside it. */
+  onCreate?: (name: string) => unknown;
+  createLabel?: (name: string) => string;
+  /** Controls under the create row; `create` runs the row, as Enter on it does. */
+  createExtra?: (name: string, create: () => void) => React.ReactNode;
+  /** The pencil's title, and the edit view's name. */
+  editLabel?: string;
+  /** How → opens a row's edit view, as each row's description. */
+  editHint?: string;
+  renderEdit?: (option: GroupedOption, back: () => void) => React.ReactNode;
+  /** Overrides the button trigger's panel width floor, for rows or controls wider than a name. */
+  panelMinWidth?: number;
+  /** Caps the search text, and so the longest name the create row offers. */
+  maxLength?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const dismissRefs = useMemo(() => [rootRef, menuRef], []);
   // Portaled and fixed under the trigger: inside a dialog (a scroll
   // container) an in-flow panel would be clipped at the dialog's edge.
-  const panelStyle = useAnchoredPanel(open ? rootRef.current : null);
+  const panelStyle = useAnchoredPanel(open ? rootRef.current : null, menuRef, {
+    onAnchorHidden: () => setOpen(false),
+  });
   const listboxId = useId();
 
   // Filter, then flatten in group order so keyboard nav and rendering agree.
@@ -94,7 +143,15 @@ export function GroupedMultiSelect({
   }, [options, groups, query]);
 
   const allOffset = allOption ? 1 : 0;
-  const rowCount = allOffset + orderedFiltered.length;
+  const typed = query.trim();
+  const creatable =
+    onCreate !== undefined &&
+    typed !== "" &&
+    !options.some((o) => o.label.toLowerCase() === typed.toLowerCase());
+  const createIndex = allOffset + orderedFiltered.length;
+  const rowCount = createIndex + (creatable ? 1 : 0);
+  const editingOption =
+    renderEdit && editing !== null ? options.find((o) => o.value === editing) : undefined;
 
   useDismiss(dismissRefs, open, () => setOpen(false));
 
@@ -108,6 +165,7 @@ export function GroupedMultiSelect({
     if (disabled) return;
     setQuery("");
     setActiveIndex(0);
+    setEditing(null);
     setOpen(true);
   }
 
@@ -133,6 +191,23 @@ export function GroupedMultiSelect({
   function activate(index: number) {
     if (allOption && index === 0) {
       allOption.onToggle(!allOption.selected);
+      return;
+    }
+    if (creatable && index === createIndex) {
+      if (creating) return;
+      const name = typed;
+      // Clears the search, unless it moved on while the create was in flight.
+      const clear = () => {
+        setQuery((q) => (q.trim() === name ? "" : q));
+        setActiveIndex(0);
+      };
+      const created = onCreate?.(name);
+      if (created instanceof Promise) {
+        setCreating(true);
+        created.then(clear, () => {}).finally(() => setCreating(false));
+      } else {
+        clear();
+      }
       return;
     }
     const option = orderedFiltered[index - allOffset];
@@ -178,20 +253,45 @@ export function GroupedMultiSelect({
         event.preventDefault();
         activate(activeIndex);
         break;
+      case "ArrowRight": {
+        const option = orderedFiltered[activeIndex - allOffset];
+        const field = event.currentTarget;
+        // Inside the typed text, → moves the caret.
+        const atEnd =
+          !(field instanceof HTMLInputElement) || field.selectionStart === field.value.length;
+        if (renderEdit && option && atEnd) {
+          event.preventDefault();
+          setEditing(option.value);
+        }
+        break;
+      }
       case "Escape":
         // Do not let a parent modal's Escape handler also fire.
         event.stopPropagation();
         closeMenu();
         break;
       case "Tab":
-        setOpen(false);
+        if (!loopTab(event, menuRef.current)) setOpen(false);
         break;
       default:
         break;
     }
   }
 
-  const activeId = open && activeIndex < rowCount ? `${listboxId}-${activeIndex}` : undefined;
+  /** Keys in the panel's other controls (a create row's extras, an edit view): Esc steps back out. */
+  function onControlsKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "Tab") {
+      loopTab(event, menuRef.current);
+    } else if (event.key === "Escape") {
+      event.stopPropagation();
+      if (editingOption) setEditing(null);
+      else closeMenu();
+    }
+  }
+
+  const panelMax = typeof panelStyle.maxHeight === "number" ? panelStyle.maxHeight : 264;
+  const activeId =
+    open && !editingOption && activeIndex < rowCount ? `${listboxId}-${activeIndex}` : undefined;
   const rowChecked = (option: GroupedOption) =>
     (allOption?.selected === true && !allOption.exclusive && !option.excludedFromAll) ||
     value.includes(option.value);
@@ -203,6 +303,7 @@ export function GroupedMultiSelect({
     adornment,
     label,
     hint,
+    edit,
   }: {
     index: number;
     checked: boolean;
@@ -210,13 +311,18 @@ export function GroupedMultiSelect({
     adornment?: React.ReactNode;
     label: string;
     hint?: string;
+    edit?: () => void;
   }) {
+    const check = checked ? <span aria-hidden="true">✓</span> : null;
     return (
       <button
         id={`${listboxId}-${index}`}
         type="button"
         role="option"
         aria-selected={checked}
+        {...(edit
+          ? { "aria-keyshortcuts": "ArrowRight", "aria-describedby": `${listboxId}-edit` }
+          : {})}
         tabIndex={-1}
         className={index === activeIndex ? "ms-menu-item active" : "ms-menu-item"}
         onMouseEnter={() => setActiveIndex(index)}
@@ -229,7 +335,25 @@ export function GroupedMultiSelect({
             <span style={{ color: "var(--ms-faint)", fontSize: 12, flex: "none" }}>{hint}</span>
           ) : null}
         </span>
-        {checked ? <span aria-hidden="true">✓</span> : null}
+        {edit && index === activeIndex ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {check}
+            {/* Hidden from assistive tech: an option holds no button, and → opens the same view. */}
+            <span
+              className="ms-menu-edit"
+              title={editLabel}
+              aria-hidden="true"
+              onClick={(event) => {
+                event.stopPropagation();
+                edit();
+              }}
+            >
+              <PencilIcon />
+            </span>
+          </span>
+        ) : (
+          check
+        )}
       </button>
     );
   }
@@ -248,7 +372,7 @@ export function GroupedMultiSelect({
         ref={triggerRef}
         type="button"
         {...(id !== undefined ? { id } : {})}
-        className="ms-input"
+        className={button ? "ms-btn ms-btn-secondary" : "ms-input"}
         role="combobox"
         aria-label={ariaLabel}
         aria-expanded={open}
@@ -273,7 +397,7 @@ export function GroupedMultiSelect({
           {summary}
         </span>
         <span style={{ flexShrink: 0, display: "flex", color: "var(--ms-faint)" }}>
-          <ChevronGlyph />
+          <ChevronGlyph direction={open ? "up" : "down"} />
         </span>
       </button>
       {open
@@ -283,86 +407,141 @@ export function GroupedMultiSelect({
               className="ms-menu"
               style={{
                 ...panelStyle,
+                ...(button ? { minWidth: panelMinWidth ?? BUTTON_PANEL_MIN_WIDTH } : {}),
                 width: "max-content",
-                maxWidth: "min(320px, calc(100vw - 32px))",
+                maxWidth: `min(320px, ${PANEL_MAX_WIDTH})`,
                 padding: 0,
                 overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
                 zIndex: "var(--ms-z-menu)",
               }}
             >
-              <input
-                className="ms-menu-search"
-                style={{ width: "100%", margin: 0 }}
-                // Search is the typing surface while the popover is open.
-                // biome-ignore lint/a11y/noAutofocus: focus moves into the popover by design, Esc restores the trigger
-                autoFocus
-                value={query}
-                placeholder={searchPlaceholder}
-                aria-label={searchPlaceholder}
-                {...(activeId !== undefined ? { "aria-activedescendant": activeId } : {})}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setActiveIndex(0);
-                }}
-                onKeyDown={onKeyDown}
-              />
-              <div
-                id={listboxId}
-                role="listbox"
-                aria-multiselectable="true"
-                aria-label={ariaLabel}
-                style={{
-                  // The search row takes the top of the panel's height budget.
-                  maxHeight:
-                    (typeof panelStyle.maxHeight === "number" ? panelStyle.maxHeight : 264) - 40,
-                  overflowY: "auto",
-                  padding: 4,
-                  boxSizing: "border-box",
-                }}
-              >
-                {allOption ? (
-                  <Row
-                    index={0}
-                    checked={allOption.selected}
-                    onClick={() => activate(0)}
-                    {...(allOption.adornment !== undefined
-                      ? { adornment: allOption.adornment }
-                      : {})}
-                    label={allOption.label}
+              {editingOption && renderEdit ? (
+                <fieldset
+                  aria-label={editLabel}
+                  style={{
+                    minWidth: 0,
+                    minHeight: 0,
+                    margin: 0,
+                    padding: 0,
+                    border: 0,
+                    overflowY: "auto",
+                  }}
+                  onKeyDown={onControlsKeyDown}
+                >
+                  {renderEdit(editingOption, () => setEditing(null))}
+                </fieldset>
+              ) : (
+                <>
+                  <input
+                    className="ms-menu-search"
+                    style={{ width: "100%", margin: 0 }}
+                    // Search is the typing surface while the popover is open.
+                    // biome-ignore lint/a11y/noAutofocus: focus moves into the popover by design, Esc restores the trigger
+                    autoFocus
+                    value={query}
+                    maxLength={maxLength}
+                    placeholder={searchPlaceholder}
+                    aria-label={searchPlaceholder}
+                    {...(activeId !== undefined ? { "aria-activedescendant": activeId } : {})}
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                      setActiveIndex(0);
+                    }}
+                    onKeyDown={onKeyDown}
                   />
-                ) : null}
-                {orderedFiltered.length === 0 ? (
-                  <div style={{ padding: "7px 12px", fontSize: 13, color: "var(--ms-muted)" }}>
-                    {noResultsLabel}
-                  </div>
-                ) : (
-                  groups.map((group) => {
-                    const rows = orderedFiltered.filter((o) => o.group === group.key);
-                    if (rows.length === 0) return null;
-                    return (
-                      <div key={group.key}>
-                        {group.label ? <div className="ms-menu-label">{group.label}</div> : null}
-                        {rows.map((option) => {
-                          const index = allOffset + orderedFiltered.indexOf(option);
-                          return (
-                            <Row
-                              key={option.value}
-                              index={index}
-                              checked={rowChecked(option)}
-                              onClick={() => activate(index)}
-                              {...(option.adornment !== undefined
-                                ? { adornment: option.adornment }
-                                : {})}
-                              {...(option.hint !== undefined ? { hint: option.hint } : {})}
-                              label={option.label}
-                            />
-                          );
-                        })}
+                  <div
+                    id={listboxId}
+                    role="listbox"
+                    aria-multiselectable="true"
+                    aria-label={ariaLabel}
+                    style={{
+                      // The search row takes the top of the panel's height budget.
+                      maxHeight: panelMax - 40,
+                      // Gives way first when a create row's extras need the room.
+                      minHeight: 0,
+                      overflowY: "auto",
+                      padding: 4,
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {allOption ? (
+                      <Row
+                        index={0}
+                        checked={allOption.selected}
+                        onClick={() => activate(0)}
+                        {...(allOption.adornment !== undefined
+                          ? { adornment: allOption.adornment }
+                          : {})}
+                        label={allOption.label}
+                      />
+                    ) : null}
+                    {orderedFiltered.length === 0 && !creatable ? (
+                      <div style={{ padding: "7px 12px", fontSize: 13, color: "var(--ms-muted)" }}>
+                        {noResultsLabel}
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                    ) : (
+                      groups.map((group) => {
+                        const rows = orderedFiltered.filter((o) => o.group === group.key);
+                        if (rows.length === 0) return null;
+                        return (
+                          <div key={group.key}>
+                            {group.label ? (
+                              <div className="ms-menu-label">{group.label}</div>
+                            ) : null}
+                            {rows.map((option) => {
+                              const index = allOffset + orderedFiltered.indexOf(option);
+                              return (
+                                <Row
+                                  key={option.value}
+                                  index={index}
+                                  checked={rowChecked(option)}
+                                  onClick={() => activate(index)}
+                                  {...(option.adornment !== undefined
+                                    ? { adornment: option.adornment }
+                                    : {})}
+                                  {...(option.hint !== undefined ? { hint: option.hint } : {})}
+                                  {...(renderEdit ? { edit: () => setEditing(option.value) } : {})}
+                                  label={option.label}
+                                />
+                              );
+                            })}
+                          </div>
+                        );
+                      })
+                    )}
+                    {creatable ? (
+                      <>
+                        {/* A listbox holds only options: a div, not a separator <hr>. */}
+                        {createIndex > 0 ? <div className="ms-menu-sep" /> : null}
+                        <Row
+                          index={createIndex}
+                          checked={false}
+                          onClick={() => activate(createIndex)}
+                          adornment={
+                            <span style={{ display: "flex", color: "var(--ms-muted)" }}>
+                              <PlusGlyph size={12} />
+                            </span>
+                          }
+                          label={createLabel ? createLabel(typed) : typed}
+                        />
+                      </>
+                    ) : null}
+                  </div>
+                  {renderEdit && editHint ? (
+                    <span id={`${listboxId}-edit`} hidden>
+                      {editHint}
+                    </span>
+                  ) : null}
+                  {creatable && createExtra ? (
+                    // biome-ignore lint/a11y/noStaticElementInteractions: keydown only keeps Tab in the panel and Esc closing it
+                    <div onKeyDown={onControlsKeyDown}>
+                      {createExtra(typed, () => activate(createIndex))}
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>,
             document.body,
           )

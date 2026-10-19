@@ -1,4 +1,5 @@
 import { unescapeHtml } from "./html.js";
+import { scanHtml } from "./links.js";
 import { makeClickToken, makeOpenToken } from "./tracking.js";
 
 /**
@@ -13,6 +14,8 @@ import { makeClickToken, makeOpenToken } from "./tracking.js";
  */
 export interface RewriteOptions {
   emailId: string;
+  /** The sending team, signed into every click token. */
+  teamId: string;
   /** Origin of the tracking endpoints (app host or the domain's CNAME'd subdomain). */
   trackingBaseUrl: string;
   click: boolean;
@@ -26,28 +29,6 @@ export interface RewriteOptions {
    * pass the `/unsubscribe/` prefix to exclude it.
    */
   skipHrefPrefix?: string;
-}
-
-// ponytail: naive attribute regex — a quoted `>` inside an <a> tag would fool
-// it, but that does not occur in real email HTML. Upgrade to a parser only if a
-// broken template surfaces it. Shared with email-insights so both sides see
-// the exact same set of anchors. The value is matched per quote kind rather
-// than lazily up to a backreference, and the tag prefix is `[^<>]` rather
-// than `[^>]`: the html is the customer's, and either lazy form backtracks
-// polynomially on a crafted body (an unclosed `<a` now stops at the next `<`).
-export const ANCHOR_HREF = /(<a\b[^<>]*?\shref=)(?:(")([^"]*)"|(')([^']*)')/gi;
-
-/** An ANCHOR_HREF match taken apart: the tag up to the quote, the quote, the raw value. */
-export function anchorHrefParts(m: readonly (string | undefined)[]): {
-  prefix: string;
-  quote: string;
-  value: string;
-} {
-  return {
-    prefix: m[1] as string,
-    quote: (m[2] ?? m[4]) as string,
-    value: (m[3] ?? m[5]) as string,
-  };
 }
 
 /**
@@ -67,16 +48,34 @@ export function rewriteForTracking(html: string, opts: RewriteOptions): string {
   let out = html;
 
   if (opts.click) {
-    out = out.replace(ANCHOR_HREF, (match: string, ...groups: (string | undefined)[]) => {
-      const { prefix, quote, value } = anchorHrefParts([match, ...groups]);
-      // The attribute is HTML: "&amp;" between query parameters is one "&" to
-      // the browser, and the redirect must follow the URL the browser would.
-      const url = unescapeHtml(value);
-      if (!isTrackableHref(url)) return match;
-      if (opts.skipHrefPrefix && url.startsWith(opts.skipHrefPrefix)) return match;
-      const token = makeClickToken({ emailId: opts.emailId, url, secretKey: opts.secretKey });
-      return `${prefix}${quote}${base}/t/c/${token}${quote}`;
+    // Only the href of a real <a> or <area>, found as the browser finds it:
+    // never a form's action, and never a look-alike inside another
+    // attribute's quotes. Each value is swapped in place, so the rest of the
+    // markup stays byte for byte.
+    const parts: string[] = [];
+    let cursor = 0;
+    scanHtml(html, {
+      tag(tag) {
+        if (tag.closing || (tag.name !== "a" && tag.name !== "area")) return;
+        const href = tag.attrs.find((attr) => attr.name === "href");
+        if (!href || href.start === -1) return;
+        // The attribute is HTML: "&amp;" between query parameters is one "&" to
+        // the browser, and the redirect must follow the URL the browser would.
+        const url = unescapeHtml(href.value);
+        if (!isTrackableHref(url)) return;
+        if (opts.skipHrefPrefix && url.startsWith(opts.skipHrefPrefix)) return;
+        const token = makeClickToken({
+          emailId: opts.emailId,
+          teamId: opts.teamId,
+          url,
+          secretKey: opts.secretKey,
+        });
+        const q = href.quote || '"';
+        parts.push(html.slice(cursor, href.start), `${q}${base}/t/c/${token}${q}`);
+        cursor = href.end;
+      },
     });
+    if (cursor > 0) out = parts.join("") + html.slice(cursor);
   }
 
   if (opts.open) {

@@ -1,38 +1,65 @@
 import { SQSClient } from "@aws-sdk/client-sqs";
 import {
+  cardFingerprints,
   createStripe,
   purgeStripeEvents,
   reconcileTeamPlan,
   reportOverage,
 } from "@millionsend/billing";
 import {
+  ABUSE_JUDGE_TIMEOUT_MS_DEFAULT,
   abuseJudgeConfig,
+  abuseVisionConfig,
+  disposableEmailsBlocked,
   env,
+  ipGeolocationEnabled,
+  receivingEnabled,
   servedRegions,
   sesTenantsEnabled,
+  sharedInboxDomain,
   trackingCnameTarget,
   trackingSubdomainsSupported,
   unsubscribeBaseUrl,
 } from "@millionsend/config";
 import {
+  anyYoungLinkDomain,
   committedDailyVolume,
+  createDomainAgeResolver,
+  createSharedNameReview,
+  DomainAgeRetryableError,
+  deriveInboxKeys,
   deriveSamplingKey,
   deriveTrackingKey,
   deriveUnsubscribeKey,
+  domainsAwaitingAge,
   eraseRecipient,
+  expireDrafts,
+  expireInboxes,
   getInstanceSettings,
   hashRecipient,
+  type InboxDeps,
+  type InboxSendDeps,
   type MonitorDeps,
+  markDomainAgeUnknown,
   monitorSettingsReader,
+  ownerDomain,
   pacingHorizonDays,
   pausedRegions,
   postJson,
   pruneMonitorSamples,
   pruneProbes,
+  purgeAccountSignups,
+  purgeCampaignFingerprints,
   purgeExpiredIdempotencyKeys,
+  purgeTrashedThreads,
   type QueuedWebhookDelivery,
+  reconcilePendingScreens,
+  recordDomainAge,
+  recordMissingFingerprints,
   recordProbes,
   recountStaleSegments,
+  refreshDisposableDomains,
+  refreshIpGeoDatabases,
   regionBulkCounts,
   sesEventsHealth,
 } from "@millionsend/core";
@@ -42,13 +69,16 @@ import {
   EMAIL_SEND_PRIORITY,
   type EmailSendPriority,
   type EnqueueEmailSends,
+  JUDGE_PRIORITY,
   Queue,
 } from "@millionsend/queue";
 import {
   createKeyringFromEnv,
   createSesAccountClient,
+  createSesReputationClient,
   createSesv2Client,
   getAccountOverview,
+  getSesComplaintRate,
   nodeDnsResolver,
   type SesIdentityClient,
 } from "@millionsend/ses";
@@ -60,7 +90,10 @@ import {
   purgeExpiredApiRequests,
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
+  purgeExpiredReceivedContent,
+  purgeExpiredReceivedMetadata,
   purgeExpiredSessions,
+  purgeInboxData,
   purgeStaleHourlyUsage,
   reapStaleTrackingSubdomains,
   reapUnverifiedDomains,
@@ -72,17 +105,30 @@ import {
   stripExpiredEventPayloads,
 } from "./handlers/cron.js";
 import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
+import { forwardToOwners } from "./handlers/inbox-forward.js";
 import { runInstanceProbes } from "./handlers/instance-probes.js";
+import { alertLinkedTeams } from "./handlers/linkage-alerts.js";
 import { runMonitorHealth } from "./handlers/monitor-health.js";
 import { reportPlanMove, sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
-import { runRevealNotices } from "./handlers/reveal-notices.js";
 import { runSafetyFlags } from "./handlers/safety-flags.js";
+import { screenReceived } from "./handlers/screen-received.js";
 import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
-import { syncTenants } from "./handlers/tenants.js";
+import {
+  queueMissingSharedSubdomains,
+  runSharedSubdomainJob,
+} from "./handlers/shared-subdomain.js";
+import {
+  abandonTenantStatus,
+  retryTenantStatus,
+  sharedTenantResolver,
+  syncTenants,
+} from "./handlers/tenants.js";
+import { mediaPool } from "./media/scan.js";
+import { createAbuseVision } from "./media/vision.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
 import { createSystemMailer } from "./system-mail.js";
@@ -119,9 +165,19 @@ const unsubscribeHost = unsubscribeBaseUrl();
 const unsubscribe = unsubscribeHost
   ? { secretKey: unsubscribeSecretKey, baseUrl: unsubscribeHost }
   : undefined;
-// Platform mail (no domain row) goes out in the default region, the first served.
+// The links this instance writes into customer mail (unsubscribe, the
+// dashboard) lead nowhere new: screening never counts them as destinations.
+const platformDomains = new Set(
+  [unsubscribeHost, env.APP_BASE_URL].flatMap((url) =>
+    url && URL.canParse(url) ? [ownerDomain(new URL(url).hostname)] : [],
+  ),
+);
+// Mail with no domain row (platform mail, the shared inbox domain's) goes out
+// in the default region, the first served, so the shared identity's tenant
+// associations are made there too.
 const regions = servedRegions();
-const ses = createSesSender(regions[0] ?? env.AWS_REGION);
+const defaultRegion = regions[0] ?? env.AWS_REGION;
+const ses = createSesSender(defaultRegion);
 // SESv2 identity clients (GetEmailIdentity) for domain re-verification, cached
 // per region since identities live in the domain's region. Distinct from the
 // send client above (SendEmail); credentials fall back to the provider chain.
@@ -139,6 +195,15 @@ const clientForRegion = (region: string): SesIdentityClient => {
   }
   return client;
 };
+const sharedDomain = sharedInboxDomain();
+const sharedTenant =
+  sesTenantsEnabled() && sharedDomain
+    ? sharedTenantResolver(db, {
+        client: clientForRegion(defaultRegion),
+        region: defaultRegion,
+        sharedInboxDomain: sharedDomain,
+      })
+    : undefined;
 // One GetAccount client per served region: the 24-hour quota and the send
 // rate are both per region.
 const accountClients = new Map<string, ReturnType<typeof createSesAccountClient>>();
@@ -154,6 +219,19 @@ const accountClientFor = (region: string) => {
   }
   return client;
 };
+// SES publishes each region's reputation (its own complaint rate) to
+// CloudWatch in that region.
+const sesUnreadableLoggedAt = new Map<string, Date>();
+const reputationClients = new Map(
+  regions.map((region) => [
+    region,
+    createSesReputationClient({
+      region,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    }),
+  ]),
+);
 // The buckets are the messages/second control; worker concurrency is not a
 // rate limit and must never be treated as one. In-memory ⇒ single worker
 // process only (see SES_MAX_SEND_RATE in @millionsend/config); each process
@@ -210,18 +288,32 @@ const enqueueSend = (emailId: string, startAfter?: Date, priority?: EmailSendPri
 // Account mail rides the pipeline, so the mailer needs the queue it enqueues into.
 const mailer = createSystemMailer({ db, keyring, enqueueSend });
 
-// The content monitor: off unless ABUSE_JUDGE names a provider. When on, an
-// accepted send may be drawn and judged after the fact; the sampling key is
-// derived like the token keys, the settings row is re-read once a minute.
+// The content monitor: off unless ABUSE_JUDGE names a provider. When on, a
+// new team's mail is judged before SES and an accepted send may be drawn and
+// judged after the fact; the sampling key is derived like the token keys,
+// the settings row is re-read once a minute.
 const judgeConfig = abuseJudgeConfig();
 const judge = createAbuseJudge(judgeConfig);
+// The image reader the judge's media read hands images to; null while ABUSE_VISION is off.
+const vision = createAbuseVision(abuseVisionConfig());
+// The parsing threads boot now, WASM compiled, so the first email with a file never waits on them.
+mediaPool().warm();
 const monitorSettings = monitorSettingsReader(db, env as unknown as Record<string, unknown>);
 const monitor: MonitorDeps | undefined = judge
   ? {
       samplingKey: deriveSamplingKey(masterKeyBytes),
       settings: monitorSettings,
-      enqueueJudge: async (sampleId) => {
-        await queue.send("abuse.judge", { sampleId }, { dedupeKey: sampleId });
+      enqueueJudge: async (sampleId, opts) => {
+        await queue.send(
+          "abuse.judge",
+          { sampleId },
+          {
+            dedupeKey: sampleId,
+            group: opts?.teamId,
+            priority: opts?.screening ? JUDGE_PRIORITY.screening : JUDGE_PRIORITY.sample,
+            startAfter: opts?.startAfter,
+          },
+        );
       },
     }
   : undefined;
@@ -253,12 +345,57 @@ const enqueueWebhook = async (deliveries: readonly QueuedWebhookDelivery[]): Pro
   await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
 
+const inboxDeps: InboxDeps = {
+  sharedInboxDomain: sharedInboxDomain() ?? null,
+  receivingEnabled: receivingEnabled(),
+  enqueueWebhookDeliveries: enqueueWebhook,
+};
+// forward_to passes go through the accept pipeline like an API send, so they
+// enqueue as transactional mail.
+const inboxSendDeps: InboxSendDeps = {
+  db,
+  keyring,
+  isCloud: env.IS_CLOUD,
+  enqueueEmailSend: (emailId, opts) =>
+    enqueueSend(emailId, opts?.startAfter, EMAIL_SEND_PRIORITY.transactional),
+  inboxKeys: deriveInboxKeys(masterKeyBytes),
+  sharedInboxDomain: inboxDeps.sharedInboxDomain,
+  monitorSettings,
+  enqueueWebhookDeliveries: enqueueWebhook,
+};
+
+const enqueueDomainAge = async (domainId: string): Promise<void> => {
+  await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
+};
+// The warm-up caps by a sending domain's age and the review hold reads it,
+// so registries are asked while either can act.
+const domainAgeWanted = async (): Promise<boolean> => {
+  const s = await monitorSettings();
+  return s.warmupEnabled || (judge !== null && s.autoHold);
+};
+// One resolver for the process: it holds the RDAP bootstrap, the WHOIS
+// referrals, the hosts in Retry-After backoff and the crt.sh clock.
+const domainAge = createDomainAgeResolver();
+// How long a verdict waits on a new link domain's age; a lookup still
+// running then fills the shared cache for the next one.
+const LINK_AGE_BUDGET_MS = 10_000;
+
 const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
   await queue.send(
     "broadcast.send",
     { broadcastId },
     { dedupeKey: broadcastId, ...(startAfter ? { startAfter } : {}) },
   );
+};
+
+const backfillSharedSubdomains = async (): Promise<void> => {
+  const { stamped, queued } = await queueMissingSharedSubdomains(db, {
+    sharedInboxDomain: sharedDomain,
+    sendMany: (jobs) => queue.enqueueSharedSubdomains(jobs),
+  });
+  if (stamped > 0 || queued > 0) {
+    console.log(`shared.subdomain: stamped=${stamped} queued=${queued}`);
+  }
 };
 
 // Crons and dead-letter workers first: they poll slowly and must never wait
@@ -270,12 +407,19 @@ await queue.scheduleCrons({
       enqueueSends,
       sesQuota: sendControls,
       finalize: (id) => finalizeBroadcast(db, { mailer, appBaseUrl: env.APP_BASE_URL }, id),
+      mailer,
+      appBaseUrl: env.APP_BASE_URL,
     });
     console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
   },
   "sends.reconcile": async () => {
-    const requeued = await reconcileStalledSends(db, { enqueueSends });
+    const requeued = await reconcileStalledSends(db, {
+      enqueueSends,
+      enqueueWebhookDelivery: enqueueWebhook,
+    });
     if (requeued > 0) console.log(`sends.reconcile: requeued=${requeued}`);
+    const screens = await reconcilePendingScreens(db, (p) => queue.enqueueScreening(p));
+    if (screens > 0) console.log(`sends.reconcile: screens=${screens}`);
   },
   "retention.purge": async () => {
     const purged = await purgeExpiredEmailBodies(db, {
@@ -291,11 +435,29 @@ await queue.scheduleCrons({
       retentionDays: metadataRetentionDays,
       deliveryRetentionDays: env.WEBHOOK_DELIVERY_RETENTION_DAYS,
     });
+    const receivedPurged = await purgeExpiredReceivedContent(db, {
+      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+    });
+    const receivedDeleted = await purgeExpiredReceivedMetadata(db, {
+      retentionDays: metadataRetentionDays,
+    });
+    // After the received metadata purge, whose deletes cascade to memberships.
+    const now = new Date();
+    const inboxData = await purgeInboxData(db, {
+      contentDays: (await getInstanceSettings(db)).emailRetentionDays ?? env.EMAIL_RETENTION_DAYS,
+      metadataDays: metadataRetentionDays,
+      now,
+    });
+    const inboxesExpired = await expireInboxes(db, inboxDeps, now);
+    const trashedThreads = await purgeTrashedThreads(db, now);
+    const draftsExpired = await expireDrafts(db, inboxSendDeps, now);
     const sessions = await purgeExpiredSessions(db);
     const hourlyUsage = await purgeStaleHourlyUsage(db);
     const stripeEvents = await purgeStripeEvents(db);
     const probes = await pruneProbes(db);
     const monitorSamples = await pruneMonitorSamples(db);
+    const signups = await purgeAccountSignups(db);
+    const fingerprints = await purgeCampaignFingerprints(db);
     // The console's retention row: how many bodies the last run purged.
     await recordProbes(db, [{ probe: "retention_purged", value: purged, ok: true }]);
     const counts = {
@@ -309,7 +471,15 @@ await queue.scheduleCrons({
       emails: metadata.emails,
       oldDeliveries: metadata.deliveries,
       broadcastsFrozen: metadata.broadcasts,
+      receivedPurged,
+      receivedDeleted,
+      ...inboxData,
+      inboxesExpired,
+      trashedThreads,
+      draftsExpired,
       sessions,
+      signups,
+      fingerprints,
       stripeEvents,
     };
     if (Object.values(counts).some((n) => n > 0)) {
@@ -375,11 +545,23 @@ await queue.scheduleCrons({
       appBaseUrl: env.APP_BASE_URL,
     });
     if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);
+    const linked = await alertLinkedTeams(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    if (linked > 0) console.log(`notifications.sweep: linkedTeamAlerts=${linked}`);
   },
   "platform.breaker": async () => {
-    // Without SES events there are no bounce/complaint counts to judge.
-    if (!env.SNS_TOPIC_ARNS?.length) return;
-    await runPlatformBreaker(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    // Runs without SES events too: SES's own complaint rate needs none.
+    await runPlatformBreaker(db, {
+      mailer,
+      appBaseUrl: env.APP_BASE_URL,
+      ses: {
+        regions,
+        complaintRate: async (region) => {
+          const client = reputationClients.get(region);
+          return client ? getSesComplaintRate(client) : null;
+        },
+        loggedAt: sesUnreadableLoggedAt,
+      },
+    });
   },
   "instance.probe": async () => {
     await runInstanceProbes(db, {
@@ -395,19 +577,16 @@ await queue.scheduleCrons({
     const result = await runSafetyFlags(db, {
       monitorFlagRisk: judge ? (await monitorSettings()).flagRisk : Number.POSITIVE_INFINITY,
     });
-    if (result.opened > 0 || result.cleared > 0) {
+    if (result.opened > 0 || result.cleared > 0 || result.graduated > 0) {
       console.log(
-        `safety.flags: teams=${result.teams} opened=${result.opened} cleared=${result.cleared}`,
+        `safety.flags: teams=${result.teams} opened=${result.opened} cleared=${result.cleared} warmupGraduated=${result.graduated}`,
       );
     }
-  },
-  "safety.reveal_notices": async () => {
-    const result = await runRevealNotices(db, { mailer, appBaseUrl: env.APP_BASE_URL });
-    if (result.disclosed > 0 || result.withheld > 0) {
-      console.log(
-        `safety.reveal_notices: disclosed=${result.disclosed} withheld=${result.withheld}`,
-      );
-    }
+    // Phishing teams suspended before linkage existed, or whose capture failed.
+    await recordMissingFingerprints(db, {
+      keyring: () => keyring,
+      cards: stripe ? (customerId) => cardFingerprints(stripe, customerId) : undefined,
+    });
   },
   "monitor.health": async () => {
     const result = await runMonitorHealth(db, {
@@ -415,6 +594,7 @@ await queue.scheduleCrons({
       mailer,
       appBaseUrl: env.APP_BASE_URL,
       state: monitorHealthState,
+      enqueueJudge: monitor?.enqueueJudge,
     });
     if (result.lost > 0 || result.degraded) {
       console.warn(
@@ -432,9 +612,26 @@ await queue.scheduleCrons({
     );
   },
   "domains.reverify": async () => {
-    const result = await reverifyDomains(db, { clientForRegion, resolver: nodeDnsResolver });
+    // First and on its own: a throw here skips no domain check, and none of theirs skips this.
+    try {
+      await backfillSharedSubdomains();
+    } catch (err) {
+      console.warn("shared.subdomain: sweep failed; the next run tries again", err);
+    }
+    const result = await reverifyDomains(db, {
+      clientForRegion,
+      resolver: nodeDnsResolver,
+      enqueueDomainAge,
+    });
     if (result.checked > 0 || result.failed > 0) {
       console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
+    }
+    // Domains no age lookup has answered for: rows from before the job, a
+    // lost enqueue, or added while neither the warm-up nor the hold was on.
+    if (await domainAgeWanted()) {
+      const awaiting = await domainsAwaitingAge(db);
+      for (const domainId of awaiting) await enqueueDomainAge(domainId);
+      if (awaiting.length > 0) console.log(`domains.age: queued=${awaiting.length}`);
     }
     // Branded tracking CNAMEs never gate domain status, so reverify above skips
     // them; sweep them here to clear a resolved subdomain's clock or unset one
@@ -460,12 +657,28 @@ await queue.scheduleCrons({
       console.log(`tenants.sync: associated=${result.associated} failed=${result.failed}`);
     }
   },
+  "reference.refresh": async () => {
+    if (disposableEmailsBlocked()) {
+      console.log(`reference.refresh: disposable_domains=${await refreshDisposableDomains(db)}`);
+    }
+    if (ipGeolocationEnabled()) {
+      const held = await refreshIpGeoDatabases(db);
+      console.log(
+        `reference.refresh: ${Object.entries(held)
+          .map(([name, month]) => `${name}=${month ?? "none"}`)
+          .join(" ")}`,
+      );
+    }
+  },
   "domains.reap": async () => {
     // Cloud-only: squatting is a cross-tenant problem. Self-host is one
     // operator's own teams and adopts existing SES identities on create, so
     // an unverified row blocks nobody there.
     if (!env.IS_CLOUD) return;
-    const reaped = await reapUnverifiedDomains(db, { clientForRegion });
+    const reaped = await reapUnverifiedDomains(db, {
+      clientForRegion,
+      enqueueWebhookDelivery: enqueueWebhook,
+    });
     if (reaped > 0) console.log(`domains.reap: reaped=${reaped}`);
   },
 });
@@ -479,10 +692,21 @@ if (stripe) {
   });
 }
 
+// A fresh instance would otherwise wait for the daily run to have any copy.
+queue.runCronNow("reference.refresh").catch((err) => {
+  console.warn("reference.refresh at boot failed; the daily run covers it", err);
+});
+
+// Teams still without a label, such as every team when the shared domain is
+// first set, are queued now rather than at the first sweep.
+backfillSharedSubdomains().catch((err) => {
+  console.warn("shared.subdomain at boot failed; the 15-minute sweep covers it", err);
+});
+
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
 // to resurrect forever.
 await queue.workDeadLetter("email.send", async ({ emailId }) => {
-  const failed = await failQueuedEmail(db, emailId, "retries_exhausted");
+  const failed = await failQueuedEmail(db, emailId, "retries_exhausted", enqueueWebhook);
   console.error(`email.send: dead-lettered ${emailId} (marked failed=${failed})`);
 });
 
@@ -513,6 +737,22 @@ await queue.workDeadLetter("abuse.judge", async ({ sampleId }) => {
   console.error(`abuse.judge: dead-lettered sample ${sampleId}`);
 });
 
+await queue.workDeadLetter("tenant.status", ({ teamId }) => abandonTenantStatus(db, teamId));
+
+// A screening that kept throwing leaves its membership pending, invisible
+// to agents; sends.reconcile retries it.
+await queue.workDeadLetter("received.screen", async ({ receivedEmailId, inboxId }) => {
+  console.error(`received.screen: dead-lettered ${receivedEmailId} inbox=${inboxId}`);
+});
+
+await queue.workDeadLetter("inbox.forward", async ({ receivedEmailId, inboxId }) => {
+  console.error(`inbox.forward: dead-lettered ${receivedEmailId} inbox=${inboxId}`);
+});
+
+// Every source kept failing: the domain reads as unknown age, which the
+// warm-up treats by the team's standing, until verification asks again.
+await queue.workDeadLetter("domain.age", ({ domainId }) => markDomainAgeUnknown(db, domainId));
+
 await queue.work(
   "email.send",
   async (payload) => {
@@ -523,12 +763,15 @@ await queue.work(
         ses,
         defaultConfigurationSet: env.SES_CONFIGURATION_SET,
         onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+        settings: monitorSettings,
+        sharedTenant,
         throttle: (region) => sendControls.throttle(region),
         reschedule: (emailId, at, priority) => enqueueSend(emailId, at, priority),
         sesQuota: sendControls,
         enqueueWebhookDelivery: enqueueWebhook,
         tracking,
         monitor,
+        platformDomains,
         ...(unsubscribe ? { unsubscribe } : {}),
       },
       payload,
@@ -555,6 +798,7 @@ await queue.work(
         sesQuota: sendControls,
         horizonDays,
         monitor,
+        platformDomains,
       },
       payload,
     );
@@ -564,8 +808,10 @@ await queue.work(
   { concurrency: 2 },
 );
 
-// Judge calls: a plain queue, a few lanes. A throttle is retried through
-// the queue's backoff, not in-process.
+// Judge calls: a few lanes, each pulling two jobs a fetch so a burst is
+// worked continuously, and one team (the job's group) on at most two of them
+// so its burst never starves another team's screening. A throttle is retried
+// through the queue's backoff, not in-process.
 await queue.work(
   "abuse.judge",
   async ({ sampleId }) => {
@@ -578,11 +824,46 @@ await queue.work(
         timeoutMs: judgeConfig?.timeoutMs,
         mailer,
         appBaseUrl: env.APP_BASE_URL,
+        syncTenant: async (teamId) => {
+          await queue.send("tenant.status", { teamId }, { dedupeKey: teamId });
+        },
+        enqueueSend: (emailId, priority) => enqueueSend(emailId, undefined, priority),
+        enqueueBroadcast: (broadcastId) => enqueueBroadcast(broadcastId),
+        platformDomains,
+        linkDomainYoung: (domains, at) =>
+          anyYoungLinkDomain(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
+        media: { vision },
       },
       { sampleId },
     );
   },
-  { concurrency: 4 },
+  { concurrency: 4, batchSize: 2, groupConcurrency: 2 },
+);
+
+// The inbound judge: a few lanes, at most two on one inbox's mail at a time.
+await queue.work(
+  "received.screen",
+  async (job) => {
+    await screenReceived(
+      db,
+      {
+        judge,
+        keyring,
+        settings: await monitorSettings(),
+        timeoutMs: judgeConfig?.timeoutMs ?? ABUSE_JUDGE_TIMEOUT_MS_DEFAULT,
+        enqueueWebhookDeliveries: enqueueWebhook,
+        enqueueInboxForward: (p) => queue.enqueueInboxForward(p),
+      },
+      job,
+    );
+  },
+  { concurrency: 4, groupConcurrency: 2 },
+);
+
+await queue.work(
+  "inbox.forward",
+  (job) => forwardToOwners(db, inboxSendDeps, job, (at) => queue.enqueueInboxForward(job, at)),
+  { concurrency: 2 },
 );
 
 await queue.work(
@@ -649,6 +930,51 @@ await queue.work(
   // before its successor queues behind everyone else's.
   { concurrency: 8, batchSize: 1, groupConcurrency: 1 },
 );
+
+await queue.work(
+  "tenant.status",
+  ({ teamId }) => retryTenantStatus(db, { clientForRegion, enabled: sesTenantsEnabled() }, teamId),
+  { pollingIntervalSeconds: 30 },
+);
+
+// One lane: crt.sh is spaced per process, and a lookup is a few slow GETs.
+// A retryable failure throws into pg-boss's backoff.
+await queue.work("domain.age", async ({ domainId }) => {
+  // No registry is asked while nothing reads the age; the sweep asks once something does.
+  if (!(await domainAgeWanted())) return;
+  try {
+    const age = await recordDomainAge(db, domainAge, domainId);
+    if (age) {
+      console.log(
+        `domain.age: ${age.domain ?? "-"} source=${age.source} registered=${age.registeredAt?.toISOString() ?? "unknown"}`,
+      );
+    }
+  } catch (err) {
+    if (err instanceof DomainAgeRetryableError)
+      console.warn(`domain.age: ${err.message}; retrying`);
+    throw err;
+  }
+});
+
+// Two lanes keep the name review's load low; a batch above one keeps a
+// backfill burst fetching.
+if (sharedDomain) {
+  const review = createSharedNameReview(judgeConfig);
+  await queue.work(
+    "shared.subdomain",
+    (job) =>
+      runSharedSubdomainJob(
+        db,
+        {
+          sharedInboxDomain: sharedDomain,
+          review,
+          requeue: (next, startAfter) => queue.enqueueSharedSubdomains([next], startAfter),
+        },
+        job,
+      ),
+    { concurrency: 2, batchSize: 10 },
+  );
+}
 
 // Erasure scans a team's whole history; it runs here so the request that
 // asked for it returns at once.

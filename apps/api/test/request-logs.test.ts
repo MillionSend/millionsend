@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 import { INTERNAL_AUTH } from "../src/mcp.js";
-import { LOGGED_JSON_MAX_BYTES, redactLoggedBody } from "../src/request-log.js";
+import { LOGGED_JSON_MAX_BYTES, loggedBody, redactLoggedBody } from "../src/request-log.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -140,6 +140,45 @@ describe("redactLoggedBody", () => {
       url: "[redacted]",
     });
   });
+
+  it("treats a received email's headers as content and every signed download link as a secret", () => {
+    const received = {
+      headers: { subject: "hi" },
+      raw: { download_url: "https://api/receiving/raw/x?signature=s", expires_at: "t" },
+      attachments: [{ filename: "a.pdf", download_url: "https://api/receiving/attachments/x/y" }],
+    };
+    expect(redactLoggedBody("/emails/receiving/x", received)).toEqual({
+      headers: "[headers, 16 B]",
+      raw: { download_url: "[redacted]", expires_at: "t" },
+      attachments: [{ filename: "a.pdf", download_url: "[redacted]" }],
+    });
+    // A send's custom headers are settings, not content.
+    expect(redactLoggedBody("/emails", { headers: { "X-Ref": "1" } })).toEqual({
+      headers: { "X-Ref": "1" },
+    });
+  });
+
+  it("treats received text as content and a received code or sign-in link as a secret", () => {
+    expect(
+      redactLoggedBody("/emails/receiving/x", {
+        extracted_text: "Your code is 482913",
+        extracted: { kinds: ["code"], code: "482913", link: null },
+      }),
+    ).toEqual({
+      extracted_text: "[extracted_text, 19 B]",
+      extracted: { kinds: ["code"], code: "[redacted]", link: null },
+    });
+    expect(
+      redactLoggedBody("/inboxes/i/codes/latest", {
+        status: "found",
+        code: null,
+        url: "https://login.example/magic?t=1",
+      }),
+    ).toEqual({ status: "found", code: null, url: "[redacted]" });
+    expect(
+      redactLoggedBody("/inboxes/i/threads/t/emails", { data: [{ extracted_text: "hi" }] }),
+    ).toEqual({ data: [{ extracted_text: "[extracted_text, 2 B]" }] });
+  });
 });
 
 describe("api request logging", () => {
@@ -175,6 +214,7 @@ describe("api request logging", () => {
       billing: {
         plan: "free",
         planQuota: null,
+        planStatus: "none",
         currentPeriodStart: null,
         currentPeriodEnd: null,
         overageEnabled: false,
@@ -184,6 +224,7 @@ describe("api request logging", () => {
       oauthClientId: "client-abc",
       permission: "full_access",
       domainId: null,
+      inboxId: null,
     });
     const res = await app.fetch(req);
     expect(res.status).toBe(200);
@@ -373,15 +414,40 @@ describe("api request logging", () => {
     expect(row?.requestBytes).toBe(declared);
   });
 
-  it("stores null for a non-JSON response", async () => {
+  it("never parses a response over 1 MiB that declares no length: the marker carries its size", async () => {
     await db.delete(schema.apiRequests);
-    // Authenticated but unrouted: Hono answers with a text/plain 404.
+    const html = `<p>${"x".repeat(1024 * 1024)}</p>`;
+    const res = await post({ ...validBody, to: ["big@example.com"], html });
+    const { id } = (await res.json()) as { id: string };
+    const read = await call("GET", `/emails/${id}`);
+    expect(read.headers.get("content-length")).toBeNull();
+    expect(((await read.json()) as { html: string }).html).toBe(html);
+
+    const rows = await waitForRows(2);
+    const logged = rows.find((r) => r.method === "GET");
+    expect(logged?.responseBody).toEqual({
+      truncated: true,
+      bytes: expect.toSatisfy((bytes: number) => bytes > 1024 * 1024),
+    });
+  });
+
+  it("logs an unrouted request with its not_found body", async () => {
+    await db.delete(schema.apiRequests);
     const res = await call("GET", "/emails/x/y");
     expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")).not.toContain("json");
 
     const [row] = await waitForRows(1);
-    expect(row).toMatchObject({ statusCode: 404, requestBody: null, responseBody: null });
+    expect(row).toMatchObject({
+      statusCode: 404,
+      requestBody: null,
+      responseBody: { statusCode: 404, name: "not_found" },
+    });
+  });
+
+  it("stores null for a non-JSON body", async () => {
+    expect(
+      await loggedBody("/emails/x", "text/plain; charset=UTF-8", null, async () => "plain"),
+    ).toBeNull();
   });
 
   // Kept last: it destroys the api_requests table for this suite's db.
@@ -393,8 +459,14 @@ describe("api request logging", () => {
     expect(res.status).toBe(200);
 
     await vi.waitFor(() => {
-      expect(errors).toHaveBeenCalledWith("api request log failed", expect.anything());
+      expect(errors).toHaveBeenCalledWith(
+        "api request log failed",
+        expect.any(String),
+        expect.any(String),
+      );
     });
+    // The failed row's values (bodies, addresses) never reach the process log.
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("still-works@example.com");
     errors.mockRestore();
   });
 });

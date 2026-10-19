@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   abbreviateDkim,
+  addrSpec,
   formatBytes,
   formatDayUtc,
   formatDurationShort,
   formatHoursMinutes,
+  formatMoneyTotals,
+  formatTimeLeft,
+  formatUsd,
   formatUtcMinute,
   formatUtcTimestampMs,
   maskApiKey,
+  senderName,
 } from "@/lib/format";
 
 describe("formatDayUtc", () => {
@@ -15,6 +20,16 @@ describe("formatDayUtc", () => {
     // Whatever the runner's zone, the label must be the key's own day.
     expect(formatDayUtc("2026-08-13", "en")).toBe("Aug 13");
     expect(formatDayUtc("2026-01-01", "en")).toBe("Jan 1");
+  });
+});
+
+describe("formatUsd", () => {
+  it("prints a bare $ with cents, and a tenth of a cent when asked for 3 digits", () => {
+    expect(formatUsd(3150, "pt-BR")).toBe("$31,50");
+    expect(formatUsd(2000, "en")).toBe("$20");
+    expect(formatUsd(10.5, "pt-BR", 3)).toBe("$0,105");
+    expect(formatUsd(10, "pt-BR", 3)).toBe("$0,10");
+    expect(formatUsd(10.5, "en")).toBe("$0.11");
   });
 });
 
@@ -77,5 +92,46 @@ describe("abbreviateDkim", () => {
     expect(abbreviateDkim('"v=spf1 include:amazonses.com ~all"')).toBe(
       '"v=spf1 include:amazonses.com ~all"',
     );
+  });
+});
+
+describe("formatMoneyTotals", () => {
+  it("sums per currency: US dollars as formatUsd writes them, any other as the locale does", () => {
+    const usd = (amount: number) => ({ amount, currency: "usd" });
+    expect(formatMoneyTotals([usd(2000), usd(2000)], "en")).toBe("$40");
+    expect(formatMoneyTotals([usd(2050), { amount: 9800, currency: "brl" }], "pt-BR")).toBe(
+      "$20,50 + R$\u00a098,00",
+    );
+    expect(formatMoneyTotals([{ amount: 500, currency: "jpy" }], "en")).toBe("¥500");
+    expect(formatMoneyTotals([], "en")).toBe("");
+  });
+});
+
+describe("addrSpec", () => {
+  it("reads the address the From value ends with, never one its display name carries", () => {
+    expect(addrSpec("Ana <ana@sender.example>")).toBe("ana@sender.example");
+    expect(addrSpec("ana@sender.example")).toBe("ana@sender.example");
+    expect(addrSpec('"Bank <alerts@bank.example>" <promo@attacker.example>')).toBe(
+      "promo@attacker.example",
+    );
+  });
+});
+
+describe("senderName", () => {
+  it("reads a From value as its display name, else its address", () => {
+    expect(senderName('"Ana Souza" <ana@sender.example>')).toBe("Ana Souza");
+    expect(senderName("Ana <ana@sender.example>")).toBe("Ana");
+    expect(senderName("<ana@sender.example>")).toBe("ana@sender.example");
+    expect(senderName("ana@sender.example")).toBe("ana@sender.example");
+    expect(senderName(null)).toBe("");
+  });
+});
+
+describe("formatTimeLeft", () => {
+  it("rounds to one compact unit", () => {
+    expect(formatTimeLeft(30_000)).toBe("1m");
+    expect(formatTimeLeft(45 * 60_000)).toBe("45m");
+    expect(formatTimeLeft(23 * 3_600_000 + 20 * 60_000)).toBe("23h");
+    expect(formatTimeLeft(7 * 86_400_000)).toBe("7d");
   });
 });

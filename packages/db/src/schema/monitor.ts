@@ -7,12 +7,14 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
 import { broadcasts } from "./broadcasts.js";
+import { domainAgeSourceEnum } from "./domains.js";
 import { emails } from "./emails.js";
 import { teams } from "./teams.js";
 
@@ -25,6 +27,8 @@ export const monitorSampleKindEnum = pgEnum("monitor_sample_kind", [
   "override",
   "broadcast_skeleton",
   "broadcast_copy",
+  "destination",
+  "agent_first_contact",
 ]);
 
 /** `unjudged` is every judge failure: the sample is kept with its error class and touches nothing else. */
@@ -61,6 +65,9 @@ export const teamMonitor = pgTable("team_monitor", {
   // When an operator last lifted the policy's pause: only verdicts after it
   // can pause the team again, so a reviewed episode is not re-litigated.
   broadcastsResumedAt: timestamp("broadcasts_resumed_at", { withTimezone: true }),
+  // Set when the review hold suspended the team. It holds a team once: after
+  // a person released it, the drained campaign's next verdicts only alert.
+  heldAt: timestamp("held_at", { withTimezone: true }),
   alertedAt: timestamp("alerted_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -93,6 +100,20 @@ export const monitorSamples = pgTable(
     latencyMs: integer("latency_ms"),
     // Throttled judge calls retry a few times before the sample gives up.
     attempts: smallint("attempts").notNull().default(0),
+    // An unsent email (or a new team's broadcast) waits on this verdict
+    // before SES; screenRetries counts the judge's re-runs after failures.
+    screening: boolean("screening").notNull().default(false),
+    screenRetries: smallint("screen_retries").notNull().default(0),
+    // The judged message's destinations the team had not cleared (link owner
+    // domains and the Reply-To's domain), and whether one of them was a link
+    // domain under 7 days old. A phishing-type verdict from 80 is always
+    // looked up, so null on one means an age not known yet; on any other,
+    // not looked up. Domains only, as the insights keep them.
+    destinations: jsonb("destinations").$type<string[]>(),
+    linkYoung: boolean("link_young"),
+    // What screening could not clear in the message's images and files
+    // (core MEDIA_ISSUES), which can park the mail waiting on this verdict.
+    mediaIssues: jsonb("media_issues").$type<string[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     judgedAt: timestamp("judged_at", { withTimezone: true }),
   },
@@ -108,7 +129,40 @@ export const monitorSamples = pgTable(
   ],
 );
 
-/** The judge's own switch is env; these sampling and threshold overrides sit beside it. */
+/**
+ * The destinations a team has cleared: a link owner domain or a Reply-To
+ * domain one of its messages carried with a verdict under 70 naming nothing
+ * phishing-type, among at most 5 new ones, or that an operator released mail
+ * to. Mail to any other destination, or to a revoked one, is judged before
+ * SES at every tier.
+ */
+export const teamDestinations = pgTable(
+  "team_destinations",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    domain: text("domain").notNull(),
+    clearedAt: timestamp("cleared_at", { withTimezone: true }).notNull().defaultNow(),
+    // Mail to it drew a phishing-type verdict after it cleared: new again
+    // until an operator releases mail to it; no verdict clears it again.
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.domain] })],
+);
+
+/**
+ * Registration dates of link domains that drew a phishing-type verdict,
+ * shared by every team: looked up once, read by every later verdict.
+ */
+export const linkDomainAges = pgTable("link_domain_ages", {
+  domain: text("domain").primaryKey(),
+  registeredAt: timestamp("registered_at", { withTimezone: true }),
+  source: domainAgeSourceEnum("source").notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+});
+
+/** The judge's own switch is env; these sampling and threshold overrides sit beside it, with the warm-up's. */
 export const monitorSettingColumns = {
   monitorFirstSends: integer("monitor_first_sends"),
   monitorFirstHours: integer("monitor_first_hours"),
@@ -128,4 +182,18 @@ export const monitorSettingColumns = {
   monitorPauseRisk: doublePrecision("monitor_pause_risk"),
   monitorAutoPause: boolean("monitor_auto_pause"),
   monitorFlagScore: smallint("monitor_flag_score"),
+  monitorAutoHold: boolean("monitor_auto_hold"),
+  monitorHoldScore: smallint("monitor_hold_score"),
+  monitorHoldRepeatCount: integer("monitor_hold_repeat_count"),
+  monitorHoldRepeatScore: smallint("monitor_hold_repeat_score"),
+  // The new-domain warm-up shares the trust & safety settings page.
+  warmupEnabled: boolean("warmup_enabled"),
+  warmupCapFirstDay: integer("warmup_cap_first_day"),
+  warmupCapFirstWeek: integer("warmup_cap_first_week"),
+  warmupCapFirstMonth: integer("warmup_cap_first_month"),
+  // So do the shared inbox domain's sending switches and team cap.
+  sharedInboxSend: boolean("shared_inbox_send"),
+  sharedInboxOpen: boolean("shared_inbox_open"),
+  sharedInboxTenants: boolean("shared_inbox_tenants"),
+  sharedInboxTeamDailyCap: integer("shared_inbox_team_daily_cap"),
 } as const;

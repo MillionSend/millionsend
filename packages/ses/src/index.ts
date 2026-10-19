@@ -62,6 +62,12 @@ export {
   requestSesDailyQuota,
   SES_DAILY_QUOTA_CODE,
 } from "./quotas.js";
+export { checkReceivingMx, RECEIVING_MX_PRIORITY, receivingDnsRecord } from "./receiving-dns.js";
+export {
+  createSesReputationClient,
+  getSesComplaintRate,
+  type SesReputationClient,
+} from "./reputation.js";
 export {
   createSesSendClient,
   type SesSendClient,
@@ -108,5 +114,6 @@ export {
   ensureTenant,
   provisionDomainTenant,
   type SesTenantClient,
+  setTenantSendingStatus,
   type TenantCommand,
 } from "./tenants.js";

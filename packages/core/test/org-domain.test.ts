@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  asciiHostname,
   isRootDomainSend,
   registrableDomain,
   vouchedRegistrableDomain,
@@ -20,6 +21,19 @@ describe("registrableDomain", () => {
     expect(registrableDomain("mail.acme.co.il")).toBe("acme.co.il");
     expect(registrableDomain("news.acme.com.ph")).toBe("acme.com.ph");
     expect(registrableDomain("send.acme.co.th")).toBe("acme.co.th");
+  });
+
+  it("follows the Public Suffix List past the old curated families", () => {
+    expect(registrableDomain("mail.acme.app.br")).toBe("acme.app.br");
+    expect(registrableDomain("news.acme.ia.br")).toBe("acme.ia.br");
+    expect(registrableDomain("pay.shop.com.ua")).toBe("shop.com.ua");
+    // ICANN section only: a private suffix is not a name a registry sold.
+    expect(registrableDomain("x.github.io")).toBe("github.io");
+  });
+
+  it("returns a name with no registrable part as is", () => {
+    expect(registrableDomain("com.br")).toBe("com.br");
+    expect(registrableDomain("10.0.0.1")).toBe("10.0.0.1");
   });
 
   it("tolerates uppercase and a trailing dot", () => {
@@ -45,15 +59,42 @@ describe("isRootDomainSend", () => {
 
 describe("vouchedRegistrableDomain", () => {
   it("vouches under a listed multi-part suffix or a generic TLD", () => {
-    expect(vouchedRegistrableDomain("news.dinzo.com.br")).toBe("dinzo.com.br");
+    expect(vouchedRegistrableDomain("news.acme.com.br")).toBe("acme.com.br");
     expect(vouchedRegistrableDomain("mail.acme.co.uk")).toBe("acme.co.uk");
     expect(vouchedRegistrableDomain("tx.acme.com")).toBe("acme.com");
   });
 
-  it("does not vouch where the last two labels may be a public suffix", () => {
-    expect(vouchedRegistrableDomain("x.sp.gov.br")).toBeNull();
-    expect(vouchedRegistrableDomain("loja.app.br")).toBeNull();
-    expect(vouchedRegistrableDomain("pay.shop.com.ua")).toBeNull();
+  it("vouches the exact name the suffix list gives, never a public suffix", () => {
+    expect(vouchedRegistrableDomain("x.sp.gov.br")).toBe("x.sp.gov.br");
+    expect(vouchedRegistrableDomain("loja.app.br")).toBe("loja.app.br");
+    expect(vouchedRegistrableDomain("pay.shop.com.ua")).toBe("shop.com.ua");
     expect(vouchedRegistrableDomain("com.br")).toBeNull();
+  });
+
+  it("does not vouch where strangers share the ICANN name", () => {
+    expect(vouchedRegistrableDomain("mail.foo.eu.org")).toBeNull();
+    expect(vouchedRegistrableDomain("x.github.io")).toBeNull();
+  });
+});
+
+describe("asciiHostname", () => {
+  it("lowercases, drops the root dot and IDNA-encodes", () => {
+    expect(asciiHostname("Inbound.Example.COM.")).toBe("inbound.example.com");
+    expect(asciiHostname("bücher.example")).toBe("xn--bcher-kva.example");
+    expect(asciiHostname("xn--bcher-kva.example")).toBe("xn--bcher-kva.example");
+  });
+
+  it("refuses anything the URL parser would reinterpret", () => {
+    for (const bad of [
+      "",
+      "a@b.example",
+      "ex%61mple.com",
+      "a b.example",
+      "a/b.example",
+      "[::1]",
+      "x:25",
+    ]) {
+      expect(asciiHostname(bad)).toBeNull();
+    }
   });
 });

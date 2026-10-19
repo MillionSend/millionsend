@@ -3,6 +3,7 @@ import type { SourceBroadcast, SourceDomain, SourceTemplate } from "../src/model
 import {
   broadcastCreateInput,
   domainCreateInput,
+  TARGET_ALL_EVENTS,
   templateCreateInput,
   translateMergeTags,
   translateSegmentFilter,
@@ -150,32 +151,53 @@ describe("translateWebhookEvents", () => {
     expect(
       translateWebhookEvents([
         "email.sent",
-        "email.suppressed",
+        "topic.created",
         "email.sent",
         "domain.created",
         "email.clicked",
+        "email.received",
         "contact.created",
       ]),
     ).toEqual({
-      events: ["email.sent", "email.clicked", "contact.created"],
-      dropped: ["email.suppressed", "domain.created"],
+      events: ["email.sent", "email.clicked", "email.received", "contact.created"],
+      dropped: ["topic.created", "domain.created"],
     });
   });
 
   it("accepts every event the target emits", () => {
     const all = [
+      "email.scheduled",
       "email.sent",
       "email.delivered",
       "email.delivery_delayed",
       "email.bounced",
       "email.complained",
+      "email.failed",
+      "email.suppressed",
       "email.opened",
       "email.clicked",
+      "email.received",
       "contact.created",
       "contact.updated",
       "contact.deleted",
+      "suppression.added",
+      "suppression.removed",
     ];
     expect(translateWebhookEvents(all)).toEqual({ events: all, dropped: [] });
+  });
+
+  it("carries Resend's inbox events over, but not the assignment ones MillionSend never emits", () => {
+    expect(
+      translateWebhookEvents(["inbox.email.received", "inbox.thread.assigned", "inbox.draft.sent"]),
+    ).toEqual({
+      events: ["inbox.email.received", "inbox.draft.sent"],
+      dropped: ["inbox.thread.assigned"],
+    });
+  });
+
+  it("reads an endpoint on every event as every event but the opt-in inbox ones", () => {
+    expect(TARGET_ALL_EVENTS).toContain("email.received");
+    expect(TARGET_ALL_EVENTS.some((event) => event.startsWith("inbox."))).toBe(false);
   });
 });
 

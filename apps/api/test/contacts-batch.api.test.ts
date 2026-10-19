@@ -24,7 +24,7 @@ let teamAId: string;
 type BatchBody = {
   data: { object: "contact"; index: number; id: string; status: string }[];
   counts: { created: number; updated: number; skipped: number; failed: number };
-  errors?: { index: number; message: string }[];
+  errors?: { index: number; statusCode: number; name: string; message: string }[];
 };
 
 const json = async (res: Response) => (await res.json()) as Record<string, unknown>;
@@ -167,9 +167,14 @@ describe("validation modes", () => {
       [0, "created"],
       [2, "created"],
     ]);
-    expect(body.errors).toHaveLength(1);
-    expect(body.errors?.[0]?.index).toBe(1);
-    expect(body.errors?.[0]?.message).toMatch(/^email: /);
+    expect(body.errors).toEqual([
+      {
+        index: 1,
+        statusCode: 422,
+        name: "validation_error",
+        message: expect.stringMatching(/^email: /),
+      },
+    ]);
     expect(body.counts).toEqual({ created: 2, updated: 0, skipped: 0, failed: 1 });
     expect((await contactByEmail("perm-1@example.com"))?.id).toBe(body.data[0]?.id);
   });
@@ -228,7 +233,9 @@ describe("on_conflict", () => {
     expect(permissive.data).toEqual([
       { object: "contact", index: 0, id: expect.any(String), status: "created" },
     ]);
-    expect(permissive.errors).toEqual([{ index: 1, message: "Contact already exists" }]);
+    expect(permissive.errors).toEqual([
+      { index: 1, statusCode: 409, name: "validation_error", message: "Contact already exists" },
+    ]);
     expect((await contactByEmail("dup@example.com"))?.id).toBe(existingId);
   });
 
@@ -394,7 +401,9 @@ describe("intra-batch duplicates (case-insensitive)", () => {
       })
     ).json()) as BatchBody;
     expect(permissive.data.map((d) => d.index)).toEqual([0]);
-    expect(permissive.errors).toEqual([{ index: 1, message: "Duplicate email in batch" }]);
+    expect(permissive.errors).toEqual([
+      { index: 1, statusCode: 422, name: "validation_error", message: "Duplicate email in batch" },
+    ]);
     expect(permissive.counts).toEqual({ created: 1, updated: 0, skipped: 0, failed: 1 });
   });
 
@@ -485,7 +494,9 @@ describe("associations", () => {
       )
     ).json()) as BatchBody;
     expect(permissive.data.map((d) => d.index)).toEqual([0]);
-    expect(permissive.errors).toEqual([{ index: 1, message: "Segment not found" }]);
+    expect(permissive.errors).toEqual([
+      { index: 1, statusCode: 404, name: "not_found", message: "Segment not found" },
+    ]);
     expect(await contactByEmail("iso-2@example.com")).toBeUndefined();
     const foreignMembers = await db
       .select()

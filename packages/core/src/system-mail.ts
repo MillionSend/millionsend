@@ -1,39 +1,37 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { type AcceptEmailDeps, acceptEmail } from "./accept-email.js";
+import { type AcceptEmailDeps, acceptEmail, SYSTEM_MAIL_TAG } from "./accept-email.js";
 import type { AccountMailKind } from "./account-mail.js";
+import { createFixedWindowLimiter } from "./domain-lifecycle.js";
 import { parseSingleSender } from "./sender-address.js";
-
-/**
- * Tag every system email carries; the value names the kind. A label only:
- * the public API accepts any tag name, so nothing may grant quota, bypass a
- * suppression or gate a send on its presence. The worker reads it to ship
- * the links untracked and, for the kinds in CREDENTIAL_MAIL_KINDS, to purge
- * the body after SES accepts the message.
- */
-export const SYSTEM_MAIL_TAG = "millionsend_system";
+import { extractAddrSpec, hashRecipient, mailboxIdentity } from "./suppressions.js";
+import { fetchTeamStanding, SILENT_SUSPENSIONS } from "./team-standing.js";
+import { DAY_MS } from "./utc-day.js";
 
 /**
  * Kinds whose body holds a live credential (a signed link that resets a
  * password, verifies an address, accepts an invitation or confirms a
- * subscription). The worker purges these the moment SES accepts the message:
- * the row lives in the team that owns the sender domain, where every member,
- * full-access key and connected app could otherwise read the link while it is
- * valid. Every other kind carries plain dashboard links and keeps its body for
- * the normal retention window.
+ * subscription, or the console's one-time code). The worker purges these
+ * the moment SES accepts the message: the row lives in the team that owns
+ * the sender domain, where every member, full-access key and connected app
+ * could otherwise read the credential while it is valid. Every other kind
+ * carries plain dashboard links and keeps its body for the normal retention
+ * window.
  */
 export const CREDENTIAL_MAIL_KINDS: ReadonlySet<string> = new Set<SystemMailKind>([
   "password_reset",
   "email_verification",
   "invitation",
   "updates.confirm",
+  "console_code",
 ]);
 
 export type SystemMailKind =
   | "password_reset"
   | "email_verification"
   | "invitation"
+  | "console_code"
   | "quota.warning"
   | "quota.reached"
   | "quota.paused"
@@ -41,11 +39,57 @@ export type SystemMailKind =
   | "deliverability.paused"
   | "region.paused"
   | "region.resumed"
+  | "region.ses_complaints"
   | "webhook.failing"
   | "webhook.auto_disabled"
   | "webhook.backlog"
   | "updates.confirm"
   | AccountMailKind;
+
+/**
+ * The only notices about a team that still reach it while it is suspended:
+ * the suspension and reinstatement (each under its own rules), the security
+ * receipts and billing. Everything else about the team is muted, so a new
+ * kind stays quiet until it is listed here, and a silent suspension mutes
+ * these too: the team must not learn that it was caught (Stripe still sends
+ * its own receipts). Mail about a person's own account and mail to the
+ * operator name no team, so no suspension mutes them.
+ */
+export const SENT_WHILE_SUSPENDED: ReadonlySet<SystemMailKind> = new Set<SystemMailKind>([
+  "team.suspended",
+  "team.reinstated",
+  "api_key.created",
+  "webhook.secret_rotated",
+  "member.joined",
+  "billing.payment_failed",
+  "billing.plan_activated",
+  "billing.plan_changed",
+  "billing.cancel_scheduled",
+  "billing.cancel_reminder",
+  "billing.downgraded",
+]);
+
+/**
+ * Kinds that reach an address on a stranger's say-so: anyone can sign up as
+ * any address, any team can invite one, and anyone can ask for product
+ * updates at one. However many accounts and teams ask, one address gets at
+ * most RECIPIENT_MAIL_PER_HOUR of these a clock hour and
+ * RECIPIENT_MAIL_PER_DAY a UTC day. A person retrying a sign-up needs three
+ * or four, and a few invitations a day still fit.
+ */
+export const RECIPIENT_CAPPED_KINDS: ReadonlySet<SystemMailKind> = new Set<SystemMailKind>([
+  "email_verification",
+  "invitation",
+  "updates.confirm",
+]);
+export const RECIPIENT_MAIL_PER_HOUR = 5;
+export const RECIPIENT_MAIL_PER_DAY = 10;
+
+// ponytail: per-process windows that a restart resets; the web, the one
+// process that sends these kinds, runs as one. Move to a table if it ever
+// runs as several.
+const recipientHourly = createFixedWindowLimiter(RECIPIENT_MAIL_PER_HOUR, 3_600_000);
+const recipientDaily = createFixedWindowLimiter(RECIPIENT_MAIL_PER_DAY, DAY_MS);
 
 export interface SystemMailMessage {
   /** `Name <user@domain>` or a bare address; one of the instance's sender env vars. */
@@ -55,6 +99,12 @@ export interface SystemMailMessage {
   html: string;
   text: string;
   kind: SystemMailKind;
+  /**
+   * The team an owner notice is about, which the suspension mutes check. Mail
+   * to the instance operator never names one: a verdict on a suspended team is
+   * what the operator needs to see.
+   */
+  aboutTeamId?: string | undefined;
 }
 
 export interface SenderDomainOwner {
@@ -109,6 +159,15 @@ export interface SystemSendDeps extends AcceptEmailDeps {
   raw(message: SystemMailMessage, owner: SenderDomainOwner | null): Promise<void>;
 }
 
+export interface SystemMailOptions {
+  /**
+   * Runs in the accept transaction with the new email's id, so a row naming
+   * that email commits with it, before the worker can take its job. Never
+   * runs on the raw path, which leaves no email row.
+   */
+  completeInTx?: ((tx: Db, emailId: string) => Promise<void>) | undefined;
+}
+
 const warnedSenders = new Set<string>();
 
 /**
@@ -122,15 +181,34 @@ const warnedSenders = new Set<string>();
  * that) while hard bounces, complaints and manual suppressions still apply.
  *
  * No owner: the raw SES path, byte for byte what every instance did before
- * a team verified the domain. A refusal (all suppressed) throws and never
- * falls back — the suppression list is the point. A failure inside accept
- * (keyring, database, queue) falls back to raw so account mail outlives an
- * outage of the pipeline it normally rides.
+ * a team verified the domain. A refusal (all suppressed, or a recipient over
+ * its cap) throws and never falls back — the suppression list and the cap
+ * are the point. A failure inside accept (keyring, database, queue) falls
+ * back to raw so account mail outlives an outage of the pipeline it
+ * normally rides.
  */
 export async function sendSystemMail(
   deps: SystemSendDeps,
   message: SystemMailMessage,
-): Promise<"pipeline" | "raw"> {
+  opts: SystemMailOptions = {},
+): Promise<"pipeline" | "raw" | "muted"> {
+  const suspended = message.aboutTeamId
+    ? (await fetchTeamStanding(deps.db, message.aboutTeamId))?.suspended
+    : null;
+  if (
+    suspended &&
+    (SILENT_SUSPENSIONS.includes(suspended.reason) || !SENT_WHILE_SUSPENDED.has(message.kind))
+  ) {
+    return "muted";
+  }
+  if (RECIPIENT_CAPPED_KINDS.has(message.kind)) {
+    // Keyed on the mailbox: +tags and Gmail's dots reach the same inbox.
+    const key = hashRecipient(mailboxIdentity(extractAddrSpec(message.to)));
+    // The hour refuses first, so a send it refuses leaves the day's budget alone.
+    if (recipientHourly(key) || recipientDaily(key)) {
+      throw new SystemMailRefused("recipient_capped");
+    }
+  }
   const owner = await findSenderDomainOwner(deps.db, message.from);
   if (!owner) {
     if (!warnedSenders.has(message.from)) {
@@ -156,6 +234,7 @@ export async function sendSystemMail(
         domainId: owner.domainId,
         tags: { [SYSTEM_MAIL_TAG]: message.kind },
       },
+      { completeInTx: opts.completeInTx },
     );
   } catch (err) {
     console.error(`system mail: accept failed for ${message.kind}, sending raw`, err);

@@ -9,16 +9,17 @@ URL base para o MillionSend. Todos os SDKs são licenciados sob MIT e vivem em
 repositórios próprios na
 [organização MillionSend no GitHub](https://github.com/MillionSend).
 
-Como a API é compatível na comunicação com a do Resend, os SDKs oficiais do
+Como a API é compatível com a do Resend, os SDKs oficiais do
 Resend também funcionam — aponte-os para o MillionSend pela opção de URL base
-(ex.: `RESEND_BASE_URL`).
+(ex.: `RESEND_BASE_URL`). A partir da 0.9.0, todo SDK do MillionSend também
+cobre os [e-mails recebidos e as caixas de entrada](#recebimento-e-caixas-de-entrada).
 
 ## URL base
 
 <DeploymentTabs>
 <DeploymentTab deployment="cloud">
 
-`api.millionsend.com` — o que todos os exemplos desta página usam, e o padrão a partir do SDK 0.5.0: sem uma base URL configurada, o SDK fala com o Cloud.
+`api.millionsend.com` — o que todos os exemplos desta página usam, e o padrão a partir do SDK 0.5.0: sem uma URL base configurada, o SDK fala com o MillionSend Cloud.
 
 </DeploymentTab>
 <DeploymentTab deployment="self-hosted">
@@ -58,7 +59,7 @@ const ms = new MillionSend("ms_123", { baseUrl: "https://api.millionsend.com" })
 
 const { data, error } = await ms.emails.send({
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@example.com",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>",
 });
@@ -80,7 +81,7 @@ millionsend.base_url = "https://api.millionsend.com"
 
 email = millionsend.Emails.send({
     "from": "Acme <onboarding@acme.dev>",
-    "to": "delivered@example.com",
+    "to": "success@simulator.amazonses.com",
     "subject": "Hello from MillionSend",
     "html": "<strong>It works!</strong>",
 })
@@ -100,7 +101,7 @@ client.BaseURL = "https://api.millionsend.com"
 
 sent, err := client.Emails.Send(&millionsend.SendEmailRequest{
     From:    "Acme <onboarding@acme.dev>",
-    To:      []string{"delivered@example.com"},
+    To:      []string{"success@simulator.amazonses.com"},
     Subject: "Hello from MillionSend",
     Html:    "<strong>It works!</strong>",
 })
@@ -122,7 +123,7 @@ Millionsend.base_url = "https://api.millionsend.com"
 
 email = Millionsend::Emails.send(
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@example.com",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>"
 )
@@ -143,7 +144,7 @@ $ms = MillionSend::client('ms_123', 'https://api.millionsend.com');
 
 $email = $ms->emails->send([
     'from' => 'Acme <onboarding@acme.dev>',
-    'to' => 'delivered@example.com',
+    'to' => 'success@simulator.amazonses.com',
     'subject' => 'Hello from MillionSend',
     'html' => '<strong>It works!</strong>',
 ]);
@@ -156,7 +157,7 @@ $email = $ms->emails->send([
 
 ```toml
 [dependencies]
-millionsend = "0.2"
+millionsend = "0.9"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -167,7 +168,7 @@ let ms = MillionSend::with_base_url("ms_123", "https://api.millionsend.com");
 
 let sent = ms.emails.send(&SendEmailOptions {
     from: "Acme <onboarding@acme.dev>".into(),
-    to: "delivered@example.com".into(),
+    to: "success@simulator.amazonses.com".into(),
     subject: "Hello from MillionSend".into(),
     html: Some("<strong>It works!</strong>".into()),
     ..Default::default()
@@ -182,7 +183,7 @@ let sent = ms.emails.send(&SendEmailOptions {
 <dependency>
   <groupId>com.millionsend</groupId>
   <artifactId>millionsend-java</artifactId>
-  <version>0.2.0</version>
+  <version>0.9.0</version>
 </dependency>
 ```
 
@@ -192,7 +193,7 @@ MillionSend ms = new MillionSend("ms_123", "https://api.millionsend.com");
 CreateEmailResponse sent = ms.emails().send(
     CreateEmailOptions.builder()
         .from("Acme <onboarding@acme.dev>")
-        .to("delivered@example.com")
+        .to("success@simulator.amazonses.com")
         .subject("Hello from MillionSend")
         .html("<strong>It works!</strong>")
         .build());
@@ -214,7 +215,7 @@ var client = new MillionSendClient("ms_123", "https://api.millionsend.com");
 var res = await client.EmailSendAsync(new EmailMessage
 {
     From = "Acme <onboarding@acme.dev>",
-    To = "delivered@example.com",
+    To = "success@simulator.amazonses.com",
     Subject = "Hello from MillionSend",
     Html = "<strong>It works!</strong>",
 });
@@ -227,7 +228,7 @@ var res = await client.EmailSendAsync(new EmailMessage
 ```elixir
 # mix.exs
 def deps do
-  [{:millionsend, "~> 0.2"}]
+  [{:millionsend, "~> 0.9"}]
 end
 ```
 
@@ -239,8 +240,53 @@ config :millionsend, MillionSend.Client,
 {:ok, email} =
   MillionSend.Emails.send(%{
     from: "Acme <onboarding@acme.dev>",
-    to: "delivered@example.com",
+    to: "success@simulator.amazonses.com",
     subject: "Hello from MillionSend",
     html: "<strong>It works!</strong>"
   })
 ```
+
+## Recebimento e caixas de entrada
+
+A partir da 0.9.0, todo SDK lê os [e-mails recebidos](/pt-BR/concepts/receiving)
+e trabalha com as [caixas de entrada](/pt-BR/concepts/inboxes), com a mesma
+árvore no jeito de cada linguagem (os nomes abaixo são os do Node):
+
+| Recurso | Métodos |
+| --- | --- |
+| `emails.receiving` | `list` (com `wait`, `since`, `inboxId`, `to`, `from`, `subjectContains`, `unread`, `includeQuarantined`), `get`, `reply`, `forward`, `remove` |
+| `emails.receiving.attachments` | `list`, `get` |
+| `inboxes` | `create`, `list`, `get` (pelo id ou pelo endereço), `update`, `remove` |
+| `inboxes.safety` | `get`, `update` |
+| `inboxes.codes` | `latest` (com `from`, `wait`, `maxAge`) |
+| `inboxes.quarantine` | `list`, `release` (com `trustSender`) |
+| `inboxes.labels` | `list`, `create`, `update`, `remove` |
+| `inboxes.threads` | `list`, `search`, `get`, `update`, `remove` |
+| `inboxes.threads.emails` | `list`, `get`, `reply`, `forward` |
+| `inboxes.drafts` | `list`, `create`, `get`, `update`, `remove`, `send`, `reject` |
+
+```ts
+import { MillionSend } from "millionsend";
+
+const ms = new MillionSend("ms_123");
+
+// Espera até 30 segundos pelo próximo e-mail entregue numa caixa.
+const { data: page } = await ms.emails.receiving.list({ inboxId: "7eeb9517-aed7-40d7-ad65-500be42ed147", wait: 30 });
+
+// O código de verificação ou link de acesso mais recente que ela recebeu.
+const { data: code } = await ms.inboxes.codes.latest("7eeb9517-aed7-40d7-ad65-500be42ed147", { wait: 30 });
+```
+
+- Responder, encaminhar e enviar rascunhos aceitam uma chave de
+  idempotência (no Node `{ idempotencyKey }`, no Go `WithIdempotencyKey`, e o
+  equivalente de cada linguagem). Passe uma para poder repetir a chamada sem
+  risco: o SDK não manda nenhuma por conta própria.
+- Uma resposta ou um encaminhamento que as regras da caixa retêm devolve um
+  rascunho em vez do e-mail enviado, e os SDKs dizem qual dos dois veio: no
+  Node o resultado traz `kind: "sent"` ou `kind: "draft"`, e cada linguagem
+  tem o equivalente.
+- Campos e valores de enum desconhecidos são mantidos ou ignorados, nunca
+  viram erro, então uma API mais nova não quebra um SDK mais antigo.
+- Os domínios ganham `receiving_catch_all`, as chaves de API `inbox_id`, os
+  webhooks `inbox_ids`, e os tipos de evento de webhook ganham o
+  `email.received` e os eventos das caixas.

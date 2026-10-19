@@ -1,0 +1,2 @@
+# Recorded registry replies keep the CRLF line ends they came with.
+*.txt -text

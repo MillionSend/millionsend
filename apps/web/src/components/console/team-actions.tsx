@@ -1,11 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import type { PopoverMenuItem } from "@/components/popover-menu";
 import { toast } from "@/components/toast";
 import { planLabel } from "@/lib/console-format";
+import { formatMoneyTotals } from "@/lib/format";
+import { consoleReviewHref } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
 import { usePlanName } from "./teams/cells";
 import { PauseDialog, ReinstateDialog, SuspendDialog } from "./teams/hold-dialogs";
@@ -21,6 +23,8 @@ export interface TeamActionTarget {
   plan: string;
   planQuota: number | null;
   suspendedAt: Date | null;
+  /** A review hold opens Suspend on phishing, the conversion it usually ends in. */
+  suspensionReason?: string | null;
   broadcastsPausedByOperatorAt: Date | null;
 }
 
@@ -50,6 +54,7 @@ type DialogKind = "team" | "limits" | "plan" | "pause" | "suspend" | "reinstate"
  */
 export function useTeamActions(onChanged: () => void): TeamActions {
   const t = useTranslations("console.teams");
+  const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const planName = usePlanName();
@@ -63,9 +68,17 @@ export function useTeamActions(onChanged: () => void): TeamActions {
   const detail = useQuery(
     trpc.console.teams.detail.queryOptions({ id: dialog?.team.id ?? "" }, { enabled: needsDetail }),
   );
+  // Suspend's cancel and refund rides on this alone, a row read, not on the
+  // heavier detail: a slow or failing detail must never hold up a suspension.
+  const subscription = useQuery(
+    trpc.console.teams.subscription.queryOptions(
+      { id: dialog?.team.id ?? "" },
+      { enabled: dialog?.kind === "suspend", staleTime: 0 },
+    ),
+  );
 
-  const done = (message: string, teamId: string) => {
-    toast(message);
+  const done = (message: string, teamId: string, tone?: "warn") => {
+    toast(message, tone);
     setDialog(null);
     void queryClient.invalidateQueries({
       queryKey: trpc.console.teams.detail.queryKey({ id: teamId }),
@@ -92,13 +105,31 @@ export function useTeamActions(onChanged: () => void): TeamActions {
   );
   const suspend = useMutation(trpc.console.teams.suspend.mutationOptions({ onError: failed }));
   const reinstate = useMutation(trpc.console.teams.reinstate.mutationOptions({ onError: failed }));
-  // A refusal stays in the dialog (the code is one it can explain); success
-  // leaves for the dashboard in this tab, so the layout reads the new cookie.
+  // Asked each time the dialog opens: a code this session confirmed may
+  // have lapsed since, or been confirmed in another tab.
+  const verified = useQuery(
+    trpc.console.teams.supportViewVerified.queryOptions(undefined, {
+      enabled: dialog?.kind === "view",
+      staleTime: 0,
+    }),
+  );
+  // A refusal stays in the dialog (the code is one it can explain) and asks
+  // again after the confirmed code: a start that failed after its code
+  // checked out needs no second one, and a lapsed mark must stop offering a
+  // start without one. Success leaves for the dashboard in this tab, so the
+  // layout reads the new cookie.
   const view = useMutation(
     trpc.console.teams.startSupportView.mutationOptions({
       onSuccess: () => window.location.assign("/"),
+      onError: () => void verified.refetch(),
     }),
   );
+  const viewCode = useMutation(trpc.console.teams.sendSupportViewCode.mutationOptions());
+  const openView = (target: TeamActionTarget) => {
+    view.reset();
+    viewCode.reset();
+    setDialog({ kind: "view", team: target });
+  };
 
   const team = dialog?.team;
   const loaded = detail.data?.id === team?.id ? detail.data : undefined;
@@ -107,22 +138,26 @@ export function useTeamActions(onChanged: () => void): TeamActions {
     <>
       {dialog?.kind === "team" ? (
         <TeamDialog
+          id={team.id}
           name={team.name}
           detail={loaded}
           onClose={close}
           onAdjustLimits={() => setDialog({ kind: "limits", team })}
-          onViewAsOwner={() => {
-            view.reset();
-            setDialog({ kind: "view", team });
-          }}
+          onViewAsOwner={() => openView(team)}
         />
       ) : null}
       {dialog?.kind === "view" ? (
         <ViewDialog
           name={team.name}
-          pending={view.isPending || view.isSuccess}
-          error={view.error?.message ?? null}
+          pending={view.isPending || view.isSuccess || viewCode.isPending}
+          error={(view.error ?? viewCode.error)?.message ?? null}
+          step={viewCode.data ?? null}
+          verifiedUntil={verified.data?.until ?? null}
           onClose={close}
+          onSendCode={() => {
+            view.reset();
+            viewCode.mutate();
+          }}
           onSubmit={(input) => view.mutate({ id: team.id, ...input })}
         />
       ) : null}
@@ -175,7 +210,9 @@ export function useTeamActions(onChanged: () => void): TeamActions {
               {
                 onSuccess: () =>
                   done(
-                    t(input.notify ? "toast.pausedNotified" : "toast.paused", { team: team.name }),
+                    t(input.notify && !team.suspendedAt ? "toast.pausedNotified" : "toast.paused", {
+                      team: team.name,
+                    }),
                     team.id,
                   ),
               },
@@ -186,20 +223,44 @@ export function useTeamActions(onChanged: () => void): TeamActions {
       {dialog?.kind === "suspend" ? (
         <SuspendDialog
           name={team.name}
+          initialReason={team.suspensionReason === "review" ? "phishing" : undefined}
+          refundPlan={
+            subscription.isPending
+              ? undefined
+              : subscription.data
+                ? planLabel(planName(subscription.data.plan), subscription.data.planQuota)
+                : null
+          }
           pending={suspend.isPending}
           onClose={close}
           onSubmit={(input) =>
             suspend.mutate(
               { id: team.id, ...input },
               {
-                onSuccess: () =>
+                onSuccess: ({ tenant, refund }) => {
+                  const regions = tenant?.failed.map((f) => f.region).join(", ");
+                  const head = regions
+                    ? t("toast.suspendedTenantFailed", { team: team.name, regions })
+                    : refund
+                      ? t("refund.suspended", { team: team.name })
+                      : t("toast.suspended", {
+                          team: team.name,
+                          reason: t(`suspendDialog.reasons.${input.reason}`),
+                        });
+                  const tail = !refund
+                    ? null
+                    : refund.failed
+                      ? t("refund.failed")
+                      : t("refund.done", {
+                          count: refund.refunds.length,
+                          amount: formatMoneyTotals(refund.refunds, locale),
+                        });
                   done(
-                    t("toast.suspended", {
-                      team: team.name,
-                      reason: t(`suspendDialog.reasons.${input.reason}`),
-                    }),
+                    tail ? `${head} · ${tail}` : head,
                     team.id,
-                  ),
+                    regions || refund?.failed ? "warn" : undefined,
+                  );
+                },
               },
             )
           }
@@ -213,7 +274,18 @@ export function useTeamActions(onChanged: () => void): TeamActions {
           onSubmit={() =>
             reinstate.mutate(
               { id: team.id },
-              { onSuccess: () => done(t("toast.reinstated", { team: team.name }), team.id) },
+              {
+                onSuccess: ({ tenant }) => {
+                  const regions = tenant?.failed.map((f) => f.region).join(", ");
+                  done(
+                    regions
+                      ? t("toast.reinstatedTenantFailed", { team: team.name, regions })
+                      : t("toast.reinstated", { team: team.name }),
+                    team.id,
+                    regions ? "warn" : undefined,
+                  );
+                },
+              },
             )
           }
         />
@@ -228,10 +300,7 @@ export function useTeamActions(onChanged: () => void): TeamActions {
     pauseBroadcasts: open("pause"),
     suspend: open("suspend"),
     reinstate: open("reinstate"),
-    viewAsOwner: (target) => {
-      view.reset();
-      setDialog({ kind: "view", team: target });
-    },
+    viewAsOwner: openView,
     resumeBroadcasts: (target) =>
       resume.mutate(
         { id: target.id },
@@ -243,25 +312,37 @@ export function useTeamActions(onChanged: () => void): TeamActions {
 
 /**
  * The Teams list's "…" items for one team, from the shared actions: Open
- * team, View as owner (when `supportView` is given: disabled with the env
- * named while the feature is off), Adjust limits, Change plan, separator,
- * Pause/Resume broadcasts, Suspend/Reinstate team. `labels` come from
- * console.teams.menu.
+ * team, Open in Trust & safety (when `navigate` is given), Copy ID (when
+ * `copyId` is given), View as owner (when `options` are given: disabled with
+ * the reason while the feature is off),
+ * Adjust limits, Change plan, separator, Pause/Resume broadcasts,
+ * Suspend/Reinstate team. `labels` come from console.teams.menu.
  */
 export function teamMenuItems(
   team: TeamActionTarget,
   actions: TeamActions,
   labels: (key: string) => string,
-  options?: { supportView: boolean },
+  options?: {
+    supportView: boolean;
+    copyId?: (id: string) => void;
+    navigate?: (href: string) => void;
+  },
 ): (PopoverMenuItem | null)[] {
+  const copyId = options?.copyId;
+  const navigate = options?.navigate;
+  const viewOff = options?.supportView ? null : "viewOff";
   return [
     { label: labels("open"), onSelect: () => actions.openTeam(team) },
+    ...(navigate
+      ? [{ label: labels("review"), onSelect: () => navigate(consoleReviewHref(team.id)) }]
+      : []),
+    ...(copyId ? [{ label: labels("copyId"), onSelect: () => copyId(team.id) }] : []),
     options
       ? {
           label: labels("view"),
           onSelect: () => actions.viewAsOwner(team),
-          disabled: !options.supportView,
-          ...(options.supportView ? {} : { title: labels("viewOff") }),
+          disabled: viewOff !== null,
+          ...(viewOff ? { title: labels(viewOff) } : {}),
         }
       : null,
     { label: labels("limits"), onSelect: () => actions.adjustLimits(team) },

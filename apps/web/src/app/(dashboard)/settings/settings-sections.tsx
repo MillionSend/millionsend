@@ -1,76 +1,44 @@
 "use client";
 
+import { CUSTOMER_TEXT_MAX } from "@millionsend/core/customer-text";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
+import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { RelativeTime } from "@/components/relative-time";
+import { SectionCard } from "@/components/section-card";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
-import { toast } from "@/components/toast";
 import { authClient } from "@/lib/auth-client";
 import { UPDATES_URL } from "@/lib/docs-links";
-import { formatDayTime, formatMmSs } from "@/lib/format";
 import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
 import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
-import { useCountdown } from "@/lib/use-countdown";
+import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { useSwitchLocale } from "@/lib/use-switch-locale";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter } from "../emails/list-parts";
 
-function SectionCard({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  /** Right-aligned control on the title row (the card's primary action). */
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="ms-card" style={{ padding: 24 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          margin: "0 0 18px",
-        }}
-      >
-        <h2
-          className="ms-display"
-          style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: 0 }}
-        >
-          {title}
-        </h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function TeamSection({ billing }: { billing: boolean }) {
   const t = useTranslations("settings");
+  const common = useTranslations("common");
   const trpc = useTRPC();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: team } = useQuery(trpc.settings.team.get.queryOptions());
   const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const activeRole = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const activeRole = useTeamRole();
   const activeTeamId = teamList?.activeTeamId;
   const canManageLogo = activeRole === "owner" || activeRole === "admin";
   const [logoBusy, setLogoBusy] = useState(false);
@@ -193,7 +161,7 @@ function TeamSection({ billing }: { billing: boolean }) {
                   className="ms-input"
                   style={{ flex: 1, minWidth: 0, maxWidth: 420 }}
                   required
-                  maxLength={80}
+                  maxLength={CUSTOMER_TEXT_MAX}
                   disabled={rename.isPending}
                   value={name}
                   onChange={(e) => setDraft(e.target.value)}
@@ -221,7 +189,9 @@ function TeamSection({ billing }: { billing: boolean }) {
                   fontSize: "var(--ms-fs-label)",
                 }}
               >
-                {t("team.error")}
+                {trpcErrorCode(rename.error) === "BAD_REQUEST"
+                  ? common("nameRule", { max: CUSTOMER_TEXT_MAX })
+                  : t("team.error")}
               </p>
             ) : null}
           </form>
@@ -474,7 +444,10 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </div>
           {create.isError ? (
             <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
-              {t("invitations.invite.error")}
+              {trpcErrorCode(create.error) === "TOO_MANY_REQUESTS" ||
+              trpcErrorCode(create.error) === "CONFLICT"
+                ? create.error.message
+                : guardMessage(create.error, t("invitations.invite.error"))}
             </p>
           ) : null}
           <ModalFooter>
@@ -524,7 +497,7 @@ function PendingInvitations() {
       <div className="ms-microlabel" style={{ marginBottom: 8 }}>
         {t("invitations.pending.title")}
       </div>
-      <Table>
+      <Table style={{ whiteSpace: "nowrap" }}>
         <thead>
           <tr>
             <th>{t("invitations.pending.email")}</th>
@@ -536,7 +509,9 @@ function PendingInvitations() {
         <tbody>
           {invitations.map((invite) => (
             <tr key={invite.id}>
-              <td className="ms-mono">{invite.email}</td>
+              <td className="ms-mono ms-cell-wrap">
+                <Breakable text={invite.email} />
+              </td>
               <td>{t(`members.roles.${invite.role}`)}</td>
               <td>
                 {new Date(invite.expiresAt).getTime() <= Date.now() ? (
@@ -596,8 +571,7 @@ function MembersSection() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { data: members } = useQuery(trpc.settings.members.list.queryOptions());
-  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
   const [inviteOpen, setInviteOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -671,7 +645,7 @@ function MembersSection() {
         ) : null
       }
     >
-      <Table>
+      <Table style={{ whiteSpace: "nowrap" }}>
         <thead>
           <tr>
             <th>{t("members.name")}</th>
@@ -701,8 +675,10 @@ function MembersSection() {
               const editable = canManage && !m.self && (role === "owner" || m.role !== "owner");
               return (
                 <tr key={m.userId}>
-                  <td>{m.name}</td>
-                  <td className="ms-mono">{m.email}</td>
+                  <td className="ms-cell-wrap">{m.name}</td>
+                  <td className="ms-mono ms-cell-wrap">
+                    <Breakable text={m.email} />
+                  </td>
                   <td>
                     {editable ? (
                       <Select
@@ -762,96 +738,6 @@ function MembersSection() {
   );
 }
 
-function SupportEndsAt({ expiresAt }: { expiresAt: Date }) {
-  const locale = useLocale();
-  const left = formatMmSs(useCountdown(expiresAt));
-  return (
-    <>
-      {formatDayTime(expiresAt, locale)} · {left}
-    </>
-  );
-}
-
-/**
- * The operator's read-only look at this team, for its owners and admins:
- * who, since when, until when and why, with the way to end it. Absent
- * while the instance has the feature off.
- */
-function SupportAccessSection() {
-  const t = useTranslations("settings.supportAccess");
-  const locale = useLocale();
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const role = useTeamRole();
-  const canManage = role === "owner" || role === "admin";
-  // The card reads the active team only, so it names it: an owner of several
-  // teams switches to see the others.
-  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const team = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.teamName ?? "";
-  const current = useQuery(
-    trpc.team.supportView.current.queryOptions(undefined, {
-      enabled: canManage,
-      // A session an operator opens shows up without a reload.
-      refetchInterval: 30_000,
-    }),
-  );
-  const end = useMutation(
-    trpc.team.supportView.end.mutationOptions({
-      onSuccess: () => {
-        toast(t("ended"));
-        void queryClient.invalidateQueries(trpc.team.supportView.current.queryFilter());
-      },
-      onError: (e) => toast(t("error", { reason: e.message }), "danger"),
-    }),
-  );
-  if (!canManage || !current.data?.enabled) return null;
-  const live = current.data.live;
-  return (
-    <SectionCard
-      title={t("title")}
-      action={
-        live ? (
-          <button
-            type="button"
-            className="ms-btn ms-btn-destructive"
-            disabled={end.isPending}
-            onClick={() => end.mutate()}
-          >
-            <BtnSpinner on={end.isPending} />
-            {t("end")}
-          </button>
-        ) : null
-      }
-    >
-      <p style={{ margin: "0 0 14px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
-        {t("intro")}
-      </p>
-      {live ? (
-        <dl className="ms-kv">
-          <dt>{t("operator")}</dt>
-          <dd>
-            {live.operator.name} · <span className="ms-mono">{live.operator.email}</span>
-          </dd>
-          <dt>{t("started")}</dt>
-          <dd>{formatDayTime(live.startedAt, locale)}</dd>
-          <dt>{t("expires")}</dt>
-          <dd>
-            <SupportEndsAt expiresAt={live.expiresAt} />
-          </dd>
-          <dt>{t("reason")}</dt>
-          <dd>{t(`reasons.${live.reason}`)}</dd>
-          <dt>{t("reference")}</dt>
-          <dd>{live.reference ?? "—"}</dd>
-        </dl>
-      ) : (
-        <p style={{ margin: 0, color: "var(--ms-bone)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("none", { team })}
-        </p>
-      )}
-    </SectionCard>
-  );
-}
-
 function LanguageSection() {
   const t = useTranslations("settings");
   const locale = useLocale();
@@ -901,7 +787,7 @@ function InstanceField({
       <input
         id={id}
         type="number"
-        className="ms-input ms-number"
+        className="ms-input"
         style={{ width: "100%" }}
         min={min}
         max={max}
@@ -1061,11 +947,12 @@ function InstanceSection() {
   );
 }
 
-function DangerSection() {
+function DangerSection({ billing }: { billing: boolean }) {
   const t = useTranslations("settings.danger");
   const trpc = useTRPC();
   const { data: teamList } = useQuery(trpc.team.list.queryOptions());
   const active = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId);
+  const role = useTeamRole();
   const [error, setError] = useState<string | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
 
@@ -1080,7 +967,7 @@ function DangerSection() {
     if (!active) return;
     const ok = await confirmDialog({
       title: t("deleteTeam"),
-      message: t("deleteTeamBody", { name: active.teamName }),
+      message: t(billing ? "deleteTeamBodyBilled" : "deleteTeamBody", { name: active.teamName }),
       confirmLabel: t("deleteTeam"),
       danger: true,
       typeToConfirm: true,
@@ -1134,8 +1021,8 @@ function DangerSection() {
           <ChevronGlyph direction="down" />
         </span>
       </summary>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-        {active?.role === "owner" ? (
+      <div className="ms-actions" style={{ marginTop: 18 }}>
+        {role === "owner" ? (
           <button
             type="button"
             className="ms-btn ms-btn-destructive"
@@ -1175,10 +1062,9 @@ export function SettingsSections({ showInstance }: { showInstance: boolean }) {
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <TeamSection billing={!showInstance} />
       <MembersSection />
-      <SupportAccessSection />
       {showInstance ? <InstanceSection /> : null}
       <LanguageSection />
-      <DangerSection />
+      <DangerSection billing={!showInstance} />
     </div>
   );
 }

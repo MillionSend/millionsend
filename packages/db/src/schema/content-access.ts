@@ -46,11 +46,17 @@ export const contentAccessGrants = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     viewCount: integer("view_count").notNull().default(0),
     lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
-    // When the seven-day disclosure ran — including when it was withheld
-    // because the team had been suspended for phishing by then, which is why
-    // this is stamped even with team_visible_at left null.
+    // The first time the grant opened what screening read from an email's
+    // images and attachments.
+    mediaViewedAt: timestamp("media_viewed_at", { withTimezone: true }),
+    // The team-side disclosure older builds made: a daily job added a row to
+    // the team's own audit log seven days after the access, for every grant
+    // with notice_sent_at null, then stamped notice_sent_at, and
+    // team_visible_at too unless it withheld the row. Grants are no longer
+    // disclosed, so a grant is created with notice_sent_at set and
+    // team_visible_at null, a withheld disclosure, which that job skips if an
+    // older build is ever run again. Rows a team was shown keep both stamps.
     noticeSentAt: timestamp("notice_sent_at", { withTimezone: true }),
-    // When the team's own audit gained its row for this access.
     teamVisibleAt: timestamp("team_visible_at", { withTimezone: true }),
   },
   (t) => [index("content_access_grants_team_idx").on(t.teamId, t.createdAt.desc())],

@@ -13,9 +13,10 @@ import {
 } from "@millionsend/core/plans";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { type CSSProperties, type ReactNode, useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { Modal } from "@/components/modal";
 import { Odometer } from "@/components/odometer";
+import { SectionCard } from "@/components/section-card";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
@@ -23,6 +24,8 @@ import { WarnCard } from "@/components/warn-card";
 import { formatDay, formatDayTime, formatUsd } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { OVERAGE_IN_FLIGHT, UPGRADES_HELD } from "@/lib/trpc-error";
+import { useTeamRole } from "@/lib/use-team-role";
 import { QuotaRow } from "../usage/usage-view";
 
 const PLANS = ["free", "starter", "pro", "scale"] as const satisfies readonly Plan[];
@@ -46,43 +49,9 @@ const STATUS_TONE = {
 const POST_CHECKOUT_POLLS = 6;
 const POST_CHECKOUT_POLL_MS = 2500;
 
-function Card({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  /** Right-aligned control on the title row (the card's primary action). */
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="ms-card" style={{ padding: 24 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          margin: "0 0 18px",
-        }}
-      >
-        <h2
-          className="ms-display"
-          style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: 0 }}
-        >
-          {title}
-        </h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function BillingSkeleton({ title }: { title: string }) {
   return (
-    <Card title={title}>
+    <SectionCard title={title}>
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
         <Skeleton width={120} height={28} />
         <Skeleton width={64} height={20} radius={999} />
@@ -91,7 +60,7 @@ function BillingSkeleton({ title }: { title: string }) {
         <Skeleton width={90} height={40} />
         <Skeleton width={140} height={40} />
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -116,6 +85,7 @@ function Check() {
 }
 
 export function BillingView({ checkout }: { checkout: "success" | "cancel" | null }) {
+  const ti = useTranslations("inboxes");
   const t = useTranslations("settings.billing");
   const planName = useTranslations("settings.plans");
   const usageT = useTranslations("settings.usage");
@@ -130,8 +100,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         ? POST_CHECKOUT_POLL_MS
         : false,
   });
-  const teams = useQuery(trpc.team.list.queryOptions());
-  const role = teams.data?.teams.find((m) => m.teamId === teams.data.activeTeamId)?.role;
+  const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
 
   const redirect = { onSuccess: ({ url }: { url: string }) => window.location.assign(url) };
@@ -153,6 +122,12 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const changePlan = useMutation(
     trpc.billing.changePlan.mutationOptions({
       onSuccess: async (result, variables) => {
+        // The bank declined the move's charge or wants it confirmed: Stripe's
+        // invoice page takes the payment, and paying it applies the move.
+        if (result.applied === "payment_required" && result.url) {
+          window.location.assign(result.url);
+          return;
+        }
         await refresh.onSuccess();
         // The outcome shows on the plan card at the top of the page, so the
         // dialog gives way to it and the page scrolls there with a notice.
@@ -165,7 +140,10 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const setOverage = useMutation(trpc.billing.setOverage.mutationOptions(refresh));
   const mutations = [startCheckout, openPortal, changePlan, setOverage];
   const busy = mutations.some((m) => m.isPending);
-  const failed = mutations.some((m) => m.isError);
+  // A hold that lands after the page loaded surfaces as this refusal.
+  const heldError = mutations.some((m) => m.error?.message === UPGRADES_HELD);
+  const counting = changePlan.error?.message === OVERAGE_IN_FLIGHT;
+  const failed = mutations.some((m) => m.isError) && !heldError && !counting;
 
   const fmt = new Intl.NumberFormat(locale);
   const usd = (cents: number) => formatUsd(cents, locale);
@@ -175,14 +153,16 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     return r ? planLabel(r.plan, r.period === "month" ? r.included : null) : key;
   };
   const changedText = changed
-    ? changed.result.applied === "now"
-      ? t("switchedNow", { plan: rungLabel(changed.rung) })
-      : changed.result.applied === "period_end"
-        ? t("pendingChange", {
-            plan: rungLabel(changed.rung),
-            date: formatDay(changed.result.at, locale),
-          })
-        : t("stayOn", { plan: rungLabel(changed.rung) })
+    ? changed.result.applied === "payment_required"
+      ? null
+      : changed.result.applied === "now"
+        ? t("switchedNow", { plan: rungLabel(changed.rung) })
+        : changed.result.applied === "period_end"
+          ? t("pendingChange", {
+              plan: rungLabel(changed.rung),
+              date: formatDay(changed.result.at, locale),
+            })
+          : t("stayOn", { plan: rungLabel(changed.rung) })
     : null;
   const success = (text: string) => (
     <div
@@ -221,6 +201,13 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
       </div>
     ) : changedText ? (
       success(changedText)
+    ) : changed?.result.applied === "payment_required" ? (
+      <div role="status" className="ms-toast ms-toast-neutral">
+        <span className="ms-toast-icon" aria-hidden="true">
+          i
+        </span>
+        {t("paymentRequired", { plan: rungLabel(changed.rung) })}
+      </div>
     ) : null;
 
   if (!status.data) {
@@ -240,13 +227,16 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     planStatus,
     currentPeriodEnd,
     quota,
+    overageEnabled,
     usage,
     hasCustomer,
     hasLiveSubscription,
+    inboxes,
+    upgradesHeld,
   } = status.data;
   if (plan === "system") {
     return (
-      <Card title={t("plan")}>
+      <SectionCard title={t("plan")}>
         <span
           className="ms-display"
           style={{ fontSize: "var(--ms-fs-h1)", color: "var(--ms-bone)", lineHeight: 1 }}
@@ -256,7 +246,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         <p style={{ margin: "14px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
           {t("systemNotice")}
         </p>
-      </Card>
+      </SectionCard>
     );
   }
   const current = PLAN_RUNGS.find((r) => r.key === currentKey) ?? PLAN_RUNGS[0];
@@ -269,6 +259,10 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     );
   const selected = PLAN_RUNGS[at] ?? current;
   const over = quota.kind === "month" ? Math.max(0, usage.accepted - quota.included) : 0;
+  const held = upgradesHeld || heldError;
+  const heldNotice = held ? (
+    <WarnCard>{t(hasLiveSubscription ? "upgradesHeldLive" : "upgradesHeld")}</WarnCard>
+  ) : null;
 
   const portalButton = (label: string, className: string) => (
     <button
@@ -285,9 +279,20 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const features = (p: Plan): string[] => {
     const domains = PLAN_DOMAIN_LIMIT[p];
     const contacts = PLAN_CONTACT_LIMIT[p];
+    const inboxLimit = inboxes?.limits[p];
     return [
       domains === null ? t("features.domainsUnlimited") : t("features.domains", { n: domains }),
       contacts === null ? t("features.contacts") : t("features.contactsLimit", { n: contacts }),
+      // Only where the instance receives mail; the team's own plan shows its usage.
+      ...(inboxes && inboxLimit !== undefined
+        ? [
+            inboxLimit === null
+              ? ti("billing.unlimited")
+              : p === plan
+                ? ti("billing.used", { used: inboxes.used, limit: inboxLimit })
+                : ti("billing.limit", { n: inboxLimit }),
+          ]
+        : []),
       t("features.broadcasts"),
       t("features.integrations"),
       t("features.agents"),
@@ -298,14 +303,19 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {notice}
 
-      <Card
+      <SectionCard
         title={t("plan")}
         action={canManage && hasCustomer ? portalButton(t("manage"), "ms-btn-secondary") : null}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 12px" }}>
           <span
             className="ms-display"
-            style={{ fontSize: "var(--ms-fs-h1)", color: "var(--ms-bone)", lineHeight: 1 }}
+            style={{
+              fontSize: "var(--ms-fs-h1)",
+              color: "var(--ms-bone)",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+            }}
           >
             {planLabel(plan, planQuota)}
           </span>
@@ -380,9 +390,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
 
         {planStatus === "past_due" ? (
           <WarnCard action={canManage ? portalButton(t("updateCard"), "ms-btn-secondary") : null}>
-            {t("pastDue")}
+            {t(quota.kind === "month" && quota.overagePaused ? "pastDueMonthly" : "pastDue")}
           </WarnCard>
         ) : null}
+
+        {heldNotice}
 
         <p
           style={{
@@ -393,9 +405,9 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         >
           {failed ? t("error") : canManage ? t("manageHint") : t("readOnly")}
         </p>
-      </Card>
+      </SectionCard>
 
-      <Card title={t("usageTitle")}>
+      <SectionCard title={t("usageTitle")}>
         {quota.kind === "month" ? (
           <>
             <QuotaRow
@@ -415,8 +427,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               }}
             >
               <Switch
-                checked={quota.overage}
-                disabled={!canManage || !hasLiveSubscription || busy}
+                checked={overageEnabled}
+                disabled={!canManage || !hasLiveSubscription || busy || (held && !overageEnabled)}
                 onChange={(enabled) => setOverage.mutate({ enabled })}
                 ariaLabel={t("overage")}
               />
@@ -425,6 +437,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                 <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
                   {t("overageCopy", { price: usd(quota.overageCentsPer1k) })}
                 </div>
+                {quota.overagePaused ? (
+                  <div style={{ fontSize: 12.5, color: "var(--ms-warn)", marginTop: 6 }}>
+                    {t("overagePaused")}
+                  </div>
+                ) : null}
                 {over > 0 ? (
                   <div style={{ fontSize: 12.5, color: "var(--ms-bone)", marginTop: 6 }}>
                     {t("overSoFar", {
@@ -444,9 +461,9 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             limit={quota.kind === "day" ? quota.limit : null}
           />
         )}
-      </Card>
+      </SectionCard>
 
-      <Card
+      <SectionCard
         title={t("plansTitle")}
         action={
           <button
@@ -476,7 +493,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             );
           })}
         </div>
-      </Card>
+      </SectionCard>
       {/* The ladder needs more width than the content column beside the
           sidebar gives it, so it opens in a dialog that fills the viewport. */}
       <Modal
@@ -525,7 +542,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               // its own, else its entry rung.
               const r = active ? selected : (PLAN_RUNGS.find((x) => x.plan === p) ?? selected);
               const isCurrent = r.key === current.key;
-              const forSale = canManage && r.priceCents > 0 && !isCurrent;
+              const forSale =
+                canManage &&
+                r.priceCents > 0 &&
+                !isCurrent &&
+                !(held && r.priceCents > current.priceCents);
               return (
                 <div key={p} className="ms-plan" data-open={active || undefined}>
                   <div className="ms-plan-name">{planName(p)}</div>
@@ -599,7 +620,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               );
             })}
           </div>
-          {canManage && hasLiveSubscription ? (
+          {held ? (
+            heldNotice
+          ) : counting ? (
+            <WarnCard>{t("overageCounting")}</WarnCard>
+          ) : canManage && hasLiveSubscription ? (
             <p
               style={{
                 margin: "14px 0 0",

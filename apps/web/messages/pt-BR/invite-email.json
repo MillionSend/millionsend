@@ -1,13 +1,15 @@
 {
-  "subject": "{inviter} convidou você para {team} no MillionSend",
+  "subject": "Você recebeu um convite para uma equipe no MillionSend",
   "body": "{inviter} convidou você para entrar em {team} no MillionSend como {role}.",
+  "bodyNewTeam": "{inviter} convidou você para entrar em uma equipe no MillionSend como {role}.",
+  "bodyNoInviter": "Você recebeu um convite para entrar em uma equipe no MillionSend como {role}.",
   "roles": {
     "member": "membro",
     "admin": "administrador"
   },
   "button": "Aceitar convite",
-  "linkFallback": "Ou copie este link no seu navegador:",
+  "linkFallback": "Ou copie e cole este link no seu navegador:",
   "noAccount": "Ainda não tem conta no MillionSend? Crie uma com este mesmo endereço ({email}) e o convite estará esperando por você.",
   "expiry": "Este link funciona uma vez e expira em {days} dias.",
-  "ignore": "Se você não esperava este convite, ignore este email."
+  "ignore": "Se você não esperava este convite, ignore este e-mail."
 }
