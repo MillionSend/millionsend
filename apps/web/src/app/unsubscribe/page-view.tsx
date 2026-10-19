@@ -267,7 +267,9 @@ export function UnsubscribePageView({
                 {/* Two forms, one button row: saving preferences must not
                     trigger the unsubscribe, so each button submits its own
                     form via the `form` attribute (plain HTML — the page
-                    ships no JS). The hidden `prefs` marker routes the POST. */}
+                    ships no JS). The hidden `prefs` and `scope` markers
+                    route the POST: next to a list of topics, "Unsubscribe"
+                    means all of them, even on one topic's link. */}
                 <form
                   method="post"
                   action={formAction}
@@ -309,7 +311,9 @@ export function UnsubscribePageView({
                     ))}
                   </div>
                 </form>
-                <form method="post" action={formAction} id="ms-unsub-all" />
+                <form method="post" action={formAction} id="ms-unsub-all">
+                  <input type="hidden" name="scope" value="all" />
+                </form>
                 <div className="ms-actions" style={{ justifyContent: "center", marginTop: 20 }}>
                   <button type="submit" form="ms-unsub-all" className="ms-btn ms-btn-secondary">
                     {m.button}
