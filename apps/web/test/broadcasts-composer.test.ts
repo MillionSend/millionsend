@@ -123,7 +123,7 @@ describe("send dialog warm-up", () => {
   it("offers a risky send a warm-up first: its plan, the inactive choice and why", () => {
     const out = render({ warmup: offer() });
     expect(out).toContain("broadcasts.guard.riskNoticeNew");
-    expect(out).toContain("broadcasts.guard.optionWarmup");
+    expect(out).toContain("warmup.off.switch");
     expect(out).toContain("broadcasts.guard.recommended");
     expect(out).toContain("broadcasts.guard.optionNormal");
     expect(out).toContain('aria-label="broadcasts.guard.warmupPlan"');
@@ -140,7 +140,7 @@ describe("send dialog warm-up", () => {
   it("shows a warming domain's own plan with no choice, and a paused one's wait with no plan", () => {
     const warming = render({ warmup: offer({ status: "warming", risky: false }) });
     expect(warming).toContain("broadcasts.guard.warmingIntro");
-    expect(warming).not.toContain("broadcasts.guard.optionWarmup");
+    expect(warming).not.toContain("warmup.off.switch");
     expect(warming).toContain("broadcasts.guard.warmupPlan");
     const paused = render({
       warmup: offer({
@@ -156,6 +156,6 @@ describe("send dialog warm-up", () => {
 
   it("refuses a warm-up past the horizon in place", () => {
     const out = render({ warmup: offer({ status: "warming", risky: false, blocked: true }) });
-    expect(out).toContain("broadcasts.guard.warmupTooLong");
+    expect(out).toContain("deliverability.sendGuard.warmupTooLong");
   });
 });

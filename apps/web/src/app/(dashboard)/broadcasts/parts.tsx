@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { DotParts } from "@/components/dot-parts";
+import { NoticeStrip } from "@/components/notice-strip";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import { Select } from "@/components/select";
 import type { TONE_COLOR } from "@/components/status-tile";
@@ -177,6 +178,7 @@ export function SendPlanSummary({
 }) {
   const t = useTranslations("broadcasts");
   const tWarmup = useTranslations("warmup");
+  const tGuard = useTranslations("deliverability");
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const finish = estimate?.finishesAt ? roundUpToQuarterHour(estimate.finishesAt) : null;
   const time = (d: Date) => formatStepTime(d, locale);
@@ -269,6 +271,13 @@ export function SendPlanSummary({
   const ramp = byWarmup && warmup?.status !== "paused" ? warmup : null;
   const rampDays = ramp?.plan.perDay.filter((d) => d.count > 0) ?? [];
   const pacedRail = !byWarmup && steps.length > 0;
+  // The offered warm-up's first day: today, or the day a scheduled send starts.
+  const firstDay = warmup?.plan.perDay[0];
+  const firstDayValues = {
+    start: nf.format(firstDay?.count ?? 0),
+    when: firstDay && !sameUtcDay(utcDayInstant(firstDay.day), now) ? "later" : "today",
+    day: firstDay ? formatStepDay(utcDayInstant(firstDay.day), locale) : "",
+  };
   return (
     <>
       <p
@@ -281,23 +290,22 @@ export function SendPlanSummary({
       </p>
       {warmup && offered ? (
         <>
-          <div
-            className="ms-notice-strip ms-notice-strip-warn"
-            role="status"
-            style={{ marginBottom: 14 }}
-          >
-            <span className="ms-notice-strip-text">
-              {warmup.bestDay > 0
-                ? t("guard.riskNotice", {
-                    domain: warmup.domain,
-                    best: nf.format(warmup.bestDay),
-                    count: nf.format(warmup.eligible),
-                  })
-                : t("guard.riskNoticeNew", {
-                    domain: warmup.domain,
-                    count: nf.format(warmup.eligible),
-                  })}
-            </span>
+          <div style={{ marginBottom: 14 }}>
+            <NoticeStrip
+              tone="warn"
+              text={
+                warmup.bestDay > 0
+                  ? t("guard.riskNotice", {
+                      domain: warmup.domain,
+                      best: warmup.bestDay,
+                      count: nf.format(warmup.eligible),
+                    })
+                  : t("guard.riskNoticeNew", {
+                      domain: warmup.domain,
+                      count: nf.format(warmup.eligible),
+                    })
+              }
+            />
           </div>
           <div style={{ display: "grid", gap: 6, marginBottom: 16 }}>
             <label className="ms-radio-card">
@@ -316,7 +324,7 @@ export function SendPlanSummary({
                     color: "var(--ms-bone)",
                   }}
                 >
-                  {t("guard.optionWarmup")}
+                  {tWarmup("off.switch")}
                   <span className="ms-chip" style={{ fontSize: 10.5, padding: "1px 7px" }}>
                     {t("guard.recommended")}
                   </span>
@@ -324,12 +332,10 @@ export function SendPlanSummary({
                 <div className="sub">
                   {warmFinish
                     ? t("guard.optionWarmupSub", {
-                        start: nf.format(warmup.plan.perDay[0]?.count ?? 0),
+                        ...firstDayValues,
                         date: formatStepDay(warmFinish, locale),
                       })
-                    : t("guard.optionWarmupSubOpen", {
-                        start: nf.format(warmup.plan.perDay[0]?.count ?? 0),
-                      })}
+                    : t("guard.optionWarmupSubOpen", firstDayValues)}
                 </div>
               </span>
             </label>
@@ -444,7 +450,7 @@ export function SendPlanSummary({
       {byWarmup ? (
         warmup?.blocked ? (
           <p className="ms-field-error" style={{ margin: "0 0 18px" }}>
-            {t("guard.warmupTooLong", { days: warmup.horizonDays })}
+            {tGuard("sendGuard.warmupTooLong", { days: warmup.horizonDays })}
           </p>
         ) : null
       ) : estimate?.blocked ? (

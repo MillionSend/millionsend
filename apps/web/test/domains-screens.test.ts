@@ -54,6 +54,7 @@ vi.mock("@/components/modal", () => ({ Modal: () => null }));
 vi.mock("@/components/api-sheet", () => ({ ResourceApiButton: () => null }));
 
 const { DomainsView } = await import("@/app/(dashboard)/domains/domains-table");
+const { formatStepTime } = await import("@/lib/format");
 const { WarmupStatus, WarmupTab } = await import("@/app/(dashboard)/domains/[id]/warmup-tab");
 
 const own = (name: string, status: string) => ({
@@ -170,7 +171,11 @@ function warmup(over: Partial<Warmup> = {}): Warmup {
 
 const tab = (data: Warmup) =>
   renderToStaticMarkup(
-    createElement(WarmupTab, { id: "d1", query: { data, isError: false } as never }),
+    createElement(WarmupTab, {
+      id: "d1",
+      query: { data, isError: false } as never,
+      live: data.status === "warming" || data.status === "paused",
+    }),
   );
 
 describe("the domain Warm-up tab", () => {
@@ -332,6 +337,8 @@ describe("the domain Warm-up tab", () => {
       ),
     );
     expect(text).toContain("Your team paused this warm-up on");
+    // Paused before its first check: no day behind it to name.
+    expect(text).not.toContain("after day");
     expect(text).not.toContain("Delivery health");
     expect(text).not.toContain("Dead addresses");
     expect(text).toContain("Starts again at 750 a day.Resume");
@@ -362,6 +369,26 @@ describe("the domain Warm-up tab", () => {
     expect(visible(renderToStaticMarkup(createElement(WarmupStatus, { data })))).toMatch(
       /^Warm-up done · 50,000\/day since/,
     );
+  });
+
+  it("rounds the end of today's window up to the quarter hour, as every forecast reads", () => {
+    const text = visible(
+      tab(
+        warmup({
+          status: "warming",
+          sendingDays: 2,
+          startedAt: new Date("2026-10-16T12:00:00Z"),
+          today: { day: "2026-10-18", allowance: 4_800, sent: 1_200, checked: true },
+          todayWindow: {
+            startsAt: new Date("2026-10-18T07:00:00Z"),
+            endsAt: new Date("2026-10-18T18:52:00Z"),
+          },
+        }),
+      ),
+    );
+    const about = formatStepTime(new Date("2026-10-18T19:00:00Z"), "en").replaceAll("\u00a0", " ");
+    // The stat under Today and the rail's today row.
+    expect(text.split(`until about ${about}`)).toHaveLength(3);
   });
 
   it("leaves every control disabled for members", () => {

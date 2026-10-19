@@ -6,6 +6,7 @@ import { accountMailPhrase, formatMailPercent, type MailLocale } from "./account
 import { broadcastAudience, broadcastAudienceWhere } from "./broadcast-audience.js";
 import { addWithinLimit } from "./domain-warmup.js";
 import { firstRow, resultRows } from "./driver-result.js";
+import { GMAIL_CLIP_BYTES } from "./email-insights.js";
 import { firstRecipientDomain } from "./mailbox-provider-sql.js";
 import {
   GMAIL_DOMAINS,
@@ -206,7 +207,13 @@ async function subscribedContacts(db: Db, teamId: string): Promise<number> {
   return row?.n ?? 0;
 }
 
-async function startingSettings(db: Db, teamId: string, domainId: string, now: Date) {
+/** The settings a warm-up turned on now would start with, for a domain that has no warm-up row yet. */
+export async function warmupStartingSettings(
+  db: Db,
+  teamId: string,
+  domainId: string,
+  now: Date,
+): Promise<WarmupSettings> {
   const [best, subscribed] = await Promise.all([
     bestDay(db, teamId, domainId, now),
     subscribedContacts(db, teamId),
@@ -214,14 +221,21 @@ async function startingSettings(db: Db, teamId: string, domainId: string, now: D
   return defaultSettings(best, subscribed);
 }
 
-/** This domain's broadcast mail parked for a warm-up, less one broadcast's own. */
+/**
+ * This domain's broadcast mail parked for a warm-up; with `aheadOf`, only
+ * the broadcasts the drain lets out before that one, in its order
+ * (scheduled_at, nulls last, then created_at and id).
+ */
 async function waitingCount(
   db: Db,
   teamId: string,
   domainId: string,
-  exceptBroadcastId?: string,
+  aheadOf?: string,
 ): Promise<number> {
   const e = schema.emails;
+  const b = schema.broadcasts;
+  const drainKey = (t: string) =>
+    sql`(coalesce(${sql.identifier(t)}.scheduled_at, 'infinity'), ${sql.identifier(t)}.created_at, ${sql.identifier(t)}.id)`;
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(e)
@@ -232,7 +246,9 @@ async function waitingCount(
         eq(e.domainId, domainId),
         isNotNull(e.broadcastId),
         eq(e.parkReason, "warmup"),
-        exceptBroadcastId ? ne(e.broadcastId, exceptBroadcastId) : undefined,
+        aheadOf
+          ? sql`${e.broadcastId} in (select ahead.id from ${b} ahead, ${b} mine where mine.id = ${aheadOf} and ${drainKey("ahead")} < ${drainKey("mine")})`
+          : undefined,
       ),
     );
   return row?.n ?? 0;
@@ -245,6 +261,34 @@ async function capToday(db: Db, domainId: string, volume: number, now: Date): Pr
     .update(d)
     .set({ allowance: sql`least(${d.allowance}, greatest(${d.sent}, ${volume}))` })
     .where(and(eq(d.domainId, domainId), eq(d.day, utcDay(now))));
+}
+
+/**
+ * Stamps the team's contacts with their newest stored real open or click
+ * past what last_engaged_at holds, so a warm-up started soon after that
+ * column existed still ranks by the opens kept from before it. Read off the
+ * team's engaged broadcast copies only.
+ * ponytail: transactional mail's opens are left to the recorder and the
+ * transactional signal; join its recipients' addresses here if a warm-up
+ * that orders without that signal ever needs them.
+ */
+async function stampStoredEngagement(db: Db, teamId: string): Promise<void> {
+  const e = schema.emails;
+  const x = schema.emailEvents;
+  const c = schema.contacts;
+  await db.execute(sql`
+    update ${c} set last_engaged_at = engaged.at
+    from (
+      select ${e.contactId} as contact_id, max(${x.occurredAt}) as at
+      from ${e} join ${x} on ${x.emailId} = ${e.id}
+      where ${e.teamId} = ${teamId} and ${e.contactId} is not null
+        and ${e.latestStatus} in ('opened', 'clicked', 'complained')
+        and ${x.type} in ('opened', 'clicked')
+      group by 1
+    ) engaged
+    where ${c.id} = engaged.contact_id and ${c.teamId} = ${teamId}
+      and (${c.lastEngagedAt} is null or ${c.lastEngagedAt} < engaged.at)
+  `);
 }
 
 /**
@@ -262,7 +306,9 @@ export async function enableWarmup(
   const current = await getWarmup(db, input.teamId, input.domainId);
   if (current?.status === "warming" || current?.status === "paused") return true;
   const settings = mergeSettings(
-    current ? settingsOf(current) : await startingSettings(db, input.teamId, input.domainId, now),
+    current
+      ? settingsOf(current)
+      : await warmupStartingSettings(db, input.teamId, input.domainId, now),
     input.settings,
   );
   const fresh = {
@@ -277,6 +323,7 @@ export async function enableWarmup(
     doneAt: null,
     updatedAt: now,
   };
+  await stampStoredEngagement(db, input.teamId);
   const w = schema.domainWarmups;
   await db.transaction(async (tx) => {
     await tx
@@ -367,7 +414,9 @@ export async function updateWarmupSettings(
   if (!(await teamDomain(db, input.teamId, input.domainId))) return false;
   const current = await getWarmup(db, input.teamId, input.domainId);
   const settings = mergeSettings(
-    current ? settingsOf(current) : await startingSettings(db, input.teamId, input.domainId, now),
+    current
+      ? settingsOf(current)
+      : await warmupStartingSettings(db, input.teamId, input.domainId, now),
     input.settings,
   );
   const w = schema.domainWarmups;
@@ -450,8 +499,13 @@ type Side = { gmail: number; other: number };
 export interface WarmupDayCounts {
   sent: Side;
   delayed: Side;
+  /**
+   * Delivered, of the sends whose opens can be read: Gmail clips a message
+   * past GMAIL_CLIP_BYTES before the open pixel at its end, so a broadcast
+   * that size would read as Gmail filing it as spam.
+   */
   delivered: Side;
-  /** Delivered and opened by a person (prefetches are their own event type). */
+  /** Of those, opened by a person (prefetches are their own event type). */
   opened: Side;
   hardBounced: Side;
   mailboxFull: Side;
@@ -576,10 +630,10 @@ async function dayCounts(
           count(*) filter (where not gmail)::int as sent_other,
           count(*) filter (where gmail and delayed)::int as delayed_gmail,
           count(*) filter (where not gmail and delayed)::int as delayed_other,
-          count(*) filter (where gmail and delivered)::int as delivered_gmail,
-          count(*) filter (where not gmail and delivered)::int as delivered_other,
-          count(*) filter (where gmail and delivered and opened)::int as opened_gmail,
-          count(*) filter (where not gmail and delivered and opened)::int as opened_other,
+          count(*) filter (where gmail and delivered and not clipped)::int as delivered_gmail,
+          count(*) filter (where not gmail and delivered and not clipped)::int as delivered_other,
+          count(*) filter (where gmail and delivered and opened and not clipped)::int as opened_gmail,
+          count(*) filter (where not gmail and delivered and opened and not clipped)::int as opened_other,
           count(*) filter (where gmail and hard)::int as hard_gmail,
           count(*) filter (where not gmail and hard)::int as hard_other,
           count(*) filter (where gmail and mailbox_full)::int as full_gmail,
@@ -594,8 +648,10 @@ async function dayCounts(
             coalesce(ev.opened, false) as opened,
             coalesce(ev.hard, false) as hard,
             coalesce(ev.mailbox_full, false) as mailbox_full,
-            coalesce(ev.complained, false) as complained
+            coalesce(ev.complained, false) as complained,
+            coalesce(i.html_size_bytes > ${GMAIL_CLIP_BYTES}, false) as clipped
           from ${e}
+          left join ${schema.emailInsights} i on i.broadcast_id = ${e.broadcastId}
           left join lateral (
             select bool_or(x.type = 'delivered') as delivered,
               bool_or(x.type = 'delivery_delayed') as delayed,
@@ -1011,8 +1067,9 @@ export function planWarmupDays(input: WarmupPlanInput): WarmupPlan {
 
 /**
  * planWarmupDays over a domain's live warm-up for `count` emails starting
- * `at`, behind the domain's mail already waiting (a broadcast's own rows
- * left out by `broadcastId`); null unless it is warming or paused.
+ * `at`, behind the domain's mail already waiting (for a `broadcastId`, only
+ * the broadcasts the drain lets out before it); null unless it is warming
+ * or paused.
  */
 export async function planDomainWarmup(
   db: Db,

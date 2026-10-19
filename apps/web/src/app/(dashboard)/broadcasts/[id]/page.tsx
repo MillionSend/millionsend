@@ -11,34 +11,29 @@ import { CopyChip } from "@/components/copy-chip";
 import { EmailContentPanel } from "@/components/email-content-panel";
 import { EmailsTable } from "@/components/emails-table";
 import { GradientBanner } from "@/components/gradient-banner";
+import { HoldIcon, PauseIcon } from "@/components/icons/warmup-icons";
 import { LoadError } from "@/components/load-error";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { StatBlock } from "@/components/stat-block";
-import { type RailStep, StepRail } from "@/components/step-rail";
+import { StatBlock, StatStrip } from "@/components/stat-block";
+import { StepRail } from "@/components/step-rail";
 import { Table } from "@/components/table";
+import { PaceBand, warmupSentSteps, warmupTodayStep } from "@/components/warmup-rail";
 import { formatPercent } from "@/lib/console-format";
 import {
   formatDayTime,
-  formatStepDay,
   formatStepTime,
   formatUtcTimestamp,
   roundUpToQuarterHour,
   sendingDays,
 } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
-import {
-  utcDayInstant,
-  type WarmupSignalView,
-  warmupPlanSteps,
-  warmupReasonShort,
-  warmupReasons,
-} from "@/lib/warmup";
+import { type WarmupSignalView, warmupPlanSteps, warmupReasons } from "@/lib/warmup";
 import type { AppRouter } from "@/server/routers";
-import { ListFooter } from "../../emails/list-parts";
+import { ListFooter, StateCard } from "../../emails/list-parts";
 import { type BroadcastStatus, FinishCell, PacingSteps, SendingStatus } from "../parts";
 
 type BroadcastWarmup = NonNullable<inferRouterOutputs<AppRouter>["broadcasts"]["get"]["warmup"]>;
@@ -210,7 +205,7 @@ export default function BroadcastDetailPage() {
           {broadcast?.warmup ? (
             <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>
               {broadcast.warmupSkipped > 0
-                ? t("detail.warmupOrderSkipped", { skipped: nf.format(broadcast.warmupSkipped) })
+                ? t("detail.warmupOrderSkipped", { skipped: broadcast.warmupSkipped })
                 : t("detail.warmupOrder")}
             </div>
           ) : null}
@@ -267,20 +262,7 @@ export default function BroadcastDetailPage() {
         <PacingBand sent={broadcast.sent} releases={broadcast.releases} locale={locale} />
       ) : null}
 
-      <div
-        className="ms-meta-grid ms-stat-strip"
-        style={{
-          display: "grid",
-          // Seven stats wrap by content rather than crush at laptop widths; the
-          // narrow-screen rules still force two columns.
-          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-          gap: 22,
-          padding: "20px 0",
-          borderTop: "1px solid var(--ms-line)",
-          borderBottom: "1px solid var(--ms-line)",
-          marginBottom: 26,
-        }}
-      >
+      <StatStrip style={{ marginBottom: 26 }}>
         {progress ? (
           <StatBlock
             label={t("detail.sentSoFar")}
@@ -322,7 +304,7 @@ export default function BroadcastDetailPage() {
           label={t("detail.stats.unsubscribed")}
           value={broadcast ? engagement(broadcast.stats.unsubscribed) : null}
         />
-      </div>
+      </StatStrip>
 
       {status === "sending" || status === "sent" || status === "canceled" ? (
         <ProvidersTable broadcastId={id} />
@@ -412,22 +394,11 @@ function PacingBand({
   const t = useTranslations("broadcasts");
   if (sendingDays(sent, releases, new Date()).length < 2) return null;
   return (
-    <div className="ms-pacing">
-      <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
-        {t("detail.pacing")}
-      </div>
+    <PaceBand label={t("detail.pacing")} note={t("guard.reason")}>
       <PacingSteps sent={sent} releases={releases} locale={locale} />
-      <p>{t("guard.reason")}</p>
-    </div>
+    </PaceBand>
   );
 }
-
-/** A checked day's outcome as its rail row words it. */
-const RAIL_OUTCOME: Record<string, string> = {
-  held: "rail.held",
-  stepped_back: "rail.steppedBack",
-  paused: "rail.paused",
-};
 
 /**
  * The domain's warm-up while it holds rows of this send: a banner when the
@@ -455,6 +426,7 @@ function WarmupBand({
     return (
       <GradientBanner
         variant="danger"
+        icon={<PauseIcon />}
         title={tWarmup("row.pausedTitle")}
         action={
           <Link
@@ -482,25 +454,18 @@ function WarmupBand({
     sentByDay.set(day, (sentByDay.get(day) ?? 0) + s.count);
   }
   const checked = new Map(warmup.days.map((d) => [d.day, d]));
-  const steps: RailStep[] = [...sentByDay]
-    .filter(([day]) => day < today)
-    .map(([day, count], i) => {
-      const check = checked.get(day);
-      const reason = check?.signals ? warmupReasonShort(check.signals, tWarmup, locale) : null;
-      return {
-        key: day,
-        when: formatStepDay(utcDayInstant(day), locale),
-        what: tWarmup(RAIL_OUTCOME[check?.outcome ?? ""] ?? "rail.sent", {
-          count: nf.format(count),
-        }),
-        sub: reason ? (
-          <span style={{ color: "var(--ms-warn)" }}>{reason}</span>
-        ) : i === 0 ? (
-          tWarmup("rail.firstNote")
-        ) : undefined,
-        state: "done",
-      };
-    });
+  const steps = warmupSentSteps(
+    [...sentByDay]
+      .filter(([day]) => day < today)
+      .map(([day, count]) => ({
+        day,
+        count,
+        outcome: checked.get(day)?.outcome ?? null,
+        signals: checked.get(day)?.signals ?? null,
+      })),
+    tWarmup,
+    locale,
+  );
   const sentToday = sentByDay.get(today) ?? 0;
   const planned = warmup.perDay[0]?.day === today ? warmup.perDay[0].count : 0;
   // Today leads the plan's rows when anything of this send goes out today.
@@ -517,25 +482,16 @@ function WarmupBand({
         : tWarmup("rail.more", { count }),
   });
   if (ahead[0]?.day === today) {
-    const allowance = sentToday + planned;
-    rest[0] = {
-      key: today,
-      when: tWarmup("rail.todayLabel"),
-      what: tWarmup("rail.today", {
-        allowance: nf.format(allowance),
-        sent: nf.format(sentToday),
-      }),
-      sub: !warmup.checked
-        ? tWarmup("rail.todayWaiting")
-        : warmup.today
-          ? tWarmup("rail.todayWindow", {
-              start: formatStepTime(warmup.today.startsAt, locale),
-              end: formatStepTime(roundUpToQuarterHour(warmup.today.endsAt), locale),
-            })
-          : undefined,
-      state: "now",
-      progress: sentToday / Math.max(1, allowance),
-    };
+    rest[0] = warmupTodayStep(
+      {
+        allowance: sentToday + planned,
+        sent: sentToday,
+        checked: warmup.checked,
+        window: warmup.today,
+      },
+      tWarmup,
+      locale,
+    );
   }
   const latest = warmup.latest;
   return (
@@ -543,6 +499,7 @@ function WarmupBand({
       {latest?.outcome === "held" || latest?.outcome === "stepped_back" ? (
         <GradientBanner
           variant="warn"
+          icon={<HoldIcon />}
           title={t(latest.outcome === "held" ? "detail.warmupHeld" : "detail.warmupCut", {
             volume: nf.format(warmup.volume),
           })}
@@ -551,13 +508,12 @@ function WarmupBand({
           {t("detail.warmupHeldBody", { reasons: reasons(latest.signals) }).trim()}
         </GradientBanner>
       ) : null}
-      <div className="ms-pacing">
-        <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
-          {tWarmup("pace.label")}
-        </div>
+      <PaceBand
+        label={tWarmup("pace.label")}
+        note={t("detail.warmupNote", { domain: warmup.domain ?? "" })}
+      >
         <StepRail label={tWarmup("pace.label")} steps={[...steps, ...rest]} />
-        <p>{t("detail.warmupNote", { domain: warmup.domain ?? "" })}</p>
-      </div>
+      </PaceBand>
     </>
   );
 }
@@ -569,18 +525,36 @@ function WarmupBand({
  */
 function ProvidersTable({ broadcastId }: { broadcastId: string }) {
   const t = useTranslations("broadcasts");
+  const common = useTranslations("common");
   const locale = useLocale();
   const trpc = useTRPC();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const query = useQuery(trpc.broadcasts.providers.queryOptions({ id: broadcastId }));
-  const rows = query.data ?? [];
-  if (rows.length === 0) return null;
+  const rows = query.data;
+  // Nothing out yet: no provider to show.
+  if (rows?.length === 0) return null;
   const share = (n: number, of: number) => (of > 0 ? formatPercent(n / of, locale, 1) : "—");
+  const label = (
+    <div className="ms-microlabel" style={{ marginBottom: 12 }}>
+      {t("detail.providers.label")}
+    </div>
+  );
+  if (query.isError) {
+    return (
+      <div style={{ marginBottom: 26 }}>
+        {label}
+        <StateCard
+          tone="error"
+          headline={t("detail.providers.loadError")}
+          actionLabel={common("loadError.retry")}
+          onAction={() => query.refetch()}
+        />
+      </div>
+    );
+  }
   return (
     <div style={{ marginBottom: 26 }}>
-      <div className="ms-microlabel" style={{ marginBottom: 12 }}>
-        {t("detail.providers.label")}
-      </div>
+      {label}
       <Table className="baseline">
         <thead>
           <tr>
@@ -594,20 +568,37 @@ function ProvidersTable({ broadcastId }: { broadcastId: string }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.provider}>
-              <td>{t(`detail.providers.${row.provider}`)}</td>
-              <td className="right num">{nf.format(row.sent)}</td>
-              <td className="right num">{share(row.delivered, row.sent)}</td>
-              <td className="right num">{share(row.opened, row.delivered)}</td>
-              <td className="right num">{share(row.clicked, row.delivered)}</td>
-              <td className="right num">{share(row.bounced, row.sent)}</td>
-              {/* The table mutes its last column; these figures read alike. */}
-              <td className="right num" style={{ color: "var(--ms-bone)" }}>
-                {share(row.delayed, row.sent)}
-              </td>
-            </tr>
-          ))}
+          {rows
+            ? rows.map((row) => (
+                <tr key={row.provider}>
+                  <td>{t(`detail.providers.${row.provider}`)}</td>
+                  <td className="right num">{nf.format(row.sent)}</td>
+                  <td className="right num">{share(row.delivered, row.sent)}</td>
+                  <td className="right num">{share(row.opened, row.delivered)}</td>
+                  <td className="right num">{share(row.clicked, row.delivered)}</td>
+                  <td className="right num">{share(row.bounced, row.sent)}</td>
+                  {/* The table mutes its last column; these figures read alike. */}
+                  <td className="right num" style={{ color: "var(--ms-bone)" }}>
+                    {share(row.delayed, row.sent)}
+                  </td>
+                </tr>
+              ))
+            : ["gmail", "microsoft", "other"].map((key) => (
+                <tr key={key}>
+                  <td>
+                    <span style={{ display: "flex" }}>
+                      <Skeleton width={72} height="1lh" />
+                    </span>
+                  </td>
+                  {[0, 1, 2, 3, 4, 5].map((cell) => (
+                    <td key={cell} className="right num">
+                      <span style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <Skeleton width={44} height="1lh" />
+                      </span>
+                    </td>
+                  ))}
+                </tr>
+              ))}
         </tbody>
       </Table>
       <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>

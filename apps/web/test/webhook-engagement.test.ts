@@ -1,7 +1,7 @@
 import { type Db, schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEngagement } from "@/app/t/record";
 
 // A person's phone fetching the pixel; without a user agent the fetch reads
@@ -210,5 +210,42 @@ describe("recordEngagement and the contact's last engagement", () => {
     await recordEngagement(db, await seedEmail(teamId), "opened", undefined, APPLE_MPP);
 
     expect(await engagedAt(id)).toBeNull();
+  });
+
+  it("puts it back when a burst folds the click that moved it", async () => {
+    // The clock stands still between hits, so the second lands 10 ms after the first.
+    vi.useFakeTimers({ now: new Date().setUTCHours(12, 30, 0, 0), toFake: ["Date"] });
+    try {
+      const teamId = await createTeam(db, "engaged-burst");
+      const lastWeek = new Date(Date.now() - 7 * 24 * 3_600_000);
+      const [engaged] = await db
+        .insert(schema.contacts)
+        .values({ teamId, email: "reader@example.com", lastEngagedAt: lastWeek })
+        .returning({ id: schema.contacts.id });
+      const never = await contact(teamId, "never@example.com");
+      const copies = await db
+        .insert(schema.emails)
+        .values(
+          [engaged?.id ?? "", never].map((contactId) => ({
+            teamId,
+            contactId,
+            from: "s@example.com",
+            to: ["r@example.com"],
+            subject: "Hi",
+          })),
+        )
+        .returning({ id: schema.emails.id });
+      for (const copy of copies) {
+        for (const link of ["https://example.com/a", "https://example.com/b"]) {
+          await recordEngagement(db, copy.id, "clicked", undefined, { ...HUMAN, link });
+          vi.setSystemTime(Date.now() + 10);
+        }
+      }
+
+      expect(await engagedAt(engaged?.id ?? "")).toEqual(lastWeek);
+      expect(await engagedAt(never)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

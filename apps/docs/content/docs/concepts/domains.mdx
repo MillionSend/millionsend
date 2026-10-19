@@ -125,7 +125,7 @@ volume to match.
   least 12 hours. Days are UTC days, and each one starts only after the day
   before it is checked.
 - Mail over the day's volume waits for the next day, in the same order, and
-  shows as **Waiting**. Nothing is lost.
+  shows as **Waiting**, for as long as email content is kept (see below).
 - Only broadcasts wait. Email sent with `POST /emails`, in a batch or
   through SMTP is never held.
 - A day that sends less than half its volume doesn't grow it. Days without a
@@ -180,8 +180,8 @@ After the check:
 
 ### Pause, resume or turn off
 
-- **Pause warm-up** stops the domain's broadcasts. Their mail waits in order
-  and nothing is lost. A severe signal pauses the warm-up the same way.
+- **Pause warm-up** stops the domain's broadcasts. Their mail waits in order.
+  A severe signal pauses the warm-up the same way.
 - **Resume** starts again from today at half the volume it had.
 - **Turn off** ends the warm-up, and the mail that was waiting goes out at
   normal speed. A big day from a domain with little history is likely to land

@@ -20,7 +20,6 @@ import {
   sendRefusal,
   splitPersonName,
   substituteUnsubscribeUrl,
-  updateWarmupSettings,
   verifySenderDomain,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -536,8 +535,9 @@ export const broadcastsRouter = router({
    * enqueue is best-effort: the broadcasts.reconcile sweep re-enqueues
    * scheduled broadcasts whose job was lost, and the fan-out is idempotent
    * per contact via the emails (broadcastId, contactId) unique index.
-   * `warmup` turns the sender domain's warm-up on first, and `skipInactive`
-   * sets its inactive skip: any member may, as part of sending.
+   * `warmup` turns the sender domain's warm-up on first, which any member
+   * may as part of sending; `skipInactive` is this send's own choice for
+   * its inactive contacts, never the domain's setting.
    */
   send: teamProcedure
     .input(
@@ -604,22 +604,11 @@ export const broadcastsRouter = router({
         enabling: input.warmup,
       });
       const live = ramp?.status === "warming" || ramp?.status === "paused";
+      const byWarmup = ramp !== null && (live || input.warmup === true);
       // A warm-up's send goes out by its day, never on capacity: its own plan meets the horizon.
-      if (ramp && (live || input.warmup)) {
+      if (byWarmup) {
         if (ramp.blocked) throw await warmupHorizonError(ramp.horizonDays);
-        if (!live) {
-          await enableWarmup(ctx.db, {
-            teamId: ctx.teamId,
-            domainId: sender.domainId,
-            settings: { skipInactive: input.skipInactive },
-          });
-        } else if (input.skipInactive !== undefined) {
-          await updateWarmupSettings(ctx.db, {
-            teamId: ctx.teamId,
-            domainId: sender.domainId,
-            settings: { skipInactive: input.skipInactive },
-          });
-        }
+        if (!live) await enableWarmup(ctx.db, { teamId: ctx.teamId, domainId: sender.domainId });
       } else {
         const horizonError = await horizonGuard(ctx, sender.region, count, scheduledAt);
         if (horizonError) throw horizonError;
@@ -629,7 +618,12 @@ export const broadcastsRouter = router({
       // both flip the row.
       const [updated] = await ctx.db
         .update(b)
-        .set({ status: "scheduled", scheduledAt, updatedAt: new Date() })
+        .set({
+          status: "scheduled",
+          scheduledAt,
+          updatedAt: new Date(),
+          warmupSkipInactive: byWarmup ? (input.skipInactive ?? null) : null,
+        })
         .where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId), eq(b.status, "draft")))
         .returning({ id: b.id });
       if (!updated) {

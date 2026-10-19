@@ -209,6 +209,25 @@ describe("a warming domain's fan-out", () => {
     expect(counters).toEqual([]);
   });
 
+  it("follows the sender's own inactive choice over the warm-up's setting", async () => {
+    const s = await warmSender("ramp-choice");
+    await db
+      .update(schema.broadcasts)
+      .set({ warmupSkipInactive: false })
+      .where(eq(schema.broadcasts.id, s.broadcastId));
+    const ago = (days: number) => new Date(Date.now() - days * DAY_MS);
+    await db.insert(schema.contacts).values([
+      { teamId: s.teamId, email: "recent@example.com", lastEngagedAt: ago(1) },
+      { teamId: s.teamId, email: "lapsed@example.com", lastEngagedAt: ago(200) },
+    ]);
+    expect(await sendBroadcast(db, makeDeps().deps, { broadcastId: s.broadcastId })).toBe("sent");
+    expect((await rowsOf(s.broadcastId)).map((r) => r.to[0])).toEqual([
+      "recent@example.com",
+      "lapsed@example.com",
+    ]);
+    expect((await broadcastRow(s.broadcastId))?.skipped).toBe(0);
+  });
+
   it("counts the inactive it skipped exactly once across an interrupted, resumed walk", async () => {
     const s = await warmSender("ramp-resume");
     const ago = (days: number) => new Date(Date.now() - days * DAY_MS);
@@ -252,7 +271,7 @@ describe("a warming domain's fan-out", () => {
   it("tells the owners when the warm-up spreads the broadcast over days", async () => {
     const s = await warmSender("ramp-note");
     await db.insert(schema.contacts).values({ teamId: s.teamId, email: "late@example.com" });
-    // Three days of another broadcast's mail already wait on the domain.
+    // Three days of an earlier broadcast's mail already wait on the domain.
     const [ahead] = await db
       .insert(schema.broadcasts)
       .values({
@@ -260,6 +279,7 @@ describe("a warming domain's fan-out", () => {
         from: "hi@ramp-note.example.com",
         subject: "s",
         status: "sending",
+        scheduledAt: new Date(Date.now() - 3_600_000),
       })
       .returning({ id: schema.broadcasts.id });
     await db.insert(schema.emails).values(

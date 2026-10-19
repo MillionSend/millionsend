@@ -1368,6 +1368,9 @@ describe("domain warm-up", () => {
       today: { day: "2026-10-18", allowance: 1_500, sent: 0, checked: true },
     });
     expect(await caller.domains.warmup({ id: moved.id })).toMatchObject({ status: "off" });
+    // The domain's own read says so too, without reading the whole warm-up.
+    expect((await caller.domains.get({ id: fresh.id })).warmupStatus).toBe("warming");
+    expect((await caller.domains.get({ id: moved.id })).warmupStatus).toBe("off");
   });
 
   it("moves through on, pause, resume and off", async () => {

@@ -53,8 +53,8 @@
     "preview": "A broadcast to all {total} contacts would go out like this",
     "previewActive": "{eligible} active contacts in about {days, plural, one {# sending day} other {# sending days}}, most active first.",
     "previewAll": "{eligible} contacts in about {days, plural, one {# sending day} other {# sending days}}, most active first.",
-    "previewSkipped": "{inactive} with no activity in 90+ days are skipped.",
-    "previewLast": "{inactive} with no activity in 90+ days go last.",
+    "previewSkipped": "{inactive, plural, one {# with no activity in 90+ days is skipped.} other {# with no activity in 90+ days are skipped.}}",
+    "previewLast": "{inactive, plural, one {# with no activity in 90+ days goes last.} other {# with no activity in 90+ days go last.}}",
     "previewTail": "Each healthy day grows the volume 1.5×. Your transactional email is never held.",
     "switch": "Warm up this domain",
     "switchHint": "Big sends start small and grow each day while delivery stays healthy. Leave it off if this domain already sends this volume through another provider."
@@ -77,7 +77,7 @@
   },
   "pace": {
     "label": "Warm-up pace",
-    "note": "Each healthy day grows the volume 1.5×. One weak signal holds it, two cut it by 30%, and a severe one pauses it. Mail over the day's volume waits for the next day. Nothing is lost. Your transactional email is never held."
+    "note": "Each healthy day grows the volume 1.5×. One weak signal holds it, two cut it by 30%, and a severe one pauses it. Mail over the day's volume waits for the next day. Your transactional email is never held."
   },
   "health": {
     "label": "Delivery health · {day}",
@@ -113,7 +113,7 @@
     "notReported": "not reported",
     "tips": {
       "opens": "Gmail opens compared with other inboxes on the same send. A low share is the clearest sign Gmail is filing the mail as spam. Machine prefetches never count.",
-      "mailboxFull": "Mailboxes that answered full or inactive. A second answer like that stops mail to the address.",
+      "mailboxFull": "Mailboxes that replied full or inactive. Inactive ones stop getting your mail right away. Full ones stop after a second full reply.",
       "complaints": "Gmail doesn't tell senders about spam reports. See your spam rate in Google Postmaster Tools."
     },
     "openTrackingOff": "Turn on open tracking to see this signal.",
@@ -130,7 +130,7 @@
     "propertyCoverage": "set on {count} of {total} contacts",
     "propertyHint": "Use a date, like the last login.",
     "inactiveTitle": "Inactive contacts",
-    "inactiveHint": "{inactive} of your {total} contacts haven't been active in 90+ days. Mailing them from a new domain is the fastest way to the spam folder.",
+    "inactiveHint": "{inactive, plural, =0 {None of your {total} contacts has gone 90+ days without activity.} one {# of your {total} contacts hasn't been active in 90+ days. Mailing them from a new domain is the fastest way to the spam folder.} other {# of your {total} contacts haven't been active in 90+ days. Mailing them from a new domain is the fastest way to the spam folder.}}",
     "inactiveSkip": "Skip while warming up",
     "inactiveLast": "Send them last",
     "targetTitle": "Daily target",
@@ -141,7 +141,7 @@
     "startError": "Use a whole number from {min} to {max}, no higher than the daily target.",
     "update": "Update",
     "controlTitle": "Pause or turn off",
-    "controlHint": "Paused, mail from this domain waits until you resume. Turned off, the waiting mail goes out at normal speed.",
+    "controlHint": "Paused, broadcasts from this domain wait until you resume. Turned off, the waiting mail goes out at normal speed.",
     "pause": "Pause warm-up",
     "turnOff": "Turn off"
   },
@@ -162,7 +162,7 @@
     "spamBody": "Gmail shows it only in Google Postmaster Tools, a day late. Above 0.3% Gmail starts rejecting mail.",
     "spamLink": "Open Postmaster Tools ↗",
     "dead": "Dead addresses",
-    "deadBody": "Full or inactive mailboxes stop getting your mail after a second answer like that.",
+    "deadBody": "Inactive mailboxes stop getting your mail right away. Full ones stop after a second full reply.",
     "resumeTitle": "Resume",
     "resumeHint": "Starts again at {volume} a day. The waiting mail keeps its order and is kept until {date}.",
     "resumeHintPlain": "Starts again at {volume} a day.",

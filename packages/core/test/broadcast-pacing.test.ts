@@ -294,6 +294,53 @@ it("leaves a warming domain's broadcast out of the region model and plans it by 
   expect(await finish()).toEqual(alone);
 });
 
+it("plans a warming domain's broadcasts in the drain's order, the newer one's mail never ahead of the older", async () => {
+  const team = await createTeam(db, "pacing-order");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({ teamId: team, name: "order.example", region: "sa-east-1", status: "verified" })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("seed failed");
+  await enableWarmup(db, {
+    teamId: team,
+    domainId: domain.id,
+    settings: { startVolume: 100, dailyTarget: 1_000 },
+    now: NOW,
+  });
+  const parkedBroadcast = async (scheduledAt: Date, n: number) => {
+    const [b] = await db
+      .insert(schema.broadcasts)
+      .values({
+        teamId: team,
+        from: "hi@order.example",
+        subject: "s",
+        status: "sending",
+        scheduledAt,
+      })
+      .returning({ id: schema.broadcasts.id });
+    if (!b) throw new Error("seed failed");
+    await db.insert(schema.emails).values(
+      Array.from({ length: n }, () => ({
+        teamId: team,
+        domainId: domain.id,
+        broadcastId: b.id,
+        from: "hi@order.example",
+        to: ["r@example.com"],
+        subject: "s",
+        latestStatus: "queued_quota" as const,
+        parkReason: "warmup" as const,
+      })),
+    );
+    return b.id;
+  };
+  const older = await parkedBroadcast(ago(60), 20);
+  const newer = await parkedBroadcast(ago(5), 30);
+  const plans = await warmupBroadcastPlans(db, await sendingBroadcasts(db, { teamId: team }), NOW);
+  // 100 today at 3 a run from 12:14: the older 20 go over seven runs, the newer 30 after them.
+  expect(plans.get(older)?.finishesAt).toEqual(new Date("2026-09-16T13:44:00Z"));
+  expect(plans.get(newer)?.finishesAt).toEqual(new Date("2026-09-16T16:14:00Z"));
+});
+
 it("refuses a warm-up plan past the horizon, never a paused one", () => {
   expect(warmupPastHorizon({ perDay: [], days: 24, finishesAt: new Date() }, 24)).toBe(false);
   expect(warmupPastHorizon({ perDay: [], days: 25, finishesAt: new Date() }, 24)).toBe(true);

@@ -19,7 +19,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { queryKey: string }) => ({ data: DATA[options.queryKey], isError: false }),
+  useQuery: (options: { queryKey: string }) => ({
+    data: DATA[options.queryKey],
+    isError: FAILED.has(options.queryKey),
+  }),
   useInfiniteQuery: () => ({ data: undefined, isSuccess: false }),
   useMutation: () => ({ mutate: vi.fn(), isPending: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
@@ -115,6 +118,7 @@ const DATA: Record<string, unknown> = {
   "broadcasts.get": BROADCAST,
   "broadcasts.providers": PROVIDERS,
 };
+const FAILED = new Set<string>();
 
 const { default: BroadcastDetailPage } = await import("@/app/(dashboard)/broadcasts/[id]/page");
 
@@ -125,6 +129,8 @@ describe("broadcast detail while the domain warms up", () => {
     expect(out).toContain("broadcasts.detail.warmupOrderSkipped");
     expect(out).toContain("broadcasts.detail.warmupHeld");
     expect(out).toContain("broadcasts.detail.warmupHeldBody");
+    // The held banner carries its mark, the level lines.
+    expect(out).toContain('d="M5 7h14"');
     expect(out).toContain('aria-label="warmup.pace.label"');
     // Yesterday held with its reason, today with its meter, then the rest.
     expect(out).toContain("warmup.rail.held");
@@ -142,6 +148,8 @@ describe("broadcast detail while the domain warms up", () => {
     DATA["broadcasts.get"] = BROADCAST;
     expect(out).toContain("warmup.status.paused");
     expect(out).toContain("warmup.row.pausedTitle");
+    // The pause mark the domain page's banner carries.
+    expect(out).toContain('d="M10 15V9"');
     expect(out).toContain(`href="/domains/${DOMAIN_ID}?tab=warmup"`);
     expect(out).not.toContain("warmup.pace.label");
   });
@@ -154,5 +162,18 @@ describe("broadcast detail while the domain warms up", () => {
     expect(out).toContain("98.0%");
     expect(out).toContain("5.0%");
     expect(out).toContain("6.2%");
+  });
+
+  it("holds the provider table's place while it loads, and offers a retry when it fails", () => {
+    DATA["broadcasts.providers"] = undefined;
+    const loading = renderToStaticMarkup(createElement(BroadcastDetailPage));
+    FAILED.add("broadcasts.providers");
+    const failed = renderToStaticMarkup(createElement(BroadcastDetailPage));
+    FAILED.clear();
+    DATA["broadcasts.providers"] = PROVIDERS;
+    expect(loading).toContain("broadcasts.detail.providers.label");
+    expect(loading).toMatch(/<table[^>]*>[\s\S]*ms-skeleton[\s\S]*<\/table>/);
+    expect(failed).toContain("broadcasts.detail.providers.loadError");
+    expect(failed).toContain("common.loadError.retry");
   });
 });

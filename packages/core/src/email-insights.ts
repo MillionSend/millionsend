@@ -135,7 +135,7 @@ export interface EmailInsightsInput {
 export const MIN_BODY_TEXT_CHARS = 100;
 
 /** Gmail clips messages whose HTML exceeds ~100KB (community-measured). */
-const GMAIL_CLIP_BYTES = 102400;
+export const GMAIL_CLIP_BYTES = 102400;
 const DMARC_STALE_MS = 24 * 60 * 60 * 1000;
 const MINOR_CAP_HUNDREDTHS = 150;
 

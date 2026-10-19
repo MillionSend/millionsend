@@ -414,6 +414,8 @@ export async function sendBroadcast(
   const transactional = warming?.orderByTransactional
     ? await recentTransactionalByAddress(db, broadcast.teamId, walkStart)
     : null;
+  // The sender's choice in the send dialog, else the warm-up's own setting.
+  const skipInactive = broadcast.warmupSkipInactive ?? warming?.skipInactive ?? false;
   // Inactive contacts left out on the page just walked: persisted with the
   // cursor that moves past that page, so a resumed walk never counts twice.
   let skipped = 0;
@@ -560,7 +562,7 @@ export async function sendBroadcast(
             },
             walkStart,
           );
-          if (warming.skipInactive && isInactiveContact(activity, walkStart)) {
+          if (skipInactive && isInactiveContact(activity, walkStart)) {
             skipped += 1;
             continue;
           }

@@ -6,26 +6,36 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { GradientBanner } from "@/components/gradient-banner";
+import { PauseIcon } from "@/components/icons/warmup-icons";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { StatBlock } from "@/components/stat-block";
+import { StatBlock, StatStrip } from "@/components/stat-block";
 import { StatusDot } from "@/components/status-badge";
-import { type RailStep, StepRail } from "@/components/step-rail";
+import { StepRail } from "@/components/step-rail";
 import { Switch } from "@/components/switch";
+import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
-import { formatDay, formatDayTime, formatStepDay, formatStepTime } from "@/lib/format";
+import { PaceBand, warmupSentSteps, warmupTodayStep } from "@/components/warmup-rail";
+import { formatPercent } from "@/lib/console-format";
+import {
+  formatDay,
+  formatDayTime,
+  formatStepDay,
+  formatStepTime,
+  roundUpToQuarterHour,
+} from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import {
   formatWarmupPercent,
+  type Translate,
   utcDayInstant,
   type WarmupSignalView,
   warmupPlanSteps,
-  warmupReasonShort,
   warmupReasons,
 } from "@/lib/warmup";
 import type { AppRouter } from "@/server/routers";
@@ -44,13 +54,6 @@ const RESULT_COLOR: Record<WarmupSignalView["result"], string> = {
   unknown: "var(--ms-faint)",
 };
 
-/** A day's outcome as the suffix on its rail row; a day that grew or ran light reads as plain "sent". */
-const OUTCOME_SUFFIX: Partial<Record<NonNullable<Warmup["days"][number]["outcome"]>, string>> = {
-  held: "rail.held",
-  stepped_back: "rail.steppedBack",
-  paused: "rail.paused",
-};
-
 const linkStyle: React.CSSProperties = {
   color: "var(--ms-bone)",
   textDecoration: "underline",
@@ -62,27 +65,6 @@ function useCopy() {
   const locale = useLocale();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   return { t, locale, n: (value: number) => nf.format(value) };
-}
-
-/** Lucide's circle-pause (MIT), the paused banner's mark. */
-function PauseIcon() {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="var(--ms-danger)"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <path d="M10 15V9" />
-      <path d="M14 15V9" />
-    </svg>
-  );
 }
 
 /** The warm-up's line in the status rows above the tabs; nothing while it is off. */
@@ -122,66 +104,16 @@ export function WarmupStatus({ data }: { data: Warmup }) {
   );
 }
 
-function StatStrip({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      className="ms-meta-grid ms-stat-strip"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-        gap: 22,
-        padding: "20px 0",
-        borderTop: "1px solid var(--ms-line)",
-        borderBottom: "1px solid var(--ms-line)",
-      }}
-    >
-      {children}
-    </div>
+/** The run's days that sent, before today, oldest first. */
+function historySteps(data: Warmup, t: Translate, locale: string) {
+  return warmupSentSteps(
+    data.days
+      .filter((d) => d.sent > 0 && d.day !== data.today?.day)
+      .reverse()
+      .map((d) => ({ day: d.day, count: d.sent, outcome: d.outcome, signals: d.signals })),
+    t,
+    locale,
   );
-}
-
-function PaceBand({
-  label,
-  steps,
-  note,
-  topRule = true,
-}: {
-  label: string;
-  steps: RailStep[];
-  note: string;
-  topRule?: boolean;
-}) {
-  return (
-    <div className="ms-pacing" style={topRule ? { marginTop: 24 } : { borderTop: 0 }}>
-      <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
-        {label}
-      </div>
-      <StepRail label={label} steps={steps} />
-      <p>{note}</p>
-    </div>
-  );
-}
-
-/** The run's checked days, oldest first, each with its outcome and the reason a missed day missed. */
-function useHistorySteps(data: Warmup): RailStep[] {
-  const { t, locale, n } = useCopy();
-  return data.days
-    .filter((d) => d.sent > 0 && d.day !== data.today?.day)
-    .reverse()
-    .map((d, i) => {
-      const reason = d.signals ? warmupReasonShort(d.signals, t, locale) : null;
-      return {
-        key: d.day,
-        when: formatStepDay(utcDayInstant(d.day), locale),
-        what: t((d.outcome && OUTCOME_SUFFIX[d.outcome]) ?? "rail.sent", { count: n(d.sent) }),
-        sub: reason ? (
-          <span style={{ color: "var(--ms-warn)" }}>{reason}</span>
-        ) : i === 0 ? (
-          t("rail.firstNote")
-        ) : undefined,
-        state: "done",
-      };
-    });
 }
 
 /** The side a flagged figure is judged on, to tint: Gmail's delays and opens, the reported complaints, else the worse side. */
@@ -202,16 +134,9 @@ function HealthTable({
   topRule?: boolean;
 }) {
   const { t, locale, n } = useCopy();
-  const figure = (key: WarmupSignalView["key"], value: number | null) => {
-    if (value === null) return "—";
-    // Complaints are judged against 0.05%, so they need the second decimal.
-    const digits = key === "complaints" ? 2 : 1;
-    return new Intl.NumberFormat(locale, {
-      style: "percent",
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits,
-    }).format(value);
-  };
+  // Complaints are judged against 0.05%, so they need the second decimal.
+  const figure = (key: WarmupSignalView["key"], value: number | null) =>
+    value === null ? "—" : formatPercent(value, locale, key === "complaints" ? 2 : 1);
   return (
     <section style={{ paddingTop: 22, borderTop: topRule ? "1px solid var(--ms-line)" : 0 }}>
       <div
@@ -240,73 +165,71 @@ function HealthTable({
           </span>
         ) : null}
       </div>
-      <div style={{ overflowX: "auto" }}>
-        <table className="ms-table baseline">
-          <thead>
-            <tr>
-              <th style={{ width: "30%" }}>{t("health.columns.signal")}</th>
-              <th style={{ width: "16%" }}>{t("health.columns.result")}</th>
-              <th className="right">{t("health.columns.gmail")}</th>
-              <th className="right">{t("health.columns.other")}</th>
-              <th className="right">{t("health.columns.line")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {health.signals.map((s) => {
-              const flagged = flaggedSide(s);
-              const tone = (side: "gmail" | "other") =>
-                flagged === side ? { color: RESULT_COLOR[s.result] } : undefined;
-              return (
-                <tr key={s.key}>
-                  <td>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      {t(`health.rows.${s.key}`)}
-                      {s.key === "opens" || s.key === "mailboxFull" ? (
-                        <Tooltip text={t(`health.tips.${s.key}`)} />
-                      ) : null}
-                    </span>
+      <Table className="baseline">
+        <thead>
+          <tr>
+            <th style={{ width: "30%" }}>{t("health.columns.signal")}</th>
+            <th style={{ width: "16%" }}>{t("health.columns.result")}</th>
+            <th className="right">{t("health.columns.gmail")}</th>
+            <th className="right">{t("health.columns.other")}</th>
+            <th className="right">{t("health.columns.line")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {health.signals.map((s) => {
+            const flagged = flaggedSide(s);
+            const tone = (side: "gmail" | "other") =>
+              flagged === side ? { color: RESULT_COLOR[s.result] } : undefined;
+            return (
+              <tr key={s.key}>
+                <td>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    {t(`health.rows.${s.key}`)}
+                    {s.key === "opens" || s.key === "mailboxFull" ? (
+                      <Tooltip text={t(`health.tips.${s.key}`)} />
+                    ) : null}
+                  </span>
+                </td>
+                {s.key === "opens" && !openTracking ? (
+                  <td colSpan={3} style={{ color: "var(--ms-muted)" }}>
+                    {t("health.openTrackingOff")}
                   </td>
-                  {s.key === "opens" && !openTracking ? (
-                    <td colSpan={3} style={{ color: "var(--ms-muted)" }}>
-                      {t("health.openTrackingOff")}
+                ) : (
+                  <>
+                    <td>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                        <StatusDot color={RESULT_COLOR[s.result]} />
+                        {t(`health.results.${s.result}`)}
+                      </span>
                     </td>
-                  ) : (
-                    <>
-                      <td>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                          <StatusDot color={RESULT_COLOR[s.result]} />
-                          {t(`health.results.${s.result}`)}
+                    <td className="right ms-mono" style={tone("gmail")}>
+                      {s.key === "complaints" ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            color: "var(--ms-muted)",
+                          }}
+                        >
+                          {t("health.notReported")}
+                          <Tooltip text={t("health.tips.complaints")} />
                         </span>
-                      </td>
-                      <td className="right ms-mono" style={tone("gmail")}>
-                        {s.key === "complaints" ? (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                              color: "var(--ms-muted)",
-                            }}
-                          >
-                            {t("health.notReported")}
-                            <Tooltip text={t("health.tips.complaints")} />
-                          </span>
-                        ) : (
-                          figure(s.key, s.gmail)
-                        )}
-                      </td>
-                      <td className="right ms-mono" style={tone("other")}>
-                        {figure(s.key, s.other)}
-                      </td>
-                    </>
-                  )}
-                  <td className="right ms-mono">{t(`health.lines.${s.key}`)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                      ) : (
+                        figure(s.key, s.gmail)
+                      )}
+                    </td>
+                    <td className="right ms-mono" style={tone("other")}>
+                      {figure(s.key, s.other)}
+                    </td>
+                  </>
+                )}
+                <td className="right ms-mono">{t(`health.lines.${s.key}`)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
       <p style={{ margin: "12px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
         {t.rich("health.footer", {
           link: (chunks) => (
@@ -514,7 +437,7 @@ function SettingsSections({
       <ConfigSection
         title={t("settings.inactiveTitle")}
         description={t("settings.inactiveHint", {
-          inactive: n(data.audience.inactive),
+          inactive: data.audience.inactive,
           total: n(data.audience.total),
         })}
       >
@@ -558,7 +481,7 @@ function OffView({
       days: preview.length,
     }),
     audience.inactive > 0
-      ? t(skip ? "off.previewSkipped" : "off.previewLast", { inactive: n(audience.inactive) })
+      ? t(skip ? "off.previewSkipped" : "off.previewLast", { inactive: audience.inactive })
       : "",
     t("off.previewTail"),
   ]
@@ -569,18 +492,19 @@ function OffView({
     <>
       <StatusRow text={t("off.row", { count: n(data.bestDay) })} note={t("off.rowNote")} />
       {preview.length > 0 ? (
-        <PaceBand
-          label={label}
-          note={note}
-          steps={warmupPlanSteps({
-            perDay: preview,
-            locale,
-            t,
-            labels: "days",
-            startsNow: true,
-            last: (count) => t("rail.lastAll", { count }),
-          })}
-        />
+        <PaceBand label={label} note={note} style={{ marginTop: 24 }}>
+          <StepRail
+            label={label}
+            steps={warmupPlanSteps({
+              perDay: preview,
+              locale,
+              t,
+              labels: "days",
+              startsNow: true,
+              last: (count) => t("rail.lastAll", { count }),
+            })}
+          />
+        </PaceBand>
       ) : null}
       <div className="ms-config-panel" style={{ marginTop: preview.length > 0 ? 12 : 24 }}>
         <ConfigSection title={t("off.switch")} description={t("off.switchHint")}>
@@ -611,7 +535,6 @@ function WarmingView({
   askOff: () => void;
 }) {
   const { t, locale, n } = useCopy();
-  const history = useHistorySteps(data);
   const today = data.today;
   if (!today) return null;
   const slot = data.todayWindow;
@@ -629,21 +552,11 @@ function WarmingView({
     labels: "dates",
     last: (count) => t("rail.target", { target: count }),
   }).slice(1);
-  const todayStep: RailStep = {
-    key: "today",
-    when: t("rail.todayLabel"),
-    what: t("rail.today", { allowance, sent: n(today.sent) }),
-    sub: !today.checked
-      ? t("rail.todayWaiting")
-      : slot
-        ? t("rail.todayWindow", {
-            start: formatStepTime(slot.startsAt, locale),
-            end: formatStepTime(slot.endsAt, locale),
-          })
-        : undefined,
-    state: "now",
-    progress: today.sent / Math.max(1, today.allowance),
-  };
+  const steps = [
+    ...historySteps(data, t, locale),
+    warmupTodayStep({ ...today, window: slot }, t, locale),
+    ...ahead,
+  ];
   return (
     <>
       <StatStrip>
@@ -654,7 +567,10 @@ function WarmingView({
             !today.checked
               ? t("stats.todaySubWaiting", { allowance })
               : slot
-                ? t("stats.todaySub", { allowance, time: formatStepTime(slot.endsAt, locale) })
+                ? t("stats.todaySub", {
+                    allowance,
+                    time: formatStepTime(roundUpToQuarterHour(slot.endsAt), locale),
+                  })
                 : t("stats.todaySubPlain", { allowance })
           }
         />
@@ -678,12 +594,9 @@ function WarmingView({
           hint={t("stats.targetSub", { date: formatStepDay(utcDayInstant(lastDay), locale) })}
         />
       </StatStrip>
-      <PaceBand
-        label={t("pace.label")}
-        note={t("pace.note")}
-        steps={[...history, todayStep, ...ahead]}
-        topRule={false}
-      />
+      <PaceBand label={t("pace.label")} note={t("pace.note")} style={{ borderTop: 0 }}>
+        <StepRail label={t("pace.label")} steps={steps} />
+      </PaceBand>
       {data.health ? <HealthTable health={data.health} openTracking={data.openTracking} /> : null}
       <div className="ms-config-panel" style={{ marginTop: 34 }}>
         <SettingsSections
@@ -787,9 +700,12 @@ function PausedView({
           <div style={{ fontSize: 15, color: "var(--ms-bone)", marginTop: 14 }}>
             {data.pausedAt ? formatStepDay(data.pausedAt, locale) : null}
           </div>
-          <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>
-            {t("stats.pausedSub", { day: String(data.sendingDays) })}
-          </div>
+          {/* Paused before its first check, it has no day behind it to name. */}
+          {data.sendingDays > 0 ? (
+            <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>
+              {t("stats.pausedSub", { day: String(data.sendingDays) })}
+            </div>
+          ) : null}
         </div>
         <StatBlock label={t("stats.target")} value={n(data.settings.dailyTarget)} />
       </StatStrip>
@@ -885,7 +801,6 @@ function DoneView({
   act: (action: Action) => void;
 }) {
   const { t, locale, n } = useCopy();
-  const history = useHistorySteps(data);
   return (
     <>
       {data.doneAt ? (
@@ -896,8 +811,10 @@ function DoneView({
       <PaceBand
         label={t("pace.label")}
         note={t("done.note", { target: n(data.settings.dailyTarget) })}
-        steps={history}
-      />
+        style={{ marginTop: 24 }}
+      >
+        <StepRail label={t("pace.label")} steps={historySteps(data, t, locale)} />
+      </PaceBand>
       <button
         type="button"
         className="ms-btn ms-btn-secondary"
@@ -911,29 +828,46 @@ function DoneView({
   );
 }
 
-/** Mirrors the warming layout: the stat strip, then the pace rail. */
-export function WarmupTabSkeleton() {
+/**
+ * Mirrors the layout the tab loads into: while live, the stat strip over the
+ * pace rail; while off or done, the status line over the rail.
+ */
+export function WarmupTabSkeleton({ live }: { live: boolean }) {
   return (
     <div style={{ marginTop: 24, maxWidth: 1000 }}>
-      <StatStrip>
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i}>
-            <div className="ms-microlabel" style={{ fontSize: 10.5, display: "flex" }}>
-              <Skeleton width={72} height="1lh" />
+      {live ? (
+        <StatStrip>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i}>
+              <div className="ms-microlabel" style={{ fontSize: 10.5, display: "flex" }}>
+                <Skeleton width={72} height="1lh" />
+              </div>
+              <div
+                className="ms-digits"
+                style={{ fontSize: "var(--ms-fs-kpi)", marginTop: 6, display: "flex" }}
+              >
+                <Skeleton width={64} height="1lh" />
+              </div>
+              <div style={{ fontSize: 12.5, marginTop: 4, display: "flex" }}>
+                <Skeleton width={120} height="1lh" />
+              </div>
             </div>
-            <div
-              className="ms-digits"
-              style={{ fontSize: "var(--ms-fs-kpi)", marginTop: 6, display: "flex" }}
-            >
-              <Skeleton width={64} height="1lh" />
-            </div>
-            <div style={{ fontSize: 12.5, marginTop: 4, display: "flex" }}>
-              <Skeleton width={120} height="1lh" />
-            </div>
-          </div>
-        ))}
-      </StatStrip>
-      <div className="ms-pacing" style={{ borderTop: 0 }}>
+          ))}
+        </StatStrip>
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            fontSize: 13.5,
+            border: "1px solid var(--ms-line)",
+            borderRadius: 12,
+            padding: "11px 16px",
+          }}
+        >
+          <Skeleton width={320} height="1lh" />
+        </div>
+      )}
+      <div className="ms-pacing" style={live ? { borderTop: 0 } : { marginTop: 24 }}>
         <div className="ms-microlabel" style={{ fontSize: 10.5, display: "flex" }}>
           <Skeleton width={110} height="1lh" />
         </div>
@@ -954,15 +888,28 @@ export function WarmupTabSkeleton() {
   );
 }
 
-export function WarmupTab({ id, query }: { id: string; query: UseQueryResult<Warmup, unknown> }) {
+export function WarmupTab({
+  id,
+  query,
+  live,
+}: {
+  id: string;
+  query: UseQueryResult<Warmup, unknown>;
+  /** Warming or paused, as the domain's own read says, for the layout the skeleton draws. */
+  live: boolean;
+}) {
   const t = useTranslations("warmup");
   const common = useTranslations("common");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const set = useMutation(
     trpc.domains.setWarmup.mutationOptions({
+      // The domain's own read carries the status that keeps this one loading off the tab.
       onSuccess: () =>
-        queryClient.invalidateQueries({ queryKey: trpc.domains.warmup.queryKey({ id }) }),
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: trpc.domains.warmup.queryKey({ id }) }),
+          queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) }),
+        ]),
       onError: () => toast(t("error"), "danger"),
     }),
   );
@@ -985,7 +932,7 @@ export function WarmupTab({ id, query }: { id: string; query: UseQueryResult<War
     );
   }
   const data = query.data;
-  if (!data) return <WarmupTabSkeleton />;
+  if (!data) return <WarmupTabSkeleton live={live} />;
 
   const views = {
     off: <OffView id={id} data={data} busy={busy} act={act} />,

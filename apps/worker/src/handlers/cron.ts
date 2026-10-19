@@ -310,7 +310,13 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
   if (budget > 0) {
     const b = schema.broadcasts;
     const waiting = await db
-      .select({ id: b.id, teamId: b.teamId })
+      .select({
+        id: b.id,
+        teamId: b.teamId,
+        domainId: sql<
+          string | null
+        >`(select e.domain_id from emails e where e.broadcast_id = broadcasts.id and e.latest_status = 'queued_quota' limit 1)`,
+      })
       .from(b)
       .where(
         and(
@@ -323,7 +329,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       .orderBy(asc(b.scheduledAt), asc(b.createdAt), asc(b.id));
     // Only broadcasts that can move this run share the slices, and a slice
     // is split among the peers of the same region (the room is per region).
-    const eligible: { id: string; teamId: string; region: string }[] = [];
+    const eligible: { id: string; teamId: string; domainId: string | null; region: string }[] = [];
     for (const broadcast of waiting) {
       const region = (await parkedRegion(db, broadcast.id)) ?? regions[0] ?? "";
       if (deps.sesQuota && (deps.sesQuota.paused?.(region) || deps.sesQuota.exhausted(region))) {
@@ -358,6 +364,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
         held: [],
         spacingMs,
         bySendOrder: true,
+        sender: broadcast,
       });
       drained += released.total;
       budget -= released.total;
@@ -389,7 +396,9 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
  * team, failed enqueue) can never be re-read into an infinite loop, and
  * teams found exhausted leave the page query so one capped team's backlog
  * is never walked row by row. `bySendOrder` first walks the rows a warm-up
- * put in line, by (sendOrder, id), then the rest oldest first.
+ * put in line, by (sendOrder, id), then the rest oldest first. One
+ * broadcast's rows share a team and a domain (`sender`): once the run holds
+ * either, the rest of its backlog is never read only to be skipped.
  */
 async function releaseParkedRows(
   db: Db,
@@ -401,8 +410,15 @@ async function releaseParkedRows(
     held: readonly string[];
     spacingMs: number;
     bySendOrder?: boolean;
+    sender?: { teamId: string; domainId: string | null };
   },
 ): Promise<{ total: number; byRegion: Map<string, number> }> {
+  const { sender } = opts;
+  const senderHeld = () =>
+    sender !== undefined &&
+    (run.heldTeams.has(sender.teamId) ||
+      run.pausedTeams.has(sender.teamId) ||
+      (sender.domainId !== null && run.heldDomains.has(sender.domainId)));
   const regions = deps.sesQuota?.regions ?? [];
   const region = sql<string>`coalesce(${schema.domains.region}, ${regions[0] ?? ""})`;
   const systemMail = sql<boolean>`coalesce(${schema.emails.tags} ? ${SYSTEM_MAIL_TAG}, false)`;
@@ -417,7 +433,7 @@ async function releaseParkedRows(
     : [{ order: e.createdAt, where: undefined }];
   for (const pass of passes) {
     let cursorId: string | undefined;
-    while (total < opts.budget) {
+    while (total < opts.budget && !senderHeld()) {
       const page = await db
         .select({
           id: schema.emails.id,

@@ -376,7 +376,17 @@ export function DomainDetail({ id }: { id: string }) {
   const records = useQuery(
     trpc.domains.records.queryOptions({ id }, { enabled: domain.isSuccess }),
   );
-  const warmup = useQuery(trpc.domains.warmup.queryOptions({ id }));
+  // In the URL so the warm-up mails can open their tab; replaceState never scrolls.
+  const [tabParam, setTab] = useUrlState("tab", "records");
+  const tab = oneOf(TABS, tabParam, "records");
+  // The whole warm-up reads the team's audience: only while its tab is open
+  // or the status rows above the tabs show it.
+  const warmup = useQuery(
+    trpc.domains.warmup.queryOptions(
+      { id },
+      { enabled: tab === "warmup" || (domain.data?.warmupStatus ?? "off") !== "off" },
+    ),
+  );
 
   // Persist the last live-DNS result across re-checks. Reading it straight off
   // the verify mutation would blank out while a re-check is pending, so a row
@@ -477,9 +487,6 @@ export function DomainDetail({ id }: { id: string }) {
   // second spinner the user never triggered.
   const [checkTick, setCheckTick] = useState(0);
   const [copiedKey, setCopiedKey] = useState<"instructions" | "prompt" | null>(null);
-  // In the URL so the warm-up mails can open their tab; replaceState never scrolls.
-  const [tabParam, setTab] = useUrlState("tab", "records");
-  const tab = oneOf(TABS, tabParam, "records");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   // Stable identity: Modal's focus effect depends on onClose, and a fresh
@@ -893,7 +900,11 @@ export function DomainDetail({ id }: { id: string }) {
       </div>
 
       {tab === "warmup" ? (
-        <WarmupTab id={id} query={warmup} />
+        <WarmupTab
+          id={id}
+          query={warmup}
+          live={data.warmupStatus === "warming" || data.warmupStatus === "paused"}
+        />
       ) : tab === "configuration" ? (
         <div style={{ marginTop: 24 }}>
           <ConfigurationPanel

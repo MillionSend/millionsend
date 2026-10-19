@@ -21,6 +21,7 @@ import {
   failQueuedEmailsForDomain,
   fetchEffectivePlan,
   getInstanceSettings,
+  getWarmup,
   isIdentitySharedByOtherDomains,
   isOperatorTeam,
   isReservedSenderDomain,
@@ -335,8 +336,12 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         .select({ n: count() })
         .from(schema.inboxes)
         .where(and(eq(schema.inboxes.domainId, domain.id), liveInbox(new Date())));
+      const ramp = await getWarmup(ctx.db, ctx.teamId, domain.id);
       return {
         sentCount: sent?.n ?? 0,
+        // The reputation warm-up's status, so the page reads the whole
+        // warm-up only when it is on or its tab is open.
+        warmupStatus: ramp?.status ?? "off",
         // The day's cap while the domain warms up, when the calendar lifts
         // it, and whether the team's other new domains share the day's
         // volume; never why, nor what a tier is.

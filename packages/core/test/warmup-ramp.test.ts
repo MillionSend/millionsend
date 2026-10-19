@@ -610,6 +610,30 @@ describe("the day check", () => {
     expect(pt.text).toContain("1 e-mail está esperando até você retomar.");
   });
 
+  it("leaves a broadcast Gmail clips out of the opens: its pixel never loads there", async () => {
+    const ctx = await warmingDomain({ allowance: 2_000, sent: 2_000 });
+    // Gmail opens 1 in 100 against 1 in 5 elsewhere: severe, were the opens read.
+    await seedSends(ctx, YESTERDAY, 2, { gmail: true, events: [delivered, opened] });
+    await seedSends(ctx, YESTERDAY, 198, { gmail: true });
+    await seedSends(ctx, YESTERDAY, 160, { gmail: false, events: [delivered, opened] });
+    await seedSends(ctx, YESTERDAY, 640, { gmail: false });
+    await db.insert(schema.emailInsights).values({
+      teamId: ctx.teamId,
+      broadcastId: ctx.broadcastId,
+      marketing: true,
+      checks: [],
+      scoreTenths: 90,
+      scoreVersion: 1,
+      htmlSizeBytes: 150_000,
+    });
+    expect(await checkWarmups(db, NOW)).toEqual([]);
+    expect(await rowOf(ctx)).toMatchObject({ status: "warming", volume: 3_000 });
+    expect(await dayOf(ctx, YESTERDAY)).toMatchObject({
+      outcome: "grew",
+      signals: { opens: { result: "unknown" } },
+    });
+  });
+
   it("finishes a healthy day at the target", async () => {
     const ctx = await warmingDomain({ allowance: 10_000, sent: 9_000 }, { startVolume: 10_000 });
     await healthyDay(ctx);
@@ -711,6 +735,50 @@ describe("turning it on and off", () => {
       startedAt: later,
     });
     expect(await dayOf(ctx, "2026-10-10")).toMatchObject({ allowance: 3_000 });
+  });
+
+  it("stamps the contacts with the opens and clicks already stored when it starts", async () => {
+    const ctx = await newDomain();
+    const lastWeek = new Date("2026-10-03T09:00:00Z");
+    const yesterday = new Date("2026-10-09T09:00:00Z");
+    const contacts = await db
+      .insert(schema.contacts)
+      .values([
+        { teamId: ctx.teamId, email: `reader${seq}@example.com` },
+        { teamId: ctx.teamId, email: `machine${seq}@example.com` },
+        { teamId: ctx.teamId, email: `newer${seq}@example.com`, lastEngagedAt: yesterday },
+      ])
+      .returning({ id: schema.contacts.id });
+    const copies = await db
+      .insert(schema.emails)
+      .values(
+        contacts.map((c, i) => ({
+          teamId: ctx.teamId,
+          broadcastId: ctx.broadcastId,
+          contactId: c.id,
+          from: "hi@news.example.com",
+          to: [`c${i}@example.com`],
+          subject: "s",
+          latestStatus: i === 1 ? ("delivered" as const) : ("clicked" as const),
+        })),
+      )
+      .returning({ id: schema.emails.id });
+    await db.insert(schema.emailEvents).values(
+      copies.map((copy, i) => ({
+        emailId: copy.id,
+        type: i === 1 ? ("prefetched" as const) : ("clicked" as const),
+        occurredAt: lastWeek,
+      })),
+    );
+    await enableWarmup(db, { ...ctx, now: NOW });
+    const engaged = await db
+      .select({ id: schema.contacts.id, at: schema.contacts.lastEngagedAt })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.teamId, ctx.teamId));
+    const at = (id: string | undefined) => engaged.find((c) => c.id === id)?.at ?? null;
+    expect(at(contacts[0]?.id)).toEqual(lastWeek);
+    expect(at(contacts[1]?.id)).toBeNull();
+    expect(at(contacts[2]?.id)).toEqual(yesterday);
   });
 
   it("pauses, resumes at half the volume from today, and refuses settings out of bounds", async () => {

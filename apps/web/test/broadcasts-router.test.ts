@@ -2,6 +2,7 @@ import {
   DAY_MS,
   defaultSafety,
   enableWarmup,
+  getWarmup,
   pauseWarmup,
   updateWarmupSettings,
   utcDay,
@@ -1119,23 +1120,44 @@ describe("paced sends", () => {
     expect((await broadcastRow(id))?.status).toBe("scheduled");
   });
 
-  it("send with warmup turns the domain's warm-up on first, a member's choice included", async () => {
-    const teamId = await createTeam(db, "team-a");
-    const { id } = await seedDraft(teamId);
-    await seedContacts(teamId, 3);
-    const member = createCaller({
+  const memberOf = (teamId: string) =>
+    createCaller({
       db,
       session: { user: { id: "u2", email: "u2@example.com", name: "u2" } },
       teamId,
       role: "member",
     });
-    await member.broadcasts.send({ id, warmup: true, skipInactive: false });
+
+  it("send with warmup turns the domain's warm-up on first, the inactive choice kept to the send", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    await seedContacts(teamId, 3);
+    await memberOf(teamId).broadcasts.send({ id, warmup: true, skipInactive: false });
     const [ramp] = await db
       .select()
       .from(schema.domainWarmups)
       .where(eq(schema.domainWarmups.teamId, teamId));
-    expect(ramp).toMatchObject({ status: "warming", skipInactive: false, startVolume: 1_500 });
-    expect((await broadcastRow(id))?.status).toBe("scheduled");
+    expect(ramp).toMatchObject({ status: "warming", skipInactive: true, startVolume: 1_500 });
+    expect(await broadcastRow(id)).toMatchObject({
+      status: "scheduled",
+      warmupSkipInactive: false,
+    });
+  });
+
+  it("a member's inactive choice in the send never changes a live warm-up's setting", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    await seedContacts(teamId, 3);
+    const domainId = await domainOf(teamId);
+    await enableWarmup(db, { teamId, domainId, settings: { skipInactive: false } });
+    await memberOf(teamId).broadcasts.send({ id, skipInactive: true });
+    expect((await getWarmup(db, teamId, domainId))?.skipInactive).toBe(false);
+    expect((await broadcastRow(id))?.warmupSkipInactive).toBe(true);
+
+    // Left unchanged in the dialog, the send follows the domain's setting.
+    const other = await callerFor(teamId).broadcasts.create(DRAFT_INPUT);
+    await memberOf(teamId).broadcasts.send({ id: other.id });
+    expect((await broadcastRow(other.id))?.warmupSkipInactive).toBeNull();
   });
 
   it("refuses a send whose warm-up runs past the horizon, in the dialog and the send", async () => {

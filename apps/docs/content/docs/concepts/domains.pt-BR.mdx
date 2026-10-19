@@ -130,7 +130,8 @@ inicial para esse número.
   pelo menos 12 horas. Os dias são dias UTC, e cada um só começa depois que o dia
   anterior é verificado.
 - O que passar do volume do dia espera o dia seguinte, na mesma ordem, e
-  aparece como **Aguardando**. Nada se perde.
+  aparece como **Aguardando**, enquanto o conteúdo dos e-mails for guardado
+  (veja abaixo).
 - Só as transmissões esperam. E-mails enviados com `POST /emails`, em lote ou
   pelo SMTP nunca ficam retidos.
 - Um dia que envia menos da metade do volume não o aumenta. Dias sem envio
@@ -191,8 +192,7 @@ Depois da verificação:
 ### Pausar, retomar ou desligar
 
 - **Pausar aquecimento** segura as transmissões do domínio. Os e-mails delas
-  esperam na ordem e nada se perde. Um sinal grave pausa o aquecimento do
-  mesmo jeito.
+  esperam na ordem. Um sinal grave pausa o aquecimento do mesmo jeito.
 - **Retomar** recomeça a partir de hoje com metade do volume que ele tinha.
 - **Desligar** encerra o aquecimento, e os e-mails que estavam esperando saem
   na velocidade normal. Um dia grande de um domínio com pouco histórico tende

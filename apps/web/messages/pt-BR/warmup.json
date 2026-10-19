@@ -53,8 +53,8 @@
     "preview": "Uma transmissão para todos os {total} contatos sairia assim",
     "previewActive": "{eligible} contatos ativos em cerca de {days, plural, one {# dia de envio} other {# dias de envio}}, os mais ativos primeiro.",
     "previewAll": "{eligible} contatos em cerca de {days, plural, one {# dia de envio} other {# dias de envio}}, os mais ativos primeiro.",
-    "previewSkipped": "{inactive} sem atividade há mais de 90 dias ficam de fora.",
-    "previewLast": "{inactive} sem atividade há mais de 90 dias vão por último.",
+    "previewSkipped": "{inactive, plural, one {# sem atividade há mais de 90 dias fica de fora.} other {# sem atividade há mais de 90 dias ficam de fora.}}",
+    "previewLast": "{inactive, plural, one {# sem atividade há mais de 90 dias vai por último.} other {# sem atividade há mais de 90 dias vão por último.}}",
     "previewTail": "Cada dia saudável aumenta o volume em 1,5×. Seus e-mails transacionais nunca ficam retidos.",
     "switch": "Aquecer este domínio",
     "switchHint": "Envios grandes começam pequenos e crescem a cada dia enquanto a entrega estiver saudável. Deixe desligado se este domínio já envia esse volume por outro provedor."
@@ -70,14 +70,14 @@
     "sentSub": "desde {date}",
     "target": "Meta diária",
     "targetSub": "volume total por volta de {date}",
-    "waiting": "Esperando",
+    "waiting": "Aguardando",
     "waitingSub": "e-mails de transmissões",
     "paused": "Pausado",
     "pausedSub": "depois do dia {day}"
   },
   "pace": {
     "label": "Ritmo do aquecimento",
-    "note": "Cada dia saudável aumenta o volume em 1,5×. Um sinal fraco mantém o volume, dois reduzem em 30% e um grave pausa o aquecimento. O que passar do volume do dia espera o dia seguinte. Nada se perde. Seus e-mails transacionais nunca ficam retidos."
+    "note": "Cada dia saudável aumenta o volume em 1,5×. Um sinal fraco mantém o volume, dois reduzem em 30% e um grave pausa o aquecimento. O que passar do volume do dia espera o dia seguinte. Seus e-mails transacionais nunca ficam retidos."
   },
   "health": {
     "label": "Saúde da entrega · {day}",
@@ -113,7 +113,7 @@
     "notReported": "não informado",
     "tips": {
       "opens": "Aberturas no Gmail comparadas com outras caixas no mesmo envio. Uma fração baixa é o sinal mais claro de que o Gmail está mandando para o spam. Pré-carregamentos automáticos não contam.",
-      "mailboxFull": "Caixas que responderam cheias ou inativas. Uma segunda resposta assim para os envios para o endereço.",
+      "mailboxFull": "Caixas que responderam cheias ou inativas. As inativas param de receber seus e-mails na hora. As cheias param depois de responder cheias pela segunda vez.",
       "complaints": "O Gmail não avisa os remetentes sobre denúncias de spam. Veja sua taxa de spam no Google Postmaster Tools."
     },
     "openTrackingOff": "Ligue o rastreamento de aberturas para ver este sinal.",
@@ -130,7 +130,7 @@
     "propertyCoverage": "preenchida em {count} de {total} contatos",
     "propertyHint": "Use uma data, como o último login.",
     "inactiveTitle": "Contatos inativos",
-    "inactiveHint": "{inactive} dos seus {total} contatos não têm atividade há mais de 90 dias. Enviar para eles de um domínio novo é o caminho mais rápido para o spam.",
+    "inactiveHint": "{inactive, plural, =0 {Nenhum dos seus {total} contatos está há mais de 90 dias sem atividade.} one {# dos seus {total} contatos não tem atividade há mais de 90 dias. Enviar para ele de um domínio novo é o caminho mais rápido para o spam.} other {# dos seus {total} contatos não têm atividade há mais de 90 dias. Enviar para eles de um domínio novo é o caminho mais rápido para o spam.}}",
     "inactiveSkip": "Pular durante o aquecimento",
     "inactiveLast": "Enviar por último",
     "targetTitle": "Meta diária",
@@ -141,7 +141,7 @@
     "startError": "Use um número inteiro de {min} a {max}, não maior que a meta diária.",
     "update": "Atualizar",
     "controlTitle": "Pausar ou desligar",
-    "controlHint": "Pausado, os e-mails deste domínio esperam até você retomar. Desligado, o que estiver esperando sai na velocidade normal.",
+    "controlHint": "Com o aquecimento pausado, as transmissões deste domínio esperam até você retomar. Com ele desligado, o que estiver esperando sai na velocidade normal.",
     "pause": "Pausar aquecimento",
     "turnOff": "Desligar"
   },
@@ -162,7 +162,7 @@
     "spamBody": "O Gmail mostra essa taxa só no Google Postmaster Tools, com um dia de atraso. Acima de 0,3% o Gmail começa a recusar e-mails.",
     "spamLink": "Abrir o Postmaster Tools ↗",
     "dead": "Endereços mortos",
-    "deadBody": "Caixas cheias ou inativas param de receber seus e-mails depois de uma segunda resposta assim.",
+    "deadBody": "Caixas inativas param de receber seus e-mails na hora. As cheias param depois de responder cheias pela segunda vez.",
     "resumeTitle": "Retomar",
     "resumeHint": "Recomeça com {volume} por dia. Os e-mails que estão esperando mantêm a ordem e ficam guardados até {date}.",
     "resumeHintPlain": "Recomeça com {volume} por dia.",

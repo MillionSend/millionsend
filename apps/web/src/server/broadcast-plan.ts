@@ -38,9 +38,9 @@ import {
   type WarmupPlan,
   type WarmupStatus,
   warmupBroadcastPlans,
-  warmupOverview,
   warmupPastHorizon,
   warmupSendPreview,
+  warmupStartingSettings,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
@@ -374,8 +374,7 @@ export async function warmupSendPlan(
   const risky = !live && preview.eligible > Math.max(RISKY_MIN, 2 * preview.bestDay);
   if (!live && !risky && !opts.enabling) return null;
   // Off, a warm-up starts from the team's earlier settings, else the defaults.
-  const ramp = live ?? (await warmupOverview(db, { teamId, domainId, now }))?.settings;
-  if (!ramp) return null;
+  const ramp = live ?? row ?? (await warmupStartingSettings(db, teamId, domainId, now));
   const skipInactive = opts.skipInactive ?? ramp.skipInactive;
   const count = preview.eligible - (skipInactive ? preview.inactive : 0);
   const plan = live

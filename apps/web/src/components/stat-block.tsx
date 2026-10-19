@@ -40,3 +40,29 @@ export function StatBlock({
     </div>
   );
 }
+
+/** The row of StatBlocks between two rules, wrapping by content. */
+export function StatStrip({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      className="ms-meta-grid ms-stat-strip"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+        gap: 22,
+        padding: "20px 0",
+        borderTop: "1px solid var(--ms-line)",
+        borderBottom: "1px solid var(--ms-line)",
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}

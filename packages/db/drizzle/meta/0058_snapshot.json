@@ -1,6 +1,6 @@
 {
-  "id": "0db1226a-1332-466d-92ac-109cd7f7582a",
-  "prevId": "d70db76c-0bb2-4b72-9630-b7758b43a73b",
+  "id": "76f0040e-90a3-42a6-b6ae-899b05e2e819",
+  "prevId": "1f86bf82-17f4-4421-ab9d-f0068efe5cdf",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -616,7 +616,7 @@
           "name": "issuer",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "account_id": {
           "name": "account_id",
@@ -693,29 +693,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "account_issuer_account_id_idx": {
-          "name": "account_issuer_account_id_idx",
-          "columns": [
-            {
-              "expression": "issuer",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "account_user_id_user_id_fk": {
           "name": "account_user_id_user_id_fk",
@@ -2356,6 +2334,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "warmup_skip_inactive": {
+          "name": "warmup_skip_inactive",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
         },
         "delivered_count": {
           "name": "delivered_count",

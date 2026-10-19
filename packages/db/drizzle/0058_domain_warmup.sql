@@ -33,6 +33,7 @@ CREATE TABLE "domain_warmups" (
 );
 --> statement-breakpoint
 ALTER TABLE "broadcasts" ADD COLUMN "warmup_skipped" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "broadcasts" ADD COLUMN "warmup_skip_inactive" boolean;--> statement-breakpoint
 ALTER TABLE "contacts" ADD COLUMN "last_engaged_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "contacts" ADD COLUMN "mailbox_full_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "emails" ADD COLUMN "send_order" bigint;--> statement-breakpoint

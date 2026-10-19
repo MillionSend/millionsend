@@ -1,4 +1,14 @@
-import { index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { segments } from "./segments.js";
 import { teams } from "./teams.js";
 import { topics } from "./topics.js";
@@ -61,6 +71,9 @@ export const broadcasts = pgTable(
     fanOutCursor: uuid("fan_out_cursor"),
     // Contacts a warm-up fan-out left out for being inactive 90+ days.
     warmupSkipped: integer("warmup_skipped").notNull().default(0),
+    // The sender's choice for this send's inactive contacts while its domain
+    // warms up; null follows the warm-up's own setting.
+    warmupSkipInactive: boolean("warmup_skip_inactive"),
     // Results recorded once the broadcast's emails are about to age out of
     // the metadata window, so a campaign keeps its numbers after its rows
     // are gone. Null while the emails are still there to count.

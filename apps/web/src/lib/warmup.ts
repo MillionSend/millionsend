@@ -20,7 +20,7 @@ export interface WarmupSignalView {
   other: number | null;
 }
 
-type Translate = (key: string, values?: Record<string, string>) => string;
+export type Translate = (key: string, values?: Record<string, string>) => string;
 
 export function formatWarmupPercent(value: number, locale: string): string {
   return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(
