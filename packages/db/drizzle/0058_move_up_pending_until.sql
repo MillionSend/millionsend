@@ -1,0 +1,1 @@
+ALTER TABLE "teams" ADD COLUMN "move_up_pending_until" timestamp with time zone;

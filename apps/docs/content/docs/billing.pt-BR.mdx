@@ -199,7 +199,8 @@ pausada enquanto `teams.plan_status` é `past_due`.
    assinatura no corpo bruto, registra o id do evento (duplicatas são
    confirmadas e ignoradas), busca a assinatura de novo no Stripe e só então
    grava `teams.plan`, `plan_quota`, `current_period_start`,
-   `current_period_end`, `stripe_overage_item_id` e `pending_rung`.
+   `current_period_end`, `stripe_overage_item_id`, `pending_rung` e
+   `move_up_pending_until`.
 4. **Trocar de faixa** acontece no painel (`billing.changePlan`), e a
    direção decide quando:
    - **Subir** espera o próprio pagamento: os itens da assinatura são
@@ -296,8 +297,9 @@ Regras adicionais:
   teria feito.
 - `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
   `current_period_end`, `stripe_overage_item_id` e `pending_rung` (a faixa
-  da última fase de um schedule pendente, quando difere da atual) são
-  guardados junto com o plano. Um item medido precificado para outra faixa
+  da última fase de um schedule pendente, quando difere da atual) e
+  `move_up_pending_until` (quando o Stripe descarta uma subida que ainda
+  espera o pagamento) são guardados junto com o plano. Um item medido precificado para outra faixa
   é reapontado para o preço medido da faixa ao ser aplicado.
 
 ## O cron de excedente
@@ -324,11 +326,17 @@ reportar; com ele ligado nada passa de 5× o volume, então um período cobra no
 máximo quatro volumes de excedente. O uso de um período que já terminou é
 carimbado um segundo dentro desse período, onde o Stripe o fatura (a fatura
 fica em rascunho por cerca de uma hora após o fim do período; linhas com mais
-de 35 dias não podem mais ser medidas e vão para o log). O mesmo relato roda
-antes de a chave desligar,
+de 35 dias não podem mais ser medidas e vão para o log). Enquanto uma subida
+espera o pagamento, o período em curso da equipe fica de fora (a fatura de um
+período encerrado não pode esperar): o Stripe não cobra nada reportado
+no preço antigo entre o pedido e o pagamento, então os envios da espera são
+reportados quando a subida se aplica (contra o volume novo) ou quando o
+Stripe a descarta sem pagamento após 23 horas (contra o antigo). O mesmo
+relato roda antes de a chave desligar,
 antes de uma subida (os envios feitos na faixa antiga acertam na taxa dela),
 antes de excluir uma equipe (o cancelamento leva uma fatura final)
-e quando o item medido sai da assinatura. O Stripe descarta um evento de
+e quando o item medido sai da assinatura; os três últimos rodam também
+durante uma espera, já que cada um a encerra. O Stripe descarta um evento de
 medidor que ainda não contou quando uma subida reprecifica o item medido, e a
 contagem leva cerca de um minuto, então uma subida compara antes o excedente
 reportado no período com os resumos do medidor no Stripe: enquanto mais de 1%

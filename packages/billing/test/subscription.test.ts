@@ -72,6 +72,14 @@ async function reportedOverage(teamId: string): Promise<number | undefined> {
   return row?.reportedOverage;
 }
 
+async function moveUpPendingUntil(teamId: string): Promise<Date | null | undefined> {
+  const [row] = await db
+    .select({ until: schema.teams.moveUpPendingUntil })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, teamId));
+  return row?.until;
+}
+
 const callOrder = (first: string, second: string) =>
   expect(state.calls.indexOf(first)).toBeLessThan(state.calls.indexOf(second));
 
@@ -168,6 +176,13 @@ describe("changeRung up", () => {
       planQuota: 100_000,
       pendingRung: null,
     });
+    // Reports wait with the move, until Stripe drops it unpaid or the payment applies it.
+    expect(await moveUpPendingUntil(teamId)).toEqual(new Date((PERIOD_START + 82_800) * 1000));
+    const paid = state.subscriptions.sub_1;
+    if (!paid) throw new Error("fixture missing");
+    paid.pending_update = null;
+    await applySubscription(db, paid, () => {});
+    expect(await moveUpPendingUntil(teamId)).toBeNull();
   });
 
   it("waits while a step Stripe refused is still pinned, and sends it again on the retry", async () => {

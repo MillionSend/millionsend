@@ -191,7 +191,8 @@ while `teams.plan_status` is `past_due`.
    signature on the raw body, records the event id (duplicates are
    acknowledged and ignored), re-fetches the subscription from Stripe, and
    only then writes `teams.plan`, `plan_quota`, `current_period_start`,
-   `current_period_end`, `stripe_overage_item_id` and `pending_rung`.
+   `current_period_end`, `stripe_overage_item_id`, `pending_rung` and
+   `move_up_pending_until`.
 4. **Switching rung** happens in the dashboard (`billing.changePlan`), and
    the direction decides when:
    - **Up** waits for its own payment: the subscription's items are
@@ -289,7 +290,8 @@ Additional rules:
 - `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
   `current_period_end`, `stripe_overage_item_id` and `pending_rung` (the rung
   of a pending schedule's last phase when it differs from the current one)
-  are stored alongside the plan. A metered item priced for another rung is
+  and `move_up_pending_until` (when Stripe drops a move up still waiting on
+  its payment) are stored alongside the plan. A metered item priced for another rung is
   re-pointed to the rung's metered price as it is applied.
 
 ## The overage cron
@@ -316,10 +318,16 @@ Usage of a period that already ended is stamped one second inside that
 period, where Stripe invoices it (the invoice stays a draft for about an hour
 after the period closes; rows older than 35 days can no longer be metered and
 are logged).
+While a move up waits on its payment, the team's running period is skipped
+(an ended period's invoice cannot wait): Stripe bills nothing reported on the
+old price between the request and the payment, so the wait's sends are
+reported once the move applies (against the new volume) or once Stripe drops
+it unpaid after 23 hours (against the old one).
 The same report runs before the switch turns off, before a move up (sends
 made under the old rung settle at its rate), before a team is deleted (its
 cancellation carries a final invoice) and when the metered item leaves the
-subscription. Stripe drops a meter event it has not counted by the time a
+subscription; the last three run during a wait too, since each ends it.
+Stripe drops a meter event it has not counted by the time a
 move up re-prices the metered item, and counting takes about a minute, so a
 move up first compares the period's reported overage with Stripe's meter
 summaries: while more than 1% of the volume (at least 1,000 emails) is

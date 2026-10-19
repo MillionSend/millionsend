@@ -31,11 +31,19 @@ export interface OverageReport {
  * duplicate; a Stripe failure leaves the pin for the next run too. Usage of
  * a period that already ended is stamped inside that period, which is where
  * Stripe invoices it (the invoice stays a draft for about an hour after the
- * period closes).
+ * period closes). Stripe bills nothing reported on the old price between a
+ * move up's request and its payment, so while a team's move up waits on
+ * payment its running period is skipped: the wait's sends are reported once
+ * the move applies (against the new volume) or lapses.
  */
 export async function reportOverage(
   deps: BillingDeps,
-  opts: { now?: Date; teamId?: string } = {},
+  opts: {
+    now?: Date;
+    teamId?: string;
+    /** Reports even while a move up waits: the caller's own change voids that wait. */
+    throughHold?: boolean;
+  } = {},
 ): Promise<OverageReport> {
   const now = opts.now ?? new Date();
   const log = deps.log ?? console.warn;
@@ -49,6 +57,7 @@ export async function reportOverage(
       planQuota: t.planQuota,
       currentPeriodStart: t.currentPeriodStart,
       currentPeriodEnd: t.currentPeriodEnd,
+      moveUpPendingUntil: t.moveUpPendingUntil,
       periodStart: p.periodStart,
       accepted: p.accepted,
       reportedOverage: p.reportedOverage,
@@ -86,6 +95,12 @@ export async function reportOverage(
           ? row.currentPeriodEnd
           : null;
     const at = end && now.getTime() >= end.getTime() ? new Date(end.getTime() - 1000) : now;
+    // Only the running period waits on a move up's payment: an ended
+    // period's invoice closes within the hour.
+    const running = at === now;
+    if (running && !opts.throughHold && row.moveUpPendingUntil && row.moveUpPendingUntil > now) {
+      continue;
+    }
     if (now.getTime() - at.getTime() > METER_MAX_AGE_MS) {
       log(
         `overage: team ${row.teamId} period ${row.periodStart.toISOString()} is too old to meter`,

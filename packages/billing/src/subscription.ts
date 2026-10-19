@@ -132,7 +132,7 @@ export async function applySubscription(
   // what it has not billed yet must reach the meter while the row still
   // names the item, inside Stripe's draft window for the closing period.
   if (stripe && team.stripeOverageItemId && overageItemId === null) {
-    await reportOverage({ db: tx, stripe, log }, { teamId: team.id });
+    await reportOverage({ db: tx, stripe, log }, { teamId: team.id, throughHold: true });
   }
   await tx
     .update(schema.teams)
@@ -143,6 +143,7 @@ export async function applySubscription(
       stripeSubscriptionId: sub.id,
       stripeOverageItemId: overageItemId,
       pendingRung: entitled ? pendingRungOf(sub, rung) : null,
+      moveUpPendingUntil: stamp(sub.pending_update?.expires_at),
       currentPeriodStart: stamp(base?.current_period_start),
       currentPeriodEnd: stamp(base?.current_period_end),
       cancelAt: stamp(sub.cancel_at),
@@ -301,7 +302,7 @@ export async function changeRung(
     await input.beforeMoveUp?.();
     // Sends made under the old rung settle at its rate before the move.
     if (overage) {
-      await reportOverage(deps, { teamId: input.teamId });
+      await reportOverage(deps, { teamId: input.teamId, throughHold: true });
       if (current.period === "month" && base.current_period_start) {
         await assertOverageCounted(deps, {
           teamId: input.teamId,
@@ -407,7 +408,11 @@ async function endSubscription(
     if (finalInvoice) {
       // A second early: the final invoice takes events stamped before the
       // cancel, which can land in the same second as the report.
-      const { failed } = await reportOverage(deps, { teamId, now: new Date(Date.now() - 1000) });
+      const { failed } = await reportOverage(deps, {
+        teamId,
+        now: new Date(Date.now() - 1000),
+        throughHold: true,
+      });
       // A step Stripe refused here would go away with the team's rows once
       // the cancel succeeds. An older pin no run sends again does not count.
       if (failed > 0) {
@@ -426,6 +431,7 @@ async function endSubscription(
       stripeOverageItemId: null,
       overageEnabled: false,
       pendingRung: null,
+      moveUpPendingUntil: null,
       currentPeriodStart: null,
       currentPeriodEnd: null,
       cancelAt: null,

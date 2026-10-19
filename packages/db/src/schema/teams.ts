@@ -73,6 +73,11 @@ export const teams = pgTable(
     // The rung a scheduled downgrade moves to when the period renews; null
     // while none is pending. Mirrors the Stripe subscription schedule.
     pendingRung: text("pending_rung"),
+    // A move up waiting on its payment: when Stripe drops it unpaid
+    // (pending_update.expires_at); null while none waits. Overage reports
+    // hold meanwhile, since Stripe bills nothing reported on the old price
+    // between the request and the payment.
+    moveUpPendingUntil: timestamp("move_up_pending_until", { withTimezone: true }),
     planStatus: planStatusEnum("plan_status").notNull().default("none"),
     // The Stripe billing period: monthly quotas count sends from its start.
     currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),

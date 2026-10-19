@@ -226,9 +226,11 @@ export function fakeStripe() {
         const s = sub(id);
         // Like Stripe's pending updates: nothing changes until the invoice is paid.
         if (state.declineUpdates && params.payment_behavior === "pending_if_incomplete") {
+          s.pending_update = {
+            expires_at: PERIOD_START + 82_800,
+          } as Stripe.Subscription.PendingUpdate;
           return {
             ...s,
-            pending_update: { expires_at: PERIOD_START + 82_800 },
             latest_invoice: {
               id: "in_pending",
               object: "invoice",
@@ -237,6 +239,8 @@ export function fakeStripe() {
             },
           };
         }
+        // An update that goes through voids any change still waiting on payment.
+        s.pending_update = null;
         for (const change of params.items ?? []) {
           if (!change.id) {
             if (change.price) {

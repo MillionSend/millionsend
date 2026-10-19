@@ -114,6 +114,38 @@ describe("reportOverage", () => {
     expect(await periodRow(teamId)).toEqual(settled(1200));
   });
 
+  it("holds the running period while a move up waits on payment, until the wait lapses or the caller ends it", async () => {
+    const teamId = await proTeam("acme", { accepted: 100_500 });
+    const previous = new Date("2026-02-01T00:00:00Z");
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: previous, accepted: 100_300 });
+    const lapses = new Date(NOW.getTime() + 3_600_000);
+    await db
+      .update(schema.teams)
+      .set({ moveUpPendingUntil: lapses })
+      .where(eq(schema.teams.id, teamId));
+    // An ended period's invoice cannot wait, so only it is reported.
+    expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 1, failed: 0 });
+    expect(await periodRow(teamId, previous)).toEqual(settled(300));
+    expect(await periodRow(teamId)).toEqual(settled(0));
+
+    expect(await reportOverage(deps(), { now: lapses })).toEqual({ reported: 1, failed: 0 });
+    expect(await periodRow(teamId)).toEqual(settled(500));
+
+    await db
+      .update(schema.usagePeriods)
+      .set({ accepted: 100_800 })
+      .where(
+        and(eq(schema.usagePeriods.teamId, teamId), eq(schema.usagePeriods.periodStart, START)),
+      );
+    expect(await reportOverage(deps(), { now: NOW, throughHold: true })).toEqual({
+      reported: 1,
+      failed: 0,
+    });
+    expect(await periodRow(teamId)).toEqual(settled(800));
+  });
+
   it("keeps the pin when Stripe fails, so the next run re-sends the same step", async () => {
     const teamId = await proTeam("acme", { accepted: 100_500 });
     state.meterError = new Error("stripe down");
