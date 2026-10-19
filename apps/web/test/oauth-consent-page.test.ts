@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -91,6 +92,23 @@ describe("the OAuth consent page", () => {
     expect(html).not.toContain("Unverified");
     expect(html).not.toContain("reviewed");
     expect(html).not.toContain('role="note"');
+  });
+
+  it("shows a custom-scheme callback whole, its invisible and bidi characters escaped", async () => {
+    await h.db
+      .update(schema.oauthClient)
+      .set({
+        redirectUris: [
+          "cursor://anysphere.cursor-mcp/oauth/callback",
+          "com.example.app:/cb\u202Eexe",
+        ],
+      })
+      .where(eq(schema.oauthClient.clientId, "client-1"));
+    const html = await renderConsent();
+    expect(html).toContain(
+      "Sends you back to cursor://anysphere.cursor-mcp/oauth/callback, com.example.app:/cb%E2%80%AEexe",
+    );
+    expect(html).not.toContain("\u202E");
   });
 
   it("offers how long to stay connected, until disconnected by default", async () => {
