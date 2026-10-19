@@ -14,7 +14,6 @@ import {
   fillTemplate,
   findSenderDomainOwner,
   forwardedClientIp,
-  isLoopbackUrl,
   isPlainName,
   MCP_SCOPES,
   recordSignup,
@@ -22,7 +21,7 @@ import {
   stripInvisible,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
-import { type BetterAuthPlugin, betterAuth } from "better-auth";
+import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { captcha, jwt } from "better-auth/plugins";
@@ -31,7 +30,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { headers } from "next/headers";
 import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
 import { GRANT_LIFETIME_DAYS, isGrantLifetime } from "@/lib/grant-lifetime";
-import { httpOrigin } from "@/lib/http-url";
+import { httpOrigin, isUnlistedHostRedirect } from "@/lib/http-url";
 import { isAppLocale, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE } from "@/lib/locale-cookie";
 import enAuth from "../../messages/en/auth.json";
 import enCommon from "../../messages/en/common.json";
@@ -66,7 +65,7 @@ export { resolveBaseUrl };
  * the registration these are dropped unless https and on the origin of a
  * redirect URI: a name plus a link to an arbitrary site on the trusted host
  * is the consent-phishing recipe, while a link to the callback's own origin
- * says nothing the redirect does not. Native (loopback) clients therefore
+ * says nothing the redirect does not. Loopback-only clients therefore
  * never get a link, which is fine — they have no web origin to vouch for.
  */
 const CLIENT_LINK_FIELDS = ["client_uri", "logo_uri", "tos_uri", "policy_uri"] as const;
@@ -567,6 +566,11 @@ export function createAuth(
         // MCP clients (Claude Code, Cursor) still self-register via RFC 7591.
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
+        // MCP clients omit application_type, which OIDC registration defaults
+        // to web, yet register native callbacks: an http loopback (Claude
+        // Code), or cursor://, https and loopback URIs together (Cursor, Grok
+        // Bot). "infer" registers those as native, under the RFC 8252 rules.
+        clientRegistrationDefaultApplicationType: "infer",
         // Access tokens are JWTs the API verifies offline, so revoking a grant
         // only bites at the next refresh; an hour bounds that window while a
         // client that cannot refresh still keeps a working session.
@@ -600,9 +604,7 @@ export function createAuth(
             },
           },
         ],
-        // The provider's OpenAPI parameter types (`items?: undefined`) do not
-        // satisfy better-call's under exactOptionalPropertyTypes; runtime shape is fine.
-      }) as unknown as BetterAuthPlugin,
+      }),
     ],
     emailAndPassword: {
       enabled: true,
@@ -616,9 +618,9 @@ export function createAuth(
       // learns the password changed and can start a reset of their own.
       onPasswordReset: async ({ user }: { user: { email: string } }, request?: Request) => {
         if (!accountEmailFrom()) return;
-        // Detached, language lookup included: Better Auth revokes the other
-        // sessions only after this hook returns, and nothing here may delay
-        // or fail that.
+        // Detached, language lookup included, so a slow lookup or a failed
+        // send never delays or fails the reset; the other sessions are
+        // already revoked when this runs.
         void accountMailLocale(db, user.email, request?.headers)
           .then((locale) =>
             sendAccountMail(buildPasswordChangedEmail({ to: user.email, locale }), mail),
@@ -762,10 +764,6 @@ export function createAuth(
       },
     },
     hooks: {
-      // MCP clients register with http://localhost:<port> redirect URIs and
-      // usually omit application_type, which RFC 7591 defaults to "web" — a
-      // type the provider (rightly) refuses http redirects for. A loopback
-      // redirect is the RFC 8252 signature of a native app, so classify it as one.
       before: createAuthMiddleware(async (ctx) => {
         // Refused here, ahead of the endpoint: thrown from inside user
         // creation, a 403 reads to better-auth as its own anti-enumeration
@@ -828,6 +826,13 @@ export function createAuth(
         const redirects = Array.isArray(body.redirect_uris)
           ? body.redirect_uris.filter((uri): uri is string => typeof uri === "string")
           : [];
+        const unlisted = redirects.find(isUnlistedHostRedirect);
+        if (unlisted) {
+          throw new APIError("BAD_REQUEST", {
+            error: "invalid_redirect_uri",
+            error_description: `custom-scheme redirect URIs carry a host only for known apps: ${unlisted}`,
+          });
+        }
         const redirectOrigins = new Set(redirects.map(httpOrigin));
         for (const field of CLIENT_LINK_FIELDS) {
           const value = body[field];
@@ -839,13 +844,6 @@ export function createAuth(
             delete body[field];
           }
         }
-        if (
-          body.application_type ||
-          !redirects.every((uri) => uri.startsWith("http://") && isLoopbackUrl(uri))
-        ) {
-          return;
-        }
-        return { context: { body: { ...body, application_type: "native" } } };
       }),
       // Registration persists a scope list (the client's own, or the server's
       // list as of that day) and authorization validates against it — which
