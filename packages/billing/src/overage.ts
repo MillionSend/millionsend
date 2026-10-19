@@ -41,7 +41,7 @@ export async function reportOverage(
   opts: {
     now?: Date;
     teamId?: string;
-    /** Reports even while a move up waits: the caller's own change voids that wait. */
+    /** Reports even while a move up waits: the caller ends the wait or the subscription. */
     throughHold?: boolean;
   } = {},
 ): Promise<OverageReport> {

@@ -588,6 +588,46 @@ describe("cancelTeamSubscription when the meter refuses", () => {
     expect(await team(teamId)).toMatchObject({ plan: "pro", stripeSubscriptionId: "sub_1" });
   });
 
+  it("ends a move up waiting on payment first, then reports the wait's sends for the final invoice", async () => {
+    const teamId = await customerTeam();
+    state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active", undefined, {
+      overageKey: "millionsend_pro_100k_overage",
+    });
+    state.subscriptions.sub_1.pending_update = {
+      expires_at: Math.floor(Date.now() / 1000) + 3_600,
+    } as Stripe.Subscription.PendingUpdate;
+    await deliver(subEvent("customer.subscription.updated", state.subscriptions.sub_1));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: new Date(PERIOD_START * 1000), accepted: 100_500 });
+    await cancelTeamSubscription(deps(), teamId);
+    expect(state.invoiceVoids).toEqual(["in_pending"]);
+    expect(state.calls.indexOf("invoices.voidInvoice")).toBeLessThan(
+      state.calls.indexOf("billing.meterEvents.create"),
+    );
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["500"]);
+    expect(state.cancels).toEqual(["sub_1"]);
+  });
+
+  it("reports through a wait the row still records after Stripe ended it", async () => {
+    const teamId = await customerTeam();
+    state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active", undefined, {
+      overageKey: "millionsend_pro_100k_overage",
+    });
+    await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
+    await db
+      .update(schema.teams)
+      .set({ moveUpPendingUntil: new Date(Date.now() + 3_600_000) })
+      .where(eq(schema.teams.id, teamId));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: new Date(PERIOD_START * 1000), accepted: 100_500 });
+    await cancelTeamSubscription(deps(), teamId);
+    expect(state.invoiceVoids).toEqual([]);
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["500"]);
+    expect(state.cancels).toEqual(["sub_1"]);
+  });
+
   it("does not wait on a pin no run sends again, such as one left before a move down to Starter", async () => {
     const teamId = await customerTeam();
     state.subscriptions.sub_1 = subscription(

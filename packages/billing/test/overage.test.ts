@@ -146,6 +146,21 @@ describe("reportOverage", () => {
     expect(await periodRow(teamId)).toEqual(settled(800));
   });
 
+  it("logs a row too old to meter without counting it as a refused step", async () => {
+    const previous = new Date("2026-02-01T00:00:00Z");
+    const teamId = await proTeam("acme", { accepted: 100_500, periodStart: previous });
+    const lines: string[] = [];
+    const later = new Date(START.getTime() + 40 * 86_400_000);
+    expect(await reportOverage({ db, stripe, log: (l) => lines.push(l) }, { now: later })).toEqual({
+      reported: 0,
+      failed: 0,
+    });
+    expect(lines).toEqual([
+      `overage: team ${teamId} period ${previous.toISOString()} is too old to meter`,
+    ]);
+    expect(state.meterEvents).toEqual([]);
+  });
+
   it("keeps the pin when Stripe fails, so the next run re-sends the same step", async () => {
     const teamId = await proTeam("acme", { accepted: 100_500 });
     state.meterError = new Error("stripe down");

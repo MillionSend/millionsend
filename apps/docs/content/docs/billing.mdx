@@ -206,7 +206,9 @@ while `teams.plan_status` is `past_due`.
      before is already dropped: Stripe holds the update for 23 hours,
      the dashboard sends the customer to the invoice's hosted page, and
      paying it there applies the move (the webhook writes the row);
-     otherwise Stripe voids the invoice. Sends already accepted inside the
+     otherwise Stripe voids the invoice. Another move up, or a team delete,
+     voids a waiting invoice before it reports anything, so that invoice
+     cannot be paid later. Sends already accepted inside the
      old volume are marked settled on the period row, so the new rung never
      bills them as overage.
    - **Down** applies at the period end, with no proration and no refund: a

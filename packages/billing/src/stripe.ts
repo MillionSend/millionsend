@@ -47,6 +47,10 @@ export interface BillingStripe {
       ): Promise<Stripe.ApiList<Stripe.Billing.MeterEventSummary>>;
     };
   };
+  invoices: {
+    list(params: Stripe.InvoiceListParams): Promise<Stripe.ApiList<Stripe.Invoice>>;
+    voidInvoice(id: string): Promise<Stripe.Invoice>;
+  };
   /** Iterating the list auto-paginates, as the real client's list does. */
   charges: { list(params: Stripe.ChargeListParams): AsyncIterable<Stripe.Charge> };
   refunds: {

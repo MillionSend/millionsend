@@ -211,6 +211,34 @@ async function applyLocked(deps: BillingDeps, customerId: string, subscriptionId
   });
 }
 
+/**
+ * Voids the invoice of a move up still waiting on payment, which drops that
+ * move. Once that invoice is paid, nothing reported on the old price in the
+ * meantime bills, so a caller about to report through the wait ends it first
+ * instead of leaving the invoice payable when it stops partway.
+ */
+async function endMoveUpWait(
+  deps: BillingDeps,
+  teamId: string,
+  sub: Stripe.Subscription,
+): Promise<void> {
+  if (!sub.pending_update) return;
+  const { data } = await deps.stripe.invoices.list({
+    subscription: sub.id,
+    status: "open",
+    limit: 10,
+  });
+  for (const invoice of data) {
+    if (invoice.billing_reason === "subscription_update" && invoice.id) {
+      await deps.stripe.invoices.voidInvoice(invoice.id);
+    }
+  }
+  await deps.db
+    .update(schema.teams)
+    .set({ moveUpPendingUntil: null })
+    .where(eq(schema.teams.id, teamId));
+}
+
 /** Drops a pending downgrade: the subscription keeps its current items. */
 async function releaseSchedule(deps: BillingDeps, sub: Stripe.Subscription): Promise<void> {
   const id = idOf(sub.schedule);
@@ -300,6 +328,7 @@ export async function changeRung(
     result = { applied: "period_end", at: new Date(periodEnd * 1000) };
   } else {
     await input.beforeMoveUp?.();
+    await endMoveUpWait(deps, input.teamId, sub);
     // Sends made under the old rung settle at its rate before the move.
     if (overage) {
       await reportOverage(deps, { teamId: input.teamId, throughHold: true });
@@ -406,6 +435,7 @@ async function endSubscription(
   const sub = await deps.stripe.subscriptions.retrieve(team.stripeSubscriptionId);
   if (sub.status !== "canceled" && sub.status !== "incomplete_expired") {
     if (finalInvoice) {
+      await endMoveUpWait(deps, teamId, sub);
       // A second early: the final invoice takes events stamped before the
       // cancel, which can land in the same second as the report.
       const { failed } = await reportOverage(deps, {

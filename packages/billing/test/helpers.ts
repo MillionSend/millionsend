@@ -163,6 +163,7 @@ export function fakeStripe() {
     /** What the meter's summaries have counted; null counts every event sent, as if Stripe were instant. */
     meterCounted: null as number | null,
     summaryParams: [] as [string, Stripe.Billing.MeterListEventSummariesParams][],
+    invoiceVoids: [] as string[],
     customers: [] as Stripe.CustomerCreateParams[],
     checkouts: [] as Stripe.Checkout.SessionCreateParams[],
   };
@@ -382,6 +383,25 @@ export function fakeStripe() {
             state.meterEvents.reduce((sum, e) => sum + Number(e.payload.value), 0);
           return { data: [{ aggregated_value: counted }] };
         },
+      },
+    },
+    invoices: {
+      async list(p: Stripe.InvoiceListParams) {
+        state.calls.push("invoices.list");
+        const s = p.subscription ? state.subscriptions[p.subscription] : undefined;
+        const waiting = s?.pending_update && p.status === "open";
+        return {
+          data: waiting
+            ? [{ id: "in_pending", object: "invoice", billing_reason: "subscription_update" }]
+            : [],
+        };
+      },
+      /** Like Stripe: voiding a waiting move up's invoice drops the move. */
+      async voidInvoice(id: string) {
+        state.calls.push("invoices.voidInvoice");
+        state.invoiceVoids.push(id);
+        for (const s of Object.values(state.subscriptions)) s.pending_update = null;
+        return { id, object: "invoice", status: "void" };
       },
     },
     checkout: {

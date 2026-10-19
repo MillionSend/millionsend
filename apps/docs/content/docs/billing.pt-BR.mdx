@@ -213,7 +213,9 @@ pausada enquanto `teams.plan_status` é `past_due`.
      autenticação a faixa continua a mesma, mas uma descida agendada antes
      já foi cancelada: o Stripe segura a atualização por 23 horas, o
      painel leva o cliente à página hospedada da fatura, e pagar lá aplica a
-     troca (o webhook grava a linha); senão o Stripe anula a fatura. Os
+     troca (o webhook grava a linha); senão o Stripe anula a fatura. Outra
+     subida, ou excluir a equipe, anula uma fatura em espera antes de
+     reportar qualquer coisa, para que ela não possa ser paga depois. Os
      envios já aceitos dentro do volume antigo são marcados como acertados
      na linha do período, então a nova faixa nunca os cobra como excedente.
    - **Descer** vale ao fim do período, sem rateio e sem reembolso: um

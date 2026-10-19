@@ -72,6 +72,14 @@ async function reportedOverage(teamId: string): Promise<number | undefined> {
   return row?.reportedOverage;
 }
 
+/** Records a move up waiting on payment for the next hour, as the row would show it. */
+async function holdReports(teamId: string): Promise<void> {
+  await db
+    .update(schema.teams)
+    .set({ moveUpPendingUntil: new Date(Date.now() + 3_600_000) })
+    .where(eq(schema.teams.id, teamId));
+}
+
 async function moveUpPendingUntil(teamId: string): Promise<Date | null | undefined> {
   const [row] = await db
     .select({ until: schema.teams.moveUpPendingUntil })
@@ -178,11 +186,58 @@ describe("changeRung up", () => {
     });
     // Reports wait with the move, until Stripe drops it unpaid or the payment applies it.
     expect(await moveUpPendingUntil(teamId)).toEqual(new Date((PERIOD_START + 82_800) * 1000));
-    const paid = state.subscriptions.sub_1;
-    if (!paid) throw new Error("fixture missing");
-    paid.pending_update = null;
-    await applySubscription(db, paid, () => {});
+    const lapsed = state.subscriptions.sub_1;
+    if (!lapsed) throw new Error("fixture missing");
+    lapsed.pending_update = null;
+    await applySubscription(db, lapsed, () => {});
     expect(await moveUpPendingUntil(teamId)).toBeNull();
+  });
+
+  it("ends a move up still waiting on payment before reporting, so a refused retry leaves nothing payable", async () => {
+    const teamId = await subscribedTeam(withOverage(), 350_000);
+    state.declineUpdates = true;
+    expect((await changeRung(deps(), { teamId, rung: "pro_200k" })).applied).toBe(
+      "payment_required",
+    );
+    // Sends during the wait; Stripe has counted only what came before it.
+    await db
+      .update(schema.usagePeriods)
+      .set({ accepted: 400_000 })
+      .where(eq(schema.usagePeriods.teamId, teamId));
+    state.meterCounted = 250_000;
+    await expect(changeRung(deps(), { teamId, rung: "pro_200k" })).rejects.toBeInstanceOf(
+      OverageInFlightError,
+    );
+    expect(state.invoiceVoids).toEqual(["in_pending"]);
+    expect(state.calls.indexOf("invoices.voidInvoice")).toBeLessThan(
+      state.calls.lastIndexOf("billing.meterEvents.create"),
+    );
+    // The wait's sends reached the meter on the old price, which the renewal bills.
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["250000", "50000"]);
+    expect(await moveUpPendingUntil(teamId)).toBeNull();
+  });
+
+  it("reports through a wait the row still records after Stripe ended it", async () => {
+    const teamId = await subscribedTeam(withOverage(), 400_000);
+    await holdReports(teamId);
+    expect(await changeRung(deps(), { teamId, rung: "pro_200k" })).toEqual({ applied: "now" });
+    expect(state.invoiceVoids).toEqual([]);
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["300000"]);
+  });
+
+  it("reports through a wait when the metered item leaves with the subscription", async () => {
+    const teamId = await subscribedTeam(withOverage(), 100_500);
+    await holdReports(teamId);
+    await applySubscription(
+      db,
+      subscription("sub_1", "cus_1", "canceled", undefined, {
+        overageKey: "millionsend_pro_100k_overage",
+      }),
+      () => {},
+      stripe,
+    );
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["500"]);
+    expect(await team(teamId)).toMatchObject({ plan: "free", stripeOverageItemId: null });
   });
 
   it("waits while a step Stripe refused is still pinned, and sends it again on the retry", async () => {
@@ -356,6 +411,14 @@ describe("setOverage", () => {
       overageEnabled: false,
       stripeOverageItemId: "si_sub_1_overage",
     });
+  });
+
+  it("off leaves the usage to the run after a move up's wait, which would otherwise drop it", async () => {
+    const teamId = await subscribedTeam(withOverage(), 100_500);
+    await holdReports(teamId);
+    await setOverage(deps(), { teamId, enabled: false });
+    expect(state.meterEvents).toEqual([]);
+    expect(await team(teamId)).toMatchObject({ overageEnabled: false });
   });
 
   it("is refused on a daily plan", async () => {
