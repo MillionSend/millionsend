@@ -63,6 +63,7 @@ async function daily(teamId: string) {
 const team = (overrides: Partial<QuotaTeamRow> = {}): QuotaTeamRow => ({
   plan: "free",
   planQuota: null,
+  planStatus: "none",
   currentPeriodStart: null,
   currentPeriodEnd: null,
   overageEnabled: true,

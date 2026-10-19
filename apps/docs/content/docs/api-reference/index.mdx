@@ -143,9 +143,10 @@ remaining deltas are deliberate and loud:
   on a daily plan (Free, Starter) when the day's sending quota is spent and
   the queued backlog is full — retry after the UTC day rolls over — and
   `429 monthly_quota_exceeded` on a monthly plan (Pro, Scale) at its included
-  volume with overage off; turn on overage in Billing or wait for the period
-  to renew (the message names the date). A batch is accepted or refused
-  whole. On any plan, a domain still under the
+  volume with overage off, or while a payment is past due (overage pauses
+  until the invoice is paid); turn on overage or pay the invoice in Billing,
+  or wait for the period to renew (the message names the date). A batch is
+  accepted or refused whole. On any plan, a domain still under the
   [new domain limit](/concepts/domains#new-domain-limit) answers the same
   `429 daily_quota_exceeded`, with a message naming that limit, once a lot
   of mail is already waiting.

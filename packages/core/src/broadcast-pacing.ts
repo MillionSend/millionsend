@@ -411,7 +411,7 @@ export function rungThatFits(
   // Nothing to name when the team's own cap already lets the send through.
   if (fits(planCaps(current, used, now))) return null;
   const here = teamRung(current.plan, current.kind === "month" ? current.included : null);
-  if (current.kind === "month" && !current.overage) {
+  if (current.kind === "month" && !current.overage && !current.overagePaused) {
     if (fits(planCaps({ ...current, overage: true }, used, now))) {
       return { rung: here, overage: true };
     }

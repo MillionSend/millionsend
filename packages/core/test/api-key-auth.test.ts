@@ -71,6 +71,7 @@ describe("authenticateApiKey billing", () => {
     expect((await authenticateApiKey(db, token))?.billing).toEqual({
       plan: "free",
       planQuota: null,
+      planStatus: "none",
       currentPeriodStart: null,
       currentPeriodEnd: null,
       overageEnabled: true,
@@ -83,6 +84,7 @@ describe("authenticateApiKey billing", () => {
       .set({
         plan: "pro",
         planQuota: 200_000,
+        planStatus: "past_due",
         currentPeriodStart,
         currentPeriodEnd,
         overageEnabled: true,
@@ -93,6 +95,7 @@ describe("authenticateApiKey billing", () => {
     expect(auth?.billing).toEqual({
       plan: "pro",
       planQuota: 200_000,
+      planStatus: "past_due",
       currentPeriodStart,
       currentPeriodEnd,
       overageEnabled: true,

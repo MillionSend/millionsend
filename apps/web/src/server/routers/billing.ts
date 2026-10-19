@@ -4,6 +4,7 @@ import {
   createCheckoutSession,
   createPortalSession,
   hasLiveSubscription,
+  OverageInFlightError,
   setOverage as setSubscriptionOverage,
 } from "@millionsend/billing";
 import { env, receivingEnabled } from "@millionsend/config";
@@ -26,7 +27,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { UPGRADES_HELD } from "@/lib/trpc-error";
+import { OVERAGE_IN_FLIGHT, UPGRADES_HELD } from "@/lib/trpc-error";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe, mailPlanMove } from "../billing";
@@ -125,6 +126,8 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         planStatus: team.planStatus,
         currentPeriodEnd: team.currentPeriodEnd,
         quota,
+        // The switch shows the customer's choice; quota.overage is what applies (off while past due).
+        overageEnabled: team.overageEnabled,
         usage: await readUsage(ctx.db, ctx.teamId, quota),
         hasCustomer: team.stripeCustomerId !== null,
         hasLiveSubscription: live,
@@ -188,7 +191,12 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
             // Up is judged against Stripe: a dropped webhook can leave the row on a higher rung.
             beforeMoveUp: () => assertNotHeld(ctx.db, ctx.teamId),
           },
-        );
+        ).catch((err: unknown) => {
+          if (err instanceof OverageInFlightError) {
+            throw new TRPCError({ code: "CONFLICT", message: OVERAGE_IN_FLIGHT });
+          }
+          throw err;
+        });
         await recordAudit(ctx, {
           action: "billing.plan_changed",
           target: { type: "team", id: ctx.teamId },

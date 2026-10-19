@@ -247,7 +247,9 @@ describe("owner mail", () => {
     await failed("evt_1", 1, Date.UTC(2026, 9, 3) / 1000);
     expect(kinds()).toEqual(["billing.payment_failed"]);
     expect(h.sent[0]?.subject).toBe("Payment failed for your Pro 100K plan");
-    expect(h.sent[0]?.text).toContain("keeps its Pro 100K plan (up to 100,000 emails a month)");
+    expect(h.sent[0]?.text).toContain(
+      "keeps its Pro 100K plan (up to 100,000 emails a month), but overage is paused until the invoice is paid",
+    );
     expect(h.sent[0]?.text).toContain("Stripe retries on October 3, 2026.");
     expect(h.sent[0]?.text).toContain("Pay the invoice: https://invoice.stripe.com/i/in_1");
     expect(h.sent[0]?.text).toContain("https://app.example.com/settings/billing");
@@ -255,6 +257,15 @@ describe("owner mail", () => {
     await failed("evt_2", 2, null);
     expect(kinds()).toEqual(["billing.payment_failed", "billing.payment_failed"]);
     expect(h.sent[1]?.text).toContain("Stripe is not retrying on its own.");
+
+    // A held move up's own invoice failing is not the renewal: no mail about it.
+    await send("evt_upgrade", "invoice.payment_failed", {
+      id: "in_upgrade",
+      attempt_count: 1,
+      billing_reason: "subscription_update",
+      hosted_invoice_url: "https://invoice.stripe.com/i/in_upgrade",
+    });
+    expect(kinds()).toHaveLength(2);
 
     // A first checkout that fails never had a plan to lose: no receipt.
     await h.db

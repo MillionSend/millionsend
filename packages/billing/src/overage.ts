@@ -7,8 +7,16 @@ import { METER_EVENT_NAME } from "./prices.js";
 /** Stripe refuses meter events older than this; a row that stale is logged and left. */
 const METER_MAX_AGE_MS = 35 * DAY_MS;
 
+/** Refuses a move up while Stripe has not yet counted the overage reported for the period. */
+export class OverageInFlightError extends Error {
+  constructor() {
+    super("overage_in_flight");
+  }
+}
+
 export interface OverageReport {
   reported: number;
+  /** Steps Stripe refused; each stays pinned for the next run. */
   failed: number;
 }
 
@@ -23,11 +31,19 @@ export interface OverageReport {
  * duplicate; a Stripe failure leaves the pin for the next run too. Usage of
  * a period that already ended is stamped inside that period, which is where
  * Stripe invoices it (the invoice stays a draft for about an hour after the
- * period closes).
+ * period closes). Stripe bills nothing reported on the old price between a
+ * move up's request and its payment, so while a team's move up waits on
+ * payment its running period is skipped: the wait's sends are reported once
+ * the move applies (against the new volume) or lapses.
  */
 export async function reportOverage(
   deps: BillingDeps,
-  opts: { now?: Date; teamId?: string } = {},
+  opts: {
+    now?: Date;
+    teamId?: string;
+    /** Reports even while a move up waits: the caller ends the wait or the subscription. */
+    throughHold?: boolean;
+  } = {},
 ): Promise<OverageReport> {
   const now = opts.now ?? new Date();
   const log = deps.log ?? console.warn;
@@ -41,6 +57,7 @@ export async function reportOverage(
       planQuota: t.planQuota,
       currentPeriodStart: t.currentPeriodStart,
       currentPeriodEnd: t.currentPeriodEnd,
+      moveUpPendingUntil: t.moveUpPendingUntil,
       periodStart: p.periodStart,
       accepted: p.accepted,
       reportedOverage: p.reportedOverage,
@@ -78,11 +95,16 @@ export async function reportOverage(
           ? row.currentPeriodEnd
           : null;
     const at = end && now.getTime() >= end.getTime() ? new Date(end.getTime() - 1000) : now;
+    // Only the running period waits on a move up's payment: an ended
+    // period's invoice closes within the hour.
+    const running = at === now;
+    if (running && !opts.throughHold && row.moveUpPendingUntil && row.moveUpPendingUntil > now) {
+      continue;
+    }
     if (now.getTime() - at.getTime() > METER_MAX_AGE_MS) {
       log(
         `overage: team ${row.teamId} period ${row.periodStart.toISOString()} is too old to meter`,
       );
-      failed += 1;
       continue;
     }
     const key = and(eq(p.teamId, row.teamId), eq(p.periodStart, row.periodStart));
@@ -113,4 +135,45 @@ export async function reportOverage(
     }
   }
   return { reported, failed };
+}
+
+/**
+ * Stripe drops a meter event it has not counted yet when the metered price
+ * changes, and counting takes about a minute. A move up re-prices the metered
+ * item, so it waits until the overage reported for the period is counted,
+ * give or take 1% of the volume (at least 1,000 emails): a burst sent just
+ * before the move would otherwise never bill.
+ */
+export async function assertOverageCounted(
+  deps: BillingDeps,
+  input: { teamId: string; customerId: string; periodStart: Date; included: number; now?: Date },
+): Promise<void> {
+  const p = schema.usagePeriods;
+  const [row] = await deps.db
+    .select({ reported: p.reportedOverage, pending: p.pendingOverage })
+    .from(p)
+    .where(and(eq(p.teamId, input.teamId), eq(p.periodStart, input.periodStart)));
+  // A pinned step is one Stripe refused or another run is still sending:
+  // the move would drop it, and nothing would report the period again.
+  if (row && row.pending !== null && row.pending > row.reported) {
+    throw new OverageInFlightError();
+  }
+  const slack = Math.max(1_000, Math.ceil(input.included / 100));
+  const reported = row?.reported ?? 0;
+  if (reported <= slack) return;
+  const { data: meters } = await deps.stripe.billing.meters.list({ status: "active", limit: 100 });
+  const meter = meters.find((m) => m.event_name === METER_EVENT_NAME);
+  if (!meter) throw new Error(`Stripe meter ${METER_EVENT_NAME} not found`);
+  // Minute-aligned, as the summaries ask; starting after the period's first
+  // minute leaves out the previous period's last events, stamped a second
+  // before its end.
+  const minute = 60;
+  const now = Math.floor((input.now ?? new Date()).getTime() / 1000);
+  const { data } = await deps.stripe.billing.meters.listEventSummaries(meter.id, {
+    customer: input.customerId,
+    start_time: Math.ceil(input.periodStart.getTime() / 1000 / minute) * minute,
+    end_time: (Math.floor(now / minute) + 2) * minute,
+  });
+  const counted = data.reduce((sum, s) => sum + s.aggregated_value, 0);
+  if (reported - counted > slack) throw new OverageInFlightError();
 }

@@ -126,6 +126,8 @@ export const en = {
         "They go out after the reset at {resetsAt} UTC, or within minutes of a higher plan.",
       releaseMonthly:
         "They go out when the period renews on {date}, as soon as overage is turned on in Billing, or within minutes of a higher plan.",
+      releasePaused:
+        "A payment is past due, so overage is paused. They go out within minutes of paying the failed invoice from Billing, or when the period renews on {date}.",
     },
   },
   "broadcast.held": {
@@ -176,6 +178,8 @@ export const en = {
         "Sends past the quota bill at your plan's overage rate and show on the next invoice. A higher plan includes more emails at a lower rate.",
       noOverage:
         "At the quota, new API sends are refused and broadcasts park until the period renews. Turn on overage in Billing to keep sending past it, or move to a higher plan.",
+      overagePaused:
+        "A payment is past due, so overage is paused: at the quota, new API sends are refused and broadcasts park until the failed invoice is paid. Update the card from Billing to lift it.",
     },
   },
   "quota.monthly_reached": {
@@ -191,6 +195,8 @@ export const en = {
         "Sends past the quota now bill at your plan's overage rate and show on the next invoice. They stop at {hardCap} times the included volume ({stopAt}) until the period renews on {renewsAt}; a higher plan includes more emails at a lower rate.",
       noOverage:
         "New API sends are refused until the period renews on {renewsAt} or overage is turned on in Billing; broadcasts park until then. A higher plan raises the quota immediately and releases parked mail within minutes.",
+      overagePaused:
+        "A payment is past due, so overage is paused: new API sends are refused and broadcasts park until the failed invoice is paid. Update the card from Billing; parked mail goes out within minutes of the payment.",
     },
   },
   "deliverability.warning": {
@@ -290,13 +296,15 @@ export const en = {
     subject: "Payment failed for your {plan} plan",
     body: [
       "We couldn't charge the card on file for {team}'s {plan} plan.",
-      "{retry} For now {team} keeps its {plan} plan ({cap}). If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
+      "{retry} For now {team} keeps its {plan} plan ({cap}){overage}. If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
     ],
     button: "Pay the invoice",
     muted: ["Or update the card from Billing: {billingUrl}"],
     extra: {
       retryOn: "Stripe retries on {date}.",
       noRetry: "Stripe is not retrying on its own.",
+      overagePaused:
+        ", but overage is paused until the invoice is paid, so sends stop at the included volume",
     },
   },
   "billing.plan_activated": {
@@ -311,7 +319,7 @@ export const en = {
     subject: "Your team moved from {old} to {new}",
     body: [
       "{team} is now on {new}, which allows {cap}. On a lower cap, sends already accepted are unaffected; past the new cap, daily plans wait for the next UTC day and monthly plans either bill overage (when it is on) or refuse new API sends until the period renews.",
-      "Proration shows on the next Stripe invoice.",
+      "A move up is charged at once for the rest of the period, with the overage used so far; a move down takes effect at renewal with no refund.",
     ],
     button: "Open billing",
   },

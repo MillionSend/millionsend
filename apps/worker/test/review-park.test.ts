@@ -65,6 +65,7 @@ async function heldTeam(slug: string) {
       billing: {
         plan: "free",
         planQuota: null,
+        planStatus: "none",
         currentPeriodStart: null,
         currentPeriodEnd: null,
         overageEnabled: false,

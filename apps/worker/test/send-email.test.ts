@@ -1785,6 +1785,7 @@ it("a paused team off the System plan still sends its account mail; a customer's
       billing: {
         plan: "free",
         planQuota: null,
+        planStatus: "none",
         currentPeriodStart: null,
         currentPeriodEnd: null,
         overageEnabled: false,

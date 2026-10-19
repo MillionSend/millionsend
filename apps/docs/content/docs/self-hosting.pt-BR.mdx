@@ -303,9 +303,10 @@ tem acesso de produção, uma região em sandbox aparece no formulário mas não
 pode ser escolhida; uma região em sandbox ritma os próprios envios a 1/s e
 segura só os próprios domínios quando sua cota de 24 horas acaba.
 
-Preço: desde 2026-07-21 uma conta × região do SES sem envios anteriores começa
-no plano Essentials (US$ 0,16 por 1.000 mensagens em vez dos US$ 0,10 à la
-carte). Depois de provisionar, o assistente lê o plano da região e, se for
+Preço: o SES cobra US$ 0,10 por 1.000 e-mails à la carte, mais US$ 0,12 por GB
+de anexos. Desde 2026-07-21 uma conta × região do SES sem envios anteriores
+começa no plano Essentials (US$ 0,16 por 1.000 mensagens). Depois de
+provisionar, o assistente lê o plano da região e, se for
 Essentials, pergunta se deve cancelá-lo; nada que o MillionSend usa precisa de
 plano, e o cancelamento de um plano atribuído por padrão vale na hora. À mão:
 `aws sesv2 put-account-pricing-attributes --plan NONE --region <região>`.

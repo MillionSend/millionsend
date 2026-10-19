@@ -181,6 +181,7 @@ describe("the accept path", () => {
   const FREE: QuotaTeamRow = {
     plan: "free",
     planQuota: null,
+    planStatus: "none",
     currentPeriodStart: null,
     currentPeriodEnd: null,
     overageEnabled: false,
@@ -188,6 +189,7 @@ describe("the accept path", () => {
   const PRO: QuotaTeamRow = {
     plan: "pro",
     planQuota: 100_000,
+    planStatus: "active",
     currentPeriodStart: new Date(NOW.getTime() - DAY_MS),
     currentPeriodEnd: new Date(NOW.getTime() + 29 * DAY_MS),
     overageEnabled: true,

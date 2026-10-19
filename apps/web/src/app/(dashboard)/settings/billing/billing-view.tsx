@@ -24,7 +24,7 @@ import { WarnCard } from "@/components/warn-card";
 import { formatDay, formatDayTime, formatUsd } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
-import { UPGRADES_HELD } from "@/lib/trpc-error";
+import { OVERAGE_IN_FLIGHT, UPGRADES_HELD } from "@/lib/trpc-error";
 import { useTeamRole } from "@/lib/use-team-role";
 import { QuotaRow } from "../usage/usage-view";
 
@@ -122,6 +122,12 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const changePlan = useMutation(
     trpc.billing.changePlan.mutationOptions({
       onSuccess: async (result, variables) => {
+        // The bank declined the move's charge or wants it confirmed: Stripe's
+        // invoice page takes the payment, and paying it applies the move.
+        if (result.applied === "payment_required" && result.url) {
+          window.location.assign(result.url);
+          return;
+        }
         await refresh.onSuccess();
         // The outcome shows on the plan card at the top of the page, so the
         // dialog gives way to it and the page scrolls there with a notice.
@@ -136,7 +142,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const busy = mutations.some((m) => m.isPending);
   // A hold that lands after the page loaded surfaces as this refusal.
   const heldError = mutations.some((m) => m.error?.message === UPGRADES_HELD);
-  const failed = mutations.some((m) => m.isError) && !heldError;
+  const counting = changePlan.error?.message === OVERAGE_IN_FLIGHT;
+  const failed = mutations.some((m) => m.isError) && !heldError && !counting;
 
   const fmt = new Intl.NumberFormat(locale);
   const usd = (cents: number) => formatUsd(cents, locale);
@@ -146,14 +153,16 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     return r ? planLabel(r.plan, r.period === "month" ? r.included : null) : key;
   };
   const changedText = changed
-    ? changed.result.applied === "now"
-      ? t("switchedNow", { plan: rungLabel(changed.rung) })
-      : changed.result.applied === "period_end"
-        ? t("pendingChange", {
-            plan: rungLabel(changed.rung),
-            date: formatDay(changed.result.at, locale),
-          })
-        : t("stayOn", { plan: rungLabel(changed.rung) })
+    ? changed.result.applied === "payment_required"
+      ? null
+      : changed.result.applied === "now"
+        ? t("switchedNow", { plan: rungLabel(changed.rung) })
+        : changed.result.applied === "period_end"
+          ? t("pendingChange", {
+              plan: rungLabel(changed.rung),
+              date: formatDay(changed.result.at, locale),
+            })
+          : t("stayOn", { plan: rungLabel(changed.rung) })
     : null;
   const success = (text: string) => (
     <div
@@ -192,6 +201,13 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
       </div>
     ) : changedText ? (
       success(changedText)
+    ) : changed?.result.applied === "payment_required" ? (
+      <div role="status" className="ms-toast ms-toast-neutral">
+        <span className="ms-toast-icon" aria-hidden="true">
+          i
+        </span>
+        {t("paymentRequired", { plan: rungLabel(changed.rung) })}
+      </div>
     ) : null;
 
   if (!status.data) {
@@ -211,6 +227,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     planStatus,
     currentPeriodEnd,
     quota,
+    overageEnabled,
     usage,
     hasCustomer,
     hasLiveSubscription,
@@ -373,7 +390,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
 
         {planStatus === "past_due" ? (
           <WarnCard action={canManage ? portalButton(t("updateCard"), "ms-btn-secondary") : null}>
-            {t("pastDue")}
+            {t(quota.kind === "month" && quota.overagePaused ? "pastDueMonthly" : "pastDue")}
           </WarnCard>
         ) : null}
 
@@ -410,8 +427,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               }}
             >
               <Switch
-                checked={quota.overage}
-                disabled={!canManage || !hasLiveSubscription || busy || (held && !quota.overage)}
+                checked={overageEnabled}
+                disabled={!canManage || !hasLiveSubscription || busy || (held && !overageEnabled)}
                 onChange={(enabled) => setOverage.mutate({ enabled })}
                 ariaLabel={t("overage")}
               />
@@ -420,6 +437,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                 <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
                   {t("overageCopy", { price: usd(quota.overageCentsPer1k) })}
                 </div>
+                {quota.overagePaused ? (
+                  <div style={{ fontSize: 12.5, color: "var(--ms-warn)", marginTop: 6 }}>
+                    {t("overagePaused")}
+                  </div>
+                ) : null}
                 {over > 0 ? (
                   <div style={{ fontSize: 12.5, color: "var(--ms-bone)", marginTop: 6 }}>
                     {t("overSoFar", {
@@ -600,6 +622,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
           </div>
           {held ? (
             heldNotice
+          ) : counting ? (
+            <WarnCard>{t("overageCounting")}</WarnCard>
           ) : canManage && hasLiveSubscription ? (
             <p
               style={{

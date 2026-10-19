@@ -1447,6 +1447,7 @@ describe("dashboard admin parity", () => {
       billing: {
         plan: "free",
         planQuota: null,
+        planStatus: "none",
         currentPeriodStart: null,
         currentPeriodEnd: null,
         overageEnabled: false,

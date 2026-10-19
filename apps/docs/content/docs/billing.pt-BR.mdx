@@ -61,11 +61,11 @@ no volume incluído depende da chave **excedente** em Cobrança, ligada por
 padrão (o cliente a desliga lá):
 
 - **Excedente desligado**: a API recusa com `429 monthly_quota_exceeded`
-  ("Monthly sending quota exceeded with overage off; the period renews on
-  `<data>`"); nada fica em espera pela API. As transmissões ainda
-  deixam o que sobra em espera como `queued_quota`, e o drain o reconfere contra o
-  período a cada rodada: sai quando o período renova, quando o excedente é
-  ligado ou quando o plano sobe.
+  ("Monthly sending quota exceeded with overage off or paused for a past-due
+  payment; the period renews on `<data>`"); nada fica em espera pela API.
+  As transmissões ainda deixam o que sobra em espera como `queued_quota`, e o
+  drain o reconfere contra o período a cada rodada: sai quando o período
+  renova, quando o excedente é ligado ou quando o plano sobe.
 - **Excedente ligado**: os envios além do volume incluído são reportados a um
   medidor do Stripe e cobrados por 1.000 na taxa da faixa, na próxima fatura
   (veja [o cron de excedente](#o-cron-de-excedente)) — até um teto rígido de
@@ -74,6 +74,13 @@ padrão (o cliente a desliga lá):
   com o mesmo `429 monthly_quota_exceeded` ("Monthly sending quota exceeded:
   sends stop at 5 times the included volume even with overage on; the period
   renews on `<data>`") até o período renovar.
+
+Enquanto o pagamento de uma renovação está pendente, o excedente fica pausado,
+seja qual for a posição da chave: a equipe mantém o volume incluído durante as
+novas tentativas do Stripe, e o que passar dele é recusado ou fica em espera
+como com o excedente desligado, até a fatura em aberto ser paga. O e-mail de
+pagamento recusado, a página de cobrança e os e-mails de cota avisam disso, e
+a fatura paga libera as transmissões em espera em poucos minutos.
 
 Os proprietários recebem `quota.warning` em 80% e `quota.reached` em 100% do volume
 incluído, uma vez por período; o e-mail de limite atingido diz se os envios
@@ -104,7 +111,7 @@ mensagem, não por destinatário, em `usage_counters.received` e
   que o [cron de excedente](#o-cron-de-excedente) cobra como um envio. Depois
   da franquia, o e-mail recebido é adiado quando `accepted` chega ao teto do
   período: 5× o volume com o excedente ligado, o próprio volume com ele
-  desligado.
+  desligado ou pausado por um pagamento pendente.
 
 O MX pergunta a cada `RCPT TO`, então, se a equipe estiver sem espaço, a
 mensagem é adiada antes de ser enviada; o remetente tenta de novo. Instâncias
@@ -174,7 +181,8 @@ preços por ambiente. Uma assinatura em uma faixa mensal carrega o preço da
 faixa e o preço medido dela como segundo item desde o Checkout (o id do item
 fica em `teams.stripe_overage_item_id`); o item medido só cobra o que o worker
 reporta, então a chave de **excedente** do cliente é uma simples flag na
-linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
+linha, `teams.overage_enabled`, que é o que toda superfície de envio lê,
+pausada enquanto `teams.plan_status` é `past_due`.
 
 ## O fluxo
 
@@ -191,16 +199,25 @@ linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
    assinatura no corpo bruto, registra o id do evento (duplicatas são
    confirmadas e ignoradas), busca a assinatura de novo no Stripe e só então
    grava `teams.plan`, `plan_quota`, `current_period_start`,
-   `current_period_end`, `stripe_overage_item_id` e `pending_rung`.
+   `current_period_end`, `stripe_overage_item_id`, `pending_rung` e
+   `move_up_pending_until`.
 4. **Trocar de faixa** acontece no painel (`billing.changePlan`), e a
    direção decide quando:
-   - **Subir** vale na hora: os itens da assinatura são atualizados — o item
-     do plano para o preço da nova faixa, o item medido reprecificado para
-     uma faixa mensal ou removido para uma diária depois de reportar o uso —
-     com a diferença rateada na próxima fatura, e o webhook que vem em
-     seguida reaplica o mesmo estado. Os envios já aceitos dentro do volume
-     antigo são marcados como acertados na linha do período, então a nova
-     faixa nunca os cobra como excedente.
+   - **Subir** espera o próprio pagamento: os itens da assinatura são
+     atualizados — o item do plano para o preço da nova faixa, o item medido
+     reprecificado para uma faixa mensal depois de reportar o uso — com
+     `proration_behavior: always_invoice` e `payment_behavior:
+     pending_if_incomplete`, então a diferença proporcional e o excedente
+     até ali são faturados e cobrados na hora, e o novo volume só vale
+     depois que essa fatura é paga. Quando o banco recusa ou pede
+     autenticação a faixa continua a mesma, mas uma descida agendada antes
+     já foi cancelada: o Stripe segura a atualização por 23 horas, o
+     painel leva o cliente à página hospedada da fatura, e pagar lá aplica a
+     troca (o webhook grava a linha); senão o Stripe anula a fatura. Outra
+     subida, ou excluir a equipe, anula uma fatura em espera antes de
+     reportar qualquer coisa, para que ela não possa ser paga depois. Os
+     envios já aceitos dentro do volume antigo são marcados como acertados
+     na linha do período, então a nova faixa nunca os cobra como excedente.
    - **Descer** vale ao fim do período, sem rateio e sem reembolso: um
      subscription schedule do Stripe é criado a partir da assinatura (ou o
      pendente é reaproveitado) com duas fases — os itens atuais até
@@ -219,6 +236,15 @@ linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
    pede o motivo do cancelamento). Trocas de plano não são oferecidas lá: o
    portal do Stripe não consegue atualizar uma assinatura com mais de um
    item, e uma faixa mensal tem dois.
+
+Excluir uma equipe cancela a assinatura na hora com uma fatura final
+(`invoice_now`): o excedente do período é reportado antes, e a fatura o cobra
+junto com qualquer valor proporcional ainda pendente. O Stripe deixa essa
+fatura em rascunho por cerca de uma hora, então um evento de medidor ainda em
+processamento entra nela, e tenta de novo uma cobrança recusada no calendário
+de sempre. O tempo não usado não é reembolsado. A exceção é a equipe suspensa
+por fraude: a assinatura termina sem fatura final, já que tudo o que ela
+pagou nos últimos 120 dias é reembolsado.
 
 Uma equipe não pode comprar nem subir de plano enquanto estiver suspensa
 (por qualquer motivo) ou tiver uma sinalização aberta em Confiança e
@@ -255,7 +281,7 @@ não medido da assinatura nomeia a faixa, nesta ordem:
 | Status da assinatura buscada de novo | `plan`, `plan_quota` | `plan_status` |
 | --- | --- | --- |
 | `active`, `trialing` | O plano e o volume incluído da faixa (`plan_quota` é nulo em uma faixa diária). Preço desconhecido: registrado em log, nada muda. | o mesmo |
-| `past_due` | Inalterado (carência de pagamento; o Stripe continua tentando) | `past_due` |
+| `past_due` | Inalterado (carência de pagamento; o Stripe continua tentando); o excedente fica pausado até a fatura ser paga | `past_due` |
 | `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, qualquer outro | `free`, nulo | `unpaid` / `canceled` / `incomplete` / `canceled` |
 
 Regras adicionais:
@@ -273,8 +299,9 @@ Regras adicionais:
   teria feito.
 - `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
   `current_period_end`, `stripe_overage_item_id` e `pending_rung` (a faixa
-  da última fase de um schedule pendente, quando difere da atual) são
-  guardados junto com o plano. Um item medido precificado para outra faixa
+  da última fase de um schedule pendente, quando difere da atual) e
+  `move_up_pending_until` (quando o Stripe descarta uma subida que ainda
+  espera o pagamento) são guardados junto com o plano. Um item medido precificado para outra faixa
   é reapontado para o preço medido da faixa ao ser aplicado.
 
 ## O cron de excedente
@@ -301,10 +328,28 @@ reportar; com ele ligado nada passa de 5× o volume, então um período cobra no
 máximo quatro volumes de excedente. O uso de um período que já terminou é
 carimbado um segundo dentro desse período, onde o Stripe o fatura (a fatura
 fica em rascunho por cerca de uma hora após o fim do período; linhas com mais
-de 35 dias não podem mais ser medidas e vão para o log). O mesmo relato roda
-antes de a chave desligar,
-antes de uma subida (os envios feitos na faixa antiga acertam na taxa dela)
-e quando o item medido sai da assinatura, para nada ficar sem cobrar.
+de 35 dias não podem mais ser medidas e vão para o log). Enquanto uma subida
+espera o pagamento, o período em curso da equipe fica de fora (a fatura de um
+período encerrado não pode esperar): o Stripe não cobra nada reportado
+no preço antigo entre o pedido e o pagamento, então os envios da espera são
+reportados quando a subida se aplica (contra o volume novo) ou quando o
+Stripe a descarta sem pagamento após 23 horas (contra o antigo). O mesmo
+relato roda antes de a chave desligar,
+antes de uma subida (os envios feitos na faixa antiga acertam na taxa dela),
+antes de excluir uma equipe (o cancelamento leva uma fatura final)
+e quando o item medido sai da assinatura; os três últimos rodam também
+durante uma espera, já que cada um a encerra. O Stripe descarta um evento de
+medidor que ainda não contou quando uma subida reprecifica o item medido, e a
+contagem leva cerca de um minuto, então uma subida compara antes o excedente
+reportado no período com os resumos do medidor no Stripe: enquanto mais de 1%
+do volume (no mínimo 1.000 e-mails) ainda não foi contado, ou um passo que o
+medidor rejeitou ainda espera novo envio, `billing.changePlan` recusa com
+`CONFLICT` (`overage_in_flight`) e o painel pede para tentar de novo em um
+minuto. Cada tentativa reporta antes o que foi enviado desde o último relato,
+então, enquanto uma equipe envia mais que essa margem por minuto, a subida
+espera o envio desacelerar. Excluir uma equipe recusa do mesmo jeito quando o
+medidor rejeita o relato que ela faz, já que o cancelamento apagaria as linhas
+que o devem.
 
 ## Ambiente
 

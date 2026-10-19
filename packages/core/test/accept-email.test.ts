@@ -53,6 +53,7 @@ const deps = () => ({
 const FREE: QuotaTeamRow = {
   plan: "free",
   planQuota: null,
+  planStatus: "none",
   currentPeriodStart: null,
   currentPeriodEnd: null,
   overageEnabled: false,
@@ -220,6 +221,7 @@ describe("acceptEmail", () => {
     const billing: QuotaTeamRow = {
       plan: "pro",
       planQuota: 100_000,
+      planStatus: "active",
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
       overageEnabled: false,

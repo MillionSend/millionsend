@@ -129,6 +129,8 @@ export const ptBR = {
         "Eles saem depois que a cota renovar às {resetsAt} UTC, ou minutos depois de você mudar para um plano maior.",
       releaseMonthly:
         "Eles saem quando o período renovar em {date}, assim que o excedente for ativado em Cobrança, ou minutos depois de você mudar para um plano maior.",
+      releasePaused:
+        "Há um pagamento pendente, então o excedente está pausado. Eles saem poucos minutos depois de você pagar a fatura em aberto em Cobrança, ou quando o período renovar em {date}.",
     },
   },
   "broadcast.held": {
@@ -181,6 +183,8 @@ export const ptBR = {
         "Os envios acima da cota são cobrados pela tarifa de excedente do seu plano e aparecem na próxima fatura. Um plano maior inclui mais e-mails a uma tarifa menor.",
       noOverage:
         "Ao atingir a cota, novos envios pela API são recusados e as transmissões ficam em espera até o período renovar. Ative o excedente em Cobrança para continuar enviando além dela, ou mude para um plano maior.",
+      overagePaused:
+        "Há um pagamento pendente, então o excedente está pausado: ao atingir a cota, novos envios pela API são recusados e as transmissões ficam em espera até a fatura em aberto ser paga. Atualize o cartão em Cobrança para liberar o excedente.",
     },
   },
   "quota.monthly_reached": {
@@ -198,6 +202,8 @@ export const ptBR = {
         "Os envios acima da cota agora são cobrados pela tarifa de excedente do seu plano e aparecem na próxima fatura. Eles param em {hardCap} vezes o volume incluído ({stopAt}) até o período renovar em {renewsAt}; um plano maior inclui mais e-mails a uma tarifa menor.",
       noOverage:
         "Novos envios pela API são recusados até o período renovar em {renewsAt} ou o excedente ser ativado em Cobrança; as transmissões ficam em espera até lá. Um plano maior aumenta a cota na hora e libera o que estava em espera em minutos.",
+      overagePaused:
+        "Há um pagamento pendente, então o excedente está pausado: novos envios pela API são recusados e as transmissões ficam em espera até a fatura em aberto ser paga. Atualize o cartão em Cobrança; o que estava em espera sai poucos minutos depois do pagamento.",
     },
   },
   "deliverability.warning": {
@@ -303,13 +309,15 @@ export const ptBR = {
     subject: "Pagamento recusado no seu plano {plan}",
     body: [
       "Não conseguimos cobrar o cartão cadastrado do plano {plan} de {team}.",
-      "{retry} Por enquanto {team} mantém o plano {plan} ({cap}). Se a fatura continuar em aberto, o Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
+      "{retry} Por enquanto {team} mantém o plano {plan} ({cap}){overage}. Se a fatura continuar em aberto, o Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
     ],
     button: "Pagar fatura",
     muted: ["Ou atualize o cartão em Cobrança: {billingUrl}"],
     extra: {
       retryOn: "O Stripe tenta de novo em {date}.",
       noRetry: "O Stripe não vai tentar de novo sozinho.",
+      overagePaused:
+        ", mas o excedente fica pausado até a fatura ser paga, então os envios param no volume incluído",
     },
   },
   "billing.plan_activated": {
@@ -324,7 +332,7 @@ export const ptBR = {
     subject: "Sua equipe mudou de {old} para {new}",
     body: [
       "{team} agora está no {new}, que permite {cap}. Com um limite menor, os envios já aceitos não mudam; o que passar do novo limite espera o próximo dia UTC nos planos diários e, nos planos mensais, é cobrado como excedente (quando ativado) ou recusado pela API até o período renovar.",
-      "O rateio aparece na próxima fatura do Stripe.",
+      "Subir de plano é cobrado na hora, proporcional ao resto do período e junto com o excedente usado até agora; descer vale na renovação, sem reembolso.",
     ],
     button: "Abrir cobrança",
   },

@@ -3,6 +3,9 @@ import { DAY_MS } from "./utc-day.js";
 
 export type Plan = (typeof schema.planEnum.enumValues)[number];
 
+/** Stripe's subscription status as the team row mirrors it; "none" = never subscribed. */
+export type PlanStatus = (typeof schema.planStatusEnum.enumValues)[number];
+
 /** A plan on the ladder: every plan but system, which has no rung and no cap. */
 export type LadderPlan = Exclude<Plan, "system">;
 
@@ -194,6 +197,8 @@ export const QUOTA_TOLERANCE = 0.5;
 export interface QuotaTeamRow {
   plan: Plan;
   planQuota: number | null;
+  /** A past-due subscription keeps its plan through Stripe's retries, but its overage waits for the payment. */
+  planStatus: PlanStatus;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
   overageEnabled: boolean;
@@ -218,8 +223,10 @@ export type TeamQuota =
       included: number;
       periodStart: Date;
       periodEnd: Date;
-      /** Sends past `included` bill instead of stopping. */
+      /** Sends past `included` bill instead of stopping: the customer's switch, off while a payment is past due. */
       overage: boolean;
+      /** The switch is on, but a past-due payment holds overage off until the invoice is paid. */
+      overagePaused?: true | undefined;
       overageCentsPer1k: number;
       /** An operator ceiling on each UTC day inside the period; absent or null = the period alone caps. */
       dailyCeiling?: number | null | undefined;
@@ -255,13 +262,15 @@ function planQuota(team: QuotaTeamRow, isCloud: boolean, now: Date): TeamQuota {
   const rung = teamRung(plan, plan === team.plan ? team.planQuota : null);
   if (rung.period === "day") return { kind: "day", plan, limit: rung.included };
   const period = quotaPeriod(team, now);
+  const paused = team.overageEnabled && team.planStatus === "past_due";
   return {
     kind: "month",
     plan,
     included: rung.included,
     periodStart: period.start,
     periodEnd: period.end,
-    overage: team.overageEnabled,
+    overage: team.overageEnabled && !paused,
+    ...(paused ? { overagePaused: true } : {}),
     overageCentsPer1k: rung.overageCentsPer1k ?? 0,
   };
 }
@@ -344,5 +353,5 @@ export function monthlyQuotaMessage(result: { periodEnd: Date; overage: boolean 
   const renews = result.periodEnd.toISOString();
   return result.overage
     ? `Monthly sending quota exceeded: sends stop at ${OVERAGE_HARD_CAP} times the included volume even with overage on; the period renews on ${renews}`
-    : `Monthly sending quota exceeded with overage off; the period renews on ${renews}`;
+    : `Monthly sending quota exceeded with overage off or paused for a past-due payment; the period renews on ${renews}`;
 }

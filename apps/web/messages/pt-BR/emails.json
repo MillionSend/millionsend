@@ -36,7 +36,8 @@
       "queued": "{count} e-mails na fila — serão enviados em {duration}.",
       "upgrade": "Faça upgrade para um limite maior →",
       "reachedMonth": "Cota mensal de {limit} e-mails atingida.",
-      "queuedMonth": "{count} e-mails na fila — serão enviados quando o período renovar em {date}, ou assim que o excedente for ativado."
+      "queuedMonth": "{count} e-mails na fila — serão enviados quando o período renovar em {date}, ou assim que o excedente for ativado.",
+      "queuedMonthPaused": "{count} e-mails na fila — serão enviados assim que o pagamento pendente for aprovado, ou quando o período renovar em {date}."
     },
     "allDomains": "Todos os domínios",
     "when": "Quando",

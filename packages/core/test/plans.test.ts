@@ -131,6 +131,7 @@ const END = new Date("2026-10-03T10:00:00Z");
 const row = (over: Partial<QuotaTeamRow> = {}): QuotaTeamRow => ({
   plan: "pro",
   planQuota: 100_000,
+  planStatus: "active",
   currentPeriodStart: START,
   currentPeriodEnd: END,
   overageEnabled: false,
@@ -219,6 +220,27 @@ describe("teamQuota", () => {
     expect(teamQuota(row({ plan: "scale", planQuota: null }), true, now)).toMatchObject({
       included: 500_000,
     });
+  });
+
+  it("pauses overage while a payment is past due, keeping the bought volume", () => {
+    const pastDue = row({ planStatus: "past_due", overageEnabled: true });
+    expect(teamQuota(pastDue, true, now)).toMatchObject({
+      kind: "month",
+      included: 100_000,
+      overage: false,
+      overagePaused: true,
+    });
+    // With the switch off there is nothing to pause, so nothing to lift on payment.
+    expect(teamQuota(row({ planStatus: "past_due" }), true, now)).not.toHaveProperty(
+      "overagePaused",
+    );
+    // The paid invoice lifts the pause: more mail fits, so parked broadcasts drain.
+    expect(
+      raisesQuota(
+        teamQuota(pastDue, true, now),
+        teamQuota(row({ overageEnabled: true }), true, now),
+      ),
+    ).toBe(true);
   });
 
   it("rolls the period forward when the recorded one has ended", () => {

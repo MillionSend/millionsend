@@ -153,9 +153,11 @@ deliberadas e explícitas:
   em um plano diário (Free, Starter) quando a cota diária de envio acabou e a
   fila de espera está cheia — tente de novo depois da virada do dia em UTC — e
   `429 monthly_quota_exceeded` em um plano mensal (Pro, Scale) no volume
-  incluído com o excedente desligado; ative o excedente em Cobrança ou espere
-  o período renovar (a mensagem informa a data). Um lote é aceito ou recusado
-  por inteiro. Em qualquer plano, um domínio ainda sob o
+  incluído com o excedente desligado, ou enquanto um pagamento está pendente
+  (o excedente fica pausado até a fatura ser paga); ative o excedente ou pague
+  a fatura em Cobrança, ou espere o período renovar (a mensagem informa a
+  data). Um lote é aceito ou recusado por inteiro. Em qualquer plano, um
+  domínio ainda sob o
   [limite de domínio novo](/pt-BR/concepts/domains#limite-de-domínio-novo)
   responde o mesmo `429 daily_quota_exceeded`, com uma mensagem que cita esse
   limite, quando já há muito e-mail aguardando.

@@ -232,9 +232,10 @@ access, a sandbox region is listed but not selectable in the form; a sandbox
 region paces its own sends at its 1/s and holds only its own domains when its
 24-hour quota is spent.
 
-Pricing: since 2026-07-21 an SES account × region with no prior sending starts
-on the Essentials plan ($0.16 per 1,000 messages instead of the à la carte
-$0.10). After provisioning, the wizard reads the region's plan and, on
+Pricing: SES bills $0.10 per 1,000 emails à la carte, plus $0.12 per GB of
+attachments. Since 2026-07-21 an SES account × region with no prior sending
+starts on the Essentials plan instead ($0.16 per 1,000 messages). After
+provisioning, the wizard reads the region's plan and, on
 Essentials, asks whether to cancel it; nothing MillionSend uses needs a plan,
 and a defaulted plan's cancellation takes effect immediately. By hand:
 `aws sesv2 put-account-pricing-attributes --plan NONE --region <region>`.

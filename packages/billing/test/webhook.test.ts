@@ -525,7 +525,7 @@ describe("reconcileTeamPlan", () => {
 });
 
 describe("cancelTeamSubscription", () => {
-  it("cancels the live subscription immediately and clears the plan; no subscription is a no-op", async () => {
+  it("reports the period's overage, cancels at once with a final invoice and clears the plan; no subscription is a no-op", async () => {
     const teamId = await customerTeam();
     await cancelTeamSubscription(deps(), teamId);
     expect(state.cancels).toEqual([]);
@@ -534,8 +534,19 @@ describe("cancelTeamSubscription", () => {
       overageKey: "millionsend_pro_100k_overage",
     });
     await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: new Date(PERIOD_START * 1000), accepted: 100_500 });
     await cancelTeamSubscription(deps(), teamId);
+    // The final invoice bills what the meter holds when the subscription ends.
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["500"]);
+    expect(state.calls.indexOf("billing.meterEvents.create")).toBeLessThan(
+      state.calls.indexOf("subscriptions.cancel"),
+    );
     expect(state.cancels).toEqual(["sub_1"]);
+    expect(state.cancelParams).toEqual({ invoice_now: true, prorate: false });
+    // Stamped before the second the cancel can land in.
+    expect(state.meterEvents[0]?.timestamp).toBeLessThan(Math.floor(Date.now() / 1000));
     expect(await team(teamId)).toEqual({
       plan: "free",
       planQuota: null,
@@ -558,6 +569,84 @@ describe("cancelTeamSubscription", () => {
     await cancelTeamSubscription(deps(), teamId);
     expect(state.cancels).toEqual(["sub_1"]);
     expect(await team(teamId)).toMatchObject({ plan: "free", stripeSubscriptionId: null });
+  });
+});
+
+describe("cancelTeamSubscription when the meter refuses", () => {
+  it("keeps the subscription and the rows that owe the step, so the delete can be retried", async () => {
+    const teamId = await customerTeam();
+    state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active", undefined, {
+      overageKey: "millionsend_pro_100k_overage",
+    });
+    await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: new Date(PERIOD_START * 1000), accepted: 100_500 });
+    state.meterError = new Error("Stripe is down");
+    await expect(cancelTeamSubscription(deps(), teamId)).rejects.toThrow("overage not reported");
+    expect(state.cancels).toEqual([]);
+    expect(await team(teamId)).toMatchObject({ plan: "pro", stripeSubscriptionId: "sub_1" });
+  });
+
+  it("ends a move up waiting on payment first, then reports the wait's sends for the final invoice", async () => {
+    const teamId = await customerTeam();
+    state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active", undefined, {
+      overageKey: "millionsend_pro_100k_overage",
+    });
+    state.subscriptions.sub_1.pending_update = {
+      expires_at: Math.floor(Date.now() / 1000) + 3_600,
+    } as Stripe.Subscription.PendingUpdate;
+    await deliver(subEvent("customer.subscription.updated", state.subscriptions.sub_1));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: new Date(PERIOD_START * 1000), accepted: 100_500 });
+    await cancelTeamSubscription(deps(), teamId);
+    expect(state.invoiceVoids).toEqual(["in_pending"]);
+    expect(state.calls.indexOf("invoices.voidInvoice")).toBeLessThan(
+      state.calls.indexOf("billing.meterEvents.create"),
+    );
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["500"]);
+    expect(state.cancels).toEqual(["sub_1"]);
+  });
+
+  it("reports through a wait the row still records after Stripe ended it", async () => {
+    const teamId = await customerTeam();
+    state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active", undefined, {
+      overageKey: "millionsend_pro_100k_overage",
+    });
+    await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
+    await db
+      .update(schema.teams)
+      .set({ moveUpPendingUntil: new Date(Date.now() + 3_600_000) })
+      .where(eq(schema.teams.id, teamId));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: new Date(PERIOD_START * 1000), accepted: 100_500 });
+    await cancelTeamSubscription(deps(), teamId);
+    expect(state.invoiceVoids).toEqual([]);
+    expect(state.meterEvents.map((e) => e.payload.value)).toEqual(["500"]);
+    expect(state.cancels).toEqual(["sub_1"]);
+  });
+
+  it("does not wait on a pin no run sends again, such as one left before a move down to Starter", async () => {
+    const teamId = await customerTeam();
+    state.subscriptions.sub_1 = subscription(
+      "sub_1",
+      "cus_1",
+      "active",
+      "millionsend_starter_monthly",
+    );
+    await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
+    await db.insert(schema.usagePeriods).values({
+      teamId,
+      periodStart: new Date(PERIOD_START * 1000),
+      accepted: 100_500,
+      pendingOverage: 500,
+    });
+    state.meterError = new Error("Stripe is down");
+    await cancelTeamSubscription(deps(), teamId);
+    expect(state.calls).not.toContain("billing.meterEvents.create");
+    expect(state.cancels).toEqual(["sub_1"]);
   });
 });
 

@@ -158,6 +158,12 @@ export function fakeStripe() {
     scheduleReleases: [] as string[],
     meterEvents: [] as Stripe.Billing.MeterEventCreateParams[],
     meterError: null as Error | null,
+    /** The bank declines (or wants confirmed) the charge a pending_if_incomplete update makes. */
+    declineUpdates: false,
+    /** What the meter's summaries have counted; null counts every event sent, as if Stripe were instant. */
+    meterCounted: null as number | null,
+    summaryParams: [] as [string, Stripe.Billing.MeterListEventSummariesParams][],
+    invoiceVoids: [] as string[],
     customers: [] as Stripe.CustomerCreateParams[],
     checkouts: [] as Stripe.Checkout.SessionCreateParams[],
   };
@@ -219,6 +225,23 @@ export function fakeStripe() {
         state.calls.push("subscriptions.update");
         state.updates.push([id, params]);
         const s = sub(id);
+        // Like Stripe's pending updates: nothing changes until the invoice is paid.
+        if (state.declineUpdates && params.payment_behavior === "pending_if_incomplete") {
+          s.pending_update = {
+            expires_at: PERIOD_START + 82_800,
+          } as Stripe.Subscription.PendingUpdate;
+          return {
+            ...s,
+            latest_invoice: {
+              id: "in_pending",
+              object: "invoice",
+              status: "open",
+              hosted_invoice_url: "https://invoice.stripe.com/i/in_pending",
+            },
+          };
+        }
+        // An update that goes through voids any change still waiting on payment.
+        s.pending_update = null;
         for (const change of params.items ?? []) {
           if (!change.id) {
             if (change.price) {
@@ -346,6 +369,39 @@ export function fakeStripe() {
           state.meterEvents.push(p);
           return p;
         },
+      },
+      meters: {
+        async list() {
+          state.calls.push("billing.meters.list");
+          return { data: [{ id: "mtr_1", event_name: "emails_over_quota" }] };
+        },
+        async listEventSummaries(id: string, p: Stripe.Billing.MeterListEventSummariesParams) {
+          state.calls.push("billing.meters.listEventSummaries");
+          state.summaryParams.push([id, p]);
+          const counted =
+            state.meterCounted ??
+            state.meterEvents.reduce((sum, e) => sum + Number(e.payload.value), 0);
+          return { data: [{ aggregated_value: counted }] };
+        },
+      },
+    },
+    invoices: {
+      async list(p: Stripe.InvoiceListParams) {
+        state.calls.push("invoices.list");
+        const s = p.subscription ? state.subscriptions[p.subscription] : undefined;
+        const waiting = s?.pending_update && p.status === "open";
+        return {
+          data: waiting
+            ? [{ id: "in_pending", object: "invoice", billing_reason: "subscription_update" }]
+            : [],
+        };
+      },
+      /** Like Stripe: voiding a waiting move up's invoice drops the move. */
+      async voidInvoice(id: string) {
+        state.calls.push("invoices.voidInvoice");
+        state.invoiceVoids.push(id);
+        for (const s of Object.values(state.subscriptions)) s.pending_update = null;
+        return { id, object: "invoice", status: "void" };
       },
     },
     checkout: {

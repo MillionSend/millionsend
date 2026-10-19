@@ -468,7 +468,7 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
             advice: accountMailPhrase({
               locale,
               kind: mailKind,
-              key: quota.overage ? "overage" : "noOverage",
+              key: quota.overage ? "overage" : quota.overagePaused ? "overagePaused" : "noOverage",
               values: {
                 renewsAt,
                 hardCap: String(OVERAGE_HARD_CAP),
