@@ -535,11 +535,12 @@ async function mailWarmupEvents(db: Db, deps: DrainDeps, events: WarmupEvent[]):
         periodKey: event.episode,
       });
       if (!claimed) continue;
+      const tab = event.kind === "warmup.paused" ? "?tab=warmup" : "";
       await mailOwners(db, mailer, event.teamId, event.kind, (locale) =>
         buildAccountMail({
           kind: event.kind,
           locale,
-          url: `${deps.appBaseUrl ?? ""}/domains/${event.domainId}`,
+          url: `${deps.appBaseUrl ?? ""}/domains/${event.domainId}${tab}`,
           values: warmupMailValues(event, locale),
         }),
       );

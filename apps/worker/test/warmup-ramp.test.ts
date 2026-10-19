@@ -446,8 +446,10 @@ describe("the drain of a warming domain", () => {
       }),
     ]);
     expect(mail.sends[0]?.text).toContain("Gmail delayed 100.00% of the day's mail.");
-    expect(mail.sends[0]?.text).toContain("2 emails are waiting. Nothing is lost.");
-    expect(mail.sends[0]?.text).toContain(`https://app.example.com/domains/${s.domainId}`);
+    expect(mail.sends[0]?.text).toContain("2 emails are waiting until you resume.");
+    expect(mail.sends[0]?.text).toContain(
+      `https://app.example.com/domains/${s.domainId}?tab=warmup`,
+    );
     await run();
     expect(mail.sends).toHaveLength(1);
   });

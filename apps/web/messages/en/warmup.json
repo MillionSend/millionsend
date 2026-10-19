@@ -35,6 +35,144 @@
     "firstNote": "Most active first",
     "today": "{allowance} go out · {sent} sent so far",
     "todayWindow": "{start} until about {end}",
-    "todayWaiting": "Starts after today's check"
-  }
+    "todayWaiting": "Starts after today's check",
+    "lastAll": "last {count} · every active contact reached"
+  },
+  "row": {
+    "warming": "Warming up: {perDay}/day today · day {day}",
+    "warmingNote": "Most active contacts go first. Volume grows each day delivery stays healthy.",
+    "done": "Warm-up done · {perDay}/day since {date}",
+    "doneNote": "Broadcasts from this domain go out at normal speed.",
+    "pausedTitle": "Warm-up paused.",
+    "pausedWaiting": "{waiting, plural, one {# email is} other {# emails are}} waiting until you resume.",
+    "pausedNothing": "Broadcasts from this domain wait until you resume."
+  },
+  "off": {
+    "row": "Not warming up · most sent in a day so far: {count}",
+    "rowNote": "Turn it on before a big first send from a new domain or subdomain.",
+    "preview": "A broadcast to all {total} contacts would go out like this",
+    "previewActive": "{eligible} active contacts in about {days, plural, one {# sending day} other {# sending days}}, most active first.",
+    "previewAll": "{eligible} contacts in about {days, plural, one {# sending day} other {# sending days}}, most active first.",
+    "previewSkipped": "{inactive} with no activity in 90+ days are skipped.",
+    "previewLast": "{inactive} with no activity in 90+ days go last.",
+    "previewTail": "Each healthy day grows the volume 1.5×. Your transactional email is never held.",
+    "switch": "Warm up this domain",
+    "switchHint": "Big sends start small and grow each day while delivery stays healthy. Leave it off if this domain already sends this volume through another provider."
+  },
+  "stats": {
+    "today": "Today",
+    "todaySub": "of {allowance} · until about {time}",
+    "todaySubPlain": "of {allowance}",
+    "todaySubWaiting": "of {allowance} · starts after today's check",
+    "day": "Day",
+    "daySub": "of about {total}",
+    "sent": "Sent in warm-up",
+    "sentSub": "since {date}",
+    "target": "Daily target",
+    "targetSub": "full volume about {date}",
+    "waiting": "Waiting",
+    "waitingSub": "emails from broadcasts",
+    "paused": "Paused",
+    "pausedSub": "after day {day}"
+  },
+  "pace": {
+    "label": "Warm-up pace",
+    "note": "Each healthy day grows the volume 1.5×. One weak signal holds it, two cut it by 30%, and a severe one pauses it. Mail over the day's volume waits for the next day. Nothing is lost. Your transactional email is never held."
+  },
+  "health": {
+    "label": "Delivery health · {day}",
+    "yesterday": "yesterday",
+    "meta": "{sent} sent · checked {time}",
+    "columns": {
+      "signal": "Signal",
+      "result": "Result",
+      "gmail": "Gmail",
+      "other": "Other inboxes",
+      "line": "Line"
+    },
+    "rows": {
+      "delays": "Delivery delays",
+      "opens": "Opens, Gmail vs. others",
+      "hardBounces": "Hard bounces",
+      "mailboxFull": "Full or inactive mailboxes",
+      "complaints": "Spam complaints"
+    },
+    "results": {
+      "within": "Within",
+      "missed": "Missed",
+      "severe": "Severe",
+      "unknown": "Not enough mail"
+    },
+    "lines": {
+      "delays": "under 5%",
+      "opens": "at least half",
+      "hardBounces": "under 2%",
+      "mailboxFull": "under 2%",
+      "complaints": "under 0.05%"
+    },
+    "notReported": "not reported",
+    "tips": {
+      "opens": "Gmail opens compared with other inboxes on the same send. A low share is the clearest sign Gmail is filing the mail as spam. Machine prefetches never count.",
+      "mailboxFull": "Mailboxes that answered full or inactive. A second answer like that stops mail to the address.",
+      "complaints": "Gmail doesn't tell senders about spam reports. See your spam rate in Google Postmaster Tools."
+    },
+    "openTrackingOff": "Turn on open tracking to see this signal.",
+    "footer": "Gmail keeps its spam rate to itself. See it in <link>Google Postmaster Tools ↗</link>",
+    "pausedByTeam": "Your team paused this warm-up on {date}."
+  },
+  "settings": {
+    "orderTitle": "Most active contacts first",
+    "orderHint": "Each day's volume goes to the people most likely to open it, ranked by the newest of these signals.",
+    "byEngagement": "Opened or clicked your email",
+    "byTransactional": "Got your transactional email in the last 30 days",
+    "byProperty": "Contact property",
+    "propertyPlaceholder": "Choose a property",
+    "propertyCoverage": "set on {count} of {total} contacts",
+    "propertyHint": "Use a date, like the last login.",
+    "inactiveTitle": "Inactive contacts",
+    "inactiveHint": "{inactive} of your {total} contacts haven't been active in 90+ days. Mailing them from a new domain is the fastest way to the spam folder.",
+    "inactiveSkip": "Skip while warming up",
+    "inactiveLast": "Send them last",
+    "targetTitle": "Daily target",
+    "targetHint": "The most you plan to send in a day. Warm-up ends after a healthy day at this volume.",
+    "targetError": "Use a whole number from {min} to {max}, no lower than the starting volume.",
+    "startTitle": "Starting volume",
+    "startHint": "Day 1 sends this many. Raise it if this domain already sends every day through another provider.",
+    "startError": "Use a whole number from {min} to {max}, no higher than the daily target.",
+    "update": "Update",
+    "controlTitle": "Pause or turn off",
+    "controlHint": "Paused, mail from this domain waits until you resume. Turned off, the waiting mail goes out at normal speed.",
+    "pause": "Pause warm-up",
+    "turnOff": "Turn off"
+  },
+  "turnOff": {
+    "title": "Turn off warm-up?",
+    "bodyWaiting": "{waiting, plural, one {# waiting email} other {# waiting emails}} will go out at normal speed. With {days, plural, one {# day} other {# days}} of history, a big day is likely to land in spam.",
+    "body": "Big sends from this domain will go out at normal speed.",
+    "keep": "Keep warming up",
+    "confirm": "Turn off"
+  },
+  "paused": {
+    "beforeTitle": "Before you resume",
+    "beforeHint": "Gmail judges a new sender by how its first recipients react.",
+    "who": "Who you send to",
+    "whoBody": "{pct} of your contacts haven't been active in 90+ days. Start again with the most active.",
+    "whoLink": "Review contacts",
+    "spam": "Your spam rate at Gmail",
+    "spamBody": "Gmail shows it only in Google Postmaster Tools, a day late. Above 0.3% Gmail starts rejecting mail.",
+    "spamLink": "Open Postmaster Tools ↗",
+    "dead": "Dead addresses",
+    "deadBody": "Full or inactive mailboxes stop getting your mail after a second answer like that.",
+    "resumeTitle": "Resume",
+    "resumeHint": "Starts again at {volume} a day. The waiting mail keeps its order and is kept until {date}.",
+    "resumeHintPlain": "Starts again at {volume} a day.",
+    "resume": "Resume at {volume}/day"
+  },
+  "done": {
+    "line": "Warm-up done on {date}.",
+    "note": "Broadcasts from this domain go out at normal speed. Turn warm-up on again if you'll send far more than {target} a day.",
+    "again": "Warm up again"
+  },
+  "loadError": "Couldn't load the warm-up.",
+  "error": "Couldn't change the warm-up. Try again."
 }

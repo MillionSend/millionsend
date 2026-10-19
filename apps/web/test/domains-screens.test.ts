@@ -14,6 +14,7 @@ vi.mock("next-intl", async (importOriginal) => {
   const messages = {
     domains: (await import("../messages/en/domains.json")).default,
     common: (await import("../messages/en/common.json")).default,
+    warmup: (await import("../messages/en/warmup.json")).default,
   };
   return {
     ...actual,
@@ -46,12 +47,14 @@ vi.mock("@tanstack/react-query", () => ({
         }
       : { data: undefined, isPending: true, isError: false, isSuccess: false },
   useMutation: () => ({ mutate: () => {}, isPending: false, isError: false }),
+  useQueryClient: () => ({ invalidateQueries: () => Promise.resolve() }),
 }));
 // Dialogs and drawers portal to document.body, which a server render does not have.
 vi.mock("@/components/modal", () => ({ Modal: () => null }));
 vi.mock("@/components/api-sheet", () => ({ ResourceApiButton: () => null }));
 
 const { DomainsView } = await import("@/app/(dashboard)/domains/domains-table");
+const { WarmupStatus, WarmupTab } = await import("@/app/(dashboard)/domains/[id]/warmup-tab");
 
 const own = (name: string, status: string) => ({
   id: name,
@@ -99,5 +102,274 @@ describe("the Domains page", () => {
     expect(html).toContain('href="/domains/new"');
     // Nothing to filter.
     expect(html).not.toContain('class="ms-filter-row"');
+  });
+});
+
+type Warmup = Parameters<typeof WarmupStatus>[0]["data"];
+
+/** What a reader sees: tags dropped, entities and no-break spaces read back. */
+function visible(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, "")
+    .replaceAll("&#x27;", "'")
+    .replaceAll("&amp;", "&")
+    .replaceAll("\u00a0", " ");
+}
+
+const signals = (over: Partial<Record<string, object>> = {}) =>
+  [
+    { key: "delays", result: "within", figure: 0.018, gmail: 0.018, other: 0.004 },
+    { key: "opens", result: "within", figure: 0.82, gmail: 0.146, other: 0.178 },
+    { key: "hardBounces", result: "within", figure: 0.005, gmail: 0.003, other: 0.007 },
+    { key: "mailboxFull", result: "within", figure: 0, gmail: 0, other: 0 },
+    { key: "complaints", result: "within", figure: 0.0002, gmail: null, other: 0.0002 },
+  ].map((s) => ({ ...s, ...over[s.key] })) as Warmup["health"] extends infer H
+    ? H extends { signals: infer S }
+      ? S
+      : never
+    : never;
+
+function warmup(over: Partial<Warmup> = {}): Warmup {
+  return {
+    status: "off",
+    settings: {
+      dailyTarget: 50_000,
+      startVolume: 1_500,
+      orderByEngagement: true,
+      orderByTransactional: true,
+      orderProperty: null,
+      skipInactive: true,
+    },
+    volume: 1_500,
+    sendingDays: 0,
+    startedAt: null,
+    pausedAt: null,
+    doneAt: null,
+    today: null,
+    days: [],
+    projection: [],
+    waiting: 0,
+    bestDay: 400,
+    audience: { total: 12_000, inactive: 3_000, withProperty: null },
+    openTracking: true,
+    pauseSignals: null,
+    health: null,
+    todayWindow: null,
+    resumeVolume: 750,
+    preview: null,
+    properties: ["last_login_at", "plan"],
+    limits: {
+      dailyTarget: { min: 1_000, max: 10_000_000 },
+      startVolume: { min: 100, max: 1_000_000 },
+    },
+    waitingExpiresAt: null,
+    canManage: true,
+    ...over,
+  };
+}
+
+const tab = (data: Warmup) =>
+  renderToStaticMarkup(
+    createElement(WarmupTab, { id: "d1", query: { data, isError: false } as never }),
+  );
+
+describe("the domain Warm-up tab", () => {
+  it("while off, previews a send to everyone and offers the switch and every setting", () => {
+    const html = tab(
+      warmup({
+        preview: [
+          { day: "2026-10-18", count: 1_500 },
+          { day: "2026-10-19", count: 2_300 },
+          { day: "2026-10-20", count: 3_500 },
+          { day: "2026-10-21", count: 1_700 },
+        ],
+      }),
+    );
+    const text = visible(html);
+    expect(text).toContain("Not warming up · most sent in a day so far: 400");
+    expect(text).toContain("A broadcast to all 12,000 contacts would go out like this");
+    expect(text).toContain("Day 11,500 go out · most active first");
+    expect(text).toContain("last 1,700 · every active contact reached");
+    expect(text).toContain(
+      "9,000 active contacts in about 4 sending days, most active first. 3,000 with no activity in 90+ days are skipped.",
+    );
+    expect(html).toMatch(/role="switch" aria-checked="false" aria-label="Warm up this domain"/);
+    for (const title of ["Most active contacts first", "Inactive contacts", "Daily target"]) {
+      expect(text).toContain(title);
+    }
+    expect(text).toContain("Starting volume");
+    expect(text).toContain("Use a date, like the last login.");
+  });
+
+  it("while warming, shows today's pace, the checked days and the delivery health", () => {
+    const html = tab(
+      warmup({
+        status: "warming",
+        volume: 4_800,
+        sendingDays: 2,
+        startedAt: new Date("2026-10-16T12:00:00Z"),
+        today: { day: "2026-10-18", allowance: 4_800, sent: 1_200, checked: true },
+        todayWindow: {
+          startsAt: new Date("2026-10-18T07:00:00Z"),
+          endsAt: new Date("2026-10-18T19:00:00Z"),
+        },
+        days: [
+          {
+            day: "2026-10-18",
+            allowance: 4_800,
+            sent: 1_200,
+            outcome: null,
+            signals: null,
+            checkedAt: null,
+          },
+          {
+            day: "2026-10-17",
+            allowance: 3_200,
+            sent: 3_200,
+            outcome: "held",
+            signals: signals({ delays: { result: "missed", figure: 0.062, gmail: 0.062 } }),
+            checkedAt: new Date("2026-10-18T00:05:00Z"),
+          },
+          {
+            day: "2026-10-16",
+            allowance: 2_100,
+            sent: 2_100,
+            outcome: "grew",
+            signals: signals(),
+            checkedAt: new Date("2026-10-17T00:05:00Z"),
+          },
+        ],
+        projection: [
+          { day: "2026-10-19", volume: 7_200 },
+          { day: "2026-10-20", volume: 10_800 },
+        ],
+        waiting: 30_000,
+        health: {
+          day: "2026-10-17",
+          sent: 3_200,
+          checkedAt: new Date("2026-10-18T00:05:00Z"),
+          signals: signals({ delays: { result: "missed", figure: 0.062, gmail: 0.062 } }),
+          yesterday: true,
+        },
+        openTracking: false,
+      }),
+    );
+    const text = visible(html);
+    // Stat figures roll on the odometer, which reads out as its label.
+    for (const figure of ["1,200", "3", "6,500", "50,000"]) {
+      expect(html).toContain(`aria-label="${figure}"`);
+    }
+    expect(text).toContain("of 4,800 · until about");
+    expect(text).toContain("of about 5");
+    expect(text).toContain("2,100 sentMost active first");
+    expect(text).toContain("3,200 sent · heldGmail delayed 6.2% of it");
+    expect(text).toContain("4,800 go out · 1,200 sent so far");
+    expect(text).toContain("10,800 · full volume");
+    expect(text).toContain("Delivery health · yesterday");
+    expect(text).toContain("Delivery delaysMissed6.2%0.4%under 5%");
+    // The side it is judged on carries the result's color.
+    expect(html).toContain('style="color:var(--ms-warn)">6.2%');
+    expect(text).toContain("Turn on open tracking to see this signal.");
+    expect(text).toContain("not reported");
+    expect(text).toContain("0.02%");
+    expect(html).toContain('href="https://postmaster.google.com/"');
+    expect(text).toContain("Pause warm-up");
+    // Day 1 is behind it, so the starting volume no longer applies.
+    expect(text).not.toContain("Starting volume");
+  });
+
+  it("while paused, says what to check and resumes at half the volume", () => {
+    const data = warmup({
+      status: "paused",
+      volume: 1_500,
+      sendingDays: 1,
+      startedAt: new Date("2026-10-16T12:00:00Z"),
+      pausedAt: new Date("2026-10-17T06:00:00Z"),
+      today: { day: "2026-10-18", allowance: 1_500, sent: 0, checked: true },
+      waiting: 2,
+      waitingExpiresAt: new Date("2026-11-15T12:00:00Z"),
+      pauseSignals: signals({
+        delays: { result: "severe", figure: 0.38, gmail: 0.38 },
+        mailboxFull: { result: "missed", figure: 0.031, gmail: 0.031 },
+      }),
+      health: {
+        day: "2026-10-16",
+        sent: 1_500,
+        checkedAt: new Date("2026-10-17T06:00:00Z"),
+        signals: signals({
+          delays: { result: "severe", figure: 0.38, gmail: 0.38 },
+          mailboxFull: { result: "missed", figure: 0.031, gmail: 0.031 },
+        }),
+        yesterday: false,
+      },
+    });
+    const html = tab(data);
+    const text = visible(html);
+    expect(html).toContain('aria-label="2"');
+    expect(text).toContain("emails from broadcasts");
+    expect(text).toContain("after day 1");
+    expect(text).toContain(
+      "25% of your contacts haven't been active in 90+ days. Start again with the most active.",
+    );
+    expect(text).toContain("Dead addresses");
+    expect(text).toContain("Starts again at 750 a day. The waiting mail keeps its order");
+    expect(text).toContain("Resume at 750/day");
+    const banner = visible(renderToStaticMarkup(createElement(WarmupStatus, { data })));
+    expect(banner).toBe(
+      "Warm-up paused.Gmail delayed 38% of the day's mail. 3.1% of mailboxes were full or inactive. 2 emails are waiting until you resume.",
+    );
+  });
+
+  it("when the team paused it, says so instead of a health table", () => {
+    const text = visible(
+      tab(
+        warmup({
+          status: "paused",
+          pausedAt: new Date("2026-10-17T12:00:00Z"),
+          startedAt: new Date("2026-10-16T12:00:00Z"),
+          today: { day: "2026-10-18", allowance: 1_500, sent: 0, checked: true },
+        }),
+      ),
+    );
+    expect(text).toContain("Your team paused this warm-up on");
+    expect(text).not.toContain("Delivery health");
+    expect(text).not.toContain("Dead addresses");
+    expect(text).toContain("Starts again at 750 a day.Resume");
+  });
+
+  it("when done, shows the history and offers to warm up again", () => {
+    const data = warmup({
+      status: "done",
+      volume: 50_000,
+      doneAt: new Date("2026-10-18T00:05:00Z"),
+      startedAt: new Date("2026-10-08T12:00:00Z"),
+      days: [
+        {
+          day: "2026-10-17",
+          allowance: 50_000,
+          sent: 50_000,
+          outcome: "done",
+          signals: signals(),
+          checkedAt: new Date("2026-10-18T00:05:00Z"),
+        },
+      ],
+    });
+    const text = visible(tab(data));
+    expect(text).toContain("Warm-up done on");
+    expect(text).toContain("50,000 sent");
+    expect(text).toContain("far more than 50,000 a day");
+    expect(text).toContain("Warm up again");
+    expect(visible(renderToStaticMarkup(createElement(WarmupStatus, { data })))).toMatch(
+      /^Warm-up done · 50,000\/day since/,
+    );
+  });
+
+  it("leaves every control disabled for members", () => {
+    const html = tab(warmup({ canManage: false, preview: [{ day: "2026-10-18", count: 9_000 }] }));
+    const controls = html.match(/<(button|input)[^>]*>/g) ?? [];
+    const enabled = controls.filter(
+      (tag) => !tag.includes("disabled") && !tag.includes("ms-tooltip-trigger"),
+    );
+    expect(enabled).toEqual([]);
   });
 });

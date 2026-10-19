@@ -598,7 +598,7 @@ describe("the day check", () => {
     expect(mail.subject).toBe("Warm-up paused for your domain");
     // 61 of the day's 1,061 sends.
     expect(mail.text).toContain("5.75% of mailboxes were full or inactive.");
-    expect(mail.text).toContain("3 emails are waiting. Nothing is lost.");
+    expect(mail.text).toContain("3 emails are waiting until you resume.");
     expect(mail.text).not.toMatch(/[;—]/);
     const pt = buildAccountMail({
       kind: "warmup.paused",
@@ -607,7 +607,7 @@ describe("the day check", () => {
       values: warmupMailValues({ ...event, waiting: 1 }, "pt-BR"),
     });
     expect(pt.text).toContain("5,75% das caixas estavam cheias ou inativas.");
-    expect(pt.text).toContain("1 e-mail está esperando. Nada se perde.");
+    expect(pt.text).toContain("1 e-mail está esperando até você retomar.");
   });
 
   it("finishes a healthy day at the target", async () => {

@@ -234,8 +234,8 @@ export const en = {
       hardBounces: "{pct} of addresses bounced.",
       mailboxFull: "{pct} of mailboxes were full or inactive.",
       complaints: "{pct} of people marked it as spam.",
-      "waiting.one": "1 email is waiting. Nothing is lost.",
-      "waiting.other": "{n} emails are waiting. Nothing is lost.",
+      "waiting.one": "1 email is waiting until you resume.",
+      "waiting.other": "{n} emails are waiting until you resume.",
     },
   },
   "warmup.done": {

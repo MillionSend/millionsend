@@ -252,6 +252,7 @@ export function AddDomainForm({
     }
   }, [served, region]);
   const [returnPath, setReturnPath] = useState("send");
+  const [sentBefore, setSentBefore] = useState<"yes" | "no">("yes");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [touched, setTouched] = useState(false);
@@ -274,7 +275,7 @@ export function AddDomainForm({
     event.preventDefault();
     setTouched(true);
     if (!nameValid || create.isPending || region === "") return;
-    create.mutate({ name, region, mailFromSubdomain: returnPath });
+    create.mutate({ name, region, mailFromSubdomain: returnPath, warmup: sentBefore === "no" });
   }
 
   if (createdId) return <DnsRecordsStep id={createdId} trackingStep={trackingStep} />;
@@ -351,6 +352,27 @@ export function AddDomainForm({
               }))}
             />
           </div>
+
+          <fieldset className="ms-field" style={{ border: 0, padding: 0, margin: "14px 0 0" }}>
+            <legend>{t("new.sentBefore.question")}</legend>
+            <div style={{ display: "grid", gap: 6 }}>
+              {(["yes", "no"] as const).map((value) => (
+                <label key={value} className="ms-radio-card">
+                  <input
+                    type="radio"
+                    name="sent-before"
+                    checked={sentBefore === value}
+                    disabled={create.isPending}
+                    onChange={() => setSentBefore(value)}
+                  />
+                  <span>
+                    {t(`new.sentBefore.${value}`)}
+                    <div className="sub">{t(`new.sentBefore.${value}Hint`)}</div>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
 
           <details
             style={{

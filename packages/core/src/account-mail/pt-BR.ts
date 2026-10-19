@@ -243,8 +243,8 @@ export const ptBR = {
       hardBounces: "{pct} dos endereços deram bounce.",
       mailboxFull: "{pct} das caixas estavam cheias ou inativas.",
       complaints: "{pct} das pessoas marcaram como spam.",
-      "waiting.one": "1 e-mail está esperando. Nada se perde.",
-      "waiting.other": "{n} e-mails estão esperando. Nada se perde.",
+      "waiting.one": "1 e-mail está esperando até você retomar.",
+      "waiting.other": "{n} e-mails estão esperando até você retomar.",
     },
   },
   "warmup.done": {

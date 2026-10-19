@@ -14,7 +14,6 @@ import {
   DnsRecordsTable,
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
-import { DotParts } from "@/components/dot-parts";
 import { GradientBanner } from "@/components/gradient-banner";
 import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
@@ -33,10 +32,15 @@ import { formatDay, formatRelative, formatUtcMinute } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
+import { oneOf, useUrlState } from "@/lib/url-state";
 import { zoneRelativeName } from "@/lib/zone";
 import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
 import { RegionLabel } from "../region-label";
 import { useTrackingToggle } from "../use-tracking-toggle";
+import { ConfigSection, StatusRow } from "./parts";
+import { WarmupStatus, WarmupTab } from "./warmup-tab";
+
+const TABS = ["records", "configuration", "warmup"] as const;
 
 /** Party-popper (Lucide, MIT) — the celebratory mark on the verified banner. */
 function TadaIcon() {
@@ -63,28 +67,6 @@ function TadaIcon() {
       <path d="m11 2 .33.82c.34.86-.2 1.82-1.11 1.98C9.52 4.9 9 5.52 9 6.23V7" />
       <path d="M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z" />
     </svg>
-  );
-}
-
-function ConfigSection({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="ms-config-section">
-      <h3 style={{ fontSize: 14, fontWeight: 500, color: "var(--ms-bone)", margin: 0 }}>{title}</h3>
-      {description ? (
-        <p style={{ fontSize: 12.5, color: "var(--ms-muted)", margin: "6px 0 0", lineHeight: 1.5 }}>
-          {description}
-        </p>
-      ) : null}
-      <div style={{ marginTop: 12 }}>{children}</div>
-    </section>
   );
 }
 
@@ -394,6 +376,7 @@ export function DomainDetail({ id }: { id: string }) {
   const records = useQuery(
     trpc.domains.records.queryOptions({ id }, { enabled: domain.isSuccess }),
   );
+  const warmup = useQuery(trpc.domains.warmup.queryOptions({ id }));
 
   // Persist the last live-DNS result across re-checks. Reading it straight off
   // the verify mutation would blank out while a re-check is pending, so a row
@@ -494,7 +477,9 @@ export function DomainDetail({ id }: { id: string }) {
   // second spinner the user never triggered.
   const [checkTick, setCheckTick] = useState(0);
   const [copiedKey, setCopiedKey] = useState<"instructions" | "prompt" | null>(null);
-  const [tab, setTab] = useState<"records" | "configuration">("records");
+  // In the URL so the warm-up mails can open their tab; replaceState never scrolls.
+  const [tabParam, setTab] = useUrlState("tab", "records");
+  const tab = oneOf(TABS, tabParam, "records");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   // Stable identity: Modal's focus effect depends on onClose, and a fresh
@@ -610,10 +595,11 @@ export function DomainDetail({ id }: { id: string }) {
         >
           <Skeleton width={280} height="1lh" />
         </div>
-        {/* Records | Configuration tab bar. */}
+        {/* Records | Configuration | Warm-up tab bar. */}
         <div className="ms-tabs bleed" style={{ marginTop: 26 }}>
           <Skeleton width={64} height={30} radius="var(--ms-r-input)" />
           <Skeleton width={96} height={30} radius="var(--ms-r-input)" />
+          <Skeleton width={110} height={30} radius="var(--ms-r-input)" />
         </div>
         <section style={{ marginTop: 24, maxWidth: 1000 }}>
           <DnsRecordsTableSkeleton showStatus />
@@ -624,6 +610,7 @@ export function DomainDetail({ id }: { id: string }) {
 
   const data = domain.data;
   const provider = records.data?.provider ?? null;
+  const warmupOn = warmup.data?.status === "off" ? undefined : warmup.data;
   // Live DNS statuses keyed by record identity, from the persisted result so a
   // re-check doesn't blank the badges mid-flight.
   const liveByKey = new Map(liveDns.map((r) => [`${r.type}\t${r.name}\t${r.value}`, r]));
@@ -836,61 +823,45 @@ export function DomainDetail({ id }: { id: string }) {
         ) : null}
       </div>
 
-      {checking ? (
-        <GradientBanner
-          variant="warn"
-          icon={<Spinner size={16} />}
-          title={t("detail.bannerLooking")}
-          style={{ marginTop: 24, maxWidth: 1000 }}
-        >
-          {provider
-            ? t("detail.bannerLookingBody", { provider: provider.name })
-            : t("detail.bannerLookingBodyGeneric")}
-        </GradientBanner>
-      ) : status === "verified" ? (
-        <GradientBanner
-          variant="success"
-          icon={<TadaIcon />}
-          title={t("detail.bannerVerified")}
-          style={{ marginTop: 24, maxWidth: 1000 }}
-        >
-          {t("detail.bannerVerifiedBody")}
-        </GradientBanner>
-      ) : null}
-
-      {status === "verified" && data.warmup ? (
-        <div
-          role="status"
-          className="ms-wrap-row"
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: 12,
-            fontSize: 13.5,
-            border: "1px solid var(--ms-line)",
-            borderRadius: 12,
-            padding: "11px 16px",
-            marginTop: 12,
-            maxWidth: 1000,
-          }}
-        >
-          <span style={{ color: "var(--ms-bone)" }}>
-            <DotParts
-              text={
-                data.warmup.fullAt
-                  ? t("detail.warmup", {
-                      perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
-                      date: formatDay(data.warmup.fullAt, locale),
-                    })
-                  : t("detail.warmupToday", {
-                      perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
-                    })
-              }
+      {checking || status === "verified" || warmupOn ? (
+        <div style={{ display: "grid", gap: 12, marginTop: 24, maxWidth: 1000 }}>
+          {checking ? (
+            <GradientBanner
+              variant="warn"
+              icon={<Spinner size={16} />}
+              title={t("detail.bannerLooking")}
+            >
+              {provider
+                ? t("detail.bannerLookingBody", { provider: provider.name })
+                : t("detail.bannerLookingBodyGeneric")}
+            </GradientBanner>
+          ) : status === "verified" ? (
+            <GradientBanner
+              variant="success"
+              icon={<TadaIcon />}
+              title={t("detail.bannerVerified")}
+            >
+              {t("detail.bannerVerifiedBody")}
+            </GradientBanner>
+          ) : null}
+          {warmupOn ? <WarmupStatus data={warmupOn} /> : null}
+          {status === "verified" && data.warmup ? (
+            // The new-domain cap by registration age, on top of any warm-up.
+            <StatusRow
+              text={t(
+                data.warmup.fullAt ? "detail.newDomainLimit.line" : "detail.newDomainLimit.today",
+                {
+                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
+                  date: data.warmup.fullAt ? formatDay(data.warmup.fullAt, locale) : "",
+                },
+              )}
+              note={t(
+                data.warmup.shared
+                  ? "detail.newDomainLimit.bodyShared"
+                  : "detail.newDomainLimit.body",
+              )}
             />
-          </span>
-          <span style={{ color: "var(--ms-muted)" }}>
-            {t(data.warmup.shared ? "detail.warmupBodyShared" : "detail.warmupBody")}
-          </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -911,9 +882,19 @@ export function DomainDetail({ id }: { id: string }) {
         >
           {t("detail.tabs.configuration")}
         </button>
+        <button
+          type="button"
+          className={tab === "warmup" ? "active" : ""}
+          onClick={() => setTab("warmup")}
+        >
+          {t("detail.tabs.warmup")}
+          <BetaPill />
+        </button>
       </div>
 
-      {tab === "configuration" ? (
+      {tab === "warmup" ? (
+        <WarmupTab id={id} query={warmup} />
+      ) : tab === "configuration" ? (
         <div style={{ marginTop: 24 }}>
           <ConfigurationPanel
             id={id}

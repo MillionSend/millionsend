@@ -1,5 +1,10 @@
 import { createPublicKey } from "node:crypto";
-import { PLAN_DOMAIN_LIMIT, SUSPENSION_REASONS, type WebhookEnqueue } from "@millionsend/core";
+import {
+  DAY_MS,
+  PLAN_DOMAIN_LIMIT,
+  SUSPENSION_REASONS,
+  type WebhookEnqueue,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
@@ -1275,5 +1280,214 @@ describe("domains receiving", () => {
     // An instance that stops taking mail stops listing the record.
     vi.stubEnv("RECEIVING_MX_HOST", "");
     expect(await receivingRows(withApexMx([{ priority: 10, exchange: MX }]))).toEqual([]);
+  });
+});
+
+describe("domain warm-up", () => {
+  const NOW = new Date("2026-10-18T10:00:00Z");
+  const YESTERDAY = "2026-10-17";
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** A verified domain row of a fresh team, made without SES. */
+  async function warmupDomain(slug = "acme") {
+    const teamId = await createTeam(db, slug);
+    const [row] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: `news.${slug}.example.com`, region: "us-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!row) throw new Error("no domain");
+    return { teamId, id: row.id };
+  }
+
+  /** `n` broadcast rows of the domain parked for its warm-up, created at `createdAt`. */
+  async function parkRows(teamId: string, domainId: string, n: number, createdAt: Date) {
+    const [broadcast] = await db
+      .insert(schema.broadcasts)
+      .values({ teamId, from: "hi@news.example.com", subject: "s", status: "sending" })
+      .returning({ id: schema.broadcasts.id });
+    await db.insert(schema.emails).values(
+      Array.from({ length: n }, (_, i) => ({
+        teamId,
+        domainId,
+        broadcastId: broadcast?.id ?? null,
+        from: "hi@news.example.com",
+        to: [`r${i}@example.com`],
+        subject: "s",
+        latestStatus: "queued_quota" as const,
+        parkReason: "warmup" as const,
+        createdAt,
+      })),
+    );
+  }
+
+  it("keeps every procedure to the team's own domains", async () => {
+    const { id } = await warmupDomain("owner");
+    const stranger = callerFor(await createTeam(db, "other"), fakeSes().deps);
+    await expect(stranger.domains.warmup({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(stranger.domains.setWarmup({ id, action: "on" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      stranger.domains.updateWarmup({ id, settings: { dailyTarget: 5_000 } }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await db.select().from(schema.domainWarmups)).toEqual([]);
+  });
+
+  it("lets members read it, and only owners and admins change it", async () => {
+    const { teamId, id } = await warmupDomain();
+    const member = callerFor(teamId, fakeSes().deps, "member");
+    expect(await member.domains.warmup({ id })).toMatchObject({ status: "off", canManage: false });
+    await expect(member.domains.setWarmup({ id, action: "on" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(
+      member.domains.updateWarmup({ id, settings: { skipInactive: false } }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await callerFor(teamId, fakeSes().deps, "admin").domains.warmup({ id })).toMatchObject({
+      canManage: true,
+    });
+  });
+
+  it("turns on for a domain new to sending, and stays off by default", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const fresh = await caller.domains.create({
+      name: "new.example.com",
+      region: "us-east-1",
+      warmup: true,
+    });
+    const moved = await caller.domains.create({ name: "moved.example.com", region: "us-east-1" });
+    expect(await caller.domains.warmup({ id: fresh.id })).toMatchObject({
+      status: "warming",
+      volume: 1_500,
+      today: { day: "2026-10-18", allowance: 1_500, sent: 0, checked: true },
+    });
+    expect(await caller.domains.warmup({ id: moved.id })).toMatchObject({ status: "off" });
+  });
+
+  it("moves through on, pause, resume and off", async () => {
+    const { teamId, id } = await warmupDomain();
+    const caller = callerFor(teamId, fakeSes().deps);
+    const status = async () => (await caller.domains.warmup({ id })).status;
+    await caller.domains.setWarmup({ id, action: "on" });
+    expect(await status()).toBe("warming");
+    expect(await caller.domains.setWarmup({ id, action: "pause" })).toEqual({ changed: true });
+    expect(await status()).toBe("paused");
+    expect(await caller.domains.setWarmup({ id, action: "pause" })).toEqual({ changed: false });
+    await caller.domains.setWarmup({ id, action: "resume" });
+    expect(await status()).toBe("warming");
+    await caller.domains.setWarmup({ id, action: "off" });
+    expect(await status()).toBe("off");
+  });
+
+  it("checks settings at the boundary and against the stored other half", async () => {
+    const { teamId, id } = await warmupDomain();
+    const caller = callerFor(teamId, fakeSes().deps);
+    for (const settings of [{ dailyTarget: 999 }, { startVolume: 2.5 }]) {
+      await expect(caller.domains.updateWarmup({ id, settings })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+    await caller.domains.updateWarmup({
+      id,
+      settings: { dailyTarget: 5_000, orderProperty: " last_login_at " },
+    });
+    await expect(
+      caller.domains.updateWarmup({ id, settings: { startVolume: 6_000 } }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "warmup_settings_out_of_range" });
+    expect(await caller.domains.warmup({ id })).toMatchObject({
+      status: "off",
+      settings: { dailyTarget: 5_000, startVolume: 1_500, orderProperty: "last_login_at" },
+    });
+  });
+
+  it("previews a send to everyone while off, and lists the keys contacts carry", async () => {
+    const { teamId, id } = await warmupDomain();
+    await db.insert(schema.contacts).values([
+      { teamId, email: "a@example.com", properties: { plan: "pro", last_login_at: "2026-10-01" } },
+      { teamId, email: "b@example.com", properties: { plan: "" } },
+      { teamId, email: "c@example.com" },
+    ]);
+    const warmup = await callerFor(teamId, fakeSes().deps).domains.warmup({ id });
+    expect(warmup.preview).toEqual([{ day: "2026-10-18", count: 3 }]);
+    expect(warmup.properties).toEqual(["last_login_at", "plan"]);
+    expect(warmup.limits.dailyTarget).toEqual({ min: 1_000, max: 10_000_000 });
+  });
+
+  it("paces today from what went out, and dates the waiting mail by retention", async () => {
+    const { teamId, id } = await warmupDomain();
+    const caller = callerFor(teamId, fakeSes().deps);
+    await caller.domains.setWarmup({ id, action: "on" });
+    await db
+      .insert(schema.domainWarmupDays)
+      .values({ domainId: id, day: "2026-10-18", allowance: 4_800, sent: 1_200 });
+    await parkRows(teamId, id, 3, new Date("2026-10-17T12:00:00Z"));
+    await db.insert(schema.instanceSettings).values({ id: 1, emailRetentionDays: 10 });
+    const warmup = await caller.domains.warmup({ id });
+    // A 48th of 4,800 per 15-minute run: 1,200 took twelve runs, the 3 waiting take one.
+    expect(warmup.todayWindow).toEqual({
+      startsAt: new Date("2026-10-18T07:00:00Z"),
+      endsAt: new Date("2026-10-18T10:15:00Z"),
+    });
+    expect(warmup.waiting).toBe(3);
+    expect(warmup.waitingExpiresAt).toEqual(new Date("2026-10-27T12:00:00Z"));
+  });
+
+  it("reads the day that paused it, and nothing when the team paused it", async () => {
+    const { teamId, id } = await warmupDomain();
+    const caller = callerFor(teamId, fakeSes().deps);
+    await caller.domains.setWarmup({ id, action: "on" });
+    const signals = {
+      sent: { gmail: 600, other: 900 },
+      delays: { gmail: 0.3, other: 0.01, result: "severe" as const },
+      opens: { gmail: null, other: null, result: "unknown" as const },
+      hardBounces: { gmail: 0.01, other: 0.005, result: "within" as const },
+      mailboxFull: { gmail: 0, other: 0, result: "within" as const },
+      complaints: { gmail: null, other: 0, result: "within" as const },
+    };
+    const w = schema.domainWarmups;
+    await db
+      .update(w)
+      .set({
+        status: "paused",
+        startedAt: new Date(NOW.getTime() - 2 * DAY_MS),
+        pausedAt: NOW,
+        pauseSignals: signals,
+        sendingDays: 1,
+      })
+      .where(eq(w.domainId, id));
+    await db.insert(schema.domainWarmupDays).values({
+      domainId: id,
+      day: YESTERDAY,
+      allowance: 1_500,
+      sent: 1_500,
+      outcome: "paused",
+      signals,
+      checkedAt: NOW,
+    });
+    const warmup = await caller.domains.warmup({ id });
+    expect(warmup.health).toMatchObject({ day: YESTERDAY, sent: 1_500, yesterday: true });
+    expect(warmup.health?.signals[0]).toEqual({
+      key: "delays",
+      result: "severe",
+      figure: 0.3,
+      gmail: 0.3,
+      other: 0.01,
+    });
+    expect(warmup.pauseSignals?.map((s) => s.key)).toEqual([
+      "delays",
+      "opens",
+      "hardBounces",
+      "mailboxFull",
+      "complaints",
+    ]);
+    expect(warmup.resumeVolume).toBe(750);
+    await db.update(w).set({ pauseSignals: null }).where(eq(w.domainId, id));
+    expect((await caller.domains.warmup({ id })).health).toBeNull();
   });
 });

@@ -35,6 +35,144 @@
     "firstNote": "Os mais ativos primeiro",
     "today": "{allowance} saem · {sent} enviados até agora",
     "todayWindow": "{start} até cerca de {end}",
-    "todayWaiting": "Começa depois da verificação de hoje"
-  }
+    "todayWaiting": "Começa depois da verificação de hoje",
+    "lastAll": "últimos {count} · todos os contatos ativos alcançados"
+  },
+  "row": {
+    "warming": "Em aquecimento: {perDay}/dia hoje · dia {day}",
+    "warmingNote": "Os contatos mais ativos recebem primeiro. O volume cresce a cada dia de entrega saudável.",
+    "done": "Aquecimento concluído · {perDay}/dia desde {date}",
+    "doneNote": "As transmissões deste domínio saem na velocidade normal.",
+    "pausedTitle": "Aquecimento pausado.",
+    "pausedWaiting": "{waiting, plural, one {# e-mail espera} other {# e-mails esperam}} até você retomar.",
+    "pausedNothing": "As transmissões deste domínio esperam até você retomar."
+  },
+  "off": {
+    "row": "Sem aquecimento · o máximo enviado em um dia até agora: {count}",
+    "rowNote": "Ligue antes de um primeiro envio grande de um domínio ou subdomínio novo.",
+    "preview": "Uma transmissão para todos os {total} contatos sairia assim",
+    "previewActive": "{eligible} contatos ativos em cerca de {days, plural, one {# dia de envio} other {# dias de envio}}, os mais ativos primeiro.",
+    "previewAll": "{eligible} contatos em cerca de {days, plural, one {# dia de envio} other {# dias de envio}}, os mais ativos primeiro.",
+    "previewSkipped": "{inactive} sem atividade há mais de 90 dias ficam de fora.",
+    "previewLast": "{inactive} sem atividade há mais de 90 dias vão por último.",
+    "previewTail": "Cada dia saudável aumenta o volume em 1,5×. Seus e-mails transacionais nunca ficam retidos.",
+    "switch": "Aquecer este domínio",
+    "switchHint": "Envios grandes começam pequenos e crescem a cada dia enquanto a entrega estiver saudável. Deixe desligado se este domínio já envia esse volume por outro provedor."
+  },
+  "stats": {
+    "today": "Hoje",
+    "todaySub": "de {allowance} · até cerca de {time}",
+    "todaySubPlain": "de {allowance}",
+    "todaySubWaiting": "de {allowance} · começa depois da verificação de hoje",
+    "day": "Dia",
+    "daySub": "de cerca de {total}",
+    "sent": "Enviados no aquecimento",
+    "sentSub": "desde {date}",
+    "target": "Meta diária",
+    "targetSub": "volume total por volta de {date}",
+    "waiting": "Esperando",
+    "waitingSub": "e-mails de transmissões",
+    "paused": "Pausado",
+    "pausedSub": "depois do dia {day}"
+  },
+  "pace": {
+    "label": "Ritmo do aquecimento",
+    "note": "Cada dia saudável aumenta o volume em 1,5×. Um sinal fraco mantém o volume, dois reduzem em 30% e um grave pausa o aquecimento. O que passar do volume do dia espera o dia seguinte. Nada se perde. Seus e-mails transacionais nunca ficam retidos."
+  },
+  "health": {
+    "label": "Saúde da entrega · {day}",
+    "yesterday": "ontem",
+    "meta": "{sent} enviados · verificado em {time}",
+    "columns": {
+      "signal": "Sinal",
+      "result": "Resultado",
+      "gmail": "Gmail",
+      "other": "Outras caixas",
+      "line": "Limite"
+    },
+    "rows": {
+      "delays": "Atrasos na entrega",
+      "opens": "Aberturas, Gmail vs. outras",
+      "hardBounces": "Hard bounces",
+      "mailboxFull": "Caixas cheias ou inativas",
+      "complaints": "Denúncias de spam"
+    },
+    "results": {
+      "within": "Dentro",
+      "missed": "Fora",
+      "severe": "Grave",
+      "unknown": "Poucos e-mails"
+    },
+    "lines": {
+      "delays": "abaixo de 5%",
+      "opens": "pelo menos metade",
+      "hardBounces": "abaixo de 2%",
+      "mailboxFull": "abaixo de 2%",
+      "complaints": "abaixo de 0,05%"
+    },
+    "notReported": "não informado",
+    "tips": {
+      "opens": "Aberturas no Gmail comparadas com outras caixas no mesmo envio. Uma fração baixa é o sinal mais claro de que o Gmail está mandando para o spam. Pré-carregamentos automáticos não contam.",
+      "mailboxFull": "Caixas que responderam cheias ou inativas. Uma segunda resposta assim para os envios para o endereço.",
+      "complaints": "O Gmail não avisa os remetentes sobre denúncias de spam. Veja sua taxa de spam no Google Postmaster Tools."
+    },
+    "openTrackingOff": "Ligue o rastreamento de aberturas para ver este sinal.",
+    "footer": "O Gmail não compartilha a taxa de spam. Veja no <link>Google Postmaster Tools ↗</link>",
+    "pausedByTeam": "Sua equipe pausou este aquecimento em {date}."
+  },
+  "settings": {
+    "orderTitle": "Contatos mais ativos primeiro",
+    "orderHint": "O volume de cada dia vai para quem tem mais chance de abrir, pela atividade mais recente entre estes sinais.",
+    "byEngagement": "Abriu ou clicou nos seus e-mails",
+    "byTransactional": "Recebeu um e-mail transacional seu nos últimos 30 dias",
+    "byProperty": "Propriedade do contato",
+    "propertyPlaceholder": "Escolha uma propriedade",
+    "propertyCoverage": "preenchida em {count} de {total} contatos",
+    "propertyHint": "Use uma data, como o último login.",
+    "inactiveTitle": "Contatos inativos",
+    "inactiveHint": "{inactive} dos seus {total} contatos não têm atividade há mais de 90 dias. Enviar para eles de um domínio novo é o caminho mais rápido para o spam.",
+    "inactiveSkip": "Pular durante o aquecimento",
+    "inactiveLast": "Enviar por último",
+    "targetTitle": "Meta diária",
+    "targetHint": "O máximo que você pretende enviar em um dia. O aquecimento termina depois de um dia saudável nesse volume.",
+    "targetError": "Use um número inteiro de {min} a {max}, não menor que o volume inicial.",
+    "startTitle": "Volume inicial",
+    "startHint": "Quantos e-mails saem no dia 1. Aumente se este domínio já envia todo dia por outro provedor.",
+    "startError": "Use um número inteiro de {min} a {max}, não maior que a meta diária.",
+    "update": "Atualizar",
+    "controlTitle": "Pausar ou desligar",
+    "controlHint": "Pausado, os e-mails deste domínio esperam até você retomar. Desligado, o que estiver esperando sai na velocidade normal.",
+    "pause": "Pausar aquecimento",
+    "turnOff": "Desligar"
+  },
+  "turnOff": {
+    "title": "Desligar o aquecimento?",
+    "bodyWaiting": "{waiting, plural, one {# e-mail que está esperando vai} other {# e-mails que estão esperando vão}} sair na velocidade normal. Com {days, plural, one {# dia} other {# dias}} de histórico, um dia grande tende a cair no spam.",
+    "body": "Envios grandes deste domínio vão sair na velocidade normal.",
+    "keep": "Continuar aquecendo",
+    "confirm": "Desligar"
+  },
+  "paused": {
+    "beforeTitle": "Antes de retomar",
+    "beforeHint": "O Gmail julga um remetente novo pela reação dos primeiros destinatários.",
+    "who": "Para quem você envia",
+    "whoBody": "{pct} dos seus contatos não têm atividade há mais de 90 dias. Recomece pelos mais ativos.",
+    "whoLink": "Ver contatos",
+    "spam": "Sua taxa de spam no Gmail",
+    "spamBody": "O Gmail mostra essa taxa só no Google Postmaster Tools, com um dia de atraso. Acima de 0,3% o Gmail começa a recusar e-mails.",
+    "spamLink": "Abrir o Postmaster Tools ↗",
+    "dead": "Endereços mortos",
+    "deadBody": "Caixas cheias ou inativas param de receber seus e-mails depois de uma segunda resposta assim.",
+    "resumeTitle": "Retomar",
+    "resumeHint": "Recomeça com {volume} por dia. Os e-mails que estão esperando mantêm a ordem e ficam guardados até {date}.",
+    "resumeHintPlain": "Recomeça com {volume} por dia.",
+    "resume": "Retomar com {volume}/dia"
+  },
+  "done": {
+    "line": "Aquecimento concluído em {date}.",
+    "note": "As transmissões deste domínio saem na velocidade normal. Ligue o aquecimento de novo se for enviar bem mais que {target} por dia.",
+    "again": "Aquecer de novo"
+  },
+  "loadError": "Não foi possível carregar o aquecimento.",
+  "error": "Não foi possível mudar o aquecimento. Tente de novo."
 }
