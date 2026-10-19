@@ -98,7 +98,10 @@ describe("the OAuth consent page", () => {
     await h.db
       .update(schema.oauthClient)
       .set({
-        redirectUris: ["cursor://anysphere.cursor-mcp/oauth/callback", "com.example.app:/cb\u202Eexe"],
+        redirectUris: [
+          "cursor://anysphere.cursor-mcp/oauth/callback",
+          "com.example.app:/cb\u202Eexe",
+        ],
       })
       .where(eq(schema.oauthClient.clientId, "client-1"));
     const html = await renderConsent();
