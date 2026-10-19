@@ -1,7 +1,7 @@
 import { type Db, schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEngagement } from "@/app/t/record";
 
 // A person's phone fetching the pixel; without a user agent the fetch reads
@@ -149,5 +149,103 @@ describe("recordEngagement webhook fan-out", () => {
       .from(schema.emailEvents)
       .where(and(eq(schema.emailEvents.emailId, emailA), eq(schema.emailEvents.type, "opened")));
     expect(ev).toBeTruthy();
+  });
+});
+
+describe("recordEngagement and the contact's last engagement", () => {
+  async function engagedAt(contactId: string): Promise<Date | null> {
+    const [row] = await db
+      .select({ at: schema.contacts.lastEngagedAt })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, contactId));
+    return row?.at ?? null;
+  }
+
+  async function contact(teamId: string, email: string): Promise<string> {
+    const [row] = await db
+      .insert(schema.contacts)
+      .values({ teamId, email })
+      .returning({ id: schema.contacts.id });
+    return row?.id ?? "";
+  }
+
+  it("stamps a real open on the contact by address, and only in the email's team", async () => {
+    const teamId = await createTeam(db, "engaged");
+    const other = await createTeam(db, "engaged-other");
+    const mine = await contact(teamId, "R@example.com");
+    const theirs = await contact(other, "r@example.com");
+
+    await recordEngagement(db, await seedEmail(teamId), "opened", undefined, HUMAN);
+
+    expect(await engagedAt(mine)).toBeInstanceOf(Date);
+    expect(await engagedAt(theirs)).toBeNull();
+  });
+
+  it("stamps a broadcast copy's own contact on a click", async () => {
+    const teamId = await createTeam(db, "engaged-copy");
+    const id = await contact(teamId, "reader@example.com");
+    const [email] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        contactId: id,
+        from: "s@example.com",
+        to: ["r@example.com"],
+        subject: "Hi",
+      })
+      .returning({ id: schema.emails.id });
+
+    await recordEngagement(db, email?.id ?? "", "clicked", undefined, {
+      ...HUMAN,
+      link: "https://example.com/a",
+    });
+
+    expect(await engagedAt(id)).toBeInstanceOf(Date);
+  });
+
+  it("leaves it alone on a prefetch", async () => {
+    const teamId = await createTeam(db, "engaged-machine");
+    const id = await contact(teamId, "r@example.com");
+
+    await recordEngagement(db, await seedEmail(teamId), "opened", undefined, APPLE_MPP);
+
+    expect(await engagedAt(id)).toBeNull();
+  });
+
+  it("puts it back when a burst folds the click that moved it", async () => {
+    // The clock stands still between hits, so the second lands 10 ms after the first.
+    vi.useFakeTimers({ now: new Date().setUTCHours(12, 30, 0, 0), toFake: ["Date"] });
+    try {
+      const teamId = await createTeam(db, "engaged-burst");
+      const lastWeek = new Date(Date.now() - 7 * 24 * 3_600_000);
+      const [engaged] = await db
+        .insert(schema.contacts)
+        .values({ teamId, email: "reader@example.com", lastEngagedAt: lastWeek })
+        .returning({ id: schema.contacts.id });
+      const never = await contact(teamId, "never@example.com");
+      const copies = await db
+        .insert(schema.emails)
+        .values(
+          [engaged?.id ?? "", never].map((contactId) => ({
+            teamId,
+            contactId,
+            from: "s@example.com",
+            to: ["r@example.com"],
+            subject: "Hi",
+          })),
+        )
+        .returning({ id: schema.emails.id });
+      for (const copy of copies) {
+        for (const link of ["https://example.com/a", "https://example.com/b"]) {
+          await recordEngagement(db, copy.id, "clicked", undefined, { ...HUMAN, link });
+          vi.setSystemTime(Date.now() + 10);
+        }
+      }
+
+      expect(await engagedAt(engaged?.id ?? "")).toEqual(lastWeek);
+      expect(await engagedAt(never)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

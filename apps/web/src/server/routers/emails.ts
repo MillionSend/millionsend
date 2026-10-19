@@ -5,6 +5,7 @@ import {
   emitSuppressionEvents,
   fetchEmailInsights,
   findSuppressionsFor,
+  getWarmup,
   hashRecipient,
   utcDay,
 } from "@millionsend/core";
@@ -119,6 +120,16 @@ async function firstPageTotal(
 const HELD_SQL = sql<boolean>`(emails.broadcast_id is not null and emails.latest_status in ('queued', 'queued_quota') and exists (select 1 from domains d join region_breakers rb on rb.region = d.region and rb.paused where d.id = emails.domain_id))`;
 
 /**
+ * A suppression a full or inactive mailbox left: the API still reads it as a
+ * hard bounce, but the bounce behind it was a soft one, which suppresses only
+ * for that. Spelled out like HELD_SQL, over a select from suppressions; the
+ * team guard keeps a stray source id from reading another team's events.
+ */
+function fullMailboxSql(teamId: string): SQL<boolean> {
+  return sql<boolean>`(suppressions.reason = 'hard_bounce' and coalesce((select ev.bounce_type = 'Transient' from email_events ev join emails e on e.id = ev.email_id where ev.email_id = suppressions.source_email_id and e.team_id = ${teamId} and ev.type = 'bounced' order by ev.occurred_at desc, ev.id desc limit 1), false))`;
+}
+
+/**
  * What a row not yet handed to the provider is waiting for, for the detail's
  * estimated nodes. Never stored: it is the planner's view at read time.
  */
@@ -128,6 +139,8 @@ type PendingSend =
   | { kind: "plan"; resumesAt: Date }
   | { kind: "waiting" }
   | { kind: "warmup" }
+  | { kind: "warmupPaused" }
+  | { kind: "newDomainLimit" }
   | { kind: "held" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
@@ -138,6 +151,7 @@ async function pendingSend(
     latestStatus: string;
     sentAt: Date | null;
     scheduledAt: Date | null;
+    domainId: string | null;
     broadcastId: string | null;
     parkReason: string | null;
     held: boolean;
@@ -152,8 +166,16 @@ async function pendingSend(
       : { kind: "queued" };
   }
   if (email.latestStatus !== "queued_quota") return null;
-  // The sending domain's warm-up: it frees by itself, so no limit to raise.
-  if (email.parkReason === "warmup") return { kind: "warmup" };
+  // Both warm-ups free the row by themselves, so no limit to raise: a
+  // broadcast copy waits on its domain's own warm-up while that is on,
+  // anything else on the age-based limit of a newly registered domain.
+  if (email.parkReason === "warmup") {
+    const ramp =
+      email.domainId && email.broadcastId ? await getWarmup(db, teamId, email.domainId) : undefined;
+    if (ramp?.status === "warming") return { kind: "warmup" };
+    if (ramp?.status === "paused") return { kind: "warmupPaused" };
+    return { kind: "newDomainLimit" };
+  }
   // A hold by the team's own cap outranks capacity: its reset is the date.
   const hold = await planHoldUntil(db, teamId, now);
   if (hold) return { kind: "plan", resumesAt: hold };
@@ -437,6 +459,7 @@ export const emailsRouter = router({
             id: t.id,
             email: t.email,
             reason: t.reason,
+            fullMailbox: fullMailboxSql(ctx.teamId),
             createdAt: t.createdAt,
             cursorCreatedAt: createdAtCursorField(t),
           })
@@ -468,6 +491,7 @@ export const emailsRouter = router({
           id: t.id,
           email: t.email,
           reason: t.reason,
+          fullMailbox: fullMailboxSql(ctx.teamId),
           createdAt: t.createdAt,
           sourceEmailId: t.sourceEmailId,
         })
@@ -511,11 +535,24 @@ export const emailsRouter = router({
         .where(and(eq(e.id, input.emailId), eq(e.teamId, ctx.teamId)))
         .limit(1);
       if (!email) throw new TRPCError({ code: "NOT_FOUND" });
-      return findSuppressionsFor(ctx.db, ctx.teamId, [
+      const rows = await findSuppressionsFor(ctx.db, ctx.teamId, [
         ...email.to,
         ...(email.cc ?? []),
         ...(email.bcc ?? []),
       ]);
+      const bounced = rows.filter((row) => row.reason === "hard_bounce").map((row) => row.id);
+      const s = schema.suppressions;
+      const full = new Set(
+        bounced.length === 0
+          ? []
+          : (
+              await ctx.db
+                .select({ id: s.id })
+                .from(s)
+                .where(and(inArray(s.id, bounced), fullMailboxSql(ctx.teamId)))
+            ).map((row) => row.id),
+      );
+      return rows.map((row) => ({ ...row, fullMailbox: full.has(row.id) }));
     }),
 
     add: teamProcedure

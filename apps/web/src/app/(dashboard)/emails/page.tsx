@@ -9,6 +9,7 @@ import { ApiDocsButton } from "@/components/api-sheet";
 import { EmailsTable } from "@/components/emails-table";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
+import { GradientBanner } from "@/components/gradient-banner";
 import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import { PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
@@ -17,7 +18,6 @@ import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDay, formatHoursMinutes } from "@/lib/format";
 import { manyOf } from "@/lib/list-param";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
-import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
@@ -188,52 +188,38 @@ export default function EmailsPage() {
       />
 
       {capReached && cap ? (
-        <div
-          className="ms-wrap-row"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            backgroundColor: "var(--ms-ground)",
-            backgroundImage: statusGlow("warn"),
-            border: "1px solid var(--ms-warn-border)",
-            borderRadius: 12,
-            padding: "12px 16px",
-            marginBottom: 20,
-          }}
+        <GradientBanner
+          variant="warn"
+          title={t(cap.monthly ? "list.capBanner.reachedMonth" : "list.capBanner.reached", {
+            limit: nf.format(cap.limit),
+          })}
+          action={
+            // A daily limit exists only on the hosted cloud, so the billing page always exists here.
+            <Link
+              href="/settings/billing"
+              style={{
+                color: "var(--ms-bone)",
+                textDecoration: "underline dotted var(--ms-muted)",
+                textUnderlineOffset: 3,
+              }}
+            >
+              {t("list.capBanner.upgrade")}
+            </Link>
+          }
+          style={{ marginBottom: 20 }}
         >
-          <span style={{ fontSize: 13.5, color: "var(--ms-warn)" }}>
-            {t(cap.monthly ? "list.capBanner.reachedMonth" : "list.capBanner.reached", {
-              limit: nf.format(cap.limit),
-            })}
-          </span>
-          {stats.data && stats.data.queuedQuota > 0 ? (
-            <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
-              {cap.monthly && usage.data?.period
-                ? t("list.capBanner.queuedMonth", {
-                    count: nf.format(stats.data.queuedQuota),
-                    date: formatDay(usage.data.period.end, locale),
-                  })
-                : t("list.capBanner.queued", {
-                    count: nf.format(stats.data.queuedQuota),
-                    duration: formatHoursMinutes(msToUtcMidnight()),
-                  })}
-            </span>
-          ) : null}
-          {/* A daily limit exists only on the hosted cloud, so the billing page always exists here. */}
-          <Link
-            href="/settings/billing"
-            style={{
-              marginLeft: "auto",
-              fontSize: 13.5,
-              color: "var(--ms-bone)",
-              textDecoration: "underline dotted var(--ms-muted)",
-              textUnderlineOffset: 3,
-            }}
-          >
-            {t("list.capBanner.upgrade")}
-          </Link>
-        </div>
+          {stats.data && stats.data.queuedQuota > 0
+            ? cap.monthly && usage.data?.period
+              ? t("list.capBanner.queuedMonth", {
+                  count: nf.format(stats.data.queuedQuota),
+                  date: formatDay(usage.data.period.end, locale),
+                })
+              : t("list.capBanner.queued", {
+                  count: nf.format(stats.data.queuedQuota),
+                  duration: formatHoursMinutes(msToUtcMidnight()),
+                })
+            : null}
+        </GradientBanner>
       ) : null}
 
       {showSources ? (

@@ -97,3 +97,50 @@ describe("a delivery delay on the email timeline", () => {
     expect(html).not.toContain("connection failure");
   });
 });
+
+describe("a row a warm-up holds", () => {
+  const render = (kind: string) => {
+    data.email = {
+      id: "email-1",
+      from: "news@example.com",
+      to: ["recipient@example.com"],
+      cc: null,
+      bcc: null,
+      replyTo: null,
+      subject: "Hello",
+      tags: null,
+      apiKeyName: null,
+      broadcast: { id: "broadcast-1", name: "October news" },
+      pending: { kind },
+      latestStatus: "queued_quota",
+      createdAt: new Date("2026-03-02T10:00:00.000Z"),
+      sentAt: null,
+      events: [],
+    };
+    return renderToStaticMarkup(createElement(EmailDetailPage));
+  };
+  const WARMING = "This domain sends a little more each day, most active contacts first.";
+  const PAUSED = "Waiting for the warm-up to resume";
+  const NEW_DOMAIN = "Newly registered domains send a little more each day.";
+
+  it("waits on the domain's own warm-up while it warms", () => {
+    const html = render("warmup");
+    expect(html).toContain(WARMING);
+    expect(html).not.toContain(PAUSED);
+    expect(html).not.toContain(NEW_DOMAIN);
+  });
+
+  it("waits for a paused warm-up to resume", () => {
+    const html = render("warmupPaused");
+    expect(html).toContain(PAUSED);
+    expect(html).toContain("This email goes out after it resumes.");
+    expect(html).not.toContain(WARMING);
+  });
+
+  it("waits on the new domain limit otherwise", () => {
+    const html = render("newDomainLimit");
+    expect(html).toContain(NEW_DOMAIN);
+    expect(html).not.toContain(WARMING);
+    expect(html).not.toContain(PAUSED);
+  });
+});

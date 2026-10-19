@@ -30,6 +30,7 @@ const standing = (over: Partial<TeamStandingRow> & { teamId: string }): TeamStan
   complaintRate7d: 0,
   hardBounceRate7d: 0,
   sent7d: 1_000,
+  complaintSent7d: 600,
   sent30d: 4_000,
   monitorRisk: null,
   monitorSamples: 0,
@@ -50,7 +51,9 @@ describe("flagTrigger", () => {
     });
   });
   it("complaints at SES's review line flag as complaints/complaint", () => {
-    expect(flagTrigger(standing({ teamId: id, complaintRate7d: 0.001, sent7d: 100 }))).toEqual({
+    expect(
+      flagTrigger(standing({ teamId: id, complaintRate7d: 0.001, complaintSent7d: 100 })),
+    ).toEqual({
       reason: "complaints",
       detail: { metric: "complaint", rate: 0.001 },
     });
@@ -62,7 +65,23 @@ describe("flagTrigger", () => {
     });
   });
   it("stays quiet below the volume floor, whatever the rate", () => {
-    expect(flagTrigger(standing({ teamId: id, complaintRate7d: 0.5, sent7d: 99 }))).toBeNull();
+    expect(
+      flagTrigger(standing({ teamId: id, complaintRate7d: 0.5, sent7d: 99, complaintSent7d: 99 })),
+    ).toBeNull();
+    expect(flagTrigger(standing({ teamId: id, hardBounceRate7d: 0.5, sent7d: 99 }))).toBeNull();
+  });
+  it("judges complaints on the sends that could draw one, hard bounces on every send", () => {
+    // Mostly Gmail: one complaint over 40 sends that could report one reads 2.5%.
+    expect(
+      flagTrigger(
+        standing({ teamId: id, sent7d: 5_000, complaintSent7d: 40, complaintRate7d: 1 / 40 }),
+      ),
+    ).toBeNull();
+    expect(
+      flagTrigger(
+        standing({ teamId: id, sent7d: 100, complaintSent7d: 0, hardBounceRate7d: 0.05 }),
+      ),
+    ).toEqual({ reason: "complaints", detail: { metric: "hard_bounce", rate: 0.05 } });
   });
   it("a score under 5 flags; 5 does not", () => {
     expect(flagTrigger(standing({ teamId: id, scoreTenths: 49 }))).toEqual({
@@ -354,18 +373,22 @@ describe("standings", () => {
     const now = new Date("2026-09-15T12:00:00Z");
     await db
       .insert(schema.usageCounters)
-      .values({ teamId, day: utcDay(now), sent: 200, complained: 1 });
+      .values({ teamId, day: utcDay(now), sent: 200, sentNoFeedback: 150, complained: 1 });
     const rows = await computeTeamStandings(db, now);
     expect(rows.filter((r) => r.teamId === teamId)).toMatchObject([
       {
         teamId,
         guardrail: "ok",
-        complaintRate7d: 0.005,
+        complaintRate7d: 0.02,
         hardBounceRate7d: 0,
         sent7d: 200,
+        complaintSent7d: 50,
         sent30d: 200,
       },
     ]);
+    // 2% clears the review line, but over 50 sends that could draw a complaint.
+    const row = rows.find((r) => r.teamId === teamId);
+    expect(row && flagTrigger(row)).toBeNull();
   });
 });
 

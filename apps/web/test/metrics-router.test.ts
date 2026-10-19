@@ -246,6 +246,34 @@ describe("metrics.window", () => {
   });
 });
 
+describe("metrics.window complaints", () => {
+  it("counts the complaint card's UTC days over the sends that could draw a complaint", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.usageCounters).values([
+      { teamId, day: utcDay(0), sent: 3_000, sentNoFeedback: 1_000, complained: 1 },
+      { teamId, day: utcDay(2), sent: 500, sentNoFeedback: 500 },
+      { teamId, day: utcDay(20), sent: 999, complained: 9 },
+    ]);
+
+    const { complaints } = await callerFor(teamId).metrics.window();
+
+    expect(complaints.days).toHaveLength(15);
+    expect(complaints.days[0]?.day).toBe(utcDay(14));
+    expect(complaints.days[14]).toEqual({ day: utcDay(0), complaintSent: 2_000, complained: 1 });
+    expect(complaints.days[13]).toEqual({ day: utcDay(1), complaintSent: 0, complained: 0 });
+    expect(complaints.days[12]).toEqual({ day: utcDay(2), complaintSent: 0, complained: 0 });
+    expect(complaints).toMatchObject({
+      sent: 3_500,
+      complaintSent: 2_000,
+      complained: 1,
+      today: utcDay(0),
+    });
+    // UTC days whatever the viewer's zone: the daily table holds no hours.
+    const tokyo = await callerFor(teamId).metrics.window({ tz: "Asia/Tokyo" });
+    expect(tokyo.complaints).toEqual(complaints);
+  });
+});
+
 describe("metrics.health", () => {
   it("pauses when the hard-bounce rate crosses the SES enforcement line", async () => {
     const teamId = await createTeam(db, "acme");
@@ -382,5 +410,23 @@ describe("metrics.accountScoreDetails", () => {
         liftTenths: 4,
       },
     ]);
+  });
+
+  it("judges complaints only once enough sends could draw one", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId, day: utcDay(0), sent: 1_000, sentNoFeedback: 950, complained: 1 });
+
+    const few = await callerFor(teamId).metrics.accountScoreDetails();
+    expect(few).toMatchObject({ sent: 1_000, complaintSent: 50, complaintsJudged: false });
+    expect(few.complaintRate).toBeCloseTo(1 / 50);
+    // Reported, never charged: the outcome keeps its full 10.
+    expect(few.outcomeScoreTenths).toBe(100);
+
+    await db.update(schema.usageCounters).set({ sentNoFeedback: 900 });
+    const enough = await callerFor(teamId).metrics.accountScoreDetails();
+    expect(enough).toMatchObject({ complaintSent: 100, complaintsJudged: true });
+    expect(enough.outcomeScoreTenths).toBeLessThan(100);
   });
 });

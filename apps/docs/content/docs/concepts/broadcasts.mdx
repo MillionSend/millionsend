@@ -45,6 +45,13 @@ plus broadcast-specific handling:
   per-recipient with their hosted unsubscribe URL.
   `{{{RESEND_UNSUBSCRIBE_URL}}}` is a supported alias, so templates written
   for Resend keep working unchanged (and roll back unchanged).
+- **List headers**: every message carries `List-Id`, `Precedence: bulk` and
+  `Auto-Submitted: auto-generated`, so mailbox providers file it as list
+  mail. `List-Id` names the list rather than the send:
+  `<{topic_id}.example.com>` for a broadcast to a topic and
+  `<broadcasts.example.com>` for the rest, where `example.com` is your
+  sending domain. Every broadcast to the same list builds the same list's
+  reputation.
 
 Broadcast emails enter the send queue below transactional ones: a
 transactional email accepted while a broadcast is going out is sent ahead of
@@ -82,16 +89,62 @@ The send tells you up front:
 
 - `finishes_at` is the estimated instant the last email goes out; `null` when
   no estimate is available. It is an estimate: other sends move it.
-- `warning` is present only when the send takes more than one wave —
+- `warning` is present only when the send takes more than one wave:
   `paced` when the audience exceeds the capacity available now,
   `queued_behind` when other sends are ahead (the message says when this one
-  starts).
+  starts). A domain warming up answers `warming_up` instead (see
+  [Warm-up](#warm-up)).
 - While a broadcast is going out, `GET /broadcasts/{id}` and the list carry a
   live `finishes_at` and `sent_count`.
 - An audience that would need more than 24 days of capacity — the
   platform's, or your plan's — is refused with `422 broadcast_too_large`
   instead of accepted and left waiting. Split it into smaller segments or
   contact support.
+
+## Warm-up
+
+When the sending domain's [warm-up](/concepts/domains#warm-up) is on, a
+broadcast goes out over days: each day sends up to that day's volume, most
+active contacts first, and contacts inactive for 90 days or more are skipped
+unless the warm-up sends them last. The **Send broadcast** dialog shows the
+plan day by day before you send. For a domain with no warm-up, it offers one
+when a broadcast is far bigger than anything the domain has sent in a day.
+
+The send response carries `warning.code` `warming_up`:
+
+```json
+{
+  "id": "8c1f0b8e-…",
+  "finishes_at": "2026-10-24T19:45:00Z",
+  "estimated": true,
+  "warning": {
+    "code": "warming_up",
+    "days": 6,
+    "message": "This domain is warming up, so this broadcast goes out over about 6 days, most active contacts first."
+  }
+}
+```
+
+- `finishes_at` comes from the warm-up's plan, which counts on every day
+  being healthy. A day that holds or cuts the volume moves it later.
+- While the warm-up is paused, `days` is `0` and `finishes_at` is `null`. The
+  broadcast waits until the warm-up resumes.
+- As with pacing, a broadcast the warm-up would need more than 24 days to
+  send is refused with `422 broadcast_too_large`. Raise the daily target or
+  send to a smaller segment.
+
+The broadcast page shows the warm-up's pace day by day, how many inactive
+contacts were skipped and, when a day missed a signal, why the volume held or
+was cut. Mail waiting for the warm-up shows as **Waiting**.
+
+## By inbox provider
+
+The broadcast page splits the broadcast's mail by inbox provider: Gmail,
+Microsoft, Yahoo, Apple and Other, each with how many emails were sent,
+delivered, opened, clicked, bounced and delayed. It groups by the
+recipient's address, so a company domain whose mail Google or Microsoft
+hosts counts as Other. Opens count people only, never a machine's prefetch,
+and bounces count hard bounces only.
 
 ## Guardrails
 
@@ -100,7 +153,10 @@ The send tells you up front:
   too, but sending a broadcast from it answers `403 inbox_send_policy`.
 - If your trailing bounce or complaint rate has crossed the SES pause
   threshold, new broadcast sends are blocked with a `403 sending_paused`
-  error — stopping the damage before SES pauses sending entirely.
+  error, stopping the damage before SES pauses sending entirely. The
+  complaint rate counts only mail to providers that report complaints
+  (Gmail, Apple Mail and t-online never do), and complaints count toward a
+  warning or this pause only once there are 100 such sends.
 - If the platform's aggregate bounce or complaint rate in your sender's SES
   region nears the line where SES acts on the account, broadcast sends in
   that region are refused with
@@ -111,6 +167,15 @@ See the [API reference](/api-reference) for all broadcast endpoints.
 
 ## Recent changes
 
+- A broadcast from a domain [warming up](#warm-up) goes out over days. The
+  send response carries `warning.code` `warming_up`, and one the warm-up
+  would need more than 24 days to send is refused with
+  `422 broadcast_too_large`.
+- `List-Id` names the topic, or the sending domain, instead of each
+  broadcast, so every broadcast to the same list carries the same one.
+- The broadcast page splits delivery [by inbox provider](#by-inbox-provider).
+- The complaint rate behind `403 sending_paused` counts only mail to
+  providers that report complaints, and only once there are 100 such sends.
 - A broadcast with emails still waiting — for capacity, or for the plan's
   cap to reset — reads `queued` with `sent_at` null until its last email has
   gone out. It used to read `sent` as soon as every email was written.

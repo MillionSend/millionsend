@@ -22,6 +22,11 @@ marked you as spam.
 Bounces and complaints arrive as SES events and suppress the address
 automatically. Suppressions are per team.
 
+When a receiving server answers that a mailbox is inactive, the address is
+suppressed at once. When it answers twice, a day to 30 days apart, that a
+contact's mailbox is full, the address is suppressed too. Both are listed as
+hard bounces (`origin: "bounce"`) but don't count toward your bounce rate.
+
 ## What suppression does
 
 - **Transactional sends** (`POST /emails` and the SMTP relay, without a

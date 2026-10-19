@@ -18,7 +18,12 @@
   "complaint": {
     "title": "Complaint rate",
     "risk": "RISK {rate}",
-    "complained": "Complained"
+    "complained": "Complained",
+    "window": "last {days} UTC days",
+    "ofReportable": "{count} of {sent} to inboxes that report spam",
+    "noReports": "To inboxes that don't report spam",
+    "notCounted": "not counted",
+    "noReportsHint": "Gmail, iCloud and t-online never tell senders when someone marks mail as spam, so mail to them stays out of the rate."
   },
   "engagement": {
     "denominator": "of delivered"
@@ -59,7 +64,10 @@
       "noFactors": "Every check passes on every scored email.",
       "passing": "{count, plural, one {# check passing} other {# checks passing}} across the whole volume",
       "outcomeSection": "Outcome · rates against the lines",
-      "outcomeNote": "Rates over {sent} sends. The lines follow Google Postmaster: keep complaints under 0.10% and never reach 0.30%.",
+      "complaintBasis": "over {sent} sends to inboxes that report spam",
+      "bounceBasis": "over {sent} sends",
+      "complaintsTooFew": "Not enough mail to inboxes that report spam to judge complaints yet.",
+      "outcomeNote": "The lines follow Google Postmaster: keep complaints under 0.10% and never reach 0.30%.",
       "lift": "How to raise",
       "liftLine": "{title} · account score to {score}",
       "liftNone": "Nothing left to gain from content. What remains is in the outcome rates.",

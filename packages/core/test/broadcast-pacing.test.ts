@@ -12,9 +12,12 @@ import {
   regionDailyPeaks,
   rungThatFits,
   sendingBroadcasts,
+  warmupBroadcastPlans,
+  warmupPastHorizon,
 } from "../src/broadcast-pacing.js";
 import { type PlanCap, planBulkWaves } from "../src/ses-capacity.js";
 import { utcDay } from "../src/utc-day.js";
+import { enableWarmup, pauseWarmup } from "../src/warmup-ramp.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -94,6 +97,8 @@ it("lists the sending broadcasts of a region with their rows by state", async ()
       teamId,
       scheduledAt: ago(30),
       region: "sa-east-1",
+      domainId,
+      warmup: null,
       queued: 2,
       parked: 3,
       sent: 4,
@@ -208,4 +213,138 @@ it("reads the transactional volume off our own rows while SES's number lags, on 
   expect(plan.share).toBe(Number.POSITIVE_INFINITY);
   // SES has seen two of our four sends; three of the four are bulk.
   expect(plan.txPerDay).toBe(1);
+});
+
+it("leaves a warming domain's broadcast out of the region model and plans it by its warm-up", async () => {
+  // Seven a day for broadcasts, three of them already spent in the window.
+  const finish = async () =>
+    (
+      await planRegionSend(db, {
+        region: "sa-east-1",
+        account: { max24h: 10, sentLast24h: 0, maxSendRate: 14 },
+        reservePercent: 30,
+        rateCeiling: 14,
+        horizonDays: 24,
+        now: NOW,
+        newSend: { key: "new", count: 10, at: NOW },
+      })
+    ).estimates.find((e) => e.key === "new")?.finishesAt;
+  const alone = await finish();
+
+  const warmTeam = await createTeam(db, "pacing-warm");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({ teamId: warmTeam, name: "warm.example", region: "sa-east-1", status: "verified" })
+    .returning({ id: schema.domains.id });
+  const [warm] = await db
+    .insert(schema.broadcasts)
+    .values({
+      teamId: warmTeam,
+      from: "hi@warm.example",
+      subject: "s",
+      status: "sending",
+      scheduledAt: ago(10),
+    })
+    .returning({ id: schema.broadcasts.id });
+  if (!domain || !warm) throw new Error("seed failed");
+  await db.insert(schema.emails).values(
+    Array.from({ length: 20 }, () => ({
+      teamId: warmTeam,
+      domainId: domain.id,
+      broadcastId: warm.id,
+      from: "hi@warm.example",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued_quota" as const,
+      parkReason: "warmup" as const,
+    })),
+  );
+  // Out of a warm-up, its rows share the region's room with the new send.
+  expect((await finish())?.getTime()).toBeGreaterThan(alone?.getTime() ?? 0);
+
+  await enableWarmup(db, {
+    teamId: warmTeam,
+    domainId: domain.id,
+    settings: { startVolume: 100, dailyTarget: 1_000 },
+    now: NOW,
+  });
+  expect(await finish()).toEqual(alone);
+  const sending = await sendingBroadcasts(db, { region: "sa-east-1" });
+  expect(sending.find((b) => b.id === warm.id)).toMatchObject({
+    domainId: domain.id,
+    warmup: "warming",
+    parked: 20,
+  });
+  // 100 today, a 48th per quarter hour from 12:14: the 20 go out over seven runs.
+  const plans = await warmupBroadcastPlans(db, sending, NOW);
+  expect(plans.get(warm.id)).toEqual({
+    perDay: [{ day: "2026-09-16", count: 20 }],
+    days: 1,
+    finishesAt: new Date("2026-09-16T13:44:00Z"),
+  });
+  expect(plans.has(broadcastId)).toBe(false);
+
+  await pauseWarmup(db, { teamId: warmTeam, domainId: domain.id, now: NOW });
+  const paused = await warmupBroadcastPlans(
+    db,
+    await sendingBroadcasts(db, { region: "sa-east-1" }),
+    NOW,
+  );
+  expect(paused.get(warm.id)).toEqual({ perDay: [], days: 0, finishesAt: null });
+  expect(await finish()).toEqual(alone);
+});
+
+it("plans a warming domain's broadcasts in the drain's order, the newer one's mail never ahead of the older", async () => {
+  const team = await createTeam(db, "pacing-order");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({ teamId: team, name: "order.example", region: "sa-east-1", status: "verified" })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("seed failed");
+  await enableWarmup(db, {
+    teamId: team,
+    domainId: domain.id,
+    settings: { startVolume: 100, dailyTarget: 1_000 },
+    now: NOW,
+  });
+  const parkedBroadcast = async (scheduledAt: Date, n: number) => {
+    const [b] = await db
+      .insert(schema.broadcasts)
+      .values({
+        teamId: team,
+        from: "hi@order.example",
+        subject: "s",
+        status: "sending",
+        scheduledAt,
+      })
+      .returning({ id: schema.broadcasts.id });
+    if (!b) throw new Error("seed failed");
+    await db.insert(schema.emails).values(
+      Array.from({ length: n }, () => ({
+        teamId: team,
+        domainId: domain.id,
+        broadcastId: b.id,
+        from: "hi@order.example",
+        to: ["r@example.com"],
+        subject: "s",
+        latestStatus: "queued_quota" as const,
+        parkReason: "warmup" as const,
+      })),
+    );
+    return b.id;
+  };
+  const older = await parkedBroadcast(ago(60), 20);
+  const newer = await parkedBroadcast(ago(5), 30);
+  const plans = await warmupBroadcastPlans(db, await sendingBroadcasts(db, { teamId: team }), NOW);
+  // 100 today at 3 a run from 12:14: the older 20 go over seven runs, the newer 30 after them.
+  expect(plans.get(older)?.finishesAt).toEqual(new Date("2026-09-16T13:44:00Z"));
+  expect(plans.get(newer)?.finishesAt).toEqual(new Date("2026-09-16T16:14:00Z"));
+});
+
+it("refuses a warm-up plan past the horizon, never a paused one", () => {
+  expect(warmupPastHorizon({ perDay: [], days: 24, finishesAt: new Date() }, 24)).toBe(false);
+  expect(warmupPastHorizon({ perDay: [], days: 25, finishesAt: new Date() }, 24)).toBe(true);
+  // Past the planner's reach there is no finish at all.
+  expect(warmupPastHorizon({ perDay: [], days: 366, finishesAt: null }, 24)).toBe(true);
+  expect(warmupPastHorizon({ perDay: [], days: 0, finishesAt: null }, 24)).toBe(false);
 });

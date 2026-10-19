@@ -51,6 +51,13 @@
     "recommended": "Recomendado",
     "regionHint": "Os domínios são provisionados em uma das regiões do SES que esta instalação atende. Cada domínio tem uma região: para mudá-la, exclua o domínio e adicione de novo.",
     "regionSandbox": "sandbox — sem acesso de produção",
+    "sentBefore": {
+      "question": "Este domínio já enviou e-mails?",
+      "yes": "Sim, por outro provedor",
+      "yesHint": "Sem aquecimento. Ele mantém a reputação que já tem.",
+      "no": "Não, é novo",
+      "noHint": "Envios grandes começam pequenos e crescem a cada dia enquanto a entrega estiver saudável. Dá para mudar depois."
+    },
     "advanced": "Opções avançadas",
     "returnPath": "Return-Path personalizado",
     "returnPathHint": "Usado para autenticação SPF, alinhamento DMARC e bounces. Evite valores que prejudiquem a credibilidade (ex.: <code>testing</code>) — eles podem ficar visíveis aos destinatários.",
@@ -87,7 +94,8 @@
     "region": "Região",
     "tabs": {
       "records": "Registros",
-      "configuration": "Configuração"
+      "configuration": "Configuração",
+      "warmup": "Aquecimento"
     },
     "recordsHeading": "Adicione estes registros em {provider}",
     "recordsHeadingGeneric": "Adicione estes registros no seu provedor de DNS",
@@ -175,10 +183,12 @@
     "bannerLookingBodyGeneric": "Isso pode levar algumas horas, dependendo do tempo de propagação do seu provedor de DNS.",
     "bannerVerified": "Domínio verificado.",
     "bannerVerifiedBody": "Pronto para enviar e-mails.",
-    "warmup": "Em aquecimento: {perDay}/dia hoje · volume total a partir de {date}",
-    "warmupToday": "Em aquecimento: {perDay}/dia hoje",
-    "warmupBody": "O aumento gradual protege a entregabilidade de domínios novos.",
-    "warmupBodyShared": "O aumento gradual protege a entregabilidade de domínios novos. O volume diário é compartilhado entre os domínios novos da sua equipe.",
+    "newDomainLimit": {
+      "line": "Limite de domínio novo: {perDay}/dia hoje · volume total a partir de {date}",
+      "today": "Limite de domínio novo: {perDay}/dia hoje",
+      "body": "Domínios registrados há pouco enviam um pouco mais a cada dia.",
+      "bodyShared": "Domínios registrados há pouco enviam um pouco mais a cada dia. Os domínios novos da sua equipe dividem esse volume diário."
+    },
     "deleteDomain": "Excluir domínio",
     "deleteBody": "Isso exclui permanentemente o domínio e sua configuração DNS. O envio a partir dele para imediatamente.",
     "deleteConfirmLabel": "Digite o domínio para confirmar",

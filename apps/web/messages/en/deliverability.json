@@ -18,6 +18,7 @@
     "operatorPaused": "Broadcasts are paused for this team by the instance operator. Transactional email is unaffected.",
     "regionHeld": "Broadcasts can't be sent right now. Sending resumes automatically; try again later. Transactional email is unaffected.",
     "tooLarge": "This audience needs more than {days} days of sending capacity. Split it into smaller segments or contact support.",
-    "tooLargeSelfHost": "This audience needs more than {days} days of sending capacity. Split it into smaller segments or ask your instance operator for more capacity."
+    "tooLargeSelfHost": "This audience needs more than {days} days of sending capacity. Split it into smaller segments or ask your instance operator for more capacity.",
+    "warmupTooLong": "At this warm-up's pace this broadcast needs more than {days} days. Raise the daily target or send to a smaller segment."
   }
 }

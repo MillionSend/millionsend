@@ -902,9 +902,13 @@ async function sendQueued(
   }
   // Bulk-mail class signals (RFC 2919 List-Id, RFC 3834 Auto-Submitted, and
   // Precedence) so mailbox providers file broadcasts as list mail. Only for
-  // broadcast rows — transactional sends must not carry them.
+  // broadcast rows — transactional sends must not carry them. The List-Id
+  // names the list, not the send: one per topic, one for the rest, so every
+  // broadcast to the same people builds the same list's reputation.
   if (email.broadcastId && email.contactId) {
-    if (domain?.name) headers["List-Id"] = `<${email.broadcastId}.${domain.name}>`;
+    if (domain?.name) {
+      headers["List-Id"] = `<${eligibility.topicId ?? "broadcasts"}.${domain.name}>`.toLowerCase();
+    }
     headers.Precedence = "bulk";
     headers["Auto-Submitted"] = "auto-generated";
   }

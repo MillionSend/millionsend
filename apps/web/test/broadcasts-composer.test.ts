@@ -47,6 +47,8 @@ vi.mock("@/components/modal", () => ({
 }));
 
 const { BroadcastComposer } = await import("@/app/(dashboard)/broadcasts/composer");
+const { SendPlanSummary } = await import("@/app/(dashboard)/broadcasts/parts");
+type SendPlanWarmup = import("@/app/(dashboard)/broadcasts/parts").SendPlanWarmup;
 
 const MAILY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 const HTML_ROW = {
@@ -80,5 +82,80 @@ describe("broadcast composer body mode", () => {
     );
     expect(out).toContain("data-block-editor");
     expect(out).not.toContain("templates.html.banner");
+  });
+});
+
+describe("send dialog warm-up", () => {
+  const offer = (over: Partial<SendPlanWarmup> = {}): SendPlanWarmup => ({
+    status: "off",
+    domain: "news.example.com",
+    bestDay: 0,
+    eligible: 9_000,
+    inactive: 1_200,
+    inactiveSince: new Date("2026-07-20T12:00:00Z"),
+    skipInactive: true,
+    risky: true,
+    plan: {
+      perDay: [
+        { day: "2026-10-18", count: 1_500 },
+        { day: "2026-10-19", count: 2_300 },
+        { day: "2026-10-20", count: 4_000 },
+      ],
+      days: 3,
+      finishesAt: new Date("2026-10-20T10:00:00Z"),
+    },
+    blocked: false,
+    horizonDays: 24,
+    ...over,
+  });
+  const render = (props: Partial<Parameters<typeof SendPlanSummary>[0]>) =>
+    renderToStaticMarkup(
+      createElement(SendPlanSummary, {
+        count: 9_000,
+        estimate: null,
+        cloud: true,
+        locale: "en",
+        now: new Date("2026-10-18T09:00:00Z"),
+        ...props,
+      }),
+    );
+
+  it("offers a risky send a warm-up first: its plan, the inactive choice and why", () => {
+    const out = render({ warmup: offer() });
+    expect(out).toContain("broadcasts.guard.riskNoticeNew");
+    expect(out).toContain("warmup.off.switch");
+    expect(out).toContain("broadcasts.guard.recommended");
+    expect(out).toContain("broadcasts.guard.optionNormal");
+    expect(out).toContain('aria-label="broadcasts.guard.warmupPlan"');
+    expect(out).toContain("broadcasts.guard.inactiveLabel");
+    expect(out).toContain("broadcasts.guard.warmupReason");
+    // With history, the notice names the domain's best day.
+    expect(render({ warmup: offer({ bestDay: 840 }) })).toContain("broadcasts.guard.riskNotice<");
+    // The normal pace drops the warm-up's rail and inactive row.
+    const normal = render({ warmup: offer(), pace: "normal" });
+    expect(normal).not.toContain("broadcasts.guard.warmupPlan");
+    expect(normal).not.toContain("broadcasts.guard.inactiveLabel");
+  });
+
+  it("shows a warming domain's own plan with no choice, and a paused one's wait with no plan", () => {
+    const warming = render({ warmup: offer({ status: "warming", risky: false }) });
+    expect(warming).toContain("broadcasts.guard.warmingIntro");
+    expect(warming).not.toContain("warmup.off.switch");
+    expect(warming).toContain("broadcasts.guard.warmupPlan");
+    const paused = render({
+      warmup: offer({
+        status: "paused",
+        risky: false,
+        plan: { perDay: [], days: 0, finishesAt: null },
+      }),
+    });
+    expect(paused).toContain("broadcasts.guard.pausedIntro");
+    expect(paused).not.toContain("broadcasts.guard.warmupPlan");
+    expect(paused).not.toContain("ms-field-error");
+  });
+
+  it("refuses a warm-up past the horizon in place", () => {
+    const out = render({ warmup: offer({ status: "warming", risky: false, blocked: true }) });
+    expect(out).toContain("deliverability.sendGuard.warmupTooLong");
   });
 });

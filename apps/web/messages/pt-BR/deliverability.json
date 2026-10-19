@@ -18,6 +18,7 @@
     "operatorPaused": "As transmissões desta equipe estão pausadas pelo operador da instância. E-mails transacionais não são afetados.",
     "regionHeld": "Não é possível enviar transmissões agora. O envio volta automaticamente; tente de novo mais tarde. E-mails transacionais não são afetados.",
     "tooLarge": "Esta audiência precisa de mais de {days} dias de capacidade de envio. Divida em segmentos menores ou fale com o suporte.",
-    "tooLargeSelfHost": "Esta audiência precisa de mais de {days} dias de capacidade de envio. Divida em segmentos menores ou peça mais capacidade ao operador da instância."
+    "tooLargeSelfHost": "Esta audiência precisa de mais de {days} dias de capacidade de envio. Divida em segmentos menores ou peça mais capacidade ao operador da instância.",
+    "warmupTooLong": "No ritmo deste aquecimento, esta transmissão precisa de mais de {days} dias. Aumente a meta diária ou envie para um segmento menor."
   }
 }

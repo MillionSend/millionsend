@@ -407,6 +407,8 @@ await queue.scheduleCrons({
       enqueueSends,
       sesQuota: sendControls,
       finalize: (id) => finalizeBroadcast(db, { mailer, appBaseUrl: env.APP_BASE_URL }, id),
+      mailer,
+      appBaseUrl: env.APP_BASE_URL,
     });
     console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
   },

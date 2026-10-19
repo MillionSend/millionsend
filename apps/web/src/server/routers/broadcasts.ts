@@ -2,9 +2,11 @@ import { env, isCloudDeployment } from "@millionsend/config";
 import {
   acceptEmail,
   applyMergeFields,
+  broadcastProviderBreakdown,
   cancelBroadcastRows,
   DAY_MS,
   emailInsightsView,
+  enableWarmup,
   fetchBroadcastInsights,
   fetchTeamStanding,
   injectPreheader,
@@ -32,10 +34,12 @@ import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
 import type { AppLocale } from "../../i18n/request";
 import { fetchQuotaRow } from "../billing";
 import {
+  broadcastWarmup,
   heldBroadcastIds,
   planBroadcastSend,
   planHoldUntil,
   sendingProgress,
+  warmupSendPlan,
 } from "../broadcast-plan";
 import { resolveEditorSave } from "../email-content";
 import { inboxSendDeps, userActor } from "../inboxes";
@@ -135,6 +139,15 @@ async function horizonGuard(
     message: t(isCloudDeployment() ? "sendGuard.tooLarge" : "sendGuard.tooLargeSelfHost", {
       days: plan.estimate.horizonDays,
     }),
+  });
+}
+
+/** The horizon refusal for a send whose domain's warm-up, not capacity, sets its pace. */
+async function warmupHorizonError(horizonDays: number): Promise<TRPCError> {
+  const { t } = await sendGuardTranslator();
+  return new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: t("sendGuard.warmupTooLong", { days: horizonDays }),
   });
 }
 
@@ -342,17 +355,20 @@ export const broadcastsRouter = router({
     // Opened likewise includes clicked; both count people only, since a
     // prefetch never lifts the status (see the tracking recorder).
     const ev = schema.emailEvents;
+    // Nested: a single-table select writes the columns it holds directly
+    // unqualified, and a bare "id" in the subquery would be the event's own.
+    const ofEmail = sql`${ev.emailId} = ${e.id}`;
     const [stats] = await ctx.db
       .select({
         total: sql<number>`count(*)::int`,
         delivered: sql<number>`count(*) filter (where ${e.latestStatus} in ('delivered', 'opened', 'clicked'))::int`,
         opened: sql<number>`count(*) filter (where ${e.latestStatus} in ('opened', 'clicked'))::int`,
         clicked: sql<number>`count(*) filter (where ${e.latestStatus} = 'clicked')::int`,
-        prefetched: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ev.emailId} = ${e.id} and ${ev.type} = 'prefetched'))::int`,
+        prefetched: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ofEmail} and ${ev.type} = 'prefetched'))::int`,
         bounced: sql<number>`count(*) filter (where ${e.latestStatus} = 'bounced')::int`,
         complained: sql<number>`count(*) filter (where ${e.latestStatus} = 'complained')::int`,
         // Recipients who opted out through this email's link, from everything or from its topic.
-        unsubscribed: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ev.emailId} = ${e.id} and ${ev.type} = 'unsubscribed'))::int`,
+        unsubscribed: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ofEmail} and ${ev.type} = 'unsubscribed'))::int`,
       })
       .from(e)
       .where(and(eq(e.broadcastId, row.id), eq(e.teamId, ctx.teamId)));
@@ -366,10 +382,15 @@ export const broadcastsRouter = router({
       progress && progress.parkedCount > 0 ? await planHoldUntil(ctx.db, ctx.teamId) : null;
     // The planner knows nothing of a region hold: its forecast would be wrong while one lasts.
     const held = (await heldBroadcastIds(ctx.db, ctx.teamId, [row])).has(row.id);
+    const warmup =
+      progress?.warmup && progress.parkedCount > 0
+        ? await broadcastWarmup(ctx.db, ctx.teamId, progress.warmup, row.scheduledAt)
+        : null;
     return {
       ...row,
       hiddenBySupportView,
       held,
+      warmup: warmup && { ...warmup, domain: parseSingleSender(row.from)?.domain ?? null },
       sentCount: progress?.sentCount ?? null,
       parkedCount: progress?.parkedCount ?? null,
       finishesAt: held ? null : (progress?.finishesAt ?? null),
@@ -514,9 +535,19 @@ export const broadcastsRouter = router({
    * enqueue is best-effort: the broadcasts.reconcile sweep re-enqueues
    * scheduled broadcasts whose job was lost, and the fan-out is idempotent
    * per contact via the emails (broadcastId, contactId) unique index.
+   * `warmup` turns the sender domain's warm-up on first, which any member
+   * may as part of sending; `skipInactive` is this send's own choice for
+   * its inactive contacts, never the domain's setting.
    */
   send: teamProcedure
-    .input(z.object({ id: z.uuid(), scheduledAt: z.date().optional() }))
+    .input(
+      z.object({
+        id: z.uuid(),
+        scheduledAt: z.date().optional(),
+        warmup: z.boolean().optional(),
+        skipInactive: z.boolean().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const row = await getOwnBroadcast(ctx, input.id);
       if (row.status !== "draft") {
@@ -561,19 +592,38 @@ export const broadcastsRouter = router({
           message: `Broadcasts can be scheduled at most ${MAX_SCHEDULE_AHEAD_DAYS} days ahead.`,
         });
       }
-      const horizonError = await horizonGuard(
-        ctx,
-        sender.region,
-        await countAudience(ctx, row),
-        scheduledAt,
-      );
-      if (horizonError) throw horizonError;
+      const count = await countAudience(ctx, row);
+      const ramp = await warmupSendPlan(ctx.db, {
+        teamId: ctx.teamId,
+        domainId: sender.domainId,
+        segmentId: row.segmentId,
+        topicId: row.topicId,
+        count,
+        at: scheduledAt,
+        skipInactive: input.skipInactive,
+        enabling: input.warmup,
+      });
+      const live = ramp?.status === "warming" || ramp?.status === "paused";
+      const byWarmup = ramp !== null && (live || input.warmup === true);
+      // A warm-up's send goes out by its day, never on capacity: its own plan meets the horizon.
+      if (byWarmup) {
+        if (ramp.blocked) throw await warmupHorizonError(ramp.horizonDays);
+        if (!live) await enableWarmup(ctx.db, { teamId: ctx.teamId, domainId: sender.domainId });
+      } else {
+        const horizonError = await horizonGuard(ctx, sender.region, count, scheduledAt);
+        if (horizonError) throw horizonError;
+      }
       const b = schema.broadcasts;
       // status filter re-checked in the UPDATE so two concurrent sends cannot
       // both flip the row.
       const [updated] = await ctx.db
         .update(b)
-        .set({ status: "scheduled", scheduledAt, updatedAt: new Date() })
+        .set({
+          status: "scheduled",
+          scheduledAt,
+          updatedAt: new Date(),
+          warmupSkipInactive: byWarmup ? (input.skipInactive ?? null) : null,
+        })
         .where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId), eq(b.status, "draft")))
         .returning({ id: b.id });
       if (!updated) {
@@ -729,7 +779,10 @@ export const broadcastsRouter = router({
   /**
    * The send dialog's plan: the audience count and, when SES has answered,
    * how the send goes out (first wave, later days, the finish, a plan hold).
-   * Advisory: the send mutation runs the same planner for the refusal.
+   * With the sender domain warming up (or paused, or a send far past its
+   * best day), what its warm-up would do, `skipInactive` overriding its
+   * inactive skip. Advisory: the send mutation runs the same planners for
+   * the refusal.
    */
   sendPlan: teamProcedure
     .input(
@@ -738,18 +791,44 @@ export const broadcastsRouter = router({
         segmentId: z.uuid().nullable().optional(),
         from: z.string().trim().max(320),
         scheduledAt: z.date().optional(),
+        skipInactive: z.boolean().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
       const cloud = isCloudDeployment();
       const count = await countAudience(ctx, input);
       const sender = await verifySenderDomain(ctx.db, ctx.teamId, input.from);
-      if (!sender.ok || count === 0) return { count, cloud, estimate: null };
-      const plan = await planBroadcastSend(ctx.db, {
+      if (!sender.ok || count === 0) return { count, cloud, estimate: null, warmup: null };
+      const at = input.scheduledAt ?? new Date();
+      const warmup = await warmupSendPlan(ctx.db, {
         teamId: ctx.teamId,
-        region: sender.region,
-        newSend: { count, at: input.scheduledAt ?? new Date() },
+        domainId: sender.domainId,
+        segmentId: input.segmentId ?? null,
+        topicId: input.topicId ?? null,
+        count,
+        at,
+        skipInactive: input.skipInactive,
       });
-      return { count, cloud, estimate: plan?.estimate ?? null };
+      // A live warm-up sets the pace alone; a risky send offers both.
+      const live = warmup?.status === "warming" || warmup?.status === "paused";
+      const plan = live
+        ? null
+        : await planBroadcastSend(ctx.db, {
+            teamId: ctx.teamId,
+            region: sender.region,
+            newSend: { count, at },
+          });
+      return {
+        count,
+        cloud,
+        estimate: plan?.estimate ?? null,
+        warmup: warmup && { ...warmup, domain: sender.fromDomain },
+      };
     }),
+
+  /** The broadcast's sends by recipient mailbox provider, for the detail page's table. */
+  providers: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
+    await getOwnBroadcast(ctx, input.id);
+    return broadcastProviderBreakdown(ctx.db, { teamId: ctx.teamId, broadcastId: input.id });
+  }),
 });

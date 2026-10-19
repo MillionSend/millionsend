@@ -132,9 +132,12 @@ remaining deltas are deliberate and loud:
 - A broadcast send answers with `finishes_at` (the estimated instant the last
   email goes out, or `null`), `estimated: true` and, when the audience exceeds
   the capacity available now, a `warning` (`paced` or `queued_behind`, with
-  `days` and a message). Broadcast reads carry `sent_count` and a live
-  `finishes_at`; a cancel answers with `canceled_remaining`. An audience that
-  needs more than 24 days of capacity is refused with
+  `days` and a message). From a domain whose
+  [warm-up](/concepts/domains#warm-up) is on, the `warning` is `warming_up`
+  instead, with `days: 0` while the warm-up is paused. Broadcast reads carry
+  `sent_count` and a live `finishes_at`, and a cancel answers with
+  `canceled_remaining`. An audience that needs more than 24 days of
+  capacity, or of the domain's warm-up, is refused with
   `422 broadcast_too_large`. See [Broadcasts](/concepts/broadcasts#pacing).
 - `POST /emails` and `POST /emails/batch` return `429 daily_quota_exceeded`
   on a daily plan (Free, Starter) when the day's sending quota is spent and
@@ -142,9 +145,9 @@ remaining deltas are deliberate and loud:
   `429 monthly_quota_exceeded` on a monthly plan (Pro, Scale) at its included
   volume with overage off; turn on overage in Billing or wait for the period
   to renew (the message names the date). A batch is accepted or refused
-  whole. On any plan, a domain still in its
-  [new domain warm-up](/concepts/domains#new-domain-warm-up) answers the same
-  `429 daily_quota_exceeded`, with a message naming the warm-up, once a lot
+  whole. On any plan, a domain still under the
+  [new domain limit](/concepts/domains#new-domain-limit) answers the same
+  `429 daily_quota_exceeded`, with a message naming that limit, once a lot
   of mail is already waiting.
 - `POST /contacts`, `POST /contacts/batch` and the audience alias return
   `403 plan_limit_reached` when a new contact would take the team past its

@@ -1341,9 +1341,12 @@ describe("dashboard admin parity", () => {
     "domains.setReceiving": [
       { name: "update_domain", arguments: { id, capabilities: { receiving: "enabled" } } },
     ],
+    // No tool turns a domain's warm-up on or off, or changes its settings.
+    "domains.setWarmup": [],
     "domains.updateConfiguration": [
       { name: "update_domain", arguments: { id, open_tracking: false } },
     ],
+    "domains.updateWarmup": [],
     "domains.verify": [{ name: "verify_domain", arguments: { id } }],
     "emails.remove": [
       { name: "remove_suppressions", arguments: { emails: [bounced] } },
