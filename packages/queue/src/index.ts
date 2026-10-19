@@ -179,6 +179,9 @@ const EXPIRE_SECONDS: Partial<Record<JobName, number>> = {
  * table small enough that the supervisor's per-minute counts stay cheap.
  */
 const DELETE_AFTER_SECONDS = 3600;
+// Cron runs keep pg-boss's retry defaults but the same retention as every
+// other job (scheduled and runCronNow alike).
+const CRON_RUN_OPTIONS = { deleteAfterSeconds: DELETE_AFTER_SECONDS } as const;
 
 const JOB_RETRY = { retryLimit: 10, retryBackoff: true, retryDelay: 5 } as const;
 
@@ -592,7 +595,11 @@ export class Queue {
   async scheduleCrons(handlers: Record<CronJobName, () => Promise<void>>): Promise<void> {
     for (const [name, cron] of Object.entries(CRON_JOBS) as [CronJobName, string][]) {
       await this.#ensureQueue(name);
-      await this.#producer.schedule(name, cron, {}, { tz: "UTC" });
+      // The schedule's options become each run's: without deleteAfterSeconds
+      // a cron run keeps pg-boss's 7-day default, so one failed pass (a
+      // database blip across a few crons) sits in the console's failed
+      // count for a week while every other job is gone within the hour.
+      await this.#producer.schedule(name, cron, {}, { tz: "UTC", ...CRON_RUN_OPTIONS });
       await this.#workers.work(
         name,
         { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
@@ -614,7 +621,7 @@ export class Queue {
    */
   async runCronNow(name: CronJobName): Promise<void> {
     await this.#ensureQueue(name);
-    await this.#producer.send(name, {});
+    await this.#producer.send(name, {}, CRON_RUN_OPTIONS);
   }
 
   /**

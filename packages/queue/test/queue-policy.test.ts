@@ -14,7 +14,7 @@ const workers: { name: string; opts: Record<string, unknown>; handler: Handler; 
   [];
 const inserted: { name: string; job: Record<string, unknown> }[] = [];
 const updated: { name: string; opts: Record<string, unknown> }[] = [];
-const scheduled: string[] = [];
+const scheduled: { name: string; cron: string; opts: Record<string, unknown> }[] = [];
 // pg-boss's schedule table, and the names scheduleCrons reconciled away.
 const scheduleTable = new Set<string>();
 const unscheduled: string[] = [];
@@ -72,8 +72,13 @@ vi.mock("pg-boss", () => ({
       sent.push({ name, opts });
       return "job-1";
     }
-    async schedule(name: string): Promise<void> {
-      scheduled.push(name);
+    async schedule(
+      name: string,
+      cron: string,
+      _data: unknown,
+      opts: Record<string, unknown>,
+    ): Promise<void> {
+      scheduled.push({ name, cron, opts });
       scheduleTable.add(name);
     }
     async getSchedules(): Promise<{ name: string }[]> {
@@ -283,12 +288,21 @@ it("cron and dead-letter workers poll slowly; crons are scheduled through the pr
     Object.keys(CRON_JOBS).map((name) => [name, async () => {}]),
   ) as Parameters<Queue["scheduleCrons"]>[0];
   await queue.scheduleCrons(handlers);
-  expect(scheduled).toEqual(Object.keys(CRON_JOBS));
+  expect(scheduled.map((s) => s.name)).toEqual(Object.keys(CRON_JOBS));
+  // Each run inherits the schedule's options: UTC, and the hour-long
+  // retention every other job gets, instead of pg-boss's 7-day default.
+  expect(scheduled.every((s) => s.cron === CRON_JOBS[s.name as keyof typeof CRON_JOBS])).toBe(true);
+  expect(scheduled.every((s) => s.opts.tz === "UTC" && s.opts.deleteAfterSeconds === 3600)).toBe(
+    true,
+  );
   const cronWorkers = workers.slice(1);
   expect(cronWorkers.map((w) => w.name)).toEqual(Object.keys(CRON_JOBS));
   expect(cronWorkers.every((w) => w.opts.pollingIntervalSeconds === 30 && w.boss === 0)).toBe(true);
   // The retired cron's schedule is dropped; the current ones are left alone.
   expect(unscheduled).toEqual(["safety.reveal_notices"]);
+  // A run forced ahead of schedule keeps the same retention.
+  await queue.runCronNow("quota.drain");
+  expect(sent.at(-1)).toMatchObject({ name: "quota.drain", opts: { deleteAfterSeconds: 3600 } });
 });
 
 it("creates job queues with the dedupe-enforcing policy", async () => {
