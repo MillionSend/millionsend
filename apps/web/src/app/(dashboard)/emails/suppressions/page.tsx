@@ -247,7 +247,11 @@ export default function SuppressionsPage() {
                   </td>
                   <td>
                     <span className={`ms-badge ms-badge-${REASON_VARIANT[row.reason]}`}>
-                      {t(`suppressions.reason.${row.reason}`)}
+                      {t(
+                        row.fullMailbox
+                          ? "suppressions.fullMailbox"
+                          : `suppressions.reason.${row.reason}`,
+                      )}
                     </span>
                   </td>
                   <td style={{ color: "var(--ms-muted)" }}>

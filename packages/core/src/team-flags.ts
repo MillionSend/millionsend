@@ -22,7 +22,8 @@ export const TEAM_FLAG_REASONS = schema.teamFlagReasonEnum.enumValues;
 /**
  * The automatic trust & safety triggers, on the 7-day rates the guardrail
  * shows the team itself. Complaints flag at SES's own review line, hard
- * bounces at its 5% line, both only past the guardrail's volume floor so a
+ * bounces at its 5% line, each only past the guardrail's volume floor over
+ * its own denominator (complaints: the sends that could draw one) so a
  * handful of sends cannot flag a team; a score under 5 is the "at risk"
  * band of the account score.
  */
@@ -40,6 +41,8 @@ export interface TeamStandingRow {
   complaintRate7d: number;
   hardBounceRate7d: number;
   sent7d: number;
+  /** The week's sends that could draw a complaint; kept in memory only, like monitorSamples. */
+  complaintSent7d: number;
   sent30d: number;
   /** The content monitor's risk and the judged samples of the last week; null and 0 when it never drew. */
   monitorRisk: number | null;
@@ -99,6 +102,7 @@ export async function computeTeamStandings(
       complaintRate7d: health.complaintRate,
       hardBounceRate7d: health.bounceRate,
       sent7d: health.sent,
+      complaintSent7d: health.complaintSent,
       sent30d: team.sent30d,
       monitorRisk: risks.get(team.teamId) ?? null,
       monitorSamples: samples.get(team.teamId) ?? 0,
@@ -122,7 +126,12 @@ export async function saveTeamStandings(
   if (rows.length === 0) return;
   await db
     .insert(schema.teamStandings)
-    .values(rows.map(({ monitorSamples: _samples, ...r }) => ({ ...r, computedAt: now })))
+    .values(
+      rows.map(({ monitorSamples: _samples, complaintSent7d: _complaintSent, ...r }) => ({
+        ...r,
+        computedAt: now,
+      })),
+    )
     .onConflictDoUpdate({
       target: schema.teamStandings.teamId,
       set: {
@@ -176,13 +185,11 @@ export function flagTrigger(s: TeamStandingRow, opts: FlagTriggerOptions = {}): 
       },
     };
   }
-  if (s.sent7d >= MIN_GUARDRAIL_VOLUME) {
-    if (s.complaintRate7d >= FLAG_COMPLAINT_RATE) {
-      return { reason: "complaints", detail: { metric: "complaint", rate: s.complaintRate7d } };
-    }
-    if (s.hardBounceRate7d >= FLAG_HARD_BOUNCE_RATE) {
-      return { reason: "complaints", detail: { metric: "hard_bounce", rate: s.hardBounceRate7d } };
-    }
+  if (s.complaintSent7d >= MIN_GUARDRAIL_VOLUME && s.complaintRate7d >= FLAG_COMPLAINT_RATE) {
+    return { reason: "complaints", detail: { metric: "complaint", rate: s.complaintRate7d } };
+  }
+  if (s.sent7d >= MIN_GUARDRAIL_VOLUME && s.hardBounceRate7d >= FLAG_HARD_BOUNCE_RATE) {
+    return { reason: "complaints", detail: { metric: "hard_bounce", rate: s.hardBounceRate7d } };
   }
   if (
     s.monitorRisk !== null &&
@@ -218,8 +225,9 @@ export async function syncTeamFlags(
   db: Db,
   standings: readonly TeamStandingRow[],
   now: Date = new Date(),
-  previous?: readonly (Omit<TeamStandingRow, "monitorSamples"> & {
+  previous?: readonly (Omit<TeamStandingRow, "monitorSamples" | "complaintSent7d"> & {
     monitorSamples?: number;
+    complaintSent7d?: number;
     computedAt?: Date;
   })[],
   opts: FlagTriggerOptions = {},
@@ -230,8 +238,10 @@ export async function syncTeamFlags(
   const before = new Map(
     priorRows.map((row) => [
       row.teamId,
-      // A stored row has no sample count; the trigger only reads the risk off it.
-      { monitorSamples: 0, ...row } as TeamStandingRow,
+      // A stored row has no sample count; the trigger only reads the risk off
+      // it. Nor a count of the sends that could draw a complaint: its sends
+      // bound that from above, so a trigger that held never reads as lapsed.
+      { monitorSamples: 0, complaintSent7d: row.sent7d, ...row } as TeamStandingRow,
     ]),
   );
   const lastRunAt = priorRows.reduce((at, row) => Math.max(at, row.computedAt?.getTime() ?? 0), 0);

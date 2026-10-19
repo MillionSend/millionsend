@@ -1,4 +1,12 @@
-import { defaultSafety, utcDay } from "@millionsend/core";
+import {
+  DAY_MS,
+  defaultSafety,
+  enableWarmup,
+  getWarmup,
+  pauseWarmup,
+  updateWarmupSettings,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -606,6 +614,38 @@ describe("delivery stats", () => {
     expect((await caller.broadcasts.list({})).items[0]?.recipients).toBe(9);
   });
 
+  it("counts the recipients who prefetched or unsubscribed, from their emails' events", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id } = await seedDraft(teamId);
+    const [a, b, c] = await db
+      .insert(schema.emails)
+      .values(
+        (["opened", "delivered", "delivered"] as const).map((latestStatus, i) => ({
+          teamId,
+          broadcastId: id,
+          contactId: crypto.randomUUID(),
+          from: DRAFT_INPUT.from,
+          to: [`r${i}@example.com`],
+          subject: DRAFT_INPUT.subject,
+          latestStatus,
+        })),
+      )
+      .returning({ id: schema.emails.id });
+    if (!a || !b || !c) throw new Error("seed failed");
+    const occurredAt = new Date();
+    await db.insert(schema.emailEvents).values([
+      { emailId: a.id, type: "prefetched", occurredAt },
+      { emailId: a.id, type: "opened", occurredAt },
+      { emailId: b.id, type: "prefetched", occurredAt },
+      { emailId: c.id, type: "unsubscribed", occurredAt },
+    ]);
+    expect((await caller.broadcasts.get({ id })).stats).toMatchObject({
+      opened: 1,
+      prefetched: 2,
+      unsubscribed: 1,
+    });
+  });
+
   it("keeps stats scoped to the broadcast", async () => {
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);
@@ -827,7 +867,7 @@ describe("paced sends", () => {
     await seedVerifiedDomain(teamId);
     await seedContacts(teamId, 2);
     const plan = await callerFor(teamId).broadcasts.sendPlan({ from: DRAFT_INPUT.from });
-    expect(plan).toEqual({ count: 2, cloud: false, estimate: null });
+    expect(plan).toEqual({ count: 2, cloud: false, estimate: null, warmup: null });
   });
 
   it("sendPlan estimates a paced send from the region's quota", async () => {
@@ -964,5 +1004,279 @@ describe("paced sends", () => {
     const released = await caller.broadcasts.get({ id: sending });
     expect(released.held).toBe(false);
     expect(released.finishesAt).toBeInstanceOf(Date);
+  });
+
+  async function domainOf(teamId: string): Promise<string> {
+    const [domain] = await db
+      .select({ id: schema.domains.id })
+      .from(schema.domains)
+      .where(eq(schema.domains.teamId, teamId));
+    if (!domain) throw new Error("domain missing");
+    return domain.id;
+  }
+
+  // Contacts last active 100 days ago: inactive to a warm-up.
+  async function seedInactive(teamId: string, n: number) {
+    await db.insert(schema.contacts).values(
+      Array.from({ length: n }, (_, i) => ({
+        teamId,
+        email: `old${i}@example.com`,
+        lastEngagedAt: new Date(Date.now() - 100 * DAY_MS),
+      })),
+    );
+  }
+
+  const planned = (warmup: { plan: { perDay: { count: number }[] } } | null) =>
+    warmup?.plan.perDay.reduce((n, d) => n + d.count, 0);
+
+  it("sendPlan offers a warm-up only to a send far past the domain's best day", async () => {
+    stubAccount({ max24h: 1_000_000, sentLast24h: 0, maxSendRate: 14 });
+    const teamId = await createTeam(db, "team-a");
+    await seedVerifiedDomain(teamId);
+    await seedContacts(teamId, 5_000);
+    const caller = callerFor(teamId);
+    // Up to 5,000 a send never reads as risky.
+    expect((await caller.broadcasts.sendPlan({ from: DRAFT_INPUT.from })).warmup).toBeNull();
+
+    await seedInactive(teamId, 100);
+    const { estimate, warmup } = await caller.broadcasts.sendPlan({ from: DRAFT_INPUT.from });
+    expect(warmup).toMatchObject({
+      status: "off",
+      domain: "example.com",
+      bestDay: 0,
+      eligible: 5_100,
+      inactive: 100,
+      skipInactive: true,
+      risky: true,
+      blocked: false,
+      horizonDays: 24,
+    });
+    // The plan a warm-up turned on now would follow, the inactive left out,
+    // beside the normal pace.
+    expect(planned(warmup)).toBe(5_000);
+    expect(warmup?.plan.finishesAt).toBeInstanceOf(Date);
+    expect(estimate).not.toBeNull();
+
+    // A domain that sent over half of it in one day lately: no risk.
+    const domainId = await domainOf(teamId);
+    await db.insert(schema.emails).values(
+      Array.from({ length: 2_600 }, (_, i) => ({
+        teamId,
+        domainId,
+        from: DRAFT_INPUT.from,
+        to: [`s${i}@example.com`],
+        subject: "s",
+        latestStatus: "delivered" as const,
+        sentAt: new Date(Date.now() - DAY_MS),
+      })),
+    );
+    expect((await caller.broadcasts.sendPlan({ from: DRAFT_INPUT.from })).warmup).toBeNull();
+  }, 60_000);
+
+  it("sendPlan follows a warming domain's own plan, its inactive skip changed in the dialog", async () => {
+    stubAccount({ max24h: 1_000_000, sentLast24h: 0, maxSendRate: 14 });
+    const teamId = await createTeam(db, "team-a");
+    await seedVerifiedDomain(teamId);
+    await seedContacts(teamId, 200);
+    await seedInactive(teamId, 50);
+    await enableWarmup(db, {
+      teamId,
+      domainId: await domainOf(teamId),
+      settings: { startVolume: 100, dailyTarget: 1_000 },
+    });
+    const caller = callerFor(teamId);
+    const plan = await caller.broadcasts.sendPlan({ from: DRAFT_INPUT.from });
+    // The warm-up sets the pace alone: no capacity estimate beside it.
+    expect(plan.estimate).toBeNull();
+    expect(plan.warmup).toMatchObject({
+      status: "warming",
+      risky: false,
+      eligible: 250,
+      inactive: 50,
+      skipInactive: true,
+      blocked: false,
+    });
+    expect(planned(plan.warmup)).toBe(200);
+    expect(plan.warmup?.plan.finishesAt).toBeInstanceOf(Date);
+
+    const all = await caller.broadcasts.sendPlan({ from: DRAFT_INPUT.from, skipInactive: false });
+    expect(all.warmup?.skipInactive).toBe(false);
+    expect(planned(all.warmup)).toBe(250);
+  });
+
+  it("lets a paused warm-up's send through: it waits, with no finish", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id } = await seedDraft(teamId);
+    await seedContacts(teamId, 20);
+    const domainId = await domainOf(teamId);
+    await enableWarmup(db, { teamId, domainId });
+    await pauseWarmup(db, { teamId, domainId });
+    expect((await caller.broadcasts.sendPlan({ from: DRAFT_INPUT.from })).warmup).toMatchObject({
+      status: "paused",
+      blocked: false,
+      plan: { perDay: [], days: 0, finishesAt: null },
+    });
+    await caller.broadcasts.send({ id });
+    expect((await broadcastRow(id))?.status).toBe("scheduled");
+  });
+
+  const memberOf = (teamId: string) =>
+    createCaller({
+      db,
+      session: { user: { id: "u2", email: "u2@example.com", name: "u2" } },
+      teamId,
+      role: "member",
+    });
+
+  it("send with warmup turns the domain's warm-up on first, the inactive choice kept to the send", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    await seedContacts(teamId, 3);
+    await memberOf(teamId).broadcasts.send({ id, warmup: true, skipInactive: false });
+    const [ramp] = await db
+      .select()
+      .from(schema.domainWarmups)
+      .where(eq(schema.domainWarmups.teamId, teamId));
+    expect(ramp).toMatchObject({ status: "warming", skipInactive: true, startVolume: 1_500 });
+    expect(await broadcastRow(id)).toMatchObject({
+      status: "scheduled",
+      warmupSkipInactive: false,
+    });
+  });
+
+  it("a member's inactive choice in the send never changes a live warm-up's setting", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    await seedContacts(teamId, 3);
+    const domainId = await domainOf(teamId);
+    await enableWarmup(db, { teamId, domainId, settings: { skipInactive: false } });
+    await memberOf(teamId).broadcasts.send({ id, skipInactive: true });
+    expect((await getWarmup(db, teamId, domainId))?.skipInactive).toBe(false);
+    expect((await broadcastRow(id))?.warmupSkipInactive).toBe(true);
+
+    // Left unchanged in the dialog, the send follows the domain's setting.
+    const other = await callerFor(teamId).broadcasts.create(DRAFT_INPUT);
+    await memberOf(teamId).broadcasts.send({ id: other.id });
+    expect((await broadcastRow(other.id))?.warmupSkipInactive).toBeNull();
+  });
+
+  it("refuses a send whose warm-up runs past the horizon, in the dialog and the send", async () => {
+    // floor(0.8 × 2): a one-day horizon.
+    vi.stubEnv("EMAIL_RETENTION_DAYS", "2");
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id } = await seedDraft(teamId);
+    await seedContacts(teamId, 250);
+    const domainId = await domainOf(teamId);
+    // Off, with a slow start saved: the warm-up the send would turn on needs two days.
+    await updateWarmupSettings(db, {
+      teamId,
+      domainId,
+      settings: { startVolume: 100, dailyTarget: 1_000 },
+    });
+    await expect(caller.broadcasts.send({ id, warmup: true })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message:
+        "At this warm-up's pace this broadcast needs more than 1 days. Raise the daily target or send to a smaller segment.",
+    });
+    const [ramp] = await db
+      .select({ status: schema.domainWarmups.status })
+      .from(schema.domainWarmups);
+    expect(ramp?.status).toBe("off");
+
+    await enableWarmup(db, { teamId, domainId });
+    expect((await caller.broadcasts.sendPlan({ from: DRAFT_INPUT.from })).warmup).toMatchObject({
+      status: "warming",
+      blocked: true,
+      horizonDays: 1,
+    });
+    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    });
+    expect((await broadcastRow(id))?.status).toBe("draft");
+  });
+
+  it("list and get give a warming broadcast the warm-up's finish, SES or not, and none while paused", async () => {
+    stubAccount(new Error("ses down"));
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id } = await seedDraft(teamId);
+    const domainId = await domainOf(teamId);
+    await enableWarmup(db, {
+      teamId,
+      domainId,
+      settings: { startVolume: 100, dailyTarget: 1_000 },
+    });
+    await db
+      .update(schema.broadcasts)
+      .set({ status: "sending", scheduledAt: new Date(Date.now() - 60_000), warmupSkipped: 7 })
+      .where(eq(schema.broadcasts.id, id));
+    await db.insert(schema.emails).values(
+      Array.from({ length: 152 }, (_, i) => ({
+        teamId,
+        broadcastId: id,
+        domainId,
+        contactId: crypto.randomUUID(),
+        from: DRAFT_INPUT.from,
+        to: [`r${i}@example.com`],
+        subject: DRAFT_INPUT.subject,
+        ...(i < 2
+          ? { latestStatus: "sent" as const, sentAt: new Date() }
+          : { latestStatus: "queued_quota" as const, parkReason: "warmup" as const }),
+      })),
+    );
+    const got = await caller.broadcasts.get({ id });
+    expect(got.warmup).toMatchObject({
+      status: "warming",
+      domainId,
+      domain: "example.com",
+      volume: 100,
+      checked: true,
+      latest: null,
+      pauseSignals: null,
+    });
+    expect(got.warmupSkipped).toBe(7);
+    // 150 waiting at 100 a day: the rest goes tomorrow.
+    expect(got.warmup?.perDay.reduce((n, d) => n + d.count, 0)).toBe(150);
+    expect(got.warmup?.perDay[0]?.day).toBe(utcDay());
+    expect(got.finishesAt?.getTime()).toBeGreaterThan(Date.now());
+    const { items } = await caller.broadcasts.list({});
+    expect(items[0]?.finishesAt).toEqual(got.finishesAt);
+
+    await pauseWarmup(db, { teamId, domainId });
+    const paused = await caller.broadcasts.get({ id });
+    expect(paused).toMatchObject({ finishesAt: null, warmup: { status: "paused" } });
+  });
+});
+
+describe("broadcasts.providers", () => {
+  it("breaks a broadcast's sends down by mailbox provider, for its own team only", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const { caller, id } = await seedDraft(teamA);
+    const sent = (to: string) => ({
+      teamId: teamA,
+      broadcastId: id,
+      contactId: crypto.randomUUID(),
+      from: DRAFT_INPUT.from,
+      to: [to],
+      subject: DRAFT_INPUT.subject,
+      latestStatus: "sent" as const,
+      sentAt: new Date(),
+    });
+    const [gmail] = await db
+      .insert(schema.emails)
+      .values([sent("ana@gmail.com"), sent("bo@gmail.com"), sent("cy@outlook.com")])
+      .returning({ id: schema.emails.id });
+    if (!gmail) throw new Error("seed failed");
+    await db
+      .insert(schema.emailEvents)
+      .values({ emailId: gmail.id, type: "delivered", occurredAt: new Date() });
+    const counts = { opened: 0, clicked: 0, bounced: 0, delayed: 0, complained: 0 };
+    expect(await caller.broadcasts.providers({ id })).toEqual([
+      { provider: "gmail", sent: 2, delivered: 1, ...counts },
+      { provider: "microsoft", sent: 1, delivered: 0, ...counts },
+    ]);
+    await expect(callerFor(teamB).broadcasts.providers({ id })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
   });
 });

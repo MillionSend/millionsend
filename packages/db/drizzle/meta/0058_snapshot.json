@@ -1,5 +1,5 @@
 {
-  "id": "62b32744-0b61-4bb8-91cd-b77d1e7f97ce",
+  "id": "76f0040e-90a3-42a6-b6ae-899b05e2e819",
   "prevId": "1f86bf82-17f4-4421-ab9d-f0068efe5cdf",
   "version": "7",
   "dialect": "postgresql",
@@ -2328,6 +2328,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "warmup_skipped": {
+          "name": "warmup_skipped",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "warmup_skip_inactive": {
+          "name": "warmup_skip_inactive",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
         "delivered_count": {
           "name": "delivered_count",
           "type": "integer",
@@ -2888,6 +2901,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "last_engaged_at": {
+          "name": "last_engaged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mailbox_full_at": {
+          "name": "mailbox_full_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3143,6 +3168,242 @@
         "content_access_grants_team_id_teams_id_fk": {
           "name": "content_access_grants_team_id_teams_id_fk",
           "tableFrom": "content_access_grants",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.domain_warmup_days": {
+      "name": "domain_warmup_days",
+      "schema": "",
+      "columns": {
+        "domain_id": {
+          "name": "domain_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "allowance": {
+          "name": "allowance",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sent": {
+          "name": "sent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "domain_warmup_outcome",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signals": {
+          "name": "signals",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "domain_warmup_days_domain_id_domain_warmups_domain_id_fk": {
+          "name": "domain_warmup_days_domain_id_domain_warmups_domain_id_fk",
+          "tableFrom": "domain_warmup_days",
+          "tableTo": "domain_warmups",
+          "columnsFrom": [
+            "domain_id"
+          ],
+          "columnsTo": [
+            "domain_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "domain_warmup_days_domain_id_day_pk": {
+          "name": "domain_warmup_days_domain_id_day_pk",
+          "columns": [
+            "domain_id",
+            "day"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.domain_warmups": {
+      "name": "domain_warmups",
+      "schema": "",
+      "columns": {
+        "domain_id": {
+          "name": "domain_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "domain_warmup_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'warming'"
+        },
+        "volume": {
+          "name": "volume",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_volume": {
+          "name": "start_volume",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "daily_target": {
+          "name": "daily_target",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sending_days": {
+          "name": "sending_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "checked_through": {
+          "name": "checked_through",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_by_engagement": {
+          "name": "order_by_engagement",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "order_by_transactional": {
+          "name": "order_by_transactional",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "order_property": {
+          "name": "order_property",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "skip_inactive": {
+          "name": "skip_inactive",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "paused_at": {
+          "name": "paused_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pause_signals": {
+          "name": "pause_signals",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "done_at": {
+          "name": "done_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "domain_warmups_domain_id_domains_id_fk": {
+          "name": "domain_warmups_domain_id_domains_id_fk",
+          "tableFrom": "domain_warmups",
+          "tableTo": "domains",
+          "columnsFrom": [
+            "domain_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "domain_warmups_team_id_teams_id_fk": {
+          "name": "domain_warmups_team_id_teams_id_fk",
+          "tableFrom": "domain_warmups",
           "tableTo": "teams",
           "columnsFrom": [
             "team_id"
@@ -3907,6 +4168,12 @@
           "notNull": true,
           "default": false
         },
+        "send_order": {
+          "name": "send_order",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4031,6 +4298,34 @@
           ],
           "isUnique": false,
           "where": "\"emails\".\"latest_status\" = 'queued_quota'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "emails_warmup_send_order_idx": {
+          "name": "emails_warmup_send_order_idx",
+          "columns": [
+            {
+              "expression": "broadcast_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "send_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"emails\".\"latest_status\" = 'queued_quota' and \"emails\".\"send_order\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -8456,12 +8751,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "move_up_pending_until": {
-          "name": "move_up_pending_until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "plan_status": {
           "name": "plan_status",
           "type": "plan_status",
@@ -9859,6 +10148,29 @@
       "values": [
         "email",
         "flagged_window"
+      ]
+    },
+    "public.domain_warmup_outcome": {
+      "name": "domain_warmup_outcome",
+      "schema": "public",
+      "values": [
+        "grew",
+        "held",
+        "stepped_back",
+        "paused",
+        "done",
+        "light",
+        "idle"
+      ]
+    },
+    "public.domain_warmup_status": {
+      "name": "domain_warmup_status",
+      "schema": "public",
+      "values": [
+        "off",
+        "warming",
+        "paused",
+        "done"
       ]
     },
     "public.domain_age_source": {

@@ -103,14 +103,16 @@ export const en = {
   },
   "broadcast.sending": {
     subject: "Your broadcast is going out over {days} days",
-    body: [
-      "{first} of {count} emails went out in the first wave; the rest follows as capacity frees, the last about {finishesAt}.",
-      "Sends above the daily sending capacity are spread over the following days; {team}'s transactional email is not held behind them.",
-    ],
+    body: ["{progress}", "{team}'s transactional email doesn't wait behind this broadcast."],
     button: "Open broadcast",
     muted: [
       "You get this once per broadcast that takes more than one day. The finish time is an estimate and can shift.",
     ],
+    extra: {
+      wave: "{first} of {count} emails went out in the first wave. The rest follows as capacity frees up, and the last goes out about {finishesAt}.",
+      warmup:
+        "{domain} is warming up, so it sends a little more each day, most active contacts first. The last email goes out about {finishesAt}.",
+    },
   },
   "broadcast.held_quota": {
     subject: "{parked} of {count} broadcast recipients are waiting for the quota",
@@ -223,6 +225,31 @@ export const en = {
     button: "Open metrics",
     muted: ["You get this once per episode."],
     extra: { bounce: "hard-bounce rate", complaint: "complaint rate" },
+  },
+  "warmup.paused": {
+    subject: "Warm-up paused for your domain",
+    body: [
+      "{domain} stopped sending broadcasts after its last check. {signals}",
+      "{waiting}",
+      "Check who you're sending to, then resume from the domain's Warm-up tab.",
+    ],
+    button: "Open warm-up",
+    extra: {
+      delays: "Gmail delayed {pct} of the day's mail.",
+      opens: "Gmail opens were {pct} of other inboxes'.",
+      hardBounces: "{pct} of addresses bounced.",
+      mailboxFull: "{pct} of mailboxes were full or inactive.",
+      complaints: "{pct} of people marked it as spam.",
+      "waiting.one": "1 email is waiting until you resume.",
+      "waiting.other": "{n} emails are waiting until you resume.",
+    },
+  },
+  "warmup.done": {
+    subject: "Your domain is warmed up",
+    body: [
+      "{domain} sent {volume} emails in a day with healthy delivery. Warm-up is done, so its broadcasts now go out at normal speed.",
+    ],
+    button: "Open domain",
   },
   "webhook.failing": {
     subject: "Webhook deliveries are failing",

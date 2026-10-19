@@ -24,6 +24,7 @@ import {
 } from "./ses-capacity.js";
 import { fetchTeamQuota } from "./team-plan.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
+import { planDomainWarmup, type WarmupPlan } from "./warmup-ramp.js";
 
 /**
  * The database side of broadcast pacing: what the worker's room ledger, the
@@ -105,6 +106,9 @@ export interface SendingBroadcast {
   scheduledAt: Date | null;
   /** The sender domain's region, read off its rows; null before the first page is written. */
   region: string | null;
+  domainId: string | null;
+  /** Its domain's warm-up while warming or paused: its rows then go out by the warm-up's day, not the region's room. */
+  warmup: "warming" | "paused" | null;
   queued: number;
   parked: number;
   sent: number;
@@ -126,6 +130,9 @@ export async function sendingBroadcasts(
   const region = sql<
     string | null
   >`(select d.region from emails e join domains d on d.id = e.domain_id where e.broadcast_id = broadcasts.id limit 1)`;
+  const domainId = sql<
+    string | null
+  >`(select e.domain_id from emails e where e.broadcast_id = broadcasts.id limit 1)`;
   const countWhere = (status: "queued" | "queued_quota") =>
     sql<number>`(select count(*)::int from emails e where e.broadcast_id = broadcasts.id and e.latest_status = ${status})`;
   const rows = await db
@@ -134,6 +141,10 @@ export async function sendingBroadcasts(
       teamId: b.teamId,
       scheduledAt: b.scheduledAt,
       region,
+      domainId,
+      warmup: sql<
+        "warming" | "paused" | null
+      >`(select w.status from domain_warmups w where w.domain_id = ${domainId} and w.status in ('warming', 'paused'))`,
       queued: countWhere("queued"),
       // Contacts the walk has not reached yet wait like parked rows; the
       // walk writes far faster than the drain releases, so they are always
@@ -146,6 +157,37 @@ export async function sendingBroadcasts(
     .where(and(eq(b.status, "sending"), opts.teamId ? eq(b.teamId, opts.teamId) : undefined))
     .orderBy(asc(b.scheduledAt), asc(b.createdAt), asc(b.id));
   return rows.filter((r) => !opts.region || r.region === opts.region);
+}
+
+/**
+ * The warm-up's plan for each of `sending` whose domain is warming up or
+ * paused in it: its waiting rows behind the domain's other waiting mail,
+ * from `now`. The region planners leave these broadcasts out, so this is
+ * when they finish (never while paused).
+ */
+export async function warmupBroadcastPlans(
+  db: Db,
+  sending: readonly SendingBroadcast[],
+  now: Date = new Date(),
+): Promise<Map<string, WarmupPlan>> {
+  const out = new Map<string, WarmupPlan>();
+  for (const b of sending) {
+    if (!b.warmup || !b.domainId) continue;
+    const plan = await planDomainWarmup(db, {
+      teamId: b.teamId,
+      domainId: b.domainId,
+      count: b.parked,
+      broadcastId: b.id,
+      at: now,
+    });
+    if (plan) out.set(b.id, plan);
+  }
+  return out;
+}
+
+/** The pacing horizon applied to a warm-up's plan: past it the send is refused. A paused warm-up has no finish, so its send waits instead. */
+export function warmupPastHorizon(plan: WarmupPlan, horizonDays: number): boolean {
+  return plan.days > horizonDays;
 }
 
 /** Sends the team has accepted so far against its caps: today's UTC day, and the billing period on a monthly plan. */
@@ -290,7 +332,7 @@ export interface RegionSendPlanInput {
 export interface RegionSendPlan {
   share: number;
   txPerDay: number;
-  /** One estimate per sending broadcast (keyed by id), plus the new send under its key. */
+  /** One estimate per sending broadcast outside a warm-up (keyed by id), plus the new send under its key. */
   estimates: BroadcastEstimate[];
   sending: SendingBroadcast[];
 }
@@ -314,17 +356,20 @@ export async function planRegionSend(db: Db, input: RegionSendPlanInput): Promis
     allSent24h: counts.get(input.region)?.allSent24h ?? 0,
     bulkSent24h: counts.get(input.region)?.sent24h ?? 0,
   });
-  const broadcasts: PlannedBroadcast[] = sending.map((b) => {
-    const caps = input.capsFor?.(b.teamId);
-    return {
-      key: b.id,
-      queued: b.queued,
-      parked: b.parked,
-      // Its days count from when it was sent, as every surface prints them.
-      ...(b.scheduledAt ? { at: Math.min(b.scheduledAt.getTime(), now.getTime()) } : {}),
-      ...(caps ? { caps } : {}),
-    };
-  });
+  // A warming domain trickles out by its warm-up's day: warmupBroadcastPlans says when.
+  const broadcasts: PlannedBroadcast[] = sending
+    .filter((b) => !b.warmup)
+    .map((b) => {
+      const caps = input.capsFor?.(b.teamId);
+      return {
+        key: b.id,
+        queued: b.queued,
+        parked: b.parked,
+        // Its days count from when it was sent, as every surface prints them.
+        ...(b.scheduledAt ? { at: Math.min(b.scheduledAt.getTime(), now.getTime()) } : {}),
+        ...(caps ? { caps } : {}),
+      };
+    });
   if (input.newSend) {
     broadcasts.push({
       key: input.newSend.key,

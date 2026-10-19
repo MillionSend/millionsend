@@ -5,6 +5,7 @@ import {
   classifyOpen,
   deriveTrackingKey,
   enqueueWebhookDeliveries,
+  extractAddrSpec,
   forwardedClientIp,
   highestStatus,
   type QueuedWebhookDelivery,
@@ -13,7 +14,8 @@ import {
   type WebhookEnqueue,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { and, asc, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { trustedProxies } from "../../server/trusted-proxies";
 
@@ -114,19 +116,33 @@ interface FoldedClick {
   data: Record<string, unknown> | null;
 }
 
+/** The email's contact: a broadcast copy's own, else the team's contact at its first recipient. */
+function contactOf(email: { teamId: string; contactId: string | null; to: string[] }): SQL | null {
+  const c = schema.contacts;
+  const recipient = email.to[0];
+  const who = email.contactId
+    ? eq(c.id, email.contactId)
+    : recipient
+      ? sql`lower(${c.email}) = lower(${extractAddrSpec(recipient)})`
+      : undefined;
+  return who ? (and(eq(c.teamId, email.teamId), who) ?? null) : null;
+}
+
 /**
  * A click recorded before the burst around it could be seen was a
  * machine's after all. The row becomes a prefetch, the open inferred from
- * it goes, and what the click advanced — status, unique counters,
- * deliveries no drain pass holds yet — is taken back. A delivery already
- * posted or leased stays: the opt-in `email.prefetched` that follows
- * carries the click's own timestamp, which is how a consumer learns it was
- * retracted. `folded` is ordered oldest first.
+ * it goes, and what the click advanced — status, unique counters, the
+ * contact's last engagement, deliveries no drain pass holds yet — is taken
+ * back. A delivery already posted or leased stays: the opt-in
+ * `email.prefetched` that follows carries the click's own timestamp, which
+ * is how a consumer learns it was retracted. `folded` is ordered oldest
+ * first.
  */
 async function foldBurst(
   tx: Db,
   teamId: string,
   email: WebhookEmailFacts,
+  contact: SQL | null,
   folded: readonly FoldedClick[],
   deliveries: QueuedWebhookDelivery[],
 ): Promise<void> {
@@ -191,6 +207,19 @@ async function foldBurst(
   }
   if (!remaining.includes("clicked")) {
     await retractCounter(tx, teamId, "clicked", first.occurredAt);
+  }
+  // Newest first, each back to what it moved from, unless a person's open
+  // or click has moved it since.
+  if (contact) {
+    const c = schema.contacts;
+    for (const row of [...folded].reverse()) {
+      const before = row.data?.engagedBefore;
+      if (before === undefined) continue;
+      await tx
+        .update(c)
+        .set({ lastEngagedAt: typeof before === "string" ? new Date(before) : null })
+        .where(and(contact, eq(c.lastEngagedAt, row.occurredAt)));
+    }
   }
   // The status stood on a person's click; the remaining events say what it
   // is. A tracking token only exists in a message that was sent, so that is
@@ -263,6 +292,7 @@ export async function recordEngagement(
       .select({
         id: schema.emails.id,
         teamId: schema.emails.teamId,
+        contactId: schema.emails.contactId,
         from: schema.emails.from,
         to: schema.emails.to,
         subject: schema.emails.subject,
@@ -349,17 +379,42 @@ export async function recordEngagement(
       .from(schema.emailEvents)
       .where(and(eq(schema.emailEvents.emailId, email.id), eq(schema.emailEvents.type, recorded)))
       .limit(1);
+    const contact = contactOf(email);
     // Before the damping: a repeat hit still exposes the burst it belongs to.
     const folded = siblings.filter((row) => row.type === "clicked");
-    if (folded.length > 0) await foldBurst(tx, email.teamId, facts, folded, deliveries);
+    if (folded.length > 0) await foldBurst(tx, email.teamId, facts, contact, folded, deliveries);
     if (newest && occurredAt.getTime() - newest.occurredAt.getTime() < DAMP_WINDOW_MS) return;
 
+    // A prefetch is a fact about a machine, never about the recipient: the
+    // status ladder and the contact's last engagement move only for a person.
+    let stored = data;
+    if (recorded !== "prefetched") {
+      await applyStatusCas(tx, email.id, recorded);
+      if (contact) {
+        const c = schema.contacts;
+        const prior = alias(c, "prior");
+        const [moved] = await tx
+          .update(c)
+          .set({ lastEngagedAt: occurredAt })
+          .from(prior)
+          .where(
+            and(
+              eq(prior.id, c.id),
+              contact,
+              or(isNull(c.lastEngagedAt), lt(c.lastEngagedAt, occurredAt)),
+            ),
+          )
+          .returning({ before: prior.lastEngagedAt });
+        // Kept on the row, never in a payload: a burst that folds this click
+        // later puts the contact back where it was.
+        if (moved && recorded === "clicked") {
+          stored = { ...data, engagedBefore: moved.before?.toISOString() ?? null };
+        }
+      }
+    }
     await tx
       .insert(schema.emailEvents)
-      .values({ emailId: email.id, type: recorded, occurredAt, data });
-    // A prefetch is a fact about a machine, never about the recipient: the
-    // status ladder moves only for a person.
-    if (recorded !== "prefetched") await applyStatusCas(tx, email.id, recorded);
+      .values({ emailId: email.id, type: recorded, occurredAt, data: stored });
 
     // A person cannot click a link in a message they never rendered, so a
     // click on an email with no open yet is also its open — the only way one

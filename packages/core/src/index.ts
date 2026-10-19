@@ -220,6 +220,7 @@ export {
   resolveBounceGuidance,
   resolveComplaintGuidance,
 } from "./bounce-guidance.js";
+export { broadcastAudience, broadcastAudienceWhere } from "./broadcast-audience.js";
 export {
   applyMergeFields,
   injectPreheader,
@@ -239,6 +240,8 @@ export {
   rungThatFits,
   type SendingBroadcast,
   sendingBroadcasts,
+  warmupBroadcastPlans,
+  warmupPastHorizon,
 } from "./broadcast-pacing.js";
 export type { FingerprintMessage } from "./campaign-fingerprints.js";
 export {
@@ -509,7 +512,14 @@ export {
   type MailPreferenceKey,
   mailPreferenceOf,
 } from "./mail-preferences.js";
-export { sentWithoutComplaintFeedback } from "./mailbox-providers.js";
+export { firstRecipientDomain, mailboxProviderSql } from "./mailbox-provider-sql.js";
+export {
+  INACTIVE_MAILBOX_PATTERN,
+  MAILBOX_FULL_PATTERN,
+  type MailboxProvider,
+  mailboxProvider,
+  sentWithoutComplaintFeedback,
+} from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,
   isValidMonitorSetting,
@@ -610,6 +620,7 @@ export {
   sesComplaintReadings,
 } from "./platform-breaker.js";
 export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
+export { broadcastProviderBreakdown, type ProviderBreakdownRow } from "./provider-breakdown.js";
 export {
   dailyCeiling,
   type QuotaResult,
@@ -879,6 +890,48 @@ export {
 export { isLoopbackUrl, unwrapRedirect } from "./url.js";
 export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./usage-hourly.js";
 export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
+export {
+  checkWarmups,
+  contactActivity,
+  contactPropertyDateSql,
+  enableWarmup,
+  getWarmup,
+  isInactiveContact,
+  movedWarmupVolume,
+  pauseWarmup,
+  planDomainWarmup,
+  planWarmupDays,
+  recentTransactionalByAddress,
+  reserveWarmupDay,
+  resumeWarmup,
+  roundWarmupVolume,
+  turnOffWarmup,
+  updateWarmupSettings,
+  WARMUP_INACTIVE_DAYS,
+  WARMUP_LIMITS,
+  WARMUP_SLICES_PER_DAY,
+  WARMUP_START_VOLUME,
+  type WarmupDayCounts,
+  type WarmupEvent,
+  type WarmupOutcome,
+  type WarmupOverview,
+  type WarmupPlan,
+  type WarmupPlanInput,
+  type WarmupRelease,
+  type WarmupSendPreview,
+  type WarmupSettings,
+  type WarmupSettingsInput,
+  type WarmupStatus,
+  warmupDayOutcome,
+  warmupMailValues,
+  warmupOverview,
+  warmupRelease,
+  warmupSendOrder,
+  warmupSendPreview,
+  warmupSignalFigure,
+  warmupSignals,
+  warmupStartingSettings,
+} from "./warmup-ramp.js";
 export {
   buildWebhookPayload,
   clearWebhookEndpointNotifications,

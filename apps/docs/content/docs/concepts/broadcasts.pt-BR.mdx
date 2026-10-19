@@ -47,6 +47,13 @@ transacional, mais o tratamento específico de transmissão:
   `{{{RESEND_UNSUBSCRIBE_URL}}}` é um alias suportado, então templates
   escritos para o Resend continuam funcionando sem mudança (e voltam sem
   mudança).
+- **Cabeçalhos de lista**: toda mensagem leva `List-Id`, `Precedence: bulk` e
+  `Auto-Submitted: auto-generated`, para os provedores de e-mail tratarem a
+  mensagem como e-mail de lista. O `List-Id` nomeia a lista, não o envio:
+  `<{topic_id}.example.com>` para uma transmissão a um tópico e
+  `<broadcasts.example.com>` para as outras, onde `example.com` é o seu
+  domínio de envio. Toda transmissão para a mesma lista constrói a reputação
+  da mesma lista.
 
 
 Os e-mails de transmissão entram na fila de envio abaixo dos transacionais: um
@@ -87,15 +94,66 @@ O envio avisa de antemão:
 
 - `finishes_at` é o instante estimado em que o último e-mail sai; `null`
   quando não há estimativa. É uma estimativa: outros envios a movem.
-- `warning` só aparece quando o envio leva mais de uma leva — `paced` quando a
+- `warning` só aparece quando o envio leva mais de uma leva: `paced` quando a
   audiência passa da capacidade disponível agora, `queued_behind` quando
-  outros envios estão na frente (a mensagem diz quando este começa).
+  outros envios estão na frente (a mensagem diz quando este começa). Um
+  domínio em aquecimento responde `warming_up` no lugar (veja
+  [Aquecimento](#aquecimento)).
 - Enquanto uma transmissão está saindo, `GET /broadcasts/{id}` e a lista trazem
   `finishes_at` ao vivo e `sent_count`.
 - Uma audiência que precisaria de mais de 24 dias de capacidade — da
   plataforma, ou do limite do seu plano — é recusada com
   `422 broadcast_too_large` em vez de aceita e deixada esperando. Divida em
   segmentos menores ou fale com o suporte.
+
+## Aquecimento
+
+Quando o [aquecimento](/pt-BR/concepts/domains#aquecimento) do domínio de
+envio está ligado, uma transmissão sai ao longo de dias: cada dia envia até o
+volume daquele dia, com os contatos mais ativos primeiro, e os contatos
+inativos há 90 dias ou mais ficam de fora, a não ser que o aquecimento os
+envie por último. A janela **Enviar transmissão** mostra o plano dia a dia
+antes do envio. Para um domínio sem aquecimento, ela oferece o aquecimento
+quando a transmissão é bem maior que tudo o que o domínio já enviou em um
+dia.
+
+A resposta do envio traz `warning.code` `warming_up`:
+
+```json
+{
+  "id": "8c1f0b8e-…",
+  "finishes_at": "2026-10-24T19:45:00Z",
+  "estimated": true,
+  "warning": {
+    "code": "warming_up",
+    "days": 6,
+    "message": "This domain is warming up, so this broadcast goes out over about 6 days, most active contacts first."
+  }
+}
+```
+
+- O `finishes_at` vem do plano do aquecimento, que conta com todos os dias
+  saudáveis. Um dia que mantém ou reduz o volume deixa o fim para mais tarde.
+- Com o aquecimento pausado, `days` é `0` e `finishes_at` é `null`. A
+  transmissão espera até o aquecimento ser retomado.
+- Como no ritmo de envio, uma transmissão que o aquecimento levaria mais de
+  24 dias para enviar é recusada com `422 broadcast_too_large`. Aumente a
+  meta diária ou envie para um segmento menor.
+
+A página da transmissão mostra o ritmo do aquecimento dia a dia, quantos
+contatos inativos ficaram de fora e, quando um dia teve um sinal fora do
+limite, por que o volume foi mantido ou reduzido. Os e-mails esperando pelo
+aquecimento aparecem como **Aguardando**.
+
+## Por provedor de e-mail
+
+A página da transmissão divide os e-mails dela por provedor: Gmail,
+Microsoft, Yahoo, Apple e Outros, cada um com quantos e-mails foram
+enviados, entregues, abertos, clicados, deram bounce e atrasaram. O
+agrupamento é pelo endereço do destinatário, então um domínio de empresa com
+e-mail hospedado no Google ou na Microsoft entra em Outros. As aberturas
+contam só pessoas, nunca um pré-carregamento feito por máquina, e os bounces
+contam só os permanentes.
 
 ## Proteções
 
@@ -105,8 +163,11 @@ O envio avisa de antemão:
   ele responde `403 inbox_send_policy`.
 - Se sua taxa recente de bounce ou reclamação cruzou o limite de pausa do
   SES, novos envios de transmissão são bloqueados com um erro
-  `403 sending_paused` — contendo o estrago antes que o SES pause o envio por
-  completo.
+  `403 sending_paused`, contendo o estrago antes que o SES pause o envio por
+  completo. A taxa de reclamação conta só os e-mails para provedores que
+  informam reclamações (Gmail, Apple Mail e t-online nunca informam), e as
+  reclamações só contam para um alerta ou para essa pausa a partir de 100
+  desses envios.
 - Se a taxa agregada de bounce ou de reclamações da plataforma na região SES do
   seu remetente se aproxima do limite em que o SES age sobre a conta, envios de
   transmissão nessa região são recusados com
@@ -118,6 +179,17 @@ transmissões.
 
 ## Mudanças recentes
 
+- Uma transmissão de um domínio [em aquecimento](#aquecimento) sai ao longo
+  de dias. A resposta do envio traz `warning.code` `warming_up`, e uma que o
+  aquecimento levaria mais de 24 dias para enviar é recusada com
+  `422 broadcast_too_large`.
+- O `List-Id` nomeia o tópico, ou o domínio de envio, em vez de cada
+  transmissão, então toda transmissão para a mesma lista leva o mesmo.
+- A página da transmissão divide a entrega
+  [por provedor de e-mail](#por-provedor-de-e-mail).
+- A taxa de reclamação por trás do `403 sending_paused` conta só os e-mails
+  para provedores que informam reclamações, e só a partir de 100 desses
+  envios.
 - Uma transmissão com e-mails ainda esperando — por capacidade, ou pela virada
   do limite do plano — aparece como `queued` com `sent_at` nulo até o último
   e-mail sair. Antes aparecia como `sent` assim que todos os e-mails eram

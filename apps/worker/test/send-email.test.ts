@@ -205,7 +205,8 @@ it("a broadcast send carries the RFC bulk-mail headers", async () => {
   // header casing, so compare case-insensitively like the transactional test.
   const mime = (sends[0]?.raw.toString("utf8") ?? "").replace(/\r\n[ \t]/g, "");
   const lowerMime = mime.toLowerCase();
-  expect(lowerMime).toContain(`list-id: <${broadcast.id}.acme.dev>`);
+  // The topic's list, whichever broadcast goes to it.
+  expect(lowerMime).toContain(`list-id: <${topic.id}.acme.dev>`);
   expect(lowerMime).toContain("precedence: bulk");
   expect(lowerMime).toContain("auto-submitted: auto-generated");
   expect(lowerMime).toContain("list-unsubscribe:");
@@ -216,6 +217,24 @@ it("a broadcast send carries the RFC bulk-mail headers", async () => {
     topicId: topic.id,
     emailId,
   });
+});
+
+it("broadcasts without a topic share one List-Id per sending domain", async () => {
+  const unsubscribe = { secretKey: randomBytes(32), baseUrl: "https://app.example.com" };
+  for (const n of [1, 2]) {
+    const [broadcast] = await db
+      .insert(schema.broadcasts)
+      .values({ teamId, from: "Acme <a@acme.dev>", subject: `hi ${n}` })
+      .returning({ id: schema.broadcasts.id });
+    if (!broadcast) throw new Error("broadcast insert failed");
+    const to = `everyone-${n}@example.com`;
+    const contactId = await insertContact(to);
+    const emailId = await insertEmail({ broadcastId: broadcast.id, contactId, to: [to] });
+    const { ses, sends } = fakeSes(`mid-bulk-all-${n}`);
+    expect(await sendEmail(db, { keyring, ses, unsubscribe }, { emailId })).toBe("sent");
+    const mime = (sends[0]?.raw.toString("utf8") ?? "").replace(/\r\n[ \t]/g, "");
+    expect(mime.toLowerCase()).toContain("list-id: <broadcasts.acme.dev>");
+  }
 });
 
 it("a topic send to a contact substitutes both unsubscribe tokens and carries RFC 8058 headers", async () => {

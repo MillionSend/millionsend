@@ -104,13 +104,18 @@ export const ptBR = {
   "broadcast.sending": {
     subject: "Sua transmissão está saindo ao longo de {days} dias",
     body: [
-      "{first} de {count} e-mails saíram na primeira leva; o restante segue conforme a capacidade libera, o último por volta de {finishesAt}.",
-      "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes; o e-mail transacional de {team} não fica esperando atrás deles.",
+      "{progress}",
+      "O e-mail transacional de {team} não fica esperando atrás desta transmissão.",
     ],
     button: "Abrir transmissão",
     muted: [
       "Você recebe isto uma vez por transmissão que leva mais de um dia. O horário de término é uma estimativa e pode mudar.",
     ],
+    extra: {
+      wave: "{first} de {count} e-mails saíram na primeira leva. O restante segue conforme a capacidade libera, e o último sai por volta de {finishesAt}.",
+      warmup:
+        "{domain} está em aquecimento, então envia um pouco mais a cada dia, primeiro para os contatos mais ativos. O último e-mail sai por volta de {finishesAt}.",
+    },
   },
   "broadcast.held_quota": {
     subject: "{parked} de {count} destinatários da transmissão aguardam a cota",
@@ -229,6 +234,31 @@ export const ptBR = {
     button: "Abrir métricas",
     muted: ["Você recebe isto uma vez por episódio."],
     extra: { bounce: "taxa de bounce permanente", complaint: "taxa de reclamação" },
+  },
+  "warmup.paused": {
+    subject: "Aquecimento pausado no seu domínio",
+    body: [
+      "{domain} parou de enviar transmissões depois da última verificação. {signals}",
+      "{waiting}",
+      "Veja para quem você está enviando e retome na aba Aquecimento do domínio.",
+    ],
+    button: "Abrir aquecimento",
+    extra: {
+      delays: "O Gmail atrasou {pct} dos e-mails do dia.",
+      opens: "As aberturas no Gmail ficaram em {pct} das outras caixas.",
+      hardBounces: "{pct} dos endereços deram bounce.",
+      mailboxFull: "{pct} das caixas estavam cheias ou inativas.",
+      complaints: "{pct} das pessoas marcaram como spam.",
+      "waiting.one": "1 e-mail está esperando até você retomar.",
+      "waiting.other": "{n} e-mails estão esperando até você retomar.",
+    },
+  },
+  "warmup.done": {
+    subject: "Seu domínio terminou o aquecimento",
+    body: [
+      "{domain} enviou {volume} e-mails em um dia com entrega saudável. O aquecimento acabou e as transmissões dele agora saem na velocidade normal.",
+    ],
+    button: "Abrir domínio",
   },
   "webhook.failing": {
     subject: "As entregas de webhook estão falhando",

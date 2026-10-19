@@ -1,5 +1,7 @@
 import { resolveNs as dnsResolveNs } from "node:dns/promises";
 import {
+  EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
+  EMAIL_RETENTION_DAYS_DEFAULT,
   env,
   receivingEnabled,
   receivingMxHost,
@@ -12,18 +14,33 @@ import {
   associateDomainTenant,
   clearTrackingClock,
   createFixedWindowLimiter,
+  DAY_MS,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   deleteInboxes,
+  enableWarmup,
   failQueuedEmailsForDomain,
   fetchEffectivePlan,
+  getInstanceSettings,
+  getWarmup,
   isIdentitySharedByOtherDomains,
   isOperatorTeam,
   isReservedSenderDomain,
   linkTeam,
   liveInbox,
+  movedWarmupVolume,
   PLAN_DOMAIN_LIMIT,
+  pauseWarmup,
+  planWarmupDays,
+  resultRows,
+  resumeWarmup,
   setDomainReceiving,
+  turnOffWarmup,
+  updateWarmupSettings,
+  utcDay,
+  WARMUP_LIMITS,
+  type WarmupOverview,
   warmupCap,
+  warmupOverview,
   webhookBatch,
 } from "@millionsend/core";
 import { registrableDomain } from "@millionsend/core/org-domain";
@@ -49,7 +66,7 @@ import {
   verificationDbPatch,
 } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, min, sql } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
@@ -58,6 +75,8 @@ import { catchAllAllowed, inboxDeps, userActor } from "../inboxes";
 import { enqueueDomainAge } from "../queue";
 import { assertTeamNotSuspended } from "../suspension-lock";
 import { adminProcedure, router, teamProcedure } from "../trpc";
+import { signalViews, warmupTodayWindow } from "../warmup-view";
+import { effectiveSetting } from "./system";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
 // registered exactly as typed, so uppercase is rejected instead of normalized.
@@ -196,6 +215,84 @@ async function requireDomain(db: Db, teamId: string, id: string) {
   return domain;
 }
 
+const WARMUP_ACTIONS = {
+  on: enableWarmup,
+  pause: pauseWarmup,
+  resume: resumeWarmup,
+  off: turnOffWarmup,
+} as const;
+
+const volumeInput = (limits: { min: number; max: number }) =>
+  z.number().int().min(limits.min).max(limits.max).optional();
+const warmupSettingsInput = z.object({
+  dailyTarget: volumeInput(WARMUP_LIMITS.dailyTarget),
+  startVolume: volumeInput(WARMUP_LIMITS.startVolume),
+  orderByEngagement: z.boolean().optional(),
+  orderByTransactional: z.boolean().optional(),
+  orderProperty: z.string().trim().max(WARMUP_LIMITS.orderPropertyLength).nullable().optional(),
+  skipInactive: z.boolean().optional(),
+});
+
+/** Today's sending window while warming and checked: until the mail waiting for today's room runs out. */
+function todayWindow(o: WarmupOverview, now: Date) {
+  const today = o.today;
+  if (o.status !== "warming" || !today?.checked) return null;
+  return warmupTodayWindow(today, Math.min(today.allowance - today.sent, o.waiting), now);
+}
+
+/** Days parked mail lasts: the body purge or the row purge, whichever comes first. */
+async function mailRetentionDays(db: Db): Promise<number> {
+  const stored = await getInstanceSettings(db);
+  return Math.min(
+    effectiveSetting(
+      stored.emailRetentionDays,
+      process.env.EMAIL_RETENTION_DAYS,
+      EMAIL_RETENTION_DAYS_DEFAULT,
+    ).value,
+    effectiveSetting(
+      null,
+      process.env.EMAIL_METADATA_RETENTION_DAYS,
+      EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
+    ).value,
+  );
+}
+
+/** The property keys the team's contacts carry with a value, the ones the segment builder lists. */
+async function contactPropertyKeys(db: Db, teamId: string): Promise<string[]> {
+  const c = schema.contacts;
+  const rows = resultRows<{ key: string }>(
+    await db.execute(sql`
+      select distinct kv.key as key
+      from ${c} c
+      cross join lateral jsonb_each_text(c.properties) as kv(key, value)
+      where c.team_id = ${teamId} and kv.value <> ''
+      order by 1
+    `),
+  );
+  return rows.map((row) => row.key);
+}
+
+/** When this domain's oldest broadcast mail parked for its warm-up leaves with retention. */
+async function waitingExpiresAt(db: Db, teamId: string, domainId: string): Promise<Date | null> {
+  const e = schema.emails;
+  const [[oldest], days] = await Promise.all([
+    db
+      .select({ at: min(e.createdAt) })
+      .from(e)
+      .where(
+        and(
+          eq(e.teamId, teamId),
+          eq(e.domainId, domainId),
+          eq(e.latestStatus, "queued_quota"),
+          eq(e.parkReason, "warmup"),
+          isNotNull(e.broadcastId),
+        ),
+      ),
+    mailRetentionDays(db),
+  ]);
+  return oldest?.at ? new Date(oldest.at.getTime() + days * DAY_MS) : null;
+}
+
 export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
   // Identity creation provisions a shared AWS resource; cloud caps it per
   // team so one tenant cannot burn the account's CreateEmailIdentity
@@ -239,8 +336,12 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         .select({ n: count() })
         .from(schema.inboxes)
         .where(and(eq(schema.inboxes.domainId, domain.id), liveInbox(new Date())));
+      const ramp = await getWarmup(ctx.db, ctx.teamId, domain.id);
       return {
         sentCount: sent?.n ?? 0,
+        // The reputation warm-up's status, so the page reads the whole
+        // warm-up only when it is on or its tab is open.
+        warmupStatus: ramp?.status ?? "off",
         // The day's cap while the domain warms up, when the calendar lifts
         // it, and whether the team's other new domains share the day's
         // volume; never why, nor what a tier is.
@@ -282,6 +383,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
             .trim()
             .refine((v) => SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
             .default("send"),
+          warmup: z.boolean().default(false),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -392,6 +494,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           throw error;
         }
         if (!created) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        if (input.warmup) await enableWarmup(ctx.db, { teamId: ctx.teamId, domainId: created.id });
         if (sesTenantsEnabled()) {
           const { id } = created;
           await associateDomainTenant(ctx.db, {
@@ -591,6 +694,91 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           trackingSubdomain: next.trackingSubdomain,
           tlsMode: next.tlsMode,
         };
+      }),
+
+    /** Everything the Warm-up tab and the status row above the tabs show, in one read. */
+    warmup: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
+      const now = new Date();
+      const [overview, properties, expiresAt] = await Promise.all([
+        warmupOverview(ctx.db, { teamId: ctx.teamId, domainId: input.id, now }),
+        contactPropertyKeys(ctx.db, ctx.teamId),
+        waitingExpiresAt(ctx.db, ctx.teamId, input.id),
+      ]);
+      if (!overview) throw new TRPCError({ code: "NOT_FOUND" });
+      const { days: allDays, pauseSignals, latestSignals: _, ...o } = overview;
+      // A restart begins a new history: only the current run's days.
+      const startDay = o.startedAt ? utcDay(o.startedAt) : null;
+      const days = allDays
+        .filter((d) => startDay !== null && d.day >= startDay)
+        .map((d) => ({ ...d, signals: signalViews(d.signals) }));
+      // The table reads the day that paused it, or else the newest one checked.
+      const checked = days.find(
+        (d) => d.signals && (o.status !== "paused" || (pauseSignals && d.outcome === "paused")),
+      );
+      return {
+        ...o,
+        days,
+        pauseSignals: signalViews(pauseSignals),
+        health: checked?.signals
+          ? {
+              day: checked.day,
+              sent: checked.sent,
+              checkedAt: checked.checkedAt,
+              signals: checked.signals,
+              yesterday: checked.day === utcDay(now.getTime() - DAY_MS),
+            }
+          : null,
+        todayWindow: todayWindow(overview, now),
+        resumeVolume: movedWarmupVolume(o.volume, "resume", o.settings.dailyTarget),
+        // A broadcast to everyone while it is off, planned from the start of a
+        // day so day 1 shows a whole day's volume however late it is now.
+        preview:
+          o.status === "off"
+            ? planWarmupDays({
+                now: new Date(`${utcDay(now)}T00:00:00Z`),
+                paused: false,
+                volume: o.settings.startVolume,
+                dailyTarget: o.settings.dailyTarget,
+                today: null,
+                waitingAhead: 0,
+                count: o.audience.total - (o.settings.skipInactive ? o.audience.inactive : 0),
+              }).perDay
+            : null,
+        properties,
+        limits: { dailyTarget: WARMUP_LIMITS.dailyTarget, startVolume: WARMUP_LIMITS.startVolume },
+        waitingExpiresAt: o.waiting > 0 ? expiresAt : null,
+        canManage: ctx.role === "owner" || ctx.role === "admin",
+      };
+    }),
+
+    setWarmup: adminProcedure
+      .input(z.object({ id: z.uuid(), action: z.enum(["on", "pause", "resume", "off"]) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireDomain(ctx.db, ctx.teamId, input.id);
+        const changed = await WARMUP_ACTIONS[input.action](ctx.db, {
+          teamId: ctx.teamId,
+          domainId: input.id,
+        });
+        return { changed };
+      }),
+
+    updateWarmup: adminProcedure
+      .input(z.object({ id: z.uuid(), settings: warmupSettingsInput }))
+      .mutation(async ({ ctx, input }) => {
+        const saved = await updateWarmupSettings(ctx.db, {
+          teamId: ctx.teamId,
+          domainId: input.id,
+          settings: input.settings,
+        }).catch((error: unknown) => {
+          // The input schema holds the bounds; what is left is a starting
+          // volume above the daily target, against the stored other half.
+          if (error instanceof RangeError) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "warmup_settings_out_of_range" });
+          }
+          throw error;
+        });
+        if (!saved) throw new TRPCError({ code: "NOT_FOUND" });
+        return { id: input.id };
       }),
 
     /** Resend's capabilities.receiving: a catch-all for every address at the domain. */

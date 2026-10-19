@@ -537,7 +537,7 @@
       },
       "deliverability": {
         "label": "Entregabilidade",
-        "note": "Taxas de bounce ou reclamação em risco, ou envio pausado."
+        "note": "Taxas de bounce ou reclamação em risco, envio pausado e o aquecimento de um domínio pausado ou concluído."
       },
       "webhook_failing": {
         "label": "Endpoint de webhook falhando",

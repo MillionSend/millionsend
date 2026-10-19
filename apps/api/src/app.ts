@@ -8,6 +8,7 @@ import {
   acceptEmail,
   authenticateApiKey,
   beginIdempotent,
+  broadcastAudience,
   broadcastSendSpacingMs,
   buildUnsubscribeUrl,
   CONTACT_PROPERTY_MAX_KEYS,
@@ -42,6 +43,7 @@ import {
   findSuppressed,
   findTopicOptOuts,
   fixedWindowCounter,
+  getWarmup,
   INBOX_KEY_FROM_MESSAGE,
   INBOX_KEY_SCOPE_MESSAGE,
   type InboxKeys,
@@ -56,7 +58,9 @@ import {
   makeUnsubscribeToken,
   markSegmentsStale,
   monthlyQuotaMessage,
+  PACING_HORIZON_MAX_RETENTION_DAYS,
   PLAN_CONTACT_LIMIT,
+  pacingHorizonDays,
   parseScheduledAt,
   planCaps,
   planRegionSend,
@@ -98,6 +102,9 @@ import {
   type VirusResult,
   verifySenderDomain,
   type WebhookEnqueue,
+  warmupBroadcastPlans,
+  warmupPastHorizon,
+  warmupSendPreview,
   webhookBatch,
   wireLastEvent,
 } from "@millionsend/core";
@@ -2759,37 +2766,15 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
   );
 }
 
-/** Contacts the fan-out would walk: subscribed, in the segment, and subscribed to the topic. */
+/** Contacts the fan-out would walk, by the audience predicate it reads itself. */
 async function countBroadcastAudience(
   db: Db,
   teamId: string,
   broadcast: { segmentId: string | null; topicId: string | null },
 ): Promise<number> {
-  const c = schema.contacts;
-  const conditions: (SQL | undefined)[] = [eq(c.teamId, teamId), eq(c.unsubscribed, false)];
-  if (broadcast.segmentId) {
-    const [segment] = await db
-      .select()
-      .from(schema.segments)
-      .where(and(eq(schema.segments.id, broadcast.segmentId), eq(schema.segments.teamId, teamId)));
-    if (segment) conditions.push(segmentContactsWhere(c, segment));
-  }
-  if (broadcast.topicId) {
-    const [topic] = await db
-      .select({ defaultSubscribed: schema.topics.defaultSubscribed })
-      .from(schema.topics)
-      .where(eq(schema.topics.id, broadcast.topicId));
-    const s = schema.contactTopicSubscriptions;
-    conditions.push(
-      topic?.defaultSubscribed
-        ? sql`not exists (select 1 from ${s} where ${s.contactId} = ${c.id} and ${s.topicId} = ${broadcast.topicId} and ${s.subscribed} = false)`
-        : sql`exists (select 1 from ${s} where ${s.contactId} = ${c.id} and ${s.topicId} = ${broadcast.topicId} and ${s.subscribed} = true)`,
-    );
-  }
-  const [row] = await db
-    .select({ n: count() })
-    .from(c)
-    .where(and(...conditions));
+  const where = await broadcastAudience(db, teamId, broadcast);
+  if (!where) return 0;
+  const [row] = await db.select({ n: count() }).from(schema.contacts).where(where);
   return row?.n ?? 0;
 }
 
@@ -2902,9 +2887,38 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     // satisfies the type); relative forms ("in 2 days") resolve against now.
     const scheduledAt =
       (scheduledAtInput ? parseScheduledAt(scheduledAtInput) : null) ?? new Date();
+    // A domain warming up its reputation sends by the warm-up's day, not by
+    // the region's room, so its own plan says when the send finishes.
+    const ramp = await getWarmup(db, auth.teamId, domain.domainId);
+    const warmup =
+      ramp?.status === "warming" || ramp?.status === "paused"
+        ? await warmupSendPreview(db, {
+            teamId: auth.teamId,
+            domainId: domain.domainId,
+            segmentId: broadcast.segmentId,
+            topicId: broadcast.topicId,
+            at: scheduledAt,
+          })
+        : null;
+    // The warm-up's own plan meets the same horizon a paced send does; a
+    // paused warm-up has no finish, and its send waits.
+    if (warmup?.plan) {
+      const horizonDays = deps.pacing
+        ? await deps.pacing.horizonDays()
+        : pacingHorizonDays(PACING_HORIZON_MAX_RETENTION_DAYS);
+      if (warmupPastHorizon(warmup.plan, horizonDays)) {
+        return fail(
+          422,
+          "broadcast_too_large",
+          `At this warm-up's pace this broadcast needs more than ${horizonDays} days. Raise the daily target or send to a smaller segment.`,
+        );
+      }
+    }
     // The planner says when the send finishes and refuses one that would
     // not finish inside the horizon; without SES's numbers it says nothing.
-    const estimate = await estimateSend(auth.teamId, broadcast, domain.region, scheduledAt);
+    const estimate = warmup?.plan
+      ? null
+      : await estimateSend(auth.teamId, broadcast, domain.region, scheduledAt);
     if (estimate?.blocked) {
       return fail(
         422,
@@ -2929,10 +2943,28 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     }
     const body: SendBody = {
       id: row.id,
-      finishes_at: estimate?.finishesAt?.toISOString() ?? null,
+      finishes_at: (warmup?.plan ?? estimate)?.finishesAt?.toISOString() ?? null,
       estimated: true,
     };
-    if (estimate?.finishesAt && estimate.startsAt && estimate.first === 0 && !estimate.planHold) {
+    if (warmup?.status === "paused") {
+      body.warning = {
+        code: "warming_up",
+        days: 0,
+        message: "This domain's warm-up is paused, so this broadcast waits until it resumes.",
+      };
+    } else if (warmup?.plan?.finishesAt) {
+      const { days } = warmup.plan;
+      body.warning = {
+        code: "warming_up",
+        days,
+        message: `This domain is warming up, so this broadcast goes out over about ${days === 1 ? "1 day" : `${days} days`}, most active contacts first.`,
+      };
+    } else if (
+      estimate?.finishesAt &&
+      estimate.startsAt &&
+      estimate.first === 0 &&
+      !estimate.planHold
+    ) {
       body.warning = {
         code: "queued_behind",
         days: estimate.days,
@@ -2989,12 +3021,17 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     return mine ? { ...mine, count, horizonDays } : null;
   };
 
-  /** finishes_at per broadcast of the team still going out: one planner run per region, under the team's own caps. */
+  /**
+   * finishes_at per broadcast of the team still going out: a warming
+   * domain's from its warm-up's plan, the rest from one planner run per
+   * region, under the team's own caps.
+   */
   const liveFinishes = async (teamId: string): Promise<Map<string, Date | null>> => {
     const out = new Map<string, Date | null>();
-    if (!deps.pacing) return out;
     const mine = await sendingBroadcasts(db, { teamId });
-    const regions = new Set(mine.flatMap((b) => (b.region ? [b.region] : [])));
+    for (const [id, plan] of await warmupBroadcastPlans(db, mine)) out.set(id, plan.finishesAt);
+    if (!deps.pacing) return out;
+    const regions = new Set(mine.flatMap((b) => (b.region && !b.warmup ? [b.region] : [])));
     if (regions.size === 0) return out;
     const [reservePercent, rateCeiling, horizonDays, quota] = await Promise.all([
       deps.pacing.reservePercent(),

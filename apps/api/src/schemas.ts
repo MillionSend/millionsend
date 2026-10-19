@@ -1210,11 +1210,14 @@ export const sendBroadcastResponseSchema = z
     warning: z
       .object({
         code: z
-          .enum(["paced", "queued_behind"])
+          .enum(["paced", "queued_behind", "warming_up"])
           .describe(
-            "paced: more than the capacity available now; queued_behind: other sends go first",
+            "paced: more than the capacity available now; queued_behind: other sends go first; warming_up: the sender domain's warm-up spreads the send over days, most active contacts first, or holds it while paused",
           ),
-        days: z.number().int().describe("Days the send spans"),
+        days: z
+          .number()
+          .int()
+          .describe("Days the send spans; 0 while the domain's warm-up is paused"),
         message: z.string(),
       })
       .optional(),

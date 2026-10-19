@@ -25,6 +25,7 @@ const NAMESPACES = [
   "settings",
   "placeholders",
   "templates",
+  "warmup",
   "webhooks",
 ] as const;
 

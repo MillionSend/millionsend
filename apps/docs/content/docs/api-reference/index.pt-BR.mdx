@@ -141,10 +141,13 @@ deliberadas e explícitas:
 - O envio de uma transmissão responde com `finishes_at` (o instante estimado em
   que o último e-mail sai, ou `null`), `estimated: true` e, quando a audiência
   passa da capacidade disponível agora, um `warning` (`paced` ou
-  `queued_behind`, com `days` e uma mensagem). As leituras de transmissão trazem
-  `sent_count` e um `finishes_at` ao vivo; um cancelamento responde com
-  `canceled_remaining`. Uma audiência que precisa de mais de 24 dias de
-  capacidade é recusada com `422 broadcast_too_large`. Veja
+  `queued_behind`, com `days` e uma mensagem). De um domínio com o
+  [aquecimento](/pt-BR/concepts/domains#aquecimento) ligado, o `warning` é
+  `warming_up`, com `days: 0` enquanto o aquecimento está pausado. As
+  leituras de transmissão trazem `sent_count` e um `finishes_at` ao vivo, e um
+  cancelamento responde com `canceled_remaining`. Uma audiência que precisa
+  de mais de 24 dias de capacidade, ou de aquecimento do domínio, é recusada
+  com `422 broadcast_too_large`. Veja
   [Transmissões](/pt-BR/concepts/broadcasts#ritmo-de-envio).
 - `POST /emails` e `POST /emails/batch` retornam `429 daily_quota_exceeded`
   em um plano diário (Free, Starter) quando a cota diária de envio acabou e a
@@ -153,11 +156,11 @@ deliberadas e explícitas:
   incluído com o excedente desligado, ou enquanto um pagamento está pendente
   (o excedente fica pausado até a fatura ser paga); ative o excedente ou pague
   a fatura em Cobrança, ou espere o período renovar (a mensagem informa a
-  data). Um lote é aceito ou recusado
-  por inteiro. Em qualquer plano, um domínio ainda no
-  [aquecimento de domínio novo](/pt-BR/concepts/domains#aquecimento-de-domínio-novo)
-  responde o mesmo `429 daily_quota_exceeded`, com uma mensagem que cita o
-  aquecimento, quando já há muito e-mail aguardando.
+  data). Um lote é aceito ou recusado por inteiro. Em qualquer plano, um
+  domínio ainda sob o
+  [limite de domínio novo](/pt-BR/concepts/domains#limite-de-domínio-novo)
+  responde o mesmo `429 daily_quota_exceeded`, com uma mensagem que cita esse
+  limite, quando já há muito e-mail aguardando.
 - `POST /contacts`, `POST /contacts/batch` e o alias de audience retornam
   `403 plan_limit_reached` quando um contato novo levaria a equipe além do
   limite de contatos do plano (1.000 no Free; planos pagos são ilimitados).

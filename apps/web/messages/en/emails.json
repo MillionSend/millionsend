@@ -140,8 +140,12 @@
       "notSentYet": "Not sent yet. Delivery events show up here as soon as the provider answers.",
       "waiting": "Waiting to send",
       "waitingBody": "Goes out as soon as sending capacity frees up.",
-      "warmup": "Warming up the domain",
-      "warmupBody": "New domains ramp up gradually to protect deliverability. Goes out as the daily volume allows."
+      "warmup": "Waiting for the domain's warm-up",
+      "warmupBody": "This domain sends a little more each day, most active contacts first. This email goes out as the day's volume allows.",
+      "warmupPaused": "Waiting for the warm-up to resume",
+      "warmupPausedBody": "The domain's warm-up is paused. This email goes out after it resumes.",
+      "newDomainLimit": "Waiting for the domain's daily volume",
+      "newDomainLimitBody": "Newly registered domains send a little more each day. This email goes out as the day's volume allows."
     },
     "headers": "Headers",
     "noHeaders": "No headers."
@@ -350,6 +354,7 @@
       "manual": "Manual",
       "one_click_unsubscribe": "Unsubscribe"
     },
+    "fullMailbox": "Full or inactive mailbox",
     "detail": {
       "breadcrumb": "Suppression details",
       "notFound": "Suppression not found.",
@@ -357,7 +362,8 @@
       "recipient": "Recipient",
       "added": "Added",
       "details": "Details",
-      "removeNote": "Removing an address that bounced permanently will likely bounce again — remove it only after the mailbox is fixed."
+      "removeNote": "An address that bounced permanently will likely bounce again. Remove it only after the mailbox is fixed.",
+      "removeNoteFull": "This mailbox answered full or inactive. Remove it once you know it takes mail again."
     },
     "removeDialog": {
       "title": "Remove email address",

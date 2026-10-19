@@ -19,6 +19,7 @@ import {
   EventNode,
   EventStripSkeleton,
 } from "@/components/email-status-icon";
+import { GradientBanner } from "@/components/gradient-banner";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
@@ -34,7 +35,6 @@ import {
   formatUtcTimestampMs,
   mailDomain,
 } from "@/lib/format";
-import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
 type EventType =
@@ -344,6 +344,8 @@ type Pending =
   | { kind: "plan"; resumesAt: Date }
   | { kind: "waiting" }
   | { kind: "warmup" }
+  | { kind: "warmupPaused" }
+  | { kind: "newDomainLimit" }
   | { kind: "held" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
@@ -409,11 +411,15 @@ function PendingEvents({
       body: t("detail.pending.waitingBody"),
       estimate: true,
     });
-  } else if (pending.kind === "warmup") {
+  } else if (
+    pending.kind === "warmup" ||
+    pending.kind === "warmupPaused" ||
+    pending.kind === "newDomainLimit"
+  ) {
     nodes.push({
       type: "queued_quota",
-      label: t("detail.pending.warmup"),
-      body: t("detail.pending.warmupBody"),
+      label: t(`detail.pending.${pending.kind}`),
+      body: t(`detail.pending.${pending.kind}Body`),
       estimate: true,
     });
   } else if (pending.kind === "held") {
@@ -727,33 +733,19 @@ export default function EmailDetailPage() {
       />
 
       {hardBounced ? (
-        <div
-          className="ms-wrap-row"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            backgroundColor: "var(--ms-ground)",
-            backgroundImage: statusGlow("danger"),
-            border: "1px solid var(--ms-danger-border)",
-            borderRadius: 12,
-            padding: "12px 16px",
-            marginBottom: 24,
-          }}
+        <GradientBanner
+          variant="danger"
+          title={t("detail.bounceBanner.hard")}
+          style={{ marginBottom: 24 }}
         >
-          <span style={{ fontSize: 13.5, color: "var(--ms-danger)" }}>
-            {t("detail.bounceBanner.hard")}
-          </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
-            {t.rich("detail.bounceBanner.suppressed", {
-              link: (chunks) => (
-                <Link href="/emails/suppressions" className="ms-link">
-                  {chunks}
-                </Link>
-              ),
-            })}
-          </span>
-        </div>
+          {t.rich("detail.bounceBanner.suppressed", {
+            link: (chunks) => (
+              <Link href="/emails/suppressions" className="ms-link">
+                {chunks}
+              </Link>
+            ),
+          })}
+        </GradientBanner>
       ) : null}
 
       <div
@@ -1059,7 +1051,13 @@ export default function EmailDetailPage() {
               <div>
                 <Microlabel>{t("suppressedDrawer.origin")}</Microlabel>
                 <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {row ? t(`suppressions.reason.${row.reason}`) : "—"}
+                  {row
+                    ? t(
+                        row.fullMailbox
+                          ? "suppressions.fullMailbox"
+                          : `suppressions.reason.${row.reason}`,
+                      )
+                    : "—"}
                 </div>
               </div>
               <div>

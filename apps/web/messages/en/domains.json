@@ -51,6 +51,13 @@
     "recommended": "Recommended",
     "regionHint": "Domains are provisioned in one of the SES regions this deployment serves. A domain has one region: to move it, delete it and add it again.",
     "regionSandbox": "sandbox — no production access",
+    "sentBefore": {
+      "question": "Has this domain sent email before?",
+      "yes": "Yes, through another provider",
+      "yesHint": "No warm-up. It keeps the reputation it already has.",
+      "no": "No, it's new to sending",
+      "noHint": "Big sends start small and grow each day while delivery stays healthy. You can change this later."
+    },
     "advanced": "Advanced options",
     "returnPath": "Custom Return-Path",
     "returnPathHint": "Used for SPF authentication, DMARC alignment, and bounces. Avoid values that undermine credibility (e.g. <code>testing</code>) — they may be exposed to recipients.",
@@ -87,7 +94,8 @@
     "region": "Region",
     "tabs": {
       "records": "Records",
-      "configuration": "Configuration"
+      "configuration": "Configuration",
+      "warmup": "Warm-up"
     },
     "recordsHeading": "Add these records at {provider}",
     "recordsHeadingGeneric": "Add these records at your DNS provider",
@@ -175,10 +183,12 @@
     "bannerLookingBodyGeneric": "This may take a few hours depending on your DNS provider's propagation time.",
     "bannerVerified": "Domain verified.",
     "bannerVerifiedBody": "Ready to send emails.",
-    "warmup": "Warming up: {perDay}/day today · full volume from {date}",
-    "warmupToday": "Warming up: {perDay}/day today",
-    "warmupBody": "Gradual ramp-up protects deliverability for new domains.",
-    "warmupBodyShared": "Gradual ramp-up protects deliverability for new domains. The daily volume is shared across your team's new domains.",
+    "newDomainLimit": {
+      "line": "New domain limit: {perDay}/day today · full volume from {date}",
+      "today": "New domain limit: {perDay}/day today",
+      "body": "Newly registered domains send a little more each day.",
+      "bodyShared": "Newly registered domains send a little more each day. Your team's new domains share this daily volume."
+    },
     "deleteDomain": "Delete domain",
     "deleteBody": "This permanently deletes the domain and its DNS configuration. Sending from it stops immediately.",
     "deleteConfirmLabel": "Type the domain to confirm",

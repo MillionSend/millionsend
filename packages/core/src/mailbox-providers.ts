@@ -4,6 +4,34 @@ export const GMAIL_DOMAINS: ReadonlySet<string> = new Set(["gmail.com", "googlem
 export const APPLE_MAIL_DOMAINS: ReadonlySet<string> = new Set(["icloud.com", "me.com", "mac.com"]);
 export const SES_MAILBOX_SIMULATOR_DOMAIN = "simulator.amazonses.com";
 
+export type MailboxProvider = "gmail" | "microsoft" | "yahoo" | "apple" | "other";
+
+// Consumer webmail by the recipient's domain. A company domain reads as
+// "other" even when Google or Microsoft hosts its mail.
+export const MICROSOFT_DOMAIN_PATTERN =
+  "^((hotmail|outlook|live|windowslive)\\.(com|[a-z]{2}|co\\.[a-z]{2}|com\\.[a-z]{2})|msn\\.com)$";
+export const YAHOO_DOMAIN_PATTERN =
+  "^(yahoo|ymail|rocketmail)\\.(com|[a-z]{2}|co\\.[a-z]{2}|com\\.[a-z]{2})$";
+
+const MICROSOFT_DOMAIN = new RegExp(MICROSOFT_DOMAIN_PATTERN);
+const YAHOO_DOMAIN = new RegExp(YAHOO_DOMAIN_PATTERN);
+
+export function mailboxProvider(domain: string): MailboxProvider {
+  const d = domain.toLowerCase();
+  if (GMAIL_DOMAINS.has(d)) return "gmail";
+  if (APPLE_MAIL_DOMAINS.has(d)) return "apple";
+  if (MICROSOFT_DOMAIN.test(d)) return "microsoft";
+  if (YAHOO_DOMAIN.test(d)) return "yahoo";
+  return "other";
+}
+
+/** A soft bounce or delay saying the mailbox is full or abandoned, in SES's subtype or the receiving server's own words. */
+export const MAILBOX_FULL_PATTERN =
+  /mailboxfull|out of storage|over quota|quota ?exceeded|mailbox (is )?full|mailbox limit|insufficient (system )?storage|\binactive\b/i;
+
+/** The part of MAILBOX_FULL_PATTERN that names an abandoned account rather than a full one: one such answer is enough. */
+export const INACTIVE_MAILBOX_PATTERN = /\binactive\b/i;
+
 /**
  * Mailbox providers that never report a complaint to SES: Gmail's feedback
  * is aggregate only (Postmaster Tools), and Apple and Deutsche Telekom run no

@@ -431,8 +431,10 @@ it("a paced broadcast tells the owners once at walk end, then reports when the l
     ["broadcast.sending", "Your broadcast is going out over 3 days"],
   ]);
   expect(mail.sends[0]?.text).toContain("1 of 3 emails went out in the first wave");
-  expect(mail.sends[0]?.text).toMatch(/the last about .* UTC\./);
-  expect(mail.sends[0]?.text).toContain("paced's transactional email is not held behind them");
+  expect(mail.sends[0]?.text).toMatch(/the last goes out about .* UTC\./);
+  expect(mail.sends[0]?.text).toContain(
+    "paced's transactional email doesn't wait behind this broadcast.",
+  );
   expect(mail.sends[0]?.text).toContain(`${BASE_URL}/broadcasts/${broadcastId}`);
   // Nothing more while rows wait; the walk-end note is said once.
   expect(await finalizeBroadcast(db, deps, broadcastId)).toBe(false);

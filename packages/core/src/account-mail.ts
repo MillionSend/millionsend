@@ -34,6 +34,8 @@ export const ACCOUNT_MAIL_KINDS = [
   "quota.monthly_reached",
   "deliverability.warning",
   "deliverability.paused",
+  "warmup.paused",
+  "warmup.done",
   "webhook.failing",
   "webhook.auto_disabled",
   "webhook.backlog",

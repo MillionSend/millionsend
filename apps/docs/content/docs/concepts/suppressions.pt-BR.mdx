@@ -23,6 +23,12 @@ teve hard bounce ou marcou você como spam.
 Bounces e reclamações chegam como eventos do SES e suprimem o endereço
 automaticamente. Supressões são por equipe.
 
+Quando o servidor de destino responde que uma caixa está inativa, o endereço
+é suprimido na hora. Quando responde duas vezes que a caixa de um contato
+está cheia, com um a 30 dias de intervalo, o endereço também é suprimido. Os
+dois casos aparecem como hard bounce (`origin: "bounce"`), mas não contam na
+sua taxa de bounce.
+
 ## O que a supressão faz
 
 - **Envios transacionais** (`POST /emails` e o relay SMTP, sem `topic_id`):
