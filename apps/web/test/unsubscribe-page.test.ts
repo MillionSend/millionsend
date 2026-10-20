@@ -391,7 +391,7 @@ describe("/unsubscribe/[token] route", () => {
       for (const page of [await renderConfirm(token, { done: "1" }), await renderConfirm(token)]) {
         expect(page).toContain("receive marketing emails anymore");
         expect(page).not.toContain("News</span> emails anymore");
-        expect(page).not.toContain('id="ms-unsub-all"');
+        expect(page).not.toContain('name="scope"');
       }
     });
 
@@ -403,6 +403,11 @@ describe("/unsubscribe/[token] route", () => {
       const page = await renderConfirm(token);
       expect(page).toContain(">News</span> emails anymore");
       expect(page).not.toContain("receive marketing emails anymore");
+      // The sender's other mail still comes, so leaving everything is one press away.
+      expect(page).toContain(`action="/unsubscribe/${encodeURIComponent(token)}"`);
+      expect(page).toContain(
+        `<input type="hidden" name="scope" value="all"/><button type="submit" class="ms-btn ms-btn-secondary">${en.buttonAll}</button></form>`,
+      );
     });
   });
 
