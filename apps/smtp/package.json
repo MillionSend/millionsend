@@ -15,8 +15,8 @@
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "mailparser": "^3.9.38",
-    "smtp-server": "^3.19.21",
+    "mailparser": "^3.9.40",
+    "smtp-server": "^3.19.23",
     "tsx": "^4.23.15",
     "zod": "^4.6.7"
   },
@@ -26,7 +26,7 @@
     "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.1",
     "@types/smtp-server": "^3.5.13",
-    "nodemailer": "^10.1.0",
+    "nodemailer": "^10.1.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.4"
   }
