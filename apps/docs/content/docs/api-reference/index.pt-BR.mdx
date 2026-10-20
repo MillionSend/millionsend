@@ -183,7 +183,11 @@ deliberadas e explícitas:
   par que você informa substitui o gerado: os pedidos de um clique passam a
   chegar no seu endpoint, o MillionSend não registra opt-out por eles, e um
   placeholder `{{{UNSUBSCRIBE_URL}}}` no corpo continua apontando para a página
-  do MillionSend.
+  do MillionSend. O MillionSend só gera o par e preenche o placeholder quando o
+  envio vai para um único endereço que é um contato: o link descadastra esse
+  contato, e todo mundo em `to`, `cc` e `bcc` recebe a mesma mensagem. Um envio
+  para mais de um endereço sai sem o par gerado, e os placeholders são
+  removidos.
 - Um envio em que todos os destinatários de `to` estão na lista de supressão ou
   saíram do `topic_id` é recusado com `422 all_recipients_suppressed` (mensagem
   `All recipients are suppressed`), e não com o `200` do Resend; destinatários

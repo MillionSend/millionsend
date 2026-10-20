@@ -33,8 +33,7 @@ export function appBaseUrl(): string {
 /**
  * Public URL the hosted unsubscribe pages answer on: their own host when the
  * deployment gave them one, else the dashboard. Every absolute URL the
- * unsubscribe flow emits derives from it, so a form post and its redirect
- * stay on one origin (the CSP's form-action reaches the redirect too).
+ * unsubscribe flow emits derives from it.
  */
 export function unsubscribeBaseUrl(): string {
   return resolveBaseUrl(env.UNSUBSCRIBE_BASE_URL ?? env.APP_BASE_URL);

@@ -265,8 +265,8 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
         };
       case "list_unsubscribe": {
         if (!(hasListUnsub && hasListUnsubPost)) return { status: "fail" };
-        // Broadcast/topic sends carry these headers via our own injection —
-        // guaranteed by the transport, not caller diligence.
+        // On a broadcast, and on a topic send to one contact, the pair comes
+        // from our own injection, not caller diligence.
         return { status: input.isBroadcast || input.hasTopic ? "passed_by_design" : "pass" };
       }
       case "link_domains_match": {

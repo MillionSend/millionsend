@@ -23,8 +23,8 @@ criação:
 - **A página de descadastro hospedada** lista os tópicos públicos da equipe,
   então um destinatário pode sair de uma categoria e continuar inscrito nas
   outras — ou sair de todo e-mail de marketing. Em um e-mail enviado com
-  tópico, o descadastro em um clique pelo app de e-mail do destinatário vale
-  só para esse tópico (a menos que você envie seu próprio par
+  tópico para um único contato, o descadastro em um clique pelo app de e-mail
+  do destinatário vale só para esse tópico (a menos que você envie seu próprio par
   `List-Unsubscribe`, que substitui o do MillionSend); já o botão **Cancelar
   todas as inscrições** da página tira o destinatário de todos os tópicos e de
   todas as transmissões. Envios transacionais sem `topic_id` não são afetados
@@ -40,5 +40,10 @@ puro de entradas como `{ "id": "<topic-id>", "subscription": "opt_in" }`, e
 lidas de volta com `GET /contacts/{id}/topics`, que lista cada tópico com a
 `subscription` efetiva do contato e um campo `explicit` (false quando é o padrão
 do tópico). Um envio com `topic_id` em que todos os destinatários de `to`
-optaram por sair é recusado com `422 all_recipients_suppressed`. Veja a
+optaram por sair é recusado com `422 all_recipients_suppressed`. Excluir um
+tópico não quebra os links de descadastro já enviados com ele: eles abrem a
+página hospedada sem esse tópico, onde o destinatário ainda pode cancelar
+todas as inscrições ou, se a equipe tiver outros tópicos públicos, ajustar
+as preferências. Já o descadastro em um clique por esses links não muda
+nada, porque o tópico não existe mais. Veja a
 [referência da API](/pt-BR/api-reference).
