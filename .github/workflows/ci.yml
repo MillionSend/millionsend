@@ -199,7 +199,9 @@ jobs:
           retention-days: 1
 
   publish:
-    needs: build
+    # helm as well: a version tag ships the chart below, so it must lint and
+    # render first; helm package alone checks neither.
+    needs: [build, helm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
