@@ -111,6 +111,13 @@ export const monitorSamples = pgTable(
     // not looked up. Domains only, as the insights keep them.
     destinations: jsonb("destinations").$type<string[]>(),
     linkYoung: boolean("link_young"),
+    // The hold rule this verdict met while the team was spared it, for a
+    // credential link to a product's own name on an app platform (core
+    // isPlatformLinkVerdict), or "burst" on waiting mail a sibling's spared
+    // verdict parked with it: the mail waits for the review list instead.
+    // "vouched" when an operator had cleared every such name: nothing to
+    // hold, and the mail flows.
+    sparedHold: text("spared_hold"),
     // What screening could not clear in the message's images and files
     // (core MEDIA_ISSUES), which can park the mail waiting on this verdict.
     mediaIssues: jsonb("media_issues").$type<string[]>(),
@@ -147,6 +154,10 @@ export const teamDestinations = pgTable(
     // Mail to it drew a phishing-type verdict after it cleared: new again
     // until an operator releases mail to it; no verdict clears it again.
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    // When an operator last released mail to it; null while only verdicts
+    // cleared it. A person's clearance is what a product's own page on an
+    // app platform keeps through later verdicts on its credential links.
+    operatorClearedAt: timestamp("operator_cleared_at", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.domain] })],
 );

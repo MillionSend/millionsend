@@ -80,6 +80,17 @@ export function vouchedRegistrableDomain(hostname: string): string | null {
   return icann !== null && icann === getDomain(name, { allowPrivateDomains: true }) ? icann : null;
 }
 
+/**
+ * Whether the name is one a free host hands out under a parent strangers
+ * share, as the private section of the suffix list draws it: x.pages.dev,
+ * ref.supabase.co, app.up.railway.app. Not the parent itself, and not a
+ * registered name of any depth.
+ */
+export function isFreeHostName(hostname: string): boolean {
+  const name = normalizeHostname(hostname);
+  return ownerDomain(name) !== registrableDomain(name);
+}
+
 /** True when the hostname IS its registrable domain (apex send, no subdomain). */
 export function isRootDomainSend(hostname: string): boolean {
   const name = normalizeHostname(hostname);

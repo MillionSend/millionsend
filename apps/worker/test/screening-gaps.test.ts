@@ -93,6 +93,20 @@ const verdict = (score: number): AbuseJudge => ({
         },
 });
 
+/** The judge's read of a product's own reset mail: a credential link off the verified domains, no brand claimed. */
+const credentialOnly = (score: number): AbuseJudge => ({
+  provider: "typesafe",
+  model: "fake-model",
+  judge: async () => ({
+    score,
+    verdict: "abuse" as const,
+    categories: ["phishing_credentials"],
+    reasons: ["off_domain_lure", "harvests_secrets"],
+    impersonatedBrand: null,
+    language: "en",
+  }),
+});
+
 const judge = (
   sampleId: string,
   answer: AbuseJudge,
@@ -191,6 +205,40 @@ it("keeps a first-window email waiting for its verdict past the team's daily cap
   expect(await sendEmail(db, sendDeps(capped), { emailId: id })).toBe("deferred");
   expect(await sampleOf(id)).toMatchObject({ screening: true, status: "pending" });
   expect(sesCalls).toEqual([]);
+});
+
+it("takes a platform name's clearance back unless an operator gave it, and then only for a lure that claims a brand", async () => {
+  const t = await team("platform-probation", "established");
+  // A name only a verdict cleared: a credential-only verdict in its probation revokes it, as any.
+  const laundered = await email(t, link("laundered.vercel.app"));
+  expect(await sendEmail(db, sendDeps(), { emailId: laundered })).toBe("deferred");
+  await judge((await sampleOf(laundered))?.id ?? "", verdict(30));
+  const lure = await email(t, link("laundered.vercel.app"));
+  expect(await sendEmail(db, sendDeps(), { emailId: lure })).toBe("sent");
+  await judge((await sampleOf(lure))?.id ?? "", credentialOnly(93));
+  expect((await clearance(t.teamId, "laundered.vercel.app"))?.revokedAt).not.toBeNull();
+  expect(mails).toContain("monitor.destination_revoked");
+  mails.length = 0;
+  // A name an operator released mail to: a credential-only verdict takes nothing back; a branded lure does.
+  const reset = await email(t, link("my-app.vercel.app"));
+  expect(await sendEmail(db, sendDeps(), { emailId: reset })).toBe("deferred");
+  await judge((await sampleOf(reset))?.id ?? "", credentialOnly(93));
+  expect(await sendEmail(db, sendDeps(), { emailId: reset })).toBe("parked");
+  expect(
+    await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [reset], holdLine: 80 }),
+  ).toEqual({ parked: 1, queued: [] });
+  expect(await clearance(t.teamId, "my-app.vercel.app")).toMatchObject({ revokedAt: null });
+  expect((await clearance(t.teamId, "my-app.vercel.app"))?.operatorClearedAt).not.toBeNull();
+  const again = await email(t, link("my-app.vercel.app"));
+  expect(await sendEmail(db, sendDeps(), { emailId: again })).toBe("sent");
+  await judge((await sampleOf(again))?.id ?? "", credentialOnly(85));
+  expect(await clearance(t.teamId, "my-app.vercel.app")).toMatchObject({ revokedAt: null });
+  expect(mails).not.toContain("monitor.destination_revoked");
+  const branded = await email(t, link("my-app.vercel.app"));
+  expect(await sendEmail(db, sendDeps(), { emailId: branded })).toBe("sent");
+  await judge((await sampleOf(branded))?.id ?? "", verdict(85));
+  // The operator heard of a revoke today already; the clearance still goes.
+  expect((await clearance(t.teamId, "my-app.vercel.app"))?.revokedAt).not.toBeNull();
 });
 
 it("takes a destination's clearance back when mail to it is read as phishing after it went out", async () => {

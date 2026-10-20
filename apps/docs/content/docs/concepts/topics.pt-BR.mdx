@@ -22,11 +22,15 @@ criação:
   descadastrados globalmente.
 - **A página de descadastro hospedada** lista os tópicos públicos da equipe,
   então um destinatário pode sair de uma categoria e continuar inscrito nas
-  outras — ou sair de todo e-mail de marketing. Envios transacionais sem
-  `topic_id` não são afetados por nenhuma das duas escolhas. A página fala
-  catorze idiomas, escolhido pelo navegador do destinatário
-  (`Accept-Language`), inglês quando nenhum corresponde; Configurações →
-  Página de descadastro pré-visualiza cada um.
+  outras — ou sair de todo e-mail de marketing. Em um e-mail enviado com
+  tópico, o descadastro em um clique pelo app de e-mail do destinatário vale
+  só para esse tópico (a menos que você envie seu próprio par
+  `List-Unsubscribe`, que substitui o do MillionSend); já o botão **Cancelar
+  todas as inscrições** da página tira o destinatário de todos os tópicos e de
+  todas as transmissões. Envios transacionais sem `topic_id` não são afetados
+  por nenhuma dessas escolhas. A página fala catorze idiomas, escolhido pelo
+  navegador do destinatário (`Accept-Language`), inglês quando nenhum
+  corresponde; Configurações → Página de descadastro pré-visualiza cada um.
 
 ## API
 

@@ -65,6 +65,8 @@ export {
   type HoldRule,
   inFirstWindow,
   isHoldVerdict,
+  isPlatformLinkVerdict,
+  isPlatformTenantName,
   loadMonitorState,
   MONITOR_ALERT_INTERVAL_MS,
   MONITOR_ANOMALY_CHECKS,
@@ -556,6 +558,7 @@ export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.j
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
 export {
   asciiHostname,
+  isFreeHostName,
   isRootDomainSend,
   linkDomain,
   ownerDomain,
@@ -685,6 +688,7 @@ export {
   screeningTeam,
   screeningTier,
   sendingDomainYoung,
+  spareWaitingSamples,
   teamDestinationStanding,
   teamNovelDestinations,
   unclearedDestinations,

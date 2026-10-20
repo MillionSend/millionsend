@@ -19,9 +19,14 @@ vi.mock("@millionsend/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@millionsend/db")>();
   return { ...actual, getDb: () => h.db };
 });
+// The confirm page reads Accept-Language through next/headers.
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "accept-language": "en" }),
+}));
 
 const { postUnsubscribeLocation, targetForToken } = await import("@/app/unsubscribe/lookup");
 const { GET, POST } = await import("@/app/unsubscribe/[token]/route");
+const { default: ConfirmPage } = await import("@/app/unsubscribe/confirm/[token]/page");
 
 let db: Db;
 let close: () => Promise<void>;
@@ -219,6 +224,142 @@ describe("/unsubscribe/[token] route", () => {
     expect(other?.id).toBeTruthy();
   });
 
+  describe("on a topic's link", () => {
+    async function seedTopicLink() {
+      const teamId = await createTeam(db, "acme");
+      const contactId = await seedContact(teamId);
+      const [topic] = await db
+        .insert(schema.topics)
+        .values({ teamId, name: "News", defaultSubscribed: true, visibility: "public" })
+        .returning({ id: schema.topics.id });
+      const [email] = await db
+        .insert(schema.emails)
+        .values({ teamId, from: "a@acme.dev", to: ["ada@x.com"], subject: "hi" })
+        .returning({ id: schema.emails.id });
+      const topicId = topic?.id ?? "";
+      const emailId = email?.id ?? "";
+      const token = makeUnsubscribeToken({ contactId, topicId, emailId, secretKey });
+      return { teamId, contactId, topicId, emailId, token };
+    }
+
+    async function stateOf(contactId: string, emailId: string) {
+      const [contact] = await db
+        .select({ unsubscribed: schema.contacts.unsubscribed })
+        .from(schema.contacts)
+        .where(eq(schema.contacts.id, contactId));
+      return {
+        unsubscribed: contact?.unsubscribed,
+        topics: await db
+          .select({
+            topicId: schema.contactTopicSubscriptions.topicId,
+            subscribed: schema.contactTopicSubscriptions.subscribed,
+          })
+          .from(schema.contactTopicSubscriptions)
+          .where(eq(schema.contactTopicSubscriptions.contactId, contactId)),
+        activities: await db
+          .select({ type: schema.contactActivities.type })
+          .from(schema.contactActivities)
+          .where(eq(schema.contactActivities.contactId, contactId)),
+        emailEvents: await db
+          .select({ data: schema.emailEvents.data })
+          .from(schema.emailEvents)
+          .where(eq(schema.emailEvents.emailId, emailId)),
+        suppressions: await db
+          .select({ email: schema.suppressions.email })
+          .from(schema.suppressions),
+      };
+    }
+
+    it("the confirm page's Unsubscribe beside the preferences leaves everything, once", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, emailId, token } = await seedTopicLink();
+
+      const post = await call("POST", token, "scope=all");
+      expect(post.status).toBe(303);
+      expect(post.headers.get("location")).toBe(
+        `${APP}/unsubscribe/confirm/${encodeURIComponent(token)}?done=1`,
+      );
+      // A second press lands the same way and records nothing new.
+      expect((await call("POST", token, "scope=all")).status).toBe(303);
+
+      expect(await stateOf(contactId, emailId)).toEqual({
+        unsubscribed: true,
+        topics: [],
+        activities: [{ type: "unsubscribed" }],
+        emailEvents: [{ data: { scope: "global", source: "hosted_page" } }],
+        suppressions: [{ email: "ada@x.com" }],
+      });
+    });
+
+    it("saving preferences touches the topics only", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, topicId, emailId, token } = await seedTopicLink();
+
+      expect((await call("POST", token, "prefs=1")).status).toBe(303);
+
+      expect(await stateOf(contactId, emailId)).toEqual({
+        unsubscribed: false,
+        topics: [{ topicId, subscribed: false }],
+        activities: [{ type: "topic_opt_out" }],
+        emailEvents: [
+          { data: { scope: "topic", topicId, topicName: "News", source: "hosted_page" } },
+        ],
+        suppressions: [],
+      });
+    });
+
+    it("a one-click post leaves the topic only, even carrying scope=all", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, topicId, emailId, token } = await seedTopicLink();
+
+      expect((await call("POST", token, "List-Unsubscribe=One-Click")).status).toBe(200);
+      expect((await call("POST", token, "List-Unsubscribe=One-Click&scope=all")).status).toBe(200);
+
+      expect(await stateOf(contactId, emailId)).toEqual({
+        unsubscribed: false,
+        topics: [{ topicId, subscribed: false }],
+        activities: [{ type: "topic_opt_out" }],
+        emailEvents: [
+          { data: { scope: "topic", topicId, topicName: "News", source: "one_click" } },
+        ],
+        suppressions: [],
+      });
+    });
+
+    const renderConfirm = async (token: string, query: { done?: string } = {}) =>
+      renderToStaticMarkup(
+        await ConfirmPage({
+          params: Promise.resolve({ token }),
+          searchParams: Promise.resolve(query),
+        }),
+      );
+
+    it("the confirm page reads as a global done after Unsubscribe from all, on the redirect and on a later visit", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { token } = await seedTopicLink();
+      const before = await renderConfirm(token);
+      expect(before).toContain(`>${en.buttonAll}</button>`);
+
+      await call("POST", token, "scope=all");
+
+      for (const page of [await renderConfirm(token, { done: "1" }), await renderConfirm(token)]) {
+        expect(page).toContain("receive marketing emails anymore");
+        expect(page).not.toContain("News</span> emails anymore");
+        expect(page).not.toContain('id="ms-unsub-all"');
+      }
+    });
+
+    it("the confirm page still reads as that topic's done after a topic-only opt-out", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { token } = await seedTopicLink();
+      await call("POST", token, "List-Unsubscribe=One-Click");
+
+      const page = await renderConfirm(token);
+      expect(page).toContain(">News</span> emails anymore");
+      expect(page).not.toContain("receive marketing emails anymore");
+    });
+  });
+
   it("an email the token names on another team, or none at all, records nothing", async () => {
     vi.stubEnv("APP_BASE_URL", APP);
     const teamId = await createTeam(db, "acme");
@@ -378,6 +519,27 @@ describe("UnsubscribePageView layout", () => {
   it("sets the topic's name in the heading's own type", () => {
     expect(out).toContain("Unsubscribe from <span");
     expect(out).not.toContain("ms-mono");
+  });
+
+  it("names the button beside the preferences for what it does, and posts it as scope=all", () => {
+    expect(out).toContain(
+      '<form id="ms-unsub-all" method="post"><input type="hidden" name="scope" value="all"/></form>',
+    );
+    expect(out).toContain(
+      `<button type="submit" form="ms-unsub-all" class="ms-btn ms-btn-secondary">${en.buttonAll}</button>`,
+    );
+  });
+
+  it("keeps the plain Unsubscribe when no preferences sit beside it", () => {
+    const plain = renderToStaticMarkup(
+      createElement(UnsubscribePageView, {
+        m: en,
+        state: "confirm",
+        customization: EMPTY_UNSUBSCRIBE_CUSTOMIZATION,
+      }),
+    );
+    expect(plain).toContain(`>${en.button}</button>`);
+    expect(plain).not.toContain(en.buttonAll);
   });
 
   it("draws each topic as a switch over a real checkbox the form posts", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asciiHostname,
+  isFreeHostName,
   isRootDomainSend,
   registrableDomain,
   vouchedRegistrableDomain,
@@ -95,6 +96,36 @@ describe("asciiHostname", () => {
       "x:25",
     ]) {
       expect(asciiHostname(bad)).toBeNull();
+    }
+  });
+});
+
+describe("isFreeHostName", () => {
+  it("is a name a free host hands out under a parent strangers share", () => {
+    for (const name of [
+      "ref.supabase.co",
+      "app.up.railway.app",
+      "x.workers.dev",
+      "my-app.vercel.app",
+      "x.pages.dev",
+      "x.github.io",
+      "x.s3.amazonaws.com",
+    ]) {
+      expect(isFreeHostName(name)).toBe(true);
+    }
+  });
+
+  it("is not the parent itself, a registered name of any depth, or no hostname at all", () => {
+    for (const name of [
+      "github.io",
+      "supabase.co",
+      "example.com",
+      "www.example.com.br",
+      "auth.example.com.br",
+      "localhost",
+      "unresolved",
+    ]) {
+      expect(isFreeHostName(name)).toBe(false);
     }
   });
 });
