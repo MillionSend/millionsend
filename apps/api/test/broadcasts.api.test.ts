@@ -11,7 +11,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 
 let db: Db;
@@ -941,6 +941,17 @@ describe("broadcasts API pacing", () => {
 });
 
 describe("broadcasts API warm-up", () => {
+  // The planner counts days as 24-hour spans from the start: a send that
+  // takes today's allowance and part of tomorrow's spans two of them from
+  // an early-morning start and one from an afternoon one. Pin the clock.
+  beforeEach(() => {
+    const early = new Date();
+    early.setUTCHours(1, 0, 0, 0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(early);
+  });
+  afterEach(() => vi.useRealTimers());
+
   type Sent = {
     finishes_at?: string | null;
     warning?: { code: string; days: number; message: string };
