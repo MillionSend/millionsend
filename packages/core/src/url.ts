@@ -19,6 +19,23 @@ export function isLoopbackUrl(url: string | null | undefined): boolean {
   }
 }
 
+/**
+ * A Postgres URL as node-postgres must receive it to read `sslmode` the way
+ * libpq and postgres.js do: without `uselibpqcompat=true` it verifies the
+ * certificate on `prefer` and `require` too. `verify-ca` is left as written,
+ * since node-postgres's libpq mode refuses it without an `sslrootcert`. A
+ * repeated `sslmode` counts by its last value, as in both drivers.
+ * Never hand the result to postgres.js: it passes unknown parameters on to
+ * the server, which rejects them.
+ */
+export function withLibpqSslmode(databaseUrl: string): string {
+  const params = URL.parse(databaseUrl)?.searchParams;
+  const mode = params?.getAll("sslmode").at(-1);
+  return (mode === "require" || mode === "prefer") && !params?.has("uselibpqcompat")
+    ? `${databaseUrl}&uselibpqcompat=true`
+    : databaseUrl;
+}
+
 /** Proofpoint URL Defense v3 runs: "**A" stands for 2 hidden characters, "**B" for 3, and so on. */
 const PROOFPOINT_RUNS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 

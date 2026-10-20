@@ -186,6 +186,15 @@ it("the worker starts a migrating, listening consumer first and a producer secon
   expect(workers).toHaveLength(0);
 });
 
+it("both instances get the URL that makes node-postgres read sslmode as libpq does", async () => {
+  const url = "postgres://app:pw@db.example.com:5432/app?sslmode=require";
+  await Queue.start(url, { workers: true });
+  expect(bosses.map((boss) => boss.options.connectionString)).toEqual([
+    `${url}&uselibpqcompat=true`,
+    `${url}&uselibpqcompat=true`,
+  ]);
+});
+
 it("work() registers on the consumer, sends go through the producer, and stop() stops both", async () => {
   const queue = await startWorker();
   await queue.work("email.send", async () => {});

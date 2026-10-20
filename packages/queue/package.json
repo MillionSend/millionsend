@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@millionsend/core": "workspace:*",
     "pg-boss": "^12.37.1"
   },
   "devDependencies": {

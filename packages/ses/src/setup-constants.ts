@@ -108,7 +108,9 @@ export function envTemplate(): string {
 
 # Postgres connection string. The default matches the docker-compose postgres
 # service; for local dev without Docker, point it at your own instance
-# (e.g. postgres://postgres:postgres@localhost:5432/millionsend).
+# (e.g. postgres://postgres:postgres@localhost:5432/millionsend). A managed
+# Postgres that requires TLS (RDS for PostgreSQL 15+, for one) needs
+# ?sslmode=require appended.
 DATABASE_URL=postgres://millionsend:millionsend@postgres:5432/millionsend
 
 # Password of the compose postgres service; the setup wizard generates one and

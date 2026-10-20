@@ -614,6 +614,9 @@ importers:
 
   packages/queue:
     dependencies:
+      '@millionsend/core':
+        specifier: workspace:*
+        version: link:../core
       pg-boss:
         specifier: ^12.37.1
         version: 12.37.1(@opentelemetry/api@1.9.1)

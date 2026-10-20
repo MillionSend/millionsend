@@ -143,7 +143,7 @@ auto-hospedada não tem limites de plano.
 
 | Variável | Propósito |
 | --- | --- |
-| `DATABASE_URL` | String de conexão do Postgres. O padrão corresponde ao serviço `postgres` do compose. |
+| `DATABASE_URL` | String de conexão do Postgres. O padrão corresponde ao serviço `postgres` do compose. Se o seu Postgres gerenciado exige TLS (como o RDS para PostgreSQL 15 ou mais novo), coloque `?sslmode=require` no final. |
 | `POSTGRES_PASSWORD` | Senha do serviço `postgres` do compose (padrão `millionsend`); o assistente de setup gera uma e a coloca também em `DATABASE_URL`. Mantenha as duas em sincronia. |
 | `MASTER_ENCRYPTION_KEY` | Chave de criptografia dos corpos de e-mail em repouso. Gere com `openssl rand -base64 32`. Perdê-la torna os corpos armazenados irrecuperáveis; trocá-la deixa os corpos antigos ilegíveis. Faça backup junto com o banco. |
 | `BETTER_AUTH_SECRET` | Segredo de assinatura das sessões do painel. Gere com `openssl rand -base64 32`. |
