@@ -969,11 +969,12 @@ describe("broadcasts API warm-up", () => {
   }
 
   it("says a warming domain's send goes out over days, and when it finishes, on both send routes", async () => {
-    const { token, broadcastId } = await warming("bc-warm", 250);
+    const { token, broadcastId } = await warming("bc-warm", 400);
     const res = await call(token, "POST", `/broadcasts/${broadcastId}/send`, {});
     expect(res.status).toBe(200);
     const body = (await res.json()) as Sent;
-    // 250 against 100 today and 150 tomorrow: never inside one day.
+    // Days count from now to the last email: 100 today, 150 tomorrow and the
+    // rest the day after end more than a day away at any start hour.
     expect(body.warning?.code).toBe("warming_up");
     expect(body.warning?.days).toBeGreaterThanOrEqual(2);
     expect(body.warning?.message).toBe(
@@ -1019,8 +1020,8 @@ describe("broadcasts API warm-up", () => {
         horizonDays: async () => 1,
       },
     });
-    // 250 against 100 today and 150 tomorrow: two days at the least.
-    const { token, broadcastId } = await warming("bc-warm-huge", 250);
+    // 400 run into the day after tomorrow: more than one day at any start hour.
+    const { token, broadcastId } = await warming("bc-warm-huge", 400);
     const res = await short.request(`/broadcasts/${broadcastId}/send`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
