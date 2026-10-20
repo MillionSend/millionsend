@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { unwrapRedirect } from "../src/url.js";
+import { unwrapRedirect, withLibpqSslmode } from "../src/url.js";
 
 const target = "https://login.lure.example/path?a=1&b=2";
 const encoded = encodeURIComponent(target);
@@ -96,5 +96,40 @@ describe("unwrapRedirect", () => {
   it("decodes only one level", () => {
     const inner = `https://l.facebook.com/l.php?u=${encoded}`;
     expect(unwrapRedirect(`https://www.google.com/url?q=${encodeURIComponent(inner)}`)).toBe(inner);
+  });
+});
+
+describe("withLibpqSslmode", () => {
+  const db = "app:pw@db.example.com:5432/app";
+
+  it("adds uselibpqcompat=true to prefer and require, on either scheme", () => {
+    for (const url of [
+      `postgres://${db}?sslmode=require`,
+      `postgresql://${db}?sslmode=require`,
+      `postgres://${db}?sslmode=prefer`,
+    ]) {
+      expect(withLibpqSslmode(url), url).toBe(`${url}&uselibpqcompat=true`);
+    }
+  });
+
+  it("keeps the other parameters and the encoded credentials as written", () => {
+    const url =
+      "postgres://app%40corp:p%40ss%2Fw%3Ard@db.example.com:5432/app?application_name=ms&sslmode=require&options=-c%20search_path%3Dmail";
+    expect(withLibpqSslmode(url)).toBe(`${url}&uselibpqcompat=true`);
+  });
+
+  it("leaves no sslmode, the verifying modes and an explicit uselibpqcompat as written", () => {
+    for (const url of [
+      `postgres://${db}`,
+      `postgresql://${db}?application_name=ms`,
+      `postgres://${db}?sslmode=verify-full`,
+      `postgres://${db}?sslmode=verify-ca`,
+      `postgres://${db}?sslmode=disable`,
+      `postgres://${db}?sslmode=require&uselibpqcompat=false`,
+      `postgres://${db}?uselibpqcompat=true&sslmode=require`,
+      "postgres://app:pw@db.example.com:port/app?sslmode=require",
+    ]) {
+      expect(withLibpqSslmode(url), url).toBe(url);
+    }
   });
 });

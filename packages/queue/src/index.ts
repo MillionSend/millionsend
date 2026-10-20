@@ -1,3 +1,4 @@
+import { withLibpqSslmode } from "@millionsend/core/url";
 import { PgBoss } from "pg-boss";
 
 /**
@@ -325,7 +326,7 @@ export class Queue {
     databaseUrl: string,
     opts: { workers?: boolean; onJobError?: JobErrorHook } = {},
   ): Promise<Queue> {
-    const base = { connectionString: databaseUrl, schema: "pgboss" };
+    const base = { connectionString: withLibpqSslmode(databaseUrl), schema: "pgboss" };
     if (!opts.workers) {
       return new Queue(await startBoss({ ...base, supervise: false, schedule: false, max: 2 }));
     }

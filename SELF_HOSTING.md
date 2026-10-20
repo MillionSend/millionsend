@@ -1669,6 +1669,8 @@ without it.
 - Postgres runs with `max_connections=200` in the compose files; each process
   (api, worker, web) holds a pool of up to 24 connections, so separate containers
   and worker replicas fit without tuning.
+- A managed Postgres that requires TLS (RDS for PostgreSQL 15+, for one): append
+  `?sslmode=require` to `DATABASE_URL`.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`, or `web`
   per container (default `all`). Upgrade them in the same `up -d`: the Metrics chart
   counts only what upgraded processes write, so a writer left on an older image during
