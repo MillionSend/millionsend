@@ -158,8 +158,12 @@ helm upgrade --install millionsend deploy/helm/millionsend \
 
 The chart README has a k3s example (Traefik, CloudNativePG, an IAM role over OIDC web identity
 instead of access keys) and an EKS example
-(ALB, RDS, External Secrets with AWS Secrets Manager, IRSA). Every variable in
-this guide goes in either `config` or the Secret.
+(ALB, RDS, External Secrets with AWS Secrets Manager, IRSA). The EKS example has
+not run on a real EKS cluster yet: treat IRSA, the ALB annotations and the RDS
+notes as untested. Receiving mail (the `mx` and `clamav` services) is not
+covered by the chart yet. Every variable in this guide goes in either `config`
+or the Secret, except the ones the chart sets itself (`WORKER_REPLICAS`,
+`SMTP_PORT`, `SMTP_PUBLIC_HOST` and `SMTP_TLS_*`; see the chart README).
 
 </details>
 
@@ -927,6 +931,12 @@ docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
     && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump'
 docker compose start millionsend smtp
 ```
+
+`pg_restore` exits 1 even when the restore went through: `--clean` cannot drop
+the primary keys that pg-boss's table partitions inherit. It prints
+`cannot drop inherited constraint` for each, then `errors ignored on restore`;
+those tables are dropped and restored anyway. When those are the only errors,
+the restore worked.
 
 </details>
 

@@ -20,8 +20,12 @@ compose file does.
 
 Every variable from [`.env.example`](../../../.env.example) works here: put
 non-secret values under `config` (a ConfigMap) and secret values in the Secret
-(see below). Both reach every pod through `envFrom`. The few variables that only
-exist for compose are listed [at the end](#compose-only-variables).
+(see below). Every pod loads the ConfigMap through `envFrom`, and every pod but
+docs the Secret too. Leave out the variables the chart sets itself:
+`WORKER_REPLICAS` (from `worker.replicas`) and, with `smtp.enabled`,
+`SMTP_PORT`, `SMTP_PUBLIC_HOST` and `SMTP_TLS_*` (from `smtp.*`). The few
+variables that only exist for compose are listed
+[at the end](#compose-only-variables).
 
 ## Install
 
@@ -36,6 +40,17 @@ version. Never point it at `latest` or `edge`: a pod that restarts (OOM,
 eviction, node drain) would pull a newer build than its neighbours and run that
 build's migrations against the shared database, and `helm rollback` could not
 move the version back.
+
+`helm rollback` brings back the previous image, not the previous schema:
+migrations only run forward, so the older version would run against the newer
+schema. Take a dump before a big version jump (see [Backups](#backups)):
+restoring it along with the rollback is the way back. With the backup CronJob
+on, this takes one now (`<fullname>`, here and below, is the name prefix of the
+chart's resources; `kubectl -n <namespace> get deploy` shows it):
+
+```sh
+kubectl -n <namespace> create job --from=cronjob/<fullname>-backup pre-upgrade-dump
+```
 
 Starting points:
 
@@ -52,7 +67,8 @@ Starting points:
   the worker's `Recreate` rollout, the backup CronJob (dump, upload, verify,
   prune, and a restore of the dump), STARTTLS on the relay.
 - `aws.webIdentity` from a k3s cluster against a real IAM role, with the issuer
-  published as static files (the recipe below), in production.
+  published as static files (the recipe below), on a self-hosted cluster in
+  everyday use.
 - `values-eks.yaml` renders and syncs through External Secrets Operator. It has
   **not** run on a real EKS cluster yet: treat IRSA, the ALB annotations and the
   RDS notes as untested until someone reports back.
@@ -60,7 +76,7 @@ Starting points:
 ## Secrets
 
 `secrets.mode` decides where the Secret comes from. Every mode produces one
-Secret that all pods load.
+Secret, which every pod but docs loads.
 
 | Mode | Use it when | Secret name |
 |---|---|---|
@@ -198,12 +214,16 @@ static keys.
 rate, so scale the worker only through the chart: an HPA or `kubectl scale`
 would leave `WORKER_REPLICAS` out of date and push the account over its quota.
 The worker uses the `Recreate` strategy for the same reason, because during a
-rolling update old and new workers would overlap.
+rolling update old and new workers would overlap. `worker.replicas: 0` pauses
+sending; `WORKER_REPLICAS` then stays at 1, the lowest value the app accepts.
 
-`web` and `api` can run more than one replica, with two costs:
+`web` and `api` can run more than one replica, with three costs:
 
 - The sign-in, sign-up, password-reset, failed-auth and MCP rate limiters are
   kept per process, so N replicas allow N times those limits.
+- So is the per-team request cap (3,000 a minute across all of a team's API
+  keys): each api and each smtp process counts it in memory. The per-key limit,
+  `API_RATE_LIMIT_PER_MINUTE`, is kept in Postgres and holds across replicas.
 - Each web or api replica opens about 26 Postgres connections, and the worker
   about 36. Size `max_connections` for the sum.
 
@@ -260,6 +280,28 @@ does not trust is the client. Your ingress controller appends the address it
 accepted the connection from, so **with a single hop (Traefik, ingress-nginx, an
 ALB) leave `TRUSTED_PROXIES` unset**: the rightmost entry already is the client.
 
+An in-cluster controller (Traefik, ingress-nginx) can only append the address
+its own Service hands it. Behind a `LoadBalancer` or `NodePort` Service with the
+default `externalTrafficPolicy: Cluster`, that is a node address, and every
+visitor coming in through that node shares one rate-limit bucket, sign-in
+included. Set `externalTrafficPolicy: Local` on the controller's Service, or
+have the load balancer send PROXY protocol and turn it on in the controller.
+k3s installs Traefik itself, with the `Cluster` policy; change it with a
+`HelmChartConfig`:
+
+```yaml
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      spec:
+        externalTrafficPolicy: Local
+```
+
 List only proxies *in front of* the ingress controller whose entries the
 controller keeps: a CDN, a Cloudflare tunnel (`cloudflared`), an external load
 balancer that adds a hop. Two things have to hold for that to work:
@@ -280,11 +322,14 @@ its choice.
 The relay will not start without a STARTTLS keypair. Create a
 `kubernetes.io/tls` Secret (for example with a cert-manager `Certificate` for the
 relay hostname), set `smtp.enabled: true` and `smtp.tlsSecretName`, and set
-`smtp.publicHost` to the hostname clients will connect to. The Secret is mounted
-at `/certs`, and the `SMTP_TLS_*`, `SMTP_PORT` and `SMTP_PUBLIC_HOST` variables
-are rendered into the shared ConfigMap, so the dashboard's SMTP tab shows the
-relay's real state, host and port. `SMTP_PORT` in the ConfigMap is the Service
-port (what clients use); the relay container itself listens on `smtp.port`.
+`smtp.publicHost` to the hostname clients will connect to. Set `smtp.publicPort`
+too when clients reach the relay on a port other than `smtp.service.port`: the
+node port of a `NodePort` Service, or the port of a load balancer in front of
+it. The Secret is mounted at `/certs`, and the `SMTP_TLS_*`, `SMTP_PORT` and
+`SMTP_PUBLIC_HOST` variables are rendered into the shared ConfigMap, so the
+dashboard's SMTP tab shows the relay's real state, host and port. `SMTP_PORT` in
+the ConfigMap is `smtp.publicPort`, else the Service port (what clients use);
+the relay container itself listens on `smtp.port`.
 
 SMTP is not HTTP, so expose it with `smtp.service.type: LoadBalancer` or
 `NodePort` (optionally limited by `loadBalancerSourceRanges`), and set
@@ -300,16 +345,18 @@ cert-manager renewal never reaches the running process and STARTTLS breaks when
 the old certificate expires. Restart the Deployment after each renewal:
 
 ```sh
-kubectl -n <namespace> rollout restart deploy/<release>-smtp
+kubectl -n <namespace> rollout restart deploy/<fullname>-smtp
 ```
 
 Either from a CronJob that runs inside the renewal window with a ServiceAccount
 allowed to patch that Deployment, or with
-[Reloader](https://github.com/stakater/Reloader), which watches the Secret:
+[Reloader](https://github.com/stakater/Reloader), which watches the Secret. Put
+its annotation on the smtp Deployment alone, so a renewal restarts nothing else:
 
 ```yaml
-deploymentAnnotations:
-  secret.reloader.stakater.com/reload: <smtp.tlsSecretName>
+smtp:
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: <smtp.tlsSecretName>
 ```
 
 A relay that only serves pods of the same cluster can use a long-lived
@@ -340,8 +387,10 @@ kubectl -n <namespace> scale deployment -l app.kubernetes.io/instance=<release> 
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: millionsend-restore
+  name: <fullname>-restore
 spec:
+  # A retry would run pg_restore --clean again over a half-restored database.
+  backoffLimit: 0
   template:
     spec:
       restartPolicy: Never
@@ -350,15 +399,24 @@ spec:
         - name: restore
           image: ghcr.io/millionsend/backup:<version>
           envFrom:
-            - configMapRef: { name: <release> }
+            - configMapRef: { name: <fullname> }
             - secretRef: { name: <secret> }
-          command: ["sh", "-c"]
+          # backup.sh sets up rclone's S3 access, then runs its arguments.
+          command: ["/usr/local/bin/backup.sh", "sh", "-c"]
           args:
             - rclone copyto ":s3:$S3_BACKUP_BUCKET/${S3_BACKUP_PREFIX:-backups}/millionsend-YYYYMMDD-HHMMSS.dump" /tmp/restore.dump
               && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
           volumeMounts: [{ name: tmp, mountPath: /tmp }]
       volumes: [{ name: tmp, emptyDir: {} }]
 ```
+
+The Job ends as failed even when the restore went through: `pg_restore` exits 1
+because `--clean` cannot drop the primary keys that pg-boss's table partitions
+inherit. It logs `cannot drop inherited constraint` for each, then
+`errors ignored on restore`; those tables are dropped and restored anyway. When
+those are the only errors in `kubectl -n <namespace> logs job/<fullname>-restore`,
+the restore worked.
 
 Then scale the Deployments back (`helm upgrade` with your values also restores
 the replica counts). Dumps encrypted with `BACKUP_AGE_RECIPIENT` need
@@ -369,9 +427,12 @@ the replica counts). Dumps encrypted with `BACKUP_AGE_RECIPIENT` need
 | In `.env` | In the chart |
 |---|---|
 | `BACKUP_CRON` | `backup.schedule` (any cron expression, not only the daily form) |
-| `PORT`, `SMTP_PORT` | set by the chart: the api listens on 3001, the relay on `smtp.port` |
+| `PORT`, `SMTP_PORT` | set by the chart: the api listens on 3001, the relay on `smtp.port`; the SMTP tab shows `smtp.publicPort`, else `smtp.service.port` |
+| `SMTP_TLS_CERT_PATH`, `SMTP_TLS_KEY_PATH` | set by the chart: the `smtp.tlsSecretName` keypair, mounted at `/certs` |
+| `SMTP_PUBLIC_HOST` | `smtp.publicHost` |
 | `WEB_PORT`, `DOCS_PORT`, `*_BIND_ADDRESS` | compose host ports and bind addresses; Services and the Ingress take their place |
 | `COMPOSE_PROFILES` | `smtp.enabled`, `docs.enabled`, `backup.enabled` |
+| `mx` and `clamav` in `COMPOSE_PROFILES` | nothing yet: receiving (the MX and ClamAV) is not covered by the chart |
 | `MILLIONSEND_IMAGE`, `MILLIONSEND_BACKUP_IMAGE` | `image.*`, `backup.image.*` |
 | `POSTGRES_PASSWORD` | not used: Postgres is external, `DATABASE_URL` carries the password |
 | `WORKER_REPLICAS` | `worker.replicas` |
