@@ -483,11 +483,25 @@ describe("UnsubscribePageView layout", () => {
     expect(out).not.toContain("ms-mono");
   });
 
-  it("posts the Unsubscribe beside the preferences as scope=all", () => {
+  it("names the button beside the preferences for what it does, and posts it as scope=all", () => {
     expect(out).toContain(
       '<form id="ms-unsub-all" method="post"><input type="hidden" name="scope" value="all"/></form>',
     );
-    expect(out).toContain('<button type="submit" form="ms-unsub-all"');
+    expect(out).toContain(
+      `<button type="submit" form="ms-unsub-all" class="ms-btn ms-btn-secondary">${en.buttonAll}</button>`,
+    );
+  });
+
+  it("keeps the plain Unsubscribe when no preferences sit beside it", () => {
+    const plain = renderToStaticMarkup(
+      createElement(UnsubscribePageView, {
+        m: en,
+        state: "confirm",
+        customization: EMPTY_UNSUBSCRIBE_CUSTOMIZATION,
+      }),
+    );
+    expect(plain).toContain(`>${en.button}</button>`);
+    expect(plain).not.toContain(en.buttonAll);
   });
 
   it("draws each topic as a switch over a real checkbox the form posts", () => {

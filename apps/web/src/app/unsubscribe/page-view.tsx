@@ -268,8 +268,8 @@ export function UnsubscribePageView({
                     trigger the unsubscribe, so each button submits its own
                     form via the `form` attribute (plain HTML — the page
                     ships no JS). The hidden `prefs` and `scope` markers
-                    route the POST: next to a list of topics, "Unsubscribe"
-                    means all of them, even on one topic's link. */}
+                    route the POST: "Unsubscribe from all" is the global
+                    opt-out, even on one topic's link. */}
                 <form
                   method="post"
                   action={formAction}
@@ -316,7 +316,7 @@ export function UnsubscribePageView({
                 </form>
                 <div className="ms-actions" style={{ justifyContent: "center", marginTop: 20 }}>
                   <button type="submit" form="ms-unsub-all" className="ms-btn ms-btn-secondary">
-                    {m.button}
+                    {m.buttonAll}
                   </button>
                   <button
                     type="submit"

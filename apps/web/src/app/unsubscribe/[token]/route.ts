@@ -55,8 +55,9 @@ async function recordEmailUnsubscribe(
  * Public unsubscribe endpoint — the signed token is the only credential, and
  * it carries the scope: a topic-scoped token unsubscribes from that topic
  * only, a bare token unsubscribes globally. The one exception is the confirm
- * page's "Unsubscribe" beside the preferences list, which posts `scope=all`:
- * the recipient left everything, whichever topic the link was minted for.
+ * page's "Unsubscribe from all" beside the preferences list, which posts
+ * `scope=all`: the recipient left everything, whichever topic the link was
+ * minted for.
  *
  * This path is what buildUnsubscribeHeaders puts in List-Unsubscribe, so it
  * takes both verbs: a browser GET lands on the hosted confirm page (which
