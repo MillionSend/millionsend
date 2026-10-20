@@ -179,6 +179,12 @@ const EXPIRE_SECONDS: Partial<Record<JobName, number>> = {
  * table small enough that the supervisor's per-minute counts stay cheap.
  */
 const DELETE_AFTER_SECONDS = 3600;
+/**
+ * Options every cron run is enqueued with. pg-boss gives each scheduled run
+ * its schedule's options, and a run without deleteAfterSeconds takes its
+ * queue's, which for the cron queues is pg-boss's 7-day default.
+ */
+const CRON_RUN_OPTIONS = { deleteAfterSeconds: DELETE_AFTER_SECONDS } as const;
 
 const JOB_RETRY = { retryLimit: 10, retryBackoff: true, retryDelay: 5 } as const;
 
@@ -592,7 +598,7 @@ export class Queue {
   async scheduleCrons(handlers: Record<CronJobName, () => Promise<void>>): Promise<void> {
     for (const [name, cron] of Object.entries(CRON_JOBS) as [CronJobName, string][]) {
       await this.#ensureQueue(name);
-      await this.#producer.schedule(name, cron, {}, { tz: "UTC" });
+      await this.#producer.schedule(name, cron, {}, { tz: "UTC", ...CRON_RUN_OPTIONS });
       await this.#workers.work(
         name,
         { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
@@ -614,7 +620,7 @@ export class Queue {
    */
   async runCronNow(name: CronJobName): Promise<void> {
     await this.#ensureQueue(name);
-    await this.#producer.send(name, {});
+    await this.#producer.send(name, {}, CRON_RUN_OPTIONS);
   }
 
   /**
