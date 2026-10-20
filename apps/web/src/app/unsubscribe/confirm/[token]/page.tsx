@@ -28,8 +28,10 @@ export default async function UnsubscribeConfirmPage({
   const target = await targetForToken(db, token);
   const saved = target !== null && query.saved === "1";
   // Already-unsubscribed reads as done: the action is idempotent and the page
-  // never asks for something that would change nothing.
-  const done = !saved && target !== null && (query.done === "1" || target.alreadyDone);
+  // never asks for something that would change nothing. A global opt-out
+  // counts on a topic's link too, where alreadyDone is only that topic.
+  const done =
+    !saved && target !== null && (query.done === "1" || target.alreadyDone || target.unsubscribed);
   const topics = target !== null && !saved && !done ? await preferenceTopics(db, target) : [];
   const state: UnsubscribeViewState =
     target === null ? "invalid" : saved ? "saved" : done ? "done" : "confirm";

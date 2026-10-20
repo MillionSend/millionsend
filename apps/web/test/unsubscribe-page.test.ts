@@ -19,9 +19,14 @@ vi.mock("@millionsend/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@millionsend/db")>();
   return { ...actual, getDb: () => h.db };
 });
+// The confirm page reads Accept-Language through next/headers.
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "accept-language": "en" }),
+}));
 
 const { postUnsubscribeLocation, targetForToken } = await import("@/app/unsubscribe/lookup");
 const { GET, POST } = await import("@/app/unsubscribe/[token]/route");
+const { default: ConfirmPage } = await import("@/app/unsubscribe/confirm/[token]/page");
 
 let db: Db;
 let close: () => Promise<void>;
@@ -319,6 +324,39 @@ describe("/unsubscribe/[token] route", () => {
         ],
         suppressions: [],
       });
+    });
+
+    const renderConfirm = async (token: string, query: { done?: string } = {}) =>
+      renderToStaticMarkup(
+        await ConfirmPage({
+          params: Promise.resolve({ token }),
+          searchParams: Promise.resolve(query),
+        }),
+      );
+
+    it("the confirm page reads as a global done after Unsubscribe from all, on the redirect and on a later visit", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { token } = await seedTopicLink();
+      const before = await renderConfirm(token);
+      expect(before).toContain(`>${en.buttonAll}</button>`);
+
+      await call("POST", token, "scope=all");
+
+      for (const page of [await renderConfirm(token, { done: "1" }), await renderConfirm(token)]) {
+        expect(page).toContain("receive marketing emails anymore");
+        expect(page).not.toContain("News</span> emails anymore");
+        expect(page).not.toContain('id="ms-unsub-all"');
+      }
+    });
+
+    it("the confirm page still reads as that topic's done after a topic-only opt-out", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { token } = await seedTopicLink();
+      await call("POST", token, "List-Unsubscribe=One-Click");
+
+      const page = await renderConfirm(token);
+      expect(page).toContain(">News</span> emails anymore");
+      expect(page).not.toContain("receive marketing emails anymore");
     });
   });
 
