@@ -13,7 +13,9 @@ teve hard bounce ou marcou você como spam.
   permanentemente.
 - **Reclamação** — o destinatário marcou uma mensagem como spam.
 - **Descadastro** — o destinatário saiu de todo e-mail de marketing, pelo
-  header de um clique ou pela página de preferências hospedada. Além de marcar
+  header de um clique ou pela página de preferências hospedada. Em um e-mail
+  enviado com tópico, o header vale só para aquele tópico, e o descadastro
+  global é feito pelo botão **Cancelar todas as inscrições** da página. Além de marcar
   o contato, a saída fica registrada aqui para sobreviver à exclusão e à
   reimportação do contato; só um `PATCH /contacts/{id}` explícito com
   `unsubscribed: false` a remove. Diferente das outras origens, cobre apenas

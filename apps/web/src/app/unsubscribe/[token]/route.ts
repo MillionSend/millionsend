@@ -54,7 +54,10 @@ async function recordEmailUnsubscribe(
 /**
  * Public unsubscribe endpoint — the signed token is the only credential, and
  * it carries the scope: a topic-scoped token unsubscribes from that topic
- * only, a bare token unsubscribes globally.
+ * only, a bare token unsubscribes globally. The one exception is the confirm
+ * page's "Unsubscribe from all" beside the preferences list, which posts
+ * `scope=all`: the recipient left everything, whichever topic the link was
+ * minted for.
  *
  * This path is what buildUnsubscribeHeaders puts in List-Unsubscribe, so it
  * takes both verbs: a browser GET lands on the hosted confirm page (which
@@ -142,13 +145,18 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
     );
   }
 
-  if (target.topic) {
+  // `scope=all` comes only from the confirm page's form. An RFC 8058 post
+  // keeps the token's scope: the header a topic email carries promises that
+  // topic, nothing wider.
+  const topic = !oneClick && form.get("scope") === "all" ? null : target.topic;
+
+  if (topic) {
     // Topic-scoped: write the explicit opt-out override, leaving the global
     // unsubscribed flag and every other topic untouched.
     const s = schema.contactTopicSubscriptions;
     await db
       .insert(s)
-      .values({ contactId: target.contactId, topicId: target.topic.id, subscribed: false })
+      .values({ contactId: target.contactId, topicId: topic.id, subscribed: false })
       .onConflictDoUpdate({
         target: [s.contactId, s.topicId],
         set: { subscribed: false, updatedAt: new Date() },
@@ -161,14 +169,14 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
           teamId: target.teamId,
           contactId: target.contactId,
           type: "topic_opt_out",
-          data: { topicId: target.topic.id, name: target.topic.name },
+          data: { topicId: topic.id, name: topic.name },
         },
         events,
       );
       await recordEmailUnsubscribe(db, target, {
         scope: "topic",
-        topicId: target.topic.id,
-        topicName: target.topic.name,
+        topicId: topic.id,
+        topicName: topic.name,
         source: events.source,
       });
     }
@@ -211,8 +219,10 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
         enqueue: events.enqueue,
       });
     }
-    // alreadyDone guards the timeline: scanner re-hits must not duplicate the event.
-    if (!target.alreadyDone) {
+    // The global flag guards the timeline: scanner re-hits must not
+    // duplicate the event. (alreadyDone is the token's scope, which on a
+    // topic's link is that topic.)
+    if (!target.unsubscribed) {
       await recordContactActivity(
         db,
         {

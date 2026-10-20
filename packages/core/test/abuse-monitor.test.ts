@@ -10,6 +10,8 @@ import {
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
+  isPlatformLinkVerdict,
+  isPlatformTenantName,
   MONITOR_PRIOR_NEW,
   MONITOR_PRIOR_SETTLED,
   MONITOR_PRIOR_WEIGHT,
@@ -681,6 +683,74 @@ describe("the review hold", () => {
     db.select().from(schema.teamFlags).where(eq(schema.teamFlags.teamId, teamId));
   const audits = (teamId: string) =>
     db.select().from(schema.auditLog).where(eq(schema.auditLog.teamId, teamId));
+
+  it("spares a new team the hold for a credential link to its own name on an app platform, so the mail parks instead", async () => {
+    expect(isPlatformTenantName("ref.supabase.co")).toBe(true);
+    expect(isPlatformTenantName("app.up.railway.app")).toBe(true);
+    // A free host that is no app platform, a registered name, the platform's parent itself.
+    expect(isPlatformTenantName("x.duckdns.org")).toBe(false);
+    expect(isPlatformTenantName("secure-login-update.com")).toBe(false);
+    expect(isPlatformTenantName("supabase.co")).toBe(false);
+
+    const RESET = {
+      verdict: "abuse" as const,
+      categories: ["phishing_credentials"],
+      reasons: ["off_domain_lure", "harvests_secrets"],
+    };
+    const at = (v: typeof RESET, score: number, destinations: string[]) =>
+      isPlatformLinkVerdict({ ...v, score }, destinations);
+    expect(at(RESET, 93, ["ref.supabase.co"])).toBe(true);
+    expect(at({ ...RESET, categories: [] }, 84, ["app.up.railway.app"])).toBe(true);
+    // A second destination off the platforms, a named brand, a moved payment, a lure without a link, or a clean verdict: not this.
+    expect(at(RESET, 93, ["ref.supabase.co", "secure-login-update.com"])).toBe(false);
+    expect(at(RESET, 93, ["x.duckdns.org"])).toBe(false);
+    expect(at(RESET, 93, [])).toBe(false);
+    expect(at(PHISHING, 93, ["ref.supabase.co"])).toBe(false);
+    expect(
+      at({ ...RESET, reasons: ["impersonation", ...RESET.reasons] }, 93, ["x.workers.dev"]),
+    ).toBe(false);
+    expect(
+      at({ ...RESET, reasons: [...RESET.reasons, "payment_redirect"] }, 93, ["x.workers.dev"]),
+    ).toBe(false);
+    expect(at({ ...RESET, categories: ["payment_redirect"] }, 93, ["x.workers.dev"])).toBe(false);
+    expect(at({ ...RESET, reasons: ["no_link_lure"] }, 93, ["x.workers.dev"])).toBe(false);
+    expect(at({ ...RESET, verdict: "clean" as "abuse" }, 40, ["ref.supabase.co"])).toBe(false);
+
+    const teamId = await newTeam("platform-spared");
+    const out = await applyJudgedSample(db, S, {
+      teamId,
+      score: 93,
+      verdict: RESET,
+      platformLink: true,
+      now: NOW,
+    });
+    expect(out).toMatchObject({
+      tier: "new",
+      held: null,
+      spared: { rule: "score" },
+      paused: false,
+    });
+    expect(out.risk).toBeGreaterThan(MONITOR_PRIOR_NEW);
+    expect(await team(teamId)).toMatchObject({ suspendedAt: null });
+    expect(await flags(teamId)).toEqual([]);
+    // Every hold rule is spared the same way, not only the score's.
+    const young = await newTeam("platform-spared-young");
+    expect(
+      await applyJudgedSample(db, S, {
+        teamId: young,
+        score: 85,
+        verdict: RESET,
+        youngSendingDomain: true,
+        platformLink: true,
+        now: NOW,
+      }),
+    ).toMatchObject({ held: null, spared: { rule: "young_domain" } });
+    // Without the flag the same verdicts hold the team.
+    const lured = await newTeam("platform-lure");
+    expect(
+      await applyJudgedSample(db, S, { teamId: lured, score: 93, verdict: RESET, now: NOW }),
+    ).toMatchObject({ held: { rule: "score" }, spared: null });
+  });
 
   it("suspends a new team for review on one confident phishing verdict, once, and leaves a released team to the operator", async () => {
     const teamId = await newTeam("held");

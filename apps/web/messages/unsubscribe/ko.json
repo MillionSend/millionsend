@@ -3,6 +3,7 @@
   "confirmPrefs": "수신 설정 관리",
   "confirmTopic": "{topic} 수신 거부",
   "button": "수신 거부",
+  "buttonAll": "전체 수신 거부",
   "preferences": "받고 싶은 이메일을 선택하세요:",
   "save": "설정 저장",
   "saved": "이메일 수신 설정이 저장되었습니다.",

@@ -5,6 +5,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
+import { isFreeHostName, registrableDomain } from "./org-domain.js";
 import { fetchTeamStanding, suspendTeam } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -586,6 +587,8 @@ export interface VerdictOutcome {
   paused: boolean;
   /** The team was suspended for review now by the hold policy, under this rule. */
   held: HoldRule | null;
+  /** The hold rule the verdict met while the team was spared it for a platform link: the mail parks instead. */
+  spared: HoldRule | null;
 }
 
 /**
@@ -628,10 +631,74 @@ export function isHoldVerdict(v: HoldVerdictFields, holdScore: number): boolean 
 }
 
 /**
+ * The parents under which app platforms hand a product its own name, where
+ * a small product's reset, one-time code and sign-in pages live. A curated
+ * subset of the free hosts isFreeHostName knows: dynamic DNS, tunnels,
+ * buckets and site builders stay out.
+ */
+export const PLATFORM_HOST_PARENTS: ReadonlySet<string> = new Set([
+  "supabase.co",
+  "railway.app",
+  "workers.dev",
+  "pages.dev",
+  "vercel.app",
+  "netlify.app",
+  "fly.dev",
+  "onrender.com",
+  "herokuapp.com",
+  "web.app",
+  "firebaseapp.com",
+  "github.io",
+  "appspot.com",
+  "run.app",
+  "azurewebsites.net",
+  "amplifyapp.com",
+  "lovable.app",
+  "replit.app",
+]);
+
+/** A product's own name on an app platform: a free host's name under one of PLATFORM_HOST_PARENTS. */
+export function isPlatformTenantName(hostname: string): boolean {
+  return isFreeHostName(hostname) && PLATFORM_HOST_PARENTS.has(registrableDomain(hostname));
+}
+
+/** What the judge says of a credential link to a page off the verified domains, and nothing more. */
+const PLATFORM_LINK_REASONS: ReadonlySet<string> = new Set(["off_domain_lure", "harvests_secrets"]);
+
+/**
+ * A phishing-type verdict that rests on nothing but a credential link to a
+ * product's own name on an app platform, on mail that poses as no other
+ * brand: phishing_credentials at most for a category, reasons saying only
+ * that the link is off the verified domains and asks for a secret, and
+ * every destination given a platform tenant name. The judge cannot tell
+ * such a page from a lure, so the hold policy spares the team the hold
+ * such a verdict meets (applyJudgedSample's `platformLink`): the mail
+ * waits for the review list instead, with the team's other mail waiting
+ * on a phishing-type verdict, unless an operator had cleared every such
+ * name, which also keeps a verdict of this shape from taking the clearance
+ * back. A lure that names a brand, moves a payment or carries no link
+ * keeps every rule, and the callers never spare a broadcast's sample.
+ */
+export function isPlatformLinkVerdict(
+  v: HoldVerdictFields,
+  destinations: readonly string[],
+): boolean {
+  return (
+    v.verdict === "abuse" &&
+    destinations.length > 0 &&
+    (v.categories ?? []).every((c) => c === "phishing_credentials") &&
+    (v.reasons ?? []).every((r) => PLATFORM_LINK_REASONS.has(r)) &&
+    destinations.every(isPlatformTenantName)
+  );
+}
+
+/**
  * The repeat hold: this verdict is at least the `holdRepeatCount`th
  * phishing-type one from `holdRepeatScore` judged in the last
  * MONITOR_HOLD_REPEAT_DAYS. The stored verdicts include this one: the judge
- * writes it in the transaction that folds it.
+ * writes it in the transaction that folds it. Verdicts on names an operator
+ * cleared (`spared_hold` "vouched") are a product's own pages read as
+ * lures, and count for nothing here.
  */
 async function repeatHold(
   db: Db,
@@ -647,6 +714,7 @@ async function repeatHold(
       verdict: ms.verdict,
       categories: ms.categories,
       reasons: ms.reasons,
+      sparedHold: ms.sparedHold,
     })
     .from(ms)
     .where(
@@ -658,7 +726,9 @@ async function repeatHold(
         lte(ms.judgedAt, now),
       ),
     );
-  const verdicts = judged.filter((v) => isHoldVerdict(v, s.holdRepeatScore)).length;
+  const verdicts = judged.filter(
+    (v) => v.sparedHold !== "vouched" && isHoldVerdict(v, s.holdRepeatScore),
+  ).length;
   return verdicts >= s.holdRepeatCount ? { rule: "repeat", verdicts } : null;
 }
 
@@ -686,6 +756,13 @@ export async function applyJudgedSample(
     youngSendingDomain?: boolean | undefined;
     /** A new destination's link domain was registered under YOUNG_DOMAIN_DAYS ago. */
     youngLinkDomain?: boolean | undefined;
+    /**
+     * The verdict rests only on a credential link to a platform tenant name
+     * (isPlatformLinkVerdict); never set on a broadcast's sample. A hold rule
+     * it meets spares the team and comes back as `spared`, for the caller to
+     * park the mail on.
+     */
+    platformLink?: boolean | undefined;
     now?: Date;
   },
 ): Promise<VerdictOutcome> {
@@ -707,6 +784,7 @@ export async function applyJudgedSample(
       });
     const tier = monitorTier(await loadMonitorState(t, { ...row, risk: next.risk }, now), s, now);
     let held: HoldRule | null = null;
+    let spared: HoldRule | null = null;
     const verdict = input.verdict && { ...input.verdict, score: input.score };
     const rule =
       s.autoHold && tier === "new" && row.heldAt === null && verdict
@@ -718,7 +796,9 @@ export async function applyJudgedSample(
               ? ({ rule: "young_link" } as const)
               : await repeatHold(t, s, row, verdict, now)
         : null;
-    if (rule) {
+    if (rule && input.platformLink) {
+      spared = rule;
+    } else if (rule) {
       // A standing suspension is the operator's call and stays as it is.
       const suspended = await suspendTeam(t, {
         teamId: input.teamId,
@@ -824,7 +904,7 @@ export async function applyJudgedSample(
         }
       }
     }
-    return { risk: next.risk, tier, alert, paused, held };
+    return { risk: next.risk, tier, alert, paused, held, spared };
   });
   if (outcome.held) {
     await recordAudit(db, {
