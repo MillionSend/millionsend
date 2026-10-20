@@ -2,6 +2,7 @@ import { deriveUnsubscribeKey, hashRecipient, makeUnsubscribeToken } from "@mill
 import { type Db, schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -561,5 +562,28 @@ describe("UnsubscribePageView layout", () => {
       }),
     );
     expect(off).not.toContain("Powered by");
+  });
+});
+
+describe("unsubscribe confirm page security headers", () => {
+  it("lets only its forms follow the team's redirect to another origin", async () => {
+    const config = await (await import("../next.config")).default(PHASE_DEVELOPMENT_SERVER);
+    const rules = (await config.headers?.()) ?? [];
+    const policy = (source: string) =>
+      rules
+        .find((rule) => rule.source === source)
+        ?.headers.find((header) => header.key === "Content-Security-Policy")
+        ?.value.split("; ") ?? [];
+    const app = policy("/:path*");
+    const page = policy("/unsubscribe/confirm/:path*");
+    expect(app).toContain("form-action 'self'");
+    expect(page).toContain("form-action 'self' https: http:");
+    const rest = (directives: string[]) => directives.filter((d) => !d.startsWith("form-action"));
+    expect(rest(page)).toEqual(rest(app));
+    // Next sends the last entry that sets a header, so the page's comes after the catch-all.
+    const sources = rules.map((rule) => rule.source);
+    expect(sources.indexOf("/unsubscribe/confirm/:path*")).toBeGreaterThan(
+      sources.indexOf("/:path*"),
+    );
   });
 });
