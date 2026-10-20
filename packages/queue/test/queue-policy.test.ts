@@ -288,21 +288,25 @@ it("cron and dead-letter workers poll slowly; crons are scheduled through the pr
     Object.keys(CRON_JOBS).map((name) => [name, async () => {}]),
   ) as Parameters<Queue["scheduleCrons"]>[0];
   await queue.scheduleCrons(handlers);
-  expect(scheduled.map((s) => s.name)).toEqual(Object.keys(CRON_JOBS));
-  // Each run inherits the schedule's options: UTC, and the hour-long
-  // retention every other job gets, instead of pg-boss's 7-day default.
-  expect(scheduled.every((s) => s.cron === CRON_JOBS[s.name as keyof typeof CRON_JOBS])).toBe(true);
-  expect(scheduled.every((s) => s.opts.tz === "UTC" && s.opts.deleteAfterSeconds === 3600)).toBe(
-    true,
+  // Each run is enqueued with its schedule's options: UTC, and an hour's retention.
+  expect(scheduled).toEqual(
+    Object.entries(CRON_JOBS).map(([name, cron]) => ({
+      name,
+      cron,
+      opts: { tz: "UTC", deleteAfterSeconds: 3600 },
+    })),
   );
   const cronWorkers = workers.slice(1);
   expect(cronWorkers.map((w) => w.name)).toEqual(Object.keys(CRON_JOBS));
   expect(cronWorkers.every((w) => w.opts.pollingIntervalSeconds === 30 && w.boss === 0)).toBe(true);
   // The retired cron's schedule is dropped; the current ones are left alone.
   expect(unscheduled).toEqual(["safety.reveal_notices"]);
-  // A run forced ahead of schedule keeps the same retention.
+});
+
+it("a cron run forced ahead of schedule is kept an hour, like a scheduled one", async () => {
+  const queue = await Queue.start("postgres://unused");
   await queue.runCronNow("quota.drain");
-  expect(sent.at(-1)).toMatchObject({ name: "quota.drain", opts: { deleteAfterSeconds: 3600 } });
+  expect(sent).toEqual([{ name: "quota.drain", opts: { deleteAfterSeconds: 3600 } }]);
 });
 
 it("creates job queues with the dedupe-enforcing policy", async () => {
