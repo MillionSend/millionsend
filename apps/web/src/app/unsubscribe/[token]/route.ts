@@ -93,6 +93,9 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
     source: oneClick ? "one_click" : "hosted_page",
     enqueue: enqueueWebhookDeliveries,
   };
+  // The topic a one-click names is gone, so nothing more is sent under it:
+  // the opt-out it asks for already holds.
+  if (oneClick && target.topicDeleted) return new Response(null, { status: 200 });
 
   // Preferences save from the confirm page: every listed topic gets an
   // explicit override (checked = subscribed). The listed set is recomputed

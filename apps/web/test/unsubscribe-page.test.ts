@@ -409,6 +409,28 @@ describe("/unsubscribe/[token] route", () => {
         `<input type="hidden" name="scope" value="all"/><button type="submit" class="ms-btn ms-btn-secondary">${en.buttonAll}</button></form>`,
       );
     });
+
+    it("a deleted topic's link still opens the page, and its one-click changes nothing", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, topicId, emailId, token } = await seedTopicLink();
+      await db.delete(schema.topics).where(eq(schema.topics.id, topicId));
+
+      expect((await call("POST", token, "List-Unsubscribe=One-Click")).status).toBe(200);
+      expect(await stateOf(contactId, emailId)).toEqual({
+        unsubscribed: false,
+        topics: [],
+        activities: [],
+        emailEvents: [],
+        suppressions: [],
+      });
+
+      // No topic left to list: the page is a bare link's, and its Unsubscribe still works.
+      const page = await renderConfirm(token);
+      expect(page).not.toContain(en.invalid);
+      expect(page).toContain(`>${en.button}</button>`);
+      expect((await call("POST", token, "")).status).toBe(303);
+      expect((await stateOf(contactId, emailId)).unsubscribed).toBe(true);
+    });
   });
 
   it("an email the token names on another team, or none at all, records nothing", async () => {

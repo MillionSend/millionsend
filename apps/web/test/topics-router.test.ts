@@ -320,6 +320,18 @@ describe("topic-scoped unsubscribe route", () => {
     const token = makeUnsubscribeToken({ contactId, topicId: foreignTopic, secretKey });
 
     expect((await post(token)).status).toBe(404);
+    const oneClick = await post(token, {
+      body: "List-Unsubscribe=One-Click",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    expect(oneClick.status).toBe(404);
     expect(await subscriptionRow(contactId, foreignTopic)).toBeNull();
+    // Nor a global opt-out: such a token is no deleted topic's link.
+    const [contact] = await db
+      .select({ unsubscribed: schema.contacts.unsubscribed })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, contactId));
+    expect(contact?.unsubscribed).toBe(false);
+    expect(await db.select().from(schema.suppressions)).toHaveLength(0);
   });
 });

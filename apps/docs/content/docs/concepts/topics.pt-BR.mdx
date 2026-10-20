@@ -40,5 +40,10 @@ puro de entradas como `{ "id": "<topic-id>", "subscription": "opt_in" }`, e
 lidas de volta com `GET /contacts/{id}/topics`, que lista cada tópico com a
 `subscription` efetiva do contato e um campo `explicit` (false quando é o padrão
 do tópico). Um envio com `topic_id` em que todos os destinatários de `to`
-optaram por sair é recusado com `422 all_recipients_suppressed`. Veja a
+optaram por sair é recusado com `422 all_recipients_suppressed`. Excluir um
+tópico não quebra os links de descadastro já enviados com ele: eles abrem a
+página hospedada sem esse tópico, onde o destinatário ainda pode cancelar
+todas as inscrições ou, se a equipe tiver outros tópicos públicos, ajustar
+as preferências. Já o descadastro em um clique por esses links não muda
+nada, porque o tópico não existe mais. Veja a
 [referência da API](/pt-BR/api-reference).
