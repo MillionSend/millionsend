@@ -3,6 +3,7 @@
   "confirmPrefs": "Gestionar preferencias",
   "confirmTopic": "Cancelar suscripción a {topic}",
   "button": "Cancelar suscripción",
+  "buttonAll": "Cancelar todas las suscripciones",
   "preferences": "Elige qué correos quieres recibir:",
   "save": "Guardar preferencias",
   "saved": "Tus preferencias de correo se han actualizado.",

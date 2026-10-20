@@ -12,7 +12,9 @@ marked you as spam.
 - **Hard bounce** — the receiving server permanently rejected the address.
 - **Complaint** — the recipient marked a message as spam.
 - **Unsubscribe** — the recipient opted out of all marketing email, through
-  the one-click header or the hosted preference page. Besides flagging the
+  the one-click header or the hosted preference page. On an email sent with
+  a topic, the header opts out of that topic only, and the page's
+  **Unsubscribe from all** is the global opt-out. Besides flagging the
   contact, the opt-out is retained here so it survives deleting and
   re-importing the contact; only an explicit `PATCH /contacts/{id}` with
   `unsubscribed: false` clears it. Unlike the other origins it covers

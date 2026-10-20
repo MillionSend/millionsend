@@ -3,6 +3,7 @@
   "confirmPrefs": "配信設定の管理",
   "confirmTopic": "{topic}の配信停止",
   "button": "配信停止",
+  "buttonAll": "すべての配信を停止",
   "preferences": "受け取るメールを選択してください：",
   "save": "設定を保存",
   "saved": "メールの配信設定を更新しました。",

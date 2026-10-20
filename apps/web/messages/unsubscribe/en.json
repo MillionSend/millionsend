@@ -3,6 +3,7 @@
   "confirmPrefs": "Manage preferences",
   "confirmTopic": "Unsubscribe from {topic}",
   "button": "Unsubscribe",
+  "buttonAll": "Unsubscribe from all",
   "preferences": "Choose which emails you want to receive:",
   "save": "Save preferences",
   "saved": "Your email preferences have been updated.",
