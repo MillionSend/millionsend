@@ -121,6 +121,8 @@ export const DEAD_LETTER_QUEUES = {
 
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
 
+const DEAD_LETTER_NAMES: ReadonlySet<string> = new Set(Object.values(DEAD_LETTER_QUEUES));
+
 const JOB_QUEUES = [
   "email.send",
   "broadcast.send",
@@ -370,9 +372,13 @@ export class Queue {
   async #ensureQueue(name: string, policy?: typeof JOB_QUEUE_POLICY): Promise<void> {
     if (this.#created.has(name)) return;
     const notify = NOTIFY_QUEUES.has(name);
+    // pg-boss builds a dead-letter copy from its queue's settings, not from the
+    // failed job's options, so that queue carries the retention itself.
+    const deleteAfterSeconds = DEAD_LETTER_NAMES.has(name) ? DELETE_AFTER_SECONDS : undefined;
     await this.#producer.createQueue(name, {
       ...(policy ? { policy } : {}),
       ...(notify ? { notify } : {}),
+      ...(deleteAfterSeconds ? { deleteAfterSeconds } : {}),
     });
     if (policy) {
       // createQueue is INSERT ... ON CONFLICT DO NOTHING: a pre-existing
@@ -393,6 +399,14 @@ export class Queue {
       // created before it existed.
       if (existing && notify && !existing.notify) {
         await this.#producer.updateQueue(name, { notify });
+      }
+    }
+    // createQueue leaves an existing queue as it was, so a dead-letter queue
+    // made without the retention gets it here.
+    if (deleteAfterSeconds) {
+      const existing = await this.#producer.getQueue(name);
+      if (existing && existing.deleteAfterSeconds !== deleteAfterSeconds) {
+        await this.#producer.updateQueue(name, { deleteAfterSeconds });
       }
     }
     this.#created.add(name);

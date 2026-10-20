@@ -3,8 +3,9 @@ import { CRON_JOBS, DEAD_LETTER_QUEUES, Queue } from "../src/index.js";
 
 // In-memory stand-in for pg-boss's queue table. createQueue mirrors the real
 // implementation's INSERT ... ON CONFLICT DO NOTHING: a pre-existing queue
-// keeps its stored policy (and notify flag) no matter what the caller asks for.
-const queues = new Map<string, { policy: string; notify: boolean }>();
+// keeps its stored policy (and notify flag, and retention) no matter what the
+// caller asks for.
+const queues = new Map<string, { policy: string; notify: boolean; deleteAfterSeconds?: number }>();
 const sent: {
   name: string;
   opts: Record<string, unknown>;
@@ -47,13 +48,16 @@ vi.mock("pg-boss", () => ({
     }
     async createQueue(
       name: string,
-      options?: { policy?: string; notify?: boolean },
+      options?: { policy?: string; notify?: boolean; deleteAfterSeconds?: number },
     ): Promise<void> {
       if (createQueueError) throw createQueueError;
       if (!queues.has(name)) {
         queues.set(name, {
           policy: options?.policy ?? "standard",
           notify: options?.notify ?? false,
+          ...(options?.deleteAfterSeconds
+            ? { deleteAfterSeconds: options.deleteAfterSeconds }
+            : {}),
         });
       }
     }
@@ -61,12 +65,19 @@ vi.mock("pg-boss", () => ({
       updated.push({ name, opts });
       const q = queues.get(name);
       if (q && typeof opts.notify === "boolean") q.notify = opts.notify;
+      if (q && typeof opts.deleteAfterSeconds === "number") {
+        q.deleteAfterSeconds = opts.deleteAfterSeconds;
+      }
     }
-    async getQueue(
-      name: string,
-    ): Promise<{ name: string; policy: string; notify: boolean } | null> {
+    async getQueue(name: string): Promise<{
+      name: string;
+      policy: string;
+      notify: boolean;
+      deleteAfterSeconds: number;
+    } | null> {
       const q = queues.get(name);
-      return q ? { name, ...q } : null;
+      // pg-boss's default retention when the queue was created without one.
+      return q ? { name, deleteAfterSeconds: 604_800, ...q } : null;
     }
     async send(name: string, _data: unknown, opts: Record<string, unknown>): Promise<string> {
       sent.push({ name, opts });
@@ -163,7 +174,11 @@ it("the worker starts a migrating, listening consumer first and a producer secon
     });
   }
   for (const name of Object.values(DEAD_LETTER_QUEUES)) {
-    expect(queues.get(name)).toEqual({ policy: "standard", notify: false });
+    expect(queues.get(name)).toEqual({
+      policy: "standard",
+      notify: false,
+      deleteAfterSeconds: 3600,
+    });
   }
   for (const name of Object.keys(CRON_JOBS)) {
     expect(queues.get(name)).toEqual({ policy: "standard", notify: false });
@@ -208,6 +223,13 @@ it("turns notify on for a queue that predates the flag, and never for the ones t
   await startWorker();
   expect(updated).toEqual([{ name: "email.send", opts: { notify: true } }]);
   expect(queues.get("email.send")?.notify).toBe(true);
+});
+
+it("gives an hour's retention to a dead-letter queue created without one", async () => {
+  queues.set("email.send.dead", { policy: "standard", notify: false });
+  await startWorker();
+  expect(updated).toEqual([{ name: "email.send.dead", opts: { deleteAfterSeconds: 3600 } }]);
+  expect(queues.get("email.send.dead")?.deleteAfterSeconds).toBe(3600);
 });
 
 it("a failing createQueue fails boot loudly instead of being swallowed", async () => {
