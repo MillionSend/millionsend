@@ -137,7 +137,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 
 | Variable | Purpose |
 | --- | --- |
-| `DATABASE_URL` | Postgres connection string. The default matches the compose `postgres` service. |
+| `DATABASE_URL` | Postgres connection string. The default matches the compose `postgres` service. For a managed Postgres that requires TLS (RDS for PostgreSQL 15+, for one), append `?sslmode=require`. |
 | `POSTGRES_PASSWORD` | Password of the compose `postgres` service (default `millionsend`); the setup wizard generates one and puts it in `DATABASE_URL` too. Keep both in sync. |
 | `MASTER_ENCRYPTION_KEY` | Encryption key for email bodies at rest. Generate with `openssl rand -base64 32`. Losing it makes stored bodies unrecoverable; changing it orphans old bodies. Back it up with the database. |
 | `BETTER_AUTH_SECRET` | Dashboard session signing secret. Generate with `openssl rand -base64 32`. |

@@ -95,6 +95,10 @@
     "./release-rules": {
       "types": "./src/inboxes/release-rules.ts",
       "default": "./src/inboxes/release-rules.ts"
+    },
+    "./url": {
+      "types": "./src/url.ts",
+      "default": "./src/url.ts"
     }
   },
   "scripts": {
