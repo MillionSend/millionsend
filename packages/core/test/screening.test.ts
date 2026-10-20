@@ -214,6 +214,21 @@ describe("cold shared-domain mail", () => {
     expect(await gate(w, row)).toEqual({ action: "park", reason: "recipient" });
   });
 
+  it("parks cold shared mail on a credential link to a platform name an operator cleared, vouched or not", async () => {
+    const { w, inbox } = await sharedInbox("cold-vouched");
+    const row = await email(w, inbox, "stranger@example.com");
+    await gate(w, row);
+    await answer((await sampleOf(row.id))?.id, {
+      status: "judged",
+      score: 93,
+      verdict: "abuse",
+      categories: ["phishing_credentials"],
+      reasons: ["off_domain_lure", "harvests_secrets"],
+      sparedHold: "vouched",
+    });
+    expect(await gate(w, row)).toEqual({ action: "park", reason: "recipient" });
+  });
+
   it("parks shared mail the judge keeps failing on, as a young domain's", async () => {
     const { w, inbox } = await sharedInbox("cold-outage");
     const row = await email(w, inbox, "stranger@example.com");

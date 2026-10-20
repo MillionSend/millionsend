@@ -11,7 +11,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { setRegionAccountDeps } from "@/server/console/ses-regions";
 import { createCaller } from "@/server/routers";
 
@@ -1163,6 +1163,16 @@ describe("paced sends", () => {
   it("refuses a send whose warm-up runs past the horizon, in the dialog and the send", async () => {
     // floor(0.8 × 2): a one-day horizon.
     vi.stubEnv("EMAIL_RETENTION_DAYS", "2");
+    // The planner counts days as 24-hour spans from the start: 100 today and
+    // 150 tomorrow is two of them from an early-morning start, one from an
+    // afternoon one. Pin the clock.
+    const early = new Date();
+    early.setUTCHours(1, 0, 0, 0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(early);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);
     await seedContacts(teamId, 400);

@@ -26,9 +26,10 @@ config:
   # The ALB appends the client address to X-Forwarded-For itself and
   # nothing sits in front of it, so TRUSTED_PROXIES stays unset.
 
-# The role needs the millionsend-ses permissions (infra/millionsend-ses.cfn.yaml)
-# plus sqs:ReceiveMessage, sqs:DeleteMessage and sqs:GetQueueAttributes on
-# the events queue, or bounces and complaints never reach suppression.
+# Attach the millionsend-ses policy to the role. One that predates the
+# policy's reads of the events queue needs a new version, or bounces and
+# complaints never reach suppression (README, "AWS credentials without
+# static keys").
 serviceAccount:
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/millionsend

@@ -42,6 +42,8 @@ export interface UnsubscribeTarget {
   emailId: string | null;
   /** Already unsubscribed from this scope — the confirm page reads as done. */
   alreadyDone: boolean;
+  /** The contact's global flag, whatever the token's scope. */
+  unsubscribed: boolean;
   /** The contact's team's customization for the confirm page. */
   customization: UnsubscribeCustomization;
 }
@@ -169,6 +171,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       emailId,
       topic: null,
       alreadyDone: contact.unsubscribed,
+      unsubscribed: contact.unsubscribed,
       customization,
     };
   }
@@ -198,6 +201,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     emailId,
     topic: { id: topic.id, name: topic.name },
     alreadyDone: !effective,
+    unsubscribed: contact.unsubscribed,
     customization,
   };
 }

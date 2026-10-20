@@ -3,6 +3,7 @@
   "confirmPrefs": "Einstellungen verwalten",
   "confirmTopic": "Von {topic} abmelden",
   "button": "Abmelden",
+  "buttonAll": "Von allem abmelden",
   "preferences": "Wähle aus, welche E-Mails du erhalten möchtest:",
   "save": "Einstellungen speichern",
   "saved": "Deine E-Mail-Einstellungen wurden aktualisiert.",
