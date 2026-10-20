@@ -56,8 +56,10 @@ Some checks can't fail on MillionSend and report `passed_by_design`:
 - `auth_alignment` — always. You can only send from a verified domain, and
   domain verification is a hard gate before any send, so SPF and DKIM
   alignment is guaranteed by construction.
-- `list_unsubscribe` — on broadcast and topic sends, where MillionSend
-  injects the one-click unsubscribe headers itself. On plain API sends the
+- `list_unsubscribe` — on broadcasts, and on topic sends to a single
+  contact, where MillionSend injects the one-click unsubscribe headers
+  itself. A topic send to more than one address, or to an address that
+  isn't a contact, gets no generated pair, so, as on plain API sends, the
   check reads the headers you supplied.
 
 On Cloud, open/click tracking only ever runs on your branded tracking

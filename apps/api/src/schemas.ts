@@ -240,7 +240,7 @@ export const sendEmailRequestSchema = z
       .nullable()
       .optional()
       .describe(
-        "Topic id: recipients opted out of the topic are skipped and an unsubscribe link is added",
+        "Topic id: recipients opted out of the topic are skipped; a send to one address that is a contact also gets that contact's unsubscribe link",
       ),
     attachments: z
       .array(attachmentSchema)

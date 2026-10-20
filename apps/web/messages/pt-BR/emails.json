@@ -182,7 +182,7 @@
       "list_unsubscribe": {
         "title": "Cabeçalhos de descadastro em um clique",
         "description": "A mensagem carrega os cabeçalhos List-Unsubscribe e List-Unsubscribe-Post. Gmail e Yahoo exigem descadastro em um clique para remetentes em massa.",
-        "advice": "Envie marketing por transmissões ou tópicos — o MillionSend injeta os dois cabeçalhos automaticamente."
+        "advice": "Envie marketing por transmissões, ou por um tópico com um contato por e-mail — assim o MillionSend injeta os dois cabeçalhos automaticamente."
       },
       "link_domains_match": {
         "title": "Links no seu domínio",

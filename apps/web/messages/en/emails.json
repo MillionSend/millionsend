@@ -182,7 +182,7 @@
       "list_unsubscribe": {
         "title": "One-click unsubscribe headers",
         "description": "The message carries List-Unsubscribe and List-Unsubscribe-Post headers. Gmail and Yahoo require one-click unsubscribe for bulk senders.",
-        "advice": "Send marketing through broadcasts or topics — MillionSend injects both headers automatically."
+        "advice": "Send marketing through broadcasts, or through a topic to one contact per email — MillionSend then injects both headers itself."
       },
       "link_domains_match": {
         "title": "Links match your domain",

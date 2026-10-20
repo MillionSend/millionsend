@@ -171,7 +171,11 @@ remaining deltas are deliberate and loud:
   `topic_id`, a pair you supply replaces the generated one: one-click requests
   then reach your endpoint, MillionSend records no opt-out for them, and an
   `{{{UNSUBSCRIBE_URL}}}` placeholder in the body still resolves to
-  MillionSend's page.
+  MillionSend's page. MillionSend generates the pair and resolves the
+  placeholder only when the send goes to a single address that is a contact:
+  the link opts out the contact it names, and every `to`, `cc` and `bcc` copy
+  carries the same message. A send to more than one address carries no
+  generated pair, and its placeholders are removed.
 - A send whose every `to` recipient is on the suppression list or opted out of
   the `topic_id` is refused with `422 all_recipients_suppressed` (message
   `All recipients are suppressed`) instead of Resend's `200`; recipients
