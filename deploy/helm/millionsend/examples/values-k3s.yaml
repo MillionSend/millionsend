@@ -1,0 +1,84 @@
+# k3s: Traefik ingress, CloudNativePG database, secrets from a SealedSecret
+# (or any Secret created out of band) named millionsend-secrets, and AWS
+# access through OIDC web identity (no access keys).
+#   helm upgrade --install millionsend deploy/helm/millionsend \
+#     -n millionsend --create-namespace -f deploy/helm/millionsend/examples/values-k3s.yaml
+#
+# The image tag is the chart's appVersion, a pinned release. Set image.tag
+# (or image.digest) to hold another version; never a moving tag.
+
+config:
+  APP_BASE_URL: "https://mail.example.com"
+  # The api has its own host below, so the dashboard and MCP tokens must
+  # point there.
+  PUBLIC_API_URL: "https://api.mail.example.com"
+  AWS_REGION: "us-east-1"
+  SNS_TOPIC_ARNS: "arn:aws:sns:us-east-1:123456789012:millionsend-events"
+  SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events"
+  SES_CONFIGURATION_SET: "millionsend"
+  # Traefik is the only hop and appends the client address to
+  # X-Forwarded-For itself, so TRUSTED_PROXIES stays unset. With a
+  # Cloudflare tunnel or another proxy in front of Traefik, see "Client
+  # addresses" in the README.
+
+# The role trusts this cluster's service-account issuer for
+# system:serviceaccount:<namespace>:millionsend (the name pinned below, so
+# the trust policy does not depend on the release name). It needs the
+# millionsend-ses permissions (infra/millionsend-ses.cfn.yaml) plus
+# sqs:ReceiveMessage, sqs:DeleteMessage and sqs:GetQueueAttributes on the
+# events queue. The issuer's discovery document and JWKS must be reachable
+# by AWS: README, "Any cluster: aws.webIdentity", has the k3s recipe.
+aws:
+  webIdentity:
+    enabled: true
+    roleArn: arn:aws:iam::123456789012:role/millionsend
+
+serviceAccount:
+  name: millionsend
+
+# Keys: DATABASE_URL, MASTER_ENCRYPTION_KEY, BETTER_AUTH_SECRET. No AWS keys:
+# the web identity role provides them. DATABASE_URL points at the
+# CloudNativePG read-write service, e.g.
+#   postgres://millionsend:<password>@<cluster>-rw.<namespace>.svc:5432/millionsend
+secrets:
+  mode: existingSecret
+  existingSecret:
+    name: millionsend-secrets
+
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: mail.example.com
+      paths:
+        # SNS delivers SES events here; the api serves it.
+        - path: /ses/events
+          pathType: Exact
+          component: api
+        - path: /
+          pathType: Prefix
+          component: web
+    - host: api.mail.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          component: api
+  tls:
+    - secretName: millionsend-tls
+      hosts: [mail.example.com, api.mail.example.com]
+
+# Requests near the use measured on a small production instance (web
+# ~185Mi, api ~120Mi, worker ~145Mi) with headroom; the limits absorb
+# peaks.
+web:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+api:
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 768Mi }
+worker:
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 768Mi }

@@ -1,0 +1,37 @@
+{{- range $name := list "web" "api" "smtp" "docs" }}
+{{- $v := index $.Values $name }}
+{{- if $v.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "millionsend.componentName" (dict "root" $ "suffix" $name) }}
+  labels:
+    {{- include "millionsend.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+  {{- with $v.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $v.service.type }}
+  {{- with $v.service.externalTrafficPolicy }}
+  {{- if not (has $v.service.type (list "NodePort" "LoadBalancer")) }}
+  {{- fail (printf "%s.service.externalTrafficPolicy applies to NodePort and LoadBalancer Services only (type is %s)" $name $v.service.type) }}
+  {{- end }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  {{- with $v.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - name: {{ $name }}
+      port: {{ $v.service.port }}
+      targetPort: {{ $name }}
+      protocol: TCP
+  selector:
+    {{- include "millionsend.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,30 @@
+{{- /*
+One PodDisruptionBudget per component that runs more than one replica. A
+budget on a single replica would block node drains, and the worker runs
+one replica under Recreate on purpose.
+*/ -}}
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- range $name := list "web" "api" "smtp" "docs" }}
+{{- $v := index $.Values $name }}
+{{- if and $v.enabled (gt (int $v.replicas) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "millionsend.componentName" (dict "root" $ "suffix" $name) }}
+  labels:
+    {{- include "millionsend.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  {{- if $.Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ $.Values.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $.Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "millionsend.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $name }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,38 @@
+MillionSend {{ include "millionsend.version" . }} deployed as {{ include "millionsend.fullname" . }}.
+
+Secret: {{ include "millionsend.secretName" . }} (mode: {{ .Values.secrets.mode }})
+{{- if eq .Values.secrets.mode "existingSecret" }}
+  Pods stay in CreateContainerConfigError until this Secret exists.
+{{- end }}
+{{- if eq .Values.secrets.mode "create" }}
+  WARNING: secrets.mode=create stores secret values in the Helm release. Use
+  existingSecret or externalSecret outside of testing.
+{{- end }}
+
+Dashboard: {{ .Values.config.APP_BASE_URL }}
+{{- if not .Values.ingress.enabled }}
+  No Ingress rendered. Try it locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "millionsend.componentName" (dict "root" . "suffix" "web") }} 3000:{{ .Values.web.service.port }}
+  Sign-in accepts only the APP_BASE_URL origin, so set config.APP_BASE_URL to
+  http://localhost:3000 while you test through the port-forward.
+{{- end }}
+{{- $apiRouted := false }}
+{{- range .Values.ingress.hosts }}
+{{- range .paths }}
+{{- if and (eq .component "api") (ne .path "/ses/events") }}
+{{- $apiRouted = true }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and .Values.ingress.enabled $apiRouted (not .Values.config.PUBLIC_API_URL) }}
+
+WARNING: the Ingress routes to api but config.PUBLIC_API_URL is unset, so the
+dashboard and MCP tokens point at https://<dashboard host>:3001.
+{{- end }}
+{{- if .Values.migrations.job.enabled }}
+
+Migrations run as a pre-upgrade hook: pass --timeout {{ .Values.migrations.job.activeDeadlineSeconds }}s
+(or more) to helm upgrade, or Helm gives up on the release while the Job runs.
+{{- end }}
+
+Logs: kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} --prefix -f --max-log-requests 20

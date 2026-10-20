@@ -1,0 +1,330 @@
+# MillionSend Helm chart. One image, one Deployment per process (PROCESS=
+# web | api | worker | smtp | docs, see scripts/start.mjs). Postgres is
+# external: point DATABASE_URL at CloudNativePG, RDS, or any Postgres 17
+# with max_connections >= 200 (each app process pools up to 24).
+# Variable reference: .env.example and SELF_HOSTING.md.
+
+image:
+  repository: ghcr.io/millionsend/millionsend
+  # Defaults to the chart's appVersion, a pinned release. Set a version or
+  # `digest` to hold a different one. Never a moving tag (latest, edge): a
+  # restarted pod would run a newer build, and its migrations, than the
+  # rest of the release.
+  tag: ""
+  # sha256:... — when set, wins over tag.
+  digest: ""
+  # Empty = the Kubernetes default (IfNotPresent for a pinned tag or digest).
+  pullPolicy: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Non-secret configuration, rendered into a ConfigMap and loaded by every
+# pod with envFrom. Keys are .env.example names. APP_BASE_URL must match
+# the public origin exactly or login fails. The chart adds WORKER_REPLICAS
+# and the SMTP_* keys itself, from worker.replicas and smtp.*; do not set
+# those here.
+config:
+  APP_BASE_URL: "https://mail.example.com"
+  # Required whenever the Ingress gives the api its own host or prefix:
+  # without it the dashboard and MCP tokens point at https://<dashboard
+  # host>:3001.
+  # PUBLIC_API_URL: "https://api.mail.example.com"
+  AWS_REGION: "us-east-1"
+  # SNS_TOPIC_ARNS: ""
+  # SQS_QUEUE_URL: ""
+  # SES_CONFIGURATION_SET: ""
+  # Proxies IN FRONT of the ingress controller (a CDN, a Cloudflare tunnel,
+  # an external load balancer) whose X-Forwarded-For entries the app skips
+  # to reach the client. The ingress controller itself needs no entry: it
+  # appends the address it accepted from, and the app reads the chain from
+  # the right. Never the pod or VPC CIDR: every in-cluster caller would then
+  # share one rate-limit bucket. README, "Client addresses".
+  # TRUSTED_PROXIES: "203.0.113.10"
+  ALLOW_SIGNUP: "false"
+
+# Secret values (DATABASE_URL, MASTER_ENCRYPTION_KEY, BETTER_AUTH_SECRET,
+# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, S3_*, ...). Every mode ends in
+# one Secret that every pod loads with envFrom.
+secrets:
+  # existingSecret — a Secret you manage (kubectl, SealedSecrets, SOPS, ...)
+  # externalSecret — an External Secrets Operator ExternalSecret this chart renders
+  # create         — a Secret rendered from secrets.create.data (dev/test only:
+  #                  the values land in the Helm release)
+  mode: existingSecret
+  existingSecret:
+    name: millionsend-secrets
+  externalSecret:
+    # external-secrets.io/v1 needs ESO >= 0.17; set v1beta1 for older operators.
+    apiVersion: external-secrets.io/v1
+    refreshInterval: 1h
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: ""
+    # Pull every key of one JSON secret from the store (e.g. one AWS
+    # Secrets Manager secret holding all the variables) ...
+    dataFrom: []
+    #  - extract:
+    #      key: millionsend/production
+    # ... and/or map keys one by one.
+    data: []
+    #  - secretKey: DATABASE_URL
+    #    remoteRef:
+    #      key: millionsend/production
+    #      property: DATABASE_URL
+  create:
+    data: {}
+    #  DATABASE_URL: postgres://millionsend:...@postgres:5432/millionsend
+    #  MASTER_ENCRYPTION_KEY: ...   # openssl rand -base64 32
+    #  BETTER_AUTH_SECRET: ...      # openssl rand -base64 32
+
+serviceAccount:
+  create: true
+  name: ""
+  # EKS: eks.amazonaws.com/role-arn for IRSA. With no AWS keys in the
+  # Secret the SES/SQS/SNS clients use the SDK default provider chain; also
+  # set AWS_DEFAULT_CHAIN: "true" in config so account mail (password
+  # resets, verification) is enabled without static keys.
+  annotations: {}
+  automountServiceAccountToken: false
+
+# AWS credentials through OIDC web identity, for clusters without the EKS
+# pod identity webhook (k3s, kubeadm, ...): the chart projects a token of
+# the pod's ServiceAccount and points the SDK at it (AWS_ROLE_ARN +
+# AWS_WEB_IDENTITY_TOKEN_FILE); the SDK default chain exchanges it for
+# temporary credentials with sts:AssumeRoleWithWebIdentity. The role's
+# trust policy must name the cluster's service-account issuer (published
+# where AWS can reach its JWKS) and system:serviceaccount:<namespace>:<sa>;
+# the role needs the millionsend-ses permissions plus read access to the
+# SES events queue (README, "AWS credentials without static keys").
+# Leave AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY out of the Secret: explicit
+# keys win over the chain. On EKS use serviceAccount.annotations (IRSA) or
+# Pod Identity instead; the webhook injects the same thing.
+aws:
+  webIdentity:
+    enabled: false
+    roleArn: ""
+    audience: sts.amazonaws.com
+    expirationSeconds: 3600
+    mountPath: /var/run/secrets/aws
+
+podAnnotations: {}
+podLabels: {}
+# On the Deployments themselves (e.g. for Reloader, to restart smtp when
+# its TLS Secret is renewed).
+deploymentAnnotations: {}
+
+# uid/gid 999 is the image's `millionsend` user (useradd --system). The
+# image sets USER by name, so runAsNonRoot needs the numeric id here.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# The containers share the pod's PID namespace, so the pause container is
+# PID 1 and reaps the zombie each boot-time migration leaves behind (the
+# compose files use init: true for the same reason).
+shareProcessNamespace: true
+
+# web, api, smtp and docs sleep this long in preStop, so the endpoint
+# removal reaches every kube-proxy and the ingress before SIGTERM (api and
+# smtp exit at once on it). 0 disables the hook.
+preStopSleepSeconds: 10
+
+# preStop plus the supervisor's 35 s child-exit budget (the worker drains
+# in-flight sends for up to 30 s), with margin.
+terminationGracePeriodSeconds: 55
+
+# Boot runs pending migrations before the process listens. The startup
+# budget (periodSeconds x failureThreshold, 10 min here) must outlast the
+# longest migration, or the pod is killed partway through it.
+startupProbe:
+  periodSeconds: 5
+  failureThreshold: 120
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# A PodDisruptionBudget for each of web, api, smtp and docs that runs more
+# than one replica. Nothing is rendered for a single replica: the budget
+# would only block node drains.
+podDisruptionBudget:
+  enabled: false
+  maxUnavailable: 1
+  # Set (e.g. 1 or "50%") to use minAvailable instead of maxUnavailable.
+  minAvailable: ""
+
+# Extra env for every app container (list form, e.g. valueFrom).
+extraEnv: []
+extraEnvFrom: []
+
+web:
+  enabled: true
+  # Each web replica keeps its own sign-in, sign-up and password-reset rate
+  # limiters (N replicas allow N times those limits) and opens about 26
+  # Postgres connections. README, "Scaling".
+  replicas: 1
+  resources: {}
+  extraEnv: []
+  service:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+
+api:
+  enabled: true
+  # Same trade-off as web: per-process failed-auth and MCP limiters, about
+  # 26 Postgres connections per replica.
+  replicas: 1
+  resources: {}
+  extraEnv: []
+  service:
+    type: ClusterIP
+    port: 3001
+    annotations: {}
+
+worker:
+  enabled: true
+  # Rendered into WORKER_REPLICAS: each worker takes 1/N of the SES send
+  # rate. Do not scale it with an HPA or `kubectl scale`, which would leave
+  # WORKER_REPLICAS stale and overshoot the account quota. About 36
+  # Postgres connections per replica.
+  replicas: 1
+  resources: {}
+  extraEnv: []
+
+smtp:
+  # The relay needs a STARTTLS keypair: a kubernetes.io/tls Secret
+  # (cert-manager Certificate, or kubectl create secret tls) named below.
+  # It reads the keypair once at boot, so restart the Deployment after each
+  # renewal (README, "SMTP relay"). Without a Secret the relay only starts
+  # with config.SMTP_ALLOW_INSECURE_AUTH: "true" (plaintext AUTH; private
+  # networks only).
+  enabled: false
+  replicas: 1
+  # The container's listen port (SMTP_PORT on the relay itself).
+  port: 2587
+  tlsSecretName: ""
+  # Hostname clients connect to, shown in the dashboard's SMTP tab as
+  # SMTP_PUBLIC_HOST. Unset, the tab shows the dashboard's own host, which
+  # is right only when the relay is reachable there.
+  publicHost: ""
+  resources: {}
+  extraEnv: []
+  service:
+    # SMTP is not HTTP: expose it with a LoadBalancer/NodePort (or a TCP
+    # route on your ingress controller), not the Ingress below. This port
+    # is the one the dashboard shows clients.
+    type: ClusterIP
+    port: 2587
+    annotations: {}
+    loadBalancerSourceRanges: []
+    # Local, for NodePort/LoadBalancer: the relay allows 10 connections per
+    # client address and checks that before AUTH; with Cluster every client
+    # arrives as a node address, so they all share one allowance. A
+    # TCP-proxying load balancer or an ingress TCP route hides client
+    # addresses the same way.
+    externalTrafficPolicy: ""
+
+docs:
+  enabled: false
+  replicas: 1
+  resources: {}
+  extraEnv: []
+  service:
+    type: ClusterIP
+    port: 3002
+    annotations: {}
+
+ingress:
+  enabled: false
+  # traefik (k3s), alb (EKS AWS Load Balancer Controller), nginx, ...
+  className: ""
+  # ingress-nginx caps request bodies at 1m by default while the API
+  # accepts 25 MiB: nginx.ingress.kubernetes.io/proxy-body-size: 25m
+  annotations: {}
+  # component: web | api | docs
+  hosts:
+    - host: mail.example.com
+      paths:
+        # SNS delivers SES events (bounces, complaints, deliveries) here and
+        # the api serves it; web would answer 404 and the SNS subscription
+        # would stay pending. Keep it first.
+        - path: /ses/events
+          pathType: Exact
+          component: api
+        - path: /
+          pathType: Prefix
+          component: web
+  # The api on its own host (then set config.PUBLIC_API_URL):
+  #  - host: api.mail.example.com
+  #    paths:
+  #      - path: /
+  #        pathType: Prefix
+  #        component: api
+  tls: []
+  #  - secretName: millionsend-tls
+  #    hosts: [mail.example.com]
+
+# Every app pod already runs pending migrations at boot under a Postgres
+# advisory lock, so this Job is optional. Enabled, it runs `migrate` as a
+# pre-install/pre-upgrade hook: a failing migration stops the upgrade
+# while the old pods keep serving. The hook runs before the chart's other
+# resources, so the Secret must already exist — use it with
+# secrets.mode=existingSecret whose Secret is created out of band. Run
+# helm upgrade with --timeout of at least activeDeadlineSeconds.
+migrations:
+  job:
+    enabled: false
+    backoffLimit: 0
+    activeDeadlineSeconds: 1800
+    # A failed Job stays this long for its logs (Helm deletes succeeded ones).
+    ttlSecondsAfterFinished: 86400
+    resources: {}
+
+# Scheduled pg_dump to S3-compatible storage (scripts/backup). Needs
+# S3_BACKUP_BUCKET in config and S3_ENDPOINT/S3_ACCESS_KEY_ID/
+# S3_SECRET_ACCESS_KEY in the Secret. Skip it when the database already has
+# its own backups (CloudNativePG ScheduledBackup, RDS snapshots).
+backup:
+  enabled: false
+  image:
+    repository: ghcr.io/millionsend/backup
+    # Defaults to image.tag, then the chart's appVersion.
+    tag: ""
+    digest: ""
+    pullPolicy: ""
+  # Any cron expression (UTC unless timeZone is set); the CronJob replaces
+  # the container's daily-only sleep loop and the BACKUP_CRON variable.
+  schedule: "0 3 * * *"
+  timeZone: ""
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 1
+  # A run (dump, upload, verify, prune) is killed past this.
+  activeDeadlineSeconds: 3600
+  # pg_dump stages the dump here before upload; size it above the dump.
+  scratch:
+    sizeLimit: 10Gi
+  # uid 70 is `postgres` in the postgres:17-alpine base image.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+  resources: {}
