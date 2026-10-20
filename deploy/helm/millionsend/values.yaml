@@ -96,8 +96,8 @@ serviceAccount:
 # temporary credentials with sts:AssumeRoleWithWebIdentity. The role's
 # trust policy must name the cluster's service-account issuer (published
 # where AWS can reach its JWKS) and system:serviceaccount:<namespace>:<sa>;
-# the role needs the millionsend-ses permissions plus read access to the
-# SES events queue (README, "AWS credentials without static keys").
+# attach the millionsend-ses policy to the role (README, "AWS credentials
+# without static keys", for a policy that predates its queue reads).
 # Leave AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY out of the Secret: explicit
 # keys win over the chain. On EKS use serviceAccount.annotations (IRSA) or
 # Pod Identity instead; the webhook injects the same thing.

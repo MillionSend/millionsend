@@ -111,19 +111,15 @@ client in the app (SES sending, GetAccount, SQS polling, quotas) uses the AWS
 SDK default provider chain. That chain picks up a web identity token, so the
 pods can assume an IAM role and never hold a long-lived key.
 
-In both setups below, the role needs the `millionsend-ses` permissions
-(`infra/millionsend-ses.cfn.yaml`) **and read access to the SES events queue**.
-The CloudFormation template grants the queue only to the IAM user it creates, so
-add this to the role, or sending works while every `ReceiveMessage` is denied and
-bounces and complaints never reach the suppression list:
-
-```json
-{
-  "Effect": "Allow",
-  "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
-  "Resource": "arn:aws:sqs:<region>:<account>:millionsend-events"
-}
-```
+In both setups below, attach the `millionsend-ses` policy to the role. It
+includes the worker's reads of the `millionsend-events` queue, which the queue's
+own policy grants only to the `millionsend` user. A policy created before that
+statement existed needs a new version, or sending works while every
+`ReceiveMessage` is denied and bounces and complaints never reach the
+suppression list. Re-run the setup wizard (`@millionsend/setup` 0.9.2 or later),
+update the CloudFormation stack with the current template, or publish one with
+`aws iam create-policy-version` ([SELF_HOSTING.md](../../../SELF_HOSTING.md),
+"AWS setup", has the command).
 
 ### Any cluster (k3s, kubeadm, ...): `aws.webIdentity`
 

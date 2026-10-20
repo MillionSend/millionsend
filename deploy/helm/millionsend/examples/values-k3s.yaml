@@ -25,11 +25,11 @@ config:
 
 # The role trusts this cluster's service-account issuer for
 # system:serviceaccount:<namespace>:millionsend (the name pinned below, so
-# the trust policy does not depend on the release name). It needs the
-# millionsend-ses permissions (infra/millionsend-ses.cfn.yaml) plus
-# sqs:ReceiveMessage, sqs:DeleteMessage and sqs:GetQueueAttributes on the
-# events queue. The issuer's discovery document and JWKS must be reachable
-# by AWS: README, "Any cluster: aws.webIdentity", has the k3s recipe.
+# the trust policy does not depend on the release name). Attach the
+# millionsend-ses policy to it; one that predates the policy's reads of the
+# events queue needs a new version (README, "AWS credentials without static
+# keys"). The issuer's discovery document and JWKS must be reachable by
+# AWS: README, "Any cluster: aws.webIdentity", has the k3s recipe.
 aws:
   webIdentity:
     enabled: true
