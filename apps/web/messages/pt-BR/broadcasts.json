@@ -52,6 +52,7 @@
     "previewTab": "Pré-visualizar",
     "noHtml": "Nenhum HTML ainda.",
     "convertInPlace": "Converter esta transmissão",
+    "switchBody": "Os blocos viram o HTML que eles geram, e a transmissão passa a abrir no modo código. Blocos com a condição \"Show if\" ficam de fora desse HTML. Até você salvar, o botão Voltar para blocos desfaz a troca; depois disso, converter de volta em blocos perde parte do layout.",
     "textToggleShow": "Alternativa em texto simples",
     "textToggleHide": "Ocultar alternativa em texto simples",
     "textLabel": "Texto simples",

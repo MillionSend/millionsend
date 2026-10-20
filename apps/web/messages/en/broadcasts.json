@@ -52,6 +52,7 @@
     "previewTab": "Preview",
     "noHtml": "No HTML yet.",
     "convertInPlace": "Convert this broadcast",
+    "switchBody": "The blocks are replaced by the HTML they render, and the broadcast opens in code mode from then on. Blocks with a Show if condition are left out of that HTML. Until you save, Back to blocks undoes the switch; after that, converting back flattens the layout.",
     "textToggleShow": "Plain-text fallback",
     "textToggleHide": "Hide plain-text fallback",
     "textLabel": "Plain text",

@@ -298,9 +298,12 @@ function CodePreview({
 export function HtmlAuthoredBanner({
   onEditHtml,
   onConvert,
+  convertDisabled = false,
 }: {
   onEditHtml: () => void;
   onConvert: () => void;
+  /** Turns Convert off, for example while a save is in flight. */
+  convertDisabled?: boolean;
 }) {
   const t = useTranslations("templates");
   return (
@@ -310,7 +313,12 @@ export function HtmlAuthoredBanner({
         <button type="button" className="ms-btn ms-btn-secondary" onClick={onEditHtml}>
           {t("html.editHtml")}
         </button>
-        <button type="button" className="ms-btn ms-btn-ghost" onClick={onConvert}>
+        <button
+          type="button"
+          className="ms-btn ms-btn-ghost"
+          disabled={convertDisabled}
+          onClick={onConvert}
+        >
           {t("html.convert")}
         </button>
       </span>
@@ -358,14 +366,17 @@ export function ConvertBlocksDialog({
 }
 
 /**
- * The guarded blocks→html switch of a template with content. The block
- * document is replaced by its rendered html; the way back flattens, so the
- * dialog offers the copy first, like the conversion does.
+ * The guarded blocks→html switch of a body with content. The block document
+ * is replaced by its rendered html; the way back flattens, so a template
+ * offers the copy first, like the conversion does. A broadcast passes its own
+ * dialog text (`body`) and `inPlaceLabel`, and no `onDuplicate`.
  */
 export function SwitchHtmlDialog({
   open,
   pending = null,
   error = null,
+  body,
+  inPlaceLabel,
   onClose,
   onDuplicate,
   onSwitchInPlace,
@@ -375,8 +386,15 @@ export function SwitchHtmlDialog({
   pending?: DialogAction | null;
   /** Why the last attempt failed, shown in the dialog that stays open. */
   error?: string | null;
+  /** The dialog text; the default says "template". A broadcast passes its own. */
+  body?: string;
+  /** Names the in-place button; the default says "template". */
+  inPlaceLabel?: string;
   onClose: () => void;
-  /** Absent on a template that is not saved yet: there is nothing to copy from. */
+  /**
+   * Absent where no copy is possible: a broadcast has no duplicate, and a new
+   * template has no saved row.
+   */
   onDuplicate?: (() => void) | undefined;
   onSwitchInPlace: () => void;
 }) {
@@ -387,9 +405,9 @@ export function SwitchHtmlDialog({
       pending={pending}
       error={error}
       title={t("html.switchTitle")}
-      body={t("html.switchBody")}
+      body={body ?? t("html.switchBody")}
       copyLabel={t("html.switchCopy")}
-      inPlaceLabel={t("html.convertInPlace")}
+      inPlaceLabel={inPlaceLabel ?? t("html.convertInPlace")}
       onClose={onClose}
       onDuplicate={onDuplicate}
       onInPlace={onSwitchInPlace}
