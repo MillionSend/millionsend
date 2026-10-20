@@ -71,6 +71,15 @@ Resources:
             Action:
               - cloudwatch:GetMetricData
             Resource: "*"
+          # The worker's reads of the events queue, so the policy alone
+          # serves a role (IRSA, web identity, an instance profile); the
+          # queue policy below grants the IAM user the same.
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: {"Fn::GetAtt": [EventsQueue, Arn]}
 
   SendUser:
     Type: AWS::IAM::User

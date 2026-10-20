@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SES_EVENT_TYPES, SES_IAM_POLICY } from "../src/setup-constants.js";
+import { SES_EVENT_TYPES, SES_IAM_POLICY, SETUP_NAMES } from "../src/setup-constants.js";
 
 const read = (relative: string) =>
   readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
@@ -15,6 +15,7 @@ const RUNTIME_MODULES = [
   ["../src/account.ts", "ses"],
   ["../src/tenants.ts", "ses"],
   ["../src/reputation.ts", "cloudwatch"],
+  ["../../../apps/worker/src/sqs-poller.ts", "sqs"],
 ] as const;
 
 /** CloudFormation's camelCase event names → SESv2's SCREAMING_SNAKE enum. */
@@ -26,7 +27,9 @@ describe("SES_IAM_POLICY", () => {
       const commands = [...read(module).matchAll(/new ([A-Za-z]+)Command\(/g)].map((m) => m[1]);
       expect(commands.length, module).toBeGreaterThan(0);
       for (const command of commands) {
-        expect(policyActions, `${module}: ${command}`).toContain(`${service}:${command}`);
+        // SQS authorizes a batch call under its single-message action.
+        const action = `${service}:${command?.replace(/Batch$/, "")}`;
+        expect(policyActions, `${module}: ${command}`).toContain(action);
       }
     }
   });
@@ -40,14 +43,29 @@ describe("SES_IAM_POLICY", () => {
     // GetAccount has no resource-level scope, so it must not sit in the identity statement.
     expect(identity?.Action).not.toContain("ses:GetAccount");
   });
+
+  it("confines the queue reads to the events queue", () => {
+    const queue = SES_IAM_POLICY.Statement.find((s) =>
+      (s.Action as readonly string[]).includes("sqs:ReceiveMessage"),
+    );
+    expect(queue?.Action).toEqual([
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+    ]);
+    expect(queue?.Resource).toBe(`arn:aws:sqs:*:*:${SETUP_NAMES.queue}`);
+  });
 });
 
 describe("infra/millionsend-ses.cfn.yaml", () => {
   const cfn = read("../../../infra/millionsend-ses.cfn.yaml");
+  // The managed policy alone: the queue policy names sqs actions of its own.
+  const sendPolicy = cfn.split("SendPolicy:")[1]?.split("SendUser:")[0] ?? "";
 
   it("grants exactly the wizard's actions", () => {
-    expect(new Set(cfn.match(/(?:ses|cloudwatch):[A-Za-z]+/g))).toEqual(policyActions);
-    expect(cfn).toContain('Resource: "arn:aws:ses:*:*:identity/*"');
+    expect(new Set(sendPolicy.match(/(?:ses|cloudwatch|sqs):[A-Za-z]+/g))).toEqual(policyActions);
+    expect(sendPolicy).toContain('Resource: "arn:aws:ses:*:*:identity/*"');
+    expect(sendPolicy).toContain('Resource: {"Fn::GetAtt": [EventsQueue, Arn]}');
   });
 
   it("subscribes exactly the wizard's event types (no open/click/send)", () => {

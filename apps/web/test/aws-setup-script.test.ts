@@ -67,7 +67,8 @@ describe("buildAwsSetupScript", () => {
       appBaseUrl: "https://mail.example.com",
     });
     expect(script).not.toContain("sns");
-    expect(script).not.toContain("sqs");
+    // The policy names the queue's read actions; no queue is created.
+    expect(script).not.toContain("aws sqs");
     expect(script).not.toContain("SES_CONFIGURATION_SET");
   });
 
