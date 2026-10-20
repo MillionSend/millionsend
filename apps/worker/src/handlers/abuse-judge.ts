@@ -10,6 +10,7 @@ import {
   destinationVerdictParks,
   type EmailAttachment,
   isHoldVerdict,
+  isPlatformLinkVerdict,
   isSharedInboxSender,
   type JudgeBlockInput,
   type JudgeVerdict,
@@ -26,6 +27,7 @@ import {
   SCREEN_JUDGE_TIMEOUT_MS,
   screeningTier,
   sendingDomainYoung,
+  spareWaitingSamples,
   teamDestinationStanding,
   teamMonitorOverview,
   teamMonitorRow,
@@ -152,6 +154,7 @@ async function judgePending(
     now,
   });
   const destinations = standing.novel;
+  const vouchedNames = new Set(standing.vouched);
   const shared = isSharedInboxSender(
     loaded.input.from,
     deps.sharedInboxDomain === undefined ? sharedInboxDomain() : deps.sharedInboxDomain,
@@ -225,6 +228,12 @@ async function judgePending(
         ? await deps.linkDomainYoung(destinations, now)
         : false
       : null;
+  // A product's own page on a platform, read as a lure: the team is spared the hold, and the mail
+  // parks unless an operator cleared every such name. Judged after the send with no such clearance,
+  // nothing is left to park, so the hold stands.
+  const platformShape = sample.broadcastId === null && isPlatformLinkVerdict(verdict, standing.all);
+  const vouched = platformShape && standing.all.every((d) => vouchedNames.has(d));
+  const platformLink = platformShape && (sample.screening || vouched);
   // The verdict and its fold commit together: a crash between them would
   // leave a judged row the retry skips and a risk that never saw it.
   const outcome = await db.transaction(async (tx) => {
@@ -250,7 +259,7 @@ async function judgePending(
       .returning({ id: ms.id });
     // A concurrent run already wrote this sample: its verdict stands, the risk moved once.
     if (!judged) return null;
-    return applyJudgedSample(t, settings, {
+    const applied = await applyJudgedSample(t, settings, {
       teamId: sample.teamId,
       score: verdict.score,
       verdict,
@@ -258,8 +267,23 @@ async function judgePending(
       broadcast: sample.broadcastId !== null,
       youngSendingDomain,
       youngLinkDomain: linkYoung === true,
+      platformLink,
       now,
     });
+    if (vouched) {
+      await t.update(ms).set({ sparedHold: "vouched" }).where(eq(ms.id, sample.id));
+    } else if (applied.spared) {
+      // The park rests on every platform name the mail links to; releasing it clears them all.
+      await t
+        .update(ms)
+        .set({ sparedHold: applied.spared.rule, destinations: standing.all })
+        .where(eq(ms.id, sample.id));
+      await spareWaitingSamples(t, {
+        teamId: sample.teamId,
+        holdRepeatScore: settings.holdRepeatScore,
+      });
+    }
+    return applied;
   });
   if (!outcome) return "skipped";
   if (verdictClearsDestinations(verdict, destinations.length)) {
@@ -267,7 +291,15 @@ async function judgePending(
   }
   // Mail to a destination that cleared within its probation, read as
   // phishing: the clearance goes, and the operator hears of it.
-  if (standing.probation.length > 0 && isHoldVerdict(verdict, settings.holdRepeatScore)) {
+  const platformProbation =
+    sample.broadcastId === null &&
+    isPlatformLinkVerdict(verdict, standing.probation) &&
+    standing.probation.every((d) => vouchedNames.has(d));
+  if (
+    standing.probation.length > 0 &&
+    !platformProbation &&
+    isHoldVerdict(verdict, settings.holdRepeatScore)
+  ) {
     const revoked = await revokeDestinations(db, sample.teamId, standing.probation, now);
     if (revoked.length > 0) {
       await notifyDestination(
@@ -281,12 +313,14 @@ async function judgePending(
       );
     }
   }
+  const spareParks = sample.screening && outcome.spared !== null && !vouched;
   const destinationParks =
-    sample.screening &&
-    destinations.length > 0 &&
-    outcome.tier !== "new" &&
     outcome.tier !== "exempt" &&
-    destinationVerdictParks({ ...verdict, linkYoung }, settings);
+    (spareParks ||
+      (sample.screening &&
+        destinations.length > 0 &&
+        outcome.tier !== "new" &&
+        destinationVerdictParks({ ...verdict, linkYoung }, settings)));
   if (destinationParks) {
     await notifyDestination(
       db,
@@ -294,7 +328,7 @@ async function judgePending(
       "monitor.destination_parked",
       sample.teamId,
       verdict,
-      destinations,
+      destinations.length > 0 ? destinations : standing.all,
       now,
     );
   }
