@@ -2,6 +2,7 @@ import { deriveUnsubscribeKey, hashRecipient, makeUnsubscribeToken } from "@mill
 import { type Db, schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -326,6 +327,51 @@ describe("/unsubscribe/[token] route", () => {
       });
     });
 
+    it("a one-click posted as multipart, the encoding RFC 8058 prefers, is still a one-click", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, topicId, emailId, token } = await seedTopicLink();
+      const body = new FormData();
+      body.append("List-Unsubscribe", "One-Click");
+
+      const res = await POST(
+        new Request(`https://localhost:3000/unsubscribe/${encodeURIComponent(token)}`, {
+          method: "POST",
+          body,
+        }),
+        { params: Promise.resolve({ token }) },
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("location")).toBeNull();
+
+      expect(await stateOf(contactId, emailId)).toEqual({
+        unsubscribed: false,
+        topics: [{ topicId, subscribed: false }],
+        activities: [{ type: "topic_opt_out" }],
+        emailEvents: [
+          { data: { scope: "topic", topicId, topicName: "News", source: "one_click" } },
+        ],
+        suppressions: [],
+      });
+    });
+
+    it("a one-click labeled multipart but sent urlencoded is still a one-click", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, topicId, emailId, token } = await seedTopicLink();
+
+      const res = await POST(
+        new Request(`https://localhost:3000/unsubscribe/${encodeURIComponent(token)}`, {
+          method: "POST",
+          headers: { "content-type": "multipart/form-data; boundary=x" },
+          body: "List-Unsubscribe=One-Click",
+        }),
+        { params: Promise.resolve({ token }) },
+      );
+      expect(res.status).toBe(200);
+      expect((await stateOf(contactId, emailId)).emailEvents).toEqual([
+        { data: { scope: "topic", topicId, topicName: "News", source: "one_click" } },
+      ]);
+    });
+
     const renderConfirm = async (token: string, query: { done?: string } = {}) =>
       renderToStaticMarkup(
         await ConfirmPage({
@@ -345,7 +391,7 @@ describe("/unsubscribe/[token] route", () => {
       for (const page of [await renderConfirm(token, { done: "1" }), await renderConfirm(token)]) {
         expect(page).toContain("receive marketing emails anymore");
         expect(page).not.toContain("News</span> emails anymore");
-        expect(page).not.toContain('id="ms-unsub-all"');
+        expect(page).not.toContain('name="scope"');
       }
     });
 
@@ -357,6 +403,33 @@ describe("/unsubscribe/[token] route", () => {
       const page = await renderConfirm(token);
       expect(page).toContain(">News</span> emails anymore");
       expect(page).not.toContain("receive marketing emails anymore");
+      // The sender's other mail still comes, so leaving everything is one press away.
+      expect(page).toContain(`action="/unsubscribe/${encodeURIComponent(token)}"`);
+      expect(page).toContain(
+        `<input type="hidden" name="scope" value="all"/><button type="submit" class="ms-btn ms-btn-secondary">${en.buttonAll}</button></form>`,
+      );
+    });
+
+    it("a deleted topic's link still opens the page, and its one-click changes nothing", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, topicId, emailId, token } = await seedTopicLink();
+      await db.delete(schema.topics).where(eq(schema.topics.id, topicId));
+
+      expect((await call("POST", token, "List-Unsubscribe=One-Click")).status).toBe(200);
+      expect(await stateOf(contactId, emailId)).toEqual({
+        unsubscribed: false,
+        topics: [],
+        activities: [],
+        emailEvents: [],
+        suppressions: [],
+      });
+
+      // No topic left to list: the page is a bare link's, and its Unsubscribe still works.
+      const page = await renderConfirm(token);
+      expect(page).not.toContain(en.invalid);
+      expect(page).toContain(`>${en.button}</button>`);
+      expect((await call("POST", token, "")).status).toBe(303);
+      expect((await stateOf(contactId, emailId)).unsubscribed).toBe(true);
     });
   });
 
@@ -561,5 +634,28 @@ describe("UnsubscribePageView layout", () => {
       }),
     );
     expect(off).not.toContain("Powered by");
+  });
+});
+
+describe("unsubscribe confirm page security headers", () => {
+  it("lets only its forms follow the team's redirect to another origin", async () => {
+    const config = await (await import("../next.config")).default(PHASE_DEVELOPMENT_SERVER);
+    const rules = (await config.headers?.()) ?? [];
+    const policy = (source: string) =>
+      rules
+        .find((rule) => rule.source === source)
+        ?.headers.find((header) => header.key === "Content-Security-Policy")
+        ?.value.split("; ") ?? [];
+    const app = policy("/:path*");
+    const page = policy("/unsubscribe/confirm/:path*");
+    expect(app).toContain("form-action 'self'");
+    expect(page).toContain("form-action 'self' https: http:");
+    const rest = (directives: string[]) => directives.filter((d) => !d.startsWith("form-action"));
+    expect(rest(page)).toEqual(rest(app));
+    // Next sends the last entry that sets a header, so the page's comes after the catch-all.
+    const sources = rules.map((rule) => rule.source);
+    expect(sources.indexOf("/unsubscribe/confirm/:path*")).toBeGreaterThan(
+      sources.indexOf("/:path*"),
+    );
   });
 });

@@ -60,9 +60,11 @@ Algumas verificações não podem falhar no MillionSend e reportam
 - `auth_alignment` — sempre. Você só envia de um domínio verificado, e a
   verificação de domínio é uma etapa obrigatória antes de qualquer envio,
   então o alinhamento de SPF e DKIM é sempre garantido.
-- `list_unsubscribe` — em transmissões e envios por tópico, onde o próprio
-  MillionSend injeta os headers de descadastro em um clique. Em envios pela
-  API a verificação lê os headers que você forneceu.
+- `list_unsubscribe` — em transmissões e em envios por tópico para um único
+  contato, onde o próprio MillionSend injeta os headers de descadastro em um
+  clique. Um envio por tópico para mais de um endereço, ou para quem não é
+  contato, sai sem o par gerado e, como nos envios pela API, a verificação lê
+  os headers que você forneceu.
 
 No MillionSend Cloud, o rastreamento de abertura/clique só roda no seu subdomínio de
 rastreamento próprio, então `tracking_unbranded` só pode falhar em instâncias

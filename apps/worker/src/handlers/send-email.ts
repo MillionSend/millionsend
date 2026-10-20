@@ -772,11 +772,15 @@ async function sendQueued(
   let text = body.text;
 
   // Transactional topic send (topicId without contactId): the unsubscribe
-  // token signs a contactId, so it exists only when the primary recipient
-  // resolves to a contact by (team, lower(addr-spec)). Substitution runs
-  // before the tracking rewrite so the expanded link can be skipped by it.
+  // token signs a contactId, so it exists only when the message goes to one
+  // address and that address resolves to a contact by (team,
+  // lower(addr-spec)). Every to/cc/bcc copy is the same MIME, so a link
+  // minted for one recipient would let the others opt that person out.
+  // Substitution runs before the tracking rewrite so the expanded link can be
+  // skipped by it.
   let topicUnsubscribeToken: string | null = null;
-  if (email.topicId && !email.contactId && deps.unsubscribe) {
+  const soleRecipient = email.to.length === 1 && !email.cc?.length && !email.bcc?.length;
+  if (email.topicId && !email.contactId && deps.unsubscribe && soleRecipient) {
     const addr = extractAddrSpec(email.to[0] ?? "").toLowerCase();
     const [contact] = await db
       .select({ id: schema.contacts.id })

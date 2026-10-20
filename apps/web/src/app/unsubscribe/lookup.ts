@@ -44,6 +44,8 @@ export interface UnsubscribeTarget {
   alreadyDone: boolean;
   /** The contact's global flag, whatever the token's scope. */
   unsubscribed: boolean;
+  /** The token named a topic deleted since the send; the link reads as a bare one. */
+  topicDeleted: boolean;
   /** The contact's team's customization for the confirm page. */
   customization: UnsubscribeCustomization;
 }
@@ -99,9 +101,11 @@ export function postUnsubscribeLocation(token: string, redirectUrl: string | nul
 
 /**
  * Token → the exact thing it unsubscribes from, or null for anything invalid
- * (bad signature, non-uuid ids, unknown/deleted contact, or a topic-scoped
- * token whose topic was deleted). Callers must render every null the same
- * way — the public page never confirms whether a contact or topic exists.
+ * (bad signature, non-uuid ids, unknown/deleted contact, a topic on another
+ * team). Callers must render
+ * every null the same way — the public page never confirms whether a contact
+ * exists. A topic-scoped token whose topic has since been deleted reads as a
+ * bare one, flagged topicDeleted.
  */
 export async function targetForToken(db: Db, token: string): Promise<UnsubscribeTarget | null> {
   if (!env.MASTER_ENCRYPTION_KEY) return null;
@@ -163,27 +167,31 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     poweredBy: contact.poweredBy || poweredByLocked(contact),
   };
 
-  if (topicId === null) {
-    return {
-      contactId: contact.id,
-      teamId: contact.teamId,
-      email: contact.email,
-      emailId,
-      topic: null,
-      alreadyDone: contact.unsubscribed,
-      unsubscribed: contact.unsubscribed,
-      customization,
-    };
-  }
+  const bare: UnsubscribeTarget = {
+    contactId: contact.id,
+    teamId: contact.teamId,
+    email: contact.email,
+    emailId,
+    topic: null,
+    alreadyDone: contact.unsubscribed,
+    unsubscribed: contact.unsubscribed,
+    topicDeleted: false,
+    customization,
+  };
+  if (topicId === null) return bare;
 
-  // Topic-scoped: the topic must still exist and belong to the contact's team.
+  // Topic-scoped. An API topic send doesn't hold its topic (emails.topic_id
+  // goes null on delete), so a topic deleted since the send leaves its links
+  // working as bare ones instead of stranding their recipients on "invalid".
+  // A topic on another team is no deletion: only a forged token names one.
   const t = schema.topics;
   const [topic] = await db
-    .select({ id: t.id, name: t.name, defaultSubscribed: t.defaultSubscribed })
+    .select({ id: t.id, teamId: t.teamId, name: t.name, defaultSubscribed: t.defaultSubscribed })
     .from(t)
-    .where(and(eq(t.id, topicId), eq(t.teamId, contact.teamId)))
+    .where(eq(t.id, topicId))
     .limit(1);
-  if (!topic) return null;
+  if (!topic) return { ...bare, topicDeleted: true };
+  if (topic.teamId !== contact.teamId) return null;
 
   // Effective state: the explicit override, else the topic's default. Absence
   // of a row is not "unsubscribed" — it is the default.
@@ -194,14 +202,5 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     .where(and(eq(s.contactId, contact.id), eq(s.topicId, topic.id)))
     .limit(1);
   const effective = isSubscribedToTopic(sub?.subscribed, topic.defaultSubscribed);
-  return {
-    contactId: contact.id,
-    teamId: contact.teamId,
-    email: contact.email,
-    emailId,
-    topic: { id: topic.id, name: topic.name },
-    alreadyDone: !effective,
-    unsubscribed: contact.unsubscribed,
-    customization,
-  };
+  return { ...bare, topic: { id: topic.id, name: topic.name }, alreadyDone: !effective };
 }
