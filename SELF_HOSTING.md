@@ -212,6 +212,26 @@ mode 600):
 Prefer not to run a CLI? The dashboard's Settings → SES page offers a CloudFormation
 quick-create link and a pre-filled shell script that create the same resources.
 
+To run on an IAM role instead of the user's access keys (an EC2 instance
+profile, IRSA on EKS, another OIDC web identity), attach the `millionsend-ses`
+policy to the role and leave `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+unset, so the AWS SDK's default credential chain finds the role. Also set
+`AWS_DEFAULT_CHAIN=true`: with neither keys nor that flag, account mail
+(password resets, email verification) stays off and the dashboard warns that
+AWS credentials are not configured. The policy includes the worker's reads of
+the `millionsend-events` queue, which the queue's own policy grants only to
+the `millionsend` user. A policy created before that statement existed needs a
+new version. The wizard publishes one whenever it runs its IAM step (a full
+re-run, or `add-region`), from `@millionsend/setup` 0.9.2 on; an older wizard
+writes its own document back, without the statement. A CloudFormation stack
+gets it from an update with the current template. By hand, save the JSON under
+Settings → SES (Manual: console steps) as `millionsend-ses.json` and run:
+
+```sh
+aws iam create-policy-version --policy-arn arn:aws:iam::<account-id>:policy/millionsend-ses \
+  --policy-document file://millionsend-ses.json --set-as-default
+```
+
 </details>
 
 <details>
@@ -331,7 +351,9 @@ request logging, and delivery events.
 Connection details:
 
 - Host: wherever the `smtp` service is reachable (compose binds it to the Docker
-  host's loopback interface by default).
+  host's loopback interface by default). The dashboard's Settings → SMTP tab
+  shows the host of `APP_BASE_URL`; set `SMTP_PUBLIC_HOST` when the relay
+  answers on another name. Only that tab reads it.
 - Port: `2587` (`SMTP_PORT` to change).
 - Username: `millionsend` (fixed).
 - Password: an `ms_` API key from the dashboard.
@@ -782,15 +804,20 @@ login and signup fail with an "invalid origin" error. Forward `Host` and
 absolute URL either app derives from the request names the public hostname
 rather than `localhost`.
 
-Client addresses (sign-in rate limits, audit entries) come from
-`X-Forwarded-For`, and only proxies listed in `TRUSTED_PROXIES` (comma-separated
-IPs or CIDRs; default `127.0.0.1,::1`, which covers nginx on the same host)
-are believed. With `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
-each hop appends itself, and the chain is walked right-to-left past every
-trusted proxy, so the first untrusted address is the client. Add your
-proxy's address when it runs on another host, and a CDN's ranges when one
-sits in front of nginx; headers from any other source are ignored and the
-socket address is used instead.
+Client addresses (sign-in rate limits, the IPs recorded on sessions and
+sign-ups, tracking hits) come from `X-Forwarded-For`. With
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` each proxy
+appends the address it accepted the connection from, and the web process
+walks the header from the right past the addresses in `TRUSTED_PROXIES`
+(comma-separated IPs or CIDRs; default `127.0.0.1,::1`): the first one not
+listed is the client. Behind one reverse proxy like this nginx, nothing needs
+setting, wherever it runs. List only proxies in front of it that append to
+the header too, such as a CDN or a load balancer; left out, their address
+stands in for every client behind them. Never list a whole pod or VPC CIDR:
+every caller inside it would then share one rate-limit bucket. The web
+process takes the header from whoever connects, so keep web and api
+reachable only through the reverse proxy. The API's failed-authentication
+throttle doesn't read the header: it keys on the connection's address.
 
 The compose files bind every application port to loopback by default so only a
 local reverse proxy reaches them. Docker publishes ports by editing iptables
@@ -1702,6 +1729,8 @@ without it.
 - Postgres runs with `max_connections=200` in the compose files; each process
   (api, worker, web) holds a pool of up to 24 connections, so separate containers
   and worker replicas fit without tuning.
+- A managed Postgres that requires TLS (RDS for PostgreSQL 15+, for one): append
+  `?sslmode=require` to `DATABASE_URL`.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`, or `web`
   per container (default `all`). Upgrade them in the same `up -d`: the Metrics chart
   counts only what upgraded processes write, so a writer left on an older image during
