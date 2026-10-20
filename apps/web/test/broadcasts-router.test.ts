@@ -1165,9 +1165,10 @@ describe("paced sends", () => {
     vi.stubEnv("EMAIL_RETENTION_DAYS", "2");
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);
-    await seedContacts(teamId, 250);
+    await seedContacts(teamId, 400);
     const domainId = await domainOf(teamId);
-    // Off, with a slow start saved: the warm-up the send would turn on needs two days.
+    // Off, with a slow start saved: the warm-up the send would turn on runs into
+    // the day after tomorrow, more than one day at any start hour.
     await updateWarmupSettings(db, {
       teamId,
       domainId,
