@@ -118,6 +118,13 @@ describe("withLibpqSslmode", () => {
     expect(withLibpqSslmode(url)).toBe(`${url}&uselibpqcompat=true`);
   });
 
+  it("reads a repeated sslmode by its last value, as both drivers do", () => {
+    const relaxed = `postgres://${db}?sslmode=verify-full&sslmode=require`;
+    expect(withLibpqSslmode(relaxed)).toBe(`${relaxed}&uselibpqcompat=true`);
+    const verifying = `postgres://${db}?sslmode=require&sslmode=verify-ca`;
+    expect(withLibpqSslmode(verifying)).toBe(verifying);
+  });
+
   it("leaves no sslmode, the verifying modes and an explicit uselibpqcompat as written", () => {
     for (const url of [
       `postgres://${db}`,
