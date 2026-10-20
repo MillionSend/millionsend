@@ -29,7 +29,7 @@ metadata:
   labels:
     {{- include "millionsend.labels" $ | nindent 4 }}
     app.kubernetes.io/component: {{ $c.name }}
-  {{- with $.Values.deploymentAnnotations }}
+  {{- with merge (dict) ($v.deploymentAnnotations | default dict) $.Values.deploymentAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}

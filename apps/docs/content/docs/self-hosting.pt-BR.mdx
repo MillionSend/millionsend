@@ -129,8 +129,13 @@ helm upgrade --install millionsend deploy/helm/millionsend \
 
 O README do chart traz um exemplo para k3s (Traefik, CloudNativePG, role IAM via web identity OIDC
 em vez de access keys) e outro
-para EKS (ALB, RDS, External Secrets com AWS Secrets Manager, IRSA). Toda
-variável desta página vai em `config` ou no Secret.
+para EKS (ALB, RDS, External Secrets com AWS Secrets Manager, IRSA). O exemplo
+de EKS ainda não rodou num cluster EKS de verdade: considere IRSA, as anotações
+do ALB e as notas sobre o RDS como não testados. O
+[recebimento](#recebimento-beta) (os serviços `mx` e `clamav`) ainda não faz
+parte do chart. Toda variável desta página vai em `config` ou no Secret, menos
+as que o chart já define sozinho (`WORKER_REPLICAS`, `SMTP_PORT`,
+`SMTP_PUBLIC_HOST` e as `SMTP_TLS_*`; veja o README do chart).
 
 ## Referência de ambiente
 
@@ -1070,6 +1075,13 @@ docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
     && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump'
 docker compose start millionsend smtp
 ```
+
+O `pg_restore` termina com código 1 mesmo quando a restauração dá certo: o
+`--clean` não consegue apagar as chaves primárias que as partições das tabelas
+do pg-boss herdam. Ele mostra um `cannot drop inherited constraint` para cada
+uma e, no fim, `errors ignored on restore`; essas tabelas são apagadas e
+restauradas mesmo assim. Se esses forem os únicos erros, a restauração
+funcionou.
 
 ## Política de cadastro
 
