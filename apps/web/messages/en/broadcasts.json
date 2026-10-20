@@ -46,7 +46,7 @@
     "optional": "optional",
     "topicLabel": "Topic",
     "topicNone": "All contacts",
-    "topicHint": "Scopes the send and each recipient's unsubscribe to this topic.",
+    "topicHint": "Scopes the send and each recipient's one-click unsubscribe to this topic.",
     "htmlLabel": "Body",
     "editTab": "Edit",
     "previewTab": "Preview",
