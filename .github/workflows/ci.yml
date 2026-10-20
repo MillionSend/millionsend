@@ -242,3 +242,21 @@ jobs:
           cd /tmp/digests/backup
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$BACKUP_META") $(printf "$BACKUP_IMAGE@sha256:%s " *)
           docker buildx imagetools inspect "$(jq -r '.tags[0]' <<<"$APP_META")"
+      # A version tag also publishes the Helm chart, with version and
+      # appVersion both the tag's, so chart 1.2.3 runs image 1.2.3. It comes
+      # after the manifests: a failed image publish must never ship a chart.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: startsWith(github.ref, 'refs/tags/v')
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          version: v3.22.1
+      - name: Publish the Helm chart
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          helm package deploy/helm/millionsend --version "$V" --app-version "$V"
+          helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN"
+          helm push "millionsend-$V.tgz" oci://ghcr.io/millionsend/charts

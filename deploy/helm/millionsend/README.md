@@ -29,17 +29,29 @@ variables that only exist for compose are listed
 
 ## Install
 
+Each [release](https://github.com/MillionSend/millionsend/releases) publishes
+the chart to `oci://ghcr.io/millionsend/charts/millionsend` under the release's
+own version: chart `X.Y.Z` runs MillionSend `X.Y.Z`.
+
+```sh
+helm upgrade --install millionsend oci://ghcr.io/millionsend/charts/millionsend \
+  --version X.Y.Z -n millionsend --create-namespace -f my-values.yaml
+```
+
+To upgrade, run it again with a newer `--version`. Releases from before the
+chart was published are not in the registry; from a clone of this repository,
+install the chart's directory instead:
+
 ```sh
 helm upgrade --install millionsend deploy/helm/millionsend \
   -n millionsend --create-namespace -f my-values.yaml
 ```
 
-The image tag defaults to the chart's `appVersion`, a pinned release. Upgrade by
-upgrading the chart, or set `image.tag` (or `image.digest`) to hold another
-version. Never point it at `latest` or `edge`: a pod that restarts (OOM,
-eviction, node drain) would pull a newer build than its neighbours and run that
-build's migrations against the shared database, and `helm rollback` could not
-move the version back.
+The image tag defaults to the chart's `appVersion`, a pinned release. Set
+`image.tag` (or `image.digest`) to hold another version. Never point it at
+`latest` or `edge`: a pod that restarts (OOM, eviction, node drain) would pull a
+newer build than its neighbours and run that build's migrations against the
+shared database, and `helm rollback` could not move the version back.
 
 `helm rollback` brings back the previous image, not the previous schema:
 migrations only run forward, so the older version would run against the newer
