@@ -42,3 +42,10 @@ paths = [
 ]
 regexTarget = "match"
 regexes = ['''Qm9vdHN0cmFwLTQ4MjkxMw|a1B2c3D4e5F6g7H8i9J0k1L2|9f8e7d6c5b4a3f2e1d0c9b8a|AbCdEf1234567890123456''']
+
+[[allowlists]]
+description = "Placeholder keys in the Helm chart's CI-only values file"
+condition = "AND"
+paths = ['''deploy/helm/millionsend/ci/create-secret-values\.yaml''']
+regexTarget = "match"
+regexes = ['''dGVzdC1tYXN0ZXIta2V5LW5vdC1mb3ItcHJvZHVjdGlvbg==|dGVzdC1hdXRoLXNlY3JldC1ub3QtZm9yLXByb2R1Y3Rpb24=''']
