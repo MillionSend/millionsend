@@ -149,12 +149,19 @@ The chart in [`deploy/helm/millionsend`](deploy/helm/millionsend/README.md) runs
 same image with one Deployment per process (web, api, worker, plus the optional
 smtp relay and docs). Postgres stays outside the chart. Secrets come from an
 existing Secret (kubectl, SealedSecrets, SOPS), an External Secrets Operator
-`ExternalSecret`, or, for tests only, the values file:
+`ExternalSecret`, or, for tests only, the values file. Each release publishes the
+chart to `oci://ghcr.io/millionsend/charts/millionsend` under the release's own
+version (chart `X.Y.Z` runs MillionSend `X.Y.Z`), so upgrading is the same
+command with a newer `--version`:
 
 ```sh
-helm upgrade --install millionsend deploy/helm/millionsend \
-  -n millionsend --create-namespace -f my-values.yaml
+helm upgrade --install millionsend oci://ghcr.io/millionsend/charts/millionsend \
+  --version X.Y.Z -n millionsend --create-namespace -f my-values.yaml
 ```
+
+Releases from before the chart was published are not in the registry; from a
+clone, use `deploy/helm/millionsend` in place of the `oci://` reference and
+leave out `--version`.
 
 The chart README has a k3s example (Traefik, CloudNativePG, an IAM role over OIDC web identity
 instead of access keys) and an EKS example
