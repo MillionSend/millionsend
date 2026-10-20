@@ -1170,7 +1170,9 @@ describe("paced sends", () => {
     early.setUTCHours(1, 0, 0, 0);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(early);
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);
     await seedContacts(teamId, 250);
