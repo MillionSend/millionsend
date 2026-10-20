@@ -33,6 +33,7 @@ import {
   deriveUnsubscribeKey,
   domainsAwaitingAge,
   eraseRecipient,
+  errorSummary,
   expireDrafts,
   expireInboxes,
   getInstanceSettings,
@@ -265,7 +266,12 @@ const horizonDays = async () =>
 
 const queue = await Queue.start(env.DATABASE_URL, {
   workers: true,
-  onJobError: (error, job) => void captureError(error, { tags: { job } }),
+  onJobError: (error, job) => {
+    // pg-boss keeps a handler's error only on the failed job, deleted an hour
+    // later; where error tracking is off, this line is what lasts.
+    console.error(`${job}: job failed: ${errorSummary(error)}`);
+    void captureError(error, { tags: { job } });
+  },
 });
 
 // Everything the worker itself enqueues is bulk unless the caller says

@@ -22,6 +22,12 @@ describe("errorSummary", () => {
     expect(errorSummary("victim@example.com")).toBe("unknown error");
     expect(errorSummary(undefined)).toBe("unknown error");
   });
+
+  it("stops on a cause chain that loops back on itself", () => {
+    const looped = new Error("loop");
+    looped.cause = looped;
+    expect(errorSummary(looped)).toBe("loop");
+  });
 });
 
 describe("errorClassAndCode", () => {
@@ -46,5 +52,12 @@ describe("errorClassAndCode", () => {
     expect(errorClassAndCode(Object.assign(new Error("x"), { code: 42 }))).toEqual(["Error", ""]);
     expect(errorClassAndCode("victim@example.com")).toEqual(["error", ""]);
     expect(errorClassAndCode(undefined)).toEqual(["error", ""]);
+  });
+
+  it("stops on a cause chain that loops back on itself", () => {
+    const a = new Error("a");
+    const b = new Error("b", { cause: a });
+    a.cause = b;
+    expect(errorClassAndCode(a)).toEqual(["Error", ""]);
   });
 });

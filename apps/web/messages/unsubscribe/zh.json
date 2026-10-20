@@ -3,6 +3,7 @@
   "confirmPrefs": "管理邮件偏好",
   "confirmTopic": "退订“{topic}”",
   "button": "退订",
+  "buttonAll": "全部退订",
   "preferences": "选择你想接收的邮件：",
   "save": "保存偏好",
   "saved": "你的邮件偏好已更新。",

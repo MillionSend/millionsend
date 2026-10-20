@@ -1163,7 +1163,23 @@ of an age not known makes its mail wait 2 minutes. Past New, the mail is
 parked for the review list on a phishing-type verdict from 90, or from 80
 with a link domain under 7 days old or of an age not known, and the operator
 is mailed at most once a day per team; a team past New is never held
-automatically. These samples count against no daily cap; a team has 200 of
+automatically. A phishing-type verdict that rests only on a sign-in, reset or
+one-time-code link to a product's own name on an app platform
+(`ref.supabase.co`, `app.up.railway.app`, `x.workers.dev`: the parents are
+`PLATFORM_HOST_PARENTS` in `packages/core`), on a message that is not a
+broadcast and poses as no other brand, spares a New-tier team the hold it
+would have met: the message parks for the review list instead, with the
+same operator mail, and the team's other mail waiting on a phishing-type
+verdict from 80, queued or parked for quota, parks with it, as the hold
+would have parked it. Releasing the message clears every platform name it
+links to as an operator's clearance (releasing the mail parked beside it
+clears none of theirs), which later verdicts of that shape respect: mail
+to such names is neither held, parked nor delayed for them, takes no
+clearance back, and counts toward no repeat hold, while a lure there that
+names a brand still does all of that, and cold mail from a shared address
+still parks for its recipient. A name only a verdict cleared keeps its
+7-day second look. Past New such mail parks as any other, and the verdict
+counts in the risk at every tier. These samples count against no daily cap; a team has 200 of
 them a day, past which its mail with a new destination waits for the next
 UTC day.
 

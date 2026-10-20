@@ -25,6 +25,7 @@ import {
   releaseWaitingEmails,
   revokeDestinations,
   screenBeforeSend,
+  spareWaitingSamples,
   verdictClearsDestinations,
 } from "../src/screening.js";
 import { suspendTeam } from "../src/team-standing.js";
@@ -106,6 +107,7 @@ describe("clearing a destination", () => {
     expect(await destinationStanding(db, teamId, all, NOW)).toEqual({
       novel: ["never.example"],
       probation: ["lately.example"],
+      vouched: [],
     });
     expect(await revokeDestinations(db, teamId, ["lately.example"], NOW)).toEqual([
       "lately.example",
@@ -117,6 +119,14 @@ describe("clearing a destination", () => {
     expect(await destinationStanding(db, teamId, all, NOW)).toEqual({
       novel: ["never.example"],
       probation: ["lately.example"],
+      vouched: ["lately.example"],
+    });
+    // An operator's clearance marks a name a verdict had cleared, and keeps its date.
+    await clearDestinations(db, teamId, ["long-ago.example"], NOW, { operator: true });
+    expect(await destinationStanding(db, teamId, all, NOW)).toEqual({
+      novel: ["never.example"],
+      probation: ["lately.example"],
+      vouched: ["lately.example", "long-ago.example"],
     });
   });
 });
@@ -260,7 +270,11 @@ describe("the review list's release", () => {
         ["vouched.example", "media-only.example", "later.example"],
         NOW,
       ),
-    ).toEqual({ novel: ["media-only.example", "later.example"], probation: ["vouched.example"] });
+    ).toEqual({
+      novel: ["media-only.example", "later.example"],
+      probation: ["vouched.example"],
+      vouched: ["vouched.example"],
+    });
   });
 });
 
@@ -360,5 +374,72 @@ describe("the gate's read of the team", () => {
       now: NOW,
     });
     expect(decision).toEqual({ action: "send", sample: null, probation: false });
+  });
+});
+
+describe("a spared verdict's burst", () => {
+  it("parks the team's waiting phishing-type mail, queued or parked for quota, and nothing else", async () => {
+    const teamId = await createTeam(db, "burst-scope");
+    const LURE = {
+      verdict: "abuse",
+      categories: ["phishing_credentials"],
+      reasons: ["off_domain_lure", "harvests_secrets"],
+    };
+    const mail = async (
+      status: "queued" | "queued_quota" | "sent",
+      parkReason: "destination" | null,
+      sample: Partial<typeof schema.monitorSamples.$inferInsert>,
+    ) => {
+      const id = randomUUID();
+      await db.insert(schema.emails).values({
+        id,
+        teamId,
+        from: "T <hi@burst-scope.dev>",
+        to: ["r@example.org"],
+        subject: "s",
+        latestStatus: status,
+        parkReason,
+        sentAt: status === "sent" ? NOW : null,
+      });
+      const [row] = await db
+        .insert(schema.monitorSamples)
+        .values({
+          teamId,
+          emailId: id,
+          kind: "first_sends",
+          screening: true,
+          status: "judged",
+          score: 85,
+          ...LURE,
+          ...sample,
+        })
+        .returning({ id: schema.monitorSamples.id });
+      return row?.id ?? "";
+    };
+    const queued = await mail("queued", null, {});
+    const quota = await mail("queued_quota", null, {});
+    const operatorParked = await mail("queued_quota", "destination", {});
+    const vouched = await mail("queued", null, { sparedHold: "vouched" });
+    const clean = await mail("queued", null, {
+      score: 40,
+      verdict: "clean",
+      categories: [],
+      reasons: [],
+    });
+    const spam = await mail("queued", null, { categories: ["unsolicited_bulk"], reasons: [] });
+    const sent = await mail("sent", null, { score: 95 });
+    expect(await spareWaitingSamples(db, { teamId, holdRepeatScore: 80 })).toBe(2);
+    const marks = new Map(
+      (
+        await db
+          .select({ id: schema.monitorSamples.id, sparedHold: schema.monitorSamples.sparedHold })
+          .from(schema.monitorSamples)
+          .where(eq(schema.monitorSamples.teamId, teamId))
+      ).map((row) => [row.id, row.sparedHold]),
+    );
+    expect(marks.get(queued)).toBe("burst");
+    expect(marks.get(quota)).toBe("burst");
+    for (const id of [operatorParked, clean, spam, sent]) expect(marks.get(id)).toBeNull();
+    expect(marks.get(vouched)).toBe("vouched");
   });
 });

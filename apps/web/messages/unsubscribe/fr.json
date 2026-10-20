@@ -3,6 +3,7 @@
   "confirmPrefs": "Gérer vos préférences",
   "confirmTopic": "Se désabonner de « {topic} »",
   "button": "Se désabonner",
+  "buttonAll": "Se désabonner de tout",
   "preferences": "Choisissez les e-mails que vous souhaitez recevoir :",
   "save": "Enregistrer",
   "saved": "Vos préférences ont été mises à jour.",
