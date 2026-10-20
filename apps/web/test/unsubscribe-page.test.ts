@@ -327,6 +327,51 @@ describe("/unsubscribe/[token] route", () => {
       });
     });
 
+    it("a one-click posted as multipart, the encoding RFC 8058 prefers, is still a one-click", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, topicId, emailId, token } = await seedTopicLink();
+      const body = new FormData();
+      body.append("List-Unsubscribe", "One-Click");
+
+      const res = await POST(
+        new Request(`https://localhost:3000/unsubscribe/${encodeURIComponent(token)}`, {
+          method: "POST",
+          body,
+        }),
+        { params: Promise.resolve({ token }) },
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("location")).toBeNull();
+
+      expect(await stateOf(contactId, emailId)).toEqual({
+        unsubscribed: false,
+        topics: [{ topicId, subscribed: false }],
+        activities: [{ type: "topic_opt_out" }],
+        emailEvents: [
+          { data: { scope: "topic", topicId, topicName: "News", source: "one_click" } },
+        ],
+        suppressions: [],
+      });
+    });
+
+    it("a one-click labeled multipart but sent urlencoded is still a one-click", async () => {
+      vi.stubEnv("APP_BASE_URL", APP);
+      const { contactId, topicId, emailId, token } = await seedTopicLink();
+
+      const res = await POST(
+        new Request(`https://localhost:3000/unsubscribe/${encodeURIComponent(token)}`, {
+          method: "POST",
+          headers: { "content-type": "multipart/form-data; boundary=x" },
+          body: "List-Unsubscribe=One-Click",
+        }),
+        { params: Promise.resolve({ token }) },
+      );
+      expect(res.status).toBe(200);
+      expect((await stateOf(contactId, emailId)).emailEvents).toEqual([
+        { data: { scope: "topic", topicId, topicName: "News", source: "one_click" } },
+      ]);
+    });
+
     const renderConfirm = async (token: string, query: { done?: string } = {}) =>
       renderToStaticMarkup(
         await ConfirmPage({

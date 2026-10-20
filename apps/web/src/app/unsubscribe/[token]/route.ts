@@ -7,6 +7,7 @@ import {
 import { type Db, getDb, schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
 import { unsubscribeBaseUrl } from "@/lib/api-base-url";
+import { readFormFields } from "@/lib/form-fields";
 import { enqueueWebhookDeliveries } from "@/server/queue";
 import {
   postUnsubscribeLocation,
@@ -63,8 +64,8 @@ async function recordEmailUnsubscribe(
  * takes both verbs: a browser GET lands on the hosted confirm page (which
  * lives one segment over — page.tsx and route.ts can't share a segment),
  * and POST serves the confirm form plus RFC 8058 one-click posts
- * (form-encoded `List-Unsubscribe=One-Click`, which must get a bare 2xx,
- * not a redirect).
+ * (`List-Unsubscribe=One-Click`, urlencoded or multipart, which must get a
+ * bare 2xx, not a redirect).
  *
  * Redirects are built on the unsubscribe host, never request.url: behind a
  * reverse proxy that rewrites Host the request URL names the upstream
@@ -84,8 +85,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
   const target = await targetForToken(db, token);
   if (!target) return new Response(null, { status: 404 });
 
-  const body = await request.text().catch(() => "");
-  const form = new URLSearchParams(body);
+  const form = await readFormFields(request);
   // An RFC 8058 header post and the confirm page's forms land here alike; the
   // published events say which one it was.
   const oneClick = form.get("List-Unsubscribe") === "One-Click";
