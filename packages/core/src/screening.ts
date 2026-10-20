@@ -199,17 +199,19 @@ export async function destinationStanding(
   teamId: string,
   destinations: readonly string[],
   now: Date,
-): Promise<{ novel: string[]; probation: string[] }> {
-  if (destinations.length === 0) return { novel: [], probation: [] };
+): Promise<{ novel: string[]; probation: string[]; vouched: string[] }> {
+  if (destinations.length === 0) return { novel: [], probation: [], vouched: [] };
   const rows = await db
-    .select({ domain: td.domain, clearedAt: td.clearedAt })
+    .select({ domain: td.domain, clearedAt: td.clearedAt, operatorClearedAt: td.operatorClearedAt })
     .from(td)
     .where(and(eq(td.teamId, teamId), inArray(td.domain, [...destinations]), isNull(td.revokedAt)));
   const cleared = new Map(rows.map((row) => [row.domain, row.clearedAt.getTime()]));
+  const vouched = new Set(rows.filter((row) => row.operatorClearedAt).map((row) => row.domain));
   const since = now.getTime() - DESTINATION_PROBATION_DAYS * DAY_MS;
   return {
     novel: destinations.filter((d) => isShortener(d) || !cleared.has(d)),
     probation: destinations.filter((d) => !isShortener(d) && (cleared.get(d) ?? 0) > since),
+    vouched: destinations.filter((d) => !isShortener(d) && vouched.has(d)),
   };
 }
 
@@ -225,8 +227,8 @@ export async function unclearedDestinations(
 /**
  * Where a message sends its reader, as its team stands with it (see
  * destinationStanding): what is new to it, which the gate judges before SES
- * and the judge lists first, and what cleared lately, which is judged after
- * the send.
+ * and the judge lists first, what cleared lately, which is judged after
+ * the send, what an operator released mail to, and `all` of it together.
  */
 export async function teamDestinationStanding(
   db: Db,
@@ -239,7 +241,7 @@ export async function teamDestinationStanding(
     ignore?: ReadonlySet<string> | undefined;
     now: Date;
   },
-): Promise<{ novel: string[]; probation: string[] }> {
+): Promise<{ novel: string[]; probation: string[]; vouched: string[]; all: string[] }> {
   const d = schema.domains;
   const verified = await db
     .select({ name: d.name })
@@ -253,7 +255,10 @@ export async function teamDestinationStanding(
     ignore: input.ignore,
     verifiedDomains: verified.map((row) => row.name),
   });
-  return destinationStanding(db, input.teamId, destinations, input.now);
+  return {
+    ...(await destinationStanding(db, input.teamId, destinations, input.now)),
+    all: destinations,
+  };
 }
 
 /** The destinations of a message its team has not cleared (see teamDestinationStanding). */
@@ -302,14 +307,65 @@ export async function clearDestinations(
 ): Promise<void> {
   const domains = destinations.filter((d) => !isShortener(d));
   if (domains.length === 0) return;
-  const rows = db.insert(td).values(domains.map((domain) => ({ teamId, domain, clearedAt: now })));
+  const operatorClearedAt = opts.operator ? now : null;
+  const rows = db
+    .insert(td)
+    .values(domains.map((domain) => ({ teamId, domain, clearedAt: now, operatorClearedAt })));
   await (opts.operator
     ? rows.onConflictDoUpdate({
         target: [td.teamId, td.domain],
-        set: { clearedAt: now, revokedAt: null },
-        setWhere: isNotNull(td.revokedAt),
+        set: {
+          operatorClearedAt: now,
+          revokedAt: null,
+          // A revoked name clears afresh; one still cleared keeps its date.
+          clearedAt: sql`case when ${td.revokedAt} is null then ${td.clearedAt} else ${now} end`,
+        },
       })
     : rows.onConflictDoNothing());
+}
+
+/**
+ * A spared verdict does to the burst it belongs to what the hold would have:
+ * the team's other mail waiting on a phishing-type verdict from
+ * `holdRepeatScore`, queued or parked for quota, parks for the review list
+ * with it, marked "burst". Mail an operator's clearance vouched for
+ * (`spared_hold` "vouched") flows. Releasing a burst row vouches for none
+ * of its destinations: only the spared verdict's own were looked at.
+ */
+export async function spareWaitingSamples(
+  db: Db,
+  input: { teamId: string; holdRepeatScore: number },
+): Promise<number> {
+  const rows = await db
+    .select({
+      id: ms.id,
+      score: ms.score,
+      verdict: ms.verdict,
+      categories: ms.categories,
+      reasons: ms.reasons,
+    })
+    .from(ms)
+    .innerJoin(e, eq(e.id, ms.emailId))
+    .where(
+      and(
+        eq(ms.teamId, input.teamId),
+        eq(ms.screening, true),
+        eq(ms.status, "judged"),
+        isNull(ms.sparedHold),
+        gte(ms.score, input.holdRepeatScore),
+        or(
+          eq(e.latestStatus, "queued"),
+          and(eq(e.latestStatus, "queued_quota"), isNull(e.parkReason)),
+        ),
+        isNull(e.sentAt),
+        isNull(e.screenReleasedAt),
+      ),
+    );
+  const ids = rows.filter((row) => isHoldVerdict(row, input.holdRepeatScore)).map((row) => row.id);
+  if (ids.length > 0) {
+    await db.update(ms).set({ sparedHold: "burst" }).where(inArray(ms.id, ids));
+  }
+  return ids.length;
 }
 
 /**
@@ -940,6 +996,10 @@ export async function screenBeforeSend(
   if (waiting === "wait") return { action: "wait", until: null };
   if (waiting === "park") return { action: "park", reason: "screening" };
   if (waiting === "proceed") return { action: "send", sample: { id: sample.id, unjudged: true } };
+  // The hold this verdict met spared the team for a platform link: the mail waits for a person instead.
+  if (sample.sparedHold && sample.sparedHold !== "vouched") {
+    return { action: "park", reason: "destination" };
+  }
   if (!isHoldVerdict(sample, s.holdRepeatScore)) return { action: "send", sample: screened };
   const destinations = sample.destinations?.length ?? 0;
   if (destinations > 0 && destinationVerdictParks(sample, s) && team.tier !== "new") {
@@ -948,6 +1008,8 @@ export async function screenBeforeSend(
   if (shared && team.tier !== "exempt" && (await coldSharedSend(db, email))) {
     return { action: "park", reason: "recipient" };
   }
+  // An operator cleared every platform name the verdict rests on: nothing to wait for.
+  if (sample.sparedHold === "vouched") return { action: "send", sample: screened };
   const waits = email.broadcastId
     ? team.tier === "new"
     : team.firstWindow || (team.tier === "new" && destinations > 0 && sample.linkYoung === null);
@@ -1124,14 +1186,21 @@ export async function releaseWaitingEmails(
     ...queued.map((row) => row.id),
   ];
   if (vouched.length > 0) {
+    // A burst row parked beside a spared verdict was never looked at for its own names.
     const samples = await db
-      .select({ destinations: ms.destinations })
+      .select({ destinations: ms.destinations, sparedHold: ms.sparedHold })
       .from(ms)
       .where(and(inArray(ms.emailId, vouched), eq(ms.screening, true)));
     await clearDestinations(
       db,
       input.teamId,
-      [...new Set(samples.flatMap((row) => row.destinations ?? []))],
+      [
+        ...new Set(
+          samples
+            .filter((row) => row.sparedHold !== "burst")
+            .flatMap((row) => row.destinations ?? []),
+        ),
+      ],
       now,
       { operator: true },
     );
