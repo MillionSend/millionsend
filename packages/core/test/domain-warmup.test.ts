@@ -15,6 +15,7 @@ import {
   warmupCap,
 } from "../src/domain-warmup.js";
 import { acceptFailure } from "../src/inboxes/send.js";
+import { secondsToNextUtcDay } from "../src/inboxes/send-policy.js";
 import type { QuotaTeamRow } from "../src/plans.js";
 import { DAY_MS } from "../src/utc-day.js";
 
@@ -318,12 +319,12 @@ describe("the accept path", () => {
     });
     // An inbox send answers it in the API's words, with the wait to the reset.
     if (refused.ok) throw new Error("unreachable");
-    expect(acceptFailure(refused)).toEqual({
+    expect(acceptFailure(refused, NOW)).toEqual({
       status: 429,
       name: "daily_quota_exceeded",
       message:
         "fresh.example sends up to 100 emails a day for now, and 300 are already waiting. Retry after 00:00 UTC.",
-      retryAfterSec: expect.any(Number),
+      retryAfterSec: secondsToNextUtcDay(NOW),
     });
   });
 

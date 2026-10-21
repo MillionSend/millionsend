@@ -475,7 +475,10 @@ export async function decideInboxSend(
 }
 
 /** The accept pipeline's refusal as an inbox send answers it. */
-export function acceptFailure(result: Exclude<AcceptEmailResult, { ok: true }>): InboxError {
+export function acceptFailure(
+  result: Exclude<AcceptEmailResult, { ok: true }>,
+  now: Date,
+): InboxError {
   switch (result.reason) {
     case "quota_backlog_full":
       return {
@@ -483,14 +486,14 @@ export function acceptFailure(result: Exclude<AcceptEmailResult, { ok: true }>):
         name: "daily_quota_exceeded",
         message:
           "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
-        retryAfterSec: secondsToNextUtcDay(new Date()),
+        retryAfterSec: secondsToNextUtcDay(now),
       };
     case "warmup_backlog_full":
       return {
         status: 429,
         name: "daily_quota_exceeded",
         message: newDomainLimitFullMessage(result),
-        retryAfterSec: secondsToNextUtcDay(new Date()),
+        retryAfterSec: secondsToNextUtcDay(now),
       };
     case "monthly_quota_exceeded":
       return { status: 429, name: "monthly_quota_exceeded", message: monthlyQuotaMessage(result) };
@@ -1261,7 +1264,7 @@ export async function dispatchSend(
           : undefined,
     },
   );
-  if (!result.ok) return { kind: "refused", error: acceptFailure(result) };
+  if (!result.ok) return { kind: "refused", error: acceptFailure(result, p.now) };
   return sentEmailOf(db, deps, {
     teamId: p.teamId,
     emailId: result.id,
