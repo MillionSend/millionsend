@@ -31,6 +31,15 @@ export const WHY_DOT: Record<string, string> = {
   media: "var(--ms-danger)",
 };
 
+/** A row action drawn as a link: a button with the text's own font and no box. */
+export const LINK_BUTTON: React.CSSProperties = {
+  font: "inherit",
+  padding: 0,
+  background: "none",
+  border: 0,
+  cursor: "pointer",
+};
+
 const PAID = ["starter", "pro", "scale"];
 const PLAN_KEYS = ["free", "starter", "pro", "scale", "system"];
 

@@ -1414,8 +1414,17 @@ describe("quota backlog cap", () => {
       .returning({ id: schema.emails.id });
     expect(parked).toBeLessThan(300);
 
+    // Retry-After counts to the next 00:00 UTC.
+    const untilReset = (res: Response) => {
+      const next = new Date();
+      next.setUTCHours(24, 0, 0, 0);
+      const left = Math.ceil((next.getTime() - Date.now()) / 1000);
+      expect(Number(res.headers.get("retry-after"))).toBeGreaterThanOrEqual(left - 5);
+      expect(Number(res.headers.get("retry-after"))).toBeLessThanOrEqual(left + 5);
+    };
     const single = await post({ ...validBody, to: ["backlog@example.com"] });
     expect(single.status).toBe(429);
+    untilReset(single);
     expect(await single.json()).toMatchObject({ statusCode: 429, name: "daily_quota_exceeded" });
 
     const batch = await app.request("/emails/batch", {
@@ -1424,6 +1433,7 @@ describe("quota backlog cap", () => {
       body: JSON.stringify([{ ...validBody, to: ["backlog-batch@example.com"] }]),
     });
     expect(batch.status).toBe(429);
+    untilReset(batch);
     expect(await batch.json()).toMatchObject({
       name: "daily_quota_exceeded",
       message: expect.stringMatching(/^emails\.0: /),

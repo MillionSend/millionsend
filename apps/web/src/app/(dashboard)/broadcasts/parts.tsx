@@ -53,6 +53,43 @@ export function fillMergeSamples(html: string, samples: Record<string, string>):
 
 export type BroadcastStatus = "draft" | "scheduled" | "sending" | "sent" | "canceled";
 
+/** What "Send test" got back: sent, held (naming only the new domain limit), or refused. */
+export type TestSendResult =
+  | { kind: "sent"; to: string }
+  | { kind: "queued"; domain: string | null }
+  | { kind: "rateLimited" }
+  | { kind: "failed" };
+
+/** The note under the composer's "Send test" button. */
+export function TestSendNote({ result }: { result: TestSendResult }) {
+  const t = useTranslations("broadcasts");
+  const refused = result.kind === "rateLimited" || result.kind === "failed";
+  return (
+    <span
+      className="ms-action-note"
+      style={{
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        right: 0,
+        color: refused ? "var(--ms-danger)" : "var(--ms-muted)",
+        fontSize: "var(--ms-fs-label)",
+        // The held note is a sentence or two: it wraps under the button.
+        ...(result.kind === "queued"
+          ? { width: 320, whiteSpace: "normal", textAlign: "right" }
+          : { whiteSpace: "nowrap" }),
+      }}
+    >
+      {result.kind === "sent"
+        ? `✓ ${t("composer.testSent", { email: result.to })}`
+        : result.kind === "queued"
+          ? result.domain
+            ? t("composer.testQueuedLimit", { domain: result.domain })
+            : t("composer.testQueued")
+          : t(result.kind === "rateLimited" ? "composer.testRateLimited" : "composer.testFailed")}
+    </span>
+  );
+}
+
 // Pill variant per the canvas: draft and canceled stay neutral, scheduled
 // warns (it will cost sends), sending informs, sent reads as done.
 export const PILL_VARIANT: Record<BroadcastStatus, keyof typeof TONE_COLOR> = {
@@ -112,6 +149,8 @@ export interface SendPlanEstimate {
   blocked: boolean;
   releases: { at: Date; endsAt: Date; count: number }[];
   planHold: { heldBack: number; resumesAt: Date } | null;
+  /** The sender domain's new domain limit, when it holds rows back. */
+  newDomainHold?: { heldBack: number; resumesAt: Date; domain: string; cap: number } | null;
   planLabel: string | null;
   planPeriod: "day" | "month" | null;
   rung: { label: string; overage: boolean; finishesAt: Date | null } | null;
@@ -183,9 +222,12 @@ export function SendPlanSummary({
   const finish = estimate?.finishesAt ? roundUpToQuarterHour(estimate.finishesAt) : null;
   const time = (d: Date) => formatStepTime(d, locale);
   const paced = estimate !== null && !estimate.blocked && estimate.first < count;
+  // The new domain limit paces the send when the plan does not: no plan lifts it.
+  const limitHold = estimate?.planHold ? null : (estimate?.newDomainHold ?? null);
   let steps: Step[] = [];
   if (paced && estimate.startsAt && finish) {
-    if (estimate.first === 0 && estimate.planHold === null) {
+    const held = estimate.planHold !== null || limitHold !== null;
+    if (estimate.first === 0 && !held) {
       // The day sits in the rail column, the clock times in the text: a
       // full stamp would wrap the narrow column.
       const starts = roundUpToQuarterHour(estimate.startsAt);
@@ -200,11 +242,10 @@ export function SendPlanSummary({
         },
       ];
     } else {
-      const held = estimate.planHold !== null;
       // A daily cap releases at UTC midnight: one row per reset, not per local day.
       const days = groupReleasesByDay(
         estimate.releases,
-        held && estimate.planPeriod === "day" ? "utc" : "local",
+        limitHold || (held && estimate.planPeriod === "day") ? "utc" : "local",
       );
       steps = days.map((day, i) => {
         const last = i === days.length - 1;
@@ -215,8 +256,9 @@ export function SendPlanSummary({
           return { when, what: t("guard.stepOnly", { count: n, time: time(finish) }), now: isNow };
         }
         if (i === 0) {
-          const sub =
-            held && estimate.planLabel
+          const sub = limitHold
+            ? t("guard.stepLimitDomain", { domain: limitHold.domain })
+            : held && estimate.planLabel
               ? t(estimate.planPeriod === "month" ? "guard.stepLimitMonth" : "guard.stepLimitDay", {
                   plan: estimate.planLabel,
                 })
@@ -442,6 +484,8 @@ export function SendPlanSummary({
             <>
               {planLine} · <Link href="/settings/billing">{t("guard.seePlans")}</Link>
             </>
+          ) : limitHold ? (
+            t("guard.limitReason", { domain: limitHold.domain, cap: nf.format(limitHold.cap) })
           ) : (
             t("guard.reason")
           )}
@@ -475,6 +519,8 @@ export interface SendingProgress {
  * A sending broadcast's days on the send dialog's step rail: days already
  * out, today with its progress, the days still ahead. `compact` is the
  * list tooltip's cut: counts only. Nothing for a send that fits in one day.
+ * `resets` when the new domain limit paces it: one row per 00:00 UTC
+ * reset, each worded as the reset it waits for.
  */
 export function PacingSteps({
   sent,
@@ -482,16 +528,18 @@ export function PacingSteps({
   locale,
   compact = false,
   now = new Date(),
+  resets = false,
 }: {
   sent: readonly { at: Date; count: number }[];
   releases: readonly { at: Date; endsAt: Date; count: number }[];
   locale: string;
   compact?: boolean;
   now?: Date;
+  resets?: boolean;
 }) {
   const t = useTranslations("broadcasts");
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
-  const days = sendingDays(sent, releases, now);
+  const days = sendingDays(sent, releases, now, resets ? "utc" : "local");
   if (days.length < 2) return null;
   const time = (d: Date) => formatStepTime(d, locale);
   const steps = days.map((day, i): RailStep => {
@@ -514,7 +562,11 @@ export function PacingSteps({
     } else if (last) {
       what = compact
         ? t("detail.pacingLastShort", { count: n })
-        : t("guard.stepLast", { count: n, time: finish });
+        : resets
+          ? t("guard.stepLastReset", { count: n, reset: time(day.startsAt), time: finish })
+          : t("guard.stepLast", { count: n, time: finish });
+    } else if (resets && !compact) {
+      what = t("guard.stepMoreReset", { count: n, reset: time(day.startsAt) });
     } else {
       what = compact
         ? t("detail.pacingMoreShort", { count: n })

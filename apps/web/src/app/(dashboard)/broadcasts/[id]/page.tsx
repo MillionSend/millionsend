@@ -10,7 +10,7 @@ import { Breakable } from "@/components/breakable";
 import { CopyChip } from "@/components/copy-chip";
 import { EmailContentPanel } from "@/components/email-content-panel";
 import { EmailsTable } from "@/components/emails-table";
-import { GradientBanner } from "@/components/gradient-banner";
+import { bannerLinkStyle, GradientBanner } from "@/components/gradient-banner";
 import { HoldIcon, PauseIcon } from "@/components/icons/warmup-icons";
 import { LoadError } from "@/components/load-error";
 import { Modal } from "@/components/modal";
@@ -30,6 +30,7 @@ import {
   roundUpToQuarterHour,
   sendingDays,
 } from "@/lib/format";
+import { domainLimits } from "@/lib/new-domain-limit";
 import { useTRPC } from "@/lib/trpc";
 import { type WarmupSignalView, warmupPlanSteps, warmupReasons } from "@/lib/warmup";
 import type { AppRouter } from "@/server/routers";
@@ -259,7 +260,12 @@ export default function BroadcastDetailPage() {
           locale={locale}
         />
       ) : progress && broadcast && broadcast.releases.length > 0 ? (
-        <PacingBand sent={broadcast.sent} releases={broadcast.releases} locale={locale} />
+        <PacingBand
+          sent={broadcast.sent}
+          releases={broadcast.releases}
+          limit={broadcast.newDomainLimit}
+          locale={locale}
+        />
       ) : null}
 
       <StatStrip style={{ marginBottom: 26 }}>
@@ -381,21 +387,32 @@ export default function BroadcastDetailPage() {
   );
 }
 
-/** The pacing rail under the meta row, for a send that spans days. */
+/**
+ * The pacing rail under the meta row, for a send that spans days: by its
+ * sender domain's new domain limit while that paces it, else by capacity.
+ */
 function PacingBand({
   sent,
   releases,
+  limit,
   locale,
 }: {
   sent: { at: Date; count: number }[];
   releases: { at: Date; endsAt: Date; count: number }[];
+  limit: { domain: string; cap: number } | null;
   locale: string;
 }) {
   const t = useTranslations("broadcasts");
-  if (sendingDays(sent, releases, new Date()).length < 2) return null;
+  if (sendingDays(sent, releases, new Date(), limit ? "utc" : "local").length < 2) return null;
+  const note = limit
+    ? t("guard.limitReason", {
+        domain: limit.domain,
+        cap: new Intl.NumberFormat(locale).format(limit.cap),
+      })
+    : t("guard.reason");
   return (
-    <PaceBand label={t("detail.pacing")} note={t("guard.reason")}>
-      <PacingSteps sent={sent} releases={releases} locale={locale} />
+    <PaceBand label={t("detail.pacing")} note={note}>
+      <PacingSteps sent={sent} releases={releases} locale={locale} resets={limit !== null} />
     </PaceBand>
   );
 }
@@ -429,14 +446,7 @@ function WarmupBand({
         icon={<PauseIcon />}
         title={tWarmup("row.pausedTitle")}
         action={
-          <Link
-            href={`/domains/${warmup.domainId}?tab=warmup`}
-            style={{
-              color: "var(--ms-bone)",
-              textDecoration: "underline dotted var(--ms-muted)",
-              textUnderlineOffset: 3,
-            }}
-          >
+          <Link href={`/domains/${warmup.domainId}?tab=warmup`} style={bannerLinkStyle}>
             {t("detail.openWarmup")}
           </Link>
         }
@@ -621,6 +631,7 @@ function BroadcastEmails({ broadcastId }: { broadcastId: string }) {
       { getNextPageParam: (page) => page.nextCursor },
     ),
   );
+  const domains = useQuery(trpc.domains.list.queryOptions());
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
   if (!query.isSuccess || items.length === 0) return null;
@@ -629,7 +640,7 @@ function BroadcastEmails({ broadcastId }: { broadcastId: string }) {
       <div className="ms-microlabel" style={{ marginBottom: 12 }}>
         {t("detail.emails")}
       </div>
-      <EmailsTable rows={items} broadcastChip={false} />
+      <EmailsTable rows={items} broadcastChip={false} limits={domainLimits(domains.data)} />
       <ListFooter
         left={emails("list.pageOf", {
           pages: query.data.pages.length,

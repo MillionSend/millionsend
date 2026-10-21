@@ -6,12 +6,14 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import {
   bulkSentBySlot,
   cancelBroadcastRows,
+  newDomainLimitPlanCap,
   planRegionSend,
   quotaUsage,
   regionBulkCounts,
   regionDailyPeaks,
   rungThatFits,
   sendingBroadcasts,
+  teamPlanHold,
   warmupBroadcastPlans,
   warmupPastHorizon,
 } from "../src/broadcast-pacing.js";
@@ -351,4 +353,72 @@ it("refuses a warm-up plan past the horizon, never a paused one", () => {
   // Past the planner's reach there is no finish at all.
   expect(warmupPastHorizon({ perDay: [], days: 366, finishesAt: null }, 24)).toBe(true);
   expect(warmupPastHorizon({ perDay: [], days: 0, finishesAt: null }, 24)).toBe(false);
+});
+
+it("turns a domain's new domain limit into a planner cap: today's room, then the schedule", () => {
+  const resetsAt = new Date("2026-09-17T00:00:00Z");
+  const full = new Date("2026-10-14T12:00:00Z");
+  const limit = {
+    domainId,
+    name: "pacing.dev",
+    cap: 300,
+    used: 120,
+    pool: null,
+    waiting: 0,
+    resetsAt,
+    registeredAt: new Date("2026-09-14T12:00:00Z"),
+    steps: [
+      { from: NOW, cap: 300 },
+      { from: new Date("2026-09-21T12:00:00Z"), cap: 2_000 },
+      { from: full, cap: null },
+    ],
+    fullAt: full,
+  };
+  expect(newDomainLimitPlanCap(limit)).toEqual({
+    remaining: 180,
+    resetsAt: resetsAt.getTime(),
+    resetTo: 300,
+    period: "day",
+    newDomain: {
+      steps: [
+        { from: NOW.getTime(), resetTo: 300 },
+        { from: Date.parse("2026-09-21T12:00:00Z"), resetTo: 2_000 },
+        { from: full.getTime(), resetTo: Number.POSITIVE_INFINITY },
+      ],
+    },
+  });
+  // The team's shared volume binds first when it has less room left.
+  expect(
+    newDomainLimitPlanCap({ ...limit, pool: { cap: 300, used: 290, domains: 2 } }).remaining,
+  ).toBe(10);
+  expect(newDomainLimitPlanCap({ ...limit, used: 400 }).remaining).toBe(0);
+});
+
+it("says which of the team's own caps holds its mail and until when", async () => {
+  const team = await createTeam(db, "plan-hold");
+  expect(await teamPlanHold(db, team, true, NOW)).toBeNull();
+  expect(await teamPlanHold(db, team, false, NOW)).toBeNull();
+  // Free: 100 a day with its tolerance, all used.
+  await db.insert(schema.usageCounters).values({ teamId: team, day: utcDay(NOW), accepted: 1_000 });
+  expect(await teamPlanHold(db, team, true, NOW)).toEqual({
+    resumesAt: new Date("2026-09-17T00:00:00Z"),
+    period: "day",
+  });
+  const start = new Date("2026-09-01T00:00:00Z");
+  const end = new Date("2026-10-01T00:00:00Z");
+  await db
+    .update(schema.teams)
+    .set({
+      plan: "pro",
+      planQuota: 100_000,
+      currentPeriodStart: start,
+      currentPeriodEnd: end,
+      overageEnabled: false,
+    })
+    .where(eq(schema.teams.id, team));
+  expect(await teamPlanHold(db, team, true, NOW)).toBeNull();
+  await db
+    .insert(schema.usagePeriods)
+    .values({ teamId: team, periodStart: start, accepted: 100_000 });
+  expect(await teamPlanHold(db, team, true, NOW)).toEqual({ resumesAt: end, period: "month" });
 });

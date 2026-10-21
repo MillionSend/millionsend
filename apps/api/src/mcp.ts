@@ -671,7 +671,7 @@ function buildServer(
     {
       title: "Get email",
       description:
-        "Get one email by id: sender, recipients, subject, body, schedule and delivery status (last_event: queued, sent, delivered, bounced, complained, ...).",
+        "Get one email by id: sender, recipients, subject, body, schedule and delivery status (last_event: queued, sent, delivered, bounced, complained, ...). A queued email that waits says why in queued_reason and, when known, the earliest it goes out in sends_after.",
       inputSchema: z.object({ id: z.uuid().describe("Email id returned by send_email") }),
       readOnly: true,
     },
@@ -1373,7 +1373,7 @@ function buildServer(
     {
       title: "Send email",
       description:
-        "Send a transactional email (or schedule it with scheduled_at). Suppressed and topic-opted-out recipients are skipped automatically. Returns the email id. Each call is a new send: repeating it delivers the email again.",
+        "Send a transactional email (or schedule it with scheduled_at). Suppressed and topic-opted-out recipients are skipped automatically. Returns the email id, plus a warning with sends_after when the sending domain's new domain limit holds it for later. Each call is a new send: repeating it delivers the email again.",
       inputSchema: sendEmailRequestSchema,
       destructive: true,
       openWorld: true,
@@ -1386,7 +1386,7 @@ function buildServer(
     {
       title: "Send email batch",
       description:
-        "Send up to 100 emails in one call; each entry has the same shape as send_email. Returns one id per accepted email. Each call is a new send: repeating it delivers every email again.",
+        "Send up to 100 emails in one call. Each entry has the same shape as send_email. Returns one id per accepted email, each with a warning when the new domain limit holds it, as send_email does. Each call is a new send: repeating it delivers every email again.",
       inputSchema: z.object({
         emails: batchEmailRequestSchema.describe("The emails to send, same shape as send_email"),
       }),

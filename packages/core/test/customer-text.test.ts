@@ -203,6 +203,7 @@ describe("system mail catalogs and customer text", () => {
       entries.flatMap(([, e]) =>
         [
           e.subject,
+          e.heading ?? "",
           ...e.body,
           e.button,
           ...(e.muted ?? []),

@@ -96,6 +96,10 @@
       "types": "./src/inboxes/release-rules.ts",
       "default": "./src/inboxes/release-rules.ts"
     },
+    "./limit-rules": {
+      "types": "./src/limit-rules.ts",
+      "default": "./src/limit-rules.ts"
+    },
     "./url": {
       "types": "./src/url.ts",
       "default": "./src/url.ts"

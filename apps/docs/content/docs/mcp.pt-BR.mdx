@@ -212,7 +212,7 @@ análise não pode rodar, nada é liberado (`screening_unavailable`). Veja
 | `list_api_keys` | `api-keys:write` | Lista as chaves de API ativas (nunca os tokens). |
 | `list_domains` | `domains:read` | Lista até 100 domínios da equipe com o status de verificação. O subdomínio da equipe no [domínio compartilhado](/pt-BR/concepts/domains#subdomínio-compartilhado) é a última linha (`shared: true`): só de leitura, com o `sending_mode` dele, e só os endereços das caixas dele enviam por ele. |
 | `get_domain` | `domains:read` | Busca um domínio com os registros DNS; o subdomínio compartilhado não tem nenhum. |
-| `send_email` | `emails:send` | Envia ou agenda um e-mail transacional. |
+| `send_email` | `emails:send` | Envia ou agenda um e-mail transacional, com um `warning` quando o [limite de domínio novo](/pt-BR/concepts/domains#limite-de-domínio-novo) segura o envio. |
 | `send_email_batch` | `emails:send` | Envia até 100 e-mails em uma chamada. |
 | `update_email` | `emails:send` | Reagenda um e-mail agendado. |
 | `cancel_email` | `emails:send` | Cancela um e-mail agendado. |

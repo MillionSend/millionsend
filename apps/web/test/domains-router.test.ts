@@ -1,6 +1,7 @@
 import { createPublicKey } from "node:crypto";
 import {
   DAY_MS,
+  declineLimitRequest,
   PLAN_DOMAIN_LIMIT,
   SUSPENSION_REASONS,
   type WebhookEnqueue,
@@ -814,18 +815,29 @@ describe("domains.get", () => {
     });
     const { id } = await caller.domains.create({ name: "news.brand-new.com", region: "us-east-1" });
     expect(asked).toEqual([id]);
-    // Off on a self-hosted instance until the operator turns it on.
-    expect((await caller.domains.get({ id })).warmup).toBeNull();
-    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
     const registeredAt = new Date(Date.now() - 2 * 86_400_000);
     await db
       .update(schema.domains)
-      .set({ registeredAt, ageSource: "rdap" })
+      .set({ registeredAt, ageSource: "rdap", status: "verified" })
       .where(eq(schema.domains.id, id));
-    expect((await caller.domains.get({ id })).warmup).toEqual({
-      perDay: 300,
-      fullAt: new Date(registeredAt.getTime() + 30 * 86_400_000),
-      shared: false,
+    // Off on a self-hosted instance until the operator turns it on.
+    expect((await caller.domains.get({ id })).limit).toBeNull();
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    const fullAt = new Date(registeredAt.getTime() + 30 * 86_400_000);
+    expect((await caller.domains.get({ id })).limit).toMatchObject({
+      domainId: id,
+      name: "news.brand-new.com",
+      cap: 300,
+      used: 0,
+      pool: null,
+      waiting: 0,
+      registeredAt,
+      fullAt,
+      steps: [
+        { cap: 300 },
+        { from: new Date(registeredAt.getTime() + 7 * 86_400_000), cap: 2000 },
+        { from: fullAt, cap: null },
+      ],
     });
     // A second young domain the team can send from: the day's volume is shared.
     await db.insert(schema.domains).values({
@@ -836,7 +848,137 @@ describe("domains.get", () => {
       registeredAt: new Date(Date.now() - 3_600_000),
       ageSource: "rdap",
     });
-    expect((await caller.domains.get({ id })).warmup).toMatchObject({ perDay: 300, shared: true });
+    expect((await caller.domains.get({ id })).limit).toMatchObject({
+      cap: 300,
+      pool: { cap: 300, used: 0, domains: 2 },
+    });
+  });
+});
+
+describe("the new domain limit on the domain pages", () => {
+  beforeEach(async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    // The signed-in asker, whom a request names.
+    await db.insert(schema.user).values({ id: "u1", name: "u1", email: "u1@example.com" });
+  });
+
+  /** A verified domain of the team, registered `days` ago. */
+  async function domainOf(teamId: string, name: string, days: number) {
+    const [row] = await db
+      .insert(schema.domains)
+      .values({
+        teamId,
+        name,
+        region: "us-east-1",
+        status: "verified",
+        registeredAt: new Date(Date.now() - days * 86_400_000),
+        ageSource: "rdap",
+      })
+      .returning({ id: schema.domains.id });
+    if (!row) throw new Error("no domain");
+    return row.id;
+  }
+
+  const ask = { sends: "account", perDay: 2000, source: "new" } as const;
+
+  it("puts the limit on the list's young rows, held mail counted, and none on old ones", async () => {
+    const teamId = await createTeam(db);
+    const young = await domainOf(teamId, "nova.example", 3);
+    const old = await domainOf(teamId, "old.example", 400);
+    await db.insert(schema.emails).values(
+      ["review", "warmup", "warmup"].map((parkReason) => ({
+        teamId,
+        domainId: young,
+        from: "hi@nova.example",
+        to: ["r@example.com"],
+        subject: "s",
+        latestStatus: "queued_quota" as const,
+        parkReason: parkReason as "review" | "warmup",
+      })),
+    );
+    const rows = await callerFor(teamId, fakeSes().deps, "member").domains.list();
+    const byId = Object.fromEntries(rows.map((row) => [row.id, row.limit]));
+    // The review hold is never counted as the limit's.
+    expect(byId[young]).toMatchObject({ name: "nova.example", cap: 300, waiting: 2 });
+    expect(byId[old]).toBeNull();
+  });
+
+  it("lets owners and admins ask, once at a time, and shows the request on the page", async () => {
+    const teamId = await createTeam(db);
+    const id = await domainOf(teamId, "nova.example", 3);
+    await expect(
+      callerFor(teamId, fakeSes().deps, "member").domains.requestHigherLimit({ id, ...ask }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const admin = callerFor(teamId, fakeSes().deps, "admin");
+    expect((await admin.domains.get({ id })).limitRequest).toBeNull();
+    const sent = await admin.domains.requestHigherLimit({
+      id,
+      ...ask,
+      note: "  Sign-up mail for a new product.  ",
+    });
+    expect(sent.status).toBe("open");
+    expect((await admin.domains.get({ id })).limitRequest).toEqual({
+      status: "open",
+      createdAt: sent.createdAt,
+      resolvedAt: null,
+    });
+    const [row] = await db.select().from(schema.domainLimitRequests);
+    expect(row).toMatchObject({
+      teamId,
+      domainId: id,
+      requestedBy: "u1",
+      sends: "account",
+      perDay: 2000,
+      source: "new",
+      note: "Sign-up mail for a new product.",
+    });
+    await expect(admin.domains.requestHigherLimit({ id, ...ask })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+  });
+
+  it("refuses another team's domain, one with no limit, and answers out of range", async () => {
+    const teamId = await createTeam(db, "asker");
+    const caller = callerFor(teamId, fakeSes().deps);
+    const stranger = await domainOf(await createTeam(db, "stranger"), "far.example", 3);
+    await expect(caller.domains.requestHigherLimit({ id: stranger, ...ask })).rejects.toMatchObject(
+      {
+        code: "NOT_FOUND",
+      },
+    );
+    const old = await domainOf(teamId, "old.example", 400);
+    await expect(caller.domains.requestHigherLimit({ id: old, ...ask })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    });
+    const young = await domainOf(teamId, "nova.example", 3);
+    for (const input of [
+      { ...ask, perDay: 0 },
+      { ...ask, perDay: 10_000_001 },
+      { ...ask, note: "x".repeat(1_001) },
+    ]) {
+      await expect(
+        caller.domains.requestHigherLimit({ id: young, ...input }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    expect(await db.select().from(schema.domainLimitRequests)).toEqual([]);
+  });
+
+  it("shows a declined request, and lets the team ask again", async () => {
+    const teamId = await createTeam(db);
+    const id = await domainOf(teamId, "nova.example", 3);
+    const caller = callerFor(teamId, fakeSes().deps);
+    await caller.domains.requestHigherLimit({ id, ...ask });
+    const [open] = await db
+      .select({ id: schema.domainLimitRequests.id })
+      .from(schema.domainLimitRequests);
+    if (!open) throw new Error("no request");
+    await declineLimitRequest(db, { requestId: open.id, operator: "ops@example.com" });
+    const declined = (await caller.domains.get({ id })).limitRequest;
+    expect(declined).toMatchObject({ status: "declined", resolvedAt: expect.any(Date) });
+    // Who decided never reaches the team.
+    expect(JSON.stringify(await caller.domains.get({ id }))).not.toContain("ops@example.com");
+    await caller.domains.requestHigherLimit({ id, ...ask, perDay: 5000 });
+    expect((await caller.domains.get({ id })).limitRequest?.status).toBe("open");
   });
 });
 

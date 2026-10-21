@@ -12,11 +12,14 @@ export function StatBlock({
   label,
   value,
   hint,
+  plain = false,
 }: {
   label: string;
   value: string | null;
   /** Muted line under the digits — a qualifier the number needs to be honest. */
   hint?: string | undefined;
+  /** A value that is not a count, such as a date: set as is, without the roll. */
+  plain?: boolean;
 }) {
   return (
     <div>
@@ -32,7 +35,13 @@ export function StatBlock({
           display: "flex",
         }}
       >
-        {value != null ? <Odometer formatted={value} /> : <Skeleton width={64} height="1lh" />}
+        {value == null ? (
+          <Skeleton width={64} height="1lh" />
+        ) : plain ? (
+          value
+        ) : (
+          <Odometer formatted={value} />
+        )}
       </div>
       {hint ? (
         <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>{hint}</div>

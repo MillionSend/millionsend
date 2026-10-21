@@ -122,6 +122,7 @@ export {
   acceptEmail,
   countDistinctRecipients,
   countParked,
+  emailRecipientsSql,
   enforceDomainWarmup,
   estimateMimeBytes,
   exceededSendSize,
@@ -129,6 +130,7 @@ export {
   isReservedTagName,
   MAX_ATTACHMENT_BYTES,
   MAX_SUBJECT_LENGTH,
+  newDomainLimitFullMessage,
   QUOTA_BACKLOG_DAYS,
   RESERVED_TAG_PREFIX,
   reviewBacklogLimit,
@@ -231,6 +233,7 @@ export {
 export {
   bulkSentBySlot,
   cancelBroadcastRows,
+  newDomainLimitPlanCap,
   planRegionSend,
   quotaUsage,
   type RegionBulkCounts,
@@ -242,6 +245,7 @@ export {
   rungThatFits,
   type SendingBroadcast,
   sendingBroadcasts,
+  teamPlanHold,
   warmupBroadcastPlans,
   warmupPastHorizon,
 } from "./broadcast-pacing.js";
@@ -403,6 +407,8 @@ export {
 export {
   type DomainWarmupRow,
   graduateWarmupDomains,
+  heldByNewDomainLimit,
+  mayWarmUp,
   pruneWarmupUsage,
   reserveWarmup,
   teamWarmupOverview,
@@ -493,6 +499,27 @@ export {
 } from "./instance-probes.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { type IpGeo, lookupIpGeo, refreshIpGeoDatabases } from "./ip-geo.js";
+export {
+  type ConsoleLimitRequest,
+  createLimitRequest,
+  declineLimitRequest,
+  getOpenLimitRequest,
+  LIMIT_REQUEST_SENDS,
+  LIMIT_REQUEST_SOURCES,
+  type LimitRequestRefusal,
+  type LimitRequestSends,
+  type LimitRequestSource,
+  type LimitRequestStatus,
+  latestLimitRequest,
+  listLimitRequests,
+  setWarmupTrust,
+  type TeamLimitRequest,
+} from "./limit-requests.js";
+export {
+  LIMIT_REQUEST_NOTE_MAX,
+  LIMIT_REQUEST_PER_DAY_MAX,
+  limitSpent,
+} from "./limit-rules.js";
 export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export {
   type BodyLink,
@@ -538,6 +565,14 @@ export {
   monitorThresholdsOrdered,
   resolveMonitorSettings,
 } from "./monitor-settings.js";
+export {
+  type NewDomainLimit,
+  type NewDomainLimitEta,
+  type NewDomainLimitStep,
+  newDomainLimitEta,
+  newDomainLimitEtas,
+  newDomainLimitStatus,
+} from "./new-domain-limit.js";
 export {
   accountLocale,
   claimNotification,

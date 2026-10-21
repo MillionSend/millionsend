@@ -5,7 +5,7 @@ export const ptBR = {
     subject: "Bem-vindo ao MillionSend",
     body: [
       "Olá, {name}, sua conta está pronta.",
-      "Primeiro adicione um domínio de envio e publique os registros DNS; os envios saem assim que ele for verificado.",
+      "Primeiro adicione um domínio de envio e publique os registros DNS. Os envios saem assim que ele for verificado, e um domínio registrado há pouco tempo começa com um limite diário que cresce nas primeiras semanas.",
       "Depois crie uma chave de API em Chaves de API — ela aparece uma única vez e é o que os SDKs, o SMTP e o servidor MCP usam para enviar.",
     ],
     button: "Adicionar domínio",
@@ -72,10 +72,20 @@ export const ptBR = {
   "domain.verified": {
     subject: "Seu domínio está verificado",
     body: [
-      "Os registros DNS de {domain} estão corretos e ele pode enviar de qualquer endereço — API, SMTP e transmissões.",
+      "Os registros DNS de {domain} estão corretos. Ele pode enviar de qualquer endereço do domínio, pela API, pelo SMTP e por transmissões.",
+      "{limit}",
+      "{moving}",
       "Continuamos verificando os registros e avisamos se algum sumir.",
     ],
     button: "Abrir domínio",
+    extra: {
+      limit:
+        "Como ele foi registrado há pouco tempo, começa com um limite diário: até {perDay} e-mails hoje, um pouco mais a cada dia, e sem limite a partir de {date}. O que passar do limite do dia fica esperando e sai sozinho no dia seguinte.",
+      limitUnknownAge:
+        "Ele começa com um limite diário de até {perDay} e-mails por enquanto, que vai subindo conforme ele cria um histórico de envios. O que passar do limite do dia fica esperando e sai sozinho no dia seguinte.",
+      moving:
+        "Vai trazer para este domínio e-mails que você já envia por outro serviço? Responda a este e-mail antes de mudar e a gente dá uma olhada.",
+    },
   },
   "domain.lost": {
     subject: "Um domínio perdeu a verificação",
@@ -91,6 +101,65 @@ export const ptBR = {
       "O SES desistiu de {domain}: a identidade sumiu ou os registros DKIM ficaram ausentes por mais de 72 horas. Os envios são recusados; adicione o domínio de novo para voltar a enviar.",
     ],
     button: "Abrir domínios",
+  },
+  "domain.waiting": {
+    subject: "Seu domínio novo atingiu o limite de hoje",
+    heading: "{waiting}",
+    body: [
+      "{reached} Está tudo funcionando. O restante fica esperando e sai sozinho depois das 00:00 UTC, então não precisa reenviar.",
+      "{schedule}",
+      "Domínios novos começam com pouco volume porque os provedores de e-mail desconfiam de mensagens vindas deles. Um plano maior não muda isso. Vai trazer para cá e-mails que você já envia por outro serviço? Responda a este e-mail e a gente dá uma olhada.",
+    ],
+    button: "Ver e-mails esperando",
+    muted: [
+      "Você recebe isto no máximo uma vez por dia por domínio enquanto houver e-mails esperando.",
+    ],
+    extra: {
+      "waiting.one": "1 e-mail esperando",
+      "waiting.other": "{n} e-mails esperando",
+      "reached.domain": "{domain} atingiu o limite diário de {cap} e-mails.",
+      "reached.pool":
+        "{domain} e seus outros domínios novos já enviaram os {cap} e-mails que dividem por dia.",
+      schedule:
+        "O limite cresce a cada dia, e o domínio passa a enviar sem limite a partir de {date}.",
+      scheduleUnknownAge: "O limite cresce conforme o domínio cria um histórico de envios.",
+    },
+  },
+  "domain.limit_lifted": {
+    subject: "O limite diário do seu domínio foi retirado",
+    body: [
+      "{domain} agora envia sem o limite diário de domínios novos. Os e-mails que estavam esperando já estão saindo.",
+    ],
+    button: "Abrir domínio",
+  },
+  "domain.limit_kept": {
+    subject: "Analisamos seu pedido de limite diário",
+    body: [
+      "{domain} continua com o limite diário por enquanto.{grows} Se tiver alguma dúvida, é só responder a este e-mail.",
+    ],
+    button: "Abrir domínio",
+    extra: { grows: " Ele cresce sozinho, e a partir de {date} não tem mais limite." },
+  },
+  "domain.limit_requested": {
+    subject: "Uma equipe pediu um limite diário maior",
+    body: [
+      "{team} pediu para tirar o limite de domínio novo de {domain}.",
+      "Pedido: cerca de {perDay} e-mails por dia. Envia: {sends}. Hoje: {source}.",
+      "{noteLine}",
+      "Aprove com Confiar no domínio, ou recuse, na página de revisão da equipe. A equipe recebe a resposta por e-mail nos dois casos.",
+    ],
+    button: "Abrir revisão",
+    muted: ["Enviado ao operador da instância uma vez por pedido."],
+    extra: {
+      "sends.account": "e-mails de cadastro e de conta",
+      "sends.notifications": "recibos e notificações",
+      "sends.marketing": "newsletters e marketing",
+      "sends.mix": "um pouco de cada",
+      "source.new": "ainda não envia, é um produto novo",
+      "source.other_provider": "envia por outro provedor de e-mail",
+      "source.own_servers": "envia pelos próprios servidores de e-mail",
+      note: "Observação: {note}",
+    },
   },
   "broadcast.sent": {
     subject: "Sua transmissão foi enviada para {count} destinatários",

@@ -1,7 +1,7 @@
 import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, gte, inArray, isNull, lt, ne, notInArray, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   loadMonitorState,
@@ -80,7 +80,7 @@ async function warmupSettings(db: Db): Promise<MonitorSettings> {
  * Domain rows that may still warm up at `at`: verified, not trusted, under
  * the last step by age and by graduation.
  */
-function mayWarmUp(at: Date): SQL | undefined {
+export function mayWarmUp(at: Date): SQL | undefined {
   const d = schema.domains;
   return and(
     eq(d.status, "verified"),
@@ -197,6 +197,42 @@ export async function warmupCap(
     pool,
     poolDomains,
   };
+}
+
+/**
+ * The days ahead under a domain's cap: today's cap from `at`, each later
+ * tier's cap from when the registration age reaches it, then no cap (null)
+ * from fullAt. Empty for an unknown age, which lifts with the team's sending
+ * history instead. Clean sends can move a step sooner than it says.
+ */
+export async function warmupSteps(
+  db: Db,
+  cap: WarmupCap,
+  registeredAt: Date | null,
+  at: Date,
+): Promise<{ from: Date; cap: number | null }[]> {
+  if (!registeredAt || !cap.fullAt) return [];
+  const s = await warmupSettings(db);
+  const steps: { from: Date; cap: number | null }[] = [{ from: at, cap: cap.cap }];
+  for (let tier = cap.tier + 1; tier < WARMUP_FULL_TIER; tier += 1) {
+    steps.push({ from: tierStart(registeredAt, tier), cap: capOf(s, tier) });
+  }
+  steps.push({ from: cap.fullAt, cap: null });
+  return steps;
+}
+
+/**
+ * Mail the new domain limit holds: parked for the warm-up, less the
+ * broadcast copies of a domain whose reputation warm-up is warming or
+ * paused, which park with the same reason and go out by that warm-up's own
+ * day. The silent holds park with reasons of their own and never match, so
+ * they keep reading as a plain wait. The one definition for every surface
+ * that counts or labels these rows, as a condition on the query's `emails`.
+ */
+export function heldByNewDomainLimit(): SQL {
+  const e = schema.emails;
+  const w = schema.domainWarmups;
+  return sql`(${e.latestStatus} = 'queued_quota' and ${e.parkReason} = 'warmup' and (${e.broadcastId} is null or ${e.domainId} not in (select ${w.domainId} from ${w} where ${w.status} in ('warming', 'paused'))))`;
 }
 
 type ColumnValues = readonly (readonly [AnyPgColumn, unknown])[];
@@ -471,21 +507,10 @@ export async function teamWarmupOverview(
     .from(schema.teams)
     .where(eq(schema.teams.id, teamId));
   const e = schema.emails;
-  const w = schema.domainWarmups;
   const parked = await db
     .select({ domainId: e.domainId, n: sql<number>`count(*)::int` })
     .from(e)
-    .leftJoin(w, eq(w.domainId, e.domainId))
-    .where(
-      and(
-        eq(e.teamId, teamId),
-        eq(e.latestStatus, "queued_quota"),
-        eq(e.parkReason, "warmup"),
-        // A reputation warm-up parks its broadcasts with the same reason and
-        // lets them out by its own day, which no trust lifts.
-        or(isNull(e.broadcastId), isNull(w.status), notInArray(w.status, ["warming", "paused"])),
-      ),
-    )
+    .where(and(eq(e.teamId, teamId), heldByNewDomainLimit()))
     .groupBy(e.domainId);
   const rows = await db
     .select({

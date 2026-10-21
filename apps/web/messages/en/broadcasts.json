@@ -76,7 +76,9 @@
     "sendTest": "Send test",
     "testSent": "Test sent to {email}",
     "testRateLimited": "Too many test emails — try again in an hour.",
-    "testFailed": "Couldn't send the test email."
+    "testFailed": "Couldn't send the test email.",
+    "testQueuedLimit": "Test queued. {domain}'s daily limit is used up, so it goes out after 00:00 UTC.",
+    "testQueued": "Test queued. It goes out as soon as it can."
   },
   "guard": {
     "title": "Send broadcast",
@@ -97,9 +99,11 @@
     "stepAllSent": "all {count} sent · about {time}",
     "stepLimitDay": "{plan}'s daily limit",
     "stepLimitMonth": "{plan}'s monthly limit",
+    "stepLimitDomain": "{domain}'s daily limit",
     "stepMoreReset": "{count} more when the limit resets at {reset}",
     "stepLastReset": "last {count} when the limit resets at {reset} · finishes about {time}",
-    "reason": "Sends above the daily sending capacity are spread over the following days. Your transactional email is not held behind them.",
+    "reason": "Sends above the daily sending capacity are spread over the following days. Your transactional email goes out ahead of them.",
+    "limitReason": "{domain} is a new domain, so it sends up to {cap} emails a day for now. A higher plan doesn't change it.",
     "planFits": "{plan} sends all of them by {time}",
     "planFitsOverage": "{plan} with overage sends all of them by {time}",
     "todayAt": "today, {time}",
@@ -121,7 +125,7 @@
     "inactiveLabel": "Inactive for 90+ days",
     "inactiveSub": "no activity since {date}",
     "inactiveSkip": "Skip {count}",
-    "warmupReason": "Mailbox providers trust a new sender a little more each day it behaves. Each day grows only while delays, bounces and complaints stay low. Your transactional email is never held.",
+    "warmupReason": "Mailbox providers trust a new sender a little more each day it behaves. Each day grows only while delays, bounces and complaints stay low. The warm-up never holds your transactional email.",
     "sendWithWarmup": "Send with warm-up"
   },
   "detail": {
@@ -182,7 +186,7 @@
     "warmupHeldBody": "{reasons} Volume grows again tomorrow if it recovers.",
     "warmupPausedBody": "{reasons} This broadcast waits until the domain's warm-up resumes.",
     "openWarmup": "Open warm-up",
-    "warmupNote": "{domain} is warming up. Each day's volume grows while delivery stays healthy, most active contacts first. Your transactional email is not held.",
+    "warmupNote": "{domain} is warming up. Each day's volume grows while delivery stays healthy, most active contacts first. The warm-up never holds your transactional email.",
     "providers": {
       "loadError": "Couldn't load the inbox providers.",
       "label": "By inbox provider",

@@ -99,6 +99,12 @@ O envio avisa de antemão:
   outros envios estão na frente (a mensagem diz quando este começa). Um
   domínio em aquecimento responde `warming_up` no lugar (veja
   [Aquecimento](#aquecimento)).
+- De um domínio sob o
+  [limite de domínio novo](/pt-BR/concepts/domains#limite-de-domínio-novo),
+  a estimativa segue o calendário do limite, e o `warning` é
+  `new_domain_limit` quando o limite distribui o envio ao longo de vários
+  dias. O limite sozinho nunca deixa um envio grande demais: quando não dá
+  para estimar o fim, `finishes_at` é `null`.
 - Enquanto uma transmissão está saindo, `GET /broadcasts/{id}` e a lista trazem
   `finishes_at` ao vivo e `sent_count`.
 - Uma audiência que precisaria de mais de 24 dias de capacidade — da

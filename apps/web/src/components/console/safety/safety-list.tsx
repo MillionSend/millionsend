@@ -22,6 +22,7 @@ import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamActions } from "../team-actions";
+import { LimitRequests } from "./limit-requests";
 import {
   FlagStatusBadge,
   GuardrailCell,
@@ -144,6 +145,7 @@ export function SafetyList() {
           </Link>
         }
       />
+      <LimitRequests />
       <WaitingList onChanged={refetch} />
       <div
         className="ms-filter-row"

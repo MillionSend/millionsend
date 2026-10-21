@@ -1,22 +1,32 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
-import { formatDayTime } from "@/lib/format";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { formatDay, formatDayTime, formatRelative, formatStepDay, formatTime } from "@/lib/format";
 
-const data = vi.hoisted(() => ({ email: undefined as unknown }));
+const data = vi.hoisted(() => ({ email: undefined as unknown, locale: "en" as "en" | "pt-BR" }));
 
-// The real English catalogs, so the test reads what the timeline shows.
+// The real catalogs, so the test reads what the timeline shows.
 vi.mock("next-intl", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next-intl")>();
   const messages = {
-    emails: (await import("../messages/en/emails.json")).default,
-    common: (await import("../messages/en/common.json")).default,
+    en: {
+      emails: (await import("../messages/en/emails.json")).default,
+      common: (await import("../messages/en/common.json")).default,
+    },
+    "pt-BR": {
+      emails: (await import("../messages/pt-BR/emails.json")).default,
+      common: (await import("../messages/pt-BR/common.json")).default,
+    },
   };
   return {
     ...actual,
-    useLocale: () => "en",
+    useLocale: () => data.locale,
     useTranslations: (namespace: string) =>
-      actual.createTranslator({ locale: "en", messages, namespace: namespace as "emails" }),
+      actual.createTranslator({
+        locale: data.locale,
+        messages: messages[data.locale],
+        namespace: namespace as "emails",
+      }),
   };
 });
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: "email-1" }) }));
@@ -121,7 +131,7 @@ describe("a row a warm-up holds", () => {
   };
   const WARMING = "This domain sends a little more each day, most active contacts first.";
   const PAUSED = "Waiting for the warm-up to resume";
-  const NEW_DOMAIN = "Newly registered domains send a little more each day.";
+  const NEW_DOMAIN = "Waiting for the daily limit";
 
   it("waits on the domain's own warm-up while it warms", () => {
     const html = render("warmup");
@@ -137,10 +147,133 @@ describe("a row a warm-up holds", () => {
     expect(html).not.toContain(WARMING);
   });
 
-  it("waits on the new domain limit otherwise", () => {
-    const html = render("newDomainLimit");
-    expect(html).toContain(NEW_DOMAIN);
-    expect(html).not.toContain(WARMING);
-    expect(html).not.toContain(PAUSED);
+  it("never reads as the new domain limit", () => {
+    for (const kind of ["warmup", "warmupPaused", "waiting"]) {
+      expect(render(kind)).not.toContain(NEW_DOMAIN);
+    }
+  });
+});
+
+describe("an email the new domain limit holds", () => {
+  const NOW = new Date("2026-10-20T21:31:00Z");
+  const RESET = new Date("2026-10-21T00:00:00Z");
+  const hold = (over: Record<string, unknown> = {}) => ({
+    kind: "newDomainLimit",
+    domainId: "d1",
+    domain: "nova.example",
+    cap: 300,
+    used: 300,
+    pool: null,
+    ahead: 41,
+    sendsAfter: RESET,
+    resetsAt: RESET,
+    ...over,
+  });
+  const render = (pending: Record<string, unknown>) => {
+    data.email = {
+      id: "email-1",
+      from: "Nova <hello@nova.example>",
+      to: ["rafael.n@example.org"],
+      cc: null,
+      bcc: null,
+      replyTo: null,
+      subject: "Confirm your email",
+      tags: null,
+      apiKeyName: "Production",
+      broadcast: null,
+      pending,
+      sendingDomain: { id: "d1", name: "nova.example", cap: 300 },
+      latestStatus: "queued_quota",
+      createdAt: new Date(NOW.getTime() - 17 * 60_000),
+      sentAt: null,
+      events: [],
+    };
+    const html = renderToStaticMarkup(createElement(EmailDetailPage));
+    return {
+      html,
+      text: html
+        .replace(/<wbr\/>/g, "")
+        .replace(/<[^>]+>/g, "|")
+        .replaceAll("&#x27;", "'")
+        .replaceAll("\u00a0", " ")
+        .replace(/\|+/g, "|"),
+    };
+  };
+  const time = formatTime(RESET, "en");
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    data.locale = "en";
+  });
+
+  it("says what holds it, how far along the line it is and when it goes out", () => {
+    const { html, text } = render(hold());
+    // The subtitle's parts, each its own span.
+    expect(text).toContain(
+      `|Accepted ${formatRelative(new Date(NOW.getTime() - 17 * 60_000), "en")} ·| |goes out after ${time}|`,
+    );
+    expect(html).toContain('aria-label="Waiting for the daily limit"');
+    expect(text).toContain("|Waiting for nova.example's daily limit.|");
+    expect(text).toContain(
+      `|It sent its 300 emails for today. This one goes out after 00:00 UTC, about ${time} your time. You don't need to do anything.|`,
+    );
+    expect(html).toContain('href="/domains/d1"');
+    expect(text).toContain("|Sending domain|nova.example|300 a day for now|");
+    expect(text).toContain(
+      "|Waiting for the daily limit|300 of 300 sent today|nova.example is a new domain. 41 emails are ahead of this one.|",
+    );
+    expect(text).toContain(
+      `|Expected send|estimate|after 00:00 UTC|About ${time} your time. Waiting mail goes out oldest first.|`,
+    );
+    // Only the expected send is an estimate: the hold itself is a fact.
+    expect(html.match(/>estimate</g)).toHaveLength(1);
+    expect(text).not.toContain("Upgrade");
+  });
+
+  it("names a later day once the line runs past the next reset", () => {
+    const later = new Date(RESET.getTime() + 86_400_000);
+    const { text } = render(hold({ sendsAfter: later, ahead: 1 }));
+    expect(text).toContain(`goes out on ${formatDay(later, "en")}|`);
+    expect(text).toContain(
+      `This one goes out on ${formatDay(later, "en")}, about ${formatTime(later, "en")} your time.`,
+    );
+    expect(text).toContain("1 email is ahead of this one.");
+    expect(text).toContain(`|Expected send|estimate|${formatStepDay(later, "en")}|`);
+  });
+
+  it("goes out in minutes once the day has room, and nothing ahead reads as nothing", () => {
+    const { text } = render(hold({ used: 120, ahead: 0, sendsAfter: NOW }));
+    expect(text).toContain("goes out in a few minutes|");
+    expect(text).toContain(
+      "|Waiting for nova.example's daily limit.|This one goes out in the next few minutes. You don't need to do anything.|",
+    );
+    expect(text).toContain("Nothing is ahead of this one.");
+    expect(text).toContain(
+      "|Expected send|estimate|in a few minutes|Waiting mail goes out oldest first.|",
+    );
+  });
+
+  it("says the team's new domains share the day when that is what is spent", () => {
+    const { text } = render(hold({ used: 120, pool: { cap: 300, used: 300, domains: 2 } }));
+    expect(text).toContain("Your new domains sent the 300 emails they share for today.");
+    expect(text).toContain("|300 of 300 sent today by your new domains|");
+  });
+
+  it("reads in Brazilian Portuguese", () => {
+    data.locale = "pt-BR";
+    const hora = formatTime(RESET, "pt-BR");
+    const { text } = render(hold());
+    expect(text).toContain("|Aguardando o limite diário de nova.example.|");
+    expect(text).toContain(
+      `Ele já enviou os 300 e-mails de hoje. Este sai depois das 00:00 UTC, por volta das ${hora} no seu horário. Você não precisa fazer nada.`,
+    );
+    expect(text).toContain(
+      "|300 de 300 enviados hoje|nova.example é um domínio novo. 41 e-mails estão na frente deste.|",
+    );
+    expect(text).toContain("|Domínio de envio|nova.example|300 por dia por enquanto|");
   });
 });

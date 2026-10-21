@@ -748,7 +748,7 @@ describe("new-domain warm-up", () => {
     return { warm, domains, send };
   }
 
-  it("parks a young domain's mail past its cap, then answers 452 naming the warm-up once the backlog is full", async () => {
+  it("parks a young domain's mail past its cap, then answers 452 naming the limit once the backlog is full", async () => {
     const { warm, domains, send: sendFrom } = await warmTeam("smtp-warm", ["fresh-smtp.com"]);
     const domain = domains[0];
     if (!domain) throw new Error("domain insert failed");
@@ -776,7 +776,8 @@ describe("new-domain warm-up", () => {
     );
     await expect(send()).rejects.toMatchObject({
       responseCode: 452,
-      response: expect.stringContaining("New domain warm-up"),
+      response:
+        "452 New domain limit: fresh-smtp.com sends up to 100 emails a day for now, and 300 are already waiting. Retry after 00:00 UTC.",
     });
   });
 

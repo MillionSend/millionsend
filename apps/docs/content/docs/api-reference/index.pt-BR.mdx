@@ -143,11 +143,15 @@ deliberadas e explícitas:
   passa da capacidade disponível agora, um `warning` (`paced` ou
   `queued_behind`, com `days` e uma mensagem). De um domínio com o
   [aquecimento](/pt-BR/concepts/domains#aquecimento) ligado, o `warning` é
-  `warming_up`, com `days: 0` enquanto o aquecimento está pausado. As
-  leituras de transmissão trazem `sent_count` e um `finishes_at` ao vivo, e um
-  cancelamento responde com `canceled_remaining`. Uma audiência que precisa
-  de mais de 24 dias de capacidade, ou de aquecimento do domínio, é recusada
-  com `422 broadcast_too_large`. Veja
+  `warming_up`, com `days: 0` enquanto o aquecimento está pausado. De um
+  domínio sob o
+  [limite de domínio novo](/pt-BR/concepts/domains#limite-de-domínio-novo),
+  a estimativa segue o calendário do limite e o `warning` é
+  `new_domain_limit`. As leituras de transmissão trazem `sent_count` e um
+  `finishes_at` ao vivo, e um cancelamento responde com `canceled_remaining`.
+  Uma audiência que precisa de mais de 24 dias de capacidade, ou de
+  aquecimento do domínio, é recusada com `422 broadcast_too_large`. O limite
+  de domínio novo sozinho nunca recusa uma. Veja
   [Transmissões](/pt-BR/concepts/broadcasts#ritmo-de-envio).
 - `POST /emails` e `POST /emails/batch` retornam `429 daily_quota_exceeded`
   em um plano diário (Free, Starter) quando a cota diária de envio acabou e a
@@ -160,7 +164,19 @@ deliberadas e explícitas:
   domínio ainda sob o
   [limite de domínio novo](/pt-BR/concepts/domains#limite-de-domínio-novo)
   responde o mesmo `429 daily_quota_exceeded`, com uma mensagem que cita esse
-  limite, quando já há muito e-mail aguardando.
+  limite, quando já há muito e-mail aguardando. As duas recusas diárias trazem
+  um header `Retry-After` com os segundos que faltam para as 00:00 UTC.
+- Um e-mail que o
+  [limite de domínio novo](/pt-BR/concepts/domains#limite-de-domínio-novo)
+  segura continua sendo aceito, e `POST /emails`, ou o item dele em
+  `POST /emails/batch`, responde com um `warning`: `code` `new_domain_limit`,
+  uma `message` e `sends_after`, o horário mais cedo em que ele sai. `GET /emails/{id}`
+  e `GET /emails` mantêm `last_event: "queued"` para um e-mail que espera,
+  como os clientes do Resend esperam, e acrescentam `queued_reason`
+  (`new_domain_limit`, `warming_up`, `daily_quota`, `monthly_quota` ou
+  `capacity`, e `null` quando ele não está esperando) e `sends_after` (`null`
+  quando não há horário conhecido, como em `capacity` e `warming_up`). Clientes
+  que não conhecem esses campos simplesmente os ignoram.
 - `POST /contacts`, `POST /contacts/batch` e o alias de audience retornam
   `403 plan_limit_reached` quando um contato novo levaria a equipe além do
   limite de contatos do plano (1.000 no Free; planos pagos são ilimitados).
@@ -303,6 +319,21 @@ Erros usam o formato do Resend:
 
 Um corpo que não é JSON válido recebe `400 invalid_parameter`, e um corpo
 enviado com `Content-Type` diferente de `application/json` recebe `415`.
+
+Um `429` de limite diário, como `daily_quota_exceeded`, traz um header
+`Retry-After` com os segundos que faltam para as 00:00 UTC, quando o limite
+zera:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 8880
+
+{
+  "statusCode": 429,
+  "name": "daily_quota_exceeded",
+  "message": "nova.example sends up to 300 emails a day for now, and 5,000 are already waiting. Retry after 00:00 UTC."
+}
+```
 
 Um caminho que a API não tem, ou um método que o caminho não aceita, recebe
 `404 not_found` com a mensagem `The requested endpoint does not exist.` (o

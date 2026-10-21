@@ -2,6 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { resultRows } from "./driver-result.js";
+import type { NewDomainLimit } from "./new-domain-limit.js";
 import {
   type LadderPlan,
   PAID_RUNGS,
@@ -207,6 +208,47 @@ export async function quotaUsage(
   return { day: today?.accepted ?? 0, period };
 }
 
+/**
+ * When the team's own cap, not capacity, holds its parked mail: the
+ * earliest reset of the caps it has used up, and whether that is the day's
+ * or the billing period's. Null while every cap has room.
+ */
+export async function teamPlanHold(
+  db: Db,
+  teamId: string,
+  isCloud: boolean,
+  now: Date = new Date(),
+): Promise<{ resumesAt: Date; period: "day" | "month" } | null> {
+  const quota = await fetchTeamQuota(db, teamId, isCloud, now);
+  if (!quota) return null;
+  const [first] = planCaps(quota, await quotaUsage(db, teamId, quota, now), now)
+    .filter((cap) => cap.remaining <= 0)
+    .sort((a, b) => a.resetsAt - b.resetsAt);
+  return first ? { resumesAt: new Date(first.resetsAt), period: first.period } : null;
+}
+
+/**
+ * A domain's new domain limit as one more cap on its sends: today's room
+ * under its own cap and the team's shared volume, then each day the cap of
+ * the schedule's step, to no cap once it lifts. An unknown age keeps
+ * today's cap. Clean sending can lift it sooner, so a plan by it errs late.
+ */
+export function newDomainLimitPlanCap(limit: NewDomainLimit): PlanCap {
+  const poolRoom = limit.pool ? limit.pool.cap - limit.pool.used : Number.POSITIVE_INFINITY;
+  return {
+    remaining: Math.max(0, Math.min(limit.cap - limit.used, poolRoom)),
+    resetsAt: limit.resetsAt.getTime(),
+    resetTo: limit.cap,
+    period: "day",
+    newDomain: {
+      steps: limit.steps.map((step) => ({
+        from: step.from.getTime(),
+        resetTo: step.cap ?? Number.POSITIVE_INFINITY,
+      })),
+    },
+  };
+}
+
 const CANCEL_PAGE = 1000;
 
 /**
@@ -317,8 +359,8 @@ export interface RegionSendPlanInput {
   rateCeiling: number;
   horizonDays: number;
   now?: Date;
-  /** The caps of a team's own broadcasts in flight, so a plan-held one is not promised a capacity-only finish. */
-  capsFor?: (teamId: string) => PlanCap[] | undefined;
+  /** The caps of a team's own broadcasts in flight, so a held one is not promised a capacity-only finish. */
+  capsFor?: (broadcast: SendingBroadcast) => PlanCap[] | undefined;
   /** A send about to be initiated, planned alongside the broadcasts already going out in the region. */
   newSend?: {
     key: string;
@@ -360,7 +402,7 @@ export async function planRegionSend(db: Db, input: RegionSendPlanInput): Promis
   const broadcasts: PlannedBroadcast[] = sending
     .filter((b) => !b.warmup)
     .map((b) => {
-      const caps = input.capsFor?.(b.teamId);
+      const caps = input.capsFor?.(b);
       return {
         key: b.id,
         queued: b.queued,

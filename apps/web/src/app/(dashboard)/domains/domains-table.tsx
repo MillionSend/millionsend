@@ -1,9 +1,10 @@
 "use client";
 
+import type { NewDomainLimit } from "@millionsend/core";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
 import { Breakable } from "@/components/breakable";
@@ -21,7 +22,9 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { shortcutBlocked } from "@/lib/keyboard";
+import { limitSchedule } from "@/lib/new-domain-limit";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage } from "@/lib/trpc-error";
 import { useUrlState } from "@/lib/url-state";
@@ -65,6 +68,44 @@ function SkeletonRows() {
 
 const shown = (d: { status: string; trackingPending: boolean }) =>
   displayDomainStatus(d.status as DomainStatus, d.trackingPending);
+
+/** A limited domain's muted tail: today's cap, what waits, and the schedule on hover. */
+function LimitTail({ limit }: { limit: NewDomainLimit }) {
+  const t = useTranslations("domains");
+  const locale = useLocale();
+  const nf = new Intl.NumberFormat(locale);
+  const schedule = limitSchedule(limit, t, locale);
+  return (
+    <Tooltip
+      inline
+      text={
+        schedule
+          ? t("list.limit.tooltip", { schedule })
+          : t("list.limit.tooltipToday", { cap: nf.format(limit.cap) })
+      }
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 12.5,
+          color: "var(--ms-muted)",
+        }}
+      >
+        {t("list.limit.perDay", { cap: nf.format(limit.cap) })}
+        {limit.waiting > 0 ? (
+          <>
+            <span style={{ color: "var(--ms-faint)" }}>·</span>
+            <span style={{ color: "var(--ms-warn)" }}>
+              {t("list.limit.waiting", { count: nf.format(limit.waiting) })}
+            </span>
+          </>
+        ) : null}
+      </span>
+    </Tooltip>
+  );
+}
 
 export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
   const t = useTranslations("domains");
@@ -227,9 +268,9 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
               <Table>
                 <thead>
                   <tr>
-                    <th style={{ width: "36%" }}>{t("list.columns.domain")}</th>
-                    <th style={{ width: "15%" }}>{t("list.columns.status")}</th>
-                    <th>{t("list.columns.region")}</th>
+                    <th style={{ width: "34%" }}>{t("list.columns.domain")}</th>
+                    <th>{t("list.columns.status")}</th>
+                    <th style={{ width: "18%" }}>{t("list.columns.region")}</th>
                     <th className="right" style={{ width: "13%" }}>
                       {t("list.columns.created")}
                     </th>
@@ -253,7 +294,21 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
                           </span>
                         </td>
                         <td>
-                          <DomainStatusBadge status={shown(domain)} />
+                          {domain.limit ? (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 10,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <DomainStatusBadge status={shown(domain)} />
+                              <LimitTail limit={domain.limit} />
+                            </span>
+                          ) : (
+                            <DomainStatusBadge status={shown(domain)} />
+                          )}
                         </td>
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RegionLabel region={domain.region} />

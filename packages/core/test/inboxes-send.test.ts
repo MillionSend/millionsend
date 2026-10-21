@@ -4,7 +4,8 @@ import { schema } from "@millionsend/db";
 import { createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { acceptEmail } from "../src/accept-email.js";
+import { acceptEmail, QUOTA_BACKLOG_DAYS } from "../src/accept-email.js";
+import { warmupCap } from "../src/domain-warmup.js";
 import type { InboxActor } from "../src/inboxes/activity.js";
 import { msgIds } from "../src/inboxes/compose.js";
 import {
@@ -23,7 +24,8 @@ import {
   type SendOutcome,
   sendNewFromInbox,
 } from "../src/inboxes/send.js";
-import { utcDay } from "../src/utc-day.js";
+import { monthlyCapacity, teamQuota } from "../src/plans.js";
+import { DAY_MS, nextUtcDayStart, utcDay } from "../src/utc-day.js";
 import {
   addInbox,
   addThread,
@@ -785,6 +787,61 @@ describe("the forward_to pass", () => {
     expect(await forwardedTo(shared)).toEqual([w.owner]);
     const own = await addInbox(w, { local: "forwarding-owners", safety });
     expect(await forwardedTo(own)).toEqual([w.owner, "former-member@example.org"]);
+  });
+
+  it("waits for 00:00 UTC when the new domain limit is spent and the backlog is full", async () => {
+    const v = await seedWorld(db, "forward-limit");
+    // A small plan day keeps the backlog to a few hundred rows.
+    await db
+      .update(schema.teams)
+      .set({ dailySendCeiling: 100 })
+      .where(eq(schema.teams.id, v.teamId));
+    await db
+      .update(schema.domains)
+      .set({ registeredAt: new Date(Date.now() - 3 * DAY_MS) })
+      .where(eq(schema.domains.id, v.domainId));
+    await db
+      .insert(schema.instanceSettings)
+      .values({ id: 1, warmupEnabled: true })
+      .onConflictDoUpdate({ target: schema.instanceSettings.id, set: { warmupEnabled: true } });
+    try {
+      const inbox = await addInbox(v, {
+        local: "forwarding-limit",
+        safety: { forward_to: [v.owner] },
+      });
+      const t = await receive(v, { inbox, threadId: await addThread(v, inbox.id) });
+      const cap = await warmupCap(db, { teamId: v.teamId, domainId: v.domainId, at: new Date() });
+      if (!cap) throw new Error("the domain is not under the new domain limit");
+      await db
+        .insert(schema.domainWarmupUsage)
+        .values({ registrableDomain: cap.key, day: utcDay(), accepted: cap.cap });
+      // A full backlog: three days of the higher of the cap and the plan's day.
+      const planDay = monthlyCapacity(teamQuota(await billing(v), true)) / 30;
+      const backlog = Math.ceil(QUOTA_BACKLOG_DAYS * Math.max(cap.cap, planDay));
+      await db.insert(schema.emails).values(
+        Array.from({ length: backlog }, () => ({
+          teamId: v.teamId,
+          domainId: v.domainId,
+          from: `a@${v.domain}`,
+          to: ["r@example.com"],
+          subject: "s",
+          latestStatus: "queued_quota" as const,
+          parkReason: "warmup" as const,
+        })),
+      );
+      const out = await forwardToForwardTargets(db, v.deps, {
+        receivedEmailId: t.id,
+        inboxId: inbox.id,
+      });
+      expect(out).toEqual({ kind: "wait", until: expect.any(Date) });
+      if (out?.kind !== "wait") throw new Error("unreachable");
+      expect(out.until.getTime()).toBeGreaterThanOrEqual(nextUtcDayStart().getTime());
+    } finally {
+      await db
+        .update(schema.instanceSettings)
+        .set({ warmupEnabled: false })
+        .where(eq(schema.instanceSettings.id, 1));
+    }
   });
 
   it("stops at one hop, never for a marker a sender wrote, and skips held mail", async () => {
