@@ -898,9 +898,32 @@
         "pool": "Compartilhado pelos domínios em aquecimento da equipe hoje: {used} de {cap}",
         "full": "Volume total",
         "trusted": "Confiável",
+        "dialog": {
+          "trustDomain": {
+            "title": "Confiar em {name}",
+            "lead": "{count, plural, =0 {O limite diário não está segurando nenhum e-mail deste domínio.} one {O e-mail que o limite diário está segurando sai na hora.} other {Os # e-mails que o limite diário está segurando começam a sair na hora.}} A partir de agora, os novos e-mails deste domínio saem no volume total da equipe.",
+            "confirm": "Confiar no domínio"
+          },
+          "trustTeam": {
+            "title": "Confiar em {name}",
+            "lead": "{count, plural, =0 {O limite diário não está segurando nenhum e-mail desta equipe.} one {O e-mail que o limite diário está segurando sai na hora.} other {Os # e-mails que o limite diário está segurando começam a sair na hora.}} A partir de agora, os novos e-mails de todos os domínios da equipe saem no volume total.",
+            "confirm": "Confiar na equipe"
+          },
+          "untrustDomain": {
+            "title": "Deixar de confiar em {name}",
+            "lead": "{teamTrust, select, trusted {A confiança da equipe ainda vale para este domínio, então ele continua enviando no volume total.} other {Os novos e-mails deste domínio voltam a ficar sob o limite diário de domínios novos.}}",
+            "confirm": "Remover confiança"
+          },
+          "untrustTeam": {
+            "title": "Deixar de confiar em {name}",
+            "lead": "Os novos e-mails dos domínios da equipe voltam a ficar sob o limite diário de domínios novos.{kept, plural, =0 {} one { O domínio marcado como confiável individualmente continua assim.} other { Os # domínios marcados como confiáveis individualmente continuam assim.}}",
+            "confirm": "Remover confiança da equipe"
+          }
+        },
         "toast": {
           "trusted": "Aquecimento dispensado para {name}",
-          "untrusted": "Aquecimento reativado para {name}"
+          "untrusted": "Aquecimento reativado para {name}",
+          "error": "Não foi possível mudar a confiança: {message}"
         }
       }
     },

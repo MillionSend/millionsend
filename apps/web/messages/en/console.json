@@ -898,9 +898,32 @@
         "pool": "Shared by the team's warming domains today: {used} of {cap}",
         "full": "Full volume",
         "trusted": "Trusted",
+        "dialog": {
+          "trustDomain": {
+            "title": "Trust {name}",
+            "lead": "{count, plural, =0 {The daily limit is not holding any mail from this domain.} one {The email the daily limit is holding goes out right away.} other {The # emails the daily limit is holding start going out right away.}} New mail from this domain sends at the team's full volume from now on.",
+            "confirm": "Trust domain"
+          },
+          "trustTeam": {
+            "title": "Trust {name}",
+            "lead": "{count, plural, =0 {The daily limit is not holding any of this team's mail.} one {The email the daily limit is holding goes out right away.} other {The # emails the daily limit is holding start going out right away.}} New mail from all of the team's domains sends at full volume from now on.",
+            "confirm": "Trust team"
+          },
+          "untrustDomain": {
+            "title": "Remove trust from {name}",
+            "lead": "{teamTrust, select, trusted {The team's own trust still covers this domain, so it keeps sending at full volume.} other {New mail from this domain goes back under the daily limit for new domains.}}",
+            "confirm": "Remove trust"
+          },
+          "untrustTeam": {
+            "title": "Remove trust from {name}",
+            "lead": "New mail from the team's domains goes back under the daily limit for new domains.{kept, plural, =0 {} one { The domain trusted on its own stays trusted.} other { The # domains trusted on their own stay trusted.}}",
+            "confirm": "Remove team trust"
+          }
+        },
         "toast": {
           "trusted": "Warm-up lifted for {name}",
-          "untrusted": "Warm-up restored for {name}"
+          "untrusted": "Warm-up restored for {name}",
+          "error": "Could not change trust: {message}"
         }
       }
     },

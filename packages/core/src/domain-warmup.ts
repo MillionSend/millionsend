@@ -1,7 +1,7 @@
 import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, ne, notInArray, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   loadMonitorState,
@@ -445,12 +445,15 @@ export interface DomainWarmupRow {
   trustedAt: Date | null;
   /** Today's cap and what it has used; null when the domain sends at full volume. */
   today: { cap: number; used: number; tier: number; fullAt: Date | null } | null;
+  /** Its mail parked for the warm-up that a trust would release now. */
+  waiting: number;
 }
 
 /**
- * A team's domains as the operator's review page shows their warm-up, and
- * today's use of the pool they share; null while none of its verified
- * domains warms up.
+ * A team's domains as the operator's review page shows their warm-up,
+ * today's use of the pool they share (null while none of its verified
+ * domains warms up), and the mail a trust would release now, per domain and
+ * in all.
  */
 export async function teamWarmupOverview(
   db: Db,
@@ -460,12 +463,30 @@ export async function teamWarmupOverview(
   trustedAt: Date | null;
   domains: DomainWarmupRow[];
   pool: { cap: number; used: number } | null;
+  waiting: number;
 }> {
   const d = schema.domains;
   const [team] = await db
     .select({ trustedAt: schema.teams.warmupTrustedAt })
     .from(schema.teams)
     .where(eq(schema.teams.id, teamId));
+  const e = schema.emails;
+  const w = schema.domainWarmups;
+  const parked = await db
+    .select({ domainId: e.domainId, n: sql<number>`count(*)::int` })
+    .from(e)
+    .leftJoin(w, eq(w.domainId, e.domainId))
+    .where(
+      and(
+        eq(e.teamId, teamId),
+        eq(e.latestStatus, "queued_quota"),
+        eq(e.parkReason, "warmup"),
+        // A reputation warm-up parks its broadcasts with the same reason and
+        // lets them out by its own day, which no trust lifts.
+        or(isNull(e.broadcastId), isNull(w.status), notInArray(w.status, ["warming", "paused"])),
+      ),
+    )
+    .groupBy(e.domainId);
   const rows = await db
     .select({
       id: d.id,
@@ -493,7 +514,10 @@ export async function teamWarmupOverview(
       today = { cap: cap.cap, used: usage?.accepted ?? 0, tier: cap.tier, fullAt: cap.fullAt };
       if (row.status === "verified") poolCap = cap.pool;
     }
-    domains.push({ ...row, today });
+    // Without a cap (trusted, aged out, warm-up off) the warm-up holds none of
+    // its rows: what still waits there waits on the plan or the next drain.
+    const waiting = today ? (parked.find((p) => p.domainId === row.id)?.n ?? 0) : 0;
+    domains.push({ ...row, today, waiting });
   }
   let pool: { cap: number; used: number } | null = null;
   if (poolCap !== null) {
@@ -504,5 +528,10 @@ export async function teamWarmupOverview(
       .where(and(eq(p.teamId, teamId), eq(p.day, utcDay(now))));
     pool = { cap: poolCap, used: usage?.accepted ?? 0 };
   }
-  return { trustedAt: team?.trustedAt ?? null, domains, pool };
+  return {
+    trustedAt: team?.trustedAt ?? null,
+    domains,
+    pool,
+    waiting: domains.reduce((n, row) => n + row.waiting, 0),
+  };
 }

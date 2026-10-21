@@ -37,6 +37,11 @@ import { RevealCell, type RevealTeam, useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
 
 const TILE: React.CSSProperties = { padding: "16px 20px" };
+const DIALOG_LEAD: React.CSSProperties = {
+  margin: "0 0 18px",
+  fontSize: 13,
+  color: "var(--ms-muted)",
+};
 // The monitoring rows are sentences, not figures: sans, left, the body size.
 const KV_VALUE: React.CSSProperties = {
   fontFamily: "var(--ms-font-sans)",
@@ -779,9 +784,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         onConfirm={submitFlag}
         title={t("openFlagTitle", { team: team.name })}
       >
-        <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>
-          {t("openFlagLead")}
-        </p>
+        <p style={DIALOG_LEAD}>{t("openFlagLead")}</p>
         <div className="ms-field">
           <label htmlFor="safety-flag-note">{common("note")}</label>
           <textarea
@@ -944,12 +947,20 @@ type WarmupOverview = {
     ageCheckedAt: Date | string | null;
     trustedAt: Date | string | null;
     today: { cap: number; used: number; fullAt: Date | string | null } | null;
+    waiting: number;
   }[];
   pool: { cap: number; used: number } | null;
+  waiting: number;
 };
 
-/** The team's domains under the new-domain warm-up, and the operator's trust over it. */
-function WarmupCard({
+/** A trust change the operator asked for, until they confirm it: the team's own, or one domain's. */
+type TrustChange = { trusted: boolean; domain?: WarmupOverview["domains"][number] };
+
+/**
+ * The team's domains under the new-domain warm-up, and the operator's trust
+ * over it. Every trust change waits for a confirm that says what it does.
+ */
+export function WarmupCard({
   team,
   warmup,
   onChanged,
@@ -964,7 +975,11 @@ function WarmupCard({
   const nf = new Intl.NumberFormat(locale);
   const trpc = useTRPC();
   const trust = useMutation(trpc.console.safety.setWarmupTrust.mutationOptions());
-  const set = (trusted: boolean, domain?: { id: string; name: string }) =>
+  const [change, setChange] = useState<TrustChange | null>(null);
+  const close = () => setChange(null);
+  const confirm = () => {
+    if (!change || trust.isPending) return;
+    const { trusted, domain } = change;
     trust.mutate(
       { teamId: team.id, trusted, ...(domain ? { domainId: domain.id } : {}) },
       {
@@ -972,11 +987,15 @@ function WarmupCard({
           toast(
             t(trusted ? "toast.trusted" : "toast.untrusted", { name: domain?.name ?? team.name }),
           );
+          setChange(null);
           onChanged();
         },
+        onError: (error) => toast(t("toast.error", { message: error.message }), "danger"),
       },
     );
+  };
   const teamTrusted = warmup.trustedAt !== null;
+  const ask = `dialog.${change?.trusted === false ? "untrust" : "trust"}${change?.domain ? "Domain" : "Team"}`;
   return (
     <div className="ms-card" style={{ padding: 0, marginBottom: 16 }}>
       <div
@@ -1004,9 +1023,8 @@ function WarmupCard({
           type="button"
           className="ms-btn ms-btn-secondary"
           disabled={trust.isPending}
-          onClick={() => set(!teamTrusted)}
+          onClick={() => setChange({ trusted: !teamTrusted })}
         >
-          <BtnSpinner on={trust.isPending} />
           {t(teamTrusted ? "untrustTeam" : "trustTeam")}
         </button>
       </div>
@@ -1066,7 +1084,7 @@ function WarmupCard({
                       cursor: "pointer",
                     }}
                     disabled={trust.isPending}
-                    onClick={() => set(!domain.trustedAt, domain)}
+                    onClick={() => setChange({ trusted: !domain.trustedAt, domain })}
                   >
                     {t(domain.trustedAt ? "untrustDomain" : "trustDomain")}
                   </button>
@@ -1076,6 +1094,36 @@ function WarmupCard({
           )}
         </tbody>
       </Table>
+      <Modal
+        open={change !== null}
+        onClose={close}
+        onConfirm={confirm}
+        title={t(`${ask}.title`, { name: change?.domain?.name ?? team.name })}
+      >
+        <p style={DIALOG_LEAD}>
+          {t(`${ask}.lead`, {
+            count: change?.domain?.waiting ?? warmup.waiting,
+            kept: warmup.domains.filter((d) => d.trustedAt).length,
+            teamTrust: teamTrusted ? "trusted" : "other",
+          })}
+        </p>
+        <ModalFooter>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={close}>
+            {common("cancel")}
+            <span className="ms-keycap">Esc</span>
+          </button>
+          <button
+            type="button"
+            className={`ms-btn ${change?.trusted === false ? "ms-btn-destructive" : "ms-btn-primary"}`}
+            disabled={trust.isPending}
+            onClick={confirm}
+          >
+            <BtnSpinner on={trust.isPending} />
+            {t(`${ask}.confirm`)}
+            <ConfirmKeycap />
+          </button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 }
