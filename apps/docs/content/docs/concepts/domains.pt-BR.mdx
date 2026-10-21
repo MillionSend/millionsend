@@ -307,7 +307,16 @@ domínio aparece como **Parcial** no painel: verificado para enviar, com o
 rastreamento ainda não ativo. No Cloudflare, o registro de rastreamento precisa
 ficar como **somente DNS** (nuvem cinza): um CNAME com proxy responde com os
 endereços do Cloudflare em vez do alvo, o que a tabela de registros mostra como
-divergência, e o TLS do host de rastreamento é servido pelo MillionSend.
+divergência, e o TLS do host de rastreamento é servido pelo MillionSend. Um host
+de rastreamento só redireciona os links da equipe cujo domínio o detém, e um
+domínio passa a deter seu host de rastreamento ao ser verificado, mesmo que
+depois perca a verificação. No MillionSend Cloud, um host que nenhum domínio
+detém não redireciona nada: depois que você troca o subdomínio de rastreamento
+ou exclui o domínio ou a equipe, os links já enviados pelo host antigo deixam de
+redirecionar, e só voltam se a equipe adicionar o domínio de novo com o mesmo
+subdomínio de rastreamento e ele for verificado. Uma instância auto-hospedada
+redireciona os links de qualquer equipe por um host que nenhum domínio detém;
+por isso, remova o CNAME de rastreamento ao abrir mão de um host.
 
 ## Precisão da taxa de abertura
 

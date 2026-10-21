@@ -287,7 +287,14 @@ them clean, self-host falls back to the app host — and the domain shows as
 Cloudflare the tracking record must stay **DNS only** (grey cloud): a proxied
 CNAME answers with Cloudflare's addresses instead of the target, which the
 records table reports as a mismatch, and TLS for the tracking host is served
-by MillionSend.
+by MillionSend. A tracking host redirects only the links of the team whose
+domain holds it, and a domain holds its tracking host once verified, even if it
+later loses verification. On MillionSend Cloud a host no domain holds redirects
+nothing: after you change the tracking subdomain or delete the domain or the
+team, links already sent through the old host stop redirecting, and they resume
+only if the team adds the domain back with the same tracking subdomain and it
+verifies. A self-hosted instance redirects every team's links from a host no
+domain holds, so remove the tracking CNAME when you give a host up.
 
 ## Open-rate accuracy
 
