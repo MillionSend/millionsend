@@ -483,6 +483,66 @@ const SHARED_ROW_READ_ONLY =
 const RECORD_STATUS_NOTE =
   "Only the DKIM and MAIL FROM (SPF) rows gate sending. The DMARC row is recommended, and reads verified when a parent-domain policy covers the subdomain (see inherited_from and policy). Each record's live field says what public DNS answers now; detail explains a pending or failed row.";
 
+/*
+ * Built here, once: zod-to-openapi records every schema .openapi() returns,
+ * and what .extend(), .optional(), .refine() and its other wrapped modifiers
+ * return from one, in a module-level Map that never drops them (.omit() and
+ * .describe() results are not recorded). buildServer runs on every request,
+ * so building these there would grow the process for as long as it runs.
+ */
+const inboxId = z.uuid().describe("Inbox id from list_inboxes");
+const threadId = z.uuid().describe("Thread id from list_threads");
+const updateEmailInput = updateEmailRequestSchema.extend({
+  id: z.uuid().describe("Email id returned by send_email"),
+});
+const updateContactInput = updateContactRequestSchema.extend({ id: idOrEmail });
+const updateSegmentInput = updateSegmentRequestSchema.extend({
+  id: z.uuid().describe("Segment id from list_segments"),
+});
+const updateTopicInput = updateTopicRequestSchema.extend({
+  id: z.uuid().describe("Topic id from list_topics"),
+});
+const updateContactPropertyInput = updateContactPropertyRequestSchema.extend({
+  id: z.uuid().describe("Property id from list_contact_properties"),
+});
+const updateBroadcastInput = updateBroadcastRequestSchema.extend({
+  id: z.uuid().describe("Broadcast id from create_broadcast"),
+});
+const sendBroadcastInput = sendBroadcastRequestSchema.extend({
+  id: z.uuid().describe("Broadcast id from create_broadcast"),
+});
+const updateTemplateInput = updateTemplateRequestSchema.extend({
+  id: z.string().min(1).describe("Template id or alias"),
+});
+const updateWebhookInput = updateWebhookRequestSchema.extend({
+  id: z.uuid().describe("Webhook id from list_webhooks"),
+});
+const updateDomainInput = updateDomainRequestSchema.extend({
+  id: z.uuid().describe("Domain id from list_domains"),
+});
+const updateThreadInput = updateThreadRequestSchema.extend({
+  inbox_id: inboxId,
+  thread_id: threadId,
+});
+const updateInboxInput = updateInboxRequestSchema.extend({ inbox_id: inboxId });
+
+const teamIdArg = z
+  .uuid()
+  .optional()
+  .describe(
+    "Team to act in (this connection spans all your teams). Defaults to your oldest team; list_teams returns the ids.",
+  );
+const teamScopedInputs = new WeakMap<z.ZodObject, z.ZodObject>();
+/** A tool input plus an all-teams token's team_id argument, extended once per input (see above). */
+function teamScoped(input: z.ZodObject): z.ZodObject {
+  let scoped = teamScopedInputs.get(input);
+  if (!scoped) {
+    scoped = input.extend({ team_id: teamIdArg });
+    teamScopedInputs.set(input, scoped);
+  }
+  return scoped;
+}
+
 /**
  * Tools are registered read-only first and only for scopes the token
  * carries. Admin tools are skipped for a plain member; on an all-teams token
@@ -496,6 +556,7 @@ function buildServer(
   deps: ApiDeps,
   authInfo: AuthInfo,
   appBaseUrl: string,
+  createDomainInput: ReturnType<typeof createDomainRequestSchema> | undefined,
 ): McpServer {
   const server = new McpServer(
     {
@@ -538,12 +599,6 @@ function buildServer(
     const { ok, json } = await call;
     return toolResult(ok ? map(json) : json, ok);
   };
-  const teamIdArg = z
-    .uuid()
-    .optional()
-    .describe(
-      "Team to act in (this connection spans all your teams). Defaults to your oldest team; list_teams returns the ids.",
-    );
   const tool = <S extends z.ZodObject & StandardSchemaWithJSON>(
     name: string,
     scope: McpScope,
@@ -578,9 +633,7 @@ function buildServer(
       {
         title: cfg.title,
         description: cfg.description,
-        inputSchema: (teams
-          ? cfg.inputSchema.extend({ team_id: teamIdArg })
-          : cfg.inputSchema) as unknown as S,
+        inputSchema: (teams ? teamScoped(cfg.inputSchema) : cfg.inputSchema) as unknown as S,
         // Directory reviews read the title from annotations, the pre-2025-06 location.
         // Directories require every hint as an explicit boolean.
         annotations: {
@@ -952,8 +1005,6 @@ function buildServer(
     );
   }
   const receivedEmailId = z.uuid().describe("Received email id from list_received_emails");
-  const inboxId = z.uuid().describe("Inbox id from list_inboxes");
-  const threadId = z.uuid().describe("Thread id from list_threads");
   const senderFilter = z
     .string()
     .max(320)
@@ -1401,9 +1452,7 @@ function buildServer(
     {
       title: "Reschedule email",
       description: "Reschedule a scheduled email that has not been sent yet.",
-      inputSchema: updateEmailRequestSchema.extend({
-        id: z.uuid().describe("Email id returned by send_email"),
-      }),
+      inputSchema: updateEmailInput,
       destructive: true,
       idempotent: true,
       openWorld: true,
@@ -1470,7 +1519,7 @@ function buildServer(
       title: "Update contact",
       description:
         "Update a contact's name, custom properties or global unsubscribe flag. Omitted fields are left unchanged.",
-      inputSchema: updateContactRequestSchema.extend({ id: idOrEmail }),
+      inputSchema: updateContactInput,
       destructive: true,
       idempotent: true,
     },
@@ -1586,9 +1635,7 @@ function buildServer(
       title: "Update segment",
       description:
         "Rename a segment or change its filter (null clears the filter, making it manual).",
-      inputSchema: updateSegmentRequestSchema.extend({
-        id: z.uuid().describe("Segment id from list_segments"),
-      }),
+      inputSchema: updateSegmentInput,
       destructive: true,
       idempotent: true,
     },
@@ -1624,9 +1671,7 @@ function buildServer(
       title: "Update topic",
       description:
         "Update a topic's name, description or visibility. The default subscription is immutable.",
-      inputSchema: updateTopicRequestSchema.extend({
-        id: z.uuid().describe("Topic id from list_topics"),
-      }),
+      inputSchema: updateTopicInput,
       destructive: true,
       idempotent: true,
     },
@@ -1660,9 +1705,7 @@ function buildServer(
     {
       title: "Update contact property",
       description: "Update a custom contact property definition.",
-      inputSchema: updateContactPropertyRequestSchema.extend({
-        id: z.uuid().describe("Property id from list_contact_properties"),
-      }),
+      inputSchema: updateContactPropertyInput,
       destructive: true,
       idempotent: true,
     },
@@ -1741,9 +1784,7 @@ function buildServer(
     {
       title: "Update broadcast",
       description: "Update a draft broadcast's audience, content or subject.",
-      inputSchema: updateBroadcastRequestSchema.extend({
-        id: z.uuid().describe("Broadcast id from create_broadcast"),
-      }),
+      inputSchema: updateBroadcastInput,
       destructive: true,
       idempotent: true,
     },
@@ -1756,9 +1797,7 @@ function buildServer(
       title: "Send broadcast",
       description:
         "Send a draft broadcast now, or schedule it with scheduled_at. Recipients are resolved at send time; unsubscribed and topic-opted-out contacts are skipped. A large audience is paced over days; the response's finishes_at and warning say when it finishes.",
-      inputSchema: sendBroadcastRequestSchema.extend({
-        id: z.uuid().describe("Broadcast id from create_broadcast"),
-      }),
+      inputSchema: sendBroadcastInput,
       destructive: true,
       openWorld: true,
     },
@@ -1807,9 +1846,7 @@ function buildServer(
       title: "Update template",
       description:
         "Change a template's name, subject, html, text or alias (null clears the alias). Omitted fields are left unchanged; the change is live immediately. Writing html makes the template html-authored: it opens in the dashboard's code mode and keeps its HTML byte for byte; converting it to blocks is the user's explicit choice there.",
-      inputSchema: updateTemplateRequestSchema.extend({
-        id: z.string().min(1).describe("Template id or alias"),
-      }),
+      inputSchema: updateTemplateInput,
       destructive: true,
       idempotent: true,
     },
@@ -1847,9 +1884,7 @@ function buildServer(
       title: "Update webhook",
       description:
         "Update a webhook's endpoint URL, subscribed events, or enabled/disabled status.",
-      inputSchema: updateWebhookRequestSchema.extend({
-        id: z.uuid().describe("Webhook id from list_webhooks"),
-      }),
+      inputSchema: updateWebhookInput,
       destructive: true,
       idempotent: true,
       openWorld: true,
@@ -1881,7 +1916,7 @@ function buildServer(
     },
     ({ id }) => api("DELETE", `/api-keys/${enc(id)}`),
   );
-  if (deps.ses) {
+  if (deps.ses && createDomainInput) {
     const regions = servedRegions(deps.ses);
     tool(
       "create_domain",
@@ -1889,7 +1924,7 @@ function buildServer(
       {
         title: "Add domain",
         description: `Add a sending domain. region is optional: this deployment serves ${regions.join(", ")} (default ${regions[0]}) and refuses any other. A domain has one region, fixed when it is added. Returns the DNS records to create; the domain sends once they verify. Open and click tracking start off; open_tracking/click_tracking together with a tracking_subdomain set the domain up tracked in one call — its Tracking CNAME then comes back with the other records (same rules as update_domain).`,
-        inputSchema: createDomainRequestSchema(regions),
+        inputSchema: createDomainInput,
         openWorld: true,
       },
       (body) => api("POST", "/domains", body),
@@ -1900,9 +1935,7 @@ function buildServer(
       {
         title: "Update domain",
         description: `Change a domain's open/click tracking, or switch inbound mail for it on or off with capabilities.receiving (verified domains only, on an instance that receives mail; the returned records then include the Receiving MX). receiving_catch_all decides whether mail to an address with no inbox is stored (true) or refused (false); turning it on needs receiving and, on MillionSend Cloud, a paid plan. Tracking is served from the domain's own tracking subdomain: tracking_subdomain (a label such as "links") sets it, and the returned records include its CNAME; links are tracked through it once that CNAME resolves (verify_domain re-checks it). On MillionSend Cloud, turning tracking on without a subdomain is refused. ${SHARED_ROW_READ_ONLY}`,
-        inputSchema: updateDomainRequestSchema.extend({
-          id: z.uuid().describe("Domain id from list_domains"),
-        }),
+        inputSchema: updateDomainInput,
         destructive: true,
         idempotent: true,
         openWorld: true,
@@ -1979,7 +2012,7 @@ function buildServer(
         title: "Update thread",
         description:
           "Mark every message of a thread read or unread, move it to inbox, archive, spam or trash (moving it out of trash restores it; trash is emptied after 30 days), or apply a label from list_labels. Returns the thread.",
-        inputSchema: updateThreadRequestSchema.extend({ inbox_id: inboxId, thread_id: threadId }),
+        inputSchema: updateThreadInput,
         idempotent: true,
       },
       ({ inbox_id, thread_id, ...body }) =>
@@ -2027,7 +2060,7 @@ function buildServer(
         title: "Update inbox",
         description:
           'Rename an inbox, change the name recipients see (from_name), or give it a new lifetime counted from now (expires_in, like "24h" or "7d"; null never expires). On the shared domain a new from_name is reviewed first (503 with retry-after while that review is unavailable). An inbox is deleted when it expires, so making it expire sooner takes the owner or admin role. Returns the inbox.',
-        inputSchema: updateInboxRequestSchema.extend({ inbox_id: inboxId }),
+        inputSchema: updateInboxInput,
         destructive: true,
         idempotent: true,
       },
@@ -2090,12 +2123,15 @@ export function registerMcp(app: OpenAPIHono<Env>, deps: ApiDeps, appBaseUrl: st
     ),
     resourceMetadataUrl,
   };
-  // One McpServer per request: nothing is kept between calls, so the
-  // endpoint scales horizontally with no session affinity.
+  // createDomainRequestSchema calls .openapi(), so it is built once (see the note above
+  // the tool inputs).
+  const createDomainInput = deps.ses && createDomainRequestSchema(servedRegions(deps.ses));
+  // One McpServer per request and no session state, so the endpoint scales
+  // horizontally with no session affinity.
   const handler = createMcpHandler(
     ({ authInfo }) => {
       if (!authInfo) throw new Error("mcp handler invoked without authInfo");
-      return buildServer(app, deps, authInfo, appBaseUrl);
+      return buildServer(app, deps, authInfo, appBaseUrl, createDomainInput);
     },
     {
       onerror: (err) => console.error("mcp error", err),

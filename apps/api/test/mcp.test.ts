@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
@@ -1078,6 +1079,29 @@ describe('all-teams tokens (team_id claim "*")', () => {
       body: ping,
     });
     expect(res.status).toBe(401);
+  });
+
+  it("serving requests leaves zod-to-openapi's schema registry the size it was", async () => {
+    // The registry keeps every schema .openapi() returns, and what .extend()
+    // and similar return from one, in a plain Map, so a tool schema built that
+    // way per request would stay in memory for the life of the process.
+    const registry = createRequire(createRequire(import.meta.url).resolve("@hono/zod-openapi"))(
+      "@asteasolutions/zod-to-openapi",
+    ).zodToOpenAPIRegistry as { _map: Map<unknown, unknown> };
+    const serve = async () => {
+      for (const token of [await mintToken(), await mintToken({ team_id: "*" })]) {
+        const client = await connect(token);
+        await client.listTools();
+        await client.close();
+      }
+    };
+    await serve();
+    const before = registry._map.size;
+    // Another zod-to-openapi instance than the app's would read 0 and pass vacuously.
+    expect(before).toBeGreaterThan(0);
+    await serve();
+    await serve();
+    expect(registry._map.size).toBe(before);
   });
 });
 

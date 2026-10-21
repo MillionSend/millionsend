@@ -15,8 +15,8 @@ instead of one supervised container:
 
 Postgres is **not** part of the chart. Bring Postgres 17 (CloudNativePG, RDS,
 Cloud SQL, ...) with `max_connections` of at least 200: each app process pools
-up to 24 connections. Also set `max_parallel_workers_per_gather = 0`, as the
-compose file does.
+up to 24 connections. Also set `max_parallel_workers_per_gather = 0` and
+`jit = off`, as the compose file does.
 
 Every variable from [`.env.example`](../../../.env.example) works here: put
 non-secret values under `config` (a ConfigMap) and secret values in the Secret
