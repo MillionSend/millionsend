@@ -15,6 +15,7 @@ import {
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactActivityRow,
   type ContactEventContext,
+  type ContactPropertyType,
   type ContactSnapshot,
   cancelBroadcastRows,
   canonicalBodyHash,
@@ -69,6 +70,7 @@ import {
   PACING_HORIZON_MAX_RETENTION_DAYS,
   PLAN_CONTACT_LIMIT,
   pacingHorizonDays,
+  parsePropertyDate,
   parseScheduledAt,
   planCaps,
   planRegionSend,
@@ -692,7 +694,7 @@ function toAcceptPayload(body: SendEmailRequest, domainId: string | null): Accep
 
 /** Registered property types by lower(key) — the registry index is
  * case-insensitive, and contact map keys are matched the same way. */
-type ContactPropertyTypes = Map<string, "string" | "number">;
+type ContactPropertyTypes = Map<string, ContactPropertyType>;
 
 async function loadContactPropertyTypes(db: Db, teamId: string): Promise<ContactPropertyTypes> {
   const p = schema.contactProperties;
@@ -718,7 +720,8 @@ export function numericPropertyValue(value: unknown): number | null {
  * `removed` (the update path unsets it; create and batch have nothing to
  * unset). Invalid — for a precise 422 rather than silently storing bad
  * data — are nested objects/arrays, and values for a key registered as
- * 'number' that don't parse to a finite number.
+ * 'number' that don't parse to a finite number, or as 'date' that don't read
+ * as a date. A date is stored trimmed, as written, never rewritten.
  */
 function coerceContactProperties(
   input: Record<string, unknown>,
@@ -737,10 +740,17 @@ function coerceContactProperties(
     if (typeof value === "object") {
       return { ok: false, message: "contact properties must be flat string or number values" };
     }
-    if (types.get(key.toLowerCase()) === "number" && numericPropertyValue(value) === null) {
+    const type = types.get(key.toLowerCase());
+    if (type === "number" && numericPropertyValue(value) === null) {
       return { ok: false, message: `property "${key}" must be a number` };
     }
-    const text = String(value);
+    if (type === "date" && parsePropertyDate(String(value)) === null) {
+      return {
+        ok: false,
+        message: `property "${key}" must be a date, such as 2026-01-08, 2026-01-08T10:30:00Z or Unix time`,
+      };
+    }
+    const text = type === "date" ? String(value).trim() : String(value);
     if (text.length > CONTACT_PROPERTY_VALUE_MAX_LENGTH) {
       return {
         ok: false,
@@ -754,12 +764,14 @@ function coerceContactProperties(
 
 type WireContactPropertyValue =
   | { type: "string"; value: string }
-  | { type: "number"; value: number };
+  | { type: "number"; value: number }
+  | { type: "date"; value: string };
 
 /**
  * GET /contacts/{id} wire: each stored value wrapped as {type, value}, typed
- * per the team's registry. Unregistered keys — and number-typed values that
- * no longer parse (typed after the value was stored) — read as strings.
+ * per the team's registry. Unregistered keys, and number- or date-typed
+ * values that no longer parse (typed after the value was stored), read as
+ * strings.
  */
 function wireContactProperties(
   map: Record<string, string>,
@@ -767,8 +779,14 @@ function wireContactProperties(
 ): Record<string, WireContactPropertyValue> {
   const out: Record<string, WireContactPropertyValue> = {};
   for (const [key, value] of Object.entries(map)) {
-    const num = types.get(key.toLowerCase()) === "number" ? numericPropertyValue(value) : null;
-    out[key] = num === null ? { type: "string", value } : { type: "number", value: num };
+    const type = types.get(key.toLowerCase());
+    const num = type === "number" ? numericPropertyValue(value) : null;
+    out[key] =
+      num !== null
+        ? { type: "number", value: num }
+        : type === "date" && parsePropertyDate(value) !== null
+          ? { type: "date", value }
+          : { type: "string", value };
   }
   return out;
 }

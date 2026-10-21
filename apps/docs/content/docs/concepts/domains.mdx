@@ -191,7 +191,10 @@ newest of these signals. You choose which ones count on the **Warm-up** tab.
 - The last transactional email they got from your team in the last 30 days.
 - A contact property you pick, read as a date, such as a last login. It
   takes an ISO 8601 date or date-time, or Unix time in seconds or
-  milliseconds.
+  milliseconds between the years 2000 and 2100, so a count never reads as a
+  date. The list shows your [date properties](/concepts/contacts#property-types)
+  first, then other properties where at least half the values are dates,
+  read from your 20,000 most recently updated contacts.
 
 A contact whose newest signal is 90 days old or more is inactive. By default
 the warm-up skips inactive contacts: they don't get the broadcast, and the

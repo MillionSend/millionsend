@@ -20,6 +20,35 @@ data de criação) e sobre
 com operadores como igual, contém, definido / não definido e comparações de
 data. As condições combinam com e/ou.
 
+## Datas
+
+`created_at` e qualquer propriedade aceitam quatro operadores de data:
+
+| Operador | Pega a data que | Valor |
+| --- | --- | --- |
+| `before` | vem antes do valor | Uma data ou data e hora ISO 8601 |
+| `after` | vem depois do valor | Uma data ou data e hora ISO 8601 |
+| `in_last_days` | fica entre N dias atrás e agora | N, de 1 a 36500 |
+| `not_in_last_days` | é de mais de N dias atrás | N, de 1 a 36500 |
+
+```json
+{
+  "match": "all",
+  "conditions": [
+    { "field": "property:last_login", "op": "not_in_last_days", "value": "90" }
+  ]
+}
+```
+
+A propriedade é lida como data do mesmo jeito que uma
+[propriedade de data](/pt-BR/concepts/contacts#tipos-de-propriedade) aceita
+uma. Um valor que não é data não entra em nenhum desses operadores, e uma
+data que ainda vai chegar não entra em `in_last_days` nem em
+`not_in_last_days`. Para achar contatos sem a propriedade, use `is_not_set`.
+Os operadores de texto valem para qualquer propriedade, seja qual for o tipo.
+No painel, os operadores de data aparecem para `created_at` e para as
+propriedades de data.
+
 ## Usando segmentos
 
 - **Transmissões** — envie para um segmento em vez de todos os contatos. O fan-out

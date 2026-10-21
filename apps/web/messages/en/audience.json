@@ -44,9 +44,12 @@
     "deleteBody": "{key} is removed from your defined properties. Contact values are not affected.",
     "deleteConfirm": "Delete property",
     "typeNumber": "Number",
+    "typeDate": "Date",
     "typeImmutable": "The type can't be changed after the property is created.",
     "fallbackNumberPlaceholder": "e.g. 0",
+    "fallbackDatePlaceholder": "e.g. 2026-01-08",
     "fallbackInvalidNumber": "The fallback value must be a number.",
+    "fallbackInvalidDate": "The fallback value must be a date, like 2026-01-08.",
     "searchPlaceholder": "Search properties…",
     "allTypes": "All types",
     "noMatch": "No properties match the filters.",
@@ -317,7 +320,9 @@
       "is_true": "is unsubscribed",
       "is_false": "is subscribed",
       "before": "is before",
-      "after": "is after"
+      "after": "is after",
+      "in_last_days": "is in the last",
+      "not_in_last_days": "is more than"
     },
     "builder": {
       "nameLabel": "Name",
@@ -330,6 +335,9 @@
       "propertyKeyPlaceholder": "Property key",
       "valuePlaceholder": "Value",
       "noValue": "No value needed",
+      "daysLabel": "Days",
+      "days": "{count, plural, one {# day} other {# days}}",
+      "daysAgo": "{count, plural, one {# day ago} other {# days ago}}",
       "removeRow": "Remove condition",
       "matchLabel": "Match",
       "editCondition": "Edit condition",

@@ -8,6 +8,14 @@ export const CONTACT_PROPERTY_KEY_MAX_LENGTH = 200;
 export const CONTACT_PROPERTY_VALUE_MAX_LENGTH = 1000;
 
 /**
+ * A property definition's type: Resend's string and number, plus date, a
+ * MillionSend extension whose values must read as a date (property-date.ts).
+ * Imports nothing, so the dashboard can read it in the browser.
+ */
+export const CONTACT_PROPERTY_TYPES = ["string", "number", "date"] as const;
+export type ContactPropertyType = (typeof CONTACT_PROPERTY_TYPES)[number];
+
+/**
  * Whether writing `incoming` over `current` (a jsonb `||` merge) and dropping
  * `removed` would change the stored map. No-op writes are skipped upstream so
  * a full re-upsert neither moves `updated_at` nor fires `contact.updated`.

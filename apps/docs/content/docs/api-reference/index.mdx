@@ -117,6 +117,11 @@ remaining deltas are deliberate and loud:
 - Contacts are team-global — audience endpoints are served as aliases of
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
+- Contact properties take a third type, `date`, beside Resend's `string` and
+  `number`. Only a team that defines one sees it: its values come back from
+  `GET /contacts/{id}` as `{ "type": "date", "value": "2026-01-08" }`, a type
+  Resend's SDK types don't list. See
+  [Contacts → Property types](/concepts/contacts#property-types).
 - `POST /domains` takes an optional `region`, which must be one of the SES
   regions the deployment serves — the values its request schema lists, the
   first being the default — and is rejected with `422` otherwise. A domain
