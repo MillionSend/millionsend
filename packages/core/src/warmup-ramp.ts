@@ -13,6 +13,7 @@ import {
   MAILBOX_FULL_PATTERN,
   NO_COMPLAINT_FEEDBACK_DOMAINS,
 } from "./mailbox-providers.js";
+import { propertyDateSql } from "./segment-filter.js";
 import { SES_QUOTA_SLOT_MS } from "./ses-capacity.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -861,27 +862,79 @@ export function warmupMailValues(event: WarmupEvent, locale: MailLocale): Record
   };
 }
 
-const EPOCH_PATTERN = "^\\d{1,13}(\\.\\d+)?$";
-const DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
-const DATE_TIME_PATTERN = "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?";
-const ZONE_PATTERN = "(Z|[+-]\\d{2}(:?\\d{2})?)$";
-/** Epoch values from here up are milliseconds: as seconds they would be past the year 5000. */
-const EPOCH_MS_FROM = 100_000_000_000;
-
 /**
- * A contact property read as a date: an ISO 8601 date or date-time (in UTC
- * when it names no zone), or epoch seconds or milliseconds; anything else
- * is null. Parsed only here, in SQL, so the fan-out's order and every count
- * of inactive contacts read a property alike.
+ * A contact's property `key` read as a date (property-date.ts), in SQL, so
+ * the fan-out's order and every count of inactive contacts read it alike.
  */
 export function contactPropertyDateSql(key: string): SQL<Date | null> {
-  const v = sql`btrim(${schema.contacts.properties}->>${key})`;
-  return sql<Date | null>`case
-    when ${v} ~ ${EPOCH_PATTERN} then to_timestamp((${v}::numeric / case when ${v}::numeric >= ${EPOCH_MS_FROM} then 1000 else 1 end)::float8)
-    when ${v} ~ ${DATE_PATTERN} and pg_input_is_valid(${v}, 'date') then ${v}::date::timestamp at time zone 'UTC'
-    when ${v} ~ ${DATE_TIME_PATTERN + ZONE_PATTERN} and pg_input_is_valid(${v}, 'timestamptz') then ${v}::timestamptz
-    when ${v} ~ ${`${DATE_TIME_PATTERN}$`} and pg_input_is_valid(${v}, 'timestamp') then ${v}::timestamp at time zone 'UTC'
-  end`.mapWith(schema.contacts.lastEngagedAt);
+  return propertyDateSql(sql`${schema.contacts.properties}->>${key}`);
+}
+
+const PROPERTY_OPTIONS_SAMPLE = 20_000;
+
+export interface WarmupPropertyOption {
+  key: string;
+  /** Defined as a date property. */
+  declared: boolean;
+  /** How many sampled contacts hold a date in it, and the newest one. */
+  dated: number;
+  latest: Date | null;
+}
+
+/**
+ * The properties the warm-up can order by: every property defined as a
+ * date, with values or not, then any other key at least half of whose
+ * non-empty values read as dates, the most dated first. A definition matches
+ * contact keys in any letter case, as API writes do, and lists the key as
+ * contacts write it: the warm-up reads that exact key.
+ * ponytail: reads only the 20,000 most recently updated contacts, so
+ * `dated` and `latest` count that sample. Read them all if a key that only
+ * older contacts carry ever needs to show.
+ */
+export async function warmupPropertyOptions(
+  db: Db,
+  teamId: string,
+): Promise<WarmupPropertyOption[]> {
+  const c = schema.contacts;
+  const p = schema.contactProperties;
+  const rows = resultRows<{
+    key: string;
+    declared: boolean;
+    dated: number;
+    latest_ms: number | string | null;
+  }>(
+    await db.execute(sql`
+      with sample as (
+        select ${c.properties} as properties from ${c}
+        where ${c.teamId} = ${teamId}
+        order by ${c.updatedAt} desc
+        limit ${PROPERTY_OPTIONS_SAMPLE}
+      ), seen as (
+        select kv.key, count(*)::int as filled, count(d.at)::int as dated, max(d.at) as latest
+        from sample
+        cross join lateral jsonb_each_text(sample.properties) as kv(key, value)
+        cross join lateral (select ${propertyDateSql(sql`kv.value`)} as at) d
+        where kv.value <> ''
+        group by kv.key
+      ), declared as (
+        select ${p.key} as key from ${p} where ${p.teamId} = ${teamId} and ${p.type} = 'date'
+      )
+      select coalesce(seen.key, declared.key) as key,
+        declared.key is not null as declared,
+        coalesce(seen.dated, 0) as dated,
+        (extract(epoch from seen.latest) * 1000)::float8 as latest_ms
+      from declared
+      full join seen on lower(seen.key) = lower(declared.key)
+      where declared.key is not null or seen.dated * 2 >= seen.filled
+      order by 2 desc, 3 desc, 1
+    `),
+  );
+  return rows.map((r) => ({
+    key: r.key,
+    declared: r.declared,
+    dated: Number(r.dated),
+    latest: r.latest_ms === null ? null : new Date(Number(r.latest_ms)),
+  }));
 }
 
 type OrderSettings = Pick<

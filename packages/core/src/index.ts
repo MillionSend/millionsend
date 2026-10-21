@@ -288,7 +288,9 @@ export {
 export {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
+  CONTACT_PROPERTY_TYPES,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
+  type ContactPropertyType,
   contactPropertiesChange,
 } from "./contact-properties.js";
 export {
@@ -658,6 +660,7 @@ export {
   sesComplaintReadings,
 } from "./platform-breaker.js";
 export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
+export { parsePropertyDate, SEGMENT_FILTER_MAX_DAYS } from "./property-date.js";
 export { broadcastProviderBreakdown, type ProviderBreakdownRow } from "./provider-breakdown.js";
 export {
   dailyCeiling,
@@ -738,6 +741,7 @@ export {
 } from "./segment-counts.js";
 export {
   escapeLike,
+  propertyDateSql,
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
   SegmentFilterError,
@@ -956,6 +960,7 @@ export {
   type WarmupOverview,
   type WarmupPlan,
   type WarmupPlanInput,
+  type WarmupPropertyOption,
   type WarmupRelease,
   type WarmupSendPreview,
   type WarmupSettings,
@@ -964,6 +969,7 @@ export {
   warmupDayOutcome,
   warmupMailValues,
   warmupOverview,
+  warmupPropertyOptions,
   warmupRelease,
   warmupSendOrder,
   warmupSendPreview,

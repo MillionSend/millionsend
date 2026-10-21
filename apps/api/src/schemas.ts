@@ -3,6 +3,7 @@ import {
   attachmentVerdict,
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
+  CONTACT_PROPERTY_TYPES,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   customHeaderIssues,
   DAY_MS,
@@ -883,10 +884,12 @@ const contactSchema = z.object({
 
 // The SDK's GetContactResponseSuccess types each property as a {type, value}
 // wrapper (ContactPropertyValue): number for keys registered as 'number' in
-// the team's property definitions, string otherwise.
+// the team's property definitions, string otherwise. 'date' (the stored text)
+// is a MillionSend extension, served only for keys registered as 'date'.
 const contactPropertyValueSchema = z.union([
   z.object({ type: z.literal("string"), value: z.string() }),
   z.object({ type: z.literal("number"), value: z.number() }),
+  z.object({ type: z.literal("date"), value: z.string() }),
 ]);
 
 export const getContactResponseSchema = contactSchema
@@ -1093,10 +1096,15 @@ export const batchContactsResponseSchema = z
  * snake_case, fallback_value typed per `type`.
  */
 
-const contactPropertyTypeSchema = z.enum(["string", "number"]);
+const contactPropertyTypeSchema = z
+  .enum(CONTACT_PROPERTY_TYPES)
+  .describe(
+    "string or number, as on Resend, or date (MillionSend extension): an ISO 8601 date or date-time, or Unix time in seconds or milliseconds from 2000 to 2100",
+  );
 
 // fallback_value is cross-validated against `type` in the handler (a number
-// property only accepts values that parse to a finite number).
+// property only accepts values that parse to a finite number, a date one
+// only values that read as a date).
 export const createContactPropertyRequestSchema = z
   .object({
     key: z.string().trim().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH),

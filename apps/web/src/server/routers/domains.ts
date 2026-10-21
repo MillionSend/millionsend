@@ -39,7 +39,6 @@ import {
   PLAN_DOMAIN_LIMIT,
   pauseWarmup,
   planWarmupDays,
-  resultRows,
   resumeWarmup,
   setDomainReceiving,
   turnOffWarmup,
@@ -48,6 +47,7 @@ import {
   WARMUP_LIMITS,
   type WarmupOverview,
   warmupOverview,
+  warmupPropertyOptions,
   webhookBatch,
 } from "@millionsend/core";
 import { registrableDomain } from "@millionsend/core/org-domain";
@@ -73,7 +73,7 @@ import {
   verificationDbPatch,
 } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
-import { and, count, desc, eq, isNotNull, min, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, min } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
@@ -270,21 +270,6 @@ async function mailRetentionDays(db: Db): Promise<number> {
       EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
     ).value,
   );
-}
-
-/** The property keys the team's contacts carry with a value, the ones the segment builder lists. */
-async function contactPropertyKeys(db: Db, teamId: string): Promise<string[]> {
-  const c = schema.contacts;
-  const rows = resultRows<{ key: string }>(
-    await db.execute(sql`
-      select distinct kv.key as key
-      from ${c} c
-      cross join lateral jsonb_each_text(c.properties) as kv(key, value)
-      where c.team_id = ${teamId} and kv.value <> ''
-      order by 1
-    `),
-  );
-  return rows.map((row) => row.key);
 }
 
 /** When this domain's oldest broadcast mail parked for its warm-up leaves with retention. */
@@ -745,7 +730,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       const now = new Date();
       const [overview, properties, expiresAt] = await Promise.all([
         warmupOverview(ctx.db, { teamId: ctx.teamId, domainId: input.id, now }),
-        contactPropertyKeys(ctx.db, ctx.teamId),
+        warmupPropertyOptions(ctx.db, ctx.teamId),
         waitingExpiresAt(ctx.db, ctx.teamId, input.id),
       ]);
       if (!overview) throw new TRPCError({ code: "NOT_FOUND" });
@@ -788,6 +773,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
                 count: o.audience.total - (o.settings.skipInactive ? o.audience.inactive : 0),
               }).perDay
             : null,
+        // Date properties, then keys whose values mostly read as dates.
         properties,
         limits: { dailyTarget: WARMUP_LIMITS.dailyTarget, startVolume: WARMUP_LIMITS.startVolume },
         waitingExpiresAt: o.waiting > 0 ? expiresAt : null,

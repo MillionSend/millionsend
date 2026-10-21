@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildAccountMail } from "../src/account-mail.js";
 import { mailPreferenceOf } from "../src/mail-preferences.js";
@@ -25,6 +25,7 @@ import {
   warmupDayOutcome,
   warmupMailValues,
   warmupOverview,
+  warmupPropertyOptions,
   warmupSendOrder,
   warmupSendPreview,
   warmupSignals,
@@ -298,6 +299,7 @@ describe("activity", () => {
     );
     expect((await propertyDate("1767225600"))?.toISOString()).toBe(iso("2026-01-01T00:00:00Z"));
     expect((await propertyDate("1767225600000"))?.toISOString()).toBe(iso("2026-01-01T00:00:00Z"));
+    expect((await propertyDate("1767225600.5"))?.toISOString()).toBe(iso("2026-01-01T00:00:00.5Z"));
   });
 
   it("reads anything else as no signal", async () => {
@@ -312,6 +314,19 @@ describe("activity", () => {
       "99999999999999999999",
     ]) {
       expect(await propertyDate(junk), junk).toBeNull();
+    }
+  });
+
+  it("reads a count as no date, so it leaves the contact unknown rather than inactive since 1970", async () => {
+    for (const count of ["3", "1500", "20260108"]) {
+      const at = await propertyDate(count);
+      expect(at, count).toBeNull();
+      const activity = contactActivity(
+        { orderByEngagement: false, orderByTransactional: false, orderProperty: "seen" },
+        { engagedAt: null, transactionalAt: null, propertyAt: at },
+        NOW,
+      );
+      expect(isInactiveContact(activity, NOW), count).toBe(false);
     }
   });
 
@@ -973,5 +988,84 @@ describe("the overview and the send preview", () => {
       days: 1,
       finishesAt: NOW,
     });
+  });
+});
+
+describe("warmupPropertyOptions", () => {
+  async function teamWith(
+    slug: string,
+    defined: { key: string; type: "string" | "number" | "date" }[],
+    properties: Record<string, string>[],
+  ): Promise<string> {
+    const teamId = await createTeam(db, slug);
+    if (defined.length > 0) {
+      await db.insert(schema.contactProperties).values(defined.map((d) => ({ teamId, ...d })));
+    }
+    await db
+      .insert(schema.contacts)
+      .values(
+        properties.map((p, i) => ({ teamId, email: `${slug}${i}@example.com`, properties: p })),
+      );
+    return teamId;
+  }
+
+  it("lists date properties first, values or not, then keys at least half dates, the most dated first", async () => {
+    const teamId = await teamWith(
+      "options",
+      [
+        { key: "renewal", type: "date" },
+        { key: "last_login", type: "date" },
+        { key: "plan", type: "string" },
+      ],
+      [
+        {
+          last_login: "2026-10-01",
+          seen: "2026-09-01T10:00:00Z",
+          half: "2026-01-01",
+          plan: "pro",
+          count: "3",
+        },
+        { last_login: "soon", seen: "1767225600", half: "nope", plan: "free", count: "1500" },
+        { seen: "not yet", half: "", count: "" },
+      ],
+    );
+    await teamWith("options-other", [{ key: "elsewhere", type: "date" }], [{ born: "2026-01-01" }]);
+
+    expect(await warmupPropertyOptions(db, teamId)).toEqual([
+      { key: "last_login", declared: true, dated: 1, latest: new Date("2026-10-01T00:00:00Z") },
+      { key: "renewal", declared: true, dated: 0, latest: null },
+      { key: "seen", declared: false, dated: 2, latest: new Date("2026-09-01T10:00:00Z") },
+      { key: "half", declared: false, dated: 1, latest: new Date("2026-01-01T00:00:00Z") },
+    ]);
+  });
+
+  it("matches a date property to the contacts' key in any letter case, listed as they write it", async () => {
+    const teamId = await teamWith(
+      "options-case",
+      [{ key: "LastLogin", type: "date" }],
+      [{ lastLogin: "2026-10-01" }, { lastLogin: "2026-09-01T10:00:00Z" }],
+    );
+    expect(await warmupPropertyOptions(db, teamId)).toEqual([
+      { key: "lastLogin", declared: true, dated: 2, latest: new Date("2026-10-01T00:00:00Z") },
+    ]);
+  });
+
+  it("reads only the 20,000 most recently updated contacts", async () => {
+    const teamId = await createTeam(db, "options-sample");
+    const c = schema.contacts;
+    await db.insert(c).values([
+      {
+        teamId,
+        email: "old@example.com",
+        properties: { old_seen: "2026-01-01" },
+        updatedAt: new Date("2020-01-01T00:00:00Z"),
+      },
+      { teamId, email: "new@example.com", properties: { new_seen: "2026-01-01" } },
+    ]);
+    await db.execute(sql`
+      insert into ${c} (team_id, email)
+      select ${teamId}, 'bulk' || g || '@example.com' from generate_series(1, 19999) g
+    `);
+    expect((await warmupPropertyOptions(db, teamId)).map((o) => o.key)).toEqual(["new_seen"]);
   });
 });

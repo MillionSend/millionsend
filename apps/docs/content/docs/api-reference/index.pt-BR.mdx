@@ -125,6 +125,12 @@ deliberadas e explícitas:
 - Contatos são globais à equipe — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
+- As propriedades de contato aceitam um terceiro tipo, `date`, além de
+  `string` e `number` do Resend. Só uma equipe que define uma propriedade
+  assim o vê: os valores dela voltam de `GET /contacts/{id}` como
+  `{ "type": "date", "value": "2026-01-08" }`, um tipo que os tipos do SDK do
+  Resend não listam. Veja
+  [Contatos → Tipos de propriedade](/pt-BR/concepts/contacts#tipos-de-propriedade).
 - `POST /domains` aceita um `region` opcional, que precisa ser uma das regiões
   do SES que a instalação atende — os valores que o schema da requisição lista,
   a primeira sendo a padrão — e é recusado com `422` caso contrário. Um domínio

@@ -22,6 +22,7 @@ import { Tooltip } from "@/components/tooltip";
 import { PaceBand, warmupSentSteps, warmupTodayStep } from "@/components/warmup-rail";
 import { formatPercent } from "@/lib/console-format";
 import {
+  formatDate,
   formatDay,
   formatDayTime,
   formatStepDay,
@@ -348,7 +349,7 @@ function SettingsSections({
   data: Warmup;
   showStart: boolean;
 }) {
-  const { t, n } = useCopy();
+  const { t, locale, n } = useCopy();
   const save = useSaveSettings(id);
   const [picking, setPicking] = useState(false);
   const s = data.settings;
@@ -357,9 +358,9 @@ function SettingsSections({
     save.mutate({ id, settings }, { onError: () => toast(t("error"), "danger") });
   const byProperty = s.orderProperty !== null || picking;
   // A stored key no contact carries any more still shows as chosen.
-  const keys =
-    s.orderProperty && !data.properties.includes(s.orderProperty)
-      ? [s.orderProperty, ...data.properties]
+  const options =
+    s.orderProperty && !data.properties.some((option) => option.key === s.orderProperty)
+      ? [{ key: s.orderProperty, dated: 0, latest: null }, ...data.properties]
       : data.properties;
   // Every row is as tall as the property row's select, so the list keeps one gap.
   const row: React.CSSProperties = {
@@ -419,7 +420,16 @@ function SettingsSections({
                 ...(s.orderProperty
                   ? []
                   : [{ value: "", label: t("settings.propertyPlaceholder"), disabled: true }]),
-                ...keys.map((key) => ({ value: key, label: key })),
+                ...options.map((option) => ({
+                  value: option.key,
+                  label: option.key,
+                  hint: option.latest
+                    ? t("settings.propertyDates", {
+                        count: option.dated,
+                        latest: formatDate(option.latest, locale),
+                      })
+                    : t("settings.propertyNoDates"),
+                })),
               ]}
             />
             <span style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
@@ -428,7 +438,7 @@ function SettingsSections({
                     count: n(data.audience.withProperty ?? 0),
                     total: n(data.audience.total),
                   })
-                : t("settings.propertyHint")}
+                : t(options.length > 0 ? "settings.propertyHint" : "settings.propertyNone")}
             </span>
           </div>
         </div>

@@ -1551,8 +1551,9 @@ describe("domain warm-up", () => {
     });
   });
 
-  it("previews a send to everyone while off, and lists the keys contacts carry", async () => {
+  it("previews a send to everyone while off, and lists date properties, then keys holding dates", async () => {
     const { teamId, id } = await warmupDomain();
+    await db.insert(schema.contactProperties).values({ teamId, key: "renewal", type: "date" });
     await db.insert(schema.contacts).values([
       { teamId, email: "a@example.com", properties: { plan: "pro", last_login_at: "2026-10-01" } },
       { teamId, email: "b@example.com", properties: { plan: "" } },
@@ -1560,7 +1561,10 @@ describe("domain warm-up", () => {
     ]);
     const warmup = await callerFor(teamId, fakeSes().deps).domains.warmup({ id });
     expect(warmup.preview).toEqual([{ day: "2026-10-18", count: 3 }]);
-    expect(warmup.properties).toEqual(["last_login_at", "plan"]);
+    expect(warmup.properties).toMatchObject([
+      { key: "renewal", declared: true, dated: 0, latest: null },
+      { key: "last_login_at", declared: false, dated: 1, latest: new Date("2026-10-01T00:00:00Z") },
+    ]);
     expect(warmup.limits.dailyTarget).toEqual({ min: 1_000, max: 10_000_000 });
   });
 

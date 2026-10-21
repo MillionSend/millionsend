@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
-import { segmentContactsWhere } from "./segment-filter.js";
+import { RELATIVE_DATE_FILTER_PATH, segmentContactsWhere } from "./segment-filter.js";
 
 export interface SegmentCounts {
   count: number;
@@ -76,7 +76,9 @@ export async function markSegmentsStale(
  * statement per segment so no single query grows with the number of segments.
  * A stale segment is skipped while no contact of its team and no manual
  * member was written since it was counted (index lookups, never a scan), so
- * an idle team's segments cost nothing between imports.
+ * an idle team's segments cost nothing between imports. A filter relative to
+ * now (in_last_days, not_in_last_days) changes with no write at all, so it
+ * is recounted whenever it is stale.
  */
 export async function recountStaleSegments(
   db: Db,
@@ -101,7 +103,18 @@ export async function recountStaleSegments(
   const stale = await db
     .select({ id: s.id, teamId: s.teamId, filter: s.filter })
     .from(s)
-    .where(or(isNull(s.countedAt), and(lt(s.countedAt, before), changedSince)))
+    .where(
+      or(
+        isNull(s.countedAt),
+        and(
+          lt(s.countedAt, before),
+          or(
+            changedSince,
+            sql`jsonb_path_exists(${s.filter}, ${RELATIVE_DATE_FILTER_PATH}::jsonpath)`,
+          ),
+        ),
+      ),
+    )
     .orderBy(asc(s.countedAt))
     .limit(opts.limit ?? 200);
   for (const segment of stale) {

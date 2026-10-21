@@ -153,3 +153,49 @@ it("a write stamped just before counted_at (committed after the count's snapshot
     .values({ segmentId: segment.id, contactId: contact.id, createdAt: minutesBefore(2, idle) });
   expect(await recountStaleSegments(db, { olderThanMs: 30 * 60_000, now: later })).toBe(1);
 });
+
+it("recounts a filter relative to now whenever it is stale, with no write since", async () => {
+  const teamId = await createTeam(db, "segment-counts-relative");
+  const now = new Date("2026-09-04T12:00:00Z");
+  await db.insert(schema.contacts).values({
+    teamId,
+    email: "x@example.com",
+    properties: { last_login: "2026-08-20" },
+    updatedAt: new Date("2026-08-20T00:00:00Z"),
+  });
+  const segments = await db
+    .insert(schema.segments)
+    .values(
+      (
+        [
+          ["in_last_days", "30"],
+          ["after", "2026-01-01"],
+        ] as const
+      ).map(([op, value]) => ({
+        teamId,
+        name: op,
+        filter: {
+          match: "all" as const,
+          conditions: [{ field: "property:last_login", op, value }],
+        },
+      })),
+    )
+    .returning({
+      id: schema.segments.id,
+      teamId: schema.segments.teamId,
+      filter: schema.segments.filter,
+    });
+  for (const segment of segments) await recountSegment(db, segment, now);
+  // Its matches move as days pass, so age alone brings it back. A fixed date doesn't.
+  const idle = new Date(now.getTime() + 31 * 60_000);
+  expect(await recountStaleSegments(db, { olderThanMs: 30 * 60_000, now: idle })).toBe(1);
+  const counted = await db
+    .select({ name: schema.segments.name, countedAt: schema.segments.countedAt })
+    .from(schema.segments)
+    .where(eq(schema.segments.teamId, teamId))
+    .orderBy(schema.segments.name);
+  expect(counted).toEqual([
+    { name: "after", countedAt: now },
+    { name: "in_last_days", countedAt: idle },
+  ]);
+});

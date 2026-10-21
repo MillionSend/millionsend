@@ -204,7 +204,11 @@ atividade mais recente entre estes sinais. Você escolhe quais contam na aba
   últimos 30 dias.
 - Uma propriedade do contato que você escolhe, lida como data, como o último
   login. Ela aceita uma data ou data e hora ISO 8601, ou um timestamp Unix em
-  segundos ou milissegundos.
+  segundos ou milissegundos entre os anos 2000 e 2100, para que uma contagem
+  nunca seja lida como data. A lista mostra primeiro suas
+  [propriedades de data](/pt-BR/concepts/contacts#tipos-de-propriedade) e
+  depois as outras propriedades em que pelo menos metade dos valores são
+  datas, lidas nos 20.000 contatos atualizados mais recentemente.
 
 Um contato cujo sinal mais recente tem 90 dias ou mais está inativo. Por
 padrão, o aquecimento pula os contatos inativos: eles não recebem a

@@ -3,7 +3,7 @@ import { schema } from "@millionsend/db";
 import type { SegmentFilter } from "@millionsend/db/schema";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   SegmentFilterError,
   segmentContactsWhere,
@@ -407,5 +407,159 @@ describe("segmentContactsWhere: resolution (filter OR manual membership)", () =>
       "bob@other.test",
       "carol@example.com",
     ]);
+  });
+});
+
+describe("segmentWhere: date ops", () => {
+  const DAY = 86_400_000;
+  const ago = (days: number) => new Date(Date.now() - days * DAY);
+  let datesTeam: string;
+
+  beforeAll(async () => {
+    datesTeam = await createTeam(db, "seg-dates");
+    await db.insert(schema.contacts).values([
+      {
+        teamId: datesTeam,
+        email: "recent@example.com",
+        properties: {
+          signup: "2026-01-08",
+          last_login: ago(2).toISOString(),
+          renews: ago(-10).toISOString(),
+          count: "3",
+        },
+        createdAt: ago(5),
+      },
+      {
+        teamId: datesTeam,
+        email: "lapsed@example.com",
+        properties: {
+          signup: "1767225600",
+          last_login: String(Math.floor(ago(60).getTime() / 1000)),
+          count: "1500",
+        },
+        createdAt: ago(40),
+      },
+      {
+        teamId: datesTeam,
+        email: "junk@example.com",
+        properties: { signup: "soon", last_login: "yesterday" },
+        createdAt: ago(400),
+      },
+      { teamId: datesTeam, email: "blank@example.com", properties: {} },
+    ]);
+  });
+
+  const inTeam = async (field: string, op: string, value: string | null) => {
+    const rows = await db
+      .select({ email: schema.contacts.email })
+      .from(schema.contacts)
+      .where(
+        and(
+          eq(schema.contacts.teamId, datesTeam),
+          segmentWhere(schema.contacts, all({ field, op, value })),
+        ),
+      );
+    return rows.map((r) => r.email.split("@")[0]).sort();
+  };
+
+  it("compares a property read as a date, before and after", async () => {
+    expect(await inTeam("property:signup", "after", "2026-01-05")).toEqual(["recent"]);
+    expect(await inTeam("property:signup", "before", "2026-01-05T00:00:00Z")).toEqual(["lapsed"]);
+  });
+
+  it("reads in_last_days as from N days ago to now, and not_in_last_days as older than that", async () => {
+    expect(await inTeam("property:last_login", "in_last_days", "30")).toEqual(["recent"]);
+    expect(await inTeam("property:last_login", "not_in_last_days", "30")).toEqual(["lapsed"]);
+    expect(await inTeam("property:last_login", "in_last_days", "90")).toEqual(["lapsed", "recent"]);
+    // A date still to come is in neither.
+    expect(await inTeam("property:renews", "in_last_days", "30")).toEqual([]);
+    expect(await inTeam("property:renews", "not_in_last_days", "30")).toEqual([]);
+    expect(await inTeam("property:renews", "after", "2026-01-01")).toEqual(["recent"]);
+  });
+
+  it("never matches a value that reads as no date, or no value", async () => {
+    for (const op of ["in_last_days", "not_in_last_days"]) {
+      expect(await inTeam("property:count", op, "36500"), op).toEqual([]);
+    }
+    expect(await inTeam("property:count", "before", "2100-01-01")).toEqual([]);
+    expect(await inTeam("property:count", "after", "0001-01-01")).toEqual([]);
+    expect(await inTeam("property:signup", "after", "0001-01-01")).toEqual(["lapsed", "recent"]);
+    // junk's "yesterday" and blank's missing key are in neither.
+    expect(await inTeam("property:last_login", "not_in_last_days", "1")).toEqual([
+      "lapsed",
+      "recent",
+    ]);
+  });
+
+  it("keeps text ops on a property that holds dates", async () => {
+    expect(await inTeam("property:signup", "equals", "1767225600")).toEqual(["lapsed"]);
+    expect(await inTeam("property:last_login", "is_not_set", null)).toEqual(["blank"]);
+  });
+
+  it("takes in_last_days and not_in_last_days on created_at", async () => {
+    expect(await inTeam("created_at", "in_last_days", "30")).toEqual(["blank", "recent"]);
+    expect(await inTeam("created_at", "not_in_last_days", "30")).toEqual(["junk", "lapsed"]);
+    expect(await inTeam("created_at", "not_in_last_days", "365")).toEqual(["junk"]);
+  });
+
+  it("validates the value statically, whatever the property's type", () => {
+    const valid = (field: string, op: string, value: string | null) =>
+      segmentFilterSchema.safeParse(all({ field, op, value })).success;
+    expect(valid("property:anything", "in_last_days", "1")).toBe(true);
+    expect(valid("property:anything", "not_in_last_days", "36500")).toBe(true);
+    expect(valid("created_at", "in_last_days", "7")).toBe(true);
+    for (const days of ["0", "36501", "007", "1.5", "-1", "7 ", "abc", null]) {
+      expect(valid("property:anything", "in_last_days", days), String(days)).toBe(false);
+      expect(valid("created_at", "not_in_last_days", days), String(days)).toBe(false);
+    }
+    expect(valid("property:anything", "before", "2026-01-08")).toBe(true);
+    for (const date of ["soon", "0000-06-01", "+010000-01-01", null]) {
+      expect(valid("property:anything", "after", date), String(date)).toBe(false);
+    }
+    // Builtin text fields take no date ops, and created_at no text ops.
+    expect(valid("email", "in_last_days", "7")).toBe(false);
+    expect(valid("created_at", "equals", "2026-01-08")).toBe(false);
+    expect(valid("property:anything", "in_next_days", "7")).toBe(false);
+  });
+
+  it("reads a before/after value with no zone in UTC, as stored values are, whatever the server's zone", () => {
+    vi.stubEnv("TZ", "America/Sao_Paulo");
+    try {
+      for (const field of ["property:last_login", "created_at"]) {
+        for (const [value, bound] of [
+          ["2026-01-08T10:00:00", "2026-01-08T10:00:00.000Z"],
+          ["2026-01-08 10:00", "2026-01-08T10:00:00.000Z"],
+          ["2026-01-08T10:00:00-03:00", "2026-01-08T13:00:00.000Z"],
+          ["2026", "2026-01-01T00:00:00.000Z"],
+        ] as const) {
+          const query = db
+            .select()
+            .from(schema.contacts)
+            .where(segmentWhere(schema.contacts, all({ field, op: "after", value })))
+            .toSQL();
+          expect(query.params, `${field} ${value}`).toContain(bound);
+        }
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("binds a hostile key and the day count as parameters", async () => {
+    const key = "x') is not null or ('1'='1";
+    expect(await inTeam(`property:${key}`, "not_in_last_days", "1")).toEqual([]);
+    const query = db
+      .select()
+      .from(schema.contacts)
+      .where(
+        segmentWhere(
+          schema.contacts,
+          all({ field: `property:${key}`, op: "in_last_days", value: "30" }),
+        ),
+      )
+      .toSQL();
+    expect(query.sql).not.toContain(key);
+    expect(query.params).toContain(key);
+    expect(query.params).toContain(30);
   });
 });
