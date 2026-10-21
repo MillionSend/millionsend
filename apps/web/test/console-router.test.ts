@@ -796,6 +796,104 @@ describe("console.safety.setWarmupTrust", () => {
     const own = await callerFor(MEMBER, warm, "owner").audit.list({ limit: 50 });
     expect(own.items.filter((r) => r.action.startsWith("warmup."))).toEqual([]);
   });
+
+  it("counts, per domain and in all, the parked mail a trust would release now", async () => {
+    vi.stubEnv("WARMUP_ENABLED", "true");
+    const warm = await createTeam(db, "warm-waiting");
+    const domain = async (name: string) => {
+      const [row] = await db
+        .insert(schema.domains)
+        .values({
+          teamId: warm,
+          name,
+          region: REGION,
+          status: "verified",
+          registeredAt: new Date(),
+        })
+        .returning({ id: schema.domains.id });
+      if (!row) throw new Error("domain insert failed");
+      return row.id;
+    };
+    const fresh = await domain("mail.fresh-waiting.example");
+    const ramped = await domain("news.ramped-waiting.example");
+    await db.insert(schema.domainWarmups).values({
+      domainId: ramped,
+      teamId: warm,
+      volume: 1500,
+      startVolume: 1500,
+      dailyTarget: 10_000,
+    });
+    const [broadcast] = await db
+      .insert(schema.broadcasts)
+      .values({
+        teamId: warm,
+        from: "news@ramped-waiting.example",
+        subject: "s",
+        status: "sending",
+      })
+      .returning({ id: schema.broadcasts.id });
+    if (!broadcast) throw new Error("broadcast insert failed");
+    const parked = (domainId: string, over: Partial<typeof schema.emails.$inferInsert> = {}) => ({
+      teamId: warm,
+      domainId,
+      from: "hi@waiting.example",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued_quota" as const,
+      parkReason: "warmup" as const,
+      ...over,
+    });
+    await db.insert(schema.emails).values([
+      parked(fresh),
+      parked(fresh),
+      parked(fresh, { broadcastId: broadcast.id }),
+      // Held by the plan or for an operator, or already on its way: not the warm-up's.
+      parked(fresh, { parkReason: null }),
+      parked(fresh, { parkReason: "screening" }),
+      parked(fresh, { latestStatus: "queued", parkReason: null }),
+      parked(ramped),
+      // A reputation warm-up lets its broadcasts out by its own day, trusted or not.
+      parked(ramped, { broadcastId: broadcast.id }),
+      parked(ramped, { broadcastId: broadcast.id }),
+    ]);
+    const waiting = async () => {
+      const { warmup } = await operator().console.safety.review({ teamId: warm });
+      return { domains: warmup.domains.map((d) => [d.name, d.waiting]), team: warmup.waiting };
+    };
+    expect(await waiting()).toEqual({
+      domains: [
+        ["mail.fresh-waiting.example", 3],
+        ["news.ramped-waiting.example", 1],
+      ],
+      team: 4,
+    });
+    await db
+      .update(schema.domainWarmups)
+      .set({ status: "off" })
+      .where(eq(schema.domainWarmups.domainId, ramped));
+    expect(await waiting()).toEqual({
+      domains: [
+        ["mail.fresh-waiting.example", 3],
+        ["news.ramped-waiting.example", 3],
+      ],
+      team: 6,
+    });
+    // Once trusted, what the domain still has parked waits on the drain or the plan, not on a trust.
+    await operator().console.safety.setWarmupTrust({
+      teamId: warm,
+      domainId: fresh,
+      trusted: true,
+    });
+    expect(await waiting()).toEqual({
+      domains: [
+        ["mail.fresh-waiting.example", 0],
+        ["news.ramped-waiting.example", 3],
+      ],
+      team: 3,
+    });
+    // Its parked broadcast rows would count in the region tests below.
+    await db.delete(schema.teams).where(eq(schema.teams.id, warm));
+  });
 });
 
 describe("console.regions reserve", () => {
