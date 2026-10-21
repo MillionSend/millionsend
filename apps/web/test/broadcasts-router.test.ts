@@ -1071,7 +1071,7 @@ describe("paced sends", () => {
       })),
     );
     expect((await caller.broadcasts.sendPlan({ from: DRAFT_INPUT.from })).warmup).toBeNull();
-  }, 60_000);
+  });
 
   it("sendPlan follows a warming domain's own plan, its inactive skip changed in the dialog", async () => {
     stubAccount({ max24h: 1_000_000, sentLast24h: 0, maxSendRate: 14 });
