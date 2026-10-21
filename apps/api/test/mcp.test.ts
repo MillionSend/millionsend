@@ -19,6 +19,7 @@ import {
   MX_INGEST_PATH,
   mcpResourceUrl,
   type TeamRole,
+  utcDay,
   WAITS_PER_TEAM_PER_PROCESS,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -593,6 +594,48 @@ describe("tools", () => {
       expect(logs[0]?.durationMs).toBeGreaterThanOrEqual(0);
     });
     await client.close();
+  });
+
+  it("send_email passes on the warning of a send the new domain limit holds", async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId,
+        name: "fresh-mcp.example",
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: new Date(),
+        registeredAt: new Date(Date.now() - 3600_000),
+      })
+      .returning({ id: schema.domains.id });
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "fresh-mcp.example", day: utcDay(), accepted: 100 });
+    try {
+      const client = await connect(await mintToken());
+      const sent = await client.callTool({
+        name: "send_email",
+        arguments: {
+          from: "a@fresh-mcp.example",
+          to: ["held@example.com"],
+          subject: "s",
+          text: "t",
+        },
+      });
+      expect(resultJson(sent)).toMatchObject({
+        warning: {
+          code: "new_domain_limit",
+          message:
+            "fresh-mcp.example sent its 100 emails for today. This email goes out after 00:00 UTC.",
+        },
+      });
+      await client.close();
+    } finally {
+      await db.delete(schema.emails).where(eq(schema.emails.domainId, domain?.id ?? ""));
+      await db.delete(schema.domains).where(eq(schema.domains.id, domain?.id ?? ""));
+      await db.delete(schema.instanceSettings);
+    }
   });
 
   it("rejects an unverified sender domain through the same rule as the REST API", async () => {
@@ -1366,6 +1409,7 @@ describe("dashboard admin parity", () => {
       { name: "update_domain", arguments: { id, capabilities: { receiving: "enabled" } } },
     ],
     // No tool turns a domain's warm-up on or off, or changes its settings.
+    "domains.requestHigherLimit": [],
     "domains.setWarmup": [],
     "domains.updateConfiguration": [
       { name: "update_domain", arguments: { id, open_tracking: false } },

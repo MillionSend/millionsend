@@ -1686,9 +1686,10 @@ trusted) also share one daily limit, the highest of their caps, counted per
 team and UTC day: a second fresh domain never adds volume, and each domain
 stays within its own cap. Mail over either parks as `queued_quota` (with
 `park_reason = 'warmup'`) and the 15-minute `quota.drain` releases it, oldest
-first, as both allow; the API answers `429 daily_quota_exceeded` with a warm-up
-message (SMTP `452`) only when the team's parked backlog is full (three days of
-its plan's volume, or of the domain's cap where that is more). A domain moves
+first, as both allow. The API answers `429 daily_quota_exceeded`, with a
+message naming the new domain limit and a `Retry-After` to 00:00 UTC (SMTP
+`452`), only when the team's parked backlog is full (three days of its plan's
+volume, or of the domain's cap where that is more). A domain moves
 up one step early once its sends since the last step are clean: at least 50
 delivered (mail to the SES simulator never counts), the first a day old, hard
 bounces under 2% of the sends delivered or hard-bounced, complaints under 0.1%
@@ -1696,6 +1697,13 @@ of the delivered ones and no phishing-type verdict from the content monitor
 (checked by the 15-minute `safety.flags` job). An operator can trust a team, or
 one domain, on its Trust & safety review page, which lifts the warm-up and is
 audited.
+
+A team that moves mail with a sending history to a new domain asks for a
+higher limit from the domain's page. The operator gets an email for each
+request, and open requests are listed under **Limit requests** on Trust &
+safety. On the team's review page, **Trust** grants it and **Decline** keeps
+the limit. Either way the team's owners, and whoever asked, get an email with the
+answer.
 
 **The age lookup** runs in the worker's `domain.age` job, never on the send
 path: when a domain is added, when it verifies, and from the 15-minute

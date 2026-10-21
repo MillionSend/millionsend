@@ -12,6 +12,7 @@ import {
   estimateAttachmentBytes,
   type InboxAccept,
   MAX_ATTACHMENT_BYTES,
+  newDomainLimitFullMessage,
   verifySenderDomain,
 } from "../accept-email.js";
 import { attachmentVerdict } from "../attachment-policy.js";
@@ -77,6 +78,7 @@ import {
   type RecipientClass,
   SHARED_RECIPIENTS_MAX,
   SHARED_REFUSALS,
+  secondsToNextUtcDay,
 } from "./send-policy.js";
 import { refusedLabel } from "./shared-domain.js";
 import { type SharedSending, sharedSendMode } from "./shared-mode.js";
@@ -473,15 +475,25 @@ export async function decideInboxSend(
 }
 
 /** The accept pipeline's refusal as an inbox send answers it. */
-export function acceptFailure(result: Exclude<AcceptEmailResult, { ok: true }>): InboxError {
+export function acceptFailure(
+  result: Exclude<AcceptEmailResult, { ok: true }>,
+  now: Date,
+): InboxError {
   switch (result.reason) {
     case "quota_backlog_full":
-    case "warmup_backlog_full":
       return {
         status: 429,
         name: "daily_quota_exceeded",
         message:
           "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
+        retryAfterSec: secondsToNextUtcDay(now),
+      };
+    case "warmup_backlog_full":
+      return {
+        status: 429,
+        name: "daily_quota_exceeded",
+        message: newDomainLimitFullMessage(result),
+        retryAfterSec: secondsToNextUtcDay(now),
       };
     case "monthly_quota_exceeded":
       return { status: 429, name: "monthly_quota_exceeded", message: monthlyQuotaMessage(result) };
@@ -1252,7 +1264,7 @@ export async function dispatchSend(
           : undefined,
     },
   );
-  if (!result.ok) return { kind: "refused", error: acceptFailure(result) };
+  if (!result.ok) return { kind: "refused", error: acceptFailure(result, p.now) };
   return sentEmailOf(db, deps, {
     teamId: p.teamId,
     emailId: result.id,
@@ -2056,9 +2068,10 @@ export type ForwardWait = { kind: "wait"; until: Date };
  * inbox's forward_to owners, approved (the owners chose them). Null when
  * there is nothing to forward: not delivered, no live target, malware, the
  * content purged, or a message that is already one of our forwards, which
- * stops two inboxes forwarding to each other after one hop. A copy the
- * shared domain holds back (sending paused, or the team past today's cap)
- * waits until FORWARD_WAIT_MAX after delivery; past that, the refusal is final.
+ * stops two inboxes forwarding to each other after one hop. A copy held
+ * back for now (the shared domain paused, or the team past today's cap or
+ * with a full backlog of waiting mail) waits until FORWARD_WAIT_MAX after
+ * delivery; past that, the refusal is final.
  */
 export async function forwardToForwardTargets(
   db: Db,
@@ -2156,7 +2169,8 @@ export async function forwardToForwardTargets(
     hold: { type: "reply", forward: true, targetId: row.id },
     now,
   });
-  // A refusal with a retry-after (the team's daily shared-domain cap) clears with the day.
+  // A refusal with a retry-after clears with the UTC day: the team's daily
+  // shared-domain cap, or a full backlog of mail waiting for a daily limit.
   if (out.kind === "refused" && out.error.retryAfterSec !== undefined) {
     return waitFor(out.error.retryAfterSec * 1000) ?? out;
   }

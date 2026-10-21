@@ -698,7 +698,7 @@ describe("broadcasts.sendTest", () => {
       text: null,
       previewText: "Preview",
     });
-    expect(result).toEqual({ to: "u1@example.com" });
+    expect(result).toEqual({ to: "u1@example.com", hold: null });
     const [row] = await db
       .select({ to: schema.emails.to, subject: schema.emails.subject, tags: schema.emails.tags })
       .from(schema.emails)
@@ -727,6 +727,44 @@ describe("broadcasts.sendTest", () => {
         text: null,
       }),
     ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+
+  it("says a test the new domain limit holds is queued, and any other hold only that it waits", async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    const teamId = await createTeam(db, "team-test-held");
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "nova.example",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date(Date.now() - 3 * DAY_MS),
+      ageSource: "rdap",
+    });
+    const test = { from: "Nova <hi@nova.example>", subject: "s", html: "<p>x</p>", text: null };
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "nova.example", day: utcDay(), accepted: 300 });
+    expect(await callerFor(teamId).broadcasts.sendTest(test)).toEqual({
+      to: "u1@example.com",
+      hold: { kind: "domain_limit", domain: "nova.example" },
+    });
+    const [held] = await db
+      .select({ status: schema.emails.latestStatus, reason: schema.emails.parkReason })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, teamId));
+    expect(held).toEqual({ status: "queued_quota", reason: "warmup" });
+
+    // The plan's cap parks it with no reason of its own: a plain wait, never named.
+    vi.stubEnv("IS_CLOUD", "true");
+    const other = await createTeam(db, "team-test-plan");
+    await seedVerifiedDomain(other, "acme.dev");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: other, day: utcDay(), accepted: 1_000_000 });
+    expect(await callerFor(other).broadcasts.sendTest({ ...test, from: "news@acme.dev" })).toEqual({
+      to: "u1@example.com",
+      hold: { kind: "waiting" },
+    });
   });
 
   it("sends from an inbox's address through that inbox", async () => {
@@ -886,6 +924,62 @@ describe("paced sends", () => {
     expect(
       (await caller.broadcasts.sendPlan({ from: "a@nowhere.example.com" })).estimate,
     ).toBeNull();
+  });
+
+  /** A team whose example.com was registered three days ago, with `used` of today's 300 gone. */
+  async function seedYoungDomain(teamId: string, used: number) {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    await db
+      .update(schema.domains)
+      .set({ registeredAt: new Date(Date.now() - 3 * DAY_MS) })
+      .where(eq(schema.domains.teamId, teamId));
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "example.com", day: utcDay(), accepted: used });
+  }
+
+  const nextMidnight = () => {
+    const at = new Date();
+    at.setUTCHours(24, 0, 0, 0);
+    return at.getTime();
+  };
+
+  it("sendPlan plans a young domain's send under its new domain limit, never refusing it", async () => {
+    stubAccount({ max24h: 100_000, sentLast24h: 0, maxSendRate: 14 });
+    const teamId = await createTeam(db, "team-a");
+    await seedVerifiedDomain(teamId);
+    await seedYoungDomain(teamId, 290);
+    await seedContacts(teamId, 20);
+    const { estimate } = await callerFor(teamId).broadcasts.sendPlan({ from: DRAFT_INPUT.from });
+    // Ten of today's 300 are left; the other ten go after 00:00 UTC.
+    expect(estimate).toMatchObject({
+      first: 10,
+      blocked: false,
+      planHold: null,
+      rung: null,
+      newDomainHold: {
+        heldBack: 10,
+        resumesAt: new Date(nextMidnight()),
+        domain: "example.com",
+        cap: 300,
+      },
+    });
+    expect(estimate?.finishesAt?.getTime()).toBeGreaterThan(nextMidnight());
+  });
+
+  it("a send in progress from a young domain finishes after the limit's reset", async () => {
+    stubAccount({ max24h: 100_000, sentLast24h: 0, maxSendRate: 14 });
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id } = await seedSendingBroadcast(teamId);
+    await seedYoungDomain(teamId, 300);
+    const got = await caller.broadcasts.get({ id });
+    expect(got.finishesAt?.getTime()).toBeGreaterThan(nextMidnight());
+    // The page names the limit that paces it, never capacity.
+    expect(got.newDomainLimit).toEqual({ domain: "example.com", cap: 300 });
+    const { items } = await caller.broadcasts.list({});
+    const listed = items.find((b) => b.id === id);
+    expect(listed?.finishesAt).toEqual(got.finishesAt);
+    expect(listed?.newDomainLimit).toEqual({ domain: "example.com", cap: 300 });
   });
 
   it("send refuses an audience that needs more days than the horizon", async () => {

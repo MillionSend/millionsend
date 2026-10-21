@@ -28,16 +28,18 @@ import { Switch } from "@/components/switch";
 import { toast } from "@/components/toast";
 import { WarnCard } from "@/components/warn-card";
 import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
-import { formatDay, formatRelative, formatUtcMinute } from "@/lib/format";
+import { formatRelative, formatUtcMinute } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useTeamRole } from "@/lib/use-team-role";
 import { zoneRelativeName } from "@/lib/zone";
 import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
 import { RegionLabel } from "../region-label";
 import { useTrackingToggle } from "../use-tracking-toggle";
-import { ConfigSection, StatusRow } from "./parts";
+import { LimitSection, LimitWaitingBanner } from "./limit-section";
+import { ConfigSection } from "./parts";
 import { WarmupStatus, WarmupTab } from "./warmup-tab";
 
 const TABS = ["records", "configuration", "warmup"] as const;
@@ -371,6 +373,7 @@ export function DomainDetail({ id }: { id: string }) {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const role = useTeamRole();
 
   const domain = useQuery(trpc.domains.get.queryOptions({ id }));
   const records = useQuery(
@@ -616,6 +619,8 @@ export function DomainDetail({ id }: { id: string }) {
   }
 
   const data = domain.data;
+  // The new domain limit applies to a verified domain only.
+  const limit = status === "verified" ? data.limit : null;
   const provider = records.data?.provider ?? null;
   const warmupOn = warmup.data?.status === "off" ? undefined : warmup.data;
   // Live DNS statuses keyed by record identity, from the persisted result so a
@@ -848,33 +853,31 @@ export function DomainDetail({ id }: { id: string }) {
               icon={<TadaIcon />}
               title={t("detail.bannerVerified")}
             >
-              {t("detail.bannerVerifiedBody")}
+              {limit
+                ? t("detail.bannerVerifiedLimited", {
+                    cap: new Intl.NumberFormat(locale).format(limit.cap),
+                  })
+                : t("detail.bannerVerifiedBody")}
             </GradientBanner>
           ) : null}
+          {limit ? <LimitWaitingBanner limit={limit} /> : null}
           {warmupOn ? <WarmupStatus data={warmupOn} /> : null}
-          {status === "verified" && data.warmup ? (
-            // The new-domain cap by registration age, on top of any warm-up.
-            <StatusRow
-              text={t(
-                data.warmup.fullAt ? "detail.newDomainLimit.line" : "detail.newDomainLimit.today",
-                {
-                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
-                  date: data.warmup.fullAt ? formatDay(data.warmup.fullAt, locale) : "",
-                },
-              )}
-              note={t(
-                data.warmup.shared
-                  ? "detail.newDomainLimit.bodyShared"
-                  : "detail.newDomainLimit.body",
-              )}
-            />
-          ) : null}
         </div>
+      ) : null}
+
+      {limit ? (
+        <LimitSection
+          domainId={id}
+          domain={data.name}
+          limit={limit}
+          request={data.limitRequest}
+          canManage={role === "owner" || role === "admin"}
+        />
       ) : null}
 
       {/* Tracking and TLS settings are stored regardless of status and apply
           once the domain sends, so they can be set while DNS propagates. */}
-      <div className="ms-tabs bleed" style={{ marginTop: 26 }}>
+      <div className="ms-tabs bleed" style={{ marginTop: limit ? 34 : 26 }}>
         <button
           type="button"
           className={tab === "records" ? "active" : ""}

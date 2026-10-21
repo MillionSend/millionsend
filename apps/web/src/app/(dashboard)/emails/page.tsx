@@ -9,7 +9,7 @@ import { ApiDocsButton } from "@/components/api-sheet";
 import { EmailsTable } from "@/components/emails-table";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
-import { GradientBanner } from "@/components/gradient-banner";
+import { bannerLinkStyle, GradientBanner } from "@/components/gradient-banner";
 import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import { PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
@@ -18,9 +18,11 @@ import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDay, formatHoursMinutes } from "@/lib/format";
 import { manyOf } from "@/lib/list-param";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
+import { domainLimits } from "@/lib/new-domain-limit";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
+import { LimitBanner } from "./limit-banner";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
 
 // Keep in enum order (packages/db schema.emailStatusEnum) — the router input
@@ -102,6 +104,7 @@ export default function EmailsPage() {
   const usage = useQuery(trpc.settings.usage.recent.queryOptions({}));
   const apiKeys = useQuery(trpc.apiKeys.list.queryOptions());
   const domains = useQuery(trpc.domains.list.queryOptions());
+  const limits = useMemo(() => domainLimits(domains.data), [domains.data]);
   const role = useTeamRole();
   const canExport = role === "owner" || role === "admin";
 
@@ -195,14 +198,7 @@ export default function EmailsPage() {
           })}
           action={
             // A daily limit exists only on the hosted cloud, so the billing page always exists here.
-            <Link
-              href="/settings/billing"
-              style={{
-                color: "var(--ms-bone)",
-                textDecoration: "underline dotted var(--ms-muted)",
-                textUnderlineOffset: 3,
-              }}
-            >
+            <Link href="/settings/billing" style={bannerLinkStyle}>
               {t("list.capBanner.upgrade")}
             </Link>
           }
@@ -226,6 +222,8 @@ export default function EmailsPage() {
             : null}
         </GradientBanner>
       ) : null}
+
+      <LimitBanner limits={limits ?? []} />
 
       {showSources ? (
         <div
@@ -409,7 +407,7 @@ export default function EmailsPage() {
         )
       ) : (
         <>
-          <EmailsTable rows={items} />
+          <EmailsTable rows={items} limits={limits} />
           <ListFooter
             left={t("list.pageOf", {
               pages: query.data?.pages.length ?? 1,

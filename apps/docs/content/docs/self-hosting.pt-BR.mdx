@@ -1767,10 +1767,10 @@ equipe e dia UTC: um segundo domínio novo nunca acrescenta volume, e cada
 domínio continua dentro do seu limite. O que passa de qualquer um fica
 em espera como `queued_quota` (com `park_reason = 'warmup'`) e o
 `quota.drain` de 15 minutos libera, do mais antigo para o mais novo, conforme
-os dois permitem; a API
-responde `429 daily_quota_exceeded` com uma mensagem de aquecimento (SMTP
-`452`) só quando a fila de espera da equipe está cheia (três dias do
-volume do plano, ou do limite do domínio quando ele é maior). Um domínio sobe
+os dois permitem. A API responde `429 daily_quota_exceeded`, com uma mensagem
+que cita o limite de domínio novo e um `Retry-After` até as 00:00 UTC (SMTP
+`452`), só quando a fila de espera da equipe está cheia (três dias do volume
+do plano, ou do limite do domínio quando ele é maior). Um domínio sobe
 um degrau antes quando os envios desde o último degrau estão limpos: pelo
 menos 50 entregues (e-mails para o simulador do SES nunca contam), o primeiro
 enviado há um dia ou mais, bounces permanentes abaixo de 2% dos envios
@@ -1780,6 +1780,13 @@ pelo job `safety.flags` de 15 minutos).
 Um operador pode confiar em uma equipe, ou em um domínio, na página de revisão de
 Confiança e segurança, o que libera o aquecimento e fica no registro de
 auditoria.
+
+Uma equipe que vai trazer para um domínio novo e-mails que já têm histórico de
+envio pede um limite maior na página do domínio. O operador recebe um e-mail
+a cada pedido, e os pedidos abertos aparecem em **Pedidos de limite**, em
+Confiança e segurança. Na página de revisão da equipe, **Confiar** atende o
+pedido e **Recusar** mantém o limite. Nos dois casos, os donos da equipe e quem fez o
+pedido recebem a resposta por e-mail.
 
 **A consulta de idade** roda no job `domain.age` do worker, nunca no caminho
 de envio: quando um domínio é adicionado, quando é verificado, e pela varredura

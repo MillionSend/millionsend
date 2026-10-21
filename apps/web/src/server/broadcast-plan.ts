@@ -16,6 +16,9 @@ import {
   getInstanceSettings,
   getWarmup,
   type InstanceSettings,
+  type NewDomainLimit,
+  newDomainLimitPlanCap,
+  newDomainLimitStatus,
   type PlanCap,
   type PlanInput,
   pacingHorizonDays,
@@ -30,6 +33,7 @@ import {
   rungThatFits,
   type SendingBroadcast,
   sendingBroadcasts,
+  teamPlanHold,
   transactionalSent24h,
   utcDay,
   verifySenderDomain,
@@ -57,6 +61,8 @@ export interface SendEstimate {
   blocked: boolean;
   releases: { at: Date; endsAt: Date; count: number }[];
   planHold: { heldBack: number; resumesAt: Date } | null;
+  /** The first time the sender domain's new domain limit held rows back, with its name and daily cap; no plan lifts it. */
+  newDomainHold: { heldBack: number; resumesAt: Date; domain: string; cap: number } | null;
   /** The team's plan as the dialog names its limit, and whether that limit is a day's or a month's; null off the ladder. */
   planLabel: string | null;
   planPeriod: "day" | "month" | null;
@@ -71,6 +77,8 @@ export interface RegionPlan {
   sending: SendingBroadcast[];
   estimates: Map<string, BroadcastEstimate>;
   estimate: SendEstimate | null;
+  /** The new domain limit on the team's sender domains the plan ran under. */
+  limits: NewDomainLimit[];
 }
 
 const NEW_SEND = "new";
@@ -87,11 +95,17 @@ function horizonDaysOf(settings: InstanceSettings): number {
  * SES has not answered GetAccount yet (a cold cache, or a region down): the
  * surfaces then show counts without an estimate rather than a wrong one.
  * The window is read once; the plan-cap candidates re-run the pure planner
- * over it.
+ * over it. The team's own sends, and a new one given its sender domain, run
+ * under their domain's new domain limit too.
  */
 export async function planBroadcastSend(
   db: Db,
-  opts: { teamId: string; region: string; now?: Date; newSend?: { count: number; at: Date } },
+  opts: {
+    teamId: string;
+    region: string;
+    now?: Date;
+    newSend?: { count: number; at: Date; domainId?: string };
+  },
 ): Promise<RegionPlan | null> {
   const account = await plannerRegionAccount(opts.region);
   if (!account?.ok) return null;
@@ -116,6 +130,20 @@ export async function planBroadcastSend(
   // The team's own sends in flight run under its caps; other teams' are
   // modelled on capacity alone.
   const ownCaps = planCaps(quota, used, now);
+  const limits = await newDomainLimitStatus(db, {
+    teamId: opts.teamId,
+    domainIds: [
+      ...sending.flatMap((b) =>
+        b.teamId === opts.teamId && b.domainId && !b.warmup ? [b.domainId] : [],
+      ),
+      ...(opts.newSend?.domainId ? [opts.newSend.domainId] : []),
+    ],
+    now,
+  });
+  const limitCaps = (domainId: string | null | undefined): PlanCap[] => {
+    const limit = limits.find((l) => l.domainId === domainId);
+    return limit ? [newDomainLimitPlanCap(limit)] : [];
+  };
   const input: PlanInput = {
     share: bulkShare(sesQuota.max24h, reservePercent),
     rate: Math.min(sesQuota.maxSendRate || rateCeiling, rateCeiling),
@@ -135,21 +163,33 @@ export async function planBroadcastSend(
         queued: b.queued,
         parked: b.parked,
         ...(b.scheduledAt ? { at: Math.min(b.scheduledAt.getTime(), now.getTime()) } : {}),
-        ...(b.teamId === opts.teamId ? { caps: ownCaps.map((c) => ({ ...c })) } : {}),
+        ...(b.teamId === opts.teamId
+          ? { caps: [...ownCaps.map((c) => ({ ...c })), ...limitCaps(b.domainId)] }
+          : {}),
       })),
   };
   const byKey = (estimates: BroadcastEstimate[]) =>
     new Map(estimates.filter((e) => e.key !== NEW_SEND).map((e) => [e.key, e]));
   if (!opts.newSend) {
-    return { sending, estimates: byKey(planBulkWaves(input)), estimate: null };
+    return { sending, estimates: byKey(planBulkWaves(input)), estimate: null, limits };
   }
   const health = await fetchDeliverabilityHealth(db, opts.teamId, { now });
   const spacingMs = broadcastSendSpacingMs(health.status);
   const { count, at } = opts.newSend;
+  // No plan lifts the domain's limit, so every candidate cap set keeps it.
   const withCaps = (caps: PlanCap[]) =>
     planBulkWaves({
       ...input,
-      broadcasts: [...input.broadcasts, { key: NEW_SEND, admit: count, at, spacingMs, caps }],
+      broadcasts: [
+        ...input.broadcasts,
+        {
+          key: NEW_SEND,
+          admit: count,
+          at,
+          spacingMs,
+          caps: [...caps, ...limitCaps(opts.newSend?.domainId)],
+        },
+      ],
     });
   const estimates = withCaps(planCaps(quota, used, now));
   const mine = estimates.find((e) => e.key === NEW_SEND);
@@ -158,8 +198,10 @@ export async function planBroadcastSend(
     mine.planHold || mine.blocked
       ? rungThatFits(quota, used, now, (caps) => withCaps(caps).find((e) => e.key === NEW_SEND))
       : null;
+  const newLimit = limits.find((l) => l.domainId === opts.newSend?.domainId);
   return {
     sending,
+    limits,
     estimates: byKey(estimates),
     estimate: {
       first: mine.first,
@@ -169,6 +211,10 @@ export async function planBroadcastSend(
       blocked: mine.blocked,
       releases: mine.releases,
       planHold: mine.planHold,
+      newDomainHold:
+        mine.newDomainHold && newLimit
+          ? { ...mine.newDomainHold, domain: newLimit.name, cap: newLimit.cap }
+          : null,
       planLabel:
         quota.kind === "none"
           ? null
@@ -198,6 +244,8 @@ export interface SendingProgressRow {
   sent: { at: Date; count: number }[];
   /** Its domain's warm-up while warming or paused, with the plan for its rows still waiting. */
   warmup: { status: "warming" | "paused"; domainId: string; plan: WarmupPlan } | null;
+  /** Its sender domain's new domain limit, while that paces the rest of the send. */
+  newDomainLimit: { domain: string; cap: number } | null;
 }
 
 /**
@@ -254,7 +302,11 @@ export async function sendingProgress(
   ]);
   for (const b of mine) {
     const plan = warmups.get(b.id);
-    const estimate = b.region ? plans.get(b.region)?.estimates.get(b.id) : undefined;
+    const region = b.region ? plans.get(b.region) : undefined;
+    const estimate = region?.estimates.get(b.id);
+    const limit = estimate?.newDomainHold
+      ? region?.limits.find((l) => l.domainId === b.domainId)
+      : undefined;
     out.set(b.id, {
       sentCount: b.sent,
       parkedCount: b.parked,
@@ -265,6 +317,7 @@ export async function sendingProgress(
         .map((r) => ({ at: new Date(r.at), count: r.count })),
       warmup:
         plan && b.warmup && b.domainId ? { status: b.warmup, domainId: b.domainId, plan } : null,
+      newDomainLimit: !plan && limit ? { domain: limit.name, cap: limit.cap } : null,
     });
   }
   return out;
@@ -302,12 +355,7 @@ export async function planHoldUntil(
   teamId: string,
   now: Date = new Date(),
 ): Promise<Date | null> {
-  const quota = await fetchTeamQuota(db, teamId, isCloudDeployment());
-  if (!quota) return null;
-  const bound = planCaps(quota, await quotaUsage(db, teamId, quota, now), now).filter(
-    (cap) => cap.remaining <= 0,
-  );
-  return bound.length > 0 ? new Date(Math.min(...bound.map((cap) => cap.resetsAt))) : null;
+  return (await teamPlanHold(db, teamId, isCloudDeployment(), now))?.resumesAt ?? null;
 }
 
 /** What a domain's warm-up does to a send: the dialog shows it, the send enforces it. */

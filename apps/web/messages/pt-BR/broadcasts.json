@@ -76,7 +76,9 @@
     "sendTest": "Enviar teste",
     "testSent": "Teste enviado para {email}",
     "testRateLimited": "Muitos e-mails de teste — tente de novo em uma hora.",
-    "testFailed": "Não foi possível enviar o e-mail de teste."
+    "testFailed": "Não foi possível enviar o e-mail de teste.",
+    "testQueuedLimit": "Teste na fila. O limite diário de {domain} acabou, então ele sai depois das 00:00 UTC.",
+    "testQueued": "Teste na fila. Ele sai assim que possível."
   },
   "guard": {
     "title": "Enviar transmissão",
@@ -97,9 +99,11 @@
     "stepAllSent": "todos os {count} enviados · por volta de {time}",
     "stepLimitDay": "limite diário do {plan}",
     "stepLimitMonth": "limite mensal do {plan}",
+    "stepLimitDomain": "limite diário de {domain}",
     "stepMoreReset": "mais {count} quando o limite renovar às {reset}",
     "stepLastReset": "últimos {count} quando o limite renovar às {reset} · termina por volta de {time}",
-    "reason": "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes. Seu e-mail transacional não fica esperando atrás deles.",
+    "reason": "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes. Seus e-mails transacionais saem na frente deles.",
+    "limitReason": "{domain} é um domínio novo, então envia até {cap} e-mails por dia por enquanto. Um plano maior não muda isso.",
     "planFits": "{plan} envia todos até {time}",
     "planFitsOverage": "{plan} com excedente envia todos até {time}",
     "todayAt": "hoje, {time}",
@@ -121,7 +125,7 @@
     "inactiveLabel": "Inativos há mais de 90 dias",
     "inactiveSub": "sem atividade desde {date}",
     "inactiveSkip": "Pular {count}",
-    "warmupReason": "Os provedores confiam um pouco mais em um remetente novo a cada dia de bom comportamento. Cada dia só cresce enquanto atrasos, bounces e denúncias ficarem baixos. Seus e-mails transacionais nunca ficam retidos.",
+    "warmupReason": "Os provedores confiam um pouco mais em um remetente novo a cada dia de bom comportamento. Cada dia só cresce enquanto atrasos, bounces e denúncias ficarem baixos. O aquecimento nunca retém seus e-mails transacionais.",
     "sendWithWarmup": "Enviar com aquecimento"
   },
   "detail": {
@@ -182,7 +186,7 @@
     "warmupHeldBody": "{reasons} O volume volta a crescer amanhã se melhorar.",
     "warmupPausedBody": "{reasons} Esta transmissão espera até o aquecimento do domínio ser retomado.",
     "openWarmup": "Abrir aquecimento",
-    "warmupNote": "{domain} está em aquecimento. O volume de cada dia cresce enquanto a entrega estiver saudável, com os contatos mais ativos primeiro. Seus e-mails transacionais não ficam retidos.",
+    "warmupNote": "{domain} está em aquecimento. O volume de cada dia cresce enquanto a entrega estiver saudável, com os contatos mais ativos primeiro. O aquecimento nunca retém seus e-mails transacionais.",
     "providers": {
       "loadError": "Não foi possível carregar os provedores de e-mail.",
       "label": "Por provedor de e-mail",

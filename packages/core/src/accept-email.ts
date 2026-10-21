@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, type SQL, sql } from "drizzle-orm";
 import type { ApiKeyAuth } from "./api-key-auth.js";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
@@ -310,9 +310,10 @@ export async function countParked(db: Db, teamId: string): Promise<number> {
  * shared warm-up limit for the delivery day both have room (now reserved);
  * "park" when either has none, the plan's units handed back so the row
  * parks as queued_quota with reason "warmup" and the drain charges them all
- * again on release; "backlog_full" when the team already holds all the
- * parked mail it may. Every accept surface enforces the warm-up through
- * this one call.
+ * again on release; "backlog_full", with the domain's cap and the team's
+ * parked count for the refusal, when the team already holds all the parked
+ * mail it may. Every accept surface enforces the warm-up through this one
+ * call.
  */
 export async function enforceDomainWarmup(
   tx: Db,
@@ -324,12 +325,27 @@ export async function enforceDomainWarmup(
     day: string;
     at: Date;
   },
-): Promise<"send" | "park" | "backlog_full"> {
+): Promise<{ kind: "send" | "park" } | { kind: "backlog_full"; cap: number; waiting: number }> {
   const warmup = await admitWarmup(tx, send);
-  if (warmup.admitted) return "send";
+  if (warmup.admitted) return { kind: "send" };
   await releaseQuota(tx, send);
-  const limit = warmupBacklogLimit(send.quota, warmup.cap.cap);
-  return (await countParked(tx, send.teamId)) >= limit ? "backlog_full" : "park";
+  const waiting = await countParked(tx, send.teamId);
+  return waiting >= warmupBacklogLimit(send.quota, warmup.cap.cap)
+    ? { kind: "backlog_full", cap: warmup.cap.cap, waiting }
+    : { kind: "park" };
+}
+
+/**
+ * The refusal once a sender under the new domain limit has a full backlog,
+ * worded alike on every surface: the domain's daily cap, the mail already
+ * waiting, and when to retry.
+ */
+export function newDomainLimitFullMessage(full: {
+  domain: string;
+  cap: number;
+  waiting: number;
+}): string {
+  return `${full.domain} sends up to ${full.cap.toLocaleString("en-US")} emails a day for now, and ${full.waiting.toLocaleString("en-US")} are already waiting. Retry after 00:00 UTC.`;
 }
 
 /**
@@ -344,6 +360,16 @@ export function countDistinctRecipients(
   return new Set(
     [...to, ...(cc ?? []), ...(bcc ?? [])].map((r) => normalizeAddress(extractAddrSpec(r))),
   ).size;
+}
+
+/**
+ * An email row's recipients in SQL, on the query's `emails`: every address
+ * in to, cc and bcc. A mailbox listed twice counts twice, so it can read a
+ * little above what countDistinctRecipients charges.
+ */
+export function emailRecipientsSql(): SQL<number> {
+  const e = schema.emails;
+  return sql<number>`(jsonb_array_length(${e.to}) + coalesce(jsonb_array_length(${e.cc}), 0) + coalesce(jsonb_array_length(${e.bcc}), 0))`;
 }
 
 export type AcceptEmailResult =
@@ -366,12 +392,20 @@ export type AcceptEmailResult =
        * with reason "review", or, in a deferred batch, for the caller to park.
        */
       underReview: boolean;
+      /**
+       * Why the row parked: "warmup" for the new domain limit, "review" for
+       * a review hold; null when it did not park or the plan's cap parked it.
+       */
+      parkReason: "warmup" | "review" | null;
     }
   | { ok: false; reason: "all_suppressed" }
   | { ok: false; reason: "attachments_too_large"; maxBytes: number }
   | { ok: false; reason: "quota_backlog_full" }
-  /** The sending domain's warm-up cap is spent and the team's parked backlog is full. */
-  | { ok: false; reason: "warmup_backlog_full" }
+  /**
+   * The sending domain's warm-up cap is spent and the team's parked backlog
+   * is full: the domain, its daily cap and the team's parked mail.
+   */
+  | { ok: false; reason: "warmup_backlog_full"; domain: string; cap: number; waiting: number }
   /**
    * A monthly plan at its cap: the included volume with overage off, or the
    * hard cap past it with overage on. Refused outright, nothing parks for a month.
@@ -627,6 +661,7 @@ export async function acceptEmail(
   const deliveryAt = quotaChargeAt(payload.scheduledAt);
   const day = utcDay(deliveryAt);
   const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
+  let warmupFull: { cap: number; waiting: number } | null = null;
   const acceptRow = async (txDb: Db, inbox: InboxAcceptState | null) => {
     const reservation =
       opts.quota === "deferred"
@@ -684,8 +719,11 @@ export async function acceptEmail(
         day,
         at: deliveryAt,
       });
-      if (warmup === "backlog_full") return "warmup_backlog_full" as const;
-      if (warmup === "park") parkReason = "warmup";
+      if (warmup.kind === "backlog_full") {
+        warmupFull = warmup;
+        return "warmup_backlog_full" as const;
+      }
+      if (warmup.kind === "park") parkReason = "warmup";
     }
     const parked = !reservation.reserved || parkReason !== null;
     const [row] = await txDb
@@ -738,7 +776,7 @@ export async function acceptEmail(
         enqueue: opts.webhooks ?? hooks.collect,
       });
     }
-    return { id: row.id, parked };
+    return { id: row.id, parked, parkReason };
   };
   // The inbox's caps are charged before anything else is written, and
   // handed back if a later step refuses: the transaction commits on a refusal.
@@ -761,8 +799,11 @@ export async function acceptEmail(
   const accepted = opts.tx
     ? await runAccept(opts.tx)
     : await deps.db.transaction((tx) => runAccept(tx as unknown as Db));
-  if (accepted === "quota_backlog_full" || accepted === "warmup_backlog_full") {
-    return { ok: false, reason: accepted };
+  if (accepted === "quota_backlog_full") return { ok: false, reason: accepted };
+  if (accepted === "warmup_backlog_full") {
+    const { cap, waiting } = warmupFull ?? { cap: 0, waiting: 0 };
+    const domain = senderDomain(payload.from) ?? payload.from;
+    return { ok: false, reason: accepted, domain, cap, waiting };
   }
   if (accepted === "inbox_send_cap_reached" || accepted === "shared_team_cap") {
     return {
@@ -805,5 +846,6 @@ export async function acceptEmail(
     at: deliveryAt,
     quota,
     underReview,
+    parkReason: accepted.parkReason,
   };
 }

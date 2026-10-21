@@ -25,6 +25,7 @@ const VALUES: Record<string, string> = Object.fromEntries(
   [...Object.values(en), ...Object.values(ptBR)]
     .flatMap((e: AccountMailEntry) => [
       e.subject,
+      e.heading ?? "",
       ...e.body,
       e.button,
       ...(e.muted ?? []),
@@ -63,6 +64,7 @@ describe("account mail catalogs", () => {
       const a: AccountMailEntry = en[kind];
       const b: AccountMailEntry = ptBR[kind];
       expect(slots(b.subject), `${kind} subject`).toEqual(slots(a.subject));
+      expect(slots(b.heading ?? ""), `${kind} heading`).toEqual(slots(a.heading ?? ""));
       expect(slots(b.body.join(" ")), `${kind} body`).toEqual(slots(a.body.join(" ")));
       expect(Object.keys(b.extra ?? {}).sort(), `${kind} extra`).toEqual(
         Object.keys(a.extra ?? {}).sort(),
@@ -142,6 +144,100 @@ describe("account mail catalogs", () => {
     });
     expect(alert.text).toContain("(nível em observação,");
     expect(alert.text).not.toContain("probation");
+  });
+});
+
+describe("new domain limit mail", () => {
+  const verified = (values: Record<string, string>) =>
+    buildAccountMail({
+      kind: "domain.verified",
+      locale: "en",
+      url: "https://app.example/domains/d",
+      values: { domain: "nova.example", limit: "", moving: "", ...values },
+    });
+
+  it("leaves a paragraph out when its slot is passed empty", () => {
+    const mail = verified({});
+    expect(mail.text.split("\n\n").slice(0, 2)).toEqual([
+      "The DNS records for nova.\u200aexample check out. It can send from any address on it, through the API, SMTP and broadcasts.",
+      "We keep re-checking the records and will tell you if one disappears.",
+    ]);
+    expect(mail.html).not.toMatch(/<p[^>]*><\/p>/);
+  });
+
+  it("tells a young domain's limit in the verified mail, with or without a date", () => {
+    const phrase = (key: string, values: Record<string, string> = {}) =>
+      accountMailPhrase({ locale: "en", kind: "domain.verified", key, values });
+    const dated = verified({
+      limit: phrase("limit", { perDay: "300", date: "November 16, 2026" }),
+      moving: phrase("moving"),
+    });
+    expect(dated.text).toContain(
+      "It was registered recently, so it starts with a daily limit: up to 300 emails today, more each day, and no limit from November 16, 2026. Mail over the day's limit waits and goes out the next day, on its own.\n\nMoving mail you already send elsewhere to this domain? Reply to this email before you switch and we'll take a look.",
+    );
+    expect(phrase("limitUnknownAge", { perDay: "300" })).toBe(
+      "It starts with a daily limit of up to 300 emails for now, rising as it builds a sending history. Mail over the day's limit waits and goes out the next day, on its own.",
+    );
+  });
+
+  it("leads the waiting mail with the count, in either language", () => {
+    for (const [locale, n, heading] of [
+      ["en", "1", "1 email waiting"],
+      ["en", "214", "214 emails waiting"],
+      ["pt-BR", "1.214", "1.214 e-mails esperando"],
+    ] as const) {
+      const mail = buildAccountMail({
+        kind: "domain.waiting",
+        locale,
+        url: "https://app.example/emails",
+        values: {
+          ...VALUES,
+          waiting: accountMailPhrase({
+            locale,
+            kind: "domain.waiting",
+            key: n === "1" ? "waiting.one" : "waiting.other",
+            values: { n },
+          }),
+        },
+      });
+      expect(mail.text.startsWith(`${heading}\n\n`), heading).toBe(true);
+      expect(mail.html).toContain(`tabular-nums">${heading}</p>`);
+    }
+  });
+
+  it("writes the new and reworded mail with no semicolons or em dashes", () => {
+    const kinds = [
+      "domain.verified",
+      "domain.waiting",
+      "domain.limit_lifted",
+      "domain.limit_kept",
+      "domain.limit_requested",
+    ] as const;
+    for (const catalog of [en, ptBR]) {
+      const entries: AccountMailEntry[] = kinds.map((kind) => catalog[kind]);
+      const copy = [
+        ...entries.flatMap((e) => [
+          e.subject,
+          e.heading ?? "",
+          ...e.body,
+          e.button,
+          ...(e.muted ?? []),
+          ...Object.values(e.extra ?? {}),
+        ]),
+        catalog.welcome.body[1],
+      ];
+      for (const text of copy) expect(text).not.toMatch(/[;\u2014]/);
+    }
+    // No mechanics and no operator in what the team reads.
+    for (const kind of kinds.filter((k) => k !== "domain.limit_requested")) {
+      const mail = buildAccountMail({
+        kind,
+        locale: "en",
+        url: "https://x.example",
+        values: VALUES,
+      });
+      expect(mail.text, kind).not.toMatch(/tier|operator|trust/i);
+    }
   });
 });
 
@@ -397,7 +493,10 @@ describe("mailPreferenceOf", () => {
     expect(mailPreferenceOf("deliverability.paused")).toBe("deliverability");
     expect(mailPreferenceOf("domain.lost.identity")).toBe("domain.lost");
     expect(mailPreferenceOf("billing.downgraded")).toBe("billing.downgraded");
+    expect(mailPreferenceOf("domain.waiting")).toBe("domain.waiting");
     const always = [
+      "domain.limit_lifted",
+      "domain.limit_kept",
       "welcome",
       "password_changed",
       "mcp.connected",

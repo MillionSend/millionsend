@@ -7,6 +7,11 @@ import {
   findSuppressionsFor,
   getWarmup,
   hashRecipient,
+  heldByNewDomainLimit,
+  type NewDomainLimit,
+  newDomainLimitEta,
+  newDomainLimitEtas,
+  newDomainLimitStatus,
   utcDay,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
@@ -130,6 +135,21 @@ function fullMailboxSql(teamId: string): SQL<boolean> {
 }
 
 /**
+ * A row the list shows as waiting for a reason the team may know: the new
+ * domain limit, a broadcast copy's own warm-up (running or paused), or (for
+ * "quota", resolved against the plan per page) the plan's cap. Every other
+ * park, a silent hold included, resolves as capacity does, so it reads as a
+ * plain wait, or the plan's while that binds. The paused warm-up's lookup
+ * is spelled out like HELD_SQL.
+ */
+const WAITING_FOR_SQL = sql<"domain_limit" | "warmup" | "warmup_paused" | "quota" | null>`case
+  when ${heldByNewDomainLimit()} then 'domain_limit'
+  when ${schema.emails.latestStatus} = 'queued_quota' and ${schema.emails.parkReason} = 'warmup' then
+    case when exists (select 1 from domain_warmups dw where dw.domain_id = emails.domain_id and dw.status = 'paused') then 'warmup_paused' else 'warmup' end
+  when ${schema.emails.latestStatus} = 'queued_quota' then 'quota'
+end`;
+
+/**
  * What a row not yet handed to the provider is waiting for, for the detail's
  * estimated nodes. Never stored: it is the planner's view at read time.
  */
@@ -140,7 +160,18 @@ type PendingSend =
   | { kind: "waiting" }
   | { kind: "warmup" }
   | { kind: "warmupPaused" }
-  | { kind: "newDomainLimit" }
+  | {
+      kind: "newDomainLimit";
+      domainId: string;
+      domain: string;
+      cap: number;
+      used: number;
+      pool: NewDomainLimit["pool"];
+      /** Held emails of the domain that go out before this one. */
+      ahead: number;
+      sendsAfter: Date;
+      resetsAt: Date;
+    }
   | { kind: "held" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
@@ -148,6 +179,7 @@ async function pendingSend(
   db: Db,
   teamId: string,
   email: {
+    id: string;
     latestStatus: string;
     sentAt: Date | null;
     scheduledAt: Date | null;
@@ -156,6 +188,7 @@ async function pendingSend(
     parkReason: string | null;
     held: boolean;
   },
+  limit: NewDomainLimit | undefined,
 ): Promise<PendingSend | null> {
   if (email.sentAt) return null;
   if (email.held) return { kind: "held" };
@@ -174,7 +207,20 @@ async function pendingSend(
       email.domainId && email.broadcastId ? await getWarmup(db, teamId, email.domainId) : undefined;
     if (ramp?.status === "warming") return { kind: "warmup" };
     if (ramp?.status === "paused") return { kind: "warmupPaused" };
-    return { kind: "newDomainLimit" };
+    // A domain the limit no longer covers lets its held mail out at the next drain.
+    const eta = limit ? await newDomainLimitEta(db, { teamId, emailId: email.id, now }) : null;
+    if (!limit || !eta) return { kind: "waiting" };
+    return {
+      kind: "newDomainLimit",
+      domainId: limit.domainId,
+      domain: limit.name,
+      cap: limit.cap,
+      used: limit.used,
+      pool: limit.pool,
+      ahead: eta.ahead,
+      sendsAfter: eta.sendsAfter,
+      resetsAt: limit.resetsAt,
+    };
   }
   // A hold by the team's own cap outranks capacity: its reset is the date.
   const hold = await planHoldUntil(db, teamId, now);
@@ -257,13 +303,34 @@ export const emailsRouter = router({
           scheduledAt: t.scheduledAt,
           sentAt: t.sentAt,
           broadcastId: t.broadcastId,
+          domainId: t.domainId,
           held: HELD_SQL,
+          waitingFor: WAITING_FOR_SQL,
         })
         .from(t)
         .where(and(...filters))
         .orderBy(...(ascending ? [asc(t.createdAt), asc(t.id)] : [desc(t.createdAt), desc(t.id)]))
         .limit(input.limit + 1);
-      return { ...paginate(rows, input.limit), total };
+      const page = paginate(rows, input.limit);
+      // Parked with no reason of its own: the plan's cap when it binds, else capacity.
+      const planResumesAt = page.items.some((row) => row.waitingFor === "quota")
+        ? await planHoldUntil(ctx.db, ctx.teamId)
+        : null;
+      // Each row the limit holds goes out by its own place in its domain's line.
+      const etas = await newDomainLimitEtas(ctx.db, {
+        teamId: ctx.teamId,
+        emailIds: page.items.flatMap((row) => (row.waitingFor === "domain_limit" ? [row.id] : [])),
+      });
+      const items = page.items.map(({ waitingFor, ...row }) => {
+        const quota = waitingFor === "quota";
+        return {
+          ...row,
+          waitingFor: quota ? (planResumesAt ? ("plan" as const) : null) : waitingFor,
+          resumesAt: quota ? planResumesAt : null,
+          sendsAfter: etas.get(row.id)?.sendsAfter ?? null,
+        };
+      });
+      return { items, nextCursor: page.nextCursor, total };
     }),
 
   /**
@@ -405,12 +472,30 @@ export const emailsRouter = router({
         .limit(1);
       broadcast = row ?? null;
     }
-    const pending = await pendingSend(ctx.db, ctx.teamId, email);
+    let sendingDomain: { id: string; name: string; cap: number | null } | null = null;
+    let limit: NewDomainLimit | undefined;
+    if (email.domainId) {
+      const d = schema.domains;
+      const [domain] = await ctx.db
+        .select({ id: d.id, name: d.name })
+        .from(d)
+        .where(and(eq(d.id, email.domainId), eq(d.teamId, ctx.teamId)))
+        .limit(1);
+      if (domain) {
+        [limit] = await newDomainLimitStatus(ctx.db, {
+          teamId: ctx.teamId,
+          domainIds: [domain.id],
+        });
+        sendingDomain = { ...domain, cap: limit?.cap ?? null };
+      }
+    }
+    const pending = await pendingSend(ctx.db, ctx.teamId, email, limit);
 
     // Whitelisted shape: the ciphertext/key columns must never reach the client.
     return {
       broadcast,
       pending,
+      sendingDomain,
       apiKeyName,
       id: email.id,
       from: email.from,

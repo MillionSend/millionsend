@@ -871,13 +871,14 @@
       },
       "warmup": {
         "title": "Aquecimento de domínios",
-        "subtitle": "Domínios de envio novos enviam sob um limite diário pela idade do registro, e os domínios em aquecimento de uma equipe compartilham um único limite diário, o maior entre os limites deles; o que passa de qualquer um espera. Confiar na equipe ou em um domínio remove o limite.",
+        "subtitle": "Domínios de envio novos enviam sob um limite diário pela idade do registro. Confiar libera o limite para a equipe ou para um domínio.",
         "off": "O aquecimento está desligado nesta instância. A confiança definida aqui vale quando ele for ligado.",
         "teamTrusted": "A equipe é confiável desde {date}: nenhum domínio dela passa por aquecimento.",
         "trustTeam": "Confiar na equipe",
         "untrustTeam": "Remover confiança da equipe",
         "trustDomain": "Confiar",
         "untrustDomain": "Remover confiança",
+        "declineDomain": "Recusar",
         "cols": {
           "domain": "Domínio",
           "registered": "Registrado",
@@ -894,10 +895,15 @@
         "unknownAge": "Desconhecido",
         "notChecked": "Ainda não consultado",
         "today": "{used} de {cap} · volume total {date}",
+        "waiting": "{count} esperando",
         "todayNoDate": "{used} de {cap}",
         "pool": "Compartilhado pelos domínios em aquecimento da equipe hoje: {used} de {cap}",
         "full": "Volume total",
         "trusted": "Confiável",
+        "request": {
+          "line": "Pede {perDay} por dia · {sends} · Hoje: {source}",
+          "by": "Pedido por {email}"
+        },
         "dialog": {
           "trustDomain": {
             "title": "Confiar em {name}",
@@ -918,12 +924,20 @@
             "title": "Deixar de confiar em {name}",
             "lead": "Os novos e-mails dos domínios da equipe voltam a ficar sob o limite diário de domínios novos.{kept, plural, =0 {} one { O domínio marcado como confiável individualmente continua assim.} other { Os # domínios marcados como confiáveis individualmente continuam assim.}}",
             "confirm": "Remover confiança da equipe"
+          },
+          "requestLifted": "{count, plural, one {A equipe recebe um e-mail avisando que o limite foi retirado.} other {A equipe recebe um e-mail para cada um dos # pedidos avisando que o limite foi retirado.}}",
+          "decline": {
+            "title": "Recusar o pedido de {name}?",
+            "lead": "O domínio continua com o limite diário de domínios novos. A equipe recebe um e-mail avisando.",
+            "confirm": "Recusar pedido"
           }
         },
         "toast": {
           "trusted": "Aquecimento dispensado para {name}",
           "untrusted": "Aquecimento reativado para {name}",
-          "error": "Não foi possível mudar a confiança: {message}"
+          "declined": "Pedido recusado para {name}",
+          "error": "Não foi possível mudar a confiança: {message}",
+          "declineError": "Não foi possível recusar o pedido: {message}"
         }
       }
     },
@@ -974,6 +988,30 @@
         "released": "{team} · {count, plural, one {# e-mail liberado} other {# e-mails liberados}}",
         "canceled": "{team} · {count, plural, one {# e-mail cancelado} other {# e-mails cancelados}}",
         "error": "Não foi possível: {message}"
+      }
+    },
+    "limitRequests": {
+      "title": "Pedidos de limite · {count}",
+      "subtitle": "Equipes pedindo para tirar o limite diário de um domínio novo. Aprove com Confiar ou recuse cada pedido na página da equipe.",
+      "cols": {
+        "team": "Equipe",
+        "domain": "Domínio",
+        "perDay": "Por dia",
+        "sends": "Envia",
+        "source": "Como envia hoje",
+        "waiting": "Esperando",
+        "since": "Pedido"
+      },
+      "sends": {
+        "account": "Cadastro e conta",
+        "notifications": "Recibos e notificações",
+        "marketing": "Newsletters e marketing",
+        "mix": "Um pouco de cada"
+      },
+      "source": {
+        "new": "Ainda não envia",
+        "other_provider": "Outro provedor",
+        "own_servers": "Servidores próprios"
       }
     },
     "tiers": {

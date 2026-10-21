@@ -55,7 +55,7 @@
     "previewAll": "{eligible} contatos em cerca de {days, plural, one {# dia de envio} other {# dias de envio}}, os mais ativos primeiro.",
     "previewSkipped": "{inactive, plural, one {# sem atividade há mais de 90 dias fica de fora.} other {# sem atividade há mais de 90 dias ficam de fora.}}",
     "previewLast": "{inactive, plural, one {# sem atividade há mais de 90 dias vai por último.} other {# sem atividade há mais de 90 dias vão por último.}}",
-    "previewTail": "Cada dia saudável aumenta o volume em 1,5×. Seus e-mails transacionais nunca ficam retidos.",
+    "previewTail": "Cada dia saudável aumenta o volume em 1,5×. O aquecimento nunca retém seus e-mails transacionais.",
     "switch": "Aquecer este domínio",
     "switchHint": "Envios grandes começam pequenos e crescem a cada dia enquanto a entrega estiver saudável. Deixe desligado se este domínio já envia esse volume por outro provedor."
   },
@@ -77,7 +77,7 @@
   },
   "pace": {
     "label": "Ritmo do aquecimento",
-    "note": "Cada dia saudável aumenta o volume em 1,5×. Um sinal fraco mantém o volume, dois reduzem em 30% e um grave pausa o aquecimento. O que passar do volume do dia espera o dia seguinte. Seus e-mails transacionais nunca ficam retidos."
+    "note": "Cada dia saudável aumenta o volume em 1,5×. Um sinal fraco mantém o volume, dois reduzem em 30% e um grave pausa o aquecimento. O que passar do volume do dia espera o dia seguinte. O aquecimento nunca retém seus e-mails transacionais."
   },
   "health": {
     "label": "Saúde da entrega · {day}",

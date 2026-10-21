@@ -18,9 +18,13 @@ import {
   formatMailDateTime,
   formatMailPercent,
   freeCapText,
+  heldByNewDomainLimit,
+  limitSpent,
   type MailContent,
   type MailLocale,
   mailCountList,
+  mayWarmUp,
+  newDomainLimitStatus,
   nextUtcDayStart,
   OVERAGE_HARD_CAP,
   PAUSE_BOUNCE_RATE,
@@ -42,16 +46,19 @@ import {
   WEBHOOK_BACKLOG_COUNT,
   WEBHOOK_FAILING_STREAK,
   type WebhookEnqueue,
+  warmupCap,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import {
   and,
   eq,
+  exists,
   gt,
   gte,
   inArray,
   isNotNull,
+  isNull,
   like,
   lt,
   ne,
@@ -59,7 +66,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { mailOwners as mailTeamOwners, type SystemMailer } from "../system-mail.js";
+import { mailOperator, mailOwners as mailTeamOwners, type SystemMailer } from "../system-mail.js";
 import { COUNTED_SETTLED_SQL, WEBHOOK_AUTO_DISABLE_AFTER } from "./deliver-webhook.js";
 
 export interface NotifyDeps {
@@ -267,12 +274,15 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
   // Webhook trouble goes out by mail only: the endpoint in trouble is the one
   // that would have received the event.
   const today = utcDay(now.getTime());
-  // Backlog claims are per UTC day and nothing else clears them.
+  // Backlog and waiting claims are per UTC day and nothing else clears them.
   await db
     .delete(schema.teamNotifications)
     .where(
       and(
-        like(schema.teamNotifications.kind, "webhook.backlog:%"),
+        or(
+          like(schema.teamNotifications.kind, "webhook.backlog:%"),
+          like(schema.teamNotifications.kind, "domain.waiting:%"),
+        ),
         lt(schema.teamNotifications.periodKey, today),
       ),
     );
@@ -575,10 +585,24 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
         await clearNotifications(db, { teamId: d.teamId, kind: lost });
       }
       if (await claimNotification(db, { teamId: d.teamId, kind: gained, periodKey: "episode" })) {
+        const limit = await warmupCap(db, { teamId: d.teamId, domainId: d.id, at: now });
         await mailOwners(
           d.teamId,
           "domain.verified",
-          account("domain.verified", `/domains/${d.id}`, values),
+          account("domain.verified", `/domains/${d.id}`, (locale) => {
+            const phrase = (key: string, phraseValues: Record<string, string> = {}) =>
+              limit
+                ? accountMailPhrase({ locale, kind: "domain.verified", key, values: phraseValues })
+                : "";
+            const perDay = limit?.cap.toLocaleString(locale) ?? "";
+            return {
+              domain: d.name,
+              limit: limit?.fullAt
+                ? phrase("limit", { perDay, date: formatMailDate(locale, limit.fullAt) })
+                : phrase("limitUnknownAge", { perDay }),
+              moving: phrase("moving"),
+            };
+          }),
         );
       }
       continue;
@@ -593,6 +617,193 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       const path = d.status === "failed" ? "/domains" : `/domains/${d.id}`;
       await mailOwners(d.teamId, kind, account(kind, path, values));
     }
+  }
+
+  // Mail the new domain limit holds once the day's room is spent: one notice
+  // per domain per UTC day, counting what waits when it goes out. Held mail
+  // with room left goes out at the next drain, so it is no news. Read from
+  // the few domains still under the limit, never from all parked mail.
+  const e = schema.emails;
+  const heldDomains = await db
+    .select({ teamId: schema.domains.teamId, domainId: schema.domains.id })
+    .from(schema.domains)
+    .where(
+      and(
+        mayWarmUp(now),
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(e)
+            .where(
+              and(
+                eq(e.teamId, schema.domains.teamId),
+                eq(e.domainId, schema.domains.id),
+                heldByNewDomainLimit(),
+              ),
+            ),
+        ),
+      ),
+    );
+  for (const { teamId, domainId } of heldDomains) {
+    const kind = `domain.waiting:${domainId}`;
+    if (domainClaimed.has(`${teamId}:${kind}`)) continue;
+    const [limit] = await newDomainLimitStatus(db, { teamId, domainIds: [domainId], now });
+    const spent = limit?.waiting ? limitSpent(limit) : null;
+    if (!limit || !spent) continue;
+    if (!(await claimNotification(db, { teamId, kind, periodKey: today }))) continue;
+    const cap = spent === "pool" && limit.pool ? limit.pool.cap : limit.cap;
+    await attempt(teamId, "domain.waiting", "mail", () =>
+      mailOwners(
+        teamId,
+        "domain.waiting",
+        account(
+          "domain.waiting",
+          `/emails?status=queued_quota&domain=${domainId}&source=all&range=all`,
+          (locale) => ({
+            waiting: accountMailPhrase({
+              locale,
+              kind: "domain.waiting",
+              key: limit.waiting === 1 ? "waiting.one" : "waiting.other",
+              values: { n: limit.waiting.toLocaleString(locale) },
+            }),
+            reached: accountMailPhrase({
+              locale,
+              kind: "domain.waiting",
+              key: `reached.${spent}`,
+              values: { domain: limit.name, cap: cap.toLocaleString(locale) },
+            }),
+            schedule: limit.fullAt
+              ? accountMailPhrase({
+                  locale,
+                  kind: "domain.waiting",
+                  key: "schedule",
+                  values: { date: formatMailDate(locale, limit.fullAt) },
+                })
+              : accountMailPhrase({ locale, kind: "domain.waiting", key: "scheduleUnknownAge" }),
+          }),
+        ),
+      ),
+    );
+  }
+
+  // Limit requests: the operator hears of each new one, the team of each
+  // answer. Each row's column is its claim, taken before the mail goes out.
+  const lr = schema.domainLimitRequests;
+  const asked = await db
+    .select({
+      id: lr.id,
+      teamId: lr.teamId,
+      team: schema.teams.name,
+      domain: schema.domains.name,
+      status: lr.status,
+      sends: lr.sends,
+      perDay: lr.perDay,
+      source: lr.source,
+      note: lr.note,
+    })
+    .from(lr)
+    .innerJoin(schema.teams, eq(schema.teams.id, lr.teamId))
+    .innerJoin(schema.domains, eq(schema.domains.id, lr.domainId))
+    .where(isNull(lr.operatorNotifiedAt));
+  for (const q of asked) {
+    const [claimed] = await db
+      .update(lr)
+      .set({ operatorNotifiedAt: now })
+      .where(and(eq(lr.id, q.id), isNull(lr.operatorNotifiedAt)))
+      .returning({ id: lr.id });
+    // Answered before the sweep saw it: nothing left to decide.
+    if (!claimed || q.status !== "open") continue;
+    const kind = "domain.limit_requested";
+    try {
+      const mailed = await mailOperator(
+        db,
+        deps.mailer,
+        kind,
+        `/console/safety/${q.teamId}`,
+        (locale) => ({
+          team: q.team,
+          domain: q.domain,
+          perDay: q.perDay.toLocaleString(locale),
+          sends: accountMailPhrase({ locale, kind, key: `sends.${q.sends}` }),
+          source: accountMailPhrase({ locale, kind, key: `source.${q.source}` }),
+          noteLine: q.note
+            ? accountMailPhrase({ locale, kind, key: "note", values: { note: q.note } })
+            : "",
+        }),
+        deps.appBaseUrl,
+      );
+      if (mailed) sent += 1;
+    } catch (err) {
+      console.error(`notifications.sweep: ${kind} for request ${q.id} failed`, err);
+    }
+  }
+  const answered = await db
+    .select({
+      id: lr.id,
+      teamId: lr.teamId,
+      domainId: lr.domainId,
+      domain: schema.domains.name,
+      status: lr.status,
+      requestedBy: lr.requestedBy,
+    })
+    .from(lr)
+    .innerJoin(schema.domains, eq(schema.domains.id, lr.domainId))
+    .where(and(ne(lr.status, "open"), isNull(lr.outcomeNotifiedAt)));
+  for (const a of answered) {
+    const [claimed] = await db
+      .update(lr)
+      .set({ outcomeNotifiedAt: now })
+      .where(and(eq(lr.id, a.id), isNull(lr.outcomeNotifiedAt)))
+      .returning({ id: lr.id });
+    if (!claimed) continue;
+    const answer = a.status === "granted" ? "domain.limit_lifted" : "domain.limit_kept";
+    await attempt(a.teamId, answer, `request ${a.id}`, async () => {
+      // A declined domain that left the limit meanwhile (its age, clean
+      // sending, a trust) hears that the limit is lifted, as it is.
+      const cap =
+        a.status === "granted"
+          ? null
+          : await warmupCap(db, { teamId: a.teamId, domainId: a.domainId, at: now });
+      const kind = cap ? "domain.limit_kept" : "domain.limit_lifted";
+      // Whoever asked hears back while still on the team, owner or not.
+      const [requester] = a.requestedBy
+        ? await db
+            .select({ email: schema.user.email })
+            .from(schema.user)
+            .innerJoin(
+              schema.teamMembers,
+              and(
+                eq(schema.teamMembers.userId, schema.user.id),
+                eq(schema.teamMembers.teamId, a.teamId),
+              ),
+            )
+            .where(eq(schema.user.id, a.requestedBy))
+        : [];
+      const fullAt = cap?.fullAt ?? null;
+      await mailOwners(
+        a.teamId,
+        kind,
+        account(kind, `/domains/${a.domainId}`, (locale) => ({
+          domain: a.domain,
+          grows: fullAt
+            ? accountMailPhrase({
+                locale,
+                kind: "domain.limit_kept",
+                key: "grows",
+                values: { date: formatMailDate(locale, fullAt) },
+              })
+            : "",
+        })),
+        requester
+          ? {
+              also: {
+                email: requester.email,
+                locale: await accountLocale(db, accountEmailFrom(), requester.email),
+              },
+            }
+          : undefined,
+      );
+    });
   }
 
   // Inboxes that need a person today: mail held in quarantine, sends waiting

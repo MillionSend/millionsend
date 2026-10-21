@@ -55,7 +55,7 @@
     "previewAll": "{eligible} contacts in about {days, plural, one {# sending day} other {# sending days}}, most active first.",
     "previewSkipped": "{inactive, plural, one {# with no activity in 90+ days is skipped.} other {# with no activity in 90+ days are skipped.}}",
     "previewLast": "{inactive, plural, one {# with no activity in 90+ days goes last.} other {# with no activity in 90+ days go last.}}",
-    "previewTail": "Each healthy day grows the volume 1.5×. Your transactional email is never held.",
+    "previewTail": "Each healthy day grows the volume 1.5×. The warm-up never holds your transactional email.",
     "switch": "Warm up this domain",
     "switchHint": "Big sends start small and grow each day while delivery stays healthy. Leave it off if this domain already sends this volume through another provider."
   },
@@ -77,7 +77,7 @@
   },
   "pace": {
     "label": "Warm-up pace",
-    "note": "Each healthy day grows the volume 1.5×. One weak signal holds it, two cut it by 30%, and a severe one pauses it. Mail over the day's volume waits for the next day. Your transactional email is never held."
+    "note": "Each healthy day grows the volume 1.5×. One weak signal holds it, two cut it by 30%, and a severe one pauses it. Mail over the day's volume waits for the next day. The warm-up never holds your transactional email."
   },
   "health": {
     "label": "Delivery health · {day}",

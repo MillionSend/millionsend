@@ -5,8 +5,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const catalogs = {
-  en: { console: (await import("../messages/en/console.json")).default },
-  "pt-BR": { console: (await import("../messages/pt-BR/console.json")).default },
+  en: {
+    console: (await import("../messages/en/console.json")).default,
+    common: (await import("../messages/en/common.json")).default,
+  },
+  "pt-BR": {
+    console: (await import("../messages/pt-BR/console.json")).default,
+    common: (await import("../messages/pt-BR/common.json")).default,
+  },
 };
 const lang = vi.hoisted(() => ({ locale: "en" as "en" | "pt-BR" }));
 
@@ -47,8 +53,11 @@ const toast = vi.hoisted(() => vi.fn());
 vi.mock("@/components/toast", () => ({ toast }));
 
 const { WarmupCard } = await import("@/components/console/safety/review-view");
+const { formatRelative } = await import("@/lib/format");
+type Warmup = Parameters<typeof WarmupCard>[0]["warmup"];
+type Domain = Warmup["domains"][number];
 
-const fresh = {
+const fresh: Domain = {
   id: "d1",
   name: "mail.fresh.example",
   registeredAt: new Date("2026-10-19T09:00:00Z"),
@@ -57,8 +66,9 @@ const fresh = {
   trustedAt: null,
   today: { cap: 100, used: 100, fullAt: new Date("2026-11-18T09:00:00Z") },
   waiting: 37,
+  request: null,
 };
-const trusted = {
+const trusted: Domain = {
   ...fresh,
   id: "d2",
   name: "news.trusted.example",
@@ -66,9 +76,19 @@ const trusted = {
   today: null,
   waiting: 0,
 };
-const warmup = {
+const request = {
+  id: "r1",
+  perDay: 2000,
+  sends: "account",
+  source: "new",
+  note: "People sign up on nova.example and get a confirmation email and a sign-in code.",
+  createdAt: new Date(Date.now() - 2 * 3_600_000),
+  requesterEmail: "ana@nova.example",
+};
+const asking: Domain = { ...fresh, request };
+const warmup: Warmup = {
   enabled: true,
-  trustedAt: null as Date | null,
+  trustedAt: null,
   domains: [fresh, trusted],
   pool: { cap: 100, used: 100 },
   waiting: 37,
@@ -95,7 +115,7 @@ afterEach(async () => {
   onChanged.mockClear();
 });
 
-const render = (over: Partial<typeof warmup> = {}) =>
+const render = (over: Partial<Warmup> = {}) =>
   act(async () =>
     root.render(
       createElement(WarmupCard, {
@@ -117,6 +137,10 @@ const press = (init: KeyboardEventInit) =>
   act(async () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...init }));
   });
+// DotParts keeps each "·" behind a no-break space.
+const text = (element: Element | null | undefined) =>
+  element?.textContent?.replaceAll("\u00a0", " ");
+const rows = () => [...container.querySelectorAll("tbody tr")].map(text);
 
 describe("the warm-up trust switch", () => {
   it("asks before trusting a domain, and only the confirm trusts it", async () => {
@@ -126,6 +150,7 @@ describe("the warm-up trust switch", () => {
     expect(dialog()?.textContent).toContain(
       "The 37 emails the daily limit is holding start going out right away. New mail from this domain sends at the team's full volume from now on.",
     );
+    expect(dialog()?.textContent).not.toContain("gets an email");
     expect(cancelButton()?.textContent).toBe("CancelEsc");
     await click(cancelButton());
     expect(dialog()).toBeNull();
@@ -220,5 +245,104 @@ describe("the warm-up trust switch", () => {
     );
     expect(confirmButton()?.textContent).toContain("Confiar no domínio");
     expect(cancelButton()?.textContent).toBe("CancelarEsc");
+  });
+});
+
+describe("a limit request on the warm-up card", () => {
+  it("shows what the limit holds, and under its domain's row what the team asked", async () => {
+    await render({ domains: [asking, trusted] });
+    expect(rows()).toEqual([
+      expect.stringContaining("100 of 100 · full volume Nov 18 · 37 waiting"),
+      `Asks for 2,000 a day · Sign-up and account · Goes out today: Nowhere yet · Asked by ana@nova.example · ${formatRelative(request.createdAt, "en")}“People sign up on nova.example and get a confirmation email and a sign-in code.”`,
+      expect.stringContaining("news.trusted.example"),
+    ]);
+    expect(rows()[0]).toMatch(/Trust · Decline$/);
+    // Someone no longer on the team, and no note: the line says what is known.
+    await render({
+      domains: [{ ...asking, request: { ...request, requesterEmail: null, note: null } }],
+    });
+    expect(rows()[1]).toBe(
+      `Asks for 2,000 a day · Sign-up and account · Goes out today: Nowhere yet · ${formatRelative(request.createdAt, "en")}`,
+    );
+    // Nothing waiting, nothing asked: the row says neither.
+    await render({ domains: [{ ...fresh, waiting: 0 }, trusted] });
+    expect(rows()).toHaveLength(2);
+    expect(rows()[0]).not.toContain("waiting");
+    expect(button("Decline")).toBeUndefined();
+  });
+
+  it("says in the trust dialog that the team hears its limit is lifted", async () => {
+    await render({ domains: [asking, trusted] });
+    await click(button("Trust"));
+    expect(text(dialog())).toContain(
+      "New mail from this domain sends at the team's full volume from now on. The team gets an email saying the limit is lifted.",
+    );
+    await click(cancelButton());
+    await click(button("Trust team"));
+    expect(text(dialog())).toContain("The team gets an email saying the limit is lifted.");
+    await click(cancelButton());
+    const other: Domain = { ...asking, id: "d3", name: "news.fresh.example", request };
+    await render({ domains: [asking, other] });
+    await click(button("Trust team"));
+    expect(text(dialog())).toContain(
+      "The team gets an email for each of its 2 requests saying the limit is lifted.",
+    );
+    await click(cancelButton());
+    expect(rq.sent).toEqual([]);
+  });
+
+  it("asks before declining, in the danger style, and only the confirm declines", async () => {
+    await render({ domains: [asking, trusted] });
+    await click(button("Decline"));
+    expect(title()).toBe("Decline the request for mail.fresh.example?");
+    expect(text(dialog())).toContain(
+      "Its mail keeps the daily limit for new domains. The team gets an email saying so.",
+    );
+    expect(confirmButton()?.className).toBe("ms-btn ms-btn-destructive");
+    expect(confirmButton()?.textContent).toContain("Decline request");
+    await click(cancelButton());
+    expect(dialog()).toBeNull();
+    await click(button("Decline"));
+    await press({ key: "Escape" });
+    expect(dialog()).toBeNull();
+    expect(rq.sent).toEqual([]);
+
+    await click(button("Decline"));
+    await press({ key: "Enter", metaKey: true });
+    expect(rq.sent).toEqual([{ requestId: "r1" }]);
+    await act(async () => rq.settle?.onError({ message: "not_open" }));
+    expect(toast).toHaveBeenCalledWith("Could not decline the request: not_open", "danger");
+    expect(dialog()).not.toBeNull();
+    expect(onChanged).not.toHaveBeenCalled();
+    rq.pending = true;
+    await render({ domains: [asking, trusted] });
+    expect(confirmButton()?.disabled).toBe(true);
+    expect(confirmButton()?.querySelector(".ms-spinner")).not.toBeNull();
+    rq.pending = false;
+    await render({ domains: [asking, trusted] });
+    await click(confirmButton());
+    await act(async () => rq.settle?.onSuccess());
+    expect(dialog()).toBeNull();
+    expect(toast).toHaveBeenCalledWith("Request declined for mail.fresh.example");
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
+
+  it("reads in Brazilian Portuguese", async () => {
+    lang.locale = "pt-BR";
+    await render({ domains: [asking, trusted] });
+    expect(rows()[1]).toContain(
+      "Pede 2.000 por dia · Cadastro e conta · Hoje: Ainda não envia · Pedido por ana@nova.example",
+    );
+    await click(button("Recusar"));
+    expect(title()).toBe("Recusar o pedido de mail.fresh.example?");
+    expect(text(dialog())).toContain(
+      "O domínio continua com o limite diário de domínios novos. A equipe recebe um e-mail avisando.",
+    );
+    expect(confirmButton()?.textContent).toContain("Recusar pedido");
+    await click(cancelButton());
+    await click(button("Confiar"));
+    expect(text(dialog())).toContain(
+      "A equipe recebe um e-mail avisando que o limite foi retirado.",
+    );
   });
 });

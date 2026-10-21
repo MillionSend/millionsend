@@ -272,7 +272,22 @@ export const sendEmailRequestSchema = z
 
 export type SendEmailRequest = z.infer<typeof sendEmailRequestSchema>;
 
-export const sendEmailResponseSchema = z.object({ id: z.uuid() }).openapi("SendEmailResponse");
+/** MillionSend's note on an accepted email that the sending domain's new domain limit holds. */
+const newDomainLimitWarningSchema = z
+  .object({
+    code: z.literal("new_domain_limit"),
+    message: z.string(),
+    sends_after: z
+      .string()
+      .describe("The earliest the email goes out by the domain's daily limit (ISO 8601)"),
+  })
+  .describe(
+    "Only on an email the new domain limit holds for later. It is still accepted and goes out on its own.",
+  );
+
+export const sendEmailResponseSchema = z
+  .object({ id: z.uuid(), warning: newDomainLimitWarningSchema.optional() })
+  .openapi("SendEmailResponse");
 
 /**
  * Batch send (resend.batch.send → POST /emails/batch). The SDK posts a bare
@@ -292,7 +307,7 @@ export const batchEmailRequestSchema = z
 
 export const batchEmailResponseSchema = z
   .object({
-    data: z.array(z.object({ id: z.uuid() })),
+    data: z.array(z.object({ id: z.uuid(), warning: newDomainLimitWarningSchema.optional() })),
     // Present only in permissive mode: per-item failures by input index.
     errors: z.array(z.object({ index: z.number().int(), message: z.string() })).optional(),
   })
@@ -316,6 +331,15 @@ export const removeEmailResponseSchema = z
   .object({ object: z.literal("email"), id: z.uuid(), deleted: z.literal(true) })
   .openapi("RemoveEmailResponse");
 
+/** Why a queued email waits, as GET /emails and GET /emails/{id} say it. */
+export const QUEUED_REASONS = [
+  "new_domain_limit",
+  "warming_up",
+  "daily_quota",
+  "monthly_quota",
+  "capacity",
+] as const;
+
 const emailListItemSchema = z.object({
   id: z.uuid(),
   from: z.string(),
@@ -327,6 +351,18 @@ const emailListItemSchema = z.object({
   created_at: z.string(),
   scheduled_at: z.string().nullable(),
   last_event: z.string(),
+  queued_reason: z
+    .enum(QUEUED_REASONS)
+    .nullable()
+    .describe(
+      "Why a queued email waits: the sending domain's new domain limit or warm-up, the plan's daily or monthly quota, or sending capacity. Null when it isn't waiting.",
+    ),
+  sends_after: z
+    .string()
+    .nullable()
+    .describe(
+      "The earliest a waiting email goes out (ISO 8601). Null when no time is known, as for capacity and the warm-up.",
+    ),
 });
 
 export const listEmailsResponseSchema = z
@@ -1210,9 +1246,9 @@ export const sendBroadcastResponseSchema = z
     warning: z
       .object({
         code: z
-          .enum(["paced", "queued_behind", "warming_up"])
+          .enum(["paced", "queued_behind", "warming_up", "new_domain_limit"])
           .describe(
-            "paced: more than the capacity available now; queued_behind: other sends go first; warming_up: the sender domain's warm-up spreads the send over days, most active contacts first, or holds it while paused",
+            "paced: more than the capacity available now. queued_behind: other sends go first. warming_up: the sender domain's warm-up spreads the send over days, most active contacts first, or holds it while paused. new_domain_limit: the sender domain's new domain limit spreads the send over days.",
           ),
         days: z
           .number()

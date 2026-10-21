@@ -298,6 +298,23 @@ export function formatStepTime(date: Date | string | number, locale: string): st
   }).format(new Date(date));
 }
 
+/** A clock time in the viewer's zone, without the zone ("9:00 PM" / "21:00"). */
+export function formatTime(date: Date | string | number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(
+    new Date(date),
+  );
+}
+
+/** Whole days until `date`, a part day counting as one ("in 27 days"); zero once it passed. */
+export function daysUntil(date: Date | string | number, now: Date = new Date()): number {
+  return Math.max(0, Math.ceil((new Date(date).getTime() - now.getTime()) / 86_400_000));
+}
+
+/** Whole days since `date` ("3 days ago"); zero for a date ahead. */
+export function daysSince(date: Date | string | number, now: Date = new Date()): number {
+  return Math.max(0, Math.floor((now.getTime() - new Date(date).getTime()) / 86_400_000));
+}
+
 /** "Fri, Sep 18, 10:30 AM GMT-3": the finish stamp of a paced send. */
 export function formatFinishAbout(date: Date | string | number, locale: string): string {
   return `${formatStepDay(date, locale)}, ${formatStepTime(date, locale)}`;
@@ -321,21 +338,24 @@ export interface SendingDay extends SendDay {
 }
 
 /**
- * A sending broadcast's days on the local calendar: what already went out
- * plus the planner's releases still to come, each day marked done, today,
- * or ahead.
+ * A sending broadcast's days: what already went out plus the planner's
+ * releases still to come, each day marked done, today, or ahead. Local days
+ * by default, UTC days when a daily cap paces the send (see
+ * groupReleasesByDay).
  */
 export function sendingDays(
   sent: readonly { at: Date | string; count: number }[],
   releases: readonly { at: Date | string; endsAt: Date | string; count: number }[],
   now: Date,
+  day: "local" | "utc" = "local",
 ): SendingDay[] {
+  const same = day === "utc" ? sameUtcDay : sameLocalDay;
   const past = sent.map((s) => ({ at: s.at, endsAt: s.at, count: s.count }));
-  const sentDays = groupReleasesByDay(past);
-  return groupReleasesByDay([...past, ...releases]).map((day) => {
-    const out = sentDays.find((d) => sameLocalDay(d.startsAt, day.startsAt))?.count ?? 0;
-    const state = sameLocalDay(day.startsAt, now) ? "now" : day.startsAt < now ? "done" : "next";
-    return { ...day, sent: out, state };
+  const sentDays = groupReleasesByDay(past, day);
+  return groupReleasesByDay([...past, ...releases], day).map((d) => {
+    const out = sentDays.find((s) => same(s.startsAt, d.startsAt))?.count ?? 0;
+    const state = same(d.startsAt, now) ? "now" : d.startsAt < now ? "done" : "next";
+    return { ...d, sent: out, state };
   });
 }
 
