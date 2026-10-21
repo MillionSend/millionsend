@@ -39,7 +39,11 @@ entries like `{ "id": "<topic-id>", "subscription": "opt_in" }`, and read back
 with `GET /contacts/{id}/topics`, which lists every topic with the contact's
 effective `subscription` and an `explicit` flag (false when it is the topic's
 default). A send with a `topic_id` whose every `to` recipient is opted out is
-refused with `422 all_recipients_suppressed`. Deleting a topic leaves the
+refused with `422 all_recipients_suppressed`. `DELETE /topics/{id}` answers
+`409 conflict` for a topic a broadcast uses (a draft can drop the topic first,
+but a sent or canceled broadcast keeps it for good), and while an email sent
+with the topic still waits to go out, until it does or, if it's scheduled,
+until it's canceled. Deleting a topic leaves the
 unsubscribe links already sent with it working: they open the hosted page
 without that topic, where the recipient can still unsubscribe from
 everything or, when the team has other public topics, change those, and

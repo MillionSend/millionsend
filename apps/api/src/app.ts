@@ -28,6 +28,7 @@ import {
   countParked,
   DAY_MS,
   decryptEmailBody,
+  deleteTopic,
   emitContactEvents,
   emitSuppressionEvents,
   enforceDomainWarmup,
@@ -2536,20 +2537,20 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
     async (c) => {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
-      let row: { id: string } | undefined;
-      try {
-        [row] = await db
-          .delete(b)
-          .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
-          .returning({ id: b.id });
-      } catch (error) {
-        if (isForeignKeyViolation(error)) {
-          return c.json(errorBody(409, "conflict", "This topic is referenced by a broadcast"), 409);
-        }
-        throw error;
+      const refusal = await deleteTopic(db, auth.teamId, id);
+      if (refusal === "not_found") {
+        return c.json(errorBody(404, "not_found", "Topic not found"), 404);
       }
-      if (!row) return c.json(errorBody(404, "not_found", "Topic not found"), 404);
-      return c.json({ id: row.id, object: "topic" as const, deleted: true as const }, 200);
+      if (refusal === "in_broadcast") {
+        return c.json(errorBody(409, "conflict", "This topic is referenced by a broadcast"), 409);
+      }
+      if (refusal === "emails_waiting") {
+        return c.json(errorBody(409, "conflict", "This topic has emails waiting to send"), 409);
+      }
+      return c.json(
+        { id: id.toLowerCase(), object: "topic" as const, deleted: true as const },
+        200,
+      );
     },
   );
 }

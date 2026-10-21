@@ -1,9 +1,10 @@
+import { deleteTopic } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, not, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
-import { isForeignKeyViolation } from "../db-errors";
+import { TOPIC_EMAILS_WAITING, TOPIC_IN_BROADCAST } from "@/lib/trpc-error";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
 
@@ -185,23 +186,14 @@ export const topicsRouter = router({
     }),
 
   delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
-    const t = schema.topics;
-    let row: { id: string } | undefined;
-    try {
-      [row] = await ctx.db
-        .delete(t)
-        .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-        .returning({ id: t.id });
-    } catch (error) {
-      if (isForeignKeyViolation(error)) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "This topic is referenced by a broadcast and cannot be deleted.",
-        });
-      }
-      throw error;
+    const refusal = await deleteTopic(ctx.db, ctx.teamId, input.id);
+    if (refusal === "not_found") throw new TRPCError({ code: "NOT_FOUND" });
+    if (refusal === "in_broadcast") {
+      throw new TRPCError({ code: "CONFLICT", message: TOPIC_IN_BROADCAST });
     }
-    if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-    return { id: row.id };
+    if (refusal === "emails_waiting") {
+      throw new TRPCError({ code: "CONFLICT", message: TOPIC_EMAILS_WAITING });
+    }
+    return { id: input.id.toLowerCase() };
   }),
 });
