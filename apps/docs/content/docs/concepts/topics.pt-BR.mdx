@@ -40,7 +40,12 @@ puro de entradas como `{ "id": "<topic-id>", "subscription": "opt_in" }`, e
 lidas de volta com `GET /contacts/{id}/topics`, que lista cada tópico com a
 `subscription` efetiva do contato e um campo `explicit` (false quando é o padrão
 do tópico). Um envio com `topic_id` em que todos os destinatários de `to`
-optaram por sair é recusado com `422 all_recipients_suppressed`. Excluir um
+optaram por sair é recusado com `422 all_recipients_suppressed`. `DELETE
+/topics/{id}` responde `409 conflict` para um tópico que uma transmissão usa
+(um rascunho pode deixar de usar o tópico antes, mas uma transmissão enviada
+ou cancelada fica com ele para sempre) e enquanto algum e-mail enviado com o
+tópico ainda espera para sair, até ele sair ou, se for agendado, até ser
+cancelado. Excluir um
 tópico não quebra os links de descadastro já enviados com ele: eles abrem a
 página hospedada sem esse tópico, onde o destinatário ainda pode cancelar
 todas as inscrições ou, se a equipe tiver outros tópicos públicos, ajustar

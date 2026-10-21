@@ -905,7 +905,12 @@ export {
   type TeamStanding,
   teamStandingOf,
 } from "./team-standing.js";
-export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
+export {
+  deleteTopic,
+  findTopicOptOuts,
+  isSubscribedToTopic,
+  type TopicDeleteRefusal,
+} from "./topics.js";
 export {
   deriveTrackingKey,
   makeClickToken,
