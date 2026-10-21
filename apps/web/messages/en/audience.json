@@ -243,6 +243,9 @@
     "deleteTitle": "Delete topic",
     "deleteBody": "{name} is deleted, along with every contact's subscription to it. This cannot be undone.",
     "deleteConfirm": "Delete topic",
+    "deleteInBroadcast": "A broadcast uses this topic, so it can't be deleted.",
+    "deleteEmailsWaiting": "Emails that use this topic are still waiting to go out. Delete the topic once they've gone out.",
+    "deleteError": "Could not delete the topic. Try again.",
     "previewTitle": "Unsubscribe page",
     "customize": "Customize page",
     "detail": {

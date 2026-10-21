@@ -243,6 +243,9 @@
     "deleteTitle": "Excluir tópico",
     "deleteBody": "{name} é excluído, junto com a inscrição de cada contato nele. Isto não pode ser desfeito.",
     "deleteConfirm": "Excluir tópico",
+    "deleteInBroadcast": "Uma transmissão usa este tópico, então ele não pode ser excluído.",
+    "deleteEmailsWaiting": "Ainda há e-mails deste tópico esperando para sair. Exclua o tópico depois que eles saírem.",
+    "deleteError": "Não foi possível excluir o tópico. Tente de novo.",
     "previewTitle": "Página de descadastro",
     "customize": "Personalizar página",
     "detail": {
