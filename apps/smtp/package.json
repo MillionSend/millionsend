@@ -28,6 +28,6 @@
     "@types/smtp-server": "^3.5.13",
     "nodemailer": "^10.1.2",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.4"
+    "vitest": "^5.0.5"
   }
 }
