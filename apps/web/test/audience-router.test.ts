@@ -11,6 +11,7 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseCsvContacts } from "@/lib/csv";
+import { propertyTypeMessage, propertyTypeRefusal } from "@/lib/trpc-error";
 import { createCaller } from "@/server/routers";
 
 // vitest.config sets SKIP_ENV_VALIDATION (env reads stay live), so setting
@@ -812,6 +813,84 @@ describe("audience.contacts.update no-op", () => {
     expect((await contactRow(id))?.updatedAt.getTime()).toBeGreaterThan(
       before?.updatedAt.getTime() ?? 0,
     );
+  });
+});
+
+describe("typed properties on contact saves", () => {
+  it("add and update refuse a value that doesn't fit its key's type, in any letter case", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await caller.audience.properties.define({ key: "plan_ends", type: "date" });
+    await caller.audience.properties.define({ key: "Seats", type: "number" });
+    const { id } = await caller.audience.contacts.add({ email: "ada@example.com" });
+
+    for (const [properties, message] of [
+      [{ PLAN_ENDS: "soon" }, propertyTypeMessage("date", "PLAN_ENDS")],
+      [{ seats: "many" }, propertyTypeMessage("number", "seats")],
+    ] as const) {
+      await expect(
+        caller.audience.contacts.add({ email: "bob@example.com", properties }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST", message });
+      await expect(caller.audience.contacts.update({ id, properties })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message,
+      });
+    }
+    expect((await caller.audience.contacts.list({ limit: 10 })).total).toBe(1);
+    expect((await contactRow(id))?.properties).toEqual({});
+    // The dashboard reads the key back whole, colons and all.
+    expect(propertyTypeRefusal(propertyTypeMessage("date", "a:b"))).toEqual({
+      mustBe: "date",
+      key: "a:b",
+    });
+  });
+
+  it("stores values that fit, a date trimmed", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await caller.audience.properties.define({ key: "plan_ends", type: "date" });
+    await caller.audience.properties.define({ key: "seats", type: "number" });
+
+    const { id } = await caller.audience.contacts.add({
+      email: "ada@example.com",
+      properties: { Plan_Ends: " 2026-01-08 ", seats: "3", plan: "soon" },
+    });
+    expect((await contactRow(id))?.properties).toEqual({
+      Plan_Ends: "2026-01-08",
+      seats: "3",
+      plan: "soon",
+    });
+    await caller.audience.contacts.update({
+      id,
+      properties: { Plan_Ends: "2026-01-08T10:30:00Z ", seats: "4" },
+    });
+    expect((await contactRow(id))?.properties).toEqual({
+      Plan_Ends: "2026-01-08T10:30:00Z",
+      seats: "4",
+    });
+  });
+
+  it("update checks only values that change, so an old value never blocks a save", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id } = await caller.audience.contacts.add({
+      email: "ada@example.com",
+      properties: { plan_ends: "soon", seats: "3" },
+    });
+    await caller.audience.properties.define({ key: "plan_ends", type: "date" });
+
+    await caller.audience.contacts.update({
+      id,
+      firstName: "Ada",
+      properties: { plan_ends: "soon", seats: "4" },
+    });
+    expect(await contactRow(id)).toMatchObject({
+      firstName: "Ada",
+      properties: { plan_ends: "soon", seats: "4" },
+    });
+    await expect(
+      caller.audience.contacts.update({ id, properties: { plan_ends: "later" } }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
 

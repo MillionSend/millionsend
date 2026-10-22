@@ -1,15 +1,9 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
-import { type ContactPropertyType, parsePropertyDate } from "@millionsend/core";
+import { type ContactPropertyType, storedPropertyValue } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq } from "drizzle-orm";
-import {
-  type Env,
-  errorBody,
-  KEYSET_LIST_DESCRIPTION,
-  keysetPage,
-  numericPropertyValue,
-} from "../app.js";
+import { type Env, errorBody, KEYSET_LIST_DESCRIPTION, keysetPage } from "../app.js";
 import {
   contactPropertyIdResponseSchema,
   createContactPropertyRequestSchema,
@@ -37,16 +31,10 @@ export function registerContactPropertyRoutes(app: OpenAPIHono<Env>, db: Db): vo
   const storedFallback = (
     type: ContactPropertyType,
     value: string | number | null | undefined,
-  ): { ok: true; stored: string | null } | { ok: false } => {
-    if (value === null || value === undefined) return { ok: true, stored: null };
-    if (type === "number" && numericPropertyValue(value) === null) return { ok: false };
-    if (type === "date") {
-      return parsePropertyDate(String(value)) === null
-        ? { ok: false }
-        : { ok: true, stored: String(value).trim() };
-    }
-    return { ok: true, stored: String(value) };
-  };
+  ): { ok: true; stored: string | null } | { ok: false } =>
+    value === null || value === undefined
+      ? { ok: true, stored: null }
+      : storedPropertyValue(type, value);
 
   const wire = (row: typeof p.$inferSelect) => ({
     id: row.id,

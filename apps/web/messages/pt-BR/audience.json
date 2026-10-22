@@ -178,6 +178,10 @@
     "propValuePlaceholder": "Valor",
     "addProperty": "Adicionar propriedade",
     "removeProperty": "Remover propriedade",
+    "propertyMustBe": {
+      "number": "{name} precisa ser um número, como 42.",
+      "date": "{name} precisa ser uma data, como 2026-01-08."
+    },
     "segments": "Segmentos",
     "noSegments": "Sem segmentos",
     "segmentsPlaceholder": "Adicionar segmentos…",
