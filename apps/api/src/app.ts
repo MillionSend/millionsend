@@ -15,6 +15,7 @@ import {
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactActivityRow,
   type ContactEventContext,
+  type ContactPropertyType,
   type ContactSnapshot,
   cancelBroadcastRows,
   canonicalBodyHash,
@@ -28,6 +29,7 @@ import {
   countParked,
   DAY_MS,
   decryptEmailBody,
+  deleteTopic,
   emitContactEvents,
   emitSuppressionEvents,
   enforceDomainWarmup,
@@ -44,6 +46,7 @@ import {
   findTopicOptOuts,
   fixedWindowCounter,
   getWarmup,
+  heldByNewDomainLimit,
   INBOX_KEY_FROM_MESSAGE,
   INBOX_KEY_SCOPE_MESSAGE,
   type InboxKeys,
@@ -51,6 +54,7 @@ import {
   isAdminRole,
   isSharedInboxSender,
   type Keyring,
+  limitSpent,
   MAX_ATTACHMENT_BYTES,
   type MonitorSettings,
   MX_DELIVER_PATH,
@@ -58,9 +62,15 @@ import {
   makeUnsubscribeToken,
   markSegmentsStale,
   monthlyQuotaMessage,
+  type NewDomainLimit,
+  newDomainLimitEtas,
+  newDomainLimitFullMessage,
+  newDomainLimitPlanCap,
+  newDomainLimitStatus,
   PACING_HORIZON_MAX_RETENTION_DAYS,
   PLAN_CONTACT_LIMIT,
   pacingHorizonDays,
+  parsePropertyDate,
   parseScheduledAt,
   planCaps,
   planRegionSend,
@@ -83,14 +93,17 @@ import {
   type SendRefusal,
   SHARED_REFUSALS,
   scoreBand,
+  secondsToNextUtcDay,
   segmentContactsWhere,
   segmentFilterSchema,
+  senderDomain,
   sendingBroadcasts,
   sendRefusal,
   sendRefusalError,
   sesMessageIdHeader,
   sharedModeReason,
   TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT,
+  teamPlanHold,
   teamQuota,
   teamSharedSending,
   transitionQueueState,
@@ -127,6 +140,7 @@ import {
   count,
   desc,
   eq,
+  getTableColumns,
   inArray,
   isNotNull,
   isNull,
@@ -194,6 +208,7 @@ import {
   listSegmentsResponseSchema,
   listTopicsResponseSchema,
   parseContactInclude,
+  type QUEUED_REASONS,
   removeBroadcastResponseSchema,
   removeContactResponseSchema,
   removeContactSegmentResponseSchema,
@@ -416,15 +431,13 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
           "daily_quota_exceeded",
           "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
         ),
+        retryAfterSec: secondsToNextUtcDay(new Date()),
       };
     case "warmup_backlog_full":
       return {
         status: 429 as const,
-        body: errorBody(
-          429,
-          "daily_quota_exceeded",
-          "New domain warm-up: this sending domain ramps up gradually and enough emails are already waiting; retry after the UTC day rolls over",
-        ),
+        body: errorBody(429, "daily_quota_exceeded", newDomainLimitFullMessage(result)),
+        retryAfterSec: secondsToNextUtcDay(new Date()),
       };
     case "monthly_quota_exceeded":
       return {
@@ -509,6 +522,85 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
 // Shared-domain addresses have no domains row, so they would otherwise fail
 // sender verification with a 422 before the inbox rails could refuse them.
 const sharedSenderRefusal = acceptRejection({ ok: false, reason: "shared_domain" });
+
+/** What an accept's answer says of a held email: the day's cap it met, and the earliest it goes out. */
+function newDomainLimitWarning(limit: NewDomainLimit, sendsAfter: Date) {
+  return {
+    code: "new_domain_limit" as const,
+    message:
+      limitSpent(limit) === "pool"
+        ? `Your new domains sent their ${grouped(limit.pool?.cap ?? limit.cap)} emails for today. This email goes out after 00:00 UTC.`
+        : `${limit.name} sent its ${grouped(limit.cap)} emails for today. This email goes out after 00:00 UTC.`,
+    sends_after: sendsAfter.toISOString(),
+  };
+}
+
+/**
+ * The send answers for `ids` in order: each id, with a warning on the ones
+ * the new domain limit holds. Any other wait, a silent hold included, adds
+ * nothing, so it reads as a plain accept.
+ */
+async function sendAnswers(
+  db: Db,
+  teamId: string,
+  ids: readonly string[],
+): Promise<{ id: string; warning?: ReturnType<typeof newDomainLimitWarning> }[]> {
+  const etas = await newDomainLimitEtas(db, { teamId, emailIds: ids });
+  return ids.map((id) => {
+    const eta = etas.get(id);
+    return eta ? { id, warning: newDomainLimitWarning(eta.limit, eta.sendsAfter) } : { id };
+  });
+}
+
+type QueuedReason = (typeof QUEUED_REASONS)[number];
+
+const NOT_WAITING = { queued_reason: null, sends_after: null } as const;
+
+/** An email row as the reads select it: every column, and whether the new domain limit holds it. */
+const emailReadColumns = {
+  ...getTableColumns(schema.emails),
+  limitHeld: sql<boolean>`${heldByNewDomainLimit()}`,
+};
+
+/**
+ * Why each waiting email among `rows` waits, and the earliest it goes out
+ * when that is known, by id. Every silent hold reads exactly as a capacity
+ * wait does: the plan's quota and its renewal while that binds, else
+ * capacity with no time.
+ */
+async function emailWaits(
+  db: Db,
+  teamId: string,
+  isCloud: boolean,
+  rows: readonly {
+    id: string;
+    latestStatus: string;
+    parkReason: string | null;
+    limitHeld: boolean;
+  }[],
+): Promise<Map<string, { queued_reason: QueuedReason; sends_after: string | null }>> {
+  const out = new Map<string, { queued_reason: QueuedReason; sends_after: string | null }>();
+  const waiting = rows.filter((r) => r.latestStatus === "queued_quota");
+  if (waiting.length === 0) return out;
+  const etas = await newDomainLimitEtas(db, {
+    teamId,
+    emailIds: waiting.filter((r) => r.limitHeld).map((r) => r.id),
+  });
+  const plan = waiting.some((r) => r.parkReason !== "warmup")
+    ? await teamPlanHold(db, teamId, isCloud)
+    : null;
+  for (const r of waiting) {
+    const [reason, at]: [QueuedReason, Date | null] = r.limitHeld
+      ? ["new_domain_limit", etas.get(r.id)?.sendsAfter ?? null]
+      : r.parkReason === "warmup"
+        ? ["warming_up", null]
+        : plan
+          ? [plan.period === "day" ? "daily_quota" : "monthly_quota", plan.resumesAt]
+          : ["capacity", null];
+    out.set(r.id, { queued_reason: reason, sends_after: at?.toISOString() ?? null });
+  }
+  return out;
+}
 
 /**
  * POST /emails's answer to a shared-domain From before anything else runs,
@@ -602,7 +694,7 @@ function toAcceptPayload(body: SendEmailRequest, domainId: string | null): Accep
 
 /** Registered property types by lower(key) — the registry index is
  * case-insensitive, and contact map keys are matched the same way. */
-type ContactPropertyTypes = Map<string, "string" | "number">;
+type ContactPropertyTypes = Map<string, ContactPropertyType>;
 
 async function loadContactPropertyTypes(db: Db, teamId: string): Promise<ContactPropertyTypes> {
   const p = schema.contactProperties;
@@ -628,7 +720,8 @@ export function numericPropertyValue(value: unknown): number | null {
  * `removed` (the update path unsets it; create and batch have nothing to
  * unset). Invalid — for a precise 422 rather than silently storing bad
  * data — are nested objects/arrays, and values for a key registered as
- * 'number' that don't parse to a finite number.
+ * 'number' that don't parse to a finite number, or as 'date' that don't read
+ * as a date. A date is stored trimmed, as written, never rewritten.
  */
 function coerceContactProperties(
   input: Record<string, unknown>,
@@ -647,10 +740,17 @@ function coerceContactProperties(
     if (typeof value === "object") {
       return { ok: false, message: "contact properties must be flat string or number values" };
     }
-    if (types.get(key.toLowerCase()) === "number" && numericPropertyValue(value) === null) {
+    const type = types.get(key.toLowerCase());
+    if (type === "number" && numericPropertyValue(value) === null) {
       return { ok: false, message: `property "${key}" must be a number` };
     }
-    const text = String(value);
+    if (type === "date" && parsePropertyDate(String(value)) === null) {
+      return {
+        ok: false,
+        message: `property "${key}" must be a date, such as 2026-01-08, 2026-01-08T10:30:00Z or Unix time`,
+      };
+    }
+    const text = type === "date" ? String(value).trim() : String(value);
     if (text.length > CONTACT_PROPERTY_VALUE_MAX_LENGTH) {
       return {
         ok: false,
@@ -664,12 +764,14 @@ function coerceContactProperties(
 
 type WireContactPropertyValue =
   | { type: "string"; value: string }
-  | { type: "number"; value: number };
+  | { type: "number"; value: number }
+  | { type: "date"; value: string };
 
 /**
  * GET /contacts/{id} wire: each stored value wrapped as {type, value}, typed
- * per the team's registry. Unregistered keys — and number-typed values that
- * no longer parse (typed after the value was stored) — read as strings.
+ * per the team's registry. Unregistered keys, and number- or date-typed
+ * values that no longer parse (typed after the value was stored), read as
+ * strings.
  */
 function wireContactProperties(
   map: Record<string, string>,
@@ -677,8 +779,14 @@ function wireContactProperties(
 ): Record<string, WireContactPropertyValue> {
   const out: Record<string, WireContactPropertyValue> = {};
   for (const [key, value] of Object.entries(map)) {
-    const num = types.get(key.toLowerCase()) === "number" ? numericPropertyValue(value) : null;
-    out[key] = num === null ? { type: "string", value } : { type: "number", value: num };
+    const type = types.get(key.toLowerCase());
+    const num = type === "number" ? numericPropertyValue(value) : null;
+    out[key] =
+      num !== null
+        ? { type: "number", value: num }
+        : type === "date" && parsePropertyDate(value) !== null
+          ? { type: "date", value }
+          : { type: "string", value };
   }
   return out;
 }
@@ -2447,20 +2555,20 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
     async (c) => {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
-      let row: { id: string } | undefined;
-      try {
-        [row] = await db
-          .delete(b)
-          .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
-          .returning({ id: b.id });
-      } catch (error) {
-        if (isForeignKeyViolation(error)) {
-          return c.json(errorBody(409, "conflict", "This topic is referenced by a broadcast"), 409);
-        }
-        throw error;
+      const refusal = await deleteTopic(db, auth.teamId, id);
+      if (refusal === "not_found") {
+        return c.json(errorBody(404, "not_found", "Topic not found"), 404);
       }
-      if (!row) return c.json(errorBody(404, "not_found", "Topic not found"), 404);
-      return c.json({ id: row.id, object: "topic" as const, deleted: true as const }, 200);
+      if (refusal === "in_broadcast") {
+        return c.json(errorBody(409, "conflict", "This topic is referenced by a broadcast"), 409);
+      }
+      if (refusal === "emails_waiting") {
+        return c.json(errorBody(409, "conflict", "This topic has emails waiting to send"), 409);
+      }
+      return c.json(
+        { id: id.toLowerCase(), object: "topic" as const, deleted: true as const },
+        200,
+      );
     },
   );
 }
@@ -2918,7 +3026,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     // not finish inside the horizon; without SES's numbers it says nothing.
     const estimate = warmup?.plan
       ? null
-      : await estimateSend(auth.teamId, broadcast, domain.region, scheduledAt);
+      : await estimateSend(auth.teamId, broadcast, domain, scheduledAt);
     if (estimate?.blocked) {
       return fail(
         422,
@@ -2959,6 +3067,16 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         days,
         message: `This domain is warming up, so this broadcast goes out over about ${days === 1 ? "1 day" : `${days} days`}, most active contacts first.`,
       };
+    } else if (estimate?.newDomainHold && estimate.limit) {
+      const { days, limit } = estimate;
+      const cap = grouped(limit.cap);
+      body.warning = {
+        code: "new_domain_limit",
+        days,
+        message: estimate.finishesAt
+          ? `${limit.name} sends up to ${cap} emails a day for now, so this broadcast goes out over about ${days === 1 ? "1 day" : `${days} days`}.`
+          : `${limit.name} sends up to ${cap} emails a day for now, so this broadcast goes out over more than ${days} days. Steady clean sending lifts the limit sooner.`,
+      };
     } else if (
       estimate?.finishesAt &&
       estimate.startsAt &&
@@ -2982,29 +3100,33 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
 
   /**
    * The new send planned beside the region's broadcasts in flight, at its
-   * scheduled instant (the window and the caps are aged to it). Null when
-   * the planner has no SES numbers to work from.
+   * scheduled instant (the window and the caps are aged to it), under its
+   * sender domain's new domain limit too. Null when the planner has no SES
+   * numbers to work from.
    */
   const estimateSend = async (
     teamId: string,
     broadcast: { id: string; segmentId: string | null; topicId: string | null },
-    region: string,
+    sender: { region: string; domainId: string },
     at: Date,
   ) => {
     if (!deps.pacing) return null;
-    const account = await deps.pacing.regionAccount(region);
+    const account = await deps.pacing.regionAccount(sender.region);
     if (!account) return null;
-    const [count, quota, health, reservePercent, rateCeiling, horizonDays] = await Promise.all([
-      countBroadcastAudience(db, teamId, broadcast),
-      fetchTeamQuota(db, teamId, deps.isCloud),
-      fetchDeliverabilityHealth(db, teamId),
-      deps.pacing.reservePercent(),
-      deps.pacing.rateCeiling(),
-      deps.pacing.horizonDays(),
-    ]);
+    const [count, quota, health, reservePercent, rateCeiling, horizonDays, limits] =
+      await Promise.all([
+        countBroadcastAudience(db, teamId, broadcast),
+        fetchTeamQuota(db, teamId, deps.isCloud),
+        fetchDeliverabilityHealth(db, teamId),
+        deps.pacing.reservePercent(),
+        deps.pacing.rateCeiling(),
+        deps.pacing.horizonDays(),
+        newDomainLimitStatus(db, { teamId, domainIds: [sender.domainId] }),
+      ]);
+    const limit = limits[0] ?? null;
     const caps = quota ? planCaps(quota, await quotaUsage(db, teamId, quota), new Date()) : [];
     const plan = await planRegionSend(db, {
-      region,
+      region: sender.region,
       account,
       reservePercent,
       rateCeiling,
@@ -3014,11 +3136,11 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         count,
         at,
         spacingMs: broadcastSendSpacingMs(health.status),
-        caps,
+        caps: limit ? [...caps, newDomainLimitPlanCap(limit)] : caps,
       },
     });
     const mine = plan.estimates.find((e) => e.key === broadcast.id);
-    return mine ? { ...mine, count, horizonDays } : null;
+    return mine ? { ...mine, count, horizonDays, limit } : null;
   };
 
   /**
@@ -3040,6 +3162,14 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       fetchTeamQuota(db, teamId, deps.isCloud),
     ]);
     const caps = quota ? planCaps(quota, await quotaUsage(db, teamId, quota), new Date()) : [];
+    const limits = await newDomainLimitStatus(db, {
+      teamId,
+      domainIds: mine.flatMap((b) => (b.domainId && !b.warmup ? [b.domainId] : [])),
+    });
+    const limitCaps = (domainId: string | null) => {
+      const limit = limits.find((l) => l.domainId === domainId);
+      return limit ? [newDomainLimitPlanCap(limit)] : [];
+    };
     for (const region of regions) {
       const account = await deps.pacing.regionAccount(region);
       if (!account) continue;
@@ -3049,7 +3179,10 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         reservePercent,
         rateCeiling,
         horizonDays,
-        capsFor: (id) => (id === teamId ? caps.map((c) => ({ ...c })) : undefined),
+        capsFor: (b) =>
+          b.teamId === teamId
+            ? [...caps.map((c) => ({ ...c })), ...limitCaps(b.domainId)]
+            : undefined,
       });
       for (const e of plan.estimates) out.set(e.key, e.finishesAt);
     }
@@ -3793,6 +3926,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     },
   });
 
+  const sendAnswer = async (teamId: string, id: string) =>
+    (await sendAnswers(deps.db, teamId, [id]))[0] ?? { id };
+
   app.openapi(sendRoute, async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
@@ -3840,7 +3976,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       });
       if (begin.kind === "replay") {
         const first = begin.emailIds[0];
-        if (first) return c.json({ id: first }, 200);
+        if (first) return c.json(await sendAnswer(auth.teamId, first), 200);
         return c.json(
           errorBody(409, "concurrent_idempotent_requests", "Idempotency record is incomplete"),
           409,
@@ -3891,7 +4027,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         if (rejection.retryAfterSec) c.header("retry-after", String(rejection.retryAfterSec));
         return c.json(rejection.body, rejection.status);
       }
-      return c.json({ id: result.id }, 200);
+      return c.json(
+        result.parkReason === "warmup"
+          ? await sendAnswer(auth.teamId, result.id)
+          : { id: result.id },
+        200,
+      );
     } catch (err) {
       if (err instanceof IdempotencyTakeoverError && idemKey) {
         const replay = await beginIdempotent(deps.db, {
@@ -3900,7 +4041,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           bodyHash: canonicalBodyHash(body),
         });
         if (replay.kind === "replay" && replay.emailIds[0]) {
-          return c.json({ id: replay.emailIds[0] }, 200);
+          return c.json(await sendAnswer(auth.teamId, replay.emailIds[0]), 200);
         }
         return c.json(
           errorBody(409, "concurrent_idempotent_requests", "Request superseded by a retry"),
@@ -4032,7 +4173,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         bodyHash: canonicalBodyHash(items),
       });
       if (begin.kind === "replay") {
-        return c.json({ data: begin.emailIds.map((id) => ({ id })) }, 200);
+        return c.json({ data: await sendAnswers(deps.db, auth.teamId, begin.emailIds) }, 200);
       }
       if (begin.kind === "conflict") {
         return c.json(
@@ -4110,6 +4251,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           at: Date;
           recipientCount: number;
           domainId: string | null;
+          domain: string;
         }[] = [];
         let underReview = false;
         for (const { payload, index } of payloads) {
@@ -4130,6 +4272,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             at: result.at,
             recipientCount: result.recipientCount,
             domainId: payload.domainId,
+            domain: senderDomain(payload.from) ?? payload.from,
             ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
           });
         }
@@ -4264,9 +4407,13 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             day: o.day,
             at: o.at,
           });
-          if (warmup === "send") continue;
-          if (warmup === "backlog_full") {
-            throw new AcceptRejectedError({ ok: false, reason: "warmup_backlog_full" }, o.index);
+          if (warmup.kind === "send") continue;
+          if (warmup.kind === "backlog_full") {
+            const { cap, waiting } = warmup;
+            throw new AcceptRejectedError(
+              { ok: false, reason: "warmup_backlog_full", domain: o.domain, cap, waiting },
+              o.index,
+            );
           }
           await txDb
             .update(schema.emails)
@@ -4297,9 +4444,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         }
       }
       await webhooks.flush();
+      const ids = accepted.map((o) => o.id);
       return c.json(
         {
-          data: accepted.map((o) => ({ id: o.id })),
+          data: accepted.some((o) => o.parked)
+            ? await sendAnswers(deps.db, auth.teamId, ids)
+            : ids.map((id) => ({ id })),
           // The SDK's permissive response type requires `errors`, empty or not.
           ...(permissive ? { errors: itemErrors } : {}),
         },
@@ -4313,7 +4463,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           bodyHash: canonicalBodyHash(items),
         });
         if (replay.kind === "replay") {
-          return c.json({ data: replay.emailIds.map((id) => ({ id })) }, 200);
+          return c.json({ data: await sendAnswers(deps.db, auth.teamId, replay.emailIds) }, 200);
         }
         return c.json(
           errorBody(409, "concurrent_idempotent_requests", "Request superseded by a retry"),
@@ -4587,7 +4737,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const auth = c.get("auth");
     const { id } = c.req.valid("param");
     const [email] = await deps.db
-      .select()
+      .select(emailReadColumns)
       .from(schema.emails)
       .where(and(eq(schema.emails.id, id), eq(schema.emails.teamId, auth.teamId)));
     if (!email) {
@@ -4615,6 +4765,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       }
     }
     const insights = await findEmailInsights(deps.db, auth.teamId, email);
+    const waits = await emailWaits(deps.db, auth.teamId, deps.isCloud, [email]);
     return c.json(
       {
         object: "email" as const,
@@ -4635,6 +4786,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           ? sesMessageIdHeader(email.sesMessageId)
           : `<${email.id}@unsent.millionsend>`,
         last_event: wireLastEvent(email.latestStatus),
+        ...(waits.get(email.id) ?? NOT_WAITING),
         score: insights ? insights.scoreTenths / 10 : null,
       },
       200,
@@ -4764,7 +4916,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         )[0],
       loadRows: (cond, orderBy, take) =>
         deps.db
-          .select()
+          .select(emailReadColumns)
           .from(t)
           .where(and(eq(t.teamId, auth.teamId), cond))
           .orderBy(...orderBy)
@@ -4780,6 +4932,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         422,
       );
     }
+    const waits = await emailWaits(deps.db, auth.teamId, deps.isCloud, page.rows);
     return c.json(
       {
         object: "list" as const,
@@ -4794,6 +4947,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           created_at: email.createdAt.toISOString(),
           scheduled_at: email.scheduledAt?.toISOString() ?? null,
           last_event: wireLastEvent(email.latestStatus),
+          ...(waits.get(email.id) ?? NOT_WAITING),
         })),
         has_more: page.hasMore,
       },

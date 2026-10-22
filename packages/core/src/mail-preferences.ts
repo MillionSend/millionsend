@@ -5,11 +5,16 @@ import type { SystemMailKind } from "./system-mail.js";
  * The owner notices a person may turn off, grouped as the settings page
  * shows them. A key covers every kind it stands for: the severity steps of
  * one notice fold into one switch, as does a domain's two ways of losing
- * verification. Mail about the account itself (welcome, password, apps) and
- * the security receipts (keys, webhook secrets) are not here: always sent.
+ * verification. Mail about the account itself (welcome, password, apps), the
+ * answer to a team's own limit request and the security receipts (keys,
+ * webhook secrets) are not here: always sent.
  */
 export const MAIL_PREFERENCE_GROUPS = [
-  { group: "domains", cloudOnly: false, keys: ["domain.verified", "domain.lost"] },
+  {
+    group: "domains",
+    cloudOnly: false,
+    keys: ["domain.verified", "domain.lost", "domain.waiting"],
+  },
   { group: "team", cloudOnly: false, keys: ["member.joined"] },
   {
     group: "broadcasts",

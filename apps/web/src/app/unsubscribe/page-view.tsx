@@ -256,6 +256,20 @@ export function UnsubscribePageView({
               {successHeading ?? m.done}
             </p>
             <p style={{ margin: "10px 0 0", fontSize: 15, color: "var(--ms-muted)" }}>{doneText}</p>
+            {/* A topic-only opt-out leaves the sender's other mail coming, so
+                the way out of everything stays on the page. */}
+            {topicName ? (
+              <form
+                method="post"
+                action={formAction}
+                style={{ marginTop: 20, display: "flex", justifyContent: "center" }}
+              >
+                <input type="hidden" name="scope" value="all" />
+                <button type="submit" className="ms-btn ms-btn-secondary">
+                  {m.buttonAll}
+                </button>
+              </form>
+            ) : null}
           </>
         ) : (
           <>

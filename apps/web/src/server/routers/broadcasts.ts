@@ -9,6 +9,7 @@ import {
   enableWarmup,
   fetchBroadcastInsights,
   fetchTeamStanding,
+  heldByNewDomainLimit,
   injectPreheader,
   MAX_SUBJECT_LENGTH,
   type MergeContact,
@@ -321,6 +322,7 @@ export const broadcastsRouter = router({
             finishesAt: p?.finishesAt ?? null,
             releases: p?.releases ?? [],
             sent: p?.sent ?? [],
+            newDomainLimit: p?.newDomainLimit ?? null,
           };
         }),
       };
@@ -396,6 +398,7 @@ export const broadcastsRouter = router({
       finishesAt: held ? null : (progress?.finishesAt ?? null),
       releases: held ? [] : (progress?.releases ?? []),
       sent: progress?.sent ?? [],
+      newDomainLimit: held ? null : (progress?.newDomainLimit ?? null),
       startedAt: row.status === "sending" ? row.scheduledAt : null,
       planHold: planHold ? { resumesAt: planHold } : null,
       replyTo: firstReplyTo(row.replyTo),
@@ -726,7 +729,19 @@ export const broadcastsRouter = router({
         { actor: userActor(ctx) },
       );
       if (!result.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: result.reason });
-      return { to };
+      if (!result.parked) return { to, hold: null };
+      // Parked: the composer says so instead of "sent", naming only the new
+      // domain limit; any other hold reads as a plain wait.
+      const [row] = await ctx.db
+        .select({ byLimit: sql<boolean>`${heldByNewDomainLimit()}` })
+        .from(e)
+        .where(and(eq(e.id, result.id), eq(e.teamId, ctx.teamId)));
+      return {
+        to,
+        hold: row?.byLimit
+          ? { kind: "domain_limit" as const, domain: sender.fromDomain }
+          : { kind: "waiting" as const },
+      };
     }),
 
   /**
@@ -816,7 +831,7 @@ export const broadcastsRouter = router({
         : await planBroadcastSend(ctx.db, {
             teamId: ctx.teamId,
             region: sender.region,
-            newSend: { count, at },
+            newSend: { count, at, domainId: sender.domainId },
           });
       return {
         count,

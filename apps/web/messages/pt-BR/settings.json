@@ -430,6 +430,7 @@
       "domain_receiving_disabled": "Desativou recebimento",
       "domain_catch_all_enabled": "Pega-tudo ativado",
       "domain_catch_all_disabled": "Pega-tudo desativado",
+      "domain_limit_requested": "Pediu um limite diário maior",
       "inbox_created": "Caixa de entrada criada",
       "inbox_deleted": "Caixa de entrada excluída",
       "inbox_safety_updated": "Regras de segurança da caixa alteradas",
@@ -480,6 +481,7 @@
       "monitor_broadcasts_resumed": "Retomou transmissões após pausa do monitor",
       "warmup_trust_granted": "Dispensou o aquecimento de domínio novo",
       "warmup_trust_revoked": "Reativou o aquecimento de domínio novo",
+      "warmup_request_declined": "Recusou um limite diário maior",
       "screening_released": "Liberou e-mails em espera para revisão",
       "screening_canceled": "Cancelou e-mails em espera para revisão",
       "content_revealed": "Leu o conteúdo de mensagens",
@@ -514,6 +516,10 @@
       "domain_lost": {
         "label": "Domínio perdeu a verificação",
         "note": "Um registro sumiu, ou o SES desistiu do domínio."
+      },
+      "domain_waiting": {
+        "label": "E-mails esperando em domínio novo",
+        "note": "Um domínio novo atingiu o limite diário e há e-mails esperando o dia seguinte, no máximo uma vez por dia."
       },
       "member_joined": {
         "label": "Membro entrou",

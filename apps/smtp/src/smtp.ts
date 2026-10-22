@@ -15,6 +15,7 @@ import {
   MAX_SUBJECT_LENGTH,
   monthlyQuotaMessage,
   msgIds,
+  newDomainLimitFullMessage,
   parseMailbox,
   parseSingleSender,
   reservedSenderRefusal,
@@ -243,7 +244,7 @@ async function handleMessage(
       throw smtpError(452, "Daily quota exceeded and the parked backlog is full");
     }
     if (result.reason === "warmup_backlog_full") {
-      throw smtpError(452, "New domain warm-up: enough mail is already waiting");
+      throw smtpError(452, `New domain limit: ${newDomainLimitFullMessage(result)}`);
     }
     if (result.reason === "monthly_quota_exceeded") {
       throw smtpError(452, monthlyQuotaMessage(result));

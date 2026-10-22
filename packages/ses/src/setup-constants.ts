@@ -31,7 +31,8 @@ export const SES_EVENT_TYPES = [
 
 /**
  * Every SES action the instance issues, plus the CloudWatch read of SES's
- * reputation — infra/millionsend-ses.cfn.yaml mirrors the same set. Identity
+ * reputation and the worker's reads of the events queue —
+ * infra/millionsend-ses.cfn.yaml mirrors the same set. Identity
  * actions support resource-level permissions and are confined to identities;
  * sending stays account-wide because a send that names a configuration set is
  * authorized against that resource too, and GetAccount and GetMetricData
@@ -77,6 +78,15 @@ export const SES_IAM_POLICY = {
       Effect: "Allow",
       Action: ["cloudwatch:GetMetricData"],
       Resource: "*",
+    },
+    // The worker's reads of the events queue, so the policy alone serves a
+    // role (IRSA, web identity, an instance profile); sqsQueuePolicy grants
+    // the IAM user the same. One document serves every account and region,
+    // so the queue is matched by its name.
+    {
+      Effect: "Allow",
+      Action: ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+      Resource: `arn:aws:sqs:*:*:${SETUP_NAMES.queue}`,
     },
   ],
 } as const;
@@ -358,6 +368,12 @@ DOCS_PORT=3002
 # authenticate with username "millionsend" and an ms_ API key as the password.
 SMTP_PORT=2587
 
+# Host the dashboard's SMTP tab (Settings → SMTP) tells clients to connect
+# to. Unset: the host of APP_BASE_URL. Set it when the relay answers on
+# another name; the relay itself never reads it. With IS_CLOUD=true the tab
+# appears only once this and the keypair below are set.
+# SMTP_PUBLIC_HOST=smtp.example.com
+
 # STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both
 # set: STARTTLS is offered and required before AUTH. Without a keypair the
 # relay refuses to start unless the private-network escape hatch below is
@@ -411,13 +427,17 @@ NOTIFICATIONS_EMAIL_FROM=
 # new invitations are refused until the day rolls over.
 # INVITES_PER_TEAM_PER_DAY=50
 
-# Reverse proxies whose forwarded-client-IP headers (X-Forwarded-For,
-# CF-Connecting-IP) are trusted, comma-separated. Default: loopback only,
-# which covers a proxy on the same host. Add your proxy's address when it
-# runs elsewhere; an untrusted source's headers are ignored and the socket
-# address is used instead. A tracking edge (millionsend-tracking-edge) that
-# forwards branded links through Cloudflare belongs here too, or every
-# tracking hit records the edge as the client.
+# Proxies the web process skips when it reads a client's address (sign-in
+# rate limits, session and sign-up IPs, tracking hits) from X-Forwarded-For,
+# comma-separated IPs or CIDRs. It walks the header from the right past these
+# and takes the first address not listed, so behind one reverse proxy that
+# appends the header nothing needs setting. List only proxies in front of it
+# that append too (a CDN, a load balancer, a tracking edge such as
+# millionsend-tracking-edge), or their address stands in for every client.
+# Never a whole pod or VPC CIDR: every caller inside it would share one
+# rate-limit bucket. Keep web and api reachable only through the reverse
+# proxy, since web takes the header from whoever connects. The API's
+# failed-auth throttle keys on the connection's address instead.
 # TRUSTED_PROXIES=127.0.0.1,::1
 
 # Local development only: let webhook endpoints target http:// and
@@ -549,10 +569,9 @@ export function snsTopicPolicy(topicArn: string, accountId: string): object {
 /**
  * Events-queue policy: only the events topics may write (one per served
  * region; SNS delivers across regions), and the millionsend IAM user may
- * consume. The consume grant lives here (resource policy) rather than in
- * SES_IAM_POLICY because a same-account resource policy suffices on SQS, and
- * the identity policy — created once, adopted on re-runs — could not gain new
- * statements on deployments that predate the queue.
+ * consume. SES_IAM_POLICY carries the same reads for a role it is attached
+ * to; this grant keeps the user reading on installs whose adopted policy
+ * predates that statement.
  */
 export function sqsQueuePolicy(
   queueArn: string,

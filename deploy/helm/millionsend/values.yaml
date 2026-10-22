@@ -23,8 +23,8 @@ fullnameOverride: ""
 # Non-secret configuration, rendered into a ConfigMap and loaded by every
 # pod with envFrom. Keys are .env.example names. APP_BASE_URL must match
 # the public origin exactly or login fails. The chart adds WORKER_REPLICAS
-# and the SMTP_* keys itself, from worker.replicas and smtp.*; do not set
-# those here.
+# itself, from worker.replicas, and with smtp.enabled also SMTP_PORT,
+# SMTP_PUBLIC_HOST and SMTP_TLS_*, from smtp.*; do not set those here.
 config:
   APP_BASE_URL: "https://mail.example.com"
   # Required whenever the Ingress gives the api its own host or prefix:
@@ -46,7 +46,7 @@ config:
 
 # Secret values (DATABASE_URL, MASTER_ENCRYPTION_KEY, BETTER_AUTH_SECRET,
 # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, S3_*, ...). Every mode ends in
-# one Secret that every pod loads with envFrom.
+# one Secret that every pod but docs loads with envFrom.
 secrets:
   # existingSecret — a Secret you manage (kubectl, SealedSecrets, SOPS, ...)
   # externalSecret — an External Secrets Operator ExternalSecret this chart renders
@@ -96,8 +96,8 @@ serviceAccount:
 # temporary credentials with sts:AssumeRoleWithWebIdentity. The role's
 # trust policy must name the cluster's service-account issuer (published
 # where AWS can reach its JWKS) and system:serviceaccount:<namespace>:<sa>;
-# the role needs the millionsend-ses permissions plus read access to the
-# SES events queue (README, "AWS credentials without static keys").
+# attach the millionsend-ses policy to the role (README, "AWS credentials
+# without static keys", for a policy that predates its queue reads).
 # Leave AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY out of the Secret: explicit
 # keys win over the chain. On EKS use serviceAccount.annotations (IRSA) or
 # Pod Identity instead; the webhook injects the same thing.
@@ -111,8 +111,8 @@ aws:
 
 podAnnotations: {}
 podLabels: {}
-# On the Deployments themselves (e.g. for Reloader, to restart smtp when
-# its TLS Secret is renewed).
+# On every Deployment itself; smtp.deploymentAnnotations adds to the smtp
+# one only.
 deploymentAnnotations: {}
 
 # uid/gid 999 is the image's `millionsend` user (useradd --system). The
@@ -185,8 +185,9 @@ web:
 
 api:
   enabled: true
-  # Same trade-off as web: per-process failed-auth and MCP limiters, about
-  # 26 Postgres connections per replica.
+  # Same trade-off as web: the failed-auth and MCP limiters and the
+  # per-team request cap are per process; about 26 Postgres connections
+  # per replica.
   replicas: 1
   resources: {}
   extraEnv: []
@@ -200,7 +201,8 @@ worker:
   # Rendered into WORKER_REPLICAS: each worker takes 1/N of the SES send
   # rate. Do not scale it with an HPA or `kubectl scale`, which would leave
   # WORKER_REPLICAS stale and overshoot the account quota. About 36
-  # Postgres connections per replica.
+  # Postgres connections per replica. 0 pauses sending (WORKER_REPLICAS
+  # stays 1, the app's minimum).
   replicas: 1
   resources: {}
   extraEnv: []
@@ -221,12 +223,20 @@ smtp:
   # SMTP_PUBLIC_HOST. Unset, the tab shows the dashboard's own host, which
   # is right only when the relay is reachable there.
   publicHost: ""
+  # Port clients connect to, shown in the SMTP tab as SMTP_PORT. Unset, the
+  # tab shows service.port; set it when clients reach the relay on another
+  # port (the node port of a NodePort Service, a load balancer's own port).
+  publicPort: ""
+  # On the smtp Deployment only, merged over deploymentAnnotations: e.g.
+  # Reloader's secret.reloader.stakater.com/reload naming tlsSecretName, so
+  # a renewal restarts the relay and nothing else.
+  deploymentAnnotations: {}
   resources: {}
   extraEnv: []
   service:
     # SMTP is not HTTP: expose it with a LoadBalancer/NodePort (or a TCP
-    # route on your ingress controller), not the Ingress below. This port
-    # is the one the dashboard shows clients.
+    # route on your ingress controller), not the Ingress below. The
+    # dashboard shows clients this port unless publicPort is set.
     type: ClusterIP
     port: 2587
     annotations: {}
@@ -302,7 +312,8 @@ backup:
   enabled: false
   image:
     repository: ghcr.io/millionsend/backup
-    # Defaults to image.tag, then the chart's appVersion.
+    # Defaults to image.tag (without a digest pinned in it), then the
+    # chart's appVersion.
     tag: ""
     digest: ""
     pullPolicy: ""

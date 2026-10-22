@@ -32,6 +32,32 @@ caminhos de contato são os mesmos, sem o aninhamento de audience.
   `properties` chave a chave; um valor `null` remove a chave. O mapa
   armazenado tem no máximo 100 chaves, nenhuma vazia.
 
+## Tipos de propriedade
+
+Defina uma propriedade para dar um tipo à chave, no painel em
+**Audiência → Propriedades** ou com `POST /contact-properties`. O tipo é
+`string`, `number` ou `date`. `string` e `number` funcionam como no Resend, e
+`date` é uma extensão do MillionSend. Uma propriedade de data aceita:
+
+- Uma data ISO 8601, como `2026-01-08`, lida como meia-noite UTC.
+- Uma data e hora ISO 8601, como `2026-01-08T10:30:00Z` ou
+  `2026-01-08 10:30`, lida em UTC quando não indica fuso horário.
+- Um timestamp Unix em segundos ou milissegundos, como `1767225600`, entre os
+  anos 2000 e 2100.
+
+Um valor de contato que não combina com o tipo da propriedade é recusado com
+`422`, e um `fallback_value` que não combina também. As chaves valem com
+qualquer capitalização. A data fica guardada como foi escrita, sem os espaços
+em volta. `GET /contacts/{id}` devolve cada valor como `{type, value}`, então
+uma data volta como `{ "type": "date", "value": "2026-01-08" }`. Um valor
+guardado antes de a chave ganhar um tipo, e que não combina com ele, volta
+como string.
+
+Você ainda pode guardar datas numa propriedade `string`. Os segmentos e o
+[aquecimento](/pt-BR/concepts/domains#quem-recebe-primeiro) leem datas de
+qualquer propriedade. O tipo `date` confere cada gravação pela API, e o
+aquecimento mostra as propriedades de data primeiro.
+
 ## API
 
 Contatos são gerenciados via `POST/GET/PATCH/DELETE /contacts` e

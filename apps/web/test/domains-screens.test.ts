@@ -158,7 +158,15 @@ function warmup(over: Partial<Warmup> = {}): Warmup {
     todayWindow: null,
     resumeVolume: 750,
     preview: null,
-    properties: ["last_login_at", "plan"],
+    properties: [
+      {
+        key: "last_login_at",
+        declared: true,
+        dated: 1_204,
+        latest: new Date("2026-10-17T09:12:00Z"),
+      },
+      { key: "renewal", declared: false, dated: 0, latest: null },
+    ],
     limits: {
       dailyTarget: { min: 1_000, max: 10_000_000 },
       startVolume: { min: 100, max: 1_000_000 },
@@ -203,7 +211,12 @@ describe("the domain Warm-up tab", () => {
       expect(text).toContain(title);
     }
     expect(text).toContain("Starting volume");
-    expect(text).toContain("Use a date, like the last login.");
+    expect(text).toContain(
+      "Pick a date that moves when people use your product, like the last login.",
+    );
+    expect(visible(tab(warmup({ properties: [] })))).toContain(
+      "None of your contact properties hold dates yet. Add a date property in Audience.",
+    );
   });
 
   it("while warming, shows today's pace, the checked days and the delivery health", () => {

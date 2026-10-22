@@ -56,7 +56,34 @@
     "hiddenBroadcasts": "{count} broadcast emails are not shown in this list.",
     "showBroadcasts": "Show broadcasts →",
     "noTransactional": "No transactional emails found.",
-    "inBroadcasts": "{count} results in broadcasts."
+    "inBroadcasts": "{count} results in broadcasts.",
+    "whenAfter": "after {time}",
+    "whenAfterDay": "after {date}",
+    "waitingFor": {
+      "domain_limit": "Waiting · daily limit",
+      "warmup": "Waiting · warm-up",
+      "plan": "Waiting · plan limit"
+    },
+    "waitingTip": {
+      "spentDomain": "{domain} sent its {cap} emails for today.",
+      "spentPool": "Your new domains sent the {cap} emails they share for today.",
+      "next": "This one goes out after 00:00 UTC, at {time} your time.",
+      "later": "Older mail goes first, so this one goes out on {date}, about {time} your time.",
+      "room": "{domain} has room again today, so this one goes out within minutes.",
+      "warmup": "The domain's warm-up sends a little more each day. This one goes out as the warm-up allows.",
+      "warmupPaused": "The domain's warm-up is paused. This one goes out after it resumes.",
+      "plan": "Your plan's limit is reached. This one goes out when it renews, {date}."
+    },
+    "limitBanner": {
+      "title": "{count, plural, one {# email is waiting for {domain}'s daily limit.} other {# emails are waiting for {domain}'s daily limit.}}",
+      "body": "It's a new domain, so it sends up to {cap} emails a day for now. {count, plural, one {The email goes out on its own} other {They go out on their own}} {when, select, soon {in the next few minutes} other {after 00:00 UTC, in {duration}}}. Nothing is broken.",
+      "titleShared": "{count, plural, one {# email is waiting for the daily limit your {domains} new domains share.} other {# emails are waiting for the daily limit your {domains} new domains share.}}",
+      "bodyShared": "Together they send up to {cap} emails a day for now. {count, plural, one {The waiting email goes out on its own} other {The waiting emails go out on their own}} {when, select, soon {in the next few minutes} other {after 00:00 UTC, in {duration}}}. Nothing is broken.",
+      "titleMany": "{count, plural, one {# email is waiting for the daily limits of {domains} new domains.} other {# emails are waiting for the daily limits of {domains} new domains.}}",
+      "bodyMany": "New domains send a limited number of emails a day for now. {count, plural, one {The email goes out on its own} other {They go out on their own}} {when, select, soon {in the next few minutes} other {after 00:00 UTC, in {duration}}}. Nothing is broken.",
+      "seeLimit": "See the limit →",
+      "seeLimits": "See the limits →"
+    }
   },
   "detail": {
     "breadcrumb": "Email details",
@@ -132,7 +159,7 @@
       "planBody": "Goes out when the limit renews, {date}.",
       "raiseLimit": "Raise limit",
       "waitingCapacity": "Waiting for capacity",
-      "pacedBody": "The broadcast goes out in waves within the daily capacity. Your transactional email is not held behind it.",
+      "pacedBody": "The broadcast goes out in waves within the daily capacity. Your transactional email goes out ahead of it.",
       "expected": "Expected send",
       "window": "between {from} and {to}",
       "until": "by about {to}",
@@ -144,11 +171,33 @@
       "warmupBody": "This domain sends a little more each day, most active contacts first. This email goes out as the day's volume allows.",
       "warmupPaused": "Waiting for the warm-up to resume",
       "warmupPausedBody": "The domain's warm-up is paused. This email goes out after it resumes.",
-      "newDomainLimit": "Waiting for the domain's daily volume",
-      "newDomainLimitBody": "Newly registered domains send a little more each day. This email goes out as the day's volume allows."
+      "newDomainLimit": "Waiting for the daily limit",
+      "newDomainLimitBody": "{domain} is a new domain. {ahead, plural, =0 {Nothing is ahead of this one.} one {# email is ahead of this one.} other {# emails are ahead of this one.}}",
+      "newDomainLimitUsed": "{used} of {cap} sent today",
+      "newDomainLimitPoolUsed": "{used} of {cap} sent today by your new domains",
+      "expectedSoon": "in a few minutes",
+      "expectedNext": "after 00:00 UTC",
+      "expectedBody": "About {time} your time. Waiting mail goes out oldest first.",
+      "expectedSoonBody": "Waiting mail goes out oldest first."
     },
     "headers": "Headers",
-    "noHeaders": "No headers."
+    "noHeaders": "No headers.",
+    "sendingDomain": "Sending domain",
+    "perDayForNow": "{cap} a day for now",
+    "acceptedAgo": "Accepted {ago}",
+    "goesOutSoon": "goes out in a few minutes",
+    "goesOutAfter": "goes out after {time}",
+    "goesOutOn": "goes out on {date}",
+    "limitBanner": {
+      "title": "Waiting for {domain}'s daily limit.",
+      "spentDomain": "It sent its {cap} emails for today.",
+      "spentPool": "Your new domains sent the {cap} emails they share for today.",
+      "soon": "This one goes out in the next few minutes.",
+      "next": "This one goes out after 00:00 UTC, about {time} your time.",
+      "later": "This one goes out on {date}, about {time} your time.",
+      "nothingToDo": "You don't need to do anything.",
+      "seeLimit": "See the limit →"
+    }
   },
   "insights": {
     "outOfTen": "/ 10",
@@ -182,7 +231,7 @@
       "list_unsubscribe": {
         "title": "One-click unsubscribe headers",
         "description": "The message carries List-Unsubscribe and List-Unsubscribe-Post headers. Gmail and Yahoo require one-click unsubscribe for bulk senders.",
-        "advice": "Send marketing through broadcasts or topics — MillionSend injects both headers automatically."
+        "advice": "Send marketing through broadcasts, or through a topic to one contact per email — MillionSend then injects both headers itself."
       },
       "link_domains_match": {
         "title": "Links match your domain",

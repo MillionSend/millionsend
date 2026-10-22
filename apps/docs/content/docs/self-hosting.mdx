@@ -115,17 +115,29 @@ The chart in
 runs the same image with one Deployment per process (web, api, worker, plus the
 optional smtp relay and docs). Postgres stays outside the chart. Secrets come
 from an existing Secret (kubectl, SealedSecrets, SOPS), an External Secrets
-Operator `ExternalSecret`, or, for tests only, the values file:
+Operator `ExternalSecret`, or, for tests only, the values file. Each release
+publishes the chart to `oci://ghcr.io/millionsend/charts/millionsend` under the
+release's own version (chart `X.Y.Z` runs MillionSend `X.Y.Z`), so upgrading is
+the same command with a newer `--version`:
 
 ```sh
-helm upgrade --install millionsend deploy/helm/millionsend \
-  -n millionsend --create-namespace -f my-values.yaml
+helm upgrade --install millionsend oci://ghcr.io/millionsend/charts/millionsend \
+  --version X.Y.Z -n millionsend --create-namespace -f my-values.yaml
 ```
+
+Releases from before the chart was published are not in the registry; from a
+clone, use `deploy/helm/millionsend` in place of the `oci://` reference and
+leave out `--version`.
 
 The chart README has a k3s example (Traefik, CloudNativePG, an IAM role over OIDC web identity
 instead of access keys) and an EKS example
-(ALB, RDS, External Secrets with AWS Secrets Manager, IRSA). Every variable on
-this page goes in either `config` or the Secret.
+(ALB, RDS, External Secrets with AWS Secrets Manager, IRSA). The EKS example has
+not run on a real EKS cluster yet: treat IRSA, the ALB annotations and the RDS
+notes as untested. [Receiving](#receiving-beta) (the `mx` and `clamav`
+services) is not covered by the chart yet. Every variable on this page goes in
+either `config` or the Secret, except the ones the chart sets itself
+(`WORKER_REPLICAS`, `SMTP_PORT`, `SMTP_PUBLIC_HOST` and `SMTP_TLS_*`; see the
+chart README).
 
 ## Environment reference
 
@@ -162,7 +174,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | --- | --- |
 | `MILLIONSEND_IMAGE` | Standalone deploy only: which image to run. The default `ghcr.io/millionsend/millionsend:latest` is the latest tagged release (`:edge` follows `main`), so `docker compose pull` is the upgrade. Set a version tag or an immutable `ghcr.io/millionsend/millionsend@sha256:…` digest to hold a version (`MILLIONSEND_BACKUP_IMAGE` pins the backup sidecar the same way). |
 | `ALLOW_SIGNUP` | The first user can always register; after that signup stays closed unless this is `true`. Keep `false` when the dashboard is reachable from the internet. |
-| `TRUSTED_PROXIES` | Reverse proxies whose forwarded-client-IP headers (`X-Forwarded-For`, `CF-Connecting-IP`) are believed, comma-separated IPs or CIDRs. Default `127.0.0.1,::1` covers a proxy on the same host; add your proxy's address when it runs elsewhere. See the [nginx section](#production-nginx--tls). |
+| `TRUSTED_PROXIES` | Proxies the web process skips when it walks `X-Forwarded-For` from the right for a client's address (comma-separated IPs or CIDRs, default `127.0.0.1,::1`); the first address not listed is the client. Behind one reverse proxy that appends the header, nothing needs setting: list only proxies in front of it that append too, such as a CDN or a load balancer, and never a whole pod or VPC CIDR. See the [nginx section](#production-nginx--tls). |
 | `WEBHOOK_ALLOW_LOCALHOST` | Local development only: lets webhook endpoints (test fires included) target `http://` and loopback/private addresses on any port. Keep `false` on any internet-reachable instance. |
 | `COMPOSE_PROFILES` | Optional compose services, comma-separated: `smtp` (the relay; mount a STARTTLS keypair first), `mx` (the inbound MX; see [Receiving](#receiving-beta)) and `clamav` (virus scanning of received mail; see [Virus scanning](#virus-scanning)), and in the standalone file also `docs` (this documentation site) and `backup` (scheduled dumps). |
 | `PORT` | API port (default `3001`). Under compose this moves both the container's listen port and the published host port together. |
@@ -170,6 +182,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
 | `DOCS_PORT` | Host port the compose file publishes this documentation site on (the docs process is always 3002 inside the container). |
 | `SMTP_PORT` | SMTP relay listen port (default `2587`). |
+| `SMTP_PUBLIC_HOST` | Host the dashboard's **Settings → SMTP** tab tells clients to connect to (e.g. `smtp.example.com`). Unset: the host of `APP_BASE_URL`. Set it when the relay answers on another name; the relay itself never reads it. With `IS_CLOUD=true` the tab appears only once this and the STARTTLS keypair are set. |
 | `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both set: STARTTLS is offered and required before AUTH. Without the pair the relay refuses to start (unless `SMTP_ALLOW_INSECURE_AUTH=true`). |
 | `SMTP_ALLOW_INSECURE_AUTH` | Explicit local/private-network escape hatch for plaintext SMTP AUTH. Keep `false`; never combine `true` with a public bind. |
 | `IS_CLOUD` | Leave `false`. `true` enables hosted-cloud behavior (KMS, Stripe billing). |
@@ -265,6 +278,26 @@ docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms -v ~/.aws:/home/
 Prefer not to run a CLI? The dashboard's **Settings → SES** page offers a
 CloudFormation quick-create link and a pre-filled shell script that create the
 same resources.
+
+To run on an IAM role instead of the user's access keys (an EC2 instance
+profile, IRSA on EKS, another OIDC web identity), attach the `millionsend-ses`
+policy to the role and leave `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+unset, so the AWS SDK's default credential chain finds the role. Also set
+`AWS_DEFAULT_CHAIN=true`: with neither keys nor that flag, account mail
+(password resets, email verification) stays off and the dashboard warns that
+AWS credentials are not configured. The policy includes the worker's reads of
+the `millionsend-events` queue, which the queue's own policy grants only to
+the `millionsend` user. A policy created before that statement existed needs a
+new version. The wizard publishes one whenever it runs its IAM step (a full
+re-run, or `add-region`), from `@millionsend/setup` 0.9.2 on; an older wizard
+writes its own document back, without the statement. A CloudFormation stack
+gets it from an update with the current template. By hand, save the JSON under
+**Settings → SES** (Manual: console steps) as `millionsend-ses.json` and run:
+
+```bash
+aws iam create-policy-version --policy-arn arn:aws:iam::<account-id>:policy/millionsend-ses \
+  --policy-document file://millionsend-ses.json --set-as-default
+```
 
 ## Adding a region
 
@@ -442,7 +475,9 @@ answers `503`.
 Connection details:
 
 - **Host:** wherever the `smtp` service is reachable (the compose files
-  publish it on the Docker host).
+  publish it on the Docker host). The dashboard's **Settings → SMTP** tab
+  shows the host of `APP_BASE_URL`; set `SMTP_PUBLIC_HOST` when the relay
+  answers on another name. Only that tab reads it.
 - **Port:** `2587` (`SMTP_PORT` to change).
 - **Username:** `millionsend` (fixed).
 - **Password:** an `ms_` API key from the dashboard.
@@ -854,15 +889,20 @@ makes login and signup fail with an "invalid origin" error. Forward `Host` and
 absolute URL either app derives from the request names the public hostname
 rather than `localhost`.
 
-Client addresses (sign-in rate limits, audit entries) come from
-`X-Forwarded-For`, and only proxies listed in `TRUSTED_PROXIES` (comma-separated
-IPs or CIDRs; default `127.0.0.1,::1`, which covers nginx on the same host)
-are believed. With `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
-each hop appends itself, and the chain is walked right-to-left past every
-trusted proxy, so the first untrusted address is the client. Add your proxy's
-address when it runs on another host, and a CDN's ranges when one sits in
-front of nginx; headers from any other source are ignored and the socket
-address is used instead.
+Client addresses (sign-in rate limits, the IPs recorded on sessions and
+sign-ups, tracking hits) come from `X-Forwarded-For`. With
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` each proxy
+appends the address it accepted the connection from, and the web process
+walks the header from the right past the addresses in `TRUSTED_PROXIES`
+(comma-separated IPs or CIDRs; default `127.0.0.1,::1`): the first one not
+listed is the client. Behind one reverse proxy like this nginx, nothing needs
+setting, wherever it runs. List only proxies in front of it that append to
+the header too, such as a CDN or a load balancer; left out, their address
+stands in for every client behind them. Never list a whole pod or VPC CIDR:
+every caller inside it would then share one rate-limit bucket. The web
+process takes the header from whoever connects, so keep web and api
+reachable only through the reverse proxy. The API's failed-authentication
+throttle doesn't read the header: it keys on the connection's address.
 
 The compose files bind every application port to loopback by default
 (`WEB_BIND_ADDRESS`, `API_BIND_ADDRESS`, `DOCS_BIND_ADDRESS`,
@@ -996,6 +1036,12 @@ docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
     && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump'
 docker compose start millionsend smtp
 ```
+
+`pg_restore` exits 1 even when the restore went through: `--clean` cannot drop
+the primary keys that pg-boss's table partitions inherit. It prints
+`cannot drop inherited constraint` for each, then `errors ignored on restore`;
+those tables are dropped and restored anyway. When those are the only errors,
+the restore worked.
 
 ## Signup policy
 
@@ -1640,9 +1686,10 @@ trusted) also share one daily limit, the highest of their caps, counted per
 team and UTC day: a second fresh domain never adds volume, and each domain
 stays within its own cap. Mail over either parks as `queued_quota` (with
 `park_reason = 'warmup'`) and the 15-minute `quota.drain` releases it, oldest
-first, as both allow; the API answers `429 daily_quota_exceeded` with a warm-up
-message (SMTP `452`) only when the team's parked backlog is full (three days of
-its plan's volume, or of the domain's cap where that is more). A domain moves
+first, as both allow. The API answers `429 daily_quota_exceeded`, with a
+message naming the new domain limit and a `Retry-After` to 00:00 UTC (SMTP
+`452`), only when the team's parked backlog is full (three days of its plan's
+volume, or of the domain's cap where that is more). A domain moves
 up one step early once its sends since the last step are clean: at least 50
 delivered (mail to the SES simulator never counts), the first a day old, hard
 bounces under 2% of the sends delivered or hard-bounced, complaints under 0.1%
@@ -1650,6 +1697,13 @@ of the delivered ones and no phishing-type verdict from the content monitor
 (checked by the 15-minute `safety.flags` job). An operator can trust a team, or
 one domain, on its Trust & safety review page, which lifts the warm-up and is
 audited.
+
+A team that moves mail with a sending history to a new domain asks for a
+higher limit from the domain's page. The operator gets an email for each
+request, and open requests are listed under **Limit requests** on Trust &
+safety. On the team's review page, **Trust** grants it and **Decline** keeps
+the limit. Either way the team's owners, and whoever asked, get an email with the
+answer.
 
 **The age lookup** runs in the worker's `domain.age` job, never on the send
 path: when a domain is added, when it verifies, and from the 15-minute

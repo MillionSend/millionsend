@@ -9,6 +9,7 @@ import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import { useTRPC } from "@/lib/trpc";
+import { TOPIC_EMAILS_WAITING, TOPIC_IN_BROADCAST } from "@/lib/trpc-error";
 
 export type TopicEditTarget = {
   id: string;
@@ -180,13 +181,19 @@ export function TopicDeleteModal({
       },
     }),
   );
+  // One dialog serves every topic on the list, so a refusal for one must not
+  // greet the next.
+  const close = () => {
+    deleteMutation.reset();
+    onClose();
+  };
 
   const submit = () => {
     if (target && !deleteMutation.isPending) deleteMutation.mutate({ id: target.id });
   };
 
   return (
-    <Modal open={target !== null} onClose={onClose} onConfirm={submit} title={t("deleteTitle")}>
+    <Modal open={target !== null} onClose={close} onConfirm={submit} title={t("deleteTitle")}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -196,8 +203,17 @@ export function TopicDeleteModal({
         <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
           {t("deleteBody", { name: target?.name ?? "—" })}
         </p>
+        {deleteMutation.isError ? (
+          <p className="ms-field-error">
+            {deleteMutation.error.message === TOPIC_EMAILS_WAITING
+              ? t("deleteEmailsWaiting")
+              : deleteMutation.error.message === TOPIC_IN_BROADCAST
+                ? t("deleteInBroadcast")
+                : t("deleteError")}
+          </p>
+        ) : null}
         <ModalFooter>
-          <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={close}>
             {common("cancel")} <span className="ms-keycap">Esc</span>
           </button>
           <button

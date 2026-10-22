@@ -27,6 +27,15 @@
       "status": "Status",
       "region": "Region",
       "created": "Created"
+    },
+    "limit": {
+      "perDay": "{cap} a day for now",
+      "waiting": "{count} waiting",
+      "tooltip": "New domain limit. {schedule}. Mail over the limit waits for the next day.",
+      "tooltipToday": "New domain limit. Up to {cap} emails a day for now. Mail over the limit waits for the next day.",
+      "first": "Up to {cap} emails a day until {date}",
+      "then": "then {cap} a day until {date}",
+      "end": "then no limit"
     }
   },
   "new": {
@@ -54,7 +63,7 @@
     "sentBefore": {
       "question": "Has this domain sent email before?",
       "yes": "Yes, through another provider",
-      "yesHint": "No warm-up. It keeps the reputation it already has.",
+      "yesHint": "No warm-up. It keeps the reputation it already has. Domains registered in the last 30 days still start with a daily limit.",
       "no": "No, it's new to sending",
       "noHint": "Big sends start small and grow each day while delivery stays healthy. You can change this later."
     },
@@ -183,12 +192,6 @@
     "bannerLookingBodyGeneric": "This may take a few hours depending on your DNS provider's propagation time.",
     "bannerVerified": "Domain verified.",
     "bannerVerifiedBody": "Ready to send emails.",
-    "newDomainLimit": {
-      "line": "New domain limit: {perDay}/day today · full volume from {date}",
-      "today": "New domain limit: {perDay}/day today",
-      "body": "Newly registered domains send a little more each day.",
-      "bodyShared": "Newly registered domains send a little more each day. Your team's new domains share this daily volume."
-    },
     "deleteDomain": "Delete domain",
     "deleteBody": "This permanently deletes the domain and its DNS configuration. Sending from it stops immediately.",
     "deleteConfirmLabel": "Type the domain to confirm",
@@ -232,6 +235,71 @@
       "catchAllOffTitle": "Turn off catch-all?",
       "catchAllOffConfirm": "Mail to addresses at {domain} that have no inbox is refused from now on. Inbox addresses keep receiving.",
       "catchAllOffCta": "Turn off catch-all"
+    },
+    "bannerVerifiedLimited": "Ready to send, up to {cap} emails a day for now.",
+    "limit": {
+      "waitingTitle": "{count, plural, one {# email waiting.} other {# emails waiting.}}",
+      "waitingSpent": "Today's {cap} are sent. {count, plural, one {It goes out after 00:00 UTC, in {duration}.} other {The rest go out after 00:00 UTC, in {duration}, oldest first.}}",
+      "waitingPool": "Your new domains sent the {cap} emails they share today. {count, plural, one {It goes out after 00:00 UTC, in {duration}.} other {The rest go out after 00:00 UTC, in {duration}, oldest first.}}",
+      "waitingSoon": "{count, plural, one {It goes out in the next few minutes.} other {They go out in the next few minutes, oldest first.}}",
+      "seeWaiting": "See waiting emails →",
+      "section": "New domain limit",
+      "registered": "Registered {days, plural, =0 {today} one {# day ago} other {# days ago}}",
+      "sentToday": "Sent today",
+      "sentHint": "of {cap} · resets at {time}",
+      "sentHintShared": "of {cap} your new domains share · resets at {time}",
+      "waiting": "Waiting",
+      "waitingHint": "{count, plural, =0 {nothing is waiting} one {goes out after 00:00 UTC} other {go out after 00:00 UTC}}",
+      "waitingHintSoon": "{count, plural, =0 {nothing is waiting} one {goes out in a few minutes} other {go out in a few minutes}}",
+      "from": "From {day}",
+      "aDay": "a day",
+      "noLimitFrom": "No limit from",
+      "noLimitHint": "{days, plural, =0 {today} one {in # day, or sooner} other {in # days, or sooner}}",
+      "rail": "How the limit grows",
+      "railToday": "Today",
+      "railTodayWhat": "{cap} go out · {used} sent",
+      "railTodayMore": "{count, plural, one {# more goes out after 00:00 UTC} other {# more go out after 00:00 UTC}}",
+      "railTodaySoon": "{count, plural, one {The # waiting goes out in a few minutes} other {The # waiting go out in a few minutes}}",
+      "railUpTo": "up to {cap} a day",
+      "railWaitingFirst": "{count, plural, one {The # waiting goes first} other {The # waiting go first}}",
+      "railNoLimit": "No limit",
+      "note": "New domains start small because inbox providers are wary of mail from them. The limit grows on its own, and steady clean sending lifts it sooner. Mail over the day's limit waits and goes out the next day. A higher plan doesn't change it.",
+      "noteUnknown": "New domains start small because inbox providers are wary of mail from them. We couldn't find when this domain was registered, so steady clean sending is what lifts the limit. Mail over the day's limit waits and goes out the next day. A higher plan doesn't change it.",
+      "shared": "Your team's {domains} new domains share up to {cap} emails a day between them.",
+      "askTitle": "Moving mail you already send elsewhere?",
+      "askBody": "If this domain takes over mail with a sending history, tell us what you send and we'll review the limit.",
+      "askButton": "Ask for a higher limit",
+      "askSent": "Request sent {date}. We'll email you when it's reviewed.",
+      "askDeclined": "We reviewed your request from {date} and kept the limit for now. If something changed, you can ask again.",
+      "ask": {
+        "title": "Ask for a higher limit",
+        "intro": "{domain} sends up to {cap} emails a day for now. Tell us what it sends and we'll review the limit. Your mail keeps going out at the current pace meanwhile.",
+        "sends": "What will it send?",
+        "sendsOptions": {
+          "account": "Sign-up and account emails",
+          "notifications": "Receipts and notifications",
+          "marketing": "Newsletters and marketing",
+          "mix": "A mix of these"
+        },
+        "perDay": "About how many a day?",
+        "perDayError": "Enter how many emails a day, from 1 to {max}.",
+        "source": "Where does it go out today?",
+        "sourceOptions": {
+          "new": "Nowhere yet, it's a new product",
+          "other_provider": "Another email provider",
+          "own_servers": "Our own servers"
+        },
+        "note": "Anything else?",
+        "optional": "optional",
+        "submit": "Send request",
+        "sent": "Request sent. We'll email you when it's reviewed.",
+        "errors": {
+          "already": "You already asked for this domain. We'll email you when it's reviewed.",
+          "notLimited": "This domain has no daily limit anymore.",
+          "invalid": "Check the answers and try again.",
+          "failed": "Couldn't send the request. Try again."
+        }
+      }
     }
   },
   "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",

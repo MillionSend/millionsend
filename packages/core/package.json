@@ -96,6 +96,18 @@
       "types": "./src/inboxes/release-rules.ts",
       "default": "./src/inboxes/release-rules.ts"
     },
+    "./limit-rules": {
+      "types": "./src/limit-rules.ts",
+      "default": "./src/limit-rules.ts"
+    },
+    "./contact-properties": {
+      "types": "./src/contact-properties.ts",
+      "default": "./src/contact-properties.ts"
+    },
+    "./property-date": {
+      "types": "./src/property-date.ts",
+      "default": "./src/property-date.ts"
+    },
     "./url": {
       "types": "./src/url.ts",
       "default": "./src/url.ts"

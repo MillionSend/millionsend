@@ -186,7 +186,8 @@ export interface TargetDomain {
 export interface TargetProperty {
   id: string;
   key: string;
-  type: "string" | "number";
+  // date is MillionSend's own: Resend has none, so the plan leaves such a key to a person.
+  type: "string" | "number" | "date";
 }
 
 export interface TargetTopic {

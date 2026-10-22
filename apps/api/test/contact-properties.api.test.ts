@@ -272,3 +272,134 @@ describe("PATCH /contacts/{id} merges properties", () => {
     expect(stored.extra).toBeDefined();
   });
 });
+
+describe("date properties", () => {
+  let renewalId: string;
+
+  it("creates a date property, with or without a fallback that reads as a date", async () => {
+    const plain = await call(tokenA, "POST", "/contact-properties", {
+      key: "last_login",
+      type: "date",
+    });
+    expect(plain.status).toBe(200);
+    expect(await json(plain)).toMatchObject({
+      object: "contact_property",
+      key: "last_login",
+      type: "date",
+      fallback_value: null,
+    });
+
+    const withFallback = await call(tokenA, "POST", "/contact-properties", {
+      key: "renewal",
+      type: "date",
+      fallback_value: " 2026-01-08 ",
+    });
+    expect(withFallback.status).toBe(200);
+    const body = await json(withFallback);
+    // Stored trimmed, never rewritten into another form.
+    expect(body).toMatchObject({ key: "renewal", type: "date", fallback_value: "2026-01-08" });
+    renewalId = body.id as string;
+
+    const list = await json(await call(tokenA, "GET", "/contact-properties"));
+    expect(list.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "last_login", type: "date", fallback_value: null }),
+        expect.objectContaining({ key: "renewal", type: "date", fallback_value: "2026-01-08" }),
+      ]),
+    );
+  });
+
+  it("422s a fallback that reads as no date, on create and update", async () => {
+    for (const fallback_value of ["2026-02-30", "3", "soon"]) {
+      const res = await call(tokenA, "POST", "/contact-properties", {
+        key: "trial_end",
+        type: "date",
+        fallback_value,
+      });
+      expect(res.status, fallback_value).toBe(422);
+      expect(await json(res)).toMatchObject({
+        name: "validation_error",
+        message: "fallback_value must be a date",
+      });
+    }
+    const bad = await call(tokenA, "PATCH", `/contact-properties/${renewalId}`, {
+      fallback_value: "next week",
+    });
+    expect(bad.status).toBe(422);
+    expect((await json(bad)).message).toBe("fallback_value must be a date");
+
+    const epoch = await call(tokenA, "PATCH", `/contact-properties/${renewalId}`, {
+      fallback_value: 1767225600,
+    });
+    expect(epoch.status).toBe(200);
+    const fetched = await json(await call(tokenA, "GET", `/contact-properties/${renewalId}`));
+    expect(fetched.fallback_value).toBe("1767225600");
+  });
+
+  it("422s a contact value that reads as no date, matching the key in any case", async () => {
+    for (const properties of [
+      { last_login: "yesterday" },
+      { LAST_LOGIN: "3" },
+      { last_login: true },
+      { last_login: "2026-02-30" },
+    ]) {
+      const res = await call(tokenA, "POST", "/contacts", {
+        email: "badlogin@example.com",
+        properties,
+      });
+      expect(res.status, JSON.stringify(properties)).toBe(422);
+      const body = await json(res);
+      expect(body.name).toBe("validation_error");
+      expect(body.message).toContain("must be a date");
+    }
+
+    const batch = await call(tokenA, "POST", "/contacts/batch", [
+      { email: "batch-ok@example.com", properties: { last_login: "2026-01-08" } },
+      { email: "batch-bad@example.com", properties: { last_login: "soon" } },
+    ]);
+    expect(batch.status).toBe(422);
+    expect((await json(batch)).message).toContain("last_login");
+  });
+
+  it("stores a date as written, trimmed, and serves it typed as date", async () => {
+    const created = await call(tokenA, "POST", "/contacts", {
+      email: "login@example.com",
+      properties: { last_login: " 2026-01-08T10:30:00Z ", plan: "pro" },
+    });
+    expect(created.status).toBe(200);
+    const id = (await json(created)).id as string;
+    const fetched = await json(await call(tokenA, "GET", `/contacts/${id}`));
+    expect(fetched.properties).toEqual({
+      last_login: { type: "date", value: "2026-01-08T10:30:00Z" },
+      plan: { type: "string", value: "pro" },
+    });
+
+    const patched = await call(tokenA, "PATCH", `/contacts/${id}`, {
+      properties: { last_login: 1767225600 },
+    });
+    expect(patched.status).toBe(200);
+    const listed = await json(await call(tokenA, "GET", "/contacts?include=properties"));
+    const row = (listed.data as { id: string; properties: Record<string, unknown> }[]).find(
+      (c) => c.id === id,
+    );
+    expect(row?.properties.last_login).toEqual({ type: "date", value: "1767225600" });
+  });
+
+  it("serves a value stored before its key was typed as date as a string while it reads as no date", async () => {
+    const created = await call(tokenA, "POST", "/contacts", {
+      email: "signup@example.com",
+      properties: { signup: "soon", joined: "2026-01-08" },
+    });
+    const id = (await json(created)).id as string;
+    for (const key of ["signup", "joined"]) {
+      expect(
+        (await call(tokenA, "POST", "/contact-properties", { key, type: "date" })).status,
+      ).toBe(200);
+    }
+    const fetched = await json(await call(tokenA, "GET", `/contacts/${id}`));
+    expect(fetched.properties).toEqual({
+      signup: { type: "string", value: "soon" },
+      joined: { type: "date", value: "2026-01-08" },
+    });
+  });
+});

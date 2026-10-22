@@ -23,7 +23,14 @@ import { useTRPC } from "@/lib/trpc";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ConvertBlocksDialog, HtmlAuthoredBanner, HtmlCodeMode } from "../templates/html-mode";
-import { ContentPreview, type SendPace, SendPlanSummary, sendsByWarmup } from "./parts";
+import {
+  ContentPreview,
+  type SendPace,
+  SendPlanSummary,
+  sendsByWarmup,
+  TestSendNote,
+  type TestSendResult,
+} from "./parts";
 
 /** Everything a crash would lose — mirrored into the local draft. */
 interface ComposerDraft {
@@ -297,12 +304,18 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const createMutation = useMutation(trpc.broadcasts.create.mutationOptions());
   const updateMutation = useMutation(trpc.broadcasts.update.mutationOptions());
   const sendMutation = useMutation(trpc.broadcasts.send.mutationOptions());
-  const [testResult, setTestResult] = useState<
-    { kind: "sent"; to: string } | { kind: "rateLimited" } | { kind: "failed" } | null
-  >(null);
+  const [testResult, setTestResult] = useState<TestSendResult | null>(null);
   const testMutation = useMutation(
     trpc.broadcasts.sendTest.mutationOptions({
-      onSuccess: (result) => setTestResult({ kind: "sent", to: result.to }),
+      onSuccess: (result) =>
+        setTestResult(
+          result.hold
+            ? {
+                kind: "queued",
+                domain: result.hold.kind === "domain_limit" ? result.hold.domain : null,
+              }
+            : { kind: "sent", to: result.to },
+        ),
       onError: (error) =>
         setTestResult({
           kind: error.data?.code === "TOO_MANY_REQUESTS" ? "rateLimited" : "failed",
@@ -447,27 +460,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                 <BtnSpinner on={testMutation.isPending} />
                 {t("composer.sendTest")}
               </button>
-              {testResult ? (
-                <span
-                  className="ms-action-note"
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 6px)",
-                    right: 0,
-                    whiteSpace: "nowrap",
-                    color: testResult.kind === "sent" ? "var(--ms-muted)" : "var(--ms-danger)",
-                    fontSize: "var(--ms-fs-label)",
-                  }}
-                >
-                  {testResult.kind === "sent"
-                    ? `✓ ${t("composer.testSent", { email: testResult.to })}`
-                    : t(
-                        testResult.kind === "rateLimited"
-                          ? "composer.testRateLimited"
-                          : "composer.testFailed",
-                      )}
-                </span>
-              ) : null}
+              {testResult ? <TestSendNote result={testResult} /> : null}
             </div>
             <button
               type="button"

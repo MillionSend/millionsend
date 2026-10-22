@@ -7,6 +7,8 @@
  * The wire shape is the pinned contract: { match, conditions: [{ field, op, value }] }.
  */
 
+import { isSegmentDayCount } from "@millionsend/core/property-date";
+
 export type MatchMode = "all" | "any";
 
 /** A builder row before it is mapped to the wire condition. */
@@ -38,30 +40,54 @@ export const BASE_FIELDS = [
   "created_at",
 ] as const;
 
-type FieldKind = "text" | "unsubscribed" | "created_at";
+type FieldKind = "text" | "date" | "unsubscribed" | "created_at";
 
-/** Which operator/value grammar a field uses. property:* behaves like text. */
-export function fieldKind(field: string): FieldKind {
+/**
+ * Which operator/value grammar a field uses. A property is text, or date when
+ * `dated`: defined as a date property, or already holding a date op.
+ */
+export function fieldKind(field: string, dated = false): FieldKind {
   if (field === "unsubscribed") return "unsubscribed";
   if (field === "created_at") return "created_at";
-  return "text";
+  return dated && isProperty(field) ? "date" : "text";
 }
 
+const TEXT_OPS = [
+  "equals",
+  "not_equals",
+  "contains",
+  "starts_with",
+  "ends_with",
+  "is_set",
+  "is_not_set",
+];
+export const DATE_OPS = ["before", "after", "in_last_days", "not_in_last_days"];
+
 export const OPS_BY_KIND: Record<FieldKind, readonly string[]> = {
-  text: ["equals", "not_equals", "contains", "starts_with", "ends_with", "is_set", "is_not_set"],
+  text: TEXT_OPS,
+  // Text ops stay: is_not_set is how to find contacts without the date.
+  date: [...DATE_OPS, ...TEXT_OPS],
   unsubscribed: ["is_true", "is_false"],
-  created_at: ["before", "after"],
+  created_at: DATE_OPS,
 };
 
 /** Operators that carry no value — the wire value is null. */
 export const VALUELESS_OPS = new Set(["is_set", "is_not_set", "is_true", "is_false"]);
 
-export function opsFor(field: string): readonly string[] {
-  return OPS_BY_KIND[fieldKind(field)];
+export function opsFor(field: string, dated = false): readonly string[] {
+  return OPS_BY_KIND[fieldKind(field, dated)];
 }
 
-export function defaultOp(field: string): string {
-  return OPS_BY_KIND[fieldKind(field)][0] as string;
+export function defaultOp(field: string, dated = false): string {
+  return opsFor(field, dated)[0] as string;
+}
+
+/** What an op's value input takes: nothing, a calendar date, a count of days, or text. */
+export function valueKind(op: string): "none" | "date" | "days" | "text" {
+  if (VALUELESS_OPS.has(op)) return "none";
+  if (op === "before" || op === "after") return "date";
+  if (op === "in_last_days" || op === "not_in_last_days") return "days";
+  return "text";
 }
 
 export function isProperty(field: string): boolean {
@@ -84,7 +110,9 @@ export function fieldPickerValue(field: string): string {
 /** A row is complete enough to translate: a real field, and a value when the op needs one. */
 export function rowComplete(row: BuilderRow): boolean {
   if (isProperty(row.field) && propertyKey(row.field).trim() === "") return false;
-  if (VALUELESS_OPS.has(row.op)) return true;
+  const kind = valueKind(row.op);
+  if (kind === "none") return true;
+  if (kind === "days") return isSegmentDayCount(row.value.trim());
   return row.value.trim() !== "";
 }
 

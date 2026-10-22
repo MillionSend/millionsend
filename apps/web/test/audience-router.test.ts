@@ -950,6 +950,26 @@ describe("audience.properties definitions", () => {
     ]);
   });
 
+  it("defines a date property, requiring a fallback that reads as a date, stored trimmed", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+
+    for (const fallbackValue of ["soon", "3", "2026-02-30"]) {
+      await expect(
+        caller.audience.properties.define({ key: "renewal", type: "date", fallbackValue }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+
+    const { id } = await caller.audience.properties.define({
+      key: "renewal",
+      type: "date",
+      fallbackValue: " 2026-01-08 ",
+    });
+    expect(await caller.audience.properties.defineList()).toMatchObject([
+      { id, key: "renewal", type: "date", fallbackValue: "2026-01-08" },
+    ]);
+  });
+
   it("stores a hostile key as data, never executing it", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);

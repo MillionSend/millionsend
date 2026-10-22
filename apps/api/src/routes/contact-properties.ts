@@ -1,4 +1,5 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
+import { type ContactPropertyType, parsePropertyDate } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq } from "drizzle-orm";
@@ -30,14 +31,20 @@ export function registerContactPropertyRoutes(app: OpenAPIHono<Env>, db: Db): vo
 
   /**
    * fallback_value is stored as text; a 'number' property only accepts values
-   * that read back as a finite number, so the typed wire never emits NaN.
+   * that read back as a finite number, so the typed wire never emits NaN, and
+   * a 'date' one only values that read as a date, stored trimmed.
    */
   const storedFallback = (
-    type: "string" | "number",
+    type: ContactPropertyType,
     value: string | number | null | undefined,
   ): { ok: true; stored: string | null } | { ok: false } => {
     if (value === null || value === undefined) return { ok: true, stored: null };
     if (type === "number" && numericPropertyValue(value) === null) return { ok: false };
+    if (type === "date") {
+      return parsePropertyDate(String(value)) === null
+        ? { ok: false }
+        : { ok: true, stored: String(value).trim() };
+    }
     return { ok: true, stored: String(value) };
   };
 
@@ -76,7 +83,10 @@ export function registerContactPropertyRoutes(app: OpenAPIHono<Env>, db: Db): vo
       const body = c.req.valid("json");
       const fallback = storedFallback(body.type, body.fallback_value);
       if (!fallback.ok) {
-        return c.json(errorBody(422, "validation_error", "fallback_value must be a number"), 422);
+        return c.json(
+          errorBody(422, "validation_error", `fallback_value must be a ${body.type}`),
+          422,
+        );
       }
       // Duplicate = the case-insensitive (teamId, lower(key)) unique index.
       // "validation_error" (not "conflict"): the name must be a
@@ -206,7 +216,10 @@ export function registerContactPropertyRoutes(app: OpenAPIHono<Env>, db: Db): vo
       if (body.fallback_value !== undefined) {
         const fallback = storedFallback(existing.type, body.fallback_value);
         if (!fallback.ok) {
-          return c.json(errorBody(422, "validation_error", "fallback_value must be a number"), 422);
+          return c.json(
+            errorBody(422, "validation_error", `fallback_value must be a ${existing.type}`),
+            422,
+          );
         }
         await db
           .update(p)

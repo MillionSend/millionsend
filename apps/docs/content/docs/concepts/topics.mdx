@@ -21,8 +21,9 @@ creation:
   unsubscribed contacts.
 - **The hosted unsubscribe page** lists the team's public topics, so a
   recipient can opt out of one category while staying subscribed to the rest —
-  or unsubscribe from all marketing email. On an email sent with a topic, the
-  mail app's one-click unsubscribe opts the recipient out of that topic only
+  or unsubscribe from all marketing email. On an email sent with a topic to a
+  single contact, the mail app's one-click unsubscribe opts the recipient out
+  of that topic only
   (unless you supply your own `List-Unsubscribe` pair, which replaces
   MillionSend's), while the page's **Unsubscribe from all** opts them out of
   every topic and broadcast. Transactional sends without a `topic_id` are
@@ -38,5 +39,13 @@ entries like `{ "id": "<topic-id>", "subscription": "opt_in" }`, and read back
 with `GET /contacts/{id}/topics`, which lists every topic with the contact's
 effective `subscription` and an `explicit` flag (false when it is the topic's
 default). A send with a `topic_id` whose every `to` recipient is opted out is
-refused with `422 all_recipients_suppressed`. See the
+refused with `422 all_recipients_suppressed`. `DELETE /topics/{id}` answers
+`409 conflict` for a topic a broadcast uses (a draft can drop the topic first,
+but a sent or canceled broadcast keeps it for good), and while an email sent
+with the topic still waits to go out, until it does or, if it's scheduled,
+until it's canceled. Deleting a topic leaves the
+unsubscribe links already sent with it working: they open the hosted page
+without that topic, where the recipient can still unsubscribe from
+everything or, when the team has other public topics, change those, and
+their one-click changes nothing, since the topic it named is gone. See the
 [API reference](/api-reference).

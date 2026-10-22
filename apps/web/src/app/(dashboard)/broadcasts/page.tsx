@@ -239,6 +239,7 @@ export default function BroadcastsPage() {
                                 releases={row.releases}
                                 locale={locale}
                                 compact
+                                resets={row.newDomainLimit !== null}
                               />
                               {t("list.progressTip", {
                                 sent: nf.format(row.sentCount),

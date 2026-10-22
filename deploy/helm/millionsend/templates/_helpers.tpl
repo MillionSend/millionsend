@@ -27,15 +27,19 @@ Usage: include "millionsend.componentName" (dict "root" $ "suffix" "web")
 {{- printf "%s%s" $base $suffix }}
 {{- end }}
 
-{{/* The version the pods run: image.tag when set, else the chart's appVersion. */}}
+{{/*
+The version the pods run: image.tag when set, else the chart's appVersion.
+A digest pinned in the tag ("0.19.0@sha256:...") is dropped: it names the
+app image only, and this version also tags the backup image.
+*/}}
 {{- define "millionsend.version" -}}
-{{- default .Chart.AppVersion .Values.image.tag }}
+{{- default .Chart.AppVersion .Values.image.tag | splitList "@" | first }}
 {{- end }}
 
 {{- define "millionsend.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{ include "millionsend.selectorLabels" . }}
-app.kubernetes.io/version: {{ include "millionsend.version" . | quote }}
+app.kubernetes.io/version: {{ include "millionsend.version" . | trunc 63 | trimSuffix "-" | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
@@ -105,17 +109,21 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/*
 ConfigMap keys the chart derives from other values, so web (the dashboard's
 SMTP tab, the console's per-worker rate) sees what the other processes run
-with. The smtp container overrides SMTP_PORT with its listen port.
+with. The smtp container overrides SMTP_PORT with its listen port. The
+SMTP_* keys are the chart's only while smtp is on; with it off, config may
+set them for a relay run elsewhere. WORKER_REPLICAS is at least 1, the app's
+own minimum, so worker.replicas: 0 pauses sending without failing every
+other process's boot.
 */}}
 {{- define "millionsend.managedConfig" -}}
 {{- range $k := list "WORKER_REPLICAS" "SMTP_PORT" "SMTP_TLS_CERT_PATH" "SMTP_TLS_KEY_PATH" "SMTP_PUBLIC_HOST" }}
-{{- if hasKey $.Values.config $k }}
-{{- fail (printf "config.%s is set by the chart (from worker.replicas, smtp.port, smtp.service.port, smtp.tlsSecretName and smtp.publicHost); remove it from config" $k) }}
+{{- if and (hasKey $.Values.config $k) (or (eq $k "WORKER_REPLICAS") $.Values.smtp.enabled) }}
+{{- fail (printf "config.%s is set by the chart (from worker.replicas, smtp.port, smtp.publicPort, smtp.service.port, smtp.tlsSecretName and smtp.publicHost); remove it from config" $k) }}
 {{- end }}
 {{- end }}
-WORKER_REPLICAS: {{ .Values.worker.replicas | toString | quote }}
+WORKER_REPLICAS: {{ max 1 (int .Values.worker.replicas) | toString | quote }}
 {{- if .Values.smtp.enabled }}
-SMTP_PORT: {{ .Values.smtp.service.port | toString | quote }}
+SMTP_PORT: {{ .Values.smtp.publicPort | default .Values.smtp.service.port | toString | quote }}
 {{- if .Values.smtp.tlsSecretName }}
 SMTP_TLS_CERT_PATH: "/certs/tls.crt"
 SMTP_TLS_KEY_PATH: "/certs/tls.key"
@@ -128,7 +136,7 @@ SMTP_PUBLIC_HOST: {{ . | quote }}
 
 {{/* True when the relay may run without a keypair (plaintext AUTH; private networks only). */}}
 {{- define "millionsend.smtpInsecureAuth" -}}
-{{- eq (toString (.Values.config.SMTP_ALLOW_INSECURE_AUTH | default "false")) "true" }}
+{{- has (toString (.Values.config.SMTP_ALLOW_INSECURE_AUTH | default "false")) (list "true" "1") }}
 {{- end }}
 
 {{/* Rolls every pod when the rendered config changes. */}}

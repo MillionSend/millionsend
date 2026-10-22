@@ -6,7 +6,10 @@ version: 0.1.0
 # The image tag defaults to this: a pinned release, never "latest". With a
 # moving tag a restarted pod (OOM, eviction, drain) pulls a newer build than
 # its neighbours and runs its migrations against the shared database, and
-# helm rollback cannot move the version back. Releases stamp both fields.
+# helm rollback cannot move the version back. A vX.Y.Z tag publishes the
+# chart with version and appVersion both X.Y.Z (the publish job in
+# .github/workflows/ci.yml), so these two fields only matter for installs
+# from a clone.
 appVersion: "0.19.0"
 home: https://millionsend.com
 sources:

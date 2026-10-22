@@ -5,7 +5,7 @@ export const en = {
     subject: "Welcome to MillionSend",
     body: [
       "Hi {name}, your account is ready.",
-      "First add a sending domain and publish its DNS records; sends go out the moment it verifies.",
+      "First add a sending domain and publish its DNS records. Sends go out once it verifies, and a newly registered domain starts with a daily limit that grows over its first weeks.",
       "Then create an API key under API keys — it is shown once, and it is what the SDKs, SMTP and the MCP server send with.",
     ],
     button: "Add a domain",
@@ -72,10 +72,20 @@ export const en = {
   "domain.verified": {
     subject: "Your domain is verified",
     body: [
-      "The DNS records for {domain} check out and it can send from any address on it — API, SMTP and broadcasts.",
+      "The DNS records for {domain} check out. It can send from any address on it, through the API, SMTP and broadcasts.",
+      "{limit}",
+      "{moving}",
       "We keep re-checking the records and will tell you if one disappears.",
     ],
     button: "Open domain",
+    extra: {
+      limit:
+        "It was registered recently, so it starts with a daily limit: up to {perDay} emails today, more each day, and no limit from {date}. Mail over the day's limit waits and goes out the next day, on its own.",
+      limitUnknownAge:
+        "It starts with a daily limit of up to {perDay} emails for now, rising as it builds a sending history. Mail over the day's limit waits and goes out the next day, on its own.",
+      moving:
+        "Moving mail you already send elsewhere to this domain? Reply to this email before you switch and we'll take a look.",
+    },
   },
   "domain.lost": {
     subject: "A domain lost its verification",
@@ -91,6 +101,62 @@ export const en = {
       "SES has given up on {domain}: its identity is gone, or its DKIM records stayed missing past the 72-hour window. Sends from it are refused; add the domain again to keep sending from it.",
     ],
     button: "Open domains",
+  },
+  "domain.waiting": {
+    subject: "Your new domain reached today's limit",
+    heading: "{waiting}",
+    body: [
+      "{reached} Nothing is broken. The rest wait and go out on their own after 00:00 UTC, so there's no need to resend.",
+      "{schedule}",
+      "New domains start small because inbox providers are wary of mail from them. A higher plan doesn't change it. Moving mail you already send elsewhere? Reply to this email and we'll take a look.",
+    ],
+    button: "See waiting emails",
+    muted: ["You get this at most once a day per domain while its mail waits."],
+    extra: {
+      "waiting.one": "1 email waiting",
+      "waiting.other": "{n} emails waiting",
+      "reached.domain": "{domain} reached its daily limit of {cap} emails.",
+      "reached.pool":
+        "{domain} and your other new domains sent the {cap} emails they share for today.",
+      schedule: "The limit grows each day, and the domain sends with no limit from {date}.",
+      scheduleUnknownAge: "The limit grows as the domain builds a sending history.",
+    },
+  },
+  "domain.limit_lifted": {
+    subject: "Your domain's daily limit is lifted",
+    body: [
+      "{domain} now sends without the daily limit for new domains. Mail that was waiting is going out now.",
+    ],
+    button: "Open domain",
+  },
+  "domain.limit_kept": {
+    subject: "We reviewed your daily limit request",
+    body: [
+      "{domain} keeps its daily limit for now.{grows} Reply to this email if you have questions.",
+    ],
+    button: "Open domain",
+    extra: { grows: " It grows on its own, with no limit from {date}." },
+  },
+  "domain.limit_requested": {
+    subject: "A team asked for a higher daily limit",
+    body: [
+      "{team} asked to lift the new domain limit on {domain}.",
+      "Asked for: about {perDay} emails a day. Sends: {sends}. Goes out today: {source}.",
+      "{noteLine}",
+      "Grant it with Trust on the domain, or decline it, from the team's review page. The team hears back by email either way.",
+    ],
+    button: "Open review",
+    muted: ["Sent to the instance operator once per request."],
+    extra: {
+      "sends.account": "sign-up and account emails",
+      "sends.notifications": "receipts and notifications",
+      "sends.marketing": "newsletters and marketing",
+      "sends.mix": "a mix of these",
+      "source.new": "nowhere yet, it's a new product",
+      "source.other_provider": "through another email provider",
+      "source.own_servers": "from its own mail servers",
+      note: "Their note: {note}",
+    },
   },
   "broadcast.sent": {
     subject: "Your broadcast went out to {count} recipients",

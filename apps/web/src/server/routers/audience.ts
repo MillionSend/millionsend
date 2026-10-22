@@ -2,6 +2,7 @@ import { isCloudDeployment } from "@millionsend/config";
 import {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
+  CONTACT_PROPERTY_TYPES,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactEventContext,
   clearUnsubscribeSuppression,
@@ -14,6 +15,7 @@ import {
   fetchEffectivePlan,
   markSegmentsStale,
   PLAN_CONTACT_LIMIT,
+  parsePropertyDate,
   recordContactActivity,
   resultRows,
   undeliverableRecipientMessage,
@@ -930,7 +932,7 @@ export const audienceRouter = router({
         z
           .object({
             key: z.string().trim().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH),
-            type: z.enum(["string", "number"]).default("string"),
+            type: z.enum(CONTACT_PROPERTY_TYPES).default("string"),
             fallbackValue: z.string().max(CONTACT_PROPERTY_VALUE_MAX_LENGTH).optional(),
           })
           // A number property's fallback must read back as a finite number —
@@ -941,17 +943,25 @@ export const audienceRouter = router({
               v.fallbackValue === undefined ||
               (v.fallbackValue.trim() !== "" && Number.isFinite(Number(v.fallbackValue))),
             { message: "fallbackValue must be a number" },
+          )
+          .refine(
+            (v) =>
+              v.type !== "date" ||
+              v.fallbackValue === undefined ||
+              parsePropertyDate(v.fallbackValue) !== null,
+            { message: "fallbackValue must be a date" },
           ),
       )
       .mutation(async ({ ctx, input }) => {
         const p = schema.contactProperties;
+        const fallback = input.type === "date" ? input.fallbackValue?.trim() : input.fallbackValue;
         const [row] = await ctx.db
           .insert(p)
           .values({
             teamId: ctx.teamId,
             key: input.key,
             type: input.type,
-            ...(input.fallbackValue !== undefined ? { fallbackValue: input.fallbackValue } : {}),
+            ...(fallback !== undefined ? { fallbackValue: fallback } : {}),
           })
           .onConflictDoNothing()
           .returning({ id: p.id });

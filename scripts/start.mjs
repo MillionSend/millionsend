@@ -28,7 +28,16 @@ function tsxEntry(pkg, entry) {
 
 const PROCESSES = {
   api: { ...tsxEntry("apps/api", "apps/api/src/server.ts"), cwd: root, env: {} },
-  worker: { ...tsxEntry("apps/worker", "apps/worker/src/server.ts"), cwd: root, env: {} },
+  worker: {
+    ...tsxEntry("apps/worker", "apps/worker/src/server.ts"),
+    cwd: root,
+    // Setting glibc's mmap threshold switches off its dynamic raise (to each
+    // freed mmapped block's size, up to 32 MiB). Raised, the media threads'
+    // multi-MB image buffers land in malloc heaps that are never handed back,
+    // so the worker's memory only climbs; at the 128 KiB default they are
+    // mmapped and returned when freed.
+    env: { MALLOC_MMAP_THRESHOLD_: "131072" },
+  },
   web: {
     command: join(root, "apps/web/node_modules/.bin/next"),
     args: ["start"],

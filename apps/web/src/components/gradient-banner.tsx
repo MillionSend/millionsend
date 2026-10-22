@@ -3,6 +3,13 @@ import { statusGlow } from "@/lib/status-glow";
 
 type BannerVariant = "success" | "info" | "warn" | "danger";
 
+/** The banner action's link: bone text on a dotted muted underline. */
+export const bannerLinkStyle: React.CSSProperties = {
+  color: "var(--ms-bone)",
+  textDecoration: "underline dotted var(--ms-muted)",
+  textUnderlineOffset: 3,
+};
+
 /**
  * A status line on a soft glow: icon, a short title in the variant's color,
  * the body, and an optional action at the end. Everything aligns to the

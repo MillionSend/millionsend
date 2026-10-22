@@ -23,6 +23,10 @@ export const ACCOUNT_MAIL_KINDS = [
   "domain.verified",
   "domain.lost",
   "domain.lost.identity",
+  "domain.waiting",
+  "domain.limit_lifted",
+  "domain.limit_kept",
+  "domain.limit_requested",
   "broadcast.sent",
   "broadcast.sending",
   "broadcast.held_quota",
@@ -63,6 +67,8 @@ export type AccountMailKind = (typeof ACCOUNT_MAIL_KINDS)[number];
 /** One catalog entry: `{slot}` placeholders are filled from the caller's values. */
 export interface AccountMailEntry {
   subject: string;
+  /** Large type above the body, for the one figure the mail is about. */
+  heading?: string;
   body: string[];
   button: string;
   muted?: string[];
@@ -246,19 +252,24 @@ export function mailCountList(
   return new Intl.ListFormat(locale, { type: "conjunction" }).format(items);
 }
 
-/** Renders one kind in one language on the shared card; `url` is the button's target. */
+/**
+ * Renders one kind in one language on the shared card; `url` is the button's
+ * target. A paragraph that fills to nothing is left out, so an optional one
+ * is a slot its caller passes empty.
+ */
 export function buildAccountMail(input: {
   kind: AccountMailKind;
   locale: MailLocale;
   url: string;
   values?: Record<string, string>;
 }): MailContent {
-  const entry = CATALOGS[input.locale][input.kind];
+  const entry: AccountMailEntry = CATALOGS[input.locale][input.kind];
   const fill = (template: string) => fillMailTemplate(template, input.values ?? {});
   return {
     subject: fill(entry.subject),
     ...accountMailCard({
-      paragraphs: entry.body.map(fill),
+      ...(entry.heading ? { heading: fill(entry.heading) } : {}),
+      paragraphs: entry.body.map(fill).filter((p) => p.trim() !== ""),
       button: fill(entry.button),
       url: input.url,
       muted: (entry.muted ?? []).map(fill),

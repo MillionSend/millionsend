@@ -13,7 +13,7 @@ import { CONTENT_MONITORING_DOCS_URL } from "@/lib/docs-links";
 import { type MonitorSettingKind, validMonitorValue } from "@/lib/monitor-settings";
 import { useTRPC } from "@/lib/trpc";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
-import { CardHead, LoadErrorCard } from "./parts";
+import { CardHead, LINK_BUTTON, LoadErrorCard } from "./parts";
 
 /** The form's groups, in the order the operator reads them. */
 const GROUPS = [
@@ -245,7 +245,7 @@ export function Field({
         <button
           type="button"
           className="ms-link"
-          style={{ font: "inherit", padding: 0, background: "none", border: 0, cursor: "pointer" }}
+          style={LINK_BUTTON}
           disabled={disabled}
           onClick={onReset}
         >

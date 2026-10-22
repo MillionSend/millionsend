@@ -122,6 +122,7 @@ export {
   acceptEmail,
   countDistinctRecipients,
   countParked,
+  emailRecipientsSql,
   enforceDomainWarmup,
   estimateMimeBytes,
   exceededSendSize,
@@ -129,6 +130,7 @@ export {
   isReservedTagName,
   MAX_ATTACHMENT_BYTES,
   MAX_SUBJECT_LENGTH,
+  newDomainLimitFullMessage,
   QUOTA_BACKLOG_DAYS,
   RESERVED_TAG_PREFIX,
   reviewBacklogLimit,
@@ -231,6 +233,7 @@ export {
 export {
   bulkSentBySlot,
   cancelBroadcastRows,
+  newDomainLimitPlanCap,
   planRegionSend,
   quotaUsage,
   type RegionBulkCounts,
@@ -242,6 +245,7 @@ export {
   rungThatFits,
   type SendingBroadcast,
   sendingBroadcasts,
+  teamPlanHold,
   warmupBroadcastPlans,
   warmupPastHorizon,
 } from "./broadcast-pacing.js";
@@ -284,7 +288,9 @@ export {
 export {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
+  CONTACT_PROPERTY_TYPES,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
+  type ContactPropertyType,
   contactPropertiesChange,
 } from "./contact-properties.js";
 export {
@@ -403,6 +409,8 @@ export {
 export {
   type DomainWarmupRow,
   graduateWarmupDomains,
+  heldByNewDomainLimit,
+  mayWarmUp,
   pruneWarmupUsage,
   reserveWarmup,
   teamWarmupOverview,
@@ -493,6 +501,27 @@ export {
 } from "./instance-probes.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { type IpGeo, lookupIpGeo, refreshIpGeoDatabases } from "./ip-geo.js";
+export {
+  type ConsoleLimitRequest,
+  createLimitRequest,
+  declineLimitRequest,
+  getOpenLimitRequest,
+  LIMIT_REQUEST_SENDS,
+  LIMIT_REQUEST_SOURCES,
+  type LimitRequestRefusal,
+  type LimitRequestSends,
+  type LimitRequestSource,
+  type LimitRequestStatus,
+  latestLimitRequest,
+  listLimitRequests,
+  setWarmupTrust,
+  type TeamLimitRequest,
+} from "./limit-requests.js";
+export {
+  LIMIT_REQUEST_NOTE_MAX,
+  LIMIT_REQUEST_PER_DAY_MAX,
+  limitSpent,
+} from "./limit-rules.js";
 export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export {
   type BodyLink,
@@ -538,6 +567,14 @@ export {
   monitorThresholdsOrdered,
   resolveMonitorSettings,
 } from "./monitor-settings.js";
+export {
+  type NewDomainLimit,
+  type NewDomainLimitEta,
+  type NewDomainLimitStep,
+  newDomainLimitEta,
+  newDomainLimitEtas,
+  newDomainLimitStatus,
+} from "./new-domain-limit.js";
 export {
   accountLocale,
   claimNotification,
@@ -623,6 +660,7 @@ export {
   sesComplaintReadings,
 } from "./platform-breaker.js";
 export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
+export { parsePropertyDate, SEGMENT_FILTER_MAX_DAYS } from "./property-date.js";
 export { broadcastProviderBreakdown, type ProviderBreakdownRow } from "./provider-breakdown.js";
 export {
   dailyCeiling,
@@ -703,6 +741,7 @@ export {
 } from "./segment-counts.js";
 export {
   escapeLike,
+  propertyDateSql,
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
   SegmentFilterError,
@@ -866,7 +905,12 @@ export {
   type TeamStanding,
   teamStandingOf,
 } from "./team-standing.js";
-export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
+export {
+  deleteTopic,
+  findTopicOptOuts,
+  isSubscribedToTopic,
+  type TopicDeleteRefusal,
+} from "./topics.js";
 export {
   deriveTrackingKey,
   makeClickToken,
@@ -921,6 +965,7 @@ export {
   type WarmupOverview,
   type WarmupPlan,
   type WarmupPlanInput,
+  type WarmupPropertyOption,
   type WarmupRelease,
   type WarmupSendPreview,
   type WarmupSettings,
@@ -929,6 +974,7 @@ export {
   warmupDayOutcome,
   warmupMailValues,
   warmupOverview,
+  warmupPropertyOptions,
   warmupRelease,
   warmupSendOrder,
   warmupSendPreview,
