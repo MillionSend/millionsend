@@ -3,8 +3,8 @@
 import {
   CONTACT_PROPERTY_TYPES,
   type ContactPropertyType,
+  storedPropertyValue,
 } from "@millionsend/core/contact-properties";
-import { parsePropertyDate } from "@millionsend/core/property-date";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
@@ -150,11 +150,7 @@ export default function PropertiesPage() {
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
 
   // A number or date property's fallback must parse, as the server checks.
-  const fallbackInvalid =
-    fallback.trim() !== "" &&
-    (type === "number"
-      ? !Number.isFinite(Number(fallback))
-      : type === "date" && parsePropertyDate(fallback) === null);
+  const fallbackInvalid = fallback.trim() !== "" && !storedPropertyValue(type, fallback).ok;
 
   const submitAdd = () => {
     if (defineMutation.isPending || key.trim().length === 0 || fallbackInvalid) return;

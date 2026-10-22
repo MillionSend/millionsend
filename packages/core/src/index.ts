@@ -292,7 +292,10 @@ export {
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactPropertyType,
   contactPropertiesChange,
+  numericPropertyValue,
+  storedPropertyValue,
 } from "./contact-properties.js";
+export { type ContactPropertyTypes, loadContactPropertyTypes } from "./contact-property-types.js";
 export {
   CONTENT_REVEAL_FIELDS,
   CONTENT_REVEAL_JUSTIFICATION_MAX,

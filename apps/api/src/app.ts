@@ -15,7 +15,7 @@ import {
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactActivityRow,
   type ContactEventContext,
-  type ContactPropertyType,
+  type ContactPropertyTypes,
   type ContactSnapshot,
   cancelBroadcastRows,
   canonicalBodyHash,
@@ -55,6 +55,7 @@ import {
   isSharedInboxSender,
   type Keyring,
   limitSpent,
+  loadContactPropertyTypes,
   MAX_ATTACHMENT_BYTES,
   type MonitorSettings,
   MX_DELIVER_PATH,
@@ -67,6 +68,7 @@ import {
   newDomainLimitFullMessage,
   newDomainLimitPlanCap,
   newDomainLimitStatus,
+  numericPropertyValue,
   PACING_HORIZON_MAX_RETENTION_DAYS,
   PLAN_CONTACT_LIMIT,
   pacingHorizonDays,
@@ -102,6 +104,7 @@ import {
   sendRefusalError,
   sesMessageIdHeader,
   sharedModeReason,
+  storedPropertyValue,
   TEAM_RATE_LIMIT_PER_MINUTE_DEFAULT,
   teamPlanHold,
   teamQuota,
@@ -692,28 +695,6 @@ function toAcceptPayload(body: SendEmailRequest, domainId: string | null): Accep
   };
 }
 
-/** Registered property types by lower(key) — the registry index is
- * case-insensitive, and contact map keys are matched the same way. */
-type ContactPropertyTypes = Map<string, ContactPropertyType>;
-
-async function loadContactPropertyTypes(db: Db, teamId: string): Promise<ContactPropertyTypes> {
-  const p = schema.contactProperties;
-  const rows = await db.select({ key: p.key, type: p.type }).from(p).where(eq(p.teamId, teamId));
-  return new Map(rows.map((r) => [r.key.toLowerCase(), r.type]));
-}
-
-/**
- * The numeric reading of a property value, or null when it has none:
- * String(value) must be non-blank and parse to a finite number (values are
- * stored as text, so this is the shared write-validate/read-back rule).
- */
-export function numericPropertyValue(value: unknown): number | null {
-  const str = String(value).trim();
-  if (str === "") return null;
-  const num = Number(str);
-  return Number.isFinite(num) ? num : null;
-}
-
 /**
  * Coerces an incoming contact `properties` record to the stored flat
  * string→string map: scalars pass through `String()`, null marks the key as
@@ -740,24 +721,23 @@ function coerceContactProperties(
     if (typeof value === "object") {
       return { ok: false, message: "contact properties must be flat string or number values" };
     }
-    const type = types.get(key.toLowerCase());
-    if (type === "number" && numericPropertyValue(value) === null) {
-      return { ok: false, message: `property "${key}" must be a number` };
-    }
-    if (type === "date" && parsePropertyDate(String(value)) === null) {
+    const typed = storedPropertyValue(types.get(key.toLowerCase()), value);
+    if (!typed.ok) {
       return {
         ok: false,
-        message: `property "${key}" must be a date, such as 2026-01-08, 2026-01-08T10:30:00Z or Unix time`,
+        message:
+          typed.mustBe === "number"
+            ? `property "${key}" must be a number`
+            : `property "${key}" must be a date, such as 2026-01-08, 2026-01-08T10:30:00Z or Unix time`,
       };
     }
-    const text = type === "date" ? String(value).trim() : String(value);
-    if (text.length > CONTACT_PROPERTY_VALUE_MAX_LENGTH) {
+    if (typed.stored.length > CONTACT_PROPERTY_VALUE_MAX_LENGTH) {
       return {
         ok: false,
         message: `property "${key}" exceeds ${CONTACT_PROPERTY_VALUE_MAX_LENGTH} characters`,
       };
     }
-    out[key] = text;
+    out[key] = typed.stored;
   }
   return { ok: true, properties: out, removed };
 }

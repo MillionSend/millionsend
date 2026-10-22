@@ -13,11 +13,12 @@ import {
   emitSuppressionEvents,
   eraseRecipient,
   fetchEffectivePlan,
+  loadContactPropertyTypes,
   markSegmentsStale,
   PLAN_CONTACT_LIMIT,
-  parsePropertyDate,
   recordContactActivity,
   resultRows,
+  storedPropertyValue,
   undeliverableRecipientMessage,
   undeliverableRecipients,
   type WebhookEnqueue,
@@ -29,6 +30,7 @@ import { and, asc, desc, eq, ilike, inArray, or, type SQL, sql } from "drizzle-o
 import { z } from "zod";
 import { CONTACT_STATUSES } from "@/lib/contact-status";
 import { escapeLike } from "@/lib/sql";
+import { propertyTypeMessage } from "@/lib/trpc-error";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 import { assertSegment, segmentPredicate } from "./segments";
@@ -47,6 +49,34 @@ const propertiesSchema = z
   .refine((map) => Object.keys(map).length <= CONTACT_PROPERTY_MAX_KEYS, {
     message: `at most ${CONTACT_PROPERTY_MAX_KEYS} properties`,
   });
+
+/**
+ * `properties` as stored, each value as its key's type takes it (a date
+ * trimmed), or BAD_REQUEST naming the first key whose value doesn't fit.
+ * Definitions match keys in any letter case, as API writes do. A value equal
+ * to the one in `stored` is kept unchecked, so a value from before its key
+ * had a type never blocks saving anything else.
+ */
+async function typedProperties(
+  ctx: { db: Db; teamId: string },
+  properties: Record<string, string>,
+  stored: Record<string, string> = {},
+): Promise<Record<string, string>> {
+  const types = await loadContactPropertyTypes(ctx.db, ctx.teamId);
+  return Object.fromEntries(
+    Object.entries(properties).map(([key, value]) => {
+      if (stored[key] === value) return [key, value];
+      const typed = storedPropertyValue(types.get(key.toLowerCase()), value);
+      if (!typed.ok) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: propertyTypeMessage(typed.mustBe, key),
+        });
+      }
+      return [key, typed.stored];
+    }),
+  );
+}
 
 /** Guards contact-keyed procedures: NOT_FOUND outside the team. */
 async function assertContact(ctx: { db: Db; teamId: string }, contactId: string): Promise<void> {
@@ -316,6 +346,7 @@ export const audienceRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const t = schema.contacts;
+        const properties = input.properties && (await typedProperties(ctx, input.properties));
         const [hit] = await undeliverableRecipients([input.email]);
         if (hit) {
           // Only new contacts are refused; a stored address still gets the CONFLICT below.
@@ -339,7 +370,7 @@ export const audienceRouter = router({
             email: input.email,
             firstName: input.firstName || null,
             lastName: input.lastName || null,
-            ...(input.properties !== undefined ? { properties: input.properties } : {}),
+            ...(properties !== undefined ? { properties } : {}),
           })
           .onConflictDoNothing()
           .returning({ id: t.id });
@@ -447,7 +478,8 @@ export const audienceRouter = router({
         if (!before) throw new TRPCError({ code: "NOT_FOUND" });
         // properties REPLACES the whole map when provided (not a merge);
         // omitting it leaves the stored map unchanged.
-        const next = input.properties;
+        const next =
+          input.properties && (await typedProperties(ctx, input.properties, before.properties));
         const dirty =
           (input.firstName !== undefined && (input.firstName || null) !== before.firstName) ||
           (input.lastName !== undefined && (input.lastName || null) !== before.lastName) ||
@@ -471,7 +503,7 @@ export const audienceRouter = router({
                         unsubscribedAt: input.unsubscribed ? new Date() : null,
                       }
                     : {}),
-                  ...(input.properties !== undefined ? { properties: input.properties } : {}),
+                  ...(next !== undefined ? { properties: next } : {}),
                   updatedAt: new Date(),
                 })
                 .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
@@ -929,39 +961,33 @@ export const audienceRouter = router({
      */
     define: teamProcedure
       .input(
-        z
-          .object({
-            key: z.string().trim().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH),
-            type: z.enum(CONTACT_PROPERTY_TYPES).default("string"),
-            fallbackValue: z.string().max(CONTACT_PROPERTY_VALUE_MAX_LENGTH).optional(),
-          })
-          // A number property's fallback must read back as a finite number —
-          // it is stored as text and coerced per type at the wire.
-          .refine(
-            (v) =>
-              v.type !== "number" ||
-              v.fallbackValue === undefined ||
-              (v.fallbackValue.trim() !== "" && Number.isFinite(Number(v.fallbackValue))),
-            { message: "fallbackValue must be a number" },
-          )
-          .refine(
-            (v) =>
-              v.type !== "date" ||
-              v.fallbackValue === undefined ||
-              parsePropertyDate(v.fallbackValue) !== null,
-            { message: "fallbackValue must be a date" },
-          ),
+        z.object({
+          key: z.string().trim().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH),
+          type: z.enum(CONTACT_PROPERTY_TYPES).default("string"),
+          fallbackValue: z.string().max(CONTACT_PROPERTY_VALUE_MAX_LENGTH).optional(),
+        }),
       )
       .mutation(async ({ ctx, input }) => {
         const p = schema.contactProperties;
-        const fallback = input.type === "date" ? input.fallbackValue?.trim() : input.fallbackValue;
+        // A number or date property's fallback must read as its type: it is
+        // stored as text and coerced per type at the wire.
+        const fallback =
+          input.fallbackValue === undefined
+            ? null
+            : storedPropertyValue(input.type, input.fallbackValue);
+        if (fallback && !fallback.ok) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `fallbackValue must be a ${fallback.mustBe}`,
+          });
+        }
         const [row] = await ctx.db
           .insert(p)
           .values({
             teamId: ctx.teamId,
             key: input.key,
             type: input.type,
-            ...(fallback !== undefined ? { fallbackValue: fallback } : {}),
+            ...(fallback ? { fallbackValue: fallback.stored } : {}),
           })
           .onConflictDoNothing()
           .returning({ id: p.id });
