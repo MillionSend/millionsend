@@ -113,9 +113,9 @@ const dialogue = (commands: string[], atPort = port): Promise<string[]> =>
     socket.on("error", reject);
   });
 
-const greeting = (): Promise<{ socket: Socket; line: string }> =>
+const greeting = (atPort = port): Promise<{ socket: Socket; line: string }> =>
   new Promise((resolve, reject) => {
-    const socket = connect(port, "127.0.0.1");
+    const socket = connect(atPort, "127.0.0.1");
     socket.setEncoding("utf8");
     socket.once("data", (line: string) => resolve({ socket, line }));
     socket.on("error", reject);
@@ -451,24 +451,33 @@ describe("smtp relay", () => {
   });
 
   it("refuses connections past the per-IP cap", async () => {
-    const open: Socket[] = [];
+    // Its own server: on the shared one, a session dropped while its client
+    // kept sending holds its slot until smtp-server destroys the socket, 5 s on.
+    const own = createSmtpServer(serverDeps());
+    await new Promise<void>((resolve) => own.listen(0, "127.0.0.1", resolve));
+    const ownPort = (own.server.address() as AddressInfo).port;
     try {
-      for (let i = 0; i < MAX_CONNECTIONS_PER_IP; i++) {
-        const { socket, line } = await greeting();
-        open.push(socket);
-        expect(line).toMatch(/^220/);
+      const open: Socket[] = [];
+      try {
+        for (let i = 0; i < MAX_CONNECTIONS_PER_IP; i++) {
+          const { socket, line } = await greeting(ownPort);
+          open.push(socket);
+          expect(line).toMatch(/^220/);
+        }
+        const extra = await greeting(ownPort);
+        open.push(extra.socket);
+        expect(extra.line).toMatch(/^421/);
+      } finally {
+        for (const socket of open) socket.destroy();
       }
-      const extra = await greeting();
-      open.push(extra.socket);
-      expect(extra.line).toMatch(/^421/);
+      // Slots are released on close.
+      await new Promise((r) => setTimeout(r, 50));
+      const { socket, line } = await greeting(ownPort);
+      socket.destroy();
+      expect(line).toMatch(/^220/);
     } finally {
-      for (const socket of open) socket.destroy();
+      await new Promise<void>((resolve) => own.close(resolve));
     }
-    // Slots are released on close.
-    await new Promise((r) => setTimeout(r, 50));
-    const { socket, line } = await greeting();
-    socket.destroy();
-    expect(line).toMatch(/^220/);
   });
 
   it("rejects an oversized DATA with 552 without buffering it", async () => {

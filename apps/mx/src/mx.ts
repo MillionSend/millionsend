@@ -107,9 +107,10 @@ const domainOf = (address: string): string =>
   address.slice(address.lastIndexOf("@") + 1).toLowerCase();
 
 /**
- * HELO is the one session value smtp-server passes through unchecked: up to
- * 4 KiB, control characters (NUL included) and all. The wire allows 255
- * UTF-16 units, and the cut never leaves half a surrogate pair behind.
+ * smtp-server (3.19.23 on) refuses a HELO with control characters or past
+ * 300 characters; the strip keeps that true whatever the library lets
+ * through. The wire allows 255 UTF-16 units, and the cut never leaves half a
+ * surrogate pair behind.
  */
 const heloOf = (session: SMTPServerSession): string =>
   String(session.hostNameAppearsAs || "")

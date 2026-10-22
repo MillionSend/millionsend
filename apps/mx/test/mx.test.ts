@@ -642,10 +642,12 @@ describe("mx session", () => {
     expect(resolver).not.toHaveBeenCalled();
   });
 
-  it("cleans the HELO name before it travels or is stored", async () => {
+  it("refuses a HELO name with control characters and cuts a long one before it travels or is stored", async () => {
     const { port } = await startMx();
     const c = await smtpClient(port);
-    await c.send(`EHLO evil\u0000\u001b[31m.test${"a".repeat(400)}`);
+    expect(await c.send("EHLO evil\u0000\u001b[31m.test")).toMatch(/^501 /);
+    expect(await c.send(`EHLO ${"a".repeat(301)}`)).toMatch(/^501 /);
+    await c.send(`EHLO ${"a".repeat(300)}`);
     await c.send("MAIL FROM:<>");
     await c.send("RCPT TO:<someone@acme.test>");
     await c.send("DATA");
@@ -654,7 +656,7 @@ describe("mx session", () => {
     await c.close();
     const envelope = envelopeOf(deliveries()[0] as Hit);
     expect(envelope?.mailFrom).toBe("");
-    expect(envelope?.helo).toBe(`evil[31m.test${"a".repeat(400)}`.slice(0, 255));
+    expect(envelope?.helo).toBe("a".repeat(255));
   });
 
   it("logs envelope facts and outcomes, never message content", async () => {
