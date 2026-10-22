@@ -287,9 +287,9 @@ function mailboxCount(value: unknown): number {
 }
 
 /**
- * Whether a From line spells out `address` itself. mailparser decodes an
- * encoded-word display name and parses the result again, so
- * "=?utf-8?B?…?=: eve@evil.example;" can yield an address that no DMARC
+ * Whether a From line spells out `address` itself. mailparser before 3.9.40
+ * decoded an encoded-word display name and parsed the result again, so
+ * "=?utf-8?B?…?=: eve@evil.example;" yielded an address that no DMARC
  * check read (RFC 2047 §5 keeps encoded words out of addresses).
  */
 function writtenIn(lines: readonly string[], address: string): boolean {
