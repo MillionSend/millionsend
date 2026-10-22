@@ -28,13 +28,14 @@ let close: () => Promise<void>;
 beforeAll(async () => {
   ({ db: h.db, close } = await createTestDb());
   const teamId = await createTeam(h.db, "tracking-ask");
-  await h.db.insert(schema.domains).values({
-    teamId,
-    name: "acme.com.br",
-    region: "sa-east-1",
-    status: "verified",
-    trackingSubdomain: "links",
-  });
+  const domain = { teamId, region: "sa-east-1", trackingSubdomain: "links" };
+  await h.db.insert(schema.domains).values([
+    { ...domain, name: "acme.com.br", status: "verified" },
+    // Verified once, then lost a record: the links it already sent still need TLS.
+    { ...domain, name: "lapsed.example", status: "failed", verifiedAt: new Date() },
+    // A claim on a name nobody proved control of.
+    { ...domain, name: "claimed.example", status: "pending" },
+  ]);
 });
 afterAll(() => close());
 
@@ -50,6 +51,11 @@ describe("GET /internal/tracking-host-allowed", () => {
 
   it("denies a hostname no team has configured", async () => {
     expect((await ask({ token: h.secret, domain: "links.evil.com" })).status).toBe(404);
+  });
+
+  it("authorizes a domain that verified once, never a claim that did not", async () => {
+    expect((await ask({ token: h.secret, domain: "links.lapsed.example" })).status).toBe(200);
+    expect((await ask({ token: h.secret, domain: "links.claimed.example" })).status).toBe(404);
   });
 
   it("denies a wrong or missing secret before touching the db", async () => {
