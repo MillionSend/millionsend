@@ -199,6 +199,27 @@ describe("broadcasts.document", () => {
     expect((await broadcastRow(id))?.document).toBeNull();
   });
 
+  it("lists a body as html-authored the way the composer opens it", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const html = await caller.broadcasts.create(DRAFT_INPUT);
+    const blocks = await caller.broadcasts.create({ ...DRAFT_INPUT, document: SAMPLE_DOC });
+    // An empty body saved in code mode: no html, no document.
+    const empty = await caller.broadcasts.create({ from: DRAFT_INPUT.from, subject: "Empty" });
+    const blank = await caller.broadcasts.create({ ...DRAFT_INPUT, html: " \n\t" });
+    const late = await caller.broadcasts.create({
+      ...DRAFT_INPUT,
+      html: `${"\n".repeat(100)}<p>Hi</p>`,
+    });
+    const { items } = await caller.broadcasts.list({});
+    const authored = (id: string) => items.find((item) => item.id === id)?.htmlAuthored;
+    expect(authored(html.id)).toBe(true);
+    expect(authored(blocks.id)).toBe(false);
+    expect(authored(empty.id)).toBe(false);
+    expect(authored(blank.id)).toBe(false);
+    expect(authored(late.id)).toBe(true);
+  });
+
   it("rejects a malformed document via the zod guard", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);

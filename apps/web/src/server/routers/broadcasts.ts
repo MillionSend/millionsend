@@ -289,9 +289,13 @@ export const broadcastsRouter = router({
           segmentId: b.segmentId,
           topicId: b.topicId,
           segmentName: sg.name,
-          // Mirrors lib/email-doc isMailyDoc: anything but a Tiptap doc node
-          // is html authored outside the block editor, shown as such in the list.
-          htmlAuthored: sql<boolean>`${b.document} is null or ${b.document}->>'type' is distinct from 'doc'`,
+          // Mirrors lib/template-mode bodyEditorMode: html without a Tiptap doc
+          // node is authored outside the block editor, shown as such in the
+          // list; an empty body opens in the block editor, so it isn't. The
+          // sort evaluates this for every row of the team: left() reads only
+          // the html's first TOAST slice, and the whole body is read only when
+          // that start is blank.
+          htmlAuthored: sql<boolean>`(${b.document} is null or ${b.document}->>'type' is distinct from 'doc') and (left(coalesce(${b.html}, ''), 64) ~ '\\S' or coalesce(${b.html}, '') ~ '\\S')`,
           recipients: recipientsSql(b),
           scheduledAt: b.scheduledAt,
           sentAt: b.sentAt,
