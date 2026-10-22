@@ -96,13 +96,14 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
   const [document, setDocument] = useState<unknown>(initial?.document ?? null);
-  // Armed by "Convert this template": the block editor then mounts on the
-  // html seed and emits its parse. Until then a document-less row never
+  // Armed by converting to blocks in place: the block editor then mounts on
+  // the html seed and emits its parse. Until then a document-less row never
   // reaches the block editor — its html would be flattened on the first edit.
   const [converting, setConverting] = useState(false);
   // Set by "Edit as HTML" (and for a row that opened html-authored): the body
   // edits as source even while its html is empty, so clearing the textarea
-  // never drops the user into the block editor. "Convert to blocks" clears it.
+  // never drops the user into the block editor. Converting to blocks in place
+  // clears it, as does "Back to blocks".
   const [asCode, setAsCode] = useState(
     () =>
       bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) === "code",

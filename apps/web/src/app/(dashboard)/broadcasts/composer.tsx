@@ -116,13 +116,14 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
   const [document, setDocument] = useState<unknown>(initial?.document ?? null);
-  // Armed by "Convert this broadcast": the block editor then mounts on the
-  // html seed and emits its parse. Until then an html-authored body never
+  // Armed by converting to blocks in place: the block editor then mounts on
+  // the html seed and emits its parse. Until then an html-authored body never
   // reaches the block editor — its html would be flattened on the first edit.
   const [converting, setConverting] = useState(false);
   // Set by "Edit as HTML" (and for a body that opened html-authored): the body
   // edits as source even while its html is empty, so clearing the textarea
-  // never drops the user into the block editor. "Convert this broadcast" clears it.
+  // never drops the user into the block editor. Converting to blocks in place
+  // clears it, as does "Back to blocks".
   // The row has no field for the choice: a body saved empty opens in blocks again.
   const [asCode, setAsCode] = useState(
     () =>
