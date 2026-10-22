@@ -293,15 +293,15 @@ ALLOW_SIGNUP=false
 # always allows branded subdomains (the operator owns the proxy and its certs).
 ALLOW_TRACKING_SUBDOMAINS=false
 
-# Host a customer's branded tracking subdomain CNAMEs at. Leave unset and the
-# CNAME targets this app's own host — correct for self-host, where the operator
-# already serves customer hostnames. On a multi-tenant cloud the app cannot
-# hold a certificate per customer hostname, so point this at a dedicated
-# tracking edge (a small box that terminates TLS on demand per hostname and
-# proxies /t/* back here); the customer's CNAME then targets that edge. The
-# edge must pass the host each click came in on as X-Tracking-Host, replacing
-# any value the client sent; the app checks that host against the team whose
-# link it is.
+# Host a team's branded tracking subdomain CNAMEs at. Unset, the CNAME targets
+# this app's own host, so whatever terminates TLS for this app must also hold a
+# certificate for every team's tracking subdomain: Cloudflare's proxy does not,
+# nor does certbot for names it was not given. Otherwise run the tracking edge
+# in deploy/tracking-edge (Caddy issuing certificates on demand and proxying
+# /t/* back here) and set this to its hostname; "Branded tracking hosts" in
+# SELF_HOSTING.md lists the other options. An edge must pass the host each
+# click came in on as X-Tracking-Host, replacing any value the client sent; the
+# app checks that host against the team whose link it is.
 # TRACKING_EDGE_HOST=track.example-dns.com
 # Shared secret the tracking edge sends when asking whether a hostname is the
 # tracking host of a domain that verified (gates on-demand certificates).
