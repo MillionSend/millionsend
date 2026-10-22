@@ -42,8 +42,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function seedEmail(): Promise<{ emailId: string; teamId: string }> {
-  const teamId = await createTeam(db);
+async function seedEmail(slug?: string): Promise<{ emailId: string; teamId: string }> {
+  const teamId = await createTeam(db, slug);
   const [email] = await db
     .insert(schema.emails)
     .values({ teamId, from: "sender@example.com", to: ["rcpt@example.com"], subject: "Hi" })
@@ -106,6 +106,7 @@ describe("click endpoint /t/c", () => {
     const res = await clickGet(...req(token));
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(url);
+    expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
 
     // The event carries the signed destination and the fetcher in Resend's
@@ -427,6 +428,77 @@ describe("a click on a branded tracking host", () => {
       expect(res.headers.get("location")).toBe(url);
     }
   });
+
+  it.each(["pending", "temporary_failure", "failed"] as const)(
+    "a domain fallen to %s still holds its host: another team's link 404s, its own redirects",
+    async (status) => {
+      const { emailId, teamId } = await seedEmail();
+      const owner = await seedEmail("bank");
+      await db.insert(schema.domains).values({
+        teamId: owner.teamId,
+        name: "bank.example",
+        region: "us-east-1",
+        status,
+        verifiedAt: new Date(),
+        trackingSubdomain: "links",
+      });
+      expect((await onHost(await clickToken(emailId, url), "links.bank.example")).status).toBe(404);
+      expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+      const own = await onHost(await clickToken(owner.emailId, url), "links.bank.example");
+      expect(own.status).toBe(302);
+    },
+  );
+});
+
+describe("a branded host reaching the app with no tracking edge in front", () => {
+  const url = "https://shop.example.com/sale?id=9";
+  const viaHost = (token: string, host: string) =>
+    clickGet(...req(token, { "user-agent": IPHONE, host }));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function seedHolder(trackingSubdomain = "links") {
+    const owner = await seedEmail("bank");
+    await db.insert(schema.domains).values({
+      teamId: owner.teamId,
+      name: "bank.example",
+      region: "us-east-1",
+      status: "verified",
+      trackingSubdomain,
+    });
+    return owner;
+  }
+
+  it("judges the Host the click came in on, port or case aside", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const owner = await seedHolder();
+    for (const host of ["links.bank.example", "Links.Bank.example:8443"]) {
+      expect((await viaHost(await clickToken(emailId, url), host)).status, host).toBe(404);
+    }
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+    expect((await viaHost(await clickToken(owner.emailId, url), "links.bank.example")).status).toBe(
+      302,
+    );
+    // A proxy that rewrites Host to its upstream names no domain: any team's link redirects.
+    expect((await viaHost(await clickToken(emailId, url), "web:3000")).status).toBe(302);
+  });
+
+  it("the app's own host carries every team's links, even when a team names it its tracking host", async () => {
+    vi.stubEnv("APP_BASE_URL", "https://mail.bank.example");
+    const { emailId } = await seedEmail();
+    await seedHolder("mail");
+    expect((await viaHost(await clickToken(emailId, url), "mail.bank.example")).status).toBe(302);
+  });
+
+  it("on the cloud, the branded Host redirects for its team and the app's own host refuses", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+    const owner = await seedHolder();
+    const token = await clickToken(owner.emailId, url);
+    expect((await viaHost(token, "links.bank.example")).status).toBe(302);
+    expect((await viaHost(token, "app.example.com")).status).toBe(404);
+  });
 });
 
 describe("a click on the cloud, where a team's links ship only on its branded host", () => {
@@ -451,6 +523,7 @@ describe("a click on the cloud, where a team's links ship only on its branded ho
 
   it("the team's branded host, through the tracking edge, still redirects", async () => {
     cloud(true);
+    vi.stubEnv("APP_BASE_URL", "https://app.example.com");
     const { emailId, teamId } = await seedEmail();
     await db.insert(schema.domains).values({
       teamId,
@@ -462,6 +535,8 @@ describe("a click on the cloud, where a team's links ship only on its branded ho
     const res = await clickGet(
       ...req(await clickToken(emailId, url), {
         "user-agent": IPHONE,
+        // The edge rewrites Host to the app's own and names the reader's host apart.
+        host: "app.example.com",
         "x-tracking-host": "links.shop.example",
       }),
     );
@@ -470,11 +545,50 @@ describe("a click on the cloud, where a team's links ship only on its branded ho
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
   });
 
-  it("a token from before links named their team still answers on the dashboard host", async () => {
+  it("a deleted team's links 404 on the branded host it held", async () => {
     cloud(true);
     const { emailId, teamId } = await seedEmail();
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "shop.example",
+      region: "us-east-1",
+      status: "verified",
+      trackingSubdomain: "links",
+    });
+    const token = await clickToken(emailId, url);
+    await db.delete(schema.teams).where(eq(schema.teams.id, teamId));
+    const res = await clickGet(
+      ...req(token, { "user-agent": IPHONE, "x-tracking-host": "links.shop.example" }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("a host no team holds redirects for no one, a claim that never verified included", async () => {
+    cloud(true);
+    const { emailId, teamId } = await seedEmail();
+    // The team's own claim on a name it never proved, whose CNAME the last owner left pointing at the edge.
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "gone.example",
+      region: "us-east-1",
+      status: "pending",
+      trackingSubdomain: "links",
+    });
+    for (const host of ["links.gone.example", "links.unclaimed.example"]) {
+      const res = await clickGet(
+        ...req(await clickToken(emailId, url), { "user-agent": IPHONE, "x-tracking-host": host }),
+      );
+      expect(res.status, host).toBe(404);
+    }
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+  });
+
+  it("a token from before links named their team still answers on the dashboard host", async () => {
+    cloud(true);
+    vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+    const { emailId, teamId } = await seedEmail();
     const token = legacyClickToken({ emailId, url, secretKey });
-    const res = await clickGet(...req(token));
+    const res = await clickGet(...req(token, { "user-agent": IPHONE, host: "app.example.com" }));
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(url);
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });

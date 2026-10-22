@@ -1,0 +1,19 @@
+# The whole tracking edge: one Caddy container. Certs live in the caddy_data
+# volume, so they survive restarts and are not re-issued (which would burn
+# Let's Encrypt rate limits). Ports 80 (ACME HTTP-01 + redirect) and 443.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
