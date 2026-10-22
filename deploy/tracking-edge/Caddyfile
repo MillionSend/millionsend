@@ -1,0 +1,46 @@
+# MillionSend tracking edge.
+#
+# Terminates TLS for customers' branded tracking hostnames (links.customer.com)
+# with on-demand Let's Encrypt certificates, and reverse-proxies the tracking
+# paths (/t/c, /t/o) back to the app. It holds no database and no app secret
+# beyond the ask token — the app verifies the tracking token and issues the
+# redirect. See README.md.
+{
+	email {$ACME_EMAIL}
+
+	# On-demand TLS mints a certificate the first time a hostname is requested.
+	# The `ask` gate is what makes that safe: the app answers 2xx only for the
+	# tracking host of a domain that has verified, so a stranger pointing DNS
+	# here cannot exhaust Let's Encrypt's issuance limits, and a claim on a name
+	# nobody proved gets no certificate.
+	on_demand_tls {
+		ask {$ASK_URL}
+	}
+}
+
+# The edge's own hostname is not a tracking link — anyone who opens it directly
+# is sent to the site. Its certificate is issued normally (this named site is
+# not on-demand), so the redirect resolves over HTTPS.
+{$EDGE_HOST} {
+	redir {$EDGE_REDIRECT} 302
+}
+
+# Match every OTHER hostname (each customer's tracking subdomain), TLS on demand.
+https:// {
+	tls {
+		on_demand
+	}
+
+	# Only the tracking endpoints are proxied — everything else is a dead end,
+	# so this is never a general-purpose open proxy.
+	@tracking path /t/c/* /t/o/*
+	handle @tracking {
+		reverse_proxy {$ORIGIN} {
+			header_up Host {$ORIGIN_HOST}
+			header_up X-Tracking-Host {host}
+		}
+	}
+	handle {
+		respond 404
+	}
+}

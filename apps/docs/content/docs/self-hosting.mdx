@@ -937,6 +937,45 @@ sudo ufw allow 2587/tcp   # only if the SMTP relay is exposed
 sudo ufw enable
 ```
 
+## Branded tracking hosts
+
+A team can serve its tracked links and open pixel from a subdomain of its own
+domain, such as `links.example.org` (see [per-domain configuration](/concepts/domains#per-domain-configuration)).
+Its CNAME points at `TRACKING_EDGE_HOST`, or at this app's host while that is
+unset, and links move to the subdomain once the CNAME resolves. Whatever answers
+HTTPS for the subdomain must hold a certificate for it, or the team's links
+fail:
+
+- **nginx with certbot**, as above, holds certificates only for the names you
+  list: add each team's tracking host to the dashboard's `server_name` and to
+  the `certbot` command, or run the tracking edge.
+- **Behind Cloudflare** (a proxied record or a Tunnel), Cloudflare holds no
+  certificate for your teams' hostnames. Run the tracking edge on a DNS-only
+  hostname, or add each tracking host to your zone as a
+  [Cloudflare for SaaS](https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/)
+  custom hostname (the first 100 are included on the Free, Pro and Business
+  plans) and set `TRACKING_EDGE_HOST` to the hostname their CNAMEs should
+  target.
+
+A team without a tracking subdomain has its links go through `APP_BASE_URL`,
+which works behind any proxy.
+
+The **tracking edge** (`deploy/tracking-edge/` in the repository) is one Caddy
+container on a box with a public IPv4 and ports 80 and 443 free. It issues a
+certificate the first time each tracking host is requested, after asking the
+app whether that host belongs to a domain that verified, and proxies only
+`/t/c/*` and `/t/o/*` back to the app. [Its README](https://github.com/MillionSend/millionsend/tree/main/deploy/tracking-edge) walks through the
+box. In the app's `.env`:
+
+```bash
+TRACKING_EDGE_HOST=track.example-dns.com    # the edge's own hostname, a DNS-only A record
+TRACKING_ASK_SECRET=<openssl rand -hex 32>  # the same value goes in the edge's ASK_URL
+TRUSTED_PROXIES=<what it lists now>,<the edge's address>
+```
+
+`TRUSTED_PROXIES` needs the edge's address: every open and click reaches the
+app through it, and left out, each one records the edge as the recipient.
+
 ## Object storage (team logos)
 
 Optional. With an S3-compatible bucket configured, team admins can upload a

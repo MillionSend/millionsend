@@ -976,6 +976,48 @@ sudo ufw allow 2587/tcp   # só se o relay SMTP estiver exposto
 sudo ufw enable
 ```
 
+## Hosts de rastreamento com marca
+
+Uma equipe pode servir os links rastreados e o pixel de abertura de um
+subdomínio do próprio domínio, como `links.exemplo.com.br` (veja a
+[configuração por domínio](/pt-BR/concepts/domains#configuração-por-domínio)).
+O CNAME dele aponta para `TRACKING_EDGE_HOST`, ou para o host deste app enquanto
+ele não estiver definido, e os links passam para o subdomínio assim que o CNAME
+resolve. Quem responde HTTPS pelo subdomínio precisa ter um certificado para
+ele, senão os links da equipe falham:
+
+- **nginx com certbot**, como acima, só tem certificados para os nomes que você
+  lista: acrescente o host de rastreamento de cada equipe ao `server_name` do
+  painel e ao comando do `certbot`, ou rode o edge de rastreamento.
+- **Atrás do Cloudflare** (um registro com proxy ou um Tunnel), o Cloudflare
+  não tem certificado para os hostnames das suas equipes. Rode o edge de
+  rastreamento num hostname **somente DNS**, ou adicione cada host de
+  rastreamento à sua zona como hostname personalizado do
+  [Cloudflare for SaaS](https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/)
+  (os 100 primeiros vêm incluídos nos planos Free, Pro e Business) e defina
+  `TRACKING_EDGE_HOST` como o hostname para onde os CNAMEs deles devem apontar.
+
+Os links de uma equipe sem subdomínio de rastreamento passam pelo
+`APP_BASE_URL`, que funciona atrás de qualquer proxy.
+
+O **edge de rastreamento** (`deploy/tracking-edge/` no repositório) é um
+contêiner Caddy numa máquina com IPv4 público e as portas 80 e 443 livres. Ele
+emite um certificado na primeira vez que cada host de rastreamento é pedido,
+depois de perguntar ao app se esse host pertence a um domínio verificado, e só
+encaminha `/t/c/*` e `/t/o/*` de volta para o app. O
+[README dele](https://github.com/MillionSend/millionsend/tree/main/deploy/tracking-edge)
+explica a máquina passo a passo. No `.env` do app:
+
+```bash
+TRACKING_EDGE_HOST=track.example-dns.com    # o hostname do próprio edge, um registro A somente DNS
+TRACKING_ASK_SECRET=<openssl rand -hex 32>  # o mesmo valor vai no ASK_URL do edge
+TRUSTED_PROXIES=<o que já lista>,<o endereço do edge>
+```
+
+O `TRUSTED_PROXIES` precisa do endereço do edge: toda abertura e todo clique
+chegam ao app por ele e, sem essa entrada, cada um registra o edge como o
+destinatário.
+
 ## Armazenamento de objetos (logos das equipes)
 
 Opcional. Com um bucket compatível com S3 configurado, administradores da equipe podem
