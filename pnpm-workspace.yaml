@@ -19,3 +19,16 @@ overrides:
   # which a read-only container with a noexec /tmp lacks. next.config.ts
   # loads it through next-intl's plugin, so `next start` would die at boot.
   "@swc/core": "1.16.2"
+  # Paste-handling XSS advisory in prosemirror-view <1.42.3 (GHSA-c8x8-7fp4-3x9w,
+  # via @tiptap/pm and its plugins, which pnpm update leaves on the old copy).
+  # prosemirror-view 1.42.5 on needs prosemirror-model ^1.25.12, and an editor
+  # that loads two copies of either breaks on paste and drop.
+  "prosemirror-view@<1.42.3": "^1.42.3"
+  "prosemirror-model@<1.25.12": "^1.25.12"
+  # Advisories fixed inside their parents' ranges, held here so that a
+  # regenerated lockfile keeps the fix: markdown-it's quadratic parsing (via
+  # prosemirror-markdown), undici 6's WebSocket denial of service (via
+  # cheerio) and source-map-js's event-loop denial of service (via tailwind).
+  "markdown-it@<14.3.3": "^14.3.3"
+  "undici@<6.28.1": "^6.28.1"
+  "source-map-js@<1.2.2": "^1.2.2"
