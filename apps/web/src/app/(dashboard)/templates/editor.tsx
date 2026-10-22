@@ -622,6 +622,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
                 <HtmlAuthoredBanner
                   onEditHtml={() => setTab("edit")}
                   onConvert={() => setConvertOpen(true)}
+                  convertDisabled={saving}
                 />
               ) : null}
               <div

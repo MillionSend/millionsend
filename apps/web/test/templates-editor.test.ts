@@ -398,6 +398,18 @@ describe("template mode recovery", () => {
     expect(back?.disabled).toBe(true);
   });
 
+  it("keeps the banner's Convert off while a save is in flight", async () => {
+    const convert = () =>
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.startsWith("templates.html.convert"),
+      );
+    await act(async () => root.render(createElement(TemplateEditor, { initial: HTML_ROW })));
+    expect(convert()?.disabled).toBe(false);
+    rq.saving = true;
+    await act(async () => root.render(createElement(TemplateEditor, { initial: HTML_ROW })));
+    expect(convert()?.disabled).toBe(true);
+  });
+
   it("offers no duplicate when a template that was never saved converts to blocks", async () => {
     await act(async () => root.render(createElement(TemplateEditor)));
     await click("templates.html.editAsHtml");
