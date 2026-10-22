@@ -1,10 +1,9 @@
 # Tracking edge
 
-Serves teams' branded tracking hosts (`links.customer.com`) over HTTPS when the
-app's own host cannot hold a certificate for each of them: on MillionSend Cloud,
-whose app sits behind Cloudflare, and on a self-hosted instance behind
-Cloudflare or behind a proxy that only issues certificates for names listed in
-advance. [Branded tracking hosts](https://docs.millionsend.com/self-hosting#branded-tracking-hosts)
+Serves teams' branded tracking hosts (`links.example.org`) over HTTPS when the
+app's own host cannot hold a certificate for each of them: behind Cloudflare's
+proxy or a Cloudflare Tunnel, or behind a proxy that only issues certificates
+for names listed in advance. [Branded tracking hosts](https://docs.millionsend.com/self-hosting#branded-tracking-hosts)
 in the self-hosting guide covers when you need it and the alternatives.
 
 It is one **Caddy** container with on-demand TLS. It terminates TLS for each
@@ -14,10 +13,10 @@ app verifies the tracking token and issues the redirect.
 
 ```
 recipient clicks a tracked link
-  → links.customer.com             the team's CNAME
-  → t.millionsend-dns.com          this box's A record, DNS only (grey cloud)
+  → links.example.org              the team's CNAME
+  → track.example-dns.com          this box's A record (DNS only on Cloudflare)
   → this box                       Caddy, on-demand TLS
-  → /t/c or /t/o proxied to app.millionsend.com (through Cloudflare)
+  → /t/c or /t/o proxied to the app (mail.example.com)
   → the app verifies the token, records the event and returns a 302
 ```
 
@@ -26,34 +25,33 @@ Before minting a certificate for a hostname, Caddy asks the app
 that has verified, so a stranger pointing DNS here cannot burn Let's Encrypt's
 issuance limits, and a claim on a name nobody proved gets no certificate.
 
-The steps use MillionSend Cloud's values; [Self-hosting](#self-hosting) lists
-what changes for your own instance.
-
 ## Setup
 
-### 1. Launch the box
+### 1. The box
 
-- **EC2 `t4g.micro`** (Arm, 1 GiB), **Ubuntu Server 24.04 LTS (arm64)**, in the
-  region nearest the app (`us-east-1`). Any small VPS with a public IPv4 works.
-- Attach an **Elastic IP** so the address is stable.
-- Security group: **80 and 443 from `0.0.0.0/0`** (80 is required for the ACME
-  HTTP-01 challenge and the HTTP→HTTPS redirect), **22 from your IP only**.
+Any small VPS or cloud instance with a public IPv4 (1 GiB of memory is plenty),
+and a stable address. Inbound: **80 and 443 from anywhere** (80 carries the
+ACME HTTP-01 challenge and the HTTP→HTTPS redirect) and SSH from your own IP
+only. When nothing else listens on 80 and 443, as with an app behind a
+Cloudflare Tunnel, the app's own box works too.
 
 ### 2. DNS
 
-In the Cloudflare zone **`millionsend-dns.com`** (a domain of its own, so a
-tracking host on a blocklist never touches `millionsend.com`):
+An A record for the edge's own hostname, the CNAME target teams point their
+tracking subdomains at:
 
-| Type | Name | Content            | Proxy status        |
-| ---- | ---- | ------------------ | ------------------- |
-| A    | `t`  | the Elastic IP     | **DNS only (grey)** |
+| Type | Name                    | Content          | Proxy status (Cloudflare) |
+| ---- | ----------------------- | ---------------- | ------------------------- |
+| A    | `track.example-dns.com` | the box's IPv4   | **DNS only (grey)**       |
 
-It must be grey: proxied, Cloudflare would terminate TLS for the teams'
-hostnames, which needs Cloudflare for SaaS, the thing this box replaces. Teams
-then point a CNAME such as `links` at `t.millionsend-dns.com`; the dashboard
-shows each team that record with its status.
+On Cloudflare it must be grey: proxied, Cloudflare would terminate TLS for the
+teams' hostnames, which needs Cloudflare for SaaS, the thing this box replaces.
+A domain of its own keeps a tracking host on a blocklist away from your main
+domain.
 
 ### 3. Docker
+
+On Ubuntu:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
@@ -72,20 +70,14 @@ chmod 600 .env
 nano .env
 ```
 
-Keep this directory: Compose names the certificate volume after it
-(`millionsend-tracking-edge_caddy_data`), and under a new name the box starts
-with no certificates and reissues one for every tracking host.
+`.env.example` explains each value: the app's URL (`ORIGIN`, `ORIGIN_HOST` and
+the host in `ASK_URL` are your `APP_BASE_URL`'s host), the app's
+`TRACKING_ASK_SECRET` as the token in `ASK_URL`, the edge's own hostname as
+`EDGE_HOST`, and the page a direct visit to it lands on as `EDGE_REDIRECT`.
 
-`.env` on MillionSend Cloud:
-
-```bash
-ACME_EMAIL=<the address Let's Encrypt writes to about expiry>
-ORIGIN=https://app.millionsend.com
-ORIGIN_HOST=app.millionsend.com
-ASK_URL=https://app.millionsend.com/internal/tracking-host-allowed?token=<the app's TRACKING_ASK_SECRET>
-EDGE_HOST=t.millionsend-dns.com
-EDGE_REDIRECT=https://millionsend.com
-```
+Keep the directory: Compose names the certificate volume after it
+(`millionsend-tracking-edge_caddy_data` here), and under a new name the box
+starts with no certificates and reissues one for every tracking host.
 
 ### 5. Start
 
@@ -96,22 +88,22 @@ docker compose logs -f    # each tracking host's certificate issues on its first
 
 ### 6. App side
 
-In the app's `.env`, then `docker compose up -d` there:
+In the app's `.env`, then restart the app:
 
 ```bash
-TRACKING_EDGE_HOST=t.millionsend-dns.com
+TRACKING_EDGE_HOST=track.example-dns.com
 TRACKING_ASK_SECRET=<the token in ASK_URL>       # openssl rand -hex 32
-TRUSTED_PROXIES=<what it lists now>,<the box's Elastic IP>
+TRUSTED_PROXIES=<what it lists now>,<the box's IPv4>
 ```
 
-With these set, a team's tracking CNAME targets the edge, and Caddy's `ask`
-check succeeds for the tracking host of each domain that has verified.
+With these set, a team's tracking CNAME targets the edge, and the `ask` check
+succeeds for the tracking host of each domain that has verified.
 
-`TRUSTED_PROXIES` must list this box: its requests reach the app through
-Cloudflare, which names the box as its peer, so without the entry every open
-and click records the box's address as the recipient's. Caddy puts the real
-client in `X-Forwarded-For` and Cloudflare appends the box to it; declaring the
-box lets the app walk past it to the client.
+`TRUSTED_PROXIES` must list the box: every open and click reaches the app
+through it, and left out, each one records the box's address as the
+recipient's. Caddy puts the real client in `X-Forwarded-For` and each proxy
+after it appends its peer; declaring the box lets the app walk past it to the
+client. If Cloudflare is in front of the app, its ranges stay in the list too.
 
 ## Checks
 
@@ -119,14 +111,14 @@ box lets the app walk past it to the client.
 # The ask gate (replace the secret): a verified domain's tracking host returns
 # 200, others 404.
 curl -s -o /dev/null -w '%{http_code}\n' \
-  "https://app.millionsend.com/internal/tracking-host-allowed?token=SECRET&domain=links.SOMECUSTOMER.com"
+  "https://mail.example.com/internal/tracking-host-allowed?token=SECRET&domain=links.example.org"
 
-# Once a team's domain has verified and its CNAME is live, the first HTTPS hit
-# issues its certificate:
-curl -sI "https://links.SOMECUSTOMER.com/t/o/anything"   # 200 + a fresh cert
+# Once the team's domain has verified and its CNAME is live, the first HTTPS
+# request issues the host's certificate:
+curl -sI "https://links.example.org/t/o/anything"
 
-# The edge's own hostname bounces to the site:
-curl -sI "https://t.millionsend-dns.com"                 # 302 → EDGE_REDIRECT
+# The edge's own hostname redirects:
+curl -sI "https://track.example-dns.com"         # 302 → EDGE_REDIRECT
 ```
 
 ## Upgrades
@@ -147,31 +139,15 @@ value.
 
 - **What the box holds:** Caddy's Let's Encrypt account key, the issued
   certificates, and the ask token in `.env`, which only answers whether a
-  hostname is a tracking host. It never sees `MASTER_ENCRYPTION_KEY`, the
-  database or API keys. A compromise of this box reaches no customer data;
-  worst case it serves redirects.
-- **Certificates persist** in the `caddy_data` volume. Do not delete it, or
-  certificates reissue and you risk Let's Encrypt's rate limits.
-- **Exposed IP.** Because the DNS record is grey, the box sits outside
-  Cloudflare's WAF and DDoS shield. That is acceptable for a stateless redirect
-  edge: a flood degrades tracking links but touches nothing sensitive.
-  Optional hardening: build Caddy with the `caddy-ratelimit` module (via
-  `xcaddy`) and add a `rate_limit` directive.
+  hostname is a tracking host. It never sees the app's encryption key, its
+  database or API keys; a compromised box can serve redirects and nothing
+  more.
+- **Certificates persist** in the `caddy_data` volume. Deleting it reissues
+  every certificate and risks Let's Encrypt's rate limits.
+- **No CDN in front.** The grey record means the box gets none of Cloudflare's
+  proxy protection. To rate-limit, build Caddy with the `caddy-ratelimit`
+  module (via `xcaddy`) and add a `rate_limit` directive.
 - **Monitor** `docker compose logs` for repeated `ask` denials or issuance
   failures. Renewals are automatic while the box stays reachable.
 - **Reboots:** Docker starts on boot and the container restarts itself
   (`restart: unless-stopped`).
-
-## Self-hosting
-
-The same box serves a self-hosted instance. What changes:
-
-- **`.env`:** `ORIGIN`, `ORIGIN_HOST` and the host in `ASK_URL` are your
-  `APP_BASE_URL`'s host; `EDGE_HOST` is the edge's own hostname, an A record
-  that is DNS only; `EDGE_REDIRECT` is any page you like.
-- **App side:** the same three settings, with your edge's hostname and
-  address. If Cloudflare is in front of the app, `TRUSTED_PROXIES` keeps its
-  ranges too.
-- **Where it runs:** any box with a public IPv4 and ports 80 and 443 free. When
-  nothing else listens on them, as with an app behind a Cloudflare Tunnel, that
-  can be the app's own box.
