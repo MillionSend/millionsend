@@ -44,9 +44,12 @@
     "deleteBody": "{key} é removida das suas propriedades definidas. Os valores dos contatos não são afetados.",
     "deleteConfirm": "Excluir propriedade",
     "typeNumber": "Número",
+    "typeDate": "Data",
     "typeImmutable": "O tipo não pode ser alterado depois que a propriedade é criada.",
     "fallbackNumberPlaceholder": "ex. 0",
+    "fallbackDatePlaceholder": "ex. 2026-01-08",
     "fallbackInvalidNumber": "O valor padrão deve ser um número.",
+    "fallbackInvalidDate": "O valor padrão deve ser uma data, como 2026-01-08.",
     "searchPlaceholder": "Buscar propriedades…",
     "allTypes": "Todos os tipos",
     "noMatch": "Nenhuma propriedade corresponde aos filtros.",
@@ -175,6 +178,10 @@
     "propValuePlaceholder": "Valor",
     "addProperty": "Adicionar propriedade",
     "removeProperty": "Remover propriedade",
+    "propertyMustBe": {
+      "number": "{name} precisa ser um número, como 42.",
+      "date": "{name} precisa ser uma data, como 2026-01-08."
+    },
     "segments": "Segmentos",
     "noSegments": "Sem segmentos",
     "segmentsPlaceholder": "Adicionar segmentos…",
@@ -243,6 +250,9 @@
     "deleteTitle": "Excluir tópico",
     "deleteBody": "{name} é excluído, junto com a inscrição de cada contato nele. Isto não pode ser desfeito.",
     "deleteConfirm": "Excluir tópico",
+    "deleteInBroadcast": "Uma transmissão usa este tópico, então ele não pode ser excluído.",
+    "deleteEmailsWaiting": "Ainda há e-mails deste tópico esperando para sair. Exclua o tópico depois que eles saírem.",
+    "deleteError": "Não foi possível excluir o tópico. Tente de novo.",
     "previewTitle": "Página de descadastro",
     "customize": "Personalizar página",
     "detail": {
@@ -314,7 +324,9 @@
       "is_true": "está descadastrado",
       "is_false": "está inscrito",
       "before": "é antes de",
-      "after": "é depois de"
+      "after": "é depois de",
+      "in_last_days": "está nos últimos",
+      "not_in_last_days": "faz mais de"
     },
     "builder": {
       "nameLabel": "Nome",
@@ -327,6 +339,9 @@
       "propertyKeyPlaceholder": "Chave da propriedade",
       "valuePlaceholder": "Valor",
       "noValue": "Nenhum valor necessário",
+      "daysLabel": "Dias",
+      "days": "{count, plural, one {# dia} other {# dias}}",
+      "daysAgo": "{count, plural, one {# dia} other {# dias}}",
       "removeRow": "Remover condição",
       "matchLabel": "Atender a",
       "editCondition": "Editar condição",

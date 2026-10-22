@@ -80,7 +80,7 @@ async function warmupSettings(db: Db): Promise<MonitorSettings> {
  * Domain rows that may still warm up at `at`: verified, not trusted, under
  * the last step by age and by graduation.
  */
-function mayWarmUp(at: Date): SQL | undefined {
+export function mayWarmUp(at: Date): SQL | undefined {
   const d = schema.domains;
   return and(
     eq(d.status, "verified"),
@@ -197,6 +197,42 @@ export async function warmupCap(
     pool,
     poolDomains,
   };
+}
+
+/**
+ * The days ahead under a domain's cap: today's cap from `at`, each later
+ * tier's cap from when the registration age reaches it, then no cap (null)
+ * from fullAt. Empty for an unknown age, which lifts with the team's sending
+ * history instead. Clean sends can move a step sooner than it says.
+ */
+export async function warmupSteps(
+  db: Db,
+  cap: WarmupCap,
+  registeredAt: Date | null,
+  at: Date,
+): Promise<{ from: Date; cap: number | null }[]> {
+  if (!registeredAt || !cap.fullAt) return [];
+  const s = await warmupSettings(db);
+  const steps: { from: Date; cap: number | null }[] = [{ from: at, cap: cap.cap }];
+  for (let tier = cap.tier + 1; tier < WARMUP_FULL_TIER; tier += 1) {
+    steps.push({ from: tierStart(registeredAt, tier), cap: capOf(s, tier) });
+  }
+  steps.push({ from: cap.fullAt, cap: null });
+  return steps;
+}
+
+/**
+ * Mail the new domain limit holds: parked for the warm-up, less the
+ * broadcast copies of a domain whose reputation warm-up is warming or
+ * paused, which park with the same reason and go out by that warm-up's own
+ * day. The silent holds park with reasons of their own and never match, so
+ * they keep reading as a plain wait. The one definition for every surface
+ * that counts or labels these rows, as a condition on the query's `emails`.
+ */
+export function heldByNewDomainLimit(): SQL {
+  const e = schema.emails;
+  const w = schema.domainWarmups;
+  return sql`(${e.latestStatus} = 'queued_quota' and ${e.parkReason} = 'warmup' and (${e.broadcastId} is null or ${e.domainId} not in (select ${w.domainId} from ${w} where ${w.status} in ('warming', 'paused'))))`;
 }
 
 type ColumnValues = readonly (readonly [AnyPgColumn, unknown])[];
@@ -445,12 +481,15 @@ export interface DomainWarmupRow {
   trustedAt: Date | null;
   /** Today's cap and what it has used; null when the domain sends at full volume. */
   today: { cap: number; used: number; tier: number; fullAt: Date | null } | null;
+  /** Its mail parked for the warm-up that a trust would release now. */
+  waiting: number;
 }
 
 /**
- * A team's domains as the operator's review page shows their warm-up, and
- * today's use of the pool they share; null while none of its verified
- * domains warms up.
+ * A team's domains as the operator's review page shows their warm-up,
+ * today's use of the pool they share (null while none of its verified
+ * domains warms up), and the mail a trust would release now, per domain and
+ * in all.
  */
 export async function teamWarmupOverview(
   db: Db,
@@ -460,12 +499,19 @@ export async function teamWarmupOverview(
   trustedAt: Date | null;
   domains: DomainWarmupRow[];
   pool: { cap: number; used: number } | null;
+  waiting: number;
 }> {
   const d = schema.domains;
   const [team] = await db
     .select({ trustedAt: schema.teams.warmupTrustedAt })
     .from(schema.teams)
     .where(eq(schema.teams.id, teamId));
+  const e = schema.emails;
+  const parked = await db
+    .select({ domainId: e.domainId, n: sql<number>`count(*)::int` })
+    .from(e)
+    .where(and(eq(e.teamId, teamId), heldByNewDomainLimit()))
+    .groupBy(e.domainId);
   const rows = await db
     .select({
       id: d.id,
@@ -493,7 +539,10 @@ export async function teamWarmupOverview(
       today = { cap: cap.cap, used: usage?.accepted ?? 0, tier: cap.tier, fullAt: cap.fullAt };
       if (row.status === "verified") poolCap = cap.pool;
     }
-    domains.push({ ...row, today });
+    // Without a cap (trusted, aged out, warm-up off) the warm-up holds none of
+    // its rows: what still waits there waits on the plan or the next drain.
+    const waiting = today ? (parked.find((p) => p.domainId === row.id)?.n ?? 0) : 0;
+    domains.push({ ...row, today, waiting });
   }
   let pool: { cap: number; used: number } | null = null;
   if (poolCap !== null) {
@@ -504,5 +553,10 @@ export async function teamWarmupOverview(
       .where(and(eq(p.teamId, teamId), eq(p.day, utcDay(now))));
     pool = { cap: poolCap, used: usage?.accepted ?? 0 };
   }
-  return { trustedAt: team?.trustedAt ?? null, domains, pool };
+  return {
+    trustedAt: team?.trustedAt ?? null,
+    domains,
+    pool,
+    waiting: domains.reduce((n, row) => n + row.waiting, 0),
+  };
 }

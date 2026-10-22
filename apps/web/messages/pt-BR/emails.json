@@ -56,7 +56,34 @@
     "hiddenBroadcasts": "{count} e-mails de transmissões não aparecem nesta lista.",
     "showBroadcasts": "Ver transmissões →",
     "noTransactional": "Nenhum e-mail transacional encontrado.",
-    "inBroadcasts": "{count} resultados em transmissões."
+    "inBroadcasts": "{count} resultados em transmissões.",
+    "whenAfter": "depois das {time}",
+    "whenAfterDay": "depois de {date}",
+    "waitingFor": {
+      "domain_limit": "Aguardando · limite diário",
+      "warmup": "Aguardando · aquecimento",
+      "plan": "Aguardando · limite do plano"
+    },
+    "waitingTip": {
+      "spentDomain": "{domain} já enviou os {cap} e-mails de hoje.",
+      "spentPool": "Seus domínios novos já enviaram os {cap} e-mails que dividem por dia.",
+      "next": "Este sai depois das 00:00 UTC, às {time} no seu horário.",
+      "later": "Os e-mails mais antigos saem primeiro, então este sai em {date}, por volta das {time} no seu horário.",
+      "room": "{domain} já tem espaço de novo hoje, então este sai em alguns minutos.",
+      "warmup": "O aquecimento do domínio envia um pouco mais a cada dia. Este sai conforme o aquecimento permitir.",
+      "warmupPaused": "O aquecimento do domínio está pausado. Este sai depois que ele for retomado.",
+      "plan": "O limite do seu plano foi atingido. Este sai quando ele renovar, {date}."
+    },
+    "limitBanner": {
+      "title": "{count, plural, one {# e-mail está esperando o limite diário de {domain}.} other {# e-mails estão esperando o limite diário de {domain}.}}",
+      "body": "É um domínio novo, então ele envia até {cap} e-mails por dia por enquanto. {count, plural, one {O e-mail sai sozinho} other {Eles saem sozinhos}} {when, select, soon {nos próximos minutos} other {depois das 00:00 UTC, em {duration}}}. Está tudo funcionando.",
+      "titleShared": "{count, plural, one {# e-mail está esperando o limite diário que seus {domains} domínios novos dividem.} other {# e-mails estão esperando o limite diário que seus {domains} domínios novos dividem.}}",
+      "bodyShared": "Juntos, eles enviam até {cap} e-mails por dia por enquanto. {count, plural, one {O e-mail que está esperando sai sozinho} other {Os e-mails que estão esperando saem sozinhos}} {when, select, soon {nos próximos minutos} other {depois das 00:00 UTC, em {duration}}}. Está tudo funcionando.",
+      "titleMany": "{count, plural, one {# e-mail está esperando o limite diário de {domains} domínios novos.} other {# e-mails estão esperando o limite diário de {domains} domínios novos.}}",
+      "bodyMany": "Domínios novos enviam um número limitado de e-mails por dia por enquanto. {count, plural, one {O e-mail sai sozinho} other {Eles saem sozinhos}} {when, select, soon {nos próximos minutos} other {depois das 00:00 UTC, em {duration}}}. Está tudo funcionando.",
+      "seeLimit": "Ver o limite →",
+      "seeLimits": "Ver os limites →"
+    }
   },
   "detail": {
     "breadcrumb": "Detalhes do e-mail",
@@ -132,7 +159,7 @@
       "planBody": "Sai quando o limite renovar, {date}.",
       "raiseLimit": "Aumentar limite",
       "waitingCapacity": "Aguardando capacidade",
-      "pacedBody": "A transmissão é enviada em ondas, dentro da capacidade diária. Seu e-mail transacional não fica esperando atrás dela.",
+      "pacedBody": "A transmissão é enviada em ondas, dentro da capacidade diária. Seus e-mails transacionais saem na frente dela.",
       "expected": "Envio previsto",
       "window": "entre {from} e {to}",
       "until": "por volta de {to}",
@@ -144,11 +171,33 @@
       "warmupBody": "Este domínio envia um pouco mais a cada dia, com os contatos mais ativos primeiro. Este e-mail sai conforme o volume do dia permitir.",
       "warmupPaused": "Aguardando a retomada do aquecimento",
       "warmupPausedBody": "O aquecimento do domínio está pausado. Este e-mail sai depois que ele for retomado.",
-      "newDomainLimit": "Aguardando o volume diário do domínio",
-      "newDomainLimitBody": "Domínios registrados há pouco enviam um pouco mais a cada dia. Este e-mail sai conforme o volume do dia permitir."
+      "newDomainLimit": "Aguardando o limite diário",
+      "newDomainLimitBody": "{domain} é um domínio novo. {ahead, plural, =0 {Nenhum e-mail está na frente deste.} one {# e-mail está na frente deste.} other {# e-mails estão na frente deste.}}",
+      "newDomainLimitUsed": "{used} de {cap} enviados hoje",
+      "newDomainLimitPoolUsed": "{used} de {cap} enviados hoje pelos seus domínios novos",
+      "expectedSoon": "em alguns minutos",
+      "expectedNext": "depois das 00:00 UTC",
+      "expectedBody": "Por volta das {time} no seu horário. Os e-mails que estão esperando saem do mais antigo para o mais novo.",
+      "expectedSoonBody": "Os e-mails que estão esperando saem do mais antigo para o mais novo."
     },
     "headers": "Cabeçalhos",
-    "noHeaders": "Sem cabeçalhos."
+    "noHeaders": "Sem cabeçalhos.",
+    "sendingDomain": "Domínio de envio",
+    "perDayForNow": "{cap} por dia por enquanto",
+    "acceptedAgo": "Aceito {ago}",
+    "goesOutSoon": "sai em alguns minutos",
+    "goesOutAfter": "sai depois das {time}",
+    "goesOutOn": "sai em {date}",
+    "limitBanner": {
+      "title": "Aguardando o limite diário de {domain}.",
+      "spentDomain": "Ele já enviou os {cap} e-mails de hoje.",
+      "spentPool": "Seus domínios novos já enviaram os {cap} e-mails que dividem por dia.",
+      "soon": "Este sai nos próximos minutos.",
+      "next": "Este sai depois das 00:00 UTC, por volta das {time} no seu horário.",
+      "later": "Este sai em {date}, por volta das {time} no seu horário.",
+      "nothingToDo": "Você não precisa fazer nada.",
+      "seeLimit": "Ver o limite →"
+    }
   },
   "insights": {
     "outOfTen": "/ 10",
@@ -182,7 +231,7 @@
       "list_unsubscribe": {
         "title": "Cabeçalhos de descadastro em um clique",
         "description": "A mensagem carrega os cabeçalhos List-Unsubscribe e List-Unsubscribe-Post. Gmail e Yahoo exigem descadastro em um clique para remetentes em massa.",
-        "advice": "Envie marketing por transmissões ou tópicos — o MillionSend injeta os dois cabeçalhos automaticamente."
+        "advice": "Envie marketing por transmissões, ou por um tópico com um contato por e-mail — assim o MillionSend injeta os dois cabeçalhos automaticamente."
       },
       "link_domains_match": {
         "title": "Links no seu domínio",

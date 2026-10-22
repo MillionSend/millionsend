@@ -120,17 +120,29 @@ roda a mesma imagem com um Deployment por processo (web, api, worker e, se
 você quiser, o relay smtp e a documentação). O Postgres fica fora do chart. Os
 segredos vêm de um Secret que já existe (kubectl, SealedSecrets, SOPS), de um
 `ExternalSecret` do External Secrets Operator ou, só para testes, do próprio
-arquivo de values:
+arquivo de values. Cada release publica o chart em
+`oci://ghcr.io/millionsend/charts/millionsend` com a mesma versão da release
+(o chart `X.Y.Z` roda o MillionSend `X.Y.Z`), então atualizar é rodar o mesmo
+comando com uma `--version` mais nova:
 
 ```sh
-helm upgrade --install millionsend deploy/helm/millionsend \
-  -n millionsend --create-namespace -f my-values.yaml
+helm upgrade --install millionsend oci://ghcr.io/millionsend/charts/millionsend \
+  --version X.Y.Z -n millionsend --create-namespace -f my-values.yaml
 ```
+
+As releases anteriores à publicação do chart não estão no registry; num clone
+do repositório, use `deploy/helm/millionsend` no lugar da referência `oci://`,
+sem o `--version`.
 
 O README do chart traz um exemplo para k3s (Traefik, CloudNativePG, role IAM via web identity OIDC
 em vez de access keys) e outro
-para EKS (ALB, RDS, External Secrets com AWS Secrets Manager, IRSA). Toda
-variável desta página vai em `config` ou no Secret.
+para EKS (ALB, RDS, External Secrets com AWS Secrets Manager, IRSA). O exemplo
+de EKS ainda não rodou num cluster EKS de verdade: considere IRSA, as anotações
+do ALB e as notas sobre o RDS como não testados. O
+[recebimento](#recebimento-beta) (os serviços `mx` e `clamav`) ainda não faz
+parte do chart. Toda variável desta página vai em `config` ou no Secret, menos
+as que o chart já define sozinho (`WORKER_REPLICAS`, `SMTP_PORT`,
+`SMTP_PUBLIC_HOST` e as `SMTP_TLS_*`; veja o README do chart).
 
 ## Referência de ambiente
 
@@ -143,7 +155,7 @@ auto-hospedada não tem limites de plano.
 
 | Variável | Propósito |
 | --- | --- |
-| `DATABASE_URL` | String de conexão do Postgres. O padrão corresponde ao serviço `postgres` do compose. |
+| `DATABASE_URL` | String de conexão do Postgres. O padrão corresponde ao serviço `postgres` do compose. Se o seu Postgres gerenciado exige TLS (como o RDS para PostgreSQL 15 ou mais novo), coloque `?sslmode=require` no final. |
 | `POSTGRES_PASSWORD` | Senha do serviço `postgres` do compose (padrão `millionsend`); o assistente de setup gera uma e a coloca também em `DATABASE_URL`. Mantenha as duas em sincronia. |
 | `MASTER_ENCRYPTION_KEY` | Chave de criptografia dos corpos de e-mail em repouso. Gere com `openssl rand -base64 32`. Perdê-la torna os corpos armazenados irrecuperáveis; trocá-la deixa os corpos antigos ilegíveis. Faça backup junto com o banco. |
 | `BETTER_AUTH_SECRET` | Segredo de assinatura das sessões do painel. Gere com `openssl rand -base64 32`. |
@@ -168,7 +180,7 @@ auto-hospedada não tem limites de plano.
 | --- | --- |
 | `MILLIONSEND_IMAGE` | Só no deploy standalone: qual imagem rodar. O padrão `ghcr.io/millionsend/millionsend:latest` é a release mais recente com tag (`:edge` acompanha a `main`), então `docker compose pull` é a atualização. Defina uma tag de versão ou um digest imutável `ghcr.io/millionsend/millionsend@sha256:…` para fixar uma versão (`MILLIONSEND_BACKUP_IMAGE` fixa o sidecar de backup do mesmo jeito). |
 | `ALLOW_SIGNUP` | O primeiro usuário sempre pode se registrar; depois disso o cadastro fica fechado a menos que isto seja `true`. Mantenha `false` quando o painel é acessível pela internet. |
-| `TRUSTED_PROXIES` | Reverse proxies cujos headers de IP do cliente (`X-Forwarded-For`, `CF-Connecting-IP`) são confiáveis, IPs ou CIDRs separados por vírgula. O padrão `127.0.0.1,::1` cobre um proxy no mesmo host; adicione o endereço do seu proxy quando ele roda em outro lugar. Veja a [seção de nginx](#produção-nginx--tls). |
+| `TRUSTED_PROXIES` | Proxies que o processo web pula ao ler o endereço do cliente no `X-Forwarded-For`, percorrendo o header da direita para a esquerda (IPs ou CIDRs separados por vírgula, padrão `127.0.0.1,::1`); o primeiro endereço fora da lista é o cliente. Atrás de um único reverse proxy que acrescenta o header, não precisa definir nada: liste só os proxies na frente dele que também acrescentam, como um CDN ou um load balancer, e nunca o CIDR inteiro de pods ou da VPC. Veja a [seção de nginx](#produção-nginx--tls). |
 | `WEBHOOK_ALLOW_LOCALHOST` | Só para desenvolvimento local: permite que endpoints de webhook (disparos de teste incluídos) apontem para `http://` e endereços de loopback/privados em qualquer porta. Mantenha `false` em qualquer instância acessível pela internet. |
 | `COMPOSE_PROFILES` | Serviços opcionais do compose, separados por vírgula: `smtp` (o relay; monte um par de chaves STARTTLS antes), `mx` (o MX de entrada; veja [Recebimento](#recebimento-beta)) e `clamav` (antivírus para os e-mails recebidos; veja [Antivírus](#antivírus)) e, no arquivo standalone, também `docs` (este site de documentação) e `backup` (dumps agendados). |
 | `PORT` | Porta da API (padrão `3001`). No compose, move junto a porta interna do contêiner e a porta publicada no host. |
@@ -176,6 +188,7 @@ auto-hospedada não tem limites de plano.
 | `WEB_PORT` | Porta do host em que o compose publica o painel (o processo web é sempre 3000 dentro do contêiner). Mantenha `APP_BASE_URL` em sincronia. |
 | `DOCS_PORT` | Porta do host em que o compose publica este site de documentação (o processo docs é sempre 3002 dentro do contêiner). |
 | `SMTP_PORT` | Porta do relay SMTP (padrão `2587`). |
+| `SMTP_PUBLIC_HOST` | Host que a aba **Configurações → SMTP** do painel indica para os clientes se conectarem (ex.: `smtp.example.com`). Sem definir: o host do `APP_BASE_URL`. Defina quando o relay atende por outro nome; o próprio relay nunca lê essa variável. Com `IS_CLOUD=true`, a aba só aparece quando essa variável e o par de chaves STARTTLS estão definidos. |
 | `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | Par de chaves STARTTLS do relay SMTP (caminhos PEM dentro do contêiner). Com ambos definidos: STARTTLS é oferecido e exigido antes do AUTH. Sem o par, o relay se recusa a iniciar (a menos que `SMTP_ALLOW_INSECURE_AUTH=true`). |
 | `SMTP_ALLOW_INSECURE_AUTH` | Escape explícito para SMTP AUTH em texto puro apenas em rede local/privada. Mantenha `false`; nunca combine `true` com bind público. |
 | `IS_CLOUD` | Deixe `false`. `true` ativa comportamento de nuvem hospedada (KMS, cobrança via Stripe). |
@@ -273,6 +286,29 @@ docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms -v ~/.aws:/home/
 Prefere não rodar um CLI? A página **Configurações → SES** do painel oferece
 um link de quick-create do CloudFormation e um shell script pré-preenchido
 que criam os mesmos recursos.
+
+Para rodar com uma role IAM em vez das chaves de acesso do usuário (um
+instance profile do EC2, IRSA no EKS ou outra web identity OIDC), anexe a
+política `millionsend-ses` à role e deixe `AWS_ACCESS_KEY_ID` e
+`AWS_SECRET_ACCESS_KEY` vazias, para a cadeia padrão de credenciais do SDK da
+AWS encontrar a role. Defina também `AWS_DEFAULT_CHAIN=true`: sem as chaves e
+sem essa variável, os e-mails de conta (redefinição de senha, confirmação de
+e-mail) ficam desligados e o painel avisa que as credenciais da AWS não estão
+configuradas. A política inclui a leitura da fila `millionsend-events` pelo
+worker; a política da própria fila só libera essa leitura para o usuário
+`millionsend`. Uma política criada antes dessa permissão existir precisa de
+uma versão nova. O assistente publica uma sempre que roda a etapa de IAM (uma
+nova execução completa ou o `add-region`), a partir do `@millionsend/setup`
+0.9.2; um assistente mais antigo grava de volta o próprio documento, sem essa
+permissão. Uma stack do CloudFormation recebe a permissão quando é atualizada
+com o template atual. Para fazer à mão, salve o JSON de
+**Configurações → SES** (Manual: passos no console) como
+`millionsend-ses.json` e rode:
+
+```bash
+aws iam create-policy-version --policy-arn arn:aws:iam::<account-id>:policy/millionsend-ses \
+  --policy-document file://millionsend-ses.json --set-as-default
+```
 
 ## Adicionando uma região
 
@@ -457,7 +493,9 @@ destinatário foi aceito, o DATA responde `503`.
 Dados de conexão:
 
 - **Host:** onde o serviço `smtp` estiver acessível (os arquivos compose o
-  publicam no host do Docker).
+  publicam no host do Docker). A aba **Configurações → SMTP** do painel
+  mostra o host do `APP_BASE_URL`; defina `SMTP_PUBLIC_HOST` quando o relay
+  atende por outro nome. Só essa aba lê a variável.
 - **Porta:** `2587` (`SMTP_PORT` para mudar).
 - **Usuário:** `millionsend` (fixo).
 - **Senha:** uma chave de API `ms_` do painel.
@@ -888,16 +926,21 @@ faz login e cadastro falharem com erro de "invalid origin". Encaminhe `Host` e
 para que qualquer URL absoluta que os apps derivem da requisição use o
 hostname público em vez de `localhost`.
 
-Os endereços dos clientes (limites de tentativas de login, entradas de
-auditoria) vêm de `X-Forwarded-For`, e só os proxies listados em
-`TRUSTED_PROXIES` (IPs ou CIDRs separados por vírgula; padrão `127.0.0.1,::1`,
-que cobre o nginx no mesmo host) são levados em conta. Com
-`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` cada salto se
-acrescenta à lista, e a cadeia é percorrida da direita para a esquerda pulando
-todos os proxies confiáveis, então o primeiro endereço não confiável é o
-cliente. Adicione o endereço do seu proxy quando ele roda em outro host, e as
-faixas de um CDN quando houver um na frente do nginx; headers de qualquer outra
-origem são ignorados e o endereço do socket é usado no lugar.
+Os endereços dos clientes (limites de tentativas de login, os IPs gravados nas
+sessões e nos cadastros, aberturas e cliques) vêm de `X-Forwarded-For`. Com
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`, cada proxy
+acrescenta o endereço de quem se conectou a ele, e o processo web percorre o
+header da direita para a esquerda pulando os endereços de `TRUSTED_PROXIES`
+(IPs ou CIDRs separados por vírgula; padrão `127.0.0.1,::1`): o primeiro que
+não estiver na lista é o cliente. Atrás de um único reverse proxy como este
+nginx, não precisa definir nada, onde quer que ele rode. Liste só os proxies
+na frente dele que também acrescentam ao header, como um CDN ou um load
+balancer; fora da lista, todo cliente que passa por eles aparece com o
+endereço deles. Nunca liste o CIDR inteiro de pods ou da VPC: todo mundo que
+chama de dentro dele passaria a dividir o mesmo limite de tentativas. O
+processo web aceita o header de quem se conectar, então deixe web e api
+acessíveis só pelo reverse proxy. O limite de falhas de autenticação da API
+não lê o header: ele conta pelo endereço da conexão.
 
 Os arquivos compose vinculam toda porta de aplicação ao loopback por padrão
 (`WEB_BIND_ADDRESS`, `API_BIND_ADDRESS`, `DOCS_BIND_ADDRESS`,
@@ -932,6 +975,48 @@ sudo ufw allow 80,443/tcp
 sudo ufw allow 2587/tcp   # só se o relay SMTP estiver exposto
 sudo ufw enable
 ```
+
+## Hosts de rastreamento com marca
+
+Uma equipe pode servir os links rastreados e o pixel de abertura de um
+subdomínio do próprio domínio, como `links.exemplo.com.br` (veja a
+[configuração por domínio](/pt-BR/concepts/domains#configuração-por-domínio)).
+O CNAME dele aponta para `TRACKING_EDGE_HOST`, ou para o host deste app enquanto
+ele não estiver definido, e os links passam para o subdomínio assim que o CNAME
+resolve. Quem responde HTTPS pelo subdomínio precisa ter um certificado para
+ele, senão os links da equipe falham:
+
+- **nginx com certbot**, como acima, só tem certificados para os nomes que você
+  lista: acrescente o host de rastreamento de cada equipe ao `server_name` do
+  painel e ao comando do `certbot`, ou rode o edge de rastreamento.
+- **Atrás do Cloudflare** (um registro com proxy ou um Tunnel), o Cloudflare
+  não tem certificado para os hostnames das suas equipes. Rode o edge de
+  rastreamento num hostname **somente DNS**, ou adicione cada host de
+  rastreamento à sua zona como hostname personalizado do
+  [Cloudflare for SaaS](https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/)
+  (os 100 primeiros vêm incluídos nos planos Free, Pro e Business) e defina
+  `TRACKING_EDGE_HOST` como o hostname para onde os CNAMEs deles devem apontar.
+
+Os links de uma equipe sem subdomínio de rastreamento passam pelo
+`APP_BASE_URL`, que funciona atrás de qualquer proxy.
+
+O **edge de rastreamento** (`deploy/tracking-edge/` no repositório) é um
+contêiner Caddy numa máquina com IPv4 público e as portas 80 e 443 livres. Ele
+emite um certificado na primeira vez que cada host de rastreamento é pedido,
+depois de perguntar ao app se esse host pertence a um domínio verificado, e só
+encaminha `/t/c/*` e `/t/o/*` de volta para o app. O
+[README dele](https://github.com/MillionSend/millionsend/tree/main/deploy/tracking-edge)
+explica a máquina passo a passo. No `.env` do app:
+
+```bash
+TRACKING_EDGE_HOST=track.example-dns.com    # o hostname do próprio edge, um registro A somente DNS
+TRACKING_ASK_SECRET=<openssl rand -hex 32>  # o mesmo valor vai no ASK_URL do edge
+TRUSTED_PROXIES=<o que já lista>,<o endereço do edge>
+```
+
+O `TRUSTED_PROXIES` precisa do endereço do edge: toda abertura e todo clique
+chegam ao app por ele e, sem essa entrada, cada um registra o edge como o
+destinatário.
 
 ## Armazenamento de objetos (logos das equipes)
 
@@ -1039,6 +1124,13 @@ docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
     && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump'
 docker compose start millionsend smtp
 ```
+
+O `pg_restore` termina com código 1 mesmo quando a restauração dá certo: o
+`--clean` não consegue apagar as chaves primárias que as partições das tabelas
+do pg-boss herdam. Ele mostra um `cannot drop inherited constraint` para cada
+uma e, no fim, `errors ignored on restore`; essas tabelas são apagadas e
+restauradas mesmo assim. Se esses forem os únicos erros, a restauração
+funcionou.
 
 ## Política de cadastro
 
@@ -1717,10 +1809,10 @@ equipe e dia UTC: um segundo domínio novo nunca acrescenta volume, e cada
 domínio continua dentro do seu limite. O que passa de qualquer um fica
 em espera como `queued_quota` (com `park_reason = 'warmup'`) e o
 `quota.drain` de 15 minutos libera, do mais antigo para o mais novo, conforme
-os dois permitem; a API
-responde `429 daily_quota_exceeded` com uma mensagem de aquecimento (SMTP
-`452`) só quando a fila de espera da equipe está cheia (três dias do
-volume do plano, ou do limite do domínio quando ele é maior). Um domínio sobe
+os dois permitem. A API responde `429 daily_quota_exceeded`, com uma mensagem
+que cita o limite de domínio novo e um `Retry-After` até as 00:00 UTC (SMTP
+`452`), só quando a fila de espera da equipe está cheia (três dias do volume
+do plano, ou do limite do domínio quando ele é maior). Um domínio sobe
 um degrau antes quando os envios desde o último degrau estão limpos: pelo
 menos 50 entregues (e-mails para o simulador do SES nunca contam), o primeiro
 enviado há um dia ou mais, bounces permanentes abaixo de 2% dos envios
@@ -1730,6 +1822,13 @@ pelo job `safety.flags` de 15 minutos).
 Um operador pode confiar em uma equipe, ou em um domínio, na página de revisão de
 Confiança e segurança, o que libera o aquecimento e fica no registro de
 auditoria.
+
+Uma equipe que vai trazer para um domínio novo e-mails que já têm histórico de
+envio pede um limite maior na página do domínio. O operador recebe um e-mail
+a cada pedido, e os pedidos abertos aparecem em **Pedidos de limite**, em
+Confiança e segurança. Na página de revisão da equipe, **Confiar** atende o
+pedido e **Recusar** mantém o limite. Nos dois casos, os donos da equipe e quem fez o
+pedido recebem a resposta por e-mail.
 
 **A consulta de idade** roda no job `domain.age` do worker, nunca no caminho
 de envio: quando um domínio é adicionado, quando é verificado, e pela varredura

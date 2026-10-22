@@ -14,6 +14,7 @@ import {
   associateDomainTenant,
   clearTrackingClock,
   createFixedWindowLimiter,
+  createLimitRequest,
   DAY_MS,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   deleteInboxes,
@@ -25,13 +26,19 @@ import {
   isIdentitySharedByOtherDomains,
   isOperatorTeam,
   isReservedSenderDomain,
+  LIMIT_REQUEST_NOTE_MAX,
+  LIMIT_REQUEST_PER_DAY_MAX,
+  LIMIT_REQUEST_SENDS,
+  LIMIT_REQUEST_SOURCES,
+  type LimitRequestRefusal,
+  latestLimitRequest,
   linkTeam,
   liveInbox,
   movedWarmupVolume,
+  newDomainLimitStatus,
   PLAN_DOMAIN_LIMIT,
   pauseWarmup,
   planWarmupDays,
-  resultRows,
   resumeWarmup,
   setDomainReceiving,
   turnOffWarmup,
@@ -39,8 +46,8 @@ import {
   utcDay,
   WARMUP_LIMITS,
   type WarmupOverview,
-  warmupCap,
   warmupOverview,
+  warmupPropertyOptions,
   webhookBatch,
 } from "@millionsend/core";
 import { registrableDomain } from "@millionsend/core/org-domain";
@@ -66,7 +73,7 @@ import {
   verificationDbPatch,
 } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
-import { and, count, desc, eq, isNotNull, min, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, min } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
@@ -240,6 +247,14 @@ function todayWindow(o: WarmupOverview, now: Date) {
   return warmupTodayWindow(today, Math.min(today.allowance - today.sent, o.waiting), now);
 }
 
+/** How the team hears a refused limit request: the dialog says each in its own words. */
+const LIMIT_REQUEST_REFUSALS = {
+  invalid: { code: "BAD_REQUEST", message: "Check the request's answers" },
+  not_found: { code: "NOT_FOUND" },
+  not_limited: { code: "PRECONDITION_FAILED", message: "This domain has no daily limit" },
+  already_open: { code: "CONFLICT", message: "A request for this domain is already open" },
+} as const satisfies Record<LimitRequestRefusal, ConstructorParameters<typeof TRPCError>[0]>;
+
 /** Days parked mail lasts: the body purge or the row purge, whichever comes first. */
 async function mailRetentionDays(db: Db): Promise<number> {
   const stored = await getInstanceSettings(db);
@@ -255,21 +270,6 @@ async function mailRetentionDays(db: Db): Promise<number> {
       EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
     ).value,
   );
-}
-
-/** The property keys the team's contacts carry with a value, the ones the segment builder lists. */
-async function contactPropertyKeys(db: Db, teamId: string): Promise<string[]> {
-  const c = schema.contacts;
-  const rows = resultRows<{ key: string }>(
-    await db.execute(sql`
-      select distinct kv.key as key
-      from ${c} c
-      cross join lateral jsonb_each_text(c.properties) as kv(key, value)
-      where c.team_id = ${teamId} and kv.value <> ''
-      order by 1
-    `),
-  );
-  return rows.map((row) => row.key);
 }
 
 /** When this domain's oldest broadcast mail parked for its warm-up leaves with retention. */
@@ -313,11 +313,13 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         .from(schema.domains)
         .where(eq(schema.domains.teamId, ctx.teamId))
         .orderBy(desc(schema.domains.createdAt));
+      const limits = await newDomainLimitStatus(ctx.db, { teamId: ctx.teamId });
       // A set subdomain whose 72h clock is still armed has a CNAME nobody has
       // seen resolve: the domain sends, but not through its tracking host.
       return rows.map(({ trackingSubdomain, trackingSubdomainSetAt, ...row }) => ({
         ...row,
         trackingPending: trackingSubdomain !== null && trackingSubdomainSetAt !== null,
+        limit: limits.find((limit) => limit.domainId === row.id) ?? null,
       }));
     }),
 
@@ -327,10 +329,13 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         .select({ n: count() })
         .from(schema.emails)
         .where(and(eq(schema.emails.teamId, ctx.teamId), eq(schema.emails.domainId, domain.id)));
-      const warmup = await warmupCap(ctx.db, {
+      const [limit] = await newDomainLimitStatus(ctx.db, {
+        teamId: ctx.teamId,
+        domainIds: [domain.id],
+      });
+      const request = await latestLimitRequest(ctx.db, {
         teamId: ctx.teamId,
         domainId: domain.id,
-        at: new Date(),
       });
       const [inboxes] = await ctx.db
         .select({ n: count() })
@@ -342,11 +347,10 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         // The reputation warm-up's status, so the page reads the whole
         // warm-up only when it is on or its tab is open.
         warmupStatus: ramp?.status ?? "off",
-        // The day's cap while the domain warms up, when the calendar lifts
-        // it, and whether the team's other new domains share the day's
-        // volume; never why, nor what a tier is.
-        warmup: warmup
-          ? { perDay: warmup.cap, fullAt: warmup.fullAt, shared: warmup.poolDomains > 1 }
+        // The new domain limit in volumes and dates; never why, nor what a tier is.
+        limit: limit ?? null,
+        limitRequest: request
+          ? { status: request.status, createdAt: request.createdAt, resolvedAt: request.resolvedAt }
           : null,
         id: domain.id,
         name: domain.name,
@@ -696,12 +700,37 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         };
       }),
 
+    /** The team asks to lift the new domain limit on one of its domains; an operator answers. */
+    requestHigherLimit: adminProcedure
+      .input(
+        z.object({
+          id: z.uuid(),
+          sends: z.enum(LIMIT_REQUEST_SENDS),
+          perDay: z.number().int().min(1).max(LIMIT_REQUEST_PER_DAY_MAX),
+          source: z.enum(LIMIT_REQUEST_SOURCES),
+          note: z.string().trim().max(LIMIT_REQUEST_NOTE_MAX).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const result = await createLimitRequest(ctx.db, {
+          teamId: ctx.teamId,
+          domainId: input.id,
+          userId: ctx.session.user.id,
+          sends: input.sends,
+          perDay: input.perDay,
+          source: input.source,
+          note: input.note,
+        });
+        if (!result.ok) throw new TRPCError(LIMIT_REQUEST_REFUSALS[result.refusal]);
+        return { status: result.request.status, createdAt: result.request.createdAt };
+      }),
+
     /** Everything the Warm-up tab and the status row above the tabs show, in one read. */
     warmup: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
       const now = new Date();
       const [overview, properties, expiresAt] = await Promise.all([
         warmupOverview(ctx.db, { teamId: ctx.teamId, domainId: input.id, now }),
-        contactPropertyKeys(ctx.db, ctx.teamId),
+        warmupPropertyOptions(ctx.db, ctx.teamId),
         waitingExpiresAt(ctx.db, ctx.teamId, input.id),
       ]);
       if (!overview) throw new TRPCError({ code: "NOT_FOUND" });
@@ -744,6 +773,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
                 count: o.audience.total - (o.settings.skipInactive ? o.audience.inactive : 0),
               }).perDay
             : null,
+        // Date properties, then keys whose values mostly read as dates.
         properties,
         limits: { dailyTarget: WARMUP_LIMITS.dailyTarget, startVolume: WARMUP_LIMITS.startVolume },
         waitingExpiresAt: o.waiting > 0 ? expiresAt : null,

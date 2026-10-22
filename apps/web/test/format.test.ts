@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   abbreviateDkim,
   addrSpec,
+  daysSince,
+  daysUntil,
   formatBytes,
   formatDayUtc,
   formatDurationShort,
   formatHoursMinutes,
   formatMoneyTotals,
+  formatTime,
   formatTimeLeft,
   formatUsd,
   formatUtcMinute,
@@ -133,5 +136,24 @@ describe("formatTimeLeft", () => {
     expect(formatTimeLeft(45 * 60_000)).toBe("45m");
     expect(formatTimeLeft(23 * 3_600_000 + 20 * 60_000)).toBe("23h");
     expect(formatTimeLeft(7 * 86_400_000)).toBe("7d");
+  });
+});
+
+describe("day counts and clock times", () => {
+  const NOW = new Date("2026-10-20T21:00:00Z");
+
+  it("counts a part day ahead as a whole one, and whole days back", () => {
+    expect(daysUntil(new Date("2026-11-16T09:00:00Z"), NOW)).toBe(27);
+    expect(daysUntil(new Date("2026-10-20T21:00:01Z"), NOW)).toBe(1);
+    expect(daysUntil(new Date("2026-10-19T00:00:00Z"), NOW)).toBe(0);
+    expect(daysSince(new Date("2026-10-17T22:00:00Z"), NOW)).toBe(2);
+    expect(daysSince(new Date("2026-10-17T21:00:00Z"), NOW)).toBe(3);
+    expect(daysSince(new Date("2026-10-21T00:00:00Z"), NOW)).toBe(0);
+  });
+
+  it("prints a clock time without a leading zero or a zone", () => {
+    const at = new Date(2026, 9, 20, 21, 5);
+    expect(formatTime(at, "en")).toBe("9:05 PM");
+    expect(formatTime(at, "pt-BR")).toBe("21:05");
   });
 });

@@ -163,7 +163,7 @@ describe("parseReceivedMetadata", () => {
     expect(metadata.messageId).toBe("<id @sender.example>");
   });
 
-  it("counts no From mailbox when the address kept is not written in the header", async () => {
+  it("never takes the From address out of an encoded word", async () => {
     const b64 = (s: string) => Buffer.from(s).toString("base64");
     const read = async (from: string) => {
       const m = await parseReceivedMetadata(
@@ -174,11 +174,8 @@ describe("parseReceivedMetadata", () => {
     // An encoded-word group name, and a lone encoded word, that decode to another address.
     expect(
       await read(`=?utf-8?B?${b64("Owner <owner@corp.example>")}?=: eve@evil.example;`),
-    ).toEqual(["owner@corp.example", 0]);
-    expect(await read(`=?utf-8?B?${b64("Owner <owner@corp.example>")}?=`)).toEqual([
-      "owner@corp.example",
-      0,
-    ]);
+    ).toEqual(["eve@evil.example", 1]);
+    expect(await read(`=?utf-8?B?${b64("Owner <owner@corp.example>")}?=`)).toEqual([null, 0]);
     expect(await read(`=?utf-8?B?${b64("Ana Souza")}?= <ana@sender.example>`)).toEqual([
       "ana@sender.example",
       1,

@@ -32,6 +32,31 @@ the same, minus the audience nesting.
   removes that key. The stored map holds at most 100 keys, none of them
   empty.
 
+## Property types
+
+Define a property to give its key a type, in the dashboard under
+**Audience → Properties** or with `POST /contact-properties`. The type is
+`string`, `number` or `date`. `string` and `number` work as on Resend, and
+`date` is a MillionSend extension. A date property takes:
+
+- An ISO 8601 date, such as `2026-01-08`, read as midnight UTC.
+- An ISO 8601 date and time, such as `2026-01-08T10:30:00Z` or
+  `2026-01-08 10:30`, read as UTC when it names no zone.
+- Unix time in seconds or milliseconds, such as `1767225600`, between the
+  years 2000 and 2100.
+
+A contact value that doesn't fit its property's type is refused with `422`,
+and so is a `fallback_value` that doesn't. Keys match in any letter case. A
+date is stored as written, without the spaces around it. `GET /contacts/{id}`
+returns each value as `{type, value}`, so a date comes back as
+`{ "type": "date", "value": "2026-01-08" }`. A value stored before its key had
+a type, and that doesn't fit it, comes back as a string.
+
+You can still keep dates in a `string` property. Segments and the
+[warm-up](/concepts/domains#who-goes-first) read dates from any property. The
+`date` type checks every write, through the API or the dashboard, and the
+warm-up lists date properties first.
+
 ## API
 
 Contacts are managed via `POST/GET/PATCH/DELETE /contacts` and

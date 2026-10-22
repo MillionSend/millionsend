@@ -871,13 +871,14 @@
       },
       "warmup": {
         "title": "Domain warm-up",
-        "subtitle": "Young sending domains send under a daily cap by registration age, and a team's warming domains share one daily limit, the highest of their caps; mail over either waits. Trust lifts the cap for the team or for one domain.",
+        "subtitle": "Young sending domains send under a daily cap by registration age. Trust lifts the cap for the team or for one domain.",
         "off": "Warm-up is off on this instance. Trust set here applies once it is on.",
         "teamTrusted": "The team is trusted since {date}: none of its domains warm up.",
         "trustTeam": "Trust team",
         "untrustTeam": "Remove team trust",
         "trustDomain": "Trust",
         "untrustDomain": "Remove trust",
+        "declineDomain": "Decline",
         "cols": {
           "domain": "Domain",
           "registered": "Registered",
@@ -894,13 +895,49 @@
         "unknownAge": "Unknown",
         "notChecked": "Not looked up yet",
         "today": "{used} of {cap} · full volume {date}",
+        "waiting": "{count} waiting",
         "todayNoDate": "{used} of {cap}",
         "pool": "Shared by the team's warming domains today: {used} of {cap}",
         "full": "Full volume",
         "trusted": "Trusted",
+        "request": {
+          "line": "Asks for {perDay} a day · {sends} · Goes out today: {source}",
+          "by": "Asked by {email}"
+        },
+        "dialog": {
+          "trustDomain": {
+            "title": "Trust {name}",
+            "lead": "{count, plural, =0 {The daily limit is not holding any mail from this domain.} one {The email the daily limit is holding goes out right away.} other {The # emails the daily limit is holding start going out right away.}} New mail from this domain sends at the team's full volume from now on.",
+            "confirm": "Trust domain"
+          },
+          "trustTeam": {
+            "title": "Trust {name}",
+            "lead": "{count, plural, =0 {The daily limit is not holding any of this team's mail.} one {The email the daily limit is holding goes out right away.} other {The # emails the daily limit is holding start going out right away.}} New mail from all of the team's domains sends at full volume from now on.",
+            "confirm": "Trust team"
+          },
+          "untrustDomain": {
+            "title": "Remove trust from {name}",
+            "lead": "{teamTrust, select, trusted {The team's own trust still covers this domain, so it keeps sending at full volume.} other {New mail from this domain goes back under the daily limit for new domains.}}",
+            "confirm": "Remove trust"
+          },
+          "untrustTeam": {
+            "title": "Remove trust from {name}",
+            "lead": "New mail from the team's domains goes back under the daily limit for new domains.{kept, plural, =0 {} one { The domain trusted on its own stays trusted.} other { The # domains trusted on their own stay trusted.}}",
+            "confirm": "Remove team trust"
+          },
+          "requestLifted": "{count, plural, one {The team gets an email saying the limit is lifted.} other {The team gets an email for each of its # requests saying the limit is lifted.}}",
+          "decline": {
+            "title": "Decline the request for {name}?",
+            "lead": "Its mail keeps the daily limit for new domains. The team gets an email saying so.",
+            "confirm": "Decline request"
+          }
+        },
         "toast": {
           "trusted": "Warm-up lifted for {name}",
-          "untrusted": "Warm-up restored for {name}"
+          "untrusted": "Warm-up restored for {name}",
+          "declined": "Request declined for {name}",
+          "error": "Could not change trust: {message}",
+          "declineError": "Could not decline the request: {message}"
         }
       }
     },
@@ -951,6 +988,30 @@
         "released": "{team} · {count, plural, one {# email released} other {# emails released}}",
         "canceled": "{team} · {count, plural, one {# email canceled} other {# emails canceled}}",
         "error": "Could not do it: {message}"
+      }
+    },
+    "limitRequests": {
+      "title": "Limit requests · {count}",
+      "subtitle": "Teams asking to lift the daily limit on a new domain. Grant each one with Trust, or decline it, on the team's page.",
+      "cols": {
+        "team": "Team",
+        "domain": "Domain",
+        "perDay": "Per day",
+        "sends": "Sends",
+        "source": "Goes out today",
+        "waiting": "Waiting",
+        "since": "Asked"
+      },
+      "sends": {
+        "account": "Sign-up and account",
+        "notifications": "Receipts and notifications",
+        "marketing": "Newsletters and marketing",
+        "mix": "A mix"
+      },
+      "source": {
+        "new": "Nowhere yet",
+        "other_provider": "Another provider",
+        "own_servers": "Their own servers"
       }
     },
     "tiers": {

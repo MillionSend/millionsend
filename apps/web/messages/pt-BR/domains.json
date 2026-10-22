@@ -27,6 +27,15 @@
       "status": "Status",
       "region": "Região",
       "created": "Criado"
+    },
+    "limit": {
+      "perDay": "{cap} por dia por enquanto",
+      "waiting": "{count} esperando",
+      "tooltip": "Limite de domínio novo. {schedule}. O que passar do limite espera o dia seguinte.",
+      "tooltipToday": "Limite de domínio novo. Até {cap} e-mails por dia por enquanto. O que passar do limite espera o dia seguinte.",
+      "first": "Até {cap} e-mails por dia até {date}",
+      "then": "depois {cap} por dia até {date}",
+      "end": "depois sem limite"
     }
   },
   "new": {
@@ -54,7 +63,7 @@
     "sentBefore": {
       "question": "Este domínio já enviou e-mails?",
       "yes": "Sim, por outro provedor",
-      "yesHint": "Sem aquecimento. Ele mantém a reputação que já tem.",
+      "yesHint": "Sem aquecimento. Ele mantém a reputação que já tem. Domínios registrados nos últimos 30 dias ainda começam com um limite diário.",
       "no": "Não, é novo",
       "noHint": "Envios grandes começam pequenos e crescem a cada dia enquanto a entrega estiver saudável. Dá para mudar depois."
     },
@@ -183,12 +192,6 @@
     "bannerLookingBodyGeneric": "Isso pode levar algumas horas, dependendo do tempo de propagação do seu provedor de DNS.",
     "bannerVerified": "Domínio verificado.",
     "bannerVerifiedBody": "Pronto para enviar e-mails.",
-    "newDomainLimit": {
-      "line": "Limite de domínio novo: {perDay}/dia hoje · volume total a partir de {date}",
-      "today": "Limite de domínio novo: {perDay}/dia hoje",
-      "body": "Domínios registrados há pouco enviam um pouco mais a cada dia.",
-      "bodyShared": "Domínios registrados há pouco enviam um pouco mais a cada dia. Os domínios novos da sua equipe dividem esse volume diário."
-    },
     "deleteDomain": "Excluir domínio",
     "deleteBody": "Isso exclui permanentemente o domínio e sua configuração DNS. O envio a partir dele para imediatamente.",
     "deleteConfirmLabel": "Digite o domínio para confirmar",
@@ -232,6 +235,71 @@
       "catchAllOffTitle": "Desligar o pega-tudo?",
       "catchAllOffConfirm": "E-mails para endereços em {domain} sem caixa de entrada passam a ser recusados. Os endereços das caixas continuam recebendo.",
       "catchAllOffCta": "Desligar pega-tudo"
+    },
+    "bannerVerifiedLimited": "Pronto para enviar, até {cap} e-mails por dia por enquanto.",
+    "limit": {
+      "waitingTitle": "{count, plural, one {# e-mail esperando.} other {# e-mails esperando.}}",
+      "waitingSpent": "Os {cap} de hoje já foram enviados. {count, plural, one {Ele sai depois das 00:00 UTC, em {duration}.} other {O restante sai depois das 00:00 UTC, em {duration}, do mais antigo para o mais novo.}}",
+      "waitingPool": "Seus domínios novos já enviaram os {cap} e-mails que dividem hoje. {count, plural, one {Ele sai depois das 00:00 UTC, em {duration}.} other {O restante sai depois das 00:00 UTC, em {duration}, do mais antigo para o mais novo.}}",
+      "waitingSoon": "{count, plural, one {Ele sai nos próximos minutos.} other {Eles saem nos próximos minutos, do mais antigo para o mais novo.}}",
+      "seeWaiting": "Ver e-mails esperando →",
+      "section": "Limite de domínio novo",
+      "registered": "Registrado {days, plural, =0 {hoje} one {há # dia} other {há # dias}}",
+      "sentToday": "Enviados hoje",
+      "sentHint": "de {cap} · renova às {time}",
+      "sentHintShared": "de {cap} que seus domínios novos dividem · renova às {time}",
+      "waiting": "Esperando",
+      "waitingHint": "{count, plural, =0 {nada esperando} one {sai depois das 00:00 UTC} other {saem depois das 00:00 UTC}}",
+      "waitingHintSoon": "{count, plural, =0 {nada esperando} one {sai em alguns minutos} other {saem em alguns minutos}}",
+      "from": "A partir de {day}",
+      "aDay": "por dia",
+      "noLimitFrom": "Sem limite a partir de",
+      "noLimitHint": "{days, plural, =0 {hoje} one {em # dia, ou antes} other {em # dias, ou antes}}",
+      "rail": "Como o limite cresce",
+      "railToday": "Hoje",
+      "railTodayWhat": "{cap} saem · {used} enviados",
+      "railTodayMore": "{count, plural, one {mais # sai depois das 00:00 UTC} other {mais # saem depois das 00:00 UTC}}",
+      "railTodaySoon": "{count, plural, one {O # que está esperando sai em alguns minutos} other {Os # que estão esperando saem em alguns minutos}}",
+      "railUpTo": "até {cap} por dia",
+      "railWaitingFirst": "{count, plural, one {O # que está esperando sai primeiro} other {Os # que estão esperando saem primeiro}}",
+      "railNoLimit": "Sem limite",
+      "note": "Domínios novos começam com pouco volume porque os provedores de e-mail desconfiam de mensagens vindas deles. O limite cresce sozinho, e enviar com regularidade e sem problemas faz ele subir mais rápido. O que passar do limite do dia fica esperando e sai no dia seguinte. Um plano maior não muda isso.",
+      "noteUnknown": "Domínios novos começam com pouco volume porque os provedores de e-mail desconfiam de mensagens vindas deles. Não encontramos quando este domínio foi registrado, então é enviar com regularidade e sem problemas que faz o limite subir. O que passar do limite do dia fica esperando e sai no dia seguinte. Um plano maior não muda isso.",
+      "shared": "Os {domains} domínios novos da sua equipe dividem até {cap} e-mails por dia entre eles.",
+      "askTitle": "Vai trazer para cá e-mails que você já envia em outro lugar?",
+      "askBody": "Se este domínio vai assumir e-mails que já têm histórico de envio, conte para a gente o que você envia e a gente revisa o limite.",
+      "askButton": "Pedir um limite maior",
+      "askSent": "Pedido enviado em {date}. Vamos te avisar por e-mail quando ele for analisado.",
+      "askDeclined": "Analisamos seu pedido de {date} e mantivemos o limite por enquanto. Se algo mudou, você pode pedir de novo.",
+      "ask": {
+        "title": "Pedir um limite maior",
+        "intro": "{domain} envia até {cap} e-mails por dia por enquanto. Conte para a gente o que ele envia e a gente revisa o limite. Enquanto isso, seus e-mails continuam saindo no ritmo atual.",
+        "sends": "O que ele vai enviar?",
+        "sendsOptions": {
+          "account": "E-mails de cadastro e de conta",
+          "notifications": "Recibos e notificações",
+          "marketing": "Newsletters e marketing",
+          "mix": "Um pouco de cada"
+        },
+        "perDay": "Mais ou menos quantos por dia?",
+        "perDayError": "Informe quantos e-mails por dia, de 1 a {max}.",
+        "source": "Por onde ele sai hoje?",
+        "sourceOptions": {
+          "new": "Ainda não sai, é um produto novo",
+          "other_provider": "Outro provedor de e-mail",
+          "own_servers": "Nossos próprios servidores"
+        },
+        "note": "Mais alguma coisa?",
+        "optional": "opcional",
+        "submit": "Enviar pedido",
+        "sent": "Pedido enviado. Vamos te avisar por e-mail quando ele for analisado.",
+        "errors": {
+          "already": "Você já pediu para este domínio. Vamos te avisar por e-mail quando ele for analisado.",
+          "notLimited": "Este domínio não tem mais limite diário.",
+          "invalid": "Confira as respostas e tente de novo.",
+          "failed": "Não foi possível enviar o pedido. Tente de novo."
+        }
+      }
     }
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",

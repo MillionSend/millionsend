@@ -4,6 +4,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TOPIC_EMAILS_WAITING, TOPIC_IN_BROADCAST } from "@/lib/trpc-error";
 import { createCaller } from "@/server/routers";
 
 const TEST_KEK = Buffer.alloc(32, 7).toString("base64");
@@ -117,6 +118,30 @@ describe("topics CRUD", () => {
 
     await expect(caller.topics.delete({ id: topicId })).rejects.toMatchObject({
       code: "CONFLICT",
+      message: TOPIC_IN_BROADCAST,
+    });
+    expect((await caller.topics.list()).map((topic) => topic.id)).toContain(topicId);
+  });
+
+  it("refuses to delete a topic while an email sent with it still waits to go out", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: topicId } = await caller.topics.create({
+      name: "Pending",
+      defaultSubscribed: true,
+    });
+    // A freshly inserted email is queued.
+    await db.insert(schema.emails).values({
+      teamId,
+      from: "a@acme.dev",
+      to: ["ada@example.com"],
+      subject: "later",
+      topicId,
+    });
+
+    await expect(caller.topics.delete({ id: topicId })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: TOPIC_EMAILS_WAITING,
     });
     expect((await caller.topics.list()).map((topic) => topic.id)).toContain(topicId);
   });
@@ -320,6 +345,18 @@ describe("topic-scoped unsubscribe route", () => {
     const token = makeUnsubscribeToken({ contactId, topicId: foreignTopic, secretKey });
 
     expect((await post(token)).status).toBe(404);
+    const oneClick = await post(token, {
+      body: "List-Unsubscribe=One-Click",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    expect(oneClick.status).toBe(404);
     expect(await subscriptionRow(contactId, foreignTopic)).toBeNull();
+    // Nor a global opt-out: such a token is no deleted topic's link.
+    const [contact] = await db
+      .select({ unsubscribed: schema.contacts.unsubscribed })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, contactId));
+    expect(contact?.unsubscribed).toBe(false);
+    expect(await db.select().from(schema.suppressions)).toHaveLength(0);
   });
 });

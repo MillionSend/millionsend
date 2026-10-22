@@ -3,8 +3,9 @@ import { CRON_JOBS, DEAD_LETTER_QUEUES, Queue } from "../src/index.js";
 
 // In-memory stand-in for pg-boss's queue table. createQueue mirrors the real
 // implementation's INSERT ... ON CONFLICT DO NOTHING: a pre-existing queue
-// keeps its stored policy (and notify flag) no matter what the caller asks for.
-const queues = new Map<string, { policy: string; notify: boolean }>();
+// keeps its stored policy (and notify flag, and retention) no matter what the
+// caller asks for.
+const queues = new Map<string, { policy: string; notify: boolean; deleteAfterSeconds?: number }>();
 const sent: {
   name: string;
   opts: Record<string, unknown>;
@@ -14,7 +15,7 @@ const workers: { name: string; opts: Record<string, unknown>; handler: Handler; 
   [];
 const inserted: { name: string; job: Record<string, unknown> }[] = [];
 const updated: { name: string; opts: Record<string, unknown> }[] = [];
-const scheduled: string[] = [];
+const scheduled: { name: string; cron: string; opts: Record<string, unknown> }[] = [];
 // pg-boss's schedule table, and the names scheduleCrons reconciled away.
 const scheduleTable = new Set<string>();
 const unscheduled: string[] = [];
@@ -47,13 +48,16 @@ vi.mock("pg-boss", () => ({
     }
     async createQueue(
       name: string,
-      options?: { policy?: string; notify?: boolean },
+      options?: { policy?: string; notify?: boolean; deleteAfterSeconds?: number },
     ): Promise<void> {
       if (createQueueError) throw createQueueError;
       if (!queues.has(name)) {
         queues.set(name, {
           policy: options?.policy ?? "standard",
           notify: options?.notify ?? false,
+          ...(options?.deleteAfterSeconds
+            ? { deleteAfterSeconds: options.deleteAfterSeconds }
+            : {}),
         });
       }
     }
@@ -61,19 +65,31 @@ vi.mock("pg-boss", () => ({
       updated.push({ name, opts });
       const q = queues.get(name);
       if (q && typeof opts.notify === "boolean") q.notify = opts.notify;
+      if (q && typeof opts.deleteAfterSeconds === "number") {
+        q.deleteAfterSeconds = opts.deleteAfterSeconds;
+      }
     }
-    async getQueue(
-      name: string,
-    ): Promise<{ name: string; policy: string; notify: boolean } | null> {
+    async getQueue(name: string): Promise<{
+      name: string;
+      policy: string;
+      notify: boolean;
+      deleteAfterSeconds: number;
+    } | null> {
       const q = queues.get(name);
-      return q ? { name, ...q } : null;
+      // pg-boss's default retention when the queue was created without one.
+      return q ? { name, deleteAfterSeconds: 604_800, ...q } : null;
     }
     async send(name: string, _data: unknown, opts: Record<string, unknown>): Promise<string> {
       sent.push({ name, opts });
       return "job-1";
     }
-    async schedule(name: string): Promise<void> {
-      scheduled.push(name);
+    async schedule(
+      name: string,
+      cron: string,
+      _data: unknown,
+      opts: Record<string, unknown>,
+    ): Promise<void> {
+      scheduled.push({ name, cron, opts });
       scheduleTable.add(name);
     }
     async getSchedules(): Promise<{ name: string }[]> {
@@ -158,12 +174,25 @@ it("the worker starts a migrating, listening consumer first and a producer secon
     });
   }
   for (const name of Object.values(DEAD_LETTER_QUEUES)) {
-    expect(queues.get(name)).toEqual({ policy: "standard", notify: false });
+    expect(queues.get(name)).toEqual({
+      policy: "standard",
+      notify: false,
+      deleteAfterSeconds: 3600,
+    });
   }
   for (const name of Object.keys(CRON_JOBS)) {
     expect(queues.get(name)).toEqual({ policy: "standard", notify: false });
   }
   expect(workers).toHaveLength(0);
+});
+
+it("both instances get the URL that makes node-postgres read sslmode as libpq does", async () => {
+  const url = "postgres://app:pw@db.example.com:5432/app?sslmode=require";
+  await Queue.start(url, { workers: true });
+  expect(bosses.map((boss) => boss.options.connectionString)).toEqual([
+    `${url}&uselibpqcompat=true`,
+    `${url}&uselibpqcompat=true`,
+  ]);
 });
 
 it("work() registers on the consumer, sends go through the producer, and stop() stops both", async () => {
@@ -203,6 +232,13 @@ it("turns notify on for a queue that predates the flag, and never for the ones t
   await startWorker();
   expect(updated).toEqual([{ name: "email.send", opts: { notify: true } }]);
   expect(queues.get("email.send")?.notify).toBe(true);
+});
+
+it("gives an hour's retention to a dead-letter queue created without one", async () => {
+  queues.set("email.send.dead", { policy: "standard", notify: false });
+  await startWorker();
+  expect(updated).toEqual([{ name: "email.send.dead", opts: { deleteAfterSeconds: 3600 } }]);
+  expect(queues.get("email.send.dead")?.deleteAfterSeconds).toBe(3600);
 });
 
 it("a failing createQueue fails boot loudly instead of being swallowed", async () => {
@@ -283,12 +319,25 @@ it("cron and dead-letter workers poll slowly; crons are scheduled through the pr
     Object.keys(CRON_JOBS).map((name) => [name, async () => {}]),
   ) as Parameters<Queue["scheduleCrons"]>[0];
   await queue.scheduleCrons(handlers);
-  expect(scheduled).toEqual(Object.keys(CRON_JOBS));
+  // Each run is enqueued with its schedule's options: UTC, and an hour's retention.
+  expect(scheduled).toEqual(
+    Object.entries(CRON_JOBS).map(([name, cron]) => ({
+      name,
+      cron,
+      opts: { tz: "UTC", deleteAfterSeconds: 3600 },
+    })),
+  );
   const cronWorkers = workers.slice(1);
   expect(cronWorkers.map((w) => w.name)).toEqual(Object.keys(CRON_JOBS));
   expect(cronWorkers.every((w) => w.opts.pollingIntervalSeconds === 30 && w.boss === 0)).toBe(true);
   // The retired cron's schedule is dropped; the current ones are left alone.
   expect(unscheduled).toEqual(["safety.reveal_notices"]);
+});
+
+it("a cron run forced ahead of schedule is kept an hour, like a scheduled one", async () => {
+  const queue = await Queue.start("postgres://unused");
+  await queue.runCronNow("quota.drain");
+  expect(sent).toEqual([{ name: "quota.drain", opts: { deleteAfterSeconds: 3600 } }]);
 });
 
 it("creates job queues with the dedupe-enforcing policy", async () => {

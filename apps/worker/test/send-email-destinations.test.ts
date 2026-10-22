@@ -11,7 +11,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { judgeSample } from "../src/handlers/abuse-judge.js";
 import { drainQuotaParked } from "../src/handlers/cron.js";
@@ -78,6 +78,20 @@ const verdict = (score: number, phishing = true): AbuseJudge => ({
           reasons: ["impersonation"],
         }
       : { verdict: "clean" as const, categories: [], reasons: [] }),
+    impersonatedBrand: null,
+    language: "en",
+  }),
+});
+
+/** The judge's read of a product's own reset mail: a credential link off the verified domains, no brand claimed. */
+const credentialOnly = (score: number): AbuseJudge => ({
+  provider: "typesafe",
+  model: "fake-model",
+  judge: async () => ({
+    score,
+    verdict: "abuse" as const,
+    categories: ["phishing_credentials"],
+    reasons: ["off_domain_lure", "harvests_secrets"],
     impersonatedBrand: null,
     language: "en",
   }),
@@ -246,6 +260,123 @@ it("parks it on 80 only when the link domain is under 7 days old", async () => {
   expect(await sampleOf(fresh)).toMatchObject({ linkYoung: true });
   expect(await sendEmail(db, sendDeps, { emailId: fresh })).toBe("parked");
   expect(await row(fresh)).toMatchObject({ parkReason: "destination" });
+});
+
+it("parks a new team's reset mail to its own name on an app platform instead of holding the team, and its release clears the name", async () => {
+  const t = await team("platform-new", "new");
+  const reset = await email(t, "https://abcdefghijklmnop.supabase.co/auth/v1/verify?token=x");
+  await sendEmail(db, sendDeps, { emailId: reset });
+  expect(await judge((await sampleOf(reset))?.id ?? "", credentialOnly(93))).toBe("judged");
+  expect(await sampleOf(reset)).toMatchObject({
+    score: 93,
+    destinations: ["abcdefghijklmnop.supabase.co"],
+    sparedHold: "score",
+  });
+  const [open] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(open?.suspendedAt).toBeNull();
+  expect(await sendEmail(db, sendDeps, { emailId: reset })).toBe("parked");
+  expect(await row(reset)).toMatchObject({ parkReason: "destination" });
+  expect(mails.map((m) => m.kind)).toEqual(["monitor.destination_parked"]);
+  expect(mails[0]?.text).toContain("abcdefghijklmnop");
+  expect(sesCalls).toEqual([]);
+  expect(
+    await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [reset], holdLine: 80 }),
+  ).toEqual({ parked: 1, queued: [] });
+  expect(await cleared(t.teamId)).toEqual(["abcdefghijklmnop.supabase.co"]);
+  const [vouched] = await db
+    .select()
+    .from(schema.teamDestinations)
+    .where(eq(schema.teamDestinations.teamId, t.teamId));
+  expect(vouched?.operatorClearedAt).not.toBeNull();
+  // The next reset mail to the name an operator cleared is neither held, parked nor delayed.
+  const again = await email(t, "https://abcdefghijklmnop.supabase.co/auth/v1/verify?token=z");
+  await sendEmail(db, sendDeps, { emailId: again });
+  expect(await judge((await sampleOf(again))?.id ?? "", credentialOnly(93))).toBe("judged");
+  expect(await sampleOf(again)).toMatchObject({ sparedHold: "vouched" });
+  const [still] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(still?.suspendedAt).toBeNull();
+  expect(await sendEmail(db, sendDeps, { emailId: again })).toBe("sent");
+});
+
+it("parks the burst a spared verdict belongs to, as the hold would have", async () => {
+  const t = await team("platform-burst", "new");
+  const ids: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    const id = await email(t, `https://burst.pages.dev/reset?token=${i}`);
+    await sendEmail(db, sendDeps, { emailId: id });
+    await judge((await sampleOf(id))?.id ?? "", credentialOnly(85));
+    ids.push(id);
+  }
+  for (const [i, id] of ids.entries()) {
+    expect(await sampleOf(id)).toMatchObject({ sparedHold: i === 4 ? "repeat" : "burst" });
+    expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("parked");
+  }
+  const [open] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(open?.suspendedAt).toBeNull();
+  expect(sesCalls).toEqual([]);
+});
+
+it("still holds a new team whose mail to a platform name claims a brand", async () => {
+  const t = await team("platform-new-lure", "new");
+  const lure = await email(t, "https://abcdefghijklmnop.supabase.co/auth/v1/verify?token=y");
+  await sendEmail(db, sendDeps, { emailId: lure });
+  await judge((await sampleOf(lure))?.id ?? "", verdict(93));
+  expect(await sampleOf(lure)).toMatchObject({ sparedHold: null });
+  const [held] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(held?.suspensionReason).toBe("review");
+  expect(await sendEmail(db, sendDeps, { emailId: lure })).toBe("parked");
+});
+
+it("parks a team past new's mail to a platform name as any other on a credential-only verdict", async () => {
+  const t = await team("platform-past-new", "established");
+  const id = await email(t, "https://my-app.up.railway.app/reset?token=x");
+  await sendEmail(db, sendDeps, { emailId: id });
+  await judge((await sampleOf(id))?.id ?? "", credentialOnly(93));
+  expect(await sampleOf(id)).toMatchObject({ sparedHold: null });
+  expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("parked");
+  expect(await row(id)).toMatchObject({ parkReason: "destination" });
+});
+
+it("spares no broadcast: a new team's broadcast linking to a platform name is held on a credential-only verdict", async () => {
+  const t = await team("platform-bcast", "new");
+  await db.insert(schema.contacts).values([{ teamId: t.teamId, email: "a@example.com" }]);
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({
+      teamId: t.teamId,
+      from: `B <hi@${t.slug}.dev>`,
+      subject: "news",
+      html: '<p><a href="https://x.pages.dev/reset">Reset</a></p>',
+      status: "scheduled",
+    })
+    .returning({ id: schema.broadcasts.id });
+  const broadcastDeps: BroadcastDeps = {
+    keyring,
+    unsubscribeSecretKey,
+    unsubscribeBaseUrl: "https://app.millionsend.test",
+    isCloud: false,
+    enqueueEmailSends: async () => {},
+    monitor,
+    platformDomains: PLATFORM,
+  };
+  await sendBroadcast(db, broadcastDeps, { broadcastId: broadcast?.id ?? "" });
+  const [skeleton] = await db
+    .select()
+    .from(schema.monitorSamples)
+    .where(
+      and(
+        eq(schema.monitorSamples.broadcastId, broadcast?.id ?? ""),
+        eq(schema.monitorSamples.kind, "broadcast_skeleton"),
+      ),
+    );
+  expect(await judge(skeleton?.id ?? "", credentialOnly(94))).toBe("judged");
+  const [judged] = await db
+    .select()
+    .from(schema.monitorSamples)
+    .where(eq(schema.monitorSamples.id, skeleton?.id ?? ""));
+  expect(judged).toMatchObject({ sparedHold: null });
+  const [held] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(held?.suspensionReason).toBe("review");
 });
 
 it("holds a new team on one phishing verdict from 80 linking to a young domain", async () => {

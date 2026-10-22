@@ -160,7 +160,7 @@ vi.mock("@/components/select", () => ({
 }));
 
 const { BroadcastComposer } = await import("@/app/(dashboard)/broadcasts/composer");
-const { SendPlanSummary } = await import("@/app/(dashboard)/broadcasts/parts");
+const { PacingSteps, SendPlanSummary } = await import("@/app/(dashboard)/broadcasts/parts");
 type SendPlanWarmup = import("@/app/(dashboard)/broadcasts/parts").SendPlanWarmup;
 
 const MAILY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
@@ -1012,6 +1012,75 @@ describe("send dialog warm-up", () => {
     expect(paused).toContain("broadcasts.guard.pausedIntro");
     expect(paused).not.toContain("broadcasts.guard.warmupPlan");
     expect(paused).not.toContain("ms-field-error");
+  });
+
+  it("paces by the new domain limit in its own words, never blaming capacity or other sends", () => {
+    const reset = new Date("2026-10-19T00:00:00Z");
+    const estimate = {
+      first: 0,
+      startsAt: reset,
+      finishesAt: new Date("2026-10-20T00:30:00Z"),
+      days: 2,
+      blocked: false,
+      releases: [
+        { at: reset, endsAt: new Date("2026-10-19T00:20:00Z"), count: 300 },
+        {
+          at: new Date("2026-10-20T00:00:00Z"),
+          endsAt: new Date("2026-10-20T00:30:00Z"),
+          count: 300,
+        },
+      ],
+      planHold: null,
+      newDomainHold: { heldBack: 600, resumesAt: reset, domain: "nova.example", cap: 300 },
+      planLabel: "Pro",
+      planPeriod: "month" as const,
+      rung: null,
+      horizonDays: 24,
+    };
+    const out = render({ count: 600, estimate });
+    expect(out).toContain("broadcasts.guard.limitReason");
+    expect(out).toContain("broadcasts.guard.stepLimitDomain");
+    expect(out).toContain("broadcasts.guard.stepFirstReset");
+    expect(out).toContain("broadcasts.guard.stepLastReset");
+    expect(out).not.toContain("broadcasts.guard.stepStarts");
+    expect(out).not.toContain("broadcasts.guard.reason<");
+    // Without the limit, the same plan reads as capacity's.
+    expect(render({ count: 600, estimate: { ...estimate, newDomainHold: null } })).toContain(
+      "broadcasts.guard.stepStarts",
+    );
+  });
+
+  it("words a sending broadcast's days as the limit's resets while it paces them", () => {
+    const rail = (resets: boolean) =>
+      renderToStaticMarkup(
+        createElement(PacingSteps, {
+          sent: [{ at: new Date("2026-10-18T09:00:00Z"), count: 300 }],
+          releases: [
+            {
+              at: new Date("2026-10-19T00:00:00Z"),
+              endsAt: new Date("2026-10-19T00:20:00Z"),
+              count: 300,
+            },
+            {
+              at: new Date("2026-10-20T00:00:00Z"),
+              endsAt: new Date("2026-10-20T00:20:00Z"),
+              count: 300,
+            },
+            {
+              at: new Date("2026-10-21T00:00:00Z"),
+              endsAt: new Date("2026-10-21T00:20:00Z"),
+              count: 100,
+            },
+          ],
+          locale: "en",
+          now: new Date("2026-10-18T09:30:00Z"),
+          resets,
+        }),
+      );
+    expect(rail(true)).toContain("broadcasts.guard.stepMoreReset");
+    expect(rail(true)).toContain("broadcasts.guard.stepLastReset");
+    expect(rail(true)).not.toContain("broadcasts.guard.stepMore<");
+    expect(rail(false)).toContain("broadcasts.guard.stepMore");
   });
 
   it("refuses a warm-up past the horizon in place", () => {

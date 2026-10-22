@@ -10,12 +10,16 @@ import {
   CONTENT_REVEAL_SCOPES,
   cancelWaitingEmails,
   contentRevealExpiry,
+  declineLimitRequest,
   decryptEmailBody,
+  emailRecipientsSql,
   fetchAccountScore,
   fetchContentFactors,
   fetchDeliverabilityHealth,
   getMonitorSettingsRow,
+  heldByNewDomainLimit,
   isHoldVerdict,
+  listLimitRequests,
   OPERATOR_PARK_REASONS,
   openMediaReview,
   parseAuditActor,
@@ -25,6 +29,7 @@ import {
   renderRevealedBody,
   renderRevealedMedia,
   resolveMonitorSettings,
+  setWarmupTrust,
   TEAM_FLAG_REASONS,
   teamMonitorOverview,
   teamWarmupOverview,
@@ -223,7 +228,7 @@ async function waitingEmails(db: Db, holdLine: number, teamId?: string) {
     teamId: e.teamId,
     createdAt: e.createdAt,
     from: e.from,
-    recipients: sql<number>`jsonb_array_length(${e.to}) + coalesce(jsonb_array_length(${e.cc}), 0) + coalesce(jsonb_array_length(${e.bcc}), 0)`,
+    recipients: emailRecipientsSql(),
     broadcastId: e.broadcastId,
     parkReason: e.parkReason,
     score: ms.score,
@@ -570,6 +575,7 @@ export const consoleSafetyRouter = router({
       samples,
       grants,
       warmup,
+      requests,
     ] = await Promise.all([
       ctx.db.select().from(f).where(eq(f.teamId, team.id)).orderBy(desc(f.openedAt)).limit(10),
       fetchDeliverabilityHealth(ctx.db, team.id, { now }),
@@ -630,6 +636,7 @@ export const consoleSafetyRouter = router({
         .where(and(eq(g.teamId, team.id), sql`${g.expiresAt} > ${now}`))
         .orderBy(desc(g.createdAt)),
       teamWarmupOverview(ctx.db, team.id, now),
+      listLimitRequests(ctx.db, { status: "open", teamId: team.id, limit: 500 }),
     ]);
     // The judge's answer for each flagged email, when it was drawn; the verdict fields only.
     const ms = schema.monitorSamples;
@@ -735,7 +742,14 @@ export const consoleSafetyRouter = router({
         flagRisk: monitorSettings.flagRisk,
         alertRisk: monitorSettings.alertRisk,
       },
-      warmup: { enabled: monitorSettings.warmupEnabled, ...warmup },
+      warmup: {
+        enabled: monitorSettings.warmupEnabled,
+        ...warmup,
+        domains: warmup.domains.map((domain) => ({
+          ...domain,
+          request: requests.find((request) => request.domainId === domain.id) ?? null,
+        })),
+      },
       audit: audit.map((row) => {
         const actor = parseAuditActor(row.actorId);
         return {
@@ -764,7 +778,7 @@ export const consoleSafetyRouter = router({
     .query(async ({ ctx, input }) => {
       const e = schema.emails;
       const ofTeam = eq(e.teamId, input.teamId);
-      const recipients = sql<number>`jsonb_array_length(${e.to}) + coalesce(jsonb_array_length(${e.cc}), 0) + coalesce(jsonb_array_length(${e.bcc}), 0)`;
+      const recipients = emailRecipientsSql();
       const [rows, [count]] = await Promise.all([
         ctx.db
           .select({
@@ -789,36 +803,93 @@ export const consoleSafetyRouter = router({
 
   /**
    * The warm-up override: a trusted team, or one trusted domain of it, sends
-   * at its plan's volume from day one. The audit row is the instance's, as
-   * the owner's own log never shows trust & safety levers.
+   * at its plan's volume from day one, and a trust grants the open limit
+   * requests it covers. The audit row is the instance's, as the owner's own
+   * log never shows trust & safety levers.
    */
   setWarmupTrust: operatorProcedure
     .input(z.object({ teamId: z.uuid(), domainId: z.uuid().optional(), trusted: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.teamId);
-      const trustedAt = input.trusted ? new Date() : null;
-      let domain: string | undefined;
-      if (input.domainId) {
-        const d = schema.domains;
-        const [row] = await ctx.db
-          .update(d)
-          .set({ warmupTrustedAt: trustedAt })
-          .where(and(eq(d.id, input.domainId), eq(d.teamId, team.id)))
-          .returning({ name: d.name });
-        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-        domain = row.name;
-      } else {
-        await ctx.db.update(t).set({ warmupTrustedAt: trustedAt }).where(eq(t.id, team.id));
-      }
+      const set = await setWarmupTrust(ctx.db, {
+        teamId: team.id,
+        domainId: input.domainId,
+        trusted: input.trusted,
+        operator: ctx.operator.email,
+      });
+      if (!set) throw new TRPCError({ code: "NOT_FOUND" });
       await auditOperator(ctx, {
         teamId: null,
         action: input.trusted ? "warmup.trust_granted" : "warmup.trust_revoked",
         target: { type: "team", id: team.id },
-        metadata: { team: team.name, ...(domain ? { domain } : {}) },
+        metadata: { team: team.name, ...(set.domain ? { domain: set.domain } : {}) },
       });
       // Mail the warm-up held goes out now rather than at the next drain.
       if (input.trusted) await kickQuotaDrain();
       return { trusted: input.trusted };
+    }),
+
+  /**
+   * The open requests to lift a new domain's limit, newest first, with what
+   * the limit holds on each domain now. Each is answered on its team's page.
+   */
+  limitRequests: operatorProcedure.query(async ({ ctx }) => {
+    const requests = await listLimitRequests(ctx.db, { status: "open", limit: 100 });
+    if (requests.length === 0) return [];
+    const e = schema.emails;
+    const teamIds = [...new Set(requests.map((request) => request.teamId))];
+    const [held, logos] = await Promise.all([
+      ctx.db
+        .select({ domainId: e.domainId, n: sql<number>`count(*)::int` })
+        .from(e)
+        .where(
+          and(
+            inArray(e.teamId, teamIds),
+            inArray(
+              e.domainId,
+              requests.map((request) => request.domainId),
+            ),
+            heldByNewDomainLimit(),
+          ),
+        )
+        .groupBy(e.domainId),
+      ctx.db.select({ id: t.id, logoUrl: t.logoUrl }).from(t).where(inArray(t.id, teamIds)),
+    ]);
+    return requests.map((request) => ({
+      ...request,
+      logoUrl: logos.find((row) => row.id === request.teamId)?.logoUrl ?? null,
+      waiting: held.find((row) => row.domainId === request.domainId)?.n ?? 0,
+    }));
+  }),
+
+  /**
+   * Declines an open limit request: the domain keeps the new domain limit
+   * and the notifications sweep tells the team. The audit row is the
+   * instance's, as a trust's is.
+   */
+  declineLimitRequest: operatorProcedure
+    .input(z.object({ requestId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const declined = await declineLimitRequest(ctx.db, {
+        requestId: input.requestId,
+        operator: ctx.operator.email,
+      });
+      if (!declined.ok) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "not_open" });
+      }
+      const d = schema.domains;
+      const [names] = await ctx.db
+        .select({ team: t.name, domain: d.name })
+        .from(d)
+        .innerJoin(t, eq(t.id, d.teamId))
+        .where(eq(d.id, declined.request.domainId));
+      await auditOperator(ctx, {
+        teamId: null,
+        action: "warmup.request_declined",
+        target: { type: "team", id: declined.request.teamId },
+        metadata: { team: names?.team, domain: names?.domain },
+      });
+      return { declined: true };
     }),
 
   /**

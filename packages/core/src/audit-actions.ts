@@ -10,6 +10,7 @@ export const AUDIT_ACTIONS = [
   "domain.receiving_disabled",
   "domain.catch_all_enabled",
   "domain.catch_all_disabled",
+  "domain.limit_requested",
   // Inboxes: dashboard creates and deletes only (an API key creates inboxes
   // by the thousand; its trail is inbox_activity), safety changes, and a
   // person's release or approval. Never per-message rows: this table is never purged.
@@ -66,6 +67,7 @@ export const AUDIT_ACTIONS = [
   "monitor.broadcasts_resumed",
   "warmup.trust_granted",
   "warmup.trust_revoked",
+  "warmup.request_declined",
   // The review list's verdict on mail screening stopped before SES; the
   // instance's rows, as every trust & safety lever.
   "screening.released",

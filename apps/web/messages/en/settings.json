@@ -430,6 +430,7 @@
       "domain_receiving_disabled": "Disabled receiving",
       "domain_catch_all_enabled": "Catch-all turned on",
       "domain_catch_all_disabled": "Catch-all turned off",
+      "domain_limit_requested": "Asked for a higher daily limit",
       "inbox_created": "Inbox created",
       "inbox_deleted": "Inbox deleted",
       "inbox_safety_updated": "Inbox safety rules changed",
@@ -480,6 +481,7 @@
       "monitor_broadcasts_resumed": "Resumed broadcasts after monitor pause",
       "warmup_trust_granted": "Lifted new-domain warm-up",
       "warmup_trust_revoked": "Restored new-domain warm-up",
+      "warmup_request_declined": "Declined a higher daily limit",
       "screening_released": "Released emails waiting for review",
       "screening_canceled": "Canceled emails waiting for review",
       "content_revealed": "Read message content",
@@ -514,6 +516,10 @@
       "domain_lost": {
         "label": "Domain lost its verification",
         "note": "A record disappeared, or SES gave up on the domain."
+      },
+      "domain_waiting": {
+        "label": "New domain's mail waiting",
+        "note": "A new domain reached its daily limit and mail waits for the next day, at most once a day."
       },
       "member_joined": {
         "label": "Member joined",

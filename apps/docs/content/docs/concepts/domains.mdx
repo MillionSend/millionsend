@@ -58,10 +58,11 @@ every region.
 ## New domain limit
 
 On MillionSend Cloud a domain registered recently sends gradually while it
-builds a reputation with mailbox providers. The age is the registered domain's
-(`acme.com` for `mail.acme.com`; a name from a free subdomain service, such as
-`shop.eu.org`, counts as its own domain), read from public data when the
-domain is added, and the cap counts per UTC day:
+builds a reputation with mailbox providers. The age is the registered
+domain's, so `mail.acme.com` counts as `acme.com`, and a name from a free
+subdomain service, such as `shop.eu.org`, counts as its own domain. It is
+read from public data when the domain is added, and the cap counts per UTC
+day:
 
 | Domain age | Emails per day |
 | --- | --- |
@@ -71,23 +72,73 @@ domain is added, and the cap counts per UTC day:
 | 30 days or older | your plan's limit only |
 
 A domain that sends cleanly (few bounces, no spam complaints) moves up a step
-sooner. The cap applies on top of your plan and a plan upgrade does not lift
-it. While it applies, the domain page shows "New domain limit: N/day today ·
-full volume from …".
+sooner. The cap applies on top of your plan, and a higher plan doesn't
+change it.
 
 Your team's new domains share one daily volume, the highest of their caps,
-and each still stays within its own: adding another new domain does not add
-volume. Domains 30 days or older are not part of it. When more than one of
+and each still stays within its own: adding another new domain doesn't add
+volume. Domains 30 days or older aren't part of it. When more than one of
 your domains is under this limit, the domain page says the volume is shared.
-
-Mail over the day's cap is never refused or lost: it is accepted, shows as
-**Waiting**, and goes out as the cap allows, oldest first. Only when a lot
-of mail is already waiting does a send answer `429 daily_quota_exceeded`
-(SMTP `452`) with a message naming this limit. Retry after the UTC day rolls
-over.
 
 This limit is automatic and separate from the opt-in [warm-up](#warm-up)
 below. When both apply, a broadcast goes out within the lower of the two.
+
+### What you see
+
+- **Emails:** each email the limit holds reads **Waiting · daily limit**,
+  and **When** shows the time it goes out after, in your time zone. A banner
+  above the list says how many emails wait for which domain, and that they
+  go out on their own after 00:00 UTC.
+- **An email's page** says it waits for the domain's daily limit, how many
+  of today's emails went out, how many waiting emails are ahead of it, and
+  when it should go out.
+- **Domains:** a domain under the limit shows its daily volume and how many
+  emails wait. Its tooltip has the schedule.
+- **The domain's page** has a **New domain limit** section with what the
+  domain sent today, what waits, how the limit grows and when it ends.
+- **Emails to your team's owners:** **Your domain is verified** says the
+  domain starts with a daily limit and when it ends. **Your new domain
+  reached today's limit** says how many emails wait, at most once a day per
+  domain. Turn it off under **Domains** in **Settings → Notifications**.
+
+### Mail that waits
+
+Mail over the day's cap is never refused. It is accepted, waits, and goes
+out on its own after 00:00 UTC, oldest first, with transactional email ahead
+of broadcasts, so there's no need to resend it. Nothing that waits is lost
+while email content is kept: 30 days on Cloud, the instance's email retention
+when self-hosted.
+
+Through the API, a send the limit holds answers with a `warning`:
+
+```json
+{
+  "id": "4f1c9a2e-7b3d-4e8a-9c61-2d5f8e0b7a14",
+  "warning": {
+    "code": "new_domain_limit",
+    "message": "nova.example sent its 300 emails for today. This email goes out after 00:00 UTC.",
+    "sends_after": "2026-10-21T00:00:00.000Z"
+  }
+}
+```
+
+Each item of `POST /emails/batch` the limit holds carries the same
+`warning`. `GET /emails/{id}` and `GET /emails` keep `last_event: "queued"`,
+as Resend clients expect, and add `queued_reason: "new_domain_limit"` with
+`sends_after`, the earliest the email goes out. Only when a lot of mail is
+already waiting does a send answer `429 daily_quota_exceeded` (SMTP `452`),
+with a message naming the limit and a `Retry-After` header that counts to
+00:00 UTC.
+
+### Ask for a higher limit
+
+When the domain takes over mail that already has a sending history, such as
+a product moving from another email provider, choose **Ask for a higher
+limit** on the domain's page. Say what it sends, about how many emails a day,
+and where it goes out today. Owners and admins can ask, with one open request
+per domain. Mail keeps going out at the current pace meanwhile, and the team's
+owners and whoever asked get an email with the answer. You can also reply to
+either email above.
 
 ## Warm-up
 
@@ -140,7 +191,10 @@ newest of these signals. You choose which ones count on the **Warm-up** tab.
 - The last transactional email they got from your team in the last 30 days.
 - A contact property you pick, read as a date, such as a last login. It
   takes an ISO 8601 date or date-time, or Unix time in seconds or
-  milliseconds.
+  milliseconds between the years 2000 and 2100, so a count never reads as a
+  date. The list shows your [date properties](/concepts/contacts#property-types)
+  first, then other properties where at least half the values are dates,
+  read from your 20,000 most recently updated contacts.
 
 A contact whose newest signal is 90 days old or more is inactive. By default
 the warm-up skips inactive contacts: they don't get the broadcast, and the
@@ -233,7 +287,14 @@ them clean, self-host falls back to the app host — and the domain shows as
 Cloudflare the tracking record must stay **DNS only** (grey cloud): a proxied
 CNAME answers with Cloudflare's addresses instead of the target, which the
 records table reports as a mismatch, and TLS for the tracking host is served
-by MillionSend.
+by MillionSend. A tracking host redirects only the links of the team whose
+domain holds it, and a domain holds its tracking host once verified, even if it
+later loses verification. On MillionSend Cloud a host no domain holds redirects
+nothing: after you change the tracking subdomain or delete the domain or the
+team, links already sent through the old host stop redirecting, and they resume
+only if the team adds the domain back with the same tracking subdomain and it
+verifies. A self-hosted instance redirects every team's links from a host no
+domain holds, so remove the tracking CNAME when you give a host up.
 
 ## Open-rate accuracy
 

@@ -145,9 +145,10 @@ export const env = createEnv({
 
     IS_CLOUD: boolFromString,
 
-    // Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are
-    // trusted for the client IP (comma-separated IPs). Anything else is a
-    // spoofable header, so the socket address wins.
+    // Proxies web skips while walking X-Forwarded-For from the right for the
+    // client address (comma-separated IPs or CIDRs); the first unlisted hop
+    // is the client. The api ignores it: its failed-auth throttle keys on
+    // the connection's address.
     TRUSTED_PROXIES: z
       .string()
       .default("127.0.0.1,::1")
@@ -443,7 +444,7 @@ export const env = createEnv({
     // own host, which only works where it can serve those hostnames directly.
     TRACKING_EDGE_HOST: z.string().optional(),
     // Shared secret the tracking edge sends when asking whether a hostname is
-    // a configured tracking subdomain (gates on-demand certificate issuance).
+    // the tracking host of a domain that verified (gates on-demand certificates).
     TRACKING_ASK_SECRET: z.string().optional(),
 
     // Inbound mail. Receiving exists on this instance only when this names

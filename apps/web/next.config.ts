@@ -46,7 +46,7 @@ const config: NextConfig = {
       process.env.NODE_ENV === "development"
         ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com"
         : "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com";
-    const contentSecurityPolicy = [
+    const directives = [
       "default-src 'self'",
       scriptPolicy,
       "style-src 'self' 'unsafe-inline'",
@@ -64,8 +64,12 @@ const config: NextConfig = {
       "manifest-src 'self'",
       "base-uri 'self'",
       "frame-ancestors 'none'",
-      "form-action 'self'",
-    ].join("; ");
+    ];
+    const contentSecurityPolicy = [...directives, "form-action 'self'"].join("; ");
+    // The unsubscribe confirm page's forms post to our route, which answers
+    // with a 303 to the team's own redirect URL when one is set, on any
+    // http(s) origin. Browsers hold that redirect to the form's form-action.
+    const unsubscribeConfirmPolicy = [...directives, "form-action 'self' https: http:"].join("; ");
     return [
       {
         source: "/:path*",
@@ -87,6 +91,12 @@ const config: NextConfig = {
           { key: "X-DNS-Prefetch-Control", value: "off" },
           { key: "X-Frame-Options", value: "DENY" },
         ],
+      },
+      {
+        // After the catch-all on purpose: when two entries set the same
+        // header for a path, Next sends the last one.
+        source: "/unsubscribe/confirm/:path*",
+        headers: [{ key: "Content-Security-Policy", value: unsubscribeConfirmPolicy }],
       },
     ];
   },

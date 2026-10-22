@@ -1,5 +1,6 @@
 "use client";
 
+import { SEGMENT_FILTER_MAX_DAYS } from "@millionsend/core/property-date";
 import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -11,6 +12,7 @@ import { FOCUSABLE } from "@/lib/keyboard";
 import {
   BASE_FIELDS,
   type BuilderRow,
+  DATE_OPS,
   defaultOp,
   fieldPickerValue,
   isProperty,
@@ -20,7 +22,7 @@ import {
   propertyKey,
   rowComplete,
   type SegmentFilterDraft,
-  VALUELESS_OPS,
+  valueKind,
 } from "@/lib/segment-builder";
 import { useTRPC } from "@/lib/trpc";
 
@@ -73,6 +75,16 @@ function ConditionPopover({
   const [custom, setCustom] = useState(false);
 
   const propertiesQuery = useQuery(trpc.audience.properties.list.queryOptions());
+  const definedQuery = useQuery(trpc.audience.properties.defineList.queryOptions());
+  // Lowercased: a definition types its key in any letter case, as API writes match it.
+  const dateKeys = useMemo(
+    () =>
+      new Set(
+        (definedQuery.data ?? []).filter((p) => p.type === "date").map((p) => p.key.toLowerCase()),
+      ),
+    [definedQuery.data],
+  );
+  const isDateProperty = (field: string) => dateKeys.has(propertyKey(field).toLowerCase());
   // A contact can carry an empty key through the API; it is no field to pick.
   const known = useMemo(
     () => (propertiesQuery.data ?? []).map((p) => p.key).filter((k) => k !== ""),
@@ -81,20 +93,23 @@ function ConditionPopover({
   const pickerValue = custom ? CUSTOM_PROPERTY : fieldPickerValue(row.field);
   const key = propertyKey(row.field);
   const listed = known.includes(key);
-  const valueless = VALUELESS_OPS.has(row.op);
+  const kind = valueKind(row.op);
+  // A saved date op on a property not typed as a date keeps its date ops.
+  const ops = opsFor(row.field, isDateProperty(row.field) || DATE_OPS.includes(row.op));
 
   const valuesQuery = useQuery(
     trpc.audience.properties.values.queryOptions(
       { key },
-      { enabled: !valueless && key !== "" && listed, staleTime: 60_000 },
+      { enabled: kind === "text" && key !== "" && listed, staleTime: 60_000 },
     ),
   );
   const needle = row.value.trim().toLowerCase();
-  const suggestions = valueless
-    ? []
-    : (valuesQuery.data ?? [])
-        .filter((s) => s.value !== row.value && s.value.toLowerCase().includes(needle))
-        .slice(0, MAX_SUGGESTIONS);
+  const suggestions =
+    kind !== "text"
+      ? []
+      : (valuesQuery.data ?? [])
+          .filter((s) => s.value !== row.value && s.value.toLowerCase().includes(needle))
+          .slice(0, MAX_SUGGESTIONS);
 
   const fieldOptions: SelectOption[] = [
     ...BASE_FIELDS.map((f) => ({
@@ -124,7 +139,7 @@ function ConditionPopover({
   const pickField = (value: string) => {
     const field = value === CUSTOM_PROPERTY ? PROPERTY_PREFIX : value;
     setCustom(value === CUSTOM_PROPERTY);
-    setRow({ field, op: defaultOp(field), value: "" });
+    setRow({ field, op: defaultOp(field, isDateProperty(field)), value: "" });
   };
 
   useEffect(() => {
@@ -240,11 +255,14 @@ function ConditionPopover({
             value={row.op}
             ariaLabel={t("builder.opLabel")}
             width="100%"
-            options={opsFor(row.field).map((op) => ({ value: op, label: t(`op.${op}`) }))}
-            onChange={(op) => setRow({ ...row, op })}
+            options={ops.map((op) => ({ value: op, label: t(`op.${op}`) }))}
+            // A value meant for another kind of op is dropped, not carried over.
+            onChange={(op) =>
+              setRow({ ...row, op, value: valueKind(op) === kind ? row.value : "" })
+            }
           />
         </div>
-        {valueless ? (
+        {kind === "none" ? (
           <p
             style={{ margin: "12px 0 0", color: "var(--ms-faint)", fontSize: "var(--ms-fs-label)" }}
           >
@@ -252,10 +270,13 @@ function ConditionPopover({
           </p>
         ) : (
           <div className="ms-field" style={{ marginTop: 12 }}>
-            <label htmlFor={`${id}-value`}>{t("builder.valuePlaceholder")}</label>
+            <label htmlFor={`${id}-value`}>
+              {kind === "days" ? t("builder.daysLabel") : t("builder.valuePlaceholder")}
+            </label>
             <input
               id={`${id}-value`}
-              type={row.field === "created_at" ? "date" : "text"}
+              type={kind === "date" ? "date" : kind === "days" ? "number" : "text"}
+              {...(kind === "days" ? { min: 1, max: SEGMENT_FILTER_MAX_DAYS, step: 1 } : {})}
               className="ms-input"
               style={{ width: "100%" }}
               value={row.value}
@@ -319,6 +340,7 @@ function ConditionPill({
 }) {
   const t = useTranslations("audience.segments");
   const property = isProperty(row.field);
+  const kind = valueKind(row.op);
   return (
     <span className={`ms-pill${open ? " open" : ""}`}>
       <button
@@ -331,7 +353,15 @@ function ConditionPill({
           {property ? propertyKey(row.field) : t(`field.${row.field}`)}
         </span>
         <span className="txt op">{t(`op.${row.op}`)}</span>
-        {VALUELESS_OPS.has(row.op) ? null : <span className="txt">{row.value}</span>}
+        {kind === "none" ? null : (
+          <span className="txt">
+            {kind === "days"
+              ? t(row.op === "in_last_days" ? "builder.days" : "builder.daysAgo", {
+                  count: Number(row.value),
+                })
+              : row.value}
+          </span>
+        )}
       </button>
       <button
         type="button"

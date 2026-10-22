@@ -1,10 +1,16 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, encryptEmailBody, hashRecipient, utcDay } from "@millionsend/core";
+import {
+  EnvKeyring,
+  encryptEmailBody,
+  hashRecipient,
+  nextUtcDayStart,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq, sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "@/server/routers";
 import type { Context } from "@/server/trpc";
 
@@ -22,6 +28,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await close();
 });
 
@@ -201,6 +208,31 @@ describe("emails.list", () => {
   });
 });
 
+/** A verified domain registered 3 days ago that sent its 300 emails today: under the new domain limit. */
+async function limitedDomain(teamId: string, name: string): Promise<string> {
+  await db
+    .insert(schema.instanceSettings)
+    .values({ id: 1, warmupEnabled: true })
+    .onConflictDoNothing();
+  const [row] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name,
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date(Date.now() - 3 * 86_400_000),
+      ageSource: "rdap",
+    })
+    .returning({ id: schema.domains.id });
+  if (!row) throw new Error("domain insert failed");
+  await db
+    .insert(schema.domainWarmupUsage)
+    .values({ registrableDomain: name, day: utcDay(), accepted: 300 })
+    .onConflictDoNothing();
+  return row.id;
+}
+
 describe("emails.list sources", () => {
   async function broadcastFor(teamId: string): Promise<string> {
     const [b] = await db
@@ -250,28 +282,49 @@ describe("emails.list sources", () => {
 
   it("shows a row the new domain limit holds as waiting for it, apart from the plan's backlog", async () => {
     const team = await createTeam(db, "team-a");
+    const domainId = await limitedDomain(team, "nova.example");
     // The plan is spent today: a warm-up row still never reads as held by it.
     await db.insert(schema.usageCounters).values({ teamId: team, day: utcDay(), accepted: 500 });
-    const warming = await insertEmail({
+    const parked = {
       ...baseEmail(team),
       latestStatus: "queued_quota",
       parkReason: "warmup",
-    });
+      domainId,
+    } as const;
+    const first = await insertEmail({ ...parked, createdAt: new Date(Date.now() - 60_000) });
+    const second = await insertEmail(parked);
     await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
-    expect((await caller(team).emails.get({ id: warming })).pending).toEqual({
+    const reset = nextUtcDayStart(new Date());
+    const got = await caller(team).emails.get({ id: second });
+    expect(got.pending).toEqual({
       kind: "newDomainLimit",
+      domainId,
+      domain: "nova.example",
+      cap: 300,
+      used: 300,
+      pool: null,
+      ahead: 1,
+      sendsAfter: reset,
+      resetsAt: reset,
     });
+    expect(got.sendingDomain).toEqual({ id: domainId, name: "nova.example", cap: 300 });
+    expect((await caller(team).emails.get({ id: first })).pending).toMatchObject({ ahead: 0 });
     expect((await caller(team).emails.stats()).queuedQuota).toBe(1);
+
+    // Once the domain is out from under the limit, its held mail is a plain wait.
+    await db
+      .update(schema.domains)
+      .set({ warmupTrustedAt: new Date() })
+      .where(eq(schema.domains.id, domainId));
+    const trusted = await caller(team).emails.get({ id: second });
+    expect(trusted.pending).toEqual({ kind: "waiting" });
+    expect(trusted.sendingDomain).toEqual({ id: domainId, name: "nova.example", cap: null });
   });
 
   it("tells a broadcast copy waiting on its domain's warm-up from one under the new domain limit", async () => {
     const team = await createTeam(db, "team-a");
     const broadcastId = await broadcastFor(team);
-    const [domain] = await db
-      .insert(schema.domains)
-      .values({ teamId: team, name: "acme.test", region: "sa-east-1", status: "verified" })
-      .returning({ id: schema.domains.id });
-    if (!domain) throw new Error("domain insert failed");
+    const domain = { id: await limitedDomain(team, "acme.test") };
     const parked = {
       latestStatus: "queued_quota",
       parkReason: "warmup",
@@ -280,9 +333,9 @@ describe("emails.list sources", () => {
     const copy = await insertEmail({ ...baseEmail(team), ...parked, broadcastId });
     // Transactional mail never waits on the warm-up, only on the age-based limit.
     const tx = await insertEmail({ ...baseEmail(team), ...parked });
-    const pending = async (id: string) => (await caller(team).emails.get({ id })).pending;
+    const pending = async (id: string) => (await caller(team).emails.get({ id })).pending?.kind;
 
-    expect(await pending(copy)).toEqual({ kind: "newDomainLimit" });
+    expect(await pending(copy)).toBe("newDomainLimit");
     await db.insert(schema.domainWarmups).values({
       domainId: domain.id,
       teamId: team,
@@ -290,17 +343,133 @@ describe("emails.list sources", () => {
       startVolume: 1_500,
       dailyTarget: 10_000,
     });
-    expect(await pending(copy)).toEqual({ kind: "warmup" });
-    expect(await pending(tx)).toEqual({ kind: "newDomainLimit" });
+    expect(await pending(copy)).toBe("warmup");
+    expect(await pending(tx)).toBe("newDomainLimit");
     await db.update(schema.domainWarmups).set({ status: "paused" });
-    expect(await pending(copy)).toEqual({ kind: "warmupPaused" });
+    expect(await pending(copy)).toBe("warmupPaused");
     await db.update(schema.domainWarmups).set({ status: "off" });
-    expect(await pending(copy)).toEqual({ kind: "newDomainLimit" });
+    expect(await pending(copy)).toBe("newDomainLimit");
 
     // Another team's warm-up row for the same id never answers for this one.
     const other = await createTeam(db, "team-b");
     await db.update(schema.domainWarmups).set({ status: "warming", teamId: other });
-    expect(await pending(copy)).toEqual({ kind: "newDomainLimit" });
+    expect(await pending(copy)).not.toBe("warmup");
+  });
+
+  it("says on each row what it waits for, and never a silent hold's reason", async () => {
+    const team = await createTeam(db, "team-a");
+    const broadcastId = await broadcastFor(team);
+    const young = await limitedDomain(team, "nova.example");
+    const ramped = await limitedDomain(team, "news.example");
+    await db.insert(schema.domainWarmups).values({
+      domainId: ramped,
+      teamId: team,
+      volume: 1_500,
+      startVolume: 1_500,
+      dailyTarget: 10_000,
+    });
+    const parked = (over: Partial<typeof schema.emails.$inferInsert>) =>
+      insertEmail({ ...baseEmail(team), latestStatus: "queued_quota", ...over });
+    const ids = {
+      limit: await parked({ parkReason: "warmup", domainId: young }),
+      limitCopy: await parked({ parkReason: "warmup", domainId: young, broadcastId }),
+      warmup: await parked({ parkReason: "warmup", domainId: ramped, broadcastId }),
+      capacity: await parked({ domainId: young }),
+      review: await parked({ parkReason: "review", domainId: young }),
+      screening: await parked({ parkReason: "screening", domainId: young }),
+      destination: await parked({ parkReason: "destination", domainId: young }),
+      media: await parked({ parkReason: "media", domainId: young }),
+      recipient: await parked({ parkReason: "recipient", domainId: young }),
+      sent: await insertEmail({ ...baseEmail(team), latestStatus: "delivered", domainId: young }),
+    };
+    const rows = new Map(
+      (await caller(team).emails.list({ limit: 50 })).items.map((row) => [row.id, row]),
+    );
+    const of = (id: string) => [rows.get(id)?.waitingFor, rows.get(id)?.domainId];
+    expect(of(ids.limit)).toEqual(["domain_limit", young]);
+    expect(of(ids.limitCopy)).toEqual(["domain_limit", young]);
+    expect(of(ids.warmup)).toEqual(["warmup", ramped]);
+    for (const id of [
+      ids.capacity,
+      ids.review,
+      ids.screening,
+      ids.destination,
+      ids.media,
+      ids.recipient,
+      ids.sent,
+    ]) {
+      expect(rows.get(id)).toMatchObject({ waitingFor: null, resumesAt: null, sendsAfter: null });
+    }
+    // A paused warm-up's copy says so, and the limit's rows keep their own reason.
+    await db.update(schema.domainWarmups).set({ status: "paused" });
+    const paused = new Map(
+      (await caller(team).emails.list({ limit: 50 })).items.map((row) => [row.id, row]),
+    );
+    expect(paused.get(ids.warmup)?.waitingFor).toBe("warmup_paused");
+    expect(paused.get(ids.limit)?.waitingFor).toBe("domain_limit");
+  });
+
+  it("puts each row the limit holds at its own place in line, as the email page does", async () => {
+    const team = await createTeam(db, "team-a");
+    const young = await limitedDomain(team, "nova.example");
+    const to = (n: number, tag: string) =>
+      Array.from({ length: n }, (_, i) => `${tag}${i}@example.com`);
+    const held = { latestStatus: "queued_quota", parkReason: "warmup", domainId: young } as const;
+    const first = await insertEmail({
+      ...baseEmail(team),
+      ...held,
+      to: to(250, "a"),
+      createdAt: new Date(Date.now() - 60_000),
+    });
+    // 250 + 100 is past the next reset's 300: the second goes the day after.
+    const second = await insertEmail({ ...baseEmail(team), ...held, to: to(100, "b") });
+    const rows = new Map(
+      (await caller(team).emails.list({})).items.map((row) => [row.id, row.sendsAfter]),
+    );
+    const reset = nextUtcDayStart(new Date());
+    const dayAfter = new Date(reset.getTime() + 86_400_000);
+    expect(rows.get(first)).toEqual(reset);
+    expect(rows.get(second)).toEqual(dayAfter);
+    expect((await caller(team).emails.get({ id: second })).pending).toMatchObject({
+      kind: "newDomainLimit",
+      ahead: 1,
+      sendsAfter: dayAfter,
+    });
+  });
+
+  it("names the plan's limit on a row it holds once it binds, with when it renews", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const team = await createTeam(db, "team-a");
+    const capacity = await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
+    const review = await insertEmail({
+      ...baseEmail(team),
+      latestStatus: "queued_quota",
+      parkReason: "review",
+    });
+    const waitingFor = async () =>
+      Object.fromEntries(
+        (await caller(team).emails.list({})).items.map((row) => [
+          row.id,
+          [row.waitingFor, row.resumesAt],
+        ]),
+      );
+    // Room under the plan: capacity holds it, a plain wait.
+    expect(await waitingFor()).toEqual({ [capacity]: [null, null], [review]: [null, null] });
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team, day: utcDay(), accepted: 1_000_000 });
+    const reset = nextUtcDayStart(new Date());
+    // A silent hold reads as capacity does, here and on its page: nothing sets it apart.
+    expect(await waitingFor()).toEqual({
+      [capacity]: ["plan", reset],
+      [review]: ["plan", reset],
+    });
+    for (const id of [capacity, review]) {
+      expect((await caller(team).emails.get({ id })).pending).toEqual({
+        kind: "plan",
+        resumesAt: reset,
+      });
+    }
   });
 
   it("says what an unsent row waits for, and names its broadcast", async () => {

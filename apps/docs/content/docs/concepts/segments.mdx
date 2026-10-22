@@ -18,6 +18,34 @@ and on [custom properties](/concepts/contacts#what-a-contact-holds), with
 operators such as equals, contains, is-set / is-not-set, and date comparisons.
 Conditions combine with and/or.
 
+## Dates
+
+`created_at` and every property take four date operators:
+
+| Operator | Matches a date that is | Value |
+| --- | --- | --- |
+| `before` | before the value | An ISO 8601 date or date-time |
+| `after` | after the value | An ISO 8601 date or date-time |
+| `in_last_days` | between N days ago and now | N, from 1 to 36500 |
+| `not_in_last_days` | more than N days ago | N, from 1 to 36500 |
+
+```json
+{
+  "match": "all",
+  "conditions": [
+    { "field": "property:last_login", "op": "not_in_last_days", "value": "90" }
+  ]
+}
+```
+
+A property is read as a date the way a
+[date property](/concepts/contacts#property-types) takes one. A value that
+isn't a date matches none of these operators, and a date still to come
+matches neither `in_last_days` nor `not_in_last_days`. To find contacts
+without the property, use `is_not_set`. Text operators work on every
+property, whatever its type. In the dashboard, date operators show for
+`created_at` and for date properties.
+
 ## Using segments
 
 - **Broadcasts** — target a segment instead of all contacts. The fan-out

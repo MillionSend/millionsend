@@ -15,17 +15,10 @@ import { Tooltip } from "@/components/tooltip";
 import { consoleReviewHref } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamActions } from "../team-actions";
-import { CardHead, WHY_DOT } from "./parts";
+import { CardHead, LINK_BUTTON, WHY_DOT } from "./parts";
 import { useContentReveal } from "./reveal";
 
 const COLUMNS = 6;
-const LINK_BUTTON: React.CSSProperties = {
-  font: "inherit",
-  padding: 0,
-  background: "none",
-  border: 0,
-  cursor: "pointer",
-};
 
 type Confirm = {
   action: "release" | "cancel";

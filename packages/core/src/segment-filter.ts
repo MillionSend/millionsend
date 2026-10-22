@@ -2,6 +2,13 @@ import { schema } from "@millionsend/db";
 import type { SegmentFilter } from "@millionsend/db/schema";
 import { and, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
+import {
+  isSegmentDayCount,
+  PROPERTY_DATE_PATTERNS,
+  PROPERTY_EPOCH_SECONDS,
+  parsePropertyDate,
+  SEGMENT_FILTER_MAX_DAYS,
+} from "./property-date.js";
 
 /**
  * Translates a team-authored segment filter into a parameterized Drizzle
@@ -28,7 +35,11 @@ const TEXT_OPS = [
   "is_not_set",
 ] as const;
 const BOOL_OPS = ["is_true", "is_false"] as const;
-const DATE_OPS = ["before", "after"] as const;
+/** Ops over a date: created_at, or a property read as one (propertyDateSql). */
+const DATE_OPS = ["before", "after", "in_last_days", "not_in_last_days"] as const;
+/** A jsonpath true for a filter using an op relative to now, whose matches move with time. */
+export const RELATIVE_DATE_FILTER_PATH =
+  '$.conditions[*] ? (@.op == "in_last_days" || @.op == "not_in_last_days")';
 const PROPERTY_PREFIX = "property:";
 
 export const SEGMENT_FILTER_MAX_CONDITIONS = 50;
@@ -39,6 +50,32 @@ type TextOp = (typeof TEXT_OPS)[number];
 /** A text op that ignores its `value` — presence tests, not comparisons. */
 function isPresenceOp(op: TextOp): boolean {
   return op === "is_set" || op === "is_not_set";
+}
+
+const isDateOp = (op: string): boolean => (DATE_OPS as readonly string[]).includes(op);
+
+/**
+ * The instant a before/after value names. A JS Date decides what is valid,
+ * so forms like "2026" keep working, but it reads a date-time with no zone
+ * in the server's zone: parsePropertyDate reads the forms it knows in UTC,
+ * as stored values are read.
+ */
+function dateBound(value: string | null): Date {
+  const loose = new Date(value ?? "");
+  return Number.isNaN(loose.getTime()) ? loose : (parsePropertyDate(value ?? "") ?? loose);
+}
+
+/** What is wrong with a date op's value, or null: before/after take a date, the rest a count of days. */
+function dateValueIssue(op: string, value: string | null): string | null {
+  if (op === "before" || op === "after") {
+    // Postgres has no year 0 and misreads a signed, extended year, so a
+    // filter holding one could be stored but never counted.
+    const year = dateBound(value).getUTCFullYear();
+    return year >= 1 && year <= 9999 ? null : `operator "${op}" requires an ISO date`;
+  }
+  return isSegmentDayCount(value)
+    ? null
+    : `operator "${op}" requires a number of days from 1 to ${SEGMENT_FILTER_MAX_DAYS}`;
 }
 
 const conditionSchema = z
@@ -54,6 +91,13 @@ const conditionSchema = z
     if (isText) {
       if (isProperty && cond.field.slice(PROPERTY_PREFIX.length).length === 0) {
         ctx.addIssue({ code: "custom", message: "property field requires a key" });
+        return;
+      }
+      // Any property takes date ops whatever its type: a value that reads as
+      // no date matches none of them.
+      if (isProperty && isDateOp(cond.op)) {
+        const issue = dateValueIssue(cond.op, cond.value);
+        if (issue) ctx.addIssue({ code: "custom", message: issue });
         return;
       }
       if (!(TEXT_OPS as readonly string[]).includes(cond.op)) {
@@ -73,16 +117,12 @@ const conditionSchema = z
       return;
     }
     if (cond.field === "created_at") {
-      if (!(DATE_OPS as readonly string[]).includes(cond.op)) {
+      if (!isDateOp(cond.op)) {
         ctx.addIssue({ code: "custom", message: `unsupported operator "${cond.op}"` });
         return;
       }
-      // Postgres has no year 0 and misreads a signed, extended year, so a
-      // filter holding one could be stored but never counted.
-      const year = cond.value === null ? Number.NaN : new Date(cond.value).getUTCFullYear();
-      if (!(year >= 1 && year <= 9999)) {
-        ctx.addIssue({ code: "custom", message: `operator "${cond.op}" requires an ISO date` });
-      }
+      const issue = dateValueIssue(cond.op, cond.value);
+      if (issue) ctx.addIssue({ code: "custom", message: issue });
       return;
     }
     ctx.addIssue({ code: "custom", message: `unknown field "${cond.field}"` });
@@ -129,6 +169,41 @@ function textExpr(contacts: ContactsTable, field: string): SQL {
   return sql`${col}`;
 }
 
+/**
+ * parsePropertyDate in SQL: `text` read as a date, or null. Each shape is
+ * matched before its cast, so no stored value can make a cast fail.
+ */
+export function propertyDateSql(text: SQL): SQL<Date | null> {
+  const v = sql`btrim(${text})`;
+  const n = sql`${v}::numeric`;
+  const { from, to } = PROPERTY_EPOCH_SECONDS;
+  const p = PROPERTY_DATE_PATTERNS;
+  return sql<Date | null>`case
+    when ${v} ~ ${p.epoch} then case
+      when ${n} between ${from} and ${to} then to_timestamp(${n}::float8)
+      when ${n} between ${from * 1000} and ${to * 1000} then to_timestamp((${n} / 1000)::float8)
+    end
+    when ${v} ~ ${p.date} and pg_input_is_valid(${v}, 'date') then ${v}::date::timestamp at time zone 'UTC'
+    when ${v} ~ ${p.zoned} and pg_input_is_valid(${v}, 'timestamptz') then ${v}::timestamptz
+    when ${v} ~ ${p.local} and pg_input_is_valid(${v}, 'timestamp') then ${v}::timestamp at time zone 'UTC'
+  end`.mapWith(schema.contacts.createdAt);
+}
+
+/** A date op over the instant `at`, which never matches when `at` is null. */
+function dateConditionSql(at: SQL, op: string, value: string | null): SQL {
+  if (op === "before" || op === "after") {
+    // The instant the validator read, not the raw value: Postgres cannot read
+    // every form a JS Date accepts, such as "2026" or "2026-10".
+    const bound = dateBound(value).toISOString();
+    return op === "before"
+      ? sql`${at} < ${bound}::timestamptz`
+      : sql`${at} > ${bound}::timestamptz`;
+  }
+  const since = sql`now() - make_interval(days => ${Number(value)})`;
+  // A date still to come is in neither: it is not in the last N days, nor older.
+  return op === "in_last_days" ? sql`${at} between ${since} and now()` : sql`${at} < ${since}`;
+}
+
 function textConditionSql(expr: SQL, op: TextOp, value: string | null): SQL {
   switch (op) {
     case "equals":
@@ -163,14 +238,8 @@ function conditionSql(
       ? sql`${contacts.unsubscribed} = true`
       : sql`${contacts.unsubscribed} = false`;
   }
-  if (field === "created_at") {
-    // The instant the validator read, not the raw value: Postgres cannot read
-    // every form a JS Date accepts, such as "2026" or "2026-10".
-    const at = new Date(value ?? "").toISOString();
-    return op === "before"
-      ? sql`${contacts.createdAt} < ${at}::timestamptz`
-      : sql`${contacts.createdAt} > ${at}::timestamptz`;
-  }
+  if (field === "created_at") return dateConditionSql(sql`${contacts.createdAt}`, op, value);
+  if (isDateOp(op)) return dateConditionSql(propertyDateSql(textExpr(contacts, field)), op, value);
   return textConditionSql(textExpr(contacts, field), op as TextOp, value);
 }
 

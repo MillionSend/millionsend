@@ -1,3 +1,4 @@
+import { withLibpqSslmode } from "@millionsend/core/url";
 import { PgBoss } from "pg-boss";
 
 /**
@@ -121,6 +122,8 @@ export const DEAD_LETTER_QUEUES = {
 
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
 
+const DEAD_LETTER_NAMES: ReadonlySet<string> = new Set(Object.values(DEAD_LETTER_QUEUES));
+
 const JOB_QUEUES = [
   "email.send",
   "broadcast.send",
@@ -179,6 +182,12 @@ const EXPIRE_SECONDS: Partial<Record<JobName, number>> = {
  * table small enough that the supervisor's per-minute counts stay cheap.
  */
 const DELETE_AFTER_SECONDS = 3600;
+/**
+ * Options every cron run is enqueued with. pg-boss gives each scheduled run
+ * its schedule's options, and a run without deleteAfterSeconds takes its
+ * queue's, which for the cron queues is pg-boss's 7-day default.
+ */
+const CRON_RUN_OPTIONS = { deleteAfterSeconds: DELETE_AFTER_SECONDS } as const;
 
 const JOB_RETRY = { retryLimit: 10, retryBackoff: true, retryDelay: 5 } as const;
 
@@ -325,7 +334,7 @@ export class Queue {
     databaseUrl: string,
     opts: { workers?: boolean; onJobError?: JobErrorHook } = {},
   ): Promise<Queue> {
-    const base = { connectionString: databaseUrl, schema: "pgboss" };
+    const base = { connectionString: withLibpqSslmode(databaseUrl), schema: "pgboss" };
     if (!opts.workers) {
       return new Queue(await startBoss({ ...base, supervise: false, schedule: false, max: 2 }));
     }
@@ -364,9 +373,13 @@ export class Queue {
   async #ensureQueue(name: string, policy?: typeof JOB_QUEUE_POLICY): Promise<void> {
     if (this.#created.has(name)) return;
     const notify = NOTIFY_QUEUES.has(name);
+    // pg-boss builds a dead-letter copy from its queue's settings, not from the
+    // failed job's options, so that queue carries the retention itself.
+    const deleteAfterSeconds = DEAD_LETTER_NAMES.has(name) ? DELETE_AFTER_SECONDS : undefined;
     await this.#producer.createQueue(name, {
       ...(policy ? { policy } : {}),
       ...(notify ? { notify } : {}),
+      ...(deleteAfterSeconds ? { deleteAfterSeconds } : {}),
     });
     if (policy) {
       // createQueue is INSERT ... ON CONFLICT DO NOTHING: a pre-existing
@@ -387,6 +400,14 @@ export class Queue {
       // created before it existed.
       if (existing && notify && !existing.notify) {
         await this.#producer.updateQueue(name, { notify });
+      }
+    }
+    // createQueue leaves an existing queue as it was, so a dead-letter queue
+    // made without the retention gets it here.
+    if (deleteAfterSeconds) {
+      const existing = await this.#producer.getQueue(name);
+      if (existing && existing.deleteAfterSeconds !== deleteAfterSeconds) {
+        await this.#producer.updateQueue(name, { deleteAfterSeconds });
       }
     }
     this.#created.add(name);
@@ -592,7 +613,7 @@ export class Queue {
   async scheduleCrons(handlers: Record<CronJobName, () => Promise<void>>): Promise<void> {
     for (const [name, cron] of Object.entries(CRON_JOBS) as [CronJobName, string][]) {
       await this.#ensureQueue(name);
-      await this.#producer.schedule(name, cron, {}, { tz: "UTC" });
+      await this.#producer.schedule(name, cron, {}, { tz: "UTC", ...CRON_RUN_OPTIONS });
       await this.#workers.work(
         name,
         { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
@@ -614,7 +635,7 @@ export class Queue {
    */
   async runCronNow(name: CronJobName): Promise<void> {
     await this.#ensureQueue(name);
-    await this.#producer.send(name, {});
+    await this.#producer.send(name, {}, CRON_RUN_OPTIONS);
   }
 
   /**

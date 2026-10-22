@@ -95,6 +95,22 @@
     "./release-rules": {
       "types": "./src/inboxes/release-rules.ts",
       "default": "./src/inboxes/release-rules.ts"
+    },
+    "./limit-rules": {
+      "types": "./src/limit-rules.ts",
+      "default": "./src/limit-rules.ts"
+    },
+    "./contact-properties": {
+      "types": "./src/contact-properties.ts",
+      "default": "./src/contact-properties.ts"
+    },
+    "./property-date": {
+      "types": "./src/property-date.ts",
+      "default": "./src/property-date.ts"
+    },
+    "./url": {
+      "types": "./src/url.ts",
+      "default": "./src/url.ts"
     }
   },
   "scripts": {
@@ -104,10 +120,10 @@
   "dependencies": {
     "@millionsend/config": "workspace:*",
     "@millionsend/db": "workspace:*",
-    "@sentry/core": "^11.7.0",
-    "@sentry/node": "^11.7.0",
+    "@sentry/core": "^11.8.0",
+    "@sentry/node": "^11.8.0",
     "drizzle-orm": "^0.45.4",
-    "mailparser": "^3.9.38",
+    "mailparser": "^3.9.40",
     "mmdb-lib": "3.0.3",
     "tldts": "^7.4.18",
     "zod": "^4.6.7"
@@ -118,8 +134,8 @@
     "@types/mailparser": "^3.9.0",
     "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.1",
-    "nodemailer": "^10.1.0",
+    "nodemailer": "^10.1.2",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.4"
+    "vitest": "^5.0.5"
   }
 }

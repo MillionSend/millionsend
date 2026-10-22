@@ -146,6 +146,38 @@ describe("the team's id on the console's team screens", () => {
     );
   });
 
+  it("leads the review page with the warm-up card while a limit request is open", async () => {
+    const asking = await createTeam(db, "asking");
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId: asking, name: "mail.asking.example", region: "us-east-1" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    const caller = createCaller({
+      db,
+      session: {
+        user: { id: operatorId, email: "op@example.com", name: "Operator" },
+        session: { id: crypto.randomUUID(), createdAt: new Date() },
+      },
+      teamId: null,
+      role: null,
+    });
+    const warmupFirst = async () => {
+      h.review = await caller.console.safety.review({ teamId: asking });
+      const html = renderToStaticMarkup(createElement(ReviewView, { teamId: asking }));
+      return html.indexOf(">Domain warm-up</h3>") < html.indexOf(">Monitoring</h3>");
+    };
+    expect(await warmupFirst()).toBe(false);
+    await db.insert(schema.domainLimitRequests).values({
+      teamId: asking,
+      domainId: domain.id,
+      sends: "account",
+      perDay: 2000,
+      source: "new",
+    });
+    expect(await warmupFirst()).toBe(true);
+  });
+
   it("is one Copy ID away in the Teams list's row menu", () => {
     const copied: string[] = [];
     const team = {

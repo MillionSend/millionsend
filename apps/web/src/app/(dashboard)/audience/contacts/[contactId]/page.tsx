@@ -1,5 +1,6 @@
 "use client";
 
+import { storedPropertyValue } from "@millionsend/core/contact-properties";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -19,6 +20,7 @@ import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
 import { useTRPC } from "@/lib/trpc";
+import { propertyTypeRefusal } from "@/lib/trpc-error";
 
 /* Types the timeline knows how to phrase; unknown kinds (added later than this
    build) are skipped rather than crashing on a missing message key. */
@@ -90,6 +92,7 @@ export default function ContactDetailPage() {
   const [editTopics, setEditTopics] = useState<string[]>([]);
   const [editSegments, setEditSegments] = useState<string[]>([]);
   const [editProps, setEditProps] = useState<{ key: string; value: string }[]>([]);
+  const [tried, setTried] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const query = useQuery(
@@ -125,6 +128,7 @@ export default function ContactDetailPage() {
   );
   const setTopicMutation = useMutation(trpc.audience.contacts.setTopic.mutationOptions());
   const allSegmentsQuery = useQuery(trpc.segments.list.queryOptions());
+  const definedQuery = useQuery(trpc.audience.properties.defineList.queryOptions());
   const addSegmentMutation = useMutation(trpc.audience.contacts.addSegment.mutationOptions());
   const removeSegmentMutation = useMutation(trpc.audience.contacts.removeSegment.mutationOptions());
 
@@ -154,6 +158,31 @@ export default function ContactDetailPage() {
     addSegmentMutation.isPending ||
     removeSegmentMutation.isPending;
 
+  const propertyTypes = new Map(
+    (definedQuery.data ?? []).map((property) => [property.key.toLowerCase(), property.type]),
+  );
+  // A stored key goes back as written: the API keeps keys verbatim, so
+  // " seats" and "seats" are two properties. Only a key typed here is trimmed.
+  const sentKey = (key: string) => (row && Object.hasOwn(row.properties, key) ? key : key.trim());
+  // The server's refusal, for a type this page had not loaded yet.
+  const refused = updateMutation.error ? propertyTypeRefusal(updateMutation.error.message) : null;
+  const refusedValue = refused ? updateMutation.variables?.properties?.[refused.key] : undefined;
+  // What a row's value must read as to save, checked as the server checks it:
+  // only once it differs from the stored value. An empty value counts only
+  // after a save attempt, so a key typed before its value isn't flagged
+  // mid-entry. A refusal holds while its row keeps the refused value.
+  const propertyMustBe = (prop: { key: string; value: string }, afterSave: boolean) => {
+    const key = sentKey(prop.key);
+    if (!key || row?.properties[key] === prop.value || (prop.value === "" && !afterSave)) {
+      return null;
+    }
+    if (refused?.key === key && prop.value === refusedValue) return refused.mustBe;
+    const typed = storedPropertyValue(propertyTypes.get(key.toLowerCase()), prop.value);
+    return typed.ok ? null : typed.mustBe;
+  };
+  const propertiesInvalid = (afterSave: boolean) =>
+    editProps.some((prop) => propertyMustBe(prop, afterSave) !== null);
+
   const openEdit = () => {
     if (!row) return;
     setEditFirst(row.firstName ?? "");
@@ -161,16 +190,19 @@ export default function ContactDetailPage() {
     setEditTopics(subscribedTopics.map((topic) => topic.id));
     setEditSegments((segmentsQuery.data ?? []).map((segment) => segment.id));
     setEditProps(Object.entries(row.properties).map(([key, value]) => ({ key, value })));
+    setTried(false);
+    updateMutation.reset();
     setEditOpen(true);
   };
 
   const submitEdit = async () => {
-    if (!row || saving) return;
-    // Rows with a blank key are dropped; a repeated key keeps its
+    setTried(true);
+    if (!row || saving || propertiesInvalid(true)) return;
+    // Rows with an empty key are dropped; a repeated key keeps its
     // last value. Sent as the full replacement map (update semantics).
     const properties: Record<string, string> = {};
     for (const { key, value } of editProps) {
-      const k = key.trim();
+      const k = sentKey(key);
       if (k) properties[k] = value;
     }
     // Topic diffs go through the existing per-topic upsert; only effective
@@ -642,46 +674,57 @@ export default function ContactDetailPage() {
             {/* A shrinkable track: an auto one takes the two inputs' intrinsic
                 width and pushes the values and their ✕ off a phone's dialog. */}
             <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
-              {editProps.map((prop, i) => (
-                // Rows are positional and may hold blank keys mid-edit, so the
-                // array index is the only stable identity here.
-                // biome-ignore lint/suspicious/noArrayIndexKey: no stable id per row
-                <div key={i} style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="ms-input"
-                    style={{ flex: 1, minWidth: 0 }}
-                    placeholder={t("detail.propKeyPlaceholder")}
-                    disabled={saving}
-                    value={prop.key}
-                    onChange={(event) =>
-                      setEditProps((rows) =>
-                        rows.map((r, j) => (j === i ? { ...r, key: event.target.value } : r)),
-                      )
-                    }
-                  />
-                  <input
-                    className="ms-input"
-                    style={{ flex: 1, minWidth: 0 }}
-                    placeholder={t("detail.propValuePlaceholder")}
-                    disabled={saving}
-                    value={prop.value}
-                    onChange={(event) =>
-                      setEditProps((rows) =>
-                        rows.map((r, j) => (j === i ? { ...r, value: event.target.value } : r)),
-                      )
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="ms-btn ms-btn-ghost"
-                    aria-label={t("detail.removeProperty")}
-                    disabled={saving}
-                    onClick={() => setEditProps((rows) => rows.filter((_, j) => j !== i))}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
+              {editProps.map((prop, i) => {
+                const mustBe = propertyMustBe(prop, tried);
+                return (
+                  // Rows are positional and may hold blank keys mid-edit, so the
+                  // array index is the only stable identity here.
+                  // biome-ignore lint/suspicious/noArrayIndexKey: no stable id per row
+                  <div key={i}>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        className="ms-input"
+                        style={{ flex: 1, minWidth: 0 }}
+                        placeholder={t("detail.propKeyPlaceholder")}
+                        disabled={saving}
+                        value={prop.key}
+                        onChange={(event) =>
+                          setEditProps((rows) =>
+                            rows.map((r, j) => (j === i ? { ...r, key: event.target.value } : r)),
+                          )
+                        }
+                      />
+                      <input
+                        className={`ms-input${mustBe ? " error" : ""}`}
+                        style={{ flex: 1, minWidth: 0 }}
+                        placeholder={t("detail.propValuePlaceholder")}
+                        aria-invalid={mustBe !== null}
+                        disabled={saving}
+                        value={prop.value}
+                        onChange={(event) =>
+                          setEditProps((rows) =>
+                            rows.map((r, j) => (j === i ? { ...r, value: event.target.value } : r)),
+                          )
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="ms-btn ms-btn-ghost"
+                        aria-label={t("detail.removeProperty")}
+                        disabled={saving}
+                        onClick={() => setEditProps((rows) => rows.filter((_, j) => j !== i))}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {mustBe ? (
+                      <span className="ms-field-error" style={{ margin: "6px 0 0" }}>
+                        {t(`detail.propertyMustBe.${mustBe}`, { name: prop.key.trim() })}
+                      </span>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
             <button
               type="button"
@@ -698,7 +741,11 @@ export default function ContactDetailPage() {
             <button type="button" className="ms-btn ms-btn-secondary" onClick={closeEdit}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
-            <button type="submit" className="ms-btn ms-btn-primary" disabled={saving}>
+            <button
+              type="submit"
+              className="ms-btn ms-btn-primary"
+              disabled={saving || propertiesInvalid(tried)}
+            >
               <BtnSpinner on={saving} />
               {t("detail.saveConfirm")} <ConfirmKeycap />
             </button>

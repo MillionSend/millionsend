@@ -27,6 +27,7 @@ import { useTeamActions } from "../team-actions";
 import { LinkedTeams } from "../teams/linked-teams";
 import {
   CardHead,
+  LINK_BUTTON,
   LoadErrorCard,
   ReasonLabel,
   scoreColor,
@@ -37,6 +38,12 @@ import { RevealCell, type RevealTeam, useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
 
 const TILE: React.CSSProperties = { padding: "16px 20px" };
+const DIALOG_LEAD: React.CSSProperties = {
+  margin: "0 0 18px",
+  fontSize: 13,
+  color: "var(--ms-muted)",
+  textWrap: "pretty",
+};
 // The monitoring rows are sentences, not figures: sans, left, the body size.
 const KV_VALUE: React.CSSProperties = {
   fontFamily: "var(--ms-font-sans)",
@@ -133,6 +140,15 @@ export function ReviewView({ teamId }: { teamId: string }) {
       flagLabel: safety(`reasons.${flag?.reason ?? "manual"}`),
     });
   const exempt = monitor.tier === "exempt";
+  const warmupCard = (
+    <WarmupCard
+      team={{ id: team.id, name: team.name }}
+      warmup={query.data.warmup}
+      onChanged={refetch}
+    />
+  );
+  // An open limit request is what the operator came to answer: its card leads.
+  const asking = query.data.warmup.domains.some((domain) => domain.request);
   const modelDetail = (reasons: string[] | null) => () =>
     reasons ? <ReasonCodes codes={reasons} /> : t("emails.notFlagged");
   const percentRate = (rate: number) =>
@@ -343,6 +359,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         <Tile label={t("tiles.contacts")}>{nf.format(team.contacts)}</Tile>
       </div>
       <LinkedTeams teamId={team.id} framed />
+      {asking ? warmupCard : null}
 
       <div className="ms-card" style={{ padding: 20, marginBottom: 16 }}>
         <div
@@ -719,11 +736,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         )}
       </div>
 
-      <WarmupCard
-        team={{ id: team.id, name: team.name }}
-        warmup={query.data.warmup}
-        onChanged={refetch}
-      />
+      {asking ? null : warmupCard}
 
       <div className="ms-card" style={{ padding: 0 }}>
         <CardHead inset title={t("audit.title")} subtitle={t("audit.subtitle")} />
@@ -779,9 +792,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         onConfirm={submitFlag}
         title={t("openFlagTitle", { team: team.name })}
       >
-        <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>
-          {t("openFlagLead")}
-        </p>
+        <p style={DIALOG_LEAD}>{t("openFlagLead")}</p>
         <div className="ms-field">
           <label htmlFor="safety-flag-note">{common("note")}</label>
           <textarea
@@ -944,12 +955,32 @@ type WarmupOverview = {
     ageCheckedAt: Date | string | null;
     trustedAt: Date | string | null;
     today: { cap: number; used: number; fullAt: Date | string | null } | null;
+    waiting: number;
+    /** The team's open request to lift the limit on this domain. */
+    request: {
+      id: string;
+      perDay: number;
+      sends: string;
+      source: string;
+      note: string | null;
+      createdAt: Date | string;
+      requesterEmail: string | null;
+    } | null;
   }[];
   pool: { cap: number; used: number } | null;
+  waiting: number;
 };
+type WarmupDomain = WarmupOverview["domains"][number];
 
-/** The team's domains under the new-domain warm-up, and the operator's trust over it. */
-function WarmupCard({
+/** A trust change the operator asked for, until they confirm it: the team's own, or one domain's. */
+type TrustChange = { trusted: boolean; domain?: WarmupDomain };
+
+/**
+ * The team's domains under the new-domain warm-up, the team's open requests
+ * to lift it, and the operator's trust over it. Every trust change and
+ * every decline waits for a confirm that says what it does.
+ */
+export function WarmupCard({
   team,
   warmup,
   onChanged,
@@ -959,12 +990,35 @@ function WarmupCard({
   onChanged: () => void;
 }) {
   const t = useTranslations("console.safety.review.warmup");
+  const requestT = useTranslations("console.safety.limitRequests");
   const common = useTranslations("console.common");
   const locale = useLocale();
   const nf = new Intl.NumberFormat(locale);
   const trpc = useTRPC();
   const trust = useMutation(trpc.console.safety.setWarmupTrust.mutationOptions());
-  const set = (trusted: boolean, domain?: { id: string; name: string }) =>
+  const decline = useMutation(trpc.console.safety.declineLimitRequest.mutationOptions());
+  const [change, setChange] = useState<TrustChange | null>(null);
+  const [declining, setDeclining] = useState<WarmupDomain | null>(null);
+  const busy = trust.isPending || decline.isPending;
+  const close = () => setChange(null);
+  const confirmDecline = () => {
+    const request = declining?.request;
+    if (!declining || !request || decline.isPending) return;
+    decline.mutate(
+      { requestId: request.id },
+      {
+        onSuccess: () => {
+          toast(t("toast.declined", { name: declining.name }));
+          setDeclining(null);
+          onChanged();
+        },
+        onError: (error) => toast(t("toast.declineError", { message: error.message }), "danger"),
+      },
+    );
+  };
+  const confirm = () => {
+    if (!change || trust.isPending) return;
+    const { trusted, domain } = change;
     trust.mutate(
       { teamId: team.id, trusted, ...(domain ? { domainId: domain.id } : {}) },
       {
@@ -972,13 +1026,23 @@ function WarmupCard({
           toast(
             t(trusted ? "toast.trusted" : "toast.untrusted", { name: domain?.name ?? team.name }),
           );
+          setChange(null);
           onChanged();
         },
+        onError: (error) => toast(t("toast.error", { message: error.message }), "danger"),
       },
     );
+  };
   const teamTrusted = warmup.trustedAt !== null;
+  const ask = `dialog.${change?.trusted === false ? "untrust" : "trust"}${change?.domain ? "Domain" : "Team"}`;
+  // A trust grants the open requests it covers, and the team hears so by email.
+  const granted = !change?.trusted
+    ? 0
+    : change.domain
+      ? Number(change.domain.request !== null)
+      : warmup.domains.filter((domain) => domain.request).length;
   return (
-    <div className="ms-card" style={{ padding: 0, marginBottom: 16 }}>
+    <div className="ms-card ms-card-table" style={{ marginBottom: 16 }}>
       <div
         style={{
           display: "flex",
@@ -1003,10 +1067,9 @@ function WarmupCard({
         <button
           type="button"
           className="ms-btn ms-btn-secondary"
-          disabled={trust.isPending}
-          onClick={() => set(!teamTrusted)}
+          disabled={busy}
+          onClick={() => setChange({ trusted: !teamTrusted })}
         >
-          <BtnSpinner on={trust.isPending} />
           {t(teamTrusted ? "untrustTeam" : "trustTeam")}
         </button>
       </div>
@@ -1032,50 +1095,180 @@ function WarmupCard({
               </td>
             </tr>
           ) : (
-            warmup.domains.map((domain) => (
-              <tr key={domain.id}>
-                <td className="ms-mono">{domain.name}</td>
-                <td style={{ color: "var(--ms-muted)" }}>
-                  {domain.registeredAt
-                    ? t("registered", {
-                        date: formatDay(domain.registeredAt, locale),
-                        source: t(`sources.${domain.ageSource ?? "unknown"}`),
-                      })
-                    : t(domain.ageCheckedAt ? "unknownAge" : "notChecked")}
-                </td>
-                <td>
-                  {domain.trustedAt
-                    ? t("trusted")
-                    : domain.today
-                      ? t(domain.today.fullAt ? "today" : "todayNoDate", {
-                          used: nf.format(domain.today.used),
-                          cap: nf.format(domain.today.cap),
-                          date: domain.today.fullAt ? formatDay(domain.today.fullAt, locale) : "",
-                        })
-                      : t("full")}
-                </td>
-                <td className="right">
-                  <button
-                    type="button"
-                    className="ms-link"
-                    style={{
-                      font: "inherit",
-                      padding: 0,
-                      background: "none",
-                      border: 0,
-                      cursor: "pointer",
-                    }}
-                    disabled={trust.isPending}
-                    onClick={() => set(!domain.trustedAt, domain)}
-                  >
-                    {t(domain.trustedAt ? "untrustDomain" : "trustDomain")}
-                  </button>
-                </td>
-              </tr>
-            ))
+            warmup.domains.map((domain) => {
+              const request = domain.request;
+              // A request's line reads as part of its domain's row.
+              const joined = request ? { borderBottom: 0 } : undefined;
+              return (
+                <Fragment key={domain.id}>
+                  <tr>
+                    <td className="ms-mono" style={joined}>
+                      {domain.name}
+                    </td>
+                    <td style={{ color: "var(--ms-muted)", ...joined }}>
+                      {domain.registeredAt
+                        ? t("registered", {
+                            date: formatDay(domain.registeredAt, locale),
+                            source: t(`sources.${domain.ageSource ?? "unknown"}`),
+                          })
+                        : t(domain.ageCheckedAt ? "unknownAge" : "notChecked")}
+                    </td>
+                    <td style={joined}>
+                      {domain.trustedAt
+                        ? t("trusted")
+                        : domain.today
+                          ? t(domain.today.fullAt ? "today" : "todayNoDate", {
+                              used: nf.format(domain.today.used),
+                              cap: nf.format(domain.today.cap),
+                              date: domain.today.fullAt
+                                ? formatDay(domain.today.fullAt, locale)
+                                : "",
+                            })
+                          : t("full")}
+                      {domain.waiting > 0 ? (
+                        <>
+                          {" "}
+                          <span style={{ color: "var(--ms-warn)" }}>
+                            · {t("waiting", { count: nf.format(domain.waiting) })}
+                          </span>
+                        </>
+                      ) : null}
+                    </td>
+                    <td className="right" style={joined}>
+                      <button
+                        type="button"
+                        className="ms-link"
+                        style={LINK_BUTTON}
+                        disabled={busy}
+                        onClick={() => setChange({ trusted: !domain.trustedAt, domain })}
+                      >
+                        {t(domain.trustedAt ? "untrustDomain" : "trustDomain")}
+                      </button>
+                      {request ? (
+                        <>
+                          {" · "}
+                          <button
+                            type="button"
+                            className="ms-link"
+                            style={LINK_BUTTON}
+                            disabled={busy}
+                            onClick={() => setDeclining(domain)}
+                          >
+                            {t("declineDomain")}
+                          </button>
+                        </>
+                      ) : null}
+                    </td>
+                  </tr>
+                  {request ? (
+                    <tr>
+                      <td colSpan={4} style={{ paddingTop: 0, paddingBottom: 10 }}>
+                        <div style={{ color: "var(--ms-bone)" }}>
+                          <DotParts
+                            lead={
+                              <span
+                                className="ms-dot"
+                                style={{
+                                  background: "var(--ms-warn)",
+                                  marginRight: 8,
+                                  verticalAlign: "middle",
+                                }}
+                              />
+                            }
+                            text={[
+                              t("request.line", {
+                                perDay: nf.format(request.perDay),
+                                sends: requestT(`sends.${request.sends}`),
+                                source: requestT(`source.${request.source}`),
+                              }),
+                              ...(request.requesterEmail
+                                ? [t("request.by", { email: request.requesterEmail })]
+                                : []),
+                            ].join(" · ")}
+                            tail={<RelativeTime date={request.createdAt} />}
+                          />
+                        </div>
+                        {request.note ? (
+                          <div
+                            style={{
+                              marginTop: 2,
+                              paddingLeft: 16,
+                              fontSize: 12.5,
+                              whiteSpace: "pre-line",
+                              overflowWrap: "anywhere",
+                            }}
+                          >
+                            “{request.note}”
+                          </div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })
           )}
         </tbody>
       </Table>
+      <Modal
+        open={change !== null}
+        onClose={close}
+        onConfirm={confirm}
+        title={t(`${ask}.title`, { name: change?.domain?.name ?? team.name })}
+      >
+        <p style={DIALOG_LEAD}>
+          {t(`${ask}.lead`, {
+            count: change?.domain?.waiting ?? warmup.waiting,
+            kept: warmup.domains.filter((d) => d.trustedAt).length,
+            teamTrust: teamTrusted ? "trusted" : "other",
+          })}
+          {granted > 0 ? ` ${t("dialog.requestLifted", { count: granted })}` : null}
+        </p>
+        <ModalFooter>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={close}>
+            {common("cancel")}
+            <span className="ms-keycap">Esc</span>
+          </button>
+          <button
+            type="button"
+            className={`ms-btn ${change?.trusted === false ? "ms-btn-destructive" : "ms-btn-primary"}`}
+            disabled={trust.isPending}
+            onClick={confirm}
+          >
+            <BtnSpinner on={trust.isPending} />
+            {t(`${ask}.confirm`)}
+            <ConfirmKeycap />
+          </button>
+        </ModalFooter>
+      </Modal>
+      <Modal
+        open={declining !== null}
+        onClose={() => setDeclining(null)}
+        onConfirm={confirmDecline}
+        title={t("dialog.decline.title", { name: declining?.name ?? "" })}
+      >
+        <p style={DIALOG_LEAD}>{t("dialog.decline.lead")}</p>
+        <ModalFooter>
+          <button
+            type="button"
+            className="ms-btn ms-btn-secondary"
+            onClick={() => setDeclining(null)}
+          >
+            {common("cancel")}
+            <span className="ms-keycap">Esc</span>
+          </button>
+          <button
+            type="button"
+            className="ms-btn ms-btn-destructive"
+            disabled={decline.isPending}
+            onClick={confirmDecline}
+          >
+            <BtnSpinner on={decline.isPending} />
+            {t("dialog.decline.confirm")}
+            <ConfirmKeycap />
+          </button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 }

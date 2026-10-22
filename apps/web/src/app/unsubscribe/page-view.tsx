@@ -256,6 +256,20 @@ export function UnsubscribePageView({
               {successHeading ?? m.done}
             </p>
             <p style={{ margin: "10px 0 0", fontSize: 15, color: "var(--ms-muted)" }}>{doneText}</p>
+            {/* A topic-only opt-out leaves the sender's other mail coming, so
+                the way out of everything stays on the page. */}
+            {topicName ? (
+              <form
+                method="post"
+                action={formAction}
+                style={{ marginTop: 20, display: "flex", justifyContent: "center" }}
+              >
+                <input type="hidden" name="scope" value="all" />
+                <button type="submit" className="ms-btn ms-btn-secondary">
+                  {m.buttonAll}
+                </button>
+              </form>
+            ) : null}
           </>
         ) : (
           <>
@@ -267,7 +281,9 @@ export function UnsubscribePageView({
                 {/* Two forms, one button row: saving preferences must not
                     trigger the unsubscribe, so each button submits its own
                     form via the `form` attribute (plain HTML — the page
-                    ships no JS). The hidden `prefs` marker routes the POST. */}
+                    ships no JS). The hidden `prefs` and `scope` markers
+                    route the POST: "Unsubscribe from all" is the global
+                    opt-out, even on one topic's link. */}
                 <form
                   method="post"
                   action={formAction}
@@ -309,10 +325,12 @@ export function UnsubscribePageView({
                     ))}
                   </div>
                 </form>
-                <form method="post" action={formAction} id="ms-unsub-all" />
+                <form method="post" action={formAction} id="ms-unsub-all">
+                  <input type="hidden" name="scope" value="all" />
+                </form>
                 <div className="ms-actions" style={{ justifyContent: "center", marginTop: 20 }}>
                   <button type="submit" form="ms-unsub-all" className="ms-btn ms-btn-secondary">
-                    {m.button}
+                    {m.buttonAll}
                   </button>
                   <button
                     type="submit"

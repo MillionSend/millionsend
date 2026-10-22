@@ -117,6 +117,11 @@ remaining deltas are deliberate and loud:
 - Contacts are team-global — audience endpoints are served as aliases of
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
+- Contact properties take a third type, `date`, beside Resend's `string` and
+  `number`. Only a team that defines one sees it: its values come back from
+  `GET /contacts/{id}` as `{ "type": "date", "value": "2026-01-08" }`, a type
+  Resend's SDK types don't list. See
+  [Contacts → Property types](/concepts/contacts#property-types).
 - `POST /domains` takes an optional `region`, which must be one of the SES
   regions the deployment serves — the values its request schema lists, the
   first being the default — and is rejected with `422` otherwise. A domain
@@ -134,11 +139,14 @@ remaining deltas are deliberate and loud:
   the capacity available now, a `warning` (`paced` or `queued_behind`, with
   `days` and a message). From a domain whose
   [warm-up](/concepts/domains#warm-up) is on, the `warning` is `warming_up`
-  instead, with `days: 0` while the warm-up is paused. Broadcast reads carry
-  `sent_count` and a live `finishes_at`, and a cancel answers with
-  `canceled_remaining`. An audience that needs more than 24 days of
-  capacity, or of the domain's warm-up, is refused with
-  `422 broadcast_too_large`. See [Broadcasts](/concepts/broadcasts#pacing).
+  instead, with `days: 0` while the warm-up is paused. From a domain under
+  the [new domain limit](/concepts/domains#new-domain-limit), the estimate
+  follows the limit's schedule and the `warning` is `new_domain_limit`.
+  Broadcast reads carry `sent_count` and a live `finishes_at`, and a cancel
+  answers with `canceled_remaining`. An audience that needs more than 24 days
+  of capacity, or of the domain's warm-up, is refused with
+  `422 broadcast_too_large`. The new domain limit alone never refuses one.
+  See [Broadcasts](/concepts/broadcasts#pacing).
 - `POST /emails` and `POST /emails/batch` return `429 daily_quota_exceeded`
   on a daily plan (Free, Starter) when the day's sending quota is spent and
   the queued backlog is full — retry after the UTC day rolls over — and
@@ -149,7 +157,17 @@ remaining deltas are deliberate and loud:
   accepted or refused whole. On any plan, a domain still under the
   [new domain limit](/concepts/domains#new-domain-limit) answers the same
   `429 daily_quota_exceeded`, with a message naming that limit, once a lot
-  of mail is already waiting.
+  of mail is already waiting. Both daily refusals carry a `Retry-After`
+  header with the seconds until 00:00 UTC.
+- An email the [new domain limit](/concepts/domains#new-domain-limit) holds
+  is still accepted, and `POST /emails`, or its item of `POST /emails/batch`,
+  answers with a `warning`: `code` `new_domain_limit`, a `message`, and
+  `sends_after`, the earliest it goes out. `GET /emails/{id}` and
+  `GET /emails` keep `last_event: "queued"` for an email that waits, as
+  Resend clients expect, and add `queued_reason` (`new_domain_limit`,
+  `warming_up`, `daily_quota`, `monthly_quota` or `capacity`, and `null` when it
+  isn't waiting) and `sends_after` (`null` when no time is known, as for
+  `capacity` and `warming_up`). Clients that don't know these fields ignore them.
 - `POST /contacts`, `POST /contacts/batch` and the audience alias return
   `403 plan_limit_reached` when a new contact would take the team past its
   plan's contact cap (1,000 on Free; paid plans are unlimited). Existing
@@ -171,7 +189,11 @@ remaining deltas are deliberate and loud:
   `topic_id`, a pair you supply replaces the generated one: one-click requests
   then reach your endpoint, MillionSend records no opt-out for them, and an
   `{{{UNSUBSCRIBE_URL}}}` placeholder in the body still resolves to
-  MillionSend's page.
+  MillionSend's page. MillionSend generates the pair and resolves the
+  placeholder only when the send goes to a single address that is a contact:
+  the link opts out the contact it names, and every `to`, `cc` and `bcc` copy
+  carries the same message. A send to more than one address carries no
+  generated pair, and its placeholders are removed.
 - A send whose every `to` recipient is on the suppression list or opted out of
   the `topic_id` is refused with `422 all_recipients_suppressed` (message
   `All recipients are suppressed`) instead of Resend's `200`; recipients
@@ -284,6 +306,20 @@ Errors use Resend's format:
 
 A body that isn't valid JSON answers `400 invalid_parameter`, and a body sent
 with a `Content-Type` other than `application/json` answers `415`.
+
+A `429` for a daily limit, such as `daily_quota_exceeded`, carries a
+`Retry-After` header with the seconds until 00:00 UTC, when the limit resets:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 8880
+
+{
+  "statusCode": 429,
+  "name": "daily_quota_exceeded",
+  "message": "nova.example sends up to 300 emails a day for now, and 5,000 are already waiting. Retry after 00:00 UTC."
+}
+```
 
 A path the API doesn't have, or a method its path doesn't take, answers
 `404 not_found` with the message `The requested endpoint does not exist.`

@@ -60,11 +60,11 @@ que outra equipe já tem está tomado em todas as regiões.
 ## Limite de domínio novo
 
 No MillionSend Cloud, um domínio registrado há pouco tempo envia aos poucos
-enquanto constrói reputação com os provedores de e-mail. A idade é a do
-domínio registrado (`acme.com` para `mail.acme.com`; um nome de um serviço
-gratuito de subdomínios, como `shop.eu.org`, conta como domínio próprio),
-lida de dados públicos quando o domínio é adicionado, e o limite conta por
-dia UTC:
+enquanto constrói reputação com os provedores de e-mail. Vale a idade do
+domínio registrado, então `mail.acme.com` conta como `acme.com`, e um nome de
+um serviço gratuito de subdomínios, como `shop.eu.org`, conta como domínio
+próprio. A idade vem de dados públicos quando o domínio é adicionado, e o
+limite conta por dia UTC:
 
 | Idade do domínio | E-mails por dia |
 | --- | --- |
@@ -73,25 +73,80 @@ dia UTC:
 | De 7 a 30 dias | 2.000 |
 | 30 dias ou mais | só o limite do seu plano |
 
-Um domínio que envia de forma limpa (poucos bounces, nenhuma reclamação de
-spam) sobe um degrau antes. O limite vale além do seu plano, e mudar de plano
-não o libera. Enquanto ele vale, a página do domínio mostra "Limite de
-domínio novo: N/dia hoje · volume total a partir de …".
+Um domínio que envia sem problemas (poucos bounces, nenhuma reclamação de
+spam) sobe um degrau antes. O limite vale além do seu plano, e um plano maior
+não muda isso.
 
-Os domínios novos da sua equipe compartilham um único volume diário, o maior
+Os domínios novos da sua equipe dividem um único volume diário, o maior
 entre os limites deles, e cada um continua dentro do seu: adicionar outro
-domínio novo não acrescenta volume. Domínios com 30 dias ou mais ficam de
+domínio novo não aumenta o volume. Domínios com 30 dias ou mais ficam de
 fora. Quando mais de um domínio seu está sob esse limite, a página do domínio
-avisa que o volume é compartilhado.
-
-O que passa do limite do dia nunca é recusado nem perdido: é aceito, aparece
-como **Aguardando** e sai conforme o limite permite, do mais antigo para o
-mais novo. Só quando já há muita coisa aguardando um envio responde
-`429 daily_quota_exceeded` (SMTP `452`) com uma mensagem que cita esse
-limite. Tente de novo depois da virada do dia UTC.
+avisa que o volume é dividido.
 
 Esse limite é automático e separado do [aquecimento](#aquecimento) opcional
 abaixo. Quando os dois valem, uma transmissão sai dentro do menor deles.
+
+### O que você vê
+
+- **E-mails:** cada e-mail que o limite segura aparece como **Aguardando ·
+  limite diário**, e **Quando** mostra a partir de que horas ele sai, no seu
+  fuso. Um aviso acima da lista diz quantos e-mails estão esperando o limite
+  de qual domínio e que eles saem sozinhos depois das 00:00 UTC.
+- **A página do e-mail** diz que ele espera o limite diário do domínio,
+  quantos e-mails de hoje já saíram, quantos estão na frente dele e quando
+  ele deve sair.
+- **Domínios:** um domínio sob o limite mostra o volume por dia e quantos
+  e-mails estão esperando. A dica ao passar o mouse mostra o calendário do
+  limite.
+- **A página do domínio** tem a seção **Limite de domínio novo**, com o que
+  o domínio enviou hoje, o que está esperando, como o limite cresce e quando
+  ele acaba.
+- **E-mails para os donos da equipe:** **Seu domínio está verificado** avisa
+  que o domínio começa com um limite diário e quando ele acaba. **Seu
+  domínio novo atingiu o limite de hoje** diz quantos e-mails estão
+  esperando, no máximo uma vez por dia por domínio. Desligue esse aviso em
+  **Domínios**, em **Configurações → Notificações**.
+
+### E-mails que esperam
+
+O que passa do limite do dia nunca é recusado. É aceito, espera e sai
+sozinho depois das 00:00 UTC, do mais antigo para o mais novo, com os
+e-mails transacionais na frente das transmissões, então não precisa enviar
+de novo. Nada que está esperando se perde enquanto o conteúdo dos e-mails é
+guardado: 30 dias no Cloud, ou a retenção de e-mails da instância quando
+auto-hospedado.
+
+Pela API, um envio que o limite segura responde com um `warning`:
+
+```json
+{
+  "id": "4f1c9a2e-7b3d-4e8a-9c61-2d5f8e0b7a14",
+  "warning": {
+    "code": "new_domain_limit",
+    "message": "nova.example sent its 300 emails for today. This email goes out after 00:00 UTC.",
+    "sends_after": "2026-10-21T00:00:00.000Z"
+  }
+}
+```
+
+Cada item de `POST /emails/batch` que o limite segura traz o mesmo
+`warning`. `GET /emails/{id}` e `GET /emails` mantêm `last_event: "queued"`,
+como os clientes do Resend esperam, e acrescentam
+`queued_reason: "new_domain_limit"` com `sends_after`, o horário mais cedo
+em que o e-mail sai. Só quando já há muito e-mail esperando um envio responde
+`429 daily_quota_exceeded` (SMTP `452`), com uma mensagem que cita o limite e
+um header `Retry-After` que conta até as 00:00 UTC.
+
+### Pedir um limite maior
+
+Quando o domínio vai assumir e-mails que já têm histórico de envio, como um
+produto que está saindo de outro provedor de e-mail, use **Pedir um limite
+maior** na página do domínio. Conte o que ele envia, mais ou menos quantos
+e-mails por dia e por onde eles saem hoje. Donos e administradores podem
+pedir, com um pedido aberto por domínio. Enquanto isso, os e-mails continuam
+saindo no ritmo atual, e os donos da equipe e quem fez o pedido recebem a
+resposta por e-mail. Você também pode responder a qualquer um dos e-mails
+acima.
 
 ## Aquecimento
 
@@ -149,7 +204,11 @@ atividade mais recente entre estes sinais. Você escolhe quais contam na aba
   últimos 30 dias.
 - Uma propriedade do contato que você escolhe, lida como data, como o último
   login. Ela aceita uma data ou data e hora ISO 8601, ou um timestamp Unix em
-  segundos ou milissegundos.
+  segundos ou milissegundos entre os anos 2000 e 2100, para que uma contagem
+  nunca seja lida como data. A lista mostra primeiro suas
+  [propriedades de data](/pt-BR/concepts/contacts#tipos-de-propriedade) e
+  depois as outras propriedades em que pelo menos metade dos valores são
+  datas, lidas nos 20.000 contatos atualizados mais recentemente.
 
 Um contato cujo sinal mais recente tem 90 dias ou mais está inativo. Por
 padrão, o aquecimento pula os contatos inativos: eles não recebem a
@@ -248,7 +307,16 @@ domínio aparece como **Parcial** no painel: verificado para enviar, com o
 rastreamento ainda não ativo. No Cloudflare, o registro de rastreamento precisa
 ficar como **somente DNS** (nuvem cinza): um CNAME com proxy responde com os
 endereços do Cloudflare em vez do alvo, o que a tabela de registros mostra como
-divergência, e o TLS do host de rastreamento é servido pelo MillionSend.
+divergência, e o TLS do host de rastreamento é servido pelo MillionSend. Um host
+de rastreamento só redireciona os links da equipe cujo domínio o detém, e um
+domínio passa a deter seu host de rastreamento ao ser verificado, mesmo que
+depois perca a verificação. No MillionSend Cloud, um host que nenhum domínio
+detém não redireciona nada: depois que você troca o subdomínio de rastreamento
+ou exclui o domínio ou a equipe, os links já enviados pelo host antigo deixam de
+redirecionar, e só voltam se a equipe adicionar o domínio de novo com o mesmo
+subdomínio de rastreamento e ele for verificado. Uma instância auto-hospedada
+redireciona os links de qualquer equipe por um host que nenhum domínio detém;
+por isso, remova o CNAME de rastreamento ao abrir mão de um host.
 
 ## Precisão da taxa de abertura
 

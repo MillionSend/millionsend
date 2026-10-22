@@ -122,6 +122,11 @@ The send tells you up front:
   `queued_behind` when other sends are ahead (the message says when this one
   starts). A domain warming up answers `warming_up` instead (see
   [Warm-up](#warm-up)).
+- From a domain under the
+  [new domain limit](/concepts/domains#new-domain-limit), the estimate
+  follows the limit's schedule, and `warning` is `new_domain_limit` when the
+  limit spreads the send over days. The limit alone never makes a send too
+  large: when the estimate can't tell when it ends, `finishes_at` is `null`.
 - While a broadcast is going out, `GET /broadcasts/{id}` and the list carry a
   live `finishes_at` and `sent_count`.
 - An audience that would need more than 24 days of capacity — the

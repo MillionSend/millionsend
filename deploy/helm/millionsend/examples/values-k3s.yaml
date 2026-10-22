@@ -17,17 +17,19 @@ config:
   SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events"
   SES_CONFIGURATION_SET: "millionsend"
   # Traefik is the only hop and appends the client address to
-  # X-Forwarded-For itself, so TRUSTED_PROXIES stays unset. With a
-  # Cloudflare tunnel or another proxy in front of Traefik, see "Client
-  # addresses" in the README.
+  # X-Forwarded-For itself, so TRUSTED_PROXIES stays unset. That address is
+  # the client's only once Traefik's own Service keeps it, with
+  # externalTrafficPolicy: Local set through a HelmChartConfig. "Client
+  # addresses" in the README has the recipe, and what changes with a
+  # Cloudflare tunnel or another proxy in front of Traefik.
 
 # The role trusts this cluster's service-account issuer for
 # system:serviceaccount:<namespace>:millionsend (the name pinned below, so
-# the trust policy does not depend on the release name). It needs the
-# millionsend-ses permissions (infra/millionsend-ses.cfn.yaml) plus
-# sqs:ReceiveMessage, sqs:DeleteMessage and sqs:GetQueueAttributes on the
-# events queue. The issuer's discovery document and JWKS must be reachable
-# by AWS: README, "Any cluster: aws.webIdentity", has the k3s recipe.
+# the trust policy does not depend on the release name). Attach the
+# millionsend-ses policy to it; one that predates the policy's reads of the
+# events queue needs a new version (README, "AWS credentials without static
+# keys"). The issuer's discovery document and JWKS must be reachable by
+# AWS: README, "Any cluster: aws.webIdentity", has the k3s recipe.
 aws:
   webIdentity:
     enabled: true
@@ -67,7 +69,7 @@ ingress:
     - secretName: millionsend-tls
       hosts: [mail.example.com, api.mail.example.com]
 
-# Requests near the use measured on a small production instance (web
+# Requests near the use measured on a small self-hosted instance (web
 # ~185Mi, api ~120Mi, worker ~145Mi) with headroom; the limits absorb
 # peaks.
 web:

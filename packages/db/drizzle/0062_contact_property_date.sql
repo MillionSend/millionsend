@@ -1,0 +1,1 @@
+ALTER TYPE "public"."contact_property_type" ADD VALUE 'date';

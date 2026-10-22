@@ -43,8 +43,8 @@ describe("the Emails list", () => {
     expect(to).toMatch(
       /^<span class="ms-lead"><span class="ms-tooltip-trigger inline"[^>]*><span role="img"[^>]*>.*?<\/span><\/span><a class="ms-lead-value" href="\/emails\/e1"><span class="ms-truncate">inbox-k3v9x2rq@fabrikam\.example\.com<\/span><\/a><span class="ms-tooltip-trigger inline"[^>]*><span class="ms-lead-more">\+2<\/span><\/span><\/span>$/,
     );
-    expect(html).toContain('<th style="width:35%">To</th>');
-    expect(html).toContain('<th style="width:14%">Status</th>');
+    expect(html).toContain('<th style="width:33%">To</th>');
+    expect(html).toContain('<th style="width:18%">Status</th>');
   });
 
   it("names the status on the envelope tile in the badge's own words", () => {

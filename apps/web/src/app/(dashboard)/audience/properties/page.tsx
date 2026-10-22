@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  CONTACT_PROPERTY_TYPES,
+  type ContactPropertyType,
+  storedPropertyValue,
+} from "@millionsend/core/contact-properties";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
@@ -23,7 +28,17 @@ import { AudienceTabs } from "../audience-tabs";
 
 type DeleteTarget = { id: string; key: string };
 type Coverage = { contactCount: number; totalContacts: number };
-type PropertyType = "string" | "number";
+
+const TYPE_LABEL = {
+  string: "typeString",
+  number: "typeNumber",
+  date: "typeDate",
+} as const satisfies Record<ContactPropertyType, string>;
+const FALLBACK_PLACEHOLDER = {
+  string: "fallbackPlaceholder",
+  number: "fallbackNumberPlaceholder",
+  date: "fallbackDatePlaceholder",
+} as const satisfies Record<ContactPropertyType, string>;
 
 function PropertiesHead() {
   const t = useTranslations("audience.properties");
@@ -106,7 +121,7 @@ export default function PropertiesPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [key, setKey] = useState("");
-  const [type, setType] = useState<PropertyType>("string");
+  const [type, setType] = useState<ContactPropertyType>("string");
   const [fallback, setFallback] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
@@ -134,9 +149,8 @@ export default function PropertiesPage() {
   const closeAdd = useCallback(() => setAddOpen(false), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
 
-  // A number property's fallback must parse — mirrors the server's rule.
-  const fallbackInvalid =
-    type === "number" && fallback.trim() !== "" && !Number.isFinite(Number(fallback));
+  // A number or date property's fallback must parse, as the server checks.
+  const fallbackInvalid = fallback.trim() !== "" && !storedPropertyValue(type, fallback).ok;
 
   const submitAdd = () => {
     if (defineMutation.isPending || key.trim().length === 0 || fallbackInvalid) return;
@@ -161,8 +175,8 @@ export default function PropertiesPage() {
     setAddOpen(true);
   };
 
-  const typeLabel = (value: PropertyType) =>
-    value === "number" ? t("typeNumber") : t("typeString");
+  const typeLabel = (value: ContactPropertyType) => t(TYPE_LABEL[value]);
+  const typeOptions = CONTACT_PROPERTY_TYPES.map((value) => ({ value, label: typeLabel(value) }));
 
   // Coverage of the derived (in-use) keys, matched to definitions
   // case-insensitively; a key with no contact value simply has no entry.
@@ -248,11 +262,7 @@ export default function PropertiesPage() {
           value={typeFilter}
           onChange={setTypeFilter}
           ariaLabel={t("type")}
-          options={[
-            { value: "", label: t("allTypes") },
-            { value: "string", label: t("typeString") },
-            { value: "number", label: t("typeNumber") },
-          ]}
+          options={[{ value: "", label: t("allTypes") }, ...typeOptions]}
         />
       </div>
 
@@ -417,14 +427,13 @@ export default function PropertiesPage() {
             <Select
               id="prop-type"
               value={type}
-              onChange={(value) => setType(value === "number" ? "number" : "string")}
+              onChange={(value) =>
+                setType(CONTACT_PROPERTY_TYPES.find((v) => v === value) ?? "string")
+              }
               ariaLabel={t("typeLabel")}
               width="100%"
               disabled={defineMutation.isPending}
-              options={[
-                { value: "string", label: t("typeString") },
-                { value: "number", label: t("typeNumber") },
-              ]}
+              options={typeOptions}
             />
             <p
               style={{
@@ -442,9 +451,7 @@ export default function PropertiesPage() {
               id="prop-fallback"
               className={`ms-input${fallbackInvalid ? " error" : ""}`}
               style={{ width: "100%" }}
-              placeholder={
-                type === "number" ? t("fallbackNumberPlaceholder") : t("fallbackPlaceholder")
-              }
+              placeholder={t(FALLBACK_PLACEHOLDER[type])}
               disabled={defineMutation.isPending}
               value={fallback}
               onChange={(event) => setFallback(event.target.value)}
@@ -458,7 +465,7 @@ export default function PropertiesPage() {
                 fontSize: "var(--ms-fs-label)",
               }}
             >
-              {t("fallbackInvalidNumber")}
+              {type === "date" ? t("fallbackInvalidDate") : t("fallbackInvalidNumber")}
             </p>
           ) : null}
           {defineMutation.isError ? (

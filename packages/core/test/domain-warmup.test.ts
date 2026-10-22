@@ -14,6 +14,8 @@ import {
   WARMUP_FULL_TIER,
   warmupCap,
 } from "../src/domain-warmup.js";
+import { acceptFailure } from "../src/inboxes/send.js";
+import { secondsToNextUtcDay } from "../src/inboxes/send-policy.js";
 import type { QuotaTeamRow } from "../src/plans.js";
 import { DAY_MS } from "../src/utc-day.js";
 
@@ -242,7 +244,7 @@ describe("the accept path", () => {
       });
     }
     const held = await send(teamId, PRO, domainId);
-    expect(held).toMatchObject({ ok: true, parked: true });
+    expect(held).toMatchObject({ ok: true, parked: true, parkReason: "warmup" });
     if (!held.ok) throw new Error("unreachable");
     expect(enqueued).not.toContain(held.id);
     expect(await periodAccepted(teamId)).toBe(100);
@@ -307,9 +309,22 @@ describe("the accept path", () => {
       })),
     );
     expect(await send(teamId, FREE, domainId)).toMatchObject({ ok: true, parked: true });
-    expect(await send(teamId, FREE, domainId)).toEqual({
+    const refused = await send(teamId, FREE, domainId);
+    expect(refused).toEqual({
       ok: false,
       reason: "warmup_backlog_full",
+      domain: "fresh.example",
+      cap: 100,
+      waiting: 300,
+    });
+    // An inbox send answers it in the API's words, with the wait to the reset.
+    if (refused.ok) throw new Error("unreachable");
+    expect(acceptFailure(refused, NOW)).toEqual({
+      status: 429,
+      name: "daily_quota_exceeded",
+      message:
+        "fresh.example sends up to 100 emails a day for now, and 300 are already waiting. Retry after 00:00 UTC.",
+      retryAfterSec: secondsToNextUtcDay(NOW),
     });
   });
 

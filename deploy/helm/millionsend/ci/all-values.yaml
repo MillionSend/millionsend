@@ -36,7 +36,7 @@ podAnnotations:
 podLabels:
   example.com/pod: "true"
 deploymentAnnotations:
-  secret.reloader.stakater.com/reload: millionsend-smtp-tls
+  example.com/deployment: "true"
 
 podDisruptionBudget:
   enabled: true
@@ -66,6 +66,8 @@ smtp:
   replicas: 2
   tlsSecretName: millionsend-smtp-tls
   publicHost: smtp.mail.example.com
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: millionsend-smtp-tls
   service:
     type: LoadBalancer
     port: 587

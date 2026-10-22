@@ -3,6 +3,7 @@ import {
   type BroadcastEstimate,
   bulkShare,
   clampReserve,
+  type PlanCap,
   type PlanInput,
   pacingHorizonDays,
   planBulkWaves,
@@ -236,6 +237,97 @@ describe("planBulkWaves", () => {
     expect(a.releases.every((r) => r.at.getTime() >= later)).toBe(true);
     const [small] = plan([{ key: "b", admit: 4_200, at: START + 3 * 24 * 3_600_000 }]);
     expect(small?.days).toBe(1);
+  });
+});
+
+describe("the new domain limit", () => {
+  const DAY = 24 * 3_600_000;
+  const RESET = Date.parse("2026-09-17T00:00:00Z");
+  /** A domain with `remaining` of today's cap left, then the schedule's steps (Infinity once lifted). */
+  const limit = (remaining: number, steps: { from: number; resetTo: number }[]): PlanCap => ({
+    remaining,
+    resetsAt: RESET,
+    resetTo: 300,
+    period: "day",
+    newDomain: { steps },
+  });
+  // Registered Sep 14 at noon: 300 a day, 2,000 from Sep 21, no limit from Oct 14.
+  const REGISTERED = Date.parse("2026-09-14T12:00:00Z");
+  const schedule = [
+    { from: START, resetTo: 300 },
+    { from: REGISTERED + 7 * DAY, resetTo: 2_000 },
+    { from: REGISTERED + 30 * DAY, resetTo: Number.POSITIVE_INFINITY },
+  ];
+
+  it("paces a send day by day along the schedule and names its own hold, never the plan's", () => {
+    const [a] = plan([
+      {
+        key: "a",
+        admit: 5_000,
+        caps: [
+          ...planCaps(
+            { kind: "day", plan: "starter", limit: 10_000 },
+            { day: 0, period: 0 },
+            START,
+          ),
+          limit(100, schedule),
+        ],
+      },
+    ]);
+    if (!a) throw new Error("no estimate");
+    expect(a.first).toBe(100);
+    expect(a.planHold).toBeNull();
+    expect(a.newDomainHold).toEqual({ heldBack: 4_900, resumesAt: new Date(RESET) });
+    // The 2,000 step begins at noon on Sep 21, so it counts from the next reset.
+    expect(a.releases.map((r) => [r.at.toISOString().slice(0, 10), r.count])).toEqual([
+      ["2026-09-16", 100],
+      ["2026-09-17", 300],
+      ["2026-09-18", 300],
+      ["2026-09-19", 300],
+      ["2026-09-20", 300],
+      ["2026-09-21", 300],
+      ["2026-09-22", 2_000],
+      ["2026-09-23", 1_400],
+    ]);
+    expect(a.blocked).toBe(false);
+    expect(a.days).toBe(7);
+  });
+
+  it("goes on past the horizon to the lift instead of refusing the send", () => {
+    // 47,500 go before the lift; the rest leave at the reset after it.
+    const [a] = plan([{ key: "a", admit: 60_000, caps: [limit(300, schedule)] }], {
+      horizonDays: 24,
+    });
+    if (!a) throw new Error("no estimate");
+    expect(a.blocked).toBe(false);
+    expect(a.finishesAt?.toISOString().slice(0, 10)).toBe("2026-10-15");
+    expect(a.days).toBe(29);
+  });
+
+  it("keeps the whole horizon past the lift, so a send capacity finishes days later still has a finish", () => {
+    // 47,500 go before the lift; capacity takes days for the rest.
+    const [a] = plan([{ key: "a", admit: 250_000, caps: [limit(300, schedule)] }], {
+      horizonDays: 24,
+    });
+    if (!a) throw new Error("no estimate");
+    expect(a.blocked).toBe(false);
+    expect(a.finishesAt?.toISOString().slice(0, 10)).toBe("2026-10-17");
+    expect(a.days).toBe(31);
+  });
+
+  it("an unknown age keeps today's cap: no known finish past the horizon, and still no refusal", () => {
+    const [a] = plan([{ key: "a", admit: 10_000, caps: [limit(300, [])] }], { horizonDays: 24 });
+    if (!a) throw new Error("no estimate");
+    expect(a.blocked).toBe(false);
+    expect(a.finishesAt).toBeNull();
+    expect(a.newDomainHold).not.toBeNull();
+  });
+
+  it("capacity still refuses what it cannot send inside the horizon", () => {
+    const [a] = plan([{ key: "a", admit: 200, caps: [limit(300, schedule)] }], {
+      share: bulkShare(10, 30),
+    });
+    expect(a?.blocked).toBe(true);
   });
 });
 

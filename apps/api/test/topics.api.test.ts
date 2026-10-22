@@ -225,8 +225,38 @@ describe("topics teamId isolation", () => {
   it("returns 409 instead of widening a broadcast when its topic is deleted", async () => {
     const res = await call(tokenA, "DELETE", `/topics/${topicA}`);
     expect(res.status).toBe(409);
-    expect(await json(res)).toMatchObject({ name: "conflict" });
+    expect(await json(res)).toMatchObject({
+      name: "conflict",
+      message: "This topic is referenced by a broadcast",
+    });
     expect((await call(tokenA, "GET", `/topics/${topicA}`)).status).toBe(200);
+  });
+
+  it("returns 409 while an email sent with the topic still waits to go out", async () => {
+    const created = await json(
+      await call(tokenA, "POST", "/topics", { name: "Pending", default_subscription: "opt_in" }),
+    );
+    const id = created.id ?? "";
+    const [topic] = await db
+      .select({ teamId: schema.topics.teamId })
+      .from(schema.topics)
+      .where(eq(schema.topics.id, id));
+    // A freshly inserted email is queued.
+    await db.insert(schema.emails).values({
+      teamId: topic?.teamId ?? "",
+      from: "a@acme.dev",
+      to: ["reader@acme.dev"],
+      subject: "later",
+      topicId: id,
+    });
+
+    const res = await call(tokenA, "DELETE", `/topics/${id}`);
+    expect(res.status).toBe(409);
+    expect(await json(res)).toMatchObject({
+      name: "conflict",
+      message: "This topic has emails waiting to send",
+    });
+    expect((await call(tokenA, "GET", `/topics/${id}`)).status).toBe(200);
   });
 });
 

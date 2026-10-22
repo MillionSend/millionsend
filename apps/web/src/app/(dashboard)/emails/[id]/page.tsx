@@ -3,6 +3,7 @@
 import { parseSmtpDiagnostic, resolveBounceGuidance } from "@millionsend/core/bounce-guidance";
 import { PREFETCH_REASONS, type PrefetchReason } from "@millionsend/core/open-classifier";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { inferRouterOutputs } from "@trpc/server";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -19,11 +20,13 @@ import {
   EventNode,
   EventStripSkeleton,
 } from "@/components/email-status-icon";
-import { GradientBanner } from "@/components/gradient-banner";
+import { bannerLinkStyle, GradientBanner } from "@/components/gradient-banner";
 import { GuidanceBlock } from "@/components/guidance-block";
+import { HourglassIcon } from "@/components/icons/warmup-icons";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { TONE_COLOR } from "@/components/status-tile";
 import { Tooltip } from "@/components/tooltip";
 import { suppressedAtAccept } from "@/lib/email-events";
 import {
@@ -35,7 +38,9 @@ import {
   formatUtcTimestampMs,
   mailDomain,
 } from "@/lib/format";
+import { limitHoldCopy } from "@/lib/new-domain-limit";
 import { useTRPC } from "@/lib/trpc";
+import type { AppRouter } from "@/server/routers";
 
 type EventType =
   | "queued"
@@ -338,17 +343,7 @@ function EmailDetailSkeleton() {
   );
 }
 
-type Pending =
-  | { kind: "scheduled"; at: Date }
-  | { kind: "queued" }
-  | { kind: "plan"; resumesAt: Date }
-  | { kind: "waiting" }
-  | { kind: "warmup" }
-  | { kind: "warmupPaused" }
-  | { kind: "newDomainLimit" }
-  | { kind: "held" }
-  | { kind: "paced"; from: Date | null; to: Date | null };
-
+type Pending = NonNullable<inferRouterOutputs<AppRouter>["emails"]["get"]["pending"]>;
 /**
  * A row the provider has not seen yet: the accept as its one real node, then
  * what it waits for. Dashed nodes are the planner's read at load time, never
@@ -372,7 +367,11 @@ function PendingEvents({
     label: string;
     when?: string | undefined;
     body?: React.ReactNode;
+    /** A read of the planner, not a recorded event: dashed, with the estimate chip unless `chip` is false. */
     estimate?: boolean;
+    chip?: boolean;
+    color?: string;
+    glyph?: React.ReactNode;
   }[] = [
     {
       type: "queued",
@@ -411,17 +410,34 @@ function PendingEvents({
       body: t("detail.pending.waitingBody"),
       estimate: true,
     });
-  } else if (
-    pending.kind === "warmup" ||
-    pending.kind === "warmupPaused" ||
-    pending.kind === "newDomainLimit"
-  ) {
+  } else if (pending.kind === "warmup" || pending.kind === "warmupPaused") {
     nodes.push({
       type: "queued_quota",
       label: t(`detail.pending.${pending.kind}`),
       body: t(`detail.pending.${pending.kind}Body`),
       estimate: true,
     });
+  } else if (pending.kind === "newDomainLimit") {
+    const copy = limitHoldCopy(pending, t, locale);
+    nodes.push(
+      {
+        type: "queued_quota",
+        label: t("detail.pending.newDomainLimit"),
+        when: copy.used,
+        body: copy.body,
+        estimate: true,
+        chip: false,
+        color: TONE_COLOR.warn,
+        glyph: <HourglassIcon size={15} strokeWidth={1.8} color="currentColor" />,
+      },
+      {
+        type: "sent",
+        label: t("detail.pending.expected"),
+        when: copy.expectedWhen,
+        body: copy.expectedBody,
+        estimate: true,
+      },
+    );
   } else if (pending.kind === "held") {
     nodes.push({
       type: "queued_quota",
@@ -459,11 +475,13 @@ function PendingEvents({
               />
             ) : null}
             <div className="ms-events-node">
-              <EventIconTile type={node.type} dashed={node.estimate ?? false} />
+              <EventIconTile type={node.type} dashed={node.estimate ?? false} color={node.color}>
+                {node.glyph}
+              </EventIconTile>
               <span className="ms-badge ms-badge-neutral" style={{ marginTop: 10 }}>
                 {node.label}
               </span>
-              {node.estimate ? (
+              {node.estimate && node.chip !== false ? (
                 <span
                   className="ms-mono"
                   style={{
@@ -666,7 +684,16 @@ export default function EmailDetailPage() {
       );
     }
   }
-  sublineParts.push(formatRelative(email.createdAt, locale));
+  const limitHold = email.pending?.kind === "newDomainLimit" ? email.pending : null;
+  const limitCopy = limitHold ? limitHoldCopy(limitHold, t, locale) : null;
+  if (limitCopy) {
+    sublineParts.push(
+      t("detail.acceptedAgo", { ago: formatRelative(email.createdAt, locale) }),
+      limitCopy.subtitle,
+    );
+  } else {
+    sublineParts.push(formatRelative(email.createdAt, locale));
+  }
   if ((email.latestStatus === "bounced" || email.latestStatus === "suppressed") && bounce) {
     if (bounce.bounceType) sublineParts.push(bounce.bounceType.toLowerCase());
     if (bounceCode) sublineParts.push(bounceCode);
@@ -727,10 +754,32 @@ export default function EmailDetailPage() {
           </>
         }
         title={recipient ?? email.subject}
-        leading={<EmailStatusIcon status={email.latestStatus} size={42} />}
+        leading={
+          <EmailStatusIcon
+            status={email.latestStatus}
+            size={42}
+            label={limitHold ? t("detail.pending.newDomainLimit") : undefined}
+          />
+        }
         subtitle={sublineParts.join(" · ")}
         menu={<ApiDocsButton />}
       />
+
+      {limitHold && limitCopy ? (
+        <GradientBanner
+          variant="warn"
+          icon={<HourglassIcon />}
+          title={t("detail.limitBanner.title", { domain: limitHold.domain })}
+          action={
+            <Link href={`/domains/${limitHold.domainId}`} style={bannerLinkStyle}>
+              {t("detail.limitBanner.seeLimit")}
+            </Link>
+          }
+          style={{ marginBottom: 24 }}
+        >
+          {limitCopy.banner}
+        </GradientBanner>
+      ) : null}
 
       {hardBounced ? (
         <GradientBanner
@@ -781,6 +830,26 @@ export default function EmailDetailPage() {
             <CopyChip value={email.id} />
           </div>
         </div>
+        {email.sendingDomain ? (
+          <Meta label={t("detail.sendingDomain")}>
+            <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <Link
+                href={`/domains/${email.sendingDomain.id}`}
+                className="ms-mono"
+                style={{ color: "var(--ms-bone)" }}
+              >
+                <Breakable text={email.sendingDomain.name} />
+              </Link>
+              {email.sendingDomain.cap !== null ? (
+                <span style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
+                  {t("detail.perDayForNow", {
+                    cap: new Intl.NumberFormat(locale).format(email.sendingDomain.cap),
+                  })}
+                </span>
+              ) : null}
+            </span>
+          </Meta>
+        ) : null}
         {email.tags && Object.keys(email.tags).length > 0 ? (
           <div>
             <Microlabel>{t("detail.tags")}</Microlabel>

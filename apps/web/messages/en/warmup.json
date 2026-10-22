@@ -55,7 +55,7 @@
     "previewAll": "{eligible} contacts in about {days, plural, one {# sending day} other {# sending days}}, most active first.",
     "previewSkipped": "{inactive, plural, one {# with no activity in 90+ days is skipped.} other {# with no activity in 90+ days are skipped.}}",
     "previewLast": "{inactive, plural, one {# with no activity in 90+ days goes last.} other {# with no activity in 90+ days go last.}}",
-    "previewTail": "Each healthy day grows the volume 1.5×. Your transactional email is never held.",
+    "previewTail": "Each healthy day grows the volume 1.5×. The warm-up never holds your transactional email.",
     "switch": "Warm up this domain",
     "switchHint": "Big sends start small and grow each day while delivery stays healthy. Leave it off if this domain already sends this volume through another provider."
   },
@@ -77,7 +77,7 @@
   },
   "pace": {
     "label": "Warm-up pace",
-    "note": "Each healthy day grows the volume 1.5×. One weak signal holds it, two cut it by 30%, and a severe one pauses it. Mail over the day's volume waits for the next day. Your transactional email is never held."
+    "note": "Each healthy day grows the volume 1.5×. One weak signal holds it, two cut it by 30%, and a severe one pauses it. Mail over the day's volume waits for the next day. The warm-up never holds your transactional email."
   },
   "health": {
     "label": "Delivery health · {day}",
@@ -128,7 +128,10 @@
     "byProperty": "Contact property",
     "propertyPlaceholder": "Choose a property",
     "propertyCoverage": "set on {count} of {total} contacts",
-    "propertyHint": "Use a date, like the last login.",
+    "propertyHint": "Pick a date that moves when people use your product, like the last login.",
+    "propertyNone": "None of your contact properties hold dates yet. Add a date property in Audience.",
+    "propertyDates": "{count, plural, one {# contact} other {# contacts}} · latest {latest}",
+    "propertyNoDates": "no dates yet",
     "inactiveTitle": "Inactive contacts",
     "inactiveHint": "{inactive, plural, =0 {None of your {total} contacts has gone 90+ days without activity.} one {# of your {total} contacts hasn't been active in 90+ days. Mailing them from a new domain is the fastest way to the spam folder.} other {# of your {total} contacts haven't been active in 90+ days. Mailing them from a new domain is the fastest way to the spam folder.}}",
     "inactiveSkip": "Skip while warming up",

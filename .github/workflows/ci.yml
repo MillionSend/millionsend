@@ -99,6 +99,22 @@ jobs:
           fetch-depth: 0
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git --config /repo/.gitleaks.toml --no-banner --redact --exit-code 1 /repo
 
+  # The tracking edge box runs these files with nothing built from this repo,
+  # so a broken Caddyfile would first show on its next restart. Caddy runs
+  # through the compose service, with the box's image and env-file loading;
+  # the example values resolve the {$VAR}s.
+  tracking-edge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/tracking-edge
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: cp .env.example .env
+      - run: docker compose config --quiet
+      - run: docker compose run --rm caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - run: docker compose run --rm caddy caddy fmt --diff /etc/caddy/Caddyfile
+
   # The Helm chart must lint and render with the default values, every
   # shipped example, and the ci/ values that turn on every option (so a
   # template no example uses cannot rot unnoticed). Helm is pinned: the
@@ -199,7 +215,9 @@ jobs:
           retention-days: 1
 
   publish:
-    needs: build
+    # helm as well: a version tag ships the chart below, so it must lint and
+    # render first; helm package alone checks neither.
+    needs: [build, helm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -242,3 +260,21 @@ jobs:
           cd /tmp/digests/backup
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$BACKUP_META") $(printf "$BACKUP_IMAGE@sha256:%s " *)
           docker buildx imagetools inspect "$(jq -r '.tags[0]' <<<"$APP_META")"
+      # A version tag also publishes the Helm chart, with version and
+      # appVersion both the tag's, so chart 1.2.3 runs image 1.2.3. It comes
+      # after the manifests: a failed image publish must never ship a chart.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: startsWith(github.ref, 'refs/tags/v')
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          version: v3.22.1
+      - name: Publish the Helm chart
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          helm package deploy/helm/millionsend --version "$V" --app-version "$V"
+          helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN"
+          helm push "millionsend-$V.tgz" oci://ghcr.io/millionsend/charts

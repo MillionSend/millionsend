@@ -1639,6 +1639,10 @@ button.ms-notice-strip-action {
 .ms-grid-12 {
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
 }
+/* A short field beside a longer one, as in a dialog's form row. */
+.ms-grid-short-long {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+}
 /* A short card beside a tall one keeps its own height. */
 .ms-grid-21,
 .ms-grid-12 {
@@ -3175,7 +3179,8 @@ summary:focus-visible,
 @media (max-width: 479px) {
   .ms-grid-4,
   .ms-grid-3,
-  .ms-grid-2 {
+  .ms-grid-2,
+  .ms-grid-short-long {
     grid-template-columns: minmax(0, 1fr);
   }
 }

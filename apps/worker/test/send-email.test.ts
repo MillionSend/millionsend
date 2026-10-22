@@ -334,6 +334,39 @@ it("a topic send to a non-contact strips the placeholder tokens and carries no u
   expect(mime).not.toContain("/unsubscribe/");
 });
 
+it("a topic send to more than one address carries no one's unsubscribe link", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Team digest", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  await insertContact("digest-a@example.com");
+  await insertContact("digest-b@example.com");
+  const deps = (ses: SendDeps["ses"]): SendDeps => ({
+    keyring,
+    ses,
+    unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+  });
+  // Every address is a contact, so only the shared MIME stands in the way.
+  for (const [n, recipients] of [
+    { to: ["digest-a@example.com", "digest-b@example.com"] },
+    { to: ["digest-a@example.com"], cc: ["digest-b@example.com"] },
+    { to: ["digest-a@example.com"], bcc: ["digest-b@example.com"] },
+  ].entries()) {
+    const { ses, sends } = fakeSes(`mid-topic-shared-${n}`);
+    const emailId = await insertEmail(
+      { topicId: topic.id, ...recipients },
+      '<p>hi</p><a href="{{{UNSUBSCRIBE_URL}}}">a</a>',
+      "bye: {{{RESEND_UNSUBSCRIBE_URL}}}",
+    );
+    expect(await sendEmail(db, deps(ses), { emailId })).toBe("sent");
+    const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+    expect(mime).not.toContain("{{{");
+    expect(mime.toLowerCase()).not.toContain("list-unsubscribe");
+    expect(mime).not.toContain("/unsubscribe/");
+  }
+});
+
 it("suppresses a queued broadcast when the contact globally unsubscribes after fan-out", async () => {
   const contactId = await insertContact("late-global@example.com");
   const [broadcast] = await db

@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
@@ -18,6 +19,7 @@ import {
   MX_INGEST_PATH,
   mcpResourceUrl,
   type TeamRole,
+  utcDay,
   WAITS_PER_TEAM_PER_PROCESS,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -594,6 +596,48 @@ describe("tools", () => {
     await client.close();
   });
 
+  it("send_email passes on the warning of a send the new domain limit holds", async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId,
+        name: "fresh-mcp.example",
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: new Date(),
+        registeredAt: new Date(Date.now() - 3600_000),
+      })
+      .returning({ id: schema.domains.id });
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "fresh-mcp.example", day: utcDay(), accepted: 100 });
+    try {
+      const client = await connect(await mintToken());
+      const sent = await client.callTool({
+        name: "send_email",
+        arguments: {
+          from: "a@fresh-mcp.example",
+          to: ["held@example.com"],
+          subject: "s",
+          text: "t",
+        },
+      });
+      expect(resultJson(sent)).toMatchObject({
+        warning: {
+          code: "new_domain_limit",
+          message:
+            "fresh-mcp.example sent its 100 emails for today. This email goes out after 00:00 UTC.",
+        },
+      });
+      await client.close();
+    } finally {
+      await db.delete(schema.emails).where(eq(schema.emails.domainId, domain?.id ?? ""));
+      await db.delete(schema.domains).where(eq(schema.domains.id, domain?.id ?? ""));
+      await db.delete(schema.instanceSettings);
+    }
+  });
+
   it("rejects an unverified sender domain through the same rule as the REST API", async () => {
     const client = await connect(await mintToken());
     const sent = await client.callTool({
@@ -1079,6 +1123,29 @@ describe('all-teams tokens (team_id claim "*")', () => {
     });
     expect(res.status).toBe(401);
   });
+
+  it("serving requests leaves zod-to-openapi's schema registry the size it was", async () => {
+    // The registry keeps every schema .openapi() returns, and what .extend()
+    // and similar return from one, in a plain Map, so a tool schema built that
+    // way per request would stay in memory for the life of the process.
+    const registry = createRequire(createRequire(import.meta.url).resolve("@hono/zod-openapi"))(
+      "@asteasolutions/zod-to-openapi",
+    ).zodToOpenAPIRegistry as { _map: Map<unknown, unknown> };
+    const serve = async () => {
+      for (const token of [await mintToken(), await mintToken({ team_id: "*" })]) {
+        const client = await connect(token);
+        await client.listTools();
+        await client.close();
+      }
+    };
+    await serve();
+    const before = registry._map.size;
+    // Another zod-to-openapi instance than the app's would read 0 and pass vacuously.
+    expect(before).toBeGreaterThan(0);
+    await serve();
+    await serve();
+    expect(registry._map.size).toBe(before);
+  });
 });
 
 it("webhook tools never carry the signing secret, in or out", async () => {
@@ -1342,6 +1409,7 @@ describe("dashboard admin parity", () => {
       { name: "update_domain", arguments: { id, capabilities: { receiving: "enabled" } } },
     ],
     // No tool turns a domain's warm-up on or off, or changes its settings.
+    "domains.requestHigherLimit": [],
     "domains.setWarmup": [],
     "domains.updateConfiguration": [
       { name: "update_domain", arguments: { id, open_tracking: false } },

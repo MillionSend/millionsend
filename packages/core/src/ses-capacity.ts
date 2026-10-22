@@ -72,6 +72,12 @@ export interface PlanCap {
   resetsAt: number;
   resetTo: number;
   period: "day" | "month";
+  /**
+   * Set on a sender domain's new domain limit, which no plan lifts: a reset
+   * refills it to the volume of the last step begun by then instead
+   * (Infinity once the limit lifts).
+   */
+  newDomain?: { steps: readonly { from: number; resetTo: number }[] };
 }
 
 function addUtcMonth(ms: number): number {
@@ -180,6 +186,8 @@ export interface BroadcastEstimate {
   releases: Release[];
   /** The first time the team's own cap, not capacity, held rows back. */
   planHold: { heldBack: number; resumesAt: Date } | null;
+  /** The first time the sender domain's new domain limit held rows back. */
+  newDomainHold: { heldBack: number; resumesAt: Date } | null;
 }
 
 interface Sim {
@@ -195,17 +203,51 @@ interface Sim {
   runs: { start: number; end: number; n: number }[];
   first: number;
   planHold: BroadcastEstimate["planHold"];
+  newDomainHold: BroadcastEstimate["newDomainHold"];
 }
 
 /**
- * What the drain will do with the broadcasts of one region: every queued
- * row sends on the bucket first; a new send is admitted up to the room its
- * fan-out finds; from then on each drain instant releases what the window
- * has freed, capped per run and split round-robin between the broadcasts
- * that still wait. A bucket leaves the window only once its end is 24 hours
- * old, so the model errs late, never early.
+ * What the drain will do with the broadcasts of one region (simulateWaves).
+ * A sender domain's new domain limit paces a send but never makes it too
+ * large, since it lifts by its own schedule: `blocked` is the verdict of a
+ * run without it, and the run with it gets the whole horizon again past the
+ * latest lift. A send that run still has waiting has no known finish.
  */
 export function planBulkWaves(input: PlanInput): BroadcastEstimate[] {
+  const limits = input.broadcasts.flatMap((b) => (b.caps ?? []).filter((c) => c.newDomain));
+  if (limits.length === 0) return simulateWaves(input);
+  const without = simulateWaves({
+    ...input,
+    broadcasts: input.broadcasts.map((b) =>
+      b.caps ? { ...b, caps: b.caps.filter((c) => !c.newDomain) } : b,
+    ),
+  });
+  const start = typeof input.start === "number" ? input.start : input.start.getTime();
+  const lift = Math.max(
+    start,
+    ...limits.flatMap((c) =>
+      (c.newDomain?.steps ?? []).flatMap((step) =>
+        step.resetTo === Number.POSITIVE_INFINITY ? [step.from] : [],
+      ),
+    ),
+  );
+  const horizonDays =
+    (input.horizonDays ?? pacingHorizonDays(PACING_HORIZON_MAX_RETENTION_DAYS)) +
+    Math.ceil((lift - start) / DAY_MS);
+  return simulateWaves({ ...input, horizonDays }).map((e, i) => {
+    const blocked = without[i]?.blocked ?? e.blocked;
+    return e.blocked ? { ...e, blocked, finishesAt: null } : { ...e, blocked };
+  });
+}
+
+/**
+ * Every queued row sends on the bucket first; a new send is admitted up to
+ * the room its fan-out finds; from then on each drain instant releases what
+ * the window has freed, capped per run and split round-robin between the
+ * broadcasts that still wait. A bucket leaves the window only once its end
+ * is 24 hours old, so the model errs late, never early.
+ */
+function simulateWaves(input: PlanInput): BroadcastEstimate[] {
   const slot = input.slotMs ?? SES_QUOTA_SLOT_MS;
   const offset = input.startOffsetMs ?? DRAIN_START_OFFSET_MS;
   const drainCap = input.drainCap ?? DRAIN_MAX_PER_RUN;
@@ -246,6 +288,7 @@ export function planBulkWaves(input: PlanInput): BroadcastEstimate[] {
     runs: [],
     first: 0,
     planHold: null,
+    newDomainHold: null,
   }));
   // Rows released but not yet sent at t, across every broadcast: only the
   // runs still open are walked, and a run that has ended leaves the list.
@@ -290,7 +333,9 @@ export function planBulkWaves(input: PlanInput): BroadcastEstimate[] {
     let least = Number.POSITIVE_INFINITY;
     for (const cap of s.caps) {
       while (t >= cap.resetsAt) {
-        cap.remaining = cap.resetTo;
+        const at = cap.resetsAt;
+        cap.remaining =
+          cap.newDomain?.steps.findLast((step) => step.from <= at)?.resetTo ?? cap.resetTo;
         cap.resetsAt = cap.period === "day" ? cap.resetsAt + DAY_MS : addUtcMonth(cap.resetsAt);
       }
       least = Math.min(least, cap.remaining);
@@ -301,15 +346,28 @@ export function planBulkWaves(input: PlanInput): BroadcastEstimate[] {
     for (const cap of s.caps) cap.remaining = Math.max(0, cap.remaining - n);
   };
   // Rows a cap that just ran dry left behind: the first such moment is what
-  // the send dialog names ("holds back N until <reset>").
+  // the send dialog names ("holds back N until <reset>"), the plan's apart
+  // from the new domain limit's.
+  const hold = (bound: PlanCap[], wanted: number, granted: number) =>
+    bound.length === 0
+      ? null
+      : {
+          heldBack: wanted - granted,
+          resumesAt: new Date(Math.min(...bound.map((c) => c.resetsAt))),
+        };
   const noteHold = (s: Sim, wanted: number, granted: number): void => {
-    if (s.planHold || granted >= wanted) return;
+    if (granted >= wanted) return;
     const bound = s.caps.filter((c) => c.remaining <= 0);
-    if (bound.length === 0) return;
-    s.planHold = {
-      heldBack: wanted - granted,
-      resumesAt: new Date(Math.min(...bound.map((c) => c.resetsAt))),
-    };
+    s.planHold ??= hold(
+      bound.filter((c) => !c.newDomain),
+      wanted,
+      granted,
+    );
+    s.newDomainHold ??= hold(
+      bound.filter((c) => c.newDomain),
+      wanted,
+      granted,
+    );
   };
 
   // The waves in flight send first, in FIFO order; then each fan-out takes
@@ -372,6 +430,7 @@ export function planBulkWaves(input: PlanInput): BroadcastEstimate[] {
       blocked: s.parked > 0,
       releases: own.map((r) => ({ at: new Date(r.start), endsAt: new Date(r.end), count: r.n })),
       planHold: s.planHold,
+      newDomainHold: s.newDomainHold,
     };
   });
 }
