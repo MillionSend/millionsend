@@ -7,13 +7,13 @@ import {
   verifyClickToken,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import en from "../../../../../messages/en/common.json";
 import ptBR from "../../../../../messages/pt-BR/common.json";
 import { localeFromHeaders } from "../../../../server/locale";
 import { enqueueWebhookDeliveries } from "../../../../server/queue";
-import { trackingHostIs } from "../../../../server/tracking-host";
+import { clickTrackingHost, holdsTrackingHost } from "../../../../server/tracking-host";
 import { engagementHit, recordEngagement, trackingKey } from "../../record";
 
 const MESSAGES = { en: en.trackedLink, "pt-BR": ptBR.trackedLink } as const;
@@ -28,7 +28,9 @@ const MESSAGES = { en: en.trackedLink, "pt-BR": ptBR.trackedLink } as const;
  * team's links are disabled (core linksDisabled) the reader gets a page saying
  * so, never the destination; with no team left to ask (a token from before the
  * team was signed whose email row aged out, or a deleted team) a page names
- * the destination's host and leaves the click to the reader.
+ * the destination's host and leaves the click to the reader. On the cloud,
+ * links that name a deleted team 404 instead: its branded host is held by no
+ * one.
  *
  * Reachable on any host: a domain's custom tracking subdomain is CNAME'd to the
  * app, so this handler serves the branded links too, each only for its own team.
@@ -42,14 +44,12 @@ export async function GET(request: Request, ctx: { params: Promise<{ token: stri
   if (!parsed || !/^https?:\/\//i.test(parsed.url) || !URL.canParse(parsed.url)) {
     return new Response(null, { status: 404 });
   }
-  // The host a reader's click came in on, as the tracking edge names it.
-  const trackingHost = request.headers.get("x-tracking-host")?.trim() || null;
+  const trackingHost = clickTrackingHost(request.headers);
   // SECURITY: the cloud mints a team's links only on its branded host (the
-  // worker's requireBrandedHost), and every branded click reaches the app
-  // through the tracking edge. A token that names its team and arrives
-  // without the edge's header was built by hand on the app's own host:
-  // refused, nothing recorded. A token from before links named their team
-  // keeps the checks below, as mail already in inboxes may point it here.
+  // worker's requireBrandedHost), so a token that names its team and arrives
+  // on the app's own host was built there by hand: refused, nothing recorded.
+  // A token from before links named their team keeps the checks below, as
+  // mail already in inboxes may point it here.
   if (parsed.teamId && !trackingHost && isCloudDeployment()) {
     return new Response(null, { status: 404 });
   }
@@ -68,7 +68,13 @@ export async function GET(request: Request, ctx: { params: Promise<{ token: stri
     engagementHit(request, parsed.url),
   );
   const standing = teamId ? await fetchTeamStanding(db, teamId) : null;
-  if (standing && !linksDisabled(standing)) return Response.redirect(parsed.url, 302);
+  if (standing && !linksDisabled(standing)) {
+    // The answer turns on X-Tracking-Host or Host, which no URL-keyed cache sees.
+    return new Response(null, {
+      status: 302,
+      headers: { location: new URL(parsed.url).href, "cache-control": "no-store" },
+    });
+  }
   return linkPage(request, standing ? null : new URL(parsed.url));
 }
 
@@ -97,14 +103,17 @@ async function senderTeam(
 /**
  * SECURITY: a branded tracking host redirects only for the team holding its
  * domain; otherwise any team's token would redirect from another team's
- * domain. A host no team holds verified is not judged here.
+ * domain. The cloud mints links only on a verified domain's own host, so a
+ * host no team holds redirects for no one; self-hosted, it redirects for any
+ * team, as a proxy may hand the app a Host that names no domain.
  */
 async function hostServesTeam(db: Db, host: string, teamId: string): Promise<boolean> {
   const holders = await db
     .select({ teamId: schema.domains.teamId })
     .from(schema.domains)
-    .where(and(eq(schema.domains.status, "verified"), trackingHostIs(host)));
-  return holders.length === 0 || holders.some((holder) => holder.teamId === teamId);
+    .where(holdsTrackingHost(host));
+  if (holders.length === 0) return !isCloudDeployment();
+  return holders.some((holder) => holder.teamId === teamId);
 }
 
 const STYLE = [

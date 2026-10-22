@@ -298,10 +298,13 @@ ALLOW_TRACKING_SUBDOMAINS=false
 # already serves customer hostnames. On a multi-tenant cloud the app cannot
 # hold a certificate per customer hostname, so point this at a dedicated
 # tracking edge (a small box that terminates TLS on demand per hostname and
-# proxies /t/* back here); the customer's CNAME then targets that edge.
+# proxies /t/* back here); the customer's CNAME then targets that edge. The
+# edge must pass the host each click came in on as X-Tracking-Host, replacing
+# any value the client sent; the app checks that host against the team whose
+# link it is.
 # TRACKING_EDGE_HOST=track.example-dns.com
-# Shared secret the tracking edge sends when asking whether a hostname is a
-# configured tracking subdomain (gates on-demand certificate issuance).
+# Shared secret the tracking edge sends when asking whether a hostname is the
+# tracking host of a domain that verified (gates on-demand certificates).
 # Generate: openssl rand -hex 32
 # TRACKING_ASK_SECRET=
 
@@ -432,8 +435,8 @@ NOTIFICATIONS_EMAIL_FROM=
 # comma-separated IPs or CIDRs. It walks the header from the right past these
 # and takes the first address not listed, so behind one reverse proxy that
 # appends the header nothing needs setting. List only proxies in front of it
-# that append too (a CDN, a load balancer, a tracking edge such as
-# millionsend-tracking-edge), or their address stands in for every client.
+# that append too (a CDN, a load balancer, a tracking edge), or their address
+# stands in for every client.
 # Never a whole pod or VPC CIDR: every caller inside it would share one
 # rate-limit bucket. Keep web and api reachable only through the reverse
 # proxy, since web takes the header from whoever connects. The API's
