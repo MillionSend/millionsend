@@ -5,8 +5,8 @@ description: Crie, agende e envie um e-mail para muitos contatos.
 
 Uma transmissão (`/broadcasts` na API) é um e-mail enviado a muitos contatos: todos eles, um
 [segmento](/pt-BR/concepts/segments) ou um [tópico](/pt-BR/concepts/topics).
-Escreva no editor de blocos do painel (com campos de mesclagem por contato)
-ou crie transmissões pela API.
+Escreva no editor de blocos do painel ou direto em HTML no modo código, com
+campos de mesclagem por contato, ou crie transmissões pela API.
 
 ## Ciclo de vida
 
@@ -27,6 +27,39 @@ draft → scheduled → sending → sent
   (correspondendo à união de status do SDK do Resend); `canceled` é uma
   extensão do MillionSend. Uma transmissão aparece como `queued` com `sent_at`
   nulo até o último e-mail sair, leve o tempo que levar.
+
+## Editor de blocos e HTML
+
+O editor da transmissão tem dois modos para o corpo. No editor de blocos, você
+monta o e-mail com blocos. No modo código, você edita o HTML direto, com uma
+pré-visualização ao vivo ao lado. Os dois modos usam os mesmos campos de
+mesclagem por contato.
+
+Uma transmissão criada com `html` (pela API, pelo MCP ou por uma migração) ou
+a partir de um template em HTML é escrita em HTML. O painel abre essa
+transmissão na pré-visualização, e você edita o HTML no modo código. O HTML
+fica exatamente como foi escrito: o editor de blocos nunca mexe nele sozinho,
+porque, ao virar blocos, um layout de tabelas e CSS inline é simplificado e
+perde o que os blocos não expressam.
+
+A transmissão só vira blocos se você escolher **Converter em blocos**, e o
+HTML armazenado só muda quando você salvar. Os
+[templates](/pt-BR/concepts/templates#templates-em-html-e-o-editor-de-blocos)
+seguem a mesma regra.
+
+O caminho inverso também existe. **Editar como HTML** passa uma transmissão de
+blocos para o modo código. A troca acontece sempre na própria transmissão, já
+que não dá para duplicar transmissões. Os blocos viram o HTML que eles geram,
+e esse HTML deixa de fora os blocos com a condição **Show if**.
+
+Até você salvar, **Voltar para blocos** traz os blocos de volta exatamente como
+estavam. Depois de salvar, converter de volta em blocos perde parte do layout.
+Com o corpo vazio, a troca acontece na hora, então uma transmissão nova pode
+começar direto em HTML. Uma transmissão salva com o corpo vazio volta a abrir
+no editor de blocos.
+
+No modo código, a parte em texto puro gerada a partir do HTML acompanha o
+HTML conforme você edita. O texto puro enviado pela API é mantido como está.
 
 ## O que o fan-out faz
 
@@ -185,6 +218,9 @@ transmissões.
 
 ## Mudanças recentes
 
+- **Editar como HTML** no editor passa uma transmissão de blocos para o modo
+  código. **Voltar para blocos** desfaz a troca até você salvar. Veja
+  [Editor de blocos e HTML](#editor-de-blocos-e-html).
 - Uma transmissão de um domínio [em aquecimento](#aquecimento) sai ao longo
   de dias. A resposta do envio traz `warning.code` `warming_up`, e uma que o
   aquecimento levaria mais de 24 dias para enviar é recusada com

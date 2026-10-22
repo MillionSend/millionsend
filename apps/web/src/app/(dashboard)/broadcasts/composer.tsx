@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { DraftBanner } from "@/components/draft-banner";
 import { FromField } from "@/components/from-field";
+import { CodeGlyph } from "@/components/icons/nav-icons";
 import { MailyEditor } from "@/components/maily-editor/lazy";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -15,14 +16,20 @@ import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { MarkerRail, MobileStepBar, StepRail } from "@/components/stepper";
-import { isMailyDoc } from "@/lib/email-doc";
+import { isEmptyMailyDoc, isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { statusGlow } from "@/lib/status-glow";
 import { bodyEditorMode, followingText } from "@/lib/template-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
-import { ConvertBlocksDialog, HtmlAuthoredBanner, HtmlCodeMode } from "../templates/html-mode";
+import {
+  BackToBlocksDialog,
+  ConvertBlocksDialog,
+  HtmlAuthoredBanner,
+  HtmlCodeMode,
+  SwitchHtmlDialog,
+} from "../templates/html-mode";
 import {
   ContentPreview,
   type SendPace,
@@ -43,6 +50,8 @@ interface ComposerDraft {
   html: string;
   text: string;
   document: unknown;
+  /** Older drafts infer the mode from their content. */
+  asCode?: boolean;
 }
 
 export interface ComposerInitial {
@@ -107,18 +116,35 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
   const [document, setDocument] = useState<unknown>(initial?.document ?? null);
-  // Armed by "Convert this broadcast": the block editor then mounts on the
-  // html seed and emits its parse. Until then an html-authored body never
+  // Armed by converting to blocks in place: the block editor then mounts on
+  // the html seed and emits its parse. Until then an html-authored body never
   // reaches the block editor — its html would be flattened on the first edit.
   const [converting, setConverting] = useState(false);
-  const mode = bodyEditorMode({ document, html, converting });
-  // An html-authored body opens on its faithful preview, not on an editor.
-  const [tab, setTab] = useState<"edit" | "preview">(() =>
-    bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) === "code"
-      ? "preview"
-      : "edit",
+  // Set by "Edit as HTML" (and for a body that opened html-authored): the body
+  // edits as source even while its html is empty, so clearing the textarea
+  // never drops the user into the block editor. Converting to blocks in place
+  // clears it, as does "Back to blocks".
+  // The row has no field for the choice: a body saved empty opens in blocks again.
+  const [asCode, setAsCode] = useState(
+    () =>
+      bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) === "code",
   );
+  const mode = bodyEditorMode({ document, html, converting, asCode });
+  // An html-authored body opens on its faithful preview, not on an editor.
+  const [tab, setTab] = useState<"edit" | "preview">(() => (asCode ? "preview" : "edit"));
   const [convertOpen, setConvertOpen] = useState(false);
+  const [switchOpen, setSwitchOpen] = useState(false);
+  const [backOpen, setBackOpen] = useState(false);
+  // The body as it stood before an in-place "Edit as HTML", kept until the
+  // next save: "Back to blocks" restores it exactly, where converting the html
+  // back would re-parse the render and flatten it.
+  const [beforeSwitch, setBeforeSwitch] = useState<{
+    document: unknown;
+    html: string;
+    text: string;
+    switchedHtml: string;
+    dirty: boolean;
+  } | null>(null);
   const [guardOpen, setGuardOpen] = useState(false);
   const [schedule, setSchedule] = useState("");
   // The guard's warm-up choices; skipInactive stays undefined until changed,
@@ -144,8 +170,19 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   // Local crash-recovery draft (browser-only, one key per broadcast).
   const [editorNonce, setEditorNonce] = useState(0);
   const draftState = useMemo<ComposerDraft>(
-    () => ({ topicId, segmentId, name, from, subject, replyTo, html, text, document }),
-    [topicId, segmentId, name, from, subject, replyTo, html, text, document],
+    () => ({
+      topicId,
+      segmentId,
+      name,
+      from,
+      subject,
+      replyTo,
+      html,
+      text,
+      document,
+      asCode: mode === "code",
+    }),
+    [topicId, segmentId, name, from, subject, replyTo, html, text, document, mode],
   );
   const draft = useLocalDraft<ComposerDraft>({
     storageKey: `ms-draft:broadcast:${initial?.id ?? "new"}`,
@@ -160,6 +197,9 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       html: initial?.html ?? "",
       text: initial?.text ?? "",
       document: initial?.document ?? null,
+      asCode:
+        bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) ===
+        "code",
     },
   });
 
@@ -175,12 +215,17 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     setHtml(data.html);
     setText(data.text);
     setDocument(data.document);
+    setAsCode(bodyEditorMode(data) === "code");
+    setConverting(false);
+    setBeforeSwitch(null);
+    setTab("edit");
     setStep(2);
     // The editor and From field seed once from their mount value — remount them.
     setEditorNonce((n) => n + 1);
-    // A restored draft is unsaved by definition: poison the baseline so the
+    // A restored draft is unsaved by definition: poison the baselines so the
     // editor's next emit differs and the leave-guard arms immediately.
     savedDoc.current = "__restored__";
+    savedHtml.current = "__restored__";
     setDirty(true);
     draft.acceptRecovered();
   }
@@ -214,6 +259,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   // edit cannot emit it — this debounced render both feeds the preview and
   // supplies the html we persist. A legacy raw-html document keeps its stored
   // html untouched until the first real edit converts it (see MailyEditor).
+  // Code mode never takes a render: its html is the source itself.
   const [debouncedDoc, setDebouncedDoc] = useState<unknown>(document);
   useEffect(() => {
     const id = setTimeout(() => setDebouncedDoc(document), 350);
@@ -226,11 +272,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     ),
   );
   useEffect(() => {
-    if (!rendered.data) return;
+    // A render that lands after a switch to code must not overwrite the source.
+    if (!rendered.data || mode !== "blocks") return;
     setHtml(rendered.data.html);
     setText(rendered.data.text);
-  }, [rendered.data]);
+  }, [rendered.data, mode]);
 
+  const savingNow = useRef(false);
   /** Copies the template's content in as a starting snapshot — no link back;
    * later template edits change nothing here. */
   async function applyTemplate(id: string) {
@@ -252,6 +300,9 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       if (!ok) return;
     }
     const template = await queryClient.fetchQuery(trpc.templates.get.queryOptions({ id }));
+    // A save that started during the fetch resets the baselines for the body it
+    // sent, so this body would show as saved. The picker is off while saving.
+    if (savingNow.current) return;
     // templateId must land in the same batch as the content: the editor is
     // keyed on it and seeds once from its mount value, so a remount before
     // setDocument would show the old body forever.
@@ -262,16 +313,19 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     setText(template.text ?? "");
     setDocument(template.document);
     setEditorNonce((n) => n + 1);
-    // An html-authored template lands as html: on its preview, like a stored one.
+    // The body follows the template: an html-authored one lands as html, on its
+    // preview like a stored one; a block one lands in the block editor. Any
+    // switch in progress is over, so its way back is gone.
+    const appliedCode =
+      bodyEditorMode({ document: template.document, html: template.html ?? "" }) === "code";
+    setAsCode(appliedCode);
     setConverting(false);
-    setTab(
-      bodyEditorMode({ document: template.document, html: template.html ?? "" }) === "code"
-        ? "preview"
-        : "edit",
-    );
-    // Applied-but-unsaved content: poison the baseline so the editor's next
+    setBeforeSwitch(null);
+    setTab(appliedCode ? "preview" : "edit");
+    // Applied-but-unsaved content: poison the baselines so the editor's next
     // emit differs and the leave-guard arms immediately.
     savedDoc.current = "__applied__";
+    savedHtml.current = "__applied__";
     setDirty(true);
   }
   // The plan behind the guard: the count and, when capacity, the plan or the
@@ -342,6 +396,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
 
   const complete = from.trim() !== "" && subject.trim() !== "";
   const saving = createMutation.isPending || updateMutation.isPending;
+  // `saving` as of the last render, for code that reads it after an await.
+  savingNow.current = saving;
   const sending = saving || sendMutation.isPending;
 
   const invalidate = () => queryClient.invalidateQueries(trpc.broadcasts.pathFilter());
@@ -365,6 +421,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       savedDoc.current = JSON.stringify(document);
       savedHtml.current = html;
       setDirty(false);
+      // Saved: the row holds the html now, so the way back is the conversion.
+      setBeforeSwitch(null);
       draft.markSaved();
       return initial.id;
     }
@@ -382,6 +440,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     savedDoc.current = JSON.stringify(document);
     savedHtml.current = html;
     setDirty(false);
+    setBeforeSwitch(null);
     draft.markSaved();
     return id;
   }
@@ -420,9 +479,100 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const closeConvert = useCallback(() => setConvertOpen(false), []);
   const convertInPlace = useCallback(() => {
     setConvertOpen(false);
+    setAsCode(false);
     setConverting(true);
+    setBeforeSwitch(null);
     setTab("edit");
   }, []);
+
+  // Blocks→html. The source is the server render of the current document,
+  // fetched now rather than read from `html`, which lags a debounce and a
+  // round trip behind the editor. An empty document switches on the spot —
+  // there is nothing to lose and nothing to render; anything else goes
+  // through the dialog, since the block document is dropped on the next save.
+  const [switching, setSwitching] = useState<"inPlace" | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  // Set by a switch; the source takes focus once code mode has mounted it.
+  const focusSource = useRef(false);
+  useEffect(() => {
+    if (!focusSource.current || mode !== "code" || tab !== "edit") return;
+    focusSource.current = false;
+    window.document.getElementById("bc-html")?.focus();
+  }, [mode, tab]);
+  // No block document yet (the editor has not emitted, or a conversion is
+  // still parsing): the html on hand is the source already.
+  const bodyEmpty = isMailyDoc(document) ? isEmptyMailyDoc(document) : html.trim() === "";
+  async function renderCurrent(): Promise<{ html: string; text: string }> {
+    if (!isMailyDoc(document)) return { html, text };
+    if (isEmptyMailyDoc(document)) return { html: "", text: "" };
+    // One attempt: the dialog reports a failure now, not after the retries.
+    return queryClient.fetchQuery({
+      ...trpc.email.render.queryOptions({ document }),
+      retry: false,
+    });
+  }
+  function enterCode(source: { html: string; text: string }) {
+    if (isMailyDoc(document)) {
+      setBeforeSwitch({
+        document,
+        html,
+        text,
+        switchedHtml: source.html,
+        dirty,
+      });
+    }
+    setHtml(source.html);
+    setText(source.text);
+    setDocument(null);
+    setConverting(false);
+    setAsCode(true);
+    setTab("edit");
+    focusSource.current = true;
+    // Until the next save the row still holds a block document, so no html
+    // can match it: poison the baseline, as a restored draft does.
+    if (initial) {
+      savedHtml.current = "__switched__";
+      setDirty(true);
+    }
+  }
+  function requestCode() {
+    setSwitchError(null);
+    if (bodyEmpty) enterCode({ html: "", text: "" });
+    else setSwitchOpen(true);
+  }
+  async function switchInPlace() {
+    setSwitching("inPlace");
+    setSwitchError(null);
+    try {
+      const source = await renderCurrent();
+      setSwitchOpen(false);
+      enterCode(source);
+    } catch {
+      setSwitchError(tTemplates("html.switchError"));
+    } finally {
+      setSwitching(null);
+    }
+  }
+
+  // Html→blocks while an in-place switch is unsaved: the blocks come back
+  // exactly as they were. Edited html would be discarded, so that asks first.
+  function requestBlocks() {
+    if (!beforeSwitch) return;
+    if (html === beforeSwitch.switchedHtml) backToBlocks();
+    else setBackOpen(true);
+  }
+  function backToBlocks() {
+    if (!beforeSwitch) return;
+    setBackOpen(false);
+    setDocument(beforeSwitch.document);
+    setHtml(beforeSwitch.html);
+    setText(beforeSwitch.text);
+    setAsCode(false);
+    setConverting(false);
+    setTab("edit");
+    setDirty(beforeSwitch.dirty);
+    setBeforeSwitch(null);
+  }
   // Source beside preview needs the room; every other body stays at reading width.
   const wideBody = mode === "code" && tab === "edit";
 
@@ -685,6 +835,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                     id="bc-template"
                     value={templateId}
                     onChange={(value) => void applyTemplate(value)}
+                    disabled={saving}
                     ariaLabel={tTemplates("picker.label")}
                     width="100%"
                     options={[
@@ -738,37 +889,66 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               </div>
 
               <div className="ms-field">
+                {/* Wraps rather than squeezing the tabs on a phone, longer locales included. */}
                 <div
                   style={{
                     display: "flex",
+                    flexWrap: "wrap",
                     alignItems: "center",
                     justifyContent: "space-between",
+                    gap: "6px 12px",
                     marginBottom: 6,
                   }}
                 >
                   <label htmlFor="bc-html" style={{ marginBottom: 0 }}>
                     {t("composer.htmlLabel")}
                   </label>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {(["edit", "preview"] as const).map((key) => (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      justifyContent: "flex-end",
+                      gap: "6px 12px",
+                      marginLeft: "auto",
+                    }}
+                  >
+                    {mode === "blocks" || beforeSwitch ? (
+                      // Off while saving: the save in flight resets the baselines
+                      // for the body it sent, whichever mode the page is in by then.
+                      // The banner's Convert and the template picker are off too.
                       <button
-                        key={key}
                         type="button"
-                        style={{
-                          fontSize: 13,
-                          padding: "4px 10px",
-                          borderRadius: 8,
-                          border: 0,
-                          cursor: "pointer",
-                          background: tab === key ? "var(--ms-panel-raised)" : "none",
-                          color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-                          font: "inherit",
-                        }}
-                        onClick={() => setTab(key)}
+                        className="ms-maily-tool ms-maily-tool-labeled"
+                        disabled={saving}
+                        onClick={mode === "blocks" ? requestCode : requestBlocks}
                       >
-                        {t(key === "edit" ? "composer.editTab" : "composer.previewTab")}
+                        {mode === "blocks" ? <CodeGlyph size={14} /> : null}
+                        {tTemplates(mode === "blocks" ? "html.editAsHtml" : "html.backToBlocks")}
                       </button>
-                    ))}
+                    ) : null}
+                    <span style={{ display: "flex", gap: 6 }}>
+                      {(["edit", "preview"] as const).map((key) => (
+                        <button
+                          key={key}
+                          type="button"
+                          style={{
+                            fontSize: 13,
+                            padding: "4px 10px",
+                            borderRadius: 8,
+                            border: 0,
+                            cursor: "pointer",
+                            background: tab === key ? "var(--ms-panel-raised)" : "none",
+                            color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
+                            font: "inherit",
+                            whiteSpace: "nowrap",
+                          }}
+                          onClick={() => setTab(key)}
+                        >
+                          {t(key === "edit" ? "composer.editTab" : "composer.previewTab")}
+                        </button>
+                      ))}
+                    </span>
                   </div>
                 </div>
                 {tab === "edit" && mode === "blocks" ? (
@@ -804,6 +984,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                       <HtmlAuthoredBanner
                         onEditHtml={() => setTab("edit")}
                         onConvert={() => setConvertOpen(true)}
+                        convertDisabled={saving}
                       />
                     ) : null}
                     <div
@@ -925,6 +1106,20 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         </form>
       </Modal>
 
+      <SwitchHtmlDialog
+        open={switchOpen}
+        pending={switching}
+        error={switchError}
+        body={t("composer.switchBody")}
+        inPlaceLabel={t("composer.convertInPlace")}
+        onClose={() => setSwitchOpen(false)}
+        onSwitchInPlace={switchInPlace}
+      />
+      <BackToBlocksDialog
+        open={backOpen}
+        onClose={() => setBackOpen(false)}
+        onConfirm={backToBlocks}
+      />
       <ConvertBlocksDialog
         open={convertOpen}
         onClose={closeConvert}

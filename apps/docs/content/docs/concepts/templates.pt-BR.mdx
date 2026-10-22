@@ -14,7 +14,7 @@ as transmissões intactas.
 
 ## Sem rascunhos, sem versões
 
-Toda gravação entra em vigor na hora. Não existe ciclo de rascunho/publicação
+Tudo o que você salva vale na hora. Não existe ciclo de rascunho/publicação
 nem histórico de versões: o que `GET /templates/{id}` retorna é o ponto de
 partida da próxima transmissão. Os campos no formato do Resend são preenchidos
 de acordo — `status` é sempre `published`, `published_at` é igual a
@@ -26,19 +26,20 @@ Resend (e o `templates.create(...).publish()`) funcionem.
 ## Templates em HTML e o editor de blocos
 
 Um template criado com `html` — pela API, pelo MCP ou por uma migração — é
-escrito em HTML: o painel o abre na pré-visualização e o edita no modo
-código (fonte ao lado de uma pré-visualização ao vivo), mantendo o HTML byte a
-byte. O editor de blocos nunca o toca por conta própria, porque interpretar um
-layout de tabelas e CSS inline como blocos o achata. Converter em blocos é uma
-escolha explícita do usuário no painel: como uma cópia convertida
-(`<name> (blocks)`, com o original intacto) ou no próprio template, caso em
-que o HTML armazenado só muda na próxima gravação.
+escrito em HTML: o painel abre esse template na pré-visualização, e você edita
+o HTML no modo código, com uma pré-visualização ao vivo ao lado. O HTML fica
+exatamente como foi escrito: o editor de blocos nunca mexe nele sozinho,
+porque, ao virar blocos, um layout de tabelas e CSS inline é simplificado e
+perde o que os blocos não expressam. O template só vira blocos se você
+escolher **Converter em blocos** no painel: como uma cópia convertida
+(`<name> (blocks)`, com o original intacto) ou no próprio template, e nesse
+caso o HTML armazenado só muda quando você salvar.
 
 O caminho inverso também existe: **Editar como HTML** passa um template de
 blocos para o modo código, como cópia (`<name> (HTML)`) ou no próprio
 template, e um template novo pode começar direto por lá. Os blocos viram o
-HTML que eles geram; até a próxima gravação, **Voltar para blocos** traz os
-blocos de volta exatamente como estavam. No modo código, a parte em texto puro
+HTML que eles geram; até você salvar, **Voltar para blocos** traz os blocos de
+volta exatamente como estavam. No modo código, a parte em texto puro
 gerada a partir do HTML acompanha as suas edições, e o texto puro enviado pela
 API é mantido como está.
 

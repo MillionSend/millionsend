@@ -5,8 +5,8 @@ description: Compose, schedule, and send one email to many contacts.
 
 A broadcast is one email sent to many contacts: all of them, a
 [segment](/concepts/segments), or a [topic](/concepts/topics). Compose in the
-dashboard's block editor (with per-contact merge fields) or create broadcasts
-via the API.
+dashboard's block editor or as HTML in code mode, with per-contact merge
+fields, or create broadcasts via the API.
 
 ## Lifecycle
 
@@ -26,6 +26,36 @@ draft → scheduled → sending → sent
   Resend SDK's status union); `canceled` is a MillionSend extension. A
   broadcast reads `queued` with `sent_at` null until its last email has gone
   out, however long that takes.
+
+## Block editor and HTML
+
+The composer edits the body in one of two modes. The block editor builds the
+email from blocks. Code mode edits the HTML source beside a live preview. Both
+modes use the same per-contact merge fields.
+
+A broadcast created with `html` (through the API, MCP or a migration) or
+started from an HTML template is html-authored. The dashboard opens it on its
+preview and edits it in code mode. The HTML stays byte for byte as written.
+The block editor never touches it on its own, because parsing a
+table-and-inline-CSS layout into blocks flattens it.
+
+It becomes blocks only when you choose **Convert to blocks**, and the stored
+HTML changes only at the next save.
+[Templates](/concepts/templates#html-templates-and-the-block-editor) follow
+the same rule.
+
+The other way works too. **Edit as HTML** moves a broadcast built with blocks
+to code mode. The switch always happens in the broadcast itself, since
+broadcasts can't be duplicated. The HTML that the blocks render replaces the
+blocks. That HTML leaves out blocks with a **Show if** condition.
+
+Until the next save, **Back to blocks** puts the blocks back exactly as they
+were. After a save, converting back to blocks flattens the layout. On an empty
+body, the switch happens at once, so a new broadcast can start as HTML. A body
+that you save empty opens in the block editor again.
+
+In code mode, a plain text part generated from the HTML keeps following the
+HTML as you edit. Plain text supplied through the API is sent as stored.
 
 ## What the fan-out does
 
@@ -172,6 +202,9 @@ See the [API reference](/api-reference) for all broadcast endpoints.
 
 ## Recent changes
 
+- **Edit as HTML** in the composer moves a broadcast built with blocks to code
+  mode. **Back to blocks** undoes the switch until the next save. See
+  [Block editor and HTML](#block-editor-and-html).
 - A broadcast from a domain [warming up](#warm-up) goes out over days. The
   send response carries `warning.code` `warming_up`, and one the warm-up
   would need more than 24 days to send is refused with
