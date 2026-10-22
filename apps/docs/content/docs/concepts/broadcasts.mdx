@@ -33,19 +33,21 @@ The composer edits the body in one of two modes. The block editor builds the
 email from blocks. Code mode edits the HTML source beside a live preview. Both
 modes use the same per-contact merge fields.
 
-A broadcast created with `html` through the API is html-authored. The
-dashboard opens it on its preview and edits it in code mode. The HTML stays
-byte for byte as written. The block editor never touches it on its own,
-because parsing a table-and-inline-CSS layout into blocks flattens it.
+A broadcast created with `html` (through the API, MCP or a migration) or
+started from an HTML template is html-authored. The dashboard opens it on its
+preview and edits it in code mode. The HTML stays byte for byte as written.
+The block editor never touches it on its own, because parsing a
+table-and-inline-CSS layout into blocks flattens it.
 
-You choose explicitly to convert it to blocks. The stored HTML changes only at
-the next save. [Templates](/concepts/templates#html-templates-and-the-block-editor)
-follow the same rule.
+It becomes blocks only when you choose **Convert to blocks**, and the stored
+HTML changes only at the next save.
+[Templates](/concepts/templates#html-templates-and-the-block-editor) follow
+the same rule.
 
 The other way works too. **Edit as HTML** moves a broadcast built with blocks
-to code mode. The switch always happens in the broadcast itself, because a
-broadcast has no duplicate. The HTML that the blocks render replaces the
-blocks. That HTML leaves out blocks with a Show if condition.
+to code mode. The switch always happens in the broadcast itself, since
+broadcasts can't be duplicated. The HTML that the blocks render replaces the
+blocks. That HTML leaves out blocks with a **Show if** condition.
 
 Until the next save, **Back to blocks** puts the blocks back exactly as they
 were. After a save, converting back to blocks flattens the layout. On an empty
