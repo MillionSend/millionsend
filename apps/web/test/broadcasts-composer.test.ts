@@ -385,6 +385,13 @@ describe("broadcast composer html switch", () => {
       expect(buttonFor(EDIT_AS_HTML)?.disabled).toBe(true);
     });
 
+    it("keeps Back to blocks off while a save is in flight", async () => {
+      await switched();
+      rq.saving = true;
+      await mount(BLOCK_ROW);
+      expect(buttonFor(BACK_TO_BLOCKS)?.disabled).toBe(true);
+    });
+
     it("keeps the banner's Convert and the template picker off while a save is in flight", async () => {
       rq.templates = TEMPLATE_ROWS;
       await mount(HTML_ROW);
@@ -879,6 +886,13 @@ describe("broadcast composer html switch", () => {
       expect(rq.update).toHaveBeenCalledWith(
         expect.objectContaining({ html: "<p>Older HTML</p>", document: null }),
       );
+    });
+
+    it("keeps an older HTML draft in the source editor when the user clears it", async () => {
+      await recover({ html: "<p>Older HTML</p>", text: "Older HTML" }, BLOCK_ROW);
+      await type("textarea#bc-html", "");
+      expect(source()).not.toBeNull();
+      expect(hasBlockEditor()).toBe(false);
     });
 
     it("opens an older block draft in the block editor and saves its document", async () => {
