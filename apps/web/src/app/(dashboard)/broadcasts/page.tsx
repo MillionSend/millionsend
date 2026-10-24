@@ -254,7 +254,9 @@ export default function BroadcastsPage() {
                         <StatusPill status={status} />
                       )}
                     </td>
-                    <td className="ms-cell-clip">{row.segmentName ?? t("composer.segmentNone")}</td>
+                    <td>
+                      <Truncated text={row.segmentName ?? t("composer.segmentNone")} />
+                    </td>
                     <td className="right ms-digits">
                       {status === "sending" && row.sentCount !== null ? (
                         <>
