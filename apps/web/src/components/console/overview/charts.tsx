@@ -121,7 +121,7 @@ function PointTeamsList({ point }: { point: PointTeams | undefined }) {
     >
       {point.top.map((team, rank) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: a point's teams by rank, redrawn whole on every hover
-        <div key={rank} style={{ display: "flex", gap: 12 }}>
+        <div key={rank} style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
           <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>
             {team.name}
           </span>
