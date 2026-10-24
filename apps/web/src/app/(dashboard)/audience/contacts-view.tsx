@@ -1,7 +1,6 @@
 "use client";
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +13,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { GrowthSparkline } from "@/components/growth-sparkline";
 import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
@@ -692,39 +692,16 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                         onChange={() => toggleSelected(row.id)}
                       />
                     </td>
-                    <td>
-                      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                        <ContactAvatar email={row.email} name={name} size={24} />
-                        <Link
-                          className="ms-mono"
-                          style={{
-                            fontSize: 13,
-                            flexShrink: 0,
-                            maxWidth: "100%",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                          href={detailHref}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {row.email}
-                        </Link>
-                        {/* A name that merely echoes the address (SES imports) adds no information. */}
-                        {name && name.toLowerCase() !== row.email.toLowerCase() ? (
-                          <span
-                            style={{
-                              color: "var(--ms-muted)",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {name}
-                          </span>
-                        ) : null}
-                      </span>
-                    </td>
+                    <LeadCell
+                      tile={<ContactAvatar email={row.email} name={name} size={24} />}
+                      value={row.email}
+                      href={detailHref}
+                      mono
+                      // A name that merely echoes the address (SES imports) adds no information.
+                      tail={
+                        name && name.toLowerCase() !== row.email.toLowerCase() ? name : undefined
+                      }
+                    />
                     <td>
                       {row.segments.length > 0 ? (
                         // First segment, then a "+N" count that lists the rest on
