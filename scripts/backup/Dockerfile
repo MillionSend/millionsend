@@ -3,7 +3,7 @@
 # chain to two upstreams (the official postgres image and Alpine's packages).
 # The postgres major here must match the compose postgres service — pg_dump
 # refuses newer servers.
-FROM postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+FROM postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
 
 RUN apk add --no-cache rclone age
 

@@ -27,8 +27,15 @@ overrides:
   "prosemirror-model@<1.25.12": "^1.25.12"
   # Advisories fixed inside their parents' ranges, held here so that a
   # regenerated lockfile keeps the fix: markdown-it's quadratic parsing (via
-  # prosemirror-markdown), undici 6's WebSocket denial of service (via
-  # cheerio) and source-map-js's event-loop denial of service (via tailwind).
+  # prosemirror-markdown), undici 6's WebSocket, content-encoding and
+  # EventSource denials of service (via cheerio), source-map-js's event-loop
+  # denial of service (via tailwind) and zod's memory exhaustion (via the
+  # MCP test client).
   "markdown-it@<14.3.3": "^14.3.3"
-  "undici@<6.28.1": "^6.28.1"
+  "undici@<6.29.1": "^6.29.1"
   "source-map-js@<1.2.2": "^1.2.2"
+  "zod@<4.6.6": "^4.6.6"
+  # undici 7's content-encoding and EventSource denials of service and its
+  # SRI bypass, fixed in 7.30.1: @scalar/json-magic (via fumadocs-openapi)
+  # pins 7.29.1 exactly, so no parent range reaches the fix.
+  "undici@>=7.0.0 <7.30.1": "^7.30.1"
