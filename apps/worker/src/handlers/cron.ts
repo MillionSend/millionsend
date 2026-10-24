@@ -3,11 +3,12 @@ import {
   buildAccountMail,
   checkWarmups,
   claimNotification,
+  complainedEmail,
   countDistinctRecipients,
   DAY_MS,
-  DELIVERED_STATUSES,
   DRAIN_MAX_PER_RUN,
   deliverabilityHold,
+  deliveredEmail,
   endQueuedEmails,
   failQueuedEmailsForDomain,
   fetchDeliverabilityHealth,
@@ -1342,9 +1343,9 @@ export async function purgeExpiredEmailMetadata(
       select
         ${e.broadcastId} as broadcast_id,
         count(*)::int as total,
-        count(*) filter (where ${e.latestStatus} in ${DELIVERED_STATUSES})::int as delivered,
+        count(*) filter (where ${deliveredEmail})::int as delivered,
         count(*) filter (where ${e.latestStatus} = 'bounced')::int as bounced,
-        count(*) filter (where ${e.latestStatus} = 'complained')::int as complained
+        count(*) filter (where ${complainedEmail})::int as complained
       from ${e}
       where ${e.broadcastId} in (
         select ${b.id} from ${b}

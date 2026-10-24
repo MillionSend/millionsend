@@ -595,24 +595,46 @@ describe("delivery stats", () => {
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);
 
-    const statuses = ["sent", "delivered", "opened", "clicked", "bounced", "complained"] as const;
-    await db.insert(schema.emails).values(
-      statuses.map((latestStatus, i) => ({
-        teamId,
-        broadcastId: id,
-        contactId: crypto.randomUUID(),
-        from: DRAFT_INPUT.from,
-        to: [`r${i}@example.com`],
-        subject: DRAFT_INPUT.subject,
-        latestStatus,
-      })),
-    );
+    const statuses = [
+      "sent",
+      "delivered",
+      "opened",
+      "clicked",
+      "bounced",
+      "complained",
+      "complained",
+    ] as const;
+    const rows = await db
+      .insert(schema.emails)
+      .values(
+        statuses.map((latestStatus, i) => ({
+          teamId,
+          broadcastId: id,
+          contactId: crypto.randomUUID(),
+          from: DRAFT_INPUT.from,
+          to: [`r${i}@example.com`],
+          subject: DRAFT_INPUT.subject,
+          latestStatus,
+        })),
+      )
+      .returning({ id: schema.emails.id });
+    // The second complaint is one SES raised for an address on its own
+    // suppression list: the mail never went out, though the status rose.
+    await db.insert(schema.emailEvents).values([
+      { emailId: rows[5]?.id ?? "", type: "complained", occurredAt: new Date(), data: {} },
+      {
+        emailId: rows[6]?.id ?? "",
+        type: "complained",
+        occurredAt: new Date(),
+        data: { complaint: { complaintSubType: "OnAccountSuppressionList" } },
+      },
+    ]);
 
     const { stats } = await caller.broadcasts.get({ id });
     // Opened counts the opened rung and clicked above it; a prefetch would
     // never lift a row here, so none is expected.
     expect(stats).toEqual({
-      total: 6,
+      total: 7,
       delivered: 4,
       opened: 2,
       clicked: 1,
@@ -623,7 +645,7 @@ describe("delivery stats", () => {
     });
 
     const { items } = await caller.broadcasts.list({});
-    expect(items[0]?.recipients).toBe(6);
+    expect(items[0]?.recipients).toBe(7);
 
     // Once the fan-out has stored recipient_count it is the size of record
     // (email rows are purged by retention; the stored count is not).

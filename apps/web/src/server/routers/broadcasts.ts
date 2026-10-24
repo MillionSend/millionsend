@@ -4,8 +4,9 @@ import {
   applyMergeFields,
   broadcastProviderBreakdown,
   cancelBroadcastRows,
+  complainedEmail,
   DAY_MS,
-  DELIVERED_STATUSES,
+  deliveredEmail,
   emailInsightsView,
   enableWarmup,
   fetchBroadcastInsights,
@@ -357,10 +358,9 @@ export const broadcastsRouter = router({
     const [segment] = row.segmentId
       ? await ctx.db.select({ name: sg.name }).from(sg).where(eq(sg.id, row.segmentId)).limit(1)
       : [];
-    // "Delivered" counts every status of an email that reached the inbox
-    // (DELIVERED_STATUSES). Opened likewise includes clicked; both count
-    // people only, since a prefetch never lifts the status (see the tracking
-    // recorder).
+    // "Delivered" counts every email that reached the inbox (deliveredEmail).
+    // Opened likewise includes clicked; both count people only, since a
+    // prefetch never lifts the status (see the tracking recorder).
     const ev = schema.emailEvents;
     // Nested: a single-table select writes the columns it holds directly
     // unqualified, and a bare "id" in the subquery would be the event's own.
@@ -368,12 +368,12 @@ export const broadcastsRouter = router({
     const [stats] = await ctx.db
       .select({
         total: sql<number>`count(*)::int`,
-        delivered: sql<number>`count(*) filter (where ${e.latestStatus} in ${DELIVERED_STATUSES})::int`,
+        delivered: sql<number>`count(*) filter (where ${deliveredEmail})::int`,
         opened: sql<number>`count(*) filter (where ${e.latestStatus} in ('opened', 'clicked'))::int`,
         clicked: sql<number>`count(*) filter (where ${e.latestStatus} = 'clicked')::int`,
         prefetched: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ofEmail} and ${ev.type} = 'prefetched'))::int`,
         bounced: sql<number>`count(*) filter (where ${e.latestStatus} = 'bounced')::int`,
-        complained: sql<number>`count(*) filter (where ${e.latestStatus} = 'complained')::int`,
+        complained: sql<number>`count(*) filter (where ${complainedEmail})::int`,
         // Recipients who opted out through this email's link, from everything or from its topic.
         unsubscribed: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ofEmail} and ${ev.type} = 'unsubscribed'))::int`,
       })
