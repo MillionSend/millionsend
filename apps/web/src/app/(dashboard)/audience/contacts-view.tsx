@@ -44,9 +44,10 @@ const IMPORT_BATCH = 1000;
 const BULK_BATCH = 100;
 
 // Fixed layout: column shares hold and long cells truncate instead of pushing
-// the trailing columns past the page edge. The floor keeps the status badge
-// readable at its 15% share, and the email about 240px once the date column
-// takes its fixed width below 1200px; narrower viewports scroll the Table box.
+// the trailing columns past the page edge; the email takes what the shares
+// and the date column's fixed width leave. The floor keeps the status badge
+// readable at its 15% share, and the email about 240px; narrower viewports
+// scroll the Table box.
 const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 860 };
 
 function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
@@ -55,9 +56,7 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
     <thead>
       <tr>
         <th className="ms-check-cell">{selectAll}</th>
-        <th className="ms-col-lead" style={{ width: "40%" }}>
-          {t("contacts.email")}
-        </th>
+        <th>{t("contacts.email")}</th>
         <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
         <th style={{ width: "15%" }}>{t("contacts.status")}</th>
         <th className="right ms-col-date">{t("contacts.added")}</th>
