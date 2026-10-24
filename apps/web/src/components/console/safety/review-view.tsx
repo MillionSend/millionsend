@@ -19,6 +19,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { mutedDash, Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
@@ -1084,10 +1085,13 @@ export function WarmupCard({
       <Table>
         <thead>
           <tr>
-            <th>{t("cols.domain")}</th>
-            <th>{t("cols.registered")}</th>
+            {/* Today takes what the others leave: the one column without a width. */}
+            <th style={{ width: "1%" }}>{t("cols.domain")}</th>
+            <th style={{ width: "1%" }}>{t("cols.registered")}</th>
             <th>{t("cols.today")}</th>
-            <th className="right">{t("cols.trust")}</th>
+            <th className="right" style={{ width: "1%" }}>
+              {t("cols.trust")}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -1116,26 +1120,31 @@ export function WarmupCard({
                           })
                         : t(domain.ageCheckedAt ? "unknownAge" : "notChecked")}
                     </td>
-                    <td style={joined}>
-                      {domain.trustedAt
-                        ? t("trusted")
-                        : domain.today
-                          ? t(domain.today.fullAt ? "today" : "todayNoDate", {
-                              used: nf.format(domain.today.used),
-                              cap: nf.format(domain.today.cap),
-                              date: domain.today.fullAt
-                                ? formatDay(domain.today.fullAt, locale)
-                                : "",
-                            })
-                          : t("full")}
-                      {domain.waiting > 0 ? (
-                        <>
-                          {" "}
-                          <span style={{ color: "var(--ms-warn)" }}>
-                            · {t("waiting", { count: nf.format(domain.waiting) })}
+                    <td className="ms-cell-fill" style={joined}>
+                      {/* The day's figures give way; what waits stays whole. */}
+                      <span style={{ display: "flex", gap: 4, minWidth: 0 }}>
+                        <Truncated
+                          text={
+                            domain.trustedAt
+                              ? t("trusted")
+                              : domain.today
+                                ? t(domain.today.fullAt ? "today" : "todayNoDate", {
+                                    used: nf.format(domain.today.used),
+                                    cap: nf.format(domain.today.cap),
+                                    date: domain.today.fullAt
+                                      ? formatDay(domain.today.fullAt, locale)
+                                      : "",
+                                  })
+                                : t("full")
+                          }
+                        />
+                        {domain.waiting > 0 ? (
+                          <span style={{ color: "var(--ms-warn)", flex: "none" }}>
+                            {/* A flex item drops its leading space on screen, where the gap stands in; the text keeps it. */}
+                            {` · ${t("waiting", { count: nf.format(domain.waiting) })}`}
                           </span>
-                        </>
-                      ) : null}
+                        ) : null}
+                      </span>
                     </td>
                     <td className="right" style={joined}>
                       <button
