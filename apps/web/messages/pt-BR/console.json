@@ -230,7 +230,8 @@
       "events": "{kind, select, complained {{count, plural, one {# reclamação} other {# reclamações}}} other {{count, plural, one {# hard bounce} other {# hard bounces}}}}",
       "others": "{count, plural, one {na outra} other {nas outras #}}",
       "showAll": "Mostrar todas",
-      "empty": "{kind, select, complained {0 reclamações no período.} other {0 hard bounces no período.}}"
+      "empty": "{kind, select, complained {0 reclamações no período.} other {0 hard bounces no período.}}",
+      "moreTeams": "{teams, plural, one {+# outra equipe} other {+# outras equipes}} · {count, number}"
     },
     "monitoring": {
       "title": "Monitoramento",

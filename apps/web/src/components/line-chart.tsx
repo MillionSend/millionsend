@@ -113,6 +113,7 @@ export function LineChart({
   formatDay,
   formatValue,
   partialNote,
+  tipExtra,
 }: {
   days: string[];
   series: LineChartSeries[];
@@ -125,6 +126,8 @@ export function LineChart({
    * and the tooltip's day label carries this note ("so far").
    */
   partialNote?: string | undefined;
+  /** More of the hovered point under its values in the tip, by the point's index. */
+  tipExtra?: ((index: number) => React.ReactNode) | undefined;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -332,6 +335,7 @@ export function LineChart({
               </span>
             </div>
           ))}
+          {tipExtra?.(hover.index)}
         </ChartTip>
       ) : null}
     </div>

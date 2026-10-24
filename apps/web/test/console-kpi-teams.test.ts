@@ -46,6 +46,7 @@ vi.mock("@/lib/trpc", () => {
   return { useTRPC: () => at([]) };
 });
 vi.mock("@tanstack/react-query", () => ({
+  skipToken: Symbol("skipToken"),
   useQuery: (options: { path: string }) =>
     options.path === "console.overview.kpiTeams"
       ? { ...h.teams, refetch: () => {} }

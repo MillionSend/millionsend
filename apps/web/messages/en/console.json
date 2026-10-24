@@ -230,7 +230,8 @@
       "events": "{kind, select, complained {{count, plural, one {# complaint} other {# complaints}}} other {{count, plural, one {# hard bounce} other {# hard bounces}}}}",
       "others": "{count, plural, one {in the other one} other {in the other #}}",
       "showAll": "Show all",
-      "empty": "{kind, select, complained {0 complaints in the period.} other {0 hard bounces in the period.}}"
+      "empty": "{kind, select, complained {0 complaints in the period.} other {0 hard bounces in the period.}}",
+      "moreTeams": "{teams, plural, one {+# more team} other {+# more teams}} · {count, number}"
     },
     "monitoring": {
       "title": "Monitoring",
