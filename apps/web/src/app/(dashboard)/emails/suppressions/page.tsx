@@ -16,7 +16,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { type BadgeStatus, StatusDot } from "@/components/status-badge";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -230,12 +230,22 @@ export default function SuppressionsPage() {
             <tbody>
               {items.map((row) => (
                 <tr key={row.id}>
-                  <LeadCell
-                    tile={<ContactAvatar email={row.email ?? ""} size={28} />}
-                    value={row.email ?? "—"}
-                    {...(row.email ? { href: `/emails/suppressions/${row.id}` } : {})}
-                    mono
-                  />
+                  {row.email ? (
+                    <LeadCell
+                      tile={<ContactAvatar email={row.email} size={28} />}
+                      value={row.email}
+                      href={`/emails/suppressions/${row.id}`}
+                      mono
+                    />
+                  ) : (
+                    // An erased recipient leaves no address behind.
+                    <td className="ms-cell-fill">
+                      <span className="ms-lead">
+                        <ContactAvatar email="" size={28} />
+                        {mutedDash}
+                      </span>
+                    </td>
+                  )}
                   <td>
                     <span className={`ms-badge ms-badge-${REASON_VARIANT[row.reason]}`}>
                       {t(
