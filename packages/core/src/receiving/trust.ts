@@ -74,9 +74,10 @@ export function allowlisted(address: string, allowlist: readonly string[]): bool
 
 /**
  * The tier, first match winning: failed beats everything, so a spoofed
- * owner never rides a lower rule; owners and the allowlist need alignment;
- * a reply in a thread we proved (token or SES id) from one of its
- * participants needs none.
+ * owner never rides a lower rule, and a From only the MX's parser could
+ * read still fails on the verdict DMARC reached for it; owners and the
+ * allowlist need alignment; a reply in a thread we proved (token or SES id)
+ * from one of its participants needs none.
  */
 export function senderTrust(
   p: SenderAuth & {
@@ -90,9 +91,9 @@ export function senderTrust(
     thread?: { proven: boolean; participants: readonly string[] } | null | undefined;
   },
 ): SenderTrust {
-  if (!p.from) return "unauthenticated";
   const { aligned, failed } = authOutcome(p);
   if (failed) return "failed";
+  if (!p.from) return "unauthenticated";
   const from = p.from.toLowerCase();
   // The MX ran DMARC on the From domain its own parser found: when that is
   // not the domain read here, the two parsers disagree on who wrote it.
