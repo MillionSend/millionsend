@@ -1,12 +1,12 @@
 "use client";
 
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CopyChip } from "@/components/copy-chip";
+import { LeadCell } from "@/components/lead-cell";
 import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -295,33 +295,13 @@ export function TopicDetail({ id }: { id: string }) {
                   const detailHref = `/audience/contacts/${row.id}`;
                   return (
                     <tr key={row.id} className="hoverable" onClick={() => router.push(detailHref)}>
-                      <td>
-                        <span
-                          style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}
-                        >
-                          <ContactAvatar email={row.email} name={name} size={24} />
-                          <Link
-                            className="ms-mono"
-                            style={{ fontSize: 13, flexShrink: 0 }}
-                            href={detailHref}
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            {row.email}
-                          </Link>
-                          {name ? (
-                            <span
-                              style={{
-                                color: "var(--ms-muted)",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {name}
-                            </span>
-                          ) : null}
-                        </span>
-                      </td>
+                      <LeadCell
+                        tile={<ContactAvatar email={row.email} name={name} size={24} />}
+                        value={row.email}
+                        href={detailHref}
+                        mono
+                        tail={name || undefined}
+                      />
                       <td>
                         <span
                           className={`ms-badge ${row.subscribed ? "ms-badge-success" : "ms-badge-neutral"}`}

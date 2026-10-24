@@ -24,10 +24,10 @@ import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../emails/list-parts";
 import { type BroadcastStatus, PacingSteps, PILL_VARIANT, StatusPill } from "./parts";
 
-// Fixed layout keeps the percentage column shares; the min width makes the
-// wrapper scroll on narrow screens instead of squeezing nowrap cells together.
-// 880px keeps the name about 180px once the date column takes its fixed
-// width (components.css, .ms-col-date) below 1200px.
+// Fixed layout keeps the percentage column shares, and the name takes what
+// they and the date column's fixed width (components.css, .ms-col-date) leave;
+// the min width makes the wrapper scroll on narrow screens instead of
+// squeezing the name under about 180px.
 const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 880 };
 
 function BroadcastsHead() {
@@ -35,9 +35,7 @@ function BroadcastsHead() {
   return (
     <thead>
       <tr>
-        <th className="ms-col-lead" style={{ width: "30%" }}>
-          {t("list.name")}
-        </th>
+        <th>{t("list.name")}</th>
         <th style={{ width: "13%" }}>{t("list.status")}</th>
         <th style={{ width: "20%" }}>{t("list.targeting")}</th>
         <th className="right" style={{ width: "13%" }}>
@@ -254,7 +252,9 @@ export default function BroadcastsPage() {
                         <StatusPill status={status} />
                       )}
                     </td>
-                    <td className="ms-cell-clip">{row.segmentName ?? t("composer.segmentNone")}</td>
+                    <td>
+                      <Truncated text={row.segmentName ?? t("composer.segmentNone")} />
+                    </td>
                     <td className="right ms-digits">
                       {status === "sending" && row.sentCount !== null ? (
                         <>

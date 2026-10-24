@@ -6,10 +6,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
-import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { RelativeTime } from "@/components/relative-time";
@@ -497,10 +497,10 @@ function PendingInvitations() {
       <div className="ms-microlabel" style={{ marginBottom: 8 }}>
         {t("invitations.pending.title")}
       </div>
-      <Table style={{ whiteSpace: "nowrap" }}>
+      <Table>
         <thead>
           <tr>
-            <th>{t("invitations.pending.email")}</th>
+            <th style={{ width: "50%" }}>{t("invitations.pending.email")}</th>
             <th>{t("members.role")}</th>
             <th>{t("invitations.pending.expires")}</th>
             <th className="right" aria-label={t("invitations.pending.actions")} />
@@ -509,9 +509,7 @@ function PendingInvitations() {
         <tbody>
           {invitations.map((invite) => (
             <tr key={invite.id}>
-              <td className="ms-mono ms-cell-wrap">
-                <Breakable text={invite.email} />
-              </td>
+              <LeadCell value={invite.email} mono />
               <td>{t(`members.roles.${invite.role}`)}</td>
               <td>
                 {new Date(invite.expiresAt).getTime() <= Date.now() ? (
@@ -645,11 +643,11 @@ function MembersSection() {
         ) : null
       }
     >
-      <Table style={{ whiteSpace: "nowrap" }}>
+      <Table>
         <thead>
           <tr>
-            <th>{t("members.name")}</th>
-            <th>{t("members.email")}</th>
+            <th style={{ width: "30%" }}>{t("members.name")}</th>
+            <th style={{ width: "40%" }}>{t("members.email")}</th>
             <th>{t("members.role")}</th>
             <th className="right" aria-label={t("members.actions")} />
           </tr>
@@ -675,10 +673,8 @@ function MembersSection() {
               const editable = canManage && !m.self && (role === "owner" || m.role !== "owner");
               return (
                 <tr key={m.userId}>
-                  <td className="ms-cell-wrap">{m.name}</td>
-                  <td className="ms-mono ms-cell-wrap">
-                    <Breakable text={m.email} />
-                  </td>
+                  <LeadCell value={m.name} />
+                  <LeadCell value={m.email} mono />
                   <td>
                     {editable ? (
                       <Select

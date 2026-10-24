@@ -1,15 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
-import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
@@ -34,21 +33,27 @@ import {
 } from "./webhook-dialogs";
 import { ENDPOINT_VARIANTS, QueueLine, WebhookStatusBadge } from "./webhook-status-badge";
 
-/** Mirrors the loaded table: mono URL, events chip, badge, rate, time, menu. */
-function WebhooksSkeleton() {
+function WebhooksHead() {
   const t = useTranslations("webhooks");
   return (
+    <thead>
+      <tr>
+        <th style={{ width: "44%" }}>{t("table.url")}</th>
+        <th>{t("table.events")}</th>
+        <th>{t("table.status")}</th>
+        <th>{t("table.successRate")}</th>
+        <th>{t("table.created")}</th>
+        <th className="right" aria-label={t("table.menu")} />
+      </tr>
+    </thead>
+  );
+}
+
+/** Mirrors the loaded table: mono URL, events chip, badge, rate, time, menu. */
+function WebhooksSkeleton() {
+  return (
     <Table>
-      <thead>
-        <tr>
-          <th>{t("table.url")}</th>
-          <th>{t("table.events")}</th>
-          <th>{t("table.status")}</th>
-          <th>{t("table.successRate")}</th>
-          <th>{t("table.created")}</th>
-          <th className="right" aria-label={t("table.menu")} />
-        </tr>
-      </thead>
+      <WebhooksHead />
       <tbody>
         {[220, 180].map((width) => (
           <tr key={width}>
@@ -215,39 +220,21 @@ export function WebhooksView() {
       {webhooks && webhooks.length > 0 ? (
         <>
           <Table>
-            <thead>
-              <tr>
-                <th>{t("table.url")}</th>
-                <th>{t("table.events")}</th>
-                <th>{t("table.status")}</th>
-                <th>{t("table.successRate")}</th>
-                <th>{t("table.created")}</th>
-                <th className="right" aria-label={t("table.menu")} />
-              </tr>
-            </thead>
+            <WebhooksHead />
             <tbody>
               {webhooks.slice(0, pages * pageSize).map((webhook) => (
                 <tr key={webhook.id}>
-                  <td>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                  <LeadCell
+                    tile={
                       <NavTile
                         name="webhooks"
                         color={TONE_COLOR[ENDPOINT_VARIANTS[webhook.status]]}
                       />
-                      <Link
-                        href={`/webhooks/${webhook.id}`}
-                        className="ms-mono"
-                        style={{
-                          color: "var(--ms-bone)",
-                          textDecoration: "underline",
-                          textUnderlineOffset: 3,
-                        }}
-                      >
-                        <Breakable text={displayUrl(webhook.url)} />
-                      </Link>
-                    </span>
-                    <QueueLine queued={webhook.queued} oldestQueuedAt={webhook.oldestQueuedAt} />
-                  </td>
+                    }
+                    value={displayUrl(webhook.url)}
+                    href={`/webhooks/${webhook.id}`}
+                    mono
+                  />
                   <td>
                     {webhook.eventTypes === null || webhook.eventTypes.length === 0 ? (
                       <span className="ms-chip">{t("allEvents")}</span>
@@ -281,7 +268,15 @@ export function WebhooksView() {
                     )}
                   </td>
                   <td>
-                    <WebhookStatusBadge status={webhook.status} />
+                    {/* Beside the badge, not as the URL's tail: a long URL would hide a backlog. */}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                      <WebhookStatusBadge status={webhook.status} />
+                      <QueueLine
+                        inline
+                        queued={webhook.queued}
+                        oldestQueuedAt={webhook.oldestQueuedAt}
+                      />
+                    </span>
                   </td>
                   <td>
                     <span className="ms-mono">

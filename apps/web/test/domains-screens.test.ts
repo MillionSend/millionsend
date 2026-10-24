@@ -68,11 +68,7 @@ const own = (name: string, status: string) => ({
 function page(p: { list: unknown[]; search?: string }) {
   h.list = p.list;
   h.search = p.search ?? "";
-  // A name's break points (Breakable) put back together.
-  const html = renderToStaticMarkup(createElement(DomainsView, { awsBanner: null })).replaceAll(
-    "<wbr/>",
-    "",
-  );
+  const html = renderToStaticMarkup(createElement(DomainsView, { awsBanner: null }));
   const rows = html.match(/<tbody>.*<\/tbody>/s)?.[0].match(/<tr>.*?<\/tr>/gs) ?? [];
   return { html, rows };
 }
@@ -86,6 +82,15 @@ describe("the Domains page", () => {
     for (const row of rows) expect(row).toContain('aria-label="More actions"');
     expect(rows[0]).toContain('href="/domains/mail.acme.example"');
     expect(html).toContain("Page 1 – 1 of 2 domains");
+  });
+
+  it("keeps each row on one line, the name ending in an ellipsis inside its column", () => {
+    const { html } = page({ list: owned });
+    expect(html).not.toContain("ms-cell-wrap");
+    expect(html).not.toContain("<wbr");
+    expect(html).toContain(
+      '<a class="ms-lead-value" href="/domains/mail.acme.example"><span class="ms-truncate">mail.acme.example</span></a>',
+    );
   });
 
   it("shows the no-match card alone when the filters match no domain", () => {

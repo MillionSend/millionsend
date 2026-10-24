@@ -690,12 +690,8 @@ export function ReviewView({ teamId }: { teamId: string }) {
                       )}
                     </td>
                     <td
-                      style={{
-                        fontSize: 12,
-                        color: "var(--ms-muted)",
-                        whiteSpace: "normal",
-                        minWidth: 260,
-                      }}
+                      className="ms-cell-wrap"
+                      style={{ fontSize: 12, color: "var(--ms-muted)", minWidth: 260 }}
                     >
                       {!email.model
                         ? common("none")
@@ -1162,7 +1158,11 @@ export function WarmupCard({
                   </tr>
                   {request ? (
                     <tr>
-                      <td colSpan={4} style={{ paddingTop: 0, paddingBottom: 10 }}>
+                      <td
+                        colSpan={4}
+                        className="ms-cell-wrap"
+                        style={{ paddingTop: 0, paddingBottom: 10 }}
+                      >
                         <div style={{ color: "var(--ms-bone)" }}>
                           <DotParts
                             lead={

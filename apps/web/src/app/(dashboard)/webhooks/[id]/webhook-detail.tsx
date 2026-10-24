@@ -573,7 +573,7 @@ export function WebhookDetail({ id }: { id: string }) {
                       </tr>
                       {expandedId === delivery.id ? (
                         <tr>
-                          <td colSpan={5}>
+                          <td colSpan={5} className="ms-cell-wrap">
                             <DeliveryExpanded id={delivery.id} />
                           </td>
                         </tr>

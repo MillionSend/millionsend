@@ -401,6 +401,10 @@ table.ms-table {
   /* Lists run at label size with tight rows (~40px with a row menu): a page
      of contacts or emails should fit a laptop viewport without scrolling. */
   font-size: var(--ms-fs-label);
+  /* Every row is one line at every width (white-space inherits into every
+     cell): free text ends in an ellipsis inside its column, whole on hover
+     (Truncated, LeadCell), and the ms-cell-fill column gives way. */
+  white-space: nowrap;
   /* What the list sits on, for a cell that must paint it (the menu column). */
   --ms-table-ground: var(--ms-void);
 }
@@ -433,6 +437,32 @@ table.ms-table {
 }
 .ms-table td:last-child {
   color: var(--ms-muted);
+}
+/* Chrome breaks at a <wbr> even under nowrap: an address's break points
+   (breakable.tsx) would undo the one-line cells. */
+.ms-table wbr {
+  display: none;
+}
+/* The one opt-out: a detail row that reads as a paragraph (an expanded
+   delivery, a limit request's note, revealed evidence) wraps at every width. */
+.ms-table td.ms-cell-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* Fixed-layout lists (broadcasts, contacts): the date column holds the
+   longest relative time ("há 11 meses") at any width, and the lead column,
+   the one without a width, takes what the other shares leave. */
+.ms-table th.ms-col-date {
+  width: 104px;
+}
+/* A badge holding a long value (an API key's domain) gives way with the
+   row's other free text, ending in an ellipsis inside (Truncated) at the
+   pill's full strength, not the dimmed ⓘ's. */
+.ms-table .ms-badge-clip {
+  min-width: 0;
+}
+.ms-table .ms-badge-clip .ms-truncate-host {
+  opacity: 1;
 }
 /* Dense variant — DNS record tables: mono chips on ~4px rows. */
 .ms-table.dense td {
@@ -1690,12 +1720,10 @@ button.ms-notice-strip-action {
   right: 0;
   bottom: 0;
 }
-/* Console lists keep every cell on one line (the wrapper scrolls sideways
-   instead) on slightly tighter cells, and print their figures in mono at
-   12.5px — a dense operator list, not a KPI. */
+/* Console lists run on slightly tighter cells and print their figures in
+   mono at 12.5px — a dense operator list, not a KPI. */
 .ms-table.nowrap th,
 .ms-table.nowrap td {
-  white-space: nowrap;
   padding-left: 8px;
   padding-right: 8px;
 }
@@ -2708,30 +2736,6 @@ summary:focus-visible,
     min-width: 0;
   }
 }
-/* Fixed-layout lists (broadcasts, contacts): on a wide desktop the lead
-   column holds its share and the date column takes the rest. Narrower, the
-   shares plus cell padding would leave the date no width at all, drawn under
-   the row menu, so the date gets a fixed width and the lead column takes
-   what is left; !important beats the share set inline. The suppression list's
-   address column drops its share the same way, so an address wraps only as
-   far as the narrow desktop needs. */
-@media (max-width: 1199px) {
-  .ms-table th.ms-col-lead {
-    width: auto !important;
-  }
-  .ms-table th.ms-col-date {
-    width: 104px;
-  }
-}
-/* A badge holding a long value (an API key's domain) ellipsizes rather than
-   push its list past a narrow desktop; the value rides in its title. */
-@media (min-width: 900px) and (max-width: 1199px) {
-  .ms-table .ms-badge-clip {
-    max-width: 16rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-}
 /* The account score's four figures go two by two where a row of four would
    fold each label onto two or three lines; !important beats the inline row. */
 @media (min-width: 640px) and (max-width: 1199px) {
@@ -2874,25 +2878,6 @@ summary:focus-visible,
   .ms-page-actions > .ms-split > .ms-btn {
     flex: 1 1 auto;
     justify-content: center;
-  }
-
-  /* Lists scroll sideways rather than folding a cell onto four lines
-     (white-space inherits into every cell). */
-  .ms-table {
-    white-space: nowrap;
-  }
-  /* Chrome breaks at a <wbr> even under nowrap: an address's break points
-     (breakable.tsx) would undo the one-line cells. */
-  .ms-table wbr {
-    display: none;
-  }
-  /* In a fixed-layout list a nowrap cell would run over its neighbours. */
-  .ms-table td.ms-cell-clip {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .ms-table td > span {
-    flex-wrap: nowrap !important;
   }
 
   /* An email's events read top to bottom: across, the latest event (the one
@@ -3296,16 +3281,10 @@ summary:focus-visible,
   /* A cell that takes what the other columns leave and ellipsizes inside it
      (the emails list's subject): with max-width 0 its text does not set the
      table's minimum width, so a long subject never pushes the time column off
-     a desktop. Phones keep the full-width table that scrolls. */
+     a desktop. It holds room only through a width on its own th, or as the
+     one column without a width. Phones keep the full-width table that scrolls. */
   .ms-table td.ms-cell-fill {
     max-width: 0;
-  }
-  /* A long address or URL wraps inside its column, at its "@", dots and
-     slashes first (breakable.tsx), instead of widening the list past the
-     screen. Phones keep the one-line list that scrolls. */
-  .ms-table td.ms-cell-wrap {
-    white-space: normal;
-    overflow-wrap: anywhere;
   }
 }
 
