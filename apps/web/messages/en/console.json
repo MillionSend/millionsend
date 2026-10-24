@@ -426,8 +426,11 @@
       "ok": "ok",
       "warning": "warning",
       "paused": "paused",
-      "suspended": "Suspended",
-      "operatorPaused": "paused by operator"
+      "suspended": "suspended",
+      "review": "in review",
+      "suspendedTip": "Suspended on {day}",
+      "reviewTip": "Held for review since {day}",
+      "window": "{metric, select, complaint {Last 7 days, counting only mail to providers that report complaints.} other {Last 7 days, over all sends.}}"
     },
     "empty": "0 teams match.",
     "menu": {

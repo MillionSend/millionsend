@@ -22,7 +22,7 @@ import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useCopied } from "@/lib/use-copied";
 import { LoadErrorCard } from "../safety/parts";
-import { GuardrailLabel, PlanBadge, RegionLabel, usePlanName } from "./cells";
+import { GUARDRAIL_TONE, PlanBadge, RegionLabel, TeamStatus, usePlanName } from "./cells";
 import type { TeamRow } from "./types";
 
 const SORT_KEYS = [
@@ -37,11 +37,6 @@ const SORT_KEYS = [
 ] as const;
 const GUARDRAILS = ["ok", "warning", "paused"] as const;
 const TEAM_TYPES = ["free", "starter", "pro", "scale", "system"] as const;
-const GUARDRAIL_COLOR = {
-  ok: "var(--ms-success)",
-  warning: "var(--ms-warn)",
-  paused: "var(--ms-danger)",
-} as const;
 const COLUMNS = 10;
 
 function scoreColor(tenths: number): string | undefined {
@@ -236,7 +231,7 @@ export function TeamsView() {
             ...GUARDRAILS.map((key) => ({
               value: key,
               label: t("filters.guardrail", { value: t(`guardrail.${key}`) }),
-              adornment: <StatusDot color={GUARDRAIL_COLOR[key]} />,
+              adornment: <StatusDot color={`var(--ms-${GUARDRAIL_TONE[key]})`} />,
             })),
           ]}
         />
@@ -318,11 +313,7 @@ export function TeamsView() {
                           : formatScoreTenths(row.scoreTenths, locale)}
                       </td>
                       <td>
-                        <GuardrailLabel
-                          guardrail={row.guardrail}
-                          suspendedAt={row.suspendedAt}
-                          broadcastsPausedByOperatorAt={row.broadcastsPausedByOperatorAt}
-                        />
+                        <TeamStatus team={row} />
                       </td>
                       <td>
                         <RegionLabel region={row.region} />

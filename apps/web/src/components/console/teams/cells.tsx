@@ -1,9 +1,11 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { regionFlag } from "@/app/(dashboard)/domains/regions";
 import { Tooltip } from "@/components/tooltip";
-import { planLabel, planTone } from "@/lib/console-format";
+import { formatPercent, planLabel, planTone } from "@/lib/console-format";
+import { formatDay } from "@/lib/format";
+import { StatusText } from "../regions/region-cells";
 
 /** The translated plan name; a value the catalog does not know prints raw. */
 export function usePlanName(): (plan: string) => string {
@@ -33,32 +35,80 @@ export function RegionLabel({ region }: { region: string | null }) {
   );
 }
 
-const GUARDRAIL_COLOR: Record<string, string> = {
-  ok: "var(--ms-success)",
-  warning: "var(--ms-warn)",
-  paused: "var(--ms-danger)",
-};
+/** A guardrail standing's dot. */
+export const GUARDRAIL_TONE = { ok: "success", warning: "warn", paused: "danger" } as const;
+
+/** What a team's status cell reads: its holds, its pause and its guardrail standing. */
+export interface TeamStatusFields {
+  suspendedAt: Date | null;
+  suspensionReason: "manual" | "reputation" | "phishing" | "non_payment" | "review" | null;
+  broadcastsPausedByOperatorAt: Date | null;
+  guardrail: keyof typeof GUARDRAIL_TONE | null;
+  guardrailMetric: "complaint" | "hard_bounce" | null;
+  complaintRate7d: number | null;
+  hardBounceRate7d: number | null;
+}
 
 /**
- * Suspended beats an operator pause beats the guardrail; a team without a
- * standing row reads as ok.
+ * A team's state now, as a dot and one or two words with the reason one
+ * hover away. The first that holds wins: a review hold, a suspension, the
+ * operator's broadcast pause, then the guardrail; a team without a standing
+ * row reads as ok.
  */
-export function GuardrailLabel({
-  guardrail,
-  suspendedAt,
-  broadcastsPausedByOperatorAt,
-}: {
-  guardrail: string | null;
-  suspendedAt: Date | null;
-  broadcastsPausedByOperatorAt: Date | null;
-}) {
-  const t = useTranslations("console.teams.guardrail");
-  if (suspendedAt) return <span className="ms-badge ms-badge-danger">{t("suspended")}</span>;
-  const status = broadcastsPausedByOperatorAt ? "paused" : (guardrail ?? "ok");
+export function TeamStatus({ team }: { team: TeamStatusFields }) {
+  const t = useTranslations("console.teams");
+  const safety = useTranslations("console.safety");
+  const overview = useTranslations("console.overview");
+  const locale = useLocale();
+  if (team.suspendedAt) {
+    const day = formatDay(team.suspendedAt, locale);
+    if (team.suspensionReason === "review") {
+      return (
+        <StatusText
+          tone="warn"
+          text={t("guardrail.review")}
+          tip={t("guardrail.reviewTip", { day })}
+        />
+      );
+    }
+    const why =
+      team.suspensionReason && team.suspensionReason !== "manual"
+        ? ` · ${t(`suspendDialog.reasons.${team.suspensionReason}`)}`
+        : "";
+    return (
+      <StatusText
+        tone="danger"
+        text={t("guardrail.suspended")}
+        tip={`${t("guardrail.suspendedTip", { day })}${why}`}
+      />
+    );
+  }
+  if (team.broadcastsPausedByOperatorAt) {
+    return (
+      <StatusText
+        tone="danger"
+        text={t("guardrail.paused")}
+        tip={`${safety("review.badges.operatorPaused")}\n${overview("regions.pauseTransactional")}`}
+      />
+    );
+  }
+  const guardrail = team.guardrail ?? "ok";
+  if (guardrail === "ok") return <StatusText tone="success" text={t("guardrail.ok")} />;
+  const label = guardrail === "paused" ? "guardrailPaused" : "guardrailWarning";
+  const metric = team.guardrailMetric;
+  const rate = metric === "hard_bounce" ? team.hardBounceRate7d : team.complaintRate7d;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      <span className="ms-dot" style={{ background: GUARDRAIL_COLOR[status] }} aria-hidden="true" />
-      {broadcastsPausedByOperatorAt ? t("operatorPaused") : t(status)}
-    </span>
+    <StatusText
+      tone={GUARDRAIL_TONE[guardrail]}
+      text={t(`guardrail.${guardrail}`)}
+      tip={
+        metric && rate !== null
+          ? `${safety(`reasonLabel.${label}`, {
+              metric: safety(`metric.${metric}`),
+              rate: formatPercent(rate, locale, 2),
+            })}\n${t("guardrail.window", { metric })}`
+          : safety(`review.badges.${label}`)
+      }
+    />
   );
 }

@@ -22,12 +22,11 @@ import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamActions } from "../team-actions";
+import { PlanBadge, TeamStatus } from "../teams/cells";
 import { LimitRequests } from "./limit-requests";
 import {
   FlagStatusBadge,
-  GuardrailCell,
   LoadErrorCard,
-  PlanBadge,
   ReasonLabel,
   RegionCell,
   RiskCell,
@@ -307,11 +306,7 @@ export function SafetyList() {
                             : common("none")}
                         </td>
                         <td style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          <GuardrailCell
-                            guardrail={row.guardrail}
-                            suspendedAt={row.suspendedAt}
-                            pausedAt={row.broadcastsPausedByOperatorAt}
-                          />
+                          <TeamStatus team={row} />
                         </td>
                         <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>
                           <ReasonLabel reason={row.reason} detail={row.detail} />

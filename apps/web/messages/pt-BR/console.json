@@ -426,8 +426,11 @@
       "ok": "ok",
       "warning": "em alerta",
       "paused": "pausada",
-      "suspended": "Suspensa",
-      "operatorPaused": "pausada pelo operador"
+      "suspended": "suspensa",
+      "review": "em revisão",
+      "suspendedTip": "Suspensa em {day}",
+      "reviewTip": "Aguardando revisão desde {day}",
+      "window": "{metric, select, complaint {Últimos 7 dias, contando só os e-mails para provedores que repassam reclamações.} other {Últimos 7 dias, sobre todos os envios.}}"
     },
     "empty": "0 equipes encontradas.",
     "menu": {

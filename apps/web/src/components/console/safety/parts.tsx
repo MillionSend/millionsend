@@ -9,7 +9,6 @@ import { planLabel } from "@/lib/console-format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
 
-export type Guardrail = "ok" | "warning" | "paused";
 export type FlagReason =
   | "monitor"
   | "complaints"
@@ -40,20 +39,12 @@ export const LINK_BUTTON: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const PAID = ["starter", "pro", "scale"];
 const PLAN_KEYS = ["free", "starter", "pro", "scale", "system"];
 
 /** "Pro 100K" when a quota is set, else the plan name; unknown plan values read raw. */
 export function usePlanLabel(): (plan: string, planQuota: number | null) => string {
   const t = useTranslations("console.plan");
   return (plan, planQuota) => planLabel(PLAN_KEYS.includes(plan) ? t(plan) : plan, planQuota);
-}
-
-/** Plan pill: info for system, success for paid, neutral for free and unknown values. */
-export function PlanBadge({ plan, planQuota }: { plan: string; planQuota: number | null }) {
-  const label = usePlanLabel();
-  const tone = plan === "system" ? "info" : PAID.includes(plan) ? "success" : "neutral";
-  return <span className={`ms-badge ms-badge-${tone}`}>{label(plan, planQuota)}</span>;
 }
 
 export function usePercent(): (rate: number) => string {
@@ -68,36 +59,6 @@ export function usePercent(): (rate: number) => string {
 
 export function scoreColor(tenths: number): string | undefined {
   return tenths < 50 ? "var(--ms-danger)" : tenths < 70 ? "var(--ms-warn)" : undefined;
-}
-
-const DOT: Record<Guardrail, string> = {
-  ok: "var(--ms-success)",
-  warning: "var(--ms-warn)",
-  paused: "var(--ms-danger)",
-};
-
-/** Suspended badge, operator-paused dot, or the guardrail dot — the Teams screen's rules. */
-export function GuardrailCell({
-  guardrail,
-  suspendedAt,
-  pausedAt,
-}: {
-  guardrail: Guardrail | null;
-  suspendedAt: Date | null;
-  pausedAt: Date | null;
-}) {
-  const t = useTranslations("console.teams.guardrail");
-  const common = useTranslations("console.common");
-  if (suspendedAt) return <span className="ms-badge ms-badge-danger">{t("suspended")}</span>;
-  const dot = (color: string, label: string) => (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      <span className="ms-dot" style={{ background: color }} />
-      {label}
-    </span>
-  );
-  if (pausedAt) return dot(DOT.paused, t("operatorPaused"));
-  if (!guardrail) return <>{common("none")}</>;
-  return dot(DOT[guardrail], t(guardrail));
 }
 
 /** Flag + city with the region code on hover; the "no verified domain" line when null. */
