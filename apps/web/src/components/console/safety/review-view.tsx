@@ -22,19 +22,11 @@ import { Tooltip } from "@/components/tooltip";
 import { Truncated } from "@/components/truncated";
 import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
-import { formatScoreTenths } from "@/lib/score-band";
+import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamActions } from "../team-actions";
 import { LinkedTeams } from "../teams/linked-teams";
-import {
-  CardHead,
-  LINK_BUTTON,
-  LoadErrorCard,
-  Rate7d,
-  ReasonLabel,
-  scoreColor,
-  usePlanLabel,
-} from "./parts";
+import { CardHead, LINK_BUTTON, LoadErrorCard, Rate7d, ReasonLabel, usePlanLabel } from "./parts";
 import { RevealCell, type RevealTeam, useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
 

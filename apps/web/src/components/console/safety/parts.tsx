@@ -88,10 +88,6 @@ export function Rate7d({
   return percent(rate);
 }
 
-export function scoreColor(tenths: number): string | undefined {
-  return tenths < 50 ? "var(--ms-danger)" : tenths < 70 ? "var(--ms-warn)" : undefined;
-}
-
 /** Flag + city with the region code on hover; the "no verified domain" line when null. */
 export function RegionCell({ region }: { region: string | null }) {
   const domains = useTranslations("domains");

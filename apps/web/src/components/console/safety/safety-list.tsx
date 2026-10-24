@@ -18,21 +18,13 @@ import { TeamLogo } from "@/components/team-logo";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { consoleReviewHref } from "@/lib/nav";
-import { formatScoreTenths } from "@/lib/score-band";
+import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamActions } from "../team-actions";
 import { PlanBadge, TeamStatus } from "../teams/cells";
 import { LimitRequests } from "./limit-requests";
-import {
-  FlagStatusBadge,
-  LoadErrorCard,
-  Rate7d,
-  ReasonLabel,
-  RegionCell,
-  RiskCell,
-  scoreColor,
-} from "./parts";
+import { FlagStatusBadge, LoadErrorCard, Rate7d, ReasonLabel, RegionCell, RiskCell } from "./parts";
 import { useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
 

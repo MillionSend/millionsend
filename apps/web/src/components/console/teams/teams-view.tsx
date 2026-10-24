@@ -17,7 +17,7 @@ import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import { Tooltip } from "@/components/tooltip";
 import { formatDay } from "@/lib/format";
-import { formatScoreTenths } from "@/lib/score-band";
+import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useCopied } from "@/lib/use-copied";
@@ -38,12 +38,6 @@ const SORT_KEYS = [
 const GUARDRAILS = ["ok", "warning", "paused"] as const;
 const TEAM_TYPES = ["free", "starter", "pro", "scale", "system"] as const;
 const COLUMNS = 10;
-
-function scoreColor(tenths: number): string | undefined {
-  if (tenths < 50) return "var(--ms-danger)";
-  if (tenths < 70) return "var(--ms-warn)";
-  return undefined;
-}
 
 /** Mirrors a loaded row: logo + name, badge, muted email, four figures, dot label, region, day, menu. */
 function SkeletonRows() {
