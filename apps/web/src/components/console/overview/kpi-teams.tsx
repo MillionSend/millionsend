@@ -10,7 +10,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { mutedDash, Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import { Tooltip } from "@/components/tooltip";
-import { formatDay } from "@/lib/format";
+import { formatDay, formatDayTime, sameLocalDay } from "@/lib/format";
 import { consoleReviewHref } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
 import { LINK_BUTTON } from "../safety/parts";
@@ -164,7 +164,12 @@ export function KpiTeams({ kind, period }: { kind: FeedbackKind; period: Period 
                         rate(row.rate)
                       )}
                     </td>
-                    <td>{pointLabel(row.lastAt, data.grain, locale)}</td>
+                    <td>
+                      {/* A day's window starts in yesterday's hours: those carry their day. */}
+                      {data.grain === "hour" && !sameLocalDay(row.lastAt, Date.now())
+                        ? formatDayTime(row.lastAt, locale)
+                        : pointLabel(row.lastAt, data.grain, locale)}
+                    </td>
                   </tr>
                 );
               })

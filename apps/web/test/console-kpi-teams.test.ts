@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { formatHourMinute } from "@/lib/console-format";
+import { formatDayTime } from "@/lib/format";
 import type { AppRouter } from "@/server/routers";
 
 type Row = inferRouterOutputs<AppRouter>["console"]["overview"]["kpiTeams"]["rows"][number];
@@ -234,18 +235,25 @@ describe("the teams behind a feedback KPI", () => {
     expect(html).not.toContain("<p ");
   });
 
-  it("prints the hour on a day's window", () => {
+  it("prints the hour on a day's window, with the day for yesterday's hours", () => {
     h.locale = "pt-BR";
-    const at = "2026-01-14T17:00:00.000Z";
-    const [first] = cells(
+    const today = new Date();
+    today.setMinutes(0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const rows = cells(
       render("complained", {
         ...complaints,
         grain: "hour",
-        rows: [row({ id: "a", name: "Acme", sent: 50, count: 1, lastAt: at })],
+        rows: [
+          row({ id: "a", name: "Acme", sent: 50, count: 1, lastAt: today.toISOString() }),
+          row({ id: "b", name: "Globex", sent: 50, count: 1, lastAt: yesterday.toISOString() }),
+        ],
       }),
     );
-    expect(first?.[7]).toBe(formatHourMinute(at, "pt-BR"));
-    expect(first?.[7]).toMatch(/^\d{2}:\d{2}$/);
+    expect(rows[0]?.[7]).toBe(formatHourMinute(today, "pt-BR"));
+    expect(rows[0]?.[7]).toMatch(/^\d{2}:\d{2}$/);
+    expect(rows[1]?.[7]).toBe(formatDayTime(yesterday, "pt-BR"));
   });
 });
 
