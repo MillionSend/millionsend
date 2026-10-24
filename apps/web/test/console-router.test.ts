@@ -1826,3 +1826,47 @@ describe("console.overview.kpiTeams", () => {
     expect(out.total).toBe((await kpis(period)).totals.hardBounced);
   });
 });
+
+describe("console.safety.list and a 7-day window with nothing to rate", () => {
+  it("says whether the standing's window held a send that could draw a complaint", async () => {
+    const c = schema.usageCounters;
+    const day = (daysAgo: number) => utcDay(Date.now() - daysAgo * DAY_MS);
+    const seed = async (
+      slug: string,
+      sent7d: number,
+      counters: { daysAgo: number; sent: number; sentNoFeedback: number } | null,
+    ) => {
+      const id = await createTeam(db, slug);
+      await db.insert(schema.teamStandings).values({ teamId: id, guardrail: "ok", sent7d });
+      await db.insert(schema.teamFlags).values({ teamId: id, reason: "manual" });
+      if (counters) {
+        const { daysAgo, ...values } = counters;
+        await db.insert(c).values({ teamId: id, day: day(daysAgo), ...values });
+      }
+      return id;
+    };
+    const gmailOnly = await seed("rates-gmail-only", 300, {
+      daysAgo: 0,
+      sent: 300,
+      sentNoFeedback: 300,
+    });
+    const reporting = await seed("rates-reporting", 100, {
+      daysAgo: 1,
+      sent: 100,
+      sentNoFeedback: 40,
+    });
+    const quiet = await seed("rates-quiet", 0, null);
+    const lastWeek = await seed("rates-last-week", 0, { daysAgo: 8, sent: 50, sentNoFeedback: 0 });
+    const rows = (await operator().console.safety.list({ limit: 100 })).items;
+    const row = (id: string) => rows.find((r) => r.teamId === id);
+    expect(row(gmailOnly)).toMatchObject({ sent7d: 300, complaintSends7d: false });
+    expect(row(reporting)).toMatchObject({ sent7d: 100, complaintSends7d: true });
+    expect(row(quiet)).toMatchObject({ sent7d: 0, complaintSends7d: false });
+    expect(row(lastWeek)).toMatchObject({ sent7d: 0, complaintSends7d: false });
+    // What the status cell reads rides along.
+    expect(row(reporting)).toMatchObject({ suspensionReason: null, guardrailMetric: null });
+    await db
+      .delete(schema.teams)
+      .where(inArray(schema.teams.id, [gmailOnly, reporting, quiet, lastWeek]));
+  });
+});

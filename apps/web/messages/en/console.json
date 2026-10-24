@@ -967,6 +967,7 @@
     },
     "settingsButton": "Monitoring settings",
     "exempt": "exempt",
+    "noSends7d": "{metric, select, complaint {No sends in the last 7 days to providers that report complaints.} other {No sends in the last 7 days.}}",
     "riskTip": "Internal monitor risk, 0 to 1. Sampled content judged by the model, decayed over time, weighted by team age. Never shown to the team.",
     "waiting": {
       "title": "Waiting for review · {count}",

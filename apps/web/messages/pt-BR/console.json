@@ -967,6 +967,7 @@
     },
     "settingsButton": "Configurações de monitoramento",
     "exempt": "isenta",
+    "noSends7d": "{metric, select, complaint {Nenhum envio nos últimos 7 dias para provedores que repassam reclamações.} other {Nenhum envio nos últimos 7 dias.}}",
     "riskTip": "Risco interno do monitor, de 0 a 1. Avaliações do modelo sobre o conteúdo amostrado, com menos peso conforme envelhecem, ajustadas pela idade da equipe. Nunca mostrado à equipe.",
     "waiting": {
       "title": "Aguardando revisão · {count}",

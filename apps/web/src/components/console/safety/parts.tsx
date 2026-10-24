@@ -4,6 +4,7 @@ import type { RevealSpan } from "@millionsend/core/content-reveal";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
 import { useLocale, useTranslations } from "next-intl";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { mutedDash } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { planLabel } from "@/lib/console-format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
@@ -55,6 +56,33 @@ export function usePercent(): (rate: number) => string {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(rate);
+}
+
+/**
+ * A standing's 7-day rate. Over a window with no send to rate (none at all,
+ * or for complaints none to a provider that reports them) the stored rate
+ * reads 0, so the cell is a dash that says why; no standing is a bare dash.
+ */
+export function Rate7d({
+  rate,
+  sends,
+  metric,
+}: {
+  rate: number | null;
+  sends: boolean;
+  metric: "complaint" | "hard_bounce";
+}) {
+  const t = useTranslations("console.safety");
+  const percent = usePercent();
+  if (rate === null) return mutedDash;
+  if (!sends) {
+    return (
+      <Tooltip inline text={t("noSends7d", { metric })}>
+        {mutedDash}
+      </Tooltip>
+    );
+  }
+  return percent(rate);
 }
 
 export function scoreColor(tenths: number): string | undefined {
