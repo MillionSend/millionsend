@@ -274,78 +274,84 @@ function RateCard(props: {
           />
         ) : null}
       </div>
-      <div
+      <div style={{ marginTop: 12 }}>
+        <RateRow
+          dot={props.color}
+          label={props.rowLabel}
+          count={props.rowCount}
+          pct={props.rowPct}
+          pctColor="var(--ms-bone)"
+        />
+        {props.secondary ? (
+          <RateRow {...props.secondary} dot="var(--ms-faint)" pctColor="var(--ms-muted)" />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A rate card's footer row: dot, label, an optional muted note, the figures.
+ * When the three don't fit one line, note and figures move under the label
+ * together: the label keeps its line whole and the figures stay at the right
+ * edge. Everything rides the label's baseline: the smaller mono note sits on
+ * it rather than floating above the x-height, and the dot, having no text,
+ * rests its bottom edge on it, which centres it on the x-height.
+ */
+function RateRow(props: {
+  dot: string;
+  label: string;
+  note?: string | undefined;
+  hint?: string | undefined;
+  count: string;
+  pct: string;
+  pctColor: string;
+}) {
+  return (
+    <div
+      title={props.hint}
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 8,
+        fontSize: 13,
+        color: "var(--ms-muted)",
+        padding: "7px 0",
+        borderTop: "1px solid var(--ms-line)",
+      }}
+    >
+      <span className="ms-dot xs" style={{ background: props.dot }} />
+      <span
         style={{
+          flex: 1,
+          minWidth: 0,
           display: "flex",
-          alignItems: "center",
-          gap: 8,
-          fontSize: 13,
-          color: "var(--ms-muted)",
-          padding: "7px 0",
-          borderTop: "1px solid var(--ms-line)",
-          marginTop: 12,
+          flexWrap: "wrap",
+          alignItems: "baseline",
+          gap: "2px 8px",
         }}
       >
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: props.color }} />
-        {props.rowLabel}
-        <span style={{ marginLeft: "auto" }}>
-          <span className="ms-digits" style={{ fontSize: 12.5, color: "var(--ms-faint)" }}>
-            {props.rowCount}
-          </span>
-          <span
-            className="ms-digits"
-            style={{ fontSize: 12.5, color: "var(--ms-bone)", marginLeft: 8 }}
-          >
-            {props.rowPct}
-          </span>
-        </span>
-      </div>
-      {props.secondary ? (
-        <div
-          title={props.secondary.hint}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 13,
-            color: "var(--ms-muted)",
-            padding: "7px 0",
-            borderTop: "1px solid var(--ms-line)",
-          }}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: "var(--ms-faint)",
-              flex: "none",
-            }}
-          />
-          {/* Baseline-aligned pair: centering the boxes would float the smaller mono note above the label's x-height.
-              On a narrow card the row stays one line: the note gives way first, then the label. */}
-          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-            <span className="ms-truncate">{props.secondary.label}</span>
-            <span
-              className="ms-mono ms-truncate"
-              style={{ fontSize: 10, color: "var(--ms-faint)", flex: "1 1 0" }}
-            >
-              {props.secondary.note}
+        {/* Cut only where the card is narrower than the label itself. */}
+        <span className="ms-truncate">{props.label}</span>
+        <span style={{ flex: "1 0 auto", display: "flex", alignItems: "baseline", gap: 8 }}>
+          {props.note ? (
+            <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+              {props.note}
             </span>
-          </span>
-          <span style={{ marginLeft: "auto", flex: "none", whiteSpace: "nowrap" }}>
+          ) : null}
+          <span style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
             <span className="ms-digits" style={{ fontSize: 12.5, color: "var(--ms-faint)" }}>
-              {props.secondary.count}
+              {props.count}
             </span>
             <span
               className="ms-digits"
-              style={{ fontSize: 12.5, color: "var(--ms-muted)", marginLeft: 8 }}
+              style={{ fontSize: 12.5, color: props.pctColor, marginLeft: 8 }}
             >
-              {props.secondary.pct}
+              {props.pct}
             </span>
           </span>
-        </div>
-      ) : null}
+        </span>
+      </span>
     </div>
   );
 }

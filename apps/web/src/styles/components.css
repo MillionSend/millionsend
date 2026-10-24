@@ -1953,9 +1953,11 @@ summary:focus-visible,
   box-shadow: var(--ms-focus-ring);
 }
 
-/* Status dot — leading adornment in select options and status rows.
-   The ring variant marks the unfiltered "all" row: an empty circle where a
-   status would put its color. */
+/* Status dot — leading adornment in select options, status rows, chart tips
+   and card rows. Every small round dot is one, so none shrinks into an oval
+   in a tight row. The ring variant marks the unfiltered "all" row: an empty
+   circle where a status would put its color. sm is the 7px dot of chart tips
+   and timelines, xs the 6px one of a card's footer rows and a pill. */
 .ms-dot {
   display: inline-block;
   width: 8px;
@@ -1966,6 +1968,14 @@ summary:focus-visible,
 }
 .ms-dot.ring {
   border: 1.5px solid var(--ms-faint);
+}
+.ms-dot.sm {
+  width: 7px;
+  height: 7px;
+}
+.ms-dot.xs {
+  width: 6px;
+  height: 6px;
 }
 
 /* Menu / popover — panel on line-strong, 10px radius, 6px inner padding,

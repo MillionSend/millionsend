@@ -284,16 +284,7 @@ function ConfigurationPanel({
                 color: "var(--ms-muted)",
               }}
             >
-              <span
-                aria-hidden
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  flexShrink: 0,
-                  background: "var(--ms-faint)",
-                }}
-              />
+              <span aria-hidden className="ms-dot sm" style={{ background: "var(--ms-faint)" }} />
               {t("detail.configuration.subdomainNeutral")}
             </p>
             <button type="button" onClick={() => router.push(setupHref)} style={linkStyle}>

@@ -546,16 +546,12 @@ export default function ContactDetailPage() {
                         }}
                       />
                       <span
-                        style={{
-                          width: 7,
-                          height: 7,
-                          borderRadius: "50%",
-                          flex: "none",
-                          boxSizing: "border-box",
-                          ...(activity.type === "contact_created"
+                        className="ms-dot sm"
+                        style={
+                          activity.type === "contact_created"
                             ? { border: `1.5px solid ${dot}` }
-                            : { background: dot }),
-                        }}
+                            : { background: dot }
+                        }
                       />
                       <span
                         style={{
