@@ -91,7 +91,7 @@ function DnsOnlyNote() {
   return (
     <span
       className="ms-badge ms-badge-neutral"
-      style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 8 }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, flex: "none" }}
     >
       <span aria-hidden="true">☁</span>
       {t("detail.dnsOnly")}
@@ -214,13 +214,20 @@ export function DnsRecordsTable({
                         <CopyChip value={name} title={record.name} />
                       </td>
                       <td style={{ paddingRight: 24 }}>
-                        <CopyChip
-                          value={record.value}
-                          {...(record.group === "verification"
-                            ? { display: abbreviateDkim(record.value) }
-                            : {})}
-                        />
-                        {record.type === "CNAME" ? <DnsOnlyNote /> : null}
+                        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          {/* The chip's 100% max width resolves against this box, which
+                              gives way, so the value ellipsizes before the badge leaves
+                              the cell. */}
+                          <span style={{ display: "flex", minWidth: 0 }}>
+                            <CopyChip
+                              value={record.value}
+                              {...(record.group === "verification"
+                                ? { display: abbreviateDkim(record.value) }
+                                : {})}
+                            />
+                          </span>
+                          {record.type === "CNAME" ? <DnsOnlyNote /> : null}
+                        </span>
                       </td>
                       <td>{t("detail.ttlAuto")}</td>
                       {showPriority ? <td>{record.priority ?? "—"}</td> : null}
