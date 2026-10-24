@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { Table } from "@/components/table";
+import { Truncated } from "@/components/truncated";
 import { formatRelative } from "@/lib/format";
 import { consoleReviewHref } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
@@ -30,8 +31,8 @@ export function LinkedTeams({ teamId, framed = false }: { teamId: string; framed
         <thead>
           <tr>
             <th>{t("columns.signal")}</th>
-            <th>{t("columns.thisTeam")}</th>
-            <th>{t("columns.matched")}</th>
+            <th style={{ width: "30%" }}>{t("columns.thisTeam")}</th>
+            <th style={{ width: "30%" }}>{t("columns.matched")}</th>
             <th>{t("columns.team")}</th>
           </tr>
         </thead>
@@ -40,11 +41,11 @@ export function LinkedTeams({ teamId, framed = false }: { teamId: string; framed
             link.matches.map((match) => (
               <tr key={`${link.linkedTeamId}:${match.kind}:${match.value}:${match.matched}`}>
                 <td>{t(`kinds.${match.kind}`)}</td>
-                <td className="ms-mono" style={{ overflowWrap: "anywhere" }}>
-                  {shown(match.kind, match.value)}
+                <td className="ms-cell-fill ms-mono">
+                  <Truncated text={shown(match.kind, match.value)} />
                 </td>
-                <td className="ms-mono" style={{ overflowWrap: "anywhere" }}>
-                  {shown(match.kind, match.matched)}
+                <td className="ms-cell-fill ms-mono">
+                  <Truncated text={shown(match.kind, match.matched)} />
                 </td>
                 <td>
                   <Link className="ms-link" href={consoleReviewHref(link.linkedTeamId)}>
