@@ -16,7 +16,7 @@ import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
@@ -29,9 +29,9 @@ import {
   CardHead,
   LINK_BUTTON,
   LoadErrorCard,
+  Rate7d,
   ReasonLabel,
   scoreColor,
-  usePercent,
   usePlanLabel,
 } from "./parts";
 import { RevealCell, type RevealTeam, useContentReveal } from "./reveal";
@@ -64,7 +64,6 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const emails = useTranslations("emails");
   const domains = useTranslations("domains");
   const locale = useLocale();
-  const percent = usePercent();
   const planLabel = usePlanLabel();
   const trpc = useTRPC();
   const nf = new Intl.NumberFormat(locale);
@@ -338,7 +337,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
           {exempt
             ? t("tiles.riskExempt")
             : monitor.risk === null
-              ? common("none")
+              ? mutedDash
               : formatRisk(monitor.risk)}
         </Tile>
         <Tile
@@ -350,11 +349,19 @@ export function ReviewView({ teamId }: { teamId: string }) {
           color={standing.scoreTenths === null ? undefined : scoreColor(standing.scoreTenths)}
         >
           {standing.scoreTenths === null
-            ? common("none")
+            ? mutedDash
             : t("tiles.scoreOf", { score: formatScoreTenths(standing.scoreTenths, locale) })}
         </Tile>
-        <Tile label={t("tiles.complaints")}>{percent(standing.complaintRate7d)}</Tile>
-        <Tile label={t("tiles.bounces")}>{percent(standing.hardBounceRate7d)}</Tile>
+        <Tile label={t("tiles.complaints")}>
+          <Rate7d
+            rate={standing.complaintRate7d}
+            sent={standing.sent7d}
+            complaintSends={standing.complaintSent7d > 0}
+          />
+        </Tile>
+        <Tile label={t("tiles.bounces")}>
+          <Rate7d rate={standing.hardBounceRate7d} sent={standing.sent7d} />
+        </Tile>
         <Tile label={t("tiles.sent7d")}>{nf.format(standing.sent7d)}</Tile>
         <Tile label={t("tiles.contacts")}>{nf.format(team.contacts)}</Tile>
       </div>

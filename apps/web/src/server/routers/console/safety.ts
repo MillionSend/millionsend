@@ -710,6 +710,7 @@ export const consoleSafetyRouter = router({
         complaintRate7d: health.complaintRate,
         hardBounceRate7d: health.bounceRate,
         sent7d: health.sent,
+        complaintSent7d: health.complaintSent,
       },
       checks: factors.map((factor) => ({
         id: factor.id,
