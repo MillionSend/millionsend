@@ -515,6 +515,29 @@ describe("the day check", () => {
     });
   });
 
+  it("leaves bounces and complaints about mail SES never attempted out of the signals", async () => {
+    const ctx = await warmingDomain({ allowance: 2_000, sent: 2_000 });
+    // Each stopped by SES's own suppression list: 25 bounces and 3 complaints of 1,028 sends.
+    const listed = {
+      bounceSubType: "OnAccountSuppressionList",
+      complaintSubType: "OnAccountSuppressionList",
+    };
+    await seedSends(ctx, YESTERDAY, 25, {
+      gmail: false,
+      events: [{ type: "bounced", bounceType: "Permanent", data: { bounce: listed } }],
+    });
+    await seedSends(ctx, YESTERDAY, 3, {
+      gmail: false,
+      events: [{ type: "complained", data: { complaint: listed } }],
+    });
+    await healthyDay(ctx);
+    await checkWarmups(db, NOW);
+    expect(await dayOf(ctx, YESTERDAY)).toMatchObject({
+      outcome: "grew",
+      signals: { hardBounces: { result: "within" }, complaints: { result: "within" } },
+    });
+  });
+
   it("steps back a day that missed two signals", async () => {
     const ctx = await warmingDomain({ allowance: 2_000, sent: 2_000 });
     // 25 hard bounces of 1,055 sends, and Gmail delaying 30 of 230.

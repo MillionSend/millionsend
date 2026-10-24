@@ -553,6 +553,7 @@ export {
   type MailboxProvider,
   mailboxProvider,
   sentWithoutComplaintFeedback,
+  sesAttempted,
 } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,

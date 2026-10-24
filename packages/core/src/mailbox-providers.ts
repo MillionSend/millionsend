@@ -46,6 +46,32 @@ export const NO_COMPLAINT_FEEDBACK_DOMAINS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * SES's subtypes for a bounce or complaint about mail it accepted but never
+ * attempted to send: the address was on the account's or a tenant's
+ * suppression list, failed email validation, or had unsubscribed through SES
+ * list management. AWS leaves such mail out of the account's bounce and
+ * complaint rates (https://docs.aws.amazon.com/ses/latest/dg/notification-contents.html,
+ * https://docs.aws.amazon.com/ses/latest/dg/sending-email-suppression-list.html).
+ * The global list's "Suppressed" is not one of them: SES counts it.
+ */
+export const SES_UNATTEMPTED_SUBTYPES: ReadonlySet<string> = new Set([
+  "OnAccountSuppressionList",
+  "OnTenantSuppressionList",
+  "EmailValidationSuppressed",
+  "UnsubscribedRecipient",
+]);
+
+/**
+ * Whether SES attempted the mail a bounce or complaint is about, by the
+ * event's subtype (a complaint usually has none). The platform breaker's
+ * hardBounceFilter and complaintFilter read it the same way in SQL, so the
+ * two must change together.
+ */
+export function sesAttempted(subType: string | null | undefined): boolean {
+  return !SES_UNATTEMPTED_SUBTYPES.has(subType ?? "");
+}
+
+/**
  * Whether no recipient of a send can report it to SES as a complaint. A
  * stored recipient's domain is what follows its last '@', less the '>' that
  * closes a display-name form; the platform breaker's recipientDomains reads
