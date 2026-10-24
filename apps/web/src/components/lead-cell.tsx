@@ -67,10 +67,19 @@ export function LeadCell({
 }
 
 /** A lead cell's loading stand-in, tile and value, so a loaded row keeps its height. */
-export function SkeletonLead({ width }: { width: number | string }) {
+export function SkeletonLead({
+  width,
+  tile = 30,
+}: {
+  width: number | string;
+  /** The loaded tile's size: a 30px status tile, or a 22px team logo. */
+  tile?: number;
+}) {
   return (
-    <span className="ms-lead">
-      <Skeleton width={30} height={30} radius={8} />
+    // Centred even in a baseline list: placeholders have no text to share a baseline.
+    <span className="ms-lead" style={{ alignItems: "center" }}>
+      {/* A team logo's corner (0.3 of its size), never rounder than a status tile's 8px. */}
+      <Skeleton width={tile} height={tile} radius={Math.min(8, Math.round(tile * 0.3))} />
       <Skeleton width={width} height={13} />
     </span>
   );

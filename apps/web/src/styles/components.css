@@ -432,6 +432,19 @@ table.ms-table {
 .ms-table.baseline td.ms-cell-menu {
   vertical-align: middle;
 }
+/* A lead cell on such a row puts its value on the row's baseline too; an
+   uploaded logo has no baseline of its own, so it centres on the line. */
+.ms-table.baseline .ms-lead {
+  align-items: baseline;
+}
+.ms-table.baseline .ms-lead > img {
+  align-self: center;
+}
+/* The console's one-line baseline lists hold the 41px row of a row menu,
+   whether a row carries a letter tile, a logo or neither. */
+.ms-table.nowrap.baseline tbody tr {
+  height: 41px;
+}
 /* Row hover: no background wash — the row's link underlines instead (quieter,
    and the affordance sits on the thing you'd click). */
 .ms-table tbody tr.hoverable:hover td {
