@@ -61,7 +61,7 @@ const ROW: Omit<Row, "id" | "name" | "sent" | "count" | "rate"> = {
   plan: "starter",
   planQuota: null,
   // Noon UTC: the same calendar day in every zone the suite runs in.
-  createdAt: new Date("2026-09-29T12:00:00Z"),
+  createdAt: new Date("2026-01-02T12:00:00Z"),
   suspendedAt: null,
   suspensionReason: null,
   broadcastsPausedByOperatorAt: null,
@@ -69,7 +69,7 @@ const ROW: Omit<Row, "id" | "name" | "sent" | "count" | "rate"> = {
   guardrailMetric: null,
   complaintRate7d: 0,
   hardBounceRate7d: 0,
-  lastAt: "2026-10-22",
+  lastAt: "2026-01-12",
 };
 const row = (over: Partial<Row> & Pick<Row, "id" | "name" | "sent" | "count">): Row => ({
   ...ROW,
@@ -90,12 +90,12 @@ const COMPLAINTS = [
   row({
     id: "b",
     name: "Example Team",
-    plan: "free",
+    plan: "pro",
     sent: 0,
-    count: 2,
-    suspendedAt: new Date("2026-10-09T12:00:00Z"),
-    suspensionReason: "phishing",
-    lastAt: "2026-10-23",
+    count: 4,
+    suspendedAt: new Date("2026-01-05T12:00:00Z"),
+    suspensionReason: "reputation",
+    lastAt: "2026-01-13",
   }),
   row({ id: "c", name: "Initech", sent: 1, count: 2 }),
   row({
@@ -103,7 +103,7 @@ const COMPLAINTS = [
     name: "Umbrella",
     sent: 400,
     count: 1,
-    suspendedAt: new Date("2026-10-23T12:00:00Z"),
+    suspendedAt: new Date("2026-01-14T12:00:00Z"),
     suspensionReason: "review",
   }),
 ];
@@ -122,7 +122,7 @@ const tipOf = (cell: string) => /data-tip="([^"]*)"/.exec(cell)?.[1];
 const note = (html: string) => text(/<p [^>]*>(.*?)<\/p>/s.exec(html)?.[1] ?? "");
 
 describe("the teams behind a feedback KPI", () => {
-  const complaints = { grain: "day", teams: 4, total: 8, rows: COMPLAINTS, buckets: [] };
+  const complaints = { grain: "day", teams: 4, total: 10, rows: COMPLAINTS, buckets: [] };
 
   it("lays out one baseline list: team, plan, age, status, then the figures", () => {
     h.locale = "pt-BR";
@@ -143,12 +143,12 @@ describe("the teams behind a feedback KPI", () => {
     expect(first?.map(text)).toEqual([
       "AAcme",
       "Starter",
-      "29 de set.",
+      "2 de jan.",
       "em alerta",
       "3",
       "2.000",
       "0,150%",
-      "22 de out.",
+      "12 de jan.",
     ]);
     expect(first?.[0]).toContain('href="/console/safety/a"');
     expect(html).toMatch(/<tr class="hoverable">/);
@@ -186,20 +186,20 @@ describe("the teams behind a feedback KPI", () => {
     expect(suspended).toContain('class="ms-dot" style="background:var(--ms-danger)');
     expect(suspended).not.toContain("ms-badge");
     expect(text(suspended)).toBe("suspensa");
-    expect(tipOf(suspended)).toBe("Suspensa em 9 de out. · Phishing ou malware");
+    expect(tipOf(suspended)).toBe("Suspensa em 5 de jan. · Reputação de envio");
     expect(text(rows[3]?.[3] ?? "")).toBe("em revisão");
   });
 
   it("sums the hidden teams under the list, and offers the rest", () => {
     h.locale = "pt-BR";
-    expect(note(render("complained", complaints))).toBe("4 equipes · 8 reclamações");
+    expect(note(render("complained", complaints))).toBe("4 equipes · 10 reclamações");
     const nine = Array.from({ length: 9 }, (_, i) =>
       row({ id: `t${i}`, name: `Team ${i}`, sent: 1000, count: 9 - i }),
     );
-    const html = render("hardBounced", { ...complaints, teams: 21, total: 81, rows: nine });
+    const html = render("hardBounced", { ...complaints, teams: 23, total: 90, rows: nine });
     expect(cells(html)).toHaveLength(7);
-    // 9+8+…+3 = 42 shown, so 39 in the other 14 teams.
-    expect(note(html)).toBe("7 de 21 equipes · 39 hard bounces nas outras 14 · Mostrar todas");
+    // 9+8+…+3 = 42 shown, so 48 in the other 16 teams.
+    expect(note(html)).toBe("7 de 23 equipes · 48 hard bounces nas outras 16 · Mostrar todas");
     h.locale = "en";
     const one = [row({ id: "a", name: "Acme", sent: 1000, count: 3 })];
     expect(note(render("complained", { ...complaints, teams: 2, total: 4, rows: one }))).toBe(
@@ -236,7 +236,7 @@ describe("the teams behind a feedback KPI", () => {
 
   it("prints the hour on a day's window", () => {
     h.locale = "pt-BR";
-    const at = "2026-10-24T17:00:00.000Z";
+    const at = "2026-01-14T17:00:00.000Z";
     const [first] = cells(
       render("complained", {
         ...complaints,
@@ -251,10 +251,10 @@ describe("the teams behind a feedback KPI", () => {
 
 describe("the feedback charts' note", () => {
   it("says the counters take the day the feedback arrives", () => {
-    const counts = { sent: 100_000, delivered: 0, bounced: 0, hardBounced: 0, complained: 6 };
+    const counts = { sent: 100_000, delivered: 0, bounced: 0, hardBounced: 0, complained: 7 };
     h.kpis = {
       grain: "day",
-      points: [{ t: "2026-10-22", ...counts }],
+      points: [{ t: "2026-01-12", ...counts }],
       totals: counts,
       previous: counts,
     };
@@ -262,7 +262,7 @@ describe("the feedback charts' note", () => {
     const chart = (kind: "sent" | "complained") =>
       note(renderToStaticMarkup(createElement(KpiChart, { kind, period: "7d" })));
     expect(chart("complained")).toBe(
-      "Últimos 7 dias · média 0,006% · pela data de chegada, não de envio",
+      "Últimos 7 dias · média 0,007% · pela data de chegada, não de envio",
     );
     expect(chart("sent")).toBe("Últimos 7 dias · total 100.000");
   });

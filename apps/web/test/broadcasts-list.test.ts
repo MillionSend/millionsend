@@ -47,8 +47,8 @@ const { default: BroadcastsPage } = await import("@/app/(dashboard)/broadcasts/p
 
 const broadcast = (id: string, segmentName: string | null) => ({
   id,
-  name: `Weekend sale ${id}`,
-  subject: "Up to 40% off",
+  name: `Spring sale ${id}`,
+  subject: "New arrivals",
   status: "sent",
   segmentName,
   htmlAuthored: false,
@@ -64,11 +64,11 @@ const broadcast = (id: string, segmentName: string | null) => ({
 
 describe("the Broadcasts list", () => {
   it("keeps Targeting on one line, ending in an ellipsis inside its column", () => {
-    h.items = [broadcast("b1", "Acme Store - 21-10-2026 - Batch 02"), broadcast("b2", null)];
+    h.items = [broadcast("b1", "Acme Store - spring list - part 2"), broadcast("b2", null)];
     const html = renderToStaticMarkup(createElement(BroadcastsPage));
     expect(html).not.toContain("ms-cell-clip");
     expect(html).toContain(
-      '<td><span class="ms-truncate">Acme Store - 21-10-2026 - Batch 02</span></td>',
+      '<td><span class="ms-truncate">Acme Store - spring list - part 2</span></td>',
     );
     // No segment means every contact: a segment in use cannot be deleted.
     expect(html).toContain('<td><span class="ms-truncate">All contacts</span></td>');

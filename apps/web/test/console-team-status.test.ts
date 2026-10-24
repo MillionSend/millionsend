@@ -41,7 +41,7 @@ const OK: TeamStatusFields = {
   hardBounceRate7d: null,
 };
 // Noon UTC: the same calendar day in every zone the suite runs in.
-const DAY = new Date("2026-10-09T12:00:00Z");
+const DAY = new Date("2026-01-05T12:00:00Z");
 
 /** The cell's dot tone, its words and the tooltip behind them. */
 function status(over: Partial<TeamStatusFields>) {
@@ -109,16 +109,16 @@ describe("a team's status cell", () => {
     expect(phishing).toMatchObject({
       tone: "danger",
       text: "suspensa",
-      tip: "Suspensa em 9 de out. · Phishing ou malware",
+      tip: "Suspensa em 5 de jan. · Phishing ou malware",
     });
     expect(phishing.html).not.toContain("ms-badge");
     expect(status({ suspendedAt: DAY, suspensionReason: "manual" }).tip).toBe(
-      "Suspensa em 9 de out.",
+      "Suspensa em 5 de jan.",
     );
     h.locale = "en";
     expect(status({ suspendedAt: DAY, suspensionReason: "non_payment" })).toMatchObject({
       text: "suspended",
-      tip: "Suspended on Oct 9 · Non-payment",
+      tip: "Suspended on Jan 5 · Non-payment",
     });
   });
 
@@ -129,12 +129,12 @@ describe("a team's status cell", () => {
     ).toMatchObject({
       tone: "warn",
       text: "em revisão",
-      tip: "Aguardando revisão desde 9 de out.",
+      tip: "Aguardando revisão desde 5 de jan.",
     });
     h.locale = "en";
     expect(status({ suspendedAt: DAY, suspensionReason: "review" })).toMatchObject({
       text: "in review",
-      tip: "Held for review since Oct 9",
+      tip: "Held for review since Jan 5",
     });
   });
 });
