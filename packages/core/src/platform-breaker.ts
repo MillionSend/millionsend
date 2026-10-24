@@ -20,7 +20,7 @@ import {
   MIN_PAUSE_HARD_BOUNCES,
   type WindowCounts,
 } from "./deliverability.js";
-import { NO_COMPLAINT_FEEDBACK_DOMAINS } from "./mailbox-providers.js";
+import { NO_COMPLAINT_FEEDBACK_DOMAINS, SES_UNATTEMPTED_SUBTYPES } from "./mailbox-providers.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -68,12 +68,21 @@ export interface RegionDecision {
 }
 
 const HOUR_MS = 60 * 60 * 1000;
+const ev = schema.emailEvents;
+/**
+ * sesAttempted() over a subtype in the stored SES payload.
+ * ponytail: the subtype has no column of its own, so an event whose payload
+ * retention stripped reads as attempted; give it a column like bounce_type
+ * if a window ever reaches past the strip.
+ */
+const sesAttemptedSql = (subType: SQL) =>
+  sql`coalesce(${subType}, '') not in ${[...SES_UNATTEMPTED_SUBTYPES]}`;
 // Bounce class lives in the stored SES payload (process-ses-event writes the
 // raw bounce object under data.bounce), so hard bounces are read back from it.
 // The column is authoritative; the json path covers rows written before it
 // existed (until retention strips their payload).
-export const hardBounceFilter = sql`${schema.emailEvents.type} = 'bounced' and coalesce(${schema.emailEvents.bounceType}, ${schema.emailEvents.data}->'bounce'->>'bounceType') = 'Permanent'`;
-const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
+export const hardBounceFilter = sql`${ev.type} = 'bounced' and coalesce(${ev.bounceType}, ${ev.data}->'bounce'->>'bounceType') = 'Permanent' and ${sesAttemptedSql(sql`${ev.data}->'bounce'->>'bounceSubType'`)}`;
+export const complaintFilter = sql`${ev.type} = 'complained' and ${sesAttemptedSql(sql`${ev.data}->'complaint'->>'complaintSubType'`)}`;
 /**
  * A send's recipients in to, cc and bcc, one `domain` row each, read the way
  * sentWithoutComplaintFeedback reads them: what follows the last '@', less a
@@ -139,7 +148,8 @@ export async function regionWindowCounts(
  * usage_counters, which the send and SES-event paths bump alongside the
  * rows the raw scan reads: `sent` per accepted send, `sent_no_feedback` per
  * send no recipient can report as a complaint, `hard_bounced` per Permanent
- * bounce, `complained` per complaint. Counters carry no domain,
+ * bounce and `complained` per complaint, each about mail SES attempted
+ * (sesAttempted). Counters carry no domain,
  * so a team's traffic goes to the region of its most recently verified
  * domain. A team whose verified domains span more than one region cannot
  * be attributed that way: it is left out of the counters and its window is

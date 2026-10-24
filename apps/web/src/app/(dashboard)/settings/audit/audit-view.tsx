@@ -6,6 +6,8 @@ import { useTranslations } from "next-intl";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../../emails/list-parts";
 
@@ -112,31 +114,34 @@ export function AuditView() {
               <td>
                 <RelativeTime date={row.createdAt} />
               </td>
-              <td>
-                {row.actor.kind === "user" ? (
-                  <span title={row.actor.email}>{row.actor.name ?? t("actors.deletedUser")}</span>
-                ) : (
+              <td className="ms-cell-fill">
+                {row.actor.kind !== "user" ? (
                   <span className="ms-chip">{t(`actors.${row.actor.kind}`)}</span>
+                ) : row.actor.name && row.actor.email ? (
+                  // The address shows on hover even when the name is whole.
+                  <Tooltip
+                    inline
+                    triggerClassName="ms-truncate-host"
+                    text={`${row.actor.name}\n${row.actor.email}`}
+                  >
+                    <span className="ms-truncate">{row.actor.name}</span>
+                  </Tooltip>
+                ) : (
+                  <Truncated text={row.actor.name ?? t("actors.deletedUser")} />
                 )}
               </td>
               {/* next-intl reads "." as nesting, so the catalogue keys carry "_" in its place. */}
-              <td>
-                {isKnownAction(row.action)
-                  ? t(`actions.${row.action.replace(".", "_")}`)
-                  : row.action}
+              <td className="ms-cell-fill">
+                <Truncated
+                  text={
+                    isKnownAction(row.action)
+                      ? t(`actions.${row.action.replace(".", "_")}`)
+                      : row.action
+                  }
+                />
               </td>
-              <td
-                className="ms-mono"
-                title={row.target ?? undefined}
-                style={{
-                  fontSize: 13,
-                  maxWidth: 360,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {targetLabel(row.data, row.target)}
+              <td className="ms-cell-fill ms-mono" style={{ fontSize: 13 }}>
+                <Truncated text={targetLabel(row.data, row.target)} />
               </td>
             </tr>
           ))}

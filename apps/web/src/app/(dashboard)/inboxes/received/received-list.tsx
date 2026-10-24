@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/skeleton";
 import { StatusTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { type AuthCheck, authResultTone } from "@/lib/auth-result";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { isUuid } from "@/lib/log-body-links";
@@ -199,13 +200,10 @@ export function ReceivedEmailsTable({ rows }: { rows: ReceivedRow[] }) {
                     style={{
                       minWidth: 0,
                       maxWidth: 420,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
                       color: row.subject ? undefined : "var(--ms-muted)",
                     }}
                   >
-                    {row.subject || t("noSubject")}
+                    <Truncated text={row.subject || t("noSubject")} />
                   </span>
                   {row.attachmentCount > 0 ? (
                     <Tooltip inline text={attachments}>

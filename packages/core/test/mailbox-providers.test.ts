@@ -3,6 +3,7 @@ import {
   INACTIVE_MAILBOX_PATTERN,
   MAILBOX_FULL_PATTERN,
   mailboxProvider,
+  sesAttempted,
 } from "../src/mailbox-providers.js";
 
 describe("mailboxProvider", () => {
@@ -33,5 +34,22 @@ describe("mailbox full patterns", () => {
     expect(MAILBOX_FULL_PATTERN.test("550 5.1.1 user unknown")).toBe(false);
     expect(INACTIVE_MAILBOX_PATTERN.test(abandoned)).toBe(true);
     expect(INACTIVE_MAILBOX_PATTERN.test(full)).toBe(false);
+  });
+});
+
+describe("sesAttempted", () => {
+  it("reads SES's own suppression, validation and unsubscribe stops as mail it never attempted", () => {
+    for (const subType of [
+      "OnAccountSuppressionList",
+      "OnTenantSuppressionList",
+      "EmailValidationSuppressed",
+      "UnsubscribedRecipient",
+    ]) {
+      expect(sesAttempted(subType)).toBe(false);
+    }
+    // SES's global list is one it still counts toward the bounce rate.
+    for (const subType of ["General", "NoEmail", "Suppressed", undefined, null]) {
+      expect(sesAttempted(subType)).toBe(true);
+    }
   });
 });

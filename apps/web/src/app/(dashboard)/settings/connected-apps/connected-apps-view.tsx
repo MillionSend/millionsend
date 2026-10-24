@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PopoverMenu } from "@/components/popover-menu";
@@ -11,6 +12,7 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { formatDate } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
@@ -57,8 +59,8 @@ export function ConnectedAppsView() {
         <Table>
           <thead>
             <tr>
-              <th>{t("table.app")}</th>
-              <th>{t("table.user")}</th>
+              <th style={{ width: "24%" }}>{t("table.app")}</th>
+              <th style={{ width: "26%" }}>{t("table.user")}</th>
               <th>{t("table.scopes")}</th>
               <th>{t("table.granted")}</th>
               <th>{t("table.expires")}</th>
@@ -70,23 +72,30 @@ export function ConnectedAppsView() {
               const name = grant.clientName || grant.clientId;
               return (
                 <tr key={grant.id}>
-                  <td>
+                  <td className="ms-cell-fill">
                     {grant.clientUri ? (
-                      <a href={grant.clientUri} target="_blank" rel="noreferrer">
-                        {name}
-                      </a>
+                      <span className="ms-lead">
+                        <a
+                          className="ms-lead-value"
+                          href={grant.clientUri}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <Truncated text={name} />
+                        </a>
+                      </span>
                     ) : (
-                      name
+                      <Truncated text={name} />
                     )}
                   </td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    {grant.userEmail ?? "—"}
-                    {grant.own ? (
-                      <span className="ms-badge ms-badge-neutral" style={{ marginLeft: 8 }}>
-                        {t("you")}
-                      </span>
-                    ) : null}
-                  </td>
+                  <LeadCell
+                    value={grant.userEmail ?? "—"}
+                    action={
+                      grant.own ? (
+                        <span className="ms-badge ms-badge-neutral">{t("you")}</span>
+                      ) : undefined
+                    }
+                  />
                   <td>
                     <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       {grant.allTeams ? (

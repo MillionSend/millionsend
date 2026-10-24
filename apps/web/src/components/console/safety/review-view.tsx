@@ -16,24 +16,17 @@ import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
-import { formatScoreTenths } from "@/lib/score-band";
+import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamActions } from "../team-actions";
 import { LinkedTeams } from "../teams/linked-teams";
-import {
-  CardHead,
-  LINK_BUTTON,
-  LoadErrorCard,
-  ReasonLabel,
-  scoreColor,
-  usePercent,
-  usePlanLabel,
-} from "./parts";
+import { CardHead, LINK_BUTTON, LoadErrorCard, Rate7d, ReasonLabel, usePlanLabel } from "./parts";
 import { RevealCell, type RevealTeam, useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
 
@@ -64,7 +57,6 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const emails = useTranslations("emails");
   const domains = useTranslations("domains");
   const locale = useLocale();
-  const percent = usePercent();
   const planLabel = usePlanLabel();
   const trpc = useTRPC();
   const nf = new Intl.NumberFormat(locale);
@@ -338,7 +330,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
           {exempt
             ? t("tiles.riskExempt")
             : monitor.risk === null
-              ? common("none")
+              ? mutedDash
               : formatRisk(monitor.risk)}
         </Tile>
         <Tile
@@ -350,11 +342,19 @@ export function ReviewView({ teamId }: { teamId: string }) {
           color={standing.scoreTenths === null ? undefined : scoreColor(standing.scoreTenths)}
         >
           {standing.scoreTenths === null
-            ? common("none")
+            ? mutedDash
             : t("tiles.scoreOf", { score: formatScoreTenths(standing.scoreTenths, locale) })}
         </Tile>
-        <Tile label={t("tiles.complaints")}>{percent(standing.complaintRate7d)}</Tile>
-        <Tile label={t("tiles.bounces")}>{percent(standing.hardBounceRate7d)}</Tile>
+        <Tile label={t("tiles.complaints")}>
+          <Rate7d
+            rate={standing.complaintRate7d}
+            sent={standing.sent7d}
+            complaintSends={standing.complaintSent7d > 0}
+          />
+        </Tile>
+        <Tile label={t("tiles.bounces")}>
+          <Rate7d rate={standing.hardBounceRate7d} sent={standing.sent7d} />
+        </Tile>
         <Tile label={t("tiles.sent7d")}>{nf.format(standing.sent7d)}</Tile>
         <Tile label={t("tiles.contacts")}>{nf.format(team.contacts)}</Tile>
       </div>
@@ -690,12 +690,8 @@ export function ReviewView({ teamId }: { teamId: string }) {
                       )}
                     </td>
                     <td
-                      style={{
-                        fontSize: 12,
-                        color: "var(--ms-muted)",
-                        whiteSpace: "normal",
-                        minWidth: 260,
-                      }}
+                      className="ms-cell-wrap"
+                      style={{ fontSize: 12, color: "var(--ms-muted)", minWidth: 260 }}
                     >
                       {!email.model
                         ? common("none")
@@ -1081,10 +1077,13 @@ export function WarmupCard({
       <Table>
         <thead>
           <tr>
-            <th>{t("cols.domain")}</th>
-            <th>{t("cols.registered")}</th>
+            {/* Today takes what the others leave: the one column without a width. */}
+            <th style={{ width: "1%" }}>{t("cols.domain")}</th>
+            <th style={{ width: "1%" }}>{t("cols.registered")}</th>
             <th>{t("cols.today")}</th>
-            <th className="right">{t("cols.trust")}</th>
+            <th className="right" style={{ width: "1%" }}>
+              {t("cols.trust")}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -1113,26 +1112,31 @@ export function WarmupCard({
                           })
                         : t(domain.ageCheckedAt ? "unknownAge" : "notChecked")}
                     </td>
-                    <td style={joined}>
-                      {domain.trustedAt
-                        ? t("trusted")
-                        : domain.today
-                          ? t(domain.today.fullAt ? "today" : "todayNoDate", {
-                              used: nf.format(domain.today.used),
-                              cap: nf.format(domain.today.cap),
-                              date: domain.today.fullAt
-                                ? formatDay(domain.today.fullAt, locale)
-                                : "",
-                            })
-                          : t("full")}
-                      {domain.waiting > 0 ? (
-                        <>
-                          {" "}
-                          <span style={{ color: "var(--ms-warn)" }}>
-                            · {t("waiting", { count: nf.format(domain.waiting) })}
+                    <td className="ms-cell-fill" style={joined}>
+                      {/* The day's figures give way; what waits stays whole. */}
+                      <span style={{ display: "flex", gap: 4, minWidth: 0 }}>
+                        <Truncated
+                          text={
+                            domain.trustedAt
+                              ? t("trusted")
+                              : domain.today
+                                ? t(domain.today.fullAt ? "today" : "todayNoDate", {
+                                    used: nf.format(domain.today.used),
+                                    cap: nf.format(domain.today.cap),
+                                    date: domain.today.fullAt
+                                      ? formatDay(domain.today.fullAt, locale)
+                                      : "",
+                                  })
+                                : t("full")
+                          }
+                        />
+                        {domain.waiting > 0 ? (
+                          <span style={{ color: "var(--ms-warn)", flex: "none" }}>
+                            {/* A flex item drops its leading space on screen, where the gap stands in; the text keeps it. */}
+                            {` · ${t("waiting", { count: nf.format(domain.waiting) })}`}
                           </span>
-                        </>
-                      ) : null}
+                        ) : null}
+                      </span>
                     </td>
                     <td className="right" style={joined}>
                       <button
@@ -1162,7 +1166,11 @@ export function WarmupCard({
                   </tr>
                   {request ? (
                     <tr>
-                      <td colSpan={4} style={{ paddingTop: 0, paddingBottom: 10 }}>
+                      <td
+                        colSpan={4}
+                        className="ms-cell-wrap"
+                        style={{ paddingTop: 0, paddingBottom: 10 }}
+                      >
                         <div style={{ color: "var(--ms-bone)" }}>
                           <DotParts
                             lead={

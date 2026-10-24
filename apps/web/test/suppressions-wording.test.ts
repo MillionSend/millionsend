@@ -122,3 +122,16 @@ describe("a suppression a full or inactive mailbox left", () => {
     expect(html).toContain("An address that bounced permanently will likely bounce again.");
   });
 });
+
+describe("the suppression list", () => {
+  it("keeps each address on one line, ending in an ellipsis inside its column", () => {
+    h.locale = "en";
+    h.rows = [row("a", "box@example.com", false)];
+    const html = renderToStaticMarkup(createElement(SuppressionsPage));
+    expect(html).not.toContain("ms-cell-wrap");
+    expect(html).not.toContain("<wbr");
+    expect(html).toContain(
+      '<a class="ms-lead-value" href="/emails/suppressions/a"><span class="ms-truncate">box@example.com</span></a>',
+    );
+  });
+});

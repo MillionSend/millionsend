@@ -4,7 +4,9 @@ import { holdRisk } from "@millionsend/core/release-rules";
 import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useLocale, useTranslations } from "next-intl";
+import { EnvelopeGlyph } from "@/components/email-status-icon";
 import type { BadgeTone } from "@/components/status-badge";
+import { StatusTile, TONE_COLOR } from "@/components/status-tile";
 import { Tooltip } from "@/components/tooltip";
 import { addrSpec, capitalize, formatRelative } from "@/lib/format";
 import { trpcErrorCode } from "@/lib/trpc-error";
@@ -42,6 +44,16 @@ const TRUST_TONE: Record<SenderTrust, BadgeTone> = {
 export function TrustBadge({ trust }: { trust: SenderTrust }) {
   const t = useTranslations("inboxes");
   return <span className={`ms-badge ms-badge-${TRUST_TONE[trust]}`}>{t(`trust.${trust}`)}</span>;
+}
+
+/** The same as a list row's tile: tinted by the trust, its words in the tooltip. */
+export function TrustTile({ trust }: { trust: SenderTrust }) {
+  const t = useTranslations("inboxes");
+  return (
+    <StatusTile color={TONE_COLOR[TRUST_TONE[trust]]} label={t(`trust.${trust}`)}>
+      <EnvelopeGlyph />
+    </StatusTile>
+  );
 }
 
 /** "Quarantined · prompt injection": why a message is held. */

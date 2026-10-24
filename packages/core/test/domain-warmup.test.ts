@@ -569,7 +569,7 @@ describe("early graduation", () => {
       to?: string[];
       cc?: string[];
       bcc?: string[];
-      events?: Pick<typeof schema.emailEvents.$inferInsert, "type" | "bounceType">[];
+      events?: Pick<typeof schema.emailEvents.$inferInsert, "type" | "bounceType" | "data">[];
     } = {},
   ): Promise<string[]> {
     const rows = await db
@@ -691,6 +691,30 @@ describe("early graduation", () => {
     const moved = await graduateWarmupDomains(db, NOW);
     expect(moved).not.toContain("bouncy-sender.com");
     expect(moved).not.toContain("spammy-sender.com");
+  });
+
+  it("leaves bounces and complaints about mail SES never attempted out of the rates", async () => {
+    // Each stopped by SES's own suppression list.
+    const listed = {
+      bounceSubType: "OnAccountSuppressionList",
+      complaintSubType: "OnAccountSuppressionList",
+    };
+    const bounced = await newTeam();
+    const bouncedDomain = await newDomain(bounced, "listed-bounces.example", REGISTERED);
+    await sent(bounced, bouncedDomain, 50, DAY_OLD);
+    await sent(bounced, bouncedDomain, 2, DAY_OLD, {
+      events: [{ type: "bounced", bounceType: "Permanent", data: { bounce: listed } }],
+    });
+    const complained = await newTeam();
+    const complainedDomain = await newDomain(complained, "listed-complaints.example", REGISTERED);
+    await sent(complained, complainedDomain, 50, DAY_OLD);
+    await sent(complained, complainedDomain, 1, DAY_OLD, {
+      events: [{ type: "complained", data: { complaint: listed } }],
+    });
+
+    const moved = await graduateWarmupDomains(db, NOW);
+    expect(moved).toContain("listed-bounces.example");
+    expect(moved).toContain("listed-complaints.example");
   });
 
   it("counts only sends a receiving server took, and leaves the rest out of the rates", async () => {

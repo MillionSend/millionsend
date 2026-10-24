@@ -34,6 +34,7 @@ import {
   teamMonitorOverview,
   teamWarmupOverview,
 } from "@millionsend/core";
+import { counterComplaintSent, GUARDRAIL_WINDOW_DAYS } from "@millionsend/core/deliverability";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -67,6 +68,10 @@ const st = schema.teamStandings;
 const teamRegion = sql<
   string | null
 >`(select d.region from ${schema.domains} d where d.team_id = ${t}."id" order by d.verified_at desc nulls last, d.created_at desc limit 1)`;
+// Whether the standing's own 7-day window, as of its run, held a send that
+// could draw a complaint: over none, the stored complaint rate reads 0.
+const uc = schema.usageCounters;
+const complaintSends7d = sql<boolean>`exists (select 1 from ${uc} where ${uc.teamId} = ${t.id} and ${counterComplaintSent} > 0 and ${uc.day} between (${st.computedAt} at time zone 'UTC')::date - ${GUARDRAIL_WINDOW_DAYS - 1}::int and (${st.computedAt} at time zone 'UTC')::date)`;
 
 const SORT_KEYS = [
   "name",
@@ -505,12 +510,15 @@ export const consoleSafetyRouter = router({
             clearedAt: f.clearedAt,
             region: teamRegion,
             suspendedAt: t.suspendedAt,
+            suspensionReason: t.suspensionReason,
             broadcastsPausedByOperatorAt: t.broadcastsPausedByOperatorAt,
             scoreTenths: st.scoreTenths,
             guardrail: st.guardrail,
+            guardrailMetric: st.guardrailMetric,
             complaintRate7d: st.complaintRate7d,
             hardBounceRate7d: st.hardBounceRate7d,
             sent7d: st.sent7d,
+            complaintSends7d,
             monitorRisk: st.monitorRisk,
           })
           .from(f)
@@ -702,6 +710,7 @@ export const consoleSafetyRouter = router({
         complaintRate7d: health.complaintRate,
         hardBounceRate7d: health.bounceRate,
         sent7d: health.sent,
+        complaintSent7d: health.complaintSent,
       },
       checks: factors.map((factor) => ({
         id: factor.id,

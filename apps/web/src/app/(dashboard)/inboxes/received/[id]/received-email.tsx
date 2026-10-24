@@ -18,6 +18,7 @@ import {
   type ReceivedEventStep,
   receivedEventLook,
 } from "@/components/email-status-icon";
+import { LeadCell } from "@/components/lead-cell";
 import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
@@ -29,6 +30,7 @@ import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
+import { Truncated } from "@/components/truncated";
 import {
   AUTH_CHECKS,
   authenticatedSender,
@@ -630,19 +632,13 @@ export function ReceivedEmailView() {
               <tbody>
                 {email.attachments.map((attachment) => (
                   <tr key={attachment.id}>
-                    <td className="ms-mono ms-cell-wrap">
-                      <Breakable text={attachment.filename ?? t("detail.unnamed")} />
-                      {attachment.inline ? (
-                        <span
-                          className="ms-chip"
-                          style={{ fontSize: 10.5, padding: "1px 7px", marginLeft: 8 }}
-                        >
-                          {t("detail.inline")}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="ms-mono" style={{ color: "var(--ms-muted)" }}>
-                      {attachment.contentType}
+                    <LeadCell
+                      value={attachment.filename ?? t("detail.unnamed")}
+                      mono
+                      tail={attachment.inline ? t("detail.inline") : undefined}
+                    />
+                    <td className="ms-cell-fill ms-mono" style={{ color: "var(--ms-muted)" }}>
+                      <Truncated text={attachment.contentType} />
                     </td>
                     <td className="right ms-mono">{formatBytes(attachment.size)}</td>
                     <td className="right">

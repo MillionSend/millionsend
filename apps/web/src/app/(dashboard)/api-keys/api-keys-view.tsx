@@ -19,25 +19,33 @@ import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter } from "../emails/list-parts";
 
-/** Mirrors the loaded table: name, masked mono token, two relative times, menu column. */
-function KeysSkeleton() {
+function KeysHead() {
   const t = useTranslations("api-keys");
   return (
+    <thead>
+      {/* The name takes what the others leave: they shrink to their content. */}
+      <tr>
+        <th>{t("table.name")}</th>
+        <th style={{ width: "1%" }}>{t("table.token")}</th>
+        <th style={{ width: "1%" }}>{t("table.lastUsed")}</th>
+        <th style={{ width: "1%" }}>{t("table.created")}</th>
+        <th className="right" style={{ width: "1%" }} aria-label={t("table.menu")} />
+      </tr>
+    </thead>
+  );
+}
+
+/** Mirrors the loaded table: name, masked mono token, two relative times, menu column. */
+function KeysSkeleton() {
+  return (
     <Table>
-      <thead>
-        <tr>
-          <th>{t("table.name")}</th>
-          <th>{t("table.token")}</th>
-          <th>{t("table.lastUsed")}</th>
-          <th>{t("table.created")}</th>
-          <th className="right" aria-label={t("table.menu")} />
-        </tr>
-      </thead>
+      <KeysHead />
       <tbody>
         {[110, 80].map((width) => (
           <tr key={width}>
@@ -214,26 +222,15 @@ export function ApiKeysView() {
       {keys && keys.length > 0 ? (
         <>
           <Table>
-            <thead>
-              <tr>
-                <th>{t("table.name")}</th>
-                <th>{t("table.token")}</th>
-                <th>{t("table.lastUsed")}</th>
-                <th>{t("table.created")}</th>
-                <th className="right" aria-label={t("table.menu")} />
-              </tr>
-            </thead>
+            <KeysHead />
             <tbody>
               {keys.map((key) => (
                 <tr key={key.id}>
-                  <td>
-                    <span
-                      style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
-                    >
-                      {/* The tile never wraps away from the name; the badges may. */}
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <NavTile name="api-keys" color={TONE_COLOR.neutral} />
-                        {key.name}
+                  <td className="ms-cell-fill">
+                    <span className="ms-lead">
+                      <NavTile name="api-keys" color={TONE_COLOR.neutral} />
+                      <span className="ms-lead-value">
+                        <Truncated text={key.name} />
                       </span>
                       <span
                         className={`ms-badge ms-badge-${
@@ -243,19 +240,13 @@ export function ApiKeysView() {
                         {t(key.permission === "sending_access" ? "scope.sending" : "scope.full")}
                       </span>
                       {key.domainName ? (
-                        <span
-                          className="ms-badge ms-badge-neutral ms-badge-clip"
-                          title={key.domainName}
-                        >
-                          {key.domainName}
+                        <span className="ms-badge ms-badge-neutral ms-badge-clip">
+                          <Truncated text={key.domainName} />
                         </span>
                       ) : null}
                       {key.inboxAddress ? (
-                        <span
-                          className="ms-badge ms-badge-info ms-badge-clip"
-                          title={key.inboxAddress}
-                        >
-                          {key.inboxAddress}
+                        <span className="ms-badge ms-badge-info ms-badge-clip">
+                          <Truncated text={key.inboxAddress} />
                         </span>
                       ) : null}
                     </span>

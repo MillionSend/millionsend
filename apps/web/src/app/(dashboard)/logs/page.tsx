@@ -13,6 +13,7 @@ import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { type BadgeTone, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { maskApiKey } from "@/lib/format";
 import { httpMethodTone } from "@/lib/http-method-tone";
@@ -271,17 +272,13 @@ export default function LogsPage() {
                       {row.method}
                     </span>
                   </td>
-                  <td
-                    className="ms-mono"
-                    style={{
-                      maxWidth: 420,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    <Link href={`/logs/${row.id}`} onClick={(event) => event.stopPropagation()}>
-                      {row.path}
+                  <td className="ms-mono" style={{ maxWidth: 420 }}>
+                    <Link
+                      href={`/logs/${row.id}`}
+                      onClick={(event) => event.stopPropagation()}
+                      style={{ display: "block" }}
+                    >
+                      <Truncated text={row.path} />
                     </Link>
                   </td>
                   <td>

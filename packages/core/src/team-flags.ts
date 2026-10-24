@@ -112,7 +112,9 @@ export async function computeTeamStandings(
 }
 
 /** The metric behind the guardrail's standing: the pause reason when paused, else the warning's. */
-function guardrailMetricOf(health: DeliverabilityHealth): TeamStandingRow["guardrailMetric"] {
+export function guardrailMetricOf(
+  health: DeliverabilityHealth,
+): TeamStandingRow["guardrailMetric"] {
   if (health.status === "ok") return null;
   const reason = health.reasons.find((r) => r.tier === health.status) ?? health.reasons[0] ?? null;
   return reason === null ? null : reason.metric === "bounce" ? "hard_bounce" : "complaint";

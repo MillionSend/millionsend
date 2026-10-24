@@ -176,10 +176,12 @@ was cut. Mail waiting for the warm-up shows as **Waiting**.
 
 The broadcast page splits the broadcast's mail by inbox provider: Gmail,
 Microsoft, Yahoo, Apple and Other, each with how many emails were sent,
-delivered, opened, clicked, bounced and delayed. It groups by the
+delivered, opened, clicked, bounced, complained and delayed. It groups by the
 recipient's address, so a company domain whose mail Google or Microsoft
 hosts counts as Other. Opens count people only, never a machine's prefetch,
-and bounces count hard bounces only.
+and bounces count hard bounces only. Complaints are a share of the mail to
+providers that report them, the same base the [guardrails](#guardrails) use;
+Gmail and Apple never report one, so their cell shows a dash.
 
 ## Guardrails
 

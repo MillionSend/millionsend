@@ -12,6 +12,7 @@ import {
   MAILBOX_FULL_PATTERN,
   noteConsoleCodeUndelivered,
   type SuppressionEventRow,
+  sesAttempted,
   utcDay,
   type WebhookEnqueue,
   webhookBatch,
@@ -205,24 +206,23 @@ export async function processSesEvent(
     }
 
     const day = utcDay(new Date(event.occurredAt));
-    // delivered/bounced/complained count every event. Engagement counters
+    // delivered and bounced count every event. Engagement counters
     // (opened/clicked) are owned by the app-layer tracking endpoints, not here.
-    const counter =
+    // hard_bounced counts only Permanent bounces — the deliverability score's
+    // bounce-rate input (transient greylisting must not read as a hard-bounce
+    // crisis) — and, like complained, only those about mail SES attempted, as
+    // SES's own rates do.
+    const cols =
       event.eventType === "Delivery"
-        ? "delivered"
+        ? ["delivered"]
         : event.eventType === "Bounce"
-          ? "bounced"
-          : event.eventType === "Complaint"
-            ? "complained"
-            : null;
-    if (counter) {
-      // bounced counts every bounce event; hard_bounced only Permanent ones —
-      // the deliverability score's bounce-rate input (transient greylisting
-      // must not read as a hard-bounce crisis).
-      const cols =
-        counter === "bounced" && event.bounce?.bounceType === "Permanent"
-          ? [counter, "hard_bounced"]
-          : [counter];
+          ? event.bounce?.bounceType === "Permanent" && sesAttempted(event.bounce.bounceSubType)
+            ? ["bounced", "hard_bounced"]
+            : ["bounced"]
+          : event.eventType === "Complaint" && sesAttempted(event.complaint?.complaintSubType)
+            ? ["complained"]
+            : [];
+    if (cols.length > 0) {
       await txDb.execute(sql`
         insert into ${schema.usageCounters} (team_id, day, ${sql.raw(cols.join(", "))})
         values (${email.teamId}, ${day}, ${sql.raw(cols.map(() => "1").join(", "))})

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { CodeHighlight, type HighlightLanguage } from "@/components/code-highlight";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
+import { LeadCell } from "@/components/lead-cell";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { MCP_DOCS_URL } from "@/lib/docs-links";
@@ -167,7 +168,7 @@ export function McpView({ serverUrl }: { serverUrl: string }) {
           <thead>
             <tr>
               <th>{t("table.tool")}</th>
-              <th>{t("table.permission")}</th>
+              <th style={{ width: "60%" }}>{t("table.permission")}</th>
             </tr>
           </thead>
           <tbody>
@@ -181,14 +182,7 @@ export function McpView({ serverUrl }: { serverUrl: string }) {
                     </span>
                   ) : null}
                 </td>
-                <td>
-                  <span className="ms-mono" style={{ fontSize: 12 }}>
-                    {tool.scope}
-                  </span>
-                  <span style={{ marginLeft: 8, fontSize: 12, color: "var(--ms-muted)" }}>
-                    {scopeT(tool.scope.replace(":", "_"))}
-                  </span>
-                </td>
+                <LeadCell value={tool.scope} mono tail={scopeT(tool.scope.replace(":", "_"))} />
               </tr>
             ))}
           </tbody>

@@ -52,7 +52,7 @@ export interface SerializedSesEvent {
     recipients: string[];
     diagnosticCode?: string;
   };
-  complaint?: { complaintFeedbackType?: string; recipients: string[] };
+  complaint?: { complaintFeedbackType?: string; complaintSubType?: string; recipients: string[] };
   delivery?: { smtpResponse?: string; processingTimeMillis?: number };
   click?: { link?: string };
   data: Record<string, unknown>;

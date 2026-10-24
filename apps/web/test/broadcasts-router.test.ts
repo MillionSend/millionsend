@@ -591,29 +591,51 @@ describe("broadcasts.recipientCount", () => {
 });
 
 describe("delivery stats", () => {
-  it("aggregates fanned-out emails by latest status, opened/clicked counting as delivered", async () => {
+  it("aggregates fanned-out emails by latest status, opened, clicked and complained counting as delivered", async () => {
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);
 
-    const statuses = ["sent", "delivered", "opened", "clicked", "bounced", "complained"] as const;
-    await db.insert(schema.emails).values(
-      statuses.map((latestStatus, i) => ({
-        teamId,
-        broadcastId: id,
-        contactId: crypto.randomUUID(),
-        from: DRAFT_INPUT.from,
-        to: [`r${i}@example.com`],
-        subject: DRAFT_INPUT.subject,
-        latestStatus,
-      })),
-    );
+    const statuses = [
+      "sent",
+      "delivered",
+      "opened",
+      "clicked",
+      "bounced",
+      "complained",
+      "complained",
+    ] as const;
+    const rows = await db
+      .insert(schema.emails)
+      .values(
+        statuses.map((latestStatus, i) => ({
+          teamId,
+          broadcastId: id,
+          contactId: crypto.randomUUID(),
+          from: DRAFT_INPUT.from,
+          to: [`r${i}@example.com`],
+          subject: DRAFT_INPUT.subject,
+          latestStatus,
+        })),
+      )
+      .returning({ id: schema.emails.id });
+    // The second complaint is one SES raised for an address on its own
+    // suppression list: the mail never went out, though the status rose.
+    await db.insert(schema.emailEvents).values([
+      { emailId: rows[5]?.id ?? "", type: "complained", occurredAt: new Date(), data: {} },
+      {
+        emailId: rows[6]?.id ?? "",
+        type: "complained",
+        occurredAt: new Date(),
+        data: { complaint: { complaintSubType: "OnAccountSuppressionList" } },
+      },
+    ]);
 
     const { stats } = await caller.broadcasts.get({ id });
     // Opened counts the opened rung and clicked above it; a prefetch would
     // never lift a row here, so none is expected.
     expect(stats).toEqual({
-      total: 6,
-      delivered: 3,
+      total: 7,
+      delivered: 4,
       opened: 2,
       clicked: 1,
       prefetched: 0,
@@ -623,7 +645,7 @@ describe("delivery stats", () => {
     });
 
     const { items } = await caller.broadcasts.list({});
-    expect(items[0]?.recipients).toBe(6);
+    expect(items[0]?.recipients).toBe(7);
 
     // Once the fan-out has stored recipient_count it is the size of record
     // (email rows are purged by retention; the stored count is not).
@@ -1398,8 +1420,8 @@ describe("broadcasts.providers", () => {
       .values({ emailId: gmail.id, type: "delivered", occurredAt: new Date() });
     const counts = { opened: 0, clicked: 0, bounced: 0, delayed: 0, complained: 0 };
     expect(await caller.broadcasts.providers({ id })).toEqual([
-      { provider: "gmail", sent: 2, delivered: 1, ...counts },
-      { provider: "microsoft", sent: 1, delivered: 0, ...counts },
+      { provider: "gmail", sent: 2, delivered: 1, ...counts, complaintSent: 0 },
+      { provider: "microsoft", sent: 1, delivered: 0, ...counts, complaintSent: 1 },
     ]);
     await expect(callerFor(teamB).broadcasts.providers({ id })).rejects.toMatchObject({
       code: "NOT_FOUND",

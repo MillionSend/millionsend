@@ -73,7 +73,15 @@ beforeAll(async () => {
     { type: "bounced", data: { bounce: { bounceType: "Permanent" } } },
   ]);
   await send("gu@yahoo.com", ["sent", "delivered", "opened"]);
+  // A complaint SES took for an address on its own list: the mail never went out.
+  await send("ha@yahoo.com", [
+    "sent",
+    { type: "complained", data: { complaint: { complaintSubType: "OnAccountSuppressionList" } } },
+  ]);
   await send("hu@example.com", ["sent", "delivered"]);
+  // AOL reports complaints; t-online never does, so it stays out of the denominator.
+  await send("lu@aol.com", ["sent", "delivered", "complained"]);
+  await send("ty@t-online.de", ["sent", "delivered"]);
 
   // Never went out: still queued, and refused outright with its claim kept.
   await send("iv@gmail.com", [], { latestStatus: "queued", sentAt: null });
@@ -86,13 +94,29 @@ beforeAll(async () => {
 afterAll(() => close());
 
 it("counts a broadcast's emails per mailbox provider, busiest first", async () => {
-  const zero = { delivered: 0, opened: 0, clicked: 0, bounced: 0, delayed: 0, complained: 0 };
+  const zero = {
+    delivered: 0,
+    opened: 0,
+    clicked: 0,
+    bounced: 0,
+    delayed: 0,
+    complained: 0,
+    complaintSent: 0,
+  };
   expect(await broadcastProviderBreakdown(db, { teamId, broadcastId })).toEqual([
     { ...zero, provider: "gmail", sent: 3, delivered: 2, opened: 1, clicked: 1, delayed: 1 },
-    { ...zero, provider: "microsoft", sent: 2, delivered: 1, bounced: 1, complained: 1 },
+    { ...zero, provider: "other", sent: 3, delivered: 3, complained: 1, complaintSent: 2 },
+    {
+      ...zero,
+      provider: "microsoft",
+      sent: 2,
+      delivered: 1,
+      bounced: 1,
+      complained: 1,
+      complaintSent: 2,
+    },
+    { ...zero, provider: "yahoo", sent: 2, delivered: 1, opened: 1, complaintSent: 2 },
     { ...zero, provider: "apple", sent: 1, bounced: 1 },
-    { ...zero, provider: "other", sent: 1, delivered: 1 },
-    { ...zero, provider: "yahoo", sent: 1, delivered: 1, opened: 1 },
   ]);
 });
 

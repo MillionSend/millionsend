@@ -3,7 +3,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { sentWithoutComplaintFeedback } from "../src/mailbox-providers.js";
+import { sentWithoutComplaintFeedback, sesAttempted } from "../src/mailbox-providers.js";
 import {
   applyRegionBreakers,
   evaluateRegionBreakers,
@@ -75,6 +75,8 @@ async function seedTraffic(
   events: {
     type: "complained" | "bounced" | "delivered" | "delivery_delayed";
     bounceType?: string;
+    /** The bounce's or complaint's SES subtype. */
+    subType?: string;
     n: number;
   }[],
   sentAt = hoursAgo(6),
@@ -105,7 +107,12 @@ async function seedTraffic(
         createdAt: sentAt,
         snsMessageId: `sns-${email.id}`,
         bounceType: spec.type === "bounced" ? (spec.bounceType ?? null) : null,
-        data: spec.type === "bounced" ? { bounce: { bounceType: spec.bounceType } } : {},
+        data:
+          spec.type === "bounced"
+            ? { bounce: { bounceType: spec.bounceType, bounceSubType: spec.subType } }
+            : spec.type === "complained"
+              ? { complaint: { complaintSubType: spec.subType } }
+              : {},
       });
     }
   }
@@ -114,8 +121,10 @@ async function seedTraffic(
   await bumpCounters(teamId, utcDay(sentAt), {
     sent,
     sentNoFeedback: rows.filter((r) => sentWithoutComplaintFeedback(r.to)).length,
-    hardBounced: n((e) => e.type === "bounced" && e.bounceType === "Permanent"),
-    complained: n((e) => e.type === "complained"),
+    hardBounced: n(
+      (e) => e.type === "bounced" && e.bounceType === "Permanent" && sesAttempted(e.subType),
+    ),
+    complained: n((e) => e.type === "complained" && sesAttempted(e.subType)),
   });
 }
 
@@ -256,6 +265,28 @@ it("hard bounces still count after the retention purge strips event payloads", a
     reason: { metric: "bounce", windowHours: 24 },
     contributors: [{ teamId: teamC, hardBounced: 45 }],
   });
+});
+
+it("leaves bounces and complaints about mail SES never attempted out of the counts and the contributors", async () => {
+  await clearTraffic();
+  await db.delete(schema.regionBreakers);
+  const [a] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
+  if (!a) throw new Error("no domain");
+  const listed = await createTeam(db, "breaker-listed");
+  await seedTraffic(teamA, a.id, 1000, permanent(45));
+  // Every one stopped by SES's own suppression list.
+  await seedTraffic(listed, await domainIn(listed, "listed.example", "sa-east-1"), 40, [
+    { type: "bounced", bounceType: "Permanent", subType: "OnAccountSuppressionList", n: 30 },
+    { type: "complained", subType: "OnAccountSuppressionList", n: 10 },
+  ]);
+  expect((await regionWindowCounts(db, { now: NOW, hours: 24 })).get("sa-east-1")).toMatchObject({
+    sent: 1040,
+    hardBounced: 45,
+    complained: 0,
+  });
+  const sa = (await evaluateRegionBreakers(db, { now: NOW })).find((d) => d.region === "sa-east-1");
+  expect(sa).toMatchObject({ trip: true, reason: { metric: "bounce", windowHours: 24 } });
+  expect(sa?.contributors.map((c) => c.teamId)).toEqual([teamA]);
 });
 
 it("names only teams with hard bounces or complaints, not those with only deliveries, delays or transient bounces", async () => {

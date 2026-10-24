@@ -10,6 +10,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { type BadgeStatus, StatusBadge } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { formatDateTime, formatDay, formatDayTime, formatTime } from "@/lib/format";
 import { rowRelease } from "@/lib/new-domain-limit";
 
@@ -187,17 +188,8 @@ export function EmailsTable({
                       {t("list.broadcastChip")}
                     </span>
                   ) : null}
-                  <span
-                    style={{
-                      display: "block",
-                      minWidth: 0,
-                      maxWidth: 480,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {row.subject}
+                  <span style={{ minWidth: 0, maxWidth: 480 }}>
+                    <Truncated text={row.subject} />
                   </span>
                 </span>
               </td>

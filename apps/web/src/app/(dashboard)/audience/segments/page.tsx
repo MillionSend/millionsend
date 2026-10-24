@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
@@ -232,34 +232,14 @@ export default function SegmentsPage() {
             <tbody>
               {shownRows.map((row) => (
                 <tr key={row.id}>
-                  <td>
-                    <div style={{ fontSize: 14 }}>
-                      <Link
-                        href={`/audience/segments/${row.id}`}
-                        style={{ color: "var(--ms-bone)" }}
-                      >
-                        {row.name}
-                      </Link>
-                      {/* Null filter = manual segment (membership added via the
-                          API); the builder only edits filter segments. */}
-                      {row.filter === null ? (
-                        <span
-                          style={{
-                            marginLeft: 8,
-                            color: "var(--ms-faint)",
-                            fontSize: "var(--ms-fs-label)",
-                          }}
-                        >
-                          {t("manual")}
-                        </span>
-                      ) : null}
-                      {copiedId === row.id ? (
-                        <span style={{ marginLeft: 8, color: "var(--ms-muted)", fontSize: 12.5 }}>
-                          ✓ {common("copied")}
-                        </span>
-                      ) : null}
-                    </div>
-                  </td>
+                  <LeadCell
+                    value={row.name}
+                    href={`/audience/segments/${row.id}`}
+                    // Null filter = manual segment (membership added via the
+                    // API); the builder only edits filter segments.
+                    tail={row.filter === null ? t("manual") : undefined}
+                    action={copiedId === row.id ? `✓ ${common("copied")}` : undefined}
+                  />
                   <td className="right">
                     {/* Stored counts, refreshed on edit and by a periodic recount; the
                         tooltip says how fresh. A never-counted segment is still

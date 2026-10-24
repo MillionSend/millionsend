@@ -345,13 +345,11 @@ export function EventNode({
         </EventIconTile>
         {latest && !prefetch ? (
           <span
+            className="ms-dot sm"
             style={{
               position: "absolute",
               top: -3,
               right: -3,
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
               background: color,
               animation: "ms-pulse 2s infinite",
             }}

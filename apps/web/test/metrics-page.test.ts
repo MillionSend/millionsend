@@ -101,3 +101,15 @@ describe("the complaint card", () => {
     expect(complaints).toMatch(/Complaint rate<\/div>.*?ms-digits[^>]*>—</s);
   });
 });
+
+describe("the rate cards", () => {
+  it("name the risk line with a legend key on the headline's row, clear of the bars", () => {
+    const html = render({ complaintRate: 0.0004, complaintSent: 5_000 });
+    expect(card(html, "Complaint rate")).toMatch(
+      />0\.04%<\/div><span class="ms-chart-key"[^>]*>Risk 0\.05%<\/span>/,
+    );
+    expect(card(html, "Hard-bounce rate")).toMatch(
+      />0\.0%<\/div><span class="ms-chart-key"[^>]*>Risk 4%<\/span>/,
+    );
+  });
+});

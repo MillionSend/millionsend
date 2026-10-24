@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Fragment, useEffect, useState } from "react";
+import { Breakable } from "@/components/breakable";
 import {
   type DnsRecord,
   DnsRecordsTable,
@@ -14,6 +15,7 @@ import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { MarkerRail, MobileStepBar, StepRail } from "@/components/stepper";
+import { SubdomainInput } from "@/components/subdomain-input";
 import { Tooltip } from "@/components/tooltip";
 import { isAwsCredentialError } from "@/lib/aws-errors";
 import { codeRichTags } from "@/lib/code-rich-tags";
@@ -400,22 +402,13 @@ export function AddDomainForm({
             </summary>
             <div className="ms-field" style={{ marginTop: 14 }}>
               <label htmlFor="domain-return-path">{t("new.returnPath")}</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input
-                  id="domain-return-path"
-                  type="text"
-                  className="ms-input mono"
-                  style={{ width: 120 }}
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={returnPath}
-                  disabled={create.isPending}
-                  onChange={(e) => setReturnPath(e.target.value.trim().toLowerCase())}
-                />
-                <span className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-                  .{previewDomain}
-                </span>
-              </div>
+              <SubdomainInput
+                id="domain-return-path"
+                domain={previewDomain}
+                value={returnPath}
+                disabled={create.isPending}
+                onChange={(e) => setReturnPath(e.target.value.trim().toLowerCase())}
+              />
               <p style={hintStyle}>{t.rich("new.returnPathHint", codeRichTags)}</p>
             </div>
           </details>
@@ -467,8 +460,10 @@ export function AddDomainForm({
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 14, color: "var(--ms-bone)", fontWeight: 600 }}>
                   {teamName}{" "}
-                  <span style={{ fontWeight: 400, color: "var(--ms-muted)" }}>
-                    {`<${t("new.preview.user")}@${previewDomain}>`}
+                  <span
+                    style={{ fontWeight: 400, color: "var(--ms-muted)", overflowWrap: "anywhere" }}
+                  >
+                    <Breakable text={`<${t("new.preview.user")}@${previewDomain}>`} />
                   </span>
                 </div>
                 <button

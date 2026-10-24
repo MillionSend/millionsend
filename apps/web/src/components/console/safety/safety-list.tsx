@@ -13,27 +13,18 @@ import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { SortableTh, type SortDir } from "@/components/sortable-th";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { consoleReviewHref } from "@/lib/nav";
-import { formatScoreTenths } from "@/lib/score-band";
+import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamActions } from "../team-actions";
+import { PlanBadge, TeamStatus } from "../teams/cells";
 import { LimitRequests } from "./limit-requests";
-import {
-  FlagStatusBadge,
-  GuardrailCell,
-  LoadErrorCard,
-  PlanBadge,
-  ReasonLabel,
-  RegionCell,
-  RiskCell,
-  scoreColor,
-  usePercent,
-} from "./parts";
+import { FlagStatusBadge, LoadErrorCard, Rate7d, ReasonLabel, RegionCell, RiskCell } from "./parts";
 import { useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
 
@@ -58,7 +49,6 @@ export function SafetyList() {
   const common = useTranslations("console.common");
   const domains = useTranslations("domains");
   const locale = useLocale();
-  const percent = usePercent();
   const router = useRouter();
   const trpc = useTRPC();
   const client = useTRPCClient();
@@ -211,7 +201,7 @@ export function SafetyList() {
       ) : (
         <>
           <div className="ms-card" style={{ padding: 0 }}>
-            <Table className="nowrap">
+            <Table className="nowrap baseline">
               <thead>
                 <tr>
                   {th("name")}
@@ -256,7 +246,6 @@ export function SafetyList() {
                       broadcastsPausedByOperatorAt: row.broadcastsPausedByOperatorAt,
                     };
                     const href = consoleReviewHref(row.teamId);
-                    const standing = row.guardrail !== null;
                     return (
                       <tr
                         key={row.id}
@@ -268,7 +257,7 @@ export function SafetyList() {
                         }}
                       >
                         <td>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span className="ms-lead" style={{ gap: 8 }}>
                             <TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />
                             {row.name}
                           </span>
@@ -293,28 +282,24 @@ export function SafetyList() {
                           }}
                         >
                           {row.scoreTenths === null
-                            ? common("none")
+                            ? mutedDash
                             : formatScoreTenths(row.scoreTenths, locale)}
                         </td>
-                        <td className="right ms-mono">
-                          {standing && row.complaintRate7d !== null
-                            ? percent(row.complaintRate7d)
-                            : common("none")}
-                        </td>
-                        <td className="right ms-mono">
-                          {standing && row.hardBounceRate7d !== null
-                            ? percent(row.hardBounceRate7d)
-                            : common("none")}
-                        </td>
-                        <td style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          <GuardrailCell
-                            guardrail={row.guardrail}
-                            suspendedAt={row.suspendedAt}
-                            pausedAt={row.broadcastsPausedByOperatorAt}
+                        <td className="right num">
+                          <Rate7d
+                            rate={row.complaintRate7d}
+                            sent={row.sent7d ?? 0}
+                            complaintSends={row.complaintSends7d}
                           />
                         </td>
-                        <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          <ReasonLabel reason={row.reason} detail={row.detail} />
+                        <td className="right num">
+                          <Rate7d rate={row.hardBounceRate7d} sent={row.sent7d ?? 0} />
+                        </td>
+                        <td style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <TeamStatus team={row} />
+                        </td>
+                        <td style={{ maxWidth: 180 }}>
+                          <ReasonLabel reason={row.reason} detail={row.detail} truncate />
                         </td>
                         <td>
                           <FlagStatusBadge status={row.status} suspendedAt={row.suspendedAt} />
@@ -325,7 +310,7 @@ export function SafetyList() {
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RelativeTime date={row.openedAt} />
                         </td>
-                        <td className="right" style={{ width: 40 }}>
+                        <td className="right ms-cell-menu" style={{ width: 40 }}>
                           <PopoverMenu
                             ariaLabel={common("actions")}
                             items={[

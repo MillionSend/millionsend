@@ -11,6 +11,7 @@ import { Sparkline } from "@/components/sparkline";
 import { formatPercent, formatSignedPercent } from "@/lib/console-format";
 import { useTRPC } from "@/lib/trpc";
 import {
+  isFeedbackKind,
   KPI_DECIMALS,
   KpiChart,
   type KpiKind,
@@ -19,6 +20,7 @@ import {
   kpiValue,
   pointLabel,
 } from "./charts";
+import { KpiTeams } from "./kpi-teams";
 
 const KPIS: { kind: KpiKind; initial: PeriodKey }[] = [
   { kind: "sent", initial: "24h" },
@@ -174,7 +176,19 @@ function KpiCard({ kind, initial }: { kind: KpiKind; initial: PeriodKey }) {
           title={t(`charts.${kind}`)}
           initialPeriod={period}
         >
-          {(p) => <KpiChart kind={kind} period={p} />}
+          {(p) => (
+            <>
+              <KpiChart kind={kind} period={p} />
+              {isFeedbackKind(kind) ? (
+                // Keyed by the period, so a new period starts compact again.
+                <KpiTeams
+                  key={typeof p === "string" ? p : `${p.from}/${p.to}`}
+                  kind={kind}
+                  period={p}
+                />
+              ) : null}
+            </>
+          )}
         </ChartDialog>
       ) : null}
     </>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +13,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { GrowthSparkline } from "@/components/growth-sparkline";
 import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
@@ -25,6 +25,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { CONTACT_STATUSES } from "@/lib/contact-status";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
@@ -44,9 +45,10 @@ const IMPORT_BATCH = 1000;
 const BULK_BATCH = 100;
 
 // Fixed layout: column shares hold and long cells truncate instead of pushing
-// the trailing columns past the page edge. The floor keeps the status badge
-// readable at its 15% share, and the email about 240px once the date column
-// takes its fixed width below 1200px; narrower viewports scroll the Table box.
+// the trailing columns past the page edge; the email takes what the shares
+// and the date column's fixed width leave. The floor keeps the status badge
+// readable at its 15% share, and the email about 240px; narrower viewports
+// scroll the Table box.
 const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 860 };
 
 function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
@@ -55,9 +57,7 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
     <thead>
       <tr>
         <th className="ms-check-cell">{selectAll}</th>
-        <th className="ms-col-lead" style={{ width: "40%" }}>
-          {t("contacts.email")}
-        </th>
+        <th>{t("contacts.email")}</th>
         <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
         <th style={{ width: "15%" }}>{t("contacts.status")}</th>
         <th className="right ms-col-date">{t("contacts.added")}</th>
@@ -693,39 +693,16 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                         onChange={() => toggleSelected(row.id)}
                       />
                     </td>
-                    <td>
-                      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                        <ContactAvatar email={row.email} name={name} size={24} />
-                        <Link
-                          className="ms-mono"
-                          style={{
-                            fontSize: 13,
-                            flexShrink: 0,
-                            maxWidth: "100%",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                          href={detailHref}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {row.email}
-                        </Link>
-                        {/* A name that merely echoes the address (SES imports) adds no information. */}
-                        {name && name.toLowerCase() !== row.email.toLowerCase() ? (
-                          <span
-                            style={{
-                              color: "var(--ms-muted)",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {name}
-                          </span>
-                        ) : null}
-                      </span>
-                    </td>
+                    <LeadCell
+                      tile={<ContactAvatar email={row.email} name={name} size={24} />}
+                      value={row.email}
+                      href={detailHref}
+                      mono
+                      // A name that merely echoes the address (SES imports) adds no information.
+                      tail={
+                        name && name.toLowerCase() !== row.email.toLowerCase() ? name : undefined
+                      }
+                    />
                     <td>
                       {row.segments.length > 0 ? (
                         // First segment, then a "+N" count that lists the rest on
@@ -739,16 +716,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                             color: "var(--ms-muted)",
                           }}
                         >
-                          <span
-                            title={row.segments[0]}
-                            style={{
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {row.segments[0]}
-                          </span>
+                          <Truncated text={row.segments[0] ?? ""} />
                           {row.segments.length > 1 ? (
                             // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so pinning the segments tooltip does not also trigger the row navigation
                             // biome-ignore lint/a11y/noStaticElementInteractions: click containment only, the tooltip trigger inside stays the interactive element

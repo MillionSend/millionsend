@@ -8,6 +8,11 @@ export const BAND_TONE: Record<ScoreBand, string> = {
   at_risk: "danger",
 };
 
+/** A score's colour in a list or tile: danger under 5, warn under 7, the text's own above. */
+export function scoreColor(tenths: number): string | undefined {
+  return tenths < 50 ? "var(--ms-danger)" : tenths < 70 ? "var(--ms-warn)" : undefined;
+}
+
 /** scoreTenths (0–100) → localized one-decimal 0–10 string ("8.5"). */
 export function formatScoreTenths(scoreTenths: number, locale: string): string {
   return new Intl.NumberFormat(locale, {

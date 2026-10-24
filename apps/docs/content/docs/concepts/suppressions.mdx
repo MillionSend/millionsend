@@ -80,7 +80,10 @@ it to bounces only: a hard-bounced mailbox is dead for everyone, so SES may
 refuse it account-wide, but a spam report is about one sender's mail and
 stays on that team's list here. A send SES refuses because of its own list
 shows as a permanent bounce with the subtype `OnAccountSuppressionList`, and
-only the SES console can remove such an entry.
+only the SES console can remove such an entry. SES never tried to deliver
+such a send, so it doesn't count as a hard bounce in your rates, the same as
+in SES's own bounce rate. The same goes for any bounce or complaint SES
+reports about mail it didn't attempt.
 
 ## API
 
