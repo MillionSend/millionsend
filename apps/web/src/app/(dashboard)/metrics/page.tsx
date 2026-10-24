@@ -153,7 +153,8 @@ function RateCard(props: {
   }
 
   return (
-    <div className="ms-kpi-card" style={{ flex: 1 }}>
+    // min-width 0: a row that ellipsizes must not widen the card past its share of the pair.
+    <div className="ms-kpi-card" style={{ flex: 1, minWidth: 0 }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "2px 8px" }}>
         <div className="ms-microlabel">{props.label}</div>
         {props.note ? (
@@ -313,16 +314,26 @@ function RateCard(props: {
           }}
         >
           <span
-            style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--ms-faint)" }}
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: "var(--ms-faint)",
+              flex: "none",
+            }}
           />
-          {/* Baseline-aligned pair: centering the boxes would float the smaller mono note above the label's x-height. */}
-          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8 }}>
-            {props.secondary.label}
-            <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+          {/* Baseline-aligned pair: centering the boxes would float the smaller mono note above the label's x-height.
+              On a narrow card the row stays one line: the note gives way first, then the label. */}
+          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+            <span className="ms-truncate">{props.secondary.label}</span>
+            <span
+              className="ms-mono ms-truncate"
+              style={{ fontSize: 10, color: "var(--ms-faint)", flex: "1 1 0" }}
+            >
               {props.secondary.note}
             </span>
           </span>
-          <span style={{ marginLeft: "auto" }}>
+          <span style={{ marginLeft: "auto", flex: "none", whiteSpace: "nowrap" }}>
             <span className="ms-digits" style={{ fontSize: 12.5, color: "var(--ms-faint)" }}>
               {props.secondary.count}
             </span>
