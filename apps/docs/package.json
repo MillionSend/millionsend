@@ -13,10 +13,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "fumadocs-core": "^16.17.5",
-    "fumadocs-mdx": "^15.4.7",
-    "fumadocs-openapi": "^12.5.2",
-    "fumadocs-ui": "^16.17.5",
+    "fumadocs-core": "^16.17.7",
+    "fumadocs-mdx": "^15.4.8",
+    "fumadocs-openapi": "^12.5.3",
+    "fumadocs-ui": "^16.17.7",
     "next": "^16.4.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
