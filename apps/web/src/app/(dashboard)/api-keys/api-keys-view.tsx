@@ -29,12 +29,13 @@ function KeysHead() {
   const t = useTranslations("api-keys");
   return (
     <thead>
+      {/* The name takes what the others leave: they shrink to their content. */}
       <tr>
-        <th style={{ width: "46%" }}>{t("table.name")}</th>
-        <th>{t("table.token")}</th>
-        <th>{t("table.lastUsed")}</th>
-        <th>{t("table.created")}</th>
-        <th className="right" aria-label={t("table.menu")} />
+        <th>{t("table.name")}</th>
+        <th style={{ width: "1%" }}>{t("table.token")}</th>
+        <th style={{ width: "1%" }}>{t("table.lastUsed")}</th>
+        <th style={{ width: "1%" }}>{t("table.created")}</th>
+        <th className="right" style={{ width: "1%" }} aria-label={t("table.menu")} />
       </tr>
     </thead>
   );
