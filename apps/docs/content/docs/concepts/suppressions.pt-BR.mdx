@@ -85,7 +85,11 @@ hard bounce está morta para todo mundo, então o SES pode recusá-la para a
 conta inteira, mas uma denúncia de spam diz respeito ao e-mail de um remetente
 e fica só na lista daquela equipe aqui. Um envio que o SES recusa por causa da
 própria lista aparece como bounce permanente com o subtipo
-`OnAccountSuppressionList`, e só o console do SES remove essa entrada.
+`OnAccountSuppressionList`, e só o console do SES remove essa entrada. O SES
+nem tentou entregar esse envio, então ele não conta como hard bounce nas suas
+taxas, assim como na taxa de bounce do próprio SES. O mesmo vale para
+qualquer bounce ou reclamação que o SES informe sobre um e-mail que ele não
+tentou entregar.
 
 ## API
 
