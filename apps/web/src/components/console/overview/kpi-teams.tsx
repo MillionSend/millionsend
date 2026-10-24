@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Period } from "@/components/console/chart-dialog";
 import { LeadCell, SkeletonLead } from "@/components/lead-cell";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
@@ -69,6 +69,12 @@ export function KpiTeams({ kind, period }: { kind: FeedbackKind; period: Period 
   const trpc = useTRPC();
   const query = useQuery(trpc.console.overview.kpiTeams.queryOptions({ kind, period }));
   const [all, setAll] = useState(false);
+  const list = useRef<HTMLDivElement>(null);
+  // "Show all" leaves with its click: focus moves on to the first row it revealed.
+  useEffect(() => {
+    if (!all) return;
+    list.current?.querySelector<HTMLElement>(`tbody tr:nth-child(${VISIBLE + 1}) a`)?.focus();
+  }, [all]);
   const nf = new Intl.NumberFormat(locale);
   const rate = kpiFormatter(kind, locale);
   // A failed refetch keeps the last rows; the table says it failed instead.
@@ -85,7 +91,7 @@ export function KpiTeams({ kind, period }: { kind: FeedbackKind; period: Period 
 
   return (
     <>
-      <div style={{ marginTop: 20 }}>
+      <div ref={list} style={{ marginTop: 20 }}>
         <Table className="nowrap baseline">
           <thead>
             <tr>
