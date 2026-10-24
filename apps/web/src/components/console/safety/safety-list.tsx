@@ -13,7 +13,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { SortableTh, type SortDir } from "@/components/sortable-th";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
@@ -282,7 +282,7 @@ export function SafetyList() {
                           }}
                         >
                           {row.scoreTenths === null
-                            ? common("none")
+                            ? mutedDash
                             : formatScoreTenths(row.scoreTenths, locale)}
                         </td>
                         <td className="right num">
@@ -298,8 +298,8 @@ export function SafetyList() {
                         <td style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
                           <TeamStatus team={row} />
                         </td>
-                        <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          <ReasonLabel reason={row.reason} detail={row.detail} />
+                        <td style={{ maxWidth: 180 }}>
+                          <ReasonLabel reason={row.reason} detail={row.detail} truncate />
                         </td>
                         <td>
                           <FlagStatusBadge status={row.status} suspendedAt={row.suspendedAt} />

@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
 import { mutedDash } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { planLabel } from "@/lib/console-format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
@@ -104,9 +105,12 @@ export function RegionCell({ region }: { region: string | null }) {
 export function ReasonLabel({
   reason,
   detail,
+  truncate = false,
 }: {
   reason: FlagReason;
   detail: TeamFlagDetail | null;
+  /** In a list column: the label ends in an ellipsis, whole on hover above the explanation. */
+  truncate?: boolean;
 }) {
   const t = useTranslations("console.safety");
   const locale = useLocale();
@@ -145,8 +149,10 @@ export function ReasonLabel({
     default:
       label = t(`reasonLabel.${reason}`);
   }
+  const tip = t(`reasonTip.${reason}`);
+  if (truncate) return <Truncated text={label} tip={tip} />;
   return (
-    <Tooltip inline text={t(`reasonTip.${reason}`)}>
+    <Tooltip inline text={tip}>
       {label}
     </Tooltip>
   );
@@ -239,9 +245,8 @@ export function RiskCell({
   thresholds?: { flagRisk: number; alertRisk: number } | undefined;
 }) {
   const t = useTranslations("console.safety");
-  const common = useTranslations("console.common");
   if (plan === "system") return <span style={{ color: "var(--ms-muted)" }}>{t("exempt")}</span>;
-  if (risk === null) return <>{common("none")}</>;
+  if (risk === null) return mutedDash;
   return (
     <span style={{ color: riskColor(risk, thresholds?.flagRisk, thresholds?.alertRisk) }}>
       {formatRisk(risk)}

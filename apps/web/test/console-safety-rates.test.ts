@@ -28,7 +28,7 @@ vi.mock("@/components/tooltip", () => ({
     createElement("span", { className: "tip", "data-tip": text }, children),
 }));
 
-const { Rate7d } = await import("@/components/console/safety/parts");
+const { Rate7d, ReasonLabel, RiskCell } = await import("@/components/console/safety/parts");
 
 const DASH = '<span class="ms-mono" style="color:var(--ms-muted)">—</span>';
 const cell = (props: Parameters<typeof Rate7d>[0]) =>
@@ -61,5 +61,27 @@ describe("a Trust & safety 7-day rate", () => {
 
   it("is a bare dash without a standing", () => {
     expect(cell({ rate: null, sent: 0, complaintSends: false })).toBe(DASH);
+  });
+});
+
+describe("a Trust & safety list row's other cells", () => {
+  it("ends a flag's reason in an ellipsis, its explanation still on hover", () => {
+    h.locale = "en";
+    const html = renderToStaticMarkup(
+      createElement(ReasonLabel, {
+        reason: "guardrail",
+        detail: { guardrail: "warning", metric: "complaint", rate: 0.0039 },
+        truncate: true,
+      }),
+    );
+    expect(html).toBe(
+      '<span class="tip" data-tip="The deliverability guardrail turned warning or paused the team on its bounce or complaint rates."><span class="ms-truncate">Complaints 0.39% · guardrail warning</span></span>',
+    );
+  });
+
+  it("is the muted dash before a team's first sample", () => {
+    expect(renderToStaticMarkup(createElement(RiskCell, { risk: null, plan: "starter" }))).toBe(
+      DASH,
+    );
   });
 });
