@@ -807,6 +807,7 @@ export {
 } from "./ssrf.js";
 export {
   applyStatusCas,
+  DELIVERED_STATUSES,
   type EmailStatus,
   endQueuedEmails,
   highestStatus,

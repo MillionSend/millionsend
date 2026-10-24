@@ -591,7 +591,7 @@ describe("broadcasts.recipientCount", () => {
 });
 
 describe("delivery stats", () => {
-  it("aggregates fanned-out emails by latest status, opened/clicked counting as delivered", async () => {
+  it("aggregates fanned-out emails by latest status, opened, clicked and complained counting as delivered", async () => {
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);
 
@@ -613,7 +613,7 @@ describe("delivery stats", () => {
     // never lift a row here, so none is expected.
     expect(stats).toEqual({
       total: 6,
-      delivered: 3,
+      delivered: 4,
       opened: 2,
       clicked: 1,
       prefetched: 0,

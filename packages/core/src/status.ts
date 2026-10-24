@@ -16,6 +16,18 @@ export type EmailStatus = (typeof schema.emailStatusEnum.enumValues)[number];
 const EVENT_LADDER_FLOOR: EmailStatus = "sent";
 
 /**
+ * The statuses of an email that reached the inbox: an opened or clicked one
+ * was necessarily delivered, and a complaint comes from a recipient who had
+ * it, though its rung sits above the bounces.
+ */
+export const DELIVERED_STATUSES = [
+  "delivered",
+  "opened",
+  "clicked",
+  "complained",
+] as const satisfies readonly EmailStatus[];
+
+/**
  * Highest-rank-wins compare-and-set on emails.latest_status, leaning on
  * Postgres's native enum ordering (declaration order = comparison order).
  * Applies ONLY to event-driven statuses ("sent" and above): queue-internal

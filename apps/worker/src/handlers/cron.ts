@@ -5,6 +5,7 @@ import {
   claimNotification,
   countDistinctRecipients,
   DAY_MS,
+  DELIVERED_STATUSES,
   DRAIN_MAX_PER_RUN,
   deliverabilityHold,
   endQueuedEmails,
@@ -1341,7 +1342,7 @@ export async function purgeExpiredEmailMetadata(
       select
         ${e.broadcastId} as broadcast_id,
         count(*)::int as total,
-        count(*) filter (where ${e.latestStatus} in ('delivered', 'opened', 'clicked'))::int as delivered,
+        count(*) filter (where ${e.latestStatus} in ${DELIVERED_STATUSES})::int as delivered,
         count(*) filter (where ${e.latestStatus} = 'bounced')::int as bounced,
         count(*) filter (where ${e.latestStatus} = 'complained')::int as complained
       from ${e}
