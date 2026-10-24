@@ -3,7 +3,8 @@
   "compilerOptions": {
     "module": "esnext",
     "moduleResolution": "bundler",
-    "jsx": "preserve",
+    // Vitest compiles the page tests' JSX by this setting; Next uses its own transform.
+    "jsx": "react-jsx",
     "lib": ["dom", "dom.iterable", "ES2023"],
     "allowJs": true,
     "noEmit": true,

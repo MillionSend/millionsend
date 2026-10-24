@@ -29,7 +29,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Majors move by hand, with @types/node above. Ignoring them keeps
+    # 24-slim the newest allowed tag, so Dependabot refreshes its pinned
+    # digest: that is how a security release of the same line arrives.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker
     directory: /scripts/backup
     schedule:
       interval: weekly
+    # As above; the Postgres major moves with the compose service and pglite.
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
