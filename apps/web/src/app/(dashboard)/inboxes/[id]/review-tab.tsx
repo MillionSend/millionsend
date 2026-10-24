@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { LeadCell } from "@/components/lead-cell";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { Truncated } from "@/components/truncated";
@@ -148,11 +148,21 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
                     )}
                   </td>
                   {inbox.kind === "agent" ? (
-                    <td className="right ms-mono" style={{ whiteSpace: "nowrap" }}>
-                      {t("review.scoreLine", {
-                        injection: item.injection_score ?? "–",
-                        phishing: item.phishing_score ?? "–",
-                      })}
+                    <td className="right ms-mono">
+                      {item.injection_score === null && item.phishing_score === null ? (
+                        mutedDash
+                      ) : (
+                        // The figures alone, named on hover: the labels would squeeze From and Subject.
+                        <Tooltip
+                          inline
+                          text={t("review.scoreLine", {
+                            injection: item.injection_score ?? "–",
+                            phishing: item.phishing_score ?? "–",
+                          })}
+                        >
+                          {`${item.injection_score ?? "–"} · ${item.phishing_score ?? "–"}`}
+                        </Tooltip>
+                      )}
                     </td>
                   ) : null}
                   <td className="right" style={{ whiteSpace: "nowrap" }}>
