@@ -235,7 +235,7 @@ export function TeamsView() {
         <LoadErrorCard onRetry={() => void list.refetch()} />
       ) : (
         <div className="ms-card" style={{ padding: 0, overflow: "hidden" }}>
-          <Table className="nowrap">
+          <Table className="nowrap baseline">
             <thead>
               <tr>
                 {sortable("name", false, "asc")}
@@ -271,7 +271,7 @@ export function TeamsView() {
                           inline
                           text={t("ownerTip", { email: row.ownerEmail ?? common("none") })}
                         >
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span className="ms-lead" style={{ gap: 8 }}>
                             <TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />
                             {row.name}
                           </span>
@@ -315,7 +315,7 @@ export function TeamsView() {
                       <td style={{ color: "var(--ms-muted)" }}>
                         {formatDay(row.createdAt, locale)}
                       </td>
-                      <td className="right" style={{ width: 40 }}>
+                      <td className="right ms-cell-menu" style={{ width: 40 }}>
                         <PopoverMenu
                           ariaLabel={common("actions")}
                           items={teamMenuItems(row, actions, (key) => t(`menu.${key}`), {

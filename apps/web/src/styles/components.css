@@ -477,6 +477,11 @@ table.ms-table {
 .ms-table.baseline td.ms-cell-menu {
   vertical-align: middle;
 }
+/* A loading row's placeholders carry no text to share the row's baseline (a
+   textless box sits on it by its bottom edge), so they centre instead. */
+.ms-table.baseline tr:has(.ms-skeleton) td {
+  vertical-align: middle;
+}
 /* The console's one-line baseline lists hold the 41px row of a row menu,
    whether a row carries a letter tile, a logo or neither. */
 .ms-table.nowrap.baseline tbody tr {

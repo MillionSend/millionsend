@@ -201,7 +201,7 @@ export function SafetyList() {
       ) : (
         <>
           <div className="ms-card" style={{ padding: 0 }}>
-            <Table className="nowrap">
+            <Table className="nowrap baseline">
               <thead>
                 <tr>
                   {th("name")}
@@ -257,7 +257,7 @@ export function SafetyList() {
                         }}
                       >
                         <td>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span className="ms-lead" style={{ gap: 8 }}>
                             <TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />
                             {row.name}
                           </span>
@@ -310,7 +310,7 @@ export function SafetyList() {
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RelativeTime date={row.openedAt} />
                         </td>
-                        <td className="right" style={{ width: 40 }}>
+                        <td className="right ms-cell-menu" style={{ width: 40 }}>
                           <PopoverMenu
                             ariaLabel={common("actions")}
                             items={[

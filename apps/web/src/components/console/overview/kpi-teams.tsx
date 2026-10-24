@@ -21,34 +21,29 @@ import { ChartNote, type FeedbackKind, kpiFormatter, pointLabel } from "./charts
 const VISIBLE = 7;
 const COLUMNS = 8;
 
-/**
- * Mirrors a loaded row: logo and name, plan badge, day, status dot and word,
- * three figures, day. Placeholders carry no text to share the row's baseline
- * (a textless box sits on it by its bottom edge), so they centre instead.
- */
+/** Mirrors a loaded row: logo and name, plan badge, day, status dot and word, three figures, day. */
 function SkeletonRows() {
-  const cell = { verticalAlign: "middle" } as const;
   return [120, 90, 140].map((width) => (
     <tr key={width}>
-      <td style={cell}>
+      <td>
         <SkeletonLead width={width} tile={22} />
       </td>
-      <td style={cell}>
+      <td>
         <SkeletonBadge width={52} />
       </td>
-      <td style={cell}>
+      <td>
         <Skeleton width={56} />
       </td>
-      <td style={cell}>
+      <td>
         <span aria-hidden="true" className="ms-dot ms-skeleton" style={{ marginRight: 8 }} />
         <Skeleton width={60} />
       </td>
       {[16, 40, 48].map((w) => (
-        <td key={w} className="right" style={cell}>
+        <td key={w} className="right">
           <Skeleton width={w} />
         </td>
       ))}
-      <td style={cell}>
+      <td>
         <Skeleton width={56} />
       </td>
     </tr>
