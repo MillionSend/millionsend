@@ -57,6 +57,21 @@ describe("senderTrust", () => {
     ).toBe("failed");
   });
 
+  it("fails an enforced DMARC failure even when this parser reads no routable From", () => {
+    const rejected = {
+      spf: { result: "fail", domain: "evil.example" },
+      dkim: { aligned: [] },
+      dmarc: { result: "fail", policy: "reject" as const, domain: "stripe.com" },
+    };
+    expect(senderTrust({ ...base, from: "", authentication: NONE, authDetail: rejected })).toBe(
+      "failed",
+    );
+    expect(senderTrust({ ...base, from: "", authentication: { ...NONE, dmarc: "fail" } })).toBe(
+      "failed",
+    );
+    expect(senderTrust({ ...base, from: "" })).toBe("unauthenticated");
+  });
+
   it("needs alignment for an allowlist entry, and one From with one mailbox for any trust (S17)", () => {
     expect(senderTrust({ ...base, allowlist: ["*@stripe.com"], authentication: NONE })).toBe(
       "unauthenticated",
