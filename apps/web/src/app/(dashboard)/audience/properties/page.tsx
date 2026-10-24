@@ -343,13 +343,10 @@ export default function PropertiesPage() {
               ))}
               {filteredDerived.map((row) => (
                 <tr key={`derived-${row.key}`}>
-                  <LeadCell
-                    value={row.key}
-                    mono
-                    action={<span className="ms-badge ms-badge-neutral">{t("inUse")}</span>}
-                  />
+                  <LeadCell value={row.key} mono />
+                  {/* In the type's place, which an undefined key has none of: the key keeps the lead column. */}
                   <td>
-                    <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
+                    <span className="ms-badge ms-badge-neutral">{t("inUse")}</span>
                   </td>
                   <td>
                     <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
