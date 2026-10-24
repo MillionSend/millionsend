@@ -9,25 +9,35 @@ export const queuedLabel = (queued: number): string =>
   queued > QUEUE_COUNT_CAP ? "10k+" : String(queued);
 
 /**
- * One muted line under an endpoint with open deliveries: how many, and how
- * long the earliest has been due — or, when nothing is due yet, when the
- * next attempt is.
+ * One muted line about an endpoint's open deliveries: how many, and how long
+ * the earliest has been due — or, when nothing is due yet, when the next
+ * attempt is. Under the status on a detail page; `inline`, beside the badge
+ * in a list row.
  */
 export function QueueLine({
   queued,
   oldestQueuedAt,
+  inline = false,
 }: {
   queued: number;
   oldestQueuedAt: Date | string | null;
+  inline?: boolean;
 }) {
   const t = useTranslations("webhooks");
   if (queued === 0 || oldestQueuedAt === null) return null;
   const oldest = new Date(oldestQueuedAt);
   const due = oldest.getTime() <= Date.now();
-  return (
-    <div style={{ marginTop: 4, color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+  const line = (
+    <>
       {t("queue.queued", { count: queuedLabel(queued) })} · {t(due ? "queue.oldest" : "queue.next")}{" "}
       <RelativeTime date={oldest} />
+    </>
+  );
+  return inline ? (
+    <span style={{ color: "var(--ms-muted)", fontSize: 12.5 }}>{line}</span>
+  ) : (
+    <div style={{ marginTop: 4, color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+      {line}
     </div>
   );
 }
