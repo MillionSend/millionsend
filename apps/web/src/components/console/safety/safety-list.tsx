@@ -296,16 +296,12 @@ export function SafetyList() {
                         <td className="right num">
                           <Rate7d
                             rate={row.complaintRate7d}
-                            sends={row.complaintSends7d}
-                            metric="complaint"
+                            sent={row.sent7d ?? 0}
+                            complaintSends={row.complaintSends7d}
                           />
                         </td>
                         <td className="right num">
-                          <Rate7d
-                            rate={row.hardBounceRate7d}
-                            sends={(row.sent7d ?? 0) > 0}
-                            metric="hard_bounce"
-                          />
+                          <Rate7d rate={row.hardBounceRate7d} sent={row.sent7d ?? 0} />
                         </td>
                         <td style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
                           <TeamStatus team={row} />

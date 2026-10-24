@@ -65,19 +65,22 @@ export function usePercent(): (rate: number) => string {
  */
 export function Rate7d({
   rate,
-  sends,
-  metric,
+  sent,
+  complaintSends,
 }: {
   rate: number | null;
-  sends: boolean;
-  metric: "complaint" | "hard_bounce";
+  /** The window's sends. */
+  sent: number;
+  /** A complaint rate's own: whether any of them went to a provider that reports complaints. */
+  complaintSends?: boolean;
 }) {
   const t = useTranslations("console.safety");
   const percent = usePercent();
   if (rate === null) return mutedDash;
-  if (!sends) {
+  if (sent === 0 || complaintSends === false) {
+    // No send at all says just that, even under the complaint rate.
     return (
-      <Tooltip inline text={t("noSends7d", { metric })}>
+      <Tooltip inline text={t("noSends7d", { metric: sent > 0 ? "complaint" : "other" })}>
         {mutedDash}
       </Tooltip>
     );

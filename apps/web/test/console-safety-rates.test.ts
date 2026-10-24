@@ -37,22 +37,29 @@ const cell = (props: Parameters<typeof Rate7d>[0]) =>
 describe("a Trust & safety 7-day rate", () => {
   it("prints the standing's rate when its window held a send to rate", () => {
     h.locale = "pt-BR";
-    expect(cell({ rate: 0.0031, sends: true, metric: "complaint" })).toBe("0,31%");
-    expect(cell({ rate: 0, sends: true, metric: "hard_bounce" })).toBe("0,00%");
+    expect(cell({ rate: 0.0031, sent: 900, complaintSends: true })).toBe("0,31%");
+    expect(cell({ rate: 0, sent: 900 })).toBe("0,00%");
   });
 
   it("is a dash that says why over a window with nothing to rate, not 0.00%", () => {
     h.locale = "pt-BR";
-    expect(cell({ rate: 0, sends: false, metric: "complaint" })).toBe(
+    expect(cell({ rate: 0, sent: 900, complaintSends: false })).toBe(
       `<span class="tip" data-tip="Nenhum envio nos últimos 7 dias para provedores que repassam reclamações.">${DASH}</span>`,
     );
     h.locale = "en";
-    expect(cell({ rate: 0, sends: false, metric: "hard_bounce" })).toBe(
+    expect(cell({ rate: 0, sent: 0 })).toBe(
+      `<span class="tip" data-tip="No sends in the last 7 days.">${DASH}</span>`,
+    );
+  });
+
+  it("says plainly that nothing was sent, under the complaint rate too", () => {
+    h.locale = "en";
+    expect(cell({ rate: 0, sent: 0, complaintSends: false })).toBe(
       `<span class="tip" data-tip="No sends in the last 7 days.">${DASH}</span>`,
     );
   });
 
   it("is a bare dash without a standing", () => {
-    expect(cell({ rate: null, sends: false, metric: "complaint" })).toBe(DASH);
+    expect(cell({ rate: null, sent: 0, complaintSends: false })).toBe(DASH);
   });
 });
