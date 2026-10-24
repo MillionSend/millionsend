@@ -446,17 +446,14 @@ describe("a limited domain on the Domains list", () => {
     ...over,
   });
   const rows = () => {
-    const html = renderToStaticMarkup(createElement(DomainsView, { awsBanner: null })).replaceAll(
-      "<wbr/>",
-      "",
-    );
+    const html = renderToStaticMarkup(createElement(DomainsView, { awsBanner: null }));
     return (html.match(/<tbody>.*<\/tbody>/s)?.[0].match(/<tr>.*?<\/tr>/gs) ?? []).map((row) => ({
       text: visible(row),
       tips: tips(row),
     }));
   };
 
-  it("tails its badge with today's cap and what waits, the schedule on hover", () => {
+  it("tails its badge with today's cap and what waits, both and the schedule on hover", () => {
     h.domains = [
       own("nova.example", { limit: nova }),
       own("ageless.example", { limit: limit({ waiting: 0, steps: [], fullAt: null }) }),
@@ -464,8 +461,9 @@ describe("a limited domain on the Domains list", () => {
     ];
     const [limited, ageless, old] = rows();
     expect(limited?.text).toContain("Verified300 a day for now·214 waiting");
+    // The tail may end in an ellipsis before what waits, so the hover leads with it.
     expect(limited?.tips).toContain(
-      `New domain limit. Up to 300 emails a day until ${formatDay(STEP, "en")}, then 2,000 a day until ${formatDay(FULL, "en")}, then no limit. Mail over the limit waits for the next day.`,
+      `214 waiting\nNew domain limit. Up to 300 emails a day until ${formatDay(STEP, "en")}, then 2,000 a day until ${formatDay(FULL, "en")}, then no limit. Mail over the limit waits for the next day.`,
     );
     expect(ageless?.text).toContain("300 a day for now");
     expect(ageless?.text).not.toContain("waiting");
@@ -481,7 +479,7 @@ describe("a limited domain on the Domains list", () => {
     const [limited] = rows();
     expect(limited?.text).toContain("300 por dia por enquanto·214 esperando");
     expect(limited?.tips).toContain(
-      `Limite de domínio novo. Até 300 e-mails por dia até ${formatDay(STEP, "pt-BR")}, depois 2.000 por dia até ${formatDay(FULL, "pt-BR")}, depois sem limite. O que passar do limite espera o dia seguinte.`,
+      `214 esperando\nLimite de domínio novo. Até 300 e-mails por dia até ${formatDay(STEP, "pt-BR")}, depois 2.000 por dia até ${formatDay(FULL, "pt-BR")}, depois sem limite. O que passar do limite espera o dia seguinte.`,
     );
   });
 });
