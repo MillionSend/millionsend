@@ -11,6 +11,7 @@ import { useCallback, useMemo, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
@@ -20,6 +21,7 @@ import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
 import { useCopied } from "@/lib/use-copied";
@@ -89,14 +91,6 @@ function PropertiesSkeleton() {
         ))}
       </tbody>
     </Table>
-  );
-}
-
-function MonoKey({ text }: { text: string }) {
-  return (
-    <span className="ms-mono" style={{ fontSize: 13, color: "var(--ms-bone)" }}>
-      {text}
-    </span>
   );
 }
 
@@ -312,20 +306,15 @@ export default function PropertiesPage() {
             <tbody>
               {shownDefined.map((row) => (
                 <tr key={row.id}>
-                  <td>
-                    <MonoKey text={row.key} />
-                    {copiedId === row.id ? (
-                      <span style={{ marginLeft: 8, color: "var(--ms-muted)", fontSize: 12.5 }}>
-                        ✓ {common("copied")}
-                      </span>
-                    ) : null}
-                  </td>
+                  <LeadCell
+                    value={row.key}
+                    mono
+                    action={copiedId === row.id ? `✓ ${common("copied")}` : undefined}
+                  />
                   <td style={{ color: "var(--ms-muted)" }}>{typeLabel(row.type)}</td>
-                  <td>
+                  <td className="ms-cell-fill" style={{ color: "var(--ms-muted)" }}>
                     {row.fallbackValue ? (
-                      <span style={{ color: "var(--ms-muted)", fontSize: 13 }}>
-                        {row.fallbackValue}
-                      </span>
+                      <Truncated text={row.fallbackValue} />
                     ) : (
                       <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
                     )}
@@ -354,12 +343,11 @@ export default function PropertiesPage() {
               ))}
               {filteredDerived.map((row) => (
                 <tr key={`derived-${row.key}`}>
-                  <td>
-                    <MonoKey text={row.key} />{" "}
-                    <span className="ms-badge ms-badge-neutral" style={{ marginLeft: 6 }}>
-                      {t("inUse")}
-                    </span>
-                  </td>
+                  <LeadCell
+                    value={row.key}
+                    mono
+                    action={<span className="ms-badge ms-badge-neutral">{t("inUse")}</span>}
+                  />
                   <td>
                     <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
                   </td>

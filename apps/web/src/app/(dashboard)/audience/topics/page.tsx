@@ -9,6 +9,7 @@ import { ResourceApiButton } from "@/components/api-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { GlobeIcon, LockIcon } from "@/components/icons/visibility-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
@@ -220,24 +221,11 @@ export default function TopicsPage() {
                         className="hoverable"
                         onClick={() => router.push(detailHref)}
                       >
-                        <td>
-                          <div style={{ fontSize: 14 }}>
-                            <Link
-                              href={detailHref}
-                              style={{ color: "var(--ms-bone)" }}
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              {row.name}
-                            </Link>
-                            {copied === row.id ? (
-                              <span
-                                style={{ marginLeft: 8, color: "var(--ms-muted)", fontSize: 12.5 }}
-                              >
-                                ✓ {common("copied")}
-                              </span>
-                            ) : null}
-                          </div>
-                        </td>
+                        <LeadCell
+                          value={row.name}
+                          href={detailHref}
+                          action={copied === row.id ? `✓ ${common("copied")}` : undefined}
+                        />
                         <td>
                           <span
                             className={`ms-badge ${row.defaultSubscribed ? "ms-badge-success" : "ms-badge-neutral"}`}
