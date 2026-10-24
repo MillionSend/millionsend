@@ -1,4 +1,4 @@
-import { DAY_MS, hashRecipient } from "@millionsend/core";
+import { DAY_MS, hashRecipient, utcDay, utcHour } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
@@ -157,6 +157,45 @@ it("Complaint: suppression with reason complaint", async () => {
     .from(schema.suppressions)
     .where(eq(schema.suppressions.emailHash, hashRecipient("angry@example.com")));
   expect(supp?.reason).toBe("complaint");
+});
+
+it("Complaint about old mail: counted on the day and hour it arrives, not the send day", async () => {
+  const lateTeam = await createTeam(db, "late-feedback-team");
+  const sentAt = new Date(Date.now() - 14 * DAY_MS);
+  const arrivedAt = new Date();
+  await db.insert(schema.emails).values({
+    teamId: lateTeam,
+    from: "a@acme.dev",
+    to: ["late@example.com"],
+    subject: "s",
+    latestStatus: "sent",
+    sesMessageId: "mid-late-complaint",
+    sentAt,
+    createdAt: sentAt,
+  });
+  await processSesEvent(
+    db,
+    makeEvent({
+      eventType: "Complaint",
+      sesMessageId: "mid-late-complaint",
+      occurredAt: arrivedAt.toISOString(),
+      complaint: { recipients: ["late@example.com"] },
+    }),
+  );
+
+  const daily = await db
+    .select({ day: schema.usageCounters.day, complained: schema.usageCounters.complained })
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, lateTeam));
+  expect(daily).toEqual([{ day: utcDay(arrivedAt), complained: 1 }]);
+  const hourly = await db
+    .select({
+      hour: schema.usageCountersHourly.hour,
+      complained: schema.usageCountersHourly.complained,
+    })
+    .from(schema.usageCountersHourly)
+    .where(eq(schema.usageCountersHourly.teamId, lateTeam));
+  expect(hourly).toEqual([{ hour: utcHour(arrivedAt), complained: 1 }]);
 });
 
 it("out-of-order events never regress the status ladder", async () => {
