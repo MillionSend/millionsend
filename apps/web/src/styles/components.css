@@ -419,6 +419,15 @@ table.ms-table {
 .ms-table td:last-child {
   color: var(--ms-muted);
 }
+/* A badge holding a long value (an API key's domain) gives way with the
+   row's other free text, ending in an ellipsis inside (Truncated) at the
+   pill's full strength, not the dimmed ⓘ's. */
+.ms-table .ms-badge-clip {
+  min-width: 0;
+}
+.ms-table .ms-badge-clip .ms-truncate-host {
+  opacity: 1;
+}
 /* Dense variant — DNS record tables: mono chips on ~4px rows. */
 .ms-table.dense td {
   padding: 4px 12px;
@@ -2693,15 +2702,6 @@ summary:focus-visible,
   }
   .ms-table th.ms-col-date {
     width: 104px;
-  }
-}
-/* A badge holding a long value (an API key's domain) ellipsizes rather than
-   push its list past a narrow desktop; the value rides in its title. */
-@media (min-width: 900px) and (max-width: 1199px) {
-  .ms-table .ms-badge-clip {
-    max-width: 16rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 }
 /* The account score's four figures go two by two where a row of four would
