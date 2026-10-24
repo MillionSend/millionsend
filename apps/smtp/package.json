@@ -15,7 +15,7 @@
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "mailparser": "^3.9.47",
+    "mailparser": "^3.10.0",
     "smtp-server": "^3.20.2",
     "tsx": "^4.23.15",
     "zod": "^4.6.7"

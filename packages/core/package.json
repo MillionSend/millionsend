@@ -123,9 +123,9 @@
     "@sentry/core": "^11.8.0",
     "@sentry/node": "^11.8.0",
     "drizzle-orm": "^0.45.4",
-    "mailparser": "^3.9.47",
+    "mailparser": "^3.10.0",
     "mmdb-lib": "3.0.3",
-    "tldts": "^7.4.18",
+    "tldts": "^7.4.19",
     "zod": "^4.6.7"
   },
   "devDependencies": {
