@@ -1014,7 +1014,7 @@ it("records a broadcast's results before its emails age out, so the campaign kee
     .returning({ id: schema.broadcasts.id });
   if (!broadcast) throw new Error("broadcast insert failed");
   await db.insert(schema.emails).values(
-    (["delivered", "opened", "bounced"] as const).map((latestStatus, i) => ({
+    (["delivered", "opened", "bounced", "complained"] as const).map((latestStatus, i) => ({
       teamId,
       broadcastId: broadcast.id,
       from: "a@acme.dev",
@@ -1026,7 +1026,7 @@ it("records a broadcast's results before its emails age out, so the campaign kee
   );
 
   const first = await purgeExpiredEmailMetadata(db, { retentionDays: 30, now });
-  expect(first).toMatchObject({ emails: 3, broadcasts: 1 });
+  expect(first).toMatchObject({ emails: 4, broadcasts: 1 });
   const [row] = await db
     .select({
       total: schema.broadcasts.recipientCount,
@@ -1036,7 +1036,8 @@ it("records a broadcast's results before its emails age out, so the campaign kee
     })
     .from(schema.broadcasts)
     .where(eq(schema.broadcasts.id, broadcast.id));
-  expect(row).toEqual({ total: 3, delivered: 2, bounced: 1, complained: 0 });
+  // A complaint comes from a recipient who had the mail.
+  expect(row).toEqual({ total: 4, delivered: 3, bounced: 1, complained: 1 });
   expect(
     await db
       .select({ id: schema.emails.id })

@@ -553,6 +553,7 @@ export {
   type MailboxProvider,
   mailboxProvider,
   sentWithoutComplaintFeedback,
+  sesAttempted,
 } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,
@@ -806,6 +807,7 @@ export {
 } from "./ssrf.js";
 export {
   applyStatusCas,
+  DELIVERED_STATUSES,
   type EmailStatus,
   endQueuedEmails,
   highestStatus,

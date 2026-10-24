@@ -112,6 +112,18 @@ const PROVIDERS = [
     bounced: 2,
     delayed: 62,
     complained: 0,
+    complaintSent: 0,
+  },
+  {
+    provider: "microsoft",
+    sent: 300,
+    delivered: 300,
+    opened: 30,
+    clicked: 3,
+    bounced: 0,
+    delayed: 0,
+    complained: 1,
+    complaintSent: 300,
   },
 ];
 const DATA: Record<string, unknown> = {
@@ -162,6 +174,16 @@ describe("broadcast detail while the domain warms up", () => {
     expect(out).toContain("98.0%");
     expect(out).toContain("5.0%");
     expect(out).toContain("6.2%");
+  });
+
+  it("puts complaints over what went to providers that report them, a dash where none do", () => {
+    const out = renderToStaticMarkup(createElement(BroadcastDetailPage));
+    expect(out).toContain("broadcasts.detail.providers.complained");
+    // Microsoft: 1 complaint of 300; Gmail never reports one.
+    expect(out).toContain("0.33%");
+    expect(out).toContain(
+      '<span class="ms-tooltip-trigger inline" tabindex="0"><span class="ms-mono" style="color:var(--ms-muted)">—</span></span>',
+    );
   });
 
   it("holds the provider table's place while it loads, and offers a retry when it fails", () => {

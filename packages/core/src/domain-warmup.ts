@@ -18,7 +18,7 @@ import {
   resolveMonitorSettings,
 } from "./monitor-settings.js";
 import { ownerDomain } from "./org-domain.js";
-import { recipientDomains } from "./platform-breaker.js";
+import { complaintFilter, hardBounceFilter, recipientDomains } from "./platform-breaker.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -411,14 +411,14 @@ async function cleanSince(
   // Spelled out: inside a subquery drizzle leaves column names unqualified,
   // and emails and email_events both have an id.
   const delivered = sql`exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'delivered')`;
-  const bounced = sql`exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'bounced' and ev.bounce_type = 'Permanent')`;
+  const bounced = sql`exists (select 1 from email_events where email_events.email_id = emails.id and ${hardBounceFilter})`;
   const [sends] = await db
     .select({
       delivered: sql<number>`count(*) filter (where ${delivered})::int`,
       dayOld: sql<number>`count(*) filter (where ${delivered} and emails.sent_at <= ${spanStart}::timestamptz)::int`,
       deliveredOrBounced: sql<number>`count(*) filter (where ${delivered} or ${bounced})::int`,
       bounced: sql<number>`count(*) filter (where ${bounced})::int`,
-      complained: sql<number>`count(*) filter (where exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'complained'))::int`,
+      complained: sql<number>`count(*) filter (where exists (select 1 from email_events where email_events.email_id = emails.id and ${complaintFilter}))::int`,
     })
     .from(e)
     .where(

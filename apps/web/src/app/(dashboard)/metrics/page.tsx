@@ -2,8 +2,6 @@
 
 import {
   GUARDRAIL_WINDOW_DAYS,
-  MIN_GUARDRAIL_VOLUME,
-  MIN_WARN_COMPLAINTS,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
 } from "@millionsend/core/deliverability";
@@ -29,7 +27,7 @@ const RANGES = [7, 15, 30] as const;
 type Range = (typeof RANGES)[number];
 
 /**
- * Rate-card geometry from the canvas: 120px bar area, dashed RISK line at a
+ * Rate-card geometry from the canvas: 120px bar area, dashed risk line at a
  * fixed top offset — bars scale so the threshold rate lands exactly on the
  * line (bounce line at top 6px → 114px = 4%; complaint at 14px → 106px = 0.05%).
  */
@@ -58,8 +56,6 @@ type Bar = {
   dayLabel: string;
   detail: string;
   partial: boolean;
-  /** Under the guardrail's floor: a day this small could not trip the warning on its own. */
-  underFloor: boolean;
 };
 /** One day of a rate card: its events over the sends that rate divides by. */
 type RateDay = { day: string; count: number; sent: number };
@@ -68,8 +64,6 @@ type EngagementDay = { day: string; delivered: number; opened: number; clicked: 
 function rateBars(
   days: RateDay[],
   geometry: { threshold: number; lineTop: number },
-  /** The guardrail's floor for one day's worth of this metric. */
-  belowFloor: (d: RateDay) => boolean,
   fmtPct: Intl.NumberFormat,
   ofSent: (count: number, sent: number) => string,
   formatDay: (day: string) => string,
@@ -84,7 +78,6 @@ function rateBars(
       dayLabel: formatDay(d.day),
       detail: `${fmtPct.format(rate)} · ${ofSent(d.count, d.sent)}`,
       partial: d.day === today,
-      underFloor: d.count > 0 && belowFloor(d),
     };
   });
 }
@@ -112,7 +105,6 @@ function engagementBars(
       dayLabel: formatDay(d.day),
       detail: `${fmtPct.format(rate)} · ${fmt.format(count(d))}`,
       partial: d.day === today,
-      underFloor: false,
     };
   });
 }
@@ -142,8 +134,6 @@ function RateCard(props: {
   note?: string;
   // Tooltip suffix for a bar whose day is still being counted.
   partialNote: string;
-  // Tooltip line for a day under the floor: too small for the guardrail to judge.
-  floorNote?: string | undefined;
   // Muted second footer row for what deliberately stays out of the headline.
   secondary?: { label: string; note: string; hint: string; count: string; pct: string } | undefined;
 }) {
@@ -176,10 +166,31 @@ function RateCard(props: {
         ) : null}
       </div>
       <div
-        className="ms-digits"
-        style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1, marginTop: 6 }}
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "baseline",
+          gap: "4px 12px",
+          marginTop: 6,
+        }}
       >
-        {props.headline}
+        <div className="ms-digits" style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1 }}>
+          {props.headline}
+        </div>
+        {props.risk ? (
+          <span
+            className="ms-chart-key"
+            style={
+              {
+                marginLeft: "auto",
+                color: "var(--ms-muted)",
+                "--ms-key": "var(--ms-danger)",
+              } as React.CSSProperties
+            }
+          >
+            {props.risk.label}
+          </span>
+        ) : null}
       </div>
       <div
         ref={areaRef}
@@ -222,8 +233,6 @@ function RateCard(props: {
                 flex: "1 1 0",
                 // 2px floor keeps zero days visible as a baseline stub.
                 height: Math.max(2, bar.height),
-                // A day under the guardrail's floor draws like any other;
-                // the tooltip is where it says the alarm could not trip.
                 background: props.color,
                 // A day still being counted sits lighter than the settled ones.
                 opacity: bar.partial
@@ -250,14 +259,6 @@ function RateCard(props: {
             >
               {hoveredBar.detail}
             </div>
-            {hoveredBar.underFloor && props.floorNote ? (
-              <div
-                className="ms-mono"
-                style={{ fontSize: 11, color: "var(--ms-faint)", marginTop: 3 }}
-              >
-                {props.floorNote}
-              </div>
-            ) : null}
           </ChartTip>
         ) : null}
         {props.risk ? (
@@ -269,20 +270,7 @@ function RateCard(props: {
               top: props.risk.lineTop,
               borderTop: "1px dashed var(--ms-danger)",
             }}
-          >
-            <span
-              className="ms-mono"
-              style={{
-                position: "absolute",
-                right: 0,
-                top: -16,
-                fontSize: 10,
-                color: "var(--ms-danger)",
-              }}
-            >
-              {props.risk.label}
-            </span>
-          </div>
+          />
         ) : null}
       </div>
       <div
@@ -728,16 +716,14 @@ export default function MetricsPage() {
               note={t("guardrail.window", { days: GUARDRAIL_WINDOW_DAYS })}
               headline={guardrailRate(health.data?.bounceRate, health.data?.sent, pct1)}
               risk={{
-                label: t("bounce.risk", { rate: riskPct.format(WARN_BOUNCE_RATE) }),
+                label: t("chart.risk", { rate: riskPct.format(WARN_BOUNCE_RATE) }),
                 lineTop: BOUNCE.lineTop,
               }}
               color="var(--ms-danger)"
               partialNote={t("chart.soFar")}
-              floorNote={t("chart.belowFloor")}
               bars={rateBars(
                 data.days.map((d) => ({ day: d.day, count: d.hardBounced, sent: d.sent })),
                 BOUNCE,
-                (d) => d.sent < MIN_GUARDRAIL_VOLUME,
                 pct2,
                 ofSent,
                 dayLabel,
@@ -755,12 +741,11 @@ export default function MetricsPage() {
               note={t("complaint.window", { days: GUARDRAIL_WINDOW_DAYS })}
               headline={guardrailRate(health.data?.complaintRate, health.data?.complaintSent, pct2)}
               risk={{
-                label: t("complaint.risk", { rate: riskPct.format(WARN_COMPLAINT_RATE) }),
+                label: t("chart.risk", { rate: riskPct.format(WARN_COMPLAINT_RATE) }),
                 lineTop: COMPLAINT.lineTop,
               }}
               color="var(--ms-warn)"
               partialNote={t("chart.soFar")}
-              floorNote={t("chart.belowFloor")}
               bars={rateBars(
                 data.complaints.days.map((d) => ({
                   day: d.day,
@@ -768,7 +753,6 @@ export default function MetricsPage() {
                   sent: d.complaintSent,
                 })),
                 COMPLAINT,
-                (d) => d.sent < MIN_GUARDRAIL_VOLUME || d.count < MIN_WARN_COMPLAINTS,
                 pct2,
                 (count, sent) =>
                   t("complaint.ofReportable", { count: fmt.format(count), sent: fmt.format(sent) }),

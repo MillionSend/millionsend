@@ -36,7 +36,9 @@ export const usageCounters = pgTable(
     bounced: integer("bounced").notNull().default(0),
     // bounced counts ALL bounce events including Transient; hardBounced counts
     // only Permanent — the deliverability score's bounce-rate input (transient
-    // greylisting must not read as a hard-bounce crisis).
+    // greylisting must not read as a hard-bounce crisis). hardBounced and
+    // complained leave out feedback about mail SES never attempted (core's
+    // sesAttempted), which SES's own rates leave out too.
     hardBounced: integer("hard_bounced").notNull().default(0),
     complained: integer("complained").notNull().default(0),
     // Unique engagement per day: one recipient opening/clicking many times

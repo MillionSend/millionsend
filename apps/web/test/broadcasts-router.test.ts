@@ -591,7 +591,7 @@ describe("broadcasts.recipientCount", () => {
 });
 
 describe("delivery stats", () => {
-  it("aggregates fanned-out emails by latest status, opened/clicked counting as delivered", async () => {
+  it("aggregates fanned-out emails by latest status, opened, clicked and complained counting as delivered", async () => {
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);
 
@@ -613,7 +613,7 @@ describe("delivery stats", () => {
     // never lift a row here, so none is expected.
     expect(stats).toEqual({
       total: 6,
-      delivered: 3,
+      delivered: 4,
       opened: 2,
       clicked: 1,
       prefetched: 0,
@@ -1398,8 +1398,8 @@ describe("broadcasts.providers", () => {
       .values({ emailId: gmail.id, type: "delivered", occurredAt: new Date() });
     const counts = { opened: 0, clicked: 0, bounced: 0, delayed: 0, complained: 0 };
     expect(await caller.broadcasts.providers({ id })).toEqual([
-      { provider: "gmail", sent: 2, delivered: 1, ...counts },
-      { provider: "microsoft", sent: 1, delivered: 0, ...counts },
+      { provider: "gmail", sent: 2, delivered: 1, ...counts, complaintSent: 0 },
+      { provider: "microsoft", sent: 1, delivered: 0, ...counts, complaintSent: 1 },
     ]);
     await expect(callerFor(teamB).broadcasts.providers({ id })).rejects.toMatchObject({
       code: "NOT_FOUND",

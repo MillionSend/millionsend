@@ -21,6 +21,7 @@ async function insertSentEmail(
   sesMessageId: string,
   to = ["r@example.com"],
   contactId: string | null = null,
+  sentAt = new Date(),
 ): Promise<string> {
   const [row] = await db
     .insert(schema.emails)
@@ -32,7 +33,7 @@ async function insertSentEmail(
       subject: "s",
       latestStatus: "sent",
       sesMessageId,
-      sentAt: new Date(),
+      sentAt,
     })
     .returning({ id: schema.emails.id });
   if (!row) throw new Error("insert failed");
@@ -157,6 +158,102 @@ it("Complaint: suppression with reason complaint", async () => {
     .from(schema.suppressions)
     .where(eq(schema.suppressions.emailHash, hashRecipient("angry@example.com")));
   expect(supp?.reason).toBe("complaint");
+});
+
+describe("hard bounce and complaint counters", () => {
+  /** The team's daily and hourly counter rows for the day and hour `at` falls in. */
+  async function countersAt(at: string) {
+    const [daily] = await db
+      .select()
+      .from(schema.usageCounters)
+      .where(
+        and(eq(schema.usageCounters.teamId, teamId), eq(schema.usageCounters.day, at.slice(0, 10))),
+      );
+    const [hourly] = await db
+      .select()
+      .from(schema.usageCountersHourly)
+      .where(
+        and(
+          eq(schema.usageCountersHourly.teamId, teamId),
+          eq(schema.usageCountersHourly.hour, new Date(`${at.slice(0, 13)}:00:00.000Z`)),
+        ),
+      );
+    return { daily, hourly };
+  }
+
+  it("leave out Permanent bounces for mail SES never attempted, which still bounce and suppress", async () => {
+    const at = "2026-09-20T15:30:00.000Z";
+    const subTypes = [
+      "OnAccountSuppressionList",
+      "OnTenantSuppressionList",
+      "EmailValidationSuppressed",
+      "UnsubscribedRecipient",
+      "General",
+    ];
+    for (const subType of subTypes) {
+      const to = `${subType.toLowerCase()}@example.com`;
+      await insertSentEmail(`mid-unattempted-${subType}`, [to]);
+      await processSesEvent(
+        db,
+        makeEvent({
+          eventType: "Bounce",
+          sesMessageId: `mid-unattempted-${subType}`,
+          occurredAt: at,
+          bounce: { bounceType: "Permanent", bounceSubType: subType, recipients: [to] },
+        }),
+      );
+    }
+
+    const { daily, hourly } = await countersAt(at);
+    expect(daily).toMatchObject({ bounced: 5, hardBounced: 1 });
+    expect(hourly).toMatchObject({ bounced: 5, hardBounced: 1 });
+    const [supp] = await db
+      .select()
+      .from(schema.suppressions)
+      .where(
+        eq(schema.suppressions.emailHash, hashRecipient("onaccountsuppressionlist@example.com")),
+      );
+    expect(supp?.reason).toBe("hard_bounce");
+  });
+
+  it("count a complaint on the day and hour it arrives, unless SES never attempted the mail", async () => {
+    const at = "2026-09-21T09:10:00.000Z";
+    const sentAt = new Date(Date.parse(at) - 14 * DAY_MS);
+    await insertSentEmail("mid-late-complaint", ["late@example.com"], null, sentAt);
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-late-complaint",
+        occurredAt: at,
+        complaint: { recipients: ["late@example.com"], complaintFeedbackType: "abuse" },
+      }),
+    );
+    const listed = await insertSentEmail("mid-listed-complaint", ["listed@example.com"]);
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-listed-complaint",
+        occurredAt: at,
+        complaint: {
+          recipients: ["listed@example.com"],
+          complaintSubType: "OnAccountSuppressionList",
+        },
+      }),
+    );
+
+    const { daily, hourly } = await countersAt(at);
+    expect(daily?.complained).toBe(1);
+    expect(hourly?.complained).toBe(1);
+    expect((await countersAt(sentAt.toISOString())).daily).toBeUndefined();
+    expect(await statusOf(listed)).toBe("complained");
+    const [supp] = await db
+      .select()
+      .from(schema.suppressions)
+      .where(eq(schema.suppressions.emailHash, hashRecipient("listed@example.com")));
+    expect(supp?.reason).toBe("complaint");
+  });
 });
 
 it("out-of-order events never regress the status ladder", async () => {

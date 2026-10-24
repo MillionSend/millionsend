@@ -12,12 +12,10 @@
   },
   "bounce": {
     "title": "Hard-bounce rate",
-    "risk": "RISK {rate}",
     "bounced": "Hard bounced"
   },
   "complaint": {
     "title": "Complaint rate",
-    "risk": "RISK {rate}",
     "complained": "Complained",
     "window": "last {days} UTC days",
     "ofReportable": "{count} of {sent} to inboxes that report spam",
@@ -31,7 +29,7 @@
   "chart": {
     "soFar": "so far",
     "ofSent": "{count} of {sent} sent",
-    "belowFloor": "below the guardrail's floor · not judged"
+    "risk": "Risk {rate}"
   },
   "score": {
     "title": "Account score",

@@ -7,12 +7,9 @@ import { broadcastAudience, broadcastAudienceWhere } from "./broadcast-audience.
 import { addWithinLimit } from "./domain-warmup.js";
 import { firstRow, resultRows } from "./driver-result.js";
 import { GMAIL_CLIP_BYTES } from "./email-insights.js";
-import { firstRecipientDomain } from "./mailbox-provider-sql.js";
-import {
-  GMAIL_DOMAINS,
-  MAILBOX_FULL_PATTERN,
-  NO_COMPLAINT_FEEDBACK_DOMAINS,
-} from "./mailbox-providers.js";
+import { firstRecipientDomain, firstRecipientReportsComplaints } from "./mailbox-provider-sql.js";
+import { GMAIL_DOMAINS, MAILBOX_FULL_PATTERN } from "./mailbox-providers.js";
+import { complaintFilter, hardBounceFilter } from "./platform-breaker.js";
 import { propertyDateSql } from "./segment-filter.js";
 import { SES_QUOTA_SLOT_MS } from "./ses-capacity.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
@@ -621,6 +618,7 @@ async function dayCounts(
   day: string,
 ): Promise<WarmupDayCounts> {
   const e = schema.emails;
+  const x = schema.emailEvents;
   const from = new Date(dayStartMs(day)).toISOString();
   const to = new Date(dayStartMs(day) + DAY_MS).toISOString();
   const r =
@@ -643,7 +641,7 @@ async function dayCounts(
           count(*) filter (where feedback and complained)::int as complained
         from (
           select ${firstRecipientDomain} in ${[...GMAIL_DOMAINS]} as gmail,
-            ${firstRecipientDomain} not in ${[...NO_COMPLAINT_FEEDBACK_DOMAINS]} as feedback,
+            ${firstRecipientReportsComplaints} as feedback,
             coalesce(ev.delivered, false) as delivered,
             coalesce(ev.delayed, false) as delayed,
             coalesce(ev.opened, false) as opened,
@@ -654,21 +652,21 @@ async function dayCounts(
           from ${e}
           left join ${schema.emailInsights} i on i.broadcast_id = ${e.broadcastId}
           left join lateral (
-            select bool_or(x.type = 'delivered') as delivered,
-              bool_or(x.type = 'delivery_delayed') as delayed,
-              bool_or(x.type = 'opened') as opened,
-              bool_or(x.type = 'bounced' and x.bounce_type = 'Permanent') as hard,
-              bool_or(x.type = 'complained') as complained,
+            select bool_or(${x.type} = 'delivered') as delivered,
+              bool_or(${x.type} = 'delivery_delayed') as delayed,
+              bool_or(${x.type} = 'opened') as opened,
+              bool_or(${hardBounceFilter}) as hard,
+              bool_or(${complaintFilter}) as complained,
               bool_or(
-                (x.type = 'bounced' and x.bounce_type = 'Transient'
-                  and concat_ws(' ', x.data->'bounce'->>'bounceSubType',
-                    x.data->'bounce'->'bouncedRecipients'->0->>'diagnosticCode') ~* ${MAILBOX_FULL_SQL})
-                or (x.type = 'delivery_delayed'
-                  and concat_ws(' ', x.data->'deliveryDelay'->>'delayType',
-                    x.data->'deliveryDelay'->'delayedRecipients'->0->>'diagnosticCode') ~* ${MAILBOX_FULL_SQL})
+                (${x.type} = 'bounced' and ${x.bounceType} = 'Transient'
+                  and concat_ws(' ', ${x.data}->'bounce'->>'bounceSubType',
+                    ${x.data}->'bounce'->'bouncedRecipients'->0->>'diagnosticCode') ~* ${MAILBOX_FULL_SQL})
+                or (${x.type} = 'delivery_delayed'
+                  and concat_ws(' ', ${x.data}->'deliveryDelay'->>'delayType',
+                    ${x.data}->'deliveryDelay'->'delayedRecipients'->0->>'diagnosticCode') ~* ${MAILBOX_FULL_SQL})
               ) as mailbox_full
-            from email_events x
-            where x.email_id = ${e.id}
+            from ${x}
+            where ${x.emailId} = ${e.id}
           ) ev on true
           where ${e.teamId} = ${row.teamId} and ${e.domainId} = ${row.domainId}
             and ${e.broadcastId} is not null

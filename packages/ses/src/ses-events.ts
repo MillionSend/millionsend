@@ -30,6 +30,8 @@ export interface ParsedSesEvent {
   };
   complaint?: {
     complaintFeedbackType?: string;
+    /** Set when SES never attempted the mail complained about. */
+    complaintSubType?: string;
     recipients: string[];
   };
   delivery?: { smtpResponse?: string; processingTimeMillis?: number };
@@ -110,6 +112,7 @@ export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
       ...(typeof c?.complaintFeedbackType === "string"
         ? { complaintFeedbackType: c.complaintFeedbackType }
         : {}),
+      ...(typeof c?.complaintSubType === "string" ? { complaintSubType: c.complaintSubType } : {}),
     };
     parsed.data.complaint = c;
   }

@@ -366,6 +366,21 @@ textarea.ms-input {
   color: var(--ms-bone);
   margin-top: 6px;
 }
+/* Chart legend key: a short stroke drawn like the line it names, centred on
+   the text's x-height. --ms-key colors the stroke; the text keeps its own color. */
+.ms-chart-key {
+  font-family: var(--ms-font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.ms-chart-key::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-top: 1px dashed var(--ms-key, currentColor);
+}
 
 /* Quota row (usage and billing cards): ring, label, figure pushed right. */
 .ms-quota-row {
