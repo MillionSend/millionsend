@@ -17,7 +17,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { displayUrl } from "@/lib/format";
@@ -41,7 +41,7 @@ function WebhooksHead() {
         <th style={{ width: "44%" }}>{t("table.url")}</th>
         <th>{t("table.events")}</th>
         <th>{t("table.status")}</th>
-        <th>{t("table.successRate")}</th>
+        <th className="right">{t("table.successRate")}</th>
         <th>{t("table.created")}</th>
         <th className="right" aria-label={t("table.menu")} />
       </tr>
@@ -66,7 +66,7 @@ function WebhooksSkeleton() {
             <td>
               <SkeletonBadge />
             </td>
-            <td>
+            <td className="right">
               <Skeleton width={40} height={13} />
             </td>
             <td>
@@ -278,10 +278,8 @@ export function WebhooksView() {
                       />
                     </span>
                   </td>
-                  <td>
-                    <span className="ms-mono">
-                      {webhook.successRate === null ? "—" : `${webhook.successRate}%`}
-                    </span>
+                  <td className="right num">
+                    {webhook.successRate === null ? mutedDash : `${webhook.successRate}%`}
                   </td>
                   <td>
                     <RelativeTime date={webhook.createdAt} />
