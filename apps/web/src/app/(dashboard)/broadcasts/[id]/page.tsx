@@ -20,7 +20,8 @@ import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { StatBlock, StatStrip } from "@/components/stat-block";
 import { StepRail } from "@/components/step-rail";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { PaceBand, warmupSentSteps, warmupTodayStep } from "@/components/warmup-rail";
 import { formatPercent } from "@/lib/console-format";
 import {
@@ -530,8 +531,10 @@ function WarmupBand({
 
 /**
  * The broadcast's sends by recipient mailbox provider. Delivered, bounced
- * and delayed are shares of what went out, opened and clicked of what was
- * delivered: a provider filing the mail as spam shows as a low open share.
+ * and delayed are shares of what went out, complaints of what went out to
+ * providers that report them (as the guardrail counts), opened and clicked
+ * of what was delivered: a provider filing the mail as spam shows as a low
+ * open share.
  */
 function ProvidersTable({ broadcastId }: { broadcastId: string }) {
   const t = useTranslations("broadcasts");
@@ -574,6 +577,7 @@ function ProvidersTable({ broadcastId }: { broadcastId: string }) {
             <th className="right">{t("detail.providers.opened")}</th>
             <th className="right">{t("detail.providers.clicked")}</th>
             <th className="right">{t("detail.providers.bounced")}</th>
+            <th className="right">{t("detail.providers.complained")}</th>
             <th className="right">{t("detail.providers.delayed")}</th>
           </tr>
         </thead>
@@ -587,6 +591,15 @@ function ProvidersTable({ broadcastId }: { broadcastId: string }) {
                   <td className="right num">{share(row.opened, row.delivered)}</td>
                   <td className="right num">{share(row.clicked, row.delivered)}</td>
                   <td className="right num">{share(row.bounced, row.sent)}</td>
+                  <td className="right num">
+                    {row.complaintSent > 0 ? (
+                      formatPercent(row.complained / row.complaintSent, locale, 2)
+                    ) : (
+                      <Tooltip inline text={t("detail.providers.noComplaints")}>
+                        {mutedDash}
+                      </Tooltip>
+                    )}
+                  </td>
                   {/* The table mutes its last column; these figures read alike. */}
                   <td className="right num" style={{ color: "var(--ms-bone)" }}>
                     {share(row.delayed, row.sent)}
@@ -600,7 +613,7 @@ function ProvidersTable({ broadcastId }: { broadcastId: string }) {
                       <Skeleton width={72} height="1lh" />
                     </span>
                   </td>
-                  {[0, 1, 2, 3, 4, 5].map((cell) => (
+                  {[0, 1, 2, 3, 4, 5, 6].map((cell) => (
                     <td key={cell} className="right num">
                       <span style={{ display: "flex", justifyContent: "flex-end" }}>
                         <Skeleton width={44} height="1lh" />

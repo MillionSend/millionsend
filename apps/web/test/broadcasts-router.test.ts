@@ -1398,8 +1398,8 @@ describe("broadcasts.providers", () => {
       .values({ emailId: gmail.id, type: "delivered", occurredAt: new Date() });
     const counts = { opened: 0, clicked: 0, bounced: 0, delayed: 0, complained: 0 };
     expect(await caller.broadcasts.providers({ id })).toEqual([
-      { provider: "gmail", sent: 2, delivered: 1, ...counts },
-      { provider: "microsoft", sent: 1, delivered: 0, ...counts },
+      { provider: "gmail", sent: 2, delivered: 1, ...counts, complaintSent: 0 },
+      { provider: "microsoft", sent: 1, delivered: 0, ...counts, complaintSent: 1 },
     ]);
     await expect(callerFor(teamB).broadcasts.providers({ id })).rejects.toMatchObject({
       code: "NOT_FOUND",

@@ -1,9 +1,13 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, desc, eq, isNotNull, ne, type SQL, sql } from "drizzle-orm";
-import { firstRecipientDomain, mailboxProviderSql } from "./mailbox-provider-sql.js";
+import {
+  firstRecipientDomain,
+  firstRecipientReportsComplaints,
+  mailboxProviderSql,
+} from "./mailbox-provider-sql.js";
 import type { MailboxProvider } from "./mailbox-providers.js";
-import { hardBounceFilter } from "./platform-breaker.js";
+import { complaintFilter, hardBounceFilter } from "./platform-breaker.js";
 
 /** One mailbox provider's share of a broadcast: each count is of emails, not events. */
 export interface ProviderBreakdownRow {
@@ -18,6 +22,8 @@ export interface ProviderBreakdownRow {
   /** Had at least one delivery delay. */
   delayed: number;
   complained: number;
+  /** Sent to a provider that reports complaints: the complaint rate's denominator, zero for Gmail and Apple. */
+  complaintSent: number;
 }
 
 /**
@@ -46,7 +52,8 @@ export async function broadcastProviderBreakdown(
         clicked: had(sql`${ev.type} = 'clicked'`),
         bounced: had(hardBounceFilter),
         delayed: had(sql`${ev.type} = 'delivery_delayed'`),
-        complained: had(sql`${ev.type} = 'complained'`),
+        complained: had(complaintFilter),
+        complaintSent: sql<number>`count(*) filter (where ${firstRecipientReportsComplaints})::int`,
       })
       .from(e)
       .where(

@@ -197,6 +197,8 @@
       "opened": "Abertos",
       "clicked": "Clicados",
       "bounced": "Devolvidos",
+      "complained": "Reclamações",
+      "noComplaints": "Este provedor não avisa quando alguém marca o e-mail como spam.",
       "delayed": "Atrasados",
       "note": "Agrupado pelo endereço do destinatário. Domínios de empresas hospedados no Google ou na Microsoft entram em Outros.",
       "gmail": "Gmail",
