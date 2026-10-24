@@ -3051,6 +3051,19 @@ summary:focus-visible,
     color: var(--ms-success);
     border-color: var(--ms-success);
   }
+  /* A done step is its ✓ alone: the label stays its accessible name but takes
+     no room. The current step never goes under its own width, so an upcoming
+     label is the one that gives way when a bar is tight. */
+  .ms-stepbar-step.done .ms-stepbar-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .ms-stepbar-step.current {
+    min-width: auto;
+  }
 
   /* Command palette sits near the top edge and keeps its list on screen. */
   .ms-cmdk {

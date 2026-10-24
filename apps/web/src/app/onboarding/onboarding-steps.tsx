@@ -12,6 +12,7 @@ import { DeliveredOdometer } from "@/components/delivered-odometer";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { StatusBadge } from "@/components/status-badge";
+import { MarkerRail } from "@/components/stepper";
 import { useTurnstile } from "@/components/turnstile";
 import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
 import { formatDayTime, formatUtcTimestamp, maskApiKey } from "@/lib/format";
@@ -36,37 +37,6 @@ const EXPLORE = [
   { key: "team", href: "/settings" },
   { key: "migrate", href: MIGRATE_DOCS_URL, external: true },
 ] as const;
-
-/** Left rail of a stepper row: marker (✓ or number) above the connector line. */
-function StepRail({
-  marker,
-  color,
-  line = true,
-}: {
-  marker: string;
-  color: string;
-  line?: boolean;
-}) {
-  return (
-    <div
-      className="ms-stepper-rail"
-      style={{
-        width: 30,
-        flex: "none",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      }}
-    >
-      <span className="ms-mono" style={{ fontSize: 11, color }}>
-        {marker}
-      </span>
-      {line ? (
-        <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
-      ) : null}
-    </div>
-  );
-}
 
 /** A stepper card: title with a ✓ once done, one-line body, then the step's content. */
 function StepCard({
@@ -581,7 +551,7 @@ export function OnboardingSteps({
           {!sesReady ? (
             /* Leading step — connect AWS SES before anything can send */
             <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-              <StepRail marker="01" color="var(--ms-bone)" />
+              <MarkerRail marker="01" color="var(--ms-bone)" />
               <StepCard title={t("stepSes.title")} body={t("stepSes.body")}>
                 <Link
                   href="/settings/ses"
@@ -596,8 +566,9 @@ export function OnboardingSteps({
 
           {/* Add an API key */}
           <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-            <StepRail
-              marker={hasKey ? "✓" : marker(1)}
+            <MarkerRail
+              marker={marker(1)}
+              done={hasKey}
               color={hasKey ? "var(--ms-success)" : "var(--ms-bone)"}
             />
             <StepCard
@@ -631,7 +602,7 @@ export function OnboardingSteps({
 
           {/* Send an email */}
           <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-            <StepRail marker={marker(2)} color={hasKey ? "var(--ms-bone)" : "var(--ms-faint)"} />
+            <MarkerRail marker={marker(2)} color={hasKey ? "var(--ms-bone)" : "var(--ms-faint)"} />
             <StepCard
               title={t("step2.title")}
               body={hasKey ? t("step2.bodyReady") : t("step2.bodyLocked")}
@@ -651,7 +622,7 @@ export function OnboardingSteps({
 
           {/* Watch it arrive */}
           <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-            <StepRail marker={marker(3)} color="var(--ms-faint)" line={false} />
+            <MarkerRail marker={marker(3)} color="var(--ms-faint)" line={false} />
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               <span style={{ fontSize: 14, color: hasKey ? "var(--ms-muted)" : "var(--ms-faint)" }}>
                 {t("step3.title")}
