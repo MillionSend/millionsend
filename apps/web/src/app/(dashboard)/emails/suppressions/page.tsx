@@ -1,14 +1,13 @@
 "use client";
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
-import { Breakable } from "@/components/breakable";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -221,9 +220,7 @@ export default function SuppressionsPage() {
           <Table>
             <thead>
               <tr>
-                <th className="ms-col-lead" style={{ width: "40%" }}>
-                  {t("suppressions.email")}
-                </th>
+                <th style={{ width: "40%" }}>{t("suppressions.email")}</th>
                 <th style={{ width: "18%" }}>{t("suppressions.origin")}</th>
                 <th>{t("suppressions.added")}</th>
                 {/* Overflow-action column — no header label. */}
@@ -233,18 +230,12 @@ export default function SuppressionsPage() {
             <tbody>
               {items.map((row) => (
                 <tr key={row.id}>
-                  <td className="ms-mono ms-cell-wrap">
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                      <ContactAvatar email={row.email ?? ""} size={28} />
-                      {row.email ? (
-                        <Link href={`/emails/suppressions/${row.id}`}>
-                          <Breakable text={row.email} />
-                        </Link>
-                      ) : (
-                        <span style={{ color: "var(--ms-faint)" }}>—</span>
-                      )}
-                    </span>
-                  </td>
+                  <LeadCell
+                    tile={<ContactAvatar email={row.email ?? ""} size={28} />}
+                    value={row.email ?? "—"}
+                    {...(row.email ? { href: `/emails/suppressions/${row.id}` } : {})}
+                    mono
+                  />
                   <td>
                     <span className={`ms-badge ms-badge-${REASON_VARIANT[row.reason]}`}>
                       {t(
