@@ -73,7 +73,7 @@ const HOUR_MS = 60 * 60 * 1000;
 // The column is authoritative; the json path covers rows written before it
 // existed (until retention strips their payload).
 export const hardBounceFilter = sql`${schema.emailEvents.type} = 'bounced' and coalesce(${schema.emailEvents.bounceType}, ${schema.emailEvents.data}->'bounce'->>'bounceType') = 'Permanent'`;
-const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
+export const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
 /**
  * A send's recipients in to, cc and bcc, one `domain` row each, read the way
  * sentWithoutComplaintFeedback reads them: what follows the last '@', less a

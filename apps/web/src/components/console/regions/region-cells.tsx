@@ -2,16 +2,10 @@
 
 import { useTranslations } from "next-intl";
 import { regionFlag } from "@/app/(dashboard)/domains/regions";
+import { mutedDash } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import type { ServedRegion } from "../region-actions";
 import { useRegionFormats } from "./formatters";
-
-/** An unknown value in a region table cell. */
-export const mutedDash = (
-  <span className="ms-mono" style={{ color: "var(--ms-muted)" }}>
-    —
-  </span>
-);
 
 /** The flag and the city, with `tip` (the AWS code) one hover away. */
 export function RegionLabel({ region, tip }: { region: string; tip: string }) {

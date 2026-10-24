@@ -11,7 +11,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { SortableTh, type SortDir } from "@/components/sortable-th";
 import { Sparkline } from "@/components/sparkline";
 import { BtnSpinner } from "@/components/spinner";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { formatFinishAbout } from "@/lib/format";
@@ -20,7 +20,7 @@ import { oneOf, useUrlState } from "@/lib/url-state";
 import { QuotaBar, RegionBadge, RegionMenu, type ServedRegion } from "../region-actions";
 import { AddRegionPanel } from "./add-region-panel";
 import { useRegionFormats } from "./formatters";
-import { BroadcastsCell, mutedDash, RegionLabel } from "./region-cells";
+import { BroadcastsCell, RegionLabel } from "./region-cells";
 import { QuotaDialog } from "./region-dialogs";
 import { ReserveCard } from "./reserve-card";
 

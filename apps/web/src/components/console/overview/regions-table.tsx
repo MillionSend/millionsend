@@ -2,13 +2,13 @@
 
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslations } from "next-intl";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { formatUsd } from "@/lib/format";
 import type { AppRouter } from "@/server/routers";
 import { QuotaBar, RegionBadge, RegionMenu, type ServedRegion } from "../region-actions";
 import { useRegionFormats } from "../regions/formatters";
-import { BroadcastsCell, mutedDash, RegionLabel, StatusText } from "../regions/region-cells";
+import { BroadcastsCell, RegionLabel, StatusText } from "../regions/region-cells";
 
 type RegionList = inferRouterOutputs<AppRouter>["console"]["regions"]["list"];
 
