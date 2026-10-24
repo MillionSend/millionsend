@@ -39,6 +39,8 @@ export function PeriodBar({
   );
   const [to, setTo] = useState(typeof value === "string" ? isoDay(new Date()) : value.to);
   const btn = (active: boolean): React.CSSProperties => ({
+    // The shorthand first: after fontSize it would reset the size to the inherited one.
+    font: "inherit",
     background: active ? "var(--ms-panel-raised)" : "none",
     border: `1px solid ${active ? "var(--ms-line-strong)" : "transparent"}`,
     borderRadius: 8,
@@ -46,7 +48,6 @@ export function PeriodBar({
     fontSize: 12,
     color: active ? "var(--ms-bone)" : "var(--ms-muted)",
     cursor: "pointer",
-    font: "inherit",
   });
   if (custom) {
     return (

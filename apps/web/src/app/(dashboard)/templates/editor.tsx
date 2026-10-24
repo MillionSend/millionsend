@@ -573,6 +573,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
                     key={key}
                     type="button"
                     style={{
+                      font: "inherit",
                       fontSize: 13,
                       padding: "4px 10px",
                       borderRadius: 8,
@@ -580,7 +581,6 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
                       cursor: "pointer",
                       background: tab === key ? "var(--ms-panel-raised)" : "none",
                       color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-                      font: "inherit",
                       whiteSpace: "nowrap",
                     }}
                     onClick={() => setTab(key)}

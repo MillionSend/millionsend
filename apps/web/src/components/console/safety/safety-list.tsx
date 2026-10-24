@@ -22,17 +22,16 @@ import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamActions } from "../team-actions";
+import { PlanBadge, TeamStatus } from "../teams/cells";
 import { LimitRequests } from "./limit-requests";
 import {
   FlagStatusBadge,
-  GuardrailCell,
   LoadErrorCard,
-  PlanBadge,
+  Rate7d,
   ReasonLabel,
   RegionCell,
   RiskCell,
   scoreColor,
-  usePercent,
 } from "./parts";
 import { useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
@@ -58,7 +57,6 @@ export function SafetyList() {
   const common = useTranslations("console.common");
   const domains = useTranslations("domains");
   const locale = useLocale();
-  const percent = usePercent();
   const router = useRouter();
   const trpc = useTRPC();
   const client = useTRPCClient();
@@ -256,7 +254,6 @@ export function SafetyList() {
                       broadcastsPausedByOperatorAt: row.broadcastsPausedByOperatorAt,
                     };
                     const href = consoleReviewHref(row.teamId);
-                    const standing = row.guardrail !== null;
                     return (
                       <tr
                         key={row.id}
@@ -296,22 +293,22 @@ export function SafetyList() {
                             ? common("none")
                             : formatScoreTenths(row.scoreTenths, locale)}
                         </td>
-                        <td className="right ms-mono">
-                          {standing && row.complaintRate7d !== null
-                            ? percent(row.complaintRate7d)
-                            : common("none")}
+                        <td className="right num">
+                          <Rate7d
+                            rate={row.complaintRate7d}
+                            sends={row.complaintSends7d}
+                            metric="complaint"
+                          />
                         </td>
-                        <td className="right ms-mono">
-                          {standing && row.hardBounceRate7d !== null
-                            ? percent(row.hardBounceRate7d)
-                            : common("none")}
+                        <td className="right num">
+                          <Rate7d
+                            rate={row.hardBounceRate7d}
+                            sends={(row.sent7d ?? 0) > 0}
+                            metric="hard_bounce"
+                          />
                         </td>
                         <td style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          <GuardrailCell
-                            guardrail={row.guardrail}
-                            suspendedAt={row.suspendedAt}
-                            pausedAt={row.broadcastsPausedByOperatorAt}
-                          />
+                          <TeamStatus team={row} />
                         </td>
                         <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>
                           <ReasonLabel reason={row.reason} detail={row.detail} />

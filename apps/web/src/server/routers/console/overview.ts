@@ -13,7 +13,12 @@ import { z } from "zod";
 import { periodSchema, previousPeriod, resolvePeriod } from "../../console/periods";
 import { servedRegionAccounts } from "../../console/ses-regions";
 import { operatorProcedure, router } from "../../trpc";
-import { instanceCounterSeries, sumPoints } from "./series";
+import {
+  bucketFeedbackTeams,
+  instanceCounterSeries,
+  sumPoints,
+  teamFeedbackTotals,
+} from "./series";
 
 export const consoleOverviewRouter = router({
   /** Everything above the charts: the stat tiles, the region count and the health rows. */
@@ -97,6 +102,21 @@ export const consoleOverviewRouter = router({
         totals: sumPoints(points),
         previous: sumPoints(before),
       };
+    }),
+
+  /**
+   * The teams behind the hard-bounce or complaint card over a period, most
+   * first (the first 100), and each chart point's top teams for its hover tip.
+   */
+  kpiTeams: operatorProcedure
+    .input(z.object({ kind: z.enum(["hardBounced", "complained"]), period: periodSchema }))
+    .query(async ({ ctx, input }) => {
+      const period = resolvePeriod(input.period);
+      const [totals, buckets] = await Promise.all([
+        teamFeedbackTotals(ctx.db, period, input.kind),
+        bucketFeedbackTeams(ctx.db, period, input.kind),
+      ]);
+      return { grain: period.grain, ...totals, buckets };
     }),
 
   /** Sent per day (or per hour over a day) with the sold volume and each region's SES quota as reference lines. */

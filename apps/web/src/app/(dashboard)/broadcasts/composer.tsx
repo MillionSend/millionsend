@@ -933,6 +933,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                           key={key}
                           type="button"
                           style={{
+                            font: "inherit",
                             fontSize: 13,
                             padding: "4px 10px",
                             borderRadius: 8,
@@ -940,7 +941,6 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                             cursor: "pointer",
                             background: tab === key ? "var(--ms-panel-raised)" : "none",
                             color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-                            font: "inherit",
                             whiteSpace: "nowrap",
                           }}
                           onClick={() => setTab(key)}

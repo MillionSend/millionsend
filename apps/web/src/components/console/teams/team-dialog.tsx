@@ -12,7 +12,7 @@ import { planLabel } from "@/lib/console-format";
 import { formatDayTime, formatMmSs, formatRelative } from "@/lib/format";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useCountdown } from "@/lib/use-countdown";
-import { GuardrailLabel, RegionLabel, usePlanName } from "./cells";
+import { RegionLabel, TeamStatus, usePlanName } from "./cells";
 import { LinkedTeams } from "./linked-teams";
 import { MembersSection } from "./members-section";
 import type { TeamDetail } from "./types";
@@ -129,11 +129,7 @@ export function TeamDialog({
               <RegionLabel region={detail.region} />
             </KvRow>
             <KvRow label={t("detail.guardrail")}>
-              <GuardrailLabel
-                guardrail={detail.guardrail}
-                suspendedAt={detail.suspendedAt}
-                broadcastsPausedByOperatorAt={detail.broadcastsPausedByOperatorAt}
-              />
+              <TeamStatus team={detail} />
             </KvRow>
             <KvRow label={t("detail.created")}>{formatDayTime(detail.createdAt, locale)}</KvRow>
             <KvRow label={t("detail.stripe")}>

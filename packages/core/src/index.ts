@@ -867,6 +867,7 @@ export {
   type FlagTriggerOptions,
   flagImitatedBrand,
   flagTrigger,
+  guardrailMetricOf,
   pruneTeamStandings,
   STANDING_WINDOW_DAYS,
   saveTeamStandings,
