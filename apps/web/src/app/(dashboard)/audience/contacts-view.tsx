@@ -25,6 +25,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { CONTACT_STATUSES } from "@/lib/contact-status";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
@@ -715,16 +716,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                             color: "var(--ms-muted)",
                           }}
                         >
-                          <span
-                            title={row.segments[0]}
-                            style={{
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {row.segments[0]}
-                          </span>
+                          <Truncated text={row.segments[0] ?? ""} />
                           {row.segments.length > 1 ? (
                             // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so pinning the segments tooltip does not also trigger the row navigation
                             // biome-ignore lint/a11y/noStaticElementInteractions: click containment only, the tooltip trigger inside stays the interactive element
