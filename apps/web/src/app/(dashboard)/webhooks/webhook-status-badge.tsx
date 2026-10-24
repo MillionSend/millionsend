@@ -1,33 +1,44 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { RelativeTime } from "@/components/relative-time";
 import type { TONE_COLOR } from "@/components/status-tile";
+import { Tooltip } from "@/components/tooltip";
+import { formatRelative } from "@/lib/format";
 import { QUEUE_COUNT_CAP } from "@/lib/webhook-queue";
 
 export const queuedLabel = (queued: number): string =>
   queued > QUEUE_COUNT_CAP ? "10k+" : String(queued);
 
 /**
- * One muted line under an endpoint with open deliveries: how many, and how
- * long the earliest has been due — or, when nothing is due yet, when the
- * next attempt is.
+ * One muted line about an endpoint's open deliveries: how many, and how long
+ * the earliest has been due — or, when nothing is due yet, when the next
+ * attempt is. Under the status on a detail page; `inline`, beside the badge
+ * in a list row, the count alone with the rest of the line on hover.
  */
 export function QueueLine({
   queued,
   oldestQueuedAt,
+  inline = false,
 }: {
   queued: number;
   oldestQueuedAt: Date | string | null;
+  inline?: boolean;
 }) {
   const t = useTranslations("webhooks");
+  const locale = useLocale();
   if (queued === 0 || oldestQueuedAt === null) return null;
   const oldest = new Date(oldestQueuedAt);
   const due = oldest.getTime() <= Date.now();
-  return (
+  const count = t("queue.queued", { count: queuedLabel(queued) });
+  const when = t(due ? "queue.oldest" : "queue.next");
+  return inline ? (
+    <Tooltip inline text={`${count} · ${when} ${formatRelative(oldest, locale)}`}>
+      <span style={{ color: "var(--ms-muted)", fontSize: 12.5 }}>{count}</span>
+    </Tooltip>
+  ) : (
     <div style={{ marginTop: 4, color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
-      {t("queue.queued", { count: queuedLabel(queued) })} · {t(due ? "queue.oldest" : "queue.next")}{" "}
-      <RelativeTime date={oldest} />
+      {count} · {when} <RelativeTime date={oldest} />
     </div>
   );
 }

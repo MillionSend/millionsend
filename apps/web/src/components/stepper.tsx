@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * The two-step wizard grammar shared by the add-domain flow and the broadcast
- * composer: a vertical number rail beside the card on desktop, per-row marker
- * rails on the second screen, and a labelled horizontal bar that replaces the
- * rail on narrow screens (the rail's wrapped numbers read as detached
- * otherwise — see the .ms-stepbar rules in components.css).
+ * The wizard grammar shared by the add-domain and tracking flows, the
+ * broadcast composer, the SES setup and onboarding: a vertical number rail
+ * beside the card on desktop, per-row marker rails where the steps stack, and
+ * a labelled horizontal bar that replaces the rail on narrow screens (the
+ * rail's wrapped numbers read as detached otherwise — see the .ms-stepbar
+ * rules in components.css). A done step is a ✓ in place of its number on both.
  */
 
 /** Vertical rail for the first screen: the current number lit, the rest faint. */
@@ -56,8 +57,8 @@ export function StepRail({ current = 1, total = 2 }: { current?: number; total?:
   );
 }
 
-/** Left rail of one step row on the second screen: the step number (plus a ✓
- * when done) above the connector line. */
+/** Left rail of one step row: the step number, or a ✓ once the step is done,
+ * above the connector line. */
 export function MarkerRail({
   marker,
   color,
@@ -69,7 +70,8 @@ export function MarkerRail({
   marker: string;
   color: string;
   line?: boolean;
-  /** Completed step: keeps the number and appends a check to its right. */
+  /** Completed step: a single ✓ in place of the number, centred on the rail
+   * like the numbers at every width; the step's heading says it is done. */
   done?: boolean;
   /** First step: a short line fades in above the marker (no layout shift). */
   fadeTop?: boolean;
@@ -105,22 +107,7 @@ export function MarkerRail({
             }}
           />
         ) : null}
-        {marker}
-        {done ? (
-          // Absolutely positioned so the ✓ never shifts the number off the
-          // rail's vertical centerline shared with the other step markers.
-          <span
-            style={{
-              position: "absolute",
-              left: "100%",
-              top: "50%",
-              transform: "translateY(-50%)",
-              paddingLeft: 4,
-            }}
-          >
-            ✓
-          </span>
-        ) : null}
+        {done ? "✓" : marker}
       </span>
       {fadeBottom ? (
         <span
@@ -141,7 +128,9 @@ export function MarkerRail({
 /**
  * Horizontal step indicator shown in place of the vertical rail on narrow
  * screens (≤899px). Labelled and connected so the steps stay legible as a
- * sequence; rendered as a real <ol> with aria-current for screen readers.
+ * sequence; rendered as a real <ol> with aria-current for screen readers. A
+ * done step shows its ✓ alone, its label kept only as its accessible name, so
+ * the current step's label has the room to stay whole.
  */
 export function MobileStepBar({ steps, active }: { steps: string[]; active: number }) {
   return (

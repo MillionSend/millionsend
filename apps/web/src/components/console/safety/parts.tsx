@@ -4,12 +4,13 @@ import type { RevealSpan } from "@millionsend/core/content-reveal";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
 import { useLocale, useTranslations } from "next-intl";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { mutedDash } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { planLabel } from "@/lib/console-format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
 
-export type Guardrail = "ok" | "warning" | "paused";
 export type FlagReason =
   | "monitor"
   | "complaints"
@@ -40,20 +41,12 @@ export const LINK_BUTTON: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const PAID = ["starter", "pro", "scale"];
 const PLAN_KEYS = ["free", "starter", "pro", "scale", "system"];
 
 /** "Pro 100K" when a quota is set, else the plan name; unknown plan values read raw. */
 export function usePlanLabel(): (plan: string, planQuota: number | null) => string {
   const t = useTranslations("console.plan");
   return (plan, planQuota) => planLabel(PLAN_KEYS.includes(plan) ? t(plan) : plan, planQuota);
-}
-
-/** Plan pill: info for system, success for paid, neutral for free and unknown values. */
-export function PlanBadge({ plan, planQuota }: { plan: string; planQuota: number | null }) {
-  const label = usePlanLabel();
-  const tone = plan === "system" ? "info" : PAID.includes(plan) ? "success" : "neutral";
-  return <span className={`ms-badge ms-badge-${tone}`}>{label(plan, planQuota)}</span>;
 }
 
 export function usePercent(): (rate: number) => string {
@@ -66,38 +59,34 @@ export function usePercent(): (rate: number) => string {
     }).format(rate);
 }
 
-export function scoreColor(tenths: number): string | undefined {
-  return tenths < 50 ? "var(--ms-danger)" : tenths < 70 ? "var(--ms-warn)" : undefined;
-}
-
-const DOT: Record<Guardrail, string> = {
-  ok: "var(--ms-success)",
-  warning: "var(--ms-warn)",
-  paused: "var(--ms-danger)",
-};
-
-/** Suspended badge, operator-paused dot, or the guardrail dot — the Teams screen's rules. */
-export function GuardrailCell({
-  guardrail,
-  suspendedAt,
-  pausedAt,
+/**
+ * A standing's 7-day rate. Over a window with no send to rate (none at all,
+ * or for complaints none to a provider that reports them) the stored rate
+ * reads 0, so the cell is a dash that says why; no standing is a bare dash.
+ */
+export function Rate7d({
+  rate,
+  sent,
+  complaintSends,
 }: {
-  guardrail: Guardrail | null;
-  suspendedAt: Date | null;
-  pausedAt: Date | null;
+  rate: number | null;
+  /** The window's sends. */
+  sent: number;
+  /** A complaint rate's own: whether any of them went to a provider that reports complaints. */
+  complaintSends?: boolean;
 }) {
-  const t = useTranslations("console.teams.guardrail");
-  const common = useTranslations("console.common");
-  if (suspendedAt) return <span className="ms-badge ms-badge-danger">{t("suspended")}</span>;
-  const dot = (color: string, label: string) => (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      <span className="ms-dot" style={{ background: color }} />
-      {label}
-    </span>
-  );
-  if (pausedAt) return dot(DOT.paused, t("operatorPaused"));
-  if (!guardrail) return <>{common("none")}</>;
-  return dot(DOT[guardrail], t(guardrail));
+  const t = useTranslations("console.safety");
+  const percent = usePercent();
+  if (rate === null) return mutedDash;
+  if (sent === 0 || complaintSends === false) {
+    // No send at all says just that, even under the complaint rate.
+    return (
+      <Tooltip inline text={t("noSends7d", { metric: sent > 0 ? "complaint" : "other" })}>
+        {mutedDash}
+      </Tooltip>
+    );
+  }
+  return percent(rate);
 }
 
 /** Flag + city with the region code on hover; the "no verified domain" line when null. */
@@ -116,9 +105,12 @@ export function RegionCell({ region }: { region: string | null }) {
 export function ReasonLabel({
   reason,
   detail,
+  truncate = false,
 }: {
   reason: FlagReason;
   detail: TeamFlagDetail | null;
+  /** In a list column: the label ends in an ellipsis, whole on hover above the explanation. */
+  truncate?: boolean;
 }) {
   const t = useTranslations("console.safety");
   const locale = useLocale();
@@ -157,8 +149,10 @@ export function ReasonLabel({
     default:
       label = t(`reasonLabel.${reason}`);
   }
+  const tip = t(`reasonTip.${reason}`);
+  if (truncate) return <Truncated text={label} tip={tip} />;
   return (
-    <Tooltip inline text={t(`reasonTip.${reason}`)}>
+    <Tooltip inline text={tip}>
       {label}
     </Tooltip>
   );
@@ -251,9 +245,8 @@ export function RiskCell({
   thresholds?: { flagRisk: number; alertRisk: number } | undefined;
 }) {
   const t = useTranslations("console.safety");
-  const common = useTranslations("console.common");
   if (plan === "system") return <span style={{ color: "var(--ms-muted)" }}>{t("exempt")}</span>;
-  if (risk === null) return <>{common("none")}</>;
+  if (risk === null) return mutedDash;
   return (
     <span style={{ color: riskColor(risk, thresholds?.flagRisk, thresholds?.alertRisk) }}>
       {formatRisk(risk)}

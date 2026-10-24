@@ -197,6 +197,8 @@
       "opened": "Opened",
       "clicked": "Clicked",
       "bounced": "Bounced",
+      "complained": "Complained",
+      "noComplaints": "This provider never tells senders when someone marks mail as spam.",
       "delayed": "Delayed",
       "note": "Grouped by the recipient's address. Company domains hosted by Google or Microsoft count as Other.",
       "gmail": "Gmail",

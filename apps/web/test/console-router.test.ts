@@ -1,11 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type { BillingStripe } from "@millionsend/billing";
-import { recordAudit, upgradesHeld, utcDay } from "@millionsend/core";
+import { DAY_MS, recordAudit, upgradesHeld, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { and, desc, eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
 import { setRegionAccountDeps } from "@/server/console/ses-regions";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
@@ -1634,5 +1644,261 @@ describe("suspend's cancel and refund in Stripe", () => {
     ).toBeNull();
     expect(stripe.stripe).toBe(0);
     expect(await team(id)).toMatchObject({ plan: "pro", planStatus: "active" });
+  });
+});
+
+describe("console.overview.kpiTeams", () => {
+  const c = schema.usageCounters;
+  const made: string[] = [];
+  const day = (daysAgo: number) => utcDay(Date.now() - daysAgo * DAY_MS);
+  /** A team with a display name of its own, removed after the suite with its counters. */
+  async function seed(slug: string, name: string): Promise<string> {
+    const id = await createTeam(db, slug);
+    await db.update(schema.teams).set({ name }).where(eq(schema.teams.id, id));
+    made.push(id);
+    return id;
+  }
+  /** Teams one test adds on top of the shared ones, gone when it ends so no other test sees them. */
+  const dropAfter = (ids: string[]) =>
+    onTestFinished(async () => {
+      await db.delete(schema.teams).where(inArray(schema.teams.id, ids));
+    });
+  const counters = (
+    id: string,
+    daysAgo: number,
+    values: { sent?: number; bounced?: number; hardBounced?: number; complained?: number },
+  ) => db.insert(c).values({ teamId: id, day: day(daysAgo), ...values });
+  const kpiTeams = (kind: "hardBounced" | "complained", period: Parameters<typeof kpis>[0]) =>
+    operator().console.overview.kpiTeams({ kind, period });
+  const kpis = (period: "24h" | "7d" | { from: string; to: string }) =>
+    operator().console.overview.kpis({ period });
+  let a = "";
+  let b = "";
+  let e = "";
+
+  // The clock stands still: the procedure resolves its window from its own
+  // now, which would start an hour or a day later than the one this suite
+  // computed if a boundary passed in between. Half past noon UTC keeps every
+  // seeded day and hour inside its window.
+  beforeAll(async () => {
+    vi.useFakeTimers({ now: new Date().setUTCHours(12, 30, 0, 0), toFake: ["Date"] });
+    a = await seed("kpi-example-a", "Example A");
+    await counters(a, 2, { sent: 1000, complained: 2 });
+    b = await seed("kpi-example-b", "Example B");
+    await counters(b, 0, { complained: 2 });
+    // More complaints than sends in the window: no rate either.
+    e = await seed("kpi-example-e", "Example E");
+    await counters(e, 1, { sent: 1, complained: 2 });
+    await counters(await seed("kpi-example-c", "Example C"), 1, { sent: 500 });
+    await counters(await seed("kpi-example-d", "Example D"), 10, { sent: 100, complained: 3 });
+  });
+  afterAll(async () => {
+    vi.useRealTimers();
+    await db.delete(schema.teams).where(inArray(schema.teams.id, made));
+  });
+
+  it("adds the teams up to the card, most first, with no rate over no sends", async () => {
+    const out = await kpiTeams("complained", "7d");
+    expect(out.grain).toBe("day");
+    expect(out.rows.map((r) => [r.id, r.count, r.sent, r.rate, r.lastAt])).toEqual([
+      [a, 2, 1000, 0.002, day(2)],
+      [b, 2, 0, null, day(0)],
+      [e, 2, 1, null, day(1)],
+    ]);
+    expect(out.teams).toBe(3);
+    expect(out.total).toBe(6);
+    expect(out.total).toBe((await kpis("7d")).totals.complained);
+  });
+
+  it("gives no rate to a team with more than it sent, and sorts it after the rated ones", async () => {
+    const out = await kpiTeams("complained", "7d");
+    expect(out.rows.map((r) => [r.name, r.rate])).toEqual([
+      ["Example A", 0.002],
+      ["Example B", null],
+      ["Example E", null],
+    ]);
+  });
+
+  it("counts hard bounces, not every bounce", async () => {
+    const f = await seed("kpi-example-f", "Example F");
+    dropAfter([f]);
+    await counters(f, 0, { sent: 200, bounced: 7, hardBounced: 2 });
+    const out = await kpiTeams("hardBounced", "7d");
+    expect(out.rows.map((r) => [r.id, r.count, r.rate])).toEqual([[f, 2, 0.01]]);
+    expect(out.total).toBe((await kpis("7d")).totals.hardBounced);
+  });
+
+  it("reads hourly rows over a day, from the window's first hour", async () => {
+    const from = new Date(Date.now() - DAY_MS);
+    from.setUTCMinutes(0, 0, 0);
+    const g = await seed("kpi-example-g", "Example G");
+    dropAfter([g]);
+    await db.insert(schema.usageCountersHourly).values([
+      { teamId: g, hour: from, sent: 40, complained: 1 },
+      // An hour before the window: out of it, as it is out of the chart.
+      { teamId: g, hour: new Date(from.getTime() - 3_600_000), complained: 5 },
+    ]);
+    const out = await kpiTeams("complained", "24h");
+    expect(out.grain).toBe("hour");
+    expect(out.rows).toEqual([
+      expect.objectContaining({
+        id: g,
+        count: 1,
+        sent: 40,
+        rate: 0.025,
+        lastAt: from.toISOString(),
+      }),
+    ]);
+    expect(out.buckets).toEqual([
+      { t: from.toISOString(), top: [{ name: "Example G", count: 1 }], moreTeams: 0, moreCount: 0 },
+    ]);
+    const chart = await kpis("24h");
+    expect(out.total).toBe(chart.totals.complained);
+    expect(chart.points.map((p) => p.t)).toContain(from.toISOString());
+  });
+
+  it("names each point's five teams with the most, ties by name, and what the rest add up to", async () => {
+    const points: string[] = [];
+    for (const [slug, n] of [
+      ["point-1", 4],
+      ["point-3", 3],
+      ["point-2", 3],
+      ["point-4", 2],
+      ["point-5", 1],
+      ["point-6", 1],
+      ["point-7", 1],
+    ] as const) {
+      const id = await seed(`kpi-${slug}`, slug);
+      points.push(id);
+      await counters(id, 3, { sent: 100, complained: n });
+    }
+    dropAfter(points);
+    const out = await kpiTeams("complained", "7d");
+    expect(out.buckets.find((x) => x.t === day(3))).toEqual({
+      t: day(3),
+      top: [
+        { name: "point-1", count: 4 },
+        { name: "point-2", count: 3 },
+        { name: "point-3", count: 3 },
+        { name: "point-4", count: 2 },
+        { name: "point-5", count: 1 },
+      ],
+      moreTeams: 2,
+      moreCount: 2,
+    });
+    // Keyed as the chart's points, and only the points with a complaint.
+    const days = (await kpis("7d")).points.map((p) => p.t);
+    expect(out.buckets.map((x) => x.t)).toEqual([day(3), day(2), day(1), day(0)]);
+    expect(days).toEqual(expect.arrayContaining(out.buckets.map((x) => x.t)));
+    expect(out.buckets.find((x) => x.t === day(0))?.top).toEqual([{ name: "Example B", count: 2 }]);
+  });
+
+  it("carries what the status cell reads: holds, suspensions, pauses and the standing", async () => {
+    const held = await seed("kpi-held", "Held");
+    const paused = await seed("kpi-paused", "Paused");
+    const warned = await seed("kpi-warned", "Warned");
+    dropAfter([held, paused, warned]);
+    const at = new Date("2026-01-02T03:04:05Z");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: at, suspensionReason: "review" })
+      .where(eq(schema.teams.id, held));
+    await db
+      .update(schema.teams)
+      .set({ broadcastsPausedByOperatorAt: at })
+      .where(eq(schema.teams.id, paused));
+    await db.insert(schema.teamStandings).values({
+      teamId: warned,
+      guardrail: "warning",
+      guardrailMetric: "complaint",
+      complaintRate7d: 0.002,
+      hardBounceRate7d: 0.01,
+    });
+    for (const id of [held, paused, warned]) await counters(id, 0, { sent: 10, complained: 1 });
+    const rows = (await kpiTeams("complained", "7d")).rows;
+    expect(rows.find((r) => r.id === held)).toMatchObject({
+      suspendedAt: at,
+      suspensionReason: "review",
+      guardrail: null,
+    });
+    expect(rows.find((r) => r.id === paused)).toMatchObject({
+      suspendedAt: null,
+      broadcastsPausedByOperatorAt: at,
+    });
+    expect(rows.find((r) => r.id === warned)).toMatchObject({
+      guardrail: "warning",
+      guardrailMetric: "complaint",
+      complaintRate7d: 0.002,
+      hardBounceRate7d: 0.01,
+      plan: "free",
+      planQuota: null,
+    });
+  });
+
+  it("is the operator's alone", async () => {
+    await expect(
+      member().console.overview.kpiTeams({ kind: "complained", period: "7d" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("lists the first 100 teams and counts every one of them", async () => {
+    const bulk = await db
+      .insert(schema.teams)
+      .values(Array.from({ length: 101 }, (_, i) => ({ name: `bulk ${i}`, slug: `kpi-bulk-${i}` })))
+      .returning({ id: schema.teams.id });
+    dropAfter(bulk.map((row) => row.id));
+    await db
+      .insert(c)
+      .values(bulk.map((row) => ({ teamId: row.id, day: day(5), sent: 50, hardBounced: 1 })));
+    const period = { from: day(6), to: day(4) };
+    const out = await kpiTeams("hardBounced", period);
+    expect(out.rows).toHaveLength(100);
+    expect(out.teams).toBe(101);
+    expect(out.total).toBe(101);
+    expect(out.total).toBe((await kpis(period)).totals.hardBounced);
+  });
+});
+
+describe("console.safety.list and a 7-day window with nothing to rate", () => {
+  it("says whether the standing's window held a send that could draw a complaint", async () => {
+    const c = schema.usageCounters;
+    const day = (daysAgo: number) => utcDay(Date.now() - daysAgo * DAY_MS);
+    const seed = async (
+      slug: string,
+      sent7d: number,
+      counters: { daysAgo: number; sent: number; sentNoFeedback: number } | null,
+    ) => {
+      const id = await createTeam(db, slug);
+      await db.insert(schema.teamStandings).values({ teamId: id, guardrail: "ok", sent7d });
+      await db.insert(schema.teamFlags).values({ teamId: id, reason: "manual" });
+      if (counters) {
+        const { daysAgo, ...values } = counters;
+        await db.insert(c).values({ teamId: id, day: day(daysAgo), ...values });
+      }
+      return id;
+    };
+    const gmailOnly = await seed("rates-gmail-only", 300, {
+      daysAgo: 0,
+      sent: 300,
+      sentNoFeedback: 300,
+    });
+    const reporting = await seed("rates-reporting", 100, {
+      daysAgo: 1,
+      sent: 100,
+      sentNoFeedback: 40,
+    });
+    const quiet = await seed("rates-quiet", 0, null);
+    const lastWeek = await seed("rates-last-week", 0, { daysAgo: 8, sent: 50, sentNoFeedback: 0 });
+    const rows = (await operator().console.safety.list({ limit: 100 })).items;
+    const row = (id: string) => rows.find((r) => r.teamId === id);
+    expect(row(gmailOnly)).toMatchObject({ sent7d: 300, complaintSends7d: false });
+    expect(row(reporting)).toMatchObject({ sent7d: 100, complaintSends7d: true });
+    expect(row(quiet)).toMatchObject({ sent7d: 0, complaintSends7d: false });
+    expect(row(lastWeek)).toMatchObject({ sent7d: 0, complaintSends7d: false });
+    // What the status cell reads rides along.
+    expect(row(reporting)).toMatchObject({ suspensionReason: null, guardrailMetric: null });
+    await db
+      .delete(schema.teams)
+      .where(inArray(schema.teams.id, [gmailOnly, reporting, quiet, lastWeek]));
   });
 });

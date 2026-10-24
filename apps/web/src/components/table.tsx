@@ -23,3 +23,10 @@ export function Table({
     </div>
   );
 }
+
+/** An unknown or not-applicable value in a table cell. */
+export const mutedDash = (
+  <span className="ms-mono" style={{ color: "var(--ms-muted)" }}>
+    —
+  </span>
+);

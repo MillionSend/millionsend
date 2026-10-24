@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { BtnSpinner } from "@/components/spinner";
+import { SubdomainInput } from "@/components/subdomain-input";
 import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
 import { useTRPC } from "@/lib/trpc";
 
@@ -100,48 +101,31 @@ export function TrackingSetup({
             {t("detail.setup.title")}
           </h3>
           <p
-            style={{ fontSize: 12.5, color: "var(--ms-muted)", margin: "6px 0 0", lineHeight: 1.5 }}
+            style={{
+              fontSize: 12.5,
+              color: "var(--ms-muted)",
+              margin: "6px 0 16px",
+              lineHeight: 1.5,
+            }}
           >
             {t("detail.setup.subtitle")}
           </p>
         </>
       ) : null}
 
-      {/* Subdomain / domain pair: <input> . <domain>. */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 8,
-          marginTop: heading ? 16 : 0,
+      <SubdomainInput
+        id="tracking-subdomain"
+        domain={domainName}
+        error={invalid || clashesReturnPath}
+        aria-label={t("detail.tracking.subdomain")}
+        placeholder={t("detail.tracking.subdomainPlaceholder")}
+        disabled={saving}
+        value={subdomain}
+        onChange={(e) => setSubdomain(e.target.value.trim().toLowerCase())}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
         }}
-      >
-        <div className="ms-field" style={{ flex: 1, minWidth: 160 }}>
-          <input
-            id="tracking-subdomain"
-            type="text"
-            className={`ms-input mono${invalid || clashesReturnPath ? " error" : ""}`}
-            style={{ width: "100%" }}
-            aria-label={t("detail.tracking.subdomain")}
-            placeholder={t("detail.tracking.subdomainPlaceholder")}
-            autoComplete="off"
-            spellCheck={false}
-            disabled={saving}
-            value={subdomain}
-            onChange={(e) => setSubdomain(e.target.value.trim().toLowerCase())}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") save();
-            }}
-          />
-        </div>
-        <span
-          className="ms-mono"
-          style={{ fontSize: 13, color: "var(--ms-muted)", whiteSpace: "nowrap" }}
-        >
-          .{domainName}
-        </span>
-      </div>
+      />
 
       {invalid ? (
         <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--ms-danger)" }}>

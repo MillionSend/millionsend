@@ -1,16 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Breakable } from "@/components/breakable";
+import { LeadCell } from "@/components/lead-cell";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
-import { Table } from "@/components/table";
+import { mutedDash, Table } from "@/components/table";
 import { toast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { StateCard } from "../../emails/list-parts";
-import { approvalReasonWords, type InboxDetail, TrustBadge } from "../parts";
+import { approvalReasonWords, type InboxDetail, TrustTile } from "../parts";
 import { ReleaseButton } from "../release-dialog";
 
 const heading: React.CSSProperties = { margin: "0 0 10px" };
@@ -50,7 +51,9 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
   }
 
   return (
-    <div style={{ display: "grid", gap: 26 }}>
+    // minmax(0, 1fr): an auto track would grow to a list's one-line width and
+    // push the page past a phone's viewport, where the list should scroll.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 26 }}>
       {pending.length > 0 ? (
         <section>
           <h2 className="ms-microlabel" style={heading}>
@@ -59,35 +62,25 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
           <Table>
             <thead>
               <tr>
-                <th>{t("review.to")}</th>
-                <th>{t("review.subject")}</th>
-                <th>{t("review.reasons")}</th>
+                <th style={{ width: "26%" }}>{t("review.to")}</th>
+                <th style={{ width: "34%" }}>{t("review.subject")}</th>
+                <th style={{ width: "22%" }}>{t("review.reasons")}</th>
                 <th className="right" />
               </tr>
             </thead>
             <tbody>
               {pending.map((draft) => (
                 <tr key={draft.id}>
-                  <td className="ms-mono ms-cell-wrap">
-                    <Breakable text={(draft.to ?? []).join(", ")} />
-                  </td>
-                  <td>
-                    {draft.thread_id ? (
-                      <Link
-                        className="ms-link"
-                        href={`/inboxes/${inbox.id}?thread=${draft.thread_id}`}
-                      >
-                        {draft.subject ?? t("noSubject")}
-                      </Link>
-                    ) : (
-                      (draft.subject ?? t("noSubject"))
-                    )}
-                    {draft.snippet ? (
-                      <div style={{ fontSize: 12, color: "var(--ms-muted)" }}>{draft.snippet}</div>
-                    ) : null}
-                  </td>
-                  <td style={{ fontSize: 12.5 }}>
-                    {approvalReasonWords(t, draft.approval_reasons)}
+                  <LeadCell value={draft.to?.[0] ?? ""} more={draft.to?.slice(1) ?? []} mono />
+                  <LeadCell
+                    value={draft.subject ?? t("noSubject")}
+                    {...(draft.thread_id
+                      ? { href: `/inboxes/${inbox.id}?thread=${draft.thread_id}` }
+                      : {})}
+                    tail={draft.snippet}
+                  />
+                  <td className="ms-cell-fill" style={{ fontSize: 12.5 }}>
+                    <Truncated text={approvalReasonWords(t, draft.approval_reasons)} />
                   </td>
                   <td className="right" style={{ whiteSpace: "nowrap" }}>
                     <span style={{ display: "inline-flex", gap: 6 }}>
@@ -124,9 +117,9 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
           <Table>
             <thead>
               <tr>
-                <th>{t("received.col.from")}</th>
-                <th>{t("review.subject")}</th>
-                <th>{t("review.reason")}</th>
+                <th style={{ width: "26%" }}>{t("received.col.from")}</th>
+                <th style={{ width: "28%" }}>{t("review.subject")}</th>
+                <th style={{ width: "16%" }}>{t("review.reason")}</th>
                 {inbox.kind === "agent" ? <th className="right">{t("review.scores")}</th> : null}
                 <th className="right">{t("received.col.received")}</th>
                 <th className="right" />
@@ -135,31 +128,41 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
             <tbody>
               {quarantined.map((item) => (
                 <tr key={item.id}>
-                  <td className="ms-mono ms-cell-wrap">
-                    <Breakable text={item.from} />
-                    <div style={{ marginTop: 4 }}>
-                      <TrustBadge trust={item.sender_trust} />
-                    </div>
-                  </td>
-                  <td>
-                    <Link className="ms-link" href={`/inboxes/received/${item.id}`}>
-                      {item.subject ?? t("noSubject")}
-                    </Link>
-                  </td>
-                  <td style={{ fontSize: 12.5 }}>
-                    {t(`qr.${item.quarantine_reason}`)}
+                  <LeadCell tile={<TrustTile trust={item.sender_trust} />} value={item.from} mono />
+                  <LeadCell
+                    value={item.subject ?? t("noSubject")}
+                    href={`/inboxes/received/${item.id}`}
+                  />
+                  <td className="ms-cell-fill" style={{ fontSize: 12.5 }}>
                     {item.virus_signature ? (
-                      <div className="ms-mono" style={{ color: "var(--ms-muted)" }}>
-                        {item.virus_signature}
-                      </div>
-                    ) : null}
+                      // The signature shows on hover even when the reason is whole.
+                      <Tooltip
+                        inline
+                        triggerClassName="ms-truncate-host"
+                        text={`${t(`qr.${item.quarantine_reason}`)}\n${item.virus_signature}`}
+                      >
+                        <span className="ms-truncate">{t(`qr.${item.quarantine_reason}`)}</span>
+                      </Tooltip>
+                    ) : (
+                      <Truncated text={t(`qr.${item.quarantine_reason}`)} />
+                    )}
                   </td>
                   {inbox.kind === "agent" ? (
-                    <td className="right ms-mono" style={{ whiteSpace: "nowrap" }}>
-                      {t("review.scoreLine", {
-                        injection: item.injection_score ?? "–",
-                        phishing: item.phishing_score ?? "–",
-                      })}
+                    <td className="right ms-mono">
+                      {item.injection_score === null && item.phishing_score === null ? (
+                        mutedDash
+                      ) : (
+                        // The figures alone, named on hover: the labels would squeeze From and Subject.
+                        <Tooltip
+                          inline
+                          text={t("review.scoreLine", {
+                            injection: item.injection_score ?? "–",
+                            phishing: item.phishing_score ?? "–",
+                          })}
+                        >
+                          {`${item.injection_score ?? "–"} · ${item.phishing_score ?? "–"}`}
+                        </Tooltip>
+                      )}
                     </td>
                   ) : null}
                   <td className="right" style={{ whiteSpace: "nowrap" }}>

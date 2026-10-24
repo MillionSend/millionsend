@@ -1013,20 +1013,36 @@ it("records a broadcast's results before its emails age out, so the campaign kee
     .values({ teamId, from: "a@acme.dev", subject: "July news", status: "sent", sentAt })
     .returning({ id: schema.broadcasts.id });
   if (!broadcast) throw new Error("broadcast insert failed");
-  await db.insert(schema.emails).values(
-    (["delivered", "opened", "bounced"] as const).map((latestStatus, i) => ({
-      teamId,
-      broadcastId: broadcast.id,
-      from: "a@acme.dev",
-      to: [`r${i}@example.com`],
-      subject: "July news",
-      latestStatus,
-      createdAt: sentAt,
-    })),
-  );
+  const emails = await db
+    .insert(schema.emails)
+    .values(
+      (["delivered", "opened", "bounced", "complained", "complained"] as const).map(
+        (latestStatus, i) => ({
+          teamId,
+          broadcastId: broadcast.id,
+          from: "a@acme.dev",
+          to: [`r${i}@example.com`],
+          subject: "July news",
+          latestStatus,
+          createdAt: sentAt,
+        }),
+      ),
+    )
+    .returning({ id: schema.emails.id });
+  // The last one's complaint SES raised for an address on its own suppression
+  // list: the mail never went out, though the status rose all the same.
+  await db.insert(schema.emailEvents).values([
+    { emailId: emails[3]?.id ?? "", type: "complained", occurredAt: sentAt, data: {} },
+    {
+      emailId: emails[4]?.id ?? "",
+      type: "complained",
+      occurredAt: sentAt,
+      data: { complaint: { complaintSubType: "OnAccountSuppressionList" } },
+    },
+  ]);
 
   const first = await purgeExpiredEmailMetadata(db, { retentionDays: 30, now });
-  expect(first).toMatchObject({ emails: 3, broadcasts: 1 });
+  expect(first).toMatchObject({ emails: 5, broadcasts: 1 });
   const [row] = await db
     .select({
       total: schema.broadcasts.recipientCount,
@@ -1036,7 +1052,8 @@ it("records a broadcast's results before its emails age out, so the campaign kee
     })
     .from(schema.broadcasts)
     .where(eq(schema.broadcasts.id, broadcast.id));
-  expect(row).toEqual({ total: 3, delivered: 2, bounced: 1, complained: 0 });
+  // A complaint comes from a recipient who had the mail, unless SES never sent it.
+  expect(row).toEqual({ total: 5, delivered: 3, bounced: 1, complained: 1 });
   expect(
     await db
       .select({ id: schema.emails.id })

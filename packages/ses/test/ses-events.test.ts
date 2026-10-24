@@ -43,4 +43,21 @@ describe("parseSesEvent", () => {
     expect(parsed?.bounce?.diagnosticCode).toBe("smtp; 550 a\uFFFDb");
     expect(JSON.stringify(parsed?.data)).not.toContain("\\u0000");
   });
+
+  it("keeps the subtype SES gives a complaint about mail it never attempted", () => {
+    const parsed = parseSesEvent({
+      eventType: "Complaint",
+      mail: { messageId: "example-message-id-0003", timestamp: "2026-03-02T10:00:00.000Z" },
+      complaint: {
+        complainedRecipients: [{ emailAddress: "recipient@example.com" }],
+        complaintSubType: "OnAccountSuppressionList",
+        timestamp: "2026-03-02T10:00:01.000Z",
+      },
+    });
+
+    expect(parsed?.complaint).toEqual({
+      recipients: ["recipient@example.com"],
+      complaintSubType: "OnAccountSuppressionList",
+    });
+  });
 });

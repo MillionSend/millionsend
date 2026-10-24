@@ -17,12 +17,12 @@ import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import { Tooltip } from "@/components/tooltip";
 import { formatDay } from "@/lib/format";
-import { formatScoreTenths } from "@/lib/score-band";
+import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useCopied } from "@/lib/use-copied";
 import { LoadErrorCard } from "../safety/parts";
-import { GuardrailLabel, PlanBadge, RegionLabel, usePlanName } from "./cells";
+import { GUARDRAIL_TONE, PlanBadge, RegionLabel, TeamStatus, usePlanName } from "./cells";
 import type { TeamRow } from "./types";
 
 const SORT_KEYS = [
@@ -37,18 +37,7 @@ const SORT_KEYS = [
 ] as const;
 const GUARDRAILS = ["ok", "warning", "paused"] as const;
 const TEAM_TYPES = ["free", "starter", "pro", "scale", "system"] as const;
-const GUARDRAIL_COLOR = {
-  ok: "var(--ms-success)",
-  warning: "var(--ms-warn)",
-  paused: "var(--ms-danger)",
-} as const;
 const COLUMNS = 10;
-
-function scoreColor(tenths: number): string | undefined {
-  if (tenths < 50) return "var(--ms-danger)";
-  if (tenths < 70) return "var(--ms-warn)";
-  return undefined;
-}
 
 /** Mirrors a loaded row: logo + name, badge, muted email, four figures, dot label, region, day, menu. */
 function SkeletonRows() {
@@ -236,7 +225,7 @@ export function TeamsView() {
             ...GUARDRAILS.map((key) => ({
               value: key,
               label: t("filters.guardrail", { value: t(`guardrail.${key}`) }),
-              adornment: <StatusDot color={GUARDRAIL_COLOR[key]} />,
+              adornment: <StatusDot color={`var(--ms-${GUARDRAIL_TONE[key]})`} />,
             })),
           ]}
         />
@@ -246,7 +235,7 @@ export function TeamsView() {
         <LoadErrorCard onRetry={() => void list.refetch()} />
       ) : (
         <div className="ms-card" style={{ padding: 0, overflow: "hidden" }}>
-          <Table className="nowrap">
+          <Table className="nowrap baseline">
             <thead>
               <tr>
                 {sortable("name", false, "asc")}
@@ -282,7 +271,7 @@ export function TeamsView() {
                           inline
                           text={t("ownerTip", { email: row.ownerEmail ?? common("none") })}
                         >
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span className="ms-lead" style={{ gap: 8 }}>
                             <TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />
                             {row.name}
                           </span>
@@ -318,11 +307,7 @@ export function TeamsView() {
                           : formatScoreTenths(row.scoreTenths, locale)}
                       </td>
                       <td>
-                        <GuardrailLabel
-                          guardrail={row.guardrail}
-                          suspendedAt={row.suspendedAt}
-                          broadcastsPausedByOperatorAt={row.broadcastsPausedByOperatorAt}
-                        />
+                        <TeamStatus team={row} />
                       </td>
                       <td>
                         <RegionLabel region={row.region} />
@@ -330,7 +315,7 @@ export function TeamsView() {
                       <td style={{ color: "var(--ms-muted)" }}>
                         {formatDay(row.createdAt, locale)}
                       </td>
-                      <td className="right" style={{ width: 40 }}>
+                      <td className="right ms-cell-menu" style={{ width: 40 }}>
                         <PopoverMenu
                           ariaLabel={common("actions")}
                           items={teamMenuItems(row, actions, (key) => t(`menu.${key}`), {

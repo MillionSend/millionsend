@@ -1,7 +1,8 @@
 "use client";
 
 import type { ProbeKey } from "@millionsend/core";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
+import type { inferRouterOutputs } from "@trpc/server";
 import { useLocale, useTranslations } from "next-intl";
 import type { Period } from "@/components/console/chart-dialog";
 import { LineChart } from "@/components/line-chart";
@@ -9,8 +10,15 @@ import { Skeleton } from "@/components/skeleton";
 import { durationUnit, formatHourMinute, formatPercent, periodDayKeys } from "@/lib/console-format";
 import { formatDayTime, formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+import type { AppRouter } from "@/server/routers";
 
 export type KpiKind = "sent" | "delivered" | "hardBounced" | "complained";
+/** The KPIs counted from feedback (bounce and complaint notices), on the day it arrives. */
+export type FeedbackKind = Extract<KpiKind, "hardBounced" | "complained">;
+
+export function isFeedbackKind(kind: KpiKind): kind is FeedbackKind {
+  return kind === "hardBounced" || kind === "complained";
+}
 
 export const KPI_DECIMALS: Record<Exclude<KpiKind, "sent">, number> = {
   delivered: 1,
@@ -64,7 +72,8 @@ function ChartSkeleton() {
   return <Skeleton width="100%" height={CHART_HEIGHT} radius="var(--ms-r-input)" />;
 }
 
-function ChartNote({ children }: { children: React.ReactNode }) {
+/** The muted line under a dialog's chart or table: the period's figure, a table's count. */
+export function ChartNote({ children }: { children: React.ReactNode }) {
   return <p style={{ margin: "12px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>{children}</p>;
 }
 
@@ -91,6 +100,45 @@ function LoadError() {
   return <ChartNote>{common("loadError")}</ChartNote>;
 }
 
+type PointTeams =
+  inferRouterOutputs<AppRouter>["console"]["overview"]["kpiTeams"]["buckets"][number];
+
+/** A feedback chart tip's teams for the hovered point: the most first, then how many more. */
+function PointTeamsList({ point }: { point: PointTeams | undefined }) {
+  const t = useTranslations("console.overview.kpiTeams");
+  const locale = useLocale();
+  if (!point) return null;
+  const nf = new Intl.NumberFormat(locale);
+  return (
+    <div
+      style={{
+        borderTop: "1px solid var(--ms-line)",
+        marginTop: 5,
+        paddingTop: 5,
+        fontSize: 12,
+        lineHeight: 1.6,
+      }}
+    >
+      {point.top.map((team, rank) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a point's teams by rank, redrawn whole on every hover
+        <div key={rank} style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
+          <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {team.name}
+          </span>
+          <span className="ms-mono" style={{ marginLeft: "auto" }}>
+            {nf.format(team.count)}
+          </span>
+        </div>
+      ))}
+      {point.moreTeams > 0 ? (
+        <div style={{ color: "var(--ms-muted)" }}>
+          {t("moreTeams", { teams: point.moreTeams, count: point.moreCount })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** One KPI over the dialog's period, with its total (sent) or average (rates) under the chart. */
 export function KpiChart({ kind, period }: { kind: KpiKind; period: Period }) {
   const t = useTranslations("console.overview");
@@ -98,6 +146,12 @@ export function KpiChart({ kind, period }: { kind: KpiKind; period: Period }) {
   const locale = useLocale();
   const trpc = useTRPC();
   const query = useQuery(trpc.console.overview.kpis.queryOptions({ period }));
+  // The teams table's own query: one request feeds the rows and the tip.
+  const teams = useQuery(
+    trpc.console.overview.kpiTeams.queryOptions(
+      isFeedbackKind(kind) ? { kind, period } : skipToken,
+    ),
+  );
   if (query.isError) return <LoadError />;
   const data = query.data;
   if (!data) return <ChartSkeleton />;
@@ -123,11 +177,21 @@ export function KpiChart({ kind, period }: { kind: KpiKind; period: Period }) {
           ]}
           formatDay={(day) => pointLabel(day, data.grain, locale)}
           formatValue={(v) => format(v / scale)}
+          tipExtra={
+            teams.data
+              ? (index) => (
+                  <PointTeamsList
+                    point={teams.data.buckets.find((b) => b.t === data.points[index]?.t)}
+                  />
+                )
+              : undefined
+          }
         />
       )}
       <ChartNote>
         {periodLabel(period, common)} · {common(kind === "sent" ? "total" : "average")}{" "}
         {format(aggregate)}
+        {isFeedbackKind(kind) ? ` · ${t("charts.byArrival")}` : null}
       </ChartNote>
     </>
   );

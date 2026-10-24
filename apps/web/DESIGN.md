@@ -31,7 +31,9 @@ sanctioned exception is the touch text-field size (Controls).
 - Empty states state the count: "0 API keys."
 - Data rendered as data: full addresses, real UUIDs, masked keys
   (`ms_••••••••abcd`), mono DNS values. Never truncate a value an engineer
-  might paste — give it a copy button (`.ms-chip`) instead.
+  might paste — give it a copy button (`.ms-chip`) instead; a list cell is the
+  one exception: it ends in an ellipsis, whole on hover, and the row's page
+  shows the value whole with its copy chip.
 - Timestamps compact and relative: "24min ago", "1h ago" — the exact local
   stamp shows on hover (`RelativeTime`), never inline.
 - Keycaps are part of the copy: ⌘ ↵ in modal confirm buttons, Esc to cancel.
@@ -75,6 +77,11 @@ the canvas overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height
 contacts or emails fits a laptop viewport; the shared `ListFooter` holds the
 page-size chooser and then "Load more" at the right, both drawn as secondary
 buttons, and any secondary action under a table or section is right-aligned.
+Every list row is one line at every width: a cell never wraps; free text ends
+in an ellipsis inside its column, whole in a tooltip (`Truncated`, `LeadCell`),
+and the `ms-cell-fill` column gives way (it holds room only through a width on
+its own header, or as the one column without a width). A detail row that reads
+as a paragraph (an expanded delivery) opts out with `ms-cell-wrap`.
 The inbox thread list (`.ms-thread-*`) is a mail list on the same type,
 rules and row height: one line per thread (unread dot, sender with a
 `.ms-count`, pills, subject and a muted snippet, time). Unread is weight 600
@@ -119,10 +126,8 @@ beside the touched column.
 **Narrow desktop (900–1199px).** Beside the sidebar the content column is
 under 880px: the console's 4-up grids go 2-up and its 2/1 splits stack, a
 detail page's meta grid lays out as many columns as keep each value 11rem
-wide, and no meta value widens its column (a long chip ellipsizes). In a
-list a long address wraps at its "@" and dots (`Breakable`) rather than push
-the list sideways. Filter rows, wrap rows and steppers wrap at every width
-rather than overflow.
+wide, and no meta value widens its column (a long chip ellipsizes). Filter
+rows, wrap rows and steppers wrap at every width rather than overflow.
 
 **Mobile (breakpoint 900px).** Below 900px the sidebar becomes an off-canvas
 drawer behind a 48px sticky topbar (hamburger `.ms-btn-icon` + wordmark on

@@ -4,7 +4,9 @@ import {
   applyMergeFields,
   broadcastProviderBreakdown,
   cancelBroadcastRows,
+  complainedEmail,
   DAY_MS,
+  deliveredEmail,
   emailInsightsView,
   enableWarmup,
   fetchBroadcastInsights,
@@ -356,8 +358,7 @@ export const broadcastsRouter = router({
     const [segment] = row.segmentId
       ? await ctx.db.select({ name: sg.name }).from(sg).where(eq(sg.id, row.segmentId)).limit(1)
       : [];
-    // "Delivered" counts the delivered rung and everything above it on the
-    // status ladder — an opened or clicked email was necessarily delivered.
+    // "Delivered" counts every email that reached the inbox (deliveredEmail).
     // Opened likewise includes clicked; both count people only, since a
     // prefetch never lifts the status (see the tracking recorder).
     const ev = schema.emailEvents;
@@ -367,12 +368,12 @@ export const broadcastsRouter = router({
     const [stats] = await ctx.db
       .select({
         total: sql<number>`count(*)::int`,
-        delivered: sql<number>`count(*) filter (where ${e.latestStatus} in ('delivered', 'opened', 'clicked'))::int`,
+        delivered: sql<number>`count(*) filter (where ${deliveredEmail})::int`,
         opened: sql<number>`count(*) filter (where ${e.latestStatus} in ('opened', 'clicked'))::int`,
         clicked: sql<number>`count(*) filter (where ${e.latestStatus} = 'clicked')::int`,
         prefetched: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ofEmail} and ${ev.type} = 'prefetched'))::int`,
         bounced: sql<number>`count(*) filter (where ${e.latestStatus} = 'bounced')::int`,
-        complained: sql<number>`count(*) filter (where ${e.latestStatus} = 'complained')::int`,
+        complained: sql<number>`count(*) filter (where ${complainedEmail})::int`,
         // Recipients who opted out through this email's link, from everything or from its topic.
         unsubscribed: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ofEmail} and ${ev.type} = 'unsubscribed'))::int`,
       })

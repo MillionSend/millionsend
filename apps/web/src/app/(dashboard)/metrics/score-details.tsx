@@ -303,11 +303,8 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
                 >
                   <span
                     aria-hidden="true"
+                    className="ms-dot"
                     style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      boxSizing: "border-box",
                       background: SEVERITY_DOT[factor.severity] ?? "var(--ms-muted)",
                       border: factor.severity === "info" ? "1px solid var(--ms-faint)" : 0,
                     }}

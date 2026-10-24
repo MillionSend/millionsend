@@ -10,6 +10,7 @@ import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { MarkerRail } from "@/components/stepper";
 import { Tooltip } from "@/components/tooltip";
 import { WarnCard } from "@/components/warn-card";
 import { buildAwsSetupScript, CFN_DEPLOY_COMMAND, cfnQuickCreateUrl } from "@/lib/aws-setup-script";
@@ -22,33 +23,6 @@ const PRODUCTION_ACCESS_DOCS_URL =
   "https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html";
 const IAM_CREATE_POLICY_URL = "https://console.aws.amazon.com/iam/home#/policies/create";
 const IAM_CREATE_USER_URL = "https://console.aws.amazon.com/iam/home#/users/create";
-
-/** Left rail of a stepper row: marker (✓ or number) above the connector line. */
-function StepRail({ marker, done, line }: { marker: string; done: boolean; line: boolean }) {
-  return (
-    <div
-      aria-hidden="true"
-      className="ms-stepper-rail"
-      style={{
-        width: 30,
-        flex: "none",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      }}
-    >
-      <span
-        className="ms-mono"
-        style={{ fontSize: 11, color: done ? "var(--ms-success)" : "var(--ms-bone)" }}
-      >
-        {done ? "✓" : marker}
-      </span>
-      {line ? (
-        <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
-      ) : null}
-    </div>
-  );
-}
 
 function Step({
   marker,
@@ -65,7 +39,12 @@ function Step({
 }) {
   return (
     <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-      <StepRail marker={marker} done={done} line={!last} />
+      <MarkerRail
+        marker={marker}
+        done={done}
+        line={!last}
+        color={done ? "var(--ms-success)" : "var(--ms-bone)"}
+      />
       {/* minWidth 0 so wide <pre> content scrolls inside its block, never the page */}
       <div style={{ flex: 1, minWidth: 0, paddingBottom: last ? 0 : 24 }}>
         <h2

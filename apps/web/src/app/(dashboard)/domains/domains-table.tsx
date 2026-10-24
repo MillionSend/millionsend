@@ -7,11 +7,11 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
-import { Breakable } from "@/components/breakable";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { PlusGlyph } from "@/components/icons/nav-icons";
+import { LeadCell } from "@/components/lead-cell";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
@@ -69,37 +69,29 @@ function SkeletonRows() {
 const shown = (d: { status: string; trackingPending: boolean }) =>
   displayDomainStatus(d.status as DomainStatus, d.trackingPending);
 
-/** A limited domain's muted tail: today's cap, what waits, and the schedule on hover. */
+/**
+ * A limited domain's muted tail: today's cap and what waits, the schedule on
+ * hover. It gives way before the badge does, ending in an ellipsis, so the
+ * hover leads with what waits: the end of the line it may have cut.
+ */
 function LimitTail({ limit }: { limit: NewDomainLimit }) {
   const t = useTranslations("domains");
   const locale = useLocale();
   const nf = new Intl.NumberFormat(locale);
   const schedule = limitSchedule(limit, t, locale);
+  const why = schedule
+    ? t("list.limit.tooltip", { schedule })
+    : t("list.limit.tooltipToday", { cap: nf.format(limit.cap) });
+  const waiting =
+    limit.waiting > 0 ? t("list.limit.waiting", { count: nf.format(limit.waiting) }) : null;
   return (
-    <Tooltip
-      inline
-      text={
-        schedule
-          ? t("list.limit.tooltip", { schedule })
-          : t("list.limit.tooltipToday", { cap: nf.format(limit.cap) })
-      }
-    >
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: 12.5,
-          color: "var(--ms-muted)",
-        }}
-      >
+    <Tooltip inline triggerClassName="ms-truncate-host" text={waiting ? `${waiting}\n${why}` : why}>
+      <span className="ms-truncate" style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
         {t("list.limit.perDay", { cap: nf.format(limit.cap) })}
-        {limit.waiting > 0 ? (
+        {waiting ? (
           <>
-            <span style={{ color: "var(--ms-faint)" }}>·</span>
-            <span style={{ color: "var(--ms-warn)" }}>
-              {t("list.limit.waiting", { count: nf.format(limit.waiting) })}
-            </span>
+            <span style={{ color: "var(--ms-faint)", margin: "0 6px" }}>·</span>
+            <span style={{ color: "var(--ms-warn)" }}>{waiting}</span>
           </>
         ) : null}
       </span>
@@ -282,33 +274,22 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
                   <tbody>
                     {filtered.map((domain) => (
                       <tr key={domain.id}>
-                        <td className="ms-mono">
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                        <LeadCell
+                          tile={
                             <NavTile
                               name="domains"
                               color={TONE_COLOR[DOMAIN_TONE[shown(domain)]]}
                             />
-                            <Link href={`/domains/${domain.id}`}>
-                              <Breakable text={domain.name} />
-                            </Link>
-                          </span>
-                        </td>
-                        <td>
-                          {domain.limit ? (
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 10,
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              <DomainStatusBadge status={shown(domain)} />
-                              <LimitTail limit={domain.limit} />
-                            </span>
-                          ) : (
+                          }
+                          value={domain.name}
+                          href={`/domains/${domain.id}`}
+                          mono
+                        />
+                        <td className="ms-cell-fill">
+                          <span className="ms-lead">
                             <DomainStatusBadge status={shown(domain)} />
-                          )}
+                            {domain.limit ? <LimitTail limit={domain.limit} /> : null}
+                          </span>
                         </td>
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RegionLabel region={domain.region} />

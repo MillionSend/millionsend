@@ -191,7 +191,7 @@ export function MediaPanel({
                     // biome-ignore lint/suspicious/noArrayIndexKey: fixed order, position is identity
                     <tr key={i}>
                       <td>{t(`sources.${SOURCE_KEYS[link.source]}`)}</td>
-                      <td className="ms-mono" style={{ overflowWrap: "anywhere" }}>
+                      <td className="ms-mono ms-cell-wrap">
                         <RevealText spans={link.link} />
                       </td>
                       <td className="right" style={{ color: "var(--ms-muted)" }}>
@@ -229,7 +229,7 @@ export function MediaPanel({
                   {data.files.map((file, i) => (
                     // biome-ignore lint/suspicious/noArrayIndexKey: fixed order, position is identity
                     <tr key={i}>
-                      <td className="ms-mono" style={{ overflowWrap: "anywhere" }}>
+                      <td className="ms-mono ms-cell-wrap">
                         <RevealText spans={file.name} />
                       </td>
                       <td className="ms-mono">{file.kind}</td>

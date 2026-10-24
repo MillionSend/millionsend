@@ -209,12 +209,29 @@
       "queue_oldest_s": "Job mais antigo na fila",
       "region_sent": "Enviados por hora · {region}",
       "noPoints": "Nada registrado neste período ainda.",
+      "byArrival": "pela data de chegada, não de envio",
       "point": {
         "max": "Cada ponto: o maior valor em {window}",
         "avg": "Cada ponto: a média em {window}"
       },
       "monitor_samples_1h": "Amostras do monitor por hora",
       "monitor_unjudged_rate": "Percentual sem avaliação do monitor"
+    },
+    "kpiTeams": {
+      "columns": {
+        "status": "Situação",
+        "sent": "Enviados",
+        "rate": "Taxa",
+        "last": "Mais recente"
+      },
+      "lateNone": "Nenhum envio no período. {kind, select, complained {As reclamações são} other {Os hard bounces são}} de e-mails enviados antes.",
+      "lateSome": "Mais {kind, select, complained {reclamações} other {hard bounces}} que envios no período. {kind, select, complained {Parte delas é} other {Parte deles é}} de e-mails enviados antes.",
+      "teams": "{count, plural, one {# equipe} other {# equipes}}",
+      "events": "{kind, select, complained {{count, plural, one {# reclamação} other {# reclamações}}} other {{count, plural, one {# hard bounce} other {# hard bounces}}}}",
+      "others": "{count, plural, one {na outra} other {nas outras #}}",
+      "showAll": "Mostrar todas",
+      "empty": "{kind, select, complained {0 reclamações no período.} other {0 hard bounces no período.}}",
+      "moreTeams": "{teams, plural, one {+# outra equipe} other {+# outras equipes}} · {count, number}"
     },
     "monitoring": {
       "title": "Monitoramento",
@@ -426,8 +443,11 @@
       "ok": "ok",
       "warning": "em alerta",
       "paused": "pausada",
-      "suspended": "Suspensa",
-      "operatorPaused": "pausada pelo operador"
+      "suspended": "suspensa",
+      "review": "em revisão",
+      "suspendedTip": "Suspensa em {day}",
+      "reviewTip": "Aguardando revisão desde {day}",
+      "window": "{metric, select, complaint {Últimos 7 dias, contando só os e-mails para provedores que repassam reclamações.} other {Últimos 7 dias, sobre todos os envios.}}"
     },
     "empty": "0 equipes encontradas.",
     "menu": {
@@ -947,6 +967,7 @@
     },
     "settingsButton": "Configurações de monitoramento",
     "exempt": "isenta",
+    "noSends7d": "{metric, select, complaint {Nenhum envio nos últimos 7 dias para provedores que repassam reclamações.} other {Nenhum envio nos últimos 7 dias.}}",
     "riskTip": "Risco interno do monitor, de 0 a 1. Avaliações do modelo sobre o conteúdo amostrado, com menos peso conforme envelhecem, ajustadas pela idade da equipe. Nunca mostrado à equipe.",
     "waiting": {
       "title": "Aguardando revisão · {count}",

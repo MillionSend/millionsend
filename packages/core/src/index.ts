@@ -553,6 +553,7 @@ export {
   type MailboxProvider,
   mailboxProvider,
   sentWithoutComplaintFeedback,
+  sesAttempted,
 } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,
@@ -806,6 +807,8 @@ export {
 } from "./ssrf.js";
 export {
   applyStatusCas,
+  complainedEmail,
+  deliveredEmail,
   type EmailStatus,
   endQueuedEmails,
   highestStatus,
@@ -865,6 +868,7 @@ export {
   type FlagTriggerOptions,
   flagImitatedBrand,
   flagTrigger,
+  guardrailMetricOf,
   pruneTeamStandings,
   STANDING_WINDOW_DAYS,
   saveTeamStandings,

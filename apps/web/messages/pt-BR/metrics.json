@@ -12,12 +12,10 @@
   },
   "bounce": {
     "title": "Taxa de bounce permanente",
-    "risk": "RISCO {rate}",
     "bounced": "Bounces permanentes"
   },
   "complaint": {
     "title": "Taxa de reclamação",
-    "risk": "RISCO {rate}",
     "complained": "Reclamações",
     "window": "últimos {days} dias em UTC",
     "ofReportable": "{count} de {sent} para caixas que avisam sobre spam",
@@ -28,7 +26,7 @@
   "chart": {
     "soFar": "até agora",
     "ofSent": "{count} de {sent} enviados",
-    "belowFloor": "abaixo do mínimo da proteção de envio · não avaliado"
+    "risk": "Risco {rate}"
   },
   "engagement": {
     "denominator": "das entregues"

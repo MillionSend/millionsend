@@ -125,14 +125,8 @@ export function StatusPill({
       {status === "sending" ? (
         <span
           aria-hidden="true"
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: "currentColor",
-            animation: "ms-pulse 2s infinite",
-            flex: "none",
-          }}
+          className="ms-dot xs"
+          style={{ background: "currentColor", animation: "ms-pulse 2s infinite" }}
         />
       ) : null}
       {label ?? t(`status.${status}`)}

@@ -5,11 +5,15 @@ import {
   GMAIL_DOMAINS,
   type MailboxProvider,
   MICROSOFT_DOMAIN_PATTERN,
+  NO_COMPLAINT_FEEDBACK_DOMAINS,
   YAHOO_DOMAIN_PATTERN,
 } from "./mailbox-providers.js";
 
 /** A send's first recipient's domain, read the way recipientDomains reads each recipient. */
 export const firstRecipientDomain = sql<string>`lower(rtrim(split_part(${schema.emails.to}->>0, '@', -1), '>'))`;
+
+/** Whether a send's first recipient is at a provider that reports complaints to SES. */
+export const firstRecipientReportsComplaints = sql<boolean>`${firstRecipientDomain} not in ${[...NO_COMPLAINT_FEEDBACK_DOMAINS]}`;
 
 /** mailboxProvider() in SQL, over an expression holding a lowercased domain. */
 export function mailboxProviderSql(domain: SQL): SQL<MailboxProvider> {

@@ -209,12 +209,29 @@
       "queue_oldest_s": "Oldest queued job",
       "region_sent": "Sent per hour · {region}",
       "noPoints": "Nothing recorded in this window yet.",
+      "byArrival": "by arrival date, not send date",
       "point": {
         "max": "Each point: the highest reading in {window}",
         "avg": "Each point: the average over {window}"
       },
       "monitor_samples_1h": "Monitor samples per hour",
       "monitor_unjudged_rate": "Monitor unjudged share"
+    },
+    "kpiTeams": {
+      "columns": {
+        "status": "Status",
+        "sent": "Sent",
+        "rate": "Rate",
+        "last": "Latest"
+      },
+      "lateNone": "No sends in the period. {kind, select, complained {These complaints are} other {These hard bounces are}} about mail sent earlier.",
+      "lateSome": "More {kind, select, complained {complaints} other {hard bounces}} than sends in the period. Some are about mail sent earlier.",
+      "teams": "{count, plural, one {# team} other {# teams}}",
+      "events": "{kind, select, complained {{count, plural, one {# complaint} other {# complaints}}} other {{count, plural, one {# hard bounce} other {# hard bounces}}}}",
+      "others": "{count, plural, one {in the other one} other {in the other #}}",
+      "showAll": "Show all",
+      "empty": "{kind, select, complained {0 complaints in the period.} other {0 hard bounces in the period.}}",
+      "moreTeams": "{teams, plural, one {+# more team} other {+# more teams}} · {count, number}"
     },
     "monitoring": {
       "title": "Monitoring",
@@ -426,8 +443,11 @@
       "ok": "ok",
       "warning": "warning",
       "paused": "paused",
-      "suspended": "Suspended",
-      "operatorPaused": "paused by operator"
+      "suspended": "suspended",
+      "review": "in review",
+      "suspendedTip": "Suspended on {day}",
+      "reviewTip": "Held for review since {day}",
+      "window": "{metric, select, complaint {Last 7 days, counting only mail to providers that report complaints.} other {Last 7 days, over all sends.}}"
     },
     "empty": "0 teams match.",
     "menu": {
@@ -947,6 +967,7 @@
     },
     "settingsButton": "Monitoring settings",
     "exempt": "exempt",
+    "noSends7d": "{metric, select, complaint {No sends in the last 7 days to providers that report complaints.} other {No sends in the last 7 days.}}",
     "riskTip": "Internal monitor risk, 0 to 1. Sampled content judged by the model, decayed over time, weighted by team age. Never shown to the team.",
     "waiting": {
       "title": "Waiting for review · {count}",

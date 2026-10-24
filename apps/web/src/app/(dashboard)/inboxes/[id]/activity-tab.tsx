@@ -6,6 +6,7 @@ import { ListFooter } from "@/components/list-footer";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { Table } from "@/components/table";
+import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { StateCard } from "../../emails/list-parts";
 import { approvalReasonWords } from "../parts";
@@ -52,14 +53,22 @@ export function ActivityTab({ inboxId }: { inboxId: string }) {
               <td style={{ whiteSpace: "nowrap" }}>
                 <RelativeTime date={row.createdAt} />
               </td>
-              <td>{row.actor.name ?? t(`activity.actor.${row.actor.kind}`)}</td>
-              <td>
-                {t.has(`activity.actions.${row.action}`)
-                  ? t(`activity.actions.${row.action}`)
-                  : row.action}
+              <td className="ms-cell-fill">
+                <Truncated text={row.actor.name ?? t(`activity.actor.${row.actor.kind}`)} />
               </td>
-              <td style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
-                {row.decision ? approvalReasonWords(t, row.decision.reasons) : ""}
+              <td className="ms-cell-fill">
+                <Truncated
+                  text={
+                    t.has(`activity.actions.${row.action}`)
+                      ? t(`activity.actions.${row.action}`)
+                      : row.action
+                  }
+                />
+              </td>
+              <td className="ms-cell-fill" style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
+                {row.decision ? (
+                  <Truncated text={approvalReasonWords(t, row.decision.reasons)} />
+                ) : null}
               </td>
             </tr>
           ))}

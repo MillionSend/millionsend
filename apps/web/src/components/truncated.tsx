@@ -8,7 +8,14 @@ import { Tooltip } from "@/components/tooltip";
  * text shows in a tooltip only once it was actually cut. The parent sets the
  * width: a flex item with min-width 0 inside a fixed-layout table cell.
  */
-export function Truncated({ text }: { text: string }) {
+export function Truncated({
+  text,
+  tip,
+}: {
+  text: string;
+  /** Hover text of its own, there whether or not the text was cut: under the whole text once it was. */
+  tip?: string;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
   const [cut, setCut] = useState(false);
   // Re-attached when `cut` flips: the span is remounted under the tooltip's
@@ -29,8 +36,9 @@ export function Truncated({ text }: { text: string }) {
       {text}
     </span>
   );
-  return cut ? (
-    <Tooltip inline triggerClassName="ms-truncate-host" text={text}>
+  const hover = cut ? (tip ? `${text}\n${tip}` : text) : tip;
+  return hover ? (
+    <Tooltip inline triggerClassName="ms-truncate-host" text={hover}>
       {line}
     </Tooltip>
   ) : (

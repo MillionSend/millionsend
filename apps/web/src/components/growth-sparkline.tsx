@@ -225,15 +225,7 @@ export function GrowthSparkline({
                 lineHeight: 1.8,
               }}
             >
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: row.color,
-                  flex: "none",
-                }}
-              />
+              <span className="ms-dot sm" style={{ background: row.color }} />
               <span style={{ color: "var(--ms-muted)" }}>{row.label}</span>
               <span className="ms-mono" style={{ marginLeft: "auto", color: "var(--ms-bone)" }}>
                 {formatValue(row.value)}
