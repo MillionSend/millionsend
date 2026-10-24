@@ -376,6 +376,7 @@ export function EmailContentPanel({
               key={key}
               type="button"
               style={{
+                font: "inherit",
                 flex: "none",
                 whiteSpace: "nowrap",
                 fontSize: 13,
@@ -385,7 +386,6 @@ export function EmailContentPanel({
                 cursor: "pointer",
                 background: tab === key ? "var(--ms-panel-raised)" : "none",
                 color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-                font: "inherit",
               }}
               onClick={() => setTab(key)}
             >
