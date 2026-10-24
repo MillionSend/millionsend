@@ -10,9 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/bedrock-sdk": "0.35.0",
-    "@aws-sdk/client-sesv2": "^3.1153.0",
-    "@aws-sdk/client-sqs": "^3.1153.0",
+    "@anthropic-ai/bedrock-sdk": "1.0.0",
+    "@aws-sdk/client-sesv2": "^3.1154.0",
+    "@aws-sdk/client-sqs": "^3.1154.0",
     "@millionsend/billing": "workspace:*",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
