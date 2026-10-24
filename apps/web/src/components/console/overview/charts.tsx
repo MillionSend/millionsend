@@ -11,6 +11,12 @@ import { formatDayTime, formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
 export type KpiKind = "sent" | "delivered" | "hardBounced" | "complained";
+/** The KPIs counted from feedback (bounce and complaint notices), on the day it arrives. */
+export type FeedbackKind = Extract<KpiKind, "hardBounced" | "complained">;
+
+export function isFeedbackKind(kind: KpiKind): kind is FeedbackKind {
+  return kind === "hardBounced" || kind === "complained";
+}
 
 export const KPI_DECIMALS: Record<Exclude<KpiKind, "sent">, number> = {
   delivered: 1,
@@ -64,7 +70,8 @@ function ChartSkeleton() {
   return <Skeleton width="100%" height={CHART_HEIGHT} radius="var(--ms-r-input)" />;
 }
 
-function ChartNote({ children }: { children: React.ReactNode }) {
+/** The muted line under a dialog's chart or table: the period's figure, a table's count. */
+export function ChartNote({ children }: { children: React.ReactNode }) {
   return <p style={{ margin: "12px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>{children}</p>;
 }
 
@@ -128,6 +135,7 @@ export function KpiChart({ kind, period }: { kind: KpiKind; period: Period }) {
       <ChartNote>
         {periodLabel(period, common)} · {common(kind === "sent" ? "total" : "average")}{" "}
         {format(aggregate)}
+        {isFeedbackKind(kind) ? ` · ${t("charts.byArrival")}` : null}
       </ChartNote>
     </>
   );

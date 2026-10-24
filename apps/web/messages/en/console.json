@@ -209,12 +209,28 @@
       "queue_oldest_s": "Oldest queued job",
       "region_sent": "Sent per hour · {region}",
       "noPoints": "Nothing recorded in this window yet.",
+      "byArrival": "by arrival date, not send date",
       "point": {
         "max": "Each point: the highest reading in {window}",
         "avg": "Each point: the average over {window}"
       },
       "monitor_samples_1h": "Monitor samples per hour",
       "monitor_unjudged_rate": "Monitor unjudged share"
+    },
+    "kpiTeams": {
+      "columns": {
+        "status": "Status",
+        "sent": "Sent",
+        "rate": "Rate",
+        "last": "Latest"
+      },
+      "lateNone": "No sends in the period. {kind, select, complained {These complaints are} other {These hard bounces are}} about mail sent earlier.",
+      "lateSome": "More {kind, select, complained {complaints} other {hard bounces}} than sends in the period. Some are about mail sent earlier.",
+      "teams": "{count, plural, one {# team} other {# teams}}",
+      "events": "{kind, select, complained {{count, plural, one {# complaint} other {# complaints}}} other {{count, plural, one {# hard bounce} other {# hard bounces}}}}",
+      "others": "{count, plural, one {in the other one} other {in the other #}}",
+      "showAll": "Show all",
+      "empty": "{kind, select, complained {0 complaints in the period.} other {0 hard bounces in the period.}}"
     },
     "monitoring": {
       "title": "Monitoring",

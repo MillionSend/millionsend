@@ -209,12 +209,28 @@
       "queue_oldest_s": "Job mais antigo na fila",
       "region_sent": "Enviados por hora · {region}",
       "noPoints": "Nada registrado neste período ainda.",
+      "byArrival": "pela data de chegada, não de envio",
       "point": {
         "max": "Cada ponto: o maior valor em {window}",
         "avg": "Cada ponto: a média em {window}"
       },
       "monitor_samples_1h": "Amostras do monitor por hora",
       "monitor_unjudged_rate": "Percentual sem avaliação do monitor"
+    },
+    "kpiTeams": {
+      "columns": {
+        "status": "Situação",
+        "sent": "Enviados",
+        "rate": "Taxa",
+        "last": "Mais recente"
+      },
+      "lateNone": "Nenhum envio no período. {kind, select, complained {As reclamações são} other {Os hard bounces são}} de e-mails enviados antes.",
+      "lateSome": "Mais {kind, select, complained {reclamações} other {hard bounces}} que envios no período. {kind, select, complained {Parte delas é} other {Parte deles é}} de e-mails enviados antes.",
+      "teams": "{count, plural, one {# equipe} other {# equipes}}",
+      "events": "{kind, select, complained {{count, plural, one {# reclamação} other {# reclamações}}} other {{count, plural, one {# hard bounce} other {# hard bounces}}}}",
+      "others": "{count, plural, one {na outra} other {nas outras #}}",
+      "showAll": "Mostrar todas",
+      "empty": "{kind, select, complained {0 reclamações no período.} other {0 hard bounces no período.}}"
     },
     "monitoring": {
       "title": "Monitoramento",
