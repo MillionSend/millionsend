@@ -88,8 +88,8 @@ importers:
         specifier: ^8.0.2
         version: 8.0.2
       nodemailer:
-        specifier: ^10.2.0
-        version: 10.2.0
+        specifier: ^10.2.1
+        version: 10.2.1
       resend:
         specifier: ^6.32.1
         version: 6.32.1(@react-email/render@1.4.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1))
@@ -164,11 +164,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
       mailauth:
-        specifier: ^8.0.1
-        version: 8.0.1
+        specifier: ^8.0.4
+        version: 8.0.4
       smtp-server:
-        specifier: ^3.21.0
-        version: 3.21.0
+        specifier: ^3.21.1
+        version: 3.21.1
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -183,8 +183,8 @@ importers:
         specifier: ^3.5.13
         version: 3.5.13
       nodemailer:
-        specifier: ^10.2.0
-        version: 10.2.0
+        specifier: ^10.2.1
+        version: 10.2.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -216,8 +216,8 @@ importers:
         specifier: ^3.9.47
         version: 3.9.47
       smtp-server:
-        specifier: ^3.21.0
-        version: 3.21.0
+        specifier: ^3.21.1
+        version: 3.21.1
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -241,8 +241,8 @@ importers:
         specifier: ^3.5.13
         version: 3.5.13
       nodemailer:
-        specifier: ^10.2.0
-        version: 10.2.0
+        specifier: ^10.2.1
+        version: 10.2.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -253,8 +253,8 @@ importers:
   apps/web:
     dependencies:
       '@aws-sdk/client-s3':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@better-auth/oauth-provider':
         specifier: ^1.7.12
         version: 1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.13)(kysely@0.29.7)(nanostores@1.5.5))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(kysely@0.29.7)(pg@8.23.1)(postgres@3.4.9))(next@16.4.2(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))))(better-call@1.4.4(zod@4.6.7))
@@ -289,8 +289,8 @@ importers:
         specifier: ^11.8.0
         version: 11.8.0
       '@sentry/core':
-        specifier: ^11.8.0
-        version: 11.8.0
+        specifier: ^11.9.0
+        version: 11.9.0
       '@sentry/node':
         specifier: ^11.8.0
         version: 11.8.0(rollup@4.62.4)
@@ -319,8 +319,8 @@ importers:
         specifier: 3.3.0
         version: 3.3.0
       motion:
-        specifier: 14.5.0
-        version: 14.5.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: 14.6.0
+        version: 14.6.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       next:
         specifier: ^16.4.2
         version: 16.4.2(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -377,11 +377,11 @@ importers:
         specifier: 0.36.0
         version: 0.36.0(zod@4.6.7)
       '@aws-sdk/client-sesv2':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sqs':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@millionsend/billing':
         specifier: workspace:*
         version: link:../../packages/billing
@@ -407,8 +407,8 @@ importers:
         specifier: 1.28.1
         version: 1.28.1
       nodemailer:
-        specifier: ^10.2.0
-        version: 10.2.0
+        specifier: ^10.2.1
+        version: 10.2.1
       sharp:
         specifier: 0.35.5
         version: 0.35.5(@types/node@22.20.5)
@@ -536,8 +536,8 @@ importers:
         specifier: workspace:*
         version: link:../db
       '@sentry/core':
-        specifier: ^11.8.0
-        version: 11.8.0
+        specifier: ^11.9.0
+        version: 11.9.0
       '@sentry/node':
         specifier: ^11.8.0
         version: 11.8.0(rollup@4.62.4)
@@ -573,8 +573,8 @@ importers:
         specifier: ^8.0.2
         version: 8.0.2
       nodemailer:
-        specifier: ^10.2.0
-        version: 10.2.0
+        specifier: ^10.2.1
+        version: 10.2.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -644,32 +644,32 @@ importers:
   packages/ses:
     dependencies:
       '@aws-sdk/client-cloudwatch':
-        specifier: 3.1155.0
-        version: 3.1155.0
+        specifier: 3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-iam':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-kms':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-s3':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-service-quotas':
-        specifier: 3.1155.0
-        version: 3.1155.0
+        specifier: 3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sesv2':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sns':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sqs':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sts':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@millionsend/core':
         specifier: workspace:*
         version: link:../core
@@ -690,23 +690,23 @@ importers:
   packages/setup:
     dependencies:
       '@aws-sdk/client-iam':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-s3':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sesv2':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sns':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sqs':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
       '@aws-sdk/client-sts':
-        specifier: ^3.1155.0
-        version: 3.1155.0
+        specifier: ^3.1156.0
+        version: 3.1156.0
     devDependencies:
       '@types/node':
         specifier: ^22.20.5
@@ -794,40 +794,40 @@ packages:
     resolution: {integrity: sha512-L+xXHIoQo3wcMlNyOe3OIo7Oq8uEL+1rbv/igbHvKTYIGXbmYZY9hKalTOh25jmV1gAfnQq4oxS9taqVzSry8w==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-cloudwatch@3.1155.0':
-    resolution: {integrity: sha512-lIiqQLr6HYQWtaosd5n0Y+FBCawblHaxA3kDl+Wve5n8eRIY1Ru3y4rWqwL27nlanJHQxozVBVHBKV2fXOvqSg==}
+  '@aws-sdk/client-cloudwatch@3.1156.0':
+    resolution: {integrity: sha512-j04drof7hci+q56lLIXm1AbNyS2XNlsmB6HN8CVKIr9/Y/uwX+zF1n3+/2R1V/B/Z9+Fozh28jak+2kIX38a1Q==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-iam@3.1155.0':
-    resolution: {integrity: sha512-a6jg+I5w505+fh+n6GlfM0BAZi1/EAjMyI0A0EKVuCo+5wO+BoVtixDF3F60U7h7qETGhMPz6C5R9EKYwKvqgQ==}
+  '@aws-sdk/client-iam@3.1156.0':
+    resolution: {integrity: sha512-Z8wtt8eI78O2OPUqAuPoecTY+kwr0Z35AYJbdgG6VNKaWlzhSoXabCF0h7u9sAq9fpLD8Pq3vByH8ainVh+gPg==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-kms@3.1155.0':
-    resolution: {integrity: sha512-8BvT5Dx7CJGmbumaVnGoLF/BzpEqpsTCgmbhh1LmVcvdLUoa6XK8XwklqX97xulH/PpTYGmspH41lpWQBbTHJg==}
+  '@aws-sdk/client-kms@3.1156.0':
+    resolution: {integrity: sha512-dXzmgG3FIZsLD5L+IVntcZW0BBuNBBqq9kImu2kjr4EX/x3yNT4JzNIFb3vUYq2i/URQKbP1vHnN2dksw3TqMw==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-s3@3.1155.0':
-    resolution: {integrity: sha512-l3uMeIlzWVgj/RTJTh5sKYKtQz1la3cvWLUPn1cwFH4UZpcqTH66SgJHCeB2FOE9bEAjOdbmCyPKt9aw867Fng==}
+  '@aws-sdk/client-s3@3.1156.0':
+    resolution: {integrity: sha512-Z2PqQqKMDVX56tNZ6ggmjoI5o/8+4+8ArmjLwE5ktYsEzs1BrvklBT1ZzI+s0Vcf3wfPguoEMD7EkMswmEta/A==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-service-quotas@3.1155.0':
-    resolution: {integrity: sha512-5msaZT+trF0VoiLtPhMvmpkbb0+1laTpGwVUKY1b894ltey+5f1t1Eyhq1WBvzYbJXgHdmBOZwr/80opam64vQ==}
+  '@aws-sdk/client-service-quotas@3.1156.0':
+    resolution: {integrity: sha512-zgHWppOFfjGXcg4mmkoagX4v36k5ttymgnYQGixCgTYnS0BYNL1aJoPrWWc0KRd/Rlk+5frAPksASTLETp89+A==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-sesv2@3.1155.0':
-    resolution: {integrity: sha512-OwGWcqGFZR6fdjVD4JoSJIsaK/t00Ab8BsvaHT4dERGNJlzNDrUMTqBcjX3XMaAiHcNTIFKaHqloFUE3FxMV/g==}
+  '@aws-sdk/client-sesv2@3.1156.0':
+    resolution: {integrity: sha512-ghZ4piyZWPIHscYsBhFQtRAjealFX/f4a+d/OQPWijIvH9nGRfbcuL5ssKyh0e+iStcXH1KzI/YuwxgoFMaYSw==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-sns@3.1155.0':
-    resolution: {integrity: sha512-2v8R5SBOdZeOCEl5xQiIL/Zjvr8vgqBatuw+6BOCjXC/HrQbJ2EczwWWNlOucxJHwLHpzObeeVL+SKuX6Ip4Mw==}
+  '@aws-sdk/client-sns@3.1156.0':
+    resolution: {integrity: sha512-WiAW6FzBNJyGMnBe2FopquQOVdDqfnnCfbdyf26Vs0MW8dMZkgX4SeqZkcP0vEw+K1tW8Tf8yH9uVrMoRdIi+A==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-sqs@3.1155.0':
-    resolution: {integrity: sha512-3jXoNixIc42vbPv+zQXcTHaZBNr9Br5IoJyNHcVMfgKHNOaVcBTe8qbjpJ/LqJI02J6TCrJWkOzNoTFAwiNd9g==}
+  '@aws-sdk/client-sqs@3.1156.0':
+    resolution: {integrity: sha512-tkDeDv5kVb87RobSQ1RLfeCcLKA/IXwj0TkGWjUIfLSYQ+mL+hbimEZ/yOr46ahR+sJXRQN+JXffqrNQeiCLIw==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-sts@3.1155.0':
-    resolution: {integrity: sha512-ukqYITBCII6M9jBrRHSz0AApbQE+i3vRUbxsV735N2Q8PzV5kaBchoum4FiZc/jJnkyaMlfcndFURkPOn9lBEw==}
+  '@aws-sdk/client-sts@3.1156.0':
+    resolution: {integrity: sha512-emJli57W8F9wPykDPhYRvXTpiI13/IsZOqXnCOoODhBpY/El/HoZDWIoQNzN9N9UOMILVh3T86EOjfI/6bqumA==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.978.5':
@@ -3186,6 +3186,10 @@ packages:
     resolution: {integrity: sha512-4MVTthk6C/1oQFjbVIfygHyNkx2YGbwNLml0kJji0vjJXy6ZNls9zdIp0FTBTi4e3189IcSc5OXD4qcJdmEeKA==}
     engines: {node: '>=20.19.0 <22.0.0 || >=22.12.0 <23.0.0 || >=23.2.0'}
 
+  '@sentry/core@11.9.0':
+    resolution: {integrity: sha512-t0dZyHILt2XVC4Fe9UmAty6YRfOuQv95cvWeNl+HlW4LphjF5/jkALV3cJCUMdhpblYELgIJC4U/S/GoYuI2bA==}
+    engines: {node: '>=20.19.0 <22.0.0 || >=22.12.0 <23.0.0 || >=23.2.0'}
+
   '@sentry/feedback@11.8.0':
     resolution: {integrity: sha512-t8MSpbPoOcPOkywcv0Hwh97A82jWFZju5NU/a6pHmn2pKFktgCgnHKNHvlYp8QUaDNYijYpLv58NIM5Dg7by7A==}
     engines: {node: '>=20.19.0 <22.0.0 || >=22.12.0 <23.0.0 || >=23.2.0'}
@@ -4690,8 +4694,8 @@ packages:
       react-dom:
         optional: true
 
-  framer-motion@14.5.0:
-    resolution: {integrity: sha512-pXIj1m9JX//3XExUgQIpS0f5iWcjenO14ekdg9S++Rr0VzfnAaveoNzonigRarD/+AM3umTGS3K/RANGQJitCQ==}
+  framer-motion@14.6.0:
+    resolution: {integrity: sha512-MzBgZxGgoHPfSLEXmo4o5XlZvb+nVRFdHtGjVhm6LMIEJKTt/8hNO023euL5mYyzc8llV/hQTfjnN68tNRHalw==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -5044,6 +5048,10 @@ packages:
     resolution: {integrity: sha512-Byw3CchK4eSqbgzpttsUoC4hx2VPP+hnveAuYAYZNipEc+0WlDFjVb1ISNscjq/idvyDP/Xjg8mnBcdgbsgvzg==}
     engines: {node: '>=20.0.0'}
 
+  libmime@5.6.2:
+    resolution: {integrity: sha512-qkEnA6lNRmGyYnKuv6cy9Z6MU2fTEXLWUm8RvzvVPgYcyawzAP4kcvn9vtikBLSgkLlAbRznkIeT2dglni4siw==}
+    engines: {node: '>=20.0.0'}
+
   libqp@3.0.1:
     resolution: {integrity: sha512-7QZxpPX25pga1WiMueduWxmrHMVBFrZPH6ZUaozGYa/H98JH6NVBSET3qVw+4NxzoraIW7rJ81YxSU9IalvCpg==}
     engines: {node: '>=20.0.0'}
@@ -5248,9 +5256,9 @@ packages:
   magic-string@1.4.3:
     resolution: {integrity: sha512-z12OxmaPGE0F4xlpGdjuAUckipLpQlTAuAmyGhNoD7ODpYUzvDfvtxUbjM/jwznyP178oju/KDdyi220wNJ0RQ==}
 
-  mailauth@8.0.1:
-    resolution: {integrity: sha512-HyHCLTgwqYZOoLbaEw+q7WaWFkHsNoT3PBM8BqqmQMhm5IHNuxKhVa/XTZXoTscbBA4CV4Bx4erzba768PKfmQ==}
-    engines: {node: '>=22.19.0'}
+  mailauth@8.0.4:
+    resolution: {integrity: sha512-cANHnIBiutXGQ3AxCCc0KVDOgJNxz99a+2E8qpjZw9/lMXUDS885T+//IamaLtbtj5fh1wOdSjT8yD8CA9EPEg==}
+    engines: {node: '>=20.18.1'}
     hasBin: true
 
   mailparser@3.9.47:
@@ -5458,11 +5466,14 @@ packages:
   motion-dom@14.3.0:
     resolution: {integrity: sha512-rcKO4aEJzAqDEsrH6qFzhLZxs7bNqZpiUEuEATz9LaRwt6dG7hZEbcFUSHNR8NECaKYM0Iuw6Iv6NpWEGXDI+w==}
 
-  motion-dom@14.5.0:
-    resolution: {integrity: sha512-GAdnk1AgdtyrD3I09ZxEpV+Nt5QgwUsxN55qQV8mfk082dFQpcoT07wXkQAHRZjvZWUEBYhBVNeoXvtkYdL8jA==}
+  motion-dom@14.6.0:
+    resolution: {integrity: sha512-lIojTl9aYSPIkeOOSzBliy1nNvpdO3JtVzW2WgTXQlOP4ZMuJhtWO3fP7OD4TVFwlRucdvxlDSMkL+fEQnQ52A==}
 
   motion-utils@14.1.1:
     resolution: {integrity: sha512-3VvN5Uvf8B6qG+OfOui6Nht5EWp+vLuU3IqcAj7ItZGKqtmTjCebl5sGZF7/08gEHRnEl1AP/fIwbcEyVrcQGQ==}
+
+  motion-utils@14.6.0:
+    resolution: {integrity: sha512-bZJo2AmQ2aOFkaato6VXrTbkPG0XhMzivWUWSaI59pxyllj8QMQUFZ84MYRQnPkK+7dr4KldyJwF2+RM0sdq/w==}
 
   motion@14.3.0:
     resolution: {integrity: sha512-yh/nHYjikl68+FTxAMywFYzzj21/oGY7RGCfkqN5zpuT1rk3rp0lKfVU8EUq0A64qQeGnxuKUJWP85MipqdLBw==}
@@ -5475,8 +5486,8 @@ packages:
       react-dom:
         optional: true
 
-  motion@14.5.0:
-    resolution: {integrity: sha512-A0MinYYhYU12CHELw4+9jKPVreI43yDOprC4kAATHhF1rLfMFMhfpBR0GvdRR/IWEuKsHDnVn4fT+R2gQRyulw==}
+  motion@14.6.0:
+    resolution: {integrity: sha512-qqaZbyubgk7x3zxjPgP1l3Br/KQXol/IIV1uqb358SoN4ApcqNuV7+wyDPg/XLErmuyQL5lL8JVI/fOmDsmBKQ==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -5557,6 +5568,10 @@ packages:
 
   nodemailer@10.2.0:
     resolution: {integrity: sha512-/XyGw6kX2stMdKGUJdAQmYAeY1FscWfdRydfd2NtK3A3KDfUUXCqZzExSNAt2xhh90X2qLCR+o2Gd48YPJcJwA==}
+    engines: {node: '>=20.0.0'}
+
+  nodemailer@10.2.1:
+    resolution: {integrity: sha512-ZrDNsPFoDMwefNs7sJwrYiEJ/CG4ClJWDZv05iNJsEBWa8GRDry1QJHTJxsuTAY9eDDKjX4k+q3SxslXJOao7w==}
     engines: {node: '>=20.0.0'}
 
   non-error@0.1.0:
@@ -6014,8 +6029,8 @@ packages:
   slick@1.12.2:
     resolution: {integrity: sha512-4qdtOGcBjral6YIBCWJ0ljFSKNLz9KkhbWtuGvUyRowl1kxfuE1x/Z/aJcaiilpb3do9bl5K7/1h9XC5wWpY/A==}
 
-  smtp-server@3.21.0:
-    resolution: {integrity: sha512-vhJTg1JR6+mM5vlCD/TzUvFcQ5JQiCqP0FY3TgMJ0u3MPuvxawKD/6PA+TacPYEFVAgZIjLaCOSf87L4jcN0+w==}
+  smtp-server@3.21.1:
+    resolution: {integrity: sha512-gj95f6YhcL0uu3m3FvRnQ6LSotursugAuVjK5V4f0f2C/4OSVpn/+h28F4pPJFob/myli9V+F7/Hxx9DJVdwvg==}
     engines: {node: '>=20.0.0'}
 
   source-map-js@1.2.2:
@@ -6121,15 +6136,8 @@ packages:
     resolution: {integrity: sha512-QXqwfEl9ddlGBaRFXIvNKK6OhipSiLXuRuLJX5DErz0o0Q0rYxulWLdFryTkV5PkdZct5iMInwYEGe/eR++1AA==}
     hasBin: true
 
-  tldts-core@7.4.18:
-    resolution: {integrity: sha512-KI2PKvCmvQI/xD6ypPqkU0i7oxNXR/O58RLRaHR4svsgVUQ2JE/XC8BtMbG6PSehD27I8sZJRcC1ASnCy6lp3g==}
-
   tldts-core@7.4.19:
     resolution: {integrity: sha512-goNXV6Ho9TIOfpJZanTd6CKG5DyYgYAL+k+22T0SLh8l6+KHIfBUPFuePuSZv05UttIaaLmI9tb7TmGIdK5AkQ==}
-
-  tldts@7.4.18:
-    resolution: {integrity: sha512-somxA8xKAUzlAxl0TX/jMSYIbRNFIVGnI96pVGJPeMc5BsHmfVXn6mOJT6U++ELnl04eGfzpfcEuZe8WiASkXg==}
-    hasBin: true
 
   tldts@7.4.19:
     resolution: {integrity: sha512-48dH6aSpQnpbzDUc4vIQZ1VjB8tkK+e8c1yx05/SZK+rkssgjEOlxDd/yU8/a4vGYQ9vRgJr9dwMq9TJ0b3X2Q==}
@@ -6574,7 +6582,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-cloudwatch@3.1155.0':
+  '@aws-sdk/client-cloudwatch@3.1156.0':
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/credential-provider-node': 3.972.88
@@ -6586,7 +6594,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-iam@3.1155.0':
+  '@aws-sdk/client-iam@3.1156.0':
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/credential-provider-node': 3.972.88
@@ -6597,7 +6605,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-kms@3.1155.0':
+  '@aws-sdk/client-kms@3.1156.0':
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/credential-provider-node': 3.972.88
@@ -6608,7 +6616,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-s3@3.1155.0':
+  '@aws-sdk/client-s3@3.1156.0':
     dependencies:
       '@aws-sdk/checksums': 3.1001.5
       '@aws-sdk/core': 3.978.5
@@ -6622,7 +6630,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-service-quotas@3.1155.0':
+  '@aws-sdk/client-service-quotas@3.1156.0':
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/credential-provider-node': 3.972.88
@@ -6633,7 +6641,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-sesv2@3.1155.0':
+  '@aws-sdk/client-sesv2@3.1156.0':
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/credential-provider-node': 3.972.88
@@ -6645,7 +6653,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-sns@3.1155.0':
+  '@aws-sdk/client-sns@3.1156.0':
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/credential-provider-node': 3.972.88
@@ -6656,7 +6664,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-sqs@3.1155.0':
+  '@aws-sdk/client-sqs@3.1156.0':
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/credential-provider-node': 3.972.88
@@ -6668,7 +6676,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-sts@3.1155.0':
+  '@aws-sdk/client-sts@3.1156.0':
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/credential-provider-node': 3.972.88
@@ -8682,6 +8690,10 @@ snapshots:
     dependencies:
       '@sentry/conventions': 0.27.0
 
+  '@sentry/core@11.9.0':
+    dependencies:
+      '@sentry/conventions': 0.27.0
+
   '@sentry/feedback@11.8.0':
     dependencies:
       '@sentry/core': 11.8.0
@@ -10024,10 +10036,10 @@ snapshots:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
 
-  framer-motion@14.5.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  framer-motion@14.6.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
-      motion-dom: 14.5.0
-      motion-utils: 14.1.1
+      motion-dom: 14.6.0
+      motion-utils: 14.6.0
       tslib: 2.8.1
     optionalDependencies:
       react: 19.3.1
@@ -10443,6 +10455,13 @@ snapshots:
       libbase64: 1.4.1
       libqp: 3.0.1
 
+  libmime@5.6.2:
+    dependencies:
+      encoding-japanese: 2.4.0
+      iconv-lite: 0.7.3
+      libbase64: 1.4.1
+      libqp: 3.0.1
+
   libqp@3.0.1: {}
 
   lightningcss-android-arm64@1.32.0:
@@ -10589,18 +10608,18 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  mailauth@8.0.1:
+  mailauth@8.0.4:
     dependencies:
       '@postalsys/vmc': 1.1.5
       commander: 14.0.3
       fast-xml-parser: 5.11.2
       ipaddr.js: 2.5.0
       joi: 18.3.0
-      libmime: 5.5.2
-      nodemailer: 10.1.7
+      libmime: 5.6.2
+      nodemailer: 10.2.0
       punycode.js: 2.3.1
-      tldts: 7.4.18
-      undici: 8.12.3
+      tldts: 7.4.19
+      undici: 7.30.1
 
   mailparser@3.9.47:
     dependencies:
@@ -11085,11 +11104,13 @@ snapshots:
     dependencies:
       motion-utils: 14.1.1
 
-  motion-dom@14.5.0:
+  motion-dom@14.6.0:
     dependencies:
-      motion-utils: 14.1.1
+      motion-utils: 14.6.0
 
   motion-utils@14.1.1: {}
+
+  motion-utils@14.6.0: {}
 
   motion@14.3.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
@@ -11099,9 +11120,9 @@ snapshots:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
 
-  motion@14.5.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  motion@14.6.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
-      framer-motion: 14.5.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      framer-motion: 14.6.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       tslib: 2.8.1
     optionalDependencies:
       react: 19.3.1
@@ -11181,6 +11202,8 @@ snapshots:
   nodemailer@10.1.7: {}
 
   nodemailer@10.2.0: {}
+
+  nodemailer@10.2.1: {}
 
   non-error@0.1.0: {}
 
@@ -11795,10 +11818,10 @@ snapshots:
 
   slick@1.12.2: {}
 
-  smtp-server@3.21.0:
+  smtp-server@3.21.1:
     dependencies:
       ipv6-normalize: 1.0.1
-      nodemailer: 10.1.7
+      nodemailer: 10.2.1
       punycode.js: 2.3.1
 
   source-map-js@1.2.2: {}
@@ -11880,13 +11903,7 @@ snapshots:
 
   tlds@1.261.0: {}
 
-  tldts-core@7.4.18: {}
-
   tldts-core@7.4.19: {}
-
-  tldts@7.4.18:
-    dependencies:
-      tldts-core: 7.4.18
 
   tldts@7.4.19:
     dependencies:
