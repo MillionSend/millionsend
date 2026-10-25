@@ -16,6 +16,14 @@
 	on_demand_tls {
 		ask {$ASK_URL}
 	}
+
+	# HTTP/1.1 only, on both ports, until Caddy ships a build with Go 1.26.9+
+	# and golang.org/x/net 0.60.0+: older builds have remote HTTP/2 server
+	# crash and exhaustion bugs (GO-2026-6617, -6611, -6612, -6603). Clicks
+	# and opens are single requests, so nothing here needs HTTP/2.
+	servers {
+		protocols h1
+	}
 }
 
 # The edge's own hostname is not a tracking link — anyone who opens it directly
@@ -43,4 +51,11 @@ https:// {
 	handle {
 		respond 404
 	}
+}
+
+# Port 80 as an explicit site so the `servers` option above reaches it: the
+# redirect server Caddy creates on its own keeps cleartext HTTP/2 (h2c). ACME
+# HTTP-01 challenges are still answered before any site.
+http:// {
+	redir https://{host}{uri} 308
 }

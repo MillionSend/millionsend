@@ -43,3 +43,7 @@ updates:
     ignore:
       - dependency-name: postgres
         update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker-compose
+    directory: /deploy/tracking-edge
+    schedule:
+      interval: weekly
