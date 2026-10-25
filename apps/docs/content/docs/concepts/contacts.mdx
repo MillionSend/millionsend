@@ -240,3 +240,17 @@ when the message is sent and is part of the API's idempotency identity. No track
 pixel or redirect is added for disabled channels. This does not suppress necessary
 delivery, bounce or complaint processing. Keep verification mail neutral, without a
 marketing topic; do not assume a newsletter opt-in also permits engagement tracking.
+
+For retention, `DELETE /contacts/{id}/confirmation?request_id=<request UUID>`
+removes only matching revoked or expired confirmation metadata on an inactive
+contact. A current active, unexpired or replaced request returns `409`. The contact
+profile and all suppressions remain. Full recipient erasure is a separate operation.
+
+A confirmation also reports `withdrawn_at` after an explicit global withdrawal;
+suppression-only revocation does not manufacture a withdrawal timestamp. This lets
+integrations recover a missed withdrawal webhook without treating a bounce as consent.
+To erase an abandoned contact as well, add `erase_contact=true` to the guarded
+retention DELETE. This succeeds only for a newly created, expired pending contact
+that is still inactive, has no names or properties, and has no suppression. All
+checks, history erasure and deletion share the contact row lock. A concurrent
+activation or profile update therefore prevents automatic erasure.

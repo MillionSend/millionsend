@@ -20,6 +20,7 @@ export interface ContactConfirmation {
   createdContact: boolean;
   confirmedAt?: string;
   revokedAt?: string;
+  withdrawnAt?: string;
 }
 
 /**

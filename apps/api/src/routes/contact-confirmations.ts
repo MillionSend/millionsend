@@ -4,6 +4,9 @@ import {
   contactEventData,
   contactRoom,
   contactSnapshotColumns,
+  ERASED_TOMBSTONE,
+  eraseRecipient,
+  markSegmentsStale,
   suppressionHashesFor,
   type TeamWebhookEvent,
   undeliverableRecipients,
@@ -24,6 +27,7 @@ const confirmationSchema = z.object({
   status: z.enum(["pending", "confirmed", "revoked"]),
   confirmed_at: z.string().optional(),
   revoked_at: z.string().optional(),
+  withdrawn_at: z.string().optional(),
   created_contact: z.boolean(),
 });
 function wire(id: string, c: Confirmation) {
@@ -36,6 +40,7 @@ function wire(id: string, c: Confirmation) {
     status: c.state,
     confirmed_at: c.confirmedAt,
     revoked_at: c.revokedAt,
+    withdrawn_at: c.withdrawnAt,
     created_contact: c.createdContact,
   };
 }
@@ -225,6 +230,91 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
       if (!contact?.confirmation)
         return c.json(errorBody(404, "not_found", "Confirmation not found"), 404);
       return c.json(wire(id, contact.confirmation), 200);
+    },
+  );
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/contacts/{id}/confirmation",
+      description:
+        "Remove only the matching revoked or expired inactive confirmation metadata, preserving the contact and every suppression.",
+      request: {
+        params: z.object({ id: z.uuid() }),
+        query: z.object({
+          request_id: z.uuid(),
+          erase_contact: z.enum(["true", "false"]).optional(),
+        }),
+      },
+      responses: {
+        200: {
+          content: {
+            "application/json": { schema: z.object({ id: z.uuid(), deleted: z.literal(true) }) },
+          },
+          description: "Confirmation metadata removed",
+        },
+        404: err("Contact not found"),
+        409: err("Confirmation is still in use or has changed"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth"),
+        id = c.req.valid("param").id,
+        requestId = c.req.valid("query").request_id,
+        eraseContact = c.req.valid("query").erase_contact === "true";
+      const result = await transaction(async (tx, emit) => {
+        const [contact] = await tx
+          .select()
+          .from(t)
+          .where(and(eq(t.teamId, auth.teamId), eq(t.id, id)))
+          .for("update");
+        if (!contact) return "missing";
+        const proof = contact.confirmation;
+        if (!proof) return eraseContact ? "conflict" : "deleted";
+        if (
+          !contact.unsubscribed ||
+          proof.requestId !== requestId ||
+          !(
+            proof.state === "revoked" ||
+            (proof.state === "pending" && new Date(proof.expiresAt) <= new Date())
+          )
+        )
+          return "conflict";
+        if (eraseContact) {
+          if (
+            !proof.createdContact ||
+            proof.state !== "pending" ||
+            contact.firstName ||
+            contact.lastName ||
+            Object.keys(contact.properties).length ||
+            (await suppressed(tx, auth.teamId, contact.email))
+          )
+            return "conflict";
+          await eraseRecipient(tx, auth.teamId, contact.email);
+          await tx.delete(t).where(eq(t.id, id));
+          await markSegmentsStale(tx, { teamId: auth.teamId });
+          await emit(
+            auth.teamId,
+            { ...contact, email: ERASED_TOMBSTONE, firstName: null, lastName: null },
+            ["contact.deleted"],
+          );
+          return "deleted";
+        }
+        const [updated] = await tx
+          .update(t)
+          .set({ confirmation: null, updatedAt: new Date() })
+          .where(eq(t.id, id))
+          .returning(contactSnapshotColumns);
+        if (updated) await emit(auth.teamId, updated, ["contact.updated"]);
+        return "deleted";
+      });
+      if (result === "missing")
+        return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      if (result === "conflict")
+        return c.json(
+          errorBody(409, "validation_error", "Confirmation is still in use or has changed"),
+          409,
+        );
+      return c.json({ id, deleted: true as const }, 200);
     },
   );
   app.openapi(

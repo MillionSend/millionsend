@@ -289,3 +289,43 @@ it("commits timeline and webhook outbox with confirmation even if queue wakeup f
     app = original;
   }
 });
+
+it("retention clears only an expired or revoked matching inactive proof, preserving profile and suppressions", async () => {
+  const p = await prepare();
+  const path = `/contacts/${p.id}/confirmation?request_id=${p.request_id}`;
+  expect((await call("DELETE", path)).status).toBe(409);
+  await call("PATCH", `/contacts/${p.id}`, { unsubscribed: true, first_name: "Kept" });
+  expect((await call("DELETE", path.replace(p.request_id, randomUUID()))).status).toBe(409);
+  expect((await call("DELETE", path)).status).toBe(200);
+  expect((await call("DELETE", path)).status).toBe(200);
+  expect(await row(p.id)).toMatchObject({
+    unsubscribed: true,
+    firstName: "Kept",
+    confirmation: null,
+  });
+  expect((await confirm(p)).status).toBe(409);
+});
+
+it("abandoned-contact erasure is guarded under the same row lock and refuses active, profiled or suppressed contacts", async () => {
+  const p = await prepare(),
+    path = `/contacts/${p.id}/confirmation?request_id=${p.request_id}&erase_contact=true`;
+  expect((await call("DELETE", path)).status).toBe(409);
+  const before = await row(p.id);
+  if (!before?.confirmation) throw new Error("Missing fixture");
+  await db
+    .update(schema.contacts)
+    .set({
+      confirmation: { ...before.confirmation, expiresAt: new Date(Date.now() - 1).toISOString() },
+      firstName: "Keep",
+    })
+    .where(eq(schema.contacts.id, p.id));
+  expect((await call("DELETE", path)).status).toBe(409);
+  await db
+    .update(schema.contacts)
+    .set({ firstName: null, unsubscribed: false })
+    .where(eq(schema.contacts.id, p.id));
+  expect((await call("DELETE", path)).status).toBe(409);
+  await db.update(schema.contacts).set({ unsubscribed: true }).where(eq(schema.contacts.id, p.id));
+  expect((await call("DELETE", path)).status).toBe(200);
+  expect(await row(p.id)).toBeUndefined();
+});

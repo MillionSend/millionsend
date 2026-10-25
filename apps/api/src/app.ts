@@ -3816,6 +3816,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.on("DELETE", ["/inboxes/:id", "/emails/receiving/:id"], requireAdmin);
   app.on("PATCH", "/inboxes/:id/safety", requireAdmin);
   app.on("DELETE", "/suppressions/:id", requireAdmin);
+  app.on("DELETE", "/contacts/:id/confirmation", requireAdmin);
   app.on("DELETE", ["/contacts/:id", "/audiences/:audienceId/contacts/:id"], (c, next) =>
     c.req.query("erase") === "true" ? requireAdmin(c, next) : next(),
   );

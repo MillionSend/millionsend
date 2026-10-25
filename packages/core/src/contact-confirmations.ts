@@ -9,8 +9,12 @@ export function hasRevocableConfirmation(value: { state: string } | null | undef
 }
 
 /** Evaluated on the locked row, so a racing confirmation cannot escape withdrawal. */
-export function revokeContactConfirmation(column: SQLWrapper, at = new Date()) {
-  const marker = JSON.stringify({ state: "revoked", revokedAt: at.toISOString() });
+export function revokeContactConfirmation(column: SQLWrapper, at = new Date(), withdrawal = true) {
+  const marker = JSON.stringify({
+    state: "revoked",
+    revokedAt: at.toISOString(),
+    ...(withdrawal ? { withdrawnAt: at.toISOString() } : {}),
+  });
   return sql`case when ${column}->>'state' in ('pending','confirmed')
     then ${column} || ${marker}::jsonb else ${column} end`;
 }
@@ -25,7 +29,10 @@ export async function revokeSuppressedConfirmations(
   const t = schema.contacts;
   await db
     .update(t)
-    .set({ confirmation: revokeContactConfirmation(t.confirmation), updatedAt: new Date() })
+    .set({
+      confirmation: revokeContactConfirmation(t.confirmation, new Date(), false),
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(t.teamId, teamId),
