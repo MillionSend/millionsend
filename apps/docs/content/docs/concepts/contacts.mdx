@@ -186,3 +186,57 @@ individual [topics](/concepts/topics). Global unsubscribes set
 `unsubscribed: true` on the contact and stop topic sends and broadcasts;
 transactional sends without a `topic_id` still arrive — see
 [Suppressions](/concepts/suppressions#what-suppression-does).
+
+## Guarded mailbox confirmations
+
+Integrations can stage a new, inactive contact atomically with a confirmation request:
+
+```http
+POST /contacts/confirmation-requests
+Authorization: Bearer YOUR_FULL_ACCESS_KEY
+Content-Type: application/json
+
+{"email":"person@example.com","request_id":"91dfdc15-6c58-40bc-ae3c-cb11a4616775","expires_at":"2026-11-01T12:00:00Z"}
+```
+
+Choose a future expiry and an unguessable request UUID. Store the returned contact ID,
+request ID and timestamps. Repeating the same request is idempotent. A new request can
+replace a still-pending request, invalidating the previous one. Historical contacts
+without a pending confirmation, existing active contacts, revoked requests and
+suppressed addresses are refused with `409`; their profile, creation date and topic
+preferences are preserved.
+
+After verifying a single-use mailbox token and an explicit confirmation action, call
+`POST /contacts/{id}/confirm` with `email`, `request_id` and `confirmed_at` (an ISO
+instant between the request and its expiry). The authenticated integration verifies
+the mailbox token; this endpoint does not issue tokens or send mail. It locks the
+contact and activates only the matching, unexpired pending request without removing
+any suppression. Repeating the identical successful confirmation is idempotent.
+`GET /contacts/{id}/confirmation` reads its current state with a full-access key.
+
+An explicit global unsubscribe through contact PATCH, batch upsert, the dashboard or
+hosted unsubscribe invalidates pending and confirmed requests, even on an already
+inactive contact. Adding a suppression also revokes the request; removing that
+suppression later does not make an old confirmation valid. Topic-only opt-outs retain
+their existing scope. Explicit operator resubscription through the existing generic
+PATCH keeps its existing behavior; integrations should use the guarded endpoint for
+mailbox confirmations.
+
+The integration remains responsible for consent wording, a dated immutable notice
+snapshot, mailbox-token security, withdrawal handling, retention and applicable law.
+Request metadata alone is not proof that a person gave informed consent.
+
+### Verification emails without engagement tracking
+
+Send verification messages through `POST /emails` (or `/emails/batch`) with:
+
+```json
+{"tracking":{"open":false,"click":false}}
+```
+
+These optional flags only disable tracking. Omitted flags use the domain settings;
+`true` is rejected. The preference is encrypted with the body, applies in the worker
+when the message is sent and is part of the API's idempotency identity. No tracking
+pixel or redirect is added for disabled channels. This does not suppress necessary
+delivery, bounce or complaint processing. Keep verification mail neutral, without a
+marketing topic; do not assume a newsletter opt-in also permits engagement tracking.

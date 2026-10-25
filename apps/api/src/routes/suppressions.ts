@@ -5,6 +5,7 @@ import {
   extractAddrSpec,
   hashRecipient,
   normalizeAddress,
+  revokeSuppressedConfirmations,
   type SuppressionEventRow,
   suppressionHashesFor,
   type WebhookEnqueue,
@@ -131,6 +132,11 @@ export function registerSuppressionRoutes(
         idByHash.set(r.emailHash, r.id);
       }
     }
+    await revokeSuppressedConfirmations(
+      db,
+      teamId,
+      entries.map((e) => e.address),
+    );
     const ids = entries.map((e) => {
       const id = e.hashes.map((h) => idByHash.get(h)).find((v) => v !== undefined);
       if (!id) throw new Error("suppression upsert returned no row");

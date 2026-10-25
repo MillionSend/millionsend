@@ -3,6 +3,7 @@ import {
   emitSuppressionEvents,
   hashRecipient,
   recordContactActivity,
+  revokeContactConfirmation,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
@@ -188,6 +189,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
       .update(schema.contacts)
       .set({
         unsubscribed: true,
+        confirmation: revokeContactConfirmation(schema.contacts.confirmation),
         // coalesce keeps the FIRST unsubscribe time: mail scanners re-hit
         // one-click links, and repeats must not walk the timestamp forward.
         unsubscribedAt: sql`coalesce(${schema.contacts.unsubscribedAt}, now())`,

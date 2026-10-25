@@ -11,6 +11,17 @@ import {
 } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
+export interface ContactConfirmation {
+  requestId: string;
+  email: string;
+  requestedAt: string;
+  expiresAt: string;
+  state: "pending" | "confirmed" | "revoked";
+  createdContact: boolean;
+  confirmedAt?: string;
+  revokedAt?: string;
+}
+
 /**
  * Team-global contacts (the Resend "new contacts experience" model): one row
  * per email address per team. Segments (saved filters) and topics reference
@@ -29,6 +40,8 @@ export const contacts = pgTable(
     // Flat string→string custom properties, Resend-style; usable as broadcast
     // merge tokens. Non-string inputs are coerced/rejected at the API boundary.
     properties: jsonb("properties").$type<Record<string, string>>().notNull().default({}),
+    // Integration-managed mailbox confirmation; independent of custom properties.
+    confirmation: jsonb("confirmation").$type<ContactConfirmation>(),
     unsubscribed: boolean("unsubscribed").notNull().default(false),
     // When the contact unsubscribed (null while subscribed) — feeds the
     // audience growth chart alongside createdAt.
