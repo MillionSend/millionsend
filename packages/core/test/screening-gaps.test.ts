@@ -351,15 +351,28 @@ describe("the phishing fingerprints a send compares with", () => {
   });
 });
 
-describe("a link to a local address", () => {
+describe("a link to a loopback address", () => {
   it("is never a new destination, never in probation and never clears, not even on an operator's release", async () => {
     const teamId = await createTeam(db, "local-links");
     const all = ["app.localhost", "127.0.0.1", "lately.example"];
     await clearDestinations(db, teamId, all, NOW, { operator: true });
-    expect(await destinationStanding(db, teamId, [...all, "[::1]"], NOW)).toEqual({
-      novel: [],
+    // A private network's address is a destination like any other.
+    expect(await destinationStanding(db, teamId, [...all, "[::1]", "192.168.1.1"], NOW)).toEqual({
+      novel: ["192.168.1.1"],
       probation: ["lately.example"],
       vouched: ["lately.example"],
+    });
+  });
+
+  it("vouches for nothing, whatever team_destinations holds for it", async () => {
+    const teamId = await createTeam(db, "local-rows");
+    await db
+      .insert(schema.teamDestinations)
+      .values({ teamId, domain: "localhost", clearedAt: NOW, operatorClearedAt: NOW });
+    expect(await destinationStanding(db, teamId, ["localhost"], NOW)).toEqual({
+      novel: [],
+      probation: [],
+      vouched: [],
     });
   });
 });

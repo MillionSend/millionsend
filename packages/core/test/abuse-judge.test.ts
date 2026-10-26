@@ -664,7 +664,7 @@ describe("buildJudgeBlock: the body as the reader sees it", () => {
     expect(rows).toHaveLength(30);
   });
 
-  it("marks a link to a local address and lists it after every other", () => {
+  it("marks a link to a loopback address and lists it after every other", () => {
     const block = buildJudgeBlock({
       ...base,
       html: '<a href="http://app.localhost/verify?t=1">Confirm</a><a href="https://partner.example/help">Help</a><a href="https://lure.example/pay">Pay</a>',

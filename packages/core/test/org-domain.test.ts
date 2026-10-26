@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   asciiHostname,
   isFreeHostName,
-  isLocalAddressHost,
+  isLoopbackHost,
   isRootDomainSend,
   registrableDomain,
   vouchedRegistrableDomain,
@@ -131,8 +131,8 @@ describe("isFreeHostName", () => {
   });
 });
 
-describe("isLocalAddressHost", () => {
-  it("knows the hosts only the reader's own machine or network answers for", () => {
+describe("isLoopbackHost", () => {
+  it("knows the reader's own machine", () => {
     for (const host of [
       "localhost",
       "app.localhost",
@@ -140,46 +140,41 @@ describe("isLocalAddressHost", () => {
       "127.0.0.1",
       "127.8.0.9",
       "0.0.0.0",
+      "[::1]",
+    ]) {
+      expect(isLoopbackHost(host), host).toBe(true);
+    }
+  });
+
+  it("leaves private networks, link-local, public, embedded-v4 and testing names to screening", () => {
+    for (const host of [
       "10.1.2.3",
       "172.16.0.1",
-      "172.31.255.255",
       "192.168.0.10",
-      "[::1]",
       "[fd12:3456::1]",
       "printer.local",
       "wiki.internal",
       "router.home.arpa",
-    ]) {
-      expect(isLocalAddressHost(host), host).toBe(true);
-    }
-  });
-
-  it("leaves link-local, public, embedded-v4 and testing names to screening", () => {
-    for (const host of [
       "169.254.169.254",
       "[fe80::1]",
       "8.8.8.8",
-      "11.0.0.1",
-      "172.32.0.1",
-      "192.169.0.1",
+      "128.0.0.1",
       "[::ffff:808:808]",
       "[2001:db8::1]",
       "localhost.example",
-      "10.0.0.1.example",
-      "relay.onion",
-      "lure.example",
+      "127.0.0.1.example",
       "app.test",
       "x.invalid",
       "example.com",
     ]) {
-      expect(isLocalAddressHost(host), host).toBe(false);
+      expect(isLoopbackHost(host), host).toBe(false);
     }
   });
 
   it("reads a link's host as the URL parser hands it over", () => {
     for (const url of ["http://2130706433/", "http://0x7f.1/", "http://[::1]:3000/x"]) {
-      expect(isLocalAddressHost(new URL(url).hostname), url).toBe(true);
+      expect(isLoopbackHost(new URL(url).hostname), url).toBe(true);
     }
-    expect(isLocalAddressHost(new URL("http://[::ffff:8.8.8.8]/").hostname)).toBe(false);
+    expect(isLoopbackHost(new URL("http://[::ffff:8.8.8.8]/").hostname)).toBe(false);
   });
 });

@@ -42,7 +42,7 @@ import {
 } from "./links.js";
 import { SES_MAILBOX_SIMULATOR_DOMAIN } from "./mailbox-providers.js";
 import type { MonitorSettings } from "./monitor-settings.js";
-import { isLocalAddressHost, ownerDomain, registrableDomain } from "./org-domain.js";
+import { isLoopbackHost, ownerDomain, registrableDomain } from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
 import { teamMemberEmails } from "./receiving/inbox-routing.js";
 import { parseSingleSender } from "./sender-address.js";
@@ -193,9 +193,10 @@ export function messageDestinations(input: {
 /**
  * A message's destinations as its team stands with them: `novel`, never
  * cleared, revoked, or a shortener, which a shortener always is; and
- * `probation`, cleared under DESTINATION_PROBATION_DAYS before `now`. A local
- * address (isLocalAddressHost) is neither: no page a sender serves is there,
- * so there is nothing to screen, clear or date, and it never clears.
+ * `probation`, cleared under DESTINATION_PROBATION_DAYS before `now`. A
+ * loopback address (isLoopbackHost) is none of these, nor `vouched`: no page
+ * a sender serves is there, so there is nothing to screen or date, and it
+ * vouches for nothing, whatever team_destinations holds for it.
  */
 export async function destinationStanding(
   db: Db,
@@ -211,11 +212,11 @@ export async function destinationStanding(
   const cleared = new Map(rows.map((row) => [row.domain, row.clearedAt.getTime()]));
   const vouched = new Set(rows.filter((row) => row.operatorClearedAt).map((row) => row.domain));
   const since = now.getTime() - DESTINATION_PROBATION_DAYS * DAY_MS;
-  const reachable = destinations.filter((d) => !isLocalAddressHost(d));
+  const reachable = destinations.filter((d) => !isLoopbackHost(d));
   return {
     novel: reachable.filter((d) => isShortener(d) || !cleared.has(d)),
     probation: reachable.filter((d) => !isShortener(d) && (cleared.get(d) ?? 0) > since),
-    vouched: destinations.filter((d) => !isShortener(d) && vouched.has(d)),
+    vouched: reachable.filter((d) => !isShortener(d) && vouched.has(d)),
   };
 }
 
@@ -299,8 +300,8 @@ export function verdictClearsDestinations(
 
 /**
  * The team cleared these destinations: mail to them no longer waits. A
- * shortener never clears, nor a local address, so a verdict resting on one
- * is never vouched and always parks; a verdict never clears a revoked
+ * shortener never clears, nor a loopback address, so a verdict resting on
+ * one is never vouched; a verdict never clears a revoked
  * destination again; an operator's release (`operator`) does.
  */
 export async function clearDestinations(
@@ -310,7 +311,7 @@ export async function clearDestinations(
   now: Date = new Date(),
   opts: { operator?: boolean } = {},
 ): Promise<void> {
-  const domains = destinations.filter((d) => !isShortener(d) && !isLocalAddressHost(d));
+  const domains = destinations.filter((d) => !isShortener(d) && !isLoopbackHost(d));
   if (domains.length === 0) return;
   const operatorClearedAt = opts.operator ? now : null;
   const rows = db

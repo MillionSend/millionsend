@@ -3,7 +3,7 @@ import { recipientDomainCheckEnabled } from "@millionsend/config";
 import { parse } from "tldts";
 import { createFixedWindowLimiter } from "./domain-lifecycle.js";
 import { SES_MAILBOX_SIMULATOR_DOMAIN } from "./mailbox-providers.js";
-import { HOME_ARPA, isDomainOrSubdomain, normalizeHostname, topLevelLabel } from "./org-domain.js";
+import { isDomainOrSubdomain, normalizeHostname, topLevelLabel } from "./org-domain.js";
 import { createPromiseCache } from "./promise-cache.js";
 import { parseSingleSender } from "./sender-address.js";
 import { DAY_MS } from "./utc-day.js";
@@ -23,6 +23,9 @@ const RESERVED_TLDS = new Set([
   "alt",
   "internal",
 ]);
+
+/** RFC 8375. The rest of .arpa stays allowed: uri.arpa and urn.arpa publish MX records. */
+const HOME_ARPA = "home.arpa";
 
 /** RFC 2606 §3; each publishes a null MX (RFC 7505). */
 const DOCUMENTATION_DOMAINS = ["example.com", "example.net", "example.org"];

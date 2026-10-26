@@ -302,7 +302,7 @@ it("parks a new team's reset mail to its own name on an app platform instead of 
   expect(await sendEmail(db, sendDeps, { emailId: again })).toBe("sent");
 });
 
-it("parks a new team's mail to a local address instead of holding the team, and never vouches the address", async () => {
+it("parks a new team's mail to a loopback address instead of holding the team, and never vouches the address", async () => {
   const t = await team("local-new", "new", "example");
   const out = await email(t, "http://app.localhost/verify?token=x");
   await sendEmail(db, sendDeps, { emailId: out });
@@ -326,7 +326,7 @@ it("parks a new team's mail to a local address instead of holding the team, and 
   expect(await sendEmail(db, sendDeps, { emailId: again })).toBe("parked");
 });
 
-it("never screens a link to a local address as a new destination", async () => {
+it("never screens a link to a loopback address as a new destination", async () => {
   const t = await team("local-settled", "established", "example");
   const id = await email(t, "http://localhost:3000/reset?token=x");
   expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("sent");

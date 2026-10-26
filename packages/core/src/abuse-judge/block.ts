@@ -9,7 +9,7 @@ import {
 } from "../links.js";
 import { maskEmailLocalParts } from "../mask.js";
 import {
-  isLocalAddressHost,
+  isLoopbackHost,
   ownerDomain,
   registrableDomain,
   vouchedRegistrableDomain,
@@ -116,7 +116,7 @@ export function clip(text: string, max: number): string {
   return `${text.slice(0, max - tail)} […${text.length - max} characters left out…] ${text.slice(-tail)}`;
 }
 
-/** Marks a link to the reader's own machine or network in the outbound link table. */
+/** Marks a link to the reader's own machine (isLoopbackHost) in the outbound link table. */
 export const LOCAL_ADDRESS_MARK = "(local address)";
 /** The lines the judge's policy reads the message's own words from (questions.ts judgePolicy). */
 export const SUBJECT_LABEL = "Subject:";
@@ -124,7 +124,7 @@ export const VISIBLE_TEXT_LABEL = "Visible text:";
 
 /**
  * The name a link's row shows: the registrable domain it lands on, or what
- * kind of link it is. `markLocal` adds LOCAL_ADDRESS_MARK to a local
+ * kind of link it is. `markLocal` adds LOCAL_ADDRESS_MARK to a loopback
  * address's: on outbound mail it is a developer's own build, while to an
  * agent reading received mail it can be the very thing a lure points at.
  */
@@ -132,7 +132,7 @@ function destinationName(raw: string, link: ResolvedLink, markLocal = false): st
   if (link.url) {
     const host = new URL(link.url).hostname;
     const name = registrableDomain(host);
-    return markLocal && isLocalAddressHost(host) ? `${name} ${LOCAL_ADDRESS_MARK}` : name;
+    return markLocal && isLoopbackHost(host) ? `${name} ${LOCAL_ADDRESS_MARK}` : name;
   }
   if (link.unresolved) return "(unresolved)";
   if (/^\s*mailto:/i.test(raw)) return "mailto";
@@ -145,8 +145,8 @@ function destinationName(raw: string, link: ResolvedLink, markLocal = false): st
  * domain the team never used first (an unresolved link among them while
  * the team has not cleared one), then other links off its verified domains,
  * then the rest, each group in document order, so a lure cannot hide behind
- * thirty links to the sender's own site. With `markLocal`, links to a local
- * address come last of all, marked (destinationName).
+ * thirty links to the sender's own site. With `markLocal`, links to a
+ * loopback address come last of all, marked (destinationName).
  */
 export function linkRows(
   links: BodyLink[],
@@ -159,7 +159,7 @@ export function linkRows(
     if (link.unresolved) return novel?.has(UNRESOLVED_DESTINATION) ? 0 : 1;
     if (!link.url) return 2;
     const host = new URL(link.url).hostname;
-    if (opts.markLocal && isLocalAddressHost(host)) return 3;
+    if (opts.markLocal && isLoopbackHost(host)) return 3;
     if (novel?.has(registrableDomain(host)) || novel?.has(ownerDomain(host))) return 0;
     return owned.has(ownerDomain(host)) ? 2 : 1;
   };

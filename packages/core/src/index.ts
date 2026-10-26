@@ -601,7 +601,7 @@ export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-clas
 export {
   asciiHostname,
   isFreeHostName,
-  isLocalAddressHost,
+  isLoopbackHost,
   isRootDomainSend,
   linkDomain,
   ownerDomain,

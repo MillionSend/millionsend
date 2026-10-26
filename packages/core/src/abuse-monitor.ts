@@ -5,7 +5,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
-import { isFreeHostName, isLocalAddressHost, registrableDomain } from "./org-domain.js";
+import { isFreeHostName, isLoopbackHost, registrableDomain } from "./org-domain.js";
 import { fetchTeamStanding, suspendTeam } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -677,7 +677,7 @@ const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
 
 /**
  * A phishing-type verdict that rests on nothing but a sign-in, reset or
- * billing link to a product's own name on an app platform, or to a local
+ * billing link to a product's own name on an app platform, or to a loopback
  * address (a developer's build left pointing at its own machine), on mail
  * that poses as no other brand: phishing_credentials or payment_redirect
  * at most for a category (PLATFORM_LINK_CATEGORIES), reasons saying only
@@ -688,8 +688,8 @@ const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
  * review list instead, with the team's other mail waiting on a
  * phishing-type verdict, unless an operator had cleared every such name,
  * which also keeps a verdict of this shape from taking the clearance back. A
- * local address never clears (clearDestinations), so a verdict resting on
- * one always waits for a person: a decoy local link can sit beside a lure
+ * loopback address never clears (clearDestinations), so a verdict resting
+ * on one always waits for a person: a decoy loopback link can sit beside a lure
  * the link table never shows. A lure that names a brand, moves a payment or
  * carries no link keeps every rule, and the callers never spare a
  * broadcast's sample.
@@ -703,7 +703,7 @@ export function isPlatformLinkVerdict(
     destinations.length > 0 &&
     (v.categories ?? []).every((c) => PLATFORM_LINK_CATEGORIES.has(c)) &&
     (v.reasons ?? []).every((r) => PLATFORM_LINK_REASONS.has(r)) &&
-    destinations.every((d) => isPlatformTenantName(d) || isLocalAddressHost(d))
+    destinations.every((d) => isPlatformTenantName(d) || isLoopbackHost(d))
   );
 }
 

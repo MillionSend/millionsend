@@ -769,7 +769,7 @@ describe("the review hold", () => {
     ).toMatchObject({ held: { rule: "score" }, spared: null });
   });
 
-  it("spares a new team the hold for a credential link to a local address, as for a platform name", async () => {
+  it("spares a new team the hold for a credential link to a loopback address, as for a platform name", async () => {
     const RESET = {
       verdict: "abuse" as const,
       categories: ["phishing_credentials"],
