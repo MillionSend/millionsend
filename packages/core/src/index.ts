@@ -96,6 +96,7 @@ export {
   monitorRate,
   monitorRowWithHistory,
   monitorSamplesByTeam,
+  monitorStandingCounts,
   monitorTier,
   noteAcceptedSend,
   planBroadcastSamples,
@@ -600,13 +601,20 @@ export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-clas
 export {
   asciiHostname,
   isFreeHostName,
+  isLoopbackHost,
   isRootDomainSend,
   linkDomain,
   ownerDomain,
   registrableDomain,
 } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
-export { findPixCodes, type PixCode, type PixKeyKind, parsePix } from "./pix.js";
+export {
+  findPixCodes,
+  mailCarriesPix,
+  type PixCode,
+  type PixKeyKind,
+  parsePix,
+} from "./pix.js";
 export {
   effectivePlan,
   formatVolume,
@@ -712,6 +720,7 @@ export {
   messageDestinations,
   NOVEL_DESTINATIONS_MAX,
   OPERATOR_PARK_REASONS,
+  reachesOnlyTeam,
   releaseWaitingEmails,
   revokeDestinations,
   SCREEN_HOLD_WAIT_MS,

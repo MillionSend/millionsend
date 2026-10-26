@@ -5,7 +5,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
-import { isFreeHostName, registrableDomain } from "./org-domain.js";
+import { isFreeHostName, isLoopbackHost, registrableDomain } from "./org-domain.js";
 import { fetchTeamStanding, suspendTeam } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -662,22 +662,38 @@ export function isPlatformTenantName(hostname: string): boolean {
   return isFreeHostName(hostname) && PLATFORM_HOST_PARENTS.has(registrableDomain(hostname));
 }
 
-/** What the judge says of a credential link to a page off the verified domains, and nothing more. */
+/** What the judge says of a sign-in or billing link to a page off the verified domains, and nothing more. */
 const PLATFORM_LINK_REASONS: ReadonlySet<string> = new Set(["off_domain_lure", "harvests_secrets"]);
+/**
+ * The classes a product's own sign-in, reset or billing page draws. A
+ * payment class counts only without a payment instrument: the reasons above
+ * leave out payment_redirect and no_link_lure, which a Pix code, changed bank
+ * details or a callback name, and the caller checks for a decoded Pix code.
+ */
+const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
+  "phishing_credentials",
+  "payment_redirect",
+]);
 
 /**
- * A phishing-type verdict that rests on nothing but a credential link to a
- * product's own name on an app platform, on mail that poses as no other
- * brand: phishing_credentials at most for a category, reasons saying only
+ * A phishing-type verdict that rests on nothing but a sign-in, reset or
+ * billing link to a product's own name on an app platform, or to a loopback
+ * address (a developer's build left pointing at its own machine), on mail
+ * that poses as no other brand: phishing_credentials or payment_redirect
+ * at most for a category (PLATFORM_LINK_CATEGORIES), reasons saying only
  * that the link is off the verified domains and asks for a secret, and
- * every destination given a platform tenant name. The judge cannot tell
- * such a page from a lure, so the hold policy spares the team the hold
- * such a verdict meets (applyJudgedSample's `platformLink`): the mail
- * waits for the review list instead, with the team's other mail waiting
- * on a phishing-type verdict, unless an operator had cleared every such
- * name, which also keeps a verdict of this shape from taking the clearance
- * back. A lure that names a brand, moves a payment or carries no link
- * keeps every rule, and the callers never spare a broadcast's sample.
+ * every destination such a name. The judge cannot tell such a
+ * page from a lure, so the hold policy spares the team the hold such a
+ * verdict meets (applyJudgedSample's `platformLink`): the mail waits for the
+ * review list instead, with the team's other mail waiting on a
+ * phishing-type verdict, unless an operator had cleared every such name,
+ * which also keeps a verdict of this shape from taking the clearance back. A
+ * loopback address never clears (clearDestinations), so a verdict resting
+ * on one always waits for a person: a decoy loopback link can sit beside a
+ * lure the link table never shows. A lure that names a brand, moves a
+ * payment or
+ * carries no link keeps every rule, and the callers never spare a
+ * broadcast's sample.
  */
 export function isPlatformLinkVerdict(
   v: HoldVerdictFields,
@@ -686,9 +702,9 @@ export function isPlatformLinkVerdict(
   return (
     v.verdict === "abuse" &&
     destinations.length > 0 &&
-    (v.categories ?? []).every((c) => c === "phishing_credentials") &&
+    (v.categories ?? []).every((c) => PLATFORM_LINK_CATEGORIES.has(c)) &&
     (v.reasons ?? []).every((r) => PLATFORM_LINK_REASONS.has(r)) &&
-    destinations.every(isPlatformTenantName)
+    destinations.every((d) => isPlatformTenantName(d) || isLoopbackHost(d))
   );
 }
 
@@ -1072,9 +1088,28 @@ export async function monitorSamplesByTeam(
   teamIds: readonly string[],
   now: Date = new Date(),
 ): Promise<Map<string, number>> {
+  const counts = await monitorStandingCounts(db, teamIds, MONITOR_SETTING_DEFAULTS.flagScore, now);
+  return new Map([...counts].map(([teamId, c]) => [teamId, c.samples]));
+}
+
+/**
+ * Per team, the judged samples of the last week and how many of them the
+ * judge called abuse from `flagScore`: the monitor flag wants one of those
+ * beside its risk.
+ */
+export async function monitorStandingCounts(
+  db: Db,
+  teamIds: readonly string[],
+  flagScore: number,
+  now: Date = new Date(),
+): Promise<Map<string, { samples: number; abuse: number }>> {
   if (teamIds.length === 0) return new Map();
   const rows = await db
-    .select({ teamId: ms.teamId, n: sql<number>`count(*)::int` })
+    .select({
+      teamId: ms.teamId,
+      samples: sql<number>`count(*)::int`,
+      abuse: sql<number>`count(*) filter (where ${ms.verdict} = 'abuse' and ${ms.score} >= ${flagScore})::int`,
+    })
     .from(ms)
     .where(
       and(
@@ -1084,7 +1119,7 @@ export async function monitorSamplesByTeam(
       ),
     )
     .groupBy(ms.teamId);
-  return new Map(rows.map((r) => [r.teamId, r.n]));
+  return new Map(rows.map((r) => [r.teamId, { samples: r.samples, abuse: r.abuse }]));
 }
 
 export interface TeamMonitorOverview {

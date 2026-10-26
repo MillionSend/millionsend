@@ -2,7 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
-import { MONITOR_FLAG_RISK_DEFAULT, monitorSamplesByTeam, riskAt } from "./abuse-monitor.js";
+import { MONITOR_FLAG_RISK_DEFAULT, monitorStandingCounts, riskAt } from "./abuse-monitor.js";
 import { fetchAccountScore } from "./account-score.js";
 import {
   type DeliverabilityHealth,
@@ -12,6 +12,7 @@ import {
   MIN_GUARDRAIL_VOLUME,
 } from "./deliverability.js";
 import { imitatedBrandIn } from "./imitated-brands.js";
+import { MONITOR_SETTING_DEFAULTS } from "./monitor-settings.js";
 import { fetchTeamStanding } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -47,6 +48,8 @@ export interface TeamStandingRow {
   /** The content monitor's risk and the judged samples of the last week; null and 0 when it never drew. */
   monitorRisk: number | null;
   monitorSamples: number;
+  /** The week's verdicts the judge called abuse from the flag score; kept in memory only, like monitorSamples. */
+  monitorAbuse: number;
 }
 
 /**
@@ -59,6 +62,7 @@ export interface TeamStandingRow {
 export async function computeTeamStandings(
   db: Db,
   now: Date = new Date(),
+  opts: { flagScore?: number | undefined } = {},
 ): Promise<TeamStandingRow[]> {
   const c = schema.usageCounters;
   const since = utcDay(now.getTime() - (STANDING_WINDOW_DAYS - 1) * DAY_MS);
@@ -87,7 +91,12 @@ export async function computeTeamStandings(
             .where(inArray(schema.teamMonitor.teamId, teamIds))
         ).map((r) => [r.teamId, riskAt(r, now)]),
   );
-  const samples = await monitorSamplesByTeam(db, teamIds, now);
+  const samples = await monitorStandingCounts(
+    db,
+    teamIds,
+    opts.flagScore ?? MONITOR_SETTING_DEFAULTS.flagScore,
+    now,
+  );
   const rows: TeamStandingRow[] = [];
   for (const team of active) {
     const [health, score] = await Promise.all([
@@ -105,7 +114,8 @@ export async function computeTeamStandings(
       complaintSent7d: health.complaintSent,
       sent30d: team.sent30d,
       monitorRisk: risks.get(team.teamId) ?? null,
-      monitorSamples: samples.get(team.teamId) ?? 0,
+      monitorSamples: samples.get(team.teamId)?.samples ?? 0,
+      monitorAbuse: samples.get(team.teamId)?.abuse ?? 0,
     });
   }
   return rows;
@@ -129,10 +139,14 @@ export async function saveTeamStandings(
   await db
     .insert(schema.teamStandings)
     .values(
-      rows.map(({ monitorSamples: _samples, complaintSent7d: _complaintSent, ...r }) => ({
-        ...r,
-        computedAt: now,
-      })),
+      rows.map(
+        ({
+          monitorSamples: _samples,
+          monitorAbuse: _abuse,
+          complaintSent7d: _complaintSent,
+          ...r
+        }) => ({ ...r, computedAt: now }),
+      ),
     )
     .onConflictDoUpdate({
       target: schema.teamStandings.teamId,
@@ -193,9 +207,11 @@ export function flagTrigger(s: TeamStandingRow, opts: FlagTriggerOptions = {}): 
   if (s.sent7d >= MIN_GUARDRAIL_VOLUME && s.hardBounceRate7d >= FLAG_HARD_BOUNCE_RATE) {
     return { reason: "complaints", detail: { metric: "hard_bounce", rate: s.hardBounceRate7d } };
   }
+  // A risk that only clean verdicts carried over the line says nothing the judge called abuse.
   if (
     s.monitorRisk !== null &&
-    s.monitorRisk >= (opts.monitorFlagRisk ?? MONITOR_FLAG_RISK_DEFAULT)
+    s.monitorRisk >= (opts.monitorFlagRisk ?? MONITOR_FLAG_RISK_DEFAULT) &&
+    s.monitorAbuse > 0
   ) {
     return {
       reason: "monitor",
@@ -218,7 +234,8 @@ const STANDING_REASONS: TeamFlagReason[] = ["monitor", "complaints", "guardrail"
  * trigger that lapsed and came back is a new finding, judged against the
  * previous run's standings, so `previous` must be the rows saved before this
  * run's); an open automatic flag whose trigger is gone is cleared, unless
- * the team is held for review, which waits on an operator; an operator's
+ * the team is held for review, which waits on an operator (an open monitor
+ * flag's trigger is its risk alone); an operator's
  * manual flag, and brand and linkage flags, which no standing triggers, are
  * never touched. `opened_at` of an open flag is left alone so the list's "since"
  * holds still.
@@ -227,8 +244,12 @@ export async function syncTeamFlags(
   db: Db,
   standings: readonly TeamStandingRow[],
   now: Date = new Date(),
-  previous?: readonly (Omit<TeamStandingRow, "monitorSamples" | "complaintSent7d"> & {
+  previous?: readonly (Omit<
+    TeamStandingRow,
+    "monitorSamples" | "monitorAbuse" | "complaintSent7d"
+  > & {
     monitorSamples?: number;
+    monitorAbuse?: number;
     complaintSent7d?: number;
     computedAt?: Date;
   })[],
@@ -243,14 +264,22 @@ export async function syncTeamFlags(
       // A stored row has no sample count; the trigger only reads the risk off
       // it. Nor a count of the sends that could draw a complaint: its sends
       // bound that from above, so a trigger that held never reads as lapsed.
-      { monitorSamples: 0, complaintSent7d: row.sent7d, ...row } as TeamStandingRow,
+      // Nor an abuse count: a risk it stored over the line flagged, so it reads as one.
+      {
+        monitorSamples: 0,
+        monitorAbuse: 1,
+        complaintSent7d: row.sent7d,
+        ...row,
+      } as TeamStandingRow,
     ]),
   );
   const lastRunAt = priorRows.reduce((at, row) => Math.max(at, row.computedAt?.getTime() ?? 0), 0);
   const openByTeam = new Map(open.map((row) => [row.teamId, row]));
   const triggered = new Map(
     standings.flatMap((s) => {
-      const trigger = flagTrigger(s, opts);
+      // The abuse verdict a monitor flag wants is for opening it.
+      const keep = openByTeam.get(s.teamId)?.reason === "monitor";
+      const trigger = flagTrigger(keep ? { ...s, monitorAbuse: 1 } : s, opts);
       return trigger ? [[s.teamId, trigger] as const] : [];
     }),
   );

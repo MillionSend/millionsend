@@ -19,6 +19,7 @@ import {
   type MediaIssue,
   type MonitorSettings,
   type MonitorTier,
+  mailCarriesPix,
   mediaParks,
   opaqueFacts,
   openAttachments,
@@ -230,8 +231,11 @@ async function judgePending(
       : null;
   // A product's own page on a platform, read as a lure: the team is spared the hold, and the mail
   // parks unless an operator cleared every such name. Judged after the send with no such clearance,
-  // nothing is left to park, so the hold stands.
-  const platformShape = sample.broadcastId === null && isPlatformLinkVerdict(verdict, standing.all);
+  // nothing is left to park, so the hold stands. A Pix code in the mail, in its text or read from
+  // its images and files, is a payment instrument, which no such page needs.
+  const paysByPix = (media?.findings.pix.length ?? 0) > 0 || mailCarriesPix(loaded.input);
+  const platformShape =
+    sample.broadcastId === null && !paysByPix && isPlatformLinkVerdict(verdict, standing.all);
   const vouched = platformShape && standing.all.every((d) => vouchedNames.has(d));
   const platformLink = platformShape && (sample.screening || vouched);
   // The verdict and its fold commit together: a crash between them would
@@ -273,7 +277,7 @@ async function judgePending(
     if (vouched) {
       await t.update(ms).set({ sparedHold: "vouched" }).where(eq(ms.id, sample.id));
     } else if (applied.spared) {
-      // The park rests on every platform name the mail links to; releasing it clears them all.
+      // The park rests on every name the spare rests on; releasing it clears its platform names.
       await t
         .update(ms)
         .set({ sparedHold: applied.spared.rule, destinations: standing.all })
@@ -293,6 +297,7 @@ async function judgePending(
   // phishing: the clearance goes, and the operator hears of it.
   const platformProbation =
     sample.broadcastId === null &&
+    !paysByPix &&
     isPlatformLinkVerdict(verdict, standing.probation) &&
     standing.probation.every((d) => vouchedNames.has(d));
   if (

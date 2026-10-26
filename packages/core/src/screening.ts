@@ -40,8 +40,9 @@ import {
   resolveTextUrl,
   UNRESOLVED_DESTINATION,
 } from "./links.js";
+import { SES_MAILBOX_SIMULATOR_DOMAIN } from "./mailbox-providers.js";
 import type { MonitorSettings } from "./monitor-settings.js";
-import { ownerDomain, registrableDomain } from "./org-domain.js";
+import { isLoopbackHost, ownerDomain, registrableDomain } from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
 import { teamMemberEmails } from "./receiving/inbox-routing.js";
 import { parseSingleSender } from "./sender-address.js";
@@ -192,7 +193,10 @@ export function messageDestinations(input: {
 /**
  * A message's destinations as its team stands with them: `novel`, never
  * cleared, revoked, or a shortener, which a shortener always is; and
- * `probation`, cleared under DESTINATION_PROBATION_DAYS before `now`.
+ * `probation`, cleared under DESTINATION_PROBATION_DAYS before `now`. A
+ * loopback address (isLoopbackHost) is none of these, nor `vouched`: no page
+ * a sender serves is there, so there is nothing to screen or date, and it
+ * vouches for nothing, whatever team_destinations holds for it.
  */
 export async function destinationStanding(
   db: Db,
@@ -208,10 +212,11 @@ export async function destinationStanding(
   const cleared = new Map(rows.map((row) => [row.domain, row.clearedAt.getTime()]));
   const vouched = new Set(rows.filter((row) => row.operatorClearedAt).map((row) => row.domain));
   const since = now.getTime() - DESTINATION_PROBATION_DAYS * DAY_MS;
+  const reachable = destinations.filter((d) => !isLoopbackHost(d));
   return {
-    novel: destinations.filter((d) => isShortener(d) || !cleared.has(d)),
-    probation: destinations.filter((d) => !isShortener(d) && (cleared.get(d) ?? 0) > since),
-    vouched: destinations.filter((d) => !isShortener(d) && vouched.has(d)),
+    novel: reachable.filter((d) => isShortener(d) || !cleared.has(d)),
+    probation: reachable.filter((d) => !isShortener(d) && (cleared.get(d) ?? 0) > since),
+    vouched: reachable.filter((d) => !isShortener(d) && vouched.has(d)),
   };
 }
 
@@ -295,8 +300,9 @@ export function verdictClearsDestinations(
 
 /**
  * The team cleared these destinations: mail to them no longer waits. A
- * shortener never clears, and a verdict never clears a revoked destination
- * again; an operator's release (`operator`) does.
+ * shortener never clears, nor a loopback address, so a verdict resting on
+ * one is never vouched; a verdict never clears a revoked
+ * destination again; an operator's release (`operator`) does.
  */
 export async function clearDestinations(
   db: Db,
@@ -305,7 +311,7 @@ export async function clearDestinations(
   now: Date = new Date(),
   opts: { operator?: boolean } = {},
 ): Promise<void> {
-  const domains = destinations.filter((d) => !isShortener(d));
+  const domains = destinations.filter((d) => !isShortener(d) && !isLoopbackHost(d));
   if (domains.length === 0) return;
   const operatorClearedAt = opts.operator ? now : null;
   const rows = db
@@ -555,11 +561,13 @@ export async function anyYoungLinkDomain(
 /**
  * What screening reads of a team, once per send: its monitor tier, and
  * whether it is in its first window, both with the usage history so a quiet
- * old team is not new. An exempt team never has a first window.
+ * old team is not new. An exempt team never has a first window. `holdSpent`:
+ * the review hold already held the team once, so none can follow.
  */
 export interface ScreeningTeam {
   tier: MonitorTier;
   firstWindow: boolean;
+  holdSpent: boolean;
 }
 
 export async function screeningTeam(
@@ -568,9 +576,14 @@ export async function screeningTeam(
   teamId: string,
   now: Date,
 ): Promise<ScreeningTeam> {
-  const state = await loadMonitorState(db, await monitorRowWithHistory(db, teamId, now), now);
+  const row = await monitorRowWithHistory(db, teamId, now);
+  const state = await loadMonitorState(db, row, now);
   const tier = monitorTier(state, s, now);
-  return { tier, firstWindow: tier !== "exempt" && inFirstWindow(state, s, now) };
+  return {
+    tier,
+    firstWindow: tier !== "exempt" && inFirstWindow(state, s, now),
+    holdSpent: row.heldAt !== null,
+  };
 }
 
 /** A team's monitor tier as screening reads it (see screeningTeam). */
@@ -647,9 +660,7 @@ async function coldSharedSend(
   db: Db,
   email: Pick<ScreenedEmail, "teamId" | "inboxId" | "threadId" | "to" | "cc" | "bcc">,
 ): Promise<boolean> {
-  const recipients = [
-    ...new Set([...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])].map(addressKey)),
-  ];
+  const recipients = recipientKeys(email);
   const { inboxId, threadId } = email;
   const c = schema.inboxCorrespondents;
   const [members, senders, wroteIn] = await Promise.all([
@@ -668,6 +679,34 @@ async function coldSharedSend(
   ]);
   const known = new Set([...members, ...senders, ...wroteIn.map((row) => row.address)]);
   return recipients.some((address) => !known.has(address));
+}
+
+/** Every address an email goes to, To, Cc and Bcc, each once in its compared form. */
+function recipientKeys(email: Pick<ScreenedEmail, "to" | "cc" | "bcc">): string[] {
+  return [...new Set([...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])].map(addressKey))];
+}
+
+/**
+ * Whether an email goes to its own team's people and no one else: every
+ * recipient a member's login, or the SES mailbox simulator, on mail that is
+ * not a broadcast's copy. Such mail never waits on a verdict, though it
+ * parks as any mail does: a key taken from the team could aim a lure at the
+ * team's own people. The review hold still reads it, since a lure a sender
+ * tries on itself first is the earliest sign of one. An address on the
+ * team's own domains is not enough: a team's account, or a key taken from
+ * it, could reach its whole organisation's staff that way.
+ */
+export async function reachesOnlyTeam(
+  db: Db,
+  email: Pick<ScreenedEmail, "teamId" | "broadcastId" | "to" | "cc" | "bcc">,
+): Promise<boolean> {
+  if (email.broadcastId !== null) return false;
+  const recipients = recipientKeys(email);
+  if (recipients.length === 0) return false;
+  const members = new Set(await teamMemberEmails(db, email.teamId));
+  return recipients.every(
+    (address) => members.has(address) || address.endsWith(`@${SES_MAILBOX_SIMULATOR_DOMAIN}`),
+  );
 }
 
 /** What screening reads of one email before SES. */
@@ -922,15 +961,16 @@ async function startScreening(
  * and no verdict waits for one (startScreening); a phishing-type verdict
  * that held nothing waits SCREEN_HOLD_WAIT_MS more while its team is new
  * (first-window mail, broadcast copies, and mail whose new link domain's age
- * is not known), in case the burst it belongs to holds the team; mail to a
- * new destination of a team past new parks on a verdict that
- * destinationVerdictParks, and cold shared-domain mail of any team not
- * exempt on a phishing-type verdict from `holdRepeatScore`; a judge that
- * keeps failing parks a young domain's email, shared-domain mail included,
- * and lets an older one's through; media the judge could not clear parks
- * as mediaParks says. The team's own standing (a hold, a pause) is the
- * caller's to read first, on every pass; `team` is what it already read of
- * the team this pass.
+ * is not known), in case the burst it belongs to holds the team, unless the
+ * team's one hold is spent; mail to a new destination of a team past new
+ * parks on a verdict that destinationVerdictParks, and cold shared-domain
+ * mail of any team not exempt on a phishing-type verdict from
+ * `holdRepeatScore`; mail that reaches only the team's own people
+ * (reachesOnlyTeam) never waits; a judge that keeps failing parks a
+ * young domain's email, shared-domain mail included, and lets an older
+ * one's through; media the judge could not clear parks as mediaParks says.
+ * The team's own standing (a hold, a pause) is the caller's to read first,
+ * on every pass; `team` is what it already read of the team this pass.
  */
 export async function screenBeforeSend(
   db: Db,
@@ -996,7 +1036,7 @@ export async function screenBeforeSend(
   if (waiting === "wait") return { action: "wait", until: null };
   if (waiting === "park") return { action: "park", reason: "screening" };
   if (waiting === "proceed") return { action: "send", sample: { id: sample.id, unjudged: true } };
-  // The hold this verdict met spared the team for a platform link: the mail waits for a person instead.
+  // The hold this verdict met spared the team (isPlatformLinkVerdict): the mail waits for a person instead.
   if (sample.sparedHold && sample.sparedHold !== "vouched") {
     return { action: "park", reason: "destination" };
   }
@@ -1008,12 +1048,14 @@ export async function screenBeforeSend(
   if (shared && team.tier !== "exempt" && (await coldSharedSend(db, email))) {
     return { action: "park", reason: "recipient" };
   }
-  // An operator cleared every platform name the verdict rests on: nothing to wait for.
+  // An operator cleared every name the spare rests on: nothing to wait for.
   if (sample.sparedHold === "vouched") return { action: "send", sample: screened };
-  const waits = email.broadcastId
-    ? team.tier === "new"
-    : team.firstWindow || (team.tier === "new" && destinations > 0 && sample.linkYoung === null);
-  if (sample.judgedAt && waits) {
+  const waits =
+    !team.holdSpent &&
+    (email.broadcastId
+      ? team.tier === "new"
+      : team.firstWindow || (team.tier === "new" && destinations > 0 && sample.linkYoung === null));
+  if (sample.judgedAt && waits && !(await reachesOnlyTeam(db, email))) {
     const until = new Date(sample.judgedAt.getTime() + SCREEN_HOLD_WAIT_MS);
     if (now < until) return { action: "wait", until };
   }

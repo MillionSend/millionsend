@@ -1144,8 +1144,11 @@ guardrail, the account score) run on every send whether or not the judge is
 on. Self-hosters can leave it off; the cloud runs it.
 
 **What it does and does not do.** It opens the `monitor` flag on Trust &
-safety when a team's risk crosses the flag line, emails the operator once a
-day per team past the alert line, and, for a team in the New tier only
+safety when a team's risk crosses the flag line and the judge called at least
+one of its messages abuse from the flag score in the last 7 days (a risk that
+only clean verdicts carried over the line opens nothing; an open flag stays
+until the risk falls back under the line), emails the operator once a day per
+team past the alert line, and, for a team in the New tier only
 (inside its first 1,000 sends or 72 hours, or under 10,000 sends within 7
 days), pauses broadcasts when the risk passes the pause line and a sampled
 message scored 90 or more within a day, or at once when a broadcast's own
@@ -1191,14 +1194,23 @@ never samples it. A message judged before SES that holds the team waits with
 the rest of its mail; one judged after sending had already gone out, and the
 hold stops what follows. In the first window, a message judged phishing-type
 from 80 that holds nothing waits 2 minutes before it is sent: a burst
-reaches the repeat count within them. `MONITOR_AUTO_HOLD=false` switches the
-hold off, and the screening before SES with it.
+reaches the repeat count within them. Mail that reaches only the team's own
+people (every recipient a member's login, or the SES mailbox simulator;
+broadcasts aside) never waits, though it parks as any mail does, since a key
+taken from the team could aim a lure at the team's own people; the hold
+still reads it, since a lure tried on its own sender first is the earliest
+sign of one. Once a team's one hold is
+spent, nothing waits for a hold that cannot come. `MONITOR_AUTO_HOLD=false`
+switches the hold off, and the screening before SES with it.
 
 **New destinations, at every tier.** A message is also judged before SES,
 whatever the team's tier (Trusted included), when it carries a destination
 the team has not cleared: the owner domain of a link (a free host's
 `x.pages.dev` counts on its own) or of its Reply-To, less the team's
-verified domains. A verdict under 70 that names nothing phishing-type clears
+verified domains. A link to a loopback address (localhost and its
+subdomains, 127.0.0.1, `::1`) never is: no page a sender serves is there, and
+it never clears; a private network's address is a destination like any other.
+A verdict under 70 that names nothing phishing-type clears
 the message's destinations for the team, when it carried 5 new ones at most;
 so does releasing mail parked for a new destination, or waiting after a
 verdict, while releasing mail parked for its media or a failing judge clears
@@ -1222,17 +1234,22 @@ of an age not known makes its mail wait 2 minutes. Past New, the mail is
 parked for the review list on a phishing-type verdict from 90, or from 80
 with a link domain under 7 days old or of an age not known, and the operator
 is mailed at most once a day per team; a team past New is never held
-automatically. A phishing-type verdict that rests only on a sign-in, reset or
-one-time-code link to a product's own name on an app platform
+automatically. A phishing-type verdict that rests only on a sign-in, reset,
+one-time-code or billing link to a product's own name on an app platform
 (`ref.supabase.co`, `app.up.railway.app`, `x.workers.dev`: the parents are
-`PLATFORM_HOST_PARENTS` in `packages/core`), on a message that is not a
-broadcast and poses as no other brand, spares a New-tier team the hold it
-would have met: the message parks for the review list instead, with the
-same operator mail, and the team's other mail waiting on a phishing-type
-verdict from 80, queued or parked for quota, parks with it, as the hold
-would have parked it. Releasing the message clears every platform name it
-links to as an operator's clearance (releasing the mail parked beside it
-clears none of theirs), which later verdicts of that shape respect: mail
+`PLATFORM_HOST_PARENTS` in `packages/core`) or to a loopback address, on a
+message judged before SES that is not a broadcast, poses as no other brand
+and carries no payment instrument (a Pix code, changed bank details, a
+callback), spares a New-tier team the hold it would have met: the message
+parks for the review list instead, with the same operator mail, and the
+team's other mail waiting on a phishing-type verdict from 80, queued or
+parked for quota, parks with it, as the hold would have parked it. Mail to a
+platform name new to the team is always judged before SES, but a loopback
+link is no reason to: past a team's first window, such a verdict on mail
+judged after sending still holds the team. Releasing the message clears
+every platform name it links to as an operator's clearance, though never a
+loopback address, so a verdict resting on one waits for a person each time
+(releasing the mail parked beside it clears none of theirs), which later verdicts of that shape respect: mail
 to such names is neither held, parked nor delayed for them, takes no
 clearance back, and counts toward no repeat hold, while a lure there that
 names a brand still does all of that, and cold mail from a shared address
@@ -1272,7 +1289,11 @@ model id that answered. `ABUSE_JUDGE_BASE_URL` (default
 `https://api.typesafe.ai`) points the judge at another endpoint serving the
 same API; it posts to `<base>/v1/systemone`. The questions Jev answers ship in
 `packages/core/src/abuse-judge/questions.ts`, and those about names on the
-shared inbox domain in `names.ts` beside it.
+shared inbox domain in `names.ts` beside it. When the subject or the visible text names MillionSend as a word, one
+sentence joins the policy: a team naming MillionSend as its own sending
+provider, as its setup tests do, is not impersonating it, and that mention
+clears nothing else in the mail. Every other message is judged on the policy
+as it stands.
 
 **Where the samples go.** Every sampled message is sent to TypeSafe, a
 sub-processor that hosts its service in the United States. Per its published
@@ -1294,8 +1315,9 @@ domain, the form links are shown in, where the suffix is unambiguous), days sinc
 and plan; the `From` and `Reply-To` headers as sent; the `Subject`; the
 rendered visible text, without elements hidden by an inline style or the
 `hidden` attribute (up to 6,000
-characters); a table of link anchor texts and their registrable domains (up
-to 30 rows); the image count, the attachment names and content types, and
+characters); a table of link anchor texts and their registrable domains (up to 30 rows),
+where a link to a loopback address (localhost, 127.0.0.1) is marked
+`(local address)` and listed last; the image count, the attachment names and content types, and
 the count of hidden characters. The subject, the visible text, the anchor
 texts and the attachment names are redacted first by the same pass the
 break-glass content access uses (links cut to their domain and a short path
@@ -1456,11 +1478,11 @@ as its `MONITOR_*` environment variable until it is; the console wins.
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | One anomaly (a failing link-domain, shortener or phishing-pattern check, under 100 characters of text carried by images or files, an attachment) multiplies the rate; two force the sample |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Draws after sending per team per UTC day; past it they stop silently. Mail judged before SES neither counts nor is capped |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide draws after sending; past it tier sampling stops, first sends and anomalies continue |
-| `MONITOR_FLAG_RISK` | 0.5 | The team gets the `monitor` flag and samples four times as much |
+| `MONITOR_FLAG_RISK` | 0.5 | The team samples four times as much, and gets the `monitor` flag with an abuse verdict from `MONITOR_FLAG_SCORE` in the last 7 days; the flag stays until the risk falls back under this |
 | `MONITOR_ALERT_RISK` | 0.7 | The operator is emailed, once per team per day |
 | `MONITOR_PAUSE_RISK` | 0.85 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |
-| `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score |
+| `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score, and the `monitor` flag wants an abuse verdict from it in the last 7 days |
 | `MONITOR_HOLD_SCORE` | 90 | New teams only: a phishing-type verdict from this score holds the team for review |
 | `MONITOR_HOLD_REPEAT_COUNT` | 5 | New teams only: this many phishing-type verdicts from the score below, within seven days of the team's first send, also hold it for review; 0 turns this off |
 | `MONITOR_HOLD_REPEAT_SCORE` | 80 | The score from which a phishing-type verdict counts toward the count above |

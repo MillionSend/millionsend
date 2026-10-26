@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   asciiHostname,
   isFreeHostName,
+  isLoopbackHost,
   isRootDomainSend,
   registrableDomain,
   vouchedRegistrableDomain,
@@ -127,5 +128,53 @@ describe("isFreeHostName", () => {
     ]) {
       expect(isFreeHostName(name)).toBe(false);
     }
+  });
+});
+
+describe("isLoopbackHost", () => {
+  it("knows the reader's own machine", () => {
+    for (const host of [
+      "localhost",
+      "app.localhost",
+      "LOCALHOST.",
+      "127.0.0.1",
+      "127.8.0.9",
+      "0.0.0.0",
+      "[::1]",
+    ]) {
+      expect(isLoopbackHost(host), host).toBe(true);
+    }
+  });
+
+  it("leaves private networks, link-local, public, embedded-v4 and testing names to screening", () => {
+    for (const host of [
+      "10.1.2.3",
+      "172.16.0.1",
+      "192.168.0.10",
+      "[fd12:3456::1]",
+      "printer.local",
+      "wiki.internal",
+      "router.home.arpa",
+      "169.254.169.254",
+      "[fe80::1]",
+      "8.8.8.8",
+      "128.0.0.1",
+      "[::ffff:808:808]",
+      "[2001:db8::1]",
+      "localhost.example",
+      "127.0.0.1.example",
+      "app.test",
+      "x.invalid",
+      "example.com",
+    ]) {
+      expect(isLoopbackHost(host), host).toBe(false);
+    }
+  });
+
+  it("reads a link's host as the URL parser hands it over", () => {
+    for (const url of ["http://2130706433/", "http://0x7f.1/", "http://[::1]:3000/x"]) {
+      expect(isLoopbackHost(new URL(url).hostname), url).toBe(true);
+    }
+    expect(isLoopbackHost(new URL("http://[::ffff:8.8.8.8]/").hostname)).toBe(false);
   });
 });

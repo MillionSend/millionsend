@@ -669,7 +669,7 @@
   },
   "safety": {
     "title": "Trust & safety",
-    "info": "A team lands here when the deliverability guardrail turns warning or paused, complaints pass 0.1% or hard bounces 5% over 7 days, the content monitor's risk crosses its flag line (sampled content judged by the model), the account score drops under 5, or an operator flags it by hand. Automatic flags clear on their own once the trigger goes away; a flag you clear stays cleared while the same trigger holds.",
+    "info": "A team lands here when the deliverability guardrail turns warning or paused, complaints pass 0.1% or hard bounces 5% over 7 days, the content monitor's risk crosses its flag line with a message judged abuse in the last 7 days (sampled content judged by the model), the account score drops under 5, or an operator flags it by hand. Automatic flags clear on their own once the trigger goes away, a monitor flag once the risk falls back under its line; a flag you clear stays cleared while the same trigger holds.",
     "proof": "{open} open · {guardrailPaused} paused by guardrail · {suspended} suspended · {revealsThisWeek, plural, one {# content reveal} other {# content reveals}} this week",
     "search": "Search teams, owners, domains",
     "filters": {
@@ -695,7 +695,7 @@
       "linked": "Linked"
     },
     "reasonTip": {
-      "monitor": "The content monitor: sampled content judged by the model pushed the internal risk over the flag line.",
+      "monitor": "The content monitor: sampled content judged by the model pushed the internal risk over the flag line, with at least one message judged abuse in the 7 days before the flag opened.",
       "complaints": "The complaint rate passed 0.1% or the hard-bounce rate 5% over the last 7 days (SES reviews accounts at those lines).",
       "guardrail": "The deliverability guardrail turned warning or paused the team on its bounce or complaint rates.",
       "score": "The account score dropped under 5 out of 10.",
@@ -1129,11 +1129,11 @@
         "anomalyMultiplier": "one failing critical or major check, a message carried by images or files, or an attachment; two or more force the sample",
         "teamDailyCap": "past it, draws after sending stop for the team; mail judged before SES is never capped",
         "instanceDailyCap": "past it, tier sampling after sending stops; first sends and anomalies continue",
-        "flagRisk": "opens the monitor flag and quadruples the team's rate",
+        "flagRisk": "quadruples the team's rate, and opens the monitor flag with an abuse verdict in the last 7 days",
         "alertRisk": "emails the operator, once per team per day",
         "pauseRisk": "new tier only, with a verdict of 90 or more in the last day",
         "autoPause": "whether the pause above is applied",
-        "flagScore": "the judge's own abuse verdict starts at 65",
+        "flagScore": "the judge's own abuse verdict starts at 65; the monitor flag opens only with one from this score in the last 7 days",
         "holdScore": "new tier only, on a phishing, brand impersonation or payment redirect verdict",
         "holdRepeatCount": "the week runs from the team's first send; 0 turns this off",
         "holdRepeatScore": "the same phishing verdicts as above, at a lower score",
