@@ -713,6 +713,7 @@ export {
   messageDestinations,
   NOVEL_DESTINATIONS_MAX,
   OPERATOR_PARK_REASONS,
+  reachesOnlyTeam,
   releaseWaitingEmails,
   revokeDestinations,
   SCREEN_HOLD_WAIT_MS,

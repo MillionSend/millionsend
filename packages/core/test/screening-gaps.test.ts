@@ -22,6 +22,7 @@ import {
   clearDestinations,
   destinationStanding,
   LINK_AGE_LOOKUPS_PER_VERDICT,
+  reachesOnlyTeam,
   releaseWaitingEmails,
   revokeDestinations,
   screenBeforeSend,
@@ -383,7 +384,7 @@ describe("the gate's read of the team", () => {
       },
       body: { html: "<p>Hello</p>", text: null },
       // The database would read this team as new; the caller read it exempt.
-      team: { tier: "exempt", firstWindow: false },
+      team: { tier: "exempt", firstWindow: false, holdSpent: false },
       now: NOW,
     });
     expect(decision).toEqual({ action: "send", sample: null, probation: false });
@@ -454,5 +455,123 @@ describe("a spared verdict's burst", () => {
     expect(marks.get(quota)).toBe("burst");
     for (const id of [operatorParked, clean, spam, sent]) expect(marks.get(id)).toBeNull();
     expect(marks.get(vouched)).toBe("vouched");
+  });
+});
+
+describe("mail that reaches only its own team", () => {
+  const member = async (teamId: string, email: string) => {
+    const userId = randomUUID();
+    await db.insert(schema.user).values({ id: userId, name: "Owner", email });
+    await db.insert(schema.teamMembers).values({ teamId, userId, role: "owner" });
+  };
+
+  it("goes to a member's login or the SES simulator, never to someone on the team's own domains", async () => {
+    const teamId = await createTeam(db, "own-only");
+    await member(teamId, "Owner@example.net");
+    await db
+      .insert(schema.domains)
+      .values({ teamId, name: "own-brand.example", region: "us-east-1", status: "verified" });
+    const to = (...addresses: string[]) =>
+      reachesOnlyTeam(db, { teamId, to: addresses, cc: null, bcc: null });
+    expect(await to("owner@example.net")).toBe(true);
+    expect(await to("Owner <OWNER@example.net>")).toBe(true);
+    expect(await to("owner@example.net", "success+run1@simulator.amazonses.com")).toBe(true);
+    // A team's account, or a key taken from it, could reach its whole organisation this way.
+    expect(await to("staff@own-brand.example")).toBe(false);
+    expect(await to("owner@example.net", "someone@example.org")).toBe(false);
+    expect(await to()).toBe(false);
+    expect(
+      await reachesOnlyTeam(db, {
+        teamId,
+        to: ["owner@example.net"],
+        cc: null,
+        bcc: ["someone@example.org"],
+      }),
+    ).toBe(false);
+  });
+
+  const LURE = {
+    verdict: "abuse",
+    categories: ["phishing_credentials"],
+    reasons: ["off_domain_lure"],
+  };
+  async function screened(
+    slug: string,
+    opts: {
+      own: boolean;
+      team: { tier: "new" | "established"; firstWindow: boolean; holdSpent: boolean };
+      sample: Partial<typeof schema.monitorSamples.$inferInsert>;
+    },
+  ) {
+    const teamId = await createTeam(db, slug);
+    await member(teamId, `owner@${slug}.example`);
+    const email = {
+      id: randomUUID(),
+      teamId,
+      domainId: null,
+      broadcastId: null,
+      from: `T <hi@${slug}.example>`,
+      to: [opts.own ? `owner@${slug}.example` : "buyer@example.org"],
+      cc: null,
+      bcc: null,
+      replyTo: null,
+      inboxId: null,
+      threadId: null,
+      screenReleasedAt: null,
+    };
+    await db.insert(schema.emails).values({ ...email, subject: "s", latestStatus: "queued" });
+    await db.insert(schema.monitorSamples).values({
+      teamId,
+      emailId: email.id,
+      kind: "destination",
+      screening: true,
+      status: "judged",
+      score: 92,
+      judgedAt: NOW,
+      ...LURE,
+      ...opts.sample,
+    });
+    return screenBeforeSend(db, deps(), {
+      email,
+      body: { html: "<p>Hi</p>", text: null },
+      team: opts.team,
+      sharedInboxDomain: null,
+      now: new Date(NOW.getTime() + 1000),
+    });
+  }
+  const NEW = { tier: "new", firstWindow: true, holdSpent: false } as const;
+  const SETTLED = { tier: "established", firstWindow: false, holdSpent: false } as const;
+
+  it("is never parked or kept waiting by a verdict, a spared hold's included", async () => {
+    const spared = { sparedHold: "score", destinations: ["app.localhost"] };
+    expect(await screened("spared-self", { own: true, team: NEW, sample: spared })).toMatchObject({
+      action: "send",
+    });
+    expect(await screened("spared-out", { own: false, team: NEW, sample: spared })).toEqual({
+      action: "park",
+      reason: "destination",
+    });
+    const parked = { destinations: ["bill-host.example"], linkYoung: false };
+    expect(
+      await screened("past-new-self", { own: true, team: SETTLED, sample: parked }),
+    ).toMatchObject({ action: "send" });
+    expect(await screened("past-new-out", { own: false, team: SETTLED, sample: parked })).toEqual({
+      action: "park",
+      reason: "destination",
+    });
+    // A new team's phishing-type verdict waits out a burst, unless the mail reaches only the team.
+    expect(
+      await screened("wait-self", { own: true, team: NEW, sample: { score: 85 } }),
+    ).toMatchObject({ action: "send" });
+    expect(
+      await screened("wait-out", { own: false, team: NEW, sample: { score: 85 } }),
+    ).toMatchObject({ action: "wait" });
+  });
+
+  it("makes nothing wait for a hold once the team's one hold is spent", async () => {
+    const spent = { tier: "new", firstWindow: true, holdSpent: true } as const;
+    expect(
+      await screened("spent-no-wait", { own: false, team: spent, sample: { score: 85 } }),
+    ).toMatchObject({ action: "send" });
   });
 });

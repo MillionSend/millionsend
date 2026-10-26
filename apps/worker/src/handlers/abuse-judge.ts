@@ -23,6 +23,7 @@ import {
   opaqueFacts,
   openAttachments,
   parseSingleSender,
+  reachesOnlyTeam,
   revokeDestinations,
   SCREEN_JUDGE_TIMEOUT_MS,
   screeningTier,
@@ -273,20 +274,21 @@ async function judgePending(
       platformLink,
       now,
     });
+    let burst = 0;
     if (vouched) {
       await t.update(ms).set({ sparedHold: "vouched" }).where(eq(ms.id, sample.id));
     } else if (applied.spared) {
-      // The park rests on every platform name the mail links to; releasing it clears them all.
+      // The park rests on every name the spare rests on; releasing it clears them all.
       await t
         .update(ms)
         .set({ sparedHold: applied.spared.rule, destinations: standing.all })
         .where(eq(ms.id, sample.id));
-      await spareWaitingSamples(t, {
+      burst = await spareWaitingSamples(t, {
         teamId: sample.teamId,
         holdRepeatScore: settings.holdRepeatScore,
       });
     }
-    return applied;
+    return { ...applied, burst };
   });
   if (!outcome) return "skipped";
   if (verdictClearsDestinations(verdict, destinations.length)) {
@@ -317,14 +319,18 @@ async function judgePending(
       );
     }
   }
+  // The send path parks on the same reading (screenBeforeSend): mail that reaches only the
+  // team's own people never parks, though a burst its spared verdict parked still does.
   const spareParks = sample.screening && outcome.spared !== null && !vouched;
-  const destinationParks =
+  const parksHere =
     outcome.tier !== "exempt" &&
     (spareParks ||
       (sample.screening &&
         destinations.length > 0 &&
         outcome.tier !== "new" &&
-        destinationVerdictParks({ ...verdict, linkYoung }, settings)));
+        destinationVerdictParks({ ...verdict, linkYoung }, settings))) &&
+    !(loaded.email && sample.broadcastId === null && (await reachesOnlyTeam(db, loaded.email)));
+  const destinationParks = parksHere || outcome.burst > 0;
   if (destinationParks) {
     await notifyDestination(
       db,
@@ -336,7 +342,7 @@ async function judgePending(
       now,
     );
   }
-  if (waiting && (destinationParks || outcome.held)) await keepMedia();
+  if (waiting && (parksHere || outcome.held)) await keepMedia();
   if ((outcome.alert || outcome.paused || outcome.held) && deps.mailer) {
     await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings, now);
   }
@@ -456,7 +462,14 @@ async function loadBlockInput(
   sendingDomain: { domainId?: string | null; name?: string | null };
   files: EmailAttachment[];
   waiting: boolean;
-  email: { id: string; teamId: string; parkReason: string | null } | null;
+  email: {
+    id: string;
+    teamId: string;
+    parkReason: string | null;
+    to: string[];
+    cc: string[] | null;
+    bcc: string[] | null;
+  } | null;
 } | null> {
   const [team] = await db
     .select({ name: schema.teams.name, plan: schema.teams.plan })
@@ -548,7 +561,14 @@ async function loadBlockInput(
     sendingDomain: { domainId: email.domainId },
     files,
     waiting: email.latestStatus === "queued" && !email.sentAt,
-    email: { id: email.id, teamId: email.teamId, parkReason: email.parkReason },
+    email: {
+      id: email.id,
+      teamId: email.teamId,
+      parkReason: email.parkReason,
+      to: email.to,
+      cc: email.cc,
+      bcc: email.bcc,
+    },
   };
 }
 
