@@ -20,11 +20,15 @@ import { eq, sql } from "drizzle-orm";
  */
 export async function runSafetyFlags(
   db: Db,
-  opts: { now?: Date; monitorFlagRisk?: number | undefined } = {},
+  opts: {
+    now?: Date;
+    monitorFlagRisk?: number | undefined;
+    monitorFlagScore?: number | undefined;
+  } = {},
 ): Promise<{ teams: number; opened: number; cleared: number; graduated: number }> {
   const now = opts.now ?? new Date();
   const previous = await db.select().from(schema.teamStandings);
-  const standings = await computeTeamStandings(db, now);
+  const standings = await computeTeamStandings(db, now, { flagScore: opts.monitorFlagScore });
   const flags = await syncTeamFlags(db, standings, now, previous, {
     monitorFlagRisk: opts.monitorFlagRisk,
   });

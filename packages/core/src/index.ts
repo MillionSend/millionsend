@@ -96,6 +96,7 @@ export {
   monitorRate,
   monitorRowWithHistory,
   monitorSamplesByTeam,
+  monitorStandingCounts,
   monitorTier,
   noteAcceptedSend,
   planBroadcastSamples,

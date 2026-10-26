@@ -1087,9 +1087,28 @@ export async function monitorSamplesByTeam(
   teamIds: readonly string[],
   now: Date = new Date(),
 ): Promise<Map<string, number>> {
+  const counts = await monitorStandingCounts(db, teamIds, MONITOR_SETTING_DEFAULTS.flagScore, now);
+  return new Map([...counts].map(([teamId, c]) => [teamId, c.samples]));
+}
+
+/**
+ * Per team, the judged samples of the last week and how many of them the
+ * judge called abuse from `flagScore`: the monitor flag wants one of those
+ * beside its risk.
+ */
+export async function monitorStandingCounts(
+  db: Db,
+  teamIds: readonly string[],
+  flagScore: number,
+  now: Date = new Date(),
+): Promise<Map<string, { samples: number; abuse: number }>> {
   if (teamIds.length === 0) return new Map();
   const rows = await db
-    .select({ teamId: ms.teamId, n: sql<number>`count(*)::int` })
+    .select({
+      teamId: ms.teamId,
+      samples: sql<number>`count(*)::int`,
+      abuse: sql<number>`count(*) filter (where ${ms.verdict} = 'abuse' and ${ms.score} >= ${flagScore})::int`,
+    })
     .from(ms)
     .where(
       and(
@@ -1099,7 +1118,7 @@ export async function monitorSamplesByTeam(
       ),
     )
     .groupBy(ms.teamId);
-  return new Map(rows.map((r) => [r.teamId, r.n]));
+  return new Map(rows.map((r) => [r.teamId, { samples: r.samples, abuse: r.abuse }]));
 }
 
 export interface TeamMonitorOverview {
