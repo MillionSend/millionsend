@@ -6,6 +6,9 @@
  * Iniciação do Pix" (EMV QRCPS-MPM).
  */
 
+import { dropInvisible } from "./customer-text.js";
+import { decodeEntities } from "./html.js";
+
 export type PixKeyKind = "cpf" | "cnpj" | "phone" | "email" | "random";
 
 export interface PixCode {
@@ -115,4 +118,22 @@ export function findPixCodes(text: string, max = 5): PixCode[] {
     at = flat.indexOf("000201", code && end !== -1 ? end : at + 1);
   }
   return found;
+}
+
+/**
+ * Whether a mail's own words carry a Pix code, read the way a reader copies
+ * one out: its subject, its text part, and its HTML with the markup taken
+ * out without a gap (a tag such as <wbr> can split a payload), character
+ * references decoded, invisible characters dropped and no-break spaces read
+ * as spaces.
+ */
+export function mailCarriesPix(mail: {
+  subject?: string | null | undefined;
+  html: string | null;
+  text: string | null;
+}): boolean {
+  const html = mail.html && decodeEntities(mail.html.replace(/<[^<>]*>/g, ""));
+  return [mail.subject, mail.text, html].some(
+    (part) => !!part && findPixCodes(dropInvisible(part).replaceAll("\u00a0", " "), 1).length > 0,
+  );
 }

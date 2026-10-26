@@ -97,6 +97,24 @@ const credentialOnly = (score: number): AbuseJudge => ({
   }),
 });
 
+/** The judge's read of a product's own billing reminder: a payment link off the verified domains, no brand claimed. */
+const billingOnly: AbuseJudge = {
+  provider: "typesafe",
+  model: "fake-model",
+  judge: async () => ({
+    score: 91,
+    verdict: "abuse" as const,
+    categories: ["payment_redirect"],
+    reasons: ["off_domain_lure"],
+    impersonatedBrand: null,
+    language: "en",
+  }),
+};
+
+/** A Pix "copia e cola" payload, as a payment request pastes it into the mail. */
+const PIX =
+  "00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D";
+
 const judge = (sampleId: string, answer: AbuseJudge, linkYoung = false) =>
   judgeSample(
     db,
@@ -139,10 +157,11 @@ async function email(
   t: { teamId: string; domainId: string; domain: string },
   href: string,
   to = ["r@example.org"],
+  extra = "",
 ) {
   const id = randomUUID();
   const body = await encryptEmailBody(
-    { html: `<p>Hello <a href="${href}">open</a></p>`, text: null },
+    { html: `<p>Hello <a href="${href}">open</a></p>${extra}`, text: null },
     keyring,
     { teamId: t.teamId, rowId: id },
   );
@@ -335,26 +354,29 @@ it("never screens a link to a loopback address as a new destination", async () =
 });
 
 it("parks a new team's billing reminder to its own app on a platform instead of holding the team", async () => {
-  const billing: AbuseJudge = {
-    provider: "typesafe",
-    model: "fake-model",
-    judge: async () => ({
-      score: 91,
-      verdict: "abuse" as const,
-      categories: ["payment_redirect"],
-      reasons: ["off_domain_lure"],
-      impersonatedBrand: null,
-      language: "en",
-    }),
-  };
   const t = await team("billing-app", "new", "example");
   const id = await email(t, "https://billing-app.workers.dev/app/subscription");
   await sendEmail(db, sendDeps, { emailId: id });
-  await judge((await sampleOf(id))?.id ?? "", billing);
+  await judge((await sampleOf(id))?.id ?? "", billingOnly);
   expect(await sampleOf(id)).toMatchObject({ sparedHold: "score" });
   const [open] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
   expect(open?.suspendedAt).toBeNull();
   expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("parked");
+});
+
+it("still holds a new team whose billing reminder pastes a Pix code into its text", async () => {
+  const t = await team("billing-pix", "new", "example");
+  const id = await email(
+    t,
+    "https://billing-pix.workers.dev/app/subscription",
+    undefined,
+    `<p>Pix copia e cola:<br>${PIX}</p>`,
+  );
+  await sendEmail(db, sendDeps, { emailId: id });
+  await judge((await sampleOf(id))?.id ?? "", billingOnly);
+  expect(await sampleOf(id)).toMatchObject({ sparedHold: null });
+  const [held] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(held?.suspensionReason).toBe("review");
 });
 
 it("sends a spared mail that reaches only the team's own people, and still parks and reports the burst it belongs to", async () => {

@@ -19,6 +19,7 @@ import {
   type MediaIssue,
   type MonitorSettings,
   type MonitorTier,
+  mailCarriesPix,
   mediaParks,
   opaqueFacts,
   openAttachments,
@@ -231,9 +232,9 @@ async function judgePending(
       : null;
   // A product's own page on a platform, read as a lure: the team is spared the hold, and the mail
   // parks unless an operator cleared every such name. Judged after the send with no such clearance,
-  // nothing is left to park, so the hold stands. A Pix code read from the mail is a payment
-  // instrument, which no such page needs.
-  const paysByPix = (media?.findings.pix.length ?? 0) > 0;
+  // nothing is left to park, so the hold stands. A Pix code in the mail, in its text or read from
+  // its images and files, is a payment instrument, which no such page needs.
+  const paysByPix = (media?.findings.pix.length ?? 0) > 0 || mailCarriesPix(loaded.input);
   const platformShape =
     sample.broadcastId === null && !paysByPix && isPlatformLinkVerdict(verdict, standing.all);
   const vouched = platformShape && standing.all.every((d) => vouchedNames.has(d));

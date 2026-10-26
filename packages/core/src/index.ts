@@ -608,7 +608,13 @@ export {
   registrableDomain,
 } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
-export { findPixCodes, type PixCode, type PixKeyKind, parsePix } from "./pix.js";
+export {
+  findPixCodes,
+  mailCarriesPix,
+  type PixCode,
+  type PixKeyKind,
+  parsePix,
+} from "./pix.js";
 export {
   effectivePlan,
   formatVolume,
