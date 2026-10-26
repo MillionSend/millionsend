@@ -234,7 +234,8 @@ const STANDING_REASONS: TeamFlagReason[] = ["monitor", "complaints", "guardrail"
  * trigger that lapsed and came back is a new finding, judged against the
  * previous run's standings, so `previous` must be the rows saved before this
  * run's); an open automatic flag whose trigger is gone is cleared, unless
- * the team is held for review, which waits on an operator; an operator's
+ * the team is held for review, which waits on an operator (an open monitor
+ * flag's trigger is its risk alone); an operator's
  * manual flag, and brand and linkage flags, which no standing triggers, are
  * never touched. `opened_at` of an open flag is left alone so the list's "since"
  * holds still.
@@ -276,7 +277,9 @@ export async function syncTeamFlags(
   const openByTeam = new Map(open.map((row) => [row.teamId, row]));
   const triggered = new Map(
     standings.flatMap((s) => {
-      const trigger = flagTrigger(s, opts);
+      // The abuse verdict a monitor flag wants is for opening it.
+      const keep = openByTeam.get(s.teamId)?.reason === "monitor";
+      const trigger = flagTrigger(keep ? { ...s, monitorAbuse: 1 } : s, opts);
       return trigger ? [[s.teamId, trigger] as const] : [];
     }),
   );

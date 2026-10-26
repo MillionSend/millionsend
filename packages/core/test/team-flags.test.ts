@@ -420,6 +420,19 @@ describe("the monitor flag's evidence", () => {
     );
   });
 
+  it("is for opening the flag: an open one stands while the risk is over the line", async () => {
+    const teamId = await createTeam(db, "monitor-kept");
+    const open = async () =>
+      (await flagsOf(teamId)).filter((f) => f.status === "open").map((f) => f.reason);
+    await syncTeamFlags(db, [standing({ teamId, monitorRisk: 0.7 })], new Date(), []);
+    expect(await open()).toEqual(["monitor"]);
+    const quiet = standing({ teamId, monitorRisk: 0.6, monitorAbuse: 0 });
+    await syncTeamFlags(db, [quiet], new Date(), []);
+    expect(await open()).toEqual(["monitor"]);
+    await syncTeamFlags(db, [{ ...quiet, monitorRisk: 0.4 }], new Date(), []);
+    expect(await open()).toEqual([]);
+  });
+
   it("counts the week's abuse verdicts from the flag score on the standing", async () => {
     const teamId = await createTeam(db, "abuse-counted");
     const now = new Date();

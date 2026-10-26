@@ -669,7 +669,7 @@
   },
   "safety": {
     "title": "Confiança e segurança",
-    "info": "Uma equipe entra aqui quando a proteção de envio fica em alerta ou pausa a equipe, as reclamações passam de 0,1% ou os hard bounces de 5% em 7 dias, o risco do monitor de conteúdo passa do limite de sinalização (conteúdo amostrado avaliado pelo modelo), a nota da conta cai abaixo de 5, ou um operador a sinaliza manualmente. Sinalizações automáticas somem sozinhas quando o gatilho passa; uma que você encerra fica encerrada enquanto o mesmo gatilho durar.",
+    "info": "Uma equipe entra aqui quando a proteção de envio fica em alerta ou pausa a equipe, as reclamações passam de 0,1% ou os hard bounces de 5% em 7 dias, o risco do monitor de conteúdo passa do limite de sinalização com alguma mensagem avaliada como abuso nos últimos 7 dias (conteúdo amostrado avaliado pelo modelo), a nota da conta cai abaixo de 5, ou um operador a sinaliza manualmente. Sinalizações automáticas somem sozinhas quando o gatilho passa, a do monitor quando o risco volta abaixo do limite; uma que você encerra fica encerrada enquanto o mesmo gatilho durar.",
     "proof": "{open, plural, =0 {# abertas} one {# aberta} other {# abertas}} · {guardrailPaused, plural, =0 {# pausadas pela proteção de envio} one {# pausada pela proteção de envio} other {# pausadas pela proteção de envio}} · {suspended, plural, =0 {# suspensas} one {# suspensa} other {# suspensas}} · {revealsThisWeek, plural, =0 {# revelações de conteúdo} one {# revelação de conteúdo} other {# revelações de conteúdo}} esta semana",
     "search": "Buscar equipes, proprietários, domínios",
     "filters": {
@@ -695,7 +695,7 @@
       "linked": "Vínculo"
     },
     "reasonTip": {
-      "monitor": "O monitor de conteúdo: conteúdo amostrado avaliado pelo modelo levou o risco interno acima do limite de sinalização.",
+      "monitor": "O monitor de conteúdo: conteúdo amostrado avaliado pelo modelo levou o risco interno acima do limite de sinalização, com pelo menos uma mensagem avaliada como abuso nos 7 dias antes de a sinalização abrir.",
       "complaints": "A taxa de reclamações passou de 0,1% ou a de hard bounces de 5% nos últimos 7 dias (o SES revisa contas a partir desses limites).",
       "guardrail": "A proteção de envio ficou em alerta ou pausou a equipe pelas taxas de bounce ou reclamação.",
       "score": "A nota da conta caiu abaixo de 5 (de 0 a 10).",
@@ -1129,11 +1129,11 @@
         "anomalyMultiplier": "uma checagem crítica ou importante falhando, uma mensagem levada por imagens ou arquivos, ou um anexo; duas ou mais anomalias forçam a amostra",
         "teamDailyCap": "além dele, os sorteios depois do envio param na equipe; e-mail avaliado antes do SES nunca tem limite",
         "instanceDailyCap": "além dele, a amostragem por nível depois do envio para; primeiros envios e anomalias continuam",
-        "flagRisk": "abre a sinalização do monitor e quadruplica a taxa da equipe",
+        "flagRisk": "quadruplica a taxa da equipe e, com uma avaliação de abuso nos últimos 7 dias, abre a sinalização do monitor",
         "alertRisk": "avisa o operador por e-mail, uma vez por equipe por dia",
         "pauseRisk": "só para equipes novas, com uma pontuação de 90 ou mais no último dia",
         "autoPause": "se a pausa acima é aplicada",
-        "flagScore": "o próprio avaliador considera abuso a partir de 65",
+        "flagScore": "o próprio avaliador considera abuso a partir de 65; a sinalização do monitor só abre com uma avaliação a partir desta pontuação nos últimos 7 dias",
         "holdScore": "só para equipes novas, quando a avaliação aponta phishing, imitação de marca ou desvio de pagamento",
         "holdRepeatCount": "a semana conta a partir do primeiro envio da equipe; 0 desliga",
         "holdRepeatScore": "as mesmas avaliações de phishing acima, com uma pontuação menor",
