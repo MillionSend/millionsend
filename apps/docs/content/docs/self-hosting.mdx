@@ -1370,8 +1370,9 @@ leave it off.
 
 **What it does.** It opens the `monitor` flag on Trust & safety when a team's risk crosses the flag line and the judge called at least
 one of its messages abuse from the flag score in the last 7 days (a risk that
-only clean verdicts carried over the line opens nothing), emails the operator once a day per team past the
-alert line, and, for a team in the New tier only (inside its first 1,000
+only clean verdicts carried over the line opens nothing; an open flag stays
+until the risk falls back under the line), emails the operator once a day per
+team past the alert line, and, for a team in the New tier only (inside its first 1,000
 sends or 72 hours, or under 10,000 sends within 7 days), pauses broadcasts
 when the risk passes the pause line and a sampled message scored 90 or more
 within a day, or at once when a broadcast's own HTML or a rendered copy
@@ -1418,11 +1419,12 @@ hold stops what follows. In the first window, a message judged phishing-type
 from 80 that holds nothing waits 2 minutes before it is sent: a burst
 reaches the repeat count within them. Mail that reaches only the team's own
 people (every recipient a member's login, or the SES mailbox simulator;
-broadcasts aside) neither waits nor parks for a new destination or a spared hold; the hold
+broadcasts aside) never waits, though it parks as any mail does, since a key
+taken from the team could aim a lure at the team's own people; the hold
 still reads it, since a lure tried on its own sender first is the earliest
-sign of one. Once a team's one hold is spent, nothing waits for a hold that
-cannot come. `MONITOR_AUTO_HOLD=false` switches the
-hold off, and the screening before SES with it.
+sign of one. Once a team's one hold is
+spent, nothing waits for a hold that cannot come. `MONITOR_AUTO_HOLD=false`
+switches the hold off, and the screening before SES with it.
 
 **New destinations, at every tier.** A message is also judged before SES,
 whatever the team's tier (Trusted included), when it carries a destination
@@ -1430,9 +1432,11 @@ the team has not cleared: the owner domain of a link a mail client would
 follow (an anchor, an image-map area, a form action, an SVG link or a URL in
 the text, read as a browser reads it and through up to three redirect
 wrappers; a free host's `x.pages.dev` counts on its own) or of its Reply-To,
-less the team's verified domains. A link that cannot be read counts as a destination too. A link to a local address (localhost, 127.0.0.1, a private network,
-`.local`, `.internal`) never is: no page a sender serves is there, and it
-never clears. A verdict under 70 that names nothing phishing-type clears
+less the team's verified domains. A link that cannot be read counts as a
+destination too. A link to a loopback address (localhost and its subdomains,
+127.0.0.1, `::1`) never is: no page a sender serves is there, and it never
+clears; a private network's address is a destination like any other. A
+verdict under 70 that names nothing phishing-type clears
 the message's destinations for the team, when it carried 5 new ones at most;
 so does releasing mail parked for a new destination, or waiting after a
 verdict, while releasing mail parked for its media or a failing judge clears
@@ -1455,12 +1459,15 @@ verdict on a link domain registered under 7 days ago holds the team, and one
 of an age not known makes its mail wait 2 minutes. Past New, the mail is
 parked for the review list on a phishing-type verdict from 90, or from 80 with
 a link domain under 7 days old or of an age not known, and the operator is
-mailed at most once a day per team; a team past New is never held automatically. A New-tier team is spared the
-hold a verdict meets when the verdict rests only on a sign-in, reset or
-billing link to a product's own name on an app platform (`ref.supabase.co`,
-`x.workers.dev`) or to a local address, on mail that is not a broadcast,
-poses as no other brand and carries no payment instrument: the message parks
-for the review list instead. These samples count against no daily cap; a team has 200 of
+mailed at most once a day per team; a team past New is never held
+automatically. A New-tier team is spared the hold a verdict meets when the
+verdict rests only on a sign-in, reset or billing link to a product's own name
+on an app platform (`ref.supabase.co`, `x.workers.dev`) or to a loopback
+address, on mail judged before SES that is not a broadcast, poses as no other
+brand and carries no payment instrument: the message parks for the review
+list instead. A loopback link alone is no reason to judge mail before SES, so
+past a team's first window such a verdict on mail judged after sending still
+holds the team. These samples count against no daily cap; a team has 200 of
 them a day, past which its mail with a new destination waits for the next UTC
 day.
 
@@ -1534,8 +1541,8 @@ and the registrable domain it lands on, read as a browser reads it and
 through up to three redirect wrappers such as Google's `/url?q=`, and links
 to domains the team has never sent to, links that cannot be read and other
 links off its verified domains listed first (up to 30 rows), a link to a
-local address (localhost, 127.0.0.1, a private network) marked
-`(local address)` and listed last; a line flagging a message that shows under 100 characters of
+loopback address (localhost, 127.0.0.1) marked `(local address)` and listed
+last; a line flagging a message that shows under 100 characters of
 text beside an image, an attachment or a QR code drawn with characters or
 table cells; the number of images it shows (`<img>`, CSS backgrounds,
 Outlook's VML, SVG); the attachment names and content types; and the count of
@@ -1700,7 +1707,7 @@ is; the console wins.
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | One anomaly (a failing link-domain, shortener or phishing-pattern check, under 100 characters of text carried by images or files, an attachment) multiplies the rate; two force the sample |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Draws after sending per team per UTC day; past it they stop silently. Mail judged before SES neither counts nor is capped |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide draws after sending; past it tier sampling stops, first sends and anomalies continue |
-| `MONITOR_FLAG_RISK` | 0.5 | The team gets the `monitor` flag and samples four times as much |
+| `MONITOR_FLAG_RISK` | 0.5 | The team samples four times as much, and gets the `monitor` flag with an abuse verdict from `MONITOR_FLAG_SCORE` in the last 7 days; the flag stays until the risk falls back under this |
 | `MONITOR_ALERT_RISK` | 0.7 | The operator is emailed, once per team per day |
 | `MONITOR_PAUSE_RISK` | 0.85 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |

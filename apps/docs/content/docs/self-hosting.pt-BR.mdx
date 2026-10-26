@@ -1421,7 +1421,8 @@ ou sem o avaliador. Quem hospeda por conta própria pode deixá-lo desligado.
 quando o risco de uma equipe cruza o limite de sinalização e o avaliador
 considerou abuso pelo menos uma das mensagens dela, a partir da pontuação de
 sinalização, nos últimos 7 dias (um risco que só avaliações limpas levaram
-acima do limite não abre nada), avisa o operador
+acima do limite não abre nada; uma sinalização aberta fica até o risco voltar
+abaixo do limite), avisa o operador
 por e-mail uma vez por dia por equipe acima do limite de alerta e, só para uma
 equipe no nível Nova (nos primeiros 1.000 envios ou 72 horas, ou abaixo de
 10.000 envios em 7 dias), pausa as transmissões quando o risco passa do
@@ -1474,9 +1475,10 @@ janela inicial, uma mensagem avaliada como do tipo phishing a partir de 80 que
 não pausa nada espera 2 minutos antes de sair: uma rajada chega à contagem de
 repetição dentro deles. Um e-mail que só chega às pessoas da própria equipe
 (todo destinatário é o login de um membro ou o simulador de caixas do SES;
-transmissões à parte) nunca espera os 2 minutos nem fica em espera por causa de um destino novo ou
-de uma pausa poupada; a pausa para revisão continua considerando esse
-e-mail, porque testar uma isca primeiro em si mesmo é o primeiro sinal dela.
+transmissões à parte) nunca espera os 2 minutos, mas fica em espera como
+qualquer e-mail, porque uma chave roubada da equipe poderia mirar uma isca nas
+próprias pessoas dela; a pausa para revisão continua considerando esse e-mail,
+porque testar uma isca primeiro em si mesmo é o primeiro sinal dela.
 Depois que a única pausa de uma equipe já foi usada, nada espera por uma
 pausa que não pode mais vir. `MONITOR_AUTO_HOLD=false` desliga a pausa para
 revisão, e a avaliação antes do SES junto com ela.
@@ -1488,10 +1490,11 @@ cliente de e-mail seguiria (uma âncora, uma área de mapa de imagem, uma ação
 de formulário, um link em SVG ou um URL do texto, lido como o navegador lê e
 passando por até três redirecionadores; um nome como `x.pages.dev`, de um
 serviço gratuito, conta sozinho) ou do seu Reply-To, menos os domínios
-verificados da equipe. Um link que não dá para ler também conta como destino; um link para um
-endereço local (localhost, 127.0.0.1, uma rede privada, `.local`,
-`.internal`) nunca conta: ali não tem nenhuma página de quem envia, e ele
-nunca se torna conhecido.
+verificados da equipe. Um link que não dá para ler também conta como destino;
+um link para um endereço de loopback (localhost e seus subdomínios,
+127.0.0.1, `::1`) nunca conta: ali não tem nenhuma página de quem envia, e ele
+nunca se torna conhecido. Um endereço de rede privada conta como qualquer
+outro destino.
 Uma avaliação abaixo de 70 que não aponta nada do tipo phishing torna os
 destinos da mensagem conhecidos da equipe, quando ela levava no máximo 5
 destinos novos; liberar um e-mail em espera por um destino novo, ou esperando
@@ -1524,9 +1527,12 @@ uma equipe depois do nível Nova nunca é pausada para revisão automaticamente.
 Uma equipe no nível Nova é poupada da pausa que uma avaliação traria quando a
 avaliação se apoia só num link de login, troca de senha ou cobrança para o
 nome do próprio produto numa plataforma de apps (`ref.supabase.co`,
-`x.workers.dev`) ou para um endereço local, num e-mail que não é transmissão,
-não se passa por outra marca e não traz meio de pagamento: a mensagem fica em
-espera na lista de revisão no lugar da pausa.
+`x.workers.dev`) ou para um endereço de loopback, num e-mail avaliado antes do
+SES que não é transmissão, não se passa por outra marca e não traz meio de
+pagamento: a mensagem fica em espera na lista de revisão no lugar da pausa.
+Um link de loopback sozinho não faz o e-mail ser avaliado antes do SES; por
+isso, depois da janela inicial da equipe, essa avaliação num e-mail avaliado
+depois do envio ainda pausa a equipe.
 Essas amostras não contam para nenhum limite diário; uma equipe tem 200 delas
 por dia, e depois disso o e-mail dela com um destino novo espera o próximo dia
 UTC.
@@ -1610,8 +1616,8 @@ seu texto e o domínio registrável onde ele chega, lido como o navegador lê e
 passando por até três redirecionadores conhecidos, como o `/url?q=` do
 Google, e os links para domínios que a equipe nunca usou, os que não dá para
 ler e os que saem dos domínios verificados dela listados primeiro (até 30
-linhas), com um link para um endereço local (localhost, 127.0.0.1, uma rede
-privada) marcado `(local address)` e listado por último; uma linha que avisa quando a mensagem
+linhas), com um link para um endereço de loopback (localhost, 127.0.0.1)
+marcado `(local address)` e listado por último; uma linha que avisa quando a mensagem
 mostra menos de 100 caracteres de texto ao lado de uma imagem, de um anexo
 ou de um QR code desenhado com caracteres ou células de tabela; o número de
 imagens que ela mostra (`<img>`, fundos em CSS, VML do Outlook, SVG); os
@@ -1786,7 +1792,7 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | Uma anomalia (uma checagem de domínio de link, encurtador ou padrão de phishing falhando, menos de 100 caracteres de texto com imagens ou arquivos levando a mensagem, um anexo) multiplica a taxa; duas forçam a amostra |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Sorteios depois do envio por equipe por dia UTC; além disso param em silêncio. E-mail avaliado antes do SES não conta nem tem limite |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Sorteios depois do envio na instância toda; além disso a amostragem por nível para, primeiros envios e anomalias continuam |
-| `MONITOR_FLAG_RISK` | 0.5 | A equipe recebe a sinalização `monitor` e é amostrada quatro vezes mais |
+| `MONITOR_FLAG_RISK` | 0.5 | A equipe é amostrada quatro vezes mais e recebe a sinalização `monitor` com uma avaliação de abuso a partir de `MONITOR_FLAG_SCORE` nos últimos 7 dias; a sinalização fica até o risco voltar abaixo deste valor |
 | `MONITOR_ALERT_RISK` | 0.7 | O operador é avisado por e-mail, uma vez por equipe por dia |
 | `MONITOR_PAUSE_RISK` | 0.85 | Só equipes novas: as transmissões são pausadas, com uma pontuação de 90 ou mais no último dia |
 | `MONITOR_AUTO_PAUSE` | true | Se a política de pausa se aplica |
