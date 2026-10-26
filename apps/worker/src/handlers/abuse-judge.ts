@@ -230,8 +230,11 @@ async function judgePending(
       : null;
   // A product's own page on a platform, read as a lure: the team is spared the hold, and the mail
   // parks unless an operator cleared every such name. Judged after the send with no such clearance,
-  // nothing is left to park, so the hold stands.
-  const platformShape = sample.broadcastId === null && isPlatformLinkVerdict(verdict, standing.all);
+  // nothing is left to park, so the hold stands. A Pix code read from the mail is a payment
+  // instrument, which no such page needs.
+  const paysByPix = (media?.findings.pix.length ?? 0) > 0;
+  const platformShape =
+    sample.broadcastId === null && !paysByPix && isPlatformLinkVerdict(verdict, standing.all);
   const vouched = platformShape && standing.all.every((d) => vouchedNames.has(d));
   const platformLink = platformShape && (sample.screening || vouched);
   // The verdict and its fold commit together: a crash between them would
@@ -293,6 +296,7 @@ async function judgePending(
   // phishing: the clearance goes, and the operator hears of it.
   const platformProbation =
     sample.broadcastId === null &&
+    !paysByPix &&
     isPlatformLinkVerdict(verdict, standing.probation) &&
     standing.probation.every((d) => vouchedNames.has(d));
   if (

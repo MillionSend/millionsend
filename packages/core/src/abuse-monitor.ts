@@ -662,16 +662,27 @@ export function isPlatformTenantName(hostname: string): boolean {
   return isFreeHostName(hostname) && PLATFORM_HOST_PARENTS.has(registrableDomain(hostname));
 }
 
-/** What the judge says of a credential link to a page off the verified domains, and nothing more. */
+/** What the judge says of a sign-in or billing link to a page off the verified domains, and nothing more. */
 const PLATFORM_LINK_REASONS: ReadonlySet<string> = new Set(["off_domain_lure", "harvests_secrets"]);
+/**
+ * The classes a product's own sign-in, reset or billing page draws. A
+ * payment class counts only without a payment instrument: the reasons above
+ * leave out payment_redirect and no_link_lure, which a Pix code, changed bank
+ * details or a callback name, and the caller checks for a decoded Pix code.
+ */
+const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
+  "phishing_credentials",
+  "payment_redirect",
+]);
 
 /**
- * A phishing-type verdict that rests on nothing but a credential link to a
- * product's own name on an app platform, or to a local address (a
- * developer's build left pointing at its own machine), on mail that poses as
- * no other brand: phishing_credentials at most for a category, reasons
- * saying only that the link is off the verified domains and asks for a
- * secret, and every destination such a name. The judge cannot tell such a
+ * A phishing-type verdict that rests on nothing but a sign-in, reset or
+ * billing link to a product's own name on an app platform, or to a local
+ * address (a developer's build left pointing at its own machine), on mail
+ * that poses as no other brand: phishing_credentials or payment_redirect
+ * at most for a category (PLATFORM_LINK_CATEGORIES), reasons saying only
+ * that the link is off the verified domains and asks for a secret, and
+ * every destination such a name. The judge cannot tell such a
  * page from a lure, so the hold policy spares the team the hold such a
  * verdict meets (applyJudgedSample's `platformLink`): the mail waits for the
  * review list instead, with the team's other mail waiting on a
@@ -690,7 +701,7 @@ export function isPlatformLinkVerdict(
   return (
     v.verdict === "abuse" &&
     destinations.length > 0 &&
-    (v.categories ?? []).every((c) => c === "phishing_credentials") &&
+    (v.categories ?? []).every((c) => PLATFORM_LINK_CATEGORIES.has(c)) &&
     (v.reasons ?? []).every((r) => PLATFORM_LINK_REASONS.has(r)) &&
     destinations.every((d) => isPlatformTenantName(d) || isLocalAddressHost(d))
   );

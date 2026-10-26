@@ -334,6 +334,29 @@ it("never screens a link to a local address as a new destination", async () => {
   expect(await cleared(t.teamId)).toEqual([]);
 });
 
+it("parks a new team's billing reminder to its own app on a platform instead of holding the team", async () => {
+  const billing: AbuseJudge = {
+    provider: "typesafe",
+    model: "fake-model",
+    judge: async () => ({
+      score: 91,
+      verdict: "abuse" as const,
+      categories: ["payment_redirect"],
+      reasons: ["off_domain_lure"],
+      impersonatedBrand: null,
+      language: "en",
+    }),
+  };
+  const t = await team("billing-app", "new", "example");
+  const id = await email(t, "https://billing-app.workers.dev/app/subscription");
+  await sendEmail(db, sendDeps, { emailId: id });
+  await judge((await sampleOf(id))?.id ?? "", billing);
+  expect(await sampleOf(id)).toMatchObject({ sparedHold: "score" });
+  const [open] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(open?.suspendedAt).toBeNull();
+  expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("parked");
+});
+
 it("parks the burst a spared verdict belongs to, as the hold would have", async () => {
   const t = await team("platform-burst", "new");
   const ids: string[] = [];

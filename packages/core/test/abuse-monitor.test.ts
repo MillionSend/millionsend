@@ -712,7 +712,24 @@ describe("the review hold", () => {
     expect(
       at({ ...RESET, reasons: [...RESET.reasons, "payment_redirect"] }, 93, ["x.workers.dev"]),
     ).toBe(false);
-    expect(at({ ...RESET, categories: ["payment_redirect"] }, 93, ["x.workers.dev"])).toBe(false);
+    // A product's own billing page there too, unless the judge saw a payment instrument.
+    expect(at({ ...RESET, categories: ["payment_redirect"] }, 93, ["x.workers.dev"])).toBe(true);
+    expect(
+      at(
+        {
+          ...RESET,
+          categories: ["payment_redirect"],
+          reasons: ["off_domain_lure", "no_link_lure"],
+        },
+        93,
+        ["x.workers.dev"],
+      ),
+    ).toBe(false);
+    expect(
+      at({ ...RESET, categories: ["payment_redirect", "brand_impersonation"] }, 93, [
+        "x.workers.dev",
+      ]),
+    ).toBe(false);
     expect(at({ ...RESET, reasons: ["no_link_lure"] }, 93, ["x.workers.dev"])).toBe(false);
     expect(at({ ...RESET, verdict: "clean" as "abuse" }, 40, ["ref.supabase.co"])).toBe(false);
 
