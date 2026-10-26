@@ -689,8 +689,9 @@ const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
  * phishing-type verdict, unless an operator had cleared every such name,
  * which also keeps a verdict of this shape from taking the clearance back. A
  * loopback address never clears (clearDestinations), so a verdict resting
- * on one always waits for a person: a decoy loopback link can sit beside a lure
- * the link table never shows. A lure that names a brand, moves a payment or
+ * on one always waits for a person: a decoy loopback link can sit beside a
+ * lure the link table never shows. A lure that names a brand, moves a
+ * payment or
  * carries no link keeps every rule, and the callers never spare a
  * broadcast's sample.
  */

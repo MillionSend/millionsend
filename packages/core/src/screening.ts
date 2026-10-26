@@ -688,17 +688,19 @@ function recipientKeys(email: Pick<ScreenedEmail, "to" | "cc" | "bcc">): string[
 
 /**
  * Whether an email goes to its own team's people and no one else: every
- * recipient a member's login, or the SES mailbox simulator. Parking or
- * delaying such mail protects no one, so no verdict does either; the
- * review hold still reads it, since a lure a sender tries on itself first
- * is the earliest sign of one. An address on the team's own domains is not
- * enough: a team's account, or a key taken from it, could reach its whole
- * organisation's staff that way.
+ * recipient a member's login, or the SES mailbox simulator, on mail that is
+ * not a broadcast's copy. Such mail never waits on a verdict, though it
+ * parks as any mail does: a key taken from the team could aim a lure at the
+ * team's own people. The review hold still reads it, since a lure a sender
+ * tries on itself first is the earliest sign of one. An address on the
+ * team's own domains is not enough: a team's account, or a key taken from
+ * it, could reach its whole organisation's staff that way.
  */
 export async function reachesOnlyTeam(
   db: Db,
-  email: Pick<ScreenedEmail, "teamId" | "to" | "cc" | "bcc">,
+  email: Pick<ScreenedEmail, "teamId" | "broadcastId" | "to" | "cc" | "bcc">,
 ): Promise<boolean> {
+  if (email.broadcastId !== null) return false;
   const recipients = recipientKeys(email);
   if (recipients.length === 0) return false;
   const members = new Set(await teamMemberEmails(db, email.teamId));
@@ -964,13 +966,11 @@ async function startScreening(
  * parks on a verdict that destinationVerdictParks, and cold shared-domain
  * mail of any team not exempt on a phishing-type verdict from
  * `holdRepeatScore`; mail that reaches only the team's own people
- * (reachesOnlyTeam) neither waits nor parks for a destination or a spared
- * hold; a judge that
- * keeps failing parks a young domain's email, shared-domain mail included,
- * and lets an older one's through; media the judge could not clear parks
- * as mediaParks says. The team's own standing (a hold, a pause) is the
- * caller's to read first, on every pass; `team` is what it already read of
- * the team this pass.
+ * (reachesOnlyTeam) never waits; a judge that keeps failing parks a
+ * young domain's email, shared-domain mail included, and lets an older
+ * one's through; media the judge could not clear parks as mediaParks says.
+ * The team's own standing (a hold, a pause) is the caller's to read first,
+ * on every pass; `team` is what it already read of the team this pass.
  */
 export async function screenBeforeSend(
   db: Db,
@@ -1036,25 +1036,13 @@ export async function screenBeforeSend(
   if (waiting === "wait") return { action: "wait", until: null };
   if (waiting === "park") return { action: "park", reason: "screening" };
   if (waiting === "proceed") return { action: "send", sample: { id: sample.id, unjudged: true } };
-  let teamOnly: boolean | undefined;
-  const reachesTeamOnly = async (): Promise<boolean> => {
-    teamOnly ??= email.broadcastId === null && (await reachesOnlyTeam(db, email));
-    return teamOnly;
-  };
   // The hold this verdict met spared the team (isPlatformLinkVerdict): the mail waits for a person instead.
   if (sample.sparedHold && sample.sparedHold !== "vouched") {
-    return (await reachesTeamOnly())
-      ? { action: "send", sample: screened }
-      : { action: "park", reason: "destination" };
+    return { action: "park", reason: "destination" };
   }
   if (!isHoldVerdict(sample, s.holdRepeatScore)) return { action: "send", sample: screened };
   const destinations = sample.destinations?.length ?? 0;
-  if (
-    destinations > 0 &&
-    destinationVerdictParks(sample, s) &&
-    team.tier !== "new" &&
-    !(await reachesTeamOnly())
-  ) {
+  if (destinations > 0 && destinationVerdictParks(sample, s) && team.tier !== "new") {
     return { action: "park", reason: "destination" };
   }
   if (shared && team.tier !== "exempt" && (await coldSharedSend(db, email))) {
@@ -1067,7 +1055,7 @@ export async function screenBeforeSend(
     (email.broadcastId
       ? team.tier === "new"
       : team.firstWindow || (team.tier === "new" && destinations > 0 && sample.linkYoung === null));
-  if (sample.judgedAt && waits && !(await reachesTeamOnly())) {
+  if (sample.judgedAt && waits && !(await reachesOnlyTeam(db, email))) {
     const until = new Date(sample.judgedAt.getTime() + SCREEN_HOLD_WAIT_MS);
     if (now < until) return { action: "wait", until };
   }

@@ -379,36 +379,21 @@ it("still holds a new team whose billing reminder pastes a Pix code into its tex
   expect(held?.suspensionReason).toBe("review");
 });
 
-it("sends a spared mail that reaches only the team's own people, and still parks and reports the burst it belongs to", async () => {
+it("parks a spared verdict's mail to the team's own people like any other", async () => {
   const t = await team("own-people", "new", "example");
   const userId = randomUUID();
   await db
     .insert(schema.user)
     .values({ id: userId, name: "Owner", email: "owner@own-people.example" });
   await db.insert(schema.teamMembers).values({ teamId: t.teamId, userId, role: "owner" });
-  // Mail to a buyer waiting out a phishing-type verdict that held nothing.
-  const out = await email(t, "https://help.own-people.example/x");
-  await sendEmail(db, sendDeps, { emailId: out });
-  await db
-    .update(schema.monitorSamples)
-    .set({
-      status: "judged",
-      score: 85,
-      verdict: "abuse",
-      categories: ["phishing_credentials"],
-      reasons: ["impersonation"],
-      judgedAt: new Date(),
-    })
-    .where(eq(schema.monitorSamples.emailId, out));
-  expect(await sendEmail(db, sendDeps, { emailId: out })).toBe("deferred");
   // The developer's own reset test, pointing at their machine.
   const own = await email(t, "http://localhost:3000/reset?token=x", ["owner@own-people.example"]);
   await sendEmail(db, sendDeps, { emailId: own });
   await judge((await sampleOf(own))?.id ?? "", credentialOnly(90));
   expect(await sampleOf(own)).toMatchObject({ sparedHold: "score" });
-  expect(await sendEmail(db, sendDeps, { emailId: own })).toBe("sent");
-  expect(await sampleOf(out)).toMatchObject({ sparedHold: "burst" });
-  expect(await sendEmail(db, sendDeps, { emailId: out })).toBe("parked");
+  const [open] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(open?.suspendedAt).toBeNull();
+  expect(await sendEmail(db, sendDeps, { emailId: own })).toBe("parked");
   expect(mails.map((m) => m.kind)).toEqual(["monitor.destination_parked"]);
 });
 

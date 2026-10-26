@@ -407,6 +407,11 @@ describe("the gate's read of the team", () => {
 describe("a spared verdict's burst", () => {
   it("parks the team's waiting phishing-type mail, queued or parked for quota, and nothing else", async () => {
     const teamId = await createTeam(db, "burst-scope");
+    const ownerId = randomUUID();
+    await db
+      .insert(schema.user)
+      .values({ id: ownerId, name: "Owner", email: "owner@burst-scope.example" });
+    await db.insert(schema.teamMembers).values({ teamId, userId: ownerId, role: "owner" });
     const LURE = {
       verdict: "abuse",
       categories: ["phishing_credentials"],
@@ -416,13 +421,14 @@ describe("a spared verdict's burst", () => {
       status: "queued" | "queued_quota" | "sent",
       parkReason: "destination" | null,
       sample: Partial<typeof schema.monitorSamples.$inferInsert>,
+      to = ["r@example.org"],
     ) => {
       const id = randomUUID();
       await db.insert(schema.emails).values({
         id,
         teamId,
         from: "T <hi@burst-scope.dev>",
-        to: ["r@example.org"],
+        to,
         subject: "s",
         latestStatus: status,
         parkReason,
@@ -445,6 +451,8 @@ describe("a spared verdict's burst", () => {
     };
     const queued = await mail("queued", null, {});
     const quota = await mail("queued_quota", null, {});
+    // Mail to the team's own people parks with the burst like any other.
+    const own = await mail("queued_quota", null, {}, ["owner@burst-scope.example"]);
     const operatorParked = await mail("queued_quota", "destination", {});
     const vouched = await mail("queued", null, { sparedHold: "vouched" });
     const clean = await mail("queued", null, {
@@ -455,7 +463,7 @@ describe("a spared verdict's burst", () => {
     });
     const spam = await mail("queued", null, { categories: ["unsolicited_bulk"], reasons: [] });
     const sent = await mail("sent", null, { score: 95 });
-    expect(await spareWaitingSamples(db, { teamId, holdRepeatScore: 80 })).toBe(2);
+    expect(await spareWaitingSamples(db, { teamId, holdRepeatScore: 80 })).toBe(3);
     const marks = new Map(
       (
         await db
@@ -464,8 +472,7 @@ describe("a spared verdict's burst", () => {
           .where(eq(schema.monitorSamples.teamId, teamId))
       ).map((row) => [row.id, row.sparedHold]),
     );
-    expect(marks.get(queued)).toBe("burst");
-    expect(marks.get(quota)).toBe("burst");
+    for (const id of [queued, quota, own]) expect(marks.get(id)).toBe("burst");
     for (const id of [operatorParked, clean, spam, sent]) expect(marks.get(id)).toBeNull();
     expect(marks.get(vouched)).toBe("vouched");
   });
@@ -485,7 +492,7 @@ describe("mail that reaches only its own team", () => {
       .insert(schema.domains)
       .values({ teamId, name: "own-brand.example", region: "us-east-1", status: "verified" });
     const to = (...addresses: string[]) =>
-      reachesOnlyTeam(db, { teamId, to: addresses, cc: null, bcc: null });
+      reachesOnlyTeam(db, { teamId, broadcastId: null, to: addresses, cc: null, bcc: null });
     expect(await to("owner@example.net")).toBe(true);
     expect(await to("Owner <OWNER@example.net>")).toBe(true);
     expect(await to("owner@example.net", "success+run1@simulator.amazonses.com")).toBe(true);
@@ -496,9 +503,20 @@ describe("mail that reaches only its own team", () => {
     expect(
       await reachesOnlyTeam(db, {
         teamId,
+        broadcastId: null,
         to: ["owner@example.net"],
         cc: null,
         bcc: ["someone@example.org"],
+      }),
+    ).toBe(false);
+    // A broadcast's copy is the broadcast's audience, whoever it lands with.
+    expect(
+      await reachesOnlyTeam(db, {
+        teamId,
+        broadcastId: randomUUID(),
+        to: ["owner@example.net"],
+        cc: null,
+        bcc: null,
       }),
     ).toBe(false);
   });
@@ -555,23 +573,19 @@ describe("mail that reaches only its own team", () => {
   const NEW = { tier: "new", firstWindow: true, holdSpent: false } as const;
   const SETTLED = { tier: "established", firstWindow: false, holdSpent: false } as const;
 
-  it("is never parked or kept waiting by a verdict, a spared hold's included", async () => {
+  it("never waits on a verdict, though it parks as any mail does", async () => {
+    // A key taken from the team could aim a lure at the team's own people.
+    const PARKED = { action: "park", reason: "destination" };
     const spared = { sparedHold: "score", destinations: ["app.localhost"] };
-    expect(await screened("spared-self", { own: true, team: NEW, sample: spared })).toMatchObject({
-      action: "send",
-    });
-    expect(await screened("spared-out", { own: false, team: NEW, sample: spared })).toEqual({
-      action: "park",
-      reason: "destination",
-    });
+    expect(await screened("spared-self", { own: true, team: NEW, sample: spared })).toEqual(PARKED);
+    expect(await screened("spared-out", { own: false, team: NEW, sample: spared })).toEqual(PARKED);
     const parked = { destinations: ["bill-host.example"], linkYoung: false };
-    expect(
-      await screened("past-new-self", { own: true, team: SETTLED, sample: parked }),
-    ).toMatchObject({ action: "send" });
-    expect(await screened("past-new-out", { own: false, team: SETTLED, sample: parked })).toEqual({
-      action: "park",
-      reason: "destination",
-    });
+    expect(await screened("past-new-self", { own: true, team: SETTLED, sample: parked })).toEqual(
+      PARKED,
+    );
+    expect(await screened("past-new-out", { own: false, team: SETTLED, sample: parked })).toEqual(
+      PARKED,
+    );
     // A new team's phishing-type verdict waits out a burst, unless the mail reaches only the team.
     expect(
       await screened("wait-self", { own: true, team: NEW, sample: { score: 85 } }),
