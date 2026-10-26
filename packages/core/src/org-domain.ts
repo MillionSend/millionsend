@@ -15,6 +15,47 @@ export function topLevelLabel(hostname: string): string {
   return hostname.slice(hostname.lastIndexOf(".") + 1);
 }
 
+/** RFC 8375. The rest of .arpa stays allowed: uri.arpa and urn.arpa publish MX records. */
+export const HOME_ARPA = "home.arpa";
+
+/** Last labels only the reader's own device or network resolves: RFC 6761, RFC 6762 (mDNS) and ICANN's private-use reservation. */
+const LOCAL_TLDS: ReadonlySet<string> = new Set(["localhost", "local", "internal"]);
+
+const DOTTED_IPV4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/;
+
+/**
+ * Whether a link's host (as the URL parser hands it over, so 2130706433 and
+ * 0x7f.1 arrive as 127.0.0.1) can only lead the reader to their own machine
+ * or private network, where a developer's build left pointing at itself
+ * sends them: a loopback or private address, or a name only those resolve
+ * (localhost and its subdomains, .local, .internal, home.arpa). No sender can
+ * serve a page there. Link-local addresses are left out (a cloud metadata
+ * endpoint lives there, no test server does), and so is an IPv6 address
+ * carrying a v4 part, since a browser reaches the public v4 it embeds; so
+ * are the testing and documentation names (.test, .example, .invalid), which
+ * get the screening every other name gets.
+ */
+export function isLocalAddressHost(hostname: string): boolean {
+  const name = normalizeHostname(hostname);
+  const v4 = DOTTED_IPV4.exec(name);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return (
+      name === "0.0.0.0" ||
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+  if (name.startsWith("[")) {
+    const v6 = name.slice(1, -1);
+    // ::1 and fc00::/7, the unique local range.
+    return v6 === "::1" || /^f[cd][0-9a-f]{2}:/.test(v6);
+  }
+  return LOCAL_TLDS.has(topLevelLabel(name)) || isDomainOrSubdomain(name, HOME_ARPA);
+}
+
 /**
  * normalizeHostname, IDNA-encoded the way DNS and the domains table store
  * names (bücher.de → xn--bcher-kva.de); null when it is not a hostname. Only

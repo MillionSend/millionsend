@@ -8,7 +8,12 @@ import {
   UNRESOLVED_DESTINATION,
 } from "../links.js";
 import { maskEmailLocalParts } from "../mask.js";
-import { ownerDomain, registrableDomain, vouchedRegistrableDomain } from "../org-domain.js";
+import {
+  isLocalAddressHost,
+  ownerDomain,
+  registrableDomain,
+  vouchedRegistrableDomain,
+} from "../org-domain.js";
 import { decodeEntities, opaqueFactsOf, readBody } from "./body.js";
 import { type MediaFindings, renderMediaLines } from "./media.js";
 
@@ -111,9 +116,21 @@ export function clip(text: string, max: number): string {
   return `${text.slice(0, max - tail)} […${text.length - max} characters left out…] ${text.slice(-tail)}`;
 }
 
-/** The name a link's row shows: the registrable domain it lands on, or what kind of link it is. */
-function destinationName(raw: string, link: ResolvedLink): string {
-  if (link.url) return registrableDomain(new URL(link.url).hostname);
+/** Marks a link to the reader's own machine or network in the outbound link table. */
+export const LOCAL_ADDRESS_MARK = "(local address)";
+
+/**
+ * The name a link's row shows: the registrable domain it lands on, or what
+ * kind of link it is. `markLocal` adds LOCAL_ADDRESS_MARK to a local
+ * address's: on outbound mail it is a developer's own build, while to an
+ * agent reading received mail it can be the very thing a lure points at.
+ */
+function destinationName(raw: string, link: ResolvedLink, markLocal = false): string {
+  if (link.url) {
+    const host = new URL(link.url).hostname;
+    const name = registrableDomain(host);
+    return markLocal && isLocalAddressHost(host) ? `${name} ${LOCAL_ADDRESS_MARK}` : name;
+  }
   if (link.unresolved) return "(unresolved)";
   if (/^\s*mailto:/i.test(raw)) return "mailto";
   if (/^\s*tel:/i.test(raw)) return "tel";
@@ -125,27 +142,30 @@ function destinationName(raw: string, link: ResolvedLink): string {
  * domain the team never used first (an unresolved link among them while
  * the team has not cleared one), then other links off its verified domains,
  * then the rest, each group in document order, so a lure cannot hide behind
- * thirty links to the sender's own site.
+ * thirty links to the sender's own site. With `markLocal`, links to a local
+ * address come last of all, marked (destinationName).
  */
 export function linkRows(
   links: BodyLink[],
   verified: string[],
   novel?: ReadonlySet<string>,
+  opts: { markLocal?: boolean } = {},
 ): string[] {
   const owned = new Set(verified.map(ownerDomain));
   const group = (link: BodyLink): number => {
     if (link.unresolved) return novel?.has(UNRESOLVED_DESTINATION) ? 0 : 1;
     if (!link.url) return 2;
     const host = new URL(link.url).hostname;
+    if (opts.markLocal && isLocalAddressHost(host)) return 3;
     if (novel?.has(registrableDomain(host)) || novel?.has(ownerDomain(host))) return 0;
     return owned.has(ownerDomain(host)) ? 2 : 1;
   };
-  const groups: BodyLink[][] = [[], [], []];
+  const groups: BodyLink[][] = [[], [], [], []];
   for (const link of links) groups[group(link)]?.push(link);
   const rows = new Set<string>();
   for (const link of groups.flat()) {
     const text = link.source === "form" ? "(form)" : label(decodeEntities(link.text));
-    rows.add(`  ${text} -> ${destinationName(link.raw, link)}`);
+    rows.add(`  ${text} -> ${destinationName(link.raw, link, opts.markLocal)}`);
     if (rows.size >= JUDGE_LINK_ROWS_MAX) break;
   }
   return [...rows];
@@ -189,6 +209,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     extractLinks(stripped?.html ?? null, !stripped || plainShown ? input.text : null),
     input.team.verifiedDomains,
     input.novelDomains,
+    { markLocal: true },
   );
   const lines = [
     `Team name: ${oneLine(input.team.name)}`,
@@ -234,7 +255,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
   lines.push(
     ...renderMediaLines(input.media, {
       redact: redacted,
-      target: (href) => destinationName(href, resolveTextUrl(href)),
+      target: (href) => destinationName(href, resolveTextUrl(href), true),
     }),
   );
   return lines.join("\n");

@@ -114,13 +114,13 @@ const judge = (sampleId: string, answer: AbuseJudge, linkYoung = false) =>
   );
 
 /** A team of a tier: Established (or Trusted), or New in its first window. */
-async function team(slug: string, tier: "new" | "established" | "trusted") {
+async function team(slug: string, tier: "new" | "established" | "trusted", tld = "dev") {
   const teamId = await createTeam(db, slug);
   const [domain] = await db
     .insert(schema.domains)
     .values({
       teamId,
-      name: `${slug}.dev`,
+      name: `${slug}.${tld}`,
       region: "us-east-1",
       status: "verified",
       verifiedAt: new Date(),
@@ -132,10 +132,14 @@ async function team(slug: string, tier: "new" | "established" | "trusted") {
     sentTotal: tier === "new" ? 1 : tier === "trusted" ? 60_000 : 20_000,
     firstSendAt: new Date(Date.now() - (tier === "new" ? 60_000 : 200 * DAY)),
   });
-  return { teamId, domainId: domain?.id ?? "", slug };
+  return { teamId, domainId: domain?.id ?? "", slug, domain: `${slug}.${tld}` };
 }
 
-async function email(t: { teamId: string; domainId: string; slug: string }, href: string) {
+async function email(
+  t: { teamId: string; domainId: string; domain: string },
+  href: string,
+  to = ["r@example.org"],
+) {
   const id = randomUUID();
   const body = await encryptEmailBody(
     { html: `<p>Hello <a href="${href}">open</a></p>`, text: null },
@@ -146,8 +150,8 @@ async function email(t: { teamId: string; domainId: string; slug: string }, href
     id,
     teamId: t.teamId,
     domainId: t.domainId,
-    from: `Team <hi@${t.slug}.dev>`,
-    to: ["r@example.org"],
+    from: `Team <hi@${t.domain}>`,
+    to,
     subject: "Hello",
     bodyCiphertext: body.ciphertext,
     bodyIv: body.iv,
@@ -296,6 +300,38 @@ it("parks a new team's reset mail to its own name on an app platform instead of 
   const [still] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
   expect(still?.suspendedAt).toBeNull();
   expect(await sendEmail(db, sendDeps, { emailId: again })).toBe("sent");
+});
+
+it("parks a new team's mail to a local address instead of holding the team, and never vouches the address", async () => {
+  const t = await team("local-new", "new", "example");
+  const out = await email(t, "http://app.localhost/verify?token=x");
+  await sendEmail(db, sendDeps, { emailId: out });
+  expect(await judge((await sampleOf(out))?.id ?? "", credentialOnly(90))).toBe("judged");
+  expect(await sampleOf(out)).toMatchObject({
+    destinations: ["app.localhost"],
+    sparedHold: "score",
+  });
+  const [open] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
+  expect(open?.suspendedAt).toBeNull();
+  expect(await sendEmail(db, sendDeps, { emailId: out })).toBe("parked");
+  expect(
+    await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [out], holdLine: 80 }),
+  ).toEqual({ parked: 1, queued: [] });
+  expect(await cleared(t.teamId)).toEqual([]);
+  // A decoy local link can sit beside a lure the table never shows: the next one waits again.
+  const again = await email(t, "http://app.localhost/verify?token=y");
+  await sendEmail(db, sendDeps, { emailId: again });
+  await judge((await sampleOf(again))?.id ?? "", credentialOnly(90));
+  expect(await sampleOf(again)).toMatchObject({ sparedHold: "score" });
+  expect(await sendEmail(db, sendDeps, { emailId: again })).toBe("parked");
+});
+
+it("never screens a link to a local address as a new destination", async () => {
+  const t = await team("local-settled", "established", "example");
+  const id = await email(t, "http://localhost:3000/reset?token=x");
+  expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("sent");
+  expect((await sampleOf(id))?.screening ?? false).toBe(false);
+  expect(await cleared(t.teamId)).toEqual([]);
 });
 
 it("parks the burst a spared verdict belongs to, as the hold would have", async () => {

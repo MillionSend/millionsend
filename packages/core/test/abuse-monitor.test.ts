@@ -752,6 +752,23 @@ describe("the review hold", () => {
     ).toMatchObject({ held: { rule: "score" }, spared: null });
   });
 
+  it("spares a new team the hold for a credential link to a local address, as for a platform name", async () => {
+    const RESET = {
+      verdict: "abuse" as const,
+      categories: ["phishing_credentials"],
+      reasons: ["off_domain_lure", "harvests_secrets"],
+    };
+    const at = (v: typeof RESET, destinations: string[]) =>
+      isPlatformLinkVerdict({ ...v, score: 90 }, destinations);
+    expect(at(RESET, ["app.localhost"])).toBe(true);
+    expect(at(RESET, ["127.0.0.1", "ref.supabase.co"])).toBe(true);
+    // A name a stranger can serve beside it, an address only dressed as local, a named brand: not this.
+    expect(at(RESET, ["localhost", "lure.example"])).toBe(false);
+    expect(at(RESET, ["[::ffff:808:808]"])).toBe(false);
+    expect(at(RESET, ["169.254.169.254"])).toBe(false);
+    expect(at(PHISHING, ["localhost"])).toBe(false);
+  });
+
   it("suspends a new team for review on one confident phishing verdict, once, and leaves a released team to the operator", async () => {
     const teamId = await newTeam("held");
     const out = await applyJudgedSample(db, S, {

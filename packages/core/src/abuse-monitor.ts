@@ -5,7 +5,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
-import { isFreeHostName, registrableDomain } from "./org-domain.js";
+import { isFreeHostName, isLocalAddressHost, registrableDomain } from "./org-domain.js";
 import { fetchTeamStanding, suspendTeam } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -667,17 +667,21 @@ const PLATFORM_LINK_REASONS: ReadonlySet<string> = new Set(["off_domain_lure", "
 
 /**
  * A phishing-type verdict that rests on nothing but a credential link to a
- * product's own name on an app platform, on mail that poses as no other
- * brand: phishing_credentials at most for a category, reasons saying only
- * that the link is off the verified domains and asks for a secret, and
- * every destination given a platform tenant name. The judge cannot tell
- * such a page from a lure, so the hold policy spares the team the hold
- * such a verdict meets (applyJudgedSample's `platformLink`): the mail
- * waits for the review list instead, with the team's other mail waiting
- * on a phishing-type verdict, unless an operator had cleared every such
- * name, which also keeps a verdict of this shape from taking the clearance
- * back. A lure that names a brand, moves a payment or carries no link
- * keeps every rule, and the callers never spare a broadcast's sample.
+ * product's own name on an app platform, or to a local address (a
+ * developer's build left pointing at its own machine), on mail that poses as
+ * no other brand: phishing_credentials at most for a category, reasons
+ * saying only that the link is off the verified domains and asks for a
+ * secret, and every destination such a name. The judge cannot tell such a
+ * page from a lure, so the hold policy spares the team the hold such a
+ * verdict meets (applyJudgedSample's `platformLink`): the mail waits for the
+ * review list instead, with the team's other mail waiting on a
+ * phishing-type verdict, unless an operator had cleared every such name,
+ * which also keeps a verdict of this shape from taking the clearance back. A
+ * local address never clears (clearDestinations), so a verdict resting on
+ * one always waits for a person: a decoy local link can sit beside a lure
+ * the link table never shows. A lure that names a brand, moves a payment or
+ * carries no link keeps every rule, and the callers never spare a
+ * broadcast's sample.
  */
 export function isPlatformLinkVerdict(
   v: HoldVerdictFields,
@@ -688,7 +692,7 @@ export function isPlatformLinkVerdict(
     destinations.length > 0 &&
     (v.categories ?? []).every((c) => c === "phishing_credentials") &&
     (v.reasons ?? []).every((r) => PLATFORM_LINK_REASONS.has(r)) &&
-    destinations.every(isPlatformTenantName)
+    destinations.every((d) => isPlatformTenantName(d) || isLocalAddressHost(d))
   );
 }
 

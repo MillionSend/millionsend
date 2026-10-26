@@ -350,6 +350,19 @@ describe("the phishing fingerprints a send compares with", () => {
   });
 });
 
+describe("a link to a local address", () => {
+  it("is never a new destination, never in probation and never clears, not even on an operator's release", async () => {
+    const teamId = await createTeam(db, "local-links");
+    const all = ["app.localhost", "127.0.0.1", "lately.example"];
+    await clearDestinations(db, teamId, all, NOW, { operator: true });
+    expect(await destinationStanding(db, teamId, [...all, "[::1]"], NOW)).toEqual({
+      novel: [],
+      probation: ["lately.example"],
+      vouched: ["lately.example"],
+    });
+  });
+});
+
 describe("the gate's read of the team", () => {
   it("is the one its caller made this send, not a second", async () => {
     const teamId = await createTeam(db, "read-once");

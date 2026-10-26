@@ -41,7 +41,7 @@ import {
   UNRESOLVED_DESTINATION,
 } from "./links.js";
 import type { MonitorSettings } from "./monitor-settings.js";
-import { ownerDomain, registrableDomain } from "./org-domain.js";
+import { isLocalAddressHost, ownerDomain, registrableDomain } from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
 import { teamMemberEmails } from "./receiving/inbox-routing.js";
 import { parseSingleSender } from "./sender-address.js";
@@ -192,7 +192,9 @@ export function messageDestinations(input: {
 /**
  * A message's destinations as its team stands with them: `novel`, never
  * cleared, revoked, or a shortener, which a shortener always is; and
- * `probation`, cleared under DESTINATION_PROBATION_DAYS before `now`.
+ * `probation`, cleared under DESTINATION_PROBATION_DAYS before `now`. A local
+ * address (isLocalAddressHost) is neither: no page a sender serves is there,
+ * so there is nothing to screen, clear or date, and it never clears.
  */
 export async function destinationStanding(
   db: Db,
@@ -208,9 +210,10 @@ export async function destinationStanding(
   const cleared = new Map(rows.map((row) => [row.domain, row.clearedAt.getTime()]));
   const vouched = new Set(rows.filter((row) => row.operatorClearedAt).map((row) => row.domain));
   const since = now.getTime() - DESTINATION_PROBATION_DAYS * DAY_MS;
+  const reachable = destinations.filter((d) => !isLocalAddressHost(d));
   return {
-    novel: destinations.filter((d) => isShortener(d) || !cleared.has(d)),
-    probation: destinations.filter((d) => !isShortener(d) && (cleared.get(d) ?? 0) > since),
+    novel: reachable.filter((d) => isShortener(d) || !cleared.has(d)),
+    probation: reachable.filter((d) => !isShortener(d) && (cleared.get(d) ?? 0) > since),
     vouched: destinations.filter((d) => !isShortener(d) && vouched.has(d)),
   };
 }
@@ -295,8 +298,9 @@ export function verdictClearsDestinations(
 
 /**
  * The team cleared these destinations: mail to them no longer waits. A
- * shortener never clears, and a verdict never clears a revoked destination
- * again; an operator's release (`operator`) does.
+ * shortener never clears, nor a local address, so a verdict resting on one
+ * is never vouched and always parks; a verdict never clears a revoked
+ * destination again; an operator's release (`operator`) does.
  */
 export async function clearDestinations(
   db: Db,
@@ -305,7 +309,7 @@ export async function clearDestinations(
   now: Date = new Date(),
   opts: { operator?: boolean } = {},
 ): Promise<void> {
-  const domains = destinations.filter((d) => !isShortener(d));
+  const domains = destinations.filter((d) => !isShortener(d) && !isLocalAddressHost(d));
   if (domains.length === 0) return;
   const operatorClearedAt = opts.operator ? now : null;
   const rows = db
