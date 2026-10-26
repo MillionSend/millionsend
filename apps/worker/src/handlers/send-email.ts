@@ -766,8 +766,16 @@ async function sendQueued(
   // A people inbox is a mailbox: its mail goes out untracked too, as from any
   // mail client.
   const inboxKind = await inboxKindOf(db, email.inboxId);
-  const click = (domain?.clickTracking ?? false) && !systemMail && inboxKind !== "human";
-  const open = (domain?.openTracking ?? false) && !systemMail && inboxKind !== "human";
+  const click =
+    body.tracking?.click !== false &&
+    (domain?.clickTracking ?? false) &&
+    !systemMail &&
+    inboxKind !== "human";
+  const open =
+    body.tracking?.open !== false &&
+    (domain?.openTracking ?? false) &&
+    !systemMail &&
+    inboxKind !== "human";
   let html = body.html;
   let text = body.text;
 

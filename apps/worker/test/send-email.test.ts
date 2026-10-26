@@ -86,8 +86,12 @@ async function insertEmail(
   overrides: Partial<typeof schema.emails.$inferInsert> = {},
   bodyHtml = "<b>hi</b>",
   bodyText: string | null = "hi",
+  tracking?: { open?: false; click?: false },
 ): Promise<string> {
-  const encrypted = await encryptEmailBody({ html: bodyHtml, text: bodyText }, keyring);
+  const encrypted = await encryptEmailBody(
+    { html: bodyHtml, text: bodyText, ...(tracking ? { tracking } : {}) },
+    keyring,
+  );
   const [row] = await db
     .insert(schema.emails)
     .values({
@@ -2007,4 +2011,33 @@ it("counts a send no recipient can report as a complaint only when every recipie
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, team));
   expect(counters).toEqual([{ sent: 4, sentNoFeedback: 2 }]);
+});
+
+it("ships verification links and no pixel when the message disables domain tracking", async () => {
+  await db
+    .update(schema.domains)
+    .set({ openTracking: true })
+    .where(eq(schema.domains.id, domainId));
+  const { ses, sends } = fakeSes("mid-untracked-verification");
+  const emailId = await insertEmail(
+    {},
+    '<a href="https://example.com/confirm#secret">Confirm</a>',
+    "https://example.com/confirm#secret",
+    { open: false, click: false },
+  );
+  expect(
+    await sendEmail(
+      db,
+      {
+        keyring,
+        ses,
+        tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://links.example.com" },
+      },
+      { emailId },
+    ),
+  ).toBe("sent");
+  const mime = unwrapQp(sends[0]!.raw.toString("utf8"));
+  expect(mime).toContain("https://example.com/confirm#secret");
+  expect(mime).not.toContain("/t/c/");
+  expect(mime).not.toContain("/t/o/");
 });

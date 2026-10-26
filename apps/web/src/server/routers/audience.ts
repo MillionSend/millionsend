@@ -13,11 +13,13 @@ import {
   emitSuppressionEvents,
   eraseRecipient,
   fetchEffectivePlan,
+  hasRevocableConfirmation,
   loadContactPropertyTypes,
   markSegmentsStale,
   PLAN_CONTACT_LIMIT,
   recordContactActivity,
   resultRows,
+  revokeContactConfirmation,
   storedPropertyValue,
   undeliverableRecipientMessage,
   undeliverableRecipients,
@@ -472,7 +474,11 @@ export const audienceRouter = router({
         // written, so updated_at stays put, no contact.updated fires and the
         // timeline only records real flips.
         const [before] = await ctx.db
-          .select({ ...contactSnapshotColumns, properties: t.properties })
+          .select({
+            ...contactSnapshotColumns,
+            properties: t.properties,
+            confirmation: t.confirmation,
+          })
           .from(t)
           .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)));
         if (!before) throw new TRPCError({ code: "NOT_FOUND" });
@@ -480,7 +486,10 @@ export const audienceRouter = router({
         // omitting it leaves the stored map unchanged.
         const next =
           input.properties && (await typedProperties(ctx, input.properties, before.properties));
+        const revokesConfirmation =
+          input.unsubscribed === true && hasRevocableConfirmation(before.confirmation);
         const dirty =
+          revokesConfirmation ||
           (input.firstName !== undefined && (input.firstName || null) !== before.firstName) ||
           (input.lastName !== undefined && (input.lastName || null) !== before.lastName) ||
           (input.unsubscribed !== undefined && input.unsubscribed !== before.unsubscribed) ||
@@ -504,6 +513,9 @@ export const audienceRouter = router({
                       }
                     : {}),
                   ...(next !== undefined ? { properties: next } : {}),
+                  ...(input.unsubscribed === true
+                    ? { confirmation: revokeContactConfirmation(t.confirmation) }
+                    : {}),
                   updatedAt: new Date(),
                 })
                 .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
@@ -523,7 +535,7 @@ export const audienceRouter = router({
             enqueue: ctx.enqueueWebhookDeliveries,
           });
         }
-        if (before.unsubscribed !== row.unsubscribed) {
+        if (before.unsubscribed !== row.unsubscribed || revokesConfirmation) {
           await recordContactActivity(
             ctx.db,
             {

@@ -9,8 +9,10 @@ import {
   hashRecipient,
   INACTIVE_MAILBOX_PATTERN,
   isWebhookEventType,
+  lockSuppressionContacts,
   MAILBOX_FULL_PATTERN,
   noteConsoleCodeUndelivered,
+  revokeSuppressedConfirmations,
   type SuppressionEventRow,
   sesAttempted,
   utcDay,
@@ -248,6 +250,12 @@ export async function processSesEvent(
     );
     const own = (recipients: readonly string[]) =>
       recipients.filter((r) => ownRecipients.has(hashRecipient(r)));
+    if (event.eventType === "Bounce" || event.eventType === "Complaint")
+      await lockSuppressionContacts(txDb, email.teamId, [
+        ...email.to,
+        ...(email.cc ?? []),
+        ...(email.bcc ?? []),
+      ]);
     const toSuppress =
       event.eventType === "Bounce" && event.bounce
         ? (event.bounce.bounceType === "Permanent"
@@ -277,7 +285,11 @@ export async function processSesEvent(
           reason: s.reason,
           sourceEmailId: email.id,
         })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: [schema.suppressions.teamId, schema.suppressions.emailHash],
+          set: { reason: s.reason, sourceEmailId: email.id },
+          setWhere: eq(schema.suppressions.reason, "one_click_unsubscribe"),
+        })
         .returning({
           id: schema.suppressions.id,
           email: schema.suppressions.email,
@@ -287,6 +299,11 @@ export async function processSesEvent(
         });
       if (inserted) suppressedRows.push(inserted);
     }
+    await revokeSuppressedConfirmations(
+      txDb,
+      email.teamId,
+      toSuppress.map((s) => s.email),
+    );
     // New suppressions publish like the email event: rows join this
     // transaction, the queue sends happen after commit.
     if (suppressedRows.length > 0) {

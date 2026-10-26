@@ -1037,6 +1037,7 @@ export {
 // run of exports, which would otherwise merge the two.
 
 export { createSemaphore, releasingStream } from "./concurrency.js";
+export * from "./contact-confirmations.js";
 export * from "./custom-headers.js";
 export { secretsEqual, sha256Hex } from "./hash.js";
 export { attachmentDisposition } from "./http-headers.js";

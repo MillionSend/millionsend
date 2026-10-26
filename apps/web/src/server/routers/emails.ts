@@ -8,10 +8,12 @@ import {
   getWarmup,
   hashRecipient,
   heldByNewDomainLimit,
+  lockSuppressionContacts,
   type NewDomainLimit,
   newDomainLimitEta,
   newDomainLimitEtas,
   newDomainLimitStatus,
+  revokeSuppressedConfirmations,
   utcDay,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
@@ -650,17 +652,27 @@ export const emailsRouter = router({
       .mutation(async ({ ctx, input }) => {
         const t = schema.suppressions;
         const emailHash = hashRecipient(input.email);
-        const [row] = await ctx.db
-          .insert(t)
-          .values({ teamId: ctx.teamId, email: input.email, emailHash, reason: input.reason })
-          .onConflictDoNothing()
-          .returning({
-            id: t.id,
-            email: t.email,
-            reason: t.reason,
-            sourceEmailId: t.sourceEmailId,
-            createdAt: t.createdAt,
-          });
+        const row = await ctx.db.transaction(async (tx) => {
+          const txDb = tx as unknown as Db;
+          await lockSuppressionContacts(txDb, ctx.teamId, [input.email]);
+          const [changed] = await txDb
+            .insert(t)
+            .values({ teamId: ctx.teamId, email: input.email, emailHash, reason: input.reason })
+            .onConflictDoUpdate({
+              target: [t.teamId, t.emailHash],
+              set: { reason: input.reason },
+              setWhere: eq(t.reason, "one_click_unsubscribe"),
+            })
+            .returning({
+              id: t.id,
+              email: t.email,
+              reason: t.reason,
+              sourceEmailId: t.sourceEmailId,
+              createdAt: t.createdAt,
+            });
+          await revokeSuppressedConfirmations(txDb, ctx.teamId, [input.email]);
+          return changed;
+        });
         if (row) {
           await emitSuppressionEvents(ctx.db, {
             teamId: ctx.teamId,
