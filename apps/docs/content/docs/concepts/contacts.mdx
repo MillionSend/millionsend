@@ -211,8 +211,27 @@ After verifying a single-use mailbox token and an explicit confirmation action, 
 instant between the request and its expiry). The authenticated integration verifies
 the mailbox token; this endpoint does not issue tokens or send mail. It locks the
 contact and activates only the matching, unexpired pending request without removing
-any suppression. Repeating the identical successful confirmation is idempotent.
+any suppression by default. Repeating the identical successful confirmation is idempotent.
 `GET /contacts/{id}/confirmation` reads its current state with a full-access key.
+
+For a fresh, recipient-initiated signup after a global unsubscribe, an integration
+may explicitly pass `allow_resubscribe: true` when preparing a **new request ID**.
+This also permits staging an existing inactive contact. The contact stays inactive,
+and any existing `one_click_unsubscribe` suppression stays in place until the new
+mailbox action is verified. The returned metadata reports `resubscription: true`.
+Preparation records the exact eligible suppression IDs; confirmation removes only
+those unchanged unsubscribe suppressions, atomically with activation and webhook
+outbox writes. A later withdrawal invalidates the request, and a changed, new,
+erased or hard suppression prevents confirmation. Bounce, complaint and manual
+suppressions are never lifted by this path. Profiles, original creation times and
+topic preferences remain unchanged. Omitting the flag preserves the stricter
+behavior above; ordinary synchronization must not request resubscription.
+
+Preparation and suppression writers serialize per team and normalized address,
+including before the contact exists. Suppression rows and the contact are checked
+again in the confirmation transaction. A hard suppression supersedes an older
+unsubscribe reason, so a later manual block or delivery failure cannot be hidden
+behind a previously captured unsubscribe suppression.
 
 An explicit global unsubscribe through contact PATCH, batch upsert, the dashboard or
 hosted unsubscribe invalidates pending and confirmed requests, even on an already

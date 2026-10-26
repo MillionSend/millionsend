@@ -21,6 +21,8 @@ export interface ContactConfirmation {
   confirmedAt?: string;
   revokedAt?: string;
   withdrawnAt?: string;
+  resubscription?: boolean;
+  unsubscribeSuppressionIds?: string[];
 }
 
 /**

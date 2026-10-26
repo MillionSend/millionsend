@@ -329,3 +329,115 @@ it("abandoned-contact erasure is guarded under the same row lock and refuses act
   expect((await call("DELETE", path)).status).toBe(200);
   expect(await row(p.id)).toBeUndefined();
 });
+
+it("only fresh explicit resubscription can lift the captured newsletter unsubscribe after confirmation", async () => {
+  const email = `${randomUUID()}@example.com`;
+  const [contact] = await db
+    .insert(schema.contacts)
+    .values({
+      teamId,
+      email,
+      unsubscribed: true,
+      firstName: "Original",
+      properties: { source: "historic" },
+    })
+    .returning();
+  const [block] = await db
+    .insert(schema.suppressions)
+    .values({ teamId, email, emailHash: hashRecipient(email), reason: "one_click_unsubscribe" })
+    .returning();
+  if (!contact || !block) throw new Error("Missing fixture");
+  const request = {
+    email,
+    request_id: randomUUID(),
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+    allow_resubscribe: true,
+  };
+  expect(
+    (
+      await call("POST", "/contacts/confirmation-requests", {
+        ...request,
+        allow_resubscribe: false,
+      })
+    ).status,
+  ).toBe(409);
+  const pending = await call("POST", "/contacts/confirmation-requests", request);
+  expect(pending.status).toBe(200);
+  const proof = (await pending.json()) as Awaited<ReturnType<typeof prepare>> & {
+    resubscription: boolean;
+    created_contact: boolean;
+  };
+  expect(proof.resubscription).toBe(true);
+  expect(proof.created_contact).toBe(false);
+  expect((await row(contact.id))?.unsubscribed).toBe(true);
+  expect(
+    await db.select().from(schema.suppressions).where(eq(schema.suppressions.id, block.id)),
+  ).toHaveLength(1);
+  expect(
+    (
+      await call("POST", `/contacts/${contact.id}/confirm`, {
+        email,
+        request_id: randomUUID(),
+        confirmed_at: new Date().toISOString(),
+      })
+    ).status,
+  ).toBe(409);
+  expect((await confirm({ ...request, ...proof })).status).toBe(200);
+  expect(
+    await db.select().from(schema.suppressions).where(eq(schema.suppressions.id, block.id)),
+  ).toHaveLength(0);
+  expect(await row(contact.id)).toMatchObject({
+    unsubscribed: false,
+    firstName: "Original",
+    properties: { source: "historic" },
+    createdAt: contact.createdAt,
+  });
+});
+
+it.each(["hard_bounce", "complaint", "manual"] as const)(
+  "fresh requests never lift %s blocks",
+  async (reason) => {
+    const email = `${randomUUID()}@example.com`;
+    await db.insert(schema.contacts).values({ teamId, email, unsubscribed: true });
+    await db
+      .insert(schema.suppressions)
+      .values({ teamId, email, emailHash: hashRecipient(email), reason });
+    expect(
+      (
+        await call("POST", "/contacts/confirmation-requests", {
+          email,
+          request_id: randomUUID(),
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+          allow_resubscribe: true,
+        })
+      ).status,
+    ).toBe(409);
+  },
+);
+
+it("another withdrawal revokes resubscription; a later hard block is not disguised by an older unsubscribe", async () => {
+  const p = await prepare();
+  await call("PATCH", `/contacts/${p.id}`, { unsubscribed: true });
+  await call("POST", "/suppressions", { email: p.email, origin: "unsubscribe" });
+  const fresh = {
+    email: p.email,
+    request_id: randomUUID(),
+    expires_at: p.expires_at,
+    allow_resubscribe: true,
+  };
+  const pending = await call("POST", "/contacts/confirmation-requests", fresh);
+  expect(pending.status).toBe(200);
+  await call("POST", "/suppressions", { email: p.email, origin: "manual" });
+  const current = await row(p.id);
+  expect(current?.confirmation?.state).toBe("revoked");
+  expect((await confirm({ ...p, ...fresh })).status).toBe(409);
+  expect(
+    (await call("POST", "/contacts/confirmation-requests", { ...fresh, request_id: randomUUID() }))
+      .status,
+  ).toBe(409);
+  const [block] = await db
+    .select()
+    .from(schema.suppressions)
+    .where(eq(schema.suppressions.emailHash, hashRecipient(p.email)));
+  expect(block?.reason).toBe("manual");
+});

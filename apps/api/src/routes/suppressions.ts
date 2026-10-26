@@ -4,6 +4,7 @@ import {
   emitSuppressionEvents,
   extractAddrSpec,
   hashRecipient,
+  lockSuppressionContacts,
   normalizeAddress,
   revokeSuppressedConfirmations,
   type SuppressionEventRow,
@@ -71,10 +72,10 @@ export function registerSuppressionRoutes(
 
   /**
    * Blocks every address, returning one id per distinct normalized address
-   * in first-occurrence order. An address already suppressed for any reason
+   * in first-occurrence order. An existing non-marketing suppression
    * (erased rows included) keeps its row untouched and reports its id:
    * suppressing is "make sure this is blocked", not "record why". `reason`
-   * lands only on rows this call creates.
+   * lands on new rows; a hard block also takes precedence over a newsletter unsubscribe.
    */
   const ensureSuppressed = async (
     teamId: string,
@@ -84,72 +85,99 @@ export function registerSuppressionRoutes(
     const entries = [...new Set(emails.map((e) => normalizeAddress(extractAddrSpec(e))))].map(
       (address) => ({ address, hashes: suppressionHashesFor(address) }),
     );
-    const existing = await db
-      .select({ id: s.id, emailHash: s.emailHash })
-      .from(s)
-      .where(
-        and(
-          eq(s.teamId, teamId),
-          inArray(
-            s.emailHash,
-            entries.flatMap((e) => e.hashes),
-          ),
-        ),
+    const result = await db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      await lockSuppressionContacts(
+        txDb,
+        teamId,
+        entries.map((e) => e.address),
       );
-    const idByHash = new Map(existing.map((r) => [r.emailHash, r.id]));
-    const missing = entries.filter((e) => !e.hashes.some((h) => idByHash.has(h)));
-    const created: SuppressionEventRow[] = [];
-    if (missing.length > 0) {
-      // A concurrent insert of the same address is absorbed by the no-op
-      // conflict update, which still returns the surviving row's id.
-      const inserted = await db
-        .insert(s)
-        .values(
-          missing.map((e) => ({
-            teamId,
-            email: e.address,
-            emailHash: hashRecipient(e.address),
-            reason,
-          })),
-        )
-        .onConflictDoUpdate({
-          target: [s.teamId, s.emailHash],
-          set: { emailHash: sql`excluded.email_hash` },
-        })
-        .returning({
-          id: s.id,
-          emailHash: s.emailHash,
-          email: s.email,
-          reason: s.reason,
-          sourceEmailId: s.sourceEmailId,
-          createdAt: s.createdAt,
-          // A row this statement inserted has xmax 0; one it reached through
-          // the conflict update does not. Only the former are new to the list.
-          inserted: sql<boolean>`(xmax = 0)`,
-        });
-      for (const { inserted: isNew, ...r } of inserted) {
-        if (isNew) created.push(r);
-        idByHash.set(r.emailHash, r.id);
+      const existing = await txDb
+        .select({ id: s.id, emailHash: s.emailHash })
+        .from(s)
+        .where(
+          and(
+            eq(s.teamId, teamId),
+            inArray(
+              s.emailHash,
+              entries.flatMap((e) => e.hashes),
+            ),
+          ),
+        );
+      const idByHash = new Map(existing.map((r) => [r.emailHash, r.id]));
+      const missing = entries.filter((e) => !e.hashes.some((h) => idByHash.has(h)));
+      const created: SuppressionEventRow[] = [];
+      if (reason !== "one_click_unsubscribe" && existing.length) {
+        const promoted = await txDb
+          .update(s)
+          .set({ reason })
+          .where(
+            and(
+              eq(s.teamId, teamId),
+              inArray(
+                s.id,
+                existing.map((row) => row.id),
+              ),
+              eq(s.reason, "one_click_unsubscribe"),
+            ),
+          )
+          .returning();
+        created.push(...promoted);
       }
-    }
-    await revokeSuppressedConfirmations(
-      db,
-      teamId,
-      entries.map((e) => e.address),
-    );
-    const ids = entries.map((e) => {
-      const id = e.hashes.map((h) => idByHash.get(h)).find((v) => v !== undefined);
-      if (!id) throw new Error("suppression upsert returned no row");
-      return id;
+      if (missing.length > 0) {
+        // A concurrent insert of the same address is absorbed by the no-op
+        // conflict update, which still returns the surviving row's id.
+        const inserted = await txDb
+          .insert(s)
+          .values(
+            missing.map((e) => ({
+              teamId,
+              email: e.address,
+              emailHash: hashRecipient(e.address),
+              reason,
+            })),
+          )
+          .onConflictDoUpdate({
+            target: [s.teamId, s.emailHash],
+            set: { emailHash: sql`excluded.email_hash` },
+          })
+          .returning({
+            id: s.id,
+            emailHash: s.emailHash,
+            email: s.email,
+            reason: s.reason,
+            sourceEmailId: s.sourceEmailId,
+            createdAt: s.createdAt,
+            // A row this statement inserted has xmax 0; one it reached through
+            // the conflict update does not. Only the former are new to the list.
+            inserted: sql<boolean>`(xmax = 0)`,
+          });
+        for (const { inserted: isNew, ...r } of inserted) {
+          if (isNew) created.push(r);
+          idByHash.set(r.emailHash, r.id);
+        }
+      }
+      await revokeSuppressedConfirmations(
+        txDb,
+        teamId,
+        entries.map((e) => e.address),
+        reason === "one_click_unsubscribe",
+      );
+      const ids = entries.map((e) => {
+        const id = e.hashes.map((h) => idByHash.get(h)).find((v) => v !== undefined);
+        if (!id) throw new Error("suppression upsert returned no row");
+        return id;
+      });
+      return { ids, created };
     });
     await emitSuppressionEvents(db, {
       teamId,
       type: "suppression.added",
-      rows: created,
+      rows: result.created,
       source: "api",
       enqueue: events.enqueue,
     });
-    return { ids, created };
+    return result;
   };
 
   const removed = async (teamId: string, rows: SuppressionEventRow[]) => {
@@ -173,7 +201,7 @@ export function registerSuppressionRoutes(
         200: {
           content: { "application/json": { schema: batchAddSuppressionsResponseSchema } },
           description:
-            "One entry per distinct address (case-insensitive) in input order; addresses already suppressed for any reason return their existing id and keep their origin. New rows record the request's origin (bounce, complaint, manual or unsubscribe; default manual). Accepts up to 1000 addresses (Resend: 100).",
+            "One entry per distinct address (case-insensitive) in input order; existing non-marketing blocks retain their id and origin; a new hard block takes precedence over a newsletter unsubscribe. New rows record the request's origin (bounce, complaint, manual or unsubscribe; default manual). Accepts up to 1000 addresses (Resend: 100).",
         },
         422: jsonErr("Validation error"),
       },

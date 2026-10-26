@@ -6,7 +6,9 @@ import {
   contactSnapshotColumns,
   ERASED_TOMBSTONE,
   eraseRecipient,
+  lockSuppressionContacts,
   markSegmentsStale,
+  type SuppressionEventRow,
   suppressionHashesFor,
   type TeamWebhookEvent,
   undeliverableRecipients,
@@ -29,6 +31,7 @@ const confirmationSchema = z.object({
   revoked_at: z.string().optional(),
   withdrawn_at: z.string().optional(),
   created_contact: z.boolean(),
+  resubscription: z.boolean(),
 });
 function wire(id: string, c: Confirmation) {
   return {
@@ -42,6 +45,7 @@ function wire(id: string, c: Confirmation) {
     revoked_at: c.revokedAt,
     withdrawn_at: c.withdrawnAt,
     created_contact: c.createdContact,
+    resubscription: c.resubscription ?? false,
   };
 }
 
@@ -69,28 +73,50 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
         types: TeamWebhookEvent["type"][],
         activity?: "contact_created" | "resubscribed",
       ) => Promise<void>,
+      removed: (teamId: string, rows: SuppressionEventRow[]) => Promise<void>,
     ) => Promise<T>,
   ) {
     const hooks = webhookBatch(deps.enqueueWebhookDeliveries);
     const result = await db.transaction(async (tx) => {
       const txDb = tx as unknown as Db;
-      return work(txDb, async (teamId, contact, types, activity) => {
-        if (activity)
-          await tx.insert(schema.contactActivities).values({
-            teamId: teamId,
-            contactId: contact.id,
-            type: activity,
-          });
-        await hooks.emit(
-          txDb,
-          teamId,
-          types.map((type) => ({
-            type,
-            occurredAt: new Date(),
-            data: contactEventData(contact, { source: "api" }),
-          })),
-        );
-      });
+      return work(
+        txDb,
+        async (teamId, contact, types, activity) => {
+          if (activity)
+            await tx.insert(schema.contactActivities).values({
+              teamId: teamId,
+              contactId: contact.id,
+              type: activity,
+            });
+          await hooks.emit(
+            txDb,
+            teamId,
+            types.map((type) => ({
+              type,
+              occurredAt: new Date(),
+              data: contactEventData(contact, { source: "api" }),
+            })),
+          );
+        },
+        async (teamId, rows) => {
+          await hooks.emit(
+            txDb,
+            teamId,
+            rows.map((row) => ({
+              type: "suppression.removed" as const,
+              occurredAt: new Date(),
+              data: {
+                id: row.id,
+                email: row.email ?? ERASED_TOMBSTONE,
+                origin: "unsubscribe",
+                source: "api",
+                source_id: row.sourceEmailId,
+                created_at: (row.createdAt ?? new Date()).toISOString(),
+              },
+            })),
+          );
+        },
+      );
     });
     await hooks.flush();
     return result;
@@ -111,7 +137,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
       method: "post",
       path: "/contacts/confirmation-requests",
       description:
-        "Create an inactive contact with a mailbox confirmation, or replace a still-pending request. Historical active/inactive contacts, revoked requests and suppressions are preserved.",
+        "Create an inactive contact with a mailbox confirmation, or replace a still-pending request. Historical contacts remain unchanged by default. Explicit allow_resubscribe stages a fresh request for an inactive contact, retaining a matching newsletter unsubscribe until confirmation. Other suppressions are never lifted.",
       request: {
         body: {
           content: {
@@ -125,6 +151,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
                     .pipe(z.string().max(320))
                     .transform((x) => x.toLowerCase()),
                   request_id: z.uuid(),
+                  allow_resubscribe: z.boolean().optional(),
                   expires_at: z.iso.datetime({ offset: true }),
                 })
                 .strict(),
@@ -149,9 +176,46 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
       )
         return c.json(errorBody(422, "validation_error", "Invalid expiry or address"), 422);
       const result = await transaction(async (tx, emit) => {
-        if (await suppressed(tx, auth.teamId, input.email)) return { kind: "conflict" } as const;
+        await lockSuppressionContacts(tx, auth.teamId, [input.email]);
         const where = and(eq(t.teamId, auth.teamId), sql`lower(${t.email}) = ${input.email}`);
         let [contact] = await tx.select().from(t).where(where).for("update");
+        const blocks = await tx
+          .select()
+          .from(s)
+          .where(
+            and(eq(s.teamId, auth.teamId), inArray(s.emailHash, suppressionHashesFor(input.email))),
+          )
+          .orderBy(s.id)
+          .for("update");
+        if (
+          blocks.length &&
+          (!input.allow_resubscribe ||
+            blocks.some(
+              (block) =>
+                block.reason !== "one_click_unsubscribe" ||
+                block.email?.toLowerCase() !== input.email,
+            ))
+        )
+          return { kind: "conflict" } as const;
+        if (contact?.confirmation?.requestId === input.request_id) {
+          if (
+            contact.unsubscribed &&
+            contact.confirmation.state === "pending" &&
+            contact.confirmation.email === input.email &&
+            JSON.stringify(contact.confirmation.unsubscribeSuppressionIds ?? []) ===
+              JSON.stringify(blocks.map((x) => x.id))
+          )
+            return { kind: "ok", id: contact.id, confirmation: contact.confirmation } as const;
+          return { kind: "conflict" } as const;
+        }
+        if (
+          contact &&
+          ((!contact.unsubscribed && !(input.allow_resubscribe && blocks.length)) ||
+            (!input.allow_resubscribe &&
+              (contact.confirmation?.state !== "pending" ||
+                contact.confirmation.email !== contact.email)))
+        )
+          return { kind: "conflict" } as const;
         let created = false;
         const candidate: Confirmation = {
           requestId: input.request_id,
@@ -159,7 +223,16 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
           requestedAt: now.toISOString(),
           expiresAt: new Date(input.expires_at).toISOString(),
           state: "pending",
-          createdContact: true,
+          createdContact:
+            !contact ||
+            (contact.confirmation?.state === "pending" && contact.confirmation.createdContact),
+          ...(contact?.confirmation?.withdrawnAt
+            ? { withdrawnAt: contact.confirmation.withdrawnAt }
+            : {}),
+          ...(input.allow_resubscribe && (contact || blocks.length)
+            ? { resubscription: true }
+            : {}),
+          ...(blocks.length ? { unsubscribeSuppressionIds: blocks.map((x) => x.id) } : {}),
         };
         if (!contact) {
           const room = await contactRoom(tx, auth.teamId, auth.plan, deps.isCloud);
@@ -175,21 +248,30 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
             .onConflictDoNothing()
             .returning();
           created = Boolean(contact);
-          if (!contact) [contact] = await tx.select().from(t).where(where).for("update");
+          if (!contact) {
+            [contact] = await tx.select().from(t).where(where).for("update");
+            candidate.createdContact = Boolean(
+              contact?.confirmation?.state === "pending" && contact.confirmation.createdContact,
+            );
+          }
         }
         if (
-          !contact?.unsubscribed ||
-          !contact.confirmation ||
-          contact.confirmation.state !== "pending" ||
-          contact.confirmation.email !== contact.email
+          (!contact?.unsubscribed && !(input.allow_resubscribe && blocks.length)) ||
+          !contact ||
+          (!created &&
+            !input.allow_resubscribe &&
+            (contact.confirmation?.state !== "pending" ||
+              contact.confirmation.email !== contact.email))
         )
           return { kind: "conflict" } as const;
-        if (!created && contact.confirmation.requestId === input.request_id)
-          return { kind: "ok", id: contact.id, confirmation: contact.confirmation } as const;
         if (!created) {
           const [updated] = await tx
             .update(t)
-            .set({ confirmation: candidate, updatedAt: now })
+            .set({
+              confirmation: candidate,
+              updatedAt: now,
+              ...(blocks.length ? { unsubscribed: true } : {}),
+            })
             .where(eq(t.id, contact.id))
             .returning();
           if (!updated) throw new Error("Confirmation contact disappeared");
@@ -322,7 +404,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
       method: "post",
       path: "/contacts/{id}/confirm",
       description:
-        "Confirm a matching, unexpired mailbox request without clearing any suppression. The authenticated integration must verify its single-use mailbox token first.",
+        "Confirm a matching, unexpired mailbox request. Only an explicitly staged resubscription can lift the exact earlier newsletter unsubscribe captured by that request; all other suppressions remain. The authenticated integration must verify its single-use mailbox token first.",
       request: {
         params: z.object({ id: z.uuid() }),
         body: {
@@ -356,7 +438,9 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
         input = c.req.valid("json"),
         now = new Date(),
         at = new Date(input.confirmed_at);
-      const result = await transaction(async (tx, emit) => {
+      const conflict = new Error("Confirmation changed concurrently");
+      const result = await transaction(async (tx, emit, removed) => {
+        await lockSuppressionContacts(tx, auth.teamId, [input.email]);
         const [contact] = await tx
           .select()
           .from(t)
@@ -368,13 +452,21 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
           !pending ||
           pending.requestId !== input.request_id ||
           pending.email !== input.email ||
-          contact.email !== input.email ||
-          (await suppressed(tx, auth.teamId, input.email))
+          contact.email !== input.email
         )
           return { kind: "conflict" } as const;
+        const blocks = await tx
+          .select()
+          .from(s)
+          .where(
+            and(eq(s.teamId, auth.teamId), inArray(s.emailHash, suppressionHashesFor(input.email))),
+          )
+          .orderBy(s.id)
+          .for("update");
         if (
           !contact.unsubscribed &&
           pending.state === "confirmed" &&
+          !blocks.length &&
           pending.confirmedAt === at.toISOString()
         )
           return { kind: "ok", confirmation: pending } as const;
@@ -386,6 +478,30 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
           return { kind: "conflict" } as const;
         if (at < new Date(pending.requestedAt) || at > now || at >= new Date(pending.expiresAt))
           return { kind: "invalid" } as const;
+        const baseline = pending.unsubscribeSuppressionIds ?? [];
+        const sameBlocks =
+          pending.resubscription === true &&
+          blocks.every(
+            (block) =>
+              block.reason === "one_click_unsubscribe" &&
+              block.email?.toLowerCase() === input.email,
+          ) &&
+          JSON.stringify(blocks.map((x) => x.id)) === JSON.stringify(baseline);
+        if ((blocks.length || baseline.length) && !sameBlocks) return { kind: "conflict" } as const;
+        if (blocks.length) {
+          const dropped = await tx
+            .delete(s)
+            .where(
+              and(
+                eq(s.teamId, auth.teamId),
+                inArray(s.id, baseline),
+                eq(s.reason, "one_click_unsubscribe"),
+              ),
+            )
+            .returning();
+          if (dropped.length !== baseline.length) throw conflict;
+          await removed(auth.teamId, dropped);
+        }
         const proof: Confirmation = {
           ...pending,
           state: "confirmed",
@@ -405,7 +521,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
             ),
           )
           .returning(contactSnapshotColumns);
-        if (!updated) return { kind: "conflict" } as const;
+        if (!updated) throw conflict;
         await emit(
           auth.teamId,
           updated,
@@ -413,6 +529,9 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
           "resubscribed",
         );
         return { kind: "ok", confirmation: proof } as const;
+      }).catch((error) => {
+        if (error === conflict) return { kind: "conflict" } as const;
+        throw error;
       });
       if (result.kind === "missing")
         return c.json(errorBody(404, "not_found", "Contact not found"), 404);
