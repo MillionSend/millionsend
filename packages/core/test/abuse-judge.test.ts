@@ -7,9 +7,11 @@ import {
 import { extractImageRefs, opaqueFacts, stripHiddenElements } from "../src/abuse-judge/body.js";
 import {
   ABUSE_JUDGE_POLICY,
+  ABUSE_JUDGE_PROVIDER_EXCEPTION,
   ABUSE_JUDGE_QUESTIONS,
   composeJudgeVerdict,
   JUDGE_IMPERSONATION_NOUL,
+  judgePolicy,
   judgeState,
 } from "../src/abuse-judge/questions.js";
 import { JudgeError, judgeErrorClass } from "../src/abuse-judge/types.js";
@@ -158,6 +160,34 @@ describe("buildJudgeBlock", () => {
       "Hidden characters count: 20",
     ]);
     expect(judgeState(block)).toEqual({ policy: ABUSE_JUDGE_POLICY, email: block });
+  });
+
+  it("tells the judge about its own provider only when the subject or the visible text names it as a word", () => {
+    const policyOf = (over: Partial<JudgeBlockInput>) =>
+      judgePolicy(buildJudgeBlock({ ...base, ...over }));
+    const WITH = ABUSE_JUDGE_POLICY + ABUSE_JUDGE_PROVIDER_EXCEPTION;
+    expect(policyOf({})).toBe(ABUSE_JUDGE_POLICY);
+    expect(policyOf({ subject: "Setup check via MillionSend" })).toBe(WITH);
+    expect(policyOf({ html: "<p>Delivered by MillionSend.</p>" })).toBe(WITH);
+    expect(policyOf({ html: null, text: "Sent through millionsend's API" })).toBe(WITH);
+    // The sender's identity lines, a link or address stub, hidden text and a differing plain-text part are not it.
+    expect(
+      policyOf({
+        team: { ...base.team, name: "MillionSend fans" },
+        from: "Agent <agent@team.millionsend.example>",
+      }),
+    ).toBe(ABUSE_JUDGE_POLICY);
+    expect(
+      policyOf({
+        html: "<p>Bye. https://app.millionsend.example/unsubscribe/x and ana@team.millionsend.example</p>",
+      }),
+    ).toBe(ABUSE_JUDGE_POLICY);
+    expect(policyOf({ html: '<p>Hi</p><div style="display:none">MillionSend</div>' })).toBe(
+      ABUSE_JUDGE_POLICY,
+    );
+    expect(policyOf({ html: "<p>Your invoice</p>", text: "Sent via MillionSend" })).toBe(
+      ABUSE_JUDGE_POLICY,
+    );
   });
 
   it("falls back to the text part, decodes entities, strips invisible characters and truncates", () => {

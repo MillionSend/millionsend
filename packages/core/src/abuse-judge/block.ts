@@ -118,6 +118,9 @@ export function clip(text: string, max: number): string {
 
 /** Marks a link to the reader's own machine or network in the outbound link table. */
 export const LOCAL_ADDRESS_MARK = "(local address)";
+/** The lines the judge's policy reads the message's own words from (questions.ts judgePolicy). */
+export const SUBJECT_LABEL = "Subject:";
+export const VISIBLE_TEXT_LABEL = "Visible text:";
 
 /**
  * The name a link's row shows: the registrable domain it lands on, or what
@@ -218,7 +221,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     `Plan: ${oneLine(input.team.plan)}`,
     `From: ${oneLine(input.from)}`,
     `Reply-To: ${input.replyTo?.map(oneLine).join(", ") || "(none)"}`,
-    `Subject: ${redacted(input.subject)}`,
+    `${SUBJECT_LABEL} ${redacted(input.subject)}`,
   ];
   if (preview) {
     lines.push(
@@ -226,7 +229,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
       `  ${preview.slice(0, JUDGE_PREVIEW_MAX_CHARS)}`,
     );
   }
-  lines.push("Visible text:", `  ${clip(redacted(body.visible), JUDGE_TEXT_MAX_CHARS)}`);
+  lines.push(VISIBLE_TEXT_LABEL, `  ${clip(redacted(body.visible), JUDGE_TEXT_MAX_CHARS)}`);
   if (hidden) {
     lines.push(
       "Hidden text (not shown to the reader):",
