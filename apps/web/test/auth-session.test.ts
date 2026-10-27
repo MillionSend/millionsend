@@ -19,6 +19,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await close();
 });
 
@@ -137,6 +138,50 @@ describe("client IP resolution", () => {
     });
     expect(await sessionIp(userId)).toBe("203.0.113.9");
     expect(await signupRecord(userId)).toEqual({ ip: "203.0.113.9", userAgent: null });
+  });
+});
+
+describe("Turnstile on Google and GitHub sign-in", () => {
+  const signInSocial = (auth: Auth, headers: Record<string, string> = {}) =>
+    auth.handler(
+      new Request(`${BASE}/api/auth/sign-in/social`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE, ...headers },
+        body: JSON.stringify({ provider: "github", callbackURL: "/emails" }),
+      }),
+    );
+
+  beforeEach(() => {
+    vi.stubEnv("GITHUB_CLIENT_ID", "github-id");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "github-secret");
+  });
+
+  it("refuses a missing or rejected token before the provider is asked", async () => {
+    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "0x4BBB");
+    const verified: string[] = [];
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      const { response } = JSON.parse(String(init?.body)) as { response: string };
+      verified.push(response);
+      return Response.json({ success: response === "good-token" });
+    });
+    const auth = createAuth(db);
+
+    const missing = await signInSocial(auth);
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ code: "MISSING_RESPONSE" });
+    const rejected = await signInSocial(auth, { "x-captcha-response": "bad-token" });
+    expect(rejected.status).toBe(403);
+    expect(await rejected.json()).toMatchObject({ code: "VERIFICATION_FAILED" });
+    expect(verified).toEqual(["bad-token"]);
+
+    const passed = await signInSocial(auth, { "x-captcha-response": "good-token" });
+    expect(passed.status).toBe(200);
+    expect(((await passed.json()) as { url: string }).url).toContain("https://github.com/");
+  });
+
+  it("asks for no token on an instance without Turnstile keys", async () => {
+    expect((await signInSocial(createAuth(db))).status).toBe(200);
   });
 });
 

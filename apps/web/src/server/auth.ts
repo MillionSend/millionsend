@@ -530,9 +530,11 @@ export function createAuth(
       },
     },
     plugins: [
-      // Turnstile on sign-in, sign-up, password reset and the verification
-      // resend when the instance opts in; the forms send the token in
-      // x-captcha-response. The plugin's default list lacks the resend.
+      // Turnstile on sign-in, sign-up, password reset, the verification resend
+      // and social sign-in when the instance opts in; the forms send the token
+      // in x-captcha-response. The plugin's default list lacks the last two.
+      // Social sign-in's OAuth callback carries no token and needs none: it
+      // only finishes what a verified /sign-in/social started.
       ...(env.TURNSTILE_SECRET_KEY
         ? [
             captcha({
@@ -541,6 +543,7 @@ export function createAuth(
               endpoints: [
                 "/sign-up/email",
                 "/sign-in/email",
+                "/sign-in/social",
                 "/request-password-reset",
                 "/send-verification-email",
               ],

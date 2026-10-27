@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
+import { isCaptchaRefusal } from "@/lib/auth-errors";
 import { typedEmail } from "@/lib/email-input";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
@@ -136,7 +137,7 @@ export function AuthForm({
       // Signup shows server messages (e.g. the signup-disabled policy)
       // verbatim; login never echoes the server, only the catalog copy.
       setErrorMessage(
-        error.code === "VERIFICATION_FAILED" || error.code === "MISSING_RESPONSE"
+        isCaptchaRefusal(error.code)
           ? t("captcha")
           : (mode === "signup" && error.message) || t("error"),
       );
@@ -180,11 +181,7 @@ export function AuthForm({
       fetchOptions: { headers: captchaHeaders(token) },
     });
     if (error) {
-      setNotice(
-        error.code === "VERIFICATION_FAILED" || error.code === "MISSING_RESPONSE"
-          ? t("captcha")
-          : t("resendFailed"),
-      );
+      setNotice(isCaptchaRefusal(error.code) ? t("captcha") : t("resendFailed"));
     } else {
       setResent(true);
     }
@@ -194,13 +191,24 @@ export function AuthForm({
   async function onSocial(provider: SocialProvider) {
     setPending(provider);
     setErrorMessage(null);
+    let token: string | null;
+    try {
+      token = await turnstile.getToken();
+    } catch {
+      setErrorMessage(t("captcha"));
+      setPending(null);
+      return;
+    }
     const { error } = await authClient.signIn.social({
       provider,
       callbackURL: next,
       errorCallbackURL: mode === "login" ? "/login" : "/signup",
+      fetchOptions: { headers: captchaHeaders(token) },
     });
     if (error) {
-      setErrorMessage(error.message || tSocial("error"));
+      setErrorMessage(
+        isCaptchaRefusal(error.code) ? t("captcha") : error.message || tSocial("error"),
+      );
       setPending(null);
     }
   }
