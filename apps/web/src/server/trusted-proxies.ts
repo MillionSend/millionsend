@@ -9,12 +9,14 @@ export function trustedProxies(): string[] {
 }
 
 /**
- * A request's client address, the one way the web app reads it: a sign-up
- * is counted against the same address it is recorded under.
+ * A request's client address as auth reads it (createAuth's
+ * advanced.ipAddress): a sign-up is counted against the same address it is
+ * recorded under. On the cloud it is the peer Cloudflare saw, never a
+ * forwarded chain: only tracking links come through a proxy of ours (the
+ * edge), and a request a Cloudflare Worker relays arrives from a Cloudflare
+ * address with whatever x-forwarded-for its author wrote.
  */
 export function clientIp(headers: { get(name: string): string | null }): string | null {
-  return forwardedClientIp(headers, {
-    cloud: isCloudDeployment(),
-    trustedProxies: trustedProxies(),
-  });
+  const cloud = isCloudDeployment();
+  return forwardedClientIp(headers, { cloud, trustedProxies: cloud ? [] : trustedProxies() });
 }

@@ -250,6 +250,32 @@ describe("new accounts per network", () => {
     expect((await signUpFrom(auth, "v4@example.com", "2001:db8:0:1::1")).status).toBe(200);
   });
 
+  it("cloud: counts the peer Cloudflare saw, never a chain behind a declared proxy", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    vi.stubEnv("TRUSTED_PROXIES", "127.0.0.1,198.51.100.0/24");
+    const auth = createAuth(db);
+    // A relay at a declared proxy's address writes a fresh chain each time.
+    const relayed = (email: string, forged: string) =>
+      auth.handler(
+        new Request(`${BASE}/api/auth/sign-up/email`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: BASE,
+            "cf-connecting-ip": "198.51.100.7",
+            "x-forwarded-for": forged,
+          },
+          body: JSON.stringify({ name: "Ada", email, password: "correct horse battery" }),
+        }),
+      );
+    for (const [i, forged] of ["203.0.113.1", "203.0.113.2", "203.0.113.3"].entries()) {
+      expect((await relayed(`r${i}@example.com`, forged)).status, forged).toBe(200);
+    }
+    expect((await relayed("r3@example.com", "203.0.113.4")).status).toBe(429);
+    const ips = await db.select({ ip: schema.accountSignups.ip }).from(schema.accountSignups);
+    expect(ips.map((row) => row.ip)).toEqual(Array(3).fill("198.51.100.7"));
+  });
+
   it("self-host: never limits a network", async () => {
     const auth = createAuth(db);
     for (const email of ["a@example.com", "b@example.com", "c@example.com", "d@example.com"]) {

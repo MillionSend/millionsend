@@ -1,4 +1,4 @@
-import { env, OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT } from "@millionsend/config";
+import { env, isCloudDeployment, OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT } from "@millionsend/config";
 import {
   applyStatusCas,
   bumpHourlyUsage,
@@ -6,6 +6,7 @@ import {
   deriveTrackingKey,
   enqueueWebhookDeliveries,
   extractAddrSpec,
+  forwardedClientIp,
   highestStatus,
   type QueuedWebhookDelivery,
   utcDay,
@@ -16,7 +17,7 @@ import { type Db, schema } from "@millionsend/db";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { clientIp } from "../../server/trusted-proxies";
+import { trustedProxies } from "../../server/trusted-proxies";
 
 /**
  * Signing key for the open/click tokens the /t/o and /t/c endpoints verify.
@@ -39,7 +40,10 @@ export interface EngagementHit {
 export function engagementHit(request: Request, link?: string): EngagementHit {
   return {
     userAgent: request.headers.get("user-agent"),
-    ipAddress: clientIp(request.headers),
+    ipAddress: forwardedClientIp(request.headers, {
+      cloud: isCloudDeployment(),
+      trustedProxies: trustedProxies(),
+    }),
     ...(link === undefined ? {} : { link }),
   };
 }
