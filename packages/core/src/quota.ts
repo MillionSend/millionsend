@@ -1,8 +1,8 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { firstRow } from "./driver-result.js";
-import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type TeamQuota } from "./plans.js";
+import { freePoolOwner, OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type TeamQuota } from "./plans.js";
 import { bumpHourlyUsage } from "./usage-hourly.js";
 import { utcDay } from "./utc-day.js";
 
@@ -363,6 +363,47 @@ export async function readDailyUsage(
   return row?.accepted ?? 0;
 }
 
+const FREE_POOL_COUNTERS = ["sent", "sent_no_feedback", "hard_bounced", "complained"] as const;
+
+/**
+ * Adds a team's deliverability counts to the Free pool it is in when they are
+ * written (freePoolOwner), if any, in the caller's transaction; usage_counters
+ * names them. Call after the team's own counter bump: rows lock team first,
+ * pool second. Column names come from FREE_POOL_COUNTERS only, never from input.
+ */
+export async function bumpFreePoolUsage(
+  db: Db,
+  params: {
+    teamId: string;
+    day: string;
+    counts: Partial<Record<(typeof FREE_POOL_COUNTERS)[number], number>>;
+  },
+): Promise<void> {
+  const entries = FREE_POOL_COUNTERS.flatMap((c) => {
+    const n = params.counts[c];
+    return n ? [[c, n] as const] : [];
+  });
+  if (entries.length === 0) return;
+  const tm = schema.teams;
+  const [team] = await db
+    .select({ plan: tm.plan, currentPeriodEnd: tm.currentPeriodEnd, poolOwnerId: tm.poolOwnerId })
+    .from(tm)
+    .where(eq(tm.id, params.teamId));
+  const ownerId = team ? freePoolOwner(team) : null;
+  if (!ownerId) return;
+  const p = schema.freePoolUsage;
+  await db.execute(sql`
+    insert into ${p} (owner_id, day, ${sql.raw(entries.map(([c]) => c).join(", "))})
+    values (${ownerId}, ${params.day}, ${sql.join(
+      entries.map(([, n]) => sql`${n}`),
+      sql`, `,
+    )})
+    on conflict (owner_id, day) do update set ${sql.join(
+      entries.map(([c, n]) => sql`${sql.raw(c)} = ${p}.${sql.raw(c)} + ${n}`),
+      sql`, `,
+    )}
+  `);
+}
 
 /** Sends accepted so far, and how many past the included volume the meter already knows about. */
 export async function readPeriodUsage(

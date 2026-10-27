@@ -678,6 +678,7 @@ export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
 export { parsePropertyDate, SEGMENT_FILTER_MAX_DAYS } from "./property-date.js";
 export { broadcastProviderBreakdown, type ProviderBreakdownRow } from "./provider-breakdown.js";
 export {
+  bumpFreePoolUsage,
   dailyCeiling,
   type QuotaResult,
   quotaChargeAt,

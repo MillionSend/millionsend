@@ -332,6 +332,68 @@ describe("feedback from the mailbox simulator and Free pools", () => {
     );
   });
 
+  it("adds a Free team's hard bounces and complaints to its pool, beside its own counters", async () => {
+    const owner = "u-events-pool";
+    const pooled = await createTeam(db, "events-pooled", { poolOwnerId: owner });
+    const paid = await createTeam(db, "events-paid", { poolOwnerId: owner });
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+    const at = "2026-09-23T10:00:00.000Z";
+    const day = at.slice(0, 10);
+    for (const [team, mid] of [
+      [pooled, "mid-pool-complaint"],
+      [paid, "mid-paid-complaint"],
+    ] as const) {
+      await insertSentEmail(mid, ["r@example.com"], null, new Date(), team);
+      await processSesEvent(
+        db,
+        makeEvent({
+          eventType: "Complaint",
+          sesMessageId: mid,
+          occurredAt: at,
+          complaint: { recipients: ["r@example.com"] },
+        }),
+      );
+    }
+    await insertSentEmail("mid-pool-bounce", ["gone@example.com"], null, new Date(), pooled);
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Bounce",
+        sesMessageId: "mid-pool-bounce",
+        occurredAt: at,
+        bounce: {
+          bounceType: "Permanent",
+          bounceSubType: "General",
+          recipients: ["gone@example.com"],
+        },
+      }),
+    );
+    await insertSentEmail("mid-pool-delivery", ["r@example.com"], null, new Date(), pooled);
+    await processSesEvent(
+      db,
+      makeEvent({ eventType: "Delivery", sesMessageId: "mid-pool-delivery", occurredAt: at }),
+    );
+    expect(await dailyOf(pooled, day)).toEqual({
+      delivered: 1,
+      bounced: 1,
+      hardBounced: 1,
+      complained: 1,
+    });
+    expect(await dailyOf(paid, day)).toMatchObject({ complained: 1 });
+    expect(
+      await db.select().from(schema.freePoolUsage).where(eq(schema.freePoolUsage.ownerId, owner)),
+    ).toEqual([
+      {
+        ownerId: owner,
+        day,
+        accepted: 0,
+        sent: 0,
+        sentNoFeedback: 0,
+        hardBounced: 1,
+        complained: 1,
+      },
+    ]);
+  });
 });
 
 it("out-of-order events never regress the status ladder", async () => {

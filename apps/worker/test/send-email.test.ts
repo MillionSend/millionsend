@@ -2008,3 +2008,49 @@ it("counts a send no recipient can report as a complaint only when every recipie
     .where(eq(schema.usageCounters.teamId, team));
   expect(counters).toEqual([{ sent: 4, sentNoFeedback: 2 }]);
 });
+
+it("adds a Free team's sends to its pool beside its own counters; simulator-only mail can draw no complaint", async () => {
+  const owner = "u-send-pool";
+  const team = await createTeam(db, "send-pool-team", { poolOwnerId: owner });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: team,
+      name: "pool.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const send = async (to: string[]) => {
+    const { ses } = fakeSes(randomUUID());
+    const emailId = await insertEmail({
+      teamId: team,
+      domainId: domain?.id,
+      from: "P <p@pool.example>",
+      to,
+    });
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  };
+  await send(["r@outlook.com"]);
+  await send(["success@simulator.amazonses.com"]);
+  const counted = { sent: 2, sentNoFeedback: 1 };
+  expect(
+    await db
+      .select({
+        sent: schema.usageCounters.sent,
+        sentNoFeedback: schema.usageCounters.sentNoFeedback,
+      })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, team)),
+  ).toEqual([counted]);
+  expect(
+    await db
+      .select({
+        sent: schema.freePoolUsage.sent,
+        sentNoFeedback: schema.freePoolUsage.sentNoFeedback,
+      })
+      .from(schema.freePoolUsage)
+      .where(eq(schema.freePoolUsage.ownerId, owner)),
+  ).toEqual([counted]);
+});

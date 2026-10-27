@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { teamQuota } from "../src/plans.js";
 import {
+  bumpFreePoolUsage,
   quotaRoom,
   readDailyUsage,
   readPeriodUsage,
@@ -352,6 +353,33 @@ describe("a Free pool", () => {
     expect(await readDailyUsage(db, h, quota, POOL_DAY)).toBe(10);
   });
 
+  it("adds a pooled team's deliverability counts to its pool, and nothing for any other team", async () => {
+    const pooled = await createTeam(db, "pool-counts", { poolOwnerId: "u-counts" });
+    const paid = await createTeam(db, "pool-paid", { poolOwnerId: "u-counts" });
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+    const alone = await createTeam(db, "pool-none");
+    const counts = { sent: 1, sent_no_feedback: 1, hard_bounced: 1, complained: 1 };
+    for (const teamId of [pooled, paid, alone]) {
+      await bumpFreePoolUsage(db, { teamId, day: POOL_DAY, counts });
+    }
+    await bumpFreePoolUsage(db, { teamId: pooled, day: POOL_DAY, counts: { complained: 1 } });
+    expect(
+      await db
+        .select()
+        .from(schema.freePoolUsage)
+        .where(eq(schema.freePoolUsage.ownerId, "u-counts")),
+    ).toEqual([
+      {
+        ownerId: "u-counts",
+        day: POOL_DAY,
+        accepted: 0,
+        sent: 1,
+        sentNoFeedback: 1,
+        hardBounced: 1,
+        complained: 2,
+      },
+    ]);
+  });
 });
 
 describe("quotaRoom", () => {

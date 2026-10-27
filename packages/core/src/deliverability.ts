@@ -5,6 +5,7 @@ import type { Db } from "@millionsend/db";
 import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { freePoolOwner } from "./plans.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -31,7 +32,8 @@ export const PAUSE_COMPLAINT_RATE = 0.001;
 /**
  * Below this many sends in a window no tier fires regardless of rate: a
  * handful of bounces in a tiny sample must never pause an account. The
- * complaint tiers count only the sends that could draw a complaint.
+ * complaint tiers count only the sends that could draw a complaint, and a
+ * Free pool's complaint tiers have no floor at all (fetchDeliverabilityHealth).
  */
 export const MIN_GUARDRAIL_VOLUME = 100;
 
@@ -126,13 +128,15 @@ const rateOf = (events: number, sent: number): number => (sent > 0 ? events / se
  * Pure guardrail decision. The pause tier reads the short window: rate at or
  * over the pause line AND at least MIN_PAUSE_* events. The warning tier reads
  * the long window: rate at or over the warning line. Neither fires under
- * `minVolume` sends in its own window, counted over the metric's own
- * denominator (complaints over complaintSent). The rates returned for display
- * are the long window's; zero sends yields zero rates, never NaN.
+ * the metric's floor of sends in its own window, counted over the metric's
+ * own denominator (complaints over complaintSent): `minVolume` for bounces,
+ * `complaintMinVolume` for complaints. The rates returned for display are the
+ * long window's; zero sends yields zero rates, never NaN.
  */
 export function evaluateDeliverability(
   windows: { warn: WindowCounts; pause: WindowCounts },
   minVolume: number = MIN_GUARDRAIL_VOLUME,
+  complaintMinVolume: number = minVolume,
 ): DeliverabilityEvaluation {
   const { warn, pause } = windows;
   const reasons: DeliverabilityReason[] = [];
@@ -144,9 +148,10 @@ export function evaluateDeliverability(
       metric === "bounce"
         ? (["hardBounced", "sent"] as const)
         : (["complained", "complaintSent"] as const);
+    const floor = metric === "bounce" ? minVolume : complaintMinVolume;
     const pauseRate = rateOf(pause[events], pause[sends]);
     if (
-      pause[sends] >= minVolume &&
+      pause[sends] >= floor &&
       pauseRate >= lines.pause &&
       pause[events] >= lines.minPauseEvents
     ) {
@@ -154,7 +159,7 @@ export function evaluateDeliverability(
       return;
     }
     const warnRate = rateOf(warn[events], warn[sends]);
-    if (warn[sends] >= minVolume && warnRate >= lines.warn && warn[events] >= lines.minWarnEvents) {
+    if (warn[sends] >= floor && warnRate >= lines.warn && warn[events] >= lines.minWarnEvents) {
       reasons.push({ metric, rate: warnRate, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS });
     }
   };
@@ -191,36 +196,66 @@ export function evaluateDeliverability(
  * warning window), using the successful SES send count as the denominator
  * (complaints: the sends that could draw one), with the windows' lower bounds
  * derived from utcDay so rows join on the exact same UTC-day key production
- * writes.
+ * writes. A team in a Free pool (freePoolOwner) is judged on the pool's one
+ * record instead, free_pool_usage summed the same way, so a pause holds every
+ * Free team of its creator; its complaints count from the first send, since a
+ * pool's volume is small and every complaint reaches the shared reputation.
  */
 export async function fetchDeliverabilityHealth(
   db: Db,
   teamId: string,
   opts?: { now?: Date },
 ): Promise<DeliverabilityHealth> {
-  const now = (opts?.now ?? new Date()).getTime();
+  const at = opts?.now ?? new Date();
+  const now = at.getTime();
   const sinceWarn = utcDay(now - (GUARDRAIL_WINDOW_DAYS - 1) * DAY_MS);
   const sincePause = utcDay(now - (PAUSE_WINDOW_DAYS - 1) * DAY_MS);
 
+  const t = schema.teams;
+  const [team] = await db
+    .select({ plan: t.plan, currentPeriodEnd: t.currentPeriodEnd, poolOwnerId: t.poolOwnerId })
+    .from(t)
+    .where(eq(t.id, teamId));
+  const ownerId = team ? freePoolOwner(team, at) : null;
   const c = schema.usageCounters;
+  const p = schema.freePoolUsage;
+  const src = ownerId
+    ? {
+        table: p,
+        scope: eq(p.ownerId, ownerId),
+        day: p.day,
+        sent: p.sent,
+        complaintSent: sql`${p.sent} - ${p.sentNoFeedback}`,
+        hardBounced: p.hardBounced,
+        complained: p.complained,
+      }
+    : {
+        table: c,
+        scope: eq(c.teamId, teamId),
+        day: c.day,
+        sent: c.sent,
+        complaintSent: counterComplaintSent,
+        hardBounced: c.hardBounced,
+        complained: c.complained,
+      };
   // ::bigint — a busy sender's window sum can overflow int4. The driver
   // returns bigint as a string; Number() is exact up to 2^53.
   const total = (col: AnyPgColumn | SQL) => sql<string>`coalesce(sum(${col}), 0)::bigint`;
   const recent = (col: AnyPgColumn | SQL) =>
-    sql<string>`coalesce(sum(case when ${c.day} >= ${sincePause} then ${col} else 0 end), 0)::bigint`;
+    sql<string>`coalesce(sum(case when ${src.day} >= ${sincePause} then ${col} else 0 end), 0)::bigint`;
   const [row] = await db
     .select({
-      sent: total(c.sent),
-      complaintSent: total(counterComplaintSent),
-      hardBounced: total(c.hardBounced),
-      complained: total(c.complained),
-      pauseSent: recent(c.sent),
-      pauseComplaintSent: recent(counterComplaintSent),
-      pauseHardBounced: recent(c.hardBounced),
-      pauseComplained: recent(c.complained),
+      sent: total(src.sent),
+      complaintSent: total(src.complaintSent),
+      hardBounced: total(src.hardBounced),
+      complained: total(src.complained),
+      pauseSent: recent(src.sent),
+      pauseComplaintSent: recent(src.complaintSent),
+      pauseHardBounced: recent(src.hardBounced),
+      pauseComplained: recent(src.complained),
     })
-    .from(c)
-    .where(and(eq(c.teamId, teamId), gte(c.day, sinceWarn)));
+    .from(src.table)
+    .where(and(src.scope, gte(src.day, sinceWarn)));
 
   const n = (v: string | undefined) => Number(v ?? 0);
   const warn = {
@@ -237,7 +272,11 @@ export async function fetchDeliverabilityHealth(
   };
 
   return {
-    ...evaluateDeliverability({ warn, pause }),
+    ...evaluateDeliverability(
+      { warn, pause },
+      MIN_GUARDRAIL_VOLUME,
+      ownerId ? 0 : MIN_GUARDRAIL_VOLUME,
+    ),
     sent: warn.sent,
     complaintSent: warn.complaintSent,
     windowDays: GUARDRAIL_WINDOW_DAYS,

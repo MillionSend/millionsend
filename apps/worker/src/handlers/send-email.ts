@@ -3,6 +3,7 @@ import {
   applyStatusCas,
   buildUnsubscribeHeaders,
   buildUnsubscribeUrl,
+  bumpFreePoolUsage,
   bumpHourlyUsage,
   CREDENTIAL_MAIL_KINDS,
   countDistinctRecipients,
@@ -1077,6 +1078,11 @@ async function sendQueued(
       },
     });
   await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
+  await bumpFreePoolUsage(db, {
+    teamId: email.teamId,
+    day: utcDay(sentAt),
+    counts: { sent: 1, sent_no_feedback: noFeedback },
+  });
   if (bulk) deps.sesQuota?.noteBulkSent?.(region);
   // Insights below evaluate the in-memory body.
   await purgeCredential();

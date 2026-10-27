@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   broadcastSendSpacingMs,
@@ -157,6 +158,18 @@ describe("evaluateDeliverability", () => {
     expect(evaluateDeliverability(today(10_000, 0, 5, MIN_GUARDRAIL_VOLUME - 1)).status).toBe("ok");
   });
 
+  it("judges complaints from the first send when their floor is lifted, bounces keeping theirs", () => {
+    expect(evaluateDeliverability(today(50, 0, 3)).status).toBe("ok");
+    expect(evaluateDeliverability(today(50, 0, 1), MIN_GUARDRAIL_VOLUME, 0).status).toBe("ok");
+    expect(evaluateDeliverability(today(50, 0, 2), MIN_GUARDRAIL_VOLUME, 0).reasons).toEqual([
+      { metric: "complaint", rate: 0.04, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS },
+    ]);
+    expect(evaluateDeliverability(today(50, 0, 3), MIN_GUARDRAIL_VOLUME, 0).reasons).toEqual([
+      { metric: "complaint", rate: 0.06, tier: "paused", windowDays: PAUSE_WINDOW_DAYS },
+    ]);
+    expect(evaluateDeliverability(today(50, 50), MIN_GUARDRAIL_VOLUME, 0).status).toBe("ok");
+  });
+
   it("is zero-send safe (no divide-by-zero)", () => {
     const r = evaluateDeliverability(today(0));
     expect(r.bounceRate).toBe(0);
@@ -286,6 +299,53 @@ describe("fetchDeliverabilityHealth", () => {
     expect(health.reasons).toEqual([
       { metric: "complaint", rate: 0.0015, tier: "paused", windowDays: PAUSE_WINDOW_DAYS },
     ]);
+  });
+
+  it("judges a Free pool on its one record, whichever of its teams sent, and from the first complaint", async () => {
+    const owner = "u-guardrail";
+    const a = await createTeam(db, "pool-guardrail-a", { poolOwnerId: owner });
+    const b = await createTeam(db, "pool-guardrail-b", { poolOwnerId: owner });
+    const paid = await createTeam(db, "pool-guardrail-paid", { poolOwnerId: owner });
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+    // b's own week is clean and large; the pool's record is what counts.
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: b, day: utcDay(nowMs), sent: 10_000, complained: 0 });
+    await db.insert(schema.freePoolUsage).values({
+      ownerId: owner,
+      day: utcDay(nowMs),
+      sent: 60,
+      sentNoFeedback: 10,
+      complained: 3,
+    });
+    for (const teamId of [a, b]) {
+      const health = await fetchDeliverabilityHealth(db, teamId, { now });
+      expect(health.complaintSent).toBe(50);
+      expect(health.reasons).toEqual([
+        { metric: "complaint", rate: 0.06, tier: "paused", windowDays: PAUSE_WINDOW_DAYS },
+      ]);
+    }
+    // A paid team of the same creator stands alone.
+    expect((await fetchDeliverabilityHealth(db, paid, { now })).status).toBe("ok");
+  });
+
+  it("keeps the volume floor for a Free pool's bounces, and for a team outside any pool", async () => {
+    const owner = "u-guardrail-bounces";
+    const pooled = await createTeam(db, "pool-guardrail-bounces", { poolOwnerId: owner });
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: owner, day: utcDay(nowMs), sent: 60, hardBounced: 30 });
+    expect((await fetchDeliverabilityHealth(db, pooled, { now })).status).toBe("ok");
+    // Self-host never records a creator, and a paid plan never pools: both keep the floor.
+    const unrecorded = await createTeam(db, "guardrail-unrecorded");
+    const paid = await createTeam(db, "guardrail-paid", { poolOwnerId: owner });
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, paid));
+    for (const teamId of [unrecorded, paid]) {
+      await db
+        .insert(schema.usageCounters)
+        .values({ teamId, day: utcDay(nowMs), sent: 60, complained: 3 });
+      expect((await fetchDeliverabilityHealth(db, teamId, { now })).status).toBe("ok");
+    }
   });
 
   it("returns ok with zero rates for a team that has never sent", async () => {

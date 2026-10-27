@@ -1,5 +1,6 @@
 import {
   applyStatusCas,
+  bumpFreePoolUsage,
   bumpHourlyUsage,
   DAY_MS,
   type EmailStatus,
@@ -241,6 +242,7 @@ export async function processSesEvent(
       `);
       const counts = Object.fromEntries(cols.map((col) => [col, 1]));
       await bumpHourlyUsage(txDb, { teamId: email.teamId, at: new Date(event.occurredAt), counts });
+      await bumpFreePoolUsage(txDb, { teamId: email.teamId, day, counts });
     }
 
     // Auto-suppression: permanent bounces, full or abandoned mailboxes (as
