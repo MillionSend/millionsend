@@ -69,7 +69,8 @@ criou (`teams.pool_owner_id`, gravado na criação da equipe) em
 equipe continuam contando para as métricas dela. Os envios de uma equipe
 excluída continuam contados, e os avisos de cota saem uma vez só para todas.
 As mesmas equipes dividem um só histórico de bounces e reclamações (veja
-[Proteções](/pt-BR/concepts/broadcasts#proteções)). Equipes criadas antes de
+[Proteções](/pt-BR/concepts/broadcasts#proteções)), que conta também os que
+chegam depois de uma equipe ser excluída. Equipes criadas antes de
 a pessoa ser gravada recebem esse dado quando o worker inicia: o usuário
 indicado na linha `team.created` do log de auditoria delas ou, sem ela, o
 primeiro proprietário. Nessa hora, uma equipe Free leva para a contagem

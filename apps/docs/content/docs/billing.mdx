@@ -64,11 +64,12 @@ person created shares one daily count, kept by its creator
 many teams they have. Each team's own `usage_counters` keep counting for its
 metrics. A deleted team's sends stay counted, and the quota notices go out
 once for all of them. The same teams share one bounce and complaint record
-(see [Guardrails](/concepts/broadcasts#guardrails)). Teams created before the
-creator was recorded get it when the worker starts: the user named in their
-`team.created` audit row, otherwise their earliest owner. A Free team then
-brings its counts from the last 7 days into the shared ones, so its bounce and
-complaint record and its day's count carry over.
+(see [Guardrails](/concepts/broadcasts#guardrails)), which also counts the
+bounces and complaints that arrive after a team is deleted. Teams created
+before the creator was recorded get it when the worker starts: the user named
+in their `team.created` audit row, otherwise their earliest owner. A Free team
+then brings its counts from the last 7 days into the shared ones, so its
+bounce and complaint record and its day's count carry over.
 
 On Free, mail to providers that report spam complaints also goes out to at
 most 10 such recipients at once, then 10 an hour, across every Free team the
