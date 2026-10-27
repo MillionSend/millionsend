@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "0.36.0",
-    "@aws-sdk/client-sesv2": "^3.1155.0",
-    "@aws-sdk/client-sqs": "^3.1155.0",
+    "@aws-sdk/client-sesv2": "^3.1157.0",
+    "@aws-sdk/client-sqs": "^3.1157.0",
     "@millionsend/billing": "workspace:*",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
@@ -21,7 +21,7 @@
     "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "mupdf": "1.28.1",
-    "nodemailer": "^10.2.0",
+    "nodemailer": "^10.2.1",
     "sharp": "0.35.5",
     "tsx": "^4.23.15",
     "zxing-wasm": "3.1.6"

@@ -33,7 +33,7 @@
     "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.2",
-    "nodemailer": "^10.2.0",
+    "nodemailer": "^10.2.1",
     "resend": "^6.32.1",
     "resend-inboxes": "npm:resend@6.32.1-preview-inboxes.6",
     "typescript": "^7.0.2",
