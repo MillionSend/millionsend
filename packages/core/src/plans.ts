@@ -248,8 +248,9 @@ export type TeamQuota =
       /**
        * A Free pool's shared cap (freePoolOwner): `limit` here is the plan's
        * own, which the pool counter reserves against with the plan's
-       * tolerance; the team's own counter then keeps only `dailyCeiling`.
-       * Holds a user id: never sent to a browser.
+       * tolerance; the team's own counter keeps its own line too, which binds
+       * only on usage from before the team joined the pool. Holds a user id:
+       * never sent to a browser.
        */
       pool?: { ownerId: string; limit: number } | undefined;
     }

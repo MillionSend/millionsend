@@ -291,6 +291,18 @@ describe("a Free pool", () => {
     expect(await acceptedOn(d, POOL_DAY)).toBe(30);
   });
 
+  it("keeps the team's own line too, so a day it spent before joining the pool still binds", async () => {
+    // Its own row already holds the day, as on the pool's first day or a lapse to Free.
+    const lapsed = await createTeam(db, "pool-lapsed", { poolOwnerId: "u-lapsed" });
+    await db.insert(schema.usageCounters).values({ teamId: lapsed, day: POOL_DAY, accepted: 150 });
+    expect(await reserve(lapsed, 1, "u-lapsed")).toEqual({
+      reserved: false,
+      accepted: 150,
+      ceiling: 150,
+    });
+    expect([await acceptedOn(lapsed, POOL_DAY), await poolAccepted("u-lapsed")]).toEqual([150, 0]);
+  });
+
   it("hands a release back to the team's row and the pool's, each floored at zero", async () => {
     const f = await createTeam(db, "pool-f", { poolOwnerId: "u-release" });
     await reserve(f, 20, "u-release");

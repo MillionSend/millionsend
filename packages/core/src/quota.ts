@@ -79,8 +79,10 @@ export async function reserveDailyQuota(
     hardLimit?: number | null;
     /**
      * A Free pool: its counter is reserved after the team's own, against the
-     * pool's limit and tolerance, while the team's counter keeps only
-     * `hardLimit`. Rows lock team first, pool second, on every path.
+     * pool's limit and tolerance. The team's counter keeps its own ceiling,
+     * which binds only on a day the team counted before it joined the pool
+     * (the pool's first day, a lapse to Free). Rows lock team first, pool
+     * second, on every path.
      */
     pool?: DailyPool | undefined;
     day?: string;
@@ -94,7 +96,7 @@ export async function reserveDailyQuota(
   const at = params.at ?? (params.day ? new Date(`${params.day}T12:00:00Z`) : new Date());
   const t = schema.usageCounters;
   const p = schema.freePoolUsage;
-  const soft = limit === null || pool ? null : dailyCeiling(limit);
+  const soft = limit === null ? null : dailyCeiling(limit);
   const hard = params.hardLimit ?? null;
   const ceiling = soft === null ? hard : hard === null ? soft : Math.min(soft, hard);
   const poolCeiling = pool ? dailyCeiling(pool.limit) : null;
