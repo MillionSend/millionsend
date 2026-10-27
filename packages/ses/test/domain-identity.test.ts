@@ -229,6 +229,27 @@ describe("createDomainIdentity", () => {
     ).rejects.toThrow("throttled");
   });
 
+  it("leaves a self-host identity for the next create to adopt when MAIL FROM fails", async () => {
+    const { client, calls } = fakeClient((command) => {
+      if (command instanceof PutEmailIdentityMailFromAttributesCommand) {
+        throw new Error("mail from failed");
+      }
+      return {};
+    });
+    await expect(
+      createDomainIdentity(client, {
+        domain: "example.com",
+        mailFromSubdomain: "send",
+        dkim: DKIM,
+        adoptExisting: true,
+      }),
+    ).rejects.toThrow("mail from failed");
+    expect(calls.map((c) => c.constructor.name)).toEqual([
+      "CreateEmailIdentityCommand",
+      "PutEmailIdentityMailFromAttributesCommand",
+    ]);
+  });
+
   it("never deletes an adopted identity when MAIL FROM fails", async () => {
     const { client, calls } = fakeClient((command) => {
       if (command instanceof CreateEmailIdentityCommand) {

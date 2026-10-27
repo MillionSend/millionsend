@@ -2176,7 +2176,13 @@ export async function forwardToForwardTargets(
   });
   // A refusal with a retry-after clears with the UTC day: the team's daily
   // shared-domain cap, or a full backlog of mail waiting for a daily limit.
-  if (out.kind === "refused" && out.error.retryAfterSec !== undefined) {
+  // The monthly quota's renewal is a billing event, not a wait: that
+  // refusal ends the forward.
+  if (
+    out.kind === "refused" &&
+    out.error.retryAfterSec !== undefined &&
+    out.error.name !== "monthly_quota_exceeded"
+  ) {
     return waitFor(out.error.retryAfterSec * 1000) ?? out;
   }
   return out;

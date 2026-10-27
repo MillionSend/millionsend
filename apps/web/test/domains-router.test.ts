@@ -436,6 +436,10 @@ describe("domains.create", () => {
     const wait = retryAfterSecOf(refused as TRPCError);
     expect(wait).toBeGreaterThan(0);
     expect(wait).toBeLessThanOrEqual(3600);
+
+    // Scale's own cap is higher, so the same team goes on within the same hour.
+    await db.update(schema.teams).set({ plan: "scale" }).where(eq(schema.teams.id, teamId));
+    await caller.domains.create({ name: "scale.example.com", region: "us-east-1" });
   });
 
   it("adopts an SES identity orphaned by a partial earlier create", async () => {

@@ -138,8 +138,10 @@ export async function createDomainIdentity(
     // The caller records no row for a failed create, so an identity this call
     // made would be left behind: in the shared cloud account every later
     // create of the name then answers AlreadyExists, and the unverified-domain
-    // reaper only walks rows. An adopted identity predates the call and stays.
-    if (created) {
+    // reaper only walks rows. With adoptExisting the next create re-keys it
+    // instead, and a concurrent create may already have adopted it, so it
+    // stays; so does an identity this call adopted.
+    if (created && !params.adoptExisting) {
       await client
         .send(new DeleteEmailIdentityCommand({ EmailIdentity: params.domain }))
         .catch((cleanupError: unknown) => {

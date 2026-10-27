@@ -333,9 +333,10 @@ para a requisição passar:
 
 | Recusa | O `Retry-After` conta até |
 | --- | --- |
-| `rate_limit_exceeded`, "Too many requests" ou "Too many failed authentication attempts" | O próximo minuto. Uma chave de API faz até 600 requisições por minuto por padrão, e uma equipe 3.000; o servidor MCP permite 600 por pessoa; um IP tem 20 autenticações falhas. |
+| `rate_limit_exceeded`, "Too many requests" ou "Too many failed authentication attempts" | O próximo minuto. Uma chave de API faz até 600 requisições por minuto por padrão, e uma equipe 3.000; o servidor MCP permite 600 por pessoa; um IP pode errar a autenticação 20 vezes. |
 | `rate_limit_exceeded`, "Too many domains created" | A próxima hora cheia (UTC). Uma equipe adiciona até 10 domínios por hora, ou 100 no Scale. |
-| `rate_limit_exceeded` do `POST /inboxes` | O momento em que a caixa mais antiga criada na última hora sai dela. |
+| `rate_limit_exceeded`, "Too many inboxes created in the last hour" | Quando a caixa mais antiga criada na última hora completa uma hora. |
+| `rate_limit_exceeded`, "Too many names were reviewed today" ou "refused today" (`POST /inboxes`, `PATCH /inboxes/{id}`) | 00:00 UTC, quando as revisões de nomes do dia no domínio compartilhado zeram. |
 | `daily_quota_exceeded` | 00:00 UTC, quando o limite diário zera. |
 | `monthly_quota_exceeded` | O fim do período de cobrança, quando o volume mensal renova. |
 
