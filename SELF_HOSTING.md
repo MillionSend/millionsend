@@ -1062,9 +1062,9 @@ content insights (never email bodies), and an instance-wide audit log.
   pause, and count the complaints about mail with no email row left. On
   MillionSend Cloud, a complaint pause also holds each Free team whose mail
   drew a complaint for review, and the Free fuse holds Free teams' mail to
-  providers that report complaints once their mail of the last 7 days draws
-  3, until the operator releases it on Trust & safety; a self-hosted
-  instance has no plans, so neither applies there.
+  providers that report complaints once their mail of the last 7 days, a
+  deleted team's included, draws 3, until the operator releases it on Trust
+  & safety; a self-hosted instance has no plans, so neither applies there.
 - **Operator actions and the team:** a suspended team's API keys still
   authenticate but every send answers `403 team_suspended` (SMTP `550`;
   under a review hold, mail through the API or SMTP is accepted and parked,

@@ -803,6 +803,8 @@ export interface FreeFuseTrip {
   complaints: number;
   /** The Free teams behind them, most first. */
   teams: { teamName: string; complaints: number }[];
+  /** Of them, those about the mail of Free teams deleted since. */
+  deleted: number;
 }
 
 /**
@@ -840,7 +842,23 @@ export async function evaluateFreeFuse(db: Db, now: Date): Promise<FreeFuseTrip 
     )
     .groupBy(t.id, t.name)
     .orderBy(desc(complaints), asc(t.name));
-  const total = teams.reduce((n, row) => n + row.complaints, 0);
+  // A deleted team's mail rows went with it: its complaints arrive unmatched,
+  // named as Free mail only by the pool its send was tagged with, and count
+  // from when they arrived.
+  const u = schema.sesUnmatchedEvents;
+  const [orphaned] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(u)
+    .where(
+      and(
+        eq(u.type, "complained"),
+        isNotNull(u.poolOwnerId),
+        gte(u.createdAt, since),
+        sesAttemptedSql(sql`${u.subType}`),
+      ),
+    );
+  const deleted = orphaned?.n ?? 0;
+  const total = teams.reduce((n, row) => n + row.complaints, deleted);
   if (total < FREE_FUSE_COMPLAINTS) return null;
   const set = { freeFuseTrippedAt: now, freeFuseComplaints: total, updatedAt: now };
   const [tripped] = await db
@@ -848,7 +866,7 @@ export async function evaluateFreeFuse(db: Db, now: Date): Promise<FreeFuseTrip 
     .values({ id: 1, ...set })
     .onConflictDoUpdate({ target: s.id, set, setWhere: isNull(s.freeFuseTrippedAt) })
     .returning({ id: s.id });
-  return tripped ? { complaints: total, teams } : null;
+  return tripped ? { complaints: total, teams, deleted } : null;
 }
 
 /**

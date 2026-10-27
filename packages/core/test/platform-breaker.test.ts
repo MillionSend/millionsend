@@ -1045,6 +1045,7 @@ it("trips the Free fuse at 3 complaints on Free teams' mail in 7 days, counts no
       { teamName: "fuse-b", complaints: 1 },
       { teamName: "fuse-lapsed", complaints: 1 },
     ],
+    deleted: 0,
   });
   expect(await fuse()).toMatchObject({ freeFuseTrippedAt: NOW, freeFuseComplaints: 3 });
   // Tripped, it waits for the operator.
@@ -1089,6 +1090,44 @@ it("trips the Free fuse at 3 complaints on Free teams' mail in 7 days, counts no
   await complainedSend(freeB.teamId, freeB.domainId, after(1), after(3));
   expect(await evaluateFreeFuse(db, after(4))).toMatchObject({ complaints: 3 });
   await releaseFreeFuse(db, after(5));
+});
+
+it("counts toward the Free fuse the complaints about the mail of Free teams deleted since, named by their send's pool tag", async () => {
+  await clearTraffic();
+  const u = schema.sesUnmatchedEvents;
+  await db.delete(u);
+  await db
+    .update(schema.instanceSettings)
+    .set({ freeFuseTrippedAt: null, freeFuseReleasedAt: null });
+  const kept = await teamOn("fuse-kept", "free", "eu-central-1");
+  await complainedSend(kept.teamId, kept.domainId, hoursAgo(5));
+  const orphan = (sesMessageId: string, extra: Partial<typeof u.$inferInsert> = {}) => ({
+    sesMessageId,
+    type: "complained" as const,
+    poolOwnerId: "owner-gone",
+    occurredAt: hoursAgo(2),
+    createdAt: hoursAgo(2),
+    ...extra,
+  });
+  await db.insert(u).values([
+    orphan("gone-1"),
+    // Untagged: nothing says the mail was a Free team's.
+    orphan("gone-2", { poolOwnerId: null }),
+    // About mail SES never attempted.
+    orphan("gone-3", { subType: "OnAccountSuppressionList" }),
+    // Arrived before the window.
+    orphan("gone-4", { createdAt: hoursAgo(8 * 24) }),
+  ]);
+  expect(await evaluateFreeFuse(db, NOW)).toBeNull();
+
+  await db.insert(u).values(orphan("gone-5"));
+  expect(await evaluateFreeFuse(db, NOW)).toEqual({
+    complaints: 3,
+    teams: [{ teamName: "fuse-kept", complaints: 1 }],
+    deleted: 2,
+  });
+  await releaseFreeFuse(db, NOW);
+  await db.delete(u);
 });
 
 it("counts complaints SES attempted on mail with no email row over the month, and purges them after 35 days", async () => {

@@ -208,6 +208,9 @@ export function freeFuseMail(input: FreeFuseTrip & { url: string }): MailContent
         (t) =>
           `${inertText(t.teamName)}: ${t.complaints} complaint${t.complaints === 1 ? "" : "s"}`,
       ),
+      ...(input.deleted > 0
+        ? [`Free teams deleted since: ${input.deleted} complaint${input.deleted === 1 ? "" : "s"}`]
+        : []),
     ],
     button: { label: "Open Trust & safety", url: input.url },
     footnote: "Sent to the instance operator when the Free fuse trips.",
