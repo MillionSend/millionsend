@@ -6,6 +6,21 @@ import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type TeamQuota } from "./plans.js";
 import { bumpHourlyUsage } from "./usage-hourly.js";
 import { utcDay } from "./utc-day.js";
 
+/** A Free pool's shared cap, as a daily TeamQuota carries it. */
+type DailyPool = NonNullable<Extract<TeamQuota, { kind: "day" }>["pool"]>;
+
+/** A counter a reservation runs against, and the most it may reach (null: uncapped). */
+interface Counted {
+  accepted: number;
+  ceiling: number | null;
+}
+
+/** Of the counters a reservation ran against, the one with the least room left. */
+function tightest(counters: Counted[]): Counted {
+  const room = (c: Counted) => (c.ceiling ?? Number.POSITIVE_INFINITY) - c.accepted;
+  return counters.reduce((a, b) => (room(b) < room(a) ? b : a));
+}
+
 /**
  * `accepted` is the counter the reservation ran against (the UTC day on a
  * daily cap, the billing period on a monthly one) after the call; `ceiling`
@@ -55,26 +70,47 @@ export async function reserveDailyQuota(
     limit: number | null;
     /** An operator ceiling: a hard line the tolerance above `limit` never crosses. */
     hardLimit?: number | null;
+    /**
+     * A Free pool: its counter is reserved after the team's own, against the
+     * pool's limit and tolerance, while the team's counter keeps only
+     * `hardLimit`. Rows lock team first, pool second, on every path.
+     */
+    pool?: DailyPool | undefined;
     day?: string;
     /** The instant the sends count against (their delivery time); noon of `day` when only that is known. */
     at?: Date;
   },
 ): Promise<QuotaResult> {
-  const { teamId, count, limit } = params;
+  const { teamId, count, limit, pool } = params;
   if (count <= 0) throw new Error("count must be positive");
   const day = params.day ?? utcDay();
   const at = params.at ?? (params.day ? new Date(`${params.day}T12:00:00Z`) : new Date());
   const t = schema.usageCounters;
-  const soft = limit === null ? null : dailyCeiling(limit);
+  const p = schema.freePoolUsage;
+  const soft = limit === null || pool ? null : dailyCeiling(limit);
   const hard = params.hardLimit ?? null;
   const ceiling = soft === null ? hard : hard === null ? soft : Math.min(soft, hard);
-
-  if (ceiling !== null && count > ceiling) {
-    const existing = await db
+  const poolCeiling = pool ? dailyCeiling(pool.limit) : null;
+  // A refusal reports the counter with the least room, which batch
+  // tail-parking fits its head under.
+  const refused = async (): Promise<QuotaResult> => {
+    const [team] = await db
       .select({ accepted: t.accepted })
       .from(t)
       .where(sql`${t.teamId} = ${teamId} and ${t.day} = ${day}`);
-    return { reserved: false, accepted: existing[0]?.accepted ?? 0, ceiling };
+    const counters: Counted[] = [{ accepted: team?.accepted ?? 0, ceiling }];
+    if (pool) {
+      const [shared] = await db
+        .select({ accepted: p.accepted })
+        .from(p)
+        .where(sql`${p.ownerId} = ${pool.ownerId} and ${p.day} = ${day}`);
+      counters.push({ accepted: shared?.accepted ?? 0, ceiling: poolCeiling });
+    }
+    return { reserved: false, ...tightest(counters) };
+  };
+
+  if ((ceiling !== null && count > ceiling) || (poolCeiling !== null && count > poolCeiling)) {
+    return refused();
   }
 
   const guard = ceiling === null ? sql`true` : sql`${t.accepted} + ${count} <= ${ceiling}`;
@@ -86,27 +122,45 @@ export async function reserveDailyQuota(
       where ${guard}
     returning accepted
   `);
-
   const row = firstRow<{ accepted: number }>(rows);
-  if (row) {
-    await bumpHourlyUsage(db, { teamId, at, counts: { accepted: count } });
-    return { reserved: true, accepted: Number(row.accepted), ceiling };
+  if (!row) return refused();
+  const counted: Counted[] = [{ accepted: Number(row.accepted), ceiling }];
+
+  if (pool) {
+    const shared = firstRow<{ accepted: number }>(
+      await db.execute<{ accepted: number }>(sql`
+        insert into ${p} (owner_id, day, accepted)
+        values (${pool.ownerId}, ${day}, ${count})
+        on conflict (owner_id, day) do update
+          set accepted = ${p.accepted} + ${count}
+          where ${p.accepted} + ${count} <= ${poolCeiling}
+        returning accepted
+      `),
+    );
+    if (!shared) {
+      // A refused send still commits (it parks), so the team's charge above
+      // goes back here rather than with a rollback.
+      await db.execute(sql`
+        update ${t}
+        set accepted = ${t.accepted} - ${count}
+        where ${t.teamId} = ${teamId} and ${t.day} = ${day}
+      `);
+      return refused();
+    }
+    counted.push({ accepted: Number(shared.accepted), ceiling: poolCeiling });
   }
 
-  const existing = await db
-    .select({ accepted: t.accepted })
-    .from(t)
-    .where(sql`${t.teamId} = ${teamId} and ${t.day} = ${day}`);
-  return { reserved: false, accepted: existing[0]?.accepted ?? 0, ceiling };
+  await bumpHourlyUsage(db, { teamId, at, counts: { accepted: count } });
+  return { reserved: true, ...tightest(counted) };
 }
 
 /**
  * Compensating release for non-transactional callers whose work failed after
- * a successful reservation. Floors at zero.
+ * a successful reservation, the Free pool's counter included. Floors at zero.
  */
 export async function releaseDailyQuota(
   db: Db,
-  params: { teamId: string; count: number; day?: string; at?: Date },
+  params: { teamId: string; count: number; pool?: DailyPool | undefined; day?: string; at?: Date },
 ): Promise<void> {
   if (params.count <= 0) throw new Error("count must be positive");
   const day = params.day ?? utcDay();
@@ -117,6 +171,14 @@ export async function releaseDailyQuota(
     set accepted = greatest(accepted - ${params.count}, 0)
     where ${t.teamId} = ${params.teamId} and ${t.day} = ${day}
   `);
+  if (params.pool) {
+    const p = schema.freePoolUsage;
+    await db.execute(sql`
+      update ${p}
+      set accepted = greatest(accepted - ${params.count}, 0)
+      where ${p.ownerId} = ${params.pool.ownerId} and ${p.day} = ${day}
+    `);
+  }
   await bumpHourlyUsage(db, { teamId: params.teamId, at, counts: { accepted: -params.count } });
 }
 
@@ -242,6 +304,7 @@ export async function reserveQuota(
     count,
     limit: quota.kind === "day" ? quota.limit : null,
     hardLimit: quota.kind === "day" ? (quota.dailyCeiling ?? null) : null,
+    pool: quota.kind === "day" ? quota.pool : undefined,
     ...when,
   });
 }
@@ -264,8 +327,42 @@ export async function releaseQuota(
     });
     return;
   }
-  await releaseDailyQuota(db, { teamId: params.teamId, count: params.count, ...when });
+  await releaseDailyQuota(db, {
+    teamId: params.teamId,
+    count: params.count,
+    pool: params.quota.kind === "day" ? params.quota.pool : undefined,
+    ...when,
+  });
 }
+
+/**
+ * Sends counted so far on a UTC day against a daily cap: the Free pool's
+ * counter when the quota carries one, the team's own otherwise. Every reader
+ * that compares a day's usage with the cap, or shows it, reads it here.
+ */
+export async function readDailyUsage(
+  db: Db,
+  teamId: string,
+  quota: TeamQuota,
+  day: string = utcDay(),
+): Promise<number> {
+  const pool = quota.kind === "day" ? quota.pool : undefined;
+  if (pool) {
+    const p = schema.freePoolUsage;
+    const [row] = await db
+      .select({ accepted: p.accepted })
+      .from(p)
+      .where(sql`${p.ownerId} = ${pool.ownerId} and ${p.day} = ${day}`);
+    return row?.accepted ?? 0;
+  }
+  const t = schema.usageCounters;
+  const [row] = await db
+    .select({ accepted: t.accepted })
+    .from(t)
+    .where(sql`${t.teamId} = ${teamId} and ${t.day} = ${day}`);
+  return row?.accepted ?? 0;
+}
+
 
 /** Sends accepted so far, and how many past the included volume the meter already knows about. */
 export async function readPeriodUsage(

@@ -204,6 +204,23 @@ export interface QuotaTeamRow {
   overageEnabled: boolean;
   /** Operator ceiling on the team's UTC day (instance console); null or absent = the plan decides. */
   dailySendCeiling?: number | null | undefined;
+  /** The team's creator, recorded on Cloud only (teams.pool_owner_id); see freePoolOwner. */
+  poolOwnerId?: string | null | undefined;
+}
+
+/**
+ * The Free pool a team counts in right now: its creator's id while the team
+ * is effectively on Free and its creator is recorded, which only Cloud does.
+ * Every such team of one creator shares one daily cap and one bounce and
+ * complaint record. Null for a paid or system team, and on self-host.
+ */
+export function freePoolOwner(
+  team: Pick<QuotaTeamRow, "plan" | "currentPeriodEnd" | "poolOwnerId">,
+  now: Date = new Date(),
+): string | null {
+  return team.poolOwnerId && effectivePlan(team.plan, team.currentPeriodEnd, now) === "free"
+    ? team.poolOwnerId
+    : null;
 }
 
 /** What limits a team's sends right now. */
@@ -216,6 +233,13 @@ export type TeamQuota =
       limit: number;
       /** An operator ceiling on the day, enforced as typed (the plan's tolerance never stretches it). */
       dailyCeiling?: number | null | undefined;
+      /**
+       * A Free pool's shared cap (freePoolOwner): `limit` here is the plan's
+       * own, which the pool counter reserves against with the plan's
+       * tolerance; the team's own counter then keeps only `dailyCeiling`.
+       * Holds a user id: never sent to a browser.
+       */
+      pool?: { ownerId: string; limit: number } | undefined;
     }
   | {
       kind: "month";
@@ -260,7 +284,12 @@ function planQuota(team: QuotaTeamRow, isCloud: boolean, now: Date): TeamQuota {
   const plan = effectivePlan(team.plan, team.currentPeriodEnd, now);
   if (plan === "system") return { kind: "none" };
   const rung = teamRung(plan, plan === team.plan ? team.planQuota : null);
-  if (rung.period === "day") return { kind: "day", plan, limit: rung.included };
+  if (rung.period === "day") {
+    const ownerId = freePoolOwner(team, now);
+    return ownerId
+      ? { kind: "day", plan, limit: rung.included, pool: { ownerId, limit: rung.included } }
+      : { kind: "day", plan, limit: rung.included };
+  }
   const period = quotaPeriod(team, now);
   const paused = team.overageEnabled && team.planStatus === "past_due";
   return {

@@ -266,6 +266,7 @@
   "usage": {
     "sentToday": "Emails sent today",
     "resetsMidnightUtc": "Resets at midnight UTC",
+    "pooledToday": "The Free teams created by the same person share this limit and one bounce and complaint record. Resets at midnight UTC.",
     "unlimited": "Unlimited",
     "history": "Daily history",
     "empty": "0 days recorded.",

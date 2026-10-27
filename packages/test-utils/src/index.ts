@@ -36,16 +36,17 @@ export async function createTestDb(): Promise<{ db: Db; close: () => Promise<voi
 /**
  * A team named after its slug; with `sharedInboxDomain`, also its unlocked
  * subdomain label `<slug>.<sharedInboxDomain>`, which a real team gets when
- * it is created.
+ * it is created. With `poolOwnerId`, the creator Cloud records, which puts a
+ * Free team in that user's Free pool.
  */
 export async function createTeam(
   db: Db,
   slug = "acme",
-  opts: { sharedInboxDomain?: string | undefined } = {},
+  opts: { sharedInboxDomain?: string | undefined; poolOwnerId?: string | undefined } = {},
 ): Promise<string> {
   const [team] = await db
     .insert(schema.teams)
-    .values({ name: slug, slug })
+    .values({ name: slug, slug, poolOwnerId: opts.poolOwnerId ?? null })
     .returning({ id: schema.teams.id });
   if (!team) throw new Error("team insert failed");
   if (opts.sharedInboxDomain) {

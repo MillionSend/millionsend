@@ -266,6 +266,7 @@
   "usage": {
     "sentToday": "E-mails enviados hoje",
     "resetsMidnightUtc": "Zera à meia-noite UTC",
+    "pooledToday": "As equipes Free criadas pela mesma pessoa dividem este limite e um só histórico de bounces e reclamações. Zera à meia-noite UTC.",
     "unlimited": "Ilimitado",
     "history": "Histórico diário",
     "empty": "0 dias registrados.",

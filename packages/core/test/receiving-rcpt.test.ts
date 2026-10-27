@@ -143,6 +143,25 @@ describe("chargeReceived", () => {
     expect(hours).toEqual([{ received: 1 }]);
   });
 
+  it("Free: one creator's teams spend one pooled counter, received mail included", async () => {
+    const owner = "u-receive-pool";
+    const a = await createTeam(db, "free-pool-a", { poolOwnerId: owner });
+    const b = await createTeam(db, "free-pool-b", { poolOwnerId: owner });
+    const rule = receivingRule(team({ poolOwnerId: owner }), true, NOW);
+    await db.insert(schema.freePoolUsage).values({ ownerId: owner, day: DAY, accepted: 148 });
+    expect(await chargeReceived(db, { teamId: a, rule, now: NOW })).toBe(true);
+    expect(await hasReceivingRoom(db, b, rule, NOW)).toBe(true);
+    expect(await chargeReceived(db, { teamId: b, rule, now: NOW })).toBe(true);
+    // Each team received one message of its own, yet the pool is at its ceiling.
+    expect(await hasReceivingRoom(db, a, rule, NOW)).toBe(false);
+    expect(await hasReceivingRoom(db, b, rule, NOW)).toBe(false);
+    expect(await chargeReceived(db, { teamId: b, rule, now: NOW })).toBe(false);
+    expect([await daily(a), await daily(b)]).toEqual([
+      { accepted: 1, received: 1 },
+      { accepted: 1, received: 1 },
+    ]);
+  });
+
   it("Starter: its own allowance, sending untouched", async () => {
     const teamId = await createTeam(db, "starter-charge");
     const rule: ReceivingRule = { kind: "day", allowance: 2 };
@@ -254,6 +273,20 @@ describe("decideRecipient", () => {
     });
     // Self-host never caps receiving.
     expect(await decide("agent@inbound.acme.test", false)).toMatchObject({ accept: true });
+  });
+
+  it("answers 452 4.2.2 to a Free team whose pool is spent, though its own count is not", async () => {
+    const pooled = await createTeam(db, "rcpt-pooled", { poolOwnerId: "u-rcpt-pool" });
+    await addDomain(pooled, "in.pooled.test", { receiving: true });
+    expect(await decide("agent@in.pooled.test", true)).toMatchObject({ accept: true });
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: "u-rcpt-pool", day: DAY, accepted: 150 });
+    expect(await decide("agent@in.pooled.test", true)).toMatchObject({
+      accept: false,
+      code: 452,
+      enhanced: "4.2.2",
+    });
   });
 });
 

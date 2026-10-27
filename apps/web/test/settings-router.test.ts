@@ -726,8 +726,21 @@ describe("settings.usage", () => {
       [dayAgo(0), 42],
       [dayAgo(1), 7],
     ]);
-    expect(usage.today).toEqual({ accepted: 42, limit: 100 });
+    expect(usage.today).toEqual({ accepted: 42, limit: 100, pooled: false });
     expect(usage.period).toBeNull();
+  });
+
+  it("measures a Free pool's day against its shared limit, the history staying the team's own", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme", { poolOwnerId: "u-usage-pool" });
+    await addMember(teamId, "u1", "owner");
+    await insertCounter(teamId, dayAgo(0), 12);
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: "u-usage-pool", day: dayAgo(0), accepted: 90 });
+    const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
+    expect(usage.today).toEqual({ accepted: 90, limit: 100, pooled: true });
+    expect(usage.rows.map((r) => r.accepted)).toEqual([12]);
   });
 
   it("widens the window when days is passed", async () => {

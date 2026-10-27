@@ -6,7 +6,7 @@ import { INBOX_FLOOD_PER_HOUR } from "../inboxes/limits.js";
 import { SHARED_ROLE_LOCAL_PARTS } from "../inboxes/shared-domain.js";
 import { isDomainOrSubdomain } from "../org-domain.js";
 import { OVERAGE_HARD_CAP, type QuotaTeamRow, type TeamQuota, teamQuota } from "../plans.js";
-import { dailyCeiling, reserveQuota } from "../quota.js";
+import { dailyCeiling, readDailyUsage, reserveQuota } from "../quota.js";
 import { routableAddress } from "../sender-address.js";
 import { QUOTA_COLUMNS } from "../team-plan.js";
 import { bumpHourlyUsage } from "../usage-hourly.js";
@@ -85,14 +85,18 @@ export async function hasReceivingRoom(
       .where(and(eq(p.teamId, teamId), eq(p.periodStart, rule.periodStart)));
     return (row?.received ?? 0) < rule.allowance || (row?.accepted ?? 0) < rule.ceiling;
   }
+  if (rule.kind === "shared_day") {
+    // ponytail: a Free pool's count is read against the team's ceiling, so an
+    // operator ceiling on a pooled team defers a little early; read the
+    // team's own row against it too if such ceilings become common.
+    return (await readDailyUsage(db, teamId, rule.quota, utcDay(now))) < rule.ceiling;
+  }
   const c = schema.usageCounters;
   const [row] = await db
-    .select({ accepted: c.accepted, received: c.received })
+    .select({ received: c.received })
     .from(c)
     .where(and(eq(c.teamId, teamId), eq(c.day, utcDay(now))));
-  return rule.kind === "shared_day"
-    ? (row?.accepted ?? 0) < rule.ceiling
-    : (row?.received ?? 0) < rule.allowance;
+  return (row?.received ?? 0) < rule.allowance;
 }
 
 /**

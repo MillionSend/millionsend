@@ -620,6 +620,7 @@ export {
 export {
   effectivePlan,
   formatVolume,
+  freePoolOwner,
   isPlanRungKey,
   type LadderPlan,
   monthlyCapacity,
@@ -681,6 +682,7 @@ export {
   type QuotaResult,
   quotaChargeAt,
   quotaRoom,
+  readDailyUsage,
   readPeriodUsage,
   releaseDailyQuota,
   releasePeriodCount,
