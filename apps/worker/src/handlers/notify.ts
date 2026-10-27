@@ -18,6 +18,7 @@ import {
   formatMailDateTime,
   formatMailPercent,
   freeCapText,
+  freePoolOwner,
   heldByNewDomainLimit,
   limitSpent,
   type MailContent,
@@ -36,6 +37,7 @@ import {
   planMove,
   QUOTA_COLUMNS,
   QUOTA_TOLERANCE,
+  readDailyUsage,
   resultRows,
   type SystemMailKind,
   teamQuota,
@@ -52,6 +54,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import {
   and,
+  asc,
   eq,
   exists,
   gt,
@@ -174,6 +177,26 @@ const lineFor = (r: DeliverabilityReason): number =>
       : WARN_COMPLAINT_RATE;
 
 /**
+ * The team a Free pool's notices are claimed on: its oldest team still in the
+ * pool, the same one on every sweep, so the pool hears each notice once
+ * however many of its teams see the line. Null when none is left in it.
+ */
+async function freePoolClaimTeam(db: Db, ownerId: string, now: Date): Promise<string | null> {
+  const t = schema.teams;
+  const rows = await db
+    .select({
+      id: t.id,
+      plan: t.plan,
+      currentPeriodEnd: t.currentPeriodEnd,
+      poolOwnerId: t.poolOwnerId,
+    })
+    .from(t)
+    .where(eq(t.poolOwnerId, ownerId))
+    .orderBy(asc(t.createdAt), asc(t.id));
+  return rows.find((row) => freePoolOwner(row, now) === ownerId)?.id ?? null;
+}
+
+/**
  * Mails a plan move to the team's owners, claimed with the key the Stripe
  * webhook route computes for the same move, so whichever surface notices
  * first (the route, the daily reconcile, the grace sweep) is the one that
@@ -269,6 +292,18 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       }),
     );
     await mailOwners(teamId, type, mail);
+  };
+  // A Free pool shares one cap and one record across its teams: its quota and
+  // deliverability notices are claimed once, on the pool's claim team, and go
+  // to the team that met the line.
+  const poolClaimTeams = new Map<string, string>();
+  const claimTeam = async (teamId: string, ownerId: string | null): Promise<string> => {
+    if (!ownerId) return teamId;
+    const known = poolClaimTeams.get(ownerId);
+    if (known) return known;
+    const found = (await freePoolClaimTeam(db, ownerId, now)) ?? teamId;
+    poolClaimTeams.set(ownerId, found);
+    return found;
   };
 
   // Webhook trouble goes out by mail only: the endpoint in trouble is the one
@@ -379,29 +414,41 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       .from(schema.usageCounters)
       .innerJoin(schema.teams, eq(schema.teams.id, schema.usageCounters.teamId))
       .where(and(eq(schema.usageCounters.day, today), gt(schema.usageCounters.accepted, 0)));
+    const judgedPools = new Set<string>();
     for (const row of rows) {
       const quota = teamQuota(row, deps.isCloud, now);
       if (quota.kind !== "day") continue;
-      const limit = quota.limit;
+      // A Free pool is judged once, on its shared count against its own line.
+      const pool = quota.pool;
+      if (pool) {
+        if (judgedPools.has(pool.ownerId)) continue;
+        judgedPools.add(pool.ownerId);
+      }
+      const used = pool ? await readDailyUsage(db, row.teamId, quota, today) : row.accepted;
+      const limit = pool?.limit ?? quota.limit;
       // The ceiling is where reserveDailyQuota starts parking: reaching it
       // means new sends now wait for the reset (or a higher plan).
-      const ceiling = Math.min(dailyCeiling(limit), quota.dailyCeiling ?? Number.POSITIVE_INFINITY);
+      const ceiling = Math.min(
+        dailyCeiling(limit),
+        (pool ? null : quota.dailyCeiling) ?? Number.POSITIVE_INFINITY,
+      );
       const kind =
-        row.accepted >= ceiling
+        used >= ceiling
           ? "quota.paused"
-          : row.accepted >= limit
+          : used >= limit
             ? "quota.reached"
-            : row.accepted >= Math.ceil(limit * QUOTA_WARNING_RATIO)
+            : used >= Math.ceil(limit * QUOTA_WARNING_RATIO)
               ? "quota.warning"
               : null;
       if (!kind) continue;
-      if (!(await claimNotification(db, { teamId: row.teamId, kind, periodKey: today }))) continue;
+      const claimant = await claimTeam(row.teamId, pool?.ownerId ?? null);
+      if (!(await claimNotification(db, { teamId: claimant, kind, periodKey: today }))) continue;
       const resetsAt = nextUtcDayStart(now.getTime());
       await notify(
         row.teamId,
         kind,
         {
-          used: row.accepted,
+          used,
           limit,
           ceiling,
           period: "day",
@@ -410,11 +457,12 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
         },
         account(kind, billingPath, (locale) => ({
           team: row.name,
-          used: row.accepted.toLocaleString(locale),
+          used: used.toLocaleString(locale),
           limit: limit.toLocaleString(locale),
-          headroom: Math.max(0, ceiling - row.accepted).toLocaleString(locale),
+          headroom: Math.max(0, ceiling - used).toLocaleString(locale),
           tolerance: `${Math.round(QUOTA_TOLERANCE * 100)}%`,
           resetsAt: `${resetsAt.toISOString().slice(11, 16)} UTC`,
+          shared: pool ? accountMailPhrase({ locale, kind, key: "shared" }) : "",
         })),
       );
     }
@@ -493,13 +541,25 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
 
   const since = utcDay(now.getTime() - 6 * DAY_MS);
   const senders = await db
-    .selectDistinct({ teamId: schema.usageCounters.teamId, name: schema.teams.name })
+    .selectDistinct({
+      teamId: schema.usageCounters.teamId,
+      name: schema.teams.name,
+      plan: schema.teams.plan,
+      currentPeriodEnd: schema.teams.currentPeriodEnd,
+      poolOwnerId: schema.teams.poolOwnerId,
+    })
     .from(schema.usageCounters)
     .innerJoin(schema.teams, eq(schema.teams.id, schema.usageCounters.teamId))
     .where(and(gte(schema.usageCounters.day, since), sql`${schema.usageCounters.sent} > 0`));
+  // A Free pool has one record, so it is judged once, under its claim team.
+  const judged = new Map<string, (typeof senders)[number]>();
+  for (const team of senders) {
+    const claimant = await claimTeam(team.teamId, freePoolOwner(team, now));
+    if (!judged.has(claimant)) judged.set(claimant, team);
+  }
   // A team with no sends left in the window has nothing to judge: its episode
   // is over even though the loop below never sees it.
-  const observed = new Set(senders.map((t) => t.teamId));
+  const observed = new Set(judged.keys());
   const claimants = await db
     .selectDistinct({ teamId: schema.teamNotifications.teamId })
     .from(schema.teamNotifications)
@@ -507,21 +567,21 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
   for (const { teamId } of claimants) {
     if (!observed.has(teamId)) await clearNotifications(db, { teamId, kind: "deliverability" });
   }
-  for (const team of senders) {
+  for (const [claimant, team] of judged) {
     const health = await fetchDeliverabilityHealth(db, team.teamId, { now });
     if (health.status === "ok") {
       if (
         health.bounceRate < DELIVERABILITY_CLEAR_RATIO * WARN_BOUNCE_RATE &&
         health.complaintRate < DELIVERABILITY_CLEAR_RATIO * WARN_COMPLAINT_RATE
       ) {
-        await clearNotifications(db, { teamId: team.teamId, kind: "deliverability" });
+        await clearNotifications(db, { teamId: claimant, kind: "deliverability" });
       }
       continue;
     }
     const reason = health.reasons.find((r) => r.tier === health.status) ?? health.reasons[0];
     if (!reason) continue;
     const claimed = await claimNotification(db, {
-      teamId: team.teamId,
+      teamId: claimant,
       kind: "deliverability",
       periodKey: health.status,
     });
@@ -548,6 +608,7 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
           kind === "deliverability.warning"
             ? accountMailPhrase({ locale, kind, key: `${reason.metric}Advice` })
             : "",
+        shared: freePoolOwner(team, now) ? accountMailPhrase({ locale, kind, key: "shared" }) : "",
       })),
     );
   }
