@@ -24,6 +24,7 @@ import {
 import {
   anyYoungLinkDomain,
   backfillPoolOwners,
+  bookFreeBurst,
   committedDailyVolume,
   createDomainAgeResolver,
   createSharedNameReview,
@@ -788,6 +789,7 @@ await queue.work(
         sharedTenant,
         throttle: (region) => sendControls.throttle(region),
         reschedule: (emailId, at, priority) => enqueueSend(emailId, at, priority),
+        ...(env.IS_CLOUD ? { freeBurst: bookFreeBurst } : {}),
         sesQuota: sendControls,
         enqueueWebhookDelivery: enqueueWebhook,
         tracking,

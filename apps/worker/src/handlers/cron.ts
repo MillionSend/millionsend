@@ -801,13 +801,15 @@ export async function reconcileStalledSends(
     }),
   );
   await hooks.flush();
-  // A row scheduled for later is waiting by design, not lost; its job is due
-  // with it and would only be re-enqueued every sweep until then.
+  // A row scheduled for later, or booked a later slot by its Free pool's
+  // burst allowance, is waiting by design, not lost; its job is due with it
+  // and would only be re-enqueued every sweep until then.
   const stalled = and(
     eq(e.latestStatus, "queued"),
     isNull(e.sentAt),
     lt(e.createdAt, staleBefore),
     or(isNull(e.scheduledAt), lte(e.scheduledAt, now)),
+    or(isNull(e.freeBurstAt), lte(e.freeBurstAt, now)),
   );
   // Keyset pages over (createdAt, id), capped per run, one enqueue per page.
   let cursorId: string | undefined;

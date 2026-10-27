@@ -334,6 +334,34 @@ it("reconcile re-enqueues stale queued emails but never claimed or fresh ones", 
   expect(enqueued).toEqual([due?.id, stale?.id]);
 });
 
+it("reconcile leaves a row its Free pool's burst allowance booked for later to that slot's job", async () => {
+  const now = new Date();
+  const minutesAgo = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const stale = {
+    teamId,
+    from: "a@example.com",
+    to: ["r@example.com"],
+    subject: "s",
+    latestStatus: "queued" as const,
+    createdAt: minutesAgo(30),
+  };
+  await db.insert(schema.emails).values({ ...stale, freeBurstAt: minutesAgo(-6) });
+  const [due] = await db
+    .insert(schema.emails)
+    .values({ ...stale, freeBurstAt: minutesAgo(1) })
+    .returning({ id: schema.emails.id });
+
+  const enqueued: string[] = [];
+  const count = await reconcileStalledSends(db, {
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+    now,
+  });
+  expect(count).toBe(1);
+  expect(enqueued).toEqual([due?.id]);
+});
+
 it("reconcile pages through a backlog larger than one batch, each row once, one enqueue per page", async () => {
   const now = new Date();
   const createdAt = new Date(now.getTime() - 30 * 60 * 1000);

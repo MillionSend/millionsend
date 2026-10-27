@@ -6,6 +6,7 @@ import {
   bumpFreePoolUsage,
   bumpHourlyUsage,
   CREDENTIAL_MAIL_KINDS,
+  complaintReportingRecipients,
   countDistinctRecipients,
   decryptEmailBody,
   deliverabilityHold,
@@ -124,6 +125,12 @@ export interface SendDeps {
   reschedule?:
     | ((emailId: string, at: Date, priority: EmailSendPriority) => Promise<void>)
     | undefined;
+  /**
+   * A Free pool's burst allowance (core bookFreeBurst): books `n` recipients
+   * and returns when they may go. Wired on Cloud only, since self-host has
+   * no Free pools: absent, no mail waits for it.
+   */
+  freeBurst?: ((db: Db, ownerId: string, n: number, now: Date) => Promise<Date>) | undefined;
   /** SES's 24-hour quota and the broadcast share; absent in tests that never reach it. */
   sesQuota?: SendQuotaControls | undefined;
   /** Arms the webhook drain for the rows written; absent, the reconcile sweep sends them. */
@@ -414,6 +421,45 @@ async function cancelQueuedEmail(db: Db, email: { id: string; teamId: string }):
   });
 }
 
+/**
+ * When an email may go under its Free pool's burst allowance, counted in its
+ * distinct recipients that can report a complaint, Bcc included. Null when
+ * its team is in no Free pool or no recipient can report one. The slot is
+ * booked once and kept on the row, under the row's lock: a wake-up, or a
+ * second lane on the same row, reads it back instead of booking again.
+ */
+async function freeBurstSlot(
+  db: Db,
+  book: NonNullable<SendDeps["freeBurst"]>,
+  email: typeof schema.emails.$inferSelect,
+): Promise<Date | null> {
+  const n = complaintReportingRecipients([
+    ...email.to,
+    ...(email.cc ?? []),
+    ...(email.bcc ?? []),
+  ]).length;
+  if (n === 0) return null;
+  // The Free pool a team counts in comes with its quota as Cloud reads it.
+  const quota = await fetchTeamQuota(db, email.teamId, true);
+  const ownerId = quota?.kind === "day" ? quota.pool?.ownerId : undefined;
+  if (!ownerId) return null;
+  if (email.freeBurstAt) return email.freeBurstAt;
+  const e = schema.emails;
+  return db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    const [row] = await txDb
+      .select({ at: e.freeBurstAt })
+      .from(e)
+      .where(and(eq(e.id, email.id), eq(e.latestStatus, "queued"), isNull(e.sentAt)))
+      .for("update");
+    if (!row) return null;
+    if (row.at) return row.at;
+    const at = await book(txDb, ownerId, n, new Date());
+    await txDb.update(e).set({ freeBurstAt: at }).where(eq(e.id, email.id));
+    return at;
+  });
+}
+
 /** Header names are case-insensitive; the caller's map keeps whatever casing it sent. */
 const hasListUnsubscribe = (headers: Record<string, string> | null | undefined): boolean =>
   Object.keys(headers ?? {}).some((k) => k.toLowerCase() === "list-unsubscribe");
@@ -663,6 +709,16 @@ async function sendQueued(
       emailSendPriority(email),
     );
     return "deferred";
+  }
+  // A Free pool's mail to providers that report complaints waits its turn in
+  // the pool's burst allowance, still queued, and costs no KMS call while it
+  // waits. Account mail and the onboarding email never wait.
+  if (deps.freeBurst && !systemMail && !onboarding) {
+    const slot = await freeBurstSlot(db, deps.freeBurst, email);
+    if (slot && slot.getTime() > Date.now()) {
+      await deps.reschedule?.(email.id, slot, emailSendPriority(email));
+      return "deferred";
+    }
   }
   const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
 
