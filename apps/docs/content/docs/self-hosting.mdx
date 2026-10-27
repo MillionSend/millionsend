@@ -1246,10 +1246,37 @@ minutes, a few cents a month). A `millionsend-ses` policy from before that
 permission leaves the rate unread, and the regional pause then estimates it
 from the instance's own count, leaving out mail to providers that never
 report complaints to SES, such as Gmail, and judges the estimate on the same
-0.4% line as SES's own rate. To add it, re-run the setup (which also mints a
+0.1% line as SES's own rate. To add it, re-run the setup (which also mints a
 new access key) or
 [update the policy in place](#ses-tenants-per-team-reputation). The
 per-region cost is a local estimate.
+
+The regional pause holds broadcasts in an SES region, never transactional
+mail, before SES acts on the whole account there. It trips when the
+platform's hard-bounce rate in the region reaches 4%, and then holds every
+team's broadcasts until the rate is back under the line. It also trips when
+SES's complaint rate reaches its 0.1% review line, and then holds only the
+broadcasts of the teams whose own complaint rate over the last 30 days, by
+when the mail went out, is 0.1% or more; every other team keeps sending,
+and the pause lifts once the rate is back under 0.08%. Paused, a region
+reads "paused · N teams" in the console, the teams named on hover. The
+operator is emailed when a region pauses or resumes, once a day while SES's
+complaint rate in a region is 0.08% or more, paused or not, and when SES
+changes the account's enforcement status in a region (a first `HEALTHY`
+reading says nothing). Those mails name the teams behind the most
+complaints over the last 30 days, and count the complaints SES reported
+about mail with no email row left: rows past their retention, a deleted
+team's, or mail sent outside MillionSend.
+
+On MillionSend Cloud, two more guards cover teams on the Free plan. When a
+region pauses on complaints, each Free team whose mail drew one there is
+held for review; released, it is held again only for a newer complaint. And
+the Free fuse trips once Free teams' mail sent over the last 7 days draws 3
+complaints: until the operator releases it on Trust & safety, every Free
+team's mail to a provider that reports complaints waits, while mail to
+Gmail, Apple Mail and T-Online, account mail and paid teams' mail flow. The
+release sends what waited and starts the count over. A self-hosted instance
+has no plans, so neither applies there.
 
 A suspended team keeps its data and its keys authenticate, but every send
 answers `403 team_suspended` (SMTP `550`; under a review hold, mail through

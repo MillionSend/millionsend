@@ -1282,11 +1282,42 @@ reclamações que o próprio SES mede: o worker a lê no CloudWatch
 centavos de dólar por mês). Uma política `millionsend-ses` anterior a essa
 permissão deixa a taxa sem leitura, e a pausa regional passa a estimá-la pela
 contagem da própria instância, sem contar os e-mails para provedores que
-nunca repassam reclamações ao SES, como o Gmail, com o mesmo limite de 0,4%
+nunca repassam reclamações ao SES, como o Gmail, com o mesmo limite de 0,1%
 usado para a taxa do SES. Para adicioná-la, rode a configuração de novo (o
 que também cria uma nova chave de acesso) ou
 [atualize a política sem recriar nada](#tenants-do-ses-reputação-por-equipe).
 O custo por região é uma estimativa local.
+
+A pausa regional segura as transmissões de uma região do SES, nunca o e-mail
+transacional, antes que o SES aja sobre a conta inteira ali. Ela entra quando
+a taxa de hard bounces da plataforma na região chega a 4%, e aí segura as
+transmissões de todas as equipes até a taxa voltar para baixo do limite.
+Também entra quando a taxa de reclamações do SES chega à linha de revisão
+dele, de 0,1%, e aí segura só as transmissões das equipes cuja própria taxa
+de reclamações nos últimos 30 dias, contados pela data de envio, é de 0,1%
+ou mais; as outras equipes seguem enviando, e a pausa termina quando a taxa
+volta para baixo de 0,08%. Pausada, a região aparece no console como
+"pausadas · N equipes", com os nomes das equipes ao passar o mouse. O
+operador recebe um e-mail quando uma região é pausada ou retomada, uma vez
+por dia enquanto a taxa de reclamações do SES em uma região está em 0,08%
+ou mais, pausada ou não, e quando o SES muda a situação da conta em uma
+região (uma primeira leitura `HEALTHY` não gera aviso). Esses e-mails trazem
+as equipes com mais reclamações nos últimos 30 dias e contam as reclamações
+que o SES informou sobre e-mails que já não têm registro: registros que
+passaram da retenção, de uma equipe excluída ou de e-mails enviados fora do
+MillionSend.
+
+No MillionSend Cloud, mais duas proteções valem para as equipes do plano
+Free. Quando uma região é pausada por reclamações, cada equipe Free cujos
+e-mails receberam uma reclamação ali fica em pausa para revisão; liberada,
+ela só volta a ser pausada por uma reclamação mais nova. E a pausa do Free
+entra quando os e-mails das equipes Free enviados nos últimos 7 dias recebem
+3 reclamações: até o operador liberá-la em Confiança e segurança, todo
+e-mail de equipe Free para um provedor que repassa reclamações fica em
+espera, enquanto os e-mails para Gmail, Apple Mail e T-Online, os e-mails de
+conta e os das equipes pagas seguem saindo. A liberação envia o que estava
+em espera e recomeça a contagem. Uma instância auto-hospedada não tem
+planos, então nenhuma das duas vale nela.
 
 Uma equipe suspensa mantém os dados e as chaves continuam autenticando, mas
 todo envio responde `403 team_suspended` (SMTP `550`; em uma pausa para

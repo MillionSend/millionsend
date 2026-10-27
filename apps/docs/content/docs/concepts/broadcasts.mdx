@@ -194,16 +194,22 @@ Gmail and Apple never report one, so their cell shows a dash.
   complaint rate counts only mail to providers that report complaints
   (Gmail, Apple Mail and t-online never do), and complaints count toward a
   warning or this pause only once there are 100 such sends.
-- If the platform's aggregate bounce or complaint rate in your sender's SES
-  region nears the line where SES acts on the account, broadcast sends in
-  that region are refused with
-  `403 broadcasts_paused` until the rate recovers. Transactional
-  email keeps flowing, and the pause clears on its own.
+- If the platform's aggregate bounce rate in your sender's SES region nears
+  the line where SES acts on the account, broadcast sends in that region are
+  refused with `403 broadcasts_paused` until the rate recovers. When it is
+  the complaint rate, only teams whose own complaint rate over the last 30
+  days reaches SES's 0.1% review line are refused, and everyone else keeps
+  sending. Transactional email keeps flowing, and the pause clears on its
+  own.
 
 See the [API reference](/api-reference) for all broadcast endpoints.
 
 ## Recent changes
 
+- A pause for the platform's complaint rate in an SES region refuses
+  broadcasts with `403 broadcasts_paused` only to the teams whose own
+  complaint rate over the last 30 days is at 0.1% or more; before, it
+  refused every team in the region.
 - **Edit as HTML** in the composer moves a broadcast built with blocks to code
   mode. **Back to blocks** undoes the switch until the next save. See
   [Block editor and HTML](#block-editor-and-html).
