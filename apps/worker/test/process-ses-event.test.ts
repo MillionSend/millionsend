@@ -278,6 +278,70 @@ it("unknown sesMessageId is ignored entirely", async () => {
   expect(after.length).toBe(before.length);
 });
 
+it("records an unknown sesMessageId's complaint and bounce once each, for the platform's rates only", async () => {
+  const complaint = makeEvent({
+    eventType: "Complaint",
+    sesMessageId: "gone-complaint",
+    complaint: { recipients: ["unknown-id@example.com"] },
+    data: { eventType: "Complaint", complaint: {} },
+  });
+  await processSesEvent(db, complaint, { snsMessageId: "sns-gone-complaint" });
+  // SNS delivers at least once.
+  await processSesEvent(db, complaint, { snsMessageId: "sns-gone-complaint" });
+  await processSesEvent(
+    db,
+    makeEvent({
+      eventType: "Bounce",
+      sesMessageId: "gone-bounce",
+      bounce: {
+        bounceType: "Permanent",
+        bounceSubType: "OnAccountSuppressionList",
+        recipients: ["unknown-id@example.com"],
+      },
+    }),
+    { snsMessageId: "sns-gone-bounce" },
+  );
+  // A delivery about mail we no longer know carries nothing to count.
+  await processSesEvent(db, makeEvent({ sesMessageId: "gone-delivery" }), {
+    snsMessageId: "sns-gone-delivery",
+  });
+  const rows = await db
+    .select({
+      sns: schema.sesUnmatchedEvents.snsMessageId,
+      ses: schema.sesUnmatchedEvents.sesMessageId,
+      type: schema.sesUnmatchedEvents.type,
+      bounceType: schema.sesUnmatchedEvents.bounceType,
+      subType: schema.sesUnmatchedEvents.subType,
+      occurredAt: schema.sesUnmatchedEvents.occurredAt,
+    })
+    .from(schema.sesUnmatchedEvents);
+  expect(rows.sort((a, b) => a.ses.localeCompare(b.ses))).toEqual([
+    {
+      sns: "sns-gone-bounce",
+      ses: "gone-bounce",
+      type: "bounced",
+      bounceType: "Permanent",
+      subType: "OnAccountSuppressionList",
+      occurredAt: new Date("2026-08-14T12:00:00.000Z"),
+    },
+    {
+      sns: "sns-gone-complaint",
+      ses: "gone-complaint",
+      type: "complained",
+      bounceType: null,
+      subType: null,
+      occurredAt: new Date("2026-08-14T12:00:00.000Z"),
+    },
+  ]);
+  // Nothing about any team moved.
+  expect(
+    await db
+      .select()
+      .from(schema.suppressions)
+      .where(eq(schema.suppressions.email, "unknown-id@example.com")),
+  ).toEqual([]);
+});
+
 it("joins an early SES event through the server-owned email tag", async () => {
   const [row] = await db
     .insert(schema.emails)

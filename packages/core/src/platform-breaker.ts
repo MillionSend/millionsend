@@ -9,6 +9,7 @@ import {
   gte,
   inArray,
   isNotNull,
+  lt,
   notInArray,
   type SQL,
   sql,
@@ -52,6 +53,8 @@ export const SES_COMPLAINT_PAUSE_RATE = 0.005;
 /** The operator hears at this rate, a day apart while it stays there. */
 export const SES_COMPLAINT_ALERT_RATE = 0.003;
 export const BREAKER_SES_COMPLAINT_RATE = 0.004;
+/** How long SES feedback that matched no email row is kept. */
+const UNMATCHED_RETENTION_DAYS = 35;
 
 export type RegionWindowCounts = WindowCounts;
 
@@ -450,6 +453,16 @@ export async function recordSesComplaintRates(
     });
   }
   return alerts;
+}
+
+/** Deletes unmatched SES feedback past its retention; returns how many rows went. */
+export async function purgeUnmatchedSesEvents(db: Db, now: Date = new Date()): Promise<number> {
+  const u = schema.sesUnmatchedEvents;
+  const gone = await db
+    .delete(u)
+    .where(lt(u.createdAt, new Date(now.getTime() - UNMATCHED_RETENTION_DAYS * DAY_MS)))
+    .returning({ id: u.id });
+  return gone.length;
 }
 
 /** Each region's SES complaint reading, as the breaker judges it. */

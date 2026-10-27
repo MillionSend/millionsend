@@ -656,6 +656,7 @@ export {
   holdRegion,
   type PausedRegion,
   pausedRegions,
+  purgeUnmatchedSesEvents,
   type RegionContributor,
   type RegionDecision,
   type RegionWindowCounts,

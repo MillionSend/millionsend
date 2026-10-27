@@ -9,6 +9,7 @@ import {
   evaluateRegionBreakers,
   holdRegion,
   pausedRegions,
+  purgeUnmatchedSesEvents,
   recordSesComplaintRates,
   regionCounterTotals,
   regionPause,
@@ -708,4 +709,15 @@ it("leaves complaints and hard bounces naming only SES's mailbox simulator out, 
   expect(
     (await regionWindowCounts(db, { now: NOW, hours: 24, teamIds: [teamC] })).get("us-east-1"),
   ).toMatchObject({ hardBounced: 1, complained: 3 });
+});
+
+it("purges SES feedback that matched no email row after 35 days", async () => {
+  const u = schema.sesUnmatchedEvents;
+  const day = (n: number) => new Date(NOW.getTime() - n * DAY_MS);
+  await db.insert(u).values([
+    { sesMessageId: "kept", type: "complained", occurredAt: day(35), createdAt: day(34) },
+    { sesMessageId: "gone", type: "bounced", occurredAt: day(36), createdAt: day(36) },
+  ]);
+  expect(await purgeUnmatchedSesEvents(db, NOW)).toBe(1);
+  expect((await db.select({ id: u.sesMessageId }).from(u)).map((r) => r.id)).toEqual(["kept"]);
 });

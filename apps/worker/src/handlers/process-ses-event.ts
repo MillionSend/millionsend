@@ -133,8 +133,25 @@ export async function processSesEvent(
         ),
       );
   }
-  // Unknown message id: not ours (or purged) — never act on it.
-  if (!email) return;
+  // Unknown message id: not ours (or purged) — never act on it. Its
+  // complaints and bounces are only recorded, for the platform's own
+  // accounting of the account's rates.
+  if (!email) {
+    if (eventType === "complained" || eventType === "bounced") {
+      await db
+        .insert(schema.sesUnmatchedEvents)
+        .values({
+          snsMessageId: opts.snsMessageId ?? null,
+          sesMessageId: event.sesMessageId,
+          type: eventType,
+          bounceType: event.bounce?.bounceType ?? null,
+          subType: event.bounce?.bounceSubType ?? event.complaint?.complaintSubType ?? null,
+          occurredAt: new Date(event.occurredAt),
+        })
+        .onConflictDoNothing();
+    }
+    return;
+  }
 
   // The event insert doubles as the idempotency gate: SNS delivers
   // at-least-once and queue dedupe cannot cover redelivery after the job

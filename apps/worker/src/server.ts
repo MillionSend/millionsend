@@ -53,6 +53,7 @@ import {
   purgeCampaignFingerprints,
   purgeExpiredIdempotencyKeys,
   purgeTrashedThreads,
+  purgeUnmatchedSesEvents,
   type QueuedWebhookDelivery,
   reconcilePendingScreens,
   recordDomainAge,
@@ -464,6 +465,7 @@ await queue.scheduleCrons({
     const monitorSamples = await pruneMonitorSamples(db);
     const signups = await purgeAccountSignups(db);
     const fingerprints = await purgeCampaignFingerprints(db);
+    const unmatchedSesEvents = await purgeUnmatchedSesEvents(db, now);
     // The console's retention row: how many bodies the last run purged.
     await recordProbes(db, [{ probe: "retention_purged", value: purged, ok: true }]);
     const counts = {
@@ -486,6 +488,7 @@ await queue.scheduleCrons({
       sessions,
       signups,
       fingerprints,
+      unmatchedSesEvents,
       stripeEvents,
     };
     if (Object.values(counts).some((n) => n > 0)) {
