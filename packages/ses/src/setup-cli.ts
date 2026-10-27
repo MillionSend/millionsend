@@ -247,8 +247,7 @@ async function walkSteps(wizard: Wizard): Promise<number> {
   // Before launch, so the stack starts with it.
   await socialLoginStep(wizard);
   await accountEmailStep(wizard);
-  // The operator's own request, not the instance's.
-  await updatesStep(wizard);
+  updatesStep(wizard);
   return await launchStep(wizard);
 }
 
@@ -509,39 +508,16 @@ async function socialLoginStep(wizard: Wizard): Promise<void> {
 /** Accepted shapes mirror packages/config parseEmailFrom; boot re-validates. */
 const EMAIL_FROM_RE = /^(?:[^<>]+<)?[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+>?$/;
 
-const UPDATES_SUBSCRIBE_URL = "https://app.millionsend.com/api/updates/subscribe";
 const UPDATES_PAGE_URL = "https://app.millionsend.com/updates?source=self-host";
 
 /**
- * Optional, interactive only: the operator's one-time opt-in to release
- * notes. This is the wizard on the operator's machine asking a human and
- * posting the answer once; the instance it sets up never calls home. The
- * cloud replies with a confirmation link, so a typo enrolls nobody.
+ * Interactive only: where the operator can subscribe to release notes. The
+ * page asks for a captcha, which the wizard cannot answer, so nothing is
+ * posted from here; the instance it sets up never calls home either.
  */
-async function updatesStep(wizard: Wizard): Promise<void> {
-  const { flow } = wizard;
+function updatesStep(wizard: Wizard): void {
   if (!wizard.interactive) return;
-  const value = await flow.ask({
-    label: "Release notes by email?",
-    hint: "your address; a confirmation link comes first, nothing else leaves this machine; empty skips",
-  });
-  if (value === "") return;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-    flow.note(`Doesn't look like an address — skipped. Subscribe any time at ${UPDATES_PAGE_URL}.`);
-    return;
-  }
-  try {
-    const res = await fetch(UPDATES_SUBSCRIBE_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: value, source: "self-host" }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    flow.note("Check your inbox for the confirmation link.");
-  } catch {
-    flow.note(`Couldn't reach millionsend.com — subscribe any time at ${UPDATES_PAGE_URL}.`);
-  }
+  wizard.flow.note(`Release notes by email: subscribe at ${UPDATES_PAGE_URL}`);
 }
 
 /**
