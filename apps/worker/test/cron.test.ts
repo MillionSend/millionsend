@@ -10,6 +10,7 @@ import {
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
   purgeExpiredSessions,
+  purgeStaleFreePoolUsage,
   purgeStaleHourlyUsage,
   reconcileBillingPlans,
   reconcileStalledSends,
@@ -1173,6 +1174,21 @@ it("hourly usage purge drops rows older than 45 days in batches and reports the 
   expect(await purgeStaleHourlyUsage(db, now)).toBe(0);
   const left = await db.select().from(schema.usageCountersHourly);
   expect(left).toHaveLength(1);
+});
+
+it("Free pool purge drops days older than 35 and keeps the rest", async () => {
+  const now = new Date("2026-09-08T12:00:00Z");
+  await db.insert(schema.freePoolUsage).values([
+    { ownerId: "u-purge", day: utcDay(now.getTime() - 36 * DAY_MS), complained: 1 },
+    { ownerId: "u-purge", day: utcDay(now.getTime() - 35 * DAY_MS), complained: 1 },
+    { ownerId: "u-purge", day: utcDay(now.getTime()), accepted: 1 },
+  ]);
+  expect(await purgeStaleFreePoolUsage(db, now)).toBe(1);
+  expect(await purgeStaleFreePoolUsage(db, now)).toBe(0);
+  expect(await db.select({ day: schema.freePoolUsage.day }).from(schema.freePoolUsage)).toEqual([
+    { day: utcDay(now.getTime() - 35 * DAY_MS) },
+    { day: utcDay(now.getTime()) },
+  ]);
 });
 
 it("drain leaves a suspended team's rows parked until the operator reinstates it", async () => {

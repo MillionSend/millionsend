@@ -1516,6 +1516,15 @@ export async function purgeStaleHourlyUsage(db: Db, now = new Date()): Promise<n
   return purged;
 }
 
+/**
+ * A Free pool's day counters feed its daily cap and the guardrail's 7-day
+ * window only; 35 days keeps a margin past both. One row per pool and day.
+ */
+export async function purgeStaleFreePoolUsage(db: Db, now = new Date()): Promise<number> {
+  const p = schema.freePoolUsage;
+  return affectedRows(await db.delete(p).where(lt(p.day, utcDay(now.getTime() - 35 * DAY_MS))));
+}
+
 export async function purgeExpiredSessions(db: Db, now = new Date()): Promise<number> {
   return affectedRows(await db.delete(schema.session).where(lt(schema.session.expiresAt, now)));
 }

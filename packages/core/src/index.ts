@@ -902,6 +902,7 @@ export {
   verifyInviteToken,
 } from "./team-invitations.js";
 export {
+  backfillPoolOwners,
   committedDailyVolume,
   contactRoom,
   fetchBestOwnedPlan,
