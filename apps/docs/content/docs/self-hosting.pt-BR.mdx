@@ -1302,10 +1302,10 @@ operador recebe um e-mail quando uma região é pausada ou retomada, uma vez
 por dia enquanto a taxa de reclamações do SES em uma região está em 0,08%
 ou mais, pausada ou não, e quando o SES muda a situação da conta em uma
 região (uma primeira leitura `HEALTHY` não gera aviso). Esses e-mails trazem
-as equipes com mais reclamações nos últimos 30 dias e contam as reclamações
-que o SES informou sobre e-mails que já não têm registro: registros que
-passaram da retenção, de uma equipe excluída ou de e-mails enviados fora do
-MillionSend.
+as equipes com mais reclamações nos últimos 30 dias, ou com mais hard bounces
+quando a pausa é por bounces, e contam as reclamações que o SES informou
+sobre e-mails que já não têm registro: registros que passaram da retenção,
+de uma equipe excluída ou de e-mails enviados fora do MillionSend.
 
 No MillionSend Cloud, mais duas proteções valem para as equipes do plano
 Free. Quando uma região é pausada por reclamações, cada equipe Free cujos

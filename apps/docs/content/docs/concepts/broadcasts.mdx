@@ -198,9 +198,10 @@ Gmail and Apple never report one, so their cell shows a dash.
   the line where SES acts on the account, broadcast sends in that region are
   refused with `403 broadcasts_paused` until the rate recovers. When it is
   the complaint rate, only teams whose own complaint rate over the last 30
-  days reaches SES's 0.1% review line are refused, and everyone else keeps
-  sending. Transactional email keeps flowing, and the pause clears on its
-  own.
+  days reaches SES's 0.1% review line are refused; the pause refuses no
+  other team's broadcasts. Transactional email keeps flowing, and the pause
+  clears on its own. On MillionSend Cloud, each Free team whose mail drew a
+  complaint in the region is also held for review.
 
 See the [API reference](/api-reference) for all broadcast endpoints.
 

@@ -1264,9 +1264,10 @@ operator is emailed when a region pauses or resumes, once a day while SES's
 complaint rate in a region is 0.08% or more, paused or not, and when SES
 changes the account's enforcement status in a region (a first `HEALTHY`
 reading says nothing). Those mails name the teams behind the most
-complaints over the last 30 days, and count the complaints SES reported
-about mail with no email row left: rows past their retention, a deleted
-team's, or mail sent outside MillionSend.
+complaints over the last 30 days, or the most hard bounces on a bounce
+pause, and count the complaints SES reported about mail with no email row
+left: rows past their retention, a deleted team's, or mail sent outside
+MillionSend.
 
 On MillionSend Cloud, two more guards cover teams on the Free plan. When a
 region pauses on complaints, each Free team whose mail drew one there is
