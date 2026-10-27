@@ -660,6 +660,7 @@ export {
   type FreeFuseTrip,
   freeFuseHolds,
   freeFuseState,
+  freeFuseTripped,
   holdRegion,
   type PausedRegion,
   pausedRegions,

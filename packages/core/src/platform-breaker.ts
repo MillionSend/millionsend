@@ -865,6 +865,10 @@ export async function freeFuseHolds(
     return false;
   }
   if ((await fetchEffectivePlan(db, email.teamId)) !== "free") return false;
+  return freeFuseTripped(db);
+}
+
+export async function freeFuseTripped(db: Db): Promise<boolean> {
   const [state] = await db
     .select({ trippedAt: schema.instanceSettings.freeFuseTrippedAt })
     .from(schema.instanceSettings);

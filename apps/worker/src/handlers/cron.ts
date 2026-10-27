@@ -12,6 +12,7 @@ import {
   endQueuedEmails,
   failQueuedEmailsForDomain,
   fetchDeliverabilityHealth,
+  freeFuseTripped,
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
   nextUtcDayStart,
@@ -226,6 +227,8 @@ const DRAIN_PAGE = 500;
 /** What one drain run carries between its passes. */
 interface DrainRun {
   now: Date;
+  /** Park reasons the run releases nothing of: the operator's, and the Free fuse's while it is tripped. */
+  heldReasons: (typeof schema.emailParkReasonEnum.enumValues)[number][];
   /** Teams found at their cap leave every later page query. */
   heldTeams: Set<string>;
   /** Teams already asked whether the deliverability pause holds them. */
@@ -281,6 +284,12 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
   const held = regions.filter((region) => deps.sesQuota?.exhausted(region));
   const run: DrainRun = {
     now,
+    // The Free fuse's rows wait only while it is tripped: its release frees
+    // them, and a row a send parked on it as the release landed goes with
+    // the next run.
+    heldReasons: (await freeFuseTripped(db))
+      ? [...OPERATOR_PARK_REASONS, "fuse"]
+      : [...OPERATOR_PARK_REASONS],
     heldTeams: new Set(),
     checkedTeams: new Set(),
     pausedTeams: new Set(),
@@ -463,8 +472,8 @@ async function releaseParkedRows(
             pass.where,
             // The operator's holds: a suspended team releases nothing, a paused
             // team releases only its transactional rows, what screening parked
-            // waits for the review list and what the Free fuse holds for its
-            // release.
+            // waits for the review list and what the Free fuse parked waits
+            // while it is tripped.
             isNull(schema.teams.suspendedAt),
             or(
               isNull(schema.emails.broadcastId),
@@ -472,7 +481,7 @@ async function releaseParkedRows(
             ),
             or(
               isNull(schema.emails.parkReason),
-              notInArray(schema.emails.parkReason, [...OPERATOR_PARK_REASONS, "fuse"]),
+              notInArray(schema.emails.parkReason, run.heldReasons),
             ),
             // A row due on a later UTC day is charged on that day, its warm-up
             // included, when it comes: reserved against today, days of the cap

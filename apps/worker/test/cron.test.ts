@@ -1,6 +1,9 @@
+import { randomBytes } from "node:crypto";
 import {
   DAY_MS,
   dailyCeiling,
+  EnvKeyring,
+  encryptEmailBody,
   releaseFreeFuse,
   SYSTEM_MAIL_TAG,
   teamRung,
@@ -22,6 +25,7 @@ import {
   reconcileStalledSends,
   stripExpiredEventPayloads,
 } from "../src/handlers/cron.js";
+import { sendEmail } from "../src/handlers/send-email.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -1506,6 +1510,7 @@ it("drain moves nothing of a broadcast in a region with no room, at its total, o
 });
 
 it("drain leaves what the Free fuse holds until the operator releases the fuse", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, freeFuseTrippedAt: new Date() });
   const fused = await insertParked(new Date("2026-08-13T01:00:00Z"), "fused", {
     parkReason: "fuse",
   });
@@ -1514,10 +1519,77 @@ it("drain leaves what the Free fuse holds until the operator releases the fuse",
   expect(await drain()).toEqual({ drained: 1, stillParked: 1 });
   expect(await statusOf(fused)).toBe("queued_quota");
   expect(await statusOf(plain)).toBe("queued");
-  await db.insert(schema.instanceSettings).values({ id: 1, freeFuseTrippedAt: new Date() });
   expect(await releaseFreeFuse(db)).toMatchObject({ emails: 1 });
   expect(await drain()).toEqual({ drained: 1, stillParked: 0 });
   expect(await statusOf(fused)).toBe("queued");
+});
+
+it("drain sends mail a send parked on the Free fuse as the operator released it", async () => {
+  const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "fused.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  await db
+    .insert(schema.instanceSettings)
+    .values({ id: 1, freeFuseTrippedAt: new Date(), freeFuseComplaints: 3 });
+  const body = await encryptEmailBody({ html: "<b>hi</b>", text: "hi" }, keyring);
+  const emailId = await insertParked(new Date(), "fused", {
+    latestStatus: "queued",
+    domainId: domain?.id,
+    from: "a@fused.example",
+    to: ["r@outlook.com"],
+    bodyCiphertext: body.ciphertext,
+    bodyIv: body.iv,
+    bodyWrappedDek: body.wrappedDek,
+    bodyKeyVersion: body.keyVersion,
+  });
+  const sent: string[] = [];
+  const deps = {
+    keyring,
+    isCloud: true,
+    ses: {
+      async sendRaw(params: { emailId: string }) {
+        sent.push(params.emailId);
+        return { messageId: `ses-${params.emailId}` };
+      },
+    },
+  };
+  // The send reads the fuse as tripped; the operator's release commits before
+  // its park, the first transaction the send opens.
+  let released: unknown;
+  const racing = new Proxy(db, {
+    get(target, prop) {
+      if (prop === "transaction" && released === undefined) {
+        return async (...args: Parameters<Db["transaction"]>) => {
+          released = await releaseFreeFuse(db);
+          return target.transaction(...args);
+        };
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  expect(await sendEmail(racing, deps, { emailId })).toBe("parked");
+  expect(released).toEqual({ complaints: 3, emails: 0 });
+  const enqueued: string[] = [];
+  expect(
+    await drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    }),
+  ).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([emailId]);
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  expect(sent).toEqual([emailId]);
 });
 
 it("drain still releases the plan-parked rows of a broadcast that already reads sent", async () => {

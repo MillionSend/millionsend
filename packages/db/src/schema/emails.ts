@@ -86,8 +86,8 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
  * not read, "recipient" for mail from a shared inbox domain address, to
  * someone who never wrote to it, that the judge read as phishing. "fuse"
  * holds a Free team's mail to a provider that reports complaints while the
- * Free fuse is tripped; neither the drain nor the review list releases it,
- * only the operator's release of the fuse. Never shown to the team.
+ * Free fuse is tripped; the review list never releases it, and the drain only
+ * once the operator has released the fuse. Never shown to the team.
  */
 export const emailParkReasonEnum = pgEnum("email_park_reason", [
   "warmup",
