@@ -1,24 +1,24 @@
-import { isCloudDeployment } from "@millionsend/config";
-import { createFixedWindowLimiter, forwardedClientIp, UPDATES_SOURCES } from "@millionsend/core";
+import { createFixedWindowLimiter, UPDATES_SOURCES } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { z } from "zod";
 import { appBaseUrl } from "@/lib/api-base-url";
 import { localeFromHeaders } from "@/server/locale";
-import { trustedProxies } from "@/server/trusted-proxies";
+import { clientIp } from "@/server/trusted-proxies";
+import { verifyTurnstile } from "@/server/turnstile";
 import { requestUpdatesConfirmation } from "@/server/updates";
 
 /**
- * Public opt-in for product updates: the /updates form on this instance and
- * the setup wizard of a self-hosted one (the operator's own, one-time
- * request — nothing on a self-hosted instance ever calls home by itself).
- * Sends a confirmation link and stores nothing until it is opened, so the
- * worst a stranger can do here is have one email sent to an address.
- * Any origin may post: the response carries no data and sets no cookie.
+ * Opt-in for product updates, posted by this instance's /updates form. No
+ * CORS headers, so another site can't read an answer; its posts (a plain
+ * form, or JSON sent as text/plain) still arrive, and where the instance
+ * has Turnstile keys a post must carry the page widget's token
+ * (cf-turnstile-response). Sends a confirmation link and stores nothing
+ * until it is opened, so the worst a stranger can do here is have one email
+ * sent to an address.
  */
-const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type" };
 const HOUR = 60 * 60 * 1000;
 const perClient = createFixedWindowLimiter(5, HOUR);
-const perInstance = createFixedWindowLimiter(200, HOUR);
+const perInstance = createFixedWindowLimiter(20, HOUR);
 // One address gets two confirmation mails an hour whoever asks; past that
 // the request is acknowledged and nothing is sent, so nobody can have the
 // account-mail domain bomb an inbox.
@@ -28,10 +28,6 @@ const input = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   source: z.enum(UPDATES_SOURCES).default("updates"),
 });
-
-export async function OPTIONS() {
-  return new Response(null, { status: 204, headers: CORS });
-}
 
 export async function POST(request: Request) {
   const form = (request.headers.get("content-type") ?? "").includes("form");
@@ -46,18 +42,22 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return form
       ? Response.redirect(page("error=invalid"), 303)
-      : Response.json({ error: "invalid_email" }, { status: 422, headers: CORS });
+      : Response.json({ error: "invalid_email" }, { status: 422 });
   }
-  const ip =
-    forwardedClientIp(request.headers, {
-      cloud: isCloudDeployment(),
-      trustedProxies: trustedProxies(),
-    }) ?? "unknown";
-  if (perClient(ip) || perInstance("all")) {
-    return form
+  const rateLimited = () =>
+    form
       ? Response.redirect(page("error=rate"), 303)
-      : Response.json({ error: "rate_limited" }, { status: 429, headers: CORS });
+      : Response.json({ error: "rate_limited" }, { status: 429 });
+  if (perClient(clientIp(request.headers) ?? "unknown")) return rateLimited();
+  // Between the two limits: the client's own bounds the verifications one
+  // client can cause, and a refused post never spends the instance's.
+  const token = (raw as Record<string, unknown> | null)?.["cf-turnstile-response"];
+  if (!(await verifyTurnstile(typeof token === "string" ? token : undefined))) {
+    return form
+      ? Response.redirect(page("error=captcha"), 303)
+      : Response.json({ error: "captcha" }, { status: 403 });
   }
+  if (perInstance("all")) return rateLimited();
   if (!perRecipient(parsed.data.email)) {
     await requestUpdatesConfirmation(getDb(), {
       ...parsed.data,
@@ -66,5 +66,5 @@ export async function POST(request: Request) {
   }
   return form
     ? Response.redirect(page("sent=1"), 303)
-    : Response.json({ ok: true }, { status: 202, headers: CORS });
+    : Response.json({ ok: true }, { status: 202 });
 }

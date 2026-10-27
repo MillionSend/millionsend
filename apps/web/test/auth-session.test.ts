@@ -1,3 +1,4 @@
+import { DAY_MS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, REAL_NAMES, REFUSED_NAMES } from "@millionsend/test-utils";
@@ -19,6 +20,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await close();
 });
 
@@ -137,6 +139,205 @@ describe("client IP resolution", () => {
     });
     expect(await sessionIp(userId)).toBe("203.0.113.9");
     expect(await signupRecord(userId)).toEqual({ ip: "203.0.113.9", userAgent: null });
+  });
+});
+
+describe("Turnstile on Google and GitHub sign-in", () => {
+  const signInSocial = (auth: Auth, headers: Record<string, string> = {}) =>
+    auth.handler(
+      new Request(`${BASE}/api/auth/sign-in/social`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE, ...headers },
+        body: JSON.stringify({ provider: "github", callbackURL: "/emails" }),
+      }),
+    );
+
+  beforeEach(() => {
+    vi.stubEnv("GITHUB_CLIENT_ID", "github-id");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "github-secret");
+  });
+
+  it("refuses a missing or rejected token before the provider is asked", async () => {
+    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "0x4BBB");
+    const verified: string[] = [];
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      const { response } = JSON.parse(String(init?.body)) as { response: string };
+      verified.push(response);
+      return Response.json({ success: response === "good-token" });
+    });
+    const auth = createAuth(db);
+
+    const missing = await signInSocial(auth);
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ code: "MISSING_RESPONSE" });
+    const rejected = await signInSocial(auth, { "x-captcha-response": "bad-token" });
+    expect(rejected.status).toBe(403);
+    expect(await rejected.json()).toMatchObject({ code: "VERIFICATION_FAILED" });
+    expect(verified).toEqual(["bad-token"]);
+
+    const passed = await signInSocial(auth, { "x-captcha-response": "good-token" });
+    expect(passed.status).toBe(200);
+    expect(((await passed.json()) as { url: string }).url).toContain("https://github.com/");
+  });
+
+  it("asks for no token on an instance without Turnstile keys", async () => {
+    expect((await signInSocial(createAuth(db))).status).toBe(200);
+  });
+});
+
+describe("new accounts per network", () => {
+  // Both headers name the client: the cloud reads cf-connecting-ip, a
+  // self-host walks x-forwarded-for.
+  const signUpFrom = (auth: Auth, email: string, ip: string, locale = "en") =>
+    auth.handler(
+      new Request(`${BASE}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: BASE,
+          "cf-connecting-ip": ip,
+          "x-forwarded-for": ip,
+          "accept-language": locale,
+        },
+        body: JSON.stringify({ name: "Ada", email, password: "correct horse battery" }),
+      }),
+    );
+
+  it("cloud: refuses a network's 4th account in a day alike for a new and a held address, verification on", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    // A sender plus SES reach: verification is required, which is when
+    // better-auth answers a held address without creating anything.
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@mail.example.com>");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
+    vi.stubEnv("AWS_DEFAULT_CHAIN", "");
+    const auth = createAuth(db, { send: async () => {} });
+    for (const email of ["a@example.com", "b@example.com", "c@example.com"]) {
+      expect((await signUpFrom(auth, email, "203.0.113.9")).status, email).toBe(200);
+    }
+
+    const fresh = await signUpFrom(auth, "d@example.com", "203.0.113.9");
+    const held = await signUpFrom(auth, "a@example.com", "203.0.113.9");
+    expect([fresh.status, held.status]).toEqual([429, 429]);
+    const refusal = await fresh.json();
+    expect(refusal).toMatchObject({
+      code: "SIGNUP_IP_LIMIT",
+      message: "Too many accounts were created from this network today. Try again later.",
+    });
+    expect(await held.json()).toEqual(refusal);
+    expect(
+      await (await signUpFrom(auth, "d@example.com", "203.0.113.9", "pt-BR")).json(),
+    ).toMatchObject({
+      message: "Muitas contas foram criadas nesta rede hoje. Tente de novo mais tarde.",
+    });
+    expect((await signUpFrom(auth, "d@example.com", "198.51.100.7")).status).toBe(200);
+
+    // A day on, the network's earlier sign-ups no longer count.
+    await db
+      .update(schema.accountSignups)
+      .set({ createdAt: new Date(Date.now() - DAY_MS - 60_000) });
+    expect((await signUpFrom(auth, "e@example.com", "203.0.113.9")).status).toBe(200);
+  });
+
+  it("cloud: counts an IPv6 network by its /64", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const auth = createAuth(db);
+    for (const [i, ip] of ["2001:db8::1", "2001:db8::2", "2001:db8::3"].entries()) {
+      expect((await signUpFrom(auth, `v${i}@example.com`, ip)).status, ip).toBe(200);
+    }
+    expect((await signUpFrom(auth, "v3@example.com", "2001:db8::ffff")).status).toBe(429);
+    expect((await signUpFrom(auth, "v4@example.com", "2001:db8:0:1::1")).status).toBe(200);
+  });
+
+  it("cloud: counts the peer Cloudflare saw, never a chain behind a declared proxy", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    vi.stubEnv("TRUSTED_PROXIES", "127.0.0.1,198.51.100.0/24");
+    const auth = createAuth(db);
+    // A relay at a declared proxy's address writes a fresh chain each time.
+    const relayed = (email: string, forged: string) =>
+      auth.handler(
+        new Request(`${BASE}/api/auth/sign-up/email`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: BASE,
+            "cf-connecting-ip": "198.51.100.7",
+            "x-forwarded-for": forged,
+          },
+          body: JSON.stringify({ name: "Ada", email, password: "correct horse battery" }),
+        }),
+      );
+    for (const [i, forged] of ["203.0.113.1", "203.0.113.2", "203.0.113.3"].entries()) {
+      expect((await relayed(`r${i}@example.com`, forged)).status, forged).toBe(200);
+    }
+    expect((await relayed("r3@example.com", "203.0.113.4")).status).toBe(429);
+    const ips = await db.select({ ip: schema.accountSignups.ip }).from(schema.accountSignups);
+    expect(ips.map((row) => row.ip)).toEqual(Array(3).fill("198.51.100.7"));
+  });
+
+  it("self-host: never limits a network", async () => {
+    const auth = createAuth(db);
+    for (const email of ["a@example.com", "b@example.com", "c@example.com", "d@example.com"]) {
+      expect((await signUpFrom(auth, email, "203.0.113.9")).status, email).toBe(200);
+    }
+    const ips = await db.select({ ip: schema.accountSignups.ip }).from(schema.accountSignups);
+    expect(ips.map((row) => row.ip)).toEqual(Array(4).fill("203.0.113.9"));
+  });
+
+  it("cloud: sends a GitHub sign-up from a network at its limit back to the form with the code", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    vi.stubEnv("GITHUB_CLIENT_ID", "github-id");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "github-secret");
+    for (const userId of ["u1", "u2", "u3"]) {
+      await db
+        .insert(schema.accountSignups)
+        .values({ userId, email: `${userId}@example.com`, ip: "203.0.113.9" });
+    }
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.startsWith("https://github.com/login/oauth/access_token")) {
+        return Response.json({ access_token: "token", token_type: "bearer", scope: "user:email" });
+      }
+      if (url === "https://api.github.com/user") {
+        return Response.json({ id: 42, login: "ada", name: "Ada", email: "ada@example.com" });
+      }
+      if (url === "https://api.github.com/user/emails") {
+        return Response.json([{ email: "ada@example.com", primary: true, verified: true }]);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const auth = createAuth(db);
+    const client = { "cf-connecting-ip": "203.0.113.9" };
+    const started = await auth.handler(
+      new Request(`${BASE}/api/auth/sign-in/social`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE, ...client },
+        body: JSON.stringify({
+          provider: "github",
+          callbackURL: "/emails",
+          errorCallbackURL: "/signup",
+        }),
+      }),
+    );
+    const state = new URL(((await started.json()) as { url: string }).url).searchParams.get(
+      "state",
+    );
+    const cookie = started.headers
+      .getSetCookie()
+      .map((c) => c.split(";")[0])
+      .join("; ");
+
+    const callback = await auth.handler(
+      new Request(`${BASE}/api/auth/callback/github?code=code&state=${state}`, {
+        headers: { cookie, ...client },
+      }),
+    );
+    expect(callback.status).toBe(302);
+    const landed = new URL(callback.headers.get("location") ?? "", BASE);
+    expect(landed.pathname).toBe("/signup");
+    expect(landed.searchParams.get("error")).toBe("SIGNUP_IP_LIMIT");
+    expect(await db.select().from(schema.user)).toEqual([]);
   });
 });
 

@@ -13,11 +13,12 @@ import {
   enrollSystemContact,
   fillTemplate,
   findSenderDomainOwner,
-  forwardedClientIp,
   isPlainName,
   MCP_SCOPES,
   recordSignup,
   removeSystemContact,
+  SIGNUPS_PER_NETWORK_PER_DAY,
+  signupsFromNetwork,
   stripInvisible,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
@@ -29,6 +30,7 @@ import { and, desc, eq, lte, ne, notExists } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { headers } from "next/headers";
 import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
+import { SIGNUP_LIMIT_CODE } from "@/lib/auth-errors";
 import { GRANT_LIFETIME_DAYS, isGrantLifetime } from "@/lib/grant-lifetime";
 import { httpOrigin, isUnlistedHostRedirect } from "@/lib/http-url";
 import { isAppLocale, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE } from "@/lib/locale-cookie";
@@ -53,7 +55,7 @@ import {
   sendVerificationEmail,
   VERIFY_TOKEN_TTL_MINUTES,
 } from "./system-mail";
-import { trustedProxies } from "./trusted-proxies";
+import { clientIp, trustedProxies } from "./trusted-proxies";
 
 export type Auth = ReturnType<typeof createAuth>;
 
@@ -128,6 +130,28 @@ async function assertPermanentAddress(
   throw new APIError("BAD_REQUEST", {
     code: "DISPOSABLE_EMAIL",
     message: DISPOSABLE_REFUSAL[when][localeFromHeaders(headers)],
+  });
+}
+
+const SIGNUP_LIMIT_REFUSAL = {
+  en: enAuth.social.ipLimit,
+  "pt-BR": ptBRAuth.social.ipLimit,
+} as const;
+
+/**
+ * The cloud's cap on the accounts one network opens a day, refused in the
+ * requester's language and with a code, which the social callback needs to
+ * send the browser back to the form. A self-host has no cap: behind a proxy
+ * it has not declared, every visitor reads as one address. A request with
+ * no client address is let through.
+ */
+async function assertSignupRoom(db: Db, headers: Headers | undefined): Promise<void> {
+  if (!isCloudDeployment() || !headers) return;
+  const ip = clientIp(headers);
+  if (!ip || (await signupsFromNetwork(db, ip)) < SIGNUPS_PER_NETWORK_PER_DAY) return;
+  throw new APIError("TOO_MANY_REQUESTS", {
+    code: SIGNUP_LIMIT_CODE,
+    message: SIGNUP_LIMIT_REFUSAL[localeFromHeaders(headers)],
   });
 }
 
@@ -531,9 +555,11 @@ export function createAuth(
       },
     },
     plugins: [
-      // Turnstile on sign-in, sign-up, password reset and the verification
-      // resend when the instance opts in; the forms send the token in
-      // x-captcha-response. The plugin's default list lacks the resend.
+      // Turnstile on sign-in, sign-up, password reset, the verification resend
+      // and social sign-in when the instance opts in; the forms send the token
+      // in x-captcha-response. The plugin's default list lacks the last two.
+      // Social sign-in's OAuth callback carries no token and needs none: it
+      // only finishes what a verified /sign-in/social started.
       ...(env.TURNSTILE_SECRET_KEY
         ? [
             captcha({
@@ -542,6 +568,7 @@ export function createAuth(
               endpoints: [
                 "/sign-up/email",
                 "/sign-in/email",
+                "/sign-in/social",
                 "/request-password-reset",
                 "/send-verification-email",
               ],
@@ -727,6 +754,7 @@ export function createAuth(
             await assertSignupAllowed(db, signupOpen());
             const headers = ctx?.headers ?? ctx?.request?.headers;
             await assertPermanentAddress(db, user.email, "signup", headers);
+            await assertSignupRoom(db, headers);
             return { data: headers ? { ...user, locale: localeFromHeaders(headers) } : user };
           },
           // Runs after the row exists (after the adapter's transaction for a
@@ -739,12 +767,7 @@ export function createAuth(
             await recordSignup(db, {
               userId: user.id,
               email: user.email,
-              ip: headers
-                ? forwardedClientIp(headers, {
-                    cloud: isCloudDeployment(),
-                    trustedProxies: trustedProxies(),
-                  })
-                : null,
+              ip: headers ? clientIp(headers) : null,
               userAgent: headers?.get("user-agent") ?? null,
             });
             await enrollAccount(user, headers);
@@ -768,8 +791,11 @@ export function createAuth(
         // Refused here, ahead of the endpoint: thrown from inside user
         // creation, a 403 reads to better-auth as its own anti-enumeration
         // signal for an address already registered, and the caller is shown
-        // "check your inbox" instead of the policy. The database hook below
-        // still guards the paths that create users elsewhere (social sign-in).
+        // "check your inbox" instead of the policy. The endpoint also answers
+        // an address already registered before it creates anything, so a
+        // refusal made only at creation would tell which addresses have
+        // accounts. The database hook below still guards the paths that
+        // create users elsewhere (social sign-in).
         if (ctx.path === "/sign-up/email") {
           await assertSignupAllowed(db, signupOpen());
           assertPlainName(ctx.body, ctx.headers);
@@ -779,6 +805,7 @@ export function createAuth(
             "signup",
             ctx.headers,
           );
+          await assertSignupRoom(db, ctx.headers);
           return;
         }
         if (ctx.path === "/update-user") {

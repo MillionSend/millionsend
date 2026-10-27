@@ -638,6 +638,11 @@ Consumer mailbox providers (Gmail, Outlook, Yahoo, iCloud, Proton, UOL, BOL, Ter
 the like) and public suffixes (`com.br`, `github.io`) are never refused, whatever the
 list says.
 
+With `IS_CLOUD=true`, one network (an IPv4 address, or an IPv6 /64) opens at most 3
+accounts a day: its sign-ups in the last 24 hours count, deleted accounts included, Google
+and GitHub sign-ups alike, and a 4th is refused until the oldest is a day old. Signing in
+to an account that exists is never refused. A self-hosted instance has no such limit.
+
 </details>
 
 <details>
@@ -692,11 +697,10 @@ account removes the contact and scrubs the address from that team's history. A c
 verification is on whenever `AUTH_EMAIL_FROM` and SES credentials are set; earlier accounts
 verify at their next sign-in.
 
-Nothing on the instance contacts millionsend.com on its own. The wizard offers, once and
-interactively, to subscribe your address to release notes (a confirmation link comes first);
-when it cannot reach millionsend.com it prints the page instead,
-<https://app.millionsend.com/updates?source=self-host>, and **Settings → Instance** links to
-the same page. Full text: docs, "Account mail, contacts and product updates".
+Nothing on the instance contacts millionsend.com on its own. The wizard shows where to
+subscribe to release notes, <https://app.millionsend.com/updates?source=self-host> (a
+confirmation link comes first), and **Settings → Instance** links to the same page. Full
+text: docs, "Account mail, contacts and product updates".
 
 </details>
 

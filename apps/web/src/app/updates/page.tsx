@@ -1,8 +1,10 @@
+import { env } from "@millionsend/config";
 import { UPDATES_SOURCES } from "@millionsend/core";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import styles from "@/components/auth/auth.module.css";
 import { AuthScreen } from "@/components/auth/auth-screen";
+import { TurnstileField } from "@/components/turnstile";
 import { localeFromHeaders } from "@/server/locale";
 import en from "../../../messages/en/updates.json";
 import ptBR from "../../../messages/pt-BR/updates.json";
@@ -13,9 +15,10 @@ const MESSAGES = { en, "pt-BR": ptBR } as const;
 
 /**
  * Public page: subscribe to product updates. A plain form, so it works from
- * the docs' link and the wizard's fallback alike; the endpoint answers with
- * a redirect back here. `?source=` tags where the reader came from (the
- * wizard's fallback link says self-host); anything else is the page itself.
+ * the docs' link and the wizard's alike; the endpoint answers with a
+ * redirect back here. Where the instance has Turnstile keys, the widget
+ * puts its token in the form. `?source=` tags where the reader came from
+ * (the wizard's link says self-host); anything else is the page itself.
  */
 export default async function UpdatesPage({
   searchParams,
@@ -50,8 +53,15 @@ export default async function UpdatesPage({
               />
             </div>
             {query.error ? (
-              <p className={styles.error}>{query.error === "rate" ? m.tryLater : m.invalidEmail}</p>
+              <p className={styles.error}>
+                {query.error === "rate"
+                  ? m.tryLater
+                  : query.error === "captcha"
+                    ? m.captcha
+                    : m.invalidEmail}
+              </p>
             ) : null}
+            <TurnstileField siteKey={env.TURNSTILE_SITE_KEY ?? null} />
             <button type="submit" className={`ms-btn ms-btn-primary ${styles.button}`}>
               {m.submit}
             </button>

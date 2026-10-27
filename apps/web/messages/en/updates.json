@@ -11,7 +11,8 @@
     "confirmPrompt": "Subscribe {email} to MillionSend product updates?",
     "confirmButton": "Yes, subscribe me",
     "invalidEmail": "That doesn't look like an email address.",
-    "tryLater": "Too many requests — try again later."
+    "tryLater": "Too many requests — try again later.",
+    "captcha": "Verification failed. Try again."
   },
   "email": {
     "subject": "Confirm your MillionSend product updates",

@@ -176,7 +176,12 @@ export {
   fetchContentFactors,
   MIN_OUTCOME_SENDS,
 } from "./account-score.js";
-export { purgeAccountSignups, recordSignup } from "./account-signups.js";
+export {
+  purgeAccountSignups,
+  recordSignup,
+  SIGNUPS_PER_NETWORK_PER_DAY,
+  signupsFromNetwork,
+} from "./account-signups.js";
 export {
   type ApiKeyAuth,
   authenticateApiKey,

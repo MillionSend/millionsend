@@ -11,7 +11,8 @@
     "confirmPrompt": "Inscrever {email} nas novidades do MillionSend?",
     "confirmButton": "Sim, quero receber",
     "invalidEmail": "Isso não parece um endereço de e-mail.",
-    "tryLater": "Muitas tentativas — tente de novo mais tarde."
+    "tryLater": "Muitas tentativas — tente de novo mais tarde.",
+    "captcha": "A verificação falhou. Tente de novo."
   },
   "email": {
     "subject": "Confirme sua inscrição nas novidades do MillionSend",
