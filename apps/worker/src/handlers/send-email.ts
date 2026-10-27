@@ -1002,7 +1002,6 @@ async function sendQueued(
     from: email.from,
     to: email.to,
     ...(email.cc ? { cc: email.cc } : {}),
-    ...(email.bcc ? { bcc: email.bcc } : {}),
     ...(email.replyTo ? { replyTo: email.replyTo } : {}),
     subject: email.subject,
     ...(html ? { html } : {}),
@@ -1306,7 +1305,9 @@ interface MimeInput {
   from: string;
   to: string[];
   cc?: string[];
-  bcc?: string[];
+  // No bcc: SES takes Bcc recipients from the send's Destination, and
+  // nodemailer's stream transport would write them into a Bcc header of the
+  // message itself.
   replyTo?: string[];
   subject: string;
   html?: string;
@@ -1325,7 +1326,6 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
     from: input.from,
     to: input.to,
     ...(input.cc ? { cc: input.cc } : {}),
-    ...(input.bcc ? { bcc: input.bcc } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     ...(input.html ? { html: input.html } : {}),
     ...(input.text ? { text: input.text } : {}),
