@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { LeadCell } from "@/components/lead-cell";
 import { RelativeTime } from "@/components/relative-time";
 import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
@@ -28,7 +28,7 @@ export function LimitRequests() {
       <Table className="nowrap">
         <thead>
           <tr>
-            <th>{t("cols.team")}</th>
+            <th style={{ width: "100%" }}>{t("cols.team")}</th>
             <th>{t("cols.domain")}</th>
             <th className="right">{t("cols.perDay")}</th>
             <th>{t("cols.sends")}</th>
@@ -40,12 +40,11 @@ export function LimitRequests() {
         <tbody>
           {requests.map((request) => (
             <tr key={request.id}>
-              <td>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <TeamLogo name={request.team} logoUrl={request.logoUrl} size={22} />
-                  <Link href={consoleReviewHref(request.teamId)}>{request.team}</Link>
-                </span>
-              </td>
+              <LeadCell
+                tile={<TeamLogo name={request.team} logoUrl={request.logoUrl} size={22} />}
+                value={request.team}
+                href={consoleReviewHref(request.teamId)}
+              />
               <td className="ms-mono">{request.domain}</td>
               <td className="right num">{nf.format(request.perDay)}</td>
               <td>{t(`sends.${request.sends}`)}</td>

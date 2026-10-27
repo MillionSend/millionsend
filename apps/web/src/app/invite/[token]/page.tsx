@@ -100,6 +100,7 @@ export default function AcceptInvitePage() {
             <button
               type="button"
               className="ms-btn ms-btn-primary"
+              style={{ justifySelf: "start" }}
               disabled={accept.isPending}
               onClick={() => accept.mutate({ token })}
             >

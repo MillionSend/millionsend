@@ -546,6 +546,7 @@ function ThreadPane({
         <button
           type="button"
           className="ms-btn ms-btn-secondary"
+          style={{ justifySelf: "start" }}
           disabled={messages.isFetchingNextPage}
           onClick={() => messages.fetchNextPage()}
         >
