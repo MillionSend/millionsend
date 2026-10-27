@@ -621,6 +621,8 @@ export {
 } from "./pix.js";
 export {
   effectivePlan,
+  FREE_BURST,
+  FREE_BURST_REFILL_MS,
   formatVolume,
   freePoolOwner,
   isPlanRungKey,
@@ -681,6 +683,7 @@ export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
 export { parsePropertyDate, SEGMENT_FILTER_MAX_DAYS } from "./property-date.js";
 export { broadcastProviderBreakdown, type ProviderBreakdownRow } from "./provider-breakdown.js";
 export {
+  bookFreeBurst,
   bumpFreePoolUsage,
   dailyCeiling,
   type QuotaResult,

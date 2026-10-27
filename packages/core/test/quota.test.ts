@@ -3,8 +3,9 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { teamQuota } from "../src/plans.js";
+import { FREE_BURST, FREE_BURST_REFILL_MS, teamQuota } from "../src/plans.js";
 import {
+  bookFreeBurst,
   bumpFreePoolUsage,
   quotaRoom,
   readDailyUsage,
@@ -16,6 +17,7 @@ import {
   reservePeriodQuota,
   reserveQuota,
 } from "../src/quota.js";
+import { DAY_MS } from "../src/utc-day.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -379,6 +381,45 @@ describe("a Free pool", () => {
         complained: 2,
       },
     ]);
+  });
+});
+
+describe("bookFreeBurst", () => {
+  const NOW = new Date("2026-08-20T12:00:00Z");
+  const at = (refills: number, from = NOW) =>
+    new Date(from.getTime() + refills * FREE_BURST_REFILL_MS);
+  const tatOf = async (ownerId: string) => {
+    const [row] = await db
+      .select({ tat: schema.freePoolBursts.tat })
+      .from(schema.freePoolBursts)
+      .where(eq(schema.freePoolBursts.ownerId, ownerId));
+    return row?.tat;
+  };
+
+  it("lets FREE_BURST recipients go at once, then each further one a refill after the last", async () => {
+    for (let i = 0; i < FREE_BURST; i++) {
+      expect(await bookFreeBurst(db, "u-burst", 1, NOW)).toEqual(NOW);
+    }
+    expect(await bookFreeBurst(db, "u-burst", 1, NOW)).toEqual(at(1));
+    expect(await bookFreeBurst(db, "u-burst", 1, NOW)).toEqual(at(2));
+    expect(await tatOf("u-burst")).toEqual(at(FREE_BURST + 2));
+    // Another creator's allowance is its own.
+    expect(await bookFreeBurst(db, "u-burst-other", 1, NOW)).toEqual(NOW);
+  });
+
+  it("books every recipient an email names, so 25 at once wait for 15 refills", async () => {
+    expect(await bookFreeBurst(db, "u-burst-bcc", 25, NOW)).toEqual(at(25 - FREE_BURST));
+  });
+
+  it("refills one recipient every FREE_BURST_REFILL_MS, never past FREE_BURST however long it sits idle", async () => {
+    expect(await bookFreeBurst(db, "u-burst-idle", FREE_BURST, NOW)).toEqual(NOW);
+    const later = at(3);
+    expect(await bookFreeBurst(db, "u-burst-idle", 3, later)).toEqual(later);
+    expect(await bookFreeBurst(db, "u-burst-idle", 1, later)).toEqual(at(1, later));
+    const nextDay = new Date(NOW.getTime() + DAY_MS);
+    expect(await bookFreeBurst(db, "u-burst-idle", FREE_BURST + 1, nextDay)).toEqual(
+      at(1, nextDay),
+    );
   });
 });
 

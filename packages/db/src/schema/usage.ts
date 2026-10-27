@@ -131,6 +131,17 @@ export const freePoolUsage = pgTable(
 );
 
 /**
+ * A Free pool's burst allowance (core bookFreeBurst), one row per creator:
+ * `tat` is when the allowance is whole again, each booked recipient pushing
+ * it one refill later. Keyed by user with no FK, like free_pool_usage, so
+ * deleting a team refills nothing.
+ */
+export const freePoolBursts = pgTable("free_pool_bursts", {
+  ownerId: text("owner_id").primaryKey(),
+  tat: timestamp("tat", { withTimezone: true }).notNull(),
+});
+
+/**
  * Monthly-plan counters, one row per team and Stripe billing period. The
  * accept paths reserve against `accepted` with the same atomic upsert the
  * daily table uses; `reportedOverage` is how much past the included volume

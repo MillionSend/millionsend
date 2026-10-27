@@ -2,7 +2,14 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { eq, sql } from "drizzle-orm";
 import { firstRow } from "./driver-result.js";
-import { freePoolOwner, OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type TeamQuota } from "./plans.js";
+import {
+  FREE_BURST,
+  FREE_BURST_REFILL_MS,
+  freePoolOwner,
+  OVERAGE_HARD_CAP,
+  QUOTA_TOLERANCE,
+  type TeamQuota,
+} from "./plans.js";
 import { bumpHourlyUsage } from "./usage-hourly.js";
 import { utcDay } from "./utc-day.js";
 
@@ -403,6 +410,31 @@ export async function bumpFreePoolUsage(
       sql`, `,
     )}
   `);
+}
+
+/**
+ * Books `n` recipients of a Free pool into its burst allowance (FREE_BURST at
+ * once, then one every FREE_BURST_REFILL_MS) and returns when they may go:
+ * `now` while the allowance holds them, else the instant it has refilled
+ * enough. A GCRA in one upsert, so parallel lanes serialize on the pool's
+ * row; it always books and never refuses, and the caller holds the mail
+ * until the slot.
+ */
+export async function bookFreeBurst(db: Db, ownerId: string, n: number, now: Date): Promise<Date> {
+  const b = schema.freePoolBursts;
+  const step = n * FREE_BURST_REFILL_MS;
+  const [row] = await db
+    .insert(b)
+    .values({ ownerId, tat: new Date(now.getTime() + step) })
+    .onConflictDoUpdate({
+      target: b.ownerId,
+      set: {
+        tat: sql`greatest(${b.tat}, ${now.toISOString()}::timestamptz) + ${step} * interval '1 millisecond'`,
+      },
+    })
+    .returning({ tat: b.tat });
+  if (!row) throw new Error("free burst booking returned no row");
+  return new Date(Math.max(now.getTime(), row.tat.getTime() - FREE_BURST * FREE_BURST_REFILL_MS));
 }
 
 /** Sends accepted so far, and how many past the included volume the meter already knows about. */
