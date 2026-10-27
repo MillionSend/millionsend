@@ -1,9 +1,11 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fetchDeliverabilityHealth, GUARDRAIL_WINDOW_DAYS } from "../src/deliverability.js";
 import { backfillPoolOwners, contactRoom } from "../src/team-plan.js";
+import { DAY_MS, utcDay } from "../src/utc-day.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -84,5 +86,60 @@ describe("backfillPoolOwners", () => {
     expect(await poolOwner(system)).toBeNull();
     expect(await poolOwner(recorded)).toBe("first-owner");
     expect(await backfillPoolOwners(db, true)).toBe(0);
+  });
+
+  it("brings a Free team's guardrail window into its pool once, and nothing of a paid or system team", async () => {
+    const now = new Date("2026-09-10T12:00:00Z");
+    const daysAgo = (n: number) => utcDay(now.getTime() - n * DAY_MS);
+    await db.insert(schema.user).values({ id: "seeded", name: "Seeded", email: "s@example.com" });
+    const free = await createTeam(db, "seed-free");
+    const paid = await createTeam(db, "seed-paid");
+    const system = await createTeam(db, "seed-system");
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+    await db.update(schema.teams).set({ plan: "system" }).where(eq(schema.teams.id, system));
+    for (const team of [free, paid, system]) {
+      await db.insert(schema.teamMembers).values({ teamId: team, userId: "seeded", role: "owner" });
+      // Paused on its own record today; the day before the window is left behind.
+      await db.insert(schema.usageCounters).values([
+        { teamId: team, day: daysAgo(0), accepted: 150, sent: 120, hardBounced: 12, complained: 3 },
+        { teamId: team, day: daysAgo(GUARDRAIL_WINDOW_DAYS - 1), sent: 10, sentNoFeedback: 4 },
+        { teamId: team, day: daysAgo(GUARDRAIL_WINDOW_DAYS), sent: 99, complained: 9 },
+      ]);
+    }
+    expect((await fetchDeliverabilityHealth(db, free, { now })).status).toBe("paused");
+
+    expect(await backfillPoolOwners(db, true, now)).toBe(2);
+    expect(await poolOwner(free)).toBe("seeded");
+    expect((await fetchDeliverabilityHealth(db, free, { now })).status).toBe("paused");
+    const pool = () =>
+      db
+        .select()
+        .from(schema.freePoolUsage)
+        .where(eq(schema.freePoolUsage.ownerId, "seeded"))
+        .orderBy(asc(schema.freePoolUsage.day));
+    const seeded = [
+      {
+        ownerId: "seeded",
+        day: daysAgo(GUARDRAIL_WINDOW_DAYS - 1),
+        accepted: 0,
+        sent: 10,
+        sentNoFeedback: 4,
+        hardBounced: 0,
+        complained: 0,
+      },
+      {
+        ownerId: "seeded",
+        day: daysAgo(0),
+        accepted: 150,
+        sent: 120,
+        sentNoFeedback: 0,
+        hardBounced: 12,
+        complained: 3,
+      },
+    ];
+    expect(await pool()).toEqual(seeded);
+
+    expect(await backfillPoolOwners(db, true, now)).toBe(0);
+    expect(await pool()).toEqual(seeded);
   });
 });
