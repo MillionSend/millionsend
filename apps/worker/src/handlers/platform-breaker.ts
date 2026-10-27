@@ -114,11 +114,20 @@ export async function runPlatformBreaker(
   const decisions = await evaluateRegionBreakers(db, { now, defaultRegion, isCloud });
   const changed = await applyRegionBreakers(db, decisions, now);
   // Held before any mail: a pause notice points to the review-hold mail only
-  // when one follows.
+  // when one follows. A failed hold is rethrown only after the mails, since
+  // the flip is already stored and a retry would never send its notice; the
+  // next run, the region still tripped, holds the teams again.
   const reviewHeld = new Map<string, string[]>();
+  const holdFailures: unknown[] = [];
   for (const d of decisions) {
     if (!d.trip || !d.reviewTeams?.length) continue;
-    const held = await holdComplaintTeams(db, d.reviewTeams, now);
+    let held: string[];
+    try {
+      held = await holdComplaintTeams(db, d.reviewTeams, now);
+    } catch (err) {
+      holdFailures.push(err);
+      continue;
+    }
     if (held.length === 0) continue;
     for (const teamId of held) {
       // The hold already refuses every send; the tenant is a second lock, so
@@ -224,6 +233,14 @@ export async function runPlatformBreaker(
   if (fuse) {
     console.warn(`platform.breaker: Free fuse tripped at ${fuse.complaints} complaints`);
     await mail("the Free fuse", "platform.free_fuse", freeFuseMail({ ...fuse, url: safetyUrl }));
+  }
+  if (holdFailures.length > 0) {
+    throw new Error(
+      `platform.breaker: ${holdFailures.length} region(s) failed their review holds`,
+      {
+        cause: holdFailures[0],
+      },
+    );
   }
   return changed;
 }

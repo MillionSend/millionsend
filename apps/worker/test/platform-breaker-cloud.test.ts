@@ -13,8 +13,8 @@ const synced: string[] = [];
 const NOW = new Date("2026-09-03T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
 const minutesLater = (m: number) => new Date(NOW.getTime() + m * 60_000);
-const run = (now: Date, isCloud = true) =>
-  runPlatformBreaker(db, {
+const run = (now: Date, isCloud = true, on: Db = db) =>
+  runPlatformBreaker(on, {
     mailer: {
       send: async (to, m) => {
         sends.push({ to, subject: m.subject, text: m.text, kind: m.kind });
@@ -169,4 +169,27 @@ it("on Cloud, a complaint trip that holds no Free team for review points to no r
     "Only the broadcasts of the paid teams at or over 0.10% complaints over their own last 30 days are held: Paid. Transactional email keeps flowing, and the pause lifts once the rate is back under 0.08%.",
   );
   expect(sends[0]?.text).not.toContain("held for review");
+});
+
+it("a review hold that fails still lets the pause notice go out, then fails the run, and the next run holds", async () => {
+  await db.delete(schema.regionBreakers);
+  await db.update(schema.teams).set({ suspendedAt: null, suspensionReason: null });
+  sends = [];
+  const failing = new Proxy(db, {
+    get: (target, prop, receiver) =>
+      prop === "transaction"
+        ? async () => {
+            throw new Error("connection reset");
+          }
+        : Reflect.get(target, prop, receiver),
+  });
+  await expect(run(minutesLater(90), true, failing)).rejects.toThrow(
+    "1 region(s) failed their review holds",
+  );
+  expect(sends.map((s) => s.kind)).toEqual(["region.paused"]);
+  expect(sends[0]?.text).not.toContain("held for review");
+
+  sends = [];
+  expect(await run(minutesLater(105))).toEqual({ tripped: [], resumed: [] });
+  expect(sends.map((s) => s.kind)).toEqual(["region.teams_held"]);
 });
