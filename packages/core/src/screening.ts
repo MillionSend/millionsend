@@ -40,7 +40,7 @@ import {
   resolveTextUrl,
   UNRESOLVED_DESTINATION,
 } from "./links.js";
-import { SES_MAILBOX_SIMULATOR_DOMAIN } from "./mailbox-providers.js";
+import { recipientDomain, SES_MAILBOX_SIMULATOR_DOMAIN } from "./mailbox-providers.js";
 import type { MonitorSettings } from "./monitor-settings.js";
 import { isLoopbackHost, ownerDomain, registrableDomain } from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
@@ -705,7 +705,7 @@ export async function reachesOnlyTeam(
   if (recipients.length === 0) return false;
   const members = new Set(await teamMemberEmails(db, email.teamId));
   return recipients.every(
-    (address) => members.has(address) || address.endsWith(`@${SES_MAILBOX_SIMULATOR_DOMAIN}`),
+    (address) => members.has(address) || recipientDomain(address) === SES_MAILBOX_SIMULATOR_DOMAIN,
   );
 }
 

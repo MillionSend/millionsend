@@ -549,12 +549,14 @@ export {
 } from "./mail-preferences.js";
 export { firstRecipientDomain, mailboxProviderSql } from "./mailbox-provider-sql.js";
 export {
+  complaintReportingRecipients,
   INACTIVE_MAILBOX_PATTERN,
   MAILBOX_FULL_PATTERN,
   type MailboxProvider,
   mailboxProvider,
   sentWithoutComplaintFeedback,
   sesAttempted,
+  simulatorFeedback,
 } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,

@@ -2,7 +2,7 @@ import { DAY_MS, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
@@ -22,11 +22,12 @@ async function insertSentEmail(
   to = ["r@example.com"],
   contactId: string | null = null,
   sentAt = new Date(),
+  team = teamId,
 ): Promise<string> {
   const [row] = await db
     .insert(schema.emails)
     .values({
-      teamId,
+      teamId: team,
       contactId,
       from: "a@acme.dev",
       to,
@@ -254,6 +255,83 @@ describe("hard bounce and complaint counters", () => {
       .where(eq(schema.suppressions.emailHash, hashRecipient("listed@example.com")));
     expect(supp?.reason).toBe("complaint");
   });
+});
+
+describe("feedback from the mailbox simulator and Free pools", () => {
+  const dailyOf = async (team: string, day: string) => {
+    const [row] = await db
+      .select({
+        delivered: schema.usageCounters.delivered,
+        bounced: schema.usageCounters.bounced,
+        hardBounced: schema.usageCounters.hardBounced,
+        complained: schema.usageCounters.complained,
+      })
+      .from(schema.usageCounters)
+      .where(and(eq(schema.usageCounters.teamId, team), eq(schema.usageCounters.day, day)));
+    return row;
+  };
+
+  it("leaves the simulator's bounces and complaints out of the rates; they still suppress and fire webhooks", async () => {
+    const sim = await createTeam(db, "events-simulator");
+    const endpoint = await createWebhookEndpoint(db, sim, null);
+    const at = "2026-09-22T10:00:00.000Z";
+    const bounce = "bounce@simulator.amazonses.com";
+    const complaint = "complaint@simulator.amazonses.com";
+    const bounced = await insertSentEmail("mid-sim-bounce", [bounce], null, new Date(), sim);
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Bounce",
+        sesMessageId: "mid-sim-bounce",
+        occurredAt: at,
+        bounce: { bounceType: "Permanent", bounceSubType: "General", recipients: [bounce] },
+      }),
+    );
+    const complained = await insertSentEmail(
+      "mid-sim-complaint",
+      [complaint],
+      null,
+      new Date(),
+      sim,
+    );
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-sim-complaint",
+        occurredAt: at,
+        complaint: { recipients: [complaint], complaintFeedbackType: "abuse" },
+      }),
+    );
+    expect(await dailyOf(sim, at.slice(0, 10))).toEqual({
+      delivered: 0,
+      bounced: 1,
+      hardBounced: 0,
+      complained: 0,
+    });
+    expect([await statusOf(bounced), await statusOf(complained)]).toEqual([
+      "bounced",
+      "complained",
+    ]);
+    const suppressed = await db
+      .select({ email: schema.suppressions.email, reason: schema.suppressions.reason })
+      .from(schema.suppressions)
+      .where(eq(schema.suppressions.teamId, sim));
+    expect(suppressed).toEqual(
+      expect.arrayContaining([
+        { email: bounce, reason: "hard_bounce" },
+        { email: complaint, reason: "complaint" },
+      ]),
+    );
+    const fired = await db
+      .select({ type: schema.webhookDeliveries.eventType })
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpoint));
+    expect(fired.map((d) => d.type)).toEqual(
+      expect.arrayContaining(["email.bounced", "email.complained"]),
+    );
+  });
+
 });
 
 it("out-of-order events never regress the status ladder", async () => {

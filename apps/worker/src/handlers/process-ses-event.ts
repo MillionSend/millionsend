@@ -13,6 +13,7 @@ import {
   noteConsoleCodeUndelivered,
   type SuppressionEventRow,
   sesAttempted,
+  simulatorFeedback,
   utcDay,
   type WebhookEnqueue,
   webhookBatch,
@@ -211,15 +212,21 @@ export async function processSesEvent(
     // hard_bounced counts only Permanent bounces — the deliverability score's
     // bounce-rate input (transient greylisting must not read as a hard-bounce
     // crisis) — and, like complained, only those about mail SES attempted, as
-    // SES's own rates do.
+    // SES's own rates do, and none from the mailbox simulator, whose feedback
+    // is a test: it still suppresses the address and fires the webhook below.
+    const rated = !simulatorFeedback(event.bounce?.recipients ?? event.complaint?.recipients ?? []);
     const cols =
       event.eventType === "Delivery"
         ? ["delivered"]
         : event.eventType === "Bounce"
-          ? event.bounce?.bounceType === "Permanent" && sesAttempted(event.bounce.bounceSubType)
+          ? event.bounce?.bounceType === "Permanent" &&
+            sesAttempted(event.bounce.bounceSubType) &&
+            rated
             ? ["bounced", "hard_bounced"]
             : ["bounced"]
-          : event.eventType === "Complaint" && sesAttempted(event.complaint?.complaintSubType)
+          : event.eventType === "Complaint" &&
+              sesAttempted(event.complaint?.complaintSubType) &&
+              rated
             ? ["complained"]
             : [];
     if (cols.length > 0) {
@@ -232,11 +239,8 @@ export async function processSesEvent(
             sql`, `,
           )}
       `);
-      await bumpHourlyUsage(txDb, {
-        teamId: email.teamId,
-        at: new Date(event.occurredAt),
-        counts: Object.fromEntries(cols.map((col) => [col, 1])),
-      });
+      const counts = Object.fromEntries(cols.map((col) => [col, 1]));
+      await bumpHourlyUsage(txDb, { teamId: email.teamId, at: new Date(event.occurredAt), counts });
     }
 
     // Auto-suppression: permanent bounces, full or abandoned mailboxes (as
