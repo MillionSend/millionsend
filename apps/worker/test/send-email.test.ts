@@ -2150,7 +2150,13 @@ describe("a Free pool's burst allowance", () => {
       bcc: Array.from({ length: 24 }, (_, i) => `b${i}@example.com`),
     });
     expect(held.outcome).toBe("deferred");
-    expect(held.rescheduled).toEqual([at(25 - FREE_BURST)]);
+    const [row] = await db
+      .select({ freeBurstAt: schema.emails.freeBurstAt })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, held.emailId));
+    expect(row?.freeBurstAt).toEqual(at(25 - FREE_BURST));
+    // Its wake-up is a burst window away at most, short of the slot.
+    expect(held.rescheduled).toEqual([at(FREE_BURST)]);
   });
 
   it("holds every Free team of one creator to one allowance", async () => {
@@ -2211,6 +2217,21 @@ describe("a Free pool's burst allowance", () => {
     expect(due.outcome).toBe("sent");
     expect(due.sends).toHaveLength(1);
     expect(await tatOf("u-burst-wake")).toEqual(tat);
+  });
+
+  it("wakes a waiting row within a burst window, so mail of a team that left Free goes then", async () => {
+    const team = await pooledTeam("burst-upgrade", "u-burst-upgrade");
+    // Spent far ahead: the next turn is hours away.
+    await bookFreeBurst(db, "u-burst-upgrade", 5 * FREE_BURST, NOW);
+    const held = await send(team, { to: ["r@outlook.com"] });
+    expect(held.outcome).toBe("deferred");
+    expect(held.rescheduled).toEqual([at(FREE_BURST)]);
+
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, team.teamId));
+    vi.setSystemTime(at(FREE_BURST));
+    const woke = await attempt(held.emailId);
+    expect(woke.outcome).toBe("sent");
+    expect(woke.sends).toHaveLength(1);
   });
 
   /** One attempt per row, in order, all at the current instant. */

@@ -721,7 +721,12 @@ async function sendQueued(
   if (deps.freeBurst && !systemMail && !onboarding) {
     const slot = await freeBurstSlot(db, deps.freeBurst, email);
     if (slot && slot.getTime() > Date.now()) {
-      await deps.reschedule?.(email.id, slot, emailSendPriority(email));
+      // At most a burst window ahead, so a long wait reads the team's plan
+      // again on the way: mail of a team that left Free goes at the next
+      // wake-up, not at a slot hours away. An upgrade cannot wake it sooner,
+      // since the queue keeps one waiting job per email.
+      const wake = Math.min(slot.getTime(), Date.now() + FREE_BURST_WINDOW_MS);
+      await deps.reschedule?.(email.id, new Date(wake), emailSendPriority(email));
       return "deferred";
     }
   }
