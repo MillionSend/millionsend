@@ -73,9 +73,12 @@ most 10 such recipients at once, then 10 an hour, across every Free team the
 person created (`FREE_BURST`, kept per creator in `free_pool_bursts`).
 Complaints arrive minutes to hours after a send, so a pause can act on the
 first ones before the day's mail has all left. Every such recipient counts,
-Bcc included, and an email waiting its turn stays `queued` until the time it
-booked; turns go in the order mail reaches the worker, so an email sent after
-a broadcast waits behind the broadcast's mail. Recipients at Gmail, iCloud and
+Bcc included. An email waiting its turn stays `queued` until the time it
+booked and checks its team's plan again at least once an hour, so if the team
+leaves Free it goes at the next check; an email that reaches its turn more
+than an hour late, because a pause held it or it was rescheduled, books a new
+turn. Turns go in the order mail reaches the worker, so an email sent after a
+broadcast waits behind the broadcast's mail. Recipients at Gmail, iCloud and
 T-Online, which report no complaints, and at the SES mailbox simulator never
 count, so mail only to them is never slowed, and neither is account mail.
 

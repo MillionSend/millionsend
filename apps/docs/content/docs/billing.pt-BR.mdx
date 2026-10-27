@@ -79,10 +79,14 @@ saem para no máximo 10 desses destinatários de uma vez e depois 10 por hora,
 somando todas as equipes Free que a pessoa criou (`FREE_BURST`, guardado por
 pessoa em `free_pool_bursts`). As reclamações chegam minutos ou horas depois
 do envio, então uma pausa pode agir logo nas primeiras, antes de todos os
-e-mails do dia saírem. Cada destinatário desses conta, inclusive os em Cco, e
-um e-mail esperando a vez fica `queued` até o horário que ele reservou; a vez
-segue a ordem em que os e-mails chegam ao worker, então um e-mail enviado
-depois de uma transmissão espera atrás dos e-mails dela. Destinatários no
+e-mails do dia saírem. Cada destinatário desses conta, inclusive os em Cco. Um
+e-mail esperando a vez fica `queued` até o horário que ele reservou e confere
+de novo o plano da equipe pelo menos uma vez por hora, então, se a equipe sair
+do Free, ele sai na próxima verificação; um e-mail que chega à vez dele com
+mais de uma hora de atraso, porque ficou parado numa pausa ou foi reagendado,
+reserva uma nova vez. A vez segue a ordem em que os e-mails chegam ao worker,
+então um e-mail enviado depois de uma transmissão espera atrás dos e-mails
+dela. Destinatários no
 Gmail, no iCloud e na T-Online, que não informam reclamações, e no simulador
 de caixas do SES nunca contam, então um e-mail só para eles nunca espera, e os
 e-mails de conta também não.
