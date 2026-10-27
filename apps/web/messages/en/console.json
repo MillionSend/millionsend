@@ -150,6 +150,9 @@
       "quotaShort": "{quota} · max rate {rate}/s",
       "broadcastsFlowing": "flowing",
       "broadcastsPaused": "paused",
+      "broadcastsPausedTeams": "paused · {count, plural, one {# team} other {# teams}}",
+      "pauseTeams": "Broadcasts held for {teams}.",
+      "pauseNoTeams": "This pause holds no team's broadcasts.",
       "pauseWindow": "Automatic pause: {metric} at {rate} over {hours, select, 168 {7 days} other {{hours}h}}, above the {limit} limit.",
       "pauseComplaints": "Automatic pause: complaints at {rate} over {hours, select, 168 {7 days} other {{hours}h}} on mail to providers that report them, above the {limit} limit.",
       "pauseSes": "Automatic pause: complaints at {rate} as SES measures them, above the {limit} limit.",
@@ -1010,6 +1013,14 @@
         "canceled": "{team} · {count, plural, one {# email canceled} other {# emails canceled}}",
         "error": "Could not do it: {message}"
       }
+    },
+    "freeFuse": {
+      "text": "Free fuse tripped <since></since>: {complaints, plural, one {# complaint} other {# complaints}} on Free teams' mail in a week. {parked, plural, =0 {No email waits on it yet.} one {{parkedCount} email to providers that report complaints waits.} other {{parkedCount} emails to providers that report complaints wait.}}",
+      "action": "Release",
+      "title": "Release the Free fuse?",
+      "lead": "{parked, plural, =0 {Free teams' mail to providers that report complaints flows again} one {The waiting email goes out through the queue, and Free teams' mail to providers that report complaints flows again} other {The {parkedCount} waiting emails go out through the queue, and Free teams' mail to providers that report complaints flows again}}. The fuse counts afresh from mail sent after the release.",
+      "confirm": "Release",
+      "toast": "{count, plural, =0 {Free fuse released} one {Free fuse released: # email goes out} other {Free fuse released: # emails go out}}"
     },
     "limitRequests": {
       "title": "Limit requests · {count}",

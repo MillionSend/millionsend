@@ -106,13 +106,13 @@ async function sendGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | n
 }
 
 /**
- * PRECONDITION_FAILED while broadcasts are held in the sender domain's SES
- * region (the platform breaker, or the operator's hold); transactional mail
- * is not affected, so only broadcasts check this. The message never says
- * why: the platform's rates are not the customer's to see.
+ * PRECONDITION_FAILED while the team's broadcasts are held in the sender
+ * domain's SES region (the platform breaker, or the operator's hold);
+ * transactional mail is not affected, so only broadcasts check this. The
+ * message never says why: the platform's rates are not the customer's to see.
  */
-async function regionGuard(db: Db, region: string): Promise<TRPCError | null> {
-  if (!(await regionPause(db, region))) return null;
+async function regionGuard(db: Db, region: string, teamId: string): Promise<TRPCError | null> {
+  if (!(await regionPause(db, region, teamId))) return null;
   const { t } = await sendGuardTranslator();
   return new TRPCError({ code: "PRECONDITION_FAILED", message: t("sendGuard.regionHeld") });
 }
@@ -590,7 +590,8 @@ export const broadcastsRouter = router({
       // Deliverability pause is enforced here, before anything is committed or
       // enqueued: a paused account must not schedule a new fan-out. "warning"
       // does not block.
-      const guardError = (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
+      const guardError =
+        (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region, ctx.teamId));
       if (guardError) throw guardError;
       const scheduledAt = input.scheduledAt ?? new Date();
       // Same horizon as the API: a body must not sit out the retention purge.
@@ -682,7 +683,8 @@ export const broadcastsRouter = router({
               : `The ${sender.fromDomain} domain is not verified for this team.`,
         });
       }
-      const guardError = (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
+      const guardError =
+        (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region, ctx.teamId));
       if (guardError) throw guardError;
       const e = schema.emails;
       const [recent] = await ctx.db

@@ -111,9 +111,10 @@ export async function isTeamSuspended(db: Db, teamId: string): Promise<boolean> 
  * suspended and its people still subscribed. A suspension already over the
  * rules has done it once: a person who opted back in since stays in.
  *
- * Any suspension but a review hold cancels the mail parked for an operator
- * or for a review hold, in the same transaction and audited, so a later
- * reinstatement never drains lures held before it.
+ * Any suspension but a review hold cancels the mail parked for an operator,
+ * for a review hold or by the Free fuse, in the same transaction and
+ * audited, so a later reinstatement or release never drains lures held
+ * before it.
  */
 export async function suspendTeam(
   db: Db,
@@ -154,7 +155,7 @@ export async function suspendTeam(
                 eq(e.teamId, input.teamId),
                 eq(e.latestStatus, "queued_quota"),
                 isNull(e.sentAt),
-                inArray(e.parkReason, ["review", ...OPERATOR_PARK_REASONS]),
+                inArray(e.parkReason, ["review", "fuse", ...OPERATOR_PARK_REASONS]),
               ),
             )
             .returning({ id: e.id });
@@ -192,6 +193,63 @@ export async function suspendTeam(
     });
   }
   return true;
+}
+
+/**
+ * The review hold for Free teams whose mail drew a complaint while their
+ * region's breaker trips on complaints: a review suspension unless one
+ * already stands, a complaints flag the release clears, and an audit row
+ * with nothing in it, since the team reads its own audit. A team an
+ * operator reinstated is held again only for a complaint that arrived after.
+ * team_monitor.held_at stays as it is: stamped, the content monitor would
+ * never hold the team itself. The caller syncs the tenant and tells the
+ * operator. Returns the teams held.
+ */
+export async function holdComplaintTeams(
+  db: Db,
+  teams: readonly { teamId: string; lastComplaintAt: Date | null }[],
+  now: Date = new Date(),
+): Promise<string[]> {
+  const a = schema.auditLog;
+  const held: string[] = [];
+  for (const team of teams) {
+    const [reinstated] = await db
+      .select({ at: sql<Date | null>`max(${a.createdAt})`.mapWith(a.createdAt) })
+      .from(a)
+      .where(and(eq(a.teamId, team.teamId), eq(a.action, "team.reinstated")));
+    if (reinstated?.at && !(team.lastComplaintAt && team.lastComplaintAt > reinstated.at)) {
+      continue;
+    }
+    const holding = await db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      const suspended = await suspendTeam(txDb, {
+        teamId: team.teamId,
+        reason: "review",
+        now,
+        ifNotSuspended: true,
+      });
+      if (!suspended) return false;
+      await txDb
+        .insert(schema.teamFlags)
+        .values({
+          teamId: team.teamId,
+          reason: "complaints",
+          detail: { metric: "complaint", suspension: true },
+          openedAt: now,
+        })
+        .onConflictDoNothing();
+      return true;
+    });
+    if (!holding) continue;
+    await recordAudit(db, {
+      teamId: team.teamId,
+      actor: "system",
+      action: "team.held_for_review",
+      target: { type: "team", id: team.teamId },
+    });
+    held.push(team.teamId);
+  }
+  return held;
 }
 
 /**

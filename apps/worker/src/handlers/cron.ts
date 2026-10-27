@@ -12,6 +12,7 @@ import {
   endQueuedEmails,
   failQueuedEmailsForDomain,
   fetchDeliverabilityHealth,
+  freeFuseTripped,
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
   nextUtcDayStart,
@@ -187,7 +188,7 @@ export interface DrainDeps {
         regions: readonly string[];
         exhausted(region: string): boolean;
         room?(region: string): number;
-        paused?(region: string): boolean;
+        paused?(region: string, teamId: string): boolean;
         recount?(): Promise<void>;
         noteBulkQueued?(region: string, n: number): void;
       }
@@ -226,6 +227,8 @@ const DRAIN_PAGE = 500;
 /** What one drain run carries between its passes. */
 interface DrainRun {
   now: Date;
+  /** Park reasons the run releases nothing of: the operator's, and the Free fuse's while it is tripped. */
+  heldReasons: (typeof schema.emailParkReasonEnum.enumValues)[number][];
   /** Teams found at their cap leave every later page query. */
   heldTeams: Set<string>;
   /** Teams already asked whether the deliverability pause holds them. */
@@ -281,6 +284,12 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
   const held = regions.filter((region) => deps.sesQuota?.exhausted(region));
   const run: DrainRun = {
     now,
+    // The Free fuse's rows wait only while it is tripped: its release frees
+    // them, and a row a send parked on it as the release landed goes with
+    // the next run.
+    heldReasons: (await freeFuseTripped(db))
+      ? [...OPERATOR_PARK_REASONS, "fuse"]
+      : [...OPERATOR_PARK_REASONS],
     heldTeams: new Set(),
     checkedTeams: new Set(),
     pausedTeams: new Set(),
@@ -325,7 +334,9 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
           // Sent rows too: a broadcast completed before the status stayed
           // sending until its last row may still hold plan-parked rows.
           inArray(b.status, ["sending", "sent"]),
-          sql`exists (select 1 from emails e where e.broadcast_id = broadcasts.id and e.latest_status = 'queued_quota')`,
+          // A broadcast whose parked rows all wait for an operator or the
+          // tripped fuse would take a slice and release nothing.
+          sql`exists (select 1 from emails e where e.broadcast_id = broadcasts.id and e.latest_status = 'queued_quota' and (e.park_reason is null or e.park_reason not in ${run.heldReasons}))`,
         ),
       )
       .orderBy(asc(b.scheduledAt), asc(b.createdAt), asc(b.id));
@@ -334,7 +345,10 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     const eligible: { id: string; teamId: string; domainId: string | null; region: string }[] = [];
     for (const broadcast of waiting) {
       const region = (await parkedRegion(db, broadcast.id)) ?? regions[0] ?? "";
-      if (deps.sesQuota && (deps.sesQuota.paused?.(region) || deps.sesQuota.exhausted(region))) {
+      if (
+        deps.sesQuota &&
+        (deps.sesQuota.paused?.(region, broadcast.teamId) || deps.sesQuota.exhausted(region))
+      ) {
         continue;
       }
       if ((deps.sesQuota?.room?.(region) ?? Number.POSITIVE_INFINITY) <= 0) continue;
@@ -459,8 +473,9 @@ async function releaseParkedRows(
             opts.where,
             pass.where,
             // The operator's holds: a suspended team releases nothing, a paused
-            // team releases only its transactional rows, and what screening
-            // parked waits for the review list.
+            // team releases only its transactional rows, what screening parked
+            // waits for the review list and what the Free fuse parked waits
+            // while it is tripped.
             isNull(schema.teams.suspendedAt),
             or(
               isNull(schema.emails.broadcastId),
@@ -468,7 +483,7 @@ async function releaseParkedRows(
             ),
             or(
               isNull(schema.emails.parkReason),
-              notInArray(schema.emails.parkReason, [...OPERATOR_PARK_REASONS]),
+              notInArray(schema.emails.parkReason, run.heldReasons),
             ),
             // A row due on a later UTC day is charged on that day, its warm-up
             // included, when it comes: reserved against today, days of the cap

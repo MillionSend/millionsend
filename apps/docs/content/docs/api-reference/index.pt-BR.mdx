@@ -142,8 +142,10 @@ deliberadas e explícitas:
   o envio da equipe está pausado aguardando revisão. Só o envio de transmissão
   também pode retornar
   `403 broadcasts_paused` enquanto a taxa agregada da plataforma na região SES
-  do remetente se recupera; é por região, não afeta e-mail transacional e
-  se resolve sozinho.
+  do remetente se recupera: uma taxa de bounce recusa todas as equipes da
+  região, uma taxa de reclamações só as equipes cuja própria taxa de
+  reclamações nos últimos 30 dias é de 0,1% ou mais. Não afeta e-mail
+  transacional e se resolve sozinho.
 - O envio de uma transmissão responde com `finishes_at` (o instante estimado em
   que o último e-mail sai, ou `null`), `estimated: true` e, quando a audiência
   passa da capacidade disponível agora, um `warning` (`paced` ou

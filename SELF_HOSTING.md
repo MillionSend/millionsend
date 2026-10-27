@@ -188,7 +188,7 @@ carries `cloudwatch:GetMetricData`, for SES's own complaint rate, and a
 deployment set up before it updates the policy the same way. Without it, the
 regional pause estimates that rate from the instance's own count, leaving out
 mail to providers that never report complaints to SES, such as Gmail, and
-judges the estimate on the same 0.4% line. An https
+judges the estimate on the same 0.1% line. An https
 `APP_BASE_URL` additionally gets events pushed to your host; the queue works
 without any public URL.
 
@@ -1050,6 +1050,21 @@ content insights (never email bodies), and an instance-wide audit log.
   cloud, the last Stripe event, retention purges) and refreshes every active
   team's standing and the automatic trust & safety flags every 15 minutes.
   History is kept 90 days.
+- **Regional pause:** broadcasts in an SES region, never transactional mail,
+  are held before SES acts on the whole account there. A hard-bounce rate of
+  4% holds every team's; SES's complaint rate at its 0.1% review line holds
+  only those of the teams whose own complaint rate over the last 30 days, by
+  when the mail went out, is 0.1% or more, and lifts once the rate is back
+  under 0.08%. The operator is emailed when a region pauses or resumes, once
+  a day while SES's complaint rate in a region is 0.08% or more, and when SES
+  changes the account's enforcement status in a region; the mails name the
+  teams behind the most complaints, or the most hard bounces on a bounce
+  pause, and count the complaints about mail with no email row left. On
+  MillionSend Cloud, a complaint pause also holds each Free team whose mail
+  drew a complaint for review, and the Free fuse holds Free teams' mail to
+  providers that report complaints once their mail of the last 7 days, a
+  deleted team's included, draws 3, until the operator releases it on Trust
+  & safety; a self-hosted instance has no plans, so neither applies there.
 - **Operator actions and the team:** a suspended team's API keys still
   authenticate but every send answers `403 team_suspended` (SMTP `550`;
   under a review hold, mail through the API or SMTP is accepted and parked,

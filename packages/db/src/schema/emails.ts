@@ -84,8 +84,10 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
  * young sending domain, "destination" for mail to a destination new to the
  * team that the judge read as phishing, "media" for content the judge could
  * not read, "recipient" for mail from a shared inbox domain address, to
- * someone who never wrote to it, that the judge read as phishing. Never
- * shown to the team.
+ * someone who never wrote to it, that the judge read as phishing. "fuse"
+ * holds a Free team's mail to a provider that reports complaints while the
+ * Free fuse is tripped; the review list never releases it, and the drain only
+ * once the operator has released the fuse. Never shown to the team.
  */
 export const emailParkReasonEnum = pgEnum("email_park_reason", [
   "warmup",
@@ -94,6 +96,7 @@ export const emailParkReasonEnum = pgEnum("email_park_reason", [
   "destination",
   "media",
   "recipient",
+  "fuse",
 ]);
 
 /**
@@ -258,5 +261,40 @@ export const emailEvents = pgTable(
     index("email_events_data_unstripped_idx").on(t.occurredAt).where(isNotNull(t.data)),
     // Events-health: SES-originated rows by arrival time, and their latest one.
     index("email_events_sns_created_idx").on(t.createdAt).where(isNotNull(t.snsMessageId)),
+    // The breaker's per-team month and the Free fuse's week read SES's
+    // complaints and bounces only, never the deliveries around them.
+    index("email_events_feedback_created_idx")
+      .on(t.createdAt)
+      .where(sql`${t.type} in ('complained', 'bounced') and ${t.snsMessageId} is not null`),
+  ],
+);
+
+/**
+ * SES complaints and bounces whose message id matches no email row: mail
+ * whose row retention or a team's deletion removed, or mail sent outside the
+ * pipeline. Kept without recipients, only so the platform's own complaint
+ * accounting still sees them; idempotent on the SNS message id like
+ * email_events.
+ */
+export const sesUnmatchedEvents = pgTable(
+  "ses_unmatched_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    snsMessageId: text("sns_message_id"),
+    sesMessageId: text("ses_message_id").notNull(),
+    type: emailEventTypeEnum("type").notNull(),
+    bounceType: text("bounce_type"),
+    // The bounce's or the complaint's SES subtype: whether SES attempted the mail.
+    subType: text("sub_type"),
+    // The Free pool the send was tagged with, when its team was in one.
+    poolOwnerId: text("pool_owner_id"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ses_unmatched_events_sns_message_id_idx")
+      .on(t.snsMessageId)
+      .where(sql`${t.snsMessageId} is not null`),
+    index("ses_unmatched_events_created_idx").on(t.createdAt),
   ],
 );

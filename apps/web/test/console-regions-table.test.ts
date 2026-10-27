@@ -182,6 +182,7 @@ describe("the Overview's regions table", () => {
             paused: true,
             manualReason: null,
             pausedAt: new Date(),
+            heldTeams: null,
             reason: {
               metric: "bounce",
               rate: 0.052,
@@ -313,6 +314,7 @@ describe("the Broadcasts cell the Regions page shares", () => {
           paused: true,
           manualReason: null,
           pausedAt: new Date(),
+          heldTeams: null,
           reason: { metric: "complaint", source: "ses", rate: 0.0042, limit: 0.004 },
         },
       }),
@@ -324,7 +326,13 @@ describe("the Broadcasts cell the Regions page shares", () => {
     const held = cell(
       served({
         region: "sa-east-1",
-        breaker: { paused: true, manualReason: "incident", pausedAt: new Date(), reason: null },
+        breaker: {
+          paused: true,
+          manualReason: "incident",
+          pausedAt: new Date(),
+          reason: null,
+          heldTeams: null,
+        },
       }),
     );
     expect(tipOf(held)).toBe("Paused by the operator: incident\nTransactional mail keeps flowing.");
@@ -335,6 +343,7 @@ describe("the Broadcasts cell the Regions page shares", () => {
         paused: true,
         manualReason: null,
         pausedAt: new Date(),
+        heldTeams: null,
         reason: {
           metric: "complaint",
           source: "events",
@@ -356,6 +365,7 @@ describe("the Broadcasts cell the Regions page shares", () => {
         paused: true,
         manualReason: null,
         pausedAt: new Date(),
+        heldTeams: null,
         reason: {
           metric: "complaint",
           rate: 0.0009,
@@ -373,5 +383,40 @@ describe("the Broadcasts cell the Regions page shares", () => {
     expect(tipOf(cell(ours))).toBe(
       "Pausa automática: reclamações de 0,45% em 7 dias nos e-mails para provedores que repassam reclamações, acima do limite de 0,4%.\nO transacional segue saindo.",
     );
+  });
+
+  it("names the teams a complaint pause holds, the rest flowing", () => {
+    h.locale = "en";
+    const cell = (heldTeams: { id: string; name: string }[]) =>
+      renderToStaticMarkup(
+        createElement(BroadcastsCell, {
+          region: served({
+            region: "sa-east-1",
+            breaker: {
+              paused: true,
+              manualReason: null,
+              pausedAt: new Date(),
+              reason: { metric: "complaint", source: "ses", rate: 0.0012, limit: 0.001 },
+              heldTeams,
+            },
+          }),
+          complaintLine: 0.001,
+        }),
+      );
+    const two = cell([
+      { id: "t1", name: "Acme" },
+      { id: "t2", name: "Globex" },
+    ]);
+    expect(text(two)).toBe("paused · 2 teams");
+    expect(tipOf(two)).toBe(
+      "Automatic pause: complaints at 0.12% as SES measures them, above the 0.1% limit.\nBroadcasts held for Acme, Globex.\nTransactional mail keeps flowing.",
+    );
+    const none = cell([]);
+    expect(text(none)).toBe("paused · 0 teams");
+    expect(tipOf(none)).toContain("This pause holds no team's broadcasts.");
+    h.locale = "pt-BR";
+    const one = cell([{ id: "t1", name: "Acme" }]);
+    expect(text(one)).toBe("pausadas · 1 equipe");
+    expect(tipOf(one)).toContain("Transmissões em espera: Acme.\n");
   });
 });

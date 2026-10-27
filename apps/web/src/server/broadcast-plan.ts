@@ -23,6 +23,7 @@ import {
   type PlanInput,
   pacingHorizonDays,
   pausedRegions,
+  pauseHolds,
   planBulkWaves,
   planCaps,
   planDomainWarmup,
@@ -325,9 +326,10 @@ export async function sendingProgress(
 
 /**
  * The broadcasts among `rows` that are due or going out but wait on a hold
- * of their sender domain's region (the platform breaker or an operator's).
- * Customers see them as delayed and are never told why: a region's hold is
- * about the platform, not anything of theirs.
+ * of their sender domain's region (the platform breaker or an operator's)
+ * that holds the team's broadcasts. Customers see them as delayed and are
+ * never told why: a region's hold is about the platform, not anything of
+ * theirs.
  */
 export async function heldBroadcastIds(
   db: Db,
@@ -340,7 +342,9 @@ export async function heldBroadcastIds(
     (r) => r.status === "sending" || (r.status === "scheduled" && (r.scheduledAt ?? now) <= now),
   );
   if (due.length === 0) return held;
-  const paused = new Set((await pausedRegions(db)).map((p) => p.region));
+  const paused = new Set(
+    (await pausedRegions(db)).filter((p) => pauseHolds(p, teamId)).map((p) => p.region),
+  );
   if (paused.size === 0) return held;
   for (const row of due) {
     const sender = await verifySenderDomain(db, teamId, row.from);

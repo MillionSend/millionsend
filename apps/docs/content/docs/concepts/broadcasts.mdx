@@ -203,16 +203,23 @@ Gmail and Apple never report one, so their cell shows a dash.
   plan they count from the first email, judged together across all the Free
   teams you created, deleted ones included, and a pause holds every one of
   them.
-- If the platform's aggregate bounce or complaint rate in your sender's SES
-  region nears the line where SES acts on the account, broadcast sends in
-  that region are refused with
-  `403 broadcasts_paused` until the rate recovers. Transactional
-  email keeps flowing, and the pause clears on its own.
+- If the platform's aggregate bounce rate in your sender's SES region nears
+  the line where SES acts on the account, broadcast sends in that region are
+  refused with `403 broadcasts_paused` until the rate recovers. When it is
+  the complaint rate, only teams whose own complaint rate over the last 30
+  days reaches SES's 0.1% review line are refused; the pause refuses no
+  other team's broadcasts. Transactional email keeps flowing, and the pause
+  clears on its own. On MillionSend Cloud, each Free team whose mail drew a
+  complaint in the region is also held for review.
 
 See the [API reference](/api-reference) for all broadcast endpoints.
 
 ## Recent changes
 
+- A pause for the platform's complaint rate in an SES region refuses
+  broadcasts with `403 broadcasts_paused` only to the teams whose own
+  complaint rate over the last 30 days is at 0.1% or more; before, it
+  refused every team in the region.
 - On the Free plan, mail to providers that report complaints goes out to 10
   recipients at once, then 10 an hour, across all the Free teams you
   created. See [Pacing](#pacing).

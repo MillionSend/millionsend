@@ -35,7 +35,7 @@ export interface RegionSendControls extends SendQuotaControls {
   /** Rows a fan-out may admit into the share right now. */
   room(region?: string): number;
   bulkExhausted(region?: string): boolean;
-  paused(region?: string): boolean;
+  paused(region: string | undefined, teamId: string): boolean;
   /** Grants a walk up to `n` rows of the room and records the grant until the count sees the rows. */
   take(region: string | undefined, walkId: string, n: number): number;
   progress(walkId: string, emitted: number): void;
@@ -78,8 +78,11 @@ export function createRegionSendControls(opts: {
   reserve?: (() => Promise<number>) | undefined;
   /** Bulk sends and queued bulk rows per region; absent = no pacing counts (tests). */
   counts?: (() => Promise<Map<string, Pick<RegionBulkCounts, "sent24h" | "queued">>>) | undefined;
-  /** Regions whose broadcasts the breaker or an operator holds. */
-  paused?: (() => Promise<Set<string>>) | undefined;
+  /**
+   * Regions whose broadcasts the breaker or an operator holds, each with the
+   * teams it holds; null holds every team's.
+   */
+  paused?: (() => Promise<ReadonlyMap<string, ReadonlySet<string> | null>>) | undefined;
   /** Rate every bucket starts at until the first probe. */
   initialRate: number;
   /** Worker processes sharing the account: each bucket takes its share. */
@@ -95,7 +98,7 @@ export function createRegionSendControls(opts: {
   // Bulk stays closed until a count has succeeded once; without a counter
   // there is nothing to wait for.
   let countsOk = !opts.counts;
-  let pausedRegions = new Set<string>();
+  let pausedRegions: ReadonlyMap<string, ReadonlySet<string> | null> = new Map();
   let ticks = 0;
   const grants = new Map<string, Grant>();
   let folded = 0;
@@ -242,7 +245,11 @@ export function createRegionSendControls(opts: {
       if (!Number.isFinite(share)) return false;
       return bulkSent(c) >= share || c.gate.exhausted() || !countsOk;
     },
-    paused: (region) => pausedRegions.has(pick(region).key),
+    paused: (region, teamId) => {
+      // core pauseHolds, over a set.
+      const held = pausedRegions.get(pick(region).key);
+      return held !== undefined && (held === null || held.has(teamId));
+    },
     take: (region, walkId, n) => {
       const c = pick(region);
       // A walk taking again (a retry, a resume): its earlier grant keeps

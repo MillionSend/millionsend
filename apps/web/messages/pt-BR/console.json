@@ -150,6 +150,9 @@
       "quotaShort": "{quota} · taxa máxima {rate}/s",
       "broadcastsFlowing": "liberadas",
       "broadcastsPaused": "pausadas",
+      "broadcastsPausedTeams": "pausadas · {count, plural, one {# equipe} other {# equipes}}",
+      "pauseTeams": "Transmissões em espera: {teams}.",
+      "pauseNoTeams": "Esta pausa não segura as transmissões de nenhuma equipe.",
       "pauseWindow": "Pausa automática: {metric} de {rate} em {hours, select, 168 {7 dias} other {{hours}h}}, acima do limite de {limit}.",
       "pauseComplaints": "Pausa automática: reclamações de {rate} em {hours, select, 168 {7 dias} other {{hours}h}} nos e-mails para provedores que repassam reclamações, acima do limite de {limit}.",
       "pauseSes": "Pausa automática: reclamações de {rate} medidas pelo SES, acima do limite de {limit}.",
@@ -1010,6 +1013,14 @@
         "canceled": "{team} · {count, plural, one {# e-mail cancelado} other {# e-mails cancelados}}",
         "error": "Não foi possível: {message}"
       }
+    },
+    "freeFuse": {
+      "text": "Pausa do Free acionada <since></since>: {complaints, plural, one {# reclamação} other {# reclamações}} nos e-mails das equipes Free em uma semana. {parked, plural, =0 {Nenhum e-mail em espera por enquanto.} one {{parkedCount} e-mail para provedores que repassam reclamações está em espera.} other {{parkedCount} e-mails para provedores que repassam reclamações estão em espera.}}",
+      "action": "Liberar",
+      "title": "Liberar a pausa do Free?",
+      "lead": "{parked, plural, =0 {Os e-mails das equipes Free para provedores que repassam reclamações voltam a sair} one {O e-mail em espera sai pela fila, e os e-mails das equipes Free para provedores que repassam reclamações voltam a sair} other {Os {parkedCount} e-mails em espera saem pela fila, e os e-mails das equipes Free para provedores que repassam reclamações voltam a sair}}. A contagem recomeça com os e-mails enviados depois da liberação.",
+      "confirm": "Liberar",
+      "toast": "{count, plural, =0 {Pausa do Free liberada} one {Pausa do Free liberada: # e-mail vai sair} other {Pausa do Free liberada: # e-mails vão sair}}"
     },
     "limitRequests": {
       "title": "Pedidos de limite · {count}",

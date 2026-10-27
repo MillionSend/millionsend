@@ -217,9 +217,10 @@ export async function sendBroadcast(
   if (domain?.status !== "verified") {
     throw new Error(`broadcast ${broadcast.id}: sender domain ${fromDomain} is not verified`);
   }
-  // Platform breaker: a broadcast scheduled before its region was held waits
-  // it out like a not-yet-due one; the reconcile sweep keeps it alive.
-  if (await regionPause(db, domain.region)) {
+  // Platform breaker: a broadcast scheduled before its region held the
+  // team's broadcasts waits it out like a not-yet-due one; the reconcile
+  // sweep keeps it alive.
+  if (await regionPause(db, domain.region, broadcast.teamId)) {
     // Said once per broadcast, however many 15-minute waits the hold lasts.
     if (
       deps.mailer &&

@@ -132,8 +132,10 @@ remaining deltas are deliberate and loud:
   enforcement thresholds, and broadcast sends also while the team's sending
   is paused pending review. Broadcast sends alone can also return
   `403 broadcasts_paused` while the platform's aggregate rate in the sender's
-  SES region is recovering; it is per region, leaves transactional email
-  untouched, and clears on its own.
+  SES region is recovering: a bounce rate refuses every team in the region, a
+  complaint rate only the teams whose own complaint rate over the last 30
+  days is at 0.1% or more. It leaves transactional email untouched, and
+  clears on its own.
 - A broadcast send answers with `finishes_at` (the estimated instant the last
   email goes out, or `null`), `estimated: true` and, when the audience exceeds
   the capacity available now, a `warning` (`paced` or `queued_behind`, with

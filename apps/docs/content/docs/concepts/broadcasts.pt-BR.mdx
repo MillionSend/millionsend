@@ -218,17 +218,25 @@ mostra um traço.
   desses envios. No plano Free, elas contam desde o primeiro e-mail e são
   julgadas juntas em todas as equipes Free que você criou, inclusive as
   excluídas, e uma pausa vale para todas elas.
-- Se a taxa agregada de bounce ou de reclamações da plataforma na região SES do
-  seu remetente se aproxima do limite em que o SES age sobre a conta, envios de
-  transmissão nessa região são recusados com
-  `403 broadcasts_paused` até a taxa se recuperar. O
-  e-mail transacional continua saindo, e a pausa termina sozinha.
+- Se a taxa agregada de bounce da plataforma na região SES do seu remetente
+  se aproxima do limite em que o SES age sobre a conta, envios de transmissão
+  nessa região são recusados com `403 broadcasts_paused` até a taxa se
+  recuperar. Quando é a taxa de reclamações, só as equipes cuja própria taxa
+  de reclamações nos últimos 30 dias chega à linha de revisão do SES, de
+  0,1%, têm o envio recusado; a pausa não recusa as transmissões de nenhuma
+  outra equipe. O e-mail transacional continua saindo, e a pausa termina
+  sozinha. No MillionSend Cloud, cada equipe Free cujos e-mails receberam uma
+  reclamação na região também fica em pausa para revisão.
 
 Veja a [referência da API](/pt-BR/api-reference) para todos os endpoints de
 transmissões.
 
 ## Mudanças recentes
 
+- Uma pausa pela taxa de reclamações da plataforma em uma região do SES
+  recusa transmissões com `403 broadcasts_paused` só para as equipes cuja
+  própria taxa de reclamações nos últimos 30 dias é de 0,1% ou mais; antes,
+  recusava todas as equipes da região.
 - No plano Free, os e-mails para provedores que informam reclamações saem
   para 10 destinatários de uma vez e depois 10 por hora, somando todas as
   equipes Free que você criou. Veja [Ritmo de envio](#ritmo-de-envio).

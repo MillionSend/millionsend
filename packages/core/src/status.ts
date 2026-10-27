@@ -2,7 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { type SQL, sql } from "drizzle-orm";
 import { firstRow, resultRows } from "./driver-result.js";
-import { complaintFilter } from "./platform-breaker.js";
+import { attemptedComplaintFilter } from "./platform-breaker.js";
 import {
   type EmailWebhookEvent,
   enqueueEmailWebhookEvents,
@@ -23,9 +23,9 @@ const events = schema.emailEvents;
  * Over emails: a recipient who had the email complained about it. SES also
  * raises a complaint about mail it never attempted (sesAttempted), which
  * lifts the status to complained all the same, so the status alone is not
- * enough: the email needs a complaint complaintFilter counts.
+ * enough: the email needs a complaint attemptedComplaintFilter counts.
  */
-export const complainedEmail = sql`(${emails.latestStatus} = 'complained' and exists (select 1 from ${events} where ${events.emailId} = ${emails.id} and ${complaintFilter}))`;
+export const complainedEmail = sql`(${emails.latestStatus} = 'complained' and exists (select 1 from ${events} where ${events.emailId} = ${emails.id} and ${attemptedComplaintFilter}))`;
 
 /**
  * Over emails: the email reached the inbox. An opened or clicked one was

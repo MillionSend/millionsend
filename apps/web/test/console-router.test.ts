@@ -1040,11 +1040,22 @@ describe("console.regions during a region hold", () => {
       paused: true,
       manualReason: null,
       reason,
+      heldTeams: null,
     });
 
     const { items } = await member().broadcasts.list({});
     expect(items.find((b) => b.id === broadcast.id)?.held).toBe(true);
     expect(JSON.stringify(items)).not.toMatch(/complaint|\b0\.0009\b|\b0\.09\b|review/i);
+
+    // Scoped to the teams drawing the complaints: the operator reads their
+    // names, a deleted one dropping out.
+    await db
+      .update(schema.regionBreakers)
+      .set({ heldTeams: [teamId, "00000000-0000-4000-8000-000000000000"] });
+    const scoped = await operator().console.regions.list();
+    expect(scoped.served.find((r) => r.region === REGION)?.breaker?.heldTeams).toEqual([
+      { id: teamId, name: "acme" },
+    ]);
 
     await db.delete(schema.regionBreakers);
     await db.delete(schema.broadcasts).where(eq(schema.broadcasts.id, broadcast.id));
@@ -1062,7 +1073,7 @@ describe("console.regions and SES's own complaint rate", () => {
     expect((await operator().console.regions.list()).complaintLines).toEqual({
       sesReview: 0.001,
       sesPause: 0.005,
-      breaker: 0.004,
+      breaker: 0.001,
     });
 
     await db

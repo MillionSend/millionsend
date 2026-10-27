@@ -8,6 +8,7 @@ import {
   FREE_BURST,
   FREE_BURST_REFILL_MS,
   hashRecipient,
+  releaseFreeFuse,
   SYSTEM_MAIL_TAG,
   sealAttachments,
   sendSystemMail,
@@ -1912,10 +1913,20 @@ it("a broadcast row parks on the bulk share or a held region; a transactional ro
     contactId: heldContact,
     to: ["share-held@example.com"],
   });
-  const paused = { ...share, bulkExhausted: () => false, paused: () => true };
+  // The region's pause holds this team's broadcasts.
+  const paused = {
+    ...share,
+    bulkExhausted: () => false,
+    paused: (_region: string | undefined, team: string) => team === teamId,
+  };
   expect(await sendEmail(db, { keyring, ses, sesQuota: paused }, { emailId: held })).toBe("parked");
 
-  const open = { ...share, bulkExhausted: () => false };
+  // A pause that holds only other teams' broadcasts lets this team's go.
+  const open = {
+    ...share,
+    bulkExhausted: () => false,
+    paused: (_region: string | undefined, team: string) => team !== teamId,
+  };
   const flowingContact = await insertContact("share-flow@example.com");
   const flowing = await insertEmail({
     broadcastId: bc?.id,
@@ -1944,6 +1955,50 @@ it("a broadcast row parks on the bulk share or a held region; a transactional ro
     await sendEmail(db, { keyring, ses, sesQuota: full }, { emailId: await insertEmail() }),
   ).toBe("parked");
   expect(parked).toEqual(["us-east-1"]);
+});
+
+it("parks a Free team's mail to a provider that reports complaints while the Free fuse is tripped, on Cloud only", async () => {
+  const fuse = (trippedAt: Date | null) =>
+    db
+      .insert(schema.instanceSettings)
+      .values({ id: 1, freeFuseTrippedAt: trippedAt, freeFuseComplaints: 3 })
+      .onConflictDoUpdate({
+        target: schema.instanceSettings.id,
+        set: { freeFuseTrippedAt: trippedAt },
+      });
+  await fuse(new Date());
+  const sent: string[] = [];
+  const ses: SesSender = {
+    async sendRaw(params) {
+      sent.push(params.emailId);
+      return { messageId: `fuse-${params.emailId}` };
+    },
+  };
+  const cloud: SendDeps = { keyring, ses, isCloud: true };
+  const outlook = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, cloud, { emailId: outlook })).toBe("parked");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, outlook));
+  expect(row).toMatchObject({ latestStatus: "queued_quota", parkReason: "fuse" });
+  // A reporting provider in Bcc is enough.
+  const bcc = await insertEmail({ to: ["r@gmail.com"], bcc: ["s@yahoo.com"] });
+  expect(await sendEmail(db, cloud, { emailId: bcc })).toBe("parked");
+  // Gmail and iCloud never report a complaint; account mail is the platform's own.
+  const gmail = await insertEmail({ to: ["r@gmail.com"], cc: ["s@icloud.com"] });
+  expect(await sendEmail(db, cloud, { emailId: gmail })).toBe("sent");
+  const account = await insertEmail({
+    to: ["r@outlook.com"],
+    tags: { [SYSTEM_MAIL_TAG]: "password_reset" },
+  });
+  expect(await sendEmail(db, cloud, { emailId: account })).toBe("sent");
+  // Self-hosted there is no fuse, and on Cloud a paid team's mail never waits on it.
+  const selfHosted = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: selfHosted })).toBe("sent");
+  await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
+  const paid = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, cloud, { emailId: paid })).toBe("sent");
+  await db.update(schema.teams).set({ plan: "free" }).where(eq(schema.teams.id, teamId));
+  await fuse(null);
+  expect(sent).toEqual([gmail, account, selfHosted, paid]);
 });
 
 it("a row of a canceled broadcast is canceled, not sent", async () => {
@@ -2334,5 +2389,43 @@ describe("a Free pool's burst allowance", () => {
       ...Array<string>(WAITING).fill("deferred"),
     ]);
     expect(due.flatMap((a) => a.rescheduled)).toEqual(paced(tomorrow));
+  });
+
+  it("books anew the rows the Free fuse held at their slots, so its release goes out as a fresh burst", async () => {
+    const team = await pooledTeam("burst-fuse", "u-burst-fuse");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`] }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // The fuse trips: each waiting row reaches its slot and parks on it.
+    const tripped = { freeFuseTrippedAt: NOW, freeFuseComplaints: 3 };
+    await db
+      .insert(schema.instanceSettings)
+      .values({ id: 1, ...tripped })
+      .onConflictDoUpdate({ target: schema.instanceSettings.id, set: tripped });
+    const held = ids.slice(FREE_BURST);
+    for (const [i, id] of held.entries()) {
+      vi.setSystemTime(at(i + 1));
+      expect((await attempt(id, { isCloud: true })).outcome).toBe("parked");
+    }
+
+    const release = new Date(at(held.length).getTime() + 2 * 3_600_000);
+    vi.setSystemTime(release);
+    expect(await releaseFreeFuse(db, release)).toEqual({ complaints: 3, emails: held.length });
+    const released: string[] = [];
+    await drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async (batch) => {
+        released.push(...batch.map((job) => job.emailId).filter((id) => held.includes(id)));
+      },
+    });
+    expect(released).toHaveLength(held.length);
+    const again = await attemptAll(released, { isCloud: true });
+    expect(outcomes(again)).toEqual([
+      ...Array<string>(held.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(again.flatMap((a) => a.rescheduled)).toEqual(paced(release));
   });
 });

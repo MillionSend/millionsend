@@ -1,4 +1,14 @@
-import { DAY_MS, dailyCeiling, SYSTEM_MAIL_TAG, teamRung, utcDay } from "@millionsend/core";
+import { randomBytes } from "node:crypto";
+import {
+  DAY_MS,
+  dailyCeiling,
+  EnvKeyring,
+  encryptEmailBody,
+  releaseFreeFuse,
+  SYSTEM_MAIL_TAG,
+  teamRung,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
@@ -16,6 +26,7 @@ import {
   reconcileStalledSends,
   stripExpiredEventPayloads,
 } from "../src/handlers/cron.js";
+import { sendEmail } from "../src/handlers/send-email.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -1530,6 +1541,35 @@ it("drain splits a run's slice round-robin between the broadcasts still waiting,
   expect(enqueued).toEqual([first.rows[3], second.rows[3], third.rows[0]]);
 });
 
+it("drain gives no slice to a broadcast whose parked rows all wait for an operator or the tripped Free fuse", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, freeFuseTrippedAt: new Date() });
+  const domainId = await seedRegionDomain(teamId);
+  const paced = await seedPacedBroadcast(teamId, domainId, 6, new Date("2026-08-13T01:00:00Z"));
+  for (const [i, parkReason] of (["fuse", "screening"] as const).entries()) {
+    const held = await seedPacedBroadcast(
+      teamId,
+      domainId,
+      3,
+      new Date(`2026-08-13T0${2 + i}:00:00Z`),
+    );
+    await db
+      .update(schema.emails)
+      .set({ parkReason })
+      .where(eq(schema.emails.broadcastId, held.id));
+  }
+  const enqueued: string[] = [];
+  expect(
+    await drainQuotaParked(db, {
+      isCloud: false,
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+      sesQuota: { regions: ["us-east-1"], exhausted: () => false, room: () => 6 },
+    }),
+  ).toEqual({ drained: 6, stillParked: 6 });
+  expect(enqueued).toEqual(paced.rows);
+});
+
 it("drain moves nothing of a broadcast in a region with no room, at its total, or held", async () => {
   const domainId = await seedRegionDomain(teamId);
   const bulk = await seedPacedBroadcast(teamId, domainId, 2, new Date("2026-08-13T01:00:00Z"));
@@ -1549,17 +1589,105 @@ it("drain moves nothing of a broadcast in a region with no room, at its total, o
       sesQuota: { regions: ["us-east-1"], exhausted: () => true, room: () => 100 },
     }),
   ).toEqual({ drained: 0, stillParked: 2 });
+  // A pause that holds this team's broadcasts keeps them; one that holds
+  // only other teams' lets them move.
+  const pausedFor = (held: string) => ({
+    regions: ["us-east-1"],
+    exhausted: () => false,
+    room: () => 100,
+    paused: (_region: string, team: string) => team === held,
+  });
+  expect(await drainQuotaParked(db, { ...deps, sesQuota: pausedFor(teamId) })).toEqual({
+    drained: 0,
+    stillParked: 2,
+  });
+  expect(await drainQuotaParked(db, { ...deps, sesQuota: pausedFor("another-team") })).toEqual({
+    drained: 2,
+    stillParked: 0,
+  });
+});
+
+it("drain leaves what the Free fuse holds until the operator releases the fuse", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, freeFuseTrippedAt: new Date() });
+  const fused = await insertParked(new Date("2026-08-13T01:00:00Z"), "fused", {
+    parkReason: "fuse",
+  });
+  const plain = await insertParked(new Date("2026-08-13T02:00:00Z"));
+  const drain = () => drainQuotaParked(db, { isCloud: false, enqueueSends: async () => {} });
+  expect(await drain()).toEqual({ drained: 1, stillParked: 1 });
+  expect(await statusOf(fused)).toBe("queued_quota");
+  expect(await statusOf(plain)).toBe("queued");
+  expect(await releaseFreeFuse(db)).toMatchObject({ emails: 1 });
+  expect(await drain()).toEqual({ drained: 1, stillParked: 0 });
+  expect(await statusOf(fused)).toBe("queued");
+});
+
+it("drain sends mail a send parked on the Free fuse as the operator released it", async () => {
+  const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "fused.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  await db
+    .insert(schema.instanceSettings)
+    .values({ id: 1, freeFuseTrippedAt: new Date(), freeFuseComplaints: 3 });
+  const body = await encryptEmailBody({ html: "<b>hi</b>", text: "hi" }, keyring);
+  const emailId = await insertParked(new Date(), "fused", {
+    latestStatus: "queued",
+    domainId: domain?.id,
+    from: "a@fused.example",
+    to: ["r@outlook.com"],
+    bodyCiphertext: body.ciphertext,
+    bodyIv: body.iv,
+    bodyWrappedDek: body.wrappedDek,
+    bodyKeyVersion: body.keyVersion,
+  });
+  const sent: string[] = [];
+  const deps = {
+    keyring,
+    isCloud: true,
+    ses: {
+      async sendRaw(params: { emailId: string }) {
+        sent.push(params.emailId);
+        return { messageId: `ses-${params.emailId}` };
+      },
+    },
+  };
+  // The send reads the fuse as tripped; the operator's release commits before
+  // its park, the first transaction the send opens.
+  let released: unknown;
+  const racing = new Proxy(db, {
+    get(target, prop) {
+      if (prop === "transaction" && released === undefined) {
+        return async (...args: Parameters<Db["transaction"]>) => {
+          released = await releaseFreeFuse(db);
+          return target.transaction(...args);
+        };
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  expect(await sendEmail(racing, deps, { emailId })).toBe("parked");
+  expect(released).toEqual({ complaints: 3, emails: 0 });
+  const enqueued: string[] = [];
   expect(
     await drainQuotaParked(db, {
-      ...deps,
-      sesQuota: {
-        regions: ["us-east-1"],
-        exhausted: () => false,
-        room: () => 100,
-        paused: () => true,
+      isCloud: true,
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
       },
     }),
-  ).toEqual({ drained: 0, stillParked: 2 });
+  ).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([emailId]);
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  expect(sent).toEqual([emailId]);
 });
 
 it("drain still releases the plan-parked rows of a broadcast that already reads sent", async () => {

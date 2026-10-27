@@ -161,14 +161,32 @@ export async function processSesEvent(
       );
   }
   // Unknown message id: not ours, or its row is gone (purged, or deleted with
-  // its team). Nothing is acted on but the Free pool the send was tagged
-  // with, whose record outlives the team.
+  // its team): never acted on. Its complaints and bounces are recorded, once
+  // per SNS message, for the platform's own accounting of the account's
+  // rates, and counted to the Free pool the send was tagged with, whose
+  // record outlives the team. Feedback naming only the mailbox simulator is
+  // a test and is neither.
   if (!email) {
-    // ponytail: no email_events row gates this count, so an SNS redelivery
-    // after the job finished adds it twice; a unique record of the SNS
-    // message id would make it exactly once.
-    if (event.poolOwnerId) {
-      await bumpFreePoolUsage(db, { ownerId: event.poolOwnerId, day, counts });
+    if ((eventType === "complained" || eventType === "bounced") && rated) {
+      await db.transaction(async (tx) => {
+        const txDb = tx as unknown as Db;
+        const [recorded] = await txDb
+          .insert(schema.sesUnmatchedEvents)
+          .values({
+            snsMessageId: opts.snsMessageId ?? null,
+            sesMessageId: event.sesMessageId,
+            type: eventType,
+            bounceType: event.bounce?.bounceType ?? null,
+            subType: event.bounce?.bounceSubType ?? event.complaint?.complaintSubType ?? null,
+            poolOwnerId: event.poolOwnerId ?? null,
+            occurredAt: new Date(event.occurredAt),
+          })
+          .onConflictDoNothing()
+          .returning({ id: schema.sesUnmatchedEvents.id });
+        if (recorded && event.poolOwnerId) {
+          await bumpFreePoolUsage(txDb, { ownerId: event.poolOwnerId, day, counts });
+        }
+      });
     }
     return;
   }

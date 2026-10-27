@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   broadcastSendSpacingMs,
   decryptEmailBody,
@@ -1407,6 +1407,28 @@ it("defers the fan-out while the sender domain's region is held by the platform 
     .from(schema.broadcasts)
     .where(eq(schema.broadcasts.id, broadcastId));
   expect(row?.status).toBe("scheduled");
+  await db.delete(schema.regionBreakers);
+});
+
+it("fans out under a pause that holds only other teams' broadcasts, and waits under one that holds its team's", async () => {
+  await db
+    .insert(schema.regionBreakers)
+    .values({ region: "us-east-1", paused: true, heldTeams: [randomUUID()] });
+  const flowing = await insertBroadcast();
+  const { deps, enqueued } = makeDeps();
+  expect(await sendBroadcast(db, deps, { broadcastId: flowing })).toBe("sent");
+  expect(enqueued).toHaveLength(2);
+  await db.update(schema.regionBreakers).set({ heldTeams: [teamId] });
+  const held = await insertBroadcast();
+  const rescheduled: Date[] = [];
+  const waiting = makeDeps({
+    reschedule: async (_id, at) => {
+      rescheduled.push(at);
+    },
+  });
+  expect(await sendBroadcast(db, waiting.deps, { broadcastId: held })).toBe("deferred");
+  expect(rescheduled).toHaveLength(1);
+  expect(waiting.enqueued).toEqual([]);
   await db.delete(schema.regionBreakers);
 });
 

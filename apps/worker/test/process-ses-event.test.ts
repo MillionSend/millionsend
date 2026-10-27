@@ -3,7 +3,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
-import { and, eq } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
 
@@ -436,8 +436,20 @@ describe("feedback from the mailbox simulator and Free pools", () => {
       { eventType: "Delivery", sesMessageId: "mid-gone-delivery" },
     ];
     for (const event of events) {
-      await processSesEvent(db, makeEvent({ ...tagged, ...event }));
+      await processSesEvent(db, makeEvent({ ...tagged, ...event }), {
+        snsMessageId: `sns-${event.sesMessageId}`,
+      });
     }
+    // SNS delivers at least once: a repeat counts nothing more.
+    await processSesEvent(db, makeEvent({ ...tagged, ...events[0] }), {
+      snsMessageId: "sns-mid-gone-complaint",
+    });
+    expect(
+      await db
+        .select({ ses: schema.sesUnmatchedEvents.sesMessageId })
+        .from(schema.sesUnmatchedEvents)
+        .where(eq(schema.sesUnmatchedEvents.poolOwnerId, owner)),
+    ).toHaveLength(4);
     expect(
       await db.select().from(schema.freePoolUsage).where(eq(schema.freePoolUsage.ownerId, owner)),
     ).toEqual([
@@ -493,6 +505,13 @@ describe("feedback from the mailbox simulator and Free pools", () => {
         .from(schema.freePoolUsage)
         .where(eq(schema.freePoolUsage.day, at.slice(0, 10))),
     ).toEqual([]);
+    // The simulator's feedback is a test: not even recorded as unmatched.
+    expect(
+      await db
+        .select({ ses: schema.sesUnmatchedEvents.sesMessageId })
+        .from(schema.sesUnmatchedEvents)
+        .where(like(schema.sesUnmatchedEvents.sesMessageId, "mid-unknown-%")),
+    ).toEqual([{ ses: "mid-unknown-untagged" }]);
   });
 });
 
@@ -516,6 +535,71 @@ it("unknown sesMessageId is ignored entirely", async () => {
   await processSesEvent(db, makeEvent({ sesMessageId: "never-recorded" }));
   const after = await db.select().from(schema.emailEvents);
   expect(after.length).toBe(before.length);
+});
+
+it("records an unknown sesMessageId's complaint and bounce once each, for the platform's rates only", async () => {
+  const complaint = makeEvent({
+    eventType: "Complaint",
+    sesMessageId: "gone-complaint",
+    complaint: { recipients: ["unknown-id@example.com"] },
+    data: { eventType: "Complaint", complaint: {} },
+  });
+  await processSesEvent(db, complaint, { snsMessageId: "sns-gone-complaint" });
+  // SNS delivers at least once.
+  await processSesEvent(db, complaint, { snsMessageId: "sns-gone-complaint" });
+  await processSesEvent(
+    db,
+    makeEvent({
+      eventType: "Bounce",
+      sesMessageId: "gone-bounce",
+      bounce: {
+        bounceType: "Permanent",
+        bounceSubType: "OnAccountSuppressionList",
+        recipients: ["unknown-id@example.com"],
+      },
+    }),
+    { snsMessageId: "sns-gone-bounce" },
+  );
+  // A delivery about mail we no longer know carries nothing to count.
+  await processSesEvent(db, makeEvent({ sesMessageId: "gone-delivery" }), {
+    snsMessageId: "sns-gone-delivery",
+  });
+  const rows = await db
+    .select({
+      sns: schema.sesUnmatchedEvents.snsMessageId,
+      ses: schema.sesUnmatchedEvents.sesMessageId,
+      type: schema.sesUnmatchedEvents.type,
+      bounceType: schema.sesUnmatchedEvents.bounceType,
+      subType: schema.sesUnmatchedEvents.subType,
+      occurredAt: schema.sesUnmatchedEvents.occurredAt,
+    })
+    .from(schema.sesUnmatchedEvents)
+    .where(like(schema.sesUnmatchedEvents.sesMessageId, "gone-%"));
+  expect(rows.sort((a, b) => a.ses.localeCompare(b.ses))).toEqual([
+    {
+      sns: "sns-gone-bounce",
+      ses: "gone-bounce",
+      type: "bounced",
+      bounceType: "Permanent",
+      subType: "OnAccountSuppressionList",
+      occurredAt: new Date("2026-08-14T12:00:00.000Z"),
+    },
+    {
+      sns: "sns-gone-complaint",
+      ses: "gone-complaint",
+      type: "complained",
+      bounceType: null,
+      subType: null,
+      occurredAt: new Date("2026-08-14T12:00:00.000Z"),
+    },
+  ]);
+  // Nothing about any team moved.
+  expect(
+    await db
+      .select()
+      .from(schema.suppressions)
+      .where(eq(schema.suppressions.email, "unknown-id@example.com")),
+  ).toEqual([]);
 });
 
 it("joins an early SES event through the server-owned email tag", async () => {

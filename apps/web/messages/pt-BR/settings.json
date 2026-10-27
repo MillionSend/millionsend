@@ -474,6 +474,7 @@
       "region_breaker_opened": "Pausou transmissões na região",
       "region_breaker_closed": "Retomou transmissões na região",
       "region_quota_requested": "Solicitou aumento de cota do SES",
+      "free_fuse_released": "Liberou a pausa do Free",
       "instance_monitor_settings_updated": "Atualizou configurações de monitoramento",
       "instance_reserve_updated": "Alterou a reserva transacional",
       "monitor_override_set": "Ativou a amostragem total do monitor",
