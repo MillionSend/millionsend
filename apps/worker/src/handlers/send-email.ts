@@ -16,6 +16,7 @@ import {
   enqueueWebhookDeliveries,
   evaluateEmailInsights,
   extractAddrSpec,
+  FREE_BURST_WINDOW_MS,
   fetchTeamQuota,
   fetchTeamStanding,
   findSuppressed,
@@ -425,8 +426,11 @@ async function cancelQueuedEmail(db: Db, email: { id: string; teamId: string }):
  * When an email may go under its Free pool's burst allowance, counted in its
  * distinct recipients that can report a complaint, Bcc included. Null when
  * its team is in no Free pool or no recipient can report one. The slot is
- * booked once and kept on the row, under the row's lock: a wake-up, or a
- * second lane on the same row, reads it back instead of booking again.
+ * kept on the row and booked under the row's lock: a wake-up, or a second
+ * lane on the same row, reads it back instead of booking again. A slot more
+ * than a burst window old is spent, and the row books anew: by then the
+ * allowance has refilled for later mail, so a row held past its slot (parked,
+ * or rescheduled) would otherwise go out on top of a full burst.
  */
 async function freeBurstSlot(
   db: Db,
@@ -443,7 +447,8 @@ async function freeBurstSlot(
   const quota = await fetchTeamQuota(db, email.teamId, true);
   const ownerId = quota?.kind === "day" ? quota.pool?.ownerId : undefined;
   if (!ownerId) return null;
-  if (email.freeBurstAt) return email.freeBurstAt;
+  const spentBefore = Date.now() - FREE_BURST_WINDOW_MS;
+  if (email.freeBurstAt && email.freeBurstAt.getTime() > spentBefore) return email.freeBurstAt;
   const e = schema.emails;
   return db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
@@ -453,7 +458,7 @@ async function freeBurstSlot(
       .where(and(eq(e.id, email.id), eq(e.latestStatus, "queued"), isNull(e.sentAt)))
       .for("update");
     if (!row) return null;
-    if (row.at) return row.at;
+    if (row.at && row.at.getTime() > spentBefore) return row.at;
     const at = await book(txDb, ownerId, n, new Date());
     await txDb.update(e).set({ freeBurstAt: at }).where(eq(e.id, email.id));
     return at;

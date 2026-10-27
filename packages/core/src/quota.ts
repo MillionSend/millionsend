@@ -3,8 +3,8 @@ import { schema } from "@millionsend/db";
 import { eq, sql } from "drizzle-orm";
 import { firstRow } from "./driver-result.js";
 import {
-  FREE_BURST,
   FREE_BURST_REFILL_MS,
+  FREE_BURST_WINDOW_MS,
   freePoolOwner,
   OVERAGE_HARD_CAP,
   QUOTA_TOLERANCE,
@@ -434,7 +434,7 @@ export async function bookFreeBurst(db: Db, ownerId: string, n: number, now: Dat
     })
     .returning({ tat: b.tat });
   if (!row) throw new Error("free burst booking returned no row");
-  return new Date(Math.max(now.getTime(), row.tat.getTime() - FREE_BURST * FREE_BURST_REFILL_MS));
+  return new Date(Math.max(now.getTime(), row.tat.getTime() - FREE_BURST_WINDOW_MS));
 }
 
 /** Sends accepted so far, and how many past the included volume the meter already knows about. */

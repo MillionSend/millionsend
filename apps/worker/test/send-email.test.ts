@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
   acceptEmail,
   bookFreeBurst,
+  DAY_MS,
   EnvKeyring,
   encryptEmailBody,
   FREE_BURST,
@@ -18,8 +19,9 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { drainQuotaParked } from "../src/handlers/cron.js";
 import {
   createTokenBucket,
   type SendDeps,
@@ -2060,7 +2062,8 @@ it("adds a Free team's sends to its pool beside its own counters; simulator-only
 
 describe("a Free pool's burst allowance", () => {
   const NOW = new Date("2026-09-03T12:00:00Z");
-  const at = (refills: number) => new Date(NOW.getTime() + refills * FREE_BURST_REFILL_MS);
+  const at = (refills: number, from = NOW) =>
+    new Date(from.getTime() + refills * FREE_BURST_REFILL_MS);
   beforeEach(() => {
     vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   });
@@ -2208,5 +2211,73 @@ describe("a Free pool's burst allowance", () => {
     expect(due.outcome).toBe("sent");
     expect(due.sends).toHaveLength(1);
     expect(await tatOf("u-burst-wake")).toEqual(tat);
+  });
+
+  /** One attempt per row, in order, all at the current instant. */
+  const attemptAll = async (ids: readonly string[], over: Partial<SendDeps> = {}) => {
+    const results = [];
+    for (const id of ids) results.push(await attempt(id, over));
+    return results;
+  };
+  const outcomes = (results: { outcome: string }[]) => results.map((r) => r.outcome);
+  const WAITING = 5;
+  /** The slots of the WAITING rows past a fresh burst at `from`: one refill apart. */
+  const paced = (from: Date) => Array.from({ length: WAITING }, (_, i) => at(i + 1, from));
+
+  it("books anew a row parked past its slot: the drain's release goes out as a fresh burst, not all at once", async () => {
+    const team = await pooledTeam("burst-park", "u-burst-park");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`] }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // Each held row wakes at its slot to find SES out of sends: parked, its slot kept.
+    const held = ids.slice(FREE_BURST);
+    vi.setSystemTime(at(held.length));
+    const sesQuota = { exhausted: () => true, refresh: async () => true };
+    expect(outcomes(await attemptAll(held, { sesQuota }))).toEqual(
+      Array<string>(held.length).fill("parked"),
+    );
+
+    const release = new Date(at(held.length).getTime() + 2 * 3_600_000);
+    vi.setSystemTime(release);
+    const released: string[] = [];
+    await drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async (batch) => {
+        released.push(...batch.map((job) => job.emailId).filter((id) => held.includes(id)));
+      },
+    });
+    expect(released).toHaveLength(held.length);
+    const again = await attemptAll(released);
+    expect(outcomes(again)).toEqual([
+      ...Array<string>(held.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(again.flatMap((a) => a.rescheduled)).toEqual(paced(release));
+  });
+
+  it("books anew a row rescheduled past its slot, when its new time comes", async () => {
+    const team = await pooledTeam("burst-moved", "u-burst-moved");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`], scheduledAt: NOW }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // PATCH /emails/{id} moves the waiting rows to tomorrow; each keeps its slot from today.
+    const tomorrow = new Date(NOW.getTime() + DAY_MS);
+    const moved = ids.slice(FREE_BURST);
+    await db
+      .update(schema.emails)
+      .set({ scheduledAt: tomorrow })
+      .where(inArray(schema.emails.id, moved));
+
+    vi.setSystemTime(tomorrow);
+    const due = await attemptAll(moved);
+    expect(outcomes(due)).toEqual([
+      ...Array<string>(moved.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(due.flatMap((a) => a.rescheduled)).toEqual(paced(tomorrow));
   });
 });

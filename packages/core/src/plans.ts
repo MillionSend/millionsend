@@ -202,6 +202,8 @@ export const QUOTA_TOLERANCE = 0.5;
  */
 export const FREE_BURST = 10;
 export const FREE_BURST_REFILL_MS = 6 * 60_000;
+/** How long a spent allowance takes to refill to FREE_BURST: its burst window. */
+export const FREE_BURST_WINDOW_MS = FREE_BURST * FREE_BURST_REFILL_MS;
 
 /** The billing columns a quota is derived from. */
 export interface QuotaTeamRow {

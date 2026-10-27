@@ -623,6 +623,7 @@ export {
   effectivePlan,
   FREE_BURST,
   FREE_BURST_REFILL_MS,
+  FREE_BURST_WINDOW_MS,
   formatVolume,
   freePoolOwner,
   isPlanRungKey,
