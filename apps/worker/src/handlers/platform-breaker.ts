@@ -113,6 +113,27 @@ export async function runPlatformBreaker(
     : [];
   const decisions = await evaluateRegionBreakers(db, { now, defaultRegion, isCloud });
   const changed = await applyRegionBreakers(db, decisions, now);
+  // Held before any mail: a pause notice points to the review-hold mail only
+  // when one follows.
+  const reviewHeld = new Map<string, string[]>();
+  for (const d of decisions) {
+    if (!d.trip || !d.reviewTeams?.length) continue;
+    const held = await holdComplaintTeams(db, d.reviewTeams, now);
+    if (held.length === 0) continue;
+    for (const teamId of held) {
+      // The hold already refuses every send; the tenant is a second lock, so
+      // a failed hand-off is logged rather than failing the committed hold.
+      try {
+        await deps.syncTenant?.(teamId);
+      } catch (err) {
+        console.error(`platform.breaker: SES tenant hand-off for held team ${teamId} failed`, err);
+      }
+    }
+    reviewHeld.set(
+      d.region,
+      d.reviewTeams.filter((s) => held.includes(s.teamId)).map((s) => s.teamName),
+    );
+  }
   const base = deps.appBaseUrl ?? "";
   const url = `${base}/console/regions`;
   const safetyUrl = `${base}/console/safety`;
@@ -163,6 +184,7 @@ export async function runPlatformBreaker(
         contributors: teams(d.contributors),
         heldTeams: d.heldTeams?.map((s) => s.teamName) ?? null,
         isCloud,
+        reviewHeld: reviewHeld.has(region),
         unmatched,
         url,
       }),
@@ -194,29 +216,9 @@ export async function runPlatformBreaker(
     );
     await mail(change.region, "region.ses_enforcement", sesEnforcementMail({ ...change, url }));
   }
-  for (const d of decisions) {
-    if (!d.trip || !d.reviewTeams?.length) continue;
-    const held = await holdComplaintTeams(db, d.reviewTeams, now);
-    if (held.length === 0) continue;
-    for (const teamId of held) {
-      // The hold already refuses every send; the tenant is a second lock, so
-      // a failed hand-off is logged rather than failing the committed hold.
-      try {
-        await deps.syncTenant?.(teamId);
-      } catch (err) {
-        console.error(`platform.breaker: SES tenant hand-off for held team ${teamId} failed`, err);
-      }
-    }
-    console.warn(`platform.breaker: ${held.length} Free team(s) held for review in ${d.region}`);
-    await mail(
-      d.region,
-      "region.teams_held",
-      teamsHeldMail({
-        region: d.region,
-        teams: d.reviewTeams.filter((s) => held.includes(s.teamId)).map((s) => s.teamName),
-        url: safetyUrl,
-      }),
-    );
+  for (const [region, teams] of reviewHeld) {
+    console.warn(`platform.breaker: ${teams.length} Free team(s) held for review in ${region}`);
+    await mail(region, "region.teams_held", teamsHeldMail({ region, teams, url: safetyUrl }));
   }
   const fuse = isCloud ? await evaluateFreeFuse(db, now) : null;
   if (fuse) {

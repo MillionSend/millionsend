@@ -71,7 +71,11 @@ const unmatchedLines = (unmatched: number) =>
 const teamList = (teams: readonly string[]) => teams.map((t) => inertText(t)).join(", ");
 
 /** Whose broadcasts a pause holds: every team's, or the teams at the line and nobody else's. */
-function pauseScope(heldTeams: readonly string[] | null, isCloud: boolean): string {
+function pauseScope(
+  heldTeams: readonly string[] | null,
+  isCloud: boolean,
+  reviewHeld: boolean,
+): string {
   if (heldTeams === null) {
     return "Every team's broadcasts in this region are held until the rate drops back under the line; transactional email keeps flowing.";
   }
@@ -82,10 +86,10 @@ function pauseScope(heldTeams: readonly string[] | null, isCloud: boolean): stri
     heldTeams.length === 0
       ? `No ${who} is at ${line} its own last ${BREAKER_TEAM_WINDOW_DAYS} days, so no broadcasts are held.`
       : `Only the broadcasts of the ${who}s at or over ${line} their own last ${BREAKER_TEAM_WINDOW_DAYS} days are held: ${teamList(heldTeams)}.`,
-    ...(isCloud
+    ...(reviewHeld
       ? ["Free teams whose mail drew a complaint are held for review, named in a separate mail."]
       : []),
-    `Every other team keeps sending, transactional email keeps flowing, and the pause lifts once the rate is back under ${percent(SES_COMPLAINT_ALERT_RATE)}.`,
+    `Transactional email keeps flowing, and the pause lifts once the rate is back under ${percent(SES_COMPLAINT_ALERT_RATE)}.`,
   ].join(" ");
 }
 
@@ -96,6 +100,8 @@ export function regionPausedMail(input: {
   /** The teams whose broadcasts the pause holds; null holds every team's. */
   heldTeams: readonly string[] | null;
   isCloud: boolean;
+  /** Free teams were held for review in the same run, named in their own mail. */
+  reviewHeld: boolean;
   /** Complaints about mail with no email row over the month. */
   unmatched: number;
   url: string;
@@ -114,7 +120,7 @@ export function regionPausedMail(input: {
             "SES's own complaint rate wasn't available (reading it takes cloudwatch:GetMetricData in the instance's IAM policy), so the breaker estimated it from our own count of complaints, leaving out mail to providers that never report them, such as Gmail.",
           ]
         : []),
-      pauseScope(heldTeams, input.isCloud),
+      pauseScope(heldTeams, input.isCloud, input.reviewHeld),
       ...teamLines(monthTeams, input.contributors),
       ...unmatchedLines(input.unmatched),
     ],

@@ -106,7 +106,7 @@ it("trips on our own complaint count while SES's rate can't be read, holding the
   );
   // Self-hosted, every team counts as paid and nobody is held for review.
   expect(sends[0]?.text).toContain(
-    "Only the broadcasts of the teams at or over 0.10% complaints over their own last 30 days are held: Noisy Sender. Every other team keeps sending, transactional email keeps flowing, and the pause lifts once the rate is back under 0.08%.",
+    "Only the broadcasts of the teams at or over 0.10% complaints over their own last 30 days are held: Noisy Sender. Transactional email keeps flowing, and the pause lifts once the rate is back under 0.08%.",
   );
   expect(sends[0]?.text).not.toContain("Free");
   expect(sends[0]?.text).toContain(
@@ -308,6 +308,7 @@ it("names contributing teams called like lures with no link but the console's", 
     contributors: LURE_NAMES.map((team) => ({ team, hardBounced: 0, complained: 1 })),
     heldTeams: [...LURE_NAMES],
     isCloud: true,
+    reviewHeld: true,
     unmatched: 0,
     url,
   });
@@ -330,6 +331,7 @@ it("counts a bounce trip over every send, holding every team's broadcasts", () =
     contributors: [],
     heldTeams: null,
     isCloud: false,
+    reviewHeld: false,
     unmatched: 0,
     url: "https://app.example.test/console",
   });

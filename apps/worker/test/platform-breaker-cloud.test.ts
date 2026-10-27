@@ -152,3 +152,21 @@ it("self-hosted, holds no team for review and judges no Free fuse", async () => 
   ).toEqual([]);
   expect((await db.select().from(schema.instanceSettings))[0]?.freeFuseTrippedAt).toBeNull();
 });
+
+it("on Cloud, a complaint trip that holds no Free team for review points to no review mail", async () => {
+  await db.delete(schema.regionBreakers);
+  // The fuse stays tripped and the Free teams with a complaint are held
+  // already: this run holds nobody new.
+  await db.update(schema.instanceSettings).set({ freeFuseTrippedAt: NOW });
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: NOW, suspensionReason: "review" })
+    .where(eq(schema.teams.plan, "free"));
+  sends = [];
+  expect(await run(minutesLater(75))).toEqual({ tripped: ["sa-east-1"], resumed: [] });
+  expect(sends.map((s) => s.kind)).toEqual(["region.paused"]);
+  expect(sends[0]?.text).toContain(
+    "Only the broadcasts of the paid teams at or over 0.10% complaints over their own last 30 days are held: Paid. Transactional email keeps flowing, and the pause lifts once the rate is back under 0.08%.",
+  );
+  expect(sends[0]?.text).not.toContain("held for review");
+});
