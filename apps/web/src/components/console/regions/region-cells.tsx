@@ -48,7 +48,11 @@ export function StatusText({
   );
 }
 
-/** Whether broadcasts flow in the region (the Overview's Broadcasts, the Regions page's breaker column). */
+/**
+ * Whether broadcasts flow in the region (the Overview's Broadcasts, the
+ * Regions page's breaker column); a pause the complaints tripped names the
+ * teams it holds.
+ */
 export function BroadcastsCell({
   region,
   complaintLine,
@@ -85,11 +89,20 @@ export function BroadcastsCell({
             },
           )
         : t("pauseSes", { rate: f.pct2(reason.rate), limit: f.pctLimit(reason.limit) });
+  const held = breaker.heldTeams;
+  const scope =
+    held === null
+      ? null
+      : held.length === 0
+        ? t("pauseNoTeams")
+        : t("pauseTeams", { teams: held.map((team) => team.name).join(", ") });
   return (
     <StatusText
       tone="danger"
-      text={t("broadcastsPaused")}
-      tip={`${why}\n${t("pauseTransactional")}`}
+      text={
+        held === null ? t("broadcastsPaused") : t("broadcastsPausedTeams", { count: held.length })
+      }
+      tip={[why, scope, t("pauseTransactional")].filter(Boolean).join("\n")}
     />
   );
 }
