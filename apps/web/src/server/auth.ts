@@ -13,7 +13,6 @@ import {
   enrollSystemContact,
   fillTemplate,
   findSenderDomainOwner,
-  forwardedClientIp,
   isPlainName,
   MCP_SCOPES,
   recordSignup,
@@ -53,7 +52,7 @@ import {
   sendVerificationEmail,
   VERIFY_TOKEN_TTL_MINUTES,
 } from "./system-mail";
-import { trustedProxies } from "./trusted-proxies";
+import { clientIp, trustedProxies } from "./trusted-proxies";
 
 export type Auth = ReturnType<typeof createAuth>;
 
@@ -739,12 +738,7 @@ export function createAuth(
             await recordSignup(db, {
               userId: user.id,
               email: user.email,
-              ip: headers
-                ? forwardedClientIp(headers, {
-                    cloud: isCloudDeployment(),
-                    trustedProxies: trustedProxies(),
-                  })
-                : null,
+              ip: headers ? clientIp(headers) : null,
               userAgent: headers?.get("user-agent") ?? null,
             });
             await enrollAccount(user, headers);

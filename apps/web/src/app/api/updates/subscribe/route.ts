@@ -1,10 +1,9 @@
-import { isCloudDeployment } from "@millionsend/config";
-import { createFixedWindowLimiter, forwardedClientIp, UPDATES_SOURCES } from "@millionsend/core";
+import { createFixedWindowLimiter, UPDATES_SOURCES } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { z } from "zod";
 import { appBaseUrl } from "@/lib/api-base-url";
 import { localeFromHeaders } from "@/server/locale";
-import { trustedProxies } from "@/server/trusted-proxies";
+import { clientIp } from "@/server/trusted-proxies";
 import { requestUpdatesConfirmation } from "@/server/updates";
 
 /**
@@ -48,12 +47,7 @@ export async function POST(request: Request) {
       ? Response.redirect(page("error=invalid"), 303)
       : Response.json({ error: "invalid_email" }, { status: 422, headers: CORS });
   }
-  const ip =
-    forwardedClientIp(request.headers, {
-      cloud: isCloudDeployment(),
-      trustedProxies: trustedProxies(),
-    }) ?? "unknown";
-  if (perClient(ip) || perInstance("all")) {
+  if (perClient(clientIp(request.headers) ?? "unknown") || perInstance("all")) {
     return form
       ? Response.redirect(page("error=rate"), 303)
       : Response.json({ error: "rate_limited" }, { status: 429, headers: CORS });
