@@ -409,16 +409,14 @@ describe("the Broadcasts cell the Regions page shares", () => {
     ]);
     expect(text(two)).toBe("paused · 2 teams");
     expect(tipOf(two)).toBe(
-      "Automatic pause: complaints at 0.12% as SES measures them, above the 0.1% limit.\nBroadcasts held for Acme, Globex; every other team keeps sending.\nTransactional mail keeps flowing.",
+      "Automatic pause: complaints at 0.12% as SES measures them, above the 0.1% limit.\nBroadcasts held for Acme, Globex.\nTransactional mail keeps flowing.",
     );
     const none = cell([]);
     expect(text(none)).toBe("paused · 0 teams");
-    expect(tipOf(none)).toContain("No team's broadcasts are held");
+    expect(tipOf(none)).toContain("This pause holds no team's broadcasts.");
     h.locale = "pt-BR";
     const one = cell([{ id: "t1", name: "Acme" }]);
     expect(text(one)).toBe("pausadas · 1 equipe");
-    expect(tipOf(one)).toContain(
-      "Transmissões em espera: Acme. As outras equipes seguem enviando.",
-    );
+    expect(tipOf(one)).toContain("Transmissões em espera: Acme.\n");
   });
 });
