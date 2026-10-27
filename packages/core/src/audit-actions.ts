@@ -58,6 +58,7 @@ export const AUDIT_ACTIONS = [
   "region.breaker_opened",
   "region.breaker_closed",
   "region.quota_requested",
+  "free_fuse.released",
   "instance.settings_updated",
   "instance.monitor_settings_updated",
   "instance.reserve_updated",

@@ -18,6 +18,7 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
+  freeFuseHolds,
   hashRecipient,
   isOnboardingSender,
   isSharedInboxSender,
@@ -97,6 +98,8 @@ export interface SesSender {
 export interface SendDeps {
   keyring: Keyring;
   ses: SesSender;
+  /** Cloud: the Free fuse holds Free teams' mail while it is tripped; absent, it never does. */
+  isCloud?: boolean | undefined;
   /** Deployment-wide SES configuration set, used when the domain has none. */
   defaultConfigurationSet?: string | undefined;
   /** ONBOARDING_EMAIL_FROM: the fixed onboarding email carries no team domain (see core isOnboardingSender). */
@@ -661,6 +664,12 @@ async function sendQueued(
     return "deferred";
   }
   const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
+  // Before the body is decrypted: a held row costs no KMS call. Account mail
+  // and the onboarding email are the platform's own, never held.
+  if (deps.isCloud && !systemMail && !onboarding && (await freeFuseHolds(db, email))) {
+    await parkQueued(db, email, "Free fuse tripped", "fuse");
+    return "parked";
+  }
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
   if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {

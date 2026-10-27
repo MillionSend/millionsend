@@ -18,7 +18,8 @@ export const PLAN_GRACE_DAYS = 7;
  * once the last paid period is past its grace window the team is limited as
  * free until Stripe reports a new period. A null period end (never
  * subscribed, or a plan set outside Stripe) is taken at face value, and the
- * system plan never lapses: Stripe has no say over it.
+ * system plan never lapses: Stripe has no say over it. team-plan's
+ * effectivelyFree reads it the same way in SQL, so the two change together.
  */
 export function effectivePlan(
   plan: Plan,

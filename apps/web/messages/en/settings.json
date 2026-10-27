@@ -473,6 +473,7 @@
       "region_breaker_opened": "Paused broadcasts in region",
       "region_breaker_closed": "Resumed broadcasts in region",
       "region_quota_requested": "Requested SES quota increase",
+      "free_fuse_released": "Released the Free fuse",
       "instance_monitor_settings_updated": "Updated monitoring settings",
       "instance_reserve_updated": "Changed the transactional reserve",
       "monitor_override_set": "Set monitor sampling override",

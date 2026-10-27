@@ -23,6 +23,7 @@ import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamActions } from "../team-actions";
 import { PlanBadge, TeamStatus } from "../teams/cells";
+import { FreeFuse } from "./free-fuse";
 import { LimitRequests } from "./limit-requests";
 import { FlagStatusBadge, LoadErrorCard, Rate7d, ReasonLabel, RegionCell, RiskCell } from "./parts";
 import { useContentReveal } from "./reveal";
@@ -135,6 +136,7 @@ export function SafetyList() {
           </Link>
         }
       />
+      <FreeFuse onChanged={refetch} />
       <LimitRequests />
       <WaitingList onChanged={refetch} />
       <div

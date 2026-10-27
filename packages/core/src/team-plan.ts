@@ -1,13 +1,31 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, lt, ne, or, type SQL } from "drizzle-orm";
 import {
   effectivePlan,
   PLAN_CONTACT_LIMIT,
+  PLAN_GRACE_DAYS,
   type Plan,
   type TeamQuota,
   teamQuota,
 } from "./plans.js";
+import { DAY_MS } from "./utc-day.js";
+
+/**
+ * Whether effectivePlan reads a teams row as free, in SQL: the free plan, or
+ * a paid one whose period ended over PLAN_GRACE_DAYS ago. Changes with
+ * effectivePlan.
+ */
+export function effectivelyFree(now: Date): SQL {
+  const t = schema.teams;
+  return or(
+    eq(t.plan, "free"),
+    and(
+      ne(t.plan, "system"),
+      lt(t.currentPeriodEnd, new Date(now.getTime() - PLAN_GRACE_DAYS * DAY_MS)),
+    ),
+  ) as SQL;
+}
 
 /** effectivePlan for a team row; null when the team does not exist. */
 export async function fetchEffectivePlan(db: Db, teamId: string): Promise<Plan | null> {

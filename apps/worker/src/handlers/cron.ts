@@ -462,8 +462,9 @@ async function releaseParkedRows(
             opts.where,
             pass.where,
             // The operator's holds: a suspended team releases nothing, a paused
-            // team releases only its transactional rows, and what screening
-            // parked waits for the review list.
+            // team releases only its transactional rows, what screening parked
+            // waits for the review list and what the Free fuse holds for its
+            // release.
             isNull(schema.teams.suspendedAt),
             or(
               isNull(schema.emails.broadcastId),
@@ -471,7 +472,7 @@ async function releaseParkedRows(
             ),
             or(
               isNull(schema.emails.parkReason),
-              notInArray(schema.emails.parkReason, [...OPERATOR_PARK_REASONS]),
+              notInArray(schema.emails.parkReason, [...OPERATOR_PARK_REASONS, "fuse"]),
             ),
             // A row due on a later UTC day is charged on that day, its warm-up
             // included, when it comes: reserved against today, days of the cap

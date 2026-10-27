@@ -16,6 +16,7 @@ import {
   fetchAccountScore,
   fetchContentFactors,
   fetchDeliverabilityHealth,
+  freeFuseState,
   getMonitorSettingsRow,
   heldByNewDomainLimit,
   isHoldVerdict,
@@ -25,6 +26,7 @@ import {
   parseAuditActor,
   recentMonitorSamples,
   redactRevealedText,
+  releaseFreeFuse,
   releaseWaitingEmails,
   renderRevealedBody,
   renderRevealedMedia,
@@ -1125,6 +1127,22 @@ export const consoleSafetyRouter = router({
         viewCount: await countView(ctx, grant, now),
       };
     }),
+
+  /** The Free fuse while it is tripped: since when, on how many complaints, and the mail it holds. */
+  freeFuse: operatorProcedure.query(({ ctx }) => freeFuseState(ctx.db)),
+
+  /**
+   * Releases the tripped Free fuse: the mail it held goes out through the
+   * drain as any parked mail, and its count starts over from mail sent now.
+   * The audit row is the instance's.
+   */
+  releaseFreeFuse: operatorProcedure.mutation(async ({ ctx }) => {
+    const released = await releaseFreeFuse(ctx.db);
+    if (!released) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "not_tripped" });
+    await auditOperator(ctx, { teamId: null, action: "free_fuse.released", metadata: released });
+    if (released.emails > 0) await kickQuotaDrain();
+    return released;
+  }),
 
   /** The review list, across teams or for one: what screening stopped before SES. */
   waiting: operatorProcedure

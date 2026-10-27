@@ -1950,6 +1950,50 @@ it("a broadcast row parks on the bulk share or a held region; a transactional ro
   expect(parked).toEqual(["us-east-1"]);
 });
 
+it("parks a Free team's mail to a provider that reports complaints while the Free fuse is tripped, on Cloud only", async () => {
+  const fuse = (trippedAt: Date | null) =>
+    db
+      .insert(schema.instanceSettings)
+      .values({ id: 1, freeFuseTrippedAt: trippedAt, freeFuseComplaints: 3 })
+      .onConflictDoUpdate({
+        target: schema.instanceSettings.id,
+        set: { freeFuseTrippedAt: trippedAt },
+      });
+  await fuse(new Date());
+  const sent: string[] = [];
+  const ses: SesSender = {
+    async sendRaw(params) {
+      sent.push(params.emailId);
+      return { messageId: `fuse-${params.emailId}` };
+    },
+  };
+  const cloud: SendDeps = { keyring, ses, isCloud: true };
+  const outlook = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, cloud, { emailId: outlook })).toBe("parked");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, outlook));
+  expect(row).toMatchObject({ latestStatus: "queued_quota", parkReason: "fuse" });
+  // A reporting provider in Bcc is enough.
+  const bcc = await insertEmail({ to: ["r@gmail.com"], bcc: ["s@yahoo.com"] });
+  expect(await sendEmail(db, cloud, { emailId: bcc })).toBe("parked");
+  // Gmail and iCloud never report a complaint; account mail is the platform's own.
+  const gmail = await insertEmail({ to: ["r@gmail.com"], cc: ["s@icloud.com"] });
+  expect(await sendEmail(db, cloud, { emailId: gmail })).toBe("sent");
+  const account = await insertEmail({
+    to: ["r@outlook.com"],
+    tags: { [SYSTEM_MAIL_TAG]: "password_reset" },
+  });
+  expect(await sendEmail(db, cloud, { emailId: account })).toBe("sent");
+  // Self-hosted there is no fuse, and on Cloud a paid team's mail never waits on it.
+  const selfHosted = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: selfHosted })).toBe("sent");
+  await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
+  const paid = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, cloud, { emailId: paid })).toBe("sent");
+  await db.update(schema.teams).set({ plan: "free" }).where(eq(schema.teams.id, teamId));
+  await fuse(null);
+  expect(sent).toEqual([gmail, account, selfHosted, paid]);
+});
+
 it("a row of a canceled broadcast is canceled, not sent", async () => {
   const { ses, sends } = fakeSes("mid-canceled");
   const [bc] = await db

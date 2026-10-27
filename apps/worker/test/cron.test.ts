@@ -1,4 +1,11 @@
-import { DAY_MS, dailyCeiling, SYSTEM_MAIL_TAG, teamRung, utcDay } from "@millionsend/core";
+import {
+  DAY_MS,
+  dailyCeiling,
+  releaseFreeFuse,
+  SYSTEM_MAIL_TAG,
+  teamRung,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
@@ -1496,6 +1503,21 @@ it("drain moves nothing of a broadcast in a region with no room, at its total, o
     drained: 2,
     stillParked: 0,
   });
+});
+
+it("drain leaves what the Free fuse holds until the operator releases the fuse", async () => {
+  const fused = await insertParked(new Date("2026-08-13T01:00:00Z"), "fused", {
+    parkReason: "fuse",
+  });
+  const plain = await insertParked(new Date("2026-08-13T02:00:00Z"));
+  const drain = () => drainQuotaParked(db, { isCloud: false, enqueueSends: async () => {} });
+  expect(await drain()).toEqual({ drained: 1, stillParked: 1 });
+  expect(await statusOf(fused)).toBe("queued_quota");
+  expect(await statusOf(plain)).toBe("queued");
+  await db.insert(schema.instanceSettings).values({ id: 1, freeFuseTrippedAt: new Date() });
+  expect(await releaseFreeFuse(db)).toMatchObject({ emails: 1 });
+  expect(await drain()).toEqual({ drained: 1, stillParked: 0 });
+  expect(await statusOf(fused)).toBe("queued");
 });
 
 it("drain still releases the plan-parked rows of a broadcast that already reads sent", async () => {

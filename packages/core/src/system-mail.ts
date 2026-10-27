@@ -42,6 +42,7 @@ export type SystemMailKind =
   | "region.ses_complaints"
   | "region.ses_enforcement"
   | "region.teams_held"
+  | "platform.free_fuse"
   | "webhook.failing"
   | "webhook.auto_disabled"
   | "webhook.backlog"

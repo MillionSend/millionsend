@@ -2,6 +2,9 @@ import {
   accountMailCard,
   BREAKER_SES_COMPLAINT_RATE,
   BREAKER_TEAM_WINDOW_DAYS,
+  FREE_FUSE_COMPLAINTS,
+  FREE_FUSE_WINDOW_DAYS,
+  type FreeFuseTrip,
   inertText,
   type MailContent,
   type RegionDecision,
@@ -186,5 +189,21 @@ export function teamsHeldMail(input: {
     ],
     button: { label: "Open Trust & safety", url: input.url },
     footnote: "Sent to the instance operator when a region breaker holds Free teams for review.",
+  });
+}
+
+export function freeFuseMail(input: FreeFuseTrip & { url: string }): MailContent {
+  return layout({
+    subject: `Free fuse tripped: ${input.complaints} complaints on Free teams' mail`,
+    paragraphs: [
+      `Free teams' mail sent over the last ${FREE_FUSE_WINDOW_DAYS} days drew ${input.complaints} complaints, at or over the fuse's line of ${FREE_FUSE_COMPLAINTS}; mail sent before its last release never counts. Until you release it on Trust & safety, every Free team's mail to a provider that reports complaints waits; mail to Gmail, Apple Mail and T-Online, account mail and paid teams' mail keep flowing.`,
+      "Free teams behind the complaints:",
+      ...input.teams.map(
+        (t) =>
+          `${inertText(t.teamName)}: ${t.complaints} complaint${t.complaints === 1 ? "" : "s"}`,
+      ),
+    ],
+    button: { label: "Open Trust & safety", url: input.url },
+    footnote: "Sent to the instance operator when the Free fuse trips.",
   });
 }

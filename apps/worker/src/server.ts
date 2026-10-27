@@ -782,6 +782,7 @@ await queue.work(
       {
         keyring,
         ses,
+        isCloud: env.IS_CLOUD,
         defaultConfigurationSet: env.SES_CONFIGURATION_SET,
         onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
         settings: monitorSettings,

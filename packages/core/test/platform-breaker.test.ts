@@ -6,7 +6,10 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { sentWithoutComplaintFeedback, sesAttempted } from "../src/mailbox-providers.js";
 import {
   applyRegionBreakers,
+  evaluateFreeFuse,
   evaluateRegionBreakers,
+  freeFuseHolds,
+  freeFuseState,
   holdRegion,
   pausedRegions,
   pauseHolds,
@@ -17,6 +20,7 @@ import {
   regionPause,
   regionTeamStats,
   regionWindowCounts,
+  releaseFreeFuse,
   releaseRegion,
   sesComplaintReadings,
   unmatchedComplaints,
@@ -907,6 +911,87 @@ it("holds a Free team with a complaint for review once, and after its release on
   await complainedSend(free.teamId, free.domainId, hoursAgo(1), NOW);
   const later = new Date(NOW.getTime() + 60_000);
   expect(await holdComplaintTeams(db, await reviewTeams(later), later)).toEqual([free.teamId]);
+});
+
+it("trips the Free fuse at 3 complaints on Free teams' mail in 7 days, counts nothing sent before a release, and parks only Free mail a provider can report", async () => {
+  await clearTraffic();
+  await db.delete(schema.regionBreakers);
+  const R = "eu-central-1";
+  const freeA = await teamOn("fuse-a", "free", R);
+  const freeB = await teamOn("fuse-b", "free", R);
+  const paid = await teamOn("fuse-paid", "pro", R);
+  // A paid plan past its grace window is limited as Free.
+  const lapsed = await teamOn("fuse-lapsed", "pro", R);
+  await db
+    .update(schema.teams)
+    .set({ currentPeriodEnd: new Date(NOW.getTime() - 30 * DAY_MS) })
+    .where(eq(schema.teams.id, lapsed.teamId));
+  const fuse = async () =>
+    (await db.select().from(schema.instanceSettings))[0] ?? {
+      freeFuseTrippedAt: null,
+      freeFuseComplaints: null,
+    };
+
+  await complainedSend(freeA.teamId, freeA.domainId, hoursAgo(30));
+  await complainedSend(freeB.teamId, freeB.domainId, hoursAgo(20));
+  // Mail sent before the window never counts, whenever its complaint came.
+  await complainedSend(freeB.teamId, freeB.domainId, hoursAgo(8 * 24), hoursAgo(1));
+  for (let i = 0; i < 5; i++) await complainedSend(paid.teamId, paid.domainId, hoursAgo(10));
+  expect(await evaluateFreeFuse(db, NOW)).toBeNull();
+  expect((await fuse()).freeFuseTrippedAt).toBeNull();
+
+  await complainedSend(lapsed.teamId, lapsed.domainId, hoursAgo(5));
+  expect(await evaluateFreeFuse(db, NOW)).toEqual({
+    complaints: 3,
+    teams: [
+      { teamName: "fuse-a", complaints: 1 },
+      { teamName: "fuse-b", complaints: 1 },
+      { teamName: "fuse-lapsed", complaints: 1 },
+    ],
+  });
+  expect(await fuse()).toMatchObject({ freeFuseTrippedAt: NOW, freeFuseComplaints: 3 });
+  // Tripped, it waits for the operator.
+  expect(await evaluateFreeFuse(db, new Date(NOW.getTime() + 60_000))).toBeNull();
+
+  const mail = (teamId: string, to: string[]) => ({ teamId, to, cc: null, bcc: null });
+  expect(await freeFuseHolds(db, mail(freeA.teamId, ["r@outlook.com"]))).toBe(true);
+  expect(await freeFuseHolds(db, mail(freeA.teamId, ["r@gmail.com", "s@icloud.com"]))).toBe(false);
+  expect(
+    await freeFuseHolds(db, { ...mail(freeA.teamId, ["r@gmail.com"]), bcc: ["s@yahoo.com"] }),
+  ).toBe(true);
+  expect(await freeFuseHolds(db, mail(paid.teamId, ["r@outlook.com"]))).toBe(false);
+
+  const [parked] = await db
+    .insert(schema.emails)
+    .values({
+      teamId: freeA.teamId,
+      from: "f@example.com",
+      to: ["r@outlook.com"],
+      subject: "s",
+      latestStatus: "queued_quota",
+      parkReason: "fuse",
+    })
+    .returning({ id: schema.emails.id });
+  if (!parked) throw new Error("seed failed");
+  expect(await freeFuseState(db)).toEqual({ trippedAt: NOW, complaints: 3, parked: 1 });
+
+  const released = new Date(NOW.getTime() + DAY_MS);
+  expect(await releaseFreeFuse(db, released)).toEqual({ complaints: 3, emails: 1 });
+  expect(await releaseFreeFuse(db, released)).toBeNull();
+  expect(await freeFuseState(db)).toBeNull();
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, parked.id));
+  expect(row).toMatchObject({ latestStatus: "queued_quota", parkReason: null });
+  expect(await freeFuseHolds(db, mail(freeA.teamId, ["r@outlook.com"]))).toBe(false);
+
+  // The window starts over at the release: the week's three complaints are spent.
+  const after = (h: number) => new Date(released.getTime() + h * 3_600_000);
+  expect(await evaluateFreeFuse(db, after(1))).toBeNull();
+  await complainedSend(freeA.teamId, freeA.domainId, after(1), after(2));
+  await complainedSend(freeA.teamId, freeA.domainId, after(1), after(2));
+  expect(await evaluateFreeFuse(db, after(3))).toBeNull();
+  await complainedSend(freeB.teamId, freeB.domainId, after(1), after(3));
+  expect(await evaluateFreeFuse(db, after(4))).toMatchObject({ complaints: 3 });
+  await releaseFreeFuse(db, after(5));
 });
 
 it("counts complaints SES attempted on mail with no email row over the month, and purges them after 35 days", async () => {

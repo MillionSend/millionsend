@@ -119,12 +119,36 @@ it("on a complaint trip holds the paid team at the line, puts the Free team with
   sends = [];
 });
 
-it("self-hosted, holds no team for review", async () => {
+it("trips the Free fuse at the third complaint on Free teams' mail in a week, once", async () => {
+  // Two more complaints, on a second Free team's mail: three in all.
+  const second = await sender("Second", "free", 10, 2);
+  await run(minutesLater(30));
+  expect(sends.map((s) => s.kind)).toEqual(["region.teams_held", "platform.free_fuse"]);
+  expect(synced.at(-1)).toBe(second);
+  const fuse = sends[1];
+  expect(fuse?.subject).toBe("Free fuse tripped: 3 complaints on Free teams' mail");
+  expect(fuse?.text).toContain("Second: 2 complaints");
+  expect(fuse?.text).toContain("Starter: 1 complaint");
+  expect(fuse?.text).toContain(
+    "every Free team's mail to a provider that reports complaints waits; mail to Gmail, Apple Mail and T-Online, account mail and paid teams' mail keep flowing.",
+  );
+  expect((await db.select().from(schema.instanceSettings))[0]).toMatchObject({
+    freeFuseTrippedAt: minutesLater(30),
+    freeFuseComplaints: 3,
+  });
+  await run(minutesLater(45));
+  expect(sends).toHaveLength(2);
+  sends = [];
+});
+
+it("self-hosted, holds no team for review and judges no Free fuse", async () => {
   await db.delete(schema.regionBreakers);
+  await db.update(schema.instanceSettings).set({ freeFuseTrippedAt: null });
   await db.update(schema.teams).set({ suspendedAt: null, suspensionReason: null });
   await run(minutesLater(60), false);
   expect(sends.map((s) => s.kind)).toEqual(["region.paused"]);
   expect(
     await db.select().from(schema.teams).where(eq(schema.teams.suspensionReason, "review")),
   ).toEqual([]);
+  expect((await db.select().from(schema.instanceSettings))[0]?.freeFuseTrippedAt).toBeNull();
 });

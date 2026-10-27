@@ -1,5 +1,6 @@
 import {
   applyRegionBreakers,
+  evaluateFreeFuse,
   evaluateRegionBreakers,
   findInstanceOperator,
   holdComplaintTeams,
@@ -11,6 +12,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import {
+  freeFuseMail,
   type MailContent,
   regionPausedMail,
   regionResumedMail,
@@ -24,7 +26,7 @@ export interface PlatformBreakerDeps {
   mailer: SystemMailer;
   appBaseUrl?: string | undefined;
   now?: Date;
-  /** Cloud: Free teams drawing complaints are held for review. */
+  /** Cloud: Free teams drawing complaints are held for review, and the Free fuse is judged. */
   isCloud: boolean;
   /** The first served region, where mail with no domain row goes out. */
   defaultRegion: string;
@@ -88,11 +90,11 @@ async function readEnforcementStatuses(
 
 /**
  * Store SES's complaint rates and enforcement statuses, evaluate the
- * per-region breakers, persist the flips and the teams they hold, and hold
- * the Free teams a complaint trip puts up for review (Cloud). The operator
- * hears about each flip, each region whose SES rate reached the alert line,
- * each enforcement change and each review hold. Returns the regions that
- * changed.
+ * per-region breakers, persist the flips and the teams they hold, hold the
+ * Free teams a complaint trip puts up for review, and judge the Free fuse
+ * (Cloud). The operator hears about each flip, each region whose SES rate
+ * reached the alert line, each enforcement change, each review hold and a
+ * fuse that trips. Returns the regions that changed.
  */
 export async function runPlatformBreaker(
   db: Db,
@@ -215,6 +217,11 @@ export async function runPlatformBreaker(
         url: safetyUrl,
       }),
     );
+  }
+  const fuse = isCloud ? await evaluateFreeFuse(db, now) : null;
+  if (fuse) {
+    console.warn(`platform.breaker: Free fuse tripped at ${fuse.complaints} complaints`);
+    await mail("the Free fuse", "platform.free_fuse", freeFuseMail({ ...fuse, url: safetyUrl }));
   }
   return changed;
 }

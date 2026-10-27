@@ -1014,6 +1014,14 @@
         "error": "Could not do it: {message}"
       }
     },
+    "freeFuse": {
+      "text": "Free fuse tripped <since></since>: {complaints, plural, one {# complaint} other {# complaints}} on Free teams' mail in a week. {parked, plural, =0 {No email waits on it yet.} one {{parkedCount} email to providers that report complaints waits.} other {{parkedCount} emails to providers that report complaints wait.}}",
+      "action": "Release",
+      "title": "Release the Free fuse?",
+      "lead": "{parked, plural, =0 {Free teams' mail to providers that report complaints flows again} one {The waiting email goes out through the queue, and Free teams' mail to providers that report complaints flows again} other {The {parkedCount} waiting emails go out through the queue, and Free teams' mail to providers that report complaints flows again}}. The fuse counts afresh from mail sent after the release.",
+      "confirm": "Release",
+      "toast": "{count, plural, =0 {Free fuse released} one {Free fuse released: # email goes out} other {Free fuse released: # emails go out}}"
+    },
     "limitRequests": {
       "title": "Limit requests · {count}",
       "subtitle": "Teams asking to lift the daily limit on a new domain. Grant each one with Trust, or decline it, on the team's page.",

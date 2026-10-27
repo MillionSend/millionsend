@@ -111,9 +111,10 @@ export async function isTeamSuspended(db: Db, teamId: string): Promise<boolean> 
  * suspended and its people still subscribed. A suspension already over the
  * rules has done it once: a person who opted back in since stays in.
  *
- * Any suspension but a review hold cancels the mail parked for an operator
- * or for a review hold, in the same transaction and audited, so a later
- * reinstatement never drains lures held before it.
+ * Any suspension but a review hold cancels the mail parked for an operator,
+ * for a review hold or by the Free fuse, in the same transaction and
+ * audited, so a later reinstatement or release never drains lures held
+ * before it.
  */
 export async function suspendTeam(
   db: Db,
@@ -154,7 +155,7 @@ export async function suspendTeam(
                 eq(e.teamId, input.teamId),
                 eq(e.latestStatus, "queued_quota"),
                 isNull(e.sentAt),
-                inArray(e.parkReason, ["review", ...OPERATOR_PARK_REASONS]),
+                inArray(e.parkReason, ["review", "fuse", ...OPERATOR_PARK_REASONS]),
               ),
             )
             .returning({ id: e.id });

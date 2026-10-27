@@ -27,8 +27,10 @@ import {
   NO_COMPLAINT_FEEDBACK_DOMAINS,
   SES_MAILBOX_SIMULATOR_DOMAIN,
   SES_UNATTEMPTED_SUBTYPES,
+  sentWithoutComplaintFeedback,
 } from "./mailbox-providers.js";
 import { effectivePlan, type Plan, paidPlan } from "./plans.js";
+import { effectivelyFree, fetchEffectivePlan } from "./team-plan.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -65,6 +67,12 @@ export const SES_COMPLAINT_ALERT_RATE = 0.0008;
 export const BREAKER_SES_COMPLAINT_RATE = 0.001;
 /** The days of sends, by when they went out, that a team's complaints and bounces are read over. */
 export const BREAKER_TEAM_WINDOW_DAYS = 30;
+/**
+ * The Free fuse (Cloud): this many complaints on Free teams' mail sent over
+ * the window trips it, and only an operator's release clears it.
+ */
+export const FREE_FUSE_COMPLAINTS = 3;
+export const FREE_FUSE_WINDOW_DAYS = 7;
 /** Unmatched SES feedback outlives the month the operator's mails count. */
 const UNMATCHED_RETENTION_DAYS = 35;
 
@@ -772,4 +780,125 @@ export async function releaseRegion(db: Db, region: string, now = new Date()): P
       updatedAt: now,
     })
     .where(eq(schema.regionBreakers.region, region));
+}
+
+/** Mail the Free fuse holds. */
+const fuseParked = and(
+  eq(schema.emails.latestStatus, "queued_quota"),
+  eq(schema.emails.parkReason, "fuse"),
+);
+
+export interface FreeFuseTrip {
+  complaints: number;
+  /** The Free teams behind them, most first. */
+  teams: { teamName: string; complaints: number }[];
+}
+
+/**
+ * Trips the Free fuse once the complaints about mail effectively Free teams
+ * sent over the last FREE_FUSE_WINDOW_DAYS, and since the operator's last
+ * release, reach FREE_FUSE_COMPLAINTS. Returns the trip, or null while the
+ * fuse stays as it was: a tripped fuse waits for the operator. Cloud only;
+ * on a self-hosted instance every team reads as Free.
+ */
+export async function evaluateFreeFuse(db: Db, now: Date): Promise<FreeFuseTrip | null> {
+  const s = schema.instanceSettings;
+  const [state] = await db
+    .select({ trippedAt: s.freeFuseTrippedAt, releasedAt: s.freeFuseReleasedAt })
+    .from(s);
+  if (state?.trippedAt) return null;
+  const since = new Date(
+    Math.max(now.getTime() - FREE_FUSE_WINDOW_DAYS * DAY_MS, state?.releasedAt?.getTime() ?? 0),
+  );
+  const e = schema.emails;
+  const t = schema.teams;
+  const complaints = sql<number>`count(*)::int`;
+  const teams = await db
+    .select({ teamName: t.name, complaints })
+    .from(ev)
+    .innerJoin(e, eq(e.id, ev.emailId))
+    .innerJoin(t, eq(t.id, e.teamId))
+    .where(
+      and(
+        feedbackEvents,
+        complaintFilter,
+        gte(ev.createdAt, since),
+        gte(e.sentAt, since),
+        effectivelyFree(now),
+      ),
+    )
+    .groupBy(t.id, t.name)
+    .orderBy(desc(complaints), asc(t.name));
+  const total = teams.reduce((n, row) => n + row.complaints, 0);
+  if (total < FREE_FUSE_COMPLAINTS) return null;
+  const set = { freeFuseTrippedAt: now, freeFuseComplaints: total, updatedAt: now };
+  const [tripped] = await db
+    .insert(s)
+    .values({ id: 1, ...set })
+    .onConflictDoUpdate({ target: s.id, set, setWhere: isNull(s.freeFuseTrippedAt) })
+    .returning({ id: s.id });
+  return tripped ? { complaints: total, teams } : null;
+}
+
+/**
+ * Whether the tripped Free fuse holds a send: a Free team's mail with a
+ * recipient at a provider that reports complaints. The fuse is read only for
+ * Free teams; the caller leaves out self-hosted instances, account mail and
+ * the onboarding email.
+ */
+export async function freeFuseHolds(
+  db: Db,
+  email: { teamId: string; to: string[]; cc: string[] | null; bcc: string[] | null },
+): Promise<boolean> {
+  if (sentWithoutComplaintFeedback([...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])])) {
+    return false;
+  }
+  if ((await fetchEffectivePlan(db, email.teamId)) !== "free") return false;
+  const [state] = await db
+    .select({ trippedAt: schema.instanceSettings.freeFuseTrippedAt })
+    .from(schema.instanceSettings);
+  return Boolean(state?.trippedAt);
+}
+
+/** The tripped Free fuse and how much mail it holds; null while it is not tripped. */
+export async function freeFuseState(
+  db: Db,
+): Promise<{ trippedAt: Date; complaints: number; parked: number } | null> {
+  const s = schema.instanceSettings;
+  const [state] = await db
+    .select({ trippedAt: s.freeFuseTrippedAt, complaints: s.freeFuseComplaints })
+    .from(s);
+  if (!state?.trippedAt) return null;
+  const [parked] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.emails)
+    .where(fuseParked);
+  return { trippedAt: state.trippedAt, complaints: state.complaints ?? 0, parked: parked?.n ?? 0 };
+}
+
+/**
+ * The operator's release of a tripped Free fuse: its count starts over from
+ * mail sent after now, and the mail it held loses its park reason, so
+ * quota.drain releases it as any parked mail, charging the plan and the
+ * warm-up. Null when the fuse was not tripped.
+ */
+export async function releaseFreeFuse(
+  db: Db,
+  now: Date = new Date(),
+): Promise<{ complaints: number; emails: number } | null> {
+  const s = schema.instanceSettings;
+  return db.transaction(async (tx) => {
+    const [released] = await tx
+      .update(s)
+      .set({ freeFuseTrippedAt: null, freeFuseReleasedAt: now, updatedAt: now })
+      .where(isNotNull(s.freeFuseTrippedAt))
+      .returning({ complaints: s.freeFuseComplaints });
+    if (!released) return null;
+    const freed = await tx
+      .update(schema.emails)
+      .set({ parkReason: null })
+      .where(fuseParked)
+      .returning({ id: schema.emails.id });
+    return { complaints: released.complaints ?? 0, emails: freed.length };
+  });
 }
