@@ -19,6 +19,7 @@ export const LEAD_GLYPH = { size: 14, strokeWidth: 2 } as const;
 export function LeadCell({
   tile,
   value,
+  tip,
   href,
   mono = false,
   more = [],
@@ -27,6 +28,8 @@ export function LeadCell({
 }: {
   tile?: React.ReactNode;
   value: string;
+  /** The value's hover text, under the whole value once it was cut. */
+  tip?: string;
   /** Where the value links; the row's own click goes there too. */
   href?: string;
   /** Mono type, for addresses. */
@@ -38,7 +41,7 @@ export function LeadCell({
   /** A link after the tail, kept whole. */
   action?: React.ReactNode;
 }) {
-  const line = <Truncated text={value} />;
+  const line = <Truncated text={value} {...(tip ? { tip } : {})} />;
   return (
     <td className={mono ? "ms-cell-fill ms-mono" : "ms-cell-fill"}>
       <span className="ms-lead">

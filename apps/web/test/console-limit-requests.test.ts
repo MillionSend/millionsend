@@ -211,7 +211,11 @@ describe("console.safety.limitRequests", () => {
     h.queries = { "console.safety.limitRequests": list };
     const html = renderToStaticMarkup(createElement(LimitRequests));
     expect(html).toContain("Limit requests · 2");
-    expect(html).toContain(`<a href="/console/safety/${nova}">nova</a>`);
+    expect(html).toMatch(
+      new RegExp(
+        `<a [^>]*href="/console/safety/${nova}"[^>]*><span class="ms-truncate">nova</span></a>`,
+      ),
+    );
     expect(html).toContain(
       '<td class="ms-mono">nova.example</td><td class="right num">2,000</td><td>Sign-up and account</td><td>Nowhere yet</td><td class="right num">2</td>',
     );
