@@ -9,11 +9,12 @@ import { requestUpdatesConfirmation } from "@/server/updates";
 
 /**
  * Opt-in for product updates, posted by this instance's /updates form. No
- * CORS headers, so another site's script can neither post JSON here nor
- * read an answer, and where the instance has Turnstile keys a post must
- * carry the page widget's token (cf-turnstile-response). Sends a
- * confirmation link and stores nothing until it is opened, so the worst a
- * stranger can do here is have one email sent to an address.
+ * CORS headers, so another site can't read an answer; its posts (a plain
+ * form, or JSON sent as text/plain) still arrive, and where the instance
+ * has Turnstile keys a post must carry the page widget's token
+ * (cf-turnstile-response). Sends a confirmation link and stores nothing
+ * until it is opened, so the worst a stranger can do here is have one email
+ * sent to an address.
  */
 const HOUR = 60 * 60 * 1000;
 const perClient = createFixedWindowLimiter(5, HOUR);
