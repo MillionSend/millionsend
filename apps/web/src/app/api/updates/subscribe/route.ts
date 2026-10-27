@@ -44,11 +44,15 @@ export async function POST(request: Request) {
       ? Response.redirect(page("error=invalid"), 303)
       : Response.json({ error: "invalid_email" }, { status: 422 });
   }
-  const rateLimited = () =>
+  const rateLimited = (retryAfter: number) =>
     form
       ? Response.redirect(page("error=rate"), 303)
-      : Response.json({ error: "rate_limited" }, { status: 429 });
-  if (perClient(clientIp(request.headers) ?? "unknown")) return rateLimited();
+      : Response.json(
+          { error: "rate_limited" },
+          { status: 429, headers: { "retry-after": String(retryAfter) } },
+        );
+  const clientWait = perClient(clientIp(request.headers) ?? "unknown");
+  if (clientWait !== null) return rateLimited(clientWait);
   // Between the two limits: the client's own bounds the verifications one
   // client can cause, and a refused post never spends the instance's.
   const token = (raw as Record<string, unknown> | null)?.["cf-turnstile-response"];
@@ -57,8 +61,9 @@ export async function POST(request: Request) {
       ? Response.redirect(page("error=captcha"), 303)
       : Response.json({ error: "captcha" }, { status: 403 });
   }
-  if (perInstance("all")) return rateLimited();
-  if (!perRecipient(parsed.data.email)) {
+  const instanceWait = perInstance("all");
+  if (instanceWait !== null) return rateLimited(instanceWait);
+  if (perRecipient(parsed.data.email) === null) {
     await requestUpdatesConfirmation(getDb(), {
       ...parsed.data,
       locale: localeFromHeaders(request.headers),

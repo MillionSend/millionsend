@@ -316,8 +316,20 @@ Errors use Resend's format:
 A body that isn't valid JSON answers `400 invalid_parameter`, and a body sent
 with a `Content-Type` other than `application/json` answers `415`.
 
-A `429` for a daily limit, such as `daily_quota_exceeded`, carries a
-`Retry-After` header with the seconds until 00:00 UTC, when the limit resets:
+Every `429` carries a `Retry-After` header with the whole seconds until the
+request can pass:
+
+| Refusal | `Retry-After` counts down to |
+| --- | --- |
+| `rate_limit_exceeded`, "Too many requests" or "Too many failed authentication attempts" | The next minute. An API key makes up to 600 requests a minute by default and a team 3,000; the MCP server allows each person 600; one IP gets 20 failed authentications. |
+| `rate_limit_exceeded`, "Too many domains created" | The next full hour (UTC). A team adds up to 10 domains an hour, or 100 on Scale. |
+| `rate_limit_exceeded`, "Too many inboxes created in the last hour" | The moment the oldest inbox created in the last hour turns an hour old. |
+| `rate_limit_exceeded`, "Too many names were reviewed today" or "refused today" (`POST /inboxes`, `PATCH /inboxes/{id}`) | 00:00 UTC, when the day's shared-domain name reviews reset. |
+| `daily_quota_exceeded` | 00:00 UTC, when the daily limit resets. |
+| `monthly_quota_exceeded` | The end of the billing period, when the monthly volume renews. |
+
+The inbox refusals in the table below name their own. For a daily limit it
+looks like this:
 
 ```
 HTTP/1.1 429 Too Many Requests

@@ -130,7 +130,10 @@ Nothing is copied or pasted — no secrets live in the client's config.
   still gets the read-only domain, webhook and API key listings.
   On an **All teams** grant the tools appear when you are an admin in any
   team, and calls into a team where you are a member are refused.
-- MCP calls share the API's per-minute rate limit.
+- MCP calls are limited per person at the API's per-minute rate; past it the
+  MCP request itself answers `429` with a `retry-after` header. A tool call the
+  API refuses with `retry-after` (an hourly create limit, or a daily or monthly
+  quota) returns it as `retry_after`, in seconds, in the tool's error.
 - No tool returns a credential: API keys are created, and webhook signing
   secrets read or rotated, only in the dashboard or through the REST API.
 - The MCP server is available on every plan, including Free.

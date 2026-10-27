@@ -18,6 +18,7 @@ import {
   recordSignup,
   removeSystemContact,
   SIGNUPS_PER_NETWORK_PER_DAY,
+  signupRoomRetryAfterSec,
   signupsFromNetwork,
   stripInvisible,
 } from "@millionsend/core";
@@ -148,11 +149,14 @@ const SIGNUP_LIMIT_REFUSAL = {
 async function assertSignupRoom(db: Db, headers: Headers | undefined): Promise<void> {
   if (!isCloudDeployment() || !headers) return;
   const ip = clientIp(headers);
-  if (!ip || (await signupsFromNetwork(db, ip)) < SIGNUPS_PER_NETWORK_PER_DAY) return;
-  throw new APIError("TOO_MANY_REQUESTS", {
-    code: SIGNUP_LIMIT_CODE,
-    message: SIGNUP_LIMIT_REFUSAL[localeFromHeaders(headers)],
-  });
+  if (!ip) return;
+  const signups = await signupsFromNetwork(db, ip);
+  if (signups.length < SIGNUPS_PER_NETWORK_PER_DAY) return;
+  throw new APIError(
+    "TOO_MANY_REQUESTS",
+    { code: SIGNUP_LIMIT_CODE, message: SIGNUP_LIMIT_REFUSAL[localeFromHeaders(headers)] },
+    { "retry-after": String(signupRoomRetryAfterSec(signups)) },
+  );
 }
 
 /**

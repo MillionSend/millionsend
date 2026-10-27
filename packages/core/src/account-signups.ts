@@ -16,7 +16,7 @@ import {
 } from "drizzle-orm";
 import { errorSummary } from "./error-summary.js";
 import { ABUSE_SUSPENSIONS } from "./team-standing.js";
-import { DAY_MS } from "./utc-day.js";
+import { DAY_MS, secondsUntil } from "./utc-day.js";
 
 /** Days a deleted account's sign-up record is kept, as the privacy policy keeps account data. */
 export const SIGNUP_RETENTION_DAYS = 90;
@@ -56,29 +56,40 @@ const MAPPED_IPV4 = new BlockList();
 MAPPED_IPV4.addSubnet("::ffff:0:0", 96, "ipv6");
 
 /**
- * Sign-ups from `ip`'s network in the 24 hours before `now`, accounts
- * deleted since included, as their records outlive them. Matched here, not
- * as inet in SQL, which refuses a stored address that carries a zone id.
+ * When each sign-up from `ip`'s network in the 24 hours before `now` was
+ * made, accounts deleted since included, as their records outlive them.
+ * Matched here, not as inet in SQL, which refuses a stored address that
+ * carries a zone id.
  */
 export async function signupsFromNetwork(
   db: Db,
   ip: string,
   now: Date = new Date(),
-): Promise<number> {
+): Promise<Date[]> {
   const network = new BlockList();
   if (isIPv4(ip)) network.addAddress(ip, "ipv4");
   else if (isIPv6(ip)) network.addSubnet(ip, MAPPED_IPV4.check(ip, "ipv6") ? 128 : 64, "ipv6");
-  else return 0;
+  else return [];
   const s = schema.accountSignups;
   // ponytail: reads the whole day's sign-ups (created_at has no index); index
   // it if a day ever holds thousands.
   const rows = await db
-    .select({ ip: s.ip })
+    .select({ ip: s.ip, createdAt: s.createdAt })
     .from(s)
     .where(and(isNotNull(s.ip), gt(s.createdAt, new Date(now.getTime() - DAY_MS))));
-  return rows.filter(
-    (row) => row.ip !== null && network.check(row.ip, isIPv6(row.ip) ? "ipv6" : "ipv4"),
-  ).length;
+  return rows
+    .filter((row) => row.ip !== null && network.check(row.ip, isIPv6(row.ip) ? "ipv6" : "ipv4"))
+    .map((row) => row.createdAt);
+}
+
+/**
+ * retry-after for a network at its cap: the seconds until enough of its
+ * day's sign-ups (`signupsFromNetwork`) age out to leave a place.
+ */
+export function signupRoomRetryAfterSec(signups: readonly Date[], now: Date = new Date()): number {
+  const times = signups.map((at) => at.getTime()).sort((a, b) => a - b);
+  const freeing = times[Math.max(0, times.length - SIGNUPS_PER_NETWORK_PER_DAY)] ?? now.getTime();
+  return secondsUntil(freeing + DAY_MS, now);
 }
 
 /** Membership in a team suspended for abuse, other than `exceptTeamId` when given. */

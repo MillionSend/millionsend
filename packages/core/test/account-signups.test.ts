@@ -8,6 +8,8 @@ import {
   clearAbuseMarks,
   purgeAccountSignups,
   recordSignup,
+  SIGNUPS_PER_NETWORK_PER_DAY,
+  signupRoomRetryAfterSec,
   signupsFromNetwork,
 } from "../src/account-signups.js";
 import { suspendTeam } from "../src/team-standing.js";
@@ -76,19 +78,38 @@ describe("signupsFromNetwork", () => {
     await signedUp("fe80::1%eth0", hoursBefore(1));
     await signedUp(null, hoursBefore(1));
 
-    expect(await signupsFromNetwork(db, "203.0.113.9", NOW)).toBe(2);
-    expect(await signupsFromNetwork(db, "::ffff:203.0.113.9", NOW)).toBe(2);
-    expect(await signupsFromNetwork(db, "2001:db8::ffff", NOW)).toBe(2);
-    expect(await signupsFromNetwork(db, "2001:db8:0:1::9", NOW)).toBe(1);
-    expect(await signupsFromNetwork(db, "198.51.100.1", NOW)).toBe(0);
-    expect(await signupsFromNetwork(db, "unknown", NOW)).toBe(0);
+    expect(await signupsFromNetwork(db, "203.0.113.9", NOW)).toHaveLength(2);
+    expect(await signupsFromNetwork(db, "::ffff:203.0.113.9", NOW)).toHaveLength(2);
+    expect(await signupsFromNetwork(db, "2001:db8::ffff", NOW)).toHaveLength(2);
+    expect(await signupsFromNetwork(db, "2001:db8:0:1::9", NOW)).toHaveLength(1);
+    expect(await signupsFromNetwork(db, "198.51.100.1", NOW)).toHaveLength(0);
+    expect(await signupsFromNetwork(db, "unknown", NOW)).toHaveLength(0);
   });
 
   it("leaves out sign-ups a day old or older", async () => {
     await signedUp("203.0.113.9", hoursBefore(24));
     await signedUp("2001:db8::1", hoursBefore(30));
-    expect(await signupsFromNetwork(db, "203.0.113.9", NOW)).toBe(0);
-    expect(await signupsFromNetwork(db, "2001:db8::2", NOW)).toBe(0);
+    expect(await signupsFromNetwork(db, "203.0.113.9", NOW)).toHaveLength(0);
+    expect(await signupsFromNetwork(db, "2001:db8::2", NOW)).toHaveLength(0);
+  });
+});
+
+describe("signupRoomRetryAfterSec", () => {
+  const NOW = new Date("2026-09-03T12:00:00Z");
+  const hoursBefore = (hours: number) => new Date(NOW.getTime() - hours * 60 * 60 * 1000);
+
+  it("waits for the sign-up whose aging out brings the network under its cap", () => {
+    // At the cap the oldest leaving frees a place; past it, more must leave first.
+    expect(SIGNUPS_PER_NETWORK_PER_DAY).toBe(3);
+    expect(signupRoomRetryAfterSec([hoursBefore(1), hoursBefore(20), hoursBefore(5)], NOW)).toBe(
+      4 * 3600,
+    );
+    expect(
+      signupRoomRetryAfterSec(
+        [hoursBefore(1), hoursBefore(20), hoursBefore(5), hoursBefore(10)],
+        NOW,
+      ),
+    ).toBe(14 * 3600);
   });
 });
 

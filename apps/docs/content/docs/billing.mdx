@@ -15,7 +15,10 @@ past it. Free holds up to 1,000 contacts; segments and topics are unlimited
 everywhere, and so are contacts from Starter up. Sending domains are capped
 at 3 on Free and 10 on Starter, unlimited above. At either cap the API
 answers `403 plan_limit_reached` ("Your plan allows up to 1000 contacts")
-and the dashboard shows the same sentence. Inboxes are capped at 3 on Free
+and the dashboard shows the same sentence. A team adds up to 10 domains an
+hour, or 100 on Scale (`DOMAIN_CREATES_PER_HOUR`); the count restarts on every
+full hour (UTC), and past it `POST /domains` answers `429 rate_limit_exceeded`
+with `retry-after`. Deleting a domain doesn't give its place in the hour back. Inboxes are capped at 3 on Free
 and 25 on Starter, unlimited above (see [Inboxes](#inboxes)).
 
 A person owns up to 3 teams on Free, 5 on Starter, 10 on Pro and 15 on

@@ -15,6 +15,7 @@ import { getAuth } from "./auth";
 import { isInstanceOperator } from "./instance-operator";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, type SessionRole } from "./membership";
 import { enqueueEmailSend, enqueueWebhookDeliveries, getQueue } from "./queue";
+import { retryAfterSecOf } from "./retry-after";
 import { resolveSupportView, SUPPORT_VIEW_COOKIE } from "./support-view";
 
 export interface SessionUser {
@@ -154,8 +155,11 @@ const isDev = process.env.NODE_ENV === "development";
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
   isDev,
-  errorFormatter: ({ shape, error }) =>
-    error.code === "INTERNAL_SERVER_ERROR" && !isDev ? { ...shape, message: FAULT_MESSAGE } : shape,
+  errorFormatter: ({ shape, error }) => ({
+    ...shape,
+    ...(error.code === "INTERNAL_SERVER_ERROR" && !isDev ? { message: FAULT_MESSAGE } : {}),
+    data: { ...shape.data, retryAfterSec: retryAfterSecOf(error) },
+  }),
 });
 
 export const router = t.router;

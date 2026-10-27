@@ -993,7 +993,10 @@ describe("rate limiting", () => {
       });
       last = res.status;
       if (res.status === 429) {
-        expect(res.headers.get("retry-after")).toBe("60");
+        // The seconds left in the minute window, not a fixed 60.
+        const wait = Number(res.headers.get("retry-after"));
+        expect(wait).toBeGreaterThan(0);
+        expect(wait).toBeLessThanOrEqual(60);
         return;
       }
     }
@@ -1334,6 +1337,70 @@ describe("REST parity tools", () => {
     ).period;
     expect(period).not.toHaveProperty("overage_usd_per_1k");
     await client.close();
+  });
+
+  it("a tool call the API refuses with retry-after carries it as retry_after", async () => {
+    const t = schema.teams;
+    const [prior] = await db
+      .select({
+        plan: t.plan,
+        planQuota: t.planQuota,
+        planStatus: t.planStatus,
+        currentPeriodStart: t.currentPeriodStart,
+        currentPeriodEnd: t.currentPeriodEnd,
+        overageEnabled: t.overageEnabled,
+      })
+      .from(t)
+      .where(eq(t.id, teamId));
+    if (!prior) throw new Error("no team");
+    const start = new Date(Date.now() - 2 * DAY_MS);
+    const end = new Date(start.getTime() + 30 * DAY_MS);
+    await db
+      .update(t)
+      .set({
+        plan: "pro",
+        planQuota: 100_000,
+        planStatus: "active",
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+        overageEnabled: false,
+      })
+      .where(eq(t.id, teamId));
+    await db.insert(schema.usagePeriods).values({ teamId, periodStart: start, accepted: 100_000 });
+    const cloud = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: true,
+      appBaseUrl,
+      enqueueEmailSend: async () => {},
+    });
+    const client = await connect(await mintToken(), cloud);
+    try {
+      const sent = await client.callTool({
+        name: "send_email",
+        arguments: {
+          from: "Acme <onboarding@acme.dev>",
+          to: ["capped@example.com"],
+          subject: "s",
+          text: "t",
+        },
+      });
+      expect(sent.isError).toBe(true);
+      const refusal = resultJson(sent);
+      expect(refusal).toMatchObject({ name: "monthly_quota_exceeded" });
+      // Counts down to the renewal, like the REST answer's retry-after header.
+      expect(
+        Math.abs(Number(refusal.retry_after) - (end.getTime() - Date.now()) / 1000),
+      ).toBeLessThan(5);
+    } finally {
+      await client.close();
+      await db.update(t).set(prior).where(eq(t.id, teamId));
+      await db
+        .delete(schema.usagePeriods)
+        .where(
+          and(eq(schema.usagePeriods.teamId, teamId), eq(schema.usagePeriods.periodStart, start)),
+        );
+    }
   });
 
   it("api keys: tools list and revoke but never mint a credential; members only list", async () => {

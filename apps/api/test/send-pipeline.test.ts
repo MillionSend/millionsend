@@ -152,9 +152,14 @@ describe("monthly plan", () => {
       name: "monthly_quota_exceeded",
       message: expect.stringContaining(end.toISOString()),
     });
+    // retry-after counts down to the renewal the message names.
+    const untilRenewal = (res: Response) =>
+      Math.abs(Number(res.headers.get("retry-after")) - (end.getTime() - Date.now()) / 1000);
+    expect(untilRenewal(single)).toBeLessThan(5);
     const res = await batch();
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({ name: "monthly_quota_exceeded" });
+    expect(untilRenewal(res)).toBeLessThan(5);
     expect(enqueued).toEqual([]);
     expect(await rows()).toBe(before);
   });

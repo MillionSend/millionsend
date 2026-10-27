@@ -2,7 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { count, eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createFixedWindowLimiter,
   failQueuedEmailsForDomain,
@@ -224,11 +224,31 @@ describe("isIdentitySharedByOtherDomains", () => {
 });
 
 describe("createFixedWindowLimiter", () => {
-  it("trips past the limit per key and resets on a new window", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("trips past the limit per key with the seconds left in the window, and resets on a new one", () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 0, 1, 12, 0, 50) });
     const limited = createFixedWindowLimiter(2, 60_000);
-    expect(limited("t1")).toBe(false);
-    expect(limited("t1")).toBe(false);
-    expect(limited("t1")).toBe(true);
-    expect(limited("t2")).toBe(false);
+    expect(limited("t1")).toBeNull();
+    expect(limited("t1")).toBeNull();
+    expect(limited("t1")).toBe(10);
+    expect(limited("t2")).toBeNull();
+    vi.setSystemTime(Date.UTC(2026, 0, 1, 12, 0, 59, 500));
+    expect(limited("t1")).toBe(1);
+    vi.setSystemTime(Date.UTC(2026, 0, 1, 12, 1, 0));
+    expect(limited("t1")).toBeNull();
+  });
+
+  it("lets a call bring its own limit", () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 0, 1, 12, 30) });
+    const limited = createFixedWindowLimiter(1, 3_600_000);
+    expect(limited("t1", 3)).toBeNull();
+    expect(limited("t1", 3)).toBeNull();
+    expect(limited("t1", 3)).toBeNull();
+    expect(limited("t1", 3)).toBe(1_800);
+    expect(limited("t2")).toBeNull();
+    expect(limited("t2")).toBe(1_800);
   });
 });

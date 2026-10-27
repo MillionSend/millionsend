@@ -16,7 +16,7 @@ import {
   createFixedWindowLimiter,
   createLimitRequest,
   DAY_MS,
-  DOMAIN_CREATE_LIMIT_PER_HOUR,
+  DOMAIN_CREATES_PER_HOUR,
   deleteInboxes,
   enableWarmup,
   failQueuedEmailsForDomain,
@@ -80,6 +80,7 @@ import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { catchAllAllowed, inboxDeps, userActor } from "../inboxes";
 import { enqueueDomainAge } from "../queue";
+import { tooManyRequests } from "../retry-after";
 import { assertTeamNotSuspended } from "../suspension-lock";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 import { signalViews, warmupTodayWindow } from "../warmup-view";
@@ -296,8 +297,8 @@ async function waitingExpiresAt(db: Db, teamId: string, domainId: string): Promi
 export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
   // Identity creation provisions a shared AWS resource; cloud caps it per
   // team so one tenant cannot burn the account's CreateEmailIdentity
-  // throttle for everyone.
-  const createLimited = createFixedWindowLimiter(DOMAIN_CREATE_LIMIT_PER_HOUR, 3_600_000);
+  // throttle for everyone. Each call passes its plan's cap.
+  const createLimited = createFixedWindowLimiter(DOMAIN_CREATES_PER_HOUR.free, 3_600_000);
   return router({
     list: teamProcedure.query(async ({ ctx }) => {
       const rows = await ctx.db
@@ -449,9 +450,8 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
               message: `Your plan allows up to ${limit} domains`,
             });
           }
-          if (createLimited(ctx.teamId)) {
-            throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many domains created" });
-          }
+          const retryAfter = createLimited(ctx.teamId, DOMAIN_CREATES_PER_HOUR[plan ?? "free"]);
+          if (retryAfter !== null) throw tooManyRequests(retryAfter, "Too many domains created");
         }
 
         // BYODKIM: the private key lives only in this block — handed to SES,

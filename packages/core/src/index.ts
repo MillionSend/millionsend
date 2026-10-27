@@ -180,6 +180,7 @@ export {
   purgeAccountSignups,
   recordSignup,
   SIGNUPS_PER_NETWORK_PER_DAY,
+  signupRoomRetryAfterSec,
   signupsFromNetwork,
 } from "./account-signups.js";
 export {
@@ -400,7 +401,6 @@ export {
 } from "./domain-age.js";
 export {
   createFixedWindowLimiter,
-  DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
   isIdentitySharedByOtherDomains,
   isOperatorTeam,
@@ -625,6 +625,7 @@ export {
   parsePix,
 } from "./pix.js";
 export {
+  DOMAIN_CREATES_PER_HOUR,
   effectivePlan,
   FREE_BURST,
   FREE_BURST_REFILL_MS,
@@ -988,7 +989,7 @@ export {
 } from "./updates-token.js";
 export { isLoopbackUrl, unwrapRedirect } from "./url.js";
 export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./usage-hourly.js";
-export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
+export { DAY_MS, nextUtcDayStart, secondsUntil, utcDay } from "./utc-day.js";
 export {
   checkWarmups,
   contactActivity,

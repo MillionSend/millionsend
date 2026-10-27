@@ -3,6 +3,7 @@ import { type Db, schema } from "@millionsend/db";
 import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { parseSingleSender } from "./sender-address.js";
 import { endQueuedEmails } from "./status.js";
+import { secondsUntil } from "./utc-day.js";
 import type { WebhookEnqueue } from "./webhooks.js";
 
 /**
@@ -38,9 +39,6 @@ export const PUBLIC_MAILBOX_DOMAINS = [
 
 /** The hosted product's own domain; a cloud tenant must never hold its SES identity. */
 export const PLATFORM_DOMAIN = "millionsend.com";
-
-/** Creates per team per hour before the dashboard/API answer 429. */
-export const DOMAIN_CREATE_LIMIT_PER_HOUR = 10;
 
 /**
  * Whether `name` (or a subdomain of it) may not be registered as a sender
@@ -149,25 +147,28 @@ export async function failQueuedEmailsForDomain(
 }
 
 /**
- * Fixed-window counter keyed by an opaque id: true once the key exceeded
- * `limit` hits inside the current window.
+ * Fixed-window counter keyed by an opaque id, its windows aligned to
+ * multiples of `windowMs` since the epoch: null while the key's hits in the
+ * current window stay within `limit` (or the call's own `keyLimit`), else the
+ * whole seconds until the window rolls over, which is what retry-after says.
  */
 export function createFixedWindowLimiter(
   limit: number,
   windowMs: number,
-): (key: string) => boolean {
+): (key: string, keyLimit?: number) => number | null {
   // ponytail: per-process window; N instances allow N× the cap. Move to the
   // api_rate_limits table if that ever matters.
   const counts = new Map<string, number>();
   let window = -1;
-  return (key) => {
-    const current = Math.floor(Date.now() / windowMs);
+  return (key, keyLimit = limit) => {
+    const now = Date.now();
+    const current = Math.floor(now / windowMs);
     if (current !== window) {
       window = current;
       counts.clear();
     }
     const n = (counts.get(key) ?? 0) + 1;
     counts.set(key, n);
-    return n > limit;
+    return n > keyLimit ? secondsUntil((current + 1) * windowMs, now) : null;
   };
 }

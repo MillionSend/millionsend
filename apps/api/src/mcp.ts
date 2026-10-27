@@ -6,6 +6,7 @@ import {
   ADMIN_MCP_SCOPES,
   ALL_TEAMS_GRANT,
   type ApiKeyAuth,
+  createFixedWindowLimiter,
   effectivePlan,
   INBOX_KINDS,
   isAdminRole,
@@ -150,21 +151,10 @@ function hasScope(granted: ReadonlySet<string>, scope: McpScope): boolean {
 }
 
 /** Thrown by the verifier so the route can answer 429 instead of a bearer challenge. */
-class McpRateLimitedError extends Error {}
-
-// ponytail: per-process fixed window keyed by user id; N instances allow N×
-// the cap. Move to the api_rate_limits table if that ever matters.
-const mcpWindows = new Map<string, number>();
-let mcpWindowMinute = -1;
-function mcpRateLimited(userId: string, limit: number): boolean {
-  const minute = Math.floor(Date.now() / 60_000);
-  if (minute !== mcpWindowMinute) {
-    mcpWindowMinute = minute;
-    mcpWindows.clear();
+class McpRateLimitedError extends Error {
+  constructor(readonly retryAfterSec: number) {
+    super("mcp rate limited");
   }
-  const count = (mcpWindows.get(userId) ?? 0) + 1;
-  mcpWindows.set(userId, count);
-  return count > limit;
 }
 
 /**
@@ -183,6 +173,8 @@ function createTokenVerifier(
   rateLimitPerMinute: number,
 ): OAuthTokenVerifier {
   const invalid = (message: string) => new OAuthError(OAuthErrorCode.InvalidToken, message);
+  // Keyed by user id, so one person's connections share the budget.
+  const rateLimited = createFixedWindowLimiter(rateLimitPerMinute, 60_000);
   return {
     async verifyAccessToken(token): Promise<AuthInfo> {
       // Pinned to what the authorization server issues (better-auth jwt
@@ -197,7 +189,8 @@ function createTokenVerifier(
       }).catch(() => null);
       const claims = verified ? accessTokenClaims.safeParse(verified.payload) : null;
       if (!claims?.success) throw invalid("Access token is invalid or expired");
-      if (mcpRateLimited(claims.data.sub, rateLimitPerMinute)) throw new McpRateLimitedError();
+      const retryAfter = rateLimited(claims.data.sub);
+      if (retryAfter !== null) throw new McpRateLimitedError(retryAfter);
       const scopes = claims.data.scope.split(" ").filter(Boolean);
       if (!scopes.some(isMcpScope)) {
         throw new OAuthError(
@@ -320,6 +313,9 @@ async function restCall(
   const json = (await res
     .json()
     .catch(() => errorBody(res.status, "error", res.statusText))) as Record<string, unknown>;
+  // A tool result has no headers, so the wait a refusal names rides in its body.
+  const retryAfter = res.headers.get("retry-after");
+  if (!res.ok && retryAfter) json.retry_after = Number(retryAfter);
   return { ok: res.ok, json };
 }
 
@@ -2162,7 +2158,7 @@ export function registerMcp(app: OpenAPIHono<Env>, deps: ApiDeps, appBaseUrl: st
       authInfo = await verifyBearerToken(c.req.header("authorization"), bearer);
     } catch (err) {
       if (err instanceof McpRateLimitedError) {
-        c.header("retry-after", "60");
+        c.header("retry-after", String(err.retryAfterSec));
         return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
       }
       return bearerAuthChallengeResponse(err, bearer);

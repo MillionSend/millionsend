@@ -220,6 +220,10 @@ describe("new accounts per network", () => {
     const fresh = await signUpFrom(auth, "d@example.com", "203.0.113.9");
     const held = await signUpFrom(auth, "a@example.com", "203.0.113.9");
     expect([fresh.status, held.status]).toEqual([429, 429]);
+    // The first of the day's three sign-ups frees a place a day after it was made.
+    const wait = Number(fresh.headers.get("retry-after"));
+    expect(wait).toBeGreaterThan(DAY_MS / 1000 - 120);
+    expect(wait).toBeLessThanOrEqual(DAY_MS / 1000);
     const refusal = await fresh.json();
     expect(refusal).toMatchObject({
       code: "SIGNUP_IP_LIMIT",

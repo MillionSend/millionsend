@@ -99,6 +99,7 @@ export async function createDomainIdentity(
     adoptExisting?: boolean | undefined;
   },
 ): Promise<void> {
+  let created = false;
   try {
     await client.send(
       new CreateEmailIdentityCommand({
@@ -109,6 +110,7 @@ export async function createDomainIdentity(
         },
       }),
     );
+    created = true;
   } catch (error) {
     if (!params.adoptExisting || (error as { name?: string }).name !== "AlreadyExistsException") {
       throw error;
@@ -124,13 +126,33 @@ export async function createDomainIdentity(
       }),
     );
   }
-  await client.send(
-    new PutEmailIdentityMailFromAttributesCommand({
-      EmailIdentity: params.domain,
-      MailFromDomain: `${params.mailFromSubdomain}.${params.domain}`,
-      BehaviorOnMxFailure: "USE_DEFAULT_VALUE",
-    }),
-  );
+  try {
+    await client.send(
+      new PutEmailIdentityMailFromAttributesCommand({
+        EmailIdentity: params.domain,
+        MailFromDomain: `${params.mailFromSubdomain}.${params.domain}`,
+        BehaviorOnMxFailure: "USE_DEFAULT_VALUE",
+      }),
+    );
+  } catch (error) {
+    // The caller records no row for a failed create, so an identity this call
+    // made would be left behind: in the shared cloud account every later
+    // create of the name then answers AlreadyExists, and the unverified-domain
+    // reaper only walks rows. With adoptExisting the next create re-keys it
+    // instead, and a concurrent create may already have adopted it, so it
+    // stays; so does an identity this call adopted.
+    if (created && !params.adoptExisting) {
+      await client
+        .send(new DeleteEmailIdentityCommand({ EmailIdentity: params.domain }))
+        .catch((cleanupError: unknown) => {
+          console.warn(
+            `SES identity ${params.domain} left without a row: its cleanup after a failed create failed`,
+            (cleanupError as { name?: string }).name,
+          );
+        });
+    }
+    throw error;
+  }
 }
 
 export async function getDomainVerification(

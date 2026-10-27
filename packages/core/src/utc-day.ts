@@ -15,3 +15,8 @@ export function nextUtcDayStart(at: number | Date = Date.now()): Date {
   next.setUTCHours(24, 0, 0, 0);
   return next;
 }
+
+/** retry-after for a limit that lifts at `at`: whole seconds from `now`, at least one. */
+export function secondsUntil(at: number | Date, now: number | Date = Date.now()): number {
+  return Math.max(1, Math.ceil((Number(at) - Number(now)) / 1000));
+}

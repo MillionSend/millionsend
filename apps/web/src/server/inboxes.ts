@@ -33,6 +33,7 @@ import { and, count, eq, inArray } from "drizzle-orm";
 import { getKeyring } from "./keyring";
 import type { SessionRole } from "./membership";
 import { enqueueInboxForward, enqueueSharedSubdomain } from "./queue";
+import { RetryAfter } from "./retry-after";
 
 /** The dashboard acts as the signed-in person, who may approve held sends and release quarantine. */
 export function userActor(ctx: { session: { user: { id: string } } }): InboxActor {
@@ -80,7 +81,11 @@ const TRPC_CODE = {
 
 /** A core refusal as a dashboard error: its status picks the code, the API's message rides along. */
 export function inboxFailure(error: InboxError): TRPCError {
-  return new TRPCError({ code: TRPC_CODE[error.status], message: error.message });
+  return new TRPCError({
+    code: TRPC_CODE[error.status],
+    message: error.message,
+    ...(error.retryAfterSec !== undefined ? { cause: new RetryAfter(error.retryAfterSec) } : {}),
+  });
 }
 
 /** What a reply, forward, new send or approval did: sent, or held as a draft for a person. */

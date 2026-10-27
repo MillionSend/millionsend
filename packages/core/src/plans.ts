@@ -380,6 +380,20 @@ export const PLAN_DOMAIN_LIMIT: Record<Plan, number | null> = {
   system: null,
 };
 
+/**
+ * Domains a cloud team may add per UTC clock hour, per plan; self-host has no
+ * limit. Each add provisions an identity on the SES account every tenant
+ * shares, and SES throttles that API account-wide, so one team's burst must
+ * not spend everyone's.
+ */
+export const DOMAIN_CREATES_PER_HOUR: Record<Plan, number> = {
+  free: 10,
+  starter: 10,
+  pro: 10,
+  scale: 100,
+  system: 10,
+};
+
 /** Contacts a team may hold per plan; null = unlimited. Self-host ignores plans entirely. */
 export const PLAN_CONTACT_LIMIT: Record<Plan, number | null> = {
   free: 1_000,

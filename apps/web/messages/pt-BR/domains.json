@@ -90,7 +90,7 @@
     "conflict": "Este domínio já foi adicionado.",
     "reserved": "Este domínio não pode ser usado como remetente.",
     "planLimit": "O limite de domínios do seu plano foi atingido.",
-    "rateLimited": "Muitos domínios adicionados recentemente — tente de novo mais tarde.",
+    "rateLimited": "Você atingiu o limite de domínios novos por hora. Tente de novo em {minutes, plural, one {# minuto} other {# minutos}}.",
     "error": "Não foi possível adicionar o domínio.",
     "credentialsError": "A AWS rejeitou as credenciais da requisição — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>. Veja <code>SELF_HOSTING.md</code>.",
     "trackingTitle": "Configurar rastreamento (opcional)",
