@@ -1,6 +1,7 @@
 "use client";
 
 import { CUSTOMER_TEXT_MAX } from "@millionsend/core/customer-text";
+import { PLAN_TEAM_LIMIT, TEAM_CREATE_WINDOW_DAYS } from "@millionsend/core/plans";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -128,9 +129,14 @@ export function OnboardingForm({ logoUploadsEnabled = false }: { logoUploadsEnab
         </div>
         {createTeam.isError ? (
           <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
-            {createTeam.error.data?.code === "BAD_REQUEST"
-              ? common("nameRule", { max: CUSTOMER_TEXT_MAX })
-              : t("error")}
+            {createTeam.error.data?.code === "FORBIDDEN"
+              ? common("teamSwitcher.limit", {
+                  limit: PLAN_TEAM_LIMIT.free,
+                  days: TEAM_CREATE_WINDOW_DAYS,
+                })
+              : createTeam.error.data?.code === "BAD_REQUEST"
+                ? common("nameRule", { max: CUSTOMER_TEXT_MAX })
+                : t("error")}
           </p>
         ) : null}
         <button

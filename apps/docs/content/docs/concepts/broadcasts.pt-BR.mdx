@@ -107,8 +107,8 @@ esteja configurada — veja
 A plataforma envia uma quantidade limitada de e-mails por dia. Uma transmissão
 que cabe no que está disponível sai de uma vez, na taxa de envio. Uma maior
 sai em levas: a primeira agora, o restante conforme a capacidade libera nos
-dias seguintes. E-mails transacionais nunca ficam esperando atrás de uma
-transmissão.
+dias seguintes. E-mails transacionais nunca ficam esperando atrás das levas
+de uma transmissão.
 
 O envio avisa de antemão:
 
@@ -138,6 +138,12 @@ O envio avisa de antemão:
   `new_domain_limit` quando o limite distribui o envio ao longo de vários
   dias. O limite sozinho nunca deixa um envio grande demais: quando não dá
   para estimar o fim, `finishes_at` é `null`.
+- No plano Free, os e-mails para provedores que informam reclamações saem
+  para 10 destinatários de uma vez e depois 10 por hora, somando todas as
+  equipes Free que você criou, cada e-mail na sua vez: um e-mail
+  transacional enviado depois de uma transmissão espera atrás dela. E-mails
+  só para Gmail, Apple Mail, t-online ou o simulador de caixas do SES nunca
+  esperam. O `finishes_at` não conta essa espera.
 - Enquanto uma transmissão está saindo, `GET /broadcasts/{id}` e a lista trazem
   `finishes_at` ao vivo e `sent_count`.
 - Uma audiência que precisaria de mais de 24 dias de capacidade — da
@@ -209,7 +215,9 @@ mostra um traço.
   completo. A taxa de reclamação conta só os e-mails para provedores que
   informam reclamações (Gmail, Apple Mail e t-online nunca informam), e as
   reclamações só contam para um alerta ou para essa pausa a partir de 100
-  desses envios.
+  desses envios. No plano Free, elas contam desde o primeiro e-mail e são
+  julgadas juntas em todas as equipes Free que você criou, inclusive as
+  excluídas, e uma pausa vale para todas elas.
 - Se a taxa agregada de bounce da plataforma na região SES do seu remetente
   se aproxima do limite em que o SES age sobre a conta, envios de transmissão
   nessa região são recusados com `403 broadcasts_paused` até a taxa se
@@ -229,6 +237,13 @@ transmissões.
   recusa transmissões com `403 broadcasts_paused` só para as equipes cuja
   própria taxa de reclamações nos últimos 30 dias é de 0,1% ou mais; antes,
   recusava todas as equipes da região.
+- No plano Free, os e-mails para provedores que informam reclamações saem
+  para 10 destinatários de uma vez e depois 10 por hora, somando todas as
+  equipes Free que você criou. Veja [Ritmo de envio](#ritmo-de-envio).
+- No plano Free, as reclamações contam para um alerta ou para o
+  `403 sending_paused` desde o primeiro e-mail, julgadas juntas em todas as
+  equipes Free que você criou. Bounces e reclamações do simulador de caixas
+  do SES nunca contam.
 - **Editar como HTML** no editor passa uma transmissão de blocos para o modo
   código. **Voltar para blocos** desfaz a troca até você salvar. Veja
   [Editor de blocos e HTML](#editor-de-blocos-e-html).

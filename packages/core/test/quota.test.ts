@@ -3,14 +3,21 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FREE_BURST, FREE_BURST_REFILL_MS, teamQuota } from "../src/plans.js";
 import {
+  bookFreeBurst,
+  bumpFreePoolUsage,
   quotaRoom,
+  readDailyUsage,
   readPeriodUsage,
+  releaseDailyQuota,
   releasePeriodQuota,
+  releaseQuota,
   reserveDailyQuota,
   reservePeriodQuota,
   reserveQuota,
 } from "../src/quota.js";
+import { DAY_MS } from "../src/utc-day.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -207,6 +214,224 @@ describe("reserveQuota", () => {
     expect(
       await reserveQuota(db, { teamId: t, count: 1_000, quota: { kind: "none" }, day: DAY }),
     ).toEqual({ reserved: true, accepted: 1_107, ceiling: null });
+  });
+});
+
+describe("a Free pool", () => {
+  const POOL_DAY = "2026-08-20";
+  const pool = (ownerId: string) => ({ ownerId, limit: 100 });
+  const poolAccepted = async (ownerId: string, day = POOL_DAY) => {
+    const [row] = await db
+      .select({ accepted: schema.freePoolUsage.accepted })
+      .from(schema.freePoolUsage)
+      .where(and(eq(schema.freePoolUsage.ownerId, ownerId), eq(schema.freePoolUsage.day, day)));
+    return row?.accepted ?? 0;
+  };
+  const reserve = (teamId: string, count: number, ownerId: string, hardLimit?: number) =>
+    reserveDailyQuota(db, {
+      teamId,
+      count,
+      limit: hardLimit === undefined ? 100 : Math.min(100, hardLimit),
+      ...(hardLimit === undefined ? {} : { hardLimit }),
+      pool: pool(ownerId),
+      day: POOL_DAY,
+    });
+
+  it("caps one creator's teams together, and a refusal leaves the team's own row as it was", async () => {
+    const a = await createTeam(db, "pool-a", { poolOwnerId: "u-pool" });
+    const b = await createTeam(db, "pool-b", { poolOwnerId: "u-pool" });
+    expect(await reserve(a, 100, "u-pool")).toEqual({
+      reserved: true,
+      accepted: 100,
+      ceiling: 150,
+    });
+    expect(await reserve(b, 10, "u-pool")).toEqual({ reserved: true, accepted: 110, ceiling: 150 });
+    // b has sent 10 of its own, yet only the pool's last 40 remain.
+    expect(await reserve(b, 41, "u-pool")).toEqual({
+      reserved: false,
+      accepted: 110,
+      ceiling: 150,
+    });
+    expect(await acceptedOn(b, POOL_DAY)).toBe(10);
+    expect(await reserve(b, 40, "u-pool")).toEqual({ reserved: true, accepted: 150, ceiling: 150 });
+    expect(await reserve(a, 1, "u-pool")).toMatchObject({ reserved: false });
+    expect([await acceptedOn(a, POOL_DAY), await acceptedOn(b, POOL_DAY)]).toEqual([100, 50]);
+    expect(await poolAccepted("u-pool")).toBe(150);
+    // A deleted team's charges stay with its creator.
+    await db.delete(schema.teams).where(eq(schema.teams.id, a));
+    expect(await poolAccepted("u-pool")).toBe(150);
+    expect(await reserve(b, 1, "u-pool")).toMatchObject({ reserved: false });
+  });
+
+  it("refuses a first reservation larger than the pool without leaving a charge behind", async () => {
+    const c = await createTeam(db, "pool-c", { poolOwnerId: "u-big" });
+    expect(await reserve(c, 151, "u-big")).toEqual({ reserved: false, accepted: 0, ceiling: 150 });
+    expect(await acceptedOn(c, POOL_DAY)).toBe(0);
+    expect(await poolAccepted("u-big")).toBe(0);
+  });
+
+  it("keeps an operator ceiling as the team's own line, and reports the counter with the least room", async () => {
+    const d = await createTeam(db, "pool-d", { poolOwnerId: "u-ceil" });
+    const e = await createTeam(db, "pool-e", { poolOwnerId: "u-ceil" });
+    expect(await reserve(d, 30, "u-ceil", 30)).toEqual({
+      reserved: true,
+      accepted: 30,
+      ceiling: 30,
+    });
+    expect(await reserve(d, 1, "u-ceil", 30)).toEqual({
+      reserved: false,
+      accepted: 30,
+      ceiling: 30,
+    });
+    expect(await reserve(e, 115, "u-ceil")).toMatchObject({ reserved: true });
+    // The pool has 5 left and the team's own line 20: the pool binds.
+    const refused = await reserve(d, 6, "u-ceil", 50);
+    expect(refused).toEqual({ reserved: false, accepted: 145, ceiling: 150 });
+    expect(quotaRoom(refused)).toBe(5);
+    expect(await acceptedOn(d, POOL_DAY)).toBe(30);
+  });
+
+  it("keeps the team's own line too, so a day it spent before joining the pool still binds", async () => {
+    // Its own row already holds the day, as on the pool's first day or a lapse to Free.
+    const lapsed = await createTeam(db, "pool-lapsed", { poolOwnerId: "u-lapsed" });
+    await db.insert(schema.usageCounters).values({ teamId: lapsed, day: POOL_DAY, accepted: 150 });
+    expect(await reserve(lapsed, 1, "u-lapsed")).toEqual({
+      reserved: false,
+      accepted: 150,
+      ceiling: 150,
+    });
+    expect([await acceptedOn(lapsed, POOL_DAY), await poolAccepted("u-lapsed")]).toEqual([150, 0]);
+  });
+
+  it("hands a release back to the team's row and the pool's, each floored at zero", async () => {
+    const f = await createTeam(db, "pool-f", { poolOwnerId: "u-release" });
+    await reserve(f, 20, "u-release");
+    await releaseDailyQuota(db, { teamId: f, count: 5, pool: pool("u-release"), day: POOL_DAY });
+    expect([await acceptedOn(f, POOL_DAY), await poolAccepted("u-release")]).toEqual([15, 15]);
+    await releaseDailyQuota(db, { teamId: f, count: 50, pool: pool("u-release"), day: POOL_DAY });
+    expect([await acceptedOn(f, POOL_DAY), await poolAccepted("u-release")]).toEqual([0, 0]);
+  });
+
+  it("is what teamQuota attaches on Cloud's Free plan only, and what reserveQuota, releaseQuota and readDailyUsage follow", async () => {
+    const row = {
+      plan: "free" as const,
+      planQuota: null,
+      planStatus: "none" as const,
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      overageEnabled: false,
+      poolOwnerId: "u-quota",
+    };
+    const quota = teamQuota(row, true);
+    expect(quota).toEqual({
+      kind: "day",
+      plan: "free",
+      limit: 100,
+      pool: { ownerId: "u-quota", limit: 100 },
+    });
+    // An operator ceiling lowers the team's limit, never the pool's.
+    expect(teamQuota({ ...row, dailySendCeiling: 40 }, true)).toEqual({
+      kind: "day",
+      plan: "free",
+      limit: 40,
+      dailyCeiling: 40,
+      pool: { ownerId: "u-quota", limit: 100 },
+    });
+    expect(teamQuota({ ...row, plan: "starter" }, true)).toEqual({
+      kind: "day",
+      plan: "starter",
+      limit: 1_500,
+    });
+    expect(teamQuota({ ...row, poolOwnerId: null }, true)).toEqual({
+      kind: "day",
+      plan: "free",
+      limit: 100,
+    });
+    expect(teamQuota(row, false)).toEqual({ kind: "none" });
+    expect(teamQuota({ ...row, dailySendCeiling: 40 }, false)).toEqual({
+      kind: "day",
+      plan: "free",
+      limit: 40,
+      dailyCeiling: 40,
+    });
+
+    const g = await createTeam(db, "pool-g", { poolOwnerId: "u-quota" });
+    const h = await createTeam(db, "pool-h", { poolOwnerId: "u-quota" });
+    await reserveQuota(db, { teamId: g, count: 70, quota, day: POOL_DAY });
+    await reserveQuota(db, { teamId: h, count: 10, quota, day: POOL_DAY });
+    expect(await readDailyUsage(db, h, quota, POOL_DAY)).toBe(80);
+    expect(await readDailyUsage(db, h, { kind: "day", plan: "free", limit: 100 }, POOL_DAY)).toBe(
+      10,
+    );
+    await releaseQuota(db, { teamId: g, count: 70, quota, day: POOL_DAY });
+    expect(await readDailyUsage(db, h, quota, POOL_DAY)).toBe(10);
+  });
+
+  it("adds a pooled team's deliverability counts to its pool, and nothing for any other team", async () => {
+    const pooled = await createTeam(db, "pool-counts", { poolOwnerId: "u-counts" });
+    const paid = await createTeam(db, "pool-paid", { poolOwnerId: "u-counts" });
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+    const alone = await createTeam(db, "pool-none");
+    const counts = { sent: 1, sent_no_feedback: 1, hard_bounced: 1, complained: 1 };
+    for (const teamId of [pooled, paid, alone]) {
+      await bumpFreePoolUsage(db, { teamId, day: POOL_DAY, counts });
+    }
+    await bumpFreePoolUsage(db, { teamId: pooled, day: POOL_DAY, counts: { complained: 1 } });
+    expect(
+      await db
+        .select()
+        .from(schema.freePoolUsage)
+        .where(eq(schema.freePoolUsage.ownerId, "u-counts")),
+    ).toEqual([
+      {
+        ownerId: "u-counts",
+        day: POOL_DAY,
+        accepted: 0,
+        sent: 1,
+        sentNoFeedback: 1,
+        hardBounced: 1,
+        complained: 2,
+      },
+    ]);
+  });
+});
+
+describe("bookFreeBurst", () => {
+  const NOW = new Date("2026-08-20T12:00:00Z");
+  const at = (refills: number, from = NOW) =>
+    new Date(from.getTime() + refills * FREE_BURST_REFILL_MS);
+  const tatOf = async (ownerId: string) => {
+    const [row] = await db
+      .select({ tat: schema.freePoolBursts.tat })
+      .from(schema.freePoolBursts)
+      .where(eq(schema.freePoolBursts.ownerId, ownerId));
+    return row?.tat;
+  };
+
+  it("lets FREE_BURST recipients go at once, then each further one a refill after the last", async () => {
+    for (let i = 0; i < FREE_BURST; i++) {
+      expect(await bookFreeBurst(db, "u-burst", 1, NOW)).toEqual(NOW);
+    }
+    expect(await bookFreeBurst(db, "u-burst", 1, NOW)).toEqual(at(1));
+    expect(await bookFreeBurst(db, "u-burst", 1, NOW)).toEqual(at(2));
+    expect(await tatOf("u-burst")).toEqual(at(FREE_BURST + 2));
+    // Another creator's allowance is its own.
+    expect(await bookFreeBurst(db, "u-burst-other", 1, NOW)).toEqual(NOW);
+  });
+
+  it("books every recipient an email names, so 25 at once wait for 15 refills", async () => {
+    expect(await bookFreeBurst(db, "u-burst-bcc", 25, NOW)).toEqual(at(25 - FREE_BURST));
+  });
+
+  it("refills one recipient every FREE_BURST_REFILL_MS, never past FREE_BURST however long it sits idle", async () => {
+    expect(await bookFreeBurst(db, "u-burst-idle", FREE_BURST, NOW)).toEqual(NOW);
+    const later = at(3);
+    expect(await bookFreeBurst(db, "u-burst-idle", 3, later)).toEqual(later);
+    expect(await bookFreeBurst(db, "u-burst-idle", 1, later)).toEqual(at(1, later));
+    const nextDay = new Date(NOW.getTime() + DAY_MS);
+    expect(await bookFreeBurst(db, "u-burst-idle", FREE_BURST + 1, nextDay)).toEqual(
+      at(1, nextDay),
+    );
   });
 });
 

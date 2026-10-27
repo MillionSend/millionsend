@@ -19,7 +19,7 @@ const execMigrations = async (filter: (idx: number) => boolean) => {
 
 beforeAll(async () => {
   client = new PGlite();
-  await execMigrations((idx) => idx < 63);
+  await execMigrations((idx) => idx < 65);
   const { rows } = await client.query<{ id: string }>(
     "insert into teams (name, slug) values ('t', 't') returning id",
   );
@@ -32,7 +32,7 @@ beforeAll(async () => {
   await client.query(
     "insert into region_breakers (region, paused, paused_at) values ('us-east-1', true, now())",
   );
-  await execMigrations((idx) => idx >= 63);
+  await execMigrations((idx) => idx >= 65);
 });
 
 afterAll(() => client.close());

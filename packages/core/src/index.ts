@@ -217,6 +217,8 @@ export {
   type AuditActor,
   type AuditEvent,
   apiRequestActor,
+  auditRow,
+  encodeAuditActor,
   type ParsedAuditActor,
   parseAuditActor,
   recordAudit,
@@ -554,12 +556,14 @@ export {
 } from "./mail-preferences.js";
 export { firstRecipientDomain, mailboxProviderSql } from "./mailbox-provider-sql.js";
 export {
+  complaintReportingRecipients,
   INACTIVE_MAILBOX_PATTERN,
   MAILBOX_FULL_PATTERN,
   type MailboxProvider,
   mailboxProvider,
   sentWithoutComplaintFeedback,
   sesAttempted,
+  simulatorFeedback,
 } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,
@@ -622,7 +626,11 @@ export {
 } from "./pix.js";
 export {
   effectivePlan,
+  FREE_BURST,
+  FREE_BURST_REFILL_MS,
+  FREE_BURST_WINDOW_MS,
   formatVolume,
+  freePoolOwner,
   isPlanRungKey,
   type LadderPlan,
   monthlyCapacity,
@@ -647,6 +655,7 @@ export {
   quotaPeriod,
   raisesQuota,
   rungByKey,
+  TEAM_CREATE_WINDOW_DAYS,
   type TeamQuota,
   teamQuota,
   teamRung,
@@ -696,10 +705,13 @@ export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
 export { parsePropertyDate, SEGMENT_FILTER_MAX_DAYS } from "./property-date.js";
 export { broadcastProviderBreakdown, type ProviderBreakdownRow } from "./provider-breakdown.js";
 export {
+  bookFreeBurst,
+  bumpFreePoolUsage,
   dailyCeiling,
   type QuotaResult,
   quotaChargeAt,
   quotaRoom,
+  readDailyUsage,
   readPeriodUsage,
   releaseDailyQuota,
   releasePeriodCount,
@@ -918,6 +930,7 @@ export {
   verifyInviteToken,
 } from "./team-invitations.js";
 export {
+  backfillPoolOwners,
   committedDailyVolume,
   contactRoom,
   fetchBestOwnedPlan,

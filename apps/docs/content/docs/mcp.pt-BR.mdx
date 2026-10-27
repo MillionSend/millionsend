@@ -179,7 +179,7 @@ análise não pode rodar, nada é liberado (`screening_unavailable`). Veja
 | --- | --- | --- |
 | `list_emails` | `emails:read` | Lista e-mails enviados, na fila e agendados. |
 | `get_email` | `emails:read` | Busca um e-mail com o status de entrega. |
-| `get_usage` | `emails:read` | Plano, limite de envio (diário no Free e Starter, mensal no Pro e Scale), limite de domínios, o total aceito hoje e, em planos mensais, o uso do período de cobrança — consulte antes de trabalho em massa. |
+| `get_usage` | `emails:read` | Plano, limite de envio (diário no Free e Starter, mensal no Pro e Scale), limite de domínios, o total aceito hoje (no Free, somando todas as equipes Free que você criou) e, em planos mensais, o uso do período de cobrança — consulte antes de trabalho em massa. |
 | `list_received_emails` | `receiving:read` | Lista os e-mails recebidos nos seus [domínios de recebimento](/pt-BR/concepts/receiving), do mais novo para o mais antigo; filtra por caixa, remetente, destinatário ou não lidos. |
 | `get_received_email` | `receiving:read` | Busca um e-mail recebido. O `format` escolhe o conteúdo: `extracted` (o padrão: remetente, confiança, análise e o texto limpo da resposta), `text`, `html` ou `raw` (só um link de download). Com `html`, o `html_format` é `cid` por padrão, para as imagens inline não incharem o resultado. |
 | `list_received_email_attachments` | `receiving:read` | Lista os anexos de um e-mail recebido com os links de download. |

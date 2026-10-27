@@ -6,6 +6,7 @@ CREATE TABLE "ses_unmatched_events" (
 	"type" "email_event_type" NOT NULL,
 	"bounce_type" text,
 	"sub_type" text,
+	"pool_owner_id" text,
 	"occurred_at" timestamp with time zone NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );

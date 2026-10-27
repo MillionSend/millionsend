@@ -1,5 +1,6 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { parseMailbox } from "@millionsend/core";
+import { SES_EMAIL_ID_TAG, SES_POOL_TAG, SES_TAG_VALUE } from "@millionsend/ses";
 import type { SesSender } from "./handlers/send-email.js";
 
 /**
@@ -40,7 +41,17 @@ export function createSesSender(defaultRegion: string, deadlineMs = SEND_DEADLIN
     return client;
   };
   return {
-    async sendRaw({ raw, emailId, configurationSetName, region, to, cc, bcc, tenantName }) {
+    async sendRaw({
+      raw,
+      emailId,
+      configurationSetName,
+      region,
+      to,
+      cc,
+      bcc,
+      tenantName,
+      poolOwnerId,
+    }) {
       const ToAddresses = toAddrSpecs(to);
       if (!ToAddresses) throw new Error("no envelope recipients; refusing to send");
       const CcAddresses = toAddrSpecs(cc);
@@ -55,7 +66,14 @@ export function createSesSender(defaultRegion: string, deadlineMs = SEND_DEADLIN
               ...(CcAddresses ? { CcAddresses } : {}),
               ...(BccAddresses ? { BccAddresses } : {}),
             },
-            EmailTags: [{ Name: "millionsend_email_id", Value: emailId }],
+            EmailTags: [
+              { Name: SES_EMAIL_ID_TAG, Value: emailId },
+              // SES would refuse the whole send over a value it cannot carry:
+              // such a pool goes untagged instead.
+              ...(poolOwnerId && SES_TAG_VALUE.test(poolOwnerId)
+                ? [{ Name: SES_POOL_TAG, Value: poolOwnerId }]
+                : []),
+            ],
             ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
             ...(tenantName ? { TenantName: tenantName } : {}),
           }),

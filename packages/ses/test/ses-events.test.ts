@@ -60,4 +60,20 @@ describe("parseSesEvent", () => {
       complaintSubType: "OnAccountSuppressionList",
     });
   });
+
+  it("reads the email id and the Free pool the worker tagged, each only as a single value", () => {
+    const parse = (tags: Record<string, unknown>) =>
+      parseSesEvent({
+        eventType: "Delivery",
+        mail: { messageId: "example-message-id-0004", timestamp: "2026-03-02T10:00:00.000Z", tags },
+        delivery: {},
+      });
+
+    expect(parse({ millionsend_email_id: ["e-1"], millionsend_pool: ["owner-1"] })).toMatchObject({
+      emailId: "e-1",
+      poolOwnerId: "owner-1",
+    });
+    expect(parse({ millionsend_pool: ["owner-1", "owner-2"] })).not.toHaveProperty("poolOwnerId");
+    expect(parse({})).not.toHaveProperty("poolOwnerId");
+  });
 });

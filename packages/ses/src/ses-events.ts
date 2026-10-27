@@ -5,6 +5,17 @@
  * the server-recorded SES MessageId — never via any client-suppliable field.
  */
 
+/**
+ * The SES message tags the worker writes on its sends, which each event
+ * carries back. No customer can set one: their tags never reach SES, and
+ * X-SES-* headers are refused at accept.
+ */
+export const SES_EMAIL_ID_TAG = "millionsend_email_id";
+/** The Free pool the sending team counted in, so feedback that outlives the email row still reaches it. */
+export const SES_POOL_TAG = "millionsend_pool";
+/** What SES takes as a message tag value; it refuses the whole send over any other. */
+export const SES_TAG_VALUE = /^[A-Za-z0-9_-]{1,256}$/;
+
 export type SesEventType =
   | "Send"
   | "Delivery"
@@ -21,6 +32,8 @@ export interface ParsedSesEvent {
   sesMessageId: string;
   /** Server-owned SES message tag used only if the MessageId join races. */
   emailId?: string;
+  /** Server-owned SES message tag: the Free pool owner the send counted in (SES_POOL_TAG). */
+  poolOwnerId?: string;
   occurredAt: Date;
   bounce?: {
     bounceType: "Permanent" | "Transient" | "Undetermined";
@@ -78,14 +91,10 @@ export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
     data: { eventType },
   };
   const tags = mail?.tags as Record<string, unknown> | undefined;
-  const taggedEmailIds = tags?.millionsend_email_id;
-  if (
-    Array.isArray(taggedEmailIds) &&
-    taggedEmailIds.length === 1 &&
-    typeof taggedEmailIds[0] === "string"
-  ) {
-    parsed.emailId = taggedEmailIds[0];
-  }
+  const emailId = singleTag(tags, SES_EMAIL_ID_TAG);
+  if (emailId !== undefined) parsed.emailId = emailId;
+  const poolOwnerId = singleTag(tags, SES_POOL_TAG);
+  if (poolOwnerId) parsed.poolOwnerId = poolOwnerId;
 
   if (eventType === "Bounce") {
     const b = obj.bounce as Record<string, unknown> | undefined;
@@ -135,6 +144,14 @@ export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
     parsed.data.click = k;
   }
   return parsed;
+}
+
+/** A tag's value: SES lists each tag's values, and only a single string is ours. */
+function singleTag(tags: Record<string, unknown> | undefined, name: string): string | undefined {
+  const values = tags?.[name];
+  return Array.isArray(values) && values.length === 1 && typeof values[0] === "string"
+    ? values[0]
+    : undefined;
 }
 
 function extractRecipients(value: unknown): string[] {

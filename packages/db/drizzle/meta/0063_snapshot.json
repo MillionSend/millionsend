@@ -1,5 +1,5 @@
 {
-  "id": "62181021-2d78-4cb2-a237-9752c2b7504b",
+  "id": "a994e89d-6928-448e-be05-53a88f81226f",
   "prevId": "3d392d16-15f0-45db-a87c-666490b94c20",
   "version": "7",
   "dialect": "postgresql",
@@ -4131,22 +4131,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "email_events_feedback_created_idx": {
-          "name": "email_events_feedback_created_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"email_events\".\"type\" in ('complained', 'bounced') and \"email_events\".\"sns_message_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -4814,102 +4798,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.ses_unmatched_events": {
-      "name": "ses_unmatched_events",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "sns_message_id": {
-          "name": "sns_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ses_message_id": {
-          "name": "ses_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "email_event_type",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bounce_type": {
-          "name": "bounce_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sub_type": {
-          "name": "sub_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "ses_unmatched_events_sns_message_id_idx": {
-          "name": "ses_unmatched_events_sns_message_id_idx",
-          "columns": [
-            {
-              "expression": "sns_message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"ses_unmatched_events\".\"sns_message_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "ses_unmatched_events_created_idx": {
-          "name": "ses_unmatched_events_created_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -7067,24 +6955,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "free_fuse_tripped_at": {
-          "name": "free_fuse_tripped_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "free_fuse_complaints": {
-          "name": "free_fuse_complaints",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "free_fuse_released_at": {
-          "name": "free_fuse_released_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -8077,12 +7947,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "held_teams": {
-          "name": "held_teams",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "paused_at": {
           "name": "paused_at",
           "type": "timestamp with time zone",
@@ -8111,12 +7975,6 @@
         "ses_complaint_alerted_at": {
           "name": "ses_complaint_alerted_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ses_enforcement_status": {
-          "name": "ses_enforcement_status",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
@@ -9237,6 +9095,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "pool_owner_id": {
+          "name": "pool_owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -9245,7 +9109,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "teams_pool_owner_idx": {
+          "name": "teams_pool_owner_idx",
+          "columns": [
+            {
+              "expression": "pool_owner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
@@ -9622,6 +9502,74 @@
           "name": "domain_warmup_usage_registrable_domain_day_pk",
           "columns": [
             "registrable_domain",
+            "day"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.free_pool_usage": {
+      "name": "free_pool_usage",
+      "schema": "",
+      "columns": {
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted": {
+          "name": "accepted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "sent": {
+          "name": "sent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "sent_no_feedback": {
+          "name": "sent_no_feedback",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "hard_bounced": {
+          "name": "hard_bounced",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "complained": {
+          "name": "complained",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "free_pool_usage_owner_id_day_pk": {
+          "name": "free_pool_usage_owner_id_day_pk",
+          "columns": [
+            "owner_id",
             "day"
           ]
         }
@@ -10600,8 +10548,7 @@
         "screening",
         "destination",
         "media",
-        "recipient",
-        "fuse"
+        "recipient"
       ]
     },
     "public.email_status": {

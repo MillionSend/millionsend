@@ -4643,6 +4643,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         count: units,
         limit: quota.kind === "day" ? quota.limit : null,
         hardLimit: quota.dailyCeiling ?? null,
+        pool: quota.kind === "day" ? quota.pool : undefined,
         day: utcDay(after),
         at: after,
       });

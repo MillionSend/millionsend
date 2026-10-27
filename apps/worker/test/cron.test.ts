@@ -20,6 +20,7 @@ import {
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
   purgeExpiredSessions,
+  purgeStaleFreePoolUsage,
   purgeStaleHourlyUsage,
   reconcileBillingPlans,
   reconcileStalledSends,
@@ -344,6 +345,34 @@ it("reconcile re-enqueues stale queued emails but never claimed or fresh ones", 
   expect(enqueued).toEqual([due?.id, stale?.id]);
 });
 
+it("reconcile leaves a row its Free pool's burst allowance booked for later to that slot's job", async () => {
+  const now = new Date();
+  const minutesAgo = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const stale = {
+    teamId,
+    from: "a@example.com",
+    to: ["r@example.com"],
+    subject: "s",
+    latestStatus: "queued" as const,
+    createdAt: minutesAgo(30),
+  };
+  await db.insert(schema.emails).values({ ...stale, freeBurstAt: minutesAgo(-6) });
+  const [due] = await db
+    .insert(schema.emails)
+    .values({ ...stale, freeBurstAt: minutesAgo(1) })
+    .returning({ id: schema.emails.id });
+
+  const enqueued: string[] = [];
+  const count = await reconcileStalledSends(db, {
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+    now,
+  });
+  expect(count).toBe(1);
+  expect(enqueued).toEqual([due?.id]);
+});
+
 it("reconcile pages through a backlog larger than one batch, each row once, one enqueue per page", async () => {
   const now = new Date();
   const createdAt = new Date(now.getTime() - 30 * 60 * 1000);
@@ -450,6 +479,31 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
   // the wall clock must never enter this test or the absolute fixture dates
   // silently expire.
   expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(0);
+});
+
+it("retention purge keeps the body of a row waiting for its Free pool's burst slot", async () => {
+  const [held] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@example.com",
+      to: ["r@example.com"],
+      subject: "held",
+      latestStatus: "queued",
+      createdAt: new Date("2026-08-12T00:00:00Z"),
+      freeBurstAt: new Date("2026-08-14T06:00:00Z"),
+      bodyCiphertext: Buffer.from("ct"),
+      bodyIv: Buffer.from("iv"),
+      bodyWrappedDek: Buffer.from("dek"),
+      bodyKeyVersion: 1,
+    })
+    .returning({ id: schema.emails.id });
+  if (!held) throw new Error("insert failed");
+  const purge = (now: string) =>
+    purgeExpiredEmailBodies(db, { defaultRetentionDays: 1, now: new Date(now) });
+  expect(await purge("2026-08-14T00:00:00Z")).toBe(0);
+  // Once its slot has left the window too, it goes like any other.
+  expect(await purge("2026-08-15T07:00:00Z")).toBe(1);
 });
 
 it("api-request purge deletes old rows but not fresh ones, honoring the instance override", async () => {
@@ -1184,6 +1238,21 @@ it("hourly usage purge drops rows older than 45 days in batches and reports the 
   expect(await purgeStaleHourlyUsage(db, now)).toBe(0);
   const left = await db.select().from(schema.usageCountersHourly);
   expect(left).toHaveLength(1);
+});
+
+it("Free pool purge drops days older than 35 and keeps the rest", async () => {
+  const now = new Date("2026-09-08T12:00:00Z");
+  await db.insert(schema.freePoolUsage).values([
+    { ownerId: "u-purge", day: utcDay(now.getTime() - 36 * DAY_MS), complained: 1 },
+    { ownerId: "u-purge", day: utcDay(now.getTime() - 35 * DAY_MS), complained: 1 },
+    { ownerId: "u-purge", day: utcDay(now.getTime()), accepted: 1 },
+  ]);
+  expect(await purgeStaleFreePoolUsage(db, now)).toBe(1);
+  expect(await purgeStaleFreePoolUsage(db, now)).toBe(0);
+  expect(await db.select({ day: schema.freePoolUsage.day }).from(schema.freePoolUsage)).toEqual([
+    { day: utcDay(now.getTime() - 35 * DAY_MS) },
+    { day: utcDay(now.getTime()) },
+  ]);
 });
 
 it("drain leaves a suspended team's rows parked until the operator reinstates it", async () => {

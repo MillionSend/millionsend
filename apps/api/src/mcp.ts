@@ -760,7 +760,7 @@ function buildServer(
     {
       title: "Get usage",
       description:
-        "Get the team's plan name (`plan`), sending limits and usage: the send limit (emails_per_day or emails_per_month), domain limit and contact limit (`limits.contacts`, null when unlimited), emails accepted so far today (UTC) and when that counter resets, and on a monthly limit a `period` object with the period's emails_sent, included volume, whether sending past it is on and when the period ends. A self-hosted instance reports cloud=false with null plan, limits and period; the instance's own (system) team reports cloud=true with the same nulls.",
+        "Get the team's plan name (`plan`), sending limits and usage: the send limit (emails_per_day or emails_per_month), domain limit and contact limit (`limits.contacts`, null when unlimited), emails accepted so far today (UTC; on Free, by every Free team created by the same person, which share the daily limit) and when that counter resets, and on a monthly limit a `period` object with the period's emails_sent, included volume, whether sending past it is on and when the period ends. A self-hosted instance reports cloud=false with null plan, limits and period; the instance's own (system) team reports cloud=true with the same nulls.",
       inputSchema: z.object({}),
       readOnly: true,
     },

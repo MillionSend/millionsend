@@ -2,8 +2,8 @@ import { DAY_MS, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { and, eq } from "drizzle-orm";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
+import { and, eq, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
 
@@ -22,11 +22,12 @@ async function insertSentEmail(
   to = ["r@example.com"],
   contactId: string | null = null,
   sentAt = new Date(),
+  team = teamId,
 ): Promise<string> {
   const [row] = await db
     .insert(schema.emails)
     .values({
-      teamId,
+      teamId: team,
       contactId,
       from: "a@acme.dev",
       to,
@@ -256,6 +257,264 @@ describe("hard bounce and complaint counters", () => {
   });
 });
 
+describe("feedback from the mailbox simulator and Free pools", () => {
+  const dailyOf = async (team: string, day: string) => {
+    const [row] = await db
+      .select({
+        delivered: schema.usageCounters.delivered,
+        bounced: schema.usageCounters.bounced,
+        hardBounced: schema.usageCounters.hardBounced,
+        complained: schema.usageCounters.complained,
+      })
+      .from(schema.usageCounters)
+      .where(and(eq(schema.usageCounters.teamId, team), eq(schema.usageCounters.day, day)));
+    return row;
+  };
+
+  it("leaves the simulator's bounces and complaints out of the rates; they still suppress and fire webhooks", async () => {
+    const sim = await createTeam(db, "events-simulator");
+    const endpoint = await createWebhookEndpoint(db, sim, null);
+    const at = "2026-09-22T10:00:00.000Z";
+    const bounce = "bounce@simulator.amazonses.com";
+    const complaint = "complaint@simulator.amazonses.com";
+    const bounced = await insertSentEmail("mid-sim-bounce", [bounce], null, new Date(), sim);
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Bounce",
+        sesMessageId: "mid-sim-bounce",
+        occurredAt: at,
+        bounce: { bounceType: "Permanent", bounceSubType: "General", recipients: [bounce] },
+      }),
+    );
+    const complained = await insertSentEmail(
+      "mid-sim-complaint",
+      [complaint],
+      null,
+      new Date(),
+      sim,
+    );
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-sim-complaint",
+        occurredAt: at,
+        complaint: { recipients: [complaint], complaintFeedbackType: "abuse" },
+      }),
+    );
+    expect(await dailyOf(sim, at.slice(0, 10))).toEqual({
+      delivered: 0,
+      bounced: 1,
+      hardBounced: 0,
+      complained: 0,
+    });
+    expect([await statusOf(bounced), await statusOf(complained)]).toEqual([
+      "bounced",
+      "complained",
+    ]);
+    const suppressed = await db
+      .select({ email: schema.suppressions.email, reason: schema.suppressions.reason })
+      .from(schema.suppressions)
+      .where(eq(schema.suppressions.teamId, sim));
+    expect(suppressed).toEqual(
+      expect.arrayContaining([
+        { email: bounce, reason: "hard_bounce" },
+        { email: complaint, reason: "complaint" },
+      ]),
+    );
+    const fired = await db
+      .select({ type: schema.webhookDeliveries.eventType })
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpoint));
+    expect(fired.map((d) => d.type)).toEqual(
+      expect.arrayContaining(["email.bounced", "email.complained"]),
+    );
+  });
+
+  it("adds a Free team's hard bounces and complaints to its pool, beside its own counters", async () => {
+    const owner = "u-events-pool";
+    const pooled = await createTeam(db, "events-pooled", { poolOwnerId: owner });
+    const paid = await createTeam(db, "events-paid", { poolOwnerId: owner });
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+    const at = "2026-09-23T10:00:00.000Z";
+    const day = at.slice(0, 10);
+    for (const [team, mid] of [
+      [pooled, "mid-pool-complaint"],
+      [paid, "mid-paid-complaint"],
+    ] as const) {
+      await insertSentEmail(mid, ["r@example.com"], null, new Date(), team);
+      await processSesEvent(
+        db,
+        makeEvent({
+          eventType: "Complaint",
+          sesMessageId: mid,
+          occurredAt: at,
+          complaint: { recipients: ["r@example.com"] },
+        }),
+      );
+    }
+    await insertSentEmail("mid-pool-bounce", ["gone@example.com"], null, new Date(), pooled);
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Bounce",
+        sesMessageId: "mid-pool-bounce",
+        occurredAt: at,
+        bounce: {
+          bounceType: "Permanent",
+          bounceSubType: "General",
+          recipients: ["gone@example.com"],
+        },
+      }),
+    );
+    await insertSentEmail("mid-pool-delivery", ["r@example.com"], null, new Date(), pooled);
+    await processSesEvent(
+      db,
+      makeEvent({ eventType: "Delivery", sesMessageId: "mid-pool-delivery", occurredAt: at }),
+    );
+    expect(await dailyOf(pooled, day)).toEqual({
+      delivered: 1,
+      bounced: 1,
+      hardBounced: 1,
+      complained: 1,
+    });
+    expect(await dailyOf(paid, day)).toMatchObject({ complained: 1 });
+    expect(
+      await db.select().from(schema.freePoolUsage).where(eq(schema.freePoolUsage.ownerId, owner)),
+    ).toEqual([
+      {
+        ownerId: owner,
+        day,
+        accepted: 0,
+        sent: 0,
+        sentNoFeedback: 0,
+        hardBounced: 1,
+        complained: 1,
+      },
+    ]);
+  });
+
+  it("adds feedback on a deleted Free team's mail to the pool its send was tagged with", async () => {
+    const owner = "u-events-deleted";
+    const gone = await createTeam(db, "events-deleted", { poolOwnerId: owner });
+    await insertSentEmail("mid-gone-complaint", ["r@outlook.com"], null, new Date(), gone);
+    await insertSentEmail("mid-gone-bounce", ["gone@example.com"], null, new Date(), gone);
+    await db.delete(schema.teams).where(eq(schema.teams.id, gone));
+    const at = "2026-09-24T10:00:00.000Z";
+    const tagged = { occurredAt: at, poolOwnerId: owner };
+    const events: Partial<SerializedSesEvent>[] = [
+      {
+        eventType: "Complaint",
+        sesMessageId: "mid-gone-complaint",
+        complaint: { recipients: ["r@outlook.com"] },
+      },
+      {
+        eventType: "Bounce",
+        sesMessageId: "mid-gone-bounce",
+        bounce: {
+          bounceType: "Permanent",
+          bounceSubType: "General",
+          recipients: ["gone@example.com"],
+        },
+      },
+      // None of these would count on a row either.
+      {
+        eventType: "Bounce",
+        sesMessageId: "mid-gone-soft",
+        bounce: {
+          bounceType: "Transient",
+          bounceSubType: "General",
+          recipients: ["x@example.com"],
+        },
+      },
+      {
+        eventType: "Complaint",
+        sesMessageId: "mid-gone-unattempted",
+        complaint: { recipients: ["y@outlook.com"], complaintSubType: "OnAccountSuppressionList" },
+      },
+      { eventType: "Delivery", sesMessageId: "mid-gone-delivery" },
+    ];
+    for (const event of events) {
+      await processSesEvent(db, makeEvent({ ...tagged, ...event }), {
+        snsMessageId: `sns-${event.sesMessageId}`,
+      });
+    }
+    // SNS delivers at least once: a repeat counts nothing more.
+    await processSesEvent(db, makeEvent({ ...tagged, ...events[0] }), {
+      snsMessageId: "sns-mid-gone-complaint",
+    });
+    expect(
+      await db
+        .select({ ses: schema.sesUnmatchedEvents.sesMessageId })
+        .from(schema.sesUnmatchedEvents)
+        .where(eq(schema.sesUnmatchedEvents.poolOwnerId, owner)),
+    ).toHaveLength(4);
+    expect(
+      await db.select().from(schema.freePoolUsage).where(eq(schema.freePoolUsage.ownerId, owner)),
+    ).toEqual([
+      {
+        ownerId: owner,
+        day: at.slice(0, 10),
+        accepted: 0,
+        sent: 0,
+        sentNoFeedback: 0,
+        hardBounced: 1,
+        complained: 1,
+      },
+    ]);
+  });
+
+  it("adds nothing for an unknown email's feedback without a pool tag, or from the simulator", async () => {
+    const at = "2026-09-25T10:00:00.000Z";
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-unknown-untagged",
+        occurredAt: at,
+        complaint: { recipients: ["r@outlook.com"] },
+      }),
+    );
+    const simulator = { occurredAt: at, poolOwnerId: "u-events-simulator" };
+    await processSesEvent(
+      db,
+      makeEvent({
+        ...simulator,
+        eventType: "Complaint",
+        sesMessageId: "mid-unknown-sim-complaint",
+        complaint: { recipients: ["complaint@simulator.amazonses.com"] },
+      }),
+    );
+    await processSesEvent(
+      db,
+      makeEvent({
+        ...simulator,
+        eventType: "Bounce",
+        sesMessageId: "mid-unknown-sim-bounce",
+        bounce: {
+          bounceType: "Permanent",
+          bounceSubType: "General",
+          recipients: ["bounce@simulator.amazonses.com"],
+        },
+      }),
+    );
+    expect(
+      await db
+        .select()
+        .from(schema.freePoolUsage)
+        .where(eq(schema.freePoolUsage.day, at.slice(0, 10))),
+    ).toEqual([]);
+    // The simulator's feedback is a test: not even recorded as unmatched.
+    expect(
+      await db
+        .select({ ses: schema.sesUnmatchedEvents.sesMessageId })
+        .from(schema.sesUnmatchedEvents)
+        .where(like(schema.sesUnmatchedEvents.sesMessageId, "mid-unknown-%")),
+    ).toEqual([{ ses: "mid-unknown-untagged" }]);
+  });
+});
+
 it("out-of-order events never regress the status ladder", async () => {
   const emailId = await insertSentEmail("mid-order");
   await processSesEvent(db, makeEvent({ eventType: "Delivery", sesMessageId: "mid-order" }));
@@ -314,7 +573,8 @@ it("records an unknown sesMessageId's complaint and bounce once each, for the pl
       subType: schema.sesUnmatchedEvents.subType,
       occurredAt: schema.sesUnmatchedEvents.occurredAt,
     })
-    .from(schema.sesUnmatchedEvents);
+    .from(schema.sesUnmatchedEvents)
+    .where(like(schema.sesUnmatchedEvents.sesMessageId, "gone-%"));
   expect(rows.sort((a, b) => a.ses.localeCompare(b.ses))).toEqual([
     {
       sns: "sns-gone-bounce",

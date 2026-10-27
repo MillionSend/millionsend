@@ -23,6 +23,8 @@ import {
 } from "@millionsend/config";
 import {
   anyYoungLinkDomain,
+  backfillPoolOwners,
+  bookFreeBurst,
   committedDailyVolume,
   createDomainAgeResolver,
   createSharedNameReview,
@@ -96,6 +98,7 @@ import {
   purgeExpiredReceivedMetadata,
   purgeExpiredSessions,
   purgeInboxData,
+  purgeStaleFreePoolUsage,
   purgeStaleHourlyUsage,
   reapStaleTrackingSubdomains,
   reapUnverifiedDomains,
@@ -465,6 +468,7 @@ await queue.scheduleCrons({
     const draftsExpired = await expireDrafts(db, inboxSendDeps, now);
     const sessions = await purgeExpiredSessions(db);
     const hourlyUsage = await purgeStaleHourlyUsage(db);
+    const freePoolUsage = await purgeStaleFreePoolUsage(db);
     const stripeEvents = await purgeStripeEvents(db);
     const probes = await pruneProbes(db);
     const monitorSamples = await pruneMonitorSamples(db);
@@ -478,6 +482,7 @@ await queue.scheduleCrons({
       probes,
       monitorSamples,
       hourlyUsage,
+      freePoolUsage,
       apiRequests: requests,
       events: stripped.events,
       deliveries: stripped.deliveries,
@@ -724,6 +729,15 @@ backfillSharedSubdomains().catch((err) => {
   console.warn("shared.subdomain at boot failed; the 15-minute sweep covers it", err);
 });
 
+// Teams created before their creator was recorded join their Free pool.
+backfillPoolOwners(db, env.IS_CLOUD)
+  .then((filled) => {
+    if (filled > 0) console.log(`teams.pool_owner: filled=${filled}`);
+  })
+  .catch((err) => {
+    console.warn("teams.pool_owner at boot failed; the next boot tries again", err);
+  });
+
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
 // to resurrect forever.
 await queue.workDeadLetter("email.send", async ({ emailId }) => {
@@ -789,6 +803,7 @@ await queue.work(
         sharedTenant,
         throttle: (region) => sendControls.throttle(region),
         reschedule: (emailId, at, priority) => enqueueSend(emailId, at, priority),
+        ...(env.IS_CLOUD ? { freeBurst: bookFreeBurst } : {}),
         sesQuota: sendControls,
         enqueueWebhookDelivery: enqueueWebhook,
         tracking,

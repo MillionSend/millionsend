@@ -12,7 +12,7 @@ import {
   type TeamQuota,
   teamRung,
 } from "./plans.js";
-import { readPeriodUsage, releaseQuota } from "./quota.js";
+import { readDailyUsage, readPeriodUsage, releaseQuota } from "./quota.js";
 import {
   type BroadcastEstimate,
   bulkShare,
@@ -198,14 +198,9 @@ export async function quotaUsage(
   quota: TeamQuota,
   now: Date = new Date(),
 ): Promise<{ day: number; period: number }> {
-  const c = schema.usageCounters;
-  const [today] = await db
-    .select({ accepted: c.accepted })
-    .from(c)
-    .where(and(eq(c.teamId, teamId), eq(c.day, utcDay(now))));
   const period =
     quota.kind === "month" ? (await readPeriodUsage(db, teamId, quota.periodStart)).accepted : 0;
-  return { day: today?.accepted ?? 0, period };
+  return { day: await readDailyUsage(db, teamId, quota, utcDay(now)), period };
 }
 
 /**

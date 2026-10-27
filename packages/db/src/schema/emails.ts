@@ -145,6 +145,10 @@ export const emails = pgTable(
     bodyKeyVersion: integer("body_key_version"),
     bodyPurgedAt: timestamp("body_purged_at", { withTimezone: true }),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    // The slot a Free pool's burst allowance booked for this send (core
+    // bookFreeBurst): a wake-up reads it back instead of booking again,
+    // until it is a burst window old (FREE_BURST_WINDOW_MS).
+    freeBurstAt: timestamp("free_burst_at", { withTimezone: true }),
     // An operator released it from the review list: no screening reason
     // stops it again.
     screenReleasedAt: timestamp("screen_released_at", { withTimezone: true }),
@@ -282,6 +286,8 @@ export const sesUnmatchedEvents = pgTable(
     bounceType: text("bounce_type"),
     // The bounce's or the complaint's SES subtype: whether SES attempted the mail.
     subType: text("sub_type"),
+    // The Free pool the send was tagged with, when its team was in one.
+    poolOwnerId: text("pool_owner_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
