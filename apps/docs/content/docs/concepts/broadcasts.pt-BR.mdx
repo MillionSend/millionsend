@@ -209,7 +209,9 @@ mostra um traço.
   completo. A taxa de reclamação conta só os e-mails para provedores que
   informam reclamações (Gmail, Apple Mail e t-online nunca informam), e as
   reclamações só contam para um alerta ou para essa pausa a partir de 100
-  desses envios.
+  desses envios. No plano Free, elas contam desde o primeiro e-mail e são
+  julgadas juntas em todas as equipes Free que você criou, inclusive as
+  excluídas, e uma pausa vale para todas elas.
 - Se a taxa agregada de bounce ou de reclamações da plataforma na região SES do
   seu remetente se aproxima do limite em que o SES age sobre a conta, envios de
   transmissão nessa região são recusados com
@@ -221,6 +223,10 @@ transmissões.
 
 ## Mudanças recentes
 
+- No plano Free, as reclamações contam para um alerta ou para o
+  `403 sending_paused` desde o primeiro e-mail, julgadas juntas em todas as
+  equipes Free que você criou. Bounces e reclamações do simulador de caixas
+  do SES nunca contam.
 - **Editar como HTML** no editor passa uma transmissão de blocos para o modo
   código. **Voltar para blocos** desfaz a troca até você salvar. Veja
   [Editor de blocos e HTML](#editor-de-blocos-e-html).

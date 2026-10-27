@@ -170,7 +170,7 @@ while it can't run, nothing is released (`screening_unavailable`). See
 | --- | --- | --- |
 | `list_emails` | `emails:read` | List sent, queued and scheduled emails. |
 | `get_email` | `emails:read` | Get one email with its delivery status. |
-| `get_usage` | `emails:read` | Plan, send limit (daily on Free and Starter, monthly on Pro and Scale), domain limit, today's accepted count and, on monthly plans, the billing period's usage — check before bulk work. |
+| `get_usage` | `emails:read` | Plan, send limit (daily on Free and Starter, monthly on Pro and Scale), domain limit, today's accepted count (on Free, shared by all the Free teams you created) and, on monthly plans, the billing period's usage — check before bulk work. |
 | `list_received_emails` | `receiving:read` | List the emails received at your [receiving domains](/concepts/receiving), newest first; filter by inbox, sender, recipient or unread. |
 | `get_received_email` | `receiving:read` | Get one received email. `format` picks the content: `extracted` (the default: sender, trust, screening and the cleaned reply text), `text`, `html` or `raw` (a download link only). With `html`, `html_format` defaults to `cid`, keeping inline images out of the result. |
 | `list_received_email_attachments` | `receiving:read` | List a received email's attachments with their download links. |

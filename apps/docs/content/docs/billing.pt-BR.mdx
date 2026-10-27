@@ -20,6 +20,14 @@ Starter, ilimitados acima. Em qualquer um desses limites a API responde
 mostra a mesma frase. Caixas de entrada são limitadas a 3 no Free e 25 no
 Starter, ilimitadas acima (veja [Caixas de entrada](#caixas-de-entrada)).
 
+Uma pessoa pode ser dona de até 3 equipes no Free, 5 no Starter, 10 no Pro e
+15 no Scale, pelo melhor plano entre as equipes de que ela é dona
+(`PLAN_TEAM_LIMIT`); participar da equipe de outra pessoa não conta. No Free,
+toda equipe que a pessoa criou nos últimos 30 dias
+(`TEAM_CREATE_WINDOW_DAYS`) também conta, inclusive as excluídas, então
+excluir uma equipe não libera vaga. Acima do limite, o painel recusa a nova
+equipe e diz o motivo.
+
 | Faixa | Plano | Preço | Incluído | Limite | Excedente por 1.000 |
 | --- | --- | --- | --- | --- | --- |
 | `free` | Free | US$ 0 | 100 | por dia | — |
@@ -52,6 +60,19 @@ envio agendado conta no dia UTC em que sai: o próprio dia, ou hoje para um
 `scheduled_at` já passado (ele sai na hora). Reagendá-lo para outro dia conta
 também nesse dia, e o dia que ele deixa mantém a contagem; se esse dia estiver
 cheio, o e-mail fica em espera até o drain achar espaço.
+
+No Free, o limite é da pessoa, não da equipe: todas as equipes Free que uma
+pessoa criou dividem uma única contagem diária, guardada pela pessoa que as
+criou (`teams.pool_owner_id`, gravado na criação da equipe) em
+`free_pool_usage`, então ela continua em 100 por dia, com a mesma tolerância de
+50%, não importa quantas equipes a pessoa tenha. Os `usage_counters` de cada
+equipe continuam contando para as métricas dela. Os envios de uma equipe
+excluída continuam contados, e os avisos de cota saem uma vez só para todas.
+As mesmas equipes dividem um só histórico de bounces e reclamações (veja
+[Proteções](/pt-BR/concepts/broadcasts#proteções)). Equipes criadas antes de
+a pessoa ser gravada recebem esse dado quando o worker inicia: o usuário
+indicado na linha `team.created` do log de auditoria delas ou, sem ela, o
+primeiro proprietário.
 
 ### Volumes mensais (Pro, Scale)
 
@@ -101,9 +122,11 @@ mensagem, não por destinatário, em `usage_counters.received` e
 `receivingRule` em `packages/core/src/receiving/rcpt.ts`:
 
 - **Free**: o e-mail recebido gasta o contador de envios do dia
-  (`usage_counters.accepted`), então envios e e-mails recebidos dividem a
-  cota e a tolerância de 50%, e os avisos de cota contam os dois. No teto, o
-  MX adia e-mails novos com `452 4.2.2` até a meia-noite UTC.
+  (`usage_counters.accepted`, e a contagem compartilhada da pessoa que criou
+  a equipe em `free_pool_usage`), então envios e e-mails recebidos dividem a
+  cota e a tolerância de 50% em todas as equipes Free que essa pessoa criou,
+  e os avisos de cota contam os dois. No teto, o MX adia e-mails novos com
+  `452 4.2.2` até a meia-noite UTC.
 - **Starter**: grátis até o dobro da cota diária (3.000) por dia UTC, contado
   à parte dos envios; além disso, `452`.
 - **Pro, Scale**: grátis até o dobro do volume incluído por período. Além

@@ -193,7 +193,10 @@ Gmail and Apple never report one, so their cell shows a dash.
   error, stopping the damage before SES pauses sending entirely. The
   complaint rate counts only mail to providers that report complaints
   (Gmail, Apple Mail and t-online never do), and complaints count toward a
-  warning or this pause only once there are 100 such sends.
+  warning or this pause only once there are 100 such sends. On the Free
+  plan they count from the first email, judged together across all the Free
+  teams you created, deleted ones included, and a pause holds every one of
+  them.
 - If the platform's aggregate bounce or complaint rate in your sender's SES
   region nears the line where SES acts on the account, broadcast sends in
   that region are refused with
@@ -204,6 +207,10 @@ See the [API reference](/api-reference) for all broadcast endpoints.
 
 ## Recent changes
 
+- On the Free plan, complaints count toward a warning or
+  `403 sending_paused` from the first email, judged together across all the
+  Free teams you created. Bounces and complaints from the SES mailbox
+  simulator never count.
 - **Edit as HTML** in the composer moves a broadcast built with blocks to code
   mode. **Back to blocks** undoes the switch until the next save. See
   [Block editor and HTML](#block-editor-and-html).
