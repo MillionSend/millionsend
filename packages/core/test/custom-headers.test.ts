@@ -8,6 +8,7 @@ describe("customHeaderIssues", () => {
         "In-Reply-To": "<a@x.example>",
         References: "<a@x.example> <b@y.example>",
         "X-Ticket": "42",
+        "OTP-Token": '"123456"; origin="https://example.com"',
       }),
     ).toEqual([]);
     expect(customHeaderIssues({ "X-SES-Configuration-Set": "x" })[0]?.message).toMatch(
@@ -16,6 +17,14 @@ describe("customHeaderIssues", () => {
     expect(customHeaderIssues({ "X-MillionSend-Forwarded": "x" })).toHaveLength(1);
     expect(customHeaderIssues({ "Auto-Submitted": "auto-replied" })).toHaveLength(1);
     expect(customHeaderIssues({ "Bad Name": "x" })[0]?.message).toMatch(/not a valid header name/);
+  });
+
+  it("refuses a vetted name given twice in different cases; X- headers may repeat", () => {
+    const otp = '"123456"; origin="https://example.com"';
+    expect(customHeaderIssues({ "OTP-Token": otp, "otp-token": otp })).toEqual([
+      { header: "otp-token", message: '"otp-token" may appear only once' },
+    ]);
+    expect(customHeaderIssues({ "X-Tag": "a", "x-tag": "b" })).toEqual([]);
   });
 
   it("refuses values that could smuggle a header line", () => {

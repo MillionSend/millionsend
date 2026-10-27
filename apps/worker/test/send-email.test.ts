@@ -709,6 +709,47 @@ it("attachments and custom headers ride the raw MIME; tracking still rewrites th
   expect(mime).not.toContain("dest.test");
 });
 
+it("printable ASCII header values go out as given, double quotes included; non-ASCII is still encoded", async () => {
+  const { ses, sends } = fakeSes("mid-verbatim-headers");
+  const otpToken = '"123456"; origin="https://example.com"';
+  const long = `k="${"a".repeat(60)}"; b="${"c".repeat(60)}"`;
+  const emailId = await insertEmail({
+    subject: 'Your "code" is 123456',
+    headers: {
+      "OTP-Token": otpToken,
+      "X-Long": long,
+      "X-Unbroken": `"${"x".repeat(1000)}"`,
+      "X-Accent": 'olá "mundo"',
+      "In-Reply-To": "parent@acme.dev",
+      References: "<root@acme.dev> parent@acme.dev",
+    },
+  });
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+
+  const raw = sends[0]?.raw.toString("utf8") ?? "";
+  const head = raw.slice(0, raw.indexOf("\r\n\r\n"));
+  // Unfolded the way a receiver reads it; names lowercased (nodemailer
+  // normalizes their casing), values left exact.
+  const fields = head
+    .replace(/\r\n(?=[ \t])/g, "")
+    .split("\r\n")
+    .map((line) => line.replace(/^[^:]+/, (name) => name.toLowerCase()));
+  expect(fields).toContain(`otp-token: ${otpToken}`);
+  expect(fields).toContain('subject: Your "code" is 123456');
+  expect(fields).toContain(`x-long: ${long}`);
+  // Folded at its own whitespace, while a word no fold can fit within 998
+  // characters keeps nodemailer's encoded words.
+  expect(head).toMatch(/X-Long: k="a+";\r\n b="c+"/);
+  expect(fields.find((f) => f.startsWith("x-unbroken:"))).toMatch(
+    /^x-unbroken: =\?UTF-8\?Q\?=22x+\?=/,
+  );
+  expect(head.split("\r\n").every((line) => line.length <= 998)).toBe(true);
+  expect(fields).toContain("x-accent: =?UTF-8?Q?ol=C3=A1_=22mundo=22?=");
+  // Msg-ids keep nodemailer's angle brackets.
+  expect(fields).toContain("in-reply-to: <parent@acme.dev>");
+  expect(fields).toContain("references: <root@acme.dev> <parent@acme.dev>");
+});
+
 it("sends an attachment's bare media type and charset: a declared name never reaches the MIME", async () => {
   const { ses, sends } = fakeSes("mid-attach-type");
   const content = Buffer.from("hello attachment").toString("base64");
