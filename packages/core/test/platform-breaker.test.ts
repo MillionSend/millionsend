@@ -638,3 +638,74 @@ it("stores SES's rate with its read time, keeps the last one when a read fails, 
     read: true,
   });
 });
+
+/** One email sent at `sentAt`, and SES's complaint about it arriving at `complainedAt`. */
+async function complainedSend(
+  teamId: string,
+  domainId: string | null,
+  sentAt: Date,
+  complainedAt = sentAt,
+  to = ["r@example.com"],
+): Promise<string> {
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, domainId, from: "f@example.com", to, subject: "s", sentAt })
+    .returning({ id: schema.emails.id });
+  if (!email) throw new Error("seed failed");
+  await db.insert(schema.emailEvents).values({
+    emailId: email.id,
+    type: "complained",
+    occurredAt: complainedAt,
+    createdAt: complainedAt,
+    snsMessageId: `sns-${email.id}`,
+    data: { complaint: { complainedRecipients: to.map((emailAddress) => ({ emailAddress })) } },
+  });
+  return email.id;
+}
+
+it("leaves complaints and hard bounces naming only SES's mailbox simulator out, and mail to it alone out of the complaint base", async () => {
+  await clearTraffic();
+  const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamC));
+  if (!dom) throw new Error("no domain");
+  const sim = ["complaint@simulator.amazonses.com"];
+  const sent = hoursAgo(2);
+  await complainedSend(teamC, dom.id, sent, sent, sim);
+  // Every named recipient must be the simulator's for the event to stay out.
+  await complainedSend(teamC, dom.id, sent, sent, [...sim, "r@example.com"]);
+  await complainedSend(teamC, dom.id, sent, sent);
+  const [bounced] = await db
+    .insert(schema.emails)
+    .values({
+      teamId: teamC,
+      domainId: dom.id,
+      from: "f@example.com",
+      to: ["bounce@simulator.amazonses.com"],
+      subject: "s",
+      sentAt: sent,
+    })
+    .returning({ id: schema.emails.id });
+  if (!bounced) throw new Error("seed failed");
+  await db.insert(schema.emailEvents).values({
+    emailId: bounced.id,
+    type: "bounced",
+    occurredAt: sent,
+    createdAt: sent,
+    snsMessageId: `sns-${bounced.id}`,
+    bounceType: "Permanent",
+    data: {
+      bounce: {
+        bounceType: "Permanent",
+        bounceSubType: "General",
+        bouncedRecipients: [{ emailAddress: "bounce@simulator.amazonses.com" }],
+      },
+    },
+  });
+  expect(
+    (await regionWindowCounts(db, { now: NOW, hours: 24, teamIds: [teamC] })).get("us-east-1"),
+  ).toEqual({ sent: 4, complaintSent: 2, hardBounced: 0, complained: 2 });
+  // A stripped payload names no one, and reads as counted.
+  await db.update(schema.emailEvents).set({ data: null });
+  expect(
+    (await regionWindowCounts(db, { now: NOW, hours: 24, teamIds: [teamC] })).get("us-east-1"),
+  ).toMatchObject({ hardBounced: 1, complained: 3 });
+});

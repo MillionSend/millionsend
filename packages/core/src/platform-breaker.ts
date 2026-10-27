@@ -20,7 +20,11 @@ import {
   MIN_PAUSE_HARD_BOUNCES,
   type WindowCounts,
 } from "./deliverability.js";
-import { NO_COMPLAINT_FEEDBACK_DOMAINS, SES_UNATTEMPTED_SUBTYPES } from "./mailbox-providers.js";
+import {
+  NO_COMPLAINT_FEEDBACK_DOMAINS,
+  SES_MAILBOX_SIMULATOR_DOMAIN,
+  SES_UNATTEMPTED_SUBTYPES,
+} from "./mailbox-providers.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -77,12 +81,23 @@ const ev = schema.emailEvents;
  */
 const sesAttemptedSql = (subType: SQL) =>
   sql`coalesce(${subType}, '') not in ${[...SES_UNATTEMPTED_SUBTYPES]}`;
+/**
+ * Whether every recipient a stored SES bounce or complaint names is at SES's
+ * mailbox simulator, which SES leaves out of its own rates.
+ * ponytail: the recipients live only in the payload, so an event whose
+ * payload retention stripped reads as counted, the ceiling sesAttemptedSql
+ * has too.
+ */
+const simulatorOnlySql = (recipients: SQL) => sql`coalesce((
+  select bool_and(lower(rtrim(split_part(r->>'emailAddress', '@', -1), '>')) = ${SES_MAILBOX_SIMULATOR_DOMAIN})
+  from jsonb_array_elements(case when jsonb_typeof(${recipients}) = 'array' then ${recipients} else '[]'::jsonb end) r
+), false)`;
 // Bounce class lives in the stored SES payload (process-ses-event writes the
 // raw bounce object under data.bounce), so hard bounces are read back from it.
 // The column is authoritative; the json path covers rows written before it
 // existed (until retention strips their payload).
-export const hardBounceFilter = sql`${ev.type} = 'bounced' and coalesce(${ev.bounceType}, ${ev.data}->'bounce'->>'bounceType') = 'Permanent' and ${sesAttemptedSql(sql`${ev.data}->'bounce'->>'bounceSubType'`)}`;
-export const complaintFilter = sql`${ev.type} = 'complained' and ${sesAttemptedSql(sql`${ev.data}->'complaint'->>'complaintSubType'`)}`;
+export const hardBounceFilter = sql`${ev.type} = 'bounced' and coalesce(${ev.bounceType}, ${ev.data}->'bounce'->>'bounceType') = 'Permanent' and ${sesAttemptedSql(sql`${ev.data}->'bounce'->>'bounceSubType'`)} and not ${simulatorOnlySql(sql`${ev.data}->'bounce'->'bouncedRecipients'`)}`;
+export const complaintFilter = sql`${ev.type} = 'complained' and ${sesAttemptedSql(sql`${ev.data}->'complaint'->>'complaintSubType'`)} and not ${simulatorOnlySql(sql`${ev.data}->'complaint'->'complainedRecipients'`)}`;
 /**
  * A send's recipients in to, cc and bcc, one `domain` row each, read the way
  * sentWithoutComplaintFeedback reads them: what follows the last '@', less a
@@ -90,9 +105,10 @@ export const complaintFilter = sql`${ev.type} = 'complained' and ${sesAttemptedS
  */
 export const recipientDomains = sql`select lower(rtrim(split_part(r, '@', -1), '>')) as domain
   from jsonb_array_elements_text(${schema.emails.to} || coalesce(${schema.emails.cc}, '[]') || coalesce(${schema.emails.bcc}, '[]')) as r`;
-// sentWithoutComplaintFeedback over the stored recipients.
+// sentWithoutComplaintFeedback over the stored recipients. SES leaves its
+// mailbox simulator out of its rates, so mail to it alone is left out too.
 const noComplaintFeedback = sql`coalesce((
-  select bool_and(d.domain in ${[...NO_COMPLAINT_FEEDBACK_DOMAINS]}) from (${recipientDomains}) d
+  select bool_and(d.domain in ${[...NO_COMPLAINT_FEEDBACK_DOMAINS, SES_MAILBOX_SIMULATOR_DOMAIN]}) from (${recipientDomains}) d
 ), false)`;
 
 /**
