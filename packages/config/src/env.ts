@@ -404,9 +404,10 @@ export const env = createEnv({
     // this token from /.well-known/openai-apps-challenge. Unset → 404.
     OPENAI_APPS_CHALLENGE_TOKEN: z.string().optional(),
 
-    // Cloudflare Turnstile, both keys or neither: sign-in, sign-up, password
-    // reset and the onboarding send verify a token when set. Unset, every
-    // form works as before with no challenge.
+    // Cloudflare Turnstile, both keys or neither: sign-in (Google and GitHub
+    // included), sign-up, password reset, the product-updates form and the
+    // onboarding send verify a token when set. Unset, every form works as
+    // before with no challenge.
     TURNSTILE_SITE_KEY: z.string().optional(),
     TURNSTILE_SECRET_KEY: z.string().optional(),
 

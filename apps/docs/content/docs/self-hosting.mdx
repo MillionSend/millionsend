@@ -190,7 +190,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Sender for the emails to a person about their own account (password reset, email verification, the welcome, a password-changed receipt, an app granted access, the console's one-time code), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery and sign-up verification only exist when this is set and SES credentials are configured — leave unset to skip both. Verify its domain in a team under **Domains** and those emails are logged there, with new accounts as its contacts (see [Account mail](#account-mail-contacts-and-product-updates)). |
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in, sign-up, password reset and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in (Google and GitHub included), sign-up, password reset, the product-updates form and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
 | `ONBOARDING_EMAIL_FROM` | Sender of the onboarding "Send email" button, as `Name <user@domain>` or a bare address on a domain verified in this SES account. It carries one fixed test email per team, to the team's owner (a verified address, where the instance verifies), and nothing else: a send from it through the API, SMTP, MCP, a broadcast or a dashboard test is refused (`422 reserved_sender` on the API), even for a team that verified its domain. Leave unset to hide the button. |
 | `NOTIFICATIONS_EMAIL_FROM` | Sender for the notices to team owners (quota, bounce/complaint rates, a domain verifying or losing its records, a new API key, a rotated webhook secret, a member joining, a broadcast that went out or is held, billing on the cloud) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
 | `INVITES_PER_TEAM_PER_DAY` | Invitations one team, and one member across all their teams, may create in a rolling day, revoked ones and those of deleted teams included (default `50`). Past it, new invitations are refused until the day rolls over. |
@@ -1103,6 +1103,13 @@ the list says, a consumer mailbox provider (Gmail, Outlook, Yahoo, iCloud,
 Proton, UOL, BOL, Terra and the like) and a public suffix (`com.br`,
 `github.io`) are never refused.
 
+With `IS_CLOUD=true`, one network opens at most 3 accounts a day: an IPv4
+address, or an IPv6 /64. Its sign-ups in the last 24 hours count, accounts
+deleted since included, and a 4th is refused until the oldest of them is a
+day old. Google and GitHub sign-ups count the same way; signing in to an
+account that exists is never refused. A self-hosted instance has no such
+limit.
+
 ## Account mail, contacts and product updates
 
 MillionSend's own emails go out from `AUTH_EMAIL_FROM` and
@@ -1215,13 +1222,10 @@ day-old audit rows are marked as told, but a domain that is demoted at the
 moment of the upgrade is reported as lost on the first sweep.
 
 Nothing on a self-hosted instance contacts millionsend.com on its own. The
-setup wizard offers, once and interactively, to subscribe the operator's
-address to MillionSend release notes; that is the wizard on your machine
-posting your answer, and a confirmation link is sent before anything is
-stored. When it cannot reach millionsend.com it prints the page instead,
+setup wizard shows where to subscribe to MillionSend release notes,
 [app.millionsend.com/updates?source=self-host](https://app.millionsend.com/updates?source=self-host), and **Settings →
-Instance** links to the same page; the `source` tags you as a self-hoster
-either way.
+Instance** links to the same page; the `source` tags you as a self-hoster. A
+confirmation link is sent before anything is stored.
 
 ## Console
 

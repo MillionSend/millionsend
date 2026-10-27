@@ -1,7 +1,19 @@
-import { isIP } from "node:net";
+import { BlockList, isIP, isIPv4, isIPv6 } from "node:net";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, exists, inArray, isNull, lt, ne, notExists, or } from "drizzle-orm";
+import {
+  and,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  notExists,
+  or,
+} from "drizzle-orm";
 import { errorSummary } from "./error-summary.js";
 import { ABUSE_SUSPENSIONS } from "./team-standing.js";
 import { DAY_MS } from "./utc-day.js";
@@ -31,6 +43,42 @@ export async function recordSignup(
   } catch (error) {
     console.error(`account sign-up record for ${input.userId} not written: ${errorSummary(error)}`);
   }
+}
+
+/**
+ * New accounts one network may open in a day on the cloud: an IPv4 address,
+ * or an IPv6 /64, the prefix one subscriber's line gets.
+ */
+export const SIGNUPS_PER_NETWORK_PER_DAY = 3;
+
+/** IPv4 addresses written as IPv6 (::ffff:a.b.c.d): one address each, never a shared /64. */
+const MAPPED_IPV4 = new BlockList();
+MAPPED_IPV4.addSubnet("::ffff:0:0", 96, "ipv6");
+
+/**
+ * Sign-ups from `ip`'s network in the 24 hours before `now`, accounts
+ * deleted since included, as their records outlive them. Matched here, not
+ * as inet in SQL, which refuses a stored address that carries a zone id.
+ */
+export async function signupsFromNetwork(
+  db: Db,
+  ip: string,
+  now: Date = new Date(),
+): Promise<number> {
+  const network = new BlockList();
+  if (isIPv4(ip)) network.addAddress(ip, "ipv4");
+  else if (isIPv6(ip)) network.addSubnet(ip, MAPPED_IPV4.check(ip, "ipv6") ? 128 : 64, "ipv6");
+  else return 0;
+  const s = schema.accountSignups;
+  // ponytail: reads the whole day's sign-ups (created_at has no index); index
+  // it if a day ever holds thousands.
+  const rows = await db
+    .select({ ip: s.ip })
+    .from(s)
+    .where(and(isNotNull(s.ip), gt(s.createdAt, new Date(now.getTime() - DAY_MS))));
+  return rows.filter(
+    (row) => row.ip !== null && network.check(row.ip, isIPv6(row.ip) ? "ipv6" : "ipv4"),
+  ).length;
 }
 
 /** Membership in a team suspended for abuse, other than `exceptTeamId` when given. */

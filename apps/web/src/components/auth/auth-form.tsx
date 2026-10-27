@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
+import { isCaptchaRefusal, SIGNUP_LIMIT_CODE } from "@/lib/auth-errors";
 import { typedEmail } from "@/lib/email-input";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
@@ -57,7 +58,7 @@ export function AuthForm({
   legal: LegalLinks;
   /** Login only: render the "Forgot password?" link (instance can send the reset email). */
   forgotPassword?: boolean;
-  /** Set when the instance verifies a Turnstile token on the email form. */
+  /** Set when the instance verifies the Turnstile token the email form and social buttons send. */
   turnstileSiteKey?: string | null;
   /** Signup only: the instance enrolls new accounts for product updates, and says so. */
   productUpdates?: boolean;
@@ -72,14 +73,17 @@ export function AuthForm({
   const nextParam = params.get("next");
   const next = safeNextPath(nextParam, mode === "login" ? "/emails" : "/onboarding");
   // better-auth bounces failed OAuth callbacks to errorCallbackURL?error=code.
-  const socialFailed = params.get("error") !== null;
+  // Only the code is read: anyone can write a link's error_description.
+  const callbackError = params.get("error");
 
   const [name, setName] = useState("");
   // An invite link carries the invited address; signup starts from it.
   const [email, setEmail] = useState(mode === "signup" ? (params.get("email") ?? "") : "");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(
-    socialFailed ? tSocial("error") : null,
+    callbackError === null
+      ? null
+      : tSocial(callbackError === SIGNUP_LIMIT_CODE ? "ipLimit" : "error"),
   );
   const [pending, setPending] = useState<"email" | SocialProvider | null>(null);
   // An instance that verifies addresses creates the account without a
@@ -136,7 +140,7 @@ export function AuthForm({
       // Signup shows server messages (e.g. the signup-disabled policy)
       // verbatim; login never echoes the server, only the catalog copy.
       setErrorMessage(
-        error.code === "VERIFICATION_FAILED" || error.code === "MISSING_RESPONSE"
+        isCaptchaRefusal(error.code)
           ? t("captcha")
           : (mode === "signup" && error.message) || t("error"),
       );
@@ -180,11 +184,7 @@ export function AuthForm({
       fetchOptions: { headers: captchaHeaders(token) },
     });
     if (error) {
-      setNotice(
-        error.code === "VERIFICATION_FAILED" || error.code === "MISSING_RESPONSE"
-          ? t("captcha")
-          : t("resendFailed"),
-      );
+      setNotice(isCaptchaRefusal(error.code) ? t("captcha") : t("resendFailed"));
     } else {
       setResent(true);
     }
@@ -194,13 +194,24 @@ export function AuthForm({
   async function onSocial(provider: SocialProvider) {
     setPending(provider);
     setErrorMessage(null);
+    let token: string | null;
+    try {
+      token = await turnstile.getToken();
+    } catch {
+      setErrorMessage(t("captcha"));
+      setPending(null);
+      return;
+    }
     const { error } = await authClient.signIn.social({
       provider,
       callbackURL: next,
       errorCallbackURL: mode === "login" ? "/login" : "/signup",
+      fetchOptions: { headers: captchaHeaders(token) },
     });
     if (error) {
-      setErrorMessage(error.message || tSocial("error"));
+      setErrorMessage(
+        isCaptchaRefusal(error.code) ? t("captcha") : error.message || tSocial("error"),
+      );
       setPending(null);
     }
   }

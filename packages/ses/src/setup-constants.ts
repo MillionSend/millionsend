@@ -411,9 +411,10 @@ ONBOARDING_EMAIL_FROM=
 OPENAI_APPS_CHALLENGE_TOKEN=
 
 # Cloudflare Turnstile (https://dash.cloudflare.com → Turnstile), both keys or
-# neither. When set, sign-in, sign-up, password reset and the onboarding
-# "Send email" button verify a challenge token; an invisible or managed
-# widget works. Leave both unset to run without a captcha.
+# neither. When set, sign-in (Google and GitHub included), sign-up, password
+# reset, the product-updates form and the onboarding "Send email" button
+# verify a challenge token; an invisible or managed widget works. Leave both
+# unset to run without a captcha.
 TURNSTILE_SITE_KEY=
 TURNSTILE_SECRET_KEY=
 
