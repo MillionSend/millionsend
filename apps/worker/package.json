@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "0.36.0",
-    "@aws-sdk/client-sesv2": "^3.1157.0",
-    "@aws-sdk/client-sqs": "^3.1157.0",
+    "@aws-sdk/client-sesv2": "^3.1156.0",
+    "@aws-sdk/client-sqs": "^3.1156.0",
     "@millionsend/billing": "workspace:*",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
