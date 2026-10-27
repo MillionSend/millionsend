@@ -138,8 +138,13 @@ const simulatorOnlySql = (recipients: SQL) => sql`coalesce((
 // raw bounce object under data.bounce), so hard bounces are read back from it.
 // The column is authoritative; the json path covers rows written before it
 // existed (until retention strips their payload).
-export const hardBounceFilter = sql`${ev.type} = 'bounced' and coalesce(${ev.bounceType}, ${ev.data}->'bounce'->>'bounceType') = 'Permanent' and ${sesAttemptedSql(sql`${ev.data}->'bounce'->>'bounceSubType'`)} and not ${simulatorOnlySql(sql`${ev.data}->'bounce'->'bouncedRecipients'`)}`;
-export const complaintFilter = sql`${ev.type} = 'complained' and ${sesAttemptedSql(sql`${ev.data}->'complaint'->>'complaintSubType'`)} and not ${simulatorOnlySql(sql`${ev.data}->'complaint'->'complainedRecipients'`)}`;
+// A team's own stats count every hard bounce and complaint about mail SES
+// attempted; SES's own rates, and so the breaker, the Free fuse and the
+// warm-ups, leave out those naming only the mailbox simulator.
+export const attemptedHardBounceFilter = sql`${ev.type} = 'bounced' and coalesce(${ev.bounceType}, ${ev.data}->'bounce'->>'bounceType') = 'Permanent' and ${sesAttemptedSql(sql`${ev.data}->'bounce'->>'bounceSubType'`)}`;
+export const attemptedComplaintFilter = sql`${ev.type} = 'complained' and ${sesAttemptedSql(sql`${ev.data}->'complaint'->>'complaintSubType'`)}`;
+export const hardBounceFilter = sql`${attemptedHardBounceFilter} and not ${simulatorOnlySql(sql`${ev.data}->'bounce'->'bouncedRecipients'`)}`;
+export const complaintFilter = sql`${attemptedComplaintFilter} and not ${simulatorOnlySql(sql`${ev.data}->'complaint'->'complainedRecipients'`)}`;
 /** SES's complaints and bounces, as email_events_feedback_created_idx reads them. */
 const feedbackEvents = sql`${ev.type} in ('complained', 'bounced') and ${ev.snsMessageId} is not null`;
 /**

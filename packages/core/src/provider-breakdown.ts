@@ -7,7 +7,7 @@ import {
   mailboxProviderSql,
 } from "./mailbox-provider-sql.js";
 import type { MailboxProvider } from "./mailbox-providers.js";
-import { complaintFilter, hardBounceFilter } from "./platform-breaker.js";
+import { attemptedComplaintFilter, attemptedHardBounceFilter } from "./platform-breaker.js";
 
 /** One mailbox provider's share of a broadcast: each count is of emails, not events. */
 export interface ProviderBreakdownRow {
@@ -50,9 +50,9 @@ export async function broadcastProviderBreakdown(
         delivered: had(sql`${ev.type} = 'delivered'`),
         opened: had(sql`${ev.type} = 'opened'`),
         clicked: had(sql`${ev.type} = 'clicked'`),
-        bounced: had(hardBounceFilter),
+        bounced: had(attemptedHardBounceFilter),
         delayed: had(sql`${ev.type} = 'delivery_delayed'`),
-        complained: had(complaintFilter),
+        complained: had(attemptedComplaintFilter),
         complaintSent: sql<number>`count(*) filter (where ${firstRecipientReportsComplaints})::int`,
       })
       .from(e)

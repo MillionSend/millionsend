@@ -25,6 +25,8 @@ import {
   sesComplaintReadings,
   unmatchedComplaints,
 } from "../src/platform-breaker.js";
+import { broadcastProviderBreakdown } from "../src/provider-breakdown.js";
+import { complainedEmail, deliveredEmail } from "../src/status.js";
 import { holdComplaintTeams } from "../src/team-standing.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
@@ -733,6 +735,37 @@ it("leaves complaints and hard bounces naming only SES's mailbox simulator out, 
   expect(
     (await regionWindowCounts(db, { now: NOW, hours: 24, teamIds: [teamC] })).get("us-east-1"),
   ).toMatchObject({ hardBounced: 1, complained: 3 });
+});
+
+it("counts a copy to the mailbox simulator in the team's own stats, delivered and complained, while the breaker leaves it out", async () => {
+  await clearTraffic();
+  const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamC));
+  if (!dom) throw new Error("no domain");
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId: teamC, from: "f@example.com", subject: "s" })
+    .returning({ id: schema.broadcasts.id });
+  if (!broadcast) throw new Error("seed failed");
+  const id = await complainedSend(teamC, dom.id, hoursAgo(2), hoursAgo(2), [
+    "complaint@simulator.amazonses.com",
+  ]);
+  await db
+    .update(schema.emails)
+    .set({ latestStatus: "complained", broadcastId: broadcast.id })
+    .where(eq(schema.emails.id, id));
+  const [stats] = await db
+    .select({
+      delivered: sql<number>`count(*) filter (where ${deliveredEmail})::int`,
+      complained: sql<number>`count(*) filter (where ${complainedEmail})::int`,
+    })
+    .from(schema.emails);
+  expect(stats).toEqual({ delivered: 1, complained: 1 });
+  expect(
+    await broadcastProviderBreakdown(db, { teamId: teamC, broadcastId: broadcast.id }),
+  ).toMatchObject([{ sent: 1, complained: 1 }]);
+  expect(
+    (await regionWindowCounts(db, { now: NOW, hours: 24, teamIds: [teamC] })).get("us-east-1"),
+  ).toEqual({ sent: 1, complaintSent: 0, hardBounced: 0, complained: 0 });
 });
 
 it("reads a team's month by when its mail was sent, mail with no domain row in the default region", async () => {
