@@ -107,8 +107,8 @@ esteja configurada — veja
 A plataforma envia uma quantidade limitada de e-mails por dia. Uma transmissão
 que cabe no que está disponível sai de uma vez, na taxa de envio. Uma maior
 sai em levas: a primeira agora, o restante conforme a capacidade libera nos
-dias seguintes. E-mails transacionais nunca ficam esperando atrás de uma
-transmissão.
+dias seguintes. E-mails transacionais nunca ficam esperando atrás das levas
+de uma transmissão.
 
 O envio avisa de antemão:
 
@@ -138,6 +138,12 @@ O envio avisa de antemão:
   `new_domain_limit` quando o limite distribui o envio ao longo de vários
   dias. O limite sozinho nunca deixa um envio grande demais: quando não dá
   para estimar o fim, `finishes_at` é `null`.
+- No plano Free, os e-mails para provedores que informam reclamações saem
+  para 10 destinatários de uma vez e depois 10 por hora, somando todas as
+  equipes Free que você criou, cada e-mail na sua vez: um e-mail
+  transacional enviado depois de uma transmissão espera atrás dela. E-mails
+  só para Gmail, Apple Mail, t-online ou o simulador de caixas do SES nunca
+  esperam. O `finishes_at` não conta essa espera.
 - Enquanto uma transmissão está saindo, `GET /broadcasts/{id}` e a lista trazem
   `finishes_at` ao vivo e `sent_count`.
 - Uma audiência que precisaria de mais de 24 dias de capacidade — da
@@ -223,6 +229,9 @@ transmissões.
 
 ## Mudanças recentes
 
+- No plano Free, os e-mails para provedores que informam reclamações saem
+  para 10 destinatários de uma vez e depois 10 por hora, somando todas as
+  equipes Free que você criou. Veja [Ritmo de envio](#ritmo-de-envio).
 - No plano Free, as reclamações contam para um alerta ou para o
   `403 sending_paused` desde o primeiro e-mail, julgadas juntas em todas as
   equipes Free que você criou. Bounces e reclamações do simulador de caixas

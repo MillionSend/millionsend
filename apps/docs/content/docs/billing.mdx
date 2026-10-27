@@ -68,6 +68,17 @@ once for all of them. The same teams share one bounce and complaint record
 creator was recorded get it when the worker starts: the user named in their
 `team.created` audit row, otherwise their earliest owner.
 
+On Free, mail to providers that report spam complaints also goes out to at
+most 10 such recipients at once, then 10 an hour, across every Free team the
+person created (`FREE_BURST`, kept per creator in `free_pool_bursts`).
+Complaints arrive minutes to hours after a send, so a pause can act on the
+first ones before the day's mail has all left. Every such recipient counts,
+Bcc included, and an email waiting its turn stays `queued` until the time it
+booked; turns go in the order mail reaches the worker, so an email sent after
+a broadcast waits behind the broadcast's mail. Recipients at Gmail, iCloud and
+T-Online, which report no complaints, and at the SES mailbox simulator never
+count, so mail only to them is never slowed, and neither is account mail.
+
 ### Monthly volumes (Pro, Scale)
 
 The counter is the Stripe billing period — the `usage_periods` table, keyed by

@@ -74,6 +74,19 @@ a pessoa ser gravada recebem esse dado quando o worker inicia: o usuário
 indicado na linha `team.created` do log de auditoria delas ou, sem ela, o
 primeiro proprietário.
 
+No Free, os e-mails para provedores que informam reclamações de spam também
+saem para no máximo 10 desses destinatários de uma vez e depois 10 por hora,
+somando todas as equipes Free que a pessoa criou (`FREE_BURST`, guardado por
+pessoa em `free_pool_bursts`). As reclamações chegam minutos ou horas depois
+do envio, então uma pausa pode agir logo nas primeiras, antes de todos os
+e-mails do dia saírem. Cada destinatário desses conta, inclusive os em Cco, e
+um e-mail esperando a vez fica `queued` até o horário que ele reservou; a vez
+segue a ordem em que os e-mails chegam ao worker, então um e-mail enviado
+depois de uma transmissão espera atrás dos e-mails dela. Destinatários no
+Gmail, no iCloud e na T-Online, que não informam reclamações, e no simulador
+de caixas do SES nunca contam, então um e-mail só para eles nunca espera, e os
+e-mails de conta também não.
+
 ### Volumes mensais (Pro, Scale)
 
 O contador é o período de cobrança do Stripe — a tabela `usage_periods`,
