@@ -10,9 +10,16 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb, LURE_NAMES, mailLinks, readable } from "@millionsend/test-utils";
+import {
+  createTeam,
+  createTestDb,
+  createWebhookEndpoint,
+  LURE_NAMES,
+  mailLinks,
+  readable,
+} from "@millionsend/test-utils";
 import { eq, like, sql } from "drizzle-orm";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sweepNotifications } from "../src/handlers/notify.js";
 import { createSystemMailer } from "../src/system-mail.js";
 
@@ -299,6 +306,62 @@ it("deliverability pause fires once per episode and again after recovery", async
   await counters({ sent: 200, complained: 3 });
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   expect(sends).toHaveLength(2);
+});
+
+describe("a Free pool", () => {
+  /** The suite's team and a newer sibling, both Free teams the owner created. */
+  async function pooled(): Promise<string> {
+    await db
+      .update(schema.teams)
+      .set({ poolOwnerId: "owner", createdAt: new Date(Date.now() - 60_000) })
+      .where(eq(schema.teams.id, teamId));
+    const sibling = await createTeam(db, "notify-sibling", { poolOwnerId: "owner" });
+    await db.insert(schema.teamMembers).values({ teamId: sibling, userId: "owner", role: "owner" });
+    await createWebhookEndpoint(db, sibling, null);
+    return sibling;
+  }
+  const claims = (kind: string) =>
+    db
+      .select({ teamId: schema.teamNotifications.teamId })
+      .from(schema.teamNotifications)
+      .where(eq(schema.teamNotifications.kind, kind));
+
+  it("hears about the shared daily count once, measured on the pool's own line", async () => {
+    const sibling = await pooled();
+    await counters({ accepted: 50 });
+    await counters({ accepted: 40 }, utcDay(), sibling);
+    await db.insert(schema.freePoolUsage).values({ ownerId: "owner", day: utcDay(), accepted: 90 });
+    expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+    expect(sends[0]?.text).toContain(
+      "every Free team created by the same person shares this daily limit",
+    );
+    const fired = await deliveries();
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.payload).toMatchObject({
+      type: "quota.warning",
+      data: { used: 90, limit: 100, ceiling: 150 },
+    });
+    // Claimed on the pool's oldest team, so no sweep and no sibling says it twice.
+    expect(await claims("quota.warning")).toEqual([{ teamId }]);
+    expect(await sweepNotifications(db, deps())).toEqual({ sent: 0 });
+  });
+
+  it("hears about a pause once, held while any of its teams still sends", async () => {
+    const sibling = await pooled();
+    await counters({ sent: 10 });
+    await counters({ sent: 10 }, utcDay(), sibling);
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: "owner", day: utcDay(), sent: 20, complained: 3 });
+    expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+    expect(sends[0]?.subject).toBe("Sending paused (complaint rate)");
+    expect(sends[0]?.text).toContain("shares one bounce and complaint record");
+    expect(await sweepNotifications(db, deps())).toEqual({ sent: 0 });
+    // The oldest team goes quiet; its sibling keeps the episode, and its claim, alive.
+    await db.delete(schema.usageCounters).where(eq(schema.usageCounters.teamId, teamId));
+    expect(await sweepNotifications(db, deps())).toEqual({ sent: 0 });
+    expect(await claims("deliverability")).toEqual([{ teamId }]);
+  });
 });
 
 it("a quiet week ends the episode even though the team is never observed healthy", async () => {

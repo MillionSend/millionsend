@@ -31,7 +31,7 @@
     "nameLabel": "Team name",
     "submit": "Create",
     "error": "Could not create the team. Try again.",
-    "limit": "You already own the maximum number of teams for your plan."
+    "limit": "You've reached your plan's team limit. Free accounts can create up to {limit} teams every {days} days, counting deleted ones."
   },
   "select": {
     "searchPlaceholder": "Search…",

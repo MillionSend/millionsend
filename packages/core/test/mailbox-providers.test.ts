@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  complaintReportingRecipients,
   INACTIVE_MAILBOX_PATTERN,
   MAILBOX_FULL_PATTERN,
   mailboxProvider,
+  recipientDomain,
+  sentWithoutComplaintFeedback,
   sesAttempted,
+  simulatorFeedback,
 } from "../src/mailbox-providers.js";
 
 describe("mailboxProvider", () => {
@@ -51,5 +55,38 @@ describe("sesAttempted", () => {
     for (const subType of ["General", "NoEmail", "Suppressed", undefined, null]) {
       expect(sesAttempted(subType)).toBe(true);
     }
+  });
+});
+
+describe("complaint feedback by recipient", () => {
+  it("reads a stored recipient's domain, display name and case aside", () => {
+    expect(recipientDomain("Ana <Ana@Mail.Example.COM>")).toBe("mail.example.com");
+    expect(recipientDomain("a@b@example.org")).toBe("example.org");
+  });
+
+  it("names the distinct recipients that could report a complaint, never the simulator's", () => {
+    expect(
+      complaintReportingRecipients([
+        "r@outlook.com",
+        "r@outlook.com",
+        "g@gmail.com",
+        "complaint@simulator.amazonses.com",
+        "Team <t@example.com>",
+      ]),
+    ).toEqual(["r@outlook.com", "Team <t@example.com>"]);
+  });
+
+  it("leaves mail no recipient could report out of the complaint denominator, simulator mail included", () => {
+    expect(sentWithoutComplaintFeedback(["g@gmail.com", "a@icloud.com"])).toBe(true);
+    expect(sentWithoutComplaintFeedback(["success@simulator.amazonses.com"])).toBe(true);
+    expect(sentWithoutComplaintFeedback(["g@gmail.com", "r@outlook.com"])).toBe(false);
+    expect(sentWithoutComplaintFeedback([])).toBe(false);
+  });
+
+  it("reads feedback as the simulator's only when every recipient it names is there", () => {
+    expect(simulatorFeedback(["bounce@simulator.amazonses.com"])).toBe(true);
+    expect(simulatorFeedback(["Complaint+2@Simulator.AmazonSES.com>"])).toBe(true);
+    expect(simulatorFeedback(["complaint@simulator.amazonses.com", "r@outlook.com"])).toBe(false);
+    expect(simulatorFeedback([])).toBe(false);
   });
 });

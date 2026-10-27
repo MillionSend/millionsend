@@ -214,28 +214,43 @@ export const ptBR = {
     subject: "80% da cota de envio de hoje foi usada",
     body: [
       "{team} já usou {used} dos seus {limit} e-mails de hoje.",
+      "{shared}",
       "Os envios continuam saindo até {tolerance} acima da cota; depois disso, entram na fila até a cota renovar às {resetsAt}. Um plano maior aumenta a cota diária na hora.",
     ],
     button: "Revisar plano",
     muted: ["Você recebe isto uma vez por dia quando uma equipe sua se aproxima da cota."],
+    extra: {
+      shared:
+        "No plano Free, todas as equipes Free criadas pela mesma pessoa dividem este limite diário, então a contagem acima inclui todas elas.",
+    },
   },
   "quota.reached": {
     subject: "Cota de envio de hoje atingida",
     body: [
       "{team} usou os seus {limit} e-mails de hoje ({used} aceitos).",
+      "{shared}",
       "Mais {headroom} ainda saem hoje (os envios passam até {tolerance} acima da cota); o que passar disso entra na fila e sai depois que a cota renovar às {resetsAt}. Um plano maior aumenta a cota diária na hora e libera a fila em minutos.",
     ],
     button: "Revisar plano",
     muted: ["Você recebe isto uma vez por dia quando uma equipe sua atinge a cota."],
+    extra: {
+      shared:
+        "No plano Free, todas as equipes Free criadas pela mesma pessoa dividem este limite diário, então a contagem acima inclui todas elas.",
+    },
   },
   "quota.paused": {
     subject: "Envios pausados até a cota renovar",
     body: [
       "{team} usou {used} e-mails hoje, {tolerance} acima da cota de {limit}, então os novos envios entram na fila em vez de sair.",
+      "{shared}",
       "O que está na fila sai depois que a cota renovar às {resetsAt}. Um plano maior aumenta a cota diária na hora e libera a fila em minutos.",
     ],
     button: "Revisar plano",
     muted: ["Você recebe isto uma vez por dia quando uma equipe sua passa do teto da cota."],
+    extra: {
+      shared:
+        "No plano Free, todas as equipes Free criadas pela mesma pessoa dividem este limite diário, então a contagem acima inclui todas elas.",
+    },
   },
   "quota.monthly_warning": {
     subject: "80% da cota de envio deste período foi usada",
@@ -279,6 +294,7 @@ export const ptBR = {
     subject: "Sua {metric} está em risco",
     body: [
       "A {metric} de {team} nos últimos {days} dias está em {rate}, acima do limite de risco de {limit}. Os envios continuam, mas as transmissões ficam mais lentas enquanto ela estiver acima do limite.",
+      "{shared}",
       "{advice}",
     ],
     button: "Abrir métricas",
@@ -292,17 +308,25 @@ export const ptBR = {
         "Bounces permanentes vêm de endereços que não existem. Remova endereços antigos ou não verificados das suas listas; todo endereço com bounce já está na sua lista de supressão.",
       complaintAdvice:
         "Reclamações vêm de destinatários que não esperavam o e-mail. Envie só para quem se inscreveu, mantenha o link de descadastro visível e pause listas que não recebem nada seu há meses.",
+      shared:
+        "No plano Free, todas as equipes Free criadas pela mesma pessoa dividem um só histórico de bounces e reclamações, inclusive as excluídas: esta taxa conta todas elas, e as transmissões de cada uma ficam mais lentas.",
     },
   },
   "deliverability.paused": {
     subject: "Envios pausados ({metric})",
     body: [
       "A {metric} de {team} nos últimos {days} dias chegou a {rate}, no limite de pausa de {limit} ou acima dele. Novos envios são recusados até ela baixar.",
+      "{shared}",
       "A pausa termina sozinha quando a taxa na janela volta a ficar abaixo do limite. Limpe a lista de destinatários antes, ou os próximos envios vão acioná-la de novo.",
     ],
     button: "Abrir métricas",
     muted: ["Você recebe isto uma vez por episódio."],
-    extra: { bounce: "taxa de bounce permanente", complaint: "taxa de reclamação" },
+    extra: {
+      bounce: "taxa de bounce permanente",
+      complaint: "taxa de reclamação",
+      shared:
+        "No plano Free, todas as equipes Free criadas pela mesma pessoa dividem um só histórico de bounces e reclamações, inclusive as excluídas: esta taxa conta todas elas, e a pausa vale para cada uma.",
+    },
   },
   "warmup.paused": {
     subject: "Aquecimento pausado no seu domínio",

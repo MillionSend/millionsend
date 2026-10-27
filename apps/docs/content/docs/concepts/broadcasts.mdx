@@ -100,7 +100,8 @@ automatic.
 The platform sends a bounded number of emails a day. A broadcast that fits
 inside what is available goes out at once, at the sending rate. A larger one
 goes out in waves: the first wave now, the rest as capacity frees over the
-following days. Transactional email is never held behind a broadcast.
+following days. Transactional email is never held behind a broadcast's
+waves.
 
 The send tells you up front:
 
@@ -129,6 +130,11 @@ The send tells you up front:
   follows the limit's schedule, and `warning` is `new_domain_limit` when the
   limit spreads the send over days. The limit alone never makes a send too
   large: when the estimate can't tell when it ends, `finishes_at` is `null`.
+- On the Free plan, mail to providers that report complaints goes out to 10
+  recipients at once, then 10 an hour, across all the Free teams you
+  created, each email in turn: transactional email sent after a broadcast
+  waits behind it. Mail only to Gmail, Apple Mail, t-online or the SES
+  mailbox simulator never waits. `finishes_at` doesn't count this wait.
 - While a broadcast is going out, `GET /broadcasts/{id}` and the list carry a
   live `finishes_at` and `sent_count`.
 - An audience that would need more than 24 days of capacity — the
@@ -193,7 +199,10 @@ Gmail and Apple never report one, so their cell shows a dash.
   error, stopping the damage before SES pauses sending entirely. The
   complaint rate counts only mail to providers that report complaints
   (Gmail, Apple Mail and t-online never do), and complaints count toward a
-  warning or this pause only once there are 100 such sends.
+  warning or this pause only once there are 100 such sends. On the Free
+  plan they count from the first email, judged together across all the Free
+  teams you created, deleted ones included, and a pause holds every one of
+  them.
 - If the platform's aggregate bounce or complaint rate in your sender's SES
   region nears the line where SES acts on the account, broadcast sends in
   that region are refused with
@@ -204,6 +213,13 @@ See the [API reference](/api-reference) for all broadcast endpoints.
 
 ## Recent changes
 
+- On the Free plan, mail to providers that report complaints goes out to 10
+  recipients at once, then 10 an hour, across all the Free teams you
+  created. See [Pacing](#pacing).
+- On the Free plan, complaints count toward a warning or
+  `403 sending_paused` from the first email, judged together across all the
+  Free teams you created. Bounces and complaints from the SES mailbox
+  simulator never count.
 - **Edit as HTML** in the composer moves a broadcast built with blocks to code
   mode. **Back to blocks** undoes the switch until the next save. See
   [Block editor and HTML](#block-editor-and-html).

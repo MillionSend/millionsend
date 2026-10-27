@@ -28,6 +28,7 @@ import {
   QUOTA_COLUMNS,
   type QuotaTeamRow,
   RECEIVED_PER_BILLED_EMAIL,
+  readDailyUsage,
   readPeriodUsage,
   receivingRule,
   releaseSharedSubdomain,
@@ -1084,8 +1085,10 @@ export function createSettingsRouter(
           return {
             rows,
             today: {
-              accepted: todayRow?.accepted ?? 0,
+              accepted: await readDailyUsage(ctx.db, ctx.teamId, quota, today),
               limit: quota.kind === "day" ? quota.limit : null,
+              /** The cap and the bounce and complaint record belong to a Free pool. */
+              pooled: quota.kind === "day" && quota.pool !== undefined,
             },
             /** The billing period a monthly plan counts against; null on a daily cap or self-host. */
             period,

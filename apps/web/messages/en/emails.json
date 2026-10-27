@@ -33,6 +33,7 @@
     "retry": "Retry",
     "capBanner": {
       "reached": "Today's {limit}-email limit reached.",
+      "reachedPooled": "Today's {limit}-email limit reached. The Free teams created by the same person share it.",
       "queued": "{count} emails queued — they'll send in {duration}.",
       "upgrade": "Upgrade for a higher cap →",
       "reachedMonth": "Monthly quota of {limit} emails reached.",

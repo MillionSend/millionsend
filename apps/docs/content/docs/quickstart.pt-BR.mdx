@@ -148,11 +148,11 @@ API é idêntico.
   simulador funciona mesmo com a sua conta AWS ainda no sandbox do SES, e a AWS
   cobra cada mensagem normalmente.
 - Os endereços `bounce@`, `complaint@` e `suppressionlist@` do simulador geram
-  bounces e reclamações que o MillionSend trata como reais: o endereço entra na
-  [lista de supressão](/pt-BR/concepts/suppressions) da sua equipe e pesa na
-  sua taxa de bounce ou de reclamação, o que pode pausar seus envios. Use esses
-  endereços manualmente, não em testes automatizados. Cada endereço fica
-  suprimido depois do primeiro uso; para repetir o teste, use um `+`:
+  bounces e reclamações que colocam o endereço na
+  [lista de supressão](/pt-BR/concepts/suppressions) da sua equipe e disparam
+  seus webhooks como os de verdade, mas nunca pesam na sua taxa de bounce ou de
+  reclamação nem pausam seus envios. Cada endereço fica suprimido depois do
+  primeiro uso; para repetir o teste, use um `+`:
   `bounce+2@simulator.amazonses.com`.
 - Endereços em `example.com`, ou terminados em `.test` ou `.invalid`, não
   recebem e-mail, então um envio para um deles é recusado com `422` (veja

@@ -652,7 +652,9 @@ export const usageResponseSchema = z
         .number()
         .int()
         .nullable()
-        .describe("Daily cap (UTC day) on Free and Starter; null on monthly plans and self-hosted"),
+        .describe(
+          "Daily cap (UTC day) on Free and Starter; null on monthly plans and self-hosted. On Free, every Free team created by the same person shares it",
+        ),
       emails_per_month: z
         .number()
         .int()
@@ -673,7 +675,12 @@ export const usageResponseSchema = z
         .describe("Inboxes the team may hold at once; null = unlimited or self-hosted"),
     }),
     today: z.object({
-      emails_sent: z.number().int().describe("Emails accepted so far this UTC day"),
+      emails_sent: z
+        .number()
+        .int()
+        .describe(
+          "Emails accepted so far this UTC day; on Free, by every Free team created by the same person",
+        ),
       resets_at: z.string().describe("Next UTC midnight, when the daily counter resets"),
     }),
     period: z

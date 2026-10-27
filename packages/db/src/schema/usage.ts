@@ -109,6 +109,39 @@ export const usageCountersHourly = pgTable(
 );
 
 /**
+ * The Free teams one person created (teams.pool_owner_id), counted as one per
+ * UTC day: `accepted` is their shared daily cap, reserved with the same
+ * guarded upsert as usage_counters after the team's own row, and the rest are
+ * the deliverability guardrail's inputs, written beside the team's. Keyed by
+ * user with no FK, so a deleted team's usage and complaints stay counted.
+ * Columns mean what they mean in usage_counters.
+ */
+export const freePoolUsage = pgTable(
+  "free_pool_usage",
+  {
+    ownerId: text("owner_id").notNull(),
+    day: date("day").notNull(),
+    accepted: integer("accepted").notNull().default(0),
+    sent: integer("sent").notNull().default(0),
+    sentNoFeedback: integer("sent_no_feedback").notNull().default(0),
+    hardBounced: integer("hard_bounced").notNull().default(0),
+    complained: integer("complained").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.ownerId, t.day] })],
+);
+
+/**
+ * A Free pool's burst allowance (core bookFreeBurst), one row per creator:
+ * `tat` is when the allowance is whole again, each booked recipient pushing
+ * it one refill later. Keyed by user with no FK, like free_pool_usage, so
+ * deleting a team refills nothing.
+ */
+export const freePoolBursts = pgTable("free_pool_bursts", {
+  ownerId: text("owner_id").primaryKey(),
+  tat: timestamp("tat", { withTimezone: true }).notNull(),
+});
+
+/**
  * Monthly-plan counters, one row per team and Stripe billing period. The
  * accept paths reserve against `accepted` with the same atomic upsert the
  * daily table uses; `reportedOverage` is how much past the included volume

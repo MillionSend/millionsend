@@ -801,13 +801,15 @@ export async function reconcileStalledSends(
     }),
   );
   await hooks.flush();
-  // A row scheduled for later is waiting by design, not lost; its job is due
-  // with it and would only be re-enqueued every sweep until then.
+  // A row scheduled for later, or booked a later slot by its Free pool's
+  // burst allowance, is waiting by design, not lost; its job is due with it
+  // and would only be re-enqueued every sweep until then.
   const stalled = and(
     eq(e.latestStatus, "queued"),
     isNull(e.sentAt),
     lt(e.createdAt, staleBefore),
     or(isNull(e.scheduledAt), lte(e.scheduledAt, now)),
+    or(isNull(e.freeBurstAt), lte(e.freeBurstAt, now)),
   );
   // Keyset pages over (createdAt, id), capped per run, one enqueue per page.
   let cursorId: string | undefined;
@@ -838,10 +840,11 @@ export async function reconcileStalledSends(
 /**
  * Nulls body columns past the retention window and stamps bodyPurgedAt;
  * metadata, events, and aggregates keep their own lifecycles. Emails whose
- * scheduled send is still in the future keep their body (the send needs it);
- * everything else past the cutoff is purged unconditionally — retention is
- * a compliance promise, so even a zombie still-queued email loses its body
- * (the send handler then marks it failed on the missing body).
+ * scheduled send, or the slot their Free pool's burst allowance booked, is
+ * still in the window keep their body (the send needs it); everything else
+ * past the cutoff is purged unconditionally — retention is a compliance
+ * promise, so even a zombie still-queued email loses its body (the send
+ * handler then marks it failed on the missing body).
  */
 export async function purgeExpiredEmailBodies(
   db: Db,
@@ -874,6 +877,7 @@ export async function purgeExpiredEmailBodies(
                   lt(e.createdAt, cutoff),
                   isNull(e.bodyPurgedAt),
                   or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff)),
+                  or(isNull(e.freeBurstAt), lt(e.freeBurstAt, cutoff)),
                 ),
               )
               .orderBy(asc(e.createdAt))
@@ -1514,6 +1518,15 @@ export async function purgeStaleHourlyUsage(db: Db, now = new Date()): Promise<n
     if (batch < PURGE_BATCH) break;
   }
   return purged;
+}
+
+/**
+ * A Free pool's day counters feed its daily cap and the guardrail's 7-day
+ * window only; 35 days keeps a margin past both. One row per pool and day.
+ */
+export async function purgeStaleFreePoolUsage(db: Db, now = new Date()): Promise<number> {
+  const p = schema.freePoolUsage;
+  return affectedRows(await db.delete(p).where(lt(p.day, utcDay(now.getTime() - 35 * DAY_MS))));
 }
 
 export async function purgeExpiredSessions(db: Db, now = new Date()): Promise<number> {

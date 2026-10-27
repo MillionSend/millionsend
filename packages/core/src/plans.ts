@@ -193,6 +193,18 @@ export function planLabel(plan: Plan, planQuota: number | null): string {
  */
 export const QUOTA_TOLERANCE = 0.5;
 
+/**
+ * A Free pool's burst allowance on Cloud (core bookFreeBurst): its mail to
+ * providers that report complaints reaches FREE_BURST recipients at once,
+ * then one more every FREE_BURST_REFILL_MS. Complaints arrive minutes to
+ * hours after a send, so the pool's pause can act before a whole day's mail
+ * has left.
+ */
+export const FREE_BURST = 10;
+export const FREE_BURST_REFILL_MS = 6 * 60_000;
+/** How long a spent allowance takes to refill to FREE_BURST: its burst window. */
+export const FREE_BURST_WINDOW_MS = FREE_BURST * FREE_BURST_REFILL_MS;
+
 /** The billing columns a quota is derived from. */
 export interface QuotaTeamRow {
   plan: Plan;
@@ -204,6 +216,23 @@ export interface QuotaTeamRow {
   overageEnabled: boolean;
   /** Operator ceiling on the team's UTC day (instance console); null or absent = the plan decides. */
   dailySendCeiling?: number | null | undefined;
+  /** The team's creator, recorded on Cloud only (teams.pool_owner_id); see freePoolOwner. */
+  poolOwnerId?: string | null | undefined;
+}
+
+/**
+ * The Free pool a team counts in right now: its creator's id while the team
+ * is effectively on Free and its creator is recorded, which only Cloud does.
+ * Every such team of one creator shares one daily cap and one bounce and
+ * complaint record. Null for a paid or system team, and on self-host.
+ */
+export function freePoolOwner(
+  team: Pick<QuotaTeamRow, "plan" | "currentPeriodEnd" | "poolOwnerId">,
+  now: Date = new Date(),
+): string | null {
+  return team.poolOwnerId && effectivePlan(team.plan, team.currentPeriodEnd, now) === "free"
+    ? team.poolOwnerId
+    : null;
 }
 
 /** What limits a team's sends right now. */
@@ -216,6 +245,14 @@ export type TeamQuota =
       limit: number;
       /** An operator ceiling on the day, enforced as typed (the plan's tolerance never stretches it). */
       dailyCeiling?: number | null | undefined;
+      /**
+       * A Free pool's shared cap (freePoolOwner): `limit` here is the plan's
+       * own, which the pool counter reserves against with the plan's
+       * tolerance; the team's own counter keeps its own line too, which binds
+       * only on usage from before the team joined the pool. Holds a user id:
+       * never sent to a browser.
+       */
+      pool?: { ownerId: string; limit: number } | undefined;
     }
   | {
       kind: "month";
@@ -260,7 +297,12 @@ function planQuota(team: QuotaTeamRow, isCloud: boolean, now: Date): TeamQuota {
   const plan = effectivePlan(team.plan, team.currentPeriodEnd, now);
   if (plan === "system") return { kind: "none" };
   const rung = teamRung(plan, plan === team.plan ? team.planQuota : null);
-  if (rung.period === "day") return { kind: "day", plan, limit: rung.included };
+  if (rung.period === "day") {
+    const ownerId = freePoolOwner(team, now);
+    return ownerId
+      ? { kind: "day", plan, limit: rung.included, pool: { ownerId, limit: rung.included } }
+      : { kind: "day", plan, limit: rung.included };
+  }
   const period = quotaPeriod(team, now);
   const paused = team.overageEnabled && team.planStatus === "past_due";
   return {
@@ -312,7 +354,9 @@ export function raisesQuota(before: TeamQuota, after: TeamQuota): boolean {
 /**
  * Teams a user may own on Cloud, by the best effective plan among the teams
  * they already own: a paying owner gets room for more teams without buying
- * each one up. Membership in someone else's paid team does not count.
+ * each one up. Membership in someone else's paid team does not count. On
+ * Free, every team the user created in the last TEAM_CREATE_WINDOW_DAYS
+ * counts too, deleted ones included, so deleting a team never frees a place.
  * Self-host has no cap.
  */
 export const PLAN_TEAM_LIMIT: Record<Plan, number> = {
@@ -322,6 +366,9 @@ export const PLAN_TEAM_LIMIT: Record<Plan, number> = {
   scale: 15,
   system: Number.POSITIVE_INFINITY,
 };
+
+/** How far back a Free account's team creations count against PLAN_TEAM_LIMIT. */
+export const TEAM_CREATE_WINDOW_DAYS = 30;
 
 /** Sender domains per team per plan; null = unlimited. Self-host ignores plans entirely. */
 export const PLAN_DOMAIN_LIMIT: Record<Plan, number | null> = {

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  index,
   integer,
   pgEnum,
   pgTable,
@@ -128,9 +129,14 @@ export const teams = pgTable(
     suspensionNote: text("suspension_note"),
     // Operator override: none of the team's domains warm up.
     warmupTrustedAt: timestamp("warmup_trusted_at", { withTimezone: true }),
+    // The user who created the team, set on Cloud only and never changed: on
+    // the Free plan every team with the same value shares one daily cap and
+    // one bounce and complaint record (free_pool_usage). Null on self-host.
+    poolOwnerId: text("pool_owner_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("teams_pool_owner_idx").on(t.poolOwnerId),
     check(
       "teams_unsubscribe_background_color_hex",
       sql`${t.unsubscribeBackgroundColor} ~ '^#[0-9a-fA-F]{6}$'`,

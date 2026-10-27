@@ -18,6 +18,13 @@ answers `403 plan_limit_reached` ("Your plan allows up to 1000 contacts")
 and the dashboard shows the same sentence. Inboxes are capped at 3 on Free
 and 25 on Starter, unlimited above (see [Inboxes](#inboxes)).
 
+A person owns up to 3 teams on Free, 5 on Starter, 10 on Pro and 15 on
+Scale, by the best plan among the teams they own (`PLAN_TEAM_LIMIT`);
+membership in someone else's team doesn't count. On Free, every team the
+person created in the last 30 days (`TEAM_CREATE_WINDOW_DAYS`) counts as
+well, deleted ones included, so deleting a team frees no place. Past the cap
+the dashboard refuses a new team and says why.
+
 | Rung | Plan | Price | Included | Cap | Overage per 1,000 |
 | --- | --- | --- | --- | --- | --- |
 | `free` | Free | $0 | 100 | per day | — |
@@ -49,6 +56,34 @@ counts against the UTC day it goes out: its own, or today for a
 `scheduled_at` already past (it sends at once). Rescheduling it to another day
 counts it against that day too, while the day it leaves keeps its count; if
 that day is full, the email parks until the drain finds room.
+
+On Free the cap belongs to the person, not the team: every Free team one
+person created shares one daily count, kept by its creator
+(`teams.pool_owner_id`, recorded when the team is created) in
+`free_pool_usage`, so it holds 100 a day with the same 50% tolerance however
+many teams they have. Each team's own `usage_counters` keep counting for its
+metrics. A deleted team's sends stay counted, and the quota notices go out
+once for all of them. The same teams share one bounce and complaint record
+(see [Guardrails](/concepts/broadcasts#guardrails)), which also counts the
+bounces and complaints that arrive after a team is deleted. Teams created
+before the creator was recorded get it when the worker starts: the user named
+in their `team.created` audit row, otherwise their earliest owner. A Free team
+then brings its counts from the last 7 days into the shared ones, so its
+bounce and complaint record and its day's count carry over.
+
+On Free, mail to providers that report spam complaints also goes out to at
+most 10 such recipients at once, then 10 an hour, across every Free team the
+person created (`FREE_BURST`, kept per creator in `free_pool_bursts`).
+Complaints arrive minutes to hours after a send, so a pause can act on the
+first ones before the day's mail has all left. Every such recipient counts,
+Bcc included. An email waiting its turn stays `queued` until the time it
+booked and checks its team's plan again at least once an hour, so if the team
+leaves Free it goes at the next check; an email that reaches its turn more
+than an hour late, because a pause held it or it was rescheduled, books a new
+turn. Turns go in the order mail reaches the worker, so an email sent after a
+broadcast waits behind the broadcast's mail. Recipients at Gmail, iCloud and
+T-Online, which report no complaints, and at the SES mailbox simulator never
+count, so mail only to them is never slowed, and neither is account mail.
 
 ### Monthly volumes (Pro, Scale)
 
@@ -97,9 +132,11 @@ not per recipient, in `usage_counters.received` and
 `receivingRule` in `packages/core/src/receiving/rcpt.ts`:
 
 - **Free**: received mail spends the day's sending counter
-  (`usage_counters.accepted`), so sends and received mail share the cap and
-  its 50% tolerance, and the quota notices count both. At the ceiling the MX
-  defers new mail with `452 4.2.2` until midnight UTC.
+  (`usage_counters.accepted`, and the creator's shared `free_pool_usage`
+  count), so sends and received mail share the cap and its 50% tolerance
+  across every Free team that person created, and the quota notices count
+  both. At the ceiling the MX defers new mail with `452 4.2.2` until midnight
+  UTC.
 - **Starter**: free up to twice the daily cap (3,000) per UTC day, counted
   apart from sends; past it, `452`.
 - **Pro, Scale**: free up to twice the included volume per period. Past that,

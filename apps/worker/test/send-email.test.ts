@@ -1,8 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   acceptEmail,
+  bookFreeBurst,
+  DAY_MS,
   EnvKeyring,
   encryptEmailBody,
+  FREE_BURST,
+  FREE_BURST_REFILL_MS,
   hashRecipient,
   SYSTEM_MAIL_TAG,
   sealAttachments,
@@ -15,8 +19,9 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { drainQuotaParked } from "../src/handlers/cron.js";
 import {
   createTokenBucket,
   type SendDeps,
@@ -58,6 +63,7 @@ interface FakeSend {
   configurationSetName?: string | undefined;
   region?: string | undefined;
   tenantName?: string | undefined;
+  poolOwnerId?: string | undefined;
 }
 
 function fakeSes(messageId = "fake-mid"): { ses: SesSender; sends: FakeSend[] } {
@@ -2007,4 +2013,326 @@ it("counts a send no recipient can report as a complaint only when every recipie
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, team));
   expect(counters).toEqual([{ sent: 4, sentNoFeedback: 2 }]);
+});
+
+it("adds a Free team's sends to its pool beside its own counters; simulator-only mail can draw no complaint", async () => {
+  const owner = "u-send-pool";
+  const team = await createTeam(db, "send-pool-team", { poolOwnerId: owner });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: team,
+      name: "pool.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const send = async (to: string[]) => {
+    const { ses } = fakeSes(randomUUID());
+    const emailId = await insertEmail({
+      teamId: team,
+      domainId: domain?.id,
+      from: "P <p@pool.example>",
+      to,
+    });
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  };
+  await send(["r@outlook.com"]);
+  await send(["success@simulator.amazonses.com"]);
+  const counted = { sent: 2, sentNoFeedback: 1 };
+  expect(
+    await db
+      .select({
+        sent: schema.usageCounters.sent,
+        sentNoFeedback: schema.usageCounters.sentNoFeedback,
+      })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, team)),
+  ).toEqual([counted]);
+  expect(
+    await db
+      .select({
+        sent: schema.freePoolUsage.sent,
+        sentNoFeedback: schema.freePoolUsage.sentNoFeedback,
+      })
+      .from(schema.freePoolUsage)
+      .where(eq(schema.freePoolUsage.ownerId, owner)),
+  ).toEqual([counted]);
+});
+
+it("tags a Free pool's sends with the pool for SES, and a paid or creator-less team's with none", async () => {
+  const owner = "u-send-tag";
+  const tagOf = async (team: string, slug?: string) => {
+    const [domain] = slug
+      ? await db
+          .insert(schema.domains)
+          .values({
+            teamId: team,
+            name: `${slug}.example`,
+            region: "us-east-1",
+            status: "verified",
+            verifiedAt: new Date(),
+          })
+          .returning({ id: schema.domains.id })
+      : [{ id: domainId }];
+    const { ses, sends } = fakeSes(randomUUID());
+    const emailId = await insertEmail({
+      teamId: team,
+      domainId: domain?.id,
+      from: slug ? `T <t@${slug}.example>` : "Acme <a@acme.dev>",
+      to: ["g@gmail.com"],
+    });
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+    return sends[0]?.poolOwnerId;
+  };
+  const pooled = await createTeam(db, "send-tag-free", { poolOwnerId: owner });
+  const paid = await createTeam(db, "send-tag-paid", { poolOwnerId: owner });
+  await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+  expect(await tagOf(pooled, "send-tag-free")).toBe(owner);
+  expect(await tagOf(paid, "send-tag-paid")).toBeUndefined();
+  expect(await tagOf(teamId)).toBeUndefined();
+});
+
+describe("a Free pool's burst allowance", () => {
+  const NOW = new Date("2026-09-03T12:00:00Z");
+  const at = (refills: number, from = NOW) =>
+    new Date(from.getTime() + refills * FREE_BURST_REFILL_MS);
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  type Sender = { teamId: string; domainId: string | null; from: string };
+
+  /** A Free team in `ownerId`'s pool, sending from a verified domain of its own. */
+  const pooledTeam = async (slug: string, ownerId: string): Promise<Sender> => {
+    const team = await createTeam(db, slug, { poolOwnerId: ownerId });
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId: team,
+        name: `${slug}.example`,
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: new Date(),
+      })
+      .returning({ id: schema.domains.id });
+    return { teamId: team, domainId: domain?.id ?? null, from: `P <p@${slug}.example>` };
+  };
+
+  /** One send attempt on a row, as the email.send job makes it on a Cloud worker. */
+  const attempt = async (emailId: string, over: Partial<SendDeps> = {}) => {
+    const { ses, sends } = fakeSes(randomUUID());
+    const rescheduled: Date[] = [];
+    const outcome = await sendEmail(
+      db,
+      {
+        keyring,
+        ses,
+        freeBurst: bookFreeBurst,
+        reschedule: async (_id, when) => {
+          rescheduled.push(when);
+        },
+        ...over,
+      },
+      { emailId },
+    );
+    return { outcome, rescheduled, sends };
+  };
+
+  const send = async (
+    from: Sender,
+    email: Partial<typeof schema.emails.$inferInsert>,
+    over: Partial<SendDeps> = {},
+  ) => {
+    const emailId = await insertEmail({ ...from, ...email });
+    return { emailId, ...(await attempt(emailId, over)) };
+  };
+
+  const tatOf = async (ownerId: string) => {
+    const [row] = await db
+      .select({ tat: schema.freePoolBursts.tat })
+      .from(schema.freePoolBursts)
+      .where(eq(schema.freePoolBursts.ownerId, ownerId));
+    return row?.tat;
+  };
+
+  it("sends the first FREE_BURST recipients at once and holds the next one queued for a refill", async () => {
+    const team = await pooledTeam("burst-first", "u-burst-first");
+    for (let i = 0; i < FREE_BURST; i++) {
+      expect((await send(team, { to: [`r${i}@outlook.com`] })).outcome).toBe("sent");
+    }
+    const next = await send(team, { to: ["s@yahoo.com"] });
+    expect(next.outcome).toBe("deferred");
+    expect(next.rescheduled).toEqual([at(1)]);
+    expect(next.sends).toHaveLength(0);
+    const [row] = await db
+      .select({ status: schema.emails.latestStatus, freeBurstAt: schema.emails.freeBurstAt })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, next.emailId));
+    expect(row).toEqual({ status: "queued", freeBurstAt: at(1) });
+  });
+
+  it("counts every recipient that can report a complaint, Bcc included, and none that cannot", async () => {
+    const team = await pooledTeam("burst-bcc", "u-burst-bcc");
+    const held = await send(team, {
+      to: ["r@outlook.com"],
+      cc: ["g@gmail.com", "success@simulator.amazonses.com"],
+      bcc: Array.from({ length: 24 }, (_, i) => `b${i}@example.com`),
+    });
+    expect(held.outcome).toBe("deferred");
+    const [row] = await db
+      .select({ freeBurstAt: schema.emails.freeBurstAt })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, held.emailId));
+    expect(row?.freeBurstAt).toEqual(at(25 - FREE_BURST));
+    // Its wake-up is a burst window away at most, short of the slot.
+    expect(held.rescheduled).toEqual([at(FREE_BURST)]);
+  });
+
+  it("holds every Free team of one creator to one allowance", async () => {
+    const first = await pooledTeam("burst-share-a", "u-burst-share");
+    const second = await pooledTeam("burst-share-b", "u-burst-share");
+    const tenAtOnce = Array.from({ length: FREE_BURST }, (_, i) => `r${i}@outlook.com`);
+    expect((await send(first, { to: tenAtOnce })).outcome).toBe("sent");
+    const next = await send(second, { to: ["s@outlook.com"] });
+    expect(next.outcome).toBe("deferred");
+    expect(next.rescheduled).toEqual([at(1)]);
+  });
+
+  it("never holds mail no recipient can report, account mail, the onboarding email, a paid or creator-less team's mail, or mail on a worker without the allowance", async () => {
+    const team = await pooledTeam("burst-exempt", "u-burst-exempt");
+    // Spent far ahead: any mail the allowance gated would wait.
+    await bookFreeBurst(db, "u-burst-exempt", 50, NOW);
+    const tat = await tatOf("u-burst-exempt");
+    const reporting = { to: ["r@outlook.com"] };
+
+    expect((await send(team, { to: ["g@gmail.com"], cc: ["a@icloud.com"] })).outcome).toBe("sent");
+    expect((await send(team, { to: ["success@simulator.amazonses.com"] })).outcome).toBe("sent");
+    expect(
+      (await send(team, { ...reporting, tags: { [SYSTEM_MAIL_TAG]: "password_reset" } })).outcome,
+    ).toBe("sent");
+    const platform = "MillionSend <onboarding@ms.example>";
+    expect(
+      (
+        await send({ ...team, domainId: null, from: platform }, reporting, {
+          onboardingEmailFrom: platform,
+        })
+      ).outcome,
+    ).toBe("sent");
+    const paid = await pooledTeam("burst-paid", "u-burst-exempt");
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid.teamId));
+    expect((await send(paid, reporting)).outcome).toBe("sent");
+    // The suite's team has no recorded creator, as on self-host.
+    expect((await send({ teamId, domainId, from: "Acme <a@acme.dev>" }, reporting)).outcome).toBe(
+      "sent",
+    );
+    expect((await send(team, reporting, { freeBurst: undefined })).outcome).toBe("sent");
+    expect(await tatOf("u-burst-exempt")).toEqual(tat);
+  });
+
+  it("books a held row once: an early wake-up waits for the same slot, and the slot sends it", async () => {
+    const team = await pooledTeam("burst-wake", "u-burst-wake");
+    await bookFreeBurst(db, "u-burst-wake", FREE_BURST, NOW);
+    const held = await send(team, { to: ["r@outlook.com"] });
+    expect(held.rescheduled).toEqual([at(1)]);
+    const tat = await tatOf("u-burst-wake");
+
+    vi.setSystemTime(new Date(NOW.getTime() + FREE_BURST_REFILL_MS / 2));
+    const early = await attempt(held.emailId);
+    expect(early.outcome).toBe("deferred");
+    expect(early.rescheduled).toEqual([at(1)]);
+
+    vi.setSystemTime(at(1));
+    const due = await attempt(held.emailId);
+    expect(due.outcome).toBe("sent");
+    expect(due.sends).toHaveLength(1);
+    expect(await tatOf("u-burst-wake")).toEqual(tat);
+  });
+
+  it("wakes a waiting row within a burst window, so mail of a team that left Free goes then", async () => {
+    const team = await pooledTeam("burst-upgrade", "u-burst-upgrade");
+    // Spent far ahead: the next turn is hours away.
+    await bookFreeBurst(db, "u-burst-upgrade", 5 * FREE_BURST, NOW);
+    const held = await send(team, { to: ["r@outlook.com"] });
+    expect(held.outcome).toBe("deferred");
+    expect(held.rescheduled).toEqual([at(FREE_BURST)]);
+
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, team.teamId));
+    vi.setSystemTime(at(FREE_BURST));
+    const woke = await attempt(held.emailId);
+    expect(woke.outcome).toBe("sent");
+    expect(woke.sends).toHaveLength(1);
+  });
+
+  /** One attempt per row, in order, all at the current instant. */
+  const attemptAll = async (ids: readonly string[], over: Partial<SendDeps> = {}) => {
+    const results = [];
+    for (const id of ids) results.push(await attempt(id, over));
+    return results;
+  };
+  const outcomes = (results: { outcome: string }[]) => results.map((r) => r.outcome);
+  const WAITING = 5;
+  /** The slots of the WAITING rows past a fresh burst at `from`: one refill apart. */
+  const paced = (from: Date) => Array.from({ length: WAITING }, (_, i) => at(i + 1, from));
+
+  it("books anew a row parked past its slot: the drain's release goes out as a fresh burst, not all at once", async () => {
+    const team = await pooledTeam("burst-park", "u-burst-park");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`] }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // Each held row wakes at its slot to find SES out of sends: parked, its slot kept.
+    const held = ids.slice(FREE_BURST);
+    vi.setSystemTime(at(held.length));
+    const sesQuota = { exhausted: () => true, refresh: async () => true };
+    expect(outcomes(await attemptAll(held, { sesQuota }))).toEqual(
+      Array<string>(held.length).fill("parked"),
+    );
+
+    const release = new Date(at(held.length).getTime() + 2 * 3_600_000);
+    vi.setSystemTime(release);
+    const released: string[] = [];
+    await drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async (batch) => {
+        released.push(...batch.map((job) => job.emailId).filter((id) => held.includes(id)));
+      },
+    });
+    expect(released).toHaveLength(held.length);
+    const again = await attemptAll(released);
+    expect(outcomes(again)).toEqual([
+      ...Array<string>(held.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(again.flatMap((a) => a.rescheduled)).toEqual(paced(release));
+  });
+
+  it("books anew a row rescheduled past its slot, when its new time comes", async () => {
+    const team = await pooledTeam("burst-moved", "u-burst-moved");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`], scheduledAt: NOW }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // PATCH /emails/{id} moves the waiting rows to tomorrow; each keeps its slot from today.
+    const tomorrow = new Date(NOW.getTime() + DAY_MS);
+    const moved = ids.slice(FREE_BURST);
+    await db
+      .update(schema.emails)
+      .set({ scheduledAt: tomorrow })
+      .where(inArray(schema.emails.id, moved));
+
+    vi.setSystemTime(tomorrow);
+    const due = await attemptAll(moved);
+    expect(outcomes(due)).toEqual([
+      ...Array<string>(moved.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(due.flatMap((a) => a.rescheduled)).toEqual(paced(tomorrow));
+  });
 });

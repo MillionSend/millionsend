@@ -45,6 +45,7 @@ export interface SerializedSesEvent {
   eventType: string;
   sesMessageId: string;
   emailId?: string;
+  poolOwnerId?: string;
   occurredAt: string;
   bounce?: {
     bounceType: "Permanent" | "Transient" | "Undetermined";
