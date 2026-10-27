@@ -58,7 +58,7 @@ export function AuthForm({
   legal: LegalLinks;
   /** Login only: render the "Forgot password?" link (instance can send the reset email). */
   forgotPassword?: boolean;
-  /** Set when the instance verifies a Turnstile token on the email form. */
+  /** Set when the instance verifies the Turnstile token the email form and social buttons send. */
   turnstileSiteKey?: string | null;
   /** Signup only: the instance enrolls new accounts for product updates, and says so. */
   productUpdates?: boolean;
