@@ -72,7 +72,9 @@ As mesmas equipes dividem um só histórico de bounces e reclamações (veja
 [Proteções](/pt-BR/concepts/broadcasts#proteções)). Equipes criadas antes de
 a pessoa ser gravada recebem esse dado quando o worker inicia: o usuário
 indicado na linha `team.created` do log de auditoria delas ou, sem ela, o
-primeiro proprietário.
+primeiro proprietário. Nessa hora, uma equipe Free leva para a contagem
+compartilhada os números dos últimos 7 dias, então o histórico de bounces e
+reclamações dela e a contagem do dia continuam valendo.
 
 No Free, os e-mails para provedores que informam reclamações de spam também
 saem para no máximo 10 desses destinatários de uma vez e depois 10 por hora,
