@@ -187,7 +187,7 @@ export interface DrainDeps {
         regions: readonly string[];
         exhausted(region: string): boolean;
         room?(region: string): number;
-        paused?(region: string): boolean;
+        paused?(region: string, teamId: string): boolean;
         recount?(): Promise<void>;
         noteBulkQueued?(region: string, n: number): void;
       }
@@ -334,7 +334,10 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     const eligible: { id: string; teamId: string; domainId: string | null; region: string }[] = [];
     for (const broadcast of waiting) {
       const region = (await parkedRegion(db, broadcast.id)) ?? regions[0] ?? "";
-      if (deps.sesQuota && (deps.sesQuota.paused?.(region) || deps.sesQuota.exhausted(region))) {
+      if (
+        deps.sesQuota &&
+        (deps.sesQuota.paused?.(region, broadcast.teamId) || deps.sesQuota.exhausted(region))
+      ) {
         continue;
       }
       if ((deps.sesQuota?.room?.(region) ?? Number.POSITIVE_INFINITY) <= 0) continue;

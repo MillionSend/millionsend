@@ -195,6 +195,63 @@ export async function suspendTeam(
 }
 
 /**
+ * The review hold for Free teams whose mail drew a complaint while their
+ * region's breaker trips on complaints: a review suspension unless one
+ * already stands, a complaints flag the release clears, and an audit row
+ * with nothing in it, since the team reads its own audit. A team an
+ * operator reinstated is held again only for a complaint that arrived after.
+ * team_monitor.held_at stays as it is: stamped, the content monitor would
+ * never hold the team itself. The caller syncs the tenant and tells the
+ * operator. Returns the teams held.
+ */
+export async function holdComplaintTeams(
+  db: Db,
+  teams: readonly { teamId: string; lastComplaintAt: Date | null }[],
+  now: Date = new Date(),
+): Promise<string[]> {
+  const a = schema.auditLog;
+  const held: string[] = [];
+  for (const team of teams) {
+    const [reinstated] = await db
+      .select({ at: sql<Date | null>`max(${a.createdAt})`.mapWith(a.createdAt) })
+      .from(a)
+      .where(and(eq(a.teamId, team.teamId), eq(a.action, "team.reinstated")));
+    if (reinstated?.at && !(team.lastComplaintAt && team.lastComplaintAt > reinstated.at)) {
+      continue;
+    }
+    const holding = await db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      const suspended = await suspendTeam(txDb, {
+        teamId: team.teamId,
+        reason: "review",
+        now,
+        ifNotSuspended: true,
+      });
+      if (!suspended) return false;
+      await txDb
+        .insert(schema.teamFlags)
+        .values({
+          teamId: team.teamId,
+          reason: "complaints",
+          detail: { metric: "complaint", suspension: true },
+          openedAt: now,
+        })
+        .onConflictDoNothing();
+      return true;
+    });
+    if (!holding) continue;
+    await recordAudit(db, {
+      teamId: team.teamId,
+      actor: "system",
+      action: "team.held_for_review",
+      target: { type: "team", id: team.teamId },
+    });
+    held.push(team.teamId);
+  }
+  return held;
+}
+
+/**
  * What a refused API or SMTP send says while the team is suspended. A review
  * hold reads as a neutral pause: the team may be innocent, and a phisher
  * learns nothing about what was judged.

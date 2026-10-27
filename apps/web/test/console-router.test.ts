@@ -1062,7 +1062,7 @@ describe("console.regions and SES's own complaint rate", () => {
     expect((await operator().console.regions.list()).complaintLines).toEqual({
       sesReview: 0.001,
       sesPause: 0.005,
-      breaker: 0.004,
+      breaker: 0.001,
     });
 
     await db

@@ -254,7 +254,8 @@ const sendControls = createRegionSendControls({
   reserve: async () =>
     (await getInstanceSettings(db)).sesTransactionalReserve ?? env.SES_TRANSACTIONAL_RESERVE,
   counts: () => regionBulkCounts(db),
-  paused: async () => new Set((await pausedRegions(db)).map((p) => p.region)),
+  paused: async () =>
+    new Map((await pausedRegions(db)).map((p) => [p.region, p.heldTeams && new Set(p.heldTeams)])),
   initialRate: env.SES_MAX_SEND_RATE,
   replicas: env.WORKER_REPLICAS,
 });
@@ -291,6 +292,10 @@ const enqueueSends: EnqueueEmailSends = async (batch) => {
 };
 const enqueueSend = (emailId: string, startAfter?: Date, priority?: EmailSendPriority) =>
   enqueueSends([{ emailId, startAfter, priority }]);
+// A team whose standing changed: the tenant.status job brings its SES tenant in line.
+const syncTenant = async (teamId: string): Promise<void> => {
+  await queue.send("tenant.status", { teamId }, { dedupeKey: teamId });
+};
 
 // Account mail rides the pipeline, so the mailer needs the queue it enqueues into.
 const mailer = createSystemMailer({ db, keyring, enqueueSend });
@@ -562,12 +567,17 @@ await queue.scheduleCrons({
     await runPlatformBreaker(db, {
       mailer,
       appBaseUrl: env.APP_BASE_URL,
+      isCloud: env.IS_CLOUD,
+      defaultRegion,
+      syncTenant,
       ses: {
         regions,
         complaintRate: async (region) => {
           const client = reputationClients.get(region);
           return client ? getSesComplaintRate(client) : null;
         },
+        enforcementStatus: async (region) =>
+          (await getAccountOverview(accountClientFor(region))).enforcementStatus,
         loggedAt: sesUnreadableLoggedAt,
       },
     });
@@ -835,9 +845,7 @@ await queue.work(
         timeoutMs: judgeConfig?.timeoutMs,
         mailer,
         appBaseUrl: env.APP_BASE_URL,
-        syncTenant: async (teamId) => {
-          await queue.send("tenant.status", { teamId }, { dedupeKey: teamId });
-        },
+        syncTenant,
         enqueueSend: (emailId, priority) => enqueueSend(emailId, undefined, priority),
         enqueueBroadcast: (broadcastId) => enqueueBroadcast(broadcastId),
         platformDomains,

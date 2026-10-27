@@ -9,8 +9,10 @@ import {
   gte,
   inArray,
   isNotNull,
+  isNull,
   lt,
   notInArray,
+  or,
   type SQL,
   sql,
 } from "drizzle-orm";
@@ -26,13 +28,16 @@ import {
   SES_MAILBOX_SIMULATOR_DOMAIN,
   SES_UNATTEMPTED_SUBTYPES,
 } from "./mailbox-providers.js";
+import { effectivePlan, type Plan, paidPlan } from "./plans.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
  * SES enforces bounce/complaint rates on the whole account per region: one
  * team's bad week pauses every customer in that region. The breaker watches
  * the aggregate and holds broadcasts (never transactional mail) short of
- * SES's own lines, so the platform stops itself before AWS does.
+ * SES's own lines, so the platform stops itself before AWS does: every
+ * team's on a bounce trip, only those of the teams drawing the complaints
+ * on a complaint trip.
  */
 // 80% of SES's 5% bounce review line, written as a literal: 0.8 * 0.05 is
 // 0.04000000000000001 in floating point, and 40 bounces in 1000 must trip.
@@ -46,14 +51,21 @@ export const BREAKER_WINDOWS_HOURS = [24, 24 * 7] as const;
  * mail to the providers that report complaints. While it can't be read (an
  * instance whose IAM policy predates the CloudWatch read), our own count
  * estimates it the same way, leaving out sends no recipient can report.
- * BREAKER_SES_COMPLAINT_RATE judges both.
+ * BREAKER_SES_COMPLAINT_RATE judges both, and a team's own month on a
+ * complaint trip.
  */
 export const SES_COMPLAINT_REVIEW_RATE = 0.001;
 export const SES_COMPLAINT_PAUSE_RATE = 0.005;
-/** The operator hears at this rate, a day apart while it stays there. */
-export const SES_COMPLAINT_ALERT_RATE = 0.003;
-export const BREAKER_SES_COMPLAINT_RATE = 0.004;
-/** How long SES feedback that matched no email row is kept. */
+/**
+ * The operator hears at this rate, a day apart while it stays there, paused
+ * or not; a complaint trip resumes only once the rate is back under it, so a
+ * rate hovering at the trip line cannot trip and resume every run.
+ */
+export const SES_COMPLAINT_ALERT_RATE = 0.0008;
+export const BREAKER_SES_COMPLAINT_RATE = 0.001;
+/** The days of sends, by when they went out, that a team's complaints and bounces are read over. */
+export const BREAKER_TEAM_WINDOW_DAYS = 30;
+/** Unmatched SES feedback outlives the month the operator's mails count. */
 const UNMATCHED_RETENTION_DAYS = 35;
 
 export type RegionWindowCounts = WindowCounts;
@@ -67,11 +79,30 @@ export interface RegionContributor {
   complained: number;
 }
 
+/** A team's mail sent in a region over BREAKER_TEAM_WINDOW_DAYS, and SES's feedback on it. */
+export interface RegionTeamStats extends RegionContributor {
+  plan: Plan;
+  currentPeriodEnd: Date | null;
+  sent: number;
+  /** Sends that could draw a complaint: not every recipient at a provider that never reports one. */
+  complaintSent: number;
+  /** When the latest of its complaints arrived. */
+  lastComplaintAt: Date | null;
+}
+
 export interface RegionDecision {
   region: string;
   trip: boolean;
   reason?: RegionBreakerReason;
   contributors: RegionContributor[];
+  /**
+   * The paid teams whose broadcasts a complaint trip holds, each at or over
+   * BREAKER_SES_COMPLAINT_RATE on its own month; null (or absent) holds
+   * every team's.
+   */
+  heldTeams?: RegionTeamStats[] | null;
+  /** Free teams whose mail drew a complaint on a complaint trip (Cloud): held for review. */
+  reviewTeams?: RegionTeamStats[];
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -101,6 +132,8 @@ const simulatorOnlySql = (recipients: SQL) => sql`coalesce((
 // existed (until retention strips their payload).
 export const hardBounceFilter = sql`${ev.type} = 'bounced' and coalesce(${ev.bounceType}, ${ev.data}->'bounce'->>'bounceType') = 'Permanent' and ${sesAttemptedSql(sql`${ev.data}->'bounce'->>'bounceSubType'`)} and not ${simulatorOnlySql(sql`${ev.data}->'bounce'->'bouncedRecipients'`)}`;
 export const complaintFilter = sql`${ev.type} = 'complained' and ${sesAttemptedSql(sql`${ev.data}->'complaint'->>'complaintSubType'`)} and not ${simulatorOnlySql(sql`${ev.data}->'complaint'->'complainedRecipients'`)}`;
+/** SES's complaints and bounces, as email_events_feedback_created_idx reads them. */
+const feedbackEvents = sql`${ev.type} in ('complained', 'bounced') and ${ev.snsMessageId} is not null`;
 /**
  * A send's recipients in to, cc and bcc, one `domain` row each, read the way
  * sentWithoutComplaintFeedback reads them: what follows the last '@', less a
@@ -247,48 +280,104 @@ export async function regionCounterTotals(
   return out;
 }
 
-/** Teams behind a region's hard bounces and complaints over the tripping window, worst first. */
-async function contributors(
+/**
+ * The teams whose mail sent in the region over the last
+ * BREAKER_TEAM_WINDOW_DAYS, by when it went out, drew a hard bounce or a
+ * complaint, with what they sent there. Mail with no domain row (the shared
+ * inbox domain's, the onboarding email, account mail) went out in
+ * `defaultRegion`.
+ */
+export async function regionTeamStats(
   db: Db,
-  region: string,
-  now: Date,
-  hours: number,
-): Promise<RegionContributor[]> {
-  const since = new Date(now.getTime() - hours * HOUR_MS);
-  const hardBounced = sql<number>`count(*) filter (where ${hardBounceFilter})::int`;
+  opts: { region: string; defaultRegion: string; now: Date },
+): Promise<RegionTeamStats[]> {
+  const since = new Date(opts.now.getTime() - BREAKER_TEAM_WINDOW_DAYS * DAY_MS);
+  const e = schema.emails;
+  const d = schema.domains;
+  const t = schema.teams;
+  const inRegion = sql`coalesce(${d.region}, ${opts.defaultRegion}) = ${opts.region}`;
   const complained = sql<number>`count(*) filter (where ${complaintFilter})::int`;
-  return db
+  const hardBounced = sql<number>`count(*) filter (where ${hardBounceFilter})::int`;
+  const feedback = await db
     .select({
-      teamId: schema.teams.id,
-      teamName: schema.teams.name,
-      hardBounced,
+      teamId: e.teamId,
       complained,
+      hardBounced,
+      lastComplaintAt:
+        sql<Date | null>`max(${ev.createdAt}) filter (where ${complaintFilter})`.mapWith(
+          ev.createdAt,
+        ),
     })
-    .from(schema.emailEvents)
-    .innerJoin(schema.emails, eq(schema.emails.id, schema.emailEvents.emailId))
-    .innerJoin(schema.domains, eq(schema.domains.id, schema.emails.domainId))
-    .innerJoin(schema.teams, eq(schema.teams.id, schema.emails.teamId))
+    .from(ev)
+    .innerJoin(e, eq(e.id, ev.emailId))
+    .leftJoin(d, eq(d.id, e.domainId))
+    // An event arrives after its send: the arrival bound changes nothing but
+    // lets the scan use the feedback index.
+    .where(and(feedbackEvents, gte(ev.createdAt, since), gte(e.sentAt, since), inRegion))
+    .groupBy(e.teamId)
+    .having(sql`${complained} + ${hardBounced} > 0`);
+  if (feedback.length === 0) return [];
+  const sends = await db
+    .select({
+      teamId: t.id,
+      teamName: t.name,
+      plan: t.plan,
+      currentPeriodEnd: t.currentPeriodEnd,
+      sent: sql<number>`count(*)::int`,
+      complaintSent: sql<number>`count(*) filter (where not ${noComplaintFeedback})::int`,
+    })
+    .from(e)
+    .innerJoin(t, eq(t.id, e.teamId))
+    .leftJoin(d, eq(d.id, e.domainId))
     .where(
       and(
-        eq(schema.domains.region, region),
-        gte(schema.emailEvents.createdAt, since),
-        isNotNull(schema.emailEvents.snsMessageId),
+        inArray(
+          e.teamId,
+          feedback.map((row) => row.teamId),
+        ),
+        gte(e.sentAt, since),
+        inRegion,
       ),
     )
-    .groupBy(schema.teams.id, schema.teams.name)
-    .having(sql`${hardBounced} + ${complained} > 0`)
-    .orderBy(desc(sql`${hardBounced} + ${complained}`))
-    .limit(5);
+    .groupBy(t.id, t.name, t.plan, t.currentPeriodEnd);
+  const byTeam = new Map(feedback.map((row) => [row.teamId, row]));
+  return sends.flatMap((row) => {
+    const hits = byTeam.get(row.teamId);
+    return hits ? [{ ...row, ...hits }] : [];
+  });
+}
+
+/** The five teams behind the most events of the metric, worst first. */
+function topContributors(
+  stats: readonly RegionTeamStats[],
+  metric: RegionBreakerReason["metric"],
+): RegionContributor[] {
+  const [first, second] =
+    metric === "bounce"
+      ? (["hardBounced", "complained"] as const)
+      : (["complained", "hardBounced"] as const);
+  return [...stats]
+    .sort(
+      (a, b) =>
+        b[first] - a[first] || b[second] - a[second] || a.teamName.localeCompare(b.teamName),
+    )
+    .slice(0, 5)
+    .map(({ teamId, teamName, hardBounced, complained }) => ({
+      teamId,
+      teamName,
+      hardBounced,
+      complained,
+    }));
 }
 
 /**
- * Our own counts over a window, each line over its own sends; `complaints`
- * adds the complaint line, over the sends that can draw one, to the bounce one.
+ * Our own counts over a window, each line over its own sends; `complaintLine`
+ * adds a complaint line, over the sends that can draw one, to the bounce one.
  */
 function windowTrip(
   counts: RegionWindowCounts,
   windowHours: number,
-  complaints: boolean,
+  complaintLine: number | null,
 ): RegionBreakerReason | null {
   const checks = [
     {
@@ -298,13 +387,13 @@ function windowTrip(
       limit: BREAKER_BOUNCE_RATE,
       min: MIN_PAUSE_HARD_BOUNCES,
     },
-    ...(complaints
+    ...(complaintLine !== null
       ? [
           {
             metric: "complaint" as const,
             sent: counts.complaintSent,
             events: counts.complained,
-            limit: BREAKER_SES_COMPLAINT_RATE,
+            limit: complaintLine,
             min: MIN_PAUSE_COMPLAINTS,
           },
         ]
@@ -350,22 +439,21 @@ function sesReading(
   return { rate: read ? row.sesComplaintRate : null, read };
 }
 
-/** The window whose teams a reason names: SES's rate spans far more than a day. */
-function contributorHours(reason: RegionBreakerReason): number {
-  return "windowHours" in reason ? reason.windowHours : BREAKER_WINDOWS_HOURS[1];
-}
-
 /**
  * One decision per region with traffic or a current SES rate: trip when
  * either window is over a breaker line with enough sends and events behind
  * it, or SES's own complaint rate is over its line; clear only when all of
- * them are under. Complaints count through SES's rate while it can be read,
- * through our own windows otherwise. Contributors are listed for tripped
- * regions so the operator knows who to talk to.
+ * them are under, a complaint pause only once the complaint rate is under
+ * SES_COMPLAINT_ALERT_RATE. Complaints count through SES's rate while it
+ * can be read, through our own windows otherwise. A tripped region names
+ * the teams behind its events, worst first, so the operator knows who to
+ * talk to; a complaint trip holds only the broadcasts of the paid teams at
+ * or over the line on their own month and, on Cloud, puts the Free teams
+ * whose mail drew a complaint up for review.
  */
 export async function evaluateRegionBreakers(
   db: Db,
-  opts: { now?: Date } = {},
+  opts: { now?: Date; defaultRegion: string; isCloud: boolean },
 ): Promise<RegionDecision[]> {
   const now = opts.now ?? new Date();
   // The day window reads raw rows to the minute; the week window reads the
@@ -383,10 +471,12 @@ export async function evaluateRegionBreakers(
     .select({
       region: b.region,
       paused: b.paused,
+      reason: b.reason,
       sesComplaintRate: b.sesComplaintRate,
       sesComplaintReadAt: b.sesComplaintReadAt,
     })
     .from(b);
+  const byRegion = new Map(rows.map((r) => [r.region, r]));
   const sesRates = new Map(rows.map((r) => [r.region, sesReading(r, now).rate]));
   // Paused regions stay in the set even with no traffic in either window:
   // a decision with nothing tripping is what lets them resume.
@@ -394,23 +484,52 @@ export async function evaluateRegionBreakers(
     ...windows.flatMap((w) => [...w.counts.keys()]),
     ...rows.filter((r) => r.paused || sesRates.get(r.region) !== null).map((r) => r.region),
   ]);
+  const free = (s: RegionTeamStats) =>
+    !paidPlan(effectivePlan(s.plan, s.currentPeriodEnd, now), opts.isCloud);
   const decisions: RegionDecision[] = [];
   for (const region of regions) {
     const ses = sesRates.get(region) ?? null;
-    let reason: RegionBreakerReason | null = null;
-    for (const w of windows) {
-      const counts = w.counts.get(region);
-      reason = counts ? windowTrip(counts, w.hours, ses === null) : null;
-      if (reason) break;
+    const judge = (complaintLine: number): RegionBreakerReason | null => {
+      for (const w of windows) {
+        const counts = w.counts.get(region);
+        const reason = counts
+          ? windowTrip(counts, w.hours, ses === null ? complaintLine : null)
+          : null;
+        if (reason) return reason;
+      }
+      return ses !== null && ses >= complaintLine
+        ? { metric: "complaint", source: "ses", rate: ses, limit: complaintLine }
+        : null;
+    };
+    const stored = byRegion.get(region);
+    // Still over the alert line, a complaint pause holds for the reason it tripped on.
+    const reason =
+      judge(BREAKER_SES_COMPLAINT_RATE) ??
+      (stored?.paused && stored.reason?.metric === "complaint" && judge(SES_COMPLAINT_ALERT_RATE)
+        ? stored.reason
+        : null);
+    if (!reason) {
+      decisions.push({ region, trip: false, contributors: [] });
+      continue;
     }
-    if (!reason && ses !== null && ses >= BREAKER_SES_COMPLAINT_RATE) {
-      reason = { metric: "complaint", source: "ses", rate: ses, limit: BREAKER_SES_COMPLAINT_RATE };
-    }
+    const stats = await regionTeamStats(db, {
+      region,
+      defaultRegion: opts.defaultRegion,
+      now,
+    });
+    const complaints = reason.metric === "complaint";
     decisions.push({
       region,
-      trip: reason !== null,
-      ...(reason ? { reason } : {}),
-      contributors: reason ? await contributors(db, region, now, contributorHours(reason)) : [],
+      trip: true,
+      reason,
+      contributors: topContributors(stats, reason.metric),
+      heldTeams: complaints
+        ? stats.filter(
+            (s) =>
+              !free(s) && s.complained / Math.max(s.complaintSent, 1) >= BREAKER_SES_COMPLAINT_RATE,
+          )
+        : null,
+      reviewTeams: complaints ? stats.filter((s) => free(s) && s.complained > 0) : [],
     });
   }
   return decisions;
@@ -426,14 +545,15 @@ export interface SesComplaintAlert {
  * Stores SES's own complaint rate per region with the time of the read (a
  * region left out of `rates`, its read having failed, keeps its last one)
  * and returns the regions the operator should hear about: at or over the
- * alert line, not paused (the pause has its own notice), and not told in the
- * last day. Those are marked told.
+ * alert line, paused or not, and not told in the last day. Those are marked
+ * told, and name the teams behind the most complaints.
  */
 export async function recordSesComplaintRates(
   db: Db,
   rates: ReadonlyMap<string, number | null>,
-  now: Date = new Date(),
+  opts: { now: Date; defaultRegion: string },
 ): Promise<SesComplaintAlert[]> {
+  const { now } = opts;
   const b = schema.regionBreakers;
   const alerts: SesComplaintAlert[] = [];
   for (const [region, rate] of rates) {
@@ -442,17 +562,30 @@ export async function recordSesComplaintRates(
       .insert(b)
       .values({ region, ...reading })
       .onConflictDoUpdate({ target: b.region, set: reading })
-      .returning({ paused: b.paused, alertedAt: b.sesComplaintAlertedAt });
-    if (rate === null || rate < SES_COMPLAINT_ALERT_RATE || row?.paused) continue;
+      .returning({ alertedAt: b.sesComplaintAlertedAt });
+    if (rate === null || rate < SES_COMPLAINT_ALERT_RATE) continue;
     if (row?.alertedAt && now.getTime() - row.alertedAt.getTime() < DAY_MS) continue;
     await db.update(b).set({ sesComplaintAlertedAt: now }).where(eq(b.region, region));
-    alerts.push({
-      region,
-      rate,
-      contributors: await contributors(db, region, now, BREAKER_WINDOWS_HOURS[1]),
-    });
+    const stats = await regionTeamStats(db, { region, defaultRegion: opts.defaultRegion, now });
+    alerts.push({ region, rate, contributors: topContributors(stats, "complaint") });
   }
   return alerts;
+}
+
+/** SES complaints about mail SES attempted that arrived over the last month and matched no email row. */
+export async function unmatchedComplaints(db: Db, now: Date): Promise<number> {
+  const u = schema.sesUnmatchedEvents;
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(u)
+    .where(
+      and(
+        eq(u.type, "complained"),
+        gte(u.createdAt, new Date(now.getTime() - BREAKER_TEAM_WINDOW_DAYS * DAY_MS)),
+        sesAttemptedSql(sql`${u.subType}`),
+      ),
+    );
+  return row?.n ?? 0;
 }
 
 /** Deletes unmatched SES feedback past its retention; returns how many rows went. */
@@ -463,6 +596,41 @@ export async function purgeUnmatchedSesEvents(db: Db, now: Date = new Date()): P
     .where(lt(u.createdAt, new Date(now.getTime() - UNMATCHED_RETENTION_DAYS * DAY_MS)))
     .returning({ id: u.id });
   return gone.length;
+}
+
+export interface SesEnforcementChange {
+  region: string;
+  /** The status last stored; null the first time the region's is seen. */
+  from: string | null;
+  to: string;
+}
+
+/**
+ * Stores SES's EnforcementStatus per region (a region left out of
+ * `statuses` keeps its last one) and returns the changes the operator should
+ * hear about: every change of a status seen before, and a first sighting
+ * that is not HEALTHY.
+ */
+export async function recordSesEnforcementStatuses(
+  db: Db,
+  statuses: ReadonlyMap<string, string>,
+): Promise<SesEnforcementChange[]> {
+  const b = schema.regionBreakers;
+  const changes: SesEnforcementChange[] = [];
+  for (const [region, to] of statuses) {
+    const [row] = await db
+      .select({ from: b.sesEnforcementStatus })
+      .from(b)
+      .where(eq(b.region, region));
+    const from = row?.from ?? null;
+    if (from === to) continue;
+    await db
+      .insert(b)
+      .values({ region, sesEnforcementStatus: to })
+      .onConflictDoUpdate({ target: b.region, set: { sesEnforcementStatus: to } });
+    if (from !== null || to !== "HEALTHY") changes.push({ region, from, to });
+  }
+  return changes;
 }
 
 /** Each region's SES complaint reading, as the breaker judges it. */
@@ -481,7 +649,10 @@ export async function sesComplaintReadings(
   return new Map(rows.map((r) => [r.region, sesReading(r, now)]));
 }
 
-/** Persist decisions; reports only the regions whose state actually flipped. */
+/**
+ * Persist decisions: a flip, or a paused region whose held teams changed
+ * (keeping when it paused). Reports only the regions whose state flipped.
+ */
 export async function applyRegionBreakers(
   db: Db,
   decisions: RegionDecision[],
@@ -497,26 +668,22 @@ export async function applyRegionBreakers(
     // An operator's hold outlives the rates: only the operator releases it.
     if (row?.manualReason) continue;
     const paused = row?.paused ?? false;
-    if (d.trip === paused) continue;
+    const heldTeams = d.trip && d.heldTeams ? d.heldTeams.map((s) => s.teamId).sort() : null;
+    const rescoped =
+      d.trip && paused && JSON.stringify(row?.heldTeams ?? null) !== JSON.stringify(heldTeams);
+    if (d.trip === paused && !rescoped) continue;
+    const values = {
+      paused: d.trip,
+      reason: d.reason ?? null,
+      heldTeams,
+      pausedAt: d.trip ? (paused ? (row?.pausedAt ?? now) : now) : null,
+      updatedAt: now,
+    };
     await db
       .insert(schema.regionBreakers)
-      .values({
-        region: d.region,
-        paused: d.trip,
-        reason: d.reason ?? null,
-        pausedAt: d.trip ? now : null,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: schema.regionBreakers.region,
-        set: {
-          paused: d.trip,
-          reason: d.reason ?? null,
-          pausedAt: d.trip ? now : null,
-          updatedAt: now,
-        },
-      });
-    (d.trip ? tripped : resumed).push(d.region);
+      .values({ region: d.region, ...values })
+      .onConflictDoUpdate({ target: schema.regionBreakers.region, set: values });
+    if (d.trip !== paused) (d.trip ? tripped : resumed).push(d.region);
   }
   return { tripped, resumed };
 }
@@ -526,6 +693,8 @@ export interface PausedRegion {
   reason: RegionBreakerReason | null;
   /** Set when an operator holds the region by hand rather than the rates. */
   manualReason: string | null;
+  /** The teams whose broadcasts the pause holds; null holds every team's. */
+  heldTeams: string[] | null;
   pausedAt: Date | null;
 }
 
@@ -533,6 +702,7 @@ const PAUSED_COLUMNS = {
   region: schema.regionBreakers.region,
   reason: schema.regionBreakers.reason,
   manualReason: schema.regionBreakers.manualReason,
+  heldTeams: schema.regionBreakers.heldTeams,
   pausedAt: schema.regionBreakers.pausedAt,
 };
 
@@ -543,16 +713,32 @@ export async function pausedRegions(db: Db): Promise<PausedRegion[]> {
     .where(eq(schema.regionBreakers.paused, true));
 }
 
-/** The pause behind a region, or null when broadcasts flow there. */
-export async function regionPause(db: Db, region: string): Promise<PausedRegion | null> {
+/** Whether a region's pause holds this team's broadcasts. */
+export function pauseHolds(pause: Pick<PausedRegion, "heldTeams">, teamId: string): boolean {
+  return pause.heldTeams === null || pause.heldTeams.includes(teamId);
+}
+
+/** The pause that holds the team's broadcasts in a region, or null when they flow there. */
+export async function regionPause(
+  db: Db,
+  region: string,
+  teamId: string,
+): Promise<PausedRegion | null> {
+  const b = schema.regionBreakers;
   const [row] = await db
     .select(PAUSED_COLUMNS)
-    .from(schema.regionBreakers)
-    .where(and(eq(schema.regionBreakers.region, region), eq(schema.regionBreakers.paused, true)));
+    .from(b)
+    .where(
+      and(
+        eq(b.region, region),
+        eq(b.paused, true),
+        or(isNull(b.heldTeams), sql`${b.heldTeams} ? ${teamId}`),
+      ),
+    );
   return row ?? null;
 }
 
-/** Hold a region's broadcasts by hand; the breaker cron leaves it alone until released. */
+/** Hold a region's broadcasts by hand, every team's; the breaker cron leaves it alone until released. */
 export async function holdRegion(
   db: Db,
   region: string,
@@ -563,6 +749,7 @@ export async function holdRegion(
     paused: true,
     reason: null,
     manualReason: reason,
+    heldTeams: null,
     pausedAt: now,
     updatedAt: now,
   };
@@ -576,6 +763,13 @@ export async function holdRegion(
 export async function releaseRegion(db: Db, region: string, now = new Date()): Promise<void> {
   await db
     .update(schema.regionBreakers)
-    .set({ paused: false, reason: null, manualReason: null, pausedAt: null, updatedAt: now })
+    .set({
+      paused: false,
+      reason: null,
+      manualReason: null,
+      heldTeams: null,
+      pausedAt: null,
+      updatedAt: now,
+    })
     .where(eq(schema.regionBreakers.region, region));
 }

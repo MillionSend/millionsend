@@ -1906,10 +1906,20 @@ it("a broadcast row parks on the bulk share or a held region; a transactional ro
     contactId: heldContact,
     to: ["share-held@example.com"],
   });
-  const paused = { ...share, bulkExhausted: () => false, paused: () => true };
+  // The region's pause holds this team's broadcasts.
+  const paused = {
+    ...share,
+    bulkExhausted: () => false,
+    paused: (_region: string | undefined, team: string) => team === teamId,
+  };
   expect(await sendEmail(db, { keyring, ses, sesQuota: paused }, { emailId: held })).toBe("parked");
 
-  const open = { ...share, bulkExhausted: () => false };
+  // A pause that holds only other teams' broadcasts lets this team's go.
+  const open = {
+    ...share,
+    bulkExhausted: () => false,
+    paused: (_region: string | undefined, team: string) => team !== teamId,
+  };
   const flowingContact = await insertContact("share-flow@example.com");
   const flowing = await insertEmail({
     broadcastId: bc?.id,

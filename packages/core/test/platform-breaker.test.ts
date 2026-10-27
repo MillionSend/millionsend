@@ -9,14 +9,19 @@ import {
   evaluateRegionBreakers,
   holdRegion,
   pausedRegions,
+  pauseHolds,
   purgeUnmatchedSesEvents,
   recordSesComplaintRates,
+  recordSesEnforcementStatuses,
   regionCounterTotals,
   regionPause,
+  regionTeamStats,
   regionWindowCounts,
   releaseRegion,
   sesComplaintReadings,
+  unmatchedComplaints,
 } from "../src/platform-breaker.js";
+import { holdComplaintTeams } from "../src/team-standing.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
 let db: Db;
@@ -132,6 +137,13 @@ async function seedTraffic(
 /** Recipients at a provider that never reports complaints to SES. */
 const gmail = (i: number) => [`g${i}@gmail.com`];
 
+/** Where mail with no domain row goes out. */
+const DEFAULT_REGION = "sa-east-1";
+const evaluate = (now = NOW, isCloud = false) =>
+  evaluateRegionBreakers(db, { now, defaultRegion: DEFAULT_REGION, isCloud });
+const record = (rates: ReadonlyMap<string, number | null>, now: Date) =>
+  recordSesComplaintRates(db, rates, { now, defaultRegion: DEFAULT_REGION });
+
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
   teamA = await createTeam(db, "breaker-a");
@@ -151,7 +163,7 @@ const permanent = (n: number) => [{ type: "bounced" as const, bounceType: "Perma
 afterAll(() => close());
 
 it("trips a region on the 24h hard-bounce rate, names contributors worst first, and skips under the floor", async () => {
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   const sa = decisions.find((d) => d.region === "sa-east-1");
   const us = decisions.find((d) => d.region === "us-east-1");
   expect(sa).toMatchObject({
@@ -166,36 +178,38 @@ it("trips a region on the 24h hard-bounce rate, names contributors worst first, 
 });
 
 it("applies only state changes, and answers regionPause/pausedRegions", async () => {
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   expect(await applyRegionBreakers(db, decisions, NOW)).toEqual({
     tripped: ["sa-east-1"],
     resumed: [],
   });
   expect(await applyRegionBreakers(db, decisions, NOW)).toEqual({ tripped: [], resumed: [] });
-  expect((await regionPause(db, "sa-east-1"))?.reason?.metric).toBe("bounce");
-  expect(await regionPause(db, "us-east-1")).toBeNull();
-  expect((await pausedRegions(db)).map((r) => r.region)).toEqual(["sa-east-1"]);
+  expect((await regionPause(db, "sa-east-1", teamA))?.reason?.metric).toBe("bounce");
+  expect(await regionPause(db, "us-east-1", teamC)).toBeNull();
+  // A bounce trip holds every team's broadcasts in the region.
+  expect(await pausedRegions(db)).toMatchObject([{ region: "sa-east-1", heldTeams: null }]);
+  expect(await regionPause(db, "sa-east-1", teamC)).not.toBeNull();
 });
 
 it("resumes once both windows are under the line, and transient bounces never count", async () => {
   await db.delete(schema.emailEvents).where(eq(schema.emailEvents.type, "bounced"));
   await db.update(schema.usageCounters).set({ hardBounced: 0 });
-  const cleared = await evaluateRegionBreakers(db, { now: NOW });
+  const cleared = await evaluate();
   expect(cleared.find((d) => d.region === "sa-east-1")?.trip).toBe(false);
   expect(await applyRegionBreakers(db, cleared, NOW)).toEqual({
     tripped: [],
     resumed: ["sa-east-1"],
   });
-  expect(await regionPause(db, "sa-east-1")).toBeNull();
+  expect(await regionPause(db, "sa-east-1", teamA)).toBeNull();
 
   // 45 transient bounces on 1000 sends: 4.5% would trip if they counted.
   const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
   if (!dom) throw new Error("no domain");
   await seedTraffic(teamA, dom.id, 45, [{ type: "bounced", bounceType: "Transient", n: 45 }]);
-  const transient = await evaluateRegionBreakers(db, { now: NOW });
+  const transient = await evaluate();
   expect(transient.find((d) => d.region === "sa-east-1")?.trip).toBe(false);
   await seedTraffic(teamA, dom.id, 45, [{ type: "bounced", bounceType: "Permanent", n: 45 }]);
-  const permanent = await evaluateRegionBreakers(db, { now: NOW });
+  const permanent = await evaluate();
   expect(permanent.find((d) => d.region === "sa-east-1")).toMatchObject({
     trip: true,
     reason: { metric: "bounce", events: 45 },
@@ -207,10 +221,10 @@ it("judges the 7-day window too: old events still trip it when the 24h window is
   const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamC));
   if (!dom) throw new Error("no domain");
   await seedTraffic(teamC, dom.id, 1000, permanent(45), hoursAgo(72));
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   const us = decisions.find((d) => d.region === "us-east-1");
   expect(us).toMatchObject({ trip: true, reason: { windowHours: 168 } });
-  // Contributors follow the window that tripped, not a fixed 24h.
+  // Contributors cover the month's sends, not the 24h window.
   expect(us?.contributors.map((c) => [c.teamId, c.hardBounced])).toEqual([[teamC, 45]]);
 });
 
@@ -219,7 +233,7 @@ it("exactly 4.00% hard bounces (40 in 1000) trips the bounce line", async () => 
   const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
   if (!dom) throw new Error("no domain");
   await seedTraffic(teamA, dom.id, 1000, [{ type: "bounced", bounceType: "Permanent", n: 40 }]);
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   expect(decisions.find((d) => d.region === "sa-east-1")).toMatchObject({
     trip: true,
     reason: { metric: "bounce", events: 40, rate: 0.04, limit: 0.04 },
@@ -247,7 +261,7 @@ it("a paused region with no traffic left in either window still gets a resume de
     NOW,
   );
   await clearTraffic();
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   expect(decisions.find((d) => d.region === "eu-west-1")).toMatchObject({ trip: false });
   expect(await applyRegionBreakers(db, decisions, NOW)).toMatchObject({ resumed: ["eu-west-1"] });
   expect((await pausedRegions(db)).map((r) => r.region)).not.toContain("eu-west-1");
@@ -260,7 +274,7 @@ it("hard bounces still count after the retention purge strips event payloads", a
   if (!dom) throw new Error("no domain");
   await seedTraffic(teamC, dom.id, 1000, [{ type: "bounced", bounceType: "Permanent", n: 45 }]);
   await db.update(schema.emailEvents).set({ data: null });
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   expect(decisions.find((d) => d.region === "us-east-1")).toMatchObject({
     trip: true,
     reason: { metric: "bounce", windowHours: 24 },
@@ -285,7 +299,7 @@ it("leaves bounces and complaints about mail SES never attempted out of the coun
     hardBounced: 45,
     complained: 0,
   });
-  const sa = (await evaluateRegionBreakers(db, { now: NOW })).find((d) => d.region === "sa-east-1");
+  const sa = (await evaluate()).find((d) => d.region === "sa-east-1");
   expect(sa).toMatchObject({ trip: true, reason: { metric: "bounce", windowHours: 24 } });
   expect(sa?.contributors.map((c) => c.teamId)).toEqual([teamA]);
 });
@@ -307,7 +321,7 @@ it("names only teams with hard bounces or complaints, not those with only delive
   await seedTraffic(delivered, await domainIn(delivered, "delivered.example", "sa-east-1"), 2, [
     { type: "delivered", n: 2 },
   ]);
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   const sa = decisions.find((d) => d.region === "sa-east-1");
   expect(sa).toMatchObject({ trip: true, reason: { metric: "bounce", windowHours: 24 } });
   expect(sa?.contributors.map((c) => [c.teamId, c.hardBounced])).toEqual([
@@ -344,7 +358,7 @@ it("the week window reads the daily counters: seven UTC days including today (re
   expect(await regionCounterTotals(db, { now: NOW, days: 7 })).toEqual(
     new Map([["ap-south-1", { sent: 1000, complaintSent: 1000, hardBounced: 45, complained: 0 }]]),
   );
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   expect(decisions.map((d) => d.region)).toEqual(["ap-south-1"]);
   expect(decisions[0]).toMatchObject({
     trip: true,
@@ -391,7 +405,7 @@ it("a team whose verified domains span regions is read from its rows, not the co
   expect(await regionCounterTotals(db, { now: NOW, days: 7 })).toEqual(
     new Map([["eu-west-1", { sent: 1200, complaintSent: 1060, hardBounced: 50, complained: 0 }]]),
   );
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   expect(decisions.map((d) => d.region)).toEqual(["eu-west-1"]);
   expect(decisions[0]).toMatchObject({
     trip: true,
@@ -406,48 +420,47 @@ it("a region held by hand stays paused through the cron's resume decisions until
     manualReason: "incident",
   });
   // us-east-1 never trips (under the floor), so the cron would resume it.
-  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const decisions = await evaluate();
   const applied = await applyRegionBreakers(db, decisions, NOW);
   expect(applied.resumed).not.toContain("us-east-1");
-  expect(await regionPause(db, "us-east-1")).toMatchObject({ manualReason: "incident" });
+  expect(await regionPause(db, "us-east-1", teamC)).toMatchObject({ manualReason: "incident" });
   await releaseRegion(db, "us-east-1");
-  expect(await regionPause(db, "us-east-1")).toBeNull();
+  expect(await regionPause(db, "us-east-1", teamC)).toBeNull();
 });
 
-it("judges complaints on SES's own rate while it can be read: 0.4% trips, our own count does not", async () => {
+it("judges complaints on SES's own rate while it can be read: 0.1% trips, our own count does not", async () => {
   await clearTraffic();
   await db.delete(schema.regionBreakers);
   const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
   if (!dom) throw new Error("no domain");
-  // 1% of our own count, past the 0.4% line.
+  // 1% of our own count, past the 0.1% line.
   await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 10 }], hoursAgo(72));
-  await recordSesComplaintRates(
-    db,
+  await record(
     new Map([
-      ["sa-east-1", 0.0039],
-      ["us-east-1", 0.004],
+      ["sa-east-1", 0.00099],
+      ["us-east-1", 0.001],
       // No traffic of ours there: SES's rate alone puts it in the run.
       ["eu-west-1", 0.0051],
     ]),
     NOW,
   );
-  let decisions = await evaluateRegionBreakers(db, { now: NOW });
+  let decisions = await evaluate();
   expect(decisions.find((d) => d.region === "sa-east-1")).toMatchObject({ trip: false });
   expect(decisions.find((d) => d.region === "us-east-1")).toMatchObject({
     trip: true,
-    reason: { metric: "complaint", source: "ses", rate: 0.004, limit: 0.004 },
+    reason: { metric: "complaint", source: "ses", rate: 0.001, limit: 0.001 },
   });
   expect(decisions.find((d) => d.region === "eu-west-1")).toMatchObject({
     trip: true,
     contributors: [],
   });
 
-  await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0042]]), NOW);
-  decisions = await evaluateRegionBreakers(db, { now: NOW });
-  // SES's rate spans far more than a day: the week's teams are named.
+  await record(new Map([["sa-east-1", 0.0012]]), NOW);
+  decisions = await evaluate();
+  // SES's rate spans far more than a day: the month's teams are named.
   expect(decisions.find((d) => d.region === "sa-east-1")).toMatchObject({
     trip: true,
-    reason: { source: "ses", rate: 0.0042 },
+    reason: { source: "ses", rate: 0.0012 },
   });
   expect(
     decisions
@@ -456,21 +469,20 @@ it("judges complaints on SES's own rate while it can be read: 0.4% trips, our ow
   ).toEqual([[teamA, 10]]);
 });
 
-it("falls back to our estimate of SES's rate, on the same 0.4% line over either window, while SES's rate can't be read", async () => {
+it("falls back to our estimate of SES's rate, on the same 0.1% line over either window, while SES's rate can't be read", async () => {
   await clearTraffic();
   await db.delete(schema.regionBreakers);
   const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
   if (!dom) throw new Error("no domain");
   await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 10 }], hoursAgo(72));
-  const sa = async (now: Date) =>
-    (await evaluateRegionBreakers(db, { now })).find((d) => d.region === "sa-east-1");
+  const sa = async (now: Date) => (await evaluate(now)).find((d) => d.region === "sa-east-1");
   const own = {
     trip: true,
     reason: {
       metric: "complaint",
       source: "events",
       rate: 0.01,
-      limit: 0.004,
+      limit: 0.001,
       windowHours: 168,
       sent: 1000,
       events: 10,
@@ -480,24 +492,24 @@ it("falls back to our estimate of SES's rate, on the same 0.4% line over either 
   expect(await sa(NOW)).toMatchObject(own);
   expect((await sa(NOW))?.contributors.map((c) => [c.teamId, c.complained])).toEqual([[teamA, 10]]);
   // Read under a day ago, the reads since then failing: SES's rate still counts.
-  await recordSesComplaintRates(db, new Map([["sa-east-1", 0.001]]), NOW);
+  await record(new Map([["sa-east-1", 0.0005]]), NOW);
   const later = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
   expect(await sa(later(23))).toMatchObject({ trip: false });
   // Over a day of failed reads: our own count again.
   expect(await sa(later(25))).toMatchObject(own);
   // SES answering with no rate at all leaves our own count in charge too.
-  await recordSesComplaintRates(db, new Map([["sa-east-1", null]]), later(25));
+  await record(new Map([["sa-east-1", null]]), later(25));
   expect(await sa(later(25))).toMatchObject(own);
 
-  // The 24-hour window judges the same line: 3 in 1000 stay under it, 4 reach it.
+  // The 24-hour window judges the same line: 2 in 3000 stay under it, 3 reach it.
   await clearTraffic();
-  await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 3 }]);
+  await seedTraffic(teamA, dom.id, 3000, [{ type: "complained", n: 2 }]);
   expect(await sa(NOW)).toMatchObject({ trip: false });
   await clearTraffic();
-  await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 4 }]);
+  await seedTraffic(teamA, dom.id, 3000, [{ type: "complained", n: 3 }]);
   expect(await sa(NOW)).toMatchObject({
     trip: true,
-    reason: { metric: "complaint", windowHours: 24, rate: 0.004, limit: 0.004, events: 4 },
+    reason: { metric: "complaint", windowHours: 24, rate: 0.001, limit: 0.001, events: 3 },
   });
 });
 
@@ -506,35 +518,34 @@ it("leaves sends no recipient can report out of the estimate's denominator, in t
   await db.delete(schema.regionBreakers);
   const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
   if (!dom) throw new Error("no domain");
-  const sa = async () =>
-    (await evaluateRegionBreakers(db, { now: NOW })).find((d) => d.region === "sa-east-1");
-  // 4 complaints over 2000 sends is 0.2%, but half of them went to Gmail.
-  await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 4 }]);
-  await seedTraffic(teamA, dom.id, 1000, [], hoursAgo(6), gmail);
+  const sa = async () => (await evaluate()).find((d) => d.region === "sa-east-1");
+  // 3 complaints over 4000 sends is 0.075%, but three quarters of them went to Gmail.
+  await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 3 }]);
+  await seedTraffic(teamA, dom.id, 3000, [], hoursAgo(6), gmail);
   expect((await regionWindowCounts(db, { now: NOW, hours: 24 })).get("sa-east-1")).toEqual({
-    sent: 2000,
+    sent: 4000,
     complaintSent: 1000,
     hardBounced: 0,
-    complained: 4,
+    complained: 3,
   });
   expect(await sa()).toMatchObject({
     trip: true,
-    reason: { metric: "complaint", windowHours: 24, rate: 0.004, sent: 1000, events: 4 },
+    reason: { metric: "complaint", windowHours: 24, rate: 0.003, sent: 1000, events: 3 },
   });
 
   // The same week read from the counters, out of the 24-hour window.
   await clearTraffic();
-  await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 4 }], hoursAgo(72));
-  await seedTraffic(teamA, dom.id, 1000, [], hoursAgo(72), gmail);
+  await seedTraffic(teamA, dom.id, 1000, [{ type: "complained", n: 3 }], hoursAgo(72));
+  await seedTraffic(teamA, dom.id, 3000, [], hoursAgo(72), gmail);
   expect((await regionCounterTotals(db, { now: NOW, days: 7 })).get("sa-east-1")).toEqual({
-    sent: 2000,
+    sent: 4000,
     complaintSent: 1000,
     hardBounced: 0,
-    complained: 4,
+    complained: 3,
   });
   expect(await sa()).toMatchObject({
     trip: true,
-    reason: { metric: "complaint", windowHours: 168, rate: 0.004, sent: 1000, events: 4 },
+    reason: { metric: "complaint", windowHours: 168, rate: 0.003, sent: 1000, events: 3 },
   });
 });
 
@@ -588,7 +599,7 @@ it("judges complaints only past their own 1000-send floor, while bounces count e
   await seedTraffic(teamA, a.id, 1001, [], hoursAgo(6), gmail);
   // us-east-1: Gmail alone, a complaint arriving anyway (a forward).
   await seedTraffic(teamC, c.id, 2000, [{ type: "complained", n: 5 }], hoursAgo(6), gmail);
-  let decisions = await evaluateRegionBreakers(db, { now: NOW });
+  let decisions = await evaluate();
   expect(decisions.find((d) => d.region === "sa-east-1")).toMatchObject({ trip: false });
   expect(decisions.find((d) => d.region === "us-east-1")).toMatchObject({ trip: false });
 
@@ -596,22 +607,22 @@ it("judges complaints only past their own 1000-send floor, while bounces count e
   await clearTraffic();
   await seedTraffic(teamA, a.id, 999, [{ type: "complained", n: 10 }]);
   await seedTraffic(teamA, a.id, 1001, permanent(80), hoursAgo(6), gmail);
-  decisions = await evaluateRegionBreakers(db, { now: NOW });
+  decisions = await evaluate();
   expect(decisions.find((d) => d.region === "sa-east-1")).toMatchObject({
     trip: true,
     reason: { metric: "bounce", windowHours: 24, rate: 0.04, sent: 2000, events: 80 },
   });
 });
 
-it("stores SES's rate with its read time, keeps the last one when a read fails, and alerts at 0.3% once a day unless paused", async () => {
+it("stores SES's rate with its read time, keeps the last one when a read fails, and alerts at 0.08% once a day, paused or not", async () => {
   await db.delete(schema.regionBreakers);
   const at = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
-  expect(await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0025]]), at(0))).toEqual([]);
-  const first = await recordSesComplaintRates(db, new Map([["sa-east-1", 0.003]]), at(1));
-  expect(first).toMatchObject([{ region: "sa-east-1", rate: 0.003 }]);
-  expect(await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0035]]), at(2))).toEqual([]);
+  expect(await record(new Map([["sa-east-1", 0.0007]]), at(0))).toEqual([]);
+  const first = await record(new Map([["sa-east-1", 0.0008]]), at(1));
+  expect(first).toMatchObject([{ region: "sa-east-1", rate: 0.0008 }]);
+  expect(await record(new Map([["sa-east-1", 0.0035]]), at(2))).toEqual([]);
   // A failed read leaves the region out: the stored rate stands for a day.
-  await recordSesComplaintRates(db, new Map(), at(3));
+  await record(new Map(), at(3));
   expect((await sesComplaintReadings(db, at(3))).get("sa-east-1")).toEqual({
     rate: 0.0035,
     read: true,
@@ -620,21 +631,24 @@ it("stores SES's rate with its read time, keeps the last one when a read fails, 
     rate: null,
     read: false,
   });
-  expect(await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0033]]), at(25))).toMatchObject(
-    [{ region: "sa-east-1", rate: 0.0033 }],
-  );
+  expect(await record(new Map([["sa-east-1", 0.0009]]), at(25))).toMatchObject([
+    { region: "sa-east-1", rate: 0.0009 },
+  ]);
   // SES answering with no rate: read, but nothing to judge.
-  await recordSesComplaintRates(db, new Map([["sa-east-1", null]]), at(26));
+  await record(new Map([["sa-east-1", null]]), at(26));
   expect((await sesComplaintReadings(db, at(26))).get("sa-east-1")).toEqual({
     rate: null,
     read: true,
   });
-  // A paused region has its pause notice; no daily alert on top.
+  // A paused region still hears, a day apart: the pause's notice says nothing more after it.
   await holdRegion(db, "sa-east-1", "incident");
-  expect(await recordSesComplaintRates(db, new Map([["sa-east-1", 0.0045]]), at(60))).toEqual([]);
+  expect(await record(new Map([["sa-east-1", 0.0045]]), at(60))).toMatchObject([
+    { region: "sa-east-1", rate: 0.0045 },
+  ]);
+  expect(await record(new Map([["sa-east-1", 0.0045]]), at(61))).toEqual([]);
   await releaseRegion(db, "sa-east-1");
   // The hold and its release leave the reading alone.
-  expect((await sesComplaintReadings(db, at(60))).get("sa-east-1")).toEqual({
+  expect((await sesComplaintReadings(db, at(61))).get("sa-east-1")).toEqual({
     rate: 0.0045,
     read: true,
   });
@@ -662,6 +676,12 @@ async function complainedSend(
     data: { complaint: { complainedRecipients: to.map((emailAddress) => ({ emailAddress })) } },
   });
   return email.id;
+}
+
+async function teamOn(slug: string, plan: "free" | "pro", region: string) {
+  const teamId = await createTeam(db, slug);
+  await db.update(schema.teams).set({ plan }).where(eq(schema.teams.id, teamId));
+  return { teamId, domainId: await domainIn(teamId, `${slug}.example`, region) };
 }
 
 it("leaves complaints and hard bounces naming only SES's mailbox simulator out, and mail to it alone out of the complaint base", async () => {
@@ -711,13 +731,244 @@ it("leaves complaints and hard bounces naming only SES's mailbox simulator out, 
   ).toMatchObject({ hardBounced: 1, complained: 3 });
 });
 
-it("purges SES feedback that matched no email row after 35 days", async () => {
+it("reads a team's month by when its mail was sent, mail with no domain row in the default region", async () => {
+  await clearTraffic();
+  const [a] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamA));
+  if (!a) throw new Error("no domain");
+  const day = (n: number) => new Date(NOW.getTime() - n * DAY_MS);
+  // Shared inbox or onboarding mail: no domain row, so the default region.
+  await complainedSend(teamB, null, day(10), day(9));
+  await complainedSend(teamB, null, day(5), day(1));
+  await seedTraffic(teamB, a.id, 2, [], day(3), gmail);
+  // Sent before the month: its complaint, however recent, is not the month's.
+  await complainedSend(teamA, a.id, day(31), day(1));
+  await seedTraffic(teamA, a.id, 5, [], day(2));
+  const stats = await regionTeamStats(db, {
+    region: "sa-east-1",
+    defaultRegion: DEFAULT_REGION,
+    now: NOW,
+  });
+  expect(stats).toEqual([
+    {
+      teamId: teamB,
+      teamName: "breaker-b",
+      plan: "free",
+      currentPeriodEnd: null,
+      sent: 4,
+      complaintSent: 2,
+      complained: 2,
+      hardBounced: 0,
+      lastComplaintAt: day(1),
+    },
+  ]);
+  expect(
+    await regionTeamStats(db, { region: "us-east-1", defaultRegion: DEFAULT_REGION, now: NOW }),
+  ).toEqual([]);
+});
+
+it("trips at SES's 0.1% and holds a complaint pause until the rate is under 0.08%; a bounce pause resumes at once", async () => {
+  await clearTraffic();
+  await db.delete(schema.regionBreakers);
+  const at = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
+  const step = async (rate: number, h: number) => {
+    await record(new Map([["eu-west-1", rate]]), at(h));
+    return applyRegionBreakers(db, await evaluate(at(h)), at(h));
+  };
+  expect(await step(0.00099, 0)).toEqual({ tripped: [], resumed: [] });
+  expect(await step(0.001, 1)).toEqual({ tripped: ["eu-west-1"], resumed: [] });
+  expect(await step(0.0009, 2)).toEqual({ tripped: [], resumed: [] });
+  expect(await pausedRegions(db)).toMatchObject([
+    { region: "eu-west-1", reason: { source: "ses", rate: 0.001 }, pausedAt: at(1) },
+  ]);
+  expect(await step(0.0007, 3)).toEqual({ tripped: [], resumed: ["eu-west-1"] });
+
+  await applyRegionBreakers(
+    db,
+    [
+      {
+        region: "eu-west-1",
+        trip: true,
+        reason: {
+          metric: "bounce",
+          rate: 0.05,
+          limit: 0.04,
+          windowHours: 24,
+          sent: 1000,
+          events: 50,
+        },
+        contributors: [],
+      },
+    ],
+    at(4),
+  );
+  expect(await step(0.0009, 5)).toEqual({ tripped: [], resumed: ["eu-west-1"] });
+});
+
+it("on a complaint trip holds only the broadcasts of the paid teams at 0.1% on their month, and puts Free teams with a complaint up for review on Cloud", async () => {
+  await clearTraffic();
+  await db.delete(schema.regionBreakers);
+  const R = "ca-central-1";
+  const hot = await teamOn("scope-hot", "pro", R);
+  const cool = await teamOn("scope-cool", "pro", R);
+  const free = await teamOn("scope-free", "free", R);
+  // 2 in 1000: 0.2%. 1 in 2998: under the line. 1 in 10 on Free.
+  await seedTraffic(hot.teamId, hot.domainId, 1000, [{ type: "complained", n: 2 }], hoursAgo(48));
+  await seedTraffic(cool.teamId, cool.domainId, 2998, [{ type: "complained", n: 1 }], hoursAgo(48));
+  await seedTraffic(free.teamId, free.domainId, 10, [{ type: "complained", n: 1 }], hoursAgo(48));
+  await record(new Map([[R, 0.0012]]), NOW);
+  const cloud = (await evaluate(NOW, true)).find((d) => d.region === R);
+  expect(cloud?.heldTeams?.map((s) => s.teamId)).toEqual([hot.teamId]);
+  expect(cloud?.reviewTeams?.map((s) => s.teamId)).toEqual([free.teamId]);
+  expect(await applyRegionBreakers(db, cloud ? [cloud] : [], NOW)).toEqual({
+    tripped: [R],
+    resumed: [],
+  });
+  expect(await pausedRegions(db)).toMatchObject([{ region: R, heldTeams: [hot.teamId] }]);
+  expect(await regionPause(db, R, hot.teamId)).toMatchObject({ heldTeams: [hot.teamId] });
+  expect(await regionPause(db, R, cool.teamId)).toBeNull();
+  expect(await regionPause(db, R, free.teamId)).toBeNull();
+  expect(pauseHolds({ heldTeams: [hot.teamId] }, cool.teamId)).toBe(false);
+  expect(pauseHolds({ heldTeams: null }, cool.teamId)).toBe(true);
+
+  // Two more complaints bring the second paid team to the line, 3 in 3000:
+  // the scope widens, the pause keeps its start.
+  await complainedSend(cool.teamId, cool.domainId, hoursAgo(24));
+  await complainedSend(cool.teamId, cool.domainId, hoursAgo(24));
+  const later = new Date(NOW.getTime() + 15 * 60_000);
+  expect(await applyRegionBreakers(db, await evaluate(later, true), later)).toEqual({
+    tripped: [],
+    resumed: [],
+  });
+  expect(await pausedRegions(db)).toMatchObject([
+    { region: R, heldTeams: [hot.teamId, cool.teamId].sort(), pausedAt: NOW },
+  ]);
+
+  // Self-hosted, every team counts as paid and nobody is held for review.
+  const selfHosted = (await evaluate(later, false)).find((d) => d.region === R);
+  expect(selfHosted?.heldTeams?.map((s) => s.teamId).sort()).toEqual(
+    [hot.teamId, cool.teamId, free.teamId].sort(),
+  );
+  expect(selfHosted?.reviewTeams).toEqual([]);
+
+  // An operator's hold covers every team.
+  await holdRegion(db, R, "incident");
+  expect(await regionPause(db, R, free.teamId)).toMatchObject({ heldTeams: null });
+  await releaseRegion(db, R);
+  expect(await regionPause(db, R, hot.teamId)).toBeNull();
+});
+
+it("holds a Free team with a complaint for review once, and after its release only for a newer complaint", async () => {
+  await clearTraffic();
+  await db.delete(schema.regionBreakers);
+  const R = "ap-northeast-1";
+  const free = await teamOn("review-free", "free", R);
+  await seedTraffic(free.teamId, free.domainId, 5, []);
+  await complainedSend(free.teamId, free.domainId, hoursAgo(3), hoursAgo(2));
+  await record(new Map([[R, 0.002]]), NOW);
+  const reviewTeams = async (now: Date) =>
+    (await evaluate(now, true)).find((d) => d.region === R)?.reviewTeams ?? [];
+  expect(await holdComplaintTeams(db, await reviewTeams(NOW), NOW)).toEqual([free.teamId]);
+  const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, free.teamId));
+  expect(team).toMatchObject({ suspensionReason: "review", suspendedAt: NOW });
+  expect(
+    await db.select().from(schema.teamFlags).where(eq(schema.teamFlags.teamId, free.teamId)),
+  ).toMatchObject([
+    { reason: "complaints", status: "open", detail: { metric: "complaint", suspension: true } },
+  ]);
+  const audit = await db
+    .select()
+    .from(schema.auditLog)
+    .where(eq(schema.auditLog.teamId, free.teamId));
+  expect(audit).toMatchObject([{ action: "team.held_for_review", actorId: "system", data: null }]);
+  // The content monitor's own hold stays possible.
+  expect(
+    await db.select().from(schema.teamMonitor).where(eq(schema.teamMonitor.teamId, free.teamId)),
+  ).toEqual([]);
+  // Already held: nothing again.
+  expect(await holdComplaintTeams(db, await reviewTeams(NOW), NOW)).toEqual([]);
+
+  // The operator releases it: the same complaint never holds it again.
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: null, suspensionReason: null })
+    .where(eq(schema.teams.id, free.teamId));
+  await db
+    .update(schema.teamFlags)
+    .set({ status: "cleared" })
+    .where(eq(schema.teamFlags.teamId, free.teamId));
+  await db.insert(schema.auditLog).values({
+    teamId: free.teamId,
+    actorId: "user:op",
+    action: "team.reinstated",
+    createdAt: hoursAgo(1),
+  });
+  expect(await holdComplaintTeams(db, await reviewTeams(NOW), NOW)).toEqual([]);
+  // A complaint that arrived after the release does.
+  await complainedSend(free.teamId, free.domainId, hoursAgo(1), NOW);
+  const later = new Date(NOW.getTime() + 60_000);
+  expect(await holdComplaintTeams(db, await reviewTeams(later), later)).toEqual([free.teamId]);
+});
+
+it("counts complaints SES attempted on mail with no email row over the month, and purges them after 35 days", async () => {
   const u = schema.sesUnmatchedEvents;
+  await db.delete(u);
   const day = (n: number) => new Date(NOW.getTime() - n * DAY_MS);
   await db.insert(u).values([
-    { sesMessageId: "kept", type: "complained", occurredAt: day(35), createdAt: day(34) },
-    { sesMessageId: "gone", type: "bounced", occurredAt: day(36), createdAt: day(36) },
+    { sesMessageId: "m1", type: "complained", occurredAt: day(2), createdAt: day(1) },
+    {
+      sesMessageId: "m2",
+      type: "complained",
+      subType: "OnAccountSuppressionList",
+      occurredAt: day(1),
+      createdAt: day(1),
+    },
+    {
+      sesMessageId: "m3",
+      type: "bounced",
+      bounceType: "Permanent",
+      occurredAt: day(1),
+      createdAt: day(1),
+    },
+    { sesMessageId: "m4", type: "complained", occurredAt: day(31), createdAt: day(31) },
+    { sesMessageId: "m5", type: "complained", occurredAt: day(36), createdAt: day(36) },
   ]);
+  expect(await unmatchedComplaints(db, NOW)).toBe(1);
   expect(await purgeUnmatchedSesEvents(db, NOW)).toBe(1);
-  expect((await db.select({ id: u.sesMessageId }).from(u)).map((r) => r.id)).toEqual(["kept"]);
+  expect((await db.select({ id: u.sesMessageId }).from(u)).map((r) => r.id).sort()).toEqual([
+    "m1",
+    "m2",
+    "m3",
+    "m4",
+  ]);
+});
+
+it("reports a change of SES's enforcement status once, and a first sighting only off HEALTHY", async () => {
+  await db.delete(schema.regionBreakers);
+  const statuses = (entries: [string, string][]) =>
+    recordSesEnforcementStatuses(db, new Map(entries));
+  expect(await statuses([["sa-east-1", "HEALTHY"]])).toEqual([]);
+  expect(await statuses([["sa-east-1", "HEALTHY"]])).toEqual([]);
+  expect(await statuses([["sa-east-1", "PROBATION"]])).toEqual([
+    { region: "sa-east-1", from: "HEALTHY", to: "PROBATION" },
+  ]);
+  expect(await statuses([["sa-east-1", "PROBATION"]])).toEqual([]);
+  expect(
+    await statuses([
+      ["sa-east-1", "HEALTHY"],
+      ["us-east-1", "SHUTDOWN"],
+    ]),
+  ).toEqual([
+    { region: "sa-east-1", from: "PROBATION", to: "HEALTHY" },
+    { region: "us-east-1", from: null, to: "SHUTDOWN" },
+  ]);
+  // A failed read leaves the region out: its last status stands.
+  expect(await statuses([])).toEqual([]);
+  expect(
+    (await db.select().from(schema.regionBreakers)).map((r) => [r.region, r.sesEnforcementStatus]),
+  ).toEqual(
+    expect.arrayContaining([
+      ["sa-east-1", "HEALTHY"],
+      ["us-east-1", "SHUTDOWN"],
+    ]),
+  );
 });

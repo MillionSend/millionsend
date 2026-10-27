@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   DAY_MS,
   defaultSafety,
@@ -525,9 +526,17 @@ describe("broadcasts.send platform breaker", () => {
     expect(enqueued).toEqual([]);
     expect((await broadcastRow(id))?.status).toBe("draft");
 
-    await db.delete(schema.regionBreakers);
+    // A pause the complaints tripped holds only the teams it names.
+    await db
+      .update(schema.regionBreakers)
+      .set({ manualReason: null, heldTeams: [randomUUID()] })
+      .where(eq(schema.regionBreakers.region, "us-east-1"));
     await caller.broadcasts.send({ id });
     expect((await broadcastRow(id))?.status).toBe("scheduled");
+    await db.update(schema.regionBreakers).set({ heldTeams: [teamId] });
+    const second = await caller.broadcasts.create(DRAFT_INPUT);
+    await expect(caller.broadcasts.send({ id: second.id })).rejects.toMatchObject(refusal);
+    await db.delete(schema.regionBreakers);
   });
 });
 
@@ -1136,6 +1145,12 @@ describe("paced sends", () => {
     });
     expect((await caller.broadcasts.get({ id: due })).held).toBe(true);
     expect((await caller.broadcasts.get({ id: elsewhere })).held).toBe(false);
+
+    // A pause the complaints tripped holds only the teams it names.
+    await db.update(schema.regionBreakers).set({ heldTeams: [randomUUID()] });
+    expect((await caller.broadcasts.get({ id: due })).held).toBe(false);
+    await db.update(schema.regionBreakers).set({ heldTeams: [teamId] });
+    expect((await caller.broadcasts.get({ id: due })).held).toBe(true);
 
     await db.update(schema.regionBreakers).set({ paused: false });
     const released = await caller.broadcasts.get({ id: sending });

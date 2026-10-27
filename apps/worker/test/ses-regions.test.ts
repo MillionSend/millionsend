@@ -8,7 +8,8 @@ function harness(
   ceiling = 14,
   pacing: {
     counts?: Record<string, { sent24h: number; queued: number }> | Error;
-    paused?: string[];
+    /** Held regions, each with the teams it holds; null holds every team's. */
+    paused?: Record<string, string[] | null>;
     reserve?: number;
   } = {},
 ) {
@@ -32,7 +33,13 @@ function harness(
             if (pacing.counts instanceof Error) throw pacing.counts;
             return new Map(Object.entries(pacing.counts ?? {}));
           },
-          paused: async () => new Set(pacing.paused ?? []),
+          paused: async () =>
+            new Map(
+              Object.entries(pacing.paused ?? {}).map(([region, teams]) => [
+                region,
+                teams && new Set(teams),
+              ]),
+            ),
           reserve: async () => pacing.reserve ?? 30,
         }
       : {}),
@@ -122,7 +129,7 @@ describe("the broadcast share and its room ledger", () => {
     expect(h.controls.bulkSent24h(R)).toBe(10_000);
     expect(h.controls.room(R)).toBe(55_000);
     expect(h.controls.bulkExhausted(R)).toBe(false);
-    expect(h.controls.paused(R)).toBe(false);
+    expect(h.controls.paused(R, "team-a")).toBe(false);
     // Between counts the send lane and the drain keep the room honest.
     h.controls.noteBulkSent(R);
     h.controls.noteBulkQueued(R, 999);
@@ -158,7 +165,7 @@ describe("the broadcast share and its room ledger", () => {
   it("counts every fifth tick, holds a region at its share or at the total, and honours a hold", async () => {
     const h = harness({ [R]: { max24h: 100_000, sentLast24h: 71_000, maxSendRate: 14 } }, 14, {
       counts: { [R]: { sent24h: 70_000, queued: 0 } },
-      paused: [],
+      paused: {},
     });
     for (let i = 0; i < 6; i++) await h.controls.refreshAll();
     expect(h.counted()).toBe(2);
@@ -166,10 +173,15 @@ describe("the broadcast share and its room ledger", () => {
     expect(h.controls.exhausted(R)).toBe(false);
     expect(h.controls.room(R)).toBe(0);
     h.pacing.counts = { [R]: { sent24h: 60_000, queued: 0 } };
-    h.pacing.paused = [R];
+    h.pacing.paused = { [R]: ["team-a"] };
     await h.controls.recount();
     expect(h.controls.bulkExhausted(R)).toBe(false);
-    expect(h.controls.paused(R)).toBe(true);
+    // A pause the complaints tripped holds only its teams' broadcasts.
+    expect(h.controls.paused(R, "team-a")).toBe(true);
+    expect(h.controls.paused(R, "team-b")).toBe(false);
+    h.pacing.paused = { [R]: null };
+    await h.controls.recount();
+    expect(h.controls.paused(R, "team-b")).toBe(true);
     // At the total every class holds and the room is nil.
     h.quotas[R] = { max24h: 100_000, sentLast24h: 98_500, maxSendRate: 14 };
     await h.controls.refresh(R);
@@ -219,7 +231,7 @@ describe("the broadcast share and its room ledger", () => {
       read: async () => ({ max24h: 100_000, sentLast24h: 10_000, maxSendRate: 14 }),
       ceiling: async () => 14,
       reserve: async () => 30,
-      paused: async () => new Set(),
+      paused: async () => new Map(),
       counts: () => gate ?? Promise.resolve(new Map([[R, { sent24h: 10_000, queued: 0 }]])),
       initialRate: 14,
       replicas: 1,

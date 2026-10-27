@@ -117,12 +117,12 @@ async function firstPageTotal(
 }
 
 /**
- * A broadcast copy the provider has not seen whose sender region holds
- * broadcasts: the list and the detail show it as delayed, never why.
- * Spelled out because a single-table select leaves column names
- * unqualified, and the subquery's own tables would capture them.
+ * A broadcast copy the provider has not seen whose sender region holds the
+ * team's broadcasts (core pauseHolds): the list and the detail show it as
+ * delayed, never why. Spelled out because a single-table select leaves
+ * column names unqualified, and the subquery's own tables would capture them.
  */
-const HELD_SQL = sql<boolean>`(emails.broadcast_id is not null and emails.latest_status in ('queued', 'queued_quota') and exists (select 1 from domains d join region_breakers rb on rb.region = d.region and rb.paused where d.id = emails.domain_id))`;
+const HELD_SQL = sql<boolean>`(emails.broadcast_id is not null and emails.latest_status in ('queued', 'queued_quota') and exists (select 1 from domains d join region_breakers rb on rb.region = d.region and rb.paused and (rb.held_teams is null or rb.held_teams ? emails.team_id::text) where d.id = emails.domain_id))`;
 
 /**
  * A suppression a full or inactive mailbox left: the API still reads it as a

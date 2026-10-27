@@ -609,12 +609,9 @@ async function sendQueued(
       await parkQueued(db, email, "sending paused");
       return "parked";
     }
-    if (deps.sesQuota?.bulkExhausted?.(region) || deps.sesQuota?.paused?.(region)) {
-      await parkQueued(
-        db,
-        email,
-        deps.sesQuota.paused?.(region) ? "region broadcasts held" : "SES bulk share reached",
-      );
+    const held = deps.sesQuota?.paused?.(region, email.teamId) ?? false;
+    if (held || deps.sesQuota?.bulkExhausted?.(region)) {
+      await parkQueued(db, email, held ? "region broadcasts held" : "SES bulk share reached");
       return "parked";
     }
   } else if (deps.sesQuota?.exhausted(region)) {

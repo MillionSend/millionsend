@@ -40,6 +40,8 @@ export type SystemMailKind =
   | "region.paused"
   | "region.resumed"
   | "region.ses_complaints"
+  | "region.ses_enforcement"
+  | "region.teams_held"
   | "webhook.failing"
   | "webhook.auto_disabled"
   | "webhook.backlog"

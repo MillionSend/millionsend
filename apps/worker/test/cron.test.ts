@@ -1480,17 +1480,22 @@ it("drain moves nothing of a broadcast in a region with no room, at its total, o
       sesQuota: { regions: ["us-east-1"], exhausted: () => true, room: () => 100 },
     }),
   ).toEqual({ drained: 0, stillParked: 2 });
-  expect(
-    await drainQuotaParked(db, {
-      ...deps,
-      sesQuota: {
-        regions: ["us-east-1"],
-        exhausted: () => false,
-        room: () => 100,
-        paused: () => true,
-      },
-    }),
-  ).toEqual({ drained: 0, stillParked: 2 });
+  // A pause that holds this team's broadcasts keeps them; one that holds
+  // only other teams' lets them move.
+  const pausedFor = (held: string) => ({
+    regions: ["us-east-1"],
+    exhausted: () => false,
+    room: () => 100,
+    paused: (_region: string, team: string) => team === held,
+  });
+  expect(await drainQuotaParked(db, { ...deps, sesQuota: pausedFor(teamId) })).toEqual({
+    drained: 0,
+    stillParked: 2,
+  });
+  expect(await drainQuotaParked(db, { ...deps, sesQuota: pausedFor("another-team") })).toEqual({
+    drained: 2,
+    stillParked: 0,
+  });
 });
 
 it("drain still releases the plan-parked rows of a broadcast that already reads sent", async () => {
