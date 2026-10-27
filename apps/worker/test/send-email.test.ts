@@ -61,6 +61,7 @@ afterAll(() => close());
 interface FakeSend {
   raw: Buffer;
   emailId: string;
+  bcc?: string[] | null | undefined;
   configurationSetName?: string | undefined;
   region?: string | undefined;
   tenantName?: string | undefined;
@@ -707,6 +708,17 @@ it("attachments and custom headers ride the raw MIME; tracking still rewrites th
   const mime = unwrapQp(raw);
   expect(mime).toContain("https://track.example.com/t/c/");
   expect(mime).not.toContain("dest.test");
+});
+
+it("Bcc recipients reach SES as Destination only, never inside the message", async () => {
+  const { ses, sends } = fakeSes("mid-bcc");
+  const emailId = await insertEmail({ to: ["r@example.com"], bcc: ["hidden@example.com"] });
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+
+  expect(sends[0]?.bcc).toEqual(["hidden@example.com"]);
+  const raw = sends[0]?.raw.toString("utf8") ?? "";
+  expect(raw).not.toContain("hidden@example.com");
+  expect(raw.toLowerCase()).not.toContain("\r\nbcc:");
 });
 
 it("printable ASCII header values go out as given, double quotes included; non-ASCII is still encoded", async () => {
