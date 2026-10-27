@@ -373,7 +373,7 @@ export default function PropertiesPage() {
           <ListFooter
             left={t("pageOf", {
               pages: Math.max(1, Math.ceil(shownDefined.length / size)),
-              total: nf.format(filteredDefined.length),
+              total: nf.format(filteredDefined.length + filteredDerived.length),
             })}
             size={size}
             onSize={changeSize}
