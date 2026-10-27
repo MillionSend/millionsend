@@ -38,7 +38,7 @@ import { screeningTier } from "../screening.js";
 import { formatMailbox, parseMailbox, parseSingleSender } from "../sender-address.js";
 import { QUOTA_COLUMNS } from "../team-plan.js";
 import { sendRefusalError } from "../team-standing.js";
-import { utcDay } from "../utc-day.js";
+import { secondsUntil, utcDay } from "../utc-day.js";
 import { enqueueTeamWebhookEvents, type WebhookEnqueue } from "../webhooks.js";
 import { type InboxActor, isAgentActor, recordInboxActivity } from "./activity.js";
 import {
@@ -496,7 +496,12 @@ export function acceptFailure(
         retryAfterSec: secondsToNextUtcDay(now),
       };
     case "monthly_quota_exceeded":
-      return { status: 429, name: "monthly_quota_exceeded", message: monthlyQuotaMessage(result) };
+      return {
+        status: 429,
+        name: "monthly_quota_exceeded",
+        message: monthlyQuotaMessage(result),
+        retryAfterSec: secondsUntil(result.periodEnd, now),
+      };
     case "attachments_too_large":
       return {
         status: 422,

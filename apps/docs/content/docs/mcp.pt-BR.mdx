@@ -135,7 +135,9 @@ segredo fica na configuração do cliente.
   domínios, webhooks e chaves de API. Em uma autorização **Todas as equipes** as
   ferramentas aparecem se você for administrador em alguma equipe, e chamadas em uma equipe
   onde você é membro são recusadas.
-- Chamadas MCP compartilham o limite por minuto da API.
+- Chamadas MCP compartilham o limite por minuto da API. Uma chamada que a API
+  recusa com `retry-after` (um limite de taxa ou uma cota) devolve esse valor
+  como `retry_after`, em segundos, no erro da ferramenta.
 - Nenhuma ferramenta retorna uma credencial: chaves de API são criadas, e
   segredos de assinatura de webhook lidos ou rotacionados, só no painel ou
   pela API REST.

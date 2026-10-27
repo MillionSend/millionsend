@@ -17,6 +17,12 @@ Adding a domain registers it with SES and shows the DNS records to add:
   private key is never stored.
 - **MAIL FROM** — MX and SPF (TXT) records for the bounce subdomain.
 
+On the cloud a team adds up to 10 domains an hour, or 100 on Scale. The count
+restarts on every full hour (UTC); past it the API answers
+`429 rate_limit_exceeded` with `retry-after`, and the dashboard says how many
+minutes are left. A domain that isn't verified within 72 hours of being added
+is deleted, so add each one when you're ready to publish its records.
+
 Two verification signals are shown side by side:
 
 - **SES status** — what SES reports. SES caches verification and can lag

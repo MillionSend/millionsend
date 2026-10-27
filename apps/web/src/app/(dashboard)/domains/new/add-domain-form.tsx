@@ -416,7 +416,9 @@ export function AddDomainForm({
           {create.isError ? (
             <p style={{ margin: "14px 0 0", color: "var(--ms-danger)", fontSize: 13 }}>
               {errorKey
-                ? t(errorKey)
+                ? t(errorKey, {
+                    minutes: Math.ceil((create.error.data?.retryAfterSec ?? 3600) / 60),
+                  })
                 : isAwsCredentialError(create.error.message)
                   ? t.rich("new.credentialsError", codeRichTags)
                   : create.error.message || t("new.error")}

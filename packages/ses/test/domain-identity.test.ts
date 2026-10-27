@@ -187,6 +187,68 @@ describe("createDomainIdentity", () => {
     ).rejects.toThrow("throttled");
     expect(calls).toHaveLength(1);
   });
+
+  it("deletes the identity it created when MAIL FROM fails, then rethrows", async () => {
+    const { client, calls } = fakeClient((command) => {
+      if (command instanceof PutEmailIdentityMailFromAttributesCommand) {
+        throw Object.assign(new Error("throttled"), { name: "TooManyRequestsException" });
+      }
+      return {};
+    });
+    await expect(
+      createDomainIdentity(client, {
+        domain: "example.com",
+        mailFromSubdomain: "send",
+        dkim: DKIM,
+      }),
+    ).rejects.toThrow("throttled");
+    expect(calls.map((c) => c.constructor.name)).toEqual([
+      "CreateEmailIdentityCommand",
+      "PutEmailIdentityMailFromAttributesCommand",
+      "DeleteEmailIdentityCommand",
+    ]);
+    expect((calls[2] as DeleteEmailIdentityCommand).input).toEqual({
+      EmailIdentity: "example.com",
+    });
+  });
+
+  it("keeps the MAIL FROM error when the cleanup delete fails too", async () => {
+    const { client } = fakeClient((command) => {
+      if (command instanceof PutEmailIdentityMailFromAttributesCommand) {
+        throw Object.assign(new Error("throttled"), { name: "TooManyRequestsException" });
+      }
+      if (command instanceof DeleteEmailIdentityCommand) throw new Error("delete failed");
+      return {};
+    });
+    await expect(
+      createDomainIdentity(client, {
+        domain: "example.com",
+        mailFromSubdomain: "send",
+        dkim: DKIM,
+      }),
+    ).rejects.toThrow("throttled");
+  });
+
+  it("never deletes an adopted identity when MAIL FROM fails", async () => {
+    const { client, calls } = fakeClient((command) => {
+      if (command instanceof CreateEmailIdentityCommand) {
+        throw Object.assign(new Error("identity exists"), { name: "AlreadyExistsException" });
+      }
+      if (command instanceof PutEmailIdentityMailFromAttributesCommand) {
+        throw new Error("mail from failed");
+      }
+      return {};
+    });
+    await expect(
+      createDomainIdentity(client, {
+        domain: "example.com",
+        mailFromSubdomain: "send",
+        dkim: DKIM,
+        adoptExisting: true,
+      }),
+    ).rejects.toThrow("mail from failed");
+    expect(calls.map((c) => c.constructor.name)).not.toContain("DeleteEmailIdentityCommand");
+  });
 });
 
 describe("getDomainVerification", () => {

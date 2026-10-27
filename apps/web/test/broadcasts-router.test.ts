@@ -778,7 +778,10 @@ describe("broadcasts.sendTest", () => {
         html: "<p>x</p>",
         text: null,
       }),
-    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    ).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+      cause: expect.objectContaining({ seconds: expect.any(Number) }),
+    });
   });
 
   it("says a test the new domain limit holds is queued, and any other hold only that it waits", async () => {

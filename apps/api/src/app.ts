@@ -96,6 +96,7 @@ import {
   SHARED_REFUSALS,
   scoreBand,
   secondsToNextUtcDay,
+  secondsUntil,
   segmentContactsWhere,
   segmentFilterSchema,
   senderDomain,
@@ -446,6 +447,7 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
       return {
         status: 429 as const,
         body: errorBody(429, "monthly_quota_exceeded", monthlyQuotaMessage(result)),
+        retryAfterSec: secondsUntil(result.periodEnd),
       };
     case "attachments_too_large":
       return {

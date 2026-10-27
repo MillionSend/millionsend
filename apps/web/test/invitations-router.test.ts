@@ -358,6 +358,7 @@ describe("settings.invitations email + resend", () => {
     // Just sent: inside the cooldown.
     await expect(caller.settings.invitations.resend({ id: created.id })).rejects.toMatchObject({
       code: "TOO_MANY_REQUESTS",
+      cause: expect.objectContaining({ seconds: expect.any(Number) }),
     });
 
     const stale = new Date(Date.now() - 3 * 60 * 1000);
@@ -396,7 +397,10 @@ describe("settings.invitations email + resend", () => {
     }
     await expect(
       caller.settings.invitations.create({ email: "p20@example.com" }),
-    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    ).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+      cause: expect.objectContaining({ seconds: expect.any(Number) }),
+    });
     // Another team keeps its own budget.
     const other = await createTeam(db, "other");
     await addMember(other, "owner2", "owner");
@@ -552,6 +556,7 @@ describe("settings.invitations limits", () => {
     ).rejects.toMatchObject({
       code: "TOO_MANY_REQUESTS",
       message: "This team reached its limit of 3 invitations a day. Try again tomorrow.",
+      cause: expect.objectContaining({ seconds: expect.any(Number) }),
     });
     expect((await caller.settings.invitations.list()).map((invite) => invite.email).sort()).toEqual(
       ["b@example.com", "c@example.com"],

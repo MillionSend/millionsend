@@ -20,6 +20,7 @@ import {
   parseSingleSender,
   regionPause,
   reservedSenderRefusal,
+  secondsUntil,
   sendRefusal,
   splitPersonName,
   substituteUnsubscribeUrl,
@@ -28,7 +29,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, count, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, min, sql } from "drizzle-orm";
 import { createTranslator } from "next-intl";
 import { z } from "zod";
 import { mailyDocumentSchema } from "@/lib/email-doc";
@@ -48,6 +49,7 @@ import { resolveEditorSave } from "../email-content";
 import { inboxSendDeps, userActor } from "../inboxes";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { activeLocale } from "../locale";
+import { tooManyRequests } from "../retry-after";
 import { router, teamProcedure } from "../trpc";
 import { assertSegment, savedSegmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
@@ -61,6 +63,7 @@ const MAX_SCHEDULE_AHEAD_DAYS = 30;
  */
 const TEST_SEND_TAG = "millionsend_test";
 const TEST_SENDS_PER_HOUR = 10;
+const TEST_SENDS_WINDOW_MS = 60 * 60 * 1000;
 
 const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
   en: enDeliverability,
@@ -688,17 +691,19 @@ export const broadcastsRouter = router({
       if (guardError) throw guardError;
       const e = schema.emails;
       const [recent] = await ctx.db
-        .select({ n: count() })
+        .select({ n: count(), oldest: min(e.createdAt) })
         .from(e)
         .where(
           and(
             eq(e.teamId, ctx.teamId),
-            gt(e.createdAt, new Date(Date.now() - 60 * 60 * 1000)),
+            gt(e.createdAt, new Date(Date.now() - TEST_SENDS_WINDOW_MS)),
             sql`${e.tags} ? ${TEST_SEND_TAG}`,
           ),
         );
       if ((recent?.n ?? 0) >= TEST_SENDS_PER_HOUR) {
-        throw new TRPCError({ code: "TOO_MANY_REQUESTS" });
+        // The oldest test in the window is the first to leave it and free a place.
+        const freesAt = (recent?.oldest?.getTime() ?? Date.now()) + TEST_SENDS_WINDOW_MS;
+        throw tooManyRequests(secondsUntil(freesAt));
       }
       // The reader is the sender's own account, so merge fields resolve to
       // it; there is no contact to unsubscribe, so the link points home.

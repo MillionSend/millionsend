@@ -103,7 +103,7 @@ const resolver = new Resolver({ timeout: 1_000, tries: 1 });
 const lookupBudget = createFixedWindowLimiter(100, 1_000);
 const tldExists = createTldExists({
   resolveNs: (name) => resolver.resolveNs(name),
-  overBudget: () => lookupBudget("dns"),
+  overBudget: () => lookupBudget("dns") !== null,
 });
 
 /** The TLDs among `tlds` the root says don't exist; lookups that fail or outlast the deadline pass. */

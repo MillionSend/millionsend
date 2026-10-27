@@ -993,7 +993,10 @@ describe("rate limiting", () => {
       });
       last = res.status;
       if (res.status === 429) {
-        expect(res.headers.get("retry-after")).toBe("60");
+        // The seconds left in the minute window, not a fixed 60.
+        const wait = Number(res.headers.get("retry-after"));
+        expect(wait).toBeGreaterThan(0);
+        expect(wait).toBeLessThanOrEqual(60);
         return;
       }
     }

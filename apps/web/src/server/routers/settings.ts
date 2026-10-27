@@ -35,6 +35,7 @@ import {
   resolveMonitorSettings,
   SHARED_LABEL_MAX,
   SystemMailRefused,
+  secondsUntil,
   sharedSlug,
   signInviteToken,
   teamMonitorRow,
@@ -61,6 +62,7 @@ import {
   gte,
   isNull,
   lt,
+  min,
   ne,
   notExists,
   or,
@@ -80,6 +82,7 @@ import { disposableAddressTest } from "../disposable-email";
 import { settleTeamSubdomain } from "../inboxes";
 import { activeLocale } from "../locale";
 import { poweredByLocked } from "../powered-by";
+import { RetryAfter } from "../retry-after";
 import { smtpRelayOffered } from "../smtp";
 import { deletePublicObject, keyFromPublicUrl, uploadsEnabled } from "../storage";
 import { assertTeamNotSuspended } from "../suspension-lock";
@@ -220,35 +223,38 @@ async function inviteRefusal(
   code: TRPCError["code"],
   reason: keyof typeof enSettings.invitations.refused,
   values: Record<string, string> = {},
+  retryAfterSec?: number,
 ): Promise<TRPCError> {
   return new TRPCError({
     code,
     message: fillTemplate(INVITE_REFUSALS[await activeLocale()][reason], values),
+    ...(retryAfterSec !== undefined ? { cause: new RetryAfter(retryAfterSec) } : {}),
   });
 }
 
 /**
  * Invitations a team, or one member across all their teams, started in the
- * last day, whatever became of them. A revoke and the team's deletion take
- * the row along, but its member.invited audit row stays; a row whose audit
- * row is not written yet (its email is still going out) counts itself.
+ * last day, whatever became of them, and the seconds until the oldest of
+ * them leaves the day and frees a place. A revoke and the team's deletion
+ * take the row along, but its member.invited audit row stays; a row whose
+ * audit row is not written yet (its email is still going out) counts itself.
  */
 async function invitesInLastDay(
   tx: Tx,
   by: { teamId: string } | { userId: string },
-): Promise<number> {
+): Promise<{ n: number; retryAfterSec: number }> {
   const since = new Date(Date.now() - DAY_MS);
   const a = schema.auditLog;
   const i = schema.teamInvitations;
   const invited = and(eq(a.action, "member.invited"), gt(a.createdAt, since));
   const [audited] = await tx
-    .select({ n: count() })
+    .select({ n: count(), oldest: min(a.createdAt) })
     .from(a)
     .where(
       and(invited, "teamId" in by ? eq(a.teamId, by.teamId) : eq(a.actorId, `user:${by.userId}`)),
     );
   const [unaudited] = await tx
-    .select({ n: count() })
+    .select({ n: count(), oldest: min(i.createdAt) })
     .from(i)
     .where(
       and(
@@ -262,7 +268,14 @@ async function invitesInLastDay(
         ),
       ),
     );
-  return (audited?.n ?? 0) + (unaudited?.n ?? 0);
+  const oldest = Math.min(
+    audited?.oldest?.getTime() ?? Date.now(),
+    unaudited?.oldest?.getTime() ?? Date.now(),
+  );
+  return {
+    n: (audited?.n ?? 0) + (unaudited?.n ?? 0),
+    retryAfterSec: secondsUntil(oldest + DAY_MS),
+  };
 }
 
 /**
@@ -588,8 +601,9 @@ export function createSettingsRouter(
           if (disposableEmailsBlocked() && (await disposableAddressTest(ctx.db))(input.email)) {
             throw await inviteRefusal("BAD_REQUEST", "disposable");
           }
-          if (inviteEmailsLimited(ctx.teamId)) {
-            throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly");
+          const hourlyWait = inviteEmailsLimited(ctx.teamId);
+          if (hourlyWait !== null) {
+            throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly", {}, hourlyWait);
           }
           try {
             const row = await ctx.db.transaction(async (tx) => {
@@ -609,13 +623,25 @@ export function createSettingsRouter(
                 .for("no key update");
               const cap = invitesPerTeamPerDay();
               const limit = { limit: String(cap) };
-              if ((await invitesInLastDay(tx, { teamId: ctx.teamId })) >= cap) {
-                throw await inviteRefusal("TOO_MANY_REQUESTS", "daily", limit);
+              const teamDay = await invitesInLastDay(tx, { teamId: ctx.teamId });
+              if (teamDay.n >= cap) {
+                throw await inviteRefusal(
+                  "TOO_MANY_REQUESTS",
+                  "daily",
+                  limit,
+                  teamDay.retryAfterSec,
+                );
               }
               // Per member too: deleting a team and starting another would
               // otherwise hand its whole day back.
-              if ((await invitesInLastDay(tx, { userId: ctx.session.user.id })) >= cap) {
-                throw await inviteRefusal("TOO_MANY_REQUESTS", "dailyMember", limit);
+              const memberDay = await invitesInLastDay(tx, { userId: ctx.session.user.id });
+              if (memberDay.n >= cap) {
+                throw await inviteRefusal(
+                  "TOO_MANY_REQUESTS",
+                  "dailyMember",
+                  limit,
+                  memberDay.retryAfterSec,
+                );
               }
               const [inserted] = await tx
                 .insert(schema.teamInvitations)
@@ -719,10 +745,16 @@ export function createSettingsRouter(
           invite.lastSentAt &&
           Date.now() - invite.lastSentAt.getTime() < INVITE_RESEND_COOLDOWN_MS
         ) {
-          throw await inviteRefusal("TOO_MANY_REQUESTS", "cooldown");
+          throw await inviteRefusal(
+            "TOO_MANY_REQUESTS",
+            "cooldown",
+            {},
+            secondsUntil(invite.lastSentAt.getTime() + INVITE_RESEND_COOLDOWN_MS),
+          );
         }
-        if (inviteEmailsLimited(ctx.teamId)) {
-          throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly");
+        const hourlyWait = inviteEmailsLimited(ctx.teamId);
+        if (hourlyWait !== null) {
+          throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly", {}, hourlyWait);
         }
         const now = new Date();
         // The cooldown and the cap live in the same conditional update as the
@@ -749,7 +781,15 @@ export function createSettingsRouter(
             ),
           )
           .returning({ expiresAt: schema.teamInvitations.expiresAt });
-        if (!renewed) throw await inviteRefusal("TOO_MANY_REQUESTS", "cooldown");
+        // A concurrent resend just went out, so its cooldown starts about now.
+        if (!renewed) {
+          throw await inviteRefusal(
+            "TOO_MANY_REQUESTS",
+            "cooldown",
+            {},
+            secondsUntil(now.getTime() + INVITE_RESEND_COOLDOWN_MS),
+          );
+        }
         const emailed = await emailInvite(ctx, {
           id: invite.id,
           email: invite.email,

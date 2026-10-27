@@ -127,6 +127,21 @@ describe("subscribe route", () => {
     expect(over.headers.get("location")).toBe("https://app.example.com/updates?error=rate");
     expect(h.requests).toHaveLength(20);
   });
+
+  it("answers a JSON post past the client's hourly cap with 429 and retry-after", async () => {
+    vi.resetModules();
+    const fresh = await import("@/app/api/updates/subscribe/route");
+    const post = () =>
+      fresh.POST(
+        request(JSON.stringify({ email: "j@example.com" }), "application/json", "203.0.113.30"),
+      );
+    for (let i = 0; i < 5; i++) expect((await post()).status).toBe(202);
+    const over = await post();
+    expect(over.status).toBe(429);
+    const wait = Number(over.headers.get("retry-after"));
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThanOrEqual(3600);
+  });
 });
 
 describe("subscribe route with Turnstile keys", () => {

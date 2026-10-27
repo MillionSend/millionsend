@@ -328,9 +328,19 @@ Erros usam o formato do Resend:
 Um corpo que não é JSON válido recebe `400 invalid_parameter`, e um corpo
 enviado com `Content-Type` diferente de `application/json` recebe `415`.
 
-Um `429` de limite diário, como `daily_quota_exceeded`, traz um header
-`Retry-After` com os segundos que faltam para as 00:00 UTC, quando o limite
-zera:
+Todo `429` traz um header `Retry-After` com os segundos inteiros que faltam
+para a requisição passar:
+
+| Recusa | O `Retry-After` conta até |
+| --- | --- |
+| `rate_limit_exceeded`, "Too many requests" ou "Too many failed authentication attempts" | O próximo minuto. Uma chave de API faz até 600 requisições por minuto por padrão, e uma equipe 3.000; o servidor MCP permite 600 por pessoa; um IP tem 20 autenticações falhas. |
+| `rate_limit_exceeded`, "Too many domains created" | A próxima hora cheia (UTC). Uma equipe adiciona até 10 domínios por hora, ou 100 no Scale. |
+| `rate_limit_exceeded` do `POST /inboxes` | O momento em que a caixa mais antiga criada na última hora sai dela. |
+| `daily_quota_exceeded` | 00:00 UTC, quando o limite diário zera. |
+| `monthly_quota_exceeded` | O fim do período de cobrança, quando o volume mensal renova. |
+
+As recusas de caixas de entrada na tabela abaixo dizem o próprio valor. Para
+um limite diário, fica assim:
 
 ```
 HTTP/1.1 429 Too Many Requests

@@ -17,7 +17,10 @@ segmentos e tópicos são ilimitados em todos os planos, e contatos também a
 partir do Starter. Domínios de envio são limitados a 3 no Free e 10 no
 Starter, ilimitados acima. Em qualquer um desses limites a API responde
 `403 plan_limit_reached` ("Your plan allows up to 1000 contacts") e o painel
-mostra a mesma frase. Caixas de entrada são limitadas a 3 no Free e 25 no
+mostra a mesma frase. Uma equipe adiciona até 10 domínios por hora, ou 100 no
+Scale (`DOMAIN_CREATES_PER_HOUR`); a contagem zera a cada hora cheia (UTC) e,
+passando disso, o `POST /domains` responde `429 rate_limit_exceeded` com
+`retry-after`. Apagar um domínio não devolve a vaga dele na hora. Caixas de entrada são limitadas a 3 no Free e 25 no
 Starter, ilimitadas acima (veja [Caixas de entrada](#caixas-de-entrada)).
 
 Uma pessoa pode ser dona de até 3 equipes no Free, 5 no Starter, 10 no Pro e

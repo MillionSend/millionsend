@@ -343,6 +343,7 @@ describe("webhooks.testDelivery", () => {
     for (let i = 1; i < 10; i += 1) await caller.webhooks.testDelivery({ id });
     await expect(caller.webhooks.testDelivery({ id })).rejects.toMatchObject({
       code: "TOO_MANY_REQUESTS",
+      cause: expect.objectContaining({ seconds: expect.any(Number) }),
     });
   });
 });
