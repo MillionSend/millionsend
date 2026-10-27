@@ -183,9 +183,9 @@ remaining deltas are deliberate and loud:
 - `DELETE /emails/{id}` exists (Resend has no email deletion).
 - Custom `headers` are allowlisted: any `X-*` name (except `X-SES-*` and
   `X-MillionSend-*`) plus `In-Reply-To`, `References`, `Importance`,
-  `Priority`, `Comments`, `Keywords`, `Organization`, and the one-click
-  unsubscribe pair — `List-Unsubscribe` (one or more `<https://…>` or
-  `<mailto:…>` targets) with `List-Unsubscribe-Post`
+  `Priority`, `Comments`, `Keywords`, `Organization`, `OTP-Token`, and the
+  one-click unsubscribe pair — `List-Unsubscribe` (one or more `<https://…>`
+  or `<mailto:…>` targets) with `List-Unsubscribe-Post`
   (`List-Unsubscribe=One-Click`); anything else is a `422`. The two must come
   together, and `List-Unsubscribe` needs an `https` target. On a send with a
   `topic_id`, a pair you supply replaces the generated one: one-click requests
@@ -196,6 +196,13 @@ remaining deltas are deliberate and loud:
   the link opts out the contact it names, and every `to`, `cc` and `bcc` copy
   carries the same message. A send to more than one address carries no
   generated pair, and its placeholders are removed.
+- Header values and subjects in printable ASCII go out as given, double
+  quotes included, so a structured value such as
+  `OTP-Token: "123456"; origin="https://example.com"` reaches the inbox
+  intact. A value with non-ASCII text, or with a word too long for a
+  998-character header line, is RFC 2047-encoded, and `In-Reply-To` and
+  `References` go out as `<msg-id>`s. A vetted name may appear only once:
+  the same name twice in different cases is a `422`.
 - A send whose every `to` recipient is on the suppression list or opted out of
   the `topic_id` is refused with `422 all_recipients_suppressed` (message
   `All recipients are suppressed`) instead of Resend's `200`; recipients
