@@ -470,6 +470,31 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
   expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(0);
 });
 
+it("retention purge keeps the body of a row waiting for its Free pool's burst slot", async () => {
+  const [held] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@example.com",
+      to: ["r@example.com"],
+      subject: "held",
+      latestStatus: "queued",
+      createdAt: new Date("2026-08-12T00:00:00Z"),
+      freeBurstAt: new Date("2026-08-14T06:00:00Z"),
+      bodyCiphertext: Buffer.from("ct"),
+      bodyIv: Buffer.from("iv"),
+      bodyWrappedDek: Buffer.from("dek"),
+      bodyKeyVersion: 1,
+    })
+    .returning({ id: schema.emails.id });
+  if (!held) throw new Error("insert failed");
+  const purge = (now: string) =>
+    purgeExpiredEmailBodies(db, { defaultRetentionDays: 1, now: new Date(now) });
+  expect(await purge("2026-08-14T00:00:00Z")).toBe(0);
+  // Once its slot has left the window too, it goes like any other.
+  expect(await purge("2026-08-15T07:00:00Z")).toBe(1);
+});
+
 it("api-request purge deletes old rows but not fresh ones, honoring the instance override", async () => {
   const now = new Date("2026-08-14T00:00:00Z");
   const insertRequest = async (createdAt: Date) => {

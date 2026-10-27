@@ -840,10 +840,11 @@ export async function reconcileStalledSends(
 /**
  * Nulls body columns past the retention window and stamps bodyPurgedAt;
  * metadata, events, and aggregates keep their own lifecycles. Emails whose
- * scheduled send is still in the future keep their body (the send needs it);
- * everything else past the cutoff is purged unconditionally — retention is
- * a compliance promise, so even a zombie still-queued email loses its body
- * (the send handler then marks it failed on the missing body).
+ * scheduled send, or the slot their Free pool's burst allowance booked, is
+ * still in the window keep their body (the send needs it); everything else
+ * past the cutoff is purged unconditionally — retention is a compliance
+ * promise, so even a zombie still-queued email loses its body (the send
+ * handler then marks it failed on the missing body).
  */
 export async function purgeExpiredEmailBodies(
   db: Db,
@@ -876,6 +877,7 @@ export async function purgeExpiredEmailBodies(
                   lt(e.createdAt, cutoff),
                   isNull(e.bodyPurgedAt),
                   or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff)),
+                  or(isNull(e.freeBurstAt), lt(e.freeBurstAt, cutoff)),
                 ),
               )
               .orderBy(asc(e.createdAt))
