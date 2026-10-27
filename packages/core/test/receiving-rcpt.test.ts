@@ -162,6 +162,22 @@ describe("chargeReceived", () => {
     ]);
   });
 
+  it("Free: an operator ceiling on a pooled team holds its own day, not the pool's", async () => {
+    const owner = "u-receive-ceiling";
+    const pooled = await createTeam(db, "free-pool-ceiling", { poolOwnerId: owner });
+    const rule = receivingRule(team({ poolOwnerId: owner, dailySendCeiling: 20 }), true, NOW);
+    // Another team of the pool spent 50 today, this one nothing.
+    await db.insert(schema.freePoolUsage).values({ ownerId: owner, day: DAY, accepted: 50 });
+    expect(await hasReceivingRoom(db, pooled, rule, NOW)).toBe(true);
+    expect(await chargeReceived(db, { teamId: pooled, rule, now: NOW })).toBe(true);
+    await db
+      .update(schema.usageCounters)
+      .set({ accepted: 20 })
+      .where(and(eq(schema.usageCounters.teamId, pooled), eq(schema.usageCounters.day, DAY)));
+    expect(await hasReceivingRoom(db, pooled, rule, NOW)).toBe(false);
+    expect(await chargeReceived(db, { teamId: pooled, rule, now: NOW })).toBe(false);
+  });
+
   it("Starter: its own allowance, sending untouched", async () => {
     const teamId = await createTeam(db, "starter-charge");
     const rule: ReceivingRule = { kind: "day", allowance: 2 };

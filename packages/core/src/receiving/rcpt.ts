@@ -86,10 +86,19 @@ export async function hasReceivingRoom(
     return (row?.received ?? 0) < rule.allowance || (row?.accepted ?? 0) < rule.ceiling;
   }
   if (rule.kind === "shared_day") {
-    // ponytail: a Free pool's count is read against the team's ceiling, so an
-    // operator ceiling on a pooled team defers a little early; read the
-    // team's own row against it too if such ceilings become common.
-    return (await readDailyUsage(db, teamId, rule.quota, utcDay(now))) < rule.ceiling;
+    // The lines reserveDailyQuota holds: the team's own day under its
+    // ceiling, and a Free pool's day under the pool's.
+    const day = utcDay(now);
+    const c = schema.usageCounters;
+    const [own] = await db
+      .select({ accepted: c.accepted })
+      .from(c)
+      .where(and(eq(c.teamId, teamId), eq(c.day, day)));
+    const { pool } = rule.quota;
+    return (
+      (own?.accepted ?? 0) < rule.ceiling &&
+      (!pool || (await readDailyUsage(db, teamId, rule.quota, day)) < dailyCeiling(pool.limit))
+    );
   }
   const c = schema.usageCounters;
   const [row] = await db
