@@ -14,6 +14,8 @@ import {
   pausedRegions,
   pauseHolds,
   purgeUnmatchedSesEvents,
+  type RegionDecision,
+  type RegionTeamStats,
   recordSesComplaintRates,
   recordSesEnforcementStatuses,
   regionCounterTotals,
@@ -892,6 +894,68 @@ it("on a complaint trip holds only the broadcasts of the paid teams at 0.1% on t
   expect(await regionPause(db, R, free.teamId)).toMatchObject({ heldTeams: null });
   await releaseRegion(db, R);
   expect(await regionPause(db, R, hot.teamId)).toBeNull();
+});
+
+it("leaves a region the operator holds or resumes while the cron runs as the operator left it", async () => {
+  await db.delete(schema.regionBreakers);
+  const R = "eu-north-1";
+  const stat = (teamId: string): RegionTeamStats => ({
+    teamId,
+    teamName: teamId,
+    plan: "pro",
+    currentPeriodEnd: null,
+    sent: 1000,
+    complaintSent: 1000,
+    hardBounced: 0,
+    complained: 2,
+    lastComplaintAt: null,
+  });
+  const trip = (...teams: string[]): RegionDecision[] => [
+    {
+      region: R,
+      trip: true,
+      reason: { metric: "complaint", source: "ses", rate: 0.0012, limit: 0.001 },
+      contributors: [],
+      heldTeams: teams.map(stat),
+      reviewTeams: [],
+    },
+  ];
+  /** The db, with the operator's action committing between the cron's read and its write. */
+  const racing = (operator: () => Promise<void>): Db =>
+    new Proxy(db, {
+      get(target, prop) {
+        if (prop === "select") {
+          return () => ({
+            from: async (table: typeof schema.regionBreakers) => {
+              const rows = await target.select().from(table);
+              await operator();
+              return rows;
+            },
+          });
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  const nothing = { tripped: [], resumed: [] };
+  // Held by hand as the cron widens a pause: every team's broadcasts stay held.
+  await applyRegionBreakers(db, trip(teamA), NOW);
+  const hold = () => holdRegion(db, R, "incident");
+  expect(await applyRegionBreakers(racing(hold), trip(teamA, teamB), NOW)).toEqual(nothing);
+  expect(await regionPause(db, R, teamC)).toMatchObject({
+    manualReason: "incident",
+    heldTeams: null,
+  });
+  // Resumed by hand as the cron widens it: it stays resumed.
+  await releaseRegion(db, R);
+  await applyRegionBreakers(db, trip(teamA), NOW);
+  const release = () => releaseRegion(db, R);
+  expect(await applyRegionBreakers(racing(release), trip(teamA, teamB), NOW)).toEqual(nothing);
+  expect(await regionPause(db, R, teamA)).toBeNull();
+  // Held by hand as the cron trips it: no flip, no pause notice.
+  expect(await applyRegionBreakers(racing(hold), trip(teamA), NOW)).toEqual(nothing);
+  expect(await regionPause(db, R, teamC)).toMatchObject({ manualReason: "incident" });
+  await releaseRegion(db, R);
 });
 
 it("holds a Free team with a complaint for review once, and after its release only for a newer complaint", async () => {

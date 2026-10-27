@@ -664,7 +664,8 @@ export async function sesComplaintReadings(
 
 /**
  * Persist decisions: a flip, or a paused region whose held teams changed
- * (keeping when it paused). Reports only the regions whose state flipped.
+ * (keeping when it paused). A region an operator held or resumed since the
+ * read stays as they left it. Reports only the regions whose state flipped.
  */
 export async function applyRegionBreakers(
   db: Db,
@@ -692,11 +693,16 @@ export async function applyRegionBreakers(
       pausedAt: d.trip ? (paused ? (row?.pausedAt ?? now) : now) : null,
       updatedAt: now,
     };
-    await db
+    const [written] = await db
       .insert(schema.regionBreakers)
       .values({ region: d.region, ...values })
-      .onConflictDoUpdate({ target: schema.regionBreakers.region, set: values });
-    if (d.trip !== paused) (d.trip ? tripped : resumed).push(d.region);
+      .onConflictDoUpdate({
+        target: schema.regionBreakers.region,
+        set: values,
+        setWhere: sql`${schema.regionBreakers.manualReason} is null and ${schema.regionBreakers.paused} = ${paused}`,
+      })
+      .returning({ region: schema.regionBreakers.region });
+    if (written && d.trip !== paused) (d.trip ? tripped : resumed).push(d.region);
   }
   return { tripped, resumed };
 }
