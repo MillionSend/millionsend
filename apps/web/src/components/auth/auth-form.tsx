@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
-import { isCaptchaRefusal } from "@/lib/auth-errors";
+import { isCaptchaRefusal, SIGNUP_LIMIT_CODE } from "@/lib/auth-errors";
 import { typedEmail } from "@/lib/email-input";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
@@ -73,14 +73,17 @@ export function AuthForm({
   const nextParam = params.get("next");
   const next = safeNextPath(nextParam, mode === "login" ? "/emails" : "/onboarding");
   // better-auth bounces failed OAuth callbacks to errorCallbackURL?error=code.
-  const socialFailed = params.get("error") !== null;
+  // Only the code is read: anyone can write a link's error_description.
+  const callbackError = params.get("error");
 
   const [name, setName] = useState("");
   // An invite link carries the invited address; signup starts from it.
   const [email, setEmail] = useState(mode === "signup" ? (params.get("email") ?? "") : "");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(
-    socialFailed ? tSocial("error") : null,
+    callbackError === null
+      ? null
+      : tSocial(callbackError === SIGNUP_LIMIT_CODE ? "ipLimit" : "error"),
   );
   const [pending, setPending] = useState<"email" | SocialProvider | null>(null);
   // An instance that verifies addresses creates the account without a
