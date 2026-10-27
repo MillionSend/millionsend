@@ -1472,6 +1472,35 @@ it("drain splits a run's slice round-robin between the broadcasts still waiting,
   expect(enqueued).toEqual([first.rows[3], second.rows[3], third.rows[0]]);
 });
 
+it("drain gives no slice to a broadcast whose parked rows all wait for an operator or the tripped Free fuse", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, freeFuseTrippedAt: new Date() });
+  const domainId = await seedRegionDomain(teamId);
+  const paced = await seedPacedBroadcast(teamId, domainId, 6, new Date("2026-08-13T01:00:00Z"));
+  for (const [i, parkReason] of (["fuse", "screening"] as const).entries()) {
+    const held = await seedPacedBroadcast(
+      teamId,
+      domainId,
+      3,
+      new Date(`2026-08-13T0${2 + i}:00:00Z`),
+    );
+    await db
+      .update(schema.emails)
+      .set({ parkReason })
+      .where(eq(schema.emails.broadcastId, held.id));
+  }
+  const enqueued: string[] = [];
+  expect(
+    await drainQuotaParked(db, {
+      isCloud: false,
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+      sesQuota: { regions: ["us-east-1"], exhausted: () => false, room: () => 6 },
+    }),
+  ).toEqual({ drained: 6, stillParked: 6 });
+  expect(enqueued).toEqual(paced.rows);
+});
+
 it("drain moves nothing of a broadcast in a region with no room, at its total, or held", async () => {
   const domainId = await seedRegionDomain(teamId);
   const bulk = await seedPacedBroadcast(teamId, domainId, 2, new Date("2026-08-13T01:00:00Z"));
