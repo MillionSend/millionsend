@@ -557,7 +557,7 @@ export default function EmailDetailPage() {
     <button
       type="button"
       className="ms-btn ms-btn-destructive"
-      style={{ width: "100%", justifyContent: "center", marginTop }}
+      style={{ width: "100%", marginTop }}
       disabled={!row || removeMutation.isPending}
       onClick={() => {
         if (row) removeMutation.mutate({ id: row.id });

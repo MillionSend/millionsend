@@ -139,12 +139,7 @@ export function OnboardingForm({ logoUploadsEnabled = false }: { logoUploadsEnab
                 : t("error")}
           </p>
         ) : null}
-        <button
-          type="submit"
-          className="ms-btn ms-btn-primary"
-          style={{ justifyContent: "center" }}
-          disabled={busy}
-        >
+        <button type="submit" className="ms-btn ms-btn-primary" disabled={busy}>
           <BtnSpinner on={busy} />
           {t("submit")}
         </button>
