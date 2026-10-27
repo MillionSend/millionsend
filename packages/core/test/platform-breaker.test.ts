@@ -572,6 +572,9 @@ it("reads each stored recipient's domain the way the send path does", async () =
     { to: ["l@gmail.com"], bcc: ["m@example.net"], silent: false },
     { to: ["n@gmail.com.example"], silent: false },
     { to: ["o@example.com"], silent: false },
+    { to: ["success@simulator.amazonses.com"], silent: true },
+    { to: ["p@gmail.com"], bcc: ["Sim <complaint@Simulator.AmazonSES.com>"], silent: true },
+    { to: ["success@simulator.amazonses.com"], cc: ["q@outlook.com"], silent: false },
     { to: [], silent: false },
   ];
   let complaintSent = 0;

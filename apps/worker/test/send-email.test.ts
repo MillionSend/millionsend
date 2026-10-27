@@ -8,6 +8,7 @@ import {
   FREE_BURST,
   FREE_BURST_REFILL_MS,
   hashRecipient,
+  releaseFreeFuse,
   SYSTEM_MAIL_TAG,
   sealAttachments,
   sendSystemMail,
@@ -2388,5 +2389,43 @@ describe("a Free pool's burst allowance", () => {
       ...Array<string>(WAITING).fill("deferred"),
     ]);
     expect(due.flatMap((a) => a.rescheduled)).toEqual(paced(tomorrow));
+  });
+
+  it("books anew the rows the Free fuse held at their slots, so its release goes out as a fresh burst", async () => {
+    const team = await pooledTeam("burst-fuse", "u-burst-fuse");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`] }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // The fuse trips: each waiting row reaches its slot and parks on it.
+    const tripped = { freeFuseTrippedAt: NOW, freeFuseComplaints: 3 };
+    await db
+      .insert(schema.instanceSettings)
+      .values({ id: 1, ...tripped })
+      .onConflictDoUpdate({ target: schema.instanceSettings.id, set: tripped });
+    const held = ids.slice(FREE_BURST);
+    for (const [i, id] of held.entries()) {
+      vi.setSystemTime(at(i + 1));
+      expect((await attempt(id, { isCloud: true })).outcome).toBe("parked");
+    }
+
+    const release = new Date(at(held.length).getTime() + 2 * 3_600_000);
+    vi.setSystemTime(release);
+    expect(await releaseFreeFuse(db, release)).toEqual({ complaints: 3, emails: held.length });
+    const released: string[] = [];
+    await drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async (batch) => {
+        released.push(...batch.map((job) => job.emailId).filter((id) => held.includes(id)));
+      },
+    });
+    expect(released).toHaveLength(held.length);
+    const again = await attemptAll(released, { isCloud: true });
+    expect(outcomes(again)).toEqual([
+      ...Array<string>(held.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(again.flatMap((a) => a.rescheduled)).toEqual(paced(release));
   });
 });
