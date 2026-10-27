@@ -341,7 +341,9 @@ export function raisesQuota(before: TeamQuota, after: TeamQuota): boolean {
 /**
  * Teams a user may own on Cloud, by the best effective plan among the teams
  * they already own: a paying owner gets room for more teams without buying
- * each one up. Membership in someone else's paid team does not count.
+ * each one up. Membership in someone else's paid team does not count. On
+ * Free, every team the user created in the last TEAM_CREATE_WINDOW_DAYS
+ * counts too, deleted ones included, so deleting a team never frees a place.
  * Self-host has no cap.
  */
 export const PLAN_TEAM_LIMIT: Record<Plan, number> = {
@@ -351,6 +353,9 @@ export const PLAN_TEAM_LIMIT: Record<Plan, number> = {
   scale: 15,
   system: Number.POSITIVE_INFINITY,
 };
+
+/** How far back a Free account's team creations count against PLAN_TEAM_LIMIT. */
+export const TEAM_CREATE_WINDOW_DAYS = 30;
 
 /** Sender domains per team per plan; null = unlimited. Self-host ignores plans entirely. */
 export const PLAN_DOMAIN_LIMIT: Record<Plan, number | null> = {
