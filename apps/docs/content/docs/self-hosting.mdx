@@ -455,7 +455,9 @@ the same accept pipeline as `POST /emails`: same domain verification,
 suppression checks, request logging, and delivery events. While the team's
 sending is paused for its bounce or complaint rate, the relay answers
 `451 4.7.1` after DATA, so the client keeps the message and retries; a
-suspended team gets `550`.
+suspended team gets `550`. Of the message's own headers the relay carries only
+`In-Reply-To` and `References`; custom headers such as `X-*` or `OTP-Token`
+need `POST /emails`.
 
 Every message counts against its API key's per-minute rate limit, the same
 budget the key's API requests spend (`API_RATE_LIMIT_PER_MINUTE`, default

@@ -473,7 +473,9 @@ SMTP". As mensagens passam pelo mesmo pipeline de aceitação do
 requisições e eventos de entrega. Enquanto os envios da equipe estão pausados
 pela taxa de bounce ou de reclamação, o relay responde `451 4.7.1` após o
 DATA, e o cliente guarda a mensagem e tenta de novo; uma equipe suspensa
-recebe `550`.
+recebe `550`. Dos headers da própria mensagem, o relay só leva `In-Reply-To` e
+`References`; headers personalizados como `X-*` ou `OTP-Token` precisam do
+`POST /emails`.
 
 Cada mensagem conta no limite por minuto da sua chave de API, o mesmo usado
 pelas requisições dessa chave à API (`API_RATE_LIMIT_PER_MINUTE`, padrão 600),

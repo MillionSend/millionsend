@@ -200,8 +200,9 @@ deliberadas e explícitas:
 - `headers` personalizados seguem uma lista de permitidos: qualquer nome
   `X-*` (exceto `X-SES-*` e `X-MillionSend-*`) mais `In-Reply-To`,
   `References`, `Importance`, `Priority`, `Comments`, `Keywords`,
-  `Organization` e o par de descadastro em um clique — `List-Unsubscribe` (um
-  ou mais alvos `<https://…>` ou `<mailto:…>`) com `List-Unsubscribe-Post`
+  `Organization`, `OTP-Token` e o par de descadastro em um clique —
+  `List-Unsubscribe` (um ou mais alvos `<https://…>` ou `<mailto:…>`) com
+  `List-Unsubscribe-Post`
   (`List-Unsubscribe=One-Click`); qualquer outro é `422`. Os dois vêm juntos, e
   `List-Unsubscribe` precisa de um alvo `https`. Em um envio com `topic_id`, o
   par que você informa substitui o gerado: os pedidos de um clique passam a
@@ -212,6 +213,14 @@ deliberadas e explícitas:
   contato, e todo mundo em `to`, `cc` e `bcc` recebe a mesma mensagem. Um envio
   para mais de um endereço sai sem o par gerado, e os placeholders são
   removidos.
+- Valores de header e assuntos em ASCII imprimível saem como você mandou,
+  aspas incluídas, então um valor estruturado como
+  `OTP-Token: "123456"; origin="https://example.com"` chega intacto na caixa
+  de entrada. Um valor com texto fora do ASCII, ou com uma palavra longa
+  demais para uma linha de header de 998 caracteres, é codificado
+  (RFC 2047), e `In-Reply-To` e `References` saem como `<msg-id>`. Um nome
+  da lista só pode aparecer uma vez: o mesmo nome duas vezes, com maiúsculas
+  e minúsculas diferentes, é `422`.
 - Um envio em que todos os destinatários de `to` estão na lista de supressão ou
   saíram do `topic_id` é recusado com `422 all_recipients_suppressed` (mensagem
   `All recipients are suppressed`), e não com o `200` do Resend; destinatários

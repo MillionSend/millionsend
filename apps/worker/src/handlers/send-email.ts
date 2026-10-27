@@ -62,6 +62,7 @@ import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
+import * as mimeFuncs from "nodemailer/lib/mime-funcs";
 import { MediaPoolError } from "../media/pool.js";
 import { saveMediaReview } from "../media/read.js";
 import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
@@ -1314,6 +1315,10 @@ interface MimeInput {
   headers: Record<string, string>;
 }
 
+// nodemailer formats these as msg-ids, never encoding them, and takes no
+// prepared value for References.
+const MSG_ID_HEADERS = new Set(["in-reply-to", "references"]);
+
 async function buildRawMime(input: MimeInput): Promise<Buffer> {
   const transport = createTransport({ streamTransport: true, buffer: true });
   const info = await transport.sendMail({
@@ -1322,7 +1327,6 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
     ...(input.cc ? { cc: input.cc } : {}),
     ...(input.bcc ? { bcc: input.bcc } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-    subject: input.subject,
     ...(input.html ? { html: input.html } : {}),
     ...(input.text ? { text: input.text } : {}),
     ...(input.attachments
@@ -1343,7 +1347,23 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
           }),
         }
       : {}),
-    headers: input.headers,
+    // nodemailer RFC 2047-encodes any header value holding a double quote, so a
+    // structured value like OTP-Token's `"123456"; origin="https://example.com"`
+    // would arrive as an encoded word no receiver parses, and an all-ASCII
+    // subject encoded that way scores as spam (Rspamd SUBJ_EXCESS_QP). Printable
+    // ASCII needs no encoding: it goes out as given, folded at its own
+    // whitespace, unless a word is too long to fold within RFC 5322's
+    // 998-character lines. The subject rides with the headers to get the same.
+    headers: Object.fromEntries(
+      Object.entries({ ...input.headers, Subject: input.subject }).map(([key, value]) => [
+        key,
+        MSG_ID_HEADERS.has(key.toLowerCase()) ||
+        !/^[\t\x20-\x7e]*$/.test(value) ||
+        mimeFuncs.hasLongerLines(mimeFuncs.foldLines(`${key}: ${value}`), 998)
+          ? value
+          : { prepared: true, foldLines: true, value },
+      ]),
+    ),
   });
   return info.message as Buffer;
 }
