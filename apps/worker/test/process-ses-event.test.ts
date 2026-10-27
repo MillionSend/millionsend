@@ -394,6 +394,106 @@ describe("feedback from the mailbox simulator and Free pools", () => {
       },
     ]);
   });
+
+  it("adds feedback on a deleted Free team's mail to the pool its send was tagged with", async () => {
+    const owner = "u-events-deleted";
+    const gone = await createTeam(db, "events-deleted", { poolOwnerId: owner });
+    await insertSentEmail("mid-gone-complaint", ["r@outlook.com"], null, new Date(), gone);
+    await insertSentEmail("mid-gone-bounce", ["gone@example.com"], null, new Date(), gone);
+    await db.delete(schema.teams).where(eq(schema.teams.id, gone));
+    const at = "2026-09-24T10:00:00.000Z";
+    const tagged = { occurredAt: at, poolOwnerId: owner };
+    const events: Partial<SerializedSesEvent>[] = [
+      {
+        eventType: "Complaint",
+        sesMessageId: "mid-gone-complaint",
+        complaint: { recipients: ["r@outlook.com"] },
+      },
+      {
+        eventType: "Bounce",
+        sesMessageId: "mid-gone-bounce",
+        bounce: {
+          bounceType: "Permanent",
+          bounceSubType: "General",
+          recipients: ["gone@example.com"],
+        },
+      },
+      // None of these would count on a row either.
+      {
+        eventType: "Bounce",
+        sesMessageId: "mid-gone-soft",
+        bounce: {
+          bounceType: "Transient",
+          bounceSubType: "General",
+          recipients: ["x@example.com"],
+        },
+      },
+      {
+        eventType: "Complaint",
+        sesMessageId: "mid-gone-unattempted",
+        complaint: { recipients: ["y@outlook.com"], complaintSubType: "OnAccountSuppressionList" },
+      },
+      { eventType: "Delivery", sesMessageId: "mid-gone-delivery" },
+    ];
+    for (const event of events) {
+      await processSesEvent(db, makeEvent({ ...tagged, ...event }));
+    }
+    expect(
+      await db.select().from(schema.freePoolUsage).where(eq(schema.freePoolUsage.ownerId, owner)),
+    ).toEqual([
+      {
+        ownerId: owner,
+        day: at.slice(0, 10),
+        accepted: 0,
+        sent: 0,
+        sentNoFeedback: 0,
+        hardBounced: 1,
+        complained: 1,
+      },
+    ]);
+  });
+
+  it("adds nothing for an unknown email's feedback without a pool tag, or from the simulator", async () => {
+    const at = "2026-09-25T10:00:00.000Z";
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-unknown-untagged",
+        occurredAt: at,
+        complaint: { recipients: ["r@outlook.com"] },
+      }),
+    );
+    const simulator = { occurredAt: at, poolOwnerId: "u-events-simulator" };
+    await processSesEvent(
+      db,
+      makeEvent({
+        ...simulator,
+        eventType: "Complaint",
+        sesMessageId: "mid-unknown-sim-complaint",
+        complaint: { recipients: ["complaint@simulator.amazonses.com"] },
+      }),
+    );
+    await processSesEvent(
+      db,
+      makeEvent({
+        ...simulator,
+        eventType: "Bounce",
+        sesMessageId: "mid-unknown-sim-bounce",
+        bounce: {
+          bounceType: "Permanent",
+          bounceSubType: "General",
+          recipients: ["bounce@simulator.amazonses.com"],
+        },
+      }),
+    );
+    expect(
+      await db
+        .select()
+        .from(schema.freePoolUsage)
+        .where(eq(schema.freePoolUsage.day, at.slice(0, 10))),
+    ).toEqual([]);
+  });
 });
 
 it("out-of-order events never regress the status ladder", async () => {

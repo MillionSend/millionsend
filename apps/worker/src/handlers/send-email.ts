@@ -94,6 +94,11 @@ export interface SesSender {
     region?: string;
     /** The team's SES tenant; only set once the send's identity and set are associated with it. */
     tenantName?: string;
+    /**
+     * The Free pool the team counts in, tagged on the send so feedback that
+     * outlives the email row still reaches the pool.
+     */
+    poolOwnerId?: string;
   }): Promise<{ messageId: string }>;
 }
 
@@ -424,18 +429,19 @@ async function cancelQueuedEmail(db: Db, email: { id: string; teamId: string }):
 
 /**
  * When an email may go under its Free pool's burst allowance, counted in its
- * distinct recipients that can report a complaint, Bcc included. Null when
- * its team is in no Free pool or no recipient can report one. The slot is
- * kept on the row and booked under the row's lock: a wake-up, or a second
- * lane on the same row, reads it back instead of booking again. A slot more
- * than a burst window old is spent, and the row books anew: by then the
- * allowance has refilled for later mail, so a row held past its slot (parked,
- * or rescheduled) would otherwise go out on top of a full burst.
+ * distinct recipients that can report a complaint, Bcc included. Null when no
+ * recipient can report one. The slot is kept on the row and booked under the
+ * row's lock: a wake-up, or a second lane on the same row, reads it back
+ * instead of booking again. A slot more than a burst window old is spent, and
+ * the row books anew: by then the allowance has refilled for later mail, so a
+ * row held past its slot (parked, or rescheduled) would otherwise go out on
+ * top of a full burst.
  */
 async function freeBurstSlot(
   db: Db,
   book: NonNullable<SendDeps["freeBurst"]>,
   email: typeof schema.emails.$inferSelect,
+  ownerId: string,
 ): Promise<Date | null> {
   const n = complaintReportingRecipients([
     ...email.to,
@@ -443,10 +449,6 @@ async function freeBurstSlot(
     ...(email.bcc ?? []),
   ]).length;
   if (n === 0) return null;
-  // The Free pool a team counts in comes with its quota as Cloud reads it.
-  const quota = await fetchTeamQuota(db, email.teamId, true);
-  const ownerId = quota?.kind === "day" ? quota.pool?.ownerId : undefined;
-  if (!ownerId) return null;
   const spentBefore = Date.now() - FREE_BURST_WINDOW_MS;
   if (email.freeBurstAt && email.freeBurstAt.getTime() > spentBefore) return email.freeBurstAt;
   const e = schema.emails;
@@ -715,11 +717,16 @@ async function sendQueued(
     );
     return "deferred";
   }
+  // The Free pool the team counts in, from its quota as Cloud reads it, read
+  // once: the burst allowance below, the send's SES tag and the pool's
+  // counters all follow it.
+  const quota = await fetchTeamQuota(db, email.teamId, true);
+  const poolOwnerId = quota?.kind === "day" ? quota.pool?.ownerId : undefined;
   // A Free pool's mail to providers that report complaints waits its turn in
   // the pool's burst allowance, still queued, and costs no KMS call while it
   // waits. Account mail and the onboarding email never wait.
-  if (deps.freeBurst && !systemMail && !onboarding) {
-    const slot = await freeBurstSlot(db, deps.freeBurst, email);
+  if (deps.freeBurst && poolOwnerId && !systemMail && !onboarding) {
+    const slot = await freeBurstSlot(db, deps.freeBurst, email, poolOwnerId);
     if (slot && slot.getTime() > Date.now()) {
       // At most a burst window ahead, so a long wait reads the team's plan
       // again on the way: mail of a team that left Free goes at the next
@@ -1070,6 +1077,7 @@ async function sendQueued(
       ...(configurationSet ? { configurationSetName: configurationSet } : {}),
       ...(domain?.region ? { region: domain.region } : {}),
       ...(tenant ? { tenantName: tenant } : {}),
+      ...(poolOwnerId ? { poolOwnerId } : {}),
     });
   let messageId: string;
   try {
@@ -1144,11 +1152,13 @@ async function sendQueued(
       },
     });
   await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
-  await bumpFreePoolUsage(db, {
-    teamId: email.teamId,
-    day: utcDay(sentAt),
-    counts: { sent: 1, sent_no_feedback: noFeedback },
-  });
+  if (poolOwnerId) {
+    await bumpFreePoolUsage(db, {
+      ownerId: poolOwnerId,
+      day: utcDay(sentAt),
+      counts: { sent: 1, sent_no_feedback: noFeedback },
+    });
+  }
   if (bulk) deps.sesQuota?.noteBulkSent?.(region);
   // Insights below evaluate the in-memory body.
   await purgeCredential();

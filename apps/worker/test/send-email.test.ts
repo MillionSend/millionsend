@@ -63,6 +63,7 @@ interface FakeSend {
   configurationSetName?: string | undefined;
   region?: string | undefined;
   tenantName?: string | undefined;
+  poolOwnerId?: string | undefined;
 }
 
 function fakeSes(messageId = "fake-mid"): { ses: SesSender; sends: FakeSend[] } {
@@ -2058,6 +2059,39 @@ it("adds a Free team's sends to its pool beside its own counters; simulator-only
       .from(schema.freePoolUsage)
       .where(eq(schema.freePoolUsage.ownerId, owner)),
   ).toEqual([counted]);
+});
+
+it("tags a Free pool's sends with the pool for SES, and a paid or creator-less team's with none", async () => {
+  const owner = "u-send-tag";
+  const tagOf = async (team: string, slug?: string) => {
+    const [domain] = slug
+      ? await db
+          .insert(schema.domains)
+          .values({
+            teamId: team,
+            name: `${slug}.example`,
+            region: "us-east-1",
+            status: "verified",
+            verifiedAt: new Date(),
+          })
+          .returning({ id: schema.domains.id })
+      : [{ id: domainId }];
+    const { ses, sends } = fakeSes(randomUUID());
+    const emailId = await insertEmail({
+      teamId: team,
+      domainId: domain?.id,
+      from: slug ? `T <t@${slug}.example>` : "Acme <a@acme.dev>",
+      to: ["g@gmail.com"],
+    });
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+    return sends[0]?.poolOwnerId;
+  };
+  const pooled = await createTeam(db, "send-tag-free", { poolOwnerId: owner });
+  const paid = await createTeam(db, "send-tag-paid", { poolOwnerId: owner });
+  await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+  expect(await tagOf(pooled, "send-tag-free")).toBe(owner);
+  expect(await tagOf(paid, "send-tag-paid")).toBeUndefined();
+  expect(await tagOf(teamId)).toBeUndefined();
 });
 
 describe("a Free pool's burst allowance", () => {

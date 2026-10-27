@@ -375,15 +375,15 @@ export async function readDailyUsage(
 const FREE_POOL_COUNTERS = ["sent", "sent_no_feedback", "hard_bounced", "complained"] as const;
 
 /**
- * Adds a team's deliverability counts to the Free pool it is in when they are
- * written (freePoolOwner), if any, in the caller's transaction; usage_counters
- * names them. Call after the team's own counter bump: rows lock team first,
- * pool second. Column names come from FREE_POOL_COUNTERS only, never from input.
+ * Adds deliverability counts to a Free pool, in the caller's transaction: the
+ * pool `ownerId` names, or the one a team is in when they are written
+ * (freePoolOwner), if any; usage_counters names them. Call after the team's
+ * own counter bump: rows lock team first, pool second. Column names come from
+ * FREE_POOL_COUNTERS only, never from input.
  */
 export async function bumpFreePoolUsage(
   db: Db,
-  params: {
-    teamId: string;
+  params: ({ teamId: string } | { ownerId: string }) & {
     day: string;
     counts: Partial<Record<(typeof FREE_POOL_COUNTERS)[number], number>>;
   },
@@ -393,12 +393,17 @@ export async function bumpFreePoolUsage(
     return n ? [[c, n] as const] : [];
   });
   if (entries.length === 0) return;
-  const tm = schema.teams;
-  const [team] = await db
-    .select({ plan: tm.plan, currentPeriodEnd: tm.currentPeriodEnd, poolOwnerId: tm.poolOwnerId })
-    .from(tm)
-    .where(eq(tm.id, params.teamId));
-  const ownerId = team ? freePoolOwner(team) : null;
+  let ownerId: string | null;
+  if ("ownerId" in params) {
+    ownerId = params.ownerId;
+  } else {
+    const tm = schema.teams;
+    const [team] = await db
+      .select({ plan: tm.plan, currentPeriodEnd: tm.currentPeriodEnd, poolOwnerId: tm.poolOwnerId })
+      .from(tm)
+      .where(eq(tm.id, params.teamId));
+    ownerId = team ? freePoolOwner(team) : null;
+  }
   if (!ownerId) return;
   const p = schema.freePoolUsage;
   await db.execute(sql`

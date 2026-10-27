@@ -97,6 +97,31 @@ export async function processSesEvent(
   const eventType = EVENT_TYPE_BY_EVENT[event.eventType];
   if (!status || !eventType) return;
 
+  const day = utcDay(new Date(event.occurredAt));
+  // delivered and bounced count every event. Engagement counters
+  // (opened/clicked) are owned by the app-layer tracking endpoints, not here.
+  // hard_bounced counts only Permanent bounces — the deliverability score's
+  // bounce-rate input (transient greylisting must not read as a hard-bounce
+  // crisis) — and, like complained, only those about mail SES attempted, as
+  // SES's own rates do, and none from the mailbox simulator, whose feedback
+  // is a test: it still suppresses the address and fires the webhook below.
+  const rated = !simulatorFeedback(event.bounce?.recipients ?? event.complaint?.recipients ?? []);
+  const cols =
+    event.eventType === "Delivery"
+      ? ["delivered"]
+      : event.eventType === "Bounce"
+        ? event.bounce?.bounceType === "Permanent" &&
+          sesAttempted(event.bounce.bounceSubType) &&
+          rated
+          ? ["bounced", "hard_bounced"]
+          : ["bounced"]
+        : event.eventType === "Complaint" &&
+            sesAttempted(event.complaint?.complaintSubType) &&
+            rated
+          ? ["complained"]
+          : [];
+  const counts = Object.fromEntries(cols.map((col) => [col, 1]));
+
   let [email] = await db
     .select({
       id: schema.emails.id,
@@ -135,8 +160,18 @@ export async function processSesEvent(
         ),
       );
   }
-  // Unknown message id: not ours (or purged) — never act on it.
-  if (!email) return;
+  // Unknown message id: not ours, or its row is gone (purged, or deleted with
+  // its team). Nothing is acted on but the Free pool the send was tagged
+  // with, whose record outlives the team.
+  if (!email) {
+    // ponytail: no email_events row gates this count, so an SNS redelivery
+    // after the job finished adds it twice; a unique record of the SNS
+    // message id would make it exactly once.
+    if (event.poolOwnerId) {
+      await bumpFreePoolUsage(db, { ownerId: event.poolOwnerId, day, counts });
+    }
+    return;
+  }
 
   // The event insert doubles as the idempotency gate: SNS delivers
   // at-least-once and queue dedupe cannot cover redelivery after the job
@@ -207,29 +242,6 @@ export async function processSesEvent(
       });
     }
 
-    const day = utcDay(new Date(event.occurredAt));
-    // delivered and bounced count every event. Engagement counters
-    // (opened/clicked) are owned by the app-layer tracking endpoints, not here.
-    // hard_bounced counts only Permanent bounces — the deliverability score's
-    // bounce-rate input (transient greylisting must not read as a hard-bounce
-    // crisis) — and, like complained, only those about mail SES attempted, as
-    // SES's own rates do, and none from the mailbox simulator, whose feedback
-    // is a test: it still suppresses the address and fires the webhook below.
-    const rated = !simulatorFeedback(event.bounce?.recipients ?? event.complaint?.recipients ?? []);
-    const cols =
-      event.eventType === "Delivery"
-        ? ["delivered"]
-        : event.eventType === "Bounce"
-          ? event.bounce?.bounceType === "Permanent" &&
-            sesAttempted(event.bounce.bounceSubType) &&
-            rated
-            ? ["bounced", "hard_bounced"]
-            : ["bounced"]
-          : event.eventType === "Complaint" &&
-              sesAttempted(event.complaint?.complaintSubType) &&
-              rated
-            ? ["complained"]
-            : [];
     if (cols.length > 0) {
       await txDb.execute(sql`
         insert into ${schema.usageCounters} (team_id, day, ${sql.raw(cols.join(", "))})
@@ -240,7 +252,6 @@ export async function processSesEvent(
             sql`, `,
           )}
       `);
-      const counts = Object.fromEntries(cols.map((col) => [col, 1]));
       await bumpHourlyUsage(txDb, { teamId: email.teamId, at: new Date(event.occurredAt), counts });
       await bumpFreePoolUsage(txDb, { teamId: email.teamId, day, counts });
     }
