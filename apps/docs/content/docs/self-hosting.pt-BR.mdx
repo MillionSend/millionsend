@@ -196,7 +196,7 @@ auto-hospedada não tem limites de plano.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciais OAuth do "Continuar com Google". O botão só aparece com ambas definidas. URL de callback: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha, confirmação de e-mail, o código de uso único do console), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha e a confirmação no cadastro só existem com isto definido e credenciais SES configuradas — deixe vazio para pular as duas. Verifique o domínio em uma equipe em **Domínios** e esses e-mails passam a ser registrados lá, com as novas contas como seus contatos (veja [E-mails de conta](#e-mails-de-conta-contatos-e-novidades)). |
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login (inclusive com Google e GitHub), o cadastro, a redefinição de senha, o formulário de novidades do produto e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
 | `ONBOARDING_EMAIL_FROM` | Remetente do botão "Enviar e-mail" do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Leva um único e-mail de teste fixo por equipe, para o proprietário da equipe (um endereço confirmado, onde a instância confirma e-mails), e nada mais: um envio a partir dele pela API, SMTP, MCP, uma transmissão ou um teste do painel é recusado (`422 reserved_sender` na API), mesmo para uma equipe que verificou o domínio. Deixe vazio para ocultar o botão. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos proprietários da equipe (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para a equipe, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em uma equipe para registrar esses e-mails lá. |
 | `INVITES_PER_TEAM_PER_DAY` | Convites que uma equipe, e um membro somando todas as suas equipes, pode criar em um dia corrido, contando os revogados e os de equipes excluídas (padrão `50`). Acima disso, novos convites são recusados até o dia virar. |
@@ -1154,6 +1154,13 @@ isso no log e fica com a cópia que tem. Diga a lista o que disser, um provedor
 de e-mail pessoal (Gmail, Outlook, Yahoo, iCloud, Proton, UOL, BOL, Terra e
 parecidos) e um sufixo público (`com.br`, `github.io`) nunca são recusados.
 
+Com `IS_CLOUD=true`, uma mesma rede abre no máximo 3 contas por dia: um
+endereço IPv4 ou um /64 IPv6. Contam os cadastros das últimas 24 horas,
+inclusive os de contas já excluídas, e o 4º é recusado até o mais antigo deles
+completar um dia. Cadastros pelo Google e pelo GitHub contam do mesmo jeito;
+entrar em uma conta que já existe nunca é recusado. Uma instância
+auto-hospedada não tem esse limite.
+
 ## E-mails de conta, contatos e novidades
 
 Os e-mails do próprio MillionSend — redefinição de senha, confirmação de
@@ -1248,14 +1255,11 @@ anteriores confirmam no próximo login. Onde a instância confirma e-mails, o
 e-mail do onboarding só vai para um proprietário que confirmou.
 
 Nada em uma instância auto-hospedada contata millionsend.com por conta
-própria. O assistente de configuração oferece, uma vez e só de forma
-interativa, inscrever o e-mail do operador nas notas de lançamento do
-MillionSend; é o assistente na sua máquina enviando a sua resposta, e um link
-de confirmação chega antes de qualquer coisa ser armazenada. Quando não
-consegue alcançar millionsend.com, ele imprime a página,
+própria. O assistente de configuração mostra onde se inscrever nas notas de
+lançamento do MillionSend,
 [app.millionsend.com/updates?source=self-host](https://app.millionsend.com/updates?source=self-host), e **Configurações →
-Instância** leva à mesma página; o `source` marca você como auto-hospedado
-nos dois casos.
+Instância** leva à mesma página; o `source` marca você como auto-hospedado. Um
+link de confirmação chega antes de qualquer coisa ser armazenada.
 
 ## Console
 
