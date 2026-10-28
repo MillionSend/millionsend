@@ -6,6 +6,7 @@ import {
   unstorableValueMessage,
   type WebhookEnqueue,
 } from "@millionsend/core";
+import { isAdminRole } from "@millionsend/core/team-roles";
 import type { Db } from "@millionsend/db";
 import { getDb } from "@millionsend/db";
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -228,7 +229,7 @@ export const teamProcedure = protectedProcedure.use(({ ctx, next }) => {
  * admitted here on purpose rather than by default.
  */
 export const adminProcedure = teamProcedure.use(({ ctx, next }) => {
-  if (ctx.role !== "owner" && ctx.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+  if (!isAdminRole(ctx.role)) throw new TRPCError({ code: "FORBIDDEN" });
   return next();
 });
 

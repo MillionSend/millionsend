@@ -9,6 +9,7 @@ import {
   placePanel,
   viewportSize,
 } from "@/lib/panel-placement";
+import { titleWhenCut } from "@/lib/title-when-cut";
 import { ChevronGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
 
@@ -250,6 +251,7 @@ export function Select({
         {...(activeId !== undefined && open ? { "aria-activedescendant": activeId } : {})}
         disabled={disabled}
         onClick={() => (open ? closeMenu() : openMenu())}
+        onMouseEnter={(event) => titleWhenCut(event, selected?.label ?? "")}
         onKeyDown={onKeyDown}
         style={{
           display: "inline-flex",
@@ -273,7 +275,7 @@ export function Select({
         >
           {selected?.adornment}
           <span
-            title={selected?.label}
+            data-label=""
             style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           >
             {selected?.label ?? ""}
@@ -410,7 +412,10 @@ export function SelectOptionList({
           .join(" ")}
         aria-disabled={option.disabled}
         style={option.disabled ? { opacity: 0.5, cursor: "default" } : undefined}
-        onMouseEnter={() => onHover(index)}
+        onMouseEnter={(event) => {
+          onHover(index);
+          titleWhenCut(event, option.label);
+        }}
         onClick={() => {
           if (!option.disabled) onPick(option.value);
         }}
@@ -425,7 +430,7 @@ export function SelectOptionList({
         >
           {option.adornment}
           {/* A long label ends in an ellipsis before its hint does. */}
-          <span title={option.label} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+          <span data-label="" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
             {option.label}
           </span>
           {option.hint !== undefined ? (

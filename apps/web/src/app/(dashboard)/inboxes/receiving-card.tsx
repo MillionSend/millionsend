@@ -1,9 +1,10 @@
 "use client";
 
+import { isAdminRole } from "@millionsend/core/team-roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CopyButton } from "@/components/copy-chip";
 import { DnsRecordCard, InsetCard } from "@/components/dns-record-card";
 import { BtnSpinner, Spinner } from "@/components/spinner";
@@ -15,11 +16,12 @@ import {
   receivingErrorKey,
   receivingStep,
 } from "@/lib/receiving-setup";
+import { titleWhenCut } from "@/lib/title-when-cut";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import { absoluteUrl } from "@/lib/url";
 import { useMinSpin } from "@/lib/use-min-spin";
-import { isTeamAdmin, useTeamRole } from "@/lib/use-team-role";
+import { useTeamRole } from "@/lib/use-team-role";
 import { receivingSubdomain } from "@/lib/zone";
 import type { DomainStatus } from "../domains/domain-status";
 
@@ -32,6 +34,7 @@ const ACTIONS = {
   flexWrap: "wrap",
   marginTop: 12,
 } as const;
+const NOTE = { margin: "8px 0 0", fontSize: 12, color: "var(--ms-muted)" } as const;
 
 /**
  * What the picked domain still needs before an inbox on it gets mail, said
@@ -54,29 +57,43 @@ export function ReceivingCard({
   const td = useTranslations("domains");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const admin = isTeamAdmin(useTeamRole());
+  const admin = isAdminRole(useTeamRole());
   const verified = domain.status === "verified";
   const mx = useQuery(
-    trpc.domains.receivingMx.queryOptions(
-      { id: domain.id },
-      { enabled: verified, staleTime: 30_000 },
-    ),
+    trpc.domains.receivingMx.queryOptions({ id: domain.id }, { enabled: verified }),
   );
   const [acted, setActed] = useState(false);
   const [spinning, spin] = useMinSpin();
+  const region = useRef<HTMLDivElement>(null);
+  const optionsKey = trpc.inboxes.options.queryKey();
   const enable = useMutation(
     trpc.domains.setReceiving.mutationOptions({
       onSuccess: () => {
         setActed(true);
-        // The pick joins the receiving domains; its page and MX check follow.
+        // The pick joins the receiving domains at once, so Create opens with
+        // the record card rather than one options round trip later.
+        queryClient.setQueryData(optionsKey, (old) =>
+          old && !old.domains.some((d) => d.id === domain.id)
+            ? {
+                ...old,
+                domains: [...old.domains, { id: domain.id, name: domain.name }],
+                otherDomains: old.otherDomains.filter((d) => d.id !== domain.id),
+              }
+            : old,
+        );
         void queryClient.invalidateQueries(trpc.inboxes.options.pathFilter());
-        void queryClient.invalidateQueries(trpc.domains.pathFilter());
       },
     }),
   );
+  // The Enable button that had focus is gone: the card it became takes it.
+  useEffect(() => {
+    if (enable.isSuccess) region.current?.focus();
+  }, [enable.isSuccess]);
   // On from the moment the switch answers, not once the options refetch.
   const receiving = domain.receiving || enable.isSuccess;
-  const step = receivingStep({ verified, receiving, mx: mx.data?.status, acted });
+  // A check that failed reads as DNS not answering; a later failed refetch keeps the last answer.
+  const live = mx.data?.status ?? (mx.isError ? "unknown" : undefined);
+  const step = receivingStep({ verified, receiving, mx: live, acted });
   if (step === null) return null;
 
   const name = domain.name;
@@ -101,9 +118,6 @@ export function ReceivingCard({
       type="button"
       className="ms-btn ms-btn-secondary"
       disabled={checking}
-      // Takes the focus the Enable button had when the record replaces it.
-      // biome-ignore lint/a11y/noAutofocus: focus follows the action the user just took
-      autoFocus={enable.isSuccess}
       onClick={() => {
         spin();
         setActed(true);
@@ -180,6 +194,7 @@ export function ReceivingCard({
     );
   } else if (step === "elsewhere") {
     const sub = receivingSubdomain(name);
+    const addHref = `/domains/new?name=${encodeURIComponent(sub)}`;
     card = (
       <>
         <WarnCard
@@ -187,10 +202,18 @@ export function ReceivingCard({
           action={
             admin && !subdomainTaken ? (
               <Link
-                href={`/domains/new?name=${encodeURIComponent(sub)}`}
+                href={addHref}
                 className="ms-btn ms-btn-secondary"
+                style={{ maxWidth: "100%" }}
+                onMouseEnter={(event) => titleWhenCut(event, sub)}
               >
-                {t("create.receiving.addDomain", { domain: sub })}
+                {/* A long name ends in an ellipsis instead of widening the dialog. */}
+                <span
+                  data-label=""
+                  style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
+                >
+                  {t("create.receiving.addDomain", { domain: sub })}
+                </span>
               </Link>
             ) : undefined
           }
@@ -201,19 +224,26 @@ export function ReceivingCard({
             sub,
           })}
         </WarnCard>
-        {receiving ? null : (
-          <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
-            {admin
-              ? t.rich("create.receiving.onPurpose", {
-                  domain: name,
-                  link: (chunks) => (
-                    <Link href={domainReceivingHref(domain.id)} className="ms-link">
-                      {chunks}
-                    </Link>
-                  ),
-                })
-              : `${t("create.receiving.memberAddDomain")}${until}`}
-          </p>
+        {admin ? (
+          receiving ? null : (
+            <p style={NOTE}>
+              {t.rich("create.receiving.onPurpose", {
+                domain: name,
+                link: (chunks) => (
+                  <Link href={domainReceivingHref(domain.id)} className="ms-link">
+                    {chunks}
+                  </Link>
+                ),
+              })}
+            </p>
+          )
+        ) : subdomainTaken ? null : (
+          <>
+            <p style={NOTE}>{`${t("create.receiving.memberAddDomain")}${until}`}</p>
+            <div style={ACTIONS}>
+              <CopyButton value={absoluteUrl(addHref)} label={t("create.receiving.copyLink")} />
+            </div>
+          </>
         )}
       </>
     );
@@ -251,8 +281,10 @@ export function ReceivingCard({
       </DnsRecordCard>
     );
   }
+  // Polite, not role=status: a status region is atomic, and every spinner or
+  // badge change inside would read the whole card out again.
   return card ? (
-    <div role="status" style={{ marginTop: 10 }}>
+    <div ref={region} tabIndex={-1} aria-live="polite" style={{ marginTop: 10 }}>
       {card}
     </div>
   ) : null;

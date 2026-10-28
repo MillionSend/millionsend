@@ -173,7 +173,7 @@
       "openDomain": "Open domain",
       "addDomain": "Add {domain}",
       "onPurpose": "Moving all of {domain}'s mail here on purpose? <link>Enable receiving on its page</link>.",
-      "memberAddDomain": "Only owners and admins can add a domain.",
+      "memberAddDomain": "Only owners and admins can add a domain. Send one of them this link.",
       "mxToAdd": "MX to add",
       "addMxBody": "Receiving is on. Add this record at your DNS provider: you can create the inbox now, and mail reaches it once the record is live.",
       "liveBody": "Receiving is on and its MX record points here: mail arrives right away."

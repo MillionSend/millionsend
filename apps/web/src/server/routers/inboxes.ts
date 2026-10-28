@@ -330,8 +330,8 @@ export const inboxesRouter = router({
     const subdomain = shared ? await teamSharedDomain(ctx.db, ctx.teamId) : null;
     return {
       domains: rows.filter(receives).map(({ id, name }) => ({ id, name })),
-      // Listed with what each still needs, verified ones first: a domain the
-      // picker left out read as one inboxes can't use.
+      // Every other domain too, verified ones first, with what each still
+      // needs: one missing from the picker reads as one inboxes can't use.
       otherDomains: rows
         .filter((row) => !receives(row))
         .map(({ id, name, status }) => ({ id, name, status }))

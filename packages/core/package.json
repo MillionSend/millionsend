@@ -44,6 +44,10 @@
       "types": "./src/domain-status.ts",
       "default": "./src/domain-status.ts"
     },
+    "./team-roles": {
+      "types": "./src/team-roles.ts",
+      "default": "./src/team-roles.ts"
+    },
     "./docs-links": {
       "types": "./src/docs-links.ts",
       "default": "./src/docs-links.ts"

@@ -4,6 +4,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { extractTokenPrefix, verifyApiKey } from "./api-keys.js";
 import { effectivePlan, type Plan, type QuotaTeamRow } from "./plans.js";
 import { QUOTA_COLUMNS } from "./team-plan.js";
+import type { TeamRole } from "./team-roles.js";
 
 /** SECURITY: the only source of teamId for API-key-authenticated requests. */
 export interface ApiKeyAuth {
@@ -38,13 +39,7 @@ export interface ApiKeyAuth {
   role?: TeamRole;
 }
 
-export type TeamRole = (typeof schema.teamMemberRoleEnum.enumValues)[number];
-
-/**
- * The dashboard's adminProcedure line: owners and admins manage, members
- * read. An allow-list, so a role added later is refused until admitted here.
- */
-export const isAdminRole = (role: TeamRole): boolean => role === "owner" || role === "admin";
+export { isAdminRole, type TeamRole } from "./team-roles.js";
 
 const LAST_USED_STAMP_INTERVAL_MS = 60_000;
 

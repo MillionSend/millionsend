@@ -35,7 +35,10 @@ export async function checkReceivingMx(
   resolver: DnsResolver,
 ): Promise<LiveDnsCheck> {
   try {
-    const rows = await withTimeout(resolver.resolveMx(domainName), DNS_TIMEOUT_MS);
+    // A null MX ("0 .", RFC 7505) says the name takes no mail: it counts as none.
+    const rows = (await withTimeout(resolver.resolveMx(domainName), DNS_TIMEOUT_MS)).filter(
+      (r) => normalizeHostname(r.exchange) !== "",
+    );
     if (rows.length === 0) return { status: "missing" };
     const want = normalizeHostname(mxHost);
     const lowest = Math.min(...rows.map((r) => r.priority));

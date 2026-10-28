@@ -173,7 +173,7 @@
       "openDomain": "Abrir domínio",
       "addDomain": "Adicionar {domain}",
       "onPurpose": "Quer mesmo trazer todos os e-mails de {domain} para cá? <link>Ative o recebimento na página dele</link>.",
-      "memberAddDomain": "Só donos e admins podem adicionar um domínio.",
+      "memberAddDomain": "Só donos e admins podem adicionar um domínio. Mande este link para um deles.",
       "mxToAdd": "MX a adicionar",
       "addMxBody": "O recebimento está ativo. Adicione este registro no seu provedor de DNS: você já pode criar a caixa de entrada, e os e-mails chegam assim que o registro estiver no ar.",
       "liveBody": "O recebimento está ativo e o registro MX dele aponta para cá: os e-mails chegam na hora."

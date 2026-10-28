@@ -1,7 +1,6 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { StatusBadge } from "@/components/status-badge";
 import type { TONE_COLOR } from "@/components/status-tile";
 
 export type DomainStatus = "pending" | "verified" | "temporary_failure" | "failed";
@@ -39,6 +38,5 @@ export function useDomainStatusLabel(): (status: DisplayDomainStatus) => string 
 /** A pending domain is warn (canvas), not the neutral shared pending. */
 export function DomainStatusBadge({ status }: { status: DisplayDomainStatus }) {
   const label = useDomainStatusLabel();
-  if (status === "verified" || status === "failed") return <StatusBadge status={status} />;
   return <span className={`ms-badge ms-badge-${DOMAIN_TONE[status]}`}>{label(status)}</span>;
 }

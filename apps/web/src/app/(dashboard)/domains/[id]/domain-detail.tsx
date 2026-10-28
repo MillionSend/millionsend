@@ -1,6 +1,7 @@
 "use client";
 
 import { registrableDomain } from "@millionsend/core/org-domain";
+import { isAdminRole } from "@millionsend/core/team-roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -38,7 +39,7 @@ import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useMinSpin } from "@/lib/use-min-spin";
-import { isTeamAdmin, useTeamRole } from "@/lib/use-team-role";
+import { useTeamRole } from "@/lib/use-team-role";
 import { receivingSubdomain } from "@/lib/zone";
 import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
 import { RegionLabel } from "../region-label";
@@ -327,7 +328,7 @@ export function DomainDetail({ id }: { id: string }) {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const admin = isTeamAdmin(useTeamRole());
+  const admin = isAdminRole(useTeamRole());
 
   const domain = useQuery(trpc.domains.get.queryOptions({ id }));
   const records = useQuery(

@@ -102,15 +102,12 @@ export function CreateInboxDialog({
       ? { ...otherPick, receiving: false }
       : null;
   const domainName = shared ? sharedDomain : ownPick?.name;
-  // The server refuses a domain that doesn't receive; Create says why first.
+  // The server refuses a domain that doesn't receive; Create says why first,
+  // in words true whether or not the domain's mail goes elsewhere.
   const notReady = otherPick
     ? t(
-        otherPick.status === "verified"
-          ? "create.errors.notReceiving"
-          : "create.errors.notVerified",
-        {
-          domain: otherPick.name,
-        },
+        otherPick.status === "verified" ? "create.receiving.offTitle" : "create.errors.notVerified",
+        { domain: otherPick.name },
       )
     : null;
   const blocked = !domain || !localValid || create.isPending || notReady !== null;
