@@ -113,10 +113,11 @@ export const monitorSamples = pgTable(
     linkYoung: boolean("link_young"),
     // The hold rule this verdict met while the team was spared it, for a
     // credential link to a product's own name on an app platform (core
-    // isPlatformLinkVerdict), or "burst" on waiting mail a sibling's spared
-    // verdict parked with it: the mail waits for the review list instead.
-    // "vouched" when an operator had cleared every such name: nothing to
-    // hold, and the mail flows.
+    // isPlatformLinkVerdict) or a platform's notice for one client business
+    // (core isClientIdentityVerdict), or "burst" on waiting mail a sibling's
+    // spared verdict parked with it: the mail waits for the review list
+    // instead. "vouched" when an operator had cleared every such name:
+    // nothing to hold, and the mail flows.
     sparedHold: text("spared_hold"),
     // What screening could not clear in the message's images and files
     // (core MEDIA_ISSUES), which can park the mail waiting on this verdict.

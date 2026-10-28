@@ -1274,7 +1274,22 @@ clearance back, and counts toward no repeat hold, while a lure there that
 names a brand still does all of that, and cold mail from a shared address
 still parks for its recipient. A name only a verdict cleared keeps its
 7-day second look. Past New such mail parks as any other, and the verdict
-counts in the risk at every tier. These samples count against no daily cap; a team has 200 of
+counts in the risk at every tier. A platform's notice for one client
+business is spared and vouched for the same way: a verdict that names
+nothing but brand impersonation, on a message that is not a broadcast,
+carries no Pix code or file and does not ride in images or a QR code drawn
+with characters, from a sending domain at least 7 days old, whose one
+destination is a registered domain that its Reply-To and at least one web
+link lead to and whose name the From display name spells (`"Acme Tiles"
+<orders@platform.example>` replying to and linking `acme-tiles.example`),
+with no other kind of link and no brand the monitor knows in the name, the
+domain or the subject. Until an operator releases mail to that domain, the
+spare takes a message judged before SES and a domain known to be registered
+7 days ago or more (looked up as a new link domain is, even once a clean
+verdict cleared it; no date keeps the hold). After the release, later mail
+of that shape to the domain is neither held, parked nor delayed for it, and
+its verdicts take no clearance back and count toward no repeat hold; the
+same message under another name still does all of that. These samples count against no daily cap; a team has 200 of
 them a day, past which its mail with a new destination waits for the next
 UTC day.
 

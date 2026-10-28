@@ -1570,7 +1570,19 @@ SES que não é transmissão, não se passa por outra marca e não traz meio de
 pagamento: a mensagem fica em espera na lista de revisão no lugar da pausa.
 Um link de loopback sozinho não faz o e-mail ser avaliado antes do SES; por
 isso, depois da janela inicial da equipe, essa avaliação num e-mail avaliado
-depois do envio ainda pausa a equipe.
+depois do envio ainda pausa a equipe. Do mesmo jeito, uma equipe no nível
+Nova é poupada da pausa quando a avaliação só vê imitação de marca num aviso
+que uma plataforma de loja ou de agendamento manda em nome de um cliente: um
+e-mail que não é transmissão, não traz código Pix nem arquivo, não tem a
+mensagem em imagens nem num QR code desenhado com caracteres e sai de um
+domínio de envio com pelo menos 7 dias, cujo nome de remetente (From) é o nome
+do único domínio para onde vão o Reply-To e os links, sem link que não seja de
+página web e sem nenhuma marca que o monitor conheça no nome, no domínio ou no
+assunto. Até o operador liberar um e-mail para esse domínio, isso só vale para
+e-mail avaliado antes do SES e para domínio cuja data de registro mostra pelo
+menos 7 dias (sem data, a pausa continua); depois da liberação, esses avisos
+para ele saem sem ficar em espera nem esperar os 2 minutos, e sem pausar a
+equipe, e a mesma mensagem com outro nome ainda pausa a equipe.
 Essas amostras não contam para nenhum limite diário; uma equipe tem 200 delas
 por dia, e depois disso o e-mail dela com um destino novo espera o próximo dia
 UTC.

@@ -490,6 +490,10 @@ function queueLinkAges(
   })();
 }
 
+/** A link domain a registry can date: a registrable name, no free host's tenant, no shortener. */
+const datableLinkDomain = (d: string) =>
+  !isShortener(d) && registrableDomain(d) === d && ownerDomain(d) === d;
+
 /**
  * Whether any of these link domains was registered under YOUNG_DOMAIN_DAYS
  * before `at`: true as soon as one is known to be, false once every one is
@@ -509,11 +513,7 @@ export async function anyYoungLinkDomain(
   opts: { budgetMs: number },
 ): Promise<boolean | null> {
   const la = schema.linkDomainAges;
-  const datable = [
-    ...new Set(
-      domains.filter((d) => !isShortener(d) && registrableDomain(d) === d && ownerDomain(d) === d),
-    ),
-  ];
+  const datable = [...new Set(domains.filter(datableLinkDomain))];
   if (datable.length === 0) return false;
   const cached = await db
     .select({ domain: la.domain, registeredAt: la.registeredAt })
@@ -556,6 +556,31 @@ export async function anyYoungLinkDomain(
       });
     }
   });
+}
+
+/**
+ * Whether every one of these link domains is known to be registered
+ * YOUNG_DOMAIN_DAYS or more before `at` (anyYoungLinkDomain, then the date it
+ * cached): false when one is young, has no date any source knows or is never
+ * dated, null while an age is not known.
+ */
+export async function linkDomainsAged(
+  db: Db,
+  resolver: DomainAgeResolver,
+  domains: readonly string[],
+  at: Date,
+  opts: { budgetMs: number },
+): Promise<boolean | null> {
+  const young = await anyYoungLinkDomain(db, resolver, domains, at, opts);
+  if (young !== false) return young === true ? false : null;
+  const names = [...new Set(domains)];
+  if (names.length === 0 || !names.every(datableLinkDomain)) return false;
+  const la = schema.linkDomainAges;
+  const dated = await db
+    .select({ domain: la.domain })
+    .from(la)
+    .where(and(inArray(la.domain, names), isNotNull(la.registeredAt)));
+  return dated.length === names.length;
 }
 
 /**
@@ -1036,7 +1061,8 @@ export async function screenBeforeSend(
   if (waiting === "wait") return { action: "wait", until: null };
   if (waiting === "park") return { action: "park", reason: "screening" };
   if (waiting === "proceed") return { action: "send", sample: { id: sample.id, unjudged: true } };
-  // The hold this verdict met spared the team (isPlatformLinkVerdict): the mail waits for a person instead.
+  // The hold this verdict met spared the team (isPlatformLinkVerdict, isClientIdentityVerdict): the
+  // mail waits for a person instead.
   if (sample.sparedHold && sample.sparedHold !== "vouched") {
     return { action: "park", reason: "destination" };
   }
