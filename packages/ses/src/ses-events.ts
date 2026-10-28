@@ -35,6 +35,8 @@ export interface ParsedSesEvent {
   /** Server-owned SES message tag: the Free pool owner the send counted in (SES_POOL_TAG). */
   poolOwnerId?: string;
   occurredAt: Date;
+  /** mail.timestamp: when SES took the mail. An ISO string, since it rides the queue as is. */
+  sentAt?: string;
   bounce?: {
     bounceType: "Permanent" | "Transient" | "Undetermined";
     bounceSubType: string;
@@ -90,6 +92,8 @@ export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
     occurredAt,
     data: { eventType },
   };
+  const sentAt = typeof mail?.timestamp === "string" ? new Date(mail.timestamp) : null;
+  if (sentAt && !Number.isNaN(sentAt.getTime())) parsed.sentAt = sentAt.toISOString();
   const tags = mail?.tags as Record<string, unknown> | undefined;
   const emailId = singleTag(tags, SES_EMAIL_ID_TAG);
   if (emailId !== undefined) parsed.emailId = emailId;

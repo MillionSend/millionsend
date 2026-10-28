@@ -97,7 +97,13 @@ export async function processSesEvent(
   const eventType = EVENT_TYPE_BY_EVENT[event.eventType];
   if (!status || !eventType) return;
 
-  const day = utcDay(new Date(event.occurredAt));
+  // A complaint counts on the UTC day its mail went out, the day SES's own
+  // complaint rate files it under; the hourly timeline keeps its arrival.
+  const day = utcDay(
+    new Date(
+      event.eventType === "Complaint" ? (event.sentAt ?? event.occurredAt) : event.occurredAt,
+    ),
+  );
   // delivered and bounced count every event. Engagement counters
   // (opened/clicked) are owned by the app-layer tracking endpoints, not here.
   // hard_bounced counts only Permanent bounces — the deliverability score's
@@ -271,7 +277,13 @@ export async function processSesEvent(
           )}
       `);
       await bumpHourlyUsage(txDb, { teamId: email.teamId, at: new Date(event.occurredAt), counts });
-      await bumpFreePoolUsage(txDb, { teamId: email.teamId, day, counts });
+      // The tag names the pool whose `sent` counted the send; untagged mail
+      // goes to the pool the team is in now.
+      await bumpFreePoolUsage(txDb, {
+        ...(event.poolOwnerId ? { ownerId: event.poolOwnerId } : { teamId: email.teamId }),
+        day,
+        counts,
+      });
     }
 
     // Auto-suppression: permanent bounces, full or abandoned mailboxes (as

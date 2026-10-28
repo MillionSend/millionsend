@@ -61,6 +61,27 @@ describe("parseSesEvent", () => {
     });
   });
 
+  it("carries the time SES took the mail, which a complaint is counted on", () => {
+    const parse = (timestamp: string) =>
+      parseSesEvent({
+        eventType: "Complaint",
+        mail: { messageId: "example-message-id-0005", timestamp },
+        complaint: {
+          complainedRecipients: [{ emailAddress: "recipient@example.com" }],
+          timestamp: "2026-03-02T08:30:00.000Z",
+        },
+      });
+
+    expect(parse("2026-03-01T23:59:59.000Z")).toMatchObject({
+      sentAt: "2026-03-01T23:59:59.000Z",
+      occurredAt: new Date("2026-03-02T08:30:00.000Z"),
+    });
+    // An unparseable time drops the field, never the event.
+    const garbled = parse("not a time");
+    expect(garbled?.complaint?.recipients).toEqual(["recipient@example.com"]);
+    expect(garbled).not.toHaveProperty("sentAt");
+  });
+
   it("reads the email id and the Free pool the worker tagged, each only as a single value", () => {
     const parse = (tags: Record<string, unknown>) =>
       parseSesEvent({
