@@ -73,7 +73,8 @@ equipe continuam contando para as métricas dela. Os envios de uma equipe
 excluída continuam contados, e os avisos de cota saem uma vez só para todas.
 As mesmas equipes dividem um só histórico de bounces e reclamações (veja
 [Proteções](/pt-BR/concepts/broadcasts#proteções)), que conta também os que
-chegam depois de uma equipe ser excluída. Equipes criadas antes de
+chegam depois de uma equipe ser excluída, cada reclamação no dia em que o
+e-mail foi enviado. Equipes criadas antes de
 a pessoa ser gravada recebem esse dado quando o worker inicia: o usuário
 indicado na linha `team.created` do log de auditoria delas ou, sem ela, o
 primeiro proprietário. Nessa hora, uma equipe Free leva para a contagem
@@ -83,7 +84,7 @@ reclamações dela e a contagem do dia continuam valendo.
 No Free, os e-mails para provedores que informam reclamações de spam também
 saem para no máximo 10 desses destinatários de uma vez e depois 10 por hora,
 somando todas as equipes Free que a pessoa criou (`FREE_BURST`, guardado por
-pessoa em `free_pool_bursts`). As reclamações chegam minutos ou horas depois
+pessoa em `free_pool_bursts`). As reclamações chegam de minutos a dias depois
 do envio, então uma pausa pode agir logo nas primeiras, antes de todos os
 e-mails do dia saírem. Cada destinatário desses conta, inclusive os em Cco. Um
 e-mail esperando a vez fica `queued` até o horário que ele reservou e confere

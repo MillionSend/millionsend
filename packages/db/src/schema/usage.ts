@@ -40,6 +40,8 @@ export const usageCounters = pgTable(
     // complained leave out feedback about mail SES never attempted (core's
     // sesAttempted), which SES's own rates leave out too.
     hardBounced: integer("hard_bounced").notNull().default(0),
+    // Dated by the UTC day the complaint's mail went out, the day SES's own
+    // rate files it under, not the day it arrived.
     complained: integer("complained").notNull().default(0),
     // Unique engagement per day: one recipient opening/clicking many times
     // counts once, so rates against `delivered` stay <= 100%.
@@ -79,9 +81,12 @@ export const usageCounters = pgTable(
  * platform breaker's region counts read, by day, and the shared inbox
  * domain's shared_recipients, shared_name_refusals and shared_name_reviews,
  * which only their own daily limits read; quota, the deliverability
- * guardrail and the account score keep reading the daily table. Rows before
- * the table existed were backfilled at noon UTC of their day, which is the
- * same calendar date in every timezone between UTC-11 and UTC+11.
+ * guardrail and the account score keep reading the daily table. `complained`
+ * sits on the hour the complaint arrived while the daily table dates it by
+ * its mail's send day, so for complaints the hours do not sum into the daily
+ * rows. Rows before the table existed were backfilled at noon UTC of
+ * their day, which is the same calendar date in every timezone between UTC-11
+ * and UTC+11.
  */
 export const usageCountersHourly = pgTable(
   "usage_counters_hourly",

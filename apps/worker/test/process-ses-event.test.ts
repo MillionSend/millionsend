@@ -217,17 +217,33 @@ describe("hard bounce and complaint counters", () => {
     expect(supp?.reason).toBe("hard_bounce");
   });
 
-  it("count a complaint on the day and hour it arrives, unless SES never attempted the mail", async () => {
+  it("count a complaint on the day its mail went out and the hour it arrives, unless SES never attempted the mail", async () => {
     const at = "2026-09-21T09:10:00.000Z";
-    const sentAt = new Date(Date.parse(at) - 14 * DAY_MS);
-    await insertSentEmail("mid-late-complaint", ["late@example.com"], null, sentAt);
+    const sentAt = new Date(Date.parse(at) - 14 * DAY_MS).toISOString();
+    await insertSentEmail("mid-late-complaint", ["late@example.com"], null, new Date(sentAt));
     await processSesEvent(
       db,
       makeEvent({
         eventType: "Complaint",
         sesMessageId: "mid-late-complaint",
         occurredAt: at,
+        sentAt,
         complaint: { recipients: ["late@example.com"], complaintFeedbackType: "abuse" },
+      }),
+    );
+    expect((await countersAt(sentAt)).daily?.complained).toBe(1);
+    expect((await countersAt(at)).daily).toBeUndefined();
+    expect((await countersAt(at)).hourly?.complained).toBe(1);
+
+    // Queued before the send time was carried: the day it arrived.
+    await insertSentEmail("mid-untimed-complaint", ["untimed@example.com"], null, new Date(sentAt));
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-untimed-complaint",
+        occurredAt: at,
+        complaint: { recipients: ["untimed@example.com"], complaintFeedbackType: "abuse" },
       }),
     );
     const listed = await insertSentEmail("mid-listed-complaint", ["listed@example.com"]);
@@ -237,6 +253,7 @@ describe("hard bounce and complaint counters", () => {
         eventType: "Complaint",
         sesMessageId: "mid-listed-complaint",
         occurredAt: at,
+        sentAt,
         complaint: {
           recipients: ["listed@example.com"],
           complaintSubType: "OnAccountSuppressionList",
@@ -246,8 +263,8 @@ describe("hard bounce and complaint counters", () => {
 
     const { daily, hourly } = await countersAt(at);
     expect(daily?.complained).toBe(1);
-    expect(hourly?.complained).toBe(1);
-    expect((await countersAt(sentAt.toISOString())).daily).toBeUndefined();
+    expect(hourly?.complained).toBe(2);
+    expect((await countersAt(sentAt)).daily?.complained).toBe(1);
     expect(await statusOf(listed)).toBe("complained");
     const [supp] = await db
       .select()
@@ -402,7 +419,8 @@ describe("feedback from the mailbox simulator and Free pools", () => {
     await insertSentEmail("mid-gone-bounce", ["gone@example.com"], null, new Date(), gone);
     await db.delete(schema.teams).where(eq(schema.teams.id, gone));
     const at = "2026-09-24T10:00:00.000Z";
-    const tagged = { occurredAt: at, poolOwnerId: owner };
+    const sentAt = "2026-09-22T10:00:00.000Z";
+    const tagged = { occurredAt: at, sentAt, poolOwnerId: owner };
     const events: Partial<SerializedSesEvent>[] = [
       {
         eventType: "Complaint",
@@ -450,9 +468,23 @@ describe("feedback from the mailbox simulator and Free pools", () => {
         .from(schema.sesUnmatchedEvents)
         .where(eq(schema.sesUnmatchedEvents.poolOwnerId, owner)),
     ).toHaveLength(4);
+    // The complaint on its mail's send day, the hard bounce on the day it arrived.
     expect(
-      await db.select().from(schema.freePoolUsage).where(eq(schema.freePoolUsage.ownerId, owner)),
+      await db
+        .select()
+        .from(schema.freePoolUsage)
+        .where(eq(schema.freePoolUsage.ownerId, owner))
+        .orderBy(schema.freePoolUsage.day),
     ).toEqual([
+      {
+        ownerId: owner,
+        day: sentAt.slice(0, 10),
+        accepted: 0,
+        sent: 0,
+        sentNoFeedback: 0,
+        hardBounced: 0,
+        complained: 1,
+      },
       {
         ownerId: owner,
         day: at.slice(0, 10),
@@ -460,6 +492,44 @@ describe("feedback from the mailbox simulator and Free pools", () => {
         sent: 0,
         sentNoFeedback: 0,
         hardBounced: 1,
+        complained: 0,
+      },
+    ]);
+  });
+
+  it("counts a complaint in the pool its send was tagged with, even once the team left Free", async () => {
+    const owner = "u-events-upgraded";
+    const upgraded = await createTeam(db, "events-upgraded", { poolOwnerId: owner });
+    const sentAt = "2026-09-26T10:00:00.000Z";
+    await insertSentEmail(
+      "mid-upgraded-complaint",
+      ["r@example.com"],
+      null,
+      new Date(sentAt),
+      upgraded,
+    );
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, upgraded));
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-upgraded-complaint",
+        occurredAt: "2026-09-27T10:00:00.000Z",
+        sentAt,
+        poolOwnerId: owner,
+        complaint: { recipients: ["r@example.com"] },
+      }),
+    );
+    expect(
+      await db.select().from(schema.freePoolUsage).where(eq(schema.freePoolUsage.ownerId, owner)),
+    ).toEqual([
+      {
+        ownerId: owner,
+        day: sentAt.slice(0, 10),
+        accepted: 0,
+        sent: 0,
+        sentNoFeedback: 0,
+        hardBounced: 0,
         complained: 1,
       },
     ]);

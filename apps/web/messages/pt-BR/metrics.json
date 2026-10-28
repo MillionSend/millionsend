@@ -12,13 +12,16 @@
   },
   "bounce": {
     "title": "Taxa de bounce permanente",
-    "bounced": "Bounces permanentes"
+    "bounced": "Bounces permanentes",
+    "noSends": "{count, plural, =0 {Nenhum envio} one {# bounce permanente · nenhum envio} other {# bounces permanentes · nenhum envio}}"
   },
   "complaint": {
     "title": "Taxa de reclamação",
     "complained": "Reclamações",
-    "window": "últimos {days} dias em UTC",
+    "window": "últimos {days} dias em UTC, pela data de envio",
+    "collecting": "reclamações ainda chegando",
     "ofReportable": "{count} de {sent} para caixas que avisam sobre spam",
+    "noReportable": "{count, plural, =0 {Nenhum envio para caixas que avisam sobre spam} one {# reclamação · nenhum envio para caixas que avisam sobre spam} other {# reclamações · nenhum envio para caixas que avisam sobre spam}}",
     "noReports": "Para caixas que não avisam sobre spam",
     "notCounted": "fora da taxa",
     "noReportsHint": "O Gmail, o iCloud e a t-online nunca avisam os remetentes quando alguém marca um e-mail como spam, então os e-mails para eles ficam fora da taxa."
@@ -26,7 +29,8 @@
   "chart": {
     "soFar": "até agora",
     "ofSent": "{count} de {sent} enviados",
-    "risk": "Risco {rate}"
+    "risk": "Risco {rate}",
+    "byArrival": "pela data de chegada"
   },
   "engagement": {
     "denominator": "das entregues"

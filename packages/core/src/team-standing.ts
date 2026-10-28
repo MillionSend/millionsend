@@ -305,9 +305,11 @@ export function sendRefusalError(refusal: SendRefusal): {
   if (refusal.reason === "team_suspended") return suspendedSendRefusal(refusal.suspension);
   const { metric, rate, windowDays } = refusal.pause;
   const limit = metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
+  const [what, over] =
+    metric === "bounce" ? ["hard bounce", "over"] : ["complaint", "on mail sent over"];
   return {
     code: "sending_paused",
-    message: `Sending is paused: your ${metric === "bounce" ? "hard bounce" : "complaint"} rate of ${(rate * 100).toFixed(2)}% over the last ${windowDays} days is at or above the ${(limit * 100).toFixed(2)}% limit. Lower it before sending again.`,
+    message: `Sending is paused: your ${what} rate of ${(rate * 100).toFixed(2)}% ${over} the last ${windowDays} days is at or above the ${(limit * 100).toFixed(2)}% limit. Lower it before sending again.`,
   };
 }
 

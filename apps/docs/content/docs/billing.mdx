@@ -68,7 +68,8 @@ many teams they have. Each team's own `usage_counters` keep counting for its
 metrics. A deleted team's sends stay counted, and the quota notices go out
 once for all of them. The same teams share one bounce and complaint record
 (see [Guardrails](/concepts/broadcasts#guardrails)), which also counts the
-bounces and complaints that arrive after a team is deleted. Teams created
+bounces and complaints that arrive after a team is deleted, each complaint
+dated by the day its email was sent. Teams created
 before the creator was recorded get it when the worker starts: the user named
 in their `team.created` audit row, otherwise their earliest owner. A Free team
 then brings its counts from the last 7 days into the shared ones, so its
@@ -77,7 +78,7 @@ bounce and complaint record and its day's count carry over.
 On Free, mail to providers that report spam complaints also goes out to at
 most 10 such recipients at once, then 10 an hour, across every Free team the
 person created (`FREE_BURST`, kept per creator in `free_pool_bursts`).
-Complaints arrive minutes to hours after a send, so a pause can act on the
+Complaints arrive minutes to days after a send, so a pause can act on the
 first ones before the day's mail has all left. Every such recipient counts,
 Bcc included. An email waiting its turn stays `queued` until the time it
 booked and checks its team's plan again at least once an hour, so if the team

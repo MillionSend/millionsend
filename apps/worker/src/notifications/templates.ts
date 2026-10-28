@@ -113,7 +113,7 @@ export function regionPausedMail(input: {
     subject: `Broadcasts paused in ${input.region}${heldTeams === null ? "" : ` for the teams drawing complaints`}: ${windowed ? "platform" : "SES"} ${metricLabel(reason.metric)} rate at ${percent(reason.rate)}`,
     paragraphs: [
       windowed
-        ? `Across every team sending from ${input.region}, the ${metricLabel(reason.metric)} rate over the last ${reason.windowHours} hours is ${percent(reason.rate)} (${reason.events} of ${reason.sent} sends${complaints ? " to providers that report complaints" : ""}), at or over the breaker's ${percent(reason.limit)} line${complaints ? `. ${sesLines}.` : ", set short of SES's own review line for the whole account."}`
+        ? `Across every team sending from ${input.region}, the ${metricLabel(reason.metric)} rate ${complaints ? "on mail sent " : ""}over the last ${reason.windowHours} hours is ${percent(reason.rate)} (${reason.events} of ${reason.sent} sends${complaints ? " to providers that report complaints" : ""}), at or over the breaker's ${percent(reason.limit)} line${complaints ? `. ${sesLines}.` : ", set short of SES's own review line for the whole account."}`
         : `SES measures the account's complaint rate in ${input.region} at ${percent(reason.rate)}, at or over the breaker's ${percent(reason.limit)} line. ${sesLines}.`,
       ...(windowed && complaints
         ? [

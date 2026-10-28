@@ -198,7 +198,7 @@ export const QUOTA_TOLERANCE = 0.5;
  * A Free pool's burst allowance on Cloud (core bookFreeBurst): its mail to
  * providers that report complaints reaches FREE_BURST recipients at once,
  * then one more every FREE_BURST_REFILL_MS. Complaints arrive minutes to
- * hours after a send, so the pool's pause can act before a whole day's mail
+ * days after a send, so the pool's pause can act before a whole day's mail
  * has left.
  */
 export const FREE_BURST = 10;

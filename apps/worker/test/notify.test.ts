@@ -292,7 +292,7 @@ it("deliverability pause fires once per episode and again after recovery", async
   await counters({ sent: 200, complained: 3 });
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   expect(sends[0]?.subject).toBe("Sending paused (complaint rate)");
-  expect(sends[0]?.text).toContain("complaint rate");
+  expect(sends[0]?.text).toContain("complaint rate on mail sent over the last 2 days reached");
   const [row] = await deliveries();
   expect(row?.type).toBe("deliverability.paused");
   expect(row?.payload).toMatchObject({
