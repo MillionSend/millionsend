@@ -122,8 +122,9 @@ A nota da conta é uma visão móvel de 30 dias, construída de duas sub-notas:
   5%–10%. Com menos de 100 envios na janela a sub-nota de resultado aparece
   como "dados insuficientes" em vez de fabricada de uma amostra minúscula. A
   taxa de reclamação é o número de reclamações sobre os envios para
-  provedores que as informam, e ela só tira pontos quando a janela tem 100
-  desses envios.
+  provedores que as informam, cada uma contada no dia em que o e-mail foi
+  enviado, a mesma data que o SES usa na própria taxa. Ela só tira pontos
+  quando a janela tem 100 desses envios.
 
 A nota principal é `min(0,4·C + 0,6·O, O + 1,5)`. O segundo termo é um
 teto: um lint de conteúdo imaculado nunca mascara um problema real de

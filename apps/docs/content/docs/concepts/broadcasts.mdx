@@ -196,13 +196,15 @@ Gmail and Apple never report one, so their cell shows a dash.
   too, but sending a broadcast from it answers `403 inbox_send_policy`.
 - If your trailing bounce or complaint rate has crossed the SES pause
   threshold, new broadcast sends are blocked with a `403 sending_paused`
-  error, stopping the damage before SES pauses sending entirely. The
-  complaint rate counts only mail to providers that report complaints
-  (Gmail, Apple Mail and t-online never do), and complaints count toward a
-  warning or this pause only once there are 100 such sends. On the Free
-  plan they count from the first email, judged together across all the Free
-  teams you created, deleted ones included, and a pause holds every one of
-  them.
+  error, stopping the damage before SES pauses sending entirely. A complaint
+  is dated by the UTC day its email was sent, as SES dates its own rate, so
+  the pause weighs complaints about the last two days' mail and the warning
+  about the last seven days'. The complaint rate counts only mail to
+  providers that report complaints (Gmail, Apple Mail and t-online never
+  do), and complaints count toward a warning or this pause only once there
+  are 100 such sends. On the Free plan they count from the first email,
+  judged together across all the Free teams you created, deleted ones
+  included, and a pause holds every one of them.
 - If the platform's aggregate bounce rate in your sender's SES region nears
   the line where SES acts on the account, broadcast sends in that region are
   refused with `403 broadcasts_paused` until the rate recovers. When it is
@@ -216,6 +218,10 @@ See the [API reference](/api-reference) for all broadcast endpoints.
 
 ## Recent changes
 
+- Complaints are dated by the day their email was sent, as SES dates its own
+  rate, not the day they arrive: in the guardrail, the account score and
+  the complaint rate on the Metrics page. A late complaint about older mail
+  no longer pauses a team that is sending cleanly today.
 - A pause for the platform's complaint rate in an SES region refuses
   broadcasts with `403 broadcasts_paused` only to the teams whose own
   complaint rate over the last 30 days is at 0.1% or more; before, it
