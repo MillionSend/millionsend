@@ -5,6 +5,11 @@ import type { TeamRole } from "@/server/membership";
 
 const noSubscription = () => () => {};
 
+/** The roles the server's adminProcedure admits. */
+export function isTeamAdmin(role: TeamRole | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 /** The role the server rendered the page with; AppShell provides it. */
 export const ServerTeamRole = createContext<TeamRole | undefined>(undefined);
 

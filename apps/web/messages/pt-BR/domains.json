@@ -110,12 +110,12 @@
     "recordsHeadingGeneric": "Adicione estes registros no seu provedor de DNS",
     "groups": {
       "verification": "Verificação do domínio (DKIM)",
-      "sending": "Habilitar envio",
+      "sending": "Ativar envio",
       "dmarc": "DMARC (recomendado)",
       "tracking": "Rastreamento de aberturas e cliques",
       "trackingNote": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário. Defina um subdomínio em Configuração para servi-los do seu próprio domínio.",
       "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário.",
-      "receiving": "Habilitar recebimento"
+      "receiving": "Ativar recebimento"
     },
     "tracking": {
       "open": "Ativar rastreamento de aberturas",
@@ -234,7 +234,10 @@
       "catchAllError": "Não foi possível alterar o pega-tudo. Tente de novo.",
       "catchAllOffTitle": "Desligar o pega-tudo?",
       "catchAllOffConfirm": "E-mails para endereços em {domain} sem caixa de entrada passam a ser recusados. Os endereços das caixas continuam recebendo.",
-      "catchAllOffCta": "Desligar pega-tudo"
+      "catchAllOffCta": "Desligar pega-tudo",
+      "adminOnly": "Só donos e admins podem mudar o recebimento.",
+      "elsewhereOff": "Os e-mails de {domain} vão para {host}. Para receber aqui, o registro MX dele teria que apontar para o MillionSend: todos esses e-mails passariam a chegar aqui e deixariam de chegar às contas de e-mail que os recebem hoje. Para manter essas contas, receba em um subdomínio como {sub}, adicionado e verificado como um domínio próprio.",
+      "elsewhereOn": "Os e-mails de {domain} ainda vão para {host}, que é para onde o registro MX dele aponta, então as caixas de entrada daqui ainda não recebem nada. Apontar o registro para o MillionSend traria todos os e-mails de {domain} para cá. Para deixar esses e-mails onde estão, receba em um subdomínio como {sub}."
     },
     "bannerVerifiedLimited": "Pronto para enviar, até {cap} e-mails por dia por enquanto.",
     "limit": {

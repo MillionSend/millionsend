@@ -111,7 +111,7 @@
   "empty": {
     "title": "No inboxes yet",
     "body": "Create an address that receives mail. Agents read it over the API, webhooks or MCP; people read it here.",
-    "sharedOnly": "Create an address at {domain}, no DNS needed. For addresses on your own domain, turn on receiving for it."
+    "sharedOnly": "Create an address at {domain}, no DNS needed. For addresses on your own domain, <link>turn on receiving</link> for it."
   },
   "limit": {
     "reached": "You've used all {limit} inboxes on your plan. <link>Upgrade</link> to create more.",
@@ -126,8 +126,11 @@
     "title": "Create inbox",
     "needsReceiving": "Turn on receiving for a domain to create inboxes.",
     "address": "Address",
-    "addressHint": "Your domains with receiving on, or the shared {domain}, ready with no DNS.",
-    "addressHintOwn": "Your domains with receiving on.",
+    "addressHint": "Your domains, or the shared {domain}, ready with no DNS.",
+    "addressHintNone": "{domain} is ready with no DNS. To use your own domain, add it in <link>Domains</link>, then turn on receiving.",
+    "domain": "Domain",
+    "noDns": "No DNS",
+    "receivingOff": "Receiving off",
     "addressFromName": "From the name. Edit it, or clear it for a random address.",
     "addressFromNameOwn": "From the name. Edit it if you like.",
     "random": "Random address",
@@ -145,6 +148,7 @@
     "errors": {
       "taken": "This address is already in use.",
       "notReceiving": "Turn on receiving for {domain} first.",
+      "notVerified": "Verify {domain} first.",
       "rate": "Too many inboxes created in the last hour. Try again later.",
       "localPart": "Use lowercase letters, digits and . _ % + - (up to 64), with no dot at either end.",
       "username": "Use lowercase letters, digits and . _ - (up to 64), starting and ending with a letter or digit, with no two dots in a row.",
@@ -153,6 +157,26 @@
       "sharedPending": "The shared domain isn't ready for your team yet. Try again in a few minutes.",
       "tooManyNames": "Too many names were checked today. Try again tomorrow.",
       "orRandom": "Or leave the address empty for a random one."
+    },
+    "receiving": {
+      "offTitle": "{domain} doesn't receive mail here yet",
+      "checking": "Checking where {domain} gets its mail…",
+      "enableBody": "Turn on receiving, then add one MX record at your DNS provider. Mail arrives once the record is live.",
+      "enableFound": "Its MX record already points here, so mail arrives as soon as receiving is on.",
+      "memberBody": "Only owners and admins can turn on receiving. Send one of them this link.",
+      "untilShared": "Until then, {domain} works with no DNS.",
+      "copyLink": "Copy link",
+      "docs": "How receiving works",
+      "unknown": "Couldn't check where {domain} gets its mail. Try again in a moment.",
+      "unverifiedTitle": "{domain} isn't verified yet",
+      "unverifiedBody": "Inboxes need a verified domain with receiving on. Its DNS records are on the domain page.",
+      "openDomain": "Open domain",
+      "addDomain": "Add {domain}",
+      "onPurpose": "Moving all of {domain}'s mail here on purpose? <link>Enable receiving on its page</link>.",
+      "memberAddDomain": "Only owners and admins can add a domain.",
+      "mxToAdd": "MX to add",
+      "addMxBody": "Receiving is on. Add this record at your DNS provider: you can create the inbox now, and mail reaches it once the record is live.",
+      "liveBody": "Receiving is on and its MX record points here: mail arrives right away."
     }
   },
   "acceptFrom": {

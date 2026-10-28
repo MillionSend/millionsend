@@ -13,7 +13,7 @@ import { LABEL_COLORS } from "@millionsend/core/inbox-organize";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getKeyring } from "@/server/keyring";
 import type { SessionRole } from "@/server/membership";
@@ -824,8 +824,26 @@ describe("the inbox list", () => {
   it("offers the receiving domains, the shared domain and the plan's room to create", async () => {
     vi.stubEnv("SHARED_INBOX_DOMAIN", "agents.example.net");
     vi.stubEnv("IS_CLOUD", "true");
+    // Pending sorts after the verified domain that only lacks receiving, whatever its name.
+    const [pending] = await db
+      .insert(schema.domains)
+      .values({ teamId: acme, name: "a-pending.acme.test", region: "us-east-1" })
+      .returning({ id: schema.domains.id });
+    await db.insert(schema.domains).values({
+      teamId: beta,
+      name: "elsewhere.beta.test",
+      region: "us-east-1",
+      status: "verified",
+    });
     const options = await caller(acme).inboxes.options();
+    await db
+      .delete(schema.domains)
+      .where(inArray(schema.domains.name, ["a-pending.acme.test", "elsewhere.beta.test"]));
     expect(options.domains).toEqual([{ id: domainId, name: "in.acme.test" }]);
+    expect(options.otherDomains).toEqual([
+      { id: expect.any(String), name: "quiet.acme.test", status: "verified" },
+      { id: pending?.id, name: "a-pending.acme.test", status: "pending" },
+    ]);
     expect(options.sharedDomain).toBe("agents.example.net");
     expect(options.plan).toEqual({ used: 1, limit: PLAN_INBOX_LIMIT.free });
     vi.stubEnv("IS_CLOUD", "");

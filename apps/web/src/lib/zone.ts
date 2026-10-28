@@ -12,3 +12,8 @@ export function zoneRelativeName(recordName: string, domain: string): string {
   if (name === zone) return "@";
   return name.endsWith(`.${zone}`) ? name.slice(0, -(zone.length + 1)) : recordName;
 }
+
+/** The subdomain suggested for receiving, so the mailboxes at the domain itself stay where they are. */
+export function receivingSubdomain(domain: string): string {
+  return `inbound.${domain}`;
+}

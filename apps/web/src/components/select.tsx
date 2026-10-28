@@ -215,7 +215,11 @@ export function Select({
         state.buffer = now - state.at > TYPEAHEAD_RESET_MS ? event.key : state.buffer + event.key;
         state.at = now;
         const needle = state.buffer.toLowerCase();
-        const hit = filtered.findIndex((o) => o.label.toLowerCase().startsWith(needle));
+        // "@example.com" is found by typing "e" too.
+        const hit = filtered.findIndex((o) => {
+          const label = o.label.toLowerCase();
+          return label.startsWith(needle) || label.replace(/^@/, "").startsWith(needle);
+        });
         if (hit >= 0) setActiveIndex(hit);
       }
     }
@@ -268,7 +272,10 @@ export function Select({
           }}
         >
           {selected?.adornment}
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span
+            title={selected?.label}
+            style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
             {selected?.label ?? ""}
           </span>
           {selected?.badge ? (
@@ -417,14 +424,15 @@ export function SelectOptionList({
           }}
         >
           {option.adornment}
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+          {/* A long label ends in an ellipsis before its hint does. */}
+          <span title={option.label} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
             {option.label}
-            {option.hint !== undefined ? (
-              <span style={{ color: "var(--ms-muted)", marginLeft: 8, fontSize: 12 }}>
-                {option.hint}
-              </span>
-            ) : null}
           </span>
+          {option.hint !== undefined ? (
+            <span style={{ color: "var(--ms-muted)", fontSize: 12, flexShrink: 0 }}>
+              {option.hint}
+            </span>
+          ) : null}
           {option.badge ? (
             <span
               className={`ms-badge ms-badge-${option.badge.tone}`}

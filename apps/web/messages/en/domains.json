@@ -234,7 +234,10 @@
       "catchAllError": "Couldn't change catch-all. Try again.",
       "catchAllOffTitle": "Turn off catch-all?",
       "catchAllOffConfirm": "Mail to addresses at {domain} that have no inbox is refused from now on. Inbox addresses keep receiving.",
-      "catchAllOffCta": "Turn off catch-all"
+      "catchAllOffCta": "Turn off catch-all",
+      "adminOnly": "Only owners and admins can change receiving.",
+      "elsewhereOff": "Mail for {domain} goes to {host}. Receiving it here means pointing its MX record at MillionSend, which moves all of that mail here and away from the mailboxes that get it today. To keep them, receive on a subdomain such as {sub}, added and verified as its own domain.",
+      "elsewhereOn": "Mail for {domain} still goes to {host}, where its MX record points, so inboxes here get nothing yet. Pointing it at MillionSend would move all of {domain}'s mail here. To keep that mail where it is, receive on a subdomain such as {sub}."
     },
     "bannerVerifiedLimited": "Ready to send, up to {cap} emails a day for now.",
     "limit": {

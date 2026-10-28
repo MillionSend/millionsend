@@ -28,21 +28,17 @@ export function displayDomainStatus(
   return status === "verified" && trackingPending ? "partial" : status;
 }
 
-/**
- * temporary_failure is domain-specific, so its label lives in the domains
- * catalog. A pending domain is warn (canvas), not the neutral shared pending.
- */
-export function DomainStatusBadge({ status }: { status: DisplayDomainStatus }) {
+/** A domain's status in words. temporary_failure is domain-specific, so its label lives in the domains catalog. */
+export function useDomainStatusLabel(): (status: DisplayDomainStatus) => string {
   const t = useTranslations("domains");
   const common = useTranslations("common");
-  if (status === "temporary_failure") {
-    return <span className="ms-badge ms-badge-warn">{t("status.temporary_failure")}</span>;
-  }
-  if (status === "partial") {
-    return <span className="ms-badge ms-badge-info">{common("status.partial")}</span>;
-  }
-  if (status === "pending") {
-    return <span className="ms-badge ms-badge-warn">{common("status.pending")}</span>;
-  }
-  return <StatusBadge status={status} />;
+  return (status) =>
+    status === "temporary_failure" ? t("status.temporary_failure") : common(`status.${status}`);
+}
+
+/** A pending domain is warn (canvas), not the neutral shared pending. */
+export function DomainStatusBadge({ status }: { status: DisplayDomainStatus }) {
+  const label = useDomainStatusLabel();
+  if (status === "verified" || status === "failed") return <StatusBadge status={status} />;
+  return <span className={`ms-badge ms-badge-${DOMAIN_TONE[status]}`}>{label(status)}</span>;
 }
