@@ -115,7 +115,12 @@ const billingOnly: AbuseJudge = {
 const PIX =
   "00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D";
 
-const judge = (sampleId: string, answer: AbuseJudge, linkYoung = false) =>
+const judge = (
+  sampleId: string,
+  answer: AbuseJudge,
+  linkYoung: boolean | null = false,
+  linkAged: boolean | null = linkYoung === null ? null : !linkYoung,
+) =>
   judgeSample(
     db,
     {
@@ -127,6 +132,7 @@ const judge = (sampleId: string, answer: AbuseJudge, linkYoung = false) =>
       enqueueBroadcast: async (broadcastId) => void fanOuts.push(broadcastId),
       platformDomains: PLATFORM,
       linkDomainYoung: async () => linkYoung,
+      linkDomainAged: async () => linkAged,
     },
     { sampleId },
   );
@@ -197,6 +203,10 @@ const cleared = async (teamId: string) =>
       .from(schema.teamDestinations)
       .where(eq(schema.teamDestinations.teamId, teamId))
   ).map((r) => r.domain);
+
+const suspension = async (teamId: string) =>
+  (await db.select().from(schema.teams).where(eq(schema.teams.id, teamId)))[0]?.suspensionReason ??
+  null;
 
 it("never screens mail that links only to the team's own domains", async () => {
   const t = await team("own-links", "established");
@@ -436,16 +446,21 @@ it("parks a team past new's mail to a platform name as any other on a credential
   expect(await row(id)).toMatchObject({ parkReason: "destination" });
 });
 
-it("spares no broadcast: a new team's broadcast linking to a platform name is held on a credential-only verdict", async () => {
-  const t = await team("platform-bcast", "new");
+/** A new team's broadcast fanned out: its skeleton sample once `answer` judged it. */
+async function judgedBroadcast(
+  t: { teamId: string; domain: string },
+  values: { from: string; replyTo?: string[]; html: string },
+  answer: AbuseJudge,
+) {
   await db.insert(schema.contacts).values([{ teamId: t.teamId, email: "a@example.com" }]);
   const [broadcast] = await db
     .insert(schema.broadcasts)
     .values({
       teamId: t.teamId,
-      from: `B <hi@${t.slug}.dev>`,
+      from: values.from,
+      replyTo: values.replyTo ? JSON.stringify(values.replyTo) : null,
       subject: "news",
-      html: '<p><a href="https://x.pages.dev/reset">Reset</a></p>',
+      html: values.html,
       status: "scheduled",
     })
     .returning({ id: schema.broadcasts.id });
@@ -468,14 +483,24 @@ it("spares no broadcast: a new team's broadcast linking to a platform name is he
         eq(schema.monitorSamples.kind, "broadcast_skeleton"),
       ),
     );
-  expect(await judge(skeleton?.id ?? "", credentialOnly(94))).toBe("judged");
-  const [judged] = await db
-    .select()
-    .from(schema.monitorSamples)
-    .where(eq(schema.monitorSamples.id, skeleton?.id ?? ""));
+  expect(await judge(skeleton?.id ?? "", answer)).toBe("judged");
+  return (
+    await db
+      .select()
+      .from(schema.monitorSamples)
+      .where(eq(schema.monitorSamples.id, skeleton?.id ?? ""))
+  )[0];
+}
+
+it("spares no broadcast: a new team's broadcast linking to a platform name is held on a credential-only verdict", async () => {
+  const t = await team("platform-bcast", "new");
+  const judged = await judgedBroadcast(
+    t,
+    { from: `B <hi@${t.domain}>`, html: '<p><a href="https://x.pages.dev/reset">Reset</a></p>' },
+    credentialOnly(94),
+  );
   expect(judged).toMatchObject({ sparedHold: null });
-  const [held] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
-  expect(held?.suspensionReason).toBe("review");
+  expect(await suspension(t.teamId)).toBe("review");
 });
 
 it("holds a new team on one phishing verdict from 80 linking to a young domain", async () => {
@@ -623,4 +648,222 @@ it("lists a new destination first in the judge's link table, past thirty links t
     .split("\n")
     .filter((line) => line.startsWith("  ") && line.includes(" -> "));
   expect(rows[0]).toContain("-> lure-at-the-end.com");
+});
+
+/** The judge's read of a platform's order notice for a client business: that business's brand, nothing asked. */
+const clientBrand = (score: number, reasons = ["impersonation"]): AbuseJudge => ({
+  provider: "typesafe",
+  model: "fake-model",
+  judge: async () => ({
+    score,
+    verdict: "abuse" as const,
+    categories: ["brand_impersonation"],
+    reasons,
+    impersonatedBrand: null,
+    language: "pt-BR",
+  }),
+});
+
+const CLIENT_SITE = "acme-tiles.example";
+const clientHtml = (site: string) =>
+  `<p>Oi Fulano, seu pedido 12345 foi confirmado e já está em separação. Você recebe outro aviso quando ele sair para entrega.</p><p><a href="https://${site}/pedidos/12345">Ver meu pedido</a></p>`;
+
+/** A store platform's order notice for one client: From the client's name, replying to and linking its site. */
+async function clientNotice(
+  t: { teamId: string; domainId: string; domain: string },
+  o: { name?: string; site?: string; replyTo?: string[]; extra?: string } = {},
+) {
+  const site = o.site ?? CLIENT_SITE;
+  const id = randomUUID();
+  const body = await encryptEmailBody(
+    { html: `${clientHtml(site)}${o.extra ?? ""}`, text: null },
+    keyring,
+    { teamId: t.teamId, rowId: id },
+  );
+  await db.insert(schema.emails).values({
+    id,
+    teamId: t.teamId,
+    domainId: t.domainId,
+    from: `"${o.name ?? "Acme Tiles"}" <orders@${t.domain}>`,
+    replyTo: o.replyTo ?? [`contato@${site}`],
+    to: ["r@example.org"],
+    subject: "Pedido 12345 confirmado",
+    bodyCiphertext: body.ciphertext,
+    bodyIv: body.iv,
+    bodyWrappedDek: body.wrappedDek,
+    bodyKeyVersion: body.keyVersion,
+  });
+  return id;
+}
+
+it("parks a new team's notice for a client business instead of holding it, and its release vouches for the client's name on that site", async () => {
+  const t = await team("store-platform", "new", "example");
+  const first = await clientNotice(t);
+  expect(await sendEmail(db, sendDeps, { emailId: first })).toBe("deferred");
+  expect(await judge((await sampleOf(first))?.id ?? "", clientBrand(93))).toBe("judged");
+  expect(await sampleOf(first)).toMatchObject({
+    destinations: [CLIENT_SITE],
+    sparedHold: "score",
+  });
+  expect(await suspension(t.teamId)).toBeNull();
+  expect(await sendEmail(db, sendDeps, { emailId: first })).toBe("parked");
+  expect(mails.map((m) => m.kind)).toEqual(["monitor.destination_parked"]);
+  expect(sesCalls).toEqual([]);
+  await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [first], holdLine: 80 });
+  expect(await cleared(t.teamId)).toEqual([CLIENT_SITE]);
+
+  // The next notice under the client's name is neither held, parked, delayed nor a revocation.
+  const next = await clientNotice(t);
+  expect(await sendEmail(db, sendDeps, { emailId: next })).toBe("deferred");
+  await judge((await sampleOf(next))?.id ?? "", clientBrand(93));
+  expect(await sampleOf(next)).toMatchObject({ sparedHold: "vouched" });
+  expect(await sendEmail(db, sendDeps, { emailId: next })).toBe("sent");
+  expect(await suspension(t.teamId)).toBeNull();
+  expect(mails.map((m) => m.kind)).toEqual(["monitor.destination_parked"]);
+
+  // Another brand's name on the released site is no client notice: the hold stands.
+  const other = await clientNotice(t, { name: "Banco Exemplo" });
+  await sendEmail(db, sendDeps, { emailId: other });
+  await judge((await sampleOf(other))?.id ?? "", clientBrand(93));
+  expect(await sampleOf(other)).toMatchObject({ sparedHold: null });
+  expect(await suspension(t.teamId)).toBe("review");
+  expect(sesCalls).toEqual([next]);
+});
+
+it("dates a client's site a clean verdict already cleared: parked on a known date past young, held on none", async () => {
+  for (const [aged, spared] of [
+    [true, "score"],
+    [false, null],
+    [null, null],
+  ] as const) {
+    const t = await team(`store-cleared-${aged}`, "new", "example");
+    const first = await clientNotice(t);
+    await sendEmail(db, sendDeps, { emailId: first });
+    await judge((await sampleOf(first))?.id ?? "", verdict(12, false));
+    expect(await cleared(t.teamId)).toEqual([CLIENT_SITE]);
+    const next = await clientNotice(t);
+    await sendEmail(db, sendDeps, { emailId: next });
+    await judge((await sampleOf(next))?.id ?? "", clientBrand(93), null, aged);
+    expect(await sampleOf(next), `${aged}`).toMatchObject({ sparedHold: spared });
+    expect(await suspension(t.teamId), `${aged}`).toBe(spared ? null : "review");
+  }
+});
+
+it("still holds a new team whose client notice asks for anything, pays by Pix, links a young or undated site, or strays from the site", async () => {
+  const cases: [
+    string,
+    AbuseJudge,
+    boolean | null,
+    boolean | null,
+    Parameters<typeof clientNotice>[1],
+  ][] = [
+    ["client-ask", clientBrand(93, ["impersonation", "harvests_secrets"]), false, true, {}],
+    ["client-young", clientBrand(93), true, false, {}],
+    ["client-age-unknown", clientBrand(93), null, null, {}],
+    ["client-no-date", clientBrand(93), false, false, {}],
+    ["client-pix", clientBrand(93), false, true, { extra: `<p>Pix copia e cola: ${PIX}</p>` }],
+    ["client-reply-gmail", clientBrand(93), false, true, { replyTo: ["vendas@gmail.com"] }],
+    ["client-no-reply", clientBrand(93), false, true, { replyTo: [] }],
+    [
+      "client-listed",
+      clientBrand(93),
+      false,
+      true,
+      { name: "Nubank Brasil", site: "nubank-brasil.example" },
+    ],
+    [
+      "client-mailto",
+      clientBrand(93),
+      false,
+      true,
+      { extra: '<a href="&#1;mailto:pagamentos@lure.example">fale conosco</a>' },
+    ],
+  ];
+  for (const [slug, answer, linkYoung, linkAged, o] of cases) {
+    const t = await team(slug, "new", "example");
+    const id = await clientNotice(t, o);
+    await sendEmail(db, sendDeps, { emailId: id });
+    await judge((await sampleOf(id))?.id ?? "", answer, linkYoung, linkAged);
+    expect(await sampleOf(id), slug).toMatchObject({ sparedHold: null });
+    expect(await suspension(t.teamId), slug).toBe("review");
+  }
+});
+
+it("still holds a new team whose client notice comes from a sending domain under 7 days old", async () => {
+  const t = await team("client-young-sender", "new", "example");
+  await db
+    .update(schema.domains)
+    .set({ registeredAt: new Date(Date.now() - 2 * DAY) })
+    .where(eq(schema.domains.id, t.domainId));
+  const id = await clientNotice(t);
+  await sendEmail(db, sendDeps, { emailId: id });
+  await judge((await sampleOf(id))?.id ?? "", clientBrand(93));
+  expect(await sampleOf(id)).toMatchObject({ sparedHold: null });
+  expect(await suspension(t.teamId)).toBe("review");
+});
+
+it("spares no broadcast: a new team's broadcast for a client business is held", async () => {
+  const t = await team("client-bcast", "new", "example");
+  const judged = await judgedBroadcast(
+    t,
+    {
+      from: `"Acme Tiles" <hi@${t.domain}>`,
+      replyTo: [`contato@${CLIENT_SITE}`],
+      html: clientHtml(CLIENT_SITE),
+    },
+    clientBrand(93),
+  );
+  expect(judged).toMatchObject({ sparedHold: null });
+  expect(await suspension(t.teamId)).toBe("review");
+});
+
+it("lets a vouched client's notice judged after sending through, and holds a new team on one no release vouched", async () => {
+  for (const operator of [true, false]) {
+    const t = await team(`store-ramp-${operator}`, "new", "example");
+    // Past the first window, inside the ramp; the client's site cleared a day ago.
+    await db
+      .update(schema.teamMonitor)
+      .set({ sentTotal: 2_000, firstSendAt: new Date(Date.now() - 4 * DAY) })
+      .where(eq(schema.teamMonitor.teamId, t.teamId));
+    const at = new Date(Date.now() - DAY);
+    await db.insert(schema.teamDestinations).values({
+      teamId: t.teamId,
+      domain: CLIENT_SITE,
+      clearedAt: at,
+      operatorClearedAt: operator ? at : null,
+    });
+    const id = await clientNotice(t);
+    expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("sent");
+    const sample = await sampleOf(id);
+    expect(sample).toMatchObject({ screening: false, status: "pending" });
+    await judge(sample?.id ?? "", clientBrand(93));
+    expect(await sampleOf(id)).toMatchObject({ sparedHold: operator ? "vouched" : null });
+    expect(await suspension(t.teamId)).toBe(operator ? null : "review");
+    const [site] = await db
+      .select()
+      .from(schema.teamDestinations)
+      .where(eq(schema.teamDestinations.teamId, t.teamId));
+    expect(site?.revokedAt === null).toBe(operator);
+  }
+});
+
+it("counts a vouched client's notices toward no repeat hold", async () => {
+  const t = await team("store-repeat", "new", "example");
+  const at = new Date(Date.now() - DAY);
+  await db.insert(schema.teamDestinations).values({
+    teamId: t.teamId,
+    domain: CLIENT_SITE,
+    clearedAt: at,
+    operatorClearedAt: at,
+  });
+  for (let i = 0; i < 4; i++) {
+    const id = await clientNotice(t);
+    await sendEmail(db, sendDeps, { emailId: id });
+    await judge((await sampleOf(id))?.id ?? "", clientBrand(85));
+    expect(await sampleOf(id)).toMatchObject({ sparedHold: "vouched" });
+  }
+  const lure = await email(t, "https://other-site.example/login");
+  await sendEmail(db, sendDeps, { emailId: lure });
+  await judge((await sampleOf(lure))?.id ?? "", verdict(85));
+  expect(await suspension(t.teamId)).toBeNull();
 });

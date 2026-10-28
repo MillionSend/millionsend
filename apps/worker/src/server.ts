@@ -42,6 +42,7 @@ import {
   hashRecipient,
   type InboxDeps,
   type InboxSendDeps,
+  linkDomainsAged,
   type MonitorDeps,
   markDomainAgeUnknown,
   monitorSettingsReader,
@@ -867,6 +868,8 @@ await queue.work(
         platformDomains,
         linkDomainYoung: (domains, at) =>
           anyYoungLinkDomain(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
+        linkDomainAged: (domains, at) =>
+          linkDomainsAged(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
         media: { vision },
       },
       { sampleId },

@@ -1,4 +1,4 @@
-import { getDomain } from "tldts";
+import { getDomain, getDomainWithoutSuffix } from "tldts";
 
 /** A hostname as DNS compares it: lowercase, without the root's trailing dot. */
 export function normalizeHostname(hostname: string): string {
@@ -84,6 +84,15 @@ export function linkDomain(href: string): string | null {
 export function ownerDomain(hostname: string): string {
   const name = normalizeHostname(hostname);
   return getDomain(name, { allowPrivateDomains: true }) ?? name;
+}
+
+/**
+ * The name a domain was registered under, without its suffix, the private
+ * section of the list included: "acme" for mail.acme.com.br. Null for an IP
+ * or a bare suffix.
+ */
+export function registeredName(hostname: string): string | null {
+  return getDomainWithoutSuffix(normalizeHostname(hostname), { allowPrivateDomains: true });
 }
 
 /**

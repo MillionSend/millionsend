@@ -2,10 +2,22 @@ import { createHmac, hkdfSync } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import type { JudgeBlockInput } from "./abuse-judge/block.js";
+import { opaqueFacts } from "./abuse-judge/body.js";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
+import { countInvisible } from "./customer-text.js";
+import { imitatedBrandIn, plainWords } from "./imitated-brands.js";
+import { extractLinks } from "./links.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
-import { isFreeHostName, isLoopbackHost, registrableDomain } from "./org-domain.js";
+import {
+  isFreeHostName,
+  isLoopbackHost,
+  ownerDomain,
+  registeredName,
+  registrableDomain,
+} from "./org-domain.js";
+import { parseMailbox, parseSingleSender } from "./sender-address.js";
 import { fetchTeamStanding, suspendTeam } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
@@ -587,7 +599,7 @@ export interface VerdictOutcome {
   paused: boolean;
   /** The team was suspended for review now by the hold policy, under this rule. */
   held: HoldRule | null;
-  /** The hold rule the verdict met while the team was spared it for a platform link: the mail parks instead. */
+  /** The hold rule the verdict met while the team was spared it (`platformLink`): the mail parks instead. */
   spared: HoldRule | null;
 }
 
@@ -709,12 +721,76 @@ export function isPlatformLinkVerdict(
 }
 
 /**
+ * A platform's notice for one client business, sent under the platform's own
+ * verified domain ("Acme Tiles" <orders@platform.example>, replying to and
+ * linking acme-tiles.example), that the judge reads as that business's
+ * impersonation and nothing more: brand_impersonation at most for a category,
+ * impersonation at most for a reason. Its one destination is a registered
+ * name (no free host's tenant, no IDN) that every Reply-To address and at
+ * least one web link sit under, and the From name's letters spell that name
+ * without its suffix: look-alike letters read as Latin, but none of the swaps
+ * imitatedBrandIn folds, so a real name never matches a typosquat of it. No
+ * brand IMITATED_BRANDS lists in the name, the subject or the destination, no
+ * invisible character in the name, no link that opens anything but a web
+ * page, no file and no opaque body. The judge cannot tell such a notice from a
+ * brand lure on a lookalike domain, so the caller spares the team the hold and
+ * parks the mail for a person, as isPlatformLinkVerdict's are, until an
+ * operator's release of mail to that site vouches for the name spelling it.
+ */
+export function isClientIdentityVerdict(
+  v: HoldVerdictFields,
+  mail: Pick<JudgeBlockInput, "from" | "replyTo" | "subject" | "html" | "text" | "attachments">,
+  destinations: readonly string[],
+): boolean {
+  const [d, ...more] = destinations;
+  if (
+    v.verdict !== "abuse" ||
+    d === undefined ||
+    more.length > 0 ||
+    !(v.categories ?? []).every((c) => c === "brand_impersonation") ||
+    !(v.reasons ?? []).every((r) => r === "impersonation") ||
+    registrableDomain(d) !== d ||
+    d.includes("xn--") ||
+    mail.attachments.length > 0
+  ) {
+    return false;
+  }
+  const label = registeredName(d) ?? "";
+  const name = parseMailbox(mail.from)?.name ?? "";
+  const spelled = plainWords(name).join("");
+  if (spelled === "" || spelled !== plainWords(label).join("") || countInvisible(name) > 0) {
+    return false;
+  }
+  if (imitatedBrandIn(name) || imitatedBrandIn(label) || imitatedBrandIn(mail.subject)) {
+    return false;
+  }
+  const replyTo = mail.replyTo ?? [];
+  if (
+    replyTo.length === 0 ||
+    replyTo.some((address) => ownerDomain(parseSingleSender(address)?.domain ?? "") !== d)
+  ) {
+    return false;
+  }
+  const links = extractLinks(mail.html, mail.text);
+  return (
+    links.some((link) => link.url !== null && ownerDomain(new URL(link.url).hostname) === d) &&
+    // Read as the link reader reads a value, so whitespace or a control character before mailto:
+    // hides nothing.
+    !links.some((link) => {
+      const scheme = URL.parse(link.raw.replace(/[\t\n\r]/g, "").trim())?.protocol;
+      return scheme !== undefined && scheme !== "http:" && scheme !== "https:";
+    }) &&
+    !opaqueFacts({ html: mail.html, text: mail.text, attachments: 0 }).opaque
+  );
+}
+
+/**
  * The repeat hold: this verdict is at least the `holdRepeatCount`th
  * phishing-type one from `holdRepeatScore` judged in the last
  * MONITOR_HOLD_REPEAT_DAYS. The stored verdicts include this one: the judge
  * writes it in the transaction that folds it. Verdicts on names an operator
- * cleared (`spared_hold` "vouched") are a product's own pages read as
- * lures, and count for nothing here.
+ * cleared (`spared_hold` "vouched") are a product's own pages, or a client
+ * business's own notices, read as lures, and count for nothing here.
  */
 async function repeatHold(
   db: Db,
@@ -774,9 +850,10 @@ export async function applyJudgedSample(
     youngLinkDomain?: boolean | undefined;
     /**
      * The verdict rests only on a credential link to a platform tenant name
-     * (isPlatformLinkVerdict); never set on a broadcast's sample. A hold rule
-     * it meets spares the team and comes back as `spared`, for the caller to
-     * park the mail on.
+     * (isPlatformLinkVerdict) or on a platform's notice for one client
+     * business (isClientIdentityVerdict); never set on a broadcast's sample.
+     * A hold rule it meets spares the team and comes back as `spared`, for
+     * the caller to park the mail on.
      */
     platformLink?: boolean | undefined;
     now?: Date;

@@ -1501,7 +1501,18 @@ address, on mail judged before SES that is not a broadcast, poses as no other
 brand and carries no payment instrument: the message parks for the review
 list instead. A loopback link alone is no reason to judge mail before SES, so
 past a team's first window such a verdict on mail judged after sending still
-holds the team. These samples count against no daily cap; a team has 200 of
+holds the team. A store or booking platform's notice for one client business
+is spared the same way when the verdict reads it as nothing but that
+business's impersonation: mail that is not a broadcast, carries no Pix code or
+file, does not ride in images or a QR code drawn with characters, and comes
+from a sending domain at least 7 days old, whose From name spells the one
+domain its Reply-To and its links lead to, with no link but web links and no
+brand the monitor knows in the name, the domain or the subject. Until an
+operator releases mail to that domain, the spare takes mail judged before SES
+and a domain known to be registered 7 days ago or more (no date keeps the
+hold); after the release, such notices to it go out without the 2-minute wait
+or a park and never hold the team, while the same message under another name
+is held as before. These samples count against no daily cap; a team has 200 of
 them a day, past which its mail with a new destination waits for the next UTC
 day.
 

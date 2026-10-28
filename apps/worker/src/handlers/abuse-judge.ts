@@ -9,6 +9,7 @@ import {
   decryptEmailBody,
   destinationVerdictParks,
   type EmailAttachment,
+  isClientIdentityVerdict,
   isHoldVerdict,
   isPlatformLinkVerdict,
   isSharedInboxSender,
@@ -26,7 +27,7 @@ import {
   parseSingleSender,
   revokeDestinations,
   SCREEN_JUDGE_TIMEOUT_MS,
-  screeningTier,
+  screeningTeam,
   sendingDomainYoung,
   spareWaitingSamples,
   teamDestinationStanding,
@@ -71,6 +72,12 @@ export interface JudgeDeps {
    * is not known (see core anyYoungLinkDomain); absent, none is.
    */
   linkDomainYoung?: ((domains: readonly string[], at: Date) => Promise<boolean | null>) | undefined;
+  /**
+   * Whether every one of these destinations is known to be registered 7 days
+   * or more ago, by the same cache and lookup, null while an age is not known
+   * (see core linkDomainsAged); absent, none is.
+   */
+  linkDomainAged?: ((domains: readonly string[], at: Date) => Promise<boolean | null>) | undefined;
   /**
    * How images and files are read for the judge: the image reader (null
    * while ABUSE_VISION is off) and, in tests, the parsing threads and cache.
@@ -142,7 +149,7 @@ async function judgePending(
   const loaded = await loadBlockInput(db, deps.keyring, sample, now);
   if (!loaded) return unjudged("body_purged");
   const settings = await deps.settings();
-  const tier = await screeningTier(db, settings, sample.teamId, now);
+  const { tier, holdSpent } = await screeningTeam(db, settings, sample.teamId, now);
   const media = await readMedia(loaded.input, loaded.files, tier, deps.media);
   const issues = media?.issues ?? [];
   const standing = await teamDestinationStanding(db, {
@@ -236,8 +243,28 @@ async function judgePending(
   const paysByPix = (media?.findings.pix.length ?? 0) > 0 || mailCarriesPix(loaded.input);
   const platformShape =
     sample.broadcastId === null && !paysByPix && isPlatformLinkVerdict(verdict, standing.all);
-  const vouched = platformShape && standing.all.every((d) => vouchedNames.has(d));
-  const platformLink = platformShape && (sample.screening || vouched);
+  // A platform's notice for one client business, read as that business's impersonation, from a
+  // sending domain past young: spared and vouched as above. The vouch rests on the From name
+  // spelling the released site, so another brand's name on that site is held as before.
+  const clientShape =
+    sample.broadcastId === null &&
+    !paysByPix &&
+    !youngSendingDomain &&
+    isClientIdentityVerdict(verdict, loaded.input, standing.all);
+  const vouched = (platformShape || clientShape) && standing.all.every((d) => vouchedNames.has(d));
+  // Unvouched, the spare takes a client site known to be registered 7 days or more ago, even one a
+  // clean verdict made no longer new to the team: no date, or one not known yet, keeps the hold.
+  // The site is dated only when a hold rule could be met.
+  const clientSpared =
+    clientShape &&
+    sample.screening &&
+    !vouched &&
+    tier === "new" &&
+    !holdSpent &&
+    isHoldVerdict(verdict, Math.min(settings.holdScore, settings.holdRepeatScore)) &&
+    (destinations.length === 0 || linkYoung === false) &&
+    (await deps.linkDomainAged?.(standing.all, now)) === true;
+  const platformLink = vouched || (platformShape && sample.screening) || clientSpared;
   // The verdict and its fold commit together: a crash between them would
   // leave a judged row the retry skips and a risk that never saw it.
   const outcome = await db.transaction(async (tx) => {
@@ -277,7 +304,7 @@ async function judgePending(
     if (vouched) {
       await t.update(ms).set({ sparedHold: "vouched" }).where(eq(ms.id, sample.id));
     } else if (applied.spared) {
-      // The park rests on every name the spare rests on; releasing it clears its platform names.
+      // The park rests on every name the spare rests on; releasing it clears them.
       await t
         .update(ms)
         .set({ sparedHold: applied.spared.rule, destinations: standing.all })
@@ -294,7 +321,8 @@ async function judgePending(
     await clearDestinations(db, sample.teamId, destinations, now);
   }
   // Mail to a destination that cleared within its probation, read as
-  // phishing: the clearance goes, and the operator hears of it.
+  // phishing: the clearance goes, and the operator hears of it, unless an
+  // operator's release vouched for this shape on it.
   const platformProbation =
     sample.broadcastId === null &&
     !paysByPix &&
@@ -303,6 +331,7 @@ async function judgePending(
   if (
     standing.probation.length > 0 &&
     !platformProbation &&
+    !vouched &&
     isHoldVerdict(verdict, settings.holdRepeatScore)
   ) {
     const revoked = await revokeDestinations(db, sample.teamId, standing.probation, now);

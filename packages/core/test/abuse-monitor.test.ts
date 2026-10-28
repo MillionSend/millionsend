@@ -10,6 +10,7 @@ import {
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
+  isClientIdentityVerdict,
   isPlatformLinkVerdict,
   isPlatformTenantName,
   MONITOR_PRIOR_NEW,
@@ -784,6 +785,83 @@ describe("the review hold", () => {
     expect(at(RESET, ["[::ffff:808:808]"])).toBe(false);
     expect(at(RESET, ["169.254.169.254"])).toBe(false);
     expect(at(PHISHING, ["localhost"])).toBe(false);
+  });
+
+  it("reads a platform's notice for one client business, whose name it spells, as that client's own", () => {
+    const BRAND = {
+      verdict: "abuse" as const,
+      score: 93,
+      categories: ["brand_impersonation"],
+      reasons: ["impersonation"],
+    };
+    const SITE = "acme-tiles.example";
+    const mail = (o: Partial<Parameters<typeof isClientIdentityVerdict>[1]> = {}) => ({
+      from: '"Acme Tiles" <orders@platform.example>',
+      replyTo: [`contato@${SITE}`],
+      subject: "Pedido 12345 confirmado",
+      html: `<p>Oi Fulano, seu pedido 12345 foi confirmado e já está em separação.</p><p><a href="https://${SITE}/pedidos/12345">Ver meu pedido</a></p>`,
+      text: null,
+      attachments: [],
+      ...o,
+    });
+    const at = (m = mail(), v: typeof BRAND = BRAND, destinations = [SITE]) =>
+      isClientIdentityVerdict(v, m, destinations);
+    const linked = (extra: string) => mail({ html: `${mail().html}${extra}` });
+    expect(at()).toBe(true);
+    expect(at(mail(), { ...BRAND, categories: [] })).toBe(true);
+    expect(at(mail({ from: '"ACME-TILES" <a@platform.example>' }))).toBe(true);
+    expect(at(mail({ replyTo: [`Atendimento <sac@mail.${SITE}>`] }))).toBe(true);
+    // Another or a longer name, none, or one carrying invisible characters.
+    expect(at(mail({ from: '"Banco Exemplo" <a@platform.example>' }))).toBe(false);
+    expect(at(mail({ from: '"Acme Tiles Ltda" <a@platform.example>' }))).toBe(false);
+    expect(at(mail({ from: "orders@platform.example" }))).toBe(false);
+    expect(at(mail({ from: '"Acme\u200bTiles" <a@platform.example>' }))).toBe(false);
+    // Any ask the judge saw, or a class other than a brand.
+    expect(at(mail(), { ...BRAND, reasons: ["impersonation", "harvests_secrets"] })).toBe(false);
+    expect(at(mail(), { ...BRAND, reasons: ["impersonation", "off_domain_lure"] })).toBe(false);
+    expect(at(mail(), { ...BRAND, categories: ["phishing_credentials"] })).toBe(false);
+    // A second destination, a reply elsewhere or none, no web link to the site.
+    expect(at(mail(), BRAND, [SITE, "lure.example"])).toBe(false);
+    expect(at(mail({ replyTo: null }))).toBe(false);
+    expect(at(mail({ replyTo: [`contato@${SITE}`, "x@lure.example"] }))).toBe(false);
+    expect(at(mail({ html: `<p>${"Seu pedido foi confirmado. ".repeat(10)}</p>` }))).toBe(false);
+    // A link that opens a mail, a call or anything but a web page, however its value is dressed.
+    expect(at(linked('<a href="mailto:x@lure.example">fale conosco</a>'))).toBe(false);
+    expect(at(linked('<a href="te\tl:+5511900000000">ligue</a>'))).toBe(false);
+    expect(at(linked('<a href="&#1;mailto:x@lure.example">fale conosco</a>'))).toBe(false);
+    expect(at(linked('<a href="&#1;tel:+5511900000000">ligue</a>'))).toBe(false);
+    expect(at(linked('<a href="&#160;mailto:x@lure.example">fale conosco</a>'))).toBe(false);
+    expect(at(linked('<a href="&#65279;mailto:x@lure.example">fale conosco</a>'))).toBe(false);
+    expect(at(linked('<a href="whatsapp://send?phone=5511900000000">chame</a>'))).toBe(false);
+    // A listed brand in the subject or the name, a file, an opaque body.
+    expect(at(mail({ subject: "Seu pedido no Mercado Livre" }))).toBe(false);
+    expect(at(mail({ attachments: [{ filename: "pedido.pdf" }] }))).toBe(false);
+    expect(
+      at(
+        mail({
+          html: `<img src="https://cdn.platform.example/a.png"><a href="https://${SITE}">ver</a>`,
+        }),
+      ),
+    ).toBe(false);
+    // A registered name the From name spells as written: no typosquat of it, no listed brand, no
+    // free host's tenant, no name a private suffix splits, no IDN.
+    const named = (d: string, name: string) =>
+      at(
+        mail({
+          from: `"${name}" <a@platform.example>`,
+          replyTo: [`x@${d}`],
+          html: `<a href="https://${d}/x">Ver pedido</a> seu pedido foi confirmado, obrigado pela compra!`,
+        }),
+        BRAND,
+        [d],
+      );
+    expect(named("loja-123.example", "Loja 123")).toBe(true);
+    expect(named("acme-tlles.example", "Acme Tiles")).toBe(false);
+    expect(named("acrne-tiles.example", "Acme Tiles")).toBe(false);
+    expect(named("paypal-brasil.example", "PayPal Brasil")).toBe(false);
+    expect(named("acme-tiles.pages.dev", "Acme Tiles")).toBe(false);
+    expect(named("acme.com.de", "Acme")).toBe(false);
+    expect(named("xn--acme-tiles-q9a.example", "Xn Acme Tiles Q9a")).toBe(false);
   });
 
   it("suspends a new team for review on one confident phishing verdict, once, and leaves a released team to the operator", async () => {
