@@ -163,6 +163,8 @@ const noComplaintFeedback = sql`coalesce((
 /**
  * Sends and SES-reported hard bounces/complaints per region over the trailing
  * window, from the rows themselves; `teamIds` narrows the scan to those teams.
+ * Hard bounces count by when they arrived, complaints only about mail sent in
+ * the window, as the daily counters date them.
  */
 export async function regionWindowCounts(
   db: Db,
@@ -188,7 +190,7 @@ export async function regionWindowCounts(
     .select({
       region: schema.domains.region,
       hardBounced: sql<number>`count(*) filter (where ${hardBounceFilter})::int`,
-      complained: sql<number>`count(*) filter (where ${complaintFilter})::int`,
+      complained: sql<number>`count(*) filter (where ${complaintFilter} and ${gte(schema.emails.sentAt, since)})::int`,
     })
     .from(schema.emailEvents)
     .innerJoin(schema.emails, eq(schema.emails.id, schema.emailEvents.emailId))

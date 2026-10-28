@@ -35,6 +35,11 @@ const BAR_AREA = 120;
 const BAR_GAP = 4;
 const BOUNCE = { threshold: WARN_BOUNCE_RATE, lineTop: 6 };
 const COMPLAINT = { threshold: WARN_COMPLAINT_RATE, lineTop: 14 };
+/**
+ * A complaint counts on the day its mail went out and can arrive days later,
+ * so the complaint card's newest days are still filling.
+ */
+const COMPLAINT_COLLECTING_DAYS = 3;
 
 /**
  * Daily series on the main chart, in tooltip order. Sent is the muted
@@ -66,18 +71,25 @@ function rateBars(
   geometry: { threshold: number; lineTop: number },
   fmtPct: Intl.NumberFormat,
   ofSent: (count: number, sent: number) => string,
+  noSends: (count: number) => string,
   formatDay: (day: string) => string,
-  today: string,
+  partialFrom: string,
 ): Bar[] {
   const pxPerThreshold = BAR_AREA - geometry.lineTop;
   return days.map((d) => {
-    const rate = d.sent > 0 ? d.count / d.sent : 0;
+    // A day with no sends has no rate: its count is never 0% of nothing.
+    const rate = d.sent > 0 ? d.count / d.sent : null;
     return {
       day: d.day,
-      height: Math.min(BAR_AREA, Math.round((rate / geometry.threshold) * pxPerThreshold)),
+      height:
+        rate === null
+          ? 0
+          : Math.min(BAR_AREA, Math.round((rate / geometry.threshold) * pxPerThreshold)),
       dayLabel: formatDay(d.day),
-      detail: `${fmtPct.format(rate)} · ${ofSent(d.count, d.sent)}`,
-      partial: d.day === today,
+      detail:
+        rate === null ? noSends(d.count) : `${fmtPct.format(rate)} · ${ofSent(d.count, d.sent)}`,
+      // Only mail that went out can still draw more.
+      partial: d.sent > 0 && d.day >= partialFrom,
     };
   });
 }
@@ -574,6 +586,8 @@ export default function MetricsPage() {
                 series={CHART_SERIES.map((s) => ({
                   ...s,
                   label: common(`status.${s.key}`),
+                  // A timeline of when things happened, unlike the complaint card below.
+                  note: s.key === "complained" ? t("chart.byArrival") : undefined,
                   values: data.days.map((d) => d[s.key]),
                 }))}
                 formatDay={dayLabel}
@@ -743,6 +757,7 @@ export default function MetricsPage() {
                 BOUNCE,
                 pct2,
                 ofSent,
+                (count) => t("bounce.noSends", { count }),
                 dayLabel,
                 data.today,
               )}
@@ -752,7 +767,7 @@ export default function MetricsPage() {
                 data.totals.sent > 0 ? pct2.format(data.totals.hardBounced / data.totals.sent) : "—"
               }
             />
-            {/* Rates over the sends that could draw a complaint, per UTC day like the guardrail's. */}
+            {/* Complaints about each UTC day's mail over its sends that could draw one, as the guardrail counts them. */}
             <RateCard
               label={t("complaint.title")}
               note={t("complaint.window", { days: GUARDRAIL_WINDOW_DAYS })}
@@ -762,7 +777,7 @@ export default function MetricsPage() {
                 lineTop: COMPLAINT.lineTop,
               }}
               color="var(--ms-warn)"
-              partialNote={t("chart.soFar")}
+              partialNote={t("complaint.collecting")}
               bars={rateBars(
                 data.complaints.days.map((d) => ({
                   day: d.day,
@@ -773,8 +788,9 @@ export default function MetricsPage() {
                 pct2,
                 (count, sent) =>
                   t("complaint.ofReportable", { count: fmt.format(count), sent: fmt.format(sent) }),
+                (count) => t("complaint.noReportable", { count }),
                 dayLabel,
-                data.complaints.today,
+                data.complaints.days.at(-COMPLAINT_COLLECTING_DAYS)?.day ?? data.complaints.today,
               )}
               rowLabel={t("complaint.complained")}
               rowCount={fmt.format(data.complaints.complained)}

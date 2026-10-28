@@ -13,7 +13,11 @@ import { useTRPC } from "@/lib/trpc";
 import type { AppRouter } from "@/server/routers";
 
 export type KpiKind = "sent" | "delivered" | "hardBounced" | "complained";
-/** The KPIs counted from feedback (bounce and complaint notices), on the day it arrives. */
+/**
+ * The KPIs counted from feedback (bounce and complaint notices), on the hour
+ * or day it arrives, except a complaint on a daily row: that one is dated by
+ * its mail's send day.
+ */
 export type FeedbackKind = Extract<KpiKind, "hardBounced" | "complained">;
 
 export function isFeedbackKind(kind: KpiKind): kind is FeedbackKind {
@@ -191,7 +195,9 @@ export function KpiChart({ kind, period }: { kind: KpiKind; period: Period }) {
       <ChartNote>
         {periodLabel(period, common)} · {common(kind === "sent" ? "total" : "average")}{" "}
         {format(aggregate)}
-        {isFeedbackKind(kind) ? ` · ${t("charts.byArrival")}` : null}
+        {isFeedbackKind(kind)
+          ? ` · ${t(kind === "complained" && data.grain === "day" ? "charts.bySend" : "charts.byArrival")}`
+          : null}
       </ChartNote>
     </>
   );

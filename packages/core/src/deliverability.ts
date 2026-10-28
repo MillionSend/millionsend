@@ -22,7 +22,8 @@ import { DAY_MS, utcDay } from "./utc-day.js";
  * and full mailboxes are not a reputation signal. Complaint rates count only
  * the sends a recipient's provider could report, as SES does too: Gmail,
  * Apple and Deutsche Telekom never report one, so mail to them would dilute
- * the rate.
+ * the rate. They date a complaint by the UTC day its mail was sent, as SES
+ * dates its own rate.
  */
 export const WARN_BOUNCE_RATE = 0.04;
 export const WARN_COMPLAINT_RATE = 0.0005;
@@ -59,6 +60,11 @@ export const GUARDRAIL_WINDOW_DAYS = 7;
  * keyed by UTC day, so this is the honest "last 24 hours" — a one-day window
  * would hold five minutes of data just after midnight. A team that fixes its
  * list recovers in a day instead of waiting out the warning window.
+ * Complaints are dated by their mail's send day, so the pause weighs those
+ * about the last two days' mail. They keep arriving for days, so the pause
+ * acts on acute blasts and the warning window carries the slower tail. A
+ * pause lifts once the bad send days leave the window, and late complaints
+ * about older mail cannot extend it.
  */
 export const PAUSE_WINDOW_DAYS = 2;
 

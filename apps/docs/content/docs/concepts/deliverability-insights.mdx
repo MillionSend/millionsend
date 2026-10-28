@@ -116,7 +116,8 @@ The account score is a rolling 30-day view, built from two sub-scores:
   0 to 4 points across 2%–5%, up to 6 across 5%–10%. Under 100 sends in the
   window the outcome sub-score is withheld as "not enough data" rather than
   fabricated from a tiny sample. The complaint rate is complaints over sends
-  to providers that report them, and it costs points only once the window
+  to providers that report them, each complaint dated by the day its email
+  was sent, as SES dates its own rate. It costs points only once the window
   holds 100 such sends.
 
 The headline score is `min(0.4·C + 0.6·O, O + 1.5)`. The second term is a

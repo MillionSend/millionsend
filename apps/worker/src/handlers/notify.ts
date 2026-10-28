@@ -601,7 +601,12 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       account(kind, "/metrics", (locale) => ({
         team: team.name,
         metric: accountMailPhrase({ locale, kind, key: reason.metric }),
-        days: String(reason.windowDays),
+        window: accountMailPhrase({
+          locale,
+          kind,
+          key: `${reason.metric}Window`,
+          values: { days: String(reason.windowDays) },
+        }),
         rate: formatMailPercent(locale, reason.rate),
         limit: formatMailPercent(locale, limit),
         advice:

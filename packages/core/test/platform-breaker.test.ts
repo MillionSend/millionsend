@@ -742,6 +742,17 @@ it("leaves complaints and hard bounces naming only SES's mailbox simulator out, 
   ).toMatchObject({ hardBounced: 1, complained: 3 });
 });
 
+it("counts a complaint arriving in the 24-hour window only when its mail was sent in it too", async () => {
+  await clearTraffic();
+  const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamC));
+  if (!dom) throw new Error("no domain");
+  await complainedSend(teamC, dom.id, hoursAgo(30), hoursAgo(2));
+  await complainedSend(teamC, dom.id, hoursAgo(3), hoursAgo(2));
+  expect(
+    (await regionWindowCounts(db, { now: NOW, hours: 24, teamIds: [teamC] })).get("us-east-1"),
+  ).toEqual({ sent: 1, complaintSent: 1, hardBounced: 0, complained: 1 });
+});
+
 it("counts a copy to the mailbox simulator in the team's own stats, delivered and complained, while the breaker leaves it out", async () => {
   await clearTraffic();
   const [dom] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamC));

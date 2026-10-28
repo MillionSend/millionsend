@@ -293,7 +293,7 @@ export const ptBR = {
   "deliverability.warning": {
     subject: "Sua {metric} está em risco",
     body: [
-      "A {metric} de {team} nos últimos {days} dias está em {rate}, acima do limite de risco de {limit}. Os envios continuam, mas as transmissões ficam mais lentas enquanto ela estiver acima do limite.",
+      "A {metric} de {team} {window} está em {rate}, acima do limite de risco de {limit}. Os envios continuam, mas as transmissões ficam mais lentas enquanto ela estiver acima do limite.",
       "{shared}",
       "{advice}",
     ],
@@ -304,6 +304,8 @@ export const ptBR = {
     extra: {
       bounce: "taxa de bounce permanente",
       complaint: "taxa de reclamação",
+      bounceWindow: "nos últimos {days} dias",
+      complaintWindow: "nos e-mails enviados nos últimos {days} dias",
       bounceAdvice:
         "Bounces permanentes vêm de endereços que não existem. Remova endereços antigos ou não verificados das suas listas; todo endereço com bounce já está na sua lista de supressão.",
       complaintAdvice:
@@ -315,7 +317,7 @@ export const ptBR = {
   "deliverability.paused": {
     subject: "Envios pausados ({metric})",
     body: [
-      "A {metric} de {team} nos últimos {days} dias chegou a {rate}, no limite de pausa de {limit} ou acima dele. Novos envios são recusados até ela baixar.",
+      "A {metric} de {team} {window} chegou a {rate}, no limite de pausa de {limit} ou acima dele. Novos envios são recusados até ela baixar.",
       "{shared}",
       "A pausa termina sozinha quando a taxa na janela volta a ficar abaixo do limite. Limpe a lista de destinatários antes, ou os próximos envios vão acioná-la de novo.",
     ],
@@ -324,6 +326,8 @@ export const ptBR = {
     extra: {
       bounce: "taxa de bounce permanente",
       complaint: "taxa de reclamação",
+      bounceWindow: "nos últimos {days} dias",
+      complaintWindow: "nos e-mails enviados nos últimos {days} dias",
       shared:
         "No plano Free, todas as equipes Free criadas pela mesma pessoa dividem um só histórico de bounces e reclamações, inclusive as excluídas: esta taxa conta todas elas, e a pausa vale para cada uma.",
     },
@@ -461,7 +465,7 @@ export const ptBR = {
     ],
     button: "Abrir transmissões",
     extra: {
-      complaints: "a taxa de reclamações passou de 0,1% nos últimos 7 dias.",
+      complaints: "a taxa de reclamações dos e-mails enviados nos últimos 7 dias passou de 0,1%.",
       report: "uma denúncia de abuso foi recebida.",
       manual: "veja a observação abaixo.",
       note: "Observação do operador: {note}",

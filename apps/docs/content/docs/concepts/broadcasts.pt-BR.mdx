@@ -212,12 +212,15 @@ mostra um traço.
 - Se sua taxa recente de bounce ou reclamação cruzou o limite de pausa do
   SES, novos envios de transmissão são bloqueados com um erro
   `403 sending_paused`, contendo o estrago antes que o SES pause o envio por
-  completo. A taxa de reclamação conta só os e-mails para provedores que
-  informam reclamações (Gmail, Apple Mail e t-online nunca informam), e as
-  reclamações só contam para um alerta ou para essa pausa a partir de 100
-  desses envios. No plano Free, elas contam desde o primeiro e-mail e são
-  julgadas juntas em todas as equipes Free que você criou, inclusive as
-  excluídas, e uma pausa vale para todas elas.
+  completo. Cada reclamação conta no dia (UTC) em que o e-mail foi enviado,
+  a mesma data que o SES usa na própria taxa, então a pausa considera as
+  reclamações sobre os e-mails enviados nos últimos dois dias, e o alerta,
+  sobre os enviados nos últimos sete. A taxa de reclamação conta só os
+  e-mails para provedores que informam reclamações (Gmail, Apple Mail e
+  t-online nunca informam), e as reclamações só contam para um alerta ou
+  para essa pausa a partir de 100 desses envios. No plano Free, elas contam
+  desde o primeiro e-mail e são julgadas juntas em todas as equipes Free que
+  você criou, inclusive as excluídas, e uma pausa vale para todas elas.
 - Se a taxa agregada de bounce da plataforma na região SES do seu remetente
   se aproxima do limite em que o SES age sobre a conta, envios de transmissão
   nessa região são recusados com `403 broadcasts_paused` até a taxa se
@@ -233,6 +236,11 @@ transmissões.
 
 ## Mudanças recentes
 
+- As reclamações contam no dia em que o e-mail foi enviado, a mesma data que
+  o SES usa na própria taxa, e não no dia em que chegam: na proteção de
+  envio, na nota da conta e na taxa de reclamação da página de Métricas.
+  Uma reclamação atrasada sobre e-mails antigos não pausa mais uma equipe
+  que está enviando bem hoje.
 - Uma pausa pela taxa de reclamações da plataforma em uma região do SES
   recusa transmissões com `403 broadcasts_paused` só para as equipes cuja
   própria taxa de reclamações nos últimos 30 dias é de 0,1% ou mais; antes,

@@ -12,13 +12,16 @@
   },
   "bounce": {
     "title": "Hard-bounce rate",
-    "bounced": "Hard bounced"
+    "bounced": "Hard bounced",
+    "noSends": "{count, plural, =0 {Nothing sent} one {# hard bounce · nothing sent} other {# hard bounces · nothing sent}}"
   },
   "complaint": {
     "title": "Complaint rate",
     "complained": "Complained",
-    "window": "last {days} UTC days",
+    "window": "last {days} UTC days, by send date",
+    "collecting": "complaints still arriving",
     "ofReportable": "{count} of {sent} to inboxes that report spam",
+    "noReportable": "{count, plural, =0 {Nothing sent to inboxes that report spam} one {# complaint · nothing sent to inboxes that report spam} other {# complaints · nothing sent to inboxes that report spam}}",
     "noReports": "To inboxes that don't report spam",
     "notCounted": "not counted",
     "noReportsHint": "Gmail, iCloud and t-online never tell senders when someone marks mail as spam, so mail to them stays out of the rate."
@@ -29,7 +32,8 @@
   "chart": {
     "soFar": "so far",
     "ofSent": "{count} of {sent} sent",
-    "risk": "Risk {rate}"
+    "risk": "Risk {rate}",
+    "byArrival": "by arrival date"
   },
   "score": {
     "title": "Account score",
