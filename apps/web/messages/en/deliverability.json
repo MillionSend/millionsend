@@ -5,8 +5,8 @@
       "complaint": "Your complaint rate ({rate}) on mail sent over the last {days} days is approaching the limit. New broadcasts are being sent at a reduced rate until it recovers."
     },
     "paused": {
-      "bounce": "Broadcasts are paused: your hard-bounce rate ({rate}) over the last {days} days is above the {limit} limit.",
-      "complaint": "Broadcasts are paused: your complaint rate ({rate}) on mail sent over the last {days} days is above the {limit} limit."
+      "bounce": "Sending is paused: your hard-bounce rate ({rate}) over the last {days} days is above the {limit} limit.",
+      "complaint": "Sending is paused: your complaint rate ({rate}) on mail sent over the last {days} days is above the {limit} limit."
     },
     "action": "Open metrics"
   },

@@ -5,8 +5,8 @@
       "complaint": "Sua taxa de reclamação ({rate}) nos e-mails enviados nos últimos {days} dias está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere."
     },
     "paused": {
-      "bounce": "As transmissões estão pausadas: sua taxa de bounce permanente ({rate}) nos últimos {days} dias está acima do limite de {limit}.",
-      "complaint": "As transmissões estão pausadas: sua taxa de reclamação ({rate}) nos e-mails enviados nos últimos {days} dias está acima do limite de {limit}."
+      "bounce": "Os envios estão pausados: sua taxa de bounce permanente ({rate}) nos últimos {days} dias está acima do limite de {limit}.",
+      "complaint": "Os envios estão pausados: sua taxa de reclamação ({rate}) nos e-mails enviados nos últimos {days} dias está acima do limite de {limit}."
     },
     "action": "Abrir métricas"
   },
