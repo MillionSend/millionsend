@@ -154,7 +154,7 @@
       "pauseTeams": "Broadcasts held for {teams}.",
       "pauseNoTeams": "This pause holds no team's broadcasts.",
       "pauseWindow": "Automatic pause: {metric} at {rate} over {hours, select, 168 {7 days} other {{hours}h}}, above the {limit} limit.",
-      "pauseComplaints": "Automatic pause: complaints at {rate} over {hours, select, 168 {7 days} other {{hours}h}} on mail to providers that report them, above the {limit} limit.",
+      "pauseComplaints": "Automatic pause: complaints at {rate} on mail sent over {hours, select, 168 {7 days} other {{hours}h}} to providers that report them, above the {limit} limit.",
       "pauseSes": "Automatic pause: complaints at {rate} as SES measures them, above the {limit} limit.",
       "pauseManual": "Paused by the operator: {reason}",
       "pauseTransactional": "Transactional mail keeps flowing.",
@@ -167,10 +167,10 @@
       "queueHeld": "{count, plural, one {# broadcast} other {# broadcasts}} · held during the pause",
       "sesRate": "The rate SES itself measures",
       "sesLines": "SES reviews from {review} and pauses at {pause}",
-      "ourLines": "Our regional pause: {limit} · our 7-day estimate: {ours}",
+      "ourLines": "Our regional pause: {limit} · our estimate on mail sent over 7 days: {ours}",
       "sesUnreadable": "SES's rate couldn't be read",
       "sesNone": "SES hasn't published a rate for this region",
-      "oursWatched": "The regional pause watches our estimate of it: {ours} over 7 days, {limit} limit",
+      "oursWatched": "The regional pause watches our estimate of it: {ours} on mail sent over 7 days, {limit} limit",
       "costTip": "{sent} sent × {rate}/1k"
     },
     "sent": {
@@ -213,6 +213,7 @@
       "region_sent": "Sent per hour · {region}",
       "noPoints": "Nothing recorded in this window yet.",
       "byArrival": "by arrival date, not send date",
+      "bySend": "by send date; recent days can still rise",
       "point": {
         "max": "Each point: the highest reading in {window}",
         "avg": "Each point: the average over {window}"
@@ -450,7 +451,7 @@
       "review": "in review",
       "suspendedTip": "Suspended on {day}",
       "reviewTip": "Held for review since {day}",
-      "window": "{metric, select, complaint {Last 7 days, counting only mail to providers that report complaints.} other {Last 7 days, over all sends.}}"
+      "window": "{metric, select, complaint {Mail sent in the last 7 days to providers that report complaints.} other {Last 7 days, over all sends.}}"
     },
     "empty": "0 teams match.",
     "menu": {
@@ -672,7 +673,7 @@
   },
   "safety": {
     "title": "Trust & safety",
-    "info": "A team lands here when the deliverability guardrail turns warning or paused, complaints pass 0.1% or hard bounces 5% over 7 days, the content monitor's risk crosses its flag line with a message judged abuse in the last 7 days (sampled content judged by the model), the account score drops under 5, or an operator flags it by hand. Automatic flags clear on their own once the trigger goes away, a monitor flag once the risk falls back under its line; a flag you clear stays cleared while the same trigger holds.",
+    "info": "A team lands here when the deliverability guardrail turns warning or paused, complaints pass 0.1% on mail sent over 7 days or hard bounces 5% over 7 days, the content monitor's risk crosses its flag line with a message judged abuse in the last 7 days (sampled content judged by the model), the account score drops under 5, or an operator flags it by hand. Automatic flags clear on their own once the trigger goes away, a monitor flag once the risk falls back under its line; a flag you clear stays cleared while the same trigger holds.",
     "proof": "{open} open · {guardrailPaused} paused by guardrail · {suspended} suspended · {revealsThisWeek, plural, one {# content reveal} other {# content reveals}} this week",
     "search": "Search teams, owners, domains",
     "filters": {
@@ -699,7 +700,7 @@
     },
     "reasonTip": {
       "monitor": "The content monitor: sampled content judged by the model pushed the internal risk over the flag line, with at least one message judged abuse in the 7 days before the flag opened.",
-      "complaints": "The complaint rate passed 0.1% or the hard-bounce rate 5% over the last 7 days (SES reviews accounts at those lines).",
+      "complaints": "The complaint rate passed 0.1% on mail sent over the last 7 days, or the hard-bounce rate 5% over the last 7 days (SES reviews accounts at those lines).",
       "guardrail": "The deliverability guardrail turned warning or paused the team on its bounce or complaint rates.",
       "score": "The account score dropped under 5 out of 10.",
       "report": "A mailbox provider or a recipient reported abuse.",

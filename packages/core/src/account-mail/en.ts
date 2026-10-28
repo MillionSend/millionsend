@@ -283,7 +283,7 @@ export const en = {
   "deliverability.warning": {
     subject: "Your {metric} is at risk",
     body: [
-      "{team}'s {metric} over the last {days} days is {rate}, above the {limit} risk line. Sending continues, but broadcasts are slowed while it stays there.",
+      "{team}'s {metric} {window} is {rate}, above the {limit} risk line. Sending continues, but broadcasts are slowed while it stays there.",
       "{shared}",
       "{advice}",
     ],
@@ -292,6 +292,8 @@ export const en = {
     extra: {
       bounce: "hard-bounce rate",
       complaint: "complaint rate",
+      bounceWindow: "over the last {days} days",
+      complaintWindow: "on mail sent over the last {days} days",
       bounceAdvice:
         "Hard bounces come from addresses that do not exist. Remove old or unverified addresses from your lists; every bounced address is already on your suppression list.",
       complaintAdvice:
@@ -303,7 +305,7 @@ export const en = {
   "deliverability.paused": {
     subject: "Sending paused ({metric})",
     body: [
-      "{team}'s {metric} over the last {days} days reached {rate}, at or above the {limit} pause line. New sends are refused until it recovers.",
+      "{team}'s {metric} {window} reached {rate}, at or above the {limit} pause line. New sends are refused until it recovers.",
       "{shared}",
       "The pause lifts on its own once the rate over the window drops back under the line. Clean the recipient list first, or the next sends will trip it again.",
     ],
@@ -312,6 +314,8 @@ export const en = {
     extra: {
       bounce: "hard-bounce rate",
       complaint: "complaint rate",
+      bounceWindow: "over the last {days} days",
+      complaintWindow: "on mail sent over the last {days} days",
       shared:
         "On the Free plan, every Free team created by the same person shares one bounce and complaint record, deleted teams included: this rate counts all of them, and the pause holds each one.",
     },
@@ -445,7 +449,7 @@ export const en = {
     ],
     button: "Open broadcasts",
     extra: {
-      complaints: "the complaint rate passed 0.1% over the last 7 days.",
+      complaints: "the complaint rate on mail sent over the last 7 days passed 0.1%.",
       report: "an abuse report was received.",
       manual: "see the note below.",
       note: "Note from the operator: {note}",

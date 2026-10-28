@@ -258,20 +258,28 @@ describe("the teams behind a feedback KPI", () => {
 });
 
 describe("the feedback charts' note", () => {
-  it("says the counters take the day the feedback arrives", () => {
-    const counts = { sent: 100_000, delivered: 0, bounced: 0, hardBounced: 0, complained: 7 };
-    h.kpis = {
-      grain: "day",
-      points: [{ t: "2026-01-12", ...counts }],
+  it("dates complaints by send day on a daily chart and the rest by arrival", () => {
+    const counts = { sent: 100_000, delivered: 0, bounced: 0, hardBounced: 300, complained: 7 };
+    const kpis = (grain: "hour" | "day", t: string) => ({
+      grain,
+      points: [{ t, ...counts }],
       totals: counts,
       previous: counts,
-    };
+    });
     h.locale = "pt-BR";
-    const chart = (kind: "sent" | "complained") =>
-      note(renderToStaticMarkup(createElement(KpiChart, { kind, period: "7d" })));
-    expect(chart("complained")).toBe(
-      "Últimos 7 dias · média 0,007% · pela data de chegada, não de envio",
+    const chart = (kind: "sent" | "hardBounced" | "complained", period: "24h" | "7d") =>
+      note(renderToStaticMarkup(createElement(KpiChart, { kind, period })));
+    h.kpis = kpis("day", "2026-01-12");
+    expect(chart("complained", "7d")).toBe(
+      "Últimos 7 dias · média 0,007% · pela data de envio; os últimos dias ainda podem subir",
     );
-    expect(chart("sent")).toBe("Últimos 7 dias · total 100.000");
+    expect(chart("hardBounced", "7d")).toBe(
+      "Últimos 7 dias · média 0,30% · pela data de chegada, não de envio",
+    );
+    expect(chart("sent", "7d")).toBe("Últimos 7 dias · total 100.000");
+    h.kpis = kpis("hour", "2026-01-12T10:00:00.000Z");
+    expect(chart("complained", "24h")).toBe(
+      "Últimas 24h · média 0,007% · pela data de chegada, não de envio",
+    );
   });
 });

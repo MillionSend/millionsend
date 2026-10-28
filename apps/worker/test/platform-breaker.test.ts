@@ -99,7 +99,7 @@ it("trips on our own complaint count while SES's rate can't be read, holding the
     "Broadcasts paused in sa-east-1 for the teams drawing complaints: platform complaint rate at 0.50%",
   );
   expect(sends[0]?.text).toContain(
-    "the complaint rate over the last 24 hours is 0.50% (5 of 1000 sends to providers that report complaints), at or over the breaker's 0.10% line. SES reviews an account from 0.10% and pauses its sending at 0.50%.",
+    "the complaint rate on mail sent over the last 24 hours is 0.50% (5 of 1000 sends to providers that report complaints), at or over the breaker's 0.10% line. SES reviews an account from 0.10% and pauses its sending at 0.50%.",
   );
   expect(sends[0]?.text).toContain(
     "SES's own complaint rate wasn't available (reading it takes cloudwatch:GetMetricData in the instance's IAM policy), so the breaker estimated it from our own count of complaints, leaving out mail to providers that never report them, such as Gmail.",
