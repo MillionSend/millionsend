@@ -6,12 +6,13 @@ import {
   MIN_OUTCOME_SENDS,
 } from "../src/account-score.js";
 
-/** Every send could draw a complaint unless `complaintSent` says otherwise. */
+/** Every send could draw a complaint and counts toward bounces, unless overridden. */
 function input(overrides: Partial<AccountScoreInput>): AccountScoreInput {
   return {
     contentWeightedTenths: 0,
     contentRecipients: 0,
     sent: 0,
+    bounceSent: overrides.sent ?? 0,
     complaintSent: overrides.sent ?? 0,
     complained: 0,
     hardBounced: 0,
@@ -88,6 +89,13 @@ describe("computeAccountScore", () => {
     expect(s.outcomeScoreTenths).toBe(87);
   });
 
+  it("rates hard bounces over the sends net of a pause lift, reporting every send", () => {
+    const s = computeAccountScore(input({ sent: 10_000, bounceSent: 1_000, hardBounced: 100 }));
+    expect(s.hardBounceRate).toBe(0.1);
+    expect(s.insufficientOutcomeData).toBe(false);
+    expect(s.sent).toBe(10_000);
+  });
+
   it("the governor keeps perfect content from masking bad outcomes", () => {
     const s = computeAccountScore(
       input({
@@ -130,6 +138,7 @@ describe("contentFactorImpact", () => {
       contentWeightedTenths: 90 * 1000,
       contentRecipients: 1000,
       sent: 1000,
+      bounceSent: 1000,
       complaintSent: 1000,
       complained: 0,
       hardBounced: 0,
@@ -151,6 +160,7 @@ describe("contentFactorImpact", () => {
       contentWeightedTenths: 80 * 100,
       contentRecipients: 100,
       sent: 1000,
+      bounceSent: 1000,
       complaintSent: 1000,
       complained: 0,
       hardBounced: 0,

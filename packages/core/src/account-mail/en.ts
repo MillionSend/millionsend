@@ -477,6 +477,16 @@ export const en = {
     ],
     button: "Open dashboard",
   },
+  "team.sending_pause_lifted": {
+    subject: "Your sending pause is lifted",
+    body: [
+      "We lifted the sending pause on {team}. New sends are accepted again, and the hard bounces behind the pause no longer count toward its bounce rate.{waiting}",
+      "Emails refused while sending was paused were not kept. Send again any that still matter.",
+      "Every bounce from now on counts. If the hard-bounce rate reaches {limit} again, sending pauses again and resumes on its own once the rate drops back under the line. Reply to this email if you have questions.",
+    ],
+    button: "Open metrics",
+    extra: { waiting: " Mail that was waiting is going out now." },
+  },
   "monitor.alert": {
     subject: "Content monitor: a team needs a look",
     body: [

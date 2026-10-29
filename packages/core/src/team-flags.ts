@@ -290,7 +290,8 @@ export async function syncTeamFlags(
     if (current) {
       if (
         current.openedBy === null &&
-        current.reason !== trigger.reason &&
+        (current.reason !== trigger.reason ||
+          current.detail?.guardrail !== trigger.detail.guardrail) &&
         STANDING_REASONS.includes(current.reason)
       ) {
         await db

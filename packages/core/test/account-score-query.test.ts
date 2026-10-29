@@ -2,7 +2,12 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { fetchAccountScoreInput, fetchContentFactors } from "../src/account-score.js";
+import {
+  computeAccountScore,
+  fetchAccountScoreInput,
+  fetchContentFactors,
+} from "../src/account-score.js";
+import { fetchDeliverabilityHealth } from "../src/deliverability.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -135,6 +140,23 @@ it("counts complaints over the sends a recipient's provider could report", async
     complaintSent: 200,
     complained: 1,
   });
+});
+
+it("rates hard bounces net of a pause lift as the guardrail does, reporting every send", async () => {
+  const lifted = await createTeam(db, "lifted-team");
+  await db.insert(schema.usageCounters).values({
+    teamId: lifted,
+    day: "2026-09-04",
+    sent: 350,
+    hardBounced: 32,
+    excludedSent: 200,
+    excludedHardBounced: 20,
+  });
+  const input = await fetchAccountScoreInput(db, lifted, { now });
+  expect(input).toMatchObject({ sent: 350, bounceSent: 150, hardBounced: 12 });
+  const health = await fetchDeliverabilityHealth(db, lifted, { now });
+  expect(computeAccountScore(input).hardBounceRate).toBe(health.bounceRate);
+  expect(input.guardrailStatus).toBe("paused");
 });
 
 it("aggregates failing checks over the same population, heaviest first", async () => {

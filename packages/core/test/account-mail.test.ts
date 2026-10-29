@@ -212,6 +212,7 @@ describe("new domain limit mail", () => {
       "domain.limit_lifted",
       "domain.limit_kept",
       "domain.limit_requested",
+      "team.sending_pause_lifted",
     ] as const;
     for (const catalog of [en, ptBR]) {
       const entries: AccountMailEntry[] = kinds.map((kind) => catalog[kind]);

@@ -136,6 +136,21 @@ describe("syncTeamFlags", () => {
       detail: { guardrail: "paused", metric: "complaint", rate: 0.003 },
     });
 
+    // The guardrail eases to a warning: the same row reads the new level.
+    expect(
+      await syncTeamFlags(
+        db,
+        [standing({ teamId, guardrail: "warning", complaintRate7d: 0.0006 })],
+        t2,
+      ),
+    ).toEqual({ opened: 0, cleared: 0 });
+    expect((await flagsOf(teamId))[0]).toMatchObject({
+      id: opened?.id,
+      reason: "guardrail",
+      openedAt: t1,
+      detail: { guardrail: "warning", metric: "complaint", rate: 0.0006 },
+    });
+
     expect(await syncTeamFlags(db, [standing({ teamId })], t3)).toEqual({
       opened: 0,
       cleared: 1,

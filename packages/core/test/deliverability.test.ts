@@ -12,6 +12,7 @@ import {
   MIN_PAUSE_COMPLAINTS,
   MIN_PAUSE_HARD_BOUNCES,
   PAUSE_WINDOW_DAYS,
+  pauseLiftRefusal,
   THROTTLED_BROADCAST_RATE_PER_SECOND,
   type WindowCounts,
 } from "../src/deliverability.js";
@@ -192,6 +193,49 @@ describe("broadcastSendSpacingMs", () => {
   });
 });
 
+describe("pauseLiftRefusal", () => {
+  const now = new Date("2026-08-14T12:00:00.000Z");
+  const pause = (metric: "bounce" | "complaint") =>
+    ({ metric, rate: 0.08, tier: "paused", windowDays: PAUSE_WINDOW_DAYS }) as const;
+  const refusal = (over: Partial<Parameters<typeof pauseLiftRefusal>[0]> = {}) =>
+    pauseLiftRefusal({
+      suspended: false,
+      freePool: false,
+      reasons: [pause("bounce")],
+      openFlag: { reason: "guardrail", openedBy: null },
+      monitorRisk: null,
+      monitorFlagRisk: 0.5,
+      lastLiftAt: null,
+      now,
+      ...over,
+    });
+  const daysAgo = (n: number) => new Date(now.getTime() - n * DAY_MS);
+
+  it("lifts a bounce pause whose only flag is the cron's own guardrail flag", () => {
+    expect(refusal()).toBeNull();
+    expect(refusal({ openFlag: null })).toBeNull();
+  });
+
+  it("names each refusal", () => {
+    expect(refusal({ suspended: true })).toBe("suspended");
+    expect(refusal({ freePool: true })).toBe("free");
+    const warning = {
+      ...pause("bounce"),
+      tier: "warning" as const,
+      windowDays: GUARDRAIL_WINDOW_DAYS,
+    };
+    expect(refusal({ reasons: [warning] })).toBe("not_paused");
+    expect(refusal({ reasons: [pause("complaint")] })).toBe("complaints");
+    expect(refusal({ reasons: [pause("bounce"), pause("complaint")] })).toBe("complaints");
+    expect(refusal({ openFlag: { reason: "guardrail", openedBy: "op-1" } })).toBe("flagged");
+    expect(refusal({ openFlag: { reason: "brand", openedBy: null } })).toBe("flagged");
+    expect(refusal({ monitorRisk: 0.5 })).toBe("monitor");
+    expect(refusal({ monitorRisk: 0.9, monitorFlagRisk: Number.POSITIVE_INFINITY })).toBeNull();
+    expect(refusal({ lastLiftAt: daysAgo(29) })).toBe("cooldown");
+    expect(refusal({ lastLiftAt: daysAgo(30) })).toBeNull();
+  });
+});
+
 describe("fetchDeliverabilityHealth", () => {
   let db: Db;
   let close: () => Promise<void>;
@@ -348,6 +392,31 @@ describe("fetchDeliverabilityHealth", () => {
     }
   });
 
+  it("judges hard bounces net of a pause lift and reports every send", async () => {
+    const teamId = await createTeam(db, "deliverability-lifted");
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(nowMs),
+      sent: 350,
+      hardBounced: 32,
+      excludedSent: 200,
+      excludedHardBounced: 20,
+    });
+    // 12 hard bounces over 150 sends once the lift's are left out: 8%.
+    const health = await fetchDeliverabilityHealth(db, teamId, { now });
+    expect(health.status).toBe("paused");
+    expect(health.bounceRate).toBeCloseTo(0.08);
+    expect(health.sent).toBe(350);
+    expect(health.pause).toMatchObject({ sent: 150, hardBounced: 12 });
+    expect(health.lifted).toEqual({ sent: 200, hardBounced: 20 });
+    // Nine hard bounces after the lift miss the pause's minimum count; the rate still warns.
+    await db
+      .update(schema.usageCounters)
+      .set({ hardBounced: 29 })
+      .where(eq(schema.usageCounters.teamId, teamId));
+    expect((await fetchDeliverabilityHealth(db, teamId, { now })).status).toBe("warning");
+  });
+
   it("returns ok with zero rates for a team that has never sent", async () => {
     const teamId = await createTeam(db, "deliverability-empty");
     expect(await fetchDeliverabilityHealth(db, teamId, { now })).toEqual({
@@ -365,6 +434,7 @@ describe("fetchDeliverabilityHealth", () => {
         complained: 0,
         windowDays: PAUSE_WINDOW_DAYS,
       },
+      lifted: { sent: 0, hardBounced: 0 },
     });
   });
 });
