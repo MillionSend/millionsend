@@ -107,6 +107,37 @@ describe("audit.list", () => {
     });
   });
 
+  it("shows the team a pause lift without the operator's reference and note", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    // The row the console's Lift sending pause writes.
+    await db.insert(schema.auditLog).values({
+      teamId,
+      actorId: "user:op",
+      action: "team.sending_pause_lifted",
+      target: `team:${teamId}`,
+      data: {
+        name: "acme",
+        reference: "Ticket 1042",
+        note: "Fake sign-ups stopped",
+        since: "2026-08-13",
+        sent: 300,
+        hardBounces: 20,
+        notified: true,
+      },
+    });
+    const { items } = await callerFor("alice", teamId, "owner").audit.list({});
+    expect(items[0]?.data).toEqual({
+      name: "acme",
+      reference: null,
+      note: null,
+      since: "2026-08-13",
+      sent: 300,
+      hardBounces: 20,
+      notified: true,
+    });
+  });
+
   it("never lists trust & safety flags and shows the operator only as MillionSend; the console keeps both", async () => {
     // The instance operator is the first registered user, and no member of the team.
     await db
