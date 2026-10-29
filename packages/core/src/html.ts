@@ -77,6 +77,13 @@ const ENTITIES = new Map([
   ["newline", "\n"],
 ]);
 
+/**
+ * What templates pad an inbox preview line or a button with: soft hyphens,
+ * the combining grapheme joiner, zero-width and directional marks, the word
+ * joiner and the byte order mark. They carry no words. Global: replace only.
+ */
+export const PADDING_MARKS = /[\u00ad\u200b-\u200f\u2060\ufeff]|\u034f/g;
+
 /** Numeric character references and the named ones above, decoded; names match without case. */
 export function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, body: string) => {

@@ -5,6 +5,7 @@ import { registrableDomain } from "../org-domain.js";
 import { readReceived, replyWithSignature } from "../receiving/read.js";
 import {
   clip,
+  hiddenCharCount,
   JUDGE_HIDDEN_TEXT_MAX_CHARS,
   JUDGE_PLAIN_TEXT_MAX_CHARS,
   JUDGE_PREVIEW_MAX_CHARS,
@@ -266,7 +267,7 @@ export function buildInboundJudgeBlock(input: InboundJudgeBlockInput): string {
     "Links (anchor text -> domain):",
     rows.join("\n") || "  (none)",
     `Attachments: ${attachments || "(none)"}`,
-    `Hidden characters count: ${(stripped?.hiddenChars ?? 0) + read.hiddenText.invisible_chars + (plainShown ? countInvisible(plain) : 0)}`,
+    `Hidden characters count: ${hiddenCharCount(stripped, preview) + read.hiddenText.invisible_chars + (plainShown ? countInvisible(plain) : 0)}`,
     `Automated: ${input.automated ?? "no"}`,
   );
   return lines.join("\n");

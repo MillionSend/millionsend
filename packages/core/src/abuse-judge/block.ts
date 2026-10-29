@@ -1,5 +1,6 @@
 import { redactRevealedText } from "../content-reveal-render.js";
 import { countInvisible, dropInvisible } from "../customer-text.js";
+import { PADDING_MARKS } from "../html.js";
 import {
   type BodyLink,
   extractLinks,
@@ -14,7 +15,7 @@ import {
   registrableDomain,
   vouchedRegistrableDomain,
 } from "../org-domain.js";
-import { decodeEntities, opaqueFactsOf, readBody } from "./body.js";
+import { decodeEntities, opaqueFactsOf, readBody, type VisibleHtml } from "./body.js";
 import { type MediaFindings, renderMediaLines } from "./media.js";
 
 /**
@@ -182,6 +183,23 @@ export function plainTextDiffers(text: string, visible: string): boolean {
   return words.filter((w) => seen.has(w)).length < PLAIN_TEXT_SHARED_WORDS * words.length;
 }
 
+/**
+ * The hidden characters a block counts: hidden text past the inbox preview
+ * line, its spaces collapsed, the preview (`preview`, the line as the block
+ * shows it) past its cap, and any other invisible character in the preview
+ * (tags, selectors, bidi controls). Template padding (PADDING_MARKS) counts
+ * nowhere: it carries no words, and every section reaches the judge without
+ * it. The preview line itself is shown apart.
+ */
+export function hiddenCharCount(stripped: VisibleHtml | null, preview: string): number {
+  if (!stripped) return 0;
+  return (
+    oneLine(stripped.hidden.replace(PADDING_MARKS, "")).length +
+    Math.max(0, preview.length - JUDGE_PREVIEW_MAX_CHARS) +
+    countInvisible(stripped.preview.replace(PADDING_MARKS, ""))
+  );
+}
+
 function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
@@ -253,7 +271,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     rows.join("\n") || "  (none)",
     `Image count: ${facts.imageRefs.length}`,
     `Attachments: ${attachments || "(none)"}`,
-    `Hidden characters count: ${(stripped?.hiddenChars ?? 0) + body.invisible + plainInvisible}`,
+    `Hidden characters count: ${hiddenCharCount(stripped, preview) + body.invisible + plainInvisible}`,
   );
   lines.push(
     ...renderMediaLines(input.media, {

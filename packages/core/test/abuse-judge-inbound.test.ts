@@ -57,6 +57,14 @@ describe("buildInboundJudgeBlock", () => {
     expect(block).toContain("this -> 127.0.0.1\n  that -> evil.example");
     expect(block).not.toContain("(local address)");
   });
+
+  it("counts no template padding as hidden characters", () => {
+    const block = buildInboundJudgeBlock({
+      ...base,
+      html: `<div style="display:none;max-height:0;overflow:hidden">Seu pedido saiu${"\u00a0\u200c\u200b\u200d\u200e\u200f\ufeff".repeat(135)}</div><p>Seu pedido saiu para entrega.</p>`,
+    });
+    expect(block).toContain("Hidden characters count: 0");
+  });
 });
 
 describe("composeInboundVerdict", () => {
