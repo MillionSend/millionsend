@@ -6,10 +6,10 @@ import {
   buildJudgeBlock,
   claimNotification,
   clearDestinations,
+  clientIdentitySite,
   decryptEmailBody,
   destinationVerdictParks,
   type EmailAttachment,
-  isClientIdentityVerdict,
   isHoldVerdict,
   isPlatformLinkVerdict,
   isSharedInboxSender,
@@ -246,11 +246,11 @@ async function judgePending(
   // A platform's notice for one client business, read as that business's impersonation, from a
   // sending domain past young: spared and vouched as above. The vouch rests on the From name
   // spelling the released site, so another brand's name on that site is held as before.
-  const clientShape =
-    sample.broadcastId === null &&
-    !paysByPix &&
-    !youngSendingDomain &&
-    isClientIdentityVerdict(verdict, loaded.input, standing.all);
+  const clientSite =
+    sample.broadcastId === null && !paysByPix && !youngSendingDomain
+      ? clientIdentitySite(verdict, loaded.input, standing.all)
+      : null;
+  const clientShape = clientSite !== null;
   const vouched = (platformShape || clientShape) && standing.all.every((d) => vouchedNames.has(d));
   // Unvouched, the spare takes a client site known to be registered 7 days or more ago, even one a
   // clean verdict made no longer new to the team: no date, or one not known yet, keeps the hold.
@@ -322,19 +322,22 @@ async function judgePending(
   }
   // Mail to a destination that cleared within its probation, read as
   // phishing: the clearance goes, and the operator hears of it, unless an
-  // operator's release vouched for this shape on it.
+  // operator's release vouched for this shape on it. A client business's
+  // notice keeps its released site's clearance while a link new beside it
+  // is screened.
   const platformProbation =
     sample.broadcastId === null &&
     !paysByPix &&
     isPlatformLinkVerdict(verdict, standing.probation) &&
     standing.probation.every((d) => vouchedNames.has(d));
+  const probation = standing.probation.filter((d) => d !== clientSite || !vouchedNames.has(d));
   if (
-    standing.probation.length > 0 &&
+    probation.length > 0 &&
     !platformProbation &&
     !vouched &&
     isHoldVerdict(verdict, settings.holdRepeatScore)
   ) {
-    const revoked = await revokeDestinations(db, sample.teamId, standing.probation, now);
+    const revoked = await revokeDestinations(db, sample.teamId, probation, now);
     if (revoked.length > 0) {
       await notifyDestination(
         db,

@@ -7,10 +7,10 @@ import type { JudgeVerdict } from "../src/abuse-judge/types.js";
 import {
   applyJudgedSample,
   clearMonitorOverride,
+  clientIdentitySite,
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
-  isClientIdentityVerdict,
   isPlatformLinkVerdict,
   isPlatformTenantName,
   MONITOR_PRIOR_NEW,
@@ -780,11 +780,23 @@ describe("the review hold", () => {
       isPlatformLinkVerdict({ ...v, score: 90 }, destinations);
     expect(at(RESET, ["app.localhost"])).toBe(true);
     expect(at(RESET, ["127.0.0.1", "ref.supabase.co"])).toBe(true);
-    // A name a stranger can serve beside it, an address only dressed as local, a named brand: not this.
+    // A framework's default template signing its own name under the product's: only local links.
+    expect(at(PHISHING, ["localhost"])).toBe(true);
+    expect(at({ ...RESET, reasons: ["impersonation", "off_domain_lure"] }, ["localhost"])).toBe(
+      true,
+    );
+    // A name a stranger can serve beside it, an address only dressed as local: not this.
     expect(at(RESET, ["localhost", "lure.example"])).toBe(false);
     expect(at(RESET, ["[::ffff:808:808]"])).toBe(false);
     expect(at(RESET, ["169.254.169.254"])).toBe(false);
-    expect(at(PHISHING, ["localhost"])).toBe(false);
+    // A brand beside a platform name, a lure without a link, a class past a brand's: not this.
+    expect(at(PHISHING, ["localhost", "ref.supabase.co"])).toBe(false);
+    expect(at({ ...PHISHING, reasons: ["impersonation", "no_link_lure"] }, ["localhost"])).toBe(
+      false,
+    );
+    expect(at({ ...PHISHING, categories: ["brand_impersonation", "scam"] }, ["localhost"])).toBe(
+      false,
+    );
   });
 
   it("reads a platform's notice for one client business, whose name it spells, as that client's own", () => {
@@ -795,7 +807,7 @@ describe("the review hold", () => {
       reasons: ["impersonation"],
     };
     const SITE = "acme-tiles.example";
-    const mail = (o: Partial<Parameters<typeof isClientIdentityVerdict>[1]> = {}) => ({
+    const mail = (o: Partial<Parameters<typeof clientIdentitySite>[1]> = {}) => ({
       from: '"Acme Tiles" <orders@platform.example>',
       replyTo: [`contato@${SITE}`],
       subject: "Pedido 12345 confirmado",
@@ -805,44 +817,43 @@ describe("the review hold", () => {
       ...o,
     });
     const at = (m = mail(), v: typeof BRAND = BRAND, destinations = [SITE]) =>
-      isClientIdentityVerdict(v, m, destinations);
+      clientIdentitySite(v, m, destinations);
     const linked = (extra: string) => mail({ html: `${mail().html}${extra}` });
-    expect(at()).toBe(true);
-    expect(at(mail(), { ...BRAND, categories: [] })).toBe(true);
-    expect(at(mail({ from: '"ACME-TILES" <a@platform.example>' }))).toBe(true);
-    expect(at(mail({ replyTo: [`Atendimento <sac@mail.${SITE}>`] }))).toBe(true);
+    expect(at()).toBe(SITE);
+    expect(at(mail(), { ...BRAND, categories: [] })).toBe(SITE);
+    expect(at(mail({ from: '"ACME-TILES" <a@platform.example>' }))).toBe(SITE);
+    expect(at(mail({ replyTo: [`Atendimento <sac@mail.${SITE}>`] }))).toBe(SITE);
     // Another or a longer name, none, or one carrying invisible characters.
-    expect(at(mail({ from: '"Banco Exemplo" <a@platform.example>' }))).toBe(false);
-    expect(at(mail({ from: '"Acme Tiles Ltda" <a@platform.example>' }))).toBe(false);
-    expect(at(mail({ from: "orders@platform.example" }))).toBe(false);
-    expect(at(mail({ from: '"Acme\u200bTiles" <a@platform.example>' }))).toBe(false);
+    expect(at(mail({ from: '"Banco Exemplo" <a@platform.example>' }))).toBeNull();
+    expect(at(mail({ from: '"Acme Tiles Ltda" <a@platform.example>' }))).toBeNull();
+    expect(at(mail({ from: "orders@platform.example" }))).toBeNull();
+    expect(at(mail({ from: '"Acme\u200bTiles" <a@platform.example>' }))).toBeNull();
     // Any ask the judge saw, or a class other than a brand.
-    expect(at(mail(), { ...BRAND, reasons: ["impersonation", "harvests_secrets"] })).toBe(false);
-    expect(at(mail(), { ...BRAND, reasons: ["impersonation", "off_domain_lure"] })).toBe(false);
-    expect(at(mail(), { ...BRAND, categories: ["phishing_credentials"] })).toBe(false);
-    // A second destination, a reply elsewhere or none, no web link to the site.
-    expect(at(mail(), BRAND, [SITE, "lure.example"])).toBe(false);
-    expect(at(mail({ replyTo: null }))).toBe(false);
-    expect(at(mail({ replyTo: [`contato@${SITE}`, "x@lure.example"] }))).toBe(false);
-    expect(at(mail({ html: `<p>${"Seu pedido foi confirmado. ".repeat(10)}</p>` }))).toBe(false);
+    expect(at(mail(), { ...BRAND, reasons: ["impersonation", "harvests_secrets"] })).toBeNull();
+    expect(at(mail(), { ...BRAND, reasons: ["impersonation", "off_domain_lure"] })).toBeNull();
+    expect(at(mail(), { ...BRAND, categories: ["phishing_credentials"] })).toBeNull();
+    // A reply elsewhere or none, no web link to the site.
+    expect(at(mail({ replyTo: null }))).toBeNull();
+    expect(at(mail({ replyTo: [`contato@${SITE}`, "x@lure.example"] }))).toBeNull();
+    expect(at(mail({ html: `<p>${"Seu pedido foi confirmado. ".repeat(10)}</p>` }))).toBeNull();
     // A link that opens a mail, a call or anything but a web page, however its value is dressed.
-    expect(at(linked('<a href="mailto:x@lure.example">fale conosco</a>'))).toBe(false);
-    expect(at(linked('<a href="te\tl:+5511900000000">ligue</a>'))).toBe(false);
-    expect(at(linked('<a href="&#1;mailto:x@lure.example">fale conosco</a>'))).toBe(false);
-    expect(at(linked('<a href="&#1;tel:+5511900000000">ligue</a>'))).toBe(false);
-    expect(at(linked('<a href="&#160;mailto:x@lure.example">fale conosco</a>'))).toBe(false);
-    expect(at(linked('<a href="&#65279;mailto:x@lure.example">fale conosco</a>'))).toBe(false);
-    expect(at(linked('<a href="whatsapp://send?phone=5511900000000">chame</a>'))).toBe(false);
+    expect(at(linked('<a href="mailto:x@lure.example">fale conosco</a>'))).toBeNull();
+    expect(at(linked('<a href="te\tl:+5511900000000">ligue</a>'))).toBeNull();
+    expect(at(linked('<a href="&#1;mailto:x@lure.example">fale conosco</a>'))).toBeNull();
+    expect(at(linked('<a href="&#1;tel:+5511900000000">ligue</a>'))).toBeNull();
+    expect(at(linked('<a href="&#160;mailto:x@lure.example">fale conosco</a>'))).toBeNull();
+    expect(at(linked('<a href="&#65279;mailto:x@lure.example">fale conosco</a>'))).toBeNull();
+    expect(at(linked('<a href="whatsapp://send?phone=5511900000000">chame</a>'))).toBeNull();
     // A listed brand in the subject or the name, a file, an opaque body.
-    expect(at(mail({ subject: "Seu pedido no Mercado Livre" }))).toBe(false);
-    expect(at(mail({ attachments: [{ filename: "pedido.pdf" }] }))).toBe(false);
+    expect(at(mail({ subject: "Seu pedido no Mercado Livre" }))).toBeNull();
+    expect(at(mail({ attachments: [{ filename: "pedido.pdf" }] }))).toBeNull();
     expect(
       at(
         mail({
           html: `<img src="https://cdn.platform.example/a.png"><a href="https://${SITE}">ver</a>`,
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
     // A registered name the From name spells as written: no typosquat of it, no listed brand, no
     // free host's tenant, no name a private suffix splits, no IDN.
     const named = (d: string, name: string) =>
@@ -855,13 +866,28 @@ describe("the review hold", () => {
         BRAND,
         [d],
       );
-    expect(named("loja-123.example", "Loja 123")).toBe(true);
-    expect(named("acme-tlles.example", "Acme Tiles")).toBe(false);
-    expect(named("acrne-tiles.example", "Acme Tiles")).toBe(false);
-    expect(named("paypal-brasil.example", "PayPal Brasil")).toBe(false);
-    expect(named("acme-tiles.pages.dev", "Acme Tiles")).toBe(false);
-    expect(named("acme.com.de", "Acme")).toBe(false);
-    expect(named("xn--acme-tiles-q9a.example", "Xn Acme Tiles Q9a")).toBe(false);
+    expect(named("loja-123.example", "Loja 123")).toBe("loja-123.example");
+    expect(named("acme-tlles.example", "Acme Tiles")).toBeNull();
+    expect(named("acrne-tiles.example", "Acme Tiles")).toBeNull();
+    expect(named("paypal-brasil.example", "PayPal Brasil")).toBeNull();
+    expect(named("acme-tiles.pages.dev", "Acme Tiles")).toBeNull();
+    expect(named("acme.com.de", "Acme")).toBeNull();
+    expect(named("xn--acme-tiles-q9a.example", "Xn Acme Tiles Q9a")).toBeNull();
+    // Another registered name beside the site, as a carrier's tracking page: the site is still the
+    // one the name spells. No free host's tenant, IDN, shortener, address or listed brand there, no
+    // second name the From name spells, no reply under the other name.
+    const TRACK = "parcel-tracker.example";
+    const tracked = linked(`<a href="https://${TRACK}/r/AB123">Rastrear</a>`);
+    expect(at(tracked, BRAND, [SITE, TRACK])).toBe(SITE);
+    expect(at(tracked, BRAND, [TRACK, SITE])).toBe(SITE);
+    expect(at(tracked, BRAND, [SITE, "track.pages.dev"])).toBeNull();
+    expect(at(tracked, BRAND, [SITE, "xn--rastreio-q9a.example"])).toBeNull();
+    expect(at(tracked, BRAND, [SITE, "bit.ly"])).toBeNull();
+    expect(at(tracked, BRAND, [SITE, "app.localhost"])).toBeNull();
+    expect(at(tracked, BRAND, [SITE, "203.0.113.5"])).toBeNull();
+    expect(at(tracked, BRAND, [SITE, "correios.example"])).toBeNull();
+    expect(at(tracked, BRAND, [SITE, "acmetiles.example"])).toBeNull();
+    expect(at(mail({ replyTo: [`contato@${TRACK}`] }), BRAND, [SITE, TRACK])).toBeNull();
   });
 
   it("suspends a new team for review on one confident phishing verdict, once, and leaves a released team to the operator", async () => {
@@ -1149,5 +1175,71 @@ describe("the review hold", () => {
     const s = { ...S, holdRepeatCount: 2, holdRepeatScore: 70 };
     expect(await judge(two, 75, PHISHING, minute(1), s)).toBeNull();
     expect(await judge(two, 75, PHISHING, minute(2), s)).toEqual({ rule: "repeat", verdicts: 2 });
+  });
+
+  it("counts no spared verdict whose mail an operator released while its names stay released", async () => {
+    const SITE = "acme-tiles.example";
+    /** Four verdicts that spared the team and parked their mail, then a fifth of another shape. */
+    const fifth = async (
+      slug: string,
+      o: {
+        released?: boolean;
+        site?: { operator: boolean; revoked?: boolean } | null;
+        sparedHold?: string;
+        destinations?: string[];
+      } = {},
+    ) => {
+      const teamId = await newTeam(slug);
+      for (let i = 1; i <= 4; i++) {
+        const [mail] = await db
+          .insert(schema.emails)
+          .values({
+            teamId,
+            from: `"Acme Tiles" <orders@${slug}.example>`,
+            to: ["r@example.org"],
+            subject: "Pedido confirmado",
+            screenReleasedAt: (o.released ?? true) ? minute(i) : null,
+          })
+          .returning({ id: schema.emails.id });
+        await db.insert(schema.monitorSamples).values({
+          teamId,
+          emailId: mail?.id,
+          kind: "first_sends",
+          screening: true,
+          status: "judged",
+          score: 85,
+          ...PHISHING,
+          sparedHold: o.sparedHold ?? "score",
+          destinations: o.destinations ?? [SITE],
+          createdAt: minute(i),
+          judgedAt: minute(i),
+        });
+      }
+      const site = o.site === undefined ? { operator: true } : o.site;
+      if (site) {
+        await db.insert(schema.teamDestinations).values({
+          teamId,
+          domain: SITE,
+          clearedAt: minute(1),
+          operatorClearedAt: site.operator ? minute(1) : null,
+          revokedAt: site.revoked ? minute(4) : null,
+        });
+      }
+      return judge(teamId, 85, PHISHING, minute(5));
+    };
+    expect(await fifth("released-spares")).toBeNull();
+    // Mail still parked, a clearance no person gave or one taken back since: each still counts.
+    const held = { rule: "repeat", verdicts: 5 };
+    expect(await fifth("released-spares-parked", { released: false })).toEqual(held);
+    expect(await fifth("released-spares-verdict", { site: { operator: false } })).toEqual(held);
+    expect(
+      await fifth("released-spares-revoked", { site: { operator: true, revoked: true } }),
+    ).toEqual(held);
+    expect(await fifth("released-spares-none", { site: null })).toEqual(held);
+    // A burst row's own names were never looked at; a loopback address never clears.
+    expect(await fifth("released-spares-burst", { sparedHold: "burst" })).toEqual(held);
+    expect(await fifth("released-spares-local", { destinations: [SITE, "localhost"] })).toEqual(
+      held,
+    );
   });
 });

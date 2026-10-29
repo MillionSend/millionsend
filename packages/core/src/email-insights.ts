@@ -88,6 +88,11 @@ export const SHORTENER_HOSTS = new Set([
   "s.id",
 ]);
 
+/** A shortener's domain: it hides where a link leads, so it is never cleared. */
+export function isShortener(domain: string): boolean {
+  return [...SHORTENER_HOSTS].some((s) => domain === s || domain.endsWith(`.${s}`));
+}
+
 export interface EmailInsightsInput {
   /** FINAL html (post unsubscribe-substitution AND post tracking-rewrite) — used ONLY for body_size. */
   html: string | null;
@@ -280,13 +285,7 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
       }
       case "no_shorteners": {
         if (links.length === 0) return { status: "not_applicable" };
-        const found = [
-          ...new Set(
-            links
-              .map((l) => l.host)
-              .filter((h) => [...SHORTENER_HOSTS].some((s) => h === s || h.endsWith(`.${s}`))),
-          ),
-        ];
+        const found = [...new Set(links.map((l) => l.host).filter(isShortener))];
         // youtu.be is YouTube's own share domain and only harmful when our
         // click tracking actually wraps it (shortener + wrapper = double
         // redirect, the documented Gmail phishing trigger); generic

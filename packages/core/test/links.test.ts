@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isShortener } from "../src/email-insights.js";
 import {
   type BodyLink,
   extractLinks,
@@ -6,7 +7,7 @@ import {
   resolveTextUrl,
   UNRESOLVED_DESTINATION,
 } from "../src/links.js";
-import { isShortener, messageDestinations } from "../src/screening.js";
+import { messageDestinations } from "../src/screening.js";
 
 const hostOf = (link: Pick<BodyLink, "url">) => (link.url ? new URL(link.url).hostname : null);
 const summary = (links: BodyLink[]) =>

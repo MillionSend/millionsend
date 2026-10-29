@@ -1484,7 +1484,9 @@ transmissões ficam em espera, uma nova transmissão é recusada com
 `403 sending_paused` e, com `SES_TENANTS` ligado, o tenant do SES dela é desativado.
 Uma sequência de avaliações com pontuação menor também pausa a equipe: por padrão, a
 quinta dessas avaliações a partir de 80 em quaisquer sete dias enquanto a
-equipe está no nível Nova. Um link para outro domínio, sozinho, não conta para nenhuma das duas
+equipe está no nível Nova; uma avaliação que poupou a equipe (veja abaixo) e
+cujo e-mail o operador liberou deixa de contar, enquanto todo nome em que ela
+se apoiava continuar liberado. Um link para outro domínio, sozinho, não conta para nenhuma das duas
 regras: e-mail legítimo costuma ter links para outros lugares. O operador é
 avisado por e-mail na hora, com a regra que pausou a
 equipe; o proprietário não. O painel mostra um aviso neutro de "envio pausado
@@ -1566,8 +1568,9 @@ Uma equipe no nível Nova é poupada da pausa que uma avaliação traria quando 
 avaliação se apoia só num link de login, troca de senha ou cobrança para o
 nome do próprio produto numa plataforma de apps (`ref.supabase.co`,
 `x.workers.dev`) ou para um endereço de loopback, num e-mail avaliado antes do
-SES que não é transmissão, não se passa por outra marca e não traz meio de
-pagamento: a mensagem fica em espera na lista de revisão no lugar da pausa.
+SES que não é transmissão, não se passa por outra marca (com todos os links
+num endereço de loopback, pode: o modelo padrão de um framework assina com o
+nome do framework) e não traz meio de pagamento: a mensagem fica em espera na lista de revisão no lugar da pausa.
 Um link de loopback sozinho não faz o e-mail ser avaliado antes do SES; por
 isso, depois da janela inicial da equipe, essa avaliação num e-mail avaliado
 depois do envio ainda pausa a equipe. Do mesmo jeito, uma equipe no nível
@@ -1576,13 +1579,16 @@ que uma plataforma de loja ou de agendamento manda em nome de um cliente: um
 e-mail que não é transmissão, não traz código Pix nem arquivo, não tem a
 mensagem em imagens nem num QR code desenhado com caracteres e sai de um
 domínio de envio com pelo menos 7 dias, cujo nome de remetente (From) é o nome
-do único domínio para onde vão o Reply-To e os links, sem link que não seja de
-página web e sem nenhuma marca que o monitor conheça no nome, no domínio ou no
-assunto. Até o operador liberar um e-mail para esse domínio, isso só vale para
-e-mail avaliado antes do SES e para domínio cuja data de registro mostra pelo
-menos 7 dias (sem data, a pausa continua); depois da liberação, esses avisos
-para ele saem sem ficar em espera nem esperar os 2 minutos, e sem pausar a
-equipe, e a mesma mensagem com outro nome ainda pausa a equipe.
+do domínio para onde vão o Reply-To e um link, só com domínios registrados ao
+lado dele (a página de rastreio de uma transportadora), sem link que não seja
+de página web e sem nenhuma marca que o monitor conheça no nome, nos domínios
+ou no assunto. Até o operador liberar um e-mail para esses domínios, isso só
+vale para e-mail avaliado antes do SES e para domínios cuja data de registro
+mostra pelo menos 7 dias (sem data, a pausa continua); depois da liberação,
+esses avisos para eles saem sem ficar em espera nem esperar os 2 minutos, e sem
+pausar a equipe, e a mesma mensagem com outro nome ainda pausa a equipe. Um
+aviso que traz um domínio novo ao lado de um já liberado mantém a liberação
+dele enquanto o novo é avaliado.
 Essas amostras não contam para nenhum limite diário; uma equipe tem 200 delas
 por dia, e depois disso o e-mail dela com um destino novo espera o próximo dia
 UTC.

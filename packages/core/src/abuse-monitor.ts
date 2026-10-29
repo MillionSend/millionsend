@@ -1,12 +1,13 @@
 import { createHmac, hkdfSync } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { JudgeBlockInput } from "./abuse-judge/block.js";
 import { opaqueFacts } from "./abuse-judge/body.js";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
 import { countInvisible } from "./customer-text.js";
+import { isShortener } from "./email-insights.js";
 import { imitatedBrandIn, plainWords } from "./imitated-brands.js";
 import { extractLinks } from "./links.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
@@ -686,6 +687,20 @@ const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
   "phishing_credentials",
   "payment_redirect",
 ]);
+/**
+ * Mail whose every link leads back to the reader's own machine may also read
+ * as another brand's: a framework's default template signs with the
+ * framework's name under the product's. Such a link opens no page anyone
+ * serves.
+ */
+const LOOPBACK_LINK_REASONS: ReadonlySet<string> = new Set([
+  ...PLATFORM_LINK_REASONS,
+  "impersonation",
+]);
+const LOOPBACK_LINK_CATEGORIES: ReadonlySet<string> = new Set([
+  ...PLATFORM_LINK_CATEGORIES,
+  "brand_impersonation",
+]);
 
 /**
  * A phishing-type verdict that rests on nothing but a sign-in, reset or
@@ -694,7 +709,9 @@ const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
  * that poses as no other brand: phishing_credentials or payment_redirect
  * at most for a category (PLATFORM_LINK_CATEGORIES), reasons saying only
  * that the link is off the verified domains and asks for a secret, and
- * every destination such a name. The judge cannot tell such a
+ * every destination such a name. When every destination is a loopback
+ * address, the mail may pose as a brand too (LOOPBACK_LINK_CATEGORIES,
+ * LOOPBACK_LINK_REASONS). The judge cannot tell such a
  * page from a lure, so the hold policy spares the team the hold such a
  * verdict meets (applyJudgedSample's `platformLink`): the mail waits for the
  * review list instead, with the team's other mail waiting on a
@@ -702,20 +719,22 @@ const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
  * which also keeps a verdict of this shape from taking the clearance back. A
  * loopback address never clears (clearDestinations), so a verdict resting
  * on one always waits for a person: a decoy loopback link can sit beside a
- * lure the link table never shows. A lure that names a brand, moves a
- * payment or
- * carries no link keeps every rule, and the callers never spare a
- * broadcast's sample.
+ * lure the link table never shows. A lure that names a brand beside a link
+ * a stranger can serve, moves a payment or carries no link keeps every
+ * rule, and the callers never spare a broadcast's sample.
  */
 export function isPlatformLinkVerdict(
   v: HoldVerdictFields,
   destinations: readonly string[],
 ): boolean {
+  const local = destinations.every((d) => isLoopbackHost(d));
+  const categories = local ? LOOPBACK_LINK_CATEGORIES : PLATFORM_LINK_CATEGORIES;
+  const reasons = local ? LOOPBACK_LINK_REASONS : PLATFORM_LINK_REASONS;
   return (
     v.verdict === "abuse" &&
     destinations.length > 0 &&
-    (v.categories ?? []).every((c) => PLATFORM_LINK_CATEGORIES.has(c)) &&
-    (v.reasons ?? []).every((r) => PLATFORM_LINK_REASONS.has(r)) &&
+    (v.categories ?? []).every((c) => categories.has(c)) &&
+    (v.reasons ?? []).every((r) => reasons.has(r)) &&
     destinations.every((d) => isPlatformTenantName(d) || isLoopbackHost(d))
   );
 }
@@ -725,63 +744,75 @@ export function isPlatformLinkVerdict(
  * verified domain ("Acme Tiles" <orders@platform.example>, replying to and
  * linking acme-tiles.example), that the judge reads as that business's
  * impersonation and nothing more: brand_impersonation at most for a category,
- * impersonation at most for a reason. Its one destination is a registered
- * name (no free host's tenant, no IDN) that every Reply-To address and at
- * least one web link sit under, and the From name's letters spell that name
- * without its suffix: look-alike letters read as Latin, but none of the swaps
- * imitatedBrandIn folds, so a real name never matches a typosquat of it. No
- * brand IMITATED_BRANDS lists in the name, the subject or the destination, no
+ * impersonation at most for a reason. Its site is the one destination whose
+ * registered name the From name's letters spell without its suffix (look-alike
+ * letters read as Latin, but none of the swaps imitatedBrandIn folds, so a real
+ * name never matches a typosquat of it), and every Reply-To address and at
+ * least one web link sit under it. Every destination, the site or another
+ * beside it (a carrier's tracking page), is a registered name: no free host's
+ * tenant, no IDN, no shortener, no loopback address; the caller dates them
+ * all and vouches only once an operator released every one. No brand
+ * IMITATED_BRANDS lists in the name, the subject or a destination, no
  * invisible character in the name, no link that opens anything but a web
  * page, no file and no opaque body. The judge cannot tell such a notice from a
  * brand lure on a lookalike domain, so the caller spares the team the hold and
  * parks the mail for a person, as isPlatformLinkVerdict's are, until an
  * operator's release of mail to that site vouches for the name spelling it.
+ * The site, or null.
  */
-export function isClientIdentityVerdict(
+export function clientIdentitySite(
   v: HoldVerdictFields,
   mail: Pick<JudgeBlockInput, "from" | "replyTo" | "subject" | "html" | "text" | "attachments">,
   destinations: readonly string[],
-): boolean {
-  const [d, ...more] = destinations;
+): string | null {
+  const named = (d: string) =>
+    registrableDomain(d) === d &&
+    !d.includes("xn--") &&
+    !isShortener(d) &&
+    !isLoopbackHost(d) &&
+    registeredName(d) !== null;
   if (
     v.verdict !== "abuse" ||
-    d === undefined ||
-    more.length > 0 ||
+    destinations.length === 0 ||
+    !destinations.every(named) ||
     !(v.categories ?? []).every((c) => c === "brand_impersonation") ||
     !(v.reasons ?? []).every((r) => r === "impersonation") ||
-    registrableDomain(d) !== d ||
-    d.includes("xn--") ||
     mail.attachments.length > 0
   ) {
-    return false;
+    return null;
   }
-  const label = registeredName(d) ?? "";
+  const label = (d: string) => registeredName(d) ?? "";
   const name = parseMailbox(mail.from)?.name ?? "";
   const spelled = plainWords(name).join("");
-  if (spelled === "" || spelled !== plainWords(label).join("") || countInvisible(name) > 0) {
-    return false;
+  const [site, ...twins] = destinations.filter((d) => plainWords(label(d)).join("") === spelled);
+  if (spelled === "" || site === undefined || twins.length > 0 || countInvisible(name) > 0) {
+    return null;
   }
-  if (imitatedBrandIn(name) || imitatedBrandIn(label) || imitatedBrandIn(mail.subject)) {
-    return false;
+  if (
+    imitatedBrandIn(name) ||
+    imitatedBrandIn(mail.subject) ||
+    destinations.some((d) => imitatedBrandIn(label(d)))
+  ) {
+    return null;
   }
   const replyTo = mail.replyTo ?? [];
   if (
     replyTo.length === 0 ||
-    replyTo.some((address) => ownerDomain(parseSingleSender(address)?.domain ?? "") !== d)
+    replyTo.some((address) => ownerDomain(parseSingleSender(address)?.domain ?? "") !== site)
   ) {
-    return false;
+    return null;
   }
   const links = extractLinks(mail.html, mail.text);
-  return (
-    links.some((link) => link.url !== null && ownerDomain(new URL(link.url).hostname) === d) &&
+  const shaped =
+    links.some((link) => link.url !== null && ownerDomain(new URL(link.url).hostname) === site) &&
     // Read as the link reader reads a value, so whitespace or a control character before mailto:
     // hides nothing.
     !links.some((link) => {
       const scheme = URL.parse(link.raw.replace(/[\t\n\r]/g, "").trim())?.protocol;
       return scheme !== undefined && scheme !== "http:" && scheme !== "https:";
     }) &&
-    !opaqueFacts({ html: mail.html, text: mail.text, attachments: 0 }).opaque
-  );
+    !opaqueFacts({ html: mail.html, text: mail.text, attachments: 0 }).opaque;
+  return shaped ? site : null;
 }
 
 /**
@@ -790,7 +821,8 @@ export function isClientIdentityVerdict(
  * MONITOR_HOLD_REPEAT_DAYS. The stored verdicts include this one: the judge
  * writes it in the transaction that folds it. Verdicts on names an operator
  * cleared (`spared_hold` "vouched") are a product's own pages, or a client
- * business's own notices, read as lures, and count for nothing here.
+ * business's own notices, read as lures, and count for nothing here; nor
+ * does a spared verdict a person released (releasedSpares).
  */
 async function repeatHold(
   db: Db,
@@ -807,6 +839,8 @@ async function repeatHold(
       categories: ms.categories,
       reasons: ms.reasons,
       sparedHold: ms.sparedHold,
+      emailId: ms.emailId,
+      destinations: ms.destinations,
     })
     .from(ms)
     .where(
@@ -818,10 +852,74 @@ async function repeatHold(
         lte(ms.judgedAt, now),
       ),
     );
-  const verdicts = judged.filter(
+  const counted = judged.filter(
     (v) => v.sparedHold !== "vouched" && isHoldVerdict(v, s.holdRepeatScore),
-  ).length;
+  );
+  const verdicts = counted.length - (await releasedSpares(db, row.teamId, counted));
   return verdicts >= s.holdRepeatCount ? { rule: "repeat", verdicts } : null;
+}
+
+/**
+ * How many of these verdicts spared the team a hold and parked mail an
+ * operator then released, every name the spare rested on still released
+ * (cleared by an operator, not revoked since): a person looked at each, as
+ * at a verdict vouched on those names. A burst row's own names were never
+ * looked at, and a loopback address never clears, so neither is one.
+ */
+async function releasedSpares(
+  db: Db,
+  teamId: string,
+  verdicts: readonly {
+    sparedHold: string | null;
+    emailId: string | null;
+    destinations: string[] | null;
+  }[],
+): Promise<number> {
+  const spared = verdicts.flatMap((v) =>
+    v.sparedHold !== null &&
+    v.sparedHold !== "burst" &&
+    v.emailId !== null &&
+    v.destinations &&
+    v.destinations.length > 0
+      ? [{ emailId: v.emailId, names: v.destinations }]
+      : [],
+  );
+  if (spared.length === 0) return 0;
+  const e = schema.emails;
+  const td = schema.teamDestinations;
+  const released = new Set(
+    (
+      await db
+        .select({ id: e.id })
+        .from(e)
+        .where(
+          and(
+            inArray(
+              e.id,
+              spared.map((v) => v.emailId),
+            ),
+            isNotNull(e.screenReleasedAt),
+          ),
+        )
+    ).map((r) => r.id),
+  );
+  const cleared = new Set(
+    (
+      await db
+        .select({ domain: td.domain })
+        .from(td)
+        .where(
+          and(
+            eq(td.teamId, teamId),
+            inArray(td.domain, [...new Set(spared.flatMap((v) => v.names))]),
+            isNotNull(td.operatorClearedAt),
+            isNull(td.revokedAt),
+          ),
+        )
+    ).map((r) => r.domain),
+  );
+  return spared.filter((v) => released.has(v.emailId) && v.names.every((d) => cleared.has(d)))
+    .length;
 }
 
 /**
@@ -851,7 +949,7 @@ export async function applyJudgedSample(
     /**
      * The verdict rests only on a credential link to a platform tenant name
      * (isPlatformLinkVerdict) or on a platform's notice for one client
-     * business (isClientIdentityVerdict); never set on a broadcast's sample.
+     * business (clientIdentitySite); never set on a broadcast's sample.
      * A hold rule it meets spares the team and comes back as `spared`, for
      * the caller to park the mail on.
      */

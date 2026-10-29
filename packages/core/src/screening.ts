@@ -30,7 +30,7 @@ import {
 } from "./abuse-monitor.js";
 import { countDistinctRecipients } from "./accept-email.js";
 import type { DomainAgeResolver } from "./domain-age.js";
-import { SHORTENER_HOSTS } from "./email-insights.js";
+import { isShortener } from "./email-insights.js";
 import { addressKey } from "./inboxes/compose.js";
 import { threadSenders } from "./inboxes/send.js";
 import { isSharedInboxSender } from "./inboxes/send-policy.js";
@@ -140,11 +140,6 @@ const e = schema.emails;
 const td = schema.teamDestinations;
 
 type Sample = typeof schema.monitorSamples.$inferSelect;
-
-/** A shortener's domain: it hides where a link leads, so it is never cleared. */
-export function isShortener(domain: string): boolean {
-  return [...SHORTENER_HOSTS].some((s) => domain === s || domain.endsWith(`.${s}`));
-}
 
 // What a link can resolve to: a DNS name (URL hands IDNs over in punycode),
 // or an address. A merge field still in a template is neither.
@@ -1061,7 +1056,7 @@ export async function screenBeforeSend(
   if (waiting === "wait") return { action: "wait", until: null };
   if (waiting === "park") return { action: "park", reason: "screening" };
   if (waiting === "proceed") return { action: "send", sample: { id: sample.id, unjudged: true } };
-  // The hold this verdict met spared the team (isPlatformLinkVerdict, isClientIdentityVerdict): the
+  // The hold this verdict met spared the team (isPlatformLinkVerdict, clientIdentitySite): the
   // mail waits for a person instead.
   if (sample.sparedHold && sample.sparedHold !== "vouched") {
     return { action: "park", reason: "destination" };

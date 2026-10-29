@@ -114,7 +114,7 @@ export const monitorSamples = pgTable(
     // The hold rule this verdict met while the team was spared it, for a
     // credential link to a product's own name on an app platform (core
     // isPlatformLinkVerdict) or a platform's notice for one client business
-    // (core isClientIdentityVerdict), or "burst" on waiting mail a sibling's
+    // (core clientIdentitySite), or "burst" on waiting mail a sibling's
     // spared verdict parked with it: the mail waits for the review list
     // instead. "vouched" when an operator had cleared every such name:
     // nothing to hold, and the mail flows.
