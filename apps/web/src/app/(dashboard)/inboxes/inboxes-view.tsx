@@ -19,6 +19,7 @@ import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { Truncated } from "@/components/truncated";
 import { formatTimeLeft } from "@/lib/format";
+import { domainReceivingHref } from "@/lib/receiving-setup";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useLastDefined } from "@/lib/use-last-defined";
@@ -107,12 +108,18 @@ export function InboxesView() {
   const overview = tab === "all" ? (first?.overview ?? null) : null;
   const plan = options.data?.plan ?? null;
   const atLimit = plan?.limit != null && plan.used >= plan.limit;
-  // Nowhere to receive yet: no domain receives and the instance offers no shared domain.
+  // Nowhere to receive yet: the team has no domain and the instance offers no
+  // shared one. A domain that isn't receiving yet gets set up in the dialog.
   const nowhere =
     options.data !== undefined &&
     options.data.domains.length === 0 &&
+    options.data.otherDomains.length === 0 &&
     options.data.sharedDomain === null;
   const sharedOnly = options.data?.domains.length === 0 ? options.data.sharedDomain : null;
+  // "Turn on receiving" lands on the one domain it can mean, else on the list.
+  const offDomains = options.data?.otherDomains.filter((d) => d.status === "verified") ?? [];
+  const receivingHref =
+    offDomains.length === 1 && offDomains[0] ? domainReceivingHref(offDomains[0].id) : "/domains";
   const blocked = nowhere ? t("create.needsReceiving") : atLimit ? t("limit.full") : null;
 
   const createButton = (
@@ -201,7 +208,14 @@ export function InboxesView() {
                   ),
                 })
               : sharedOnly
-                ? t("empty.sharedOnly", { domain: sharedOnly })
+                ? t.rich("empty.sharedOnly", {
+                    domain: sharedOnly,
+                    link: (chunks) => (
+                      <Link href={receivingHref} className="ms-link">
+                        {chunks}
+                      </Link>
+                    ),
+                  })
                 : t("empty.body")
           }
           cta={nowhere ? undefined : createAction}
@@ -369,6 +383,7 @@ export function InboxesView() {
           open={createOpen}
           onClose={closeCreate}
           domains={options.data.domains}
+          otherDomains={options.data.otherDomains}
           sharedDomain={options.data.sharedDomain}
         />
       ) : null}

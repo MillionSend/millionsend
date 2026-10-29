@@ -3,6 +3,7 @@
 import { FROM_NAME_MAX, INBOX_NAME_MAX, SHARED_USERNAME } from "@millionsend/core/inbox-username";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
@@ -10,11 +11,15 @@ import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
+import { Tooltip } from "@/components/tooltip";
 import { WarnCard } from "@/components/warn-card";
 import { fromNameFromName, localPartFromName } from "@/lib/inbox-defaults";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
+import { receivingSubdomain } from "@/lib/zone";
+import { DOMAIN_TONE, type DomainStatus, useDomainStatusLabel } from "../domains/domain-status";
 import { ACCEPT_FROM, acceptFromHint, acceptFromWarns, nameReviewError } from "./parts";
+import { ReceivingCard } from "./receiving-card";
 
 type Kind = "agent" | "human";
 type AcceptFrom = InboxSafety["accept_from"];
@@ -30,19 +35,24 @@ export function CreateInboxDialog({
   open,
   onClose,
   domains,
+  otherDomains,
   sharedDomain,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Verified and receiving: an inbox there gets mail. */
   domains: { id: string; name: string }[];
+  /** The team's other domains, listed with what each still needs. */
+  otherDomains: { id: string; name: string; status: DomainStatus }[];
   sharedDomain: string | null;
 }) {
   const t = useTranslations("inboxes");
   const common = useTranslations("common");
+  const statusLabel = useDomainStatusLabel();
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const firstDomain = domains[0]?.id ?? (sharedDomain ? SHARED : "");
+  const firstDomain = domains[0]?.id ?? (sharedDomain ? SHARED : (otherDomains[0]?.id ?? ""));
   const [domain, setDomain] = useState(firstDomain);
   const [name, setName] = useState("");
   // The address and the sender name follow the name until typed in (then "" counts as typed).
@@ -78,8 +88,29 @@ export function CreateInboxDialog({
   const localValid = shared
     ? local === "" || SHARED_USERNAME.test(local)
     : LOCAL_PART_RE.test(local);
-  const domainName = shared ? sharedDomain : domains.find((d) => d.id === domain)?.name;
-  const blocked = !domain || !localValid || create.isPending;
+  const localHint =
+    local && !localValid
+      ? t(shared ? "create.errors.username" : "create.errors.localPart")
+      : local && typedLocal === null
+        ? t(shared ? "create.addressFromName" : "create.addressFromNameOwn")
+        : null;
+  const receivingPick = domains.find((d) => d.id === domain);
+  const otherPick = otherDomains.find((d) => d.id === domain);
+  const ownPick = receivingPick
+    ? { ...receivingPick, status: "verified" as const, receiving: true }
+    : otherPick
+      ? { ...otherPick, receiving: false }
+      : null;
+  const domainName = shared ? sharedDomain : ownPick?.name;
+  // The server refuses a domain that doesn't receive; Create says why first,
+  // in words true whether or not the domain's mail goes elsewhere.
+  const notReady = otherPick
+    ? t(
+        otherPick.status === "verified" ? "create.receiving.offTitle" : "create.errors.notVerified",
+        { domain: otherPick.name },
+      )
+    : null;
+  const blocked = !domain || !localValid || create.isPending || notReady !== null;
   const submit = () => {
     if (blocked) return;
     create.mutate({
@@ -105,6 +136,12 @@ export function CreateInboxDialog({
             : create.error.message
     : null;
   const review = nameReviewError(t, create.error);
+  const createButton = (
+    <button type="submit" className="ms-btn ms-btn-primary" disabled={blocked}>
+      <BtnSpinner on={create.isPending} />
+      {t("create.title")} <ConfirmKeycap />
+    </button>
+  );
 
   return (
     <Modal open={open} onClose={close} onConfirm={submit} title={t("create.title")}>
@@ -149,24 +186,51 @@ export function CreateInboxDialog({
             <Select
               value={domain}
               onChange={setDomain}
-              width={260}
+              width="min(300px, 100%)"
               disabled={create.isPending}
-              ariaLabel={t("create.address")}
+              ariaLabel={t("create.domain")}
               options={[
                 ...domains.map((d) => ({ value: d.id, label: `@${d.name}` })),
-                ...(sharedDomain ? [{ value: SHARED, label: `@${sharedDomain}` }] : []),
+                ...(sharedDomain
+                  ? [{ value: SHARED, label: `@${sharedDomain}`, hint: t("create.noDns") }]
+                  : []),
+                ...otherDomains.map((d) => ({
+                  value: d.id,
+                  label: `@${d.name}`,
+                  badge:
+                    d.status === "verified"
+                      ? { label: t("create.receivingOff"), tone: "neutral" as const }
+                      : { label: statusLabel(d.status), tone: DOMAIN_TONE[d.status] },
+                })),
               ]}
             />
           </div>
-          <p style={HINT}>
-            {local && !localValid
-              ? t(shared ? "create.errors.username" : "create.errors.localPart")
-              : local && typedLocal === null
-                ? t(shared ? "create.addressFromName" : "create.addressFromNameOwn")
-                : sharedDomain
-                  ? t("create.addressHint", { domain: sharedDomain })
-                  : t("create.addressHintOwn")}
-          </p>
+          {localHint ? <p style={HINT}>{localHint}</p> : null}
+          {/* The one pointer to the team's own domains: it stays while the name is typed. */}
+          {shared && sharedDomain ? (
+            <p style={{ ...HINT, marginTop: localHint ? 2 : 6 }}>
+              {domains.length + otherDomains.length > 0
+                ? t("create.addressHint", { domain: sharedDomain })
+                : t.rich("create.addressHintNone", {
+                    domain: sharedDomain,
+                    link: (chunks) => (
+                      <Link href="/domains" className="ms-link">
+                        {chunks}
+                      </Link>
+                    ),
+                  })}
+            </p>
+          ) : null}
+          {ownPick ? (
+            <ReceivingCard
+              key={ownPick.id}
+              domain={ownPick}
+              sharedDomain={sharedDomain}
+              subdomainTaken={[...domains, ...otherDomains].some(
+                (d) => d.name === receivingSubdomain(ownPick.name),
+              )}
+            />
+          ) : null}
         </div>
         <div className="ms-field">
           <label htmlFor="inbox-from-name">{t("edit.fromName")}</label>
@@ -266,10 +330,13 @@ export function CreateInboxDialog({
           <button type="button" className="ms-btn ms-btn-secondary" onClick={close}>
             {common("cancel")} <span className="ms-keycap">Esc</span>
           </button>
-          <button type="submit" className="ms-btn ms-btn-primary" disabled={blocked}>
-            <BtnSpinner on={create.isPending} />
-            {t("create.title")} <ConfirmKeycap />
-          </button>
+          {notReady ? (
+            <Tooltip inline text={notReady}>
+              {createButton}
+            </Tooltip>
+          ) : (
+            createButton
+          )}
         </ModalFooter>
       </form>
     </Modal>

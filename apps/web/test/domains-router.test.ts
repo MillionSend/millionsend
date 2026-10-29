@@ -1448,6 +1448,43 @@ describe("domains receiving", () => {
     vi.stubEnv("RECEIVING_MX_HOST", "");
     expect(await receivingRows(withApexMx([{ priority: 10, exchange: MX }]))).toEqual([]);
   });
+
+  it("reads where a domain's mail goes, receiving on or off, for any member of its team", async () => {
+    const teamId = await createTeam(db);
+    const { id, dkimPublicKey } = await verifiedDomain(teamId);
+    const published = publishedDns(dkimPublicKey);
+    const withApexMx = (rows: { priority: number; exchange: string }[]) =>
+      fakeSes({
+        dns: {
+          ...published,
+          resolveMx: async (name: string) =>
+            name === "example.com" ? rows : published.resolveMx(name),
+        },
+      }).deps;
+    const read = (deps: DomainsSesDeps) =>
+      callerFor(teamId, deps, "member").domains.receivingMx({ id });
+    const record = { type: "MX", name: "example.com", value: MX, priority: 10 };
+
+    // Off: the dialog reads it before offering to turn receiving on.
+    expect(await read(withApexMx([]))).toEqual({ record, status: "missing" });
+    expect(await read(withApexMx([{ priority: 1, exchange: "smtp.google.example" }]))).toEqual({
+      record,
+      status: "mismatch",
+      found: "1 smtp.google.example",
+    });
+    await callerFor(teamId, fakeSes().deps).domains.setReceiving({ id, enabled: true });
+    expect(await read(withApexMx([{ priority: 10, exchange: MX }]))).toEqual({
+      record,
+      status: "found",
+    });
+
+    const other = await createTeam(db, "team-other");
+    await expect(
+      callerFor(other, withApexMx([])).domains.receivingMx({ id }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    await expect(read(withApexMx([]))).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 });
 
 describe("domain warm-up", () => {

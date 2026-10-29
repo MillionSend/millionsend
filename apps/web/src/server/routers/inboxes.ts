@@ -317,20 +317,25 @@ function withoutContent<T extends { html: string | null; text: string | null }>(
 }
 
 export const inboxesRouter = router({
-  /** What the create dialog offers: the team's receiving domains, the shared domain, the plan's room. */
+  /** What the create dialog offers: the team's domains, the shared domain, the plan's room. */
   options: receivingProcedure.query(async ({ ctx }) => {
     const dm = schema.domains;
-    const domains = await ctx.db
-      .select({ id: dm.id, name: dm.name })
+    const rows = await ctx.db
+      .select({ id: dm.id, name: dm.name, status: dm.status, receiving: dm.receivingEnabled })
       .from(dm)
-      .where(
-        and(eq(dm.teamId, ctx.teamId), eq(dm.receivingEnabled, true), eq(dm.status, "verified")),
-      )
+      .where(eq(dm.teamId, ctx.teamId))
       .orderBy(dm.name);
+    const receives = (row: (typeof rows)[number]) => row.receiving && row.status === "verified";
     const shared = sharedInboxDomain();
     const subdomain = shared ? await teamSharedDomain(ctx.db, ctx.teamId) : null;
     return {
-      domains,
+      domains: rows.filter(receives).map(({ id, name }) => ({ id, name })),
+      // Every other domain too, verified ones first, with what each still
+      // needs: one missing from the picker reads as one inboxes can't use.
+      otherDomains: rows
+        .filter((row) => !receives(row))
+        .map(({ id, name, status }) => ({ id, name, status }))
+        .sort((a, b) => Number(b.status === "verified") - Number(a.status === "verified")),
       // The team's subdomain; the parent domain while its name review is pending.
       sharedDomain: shared ? (subdomain?.name ?? shared) : null,
       sharedSending: shared ? await sharedSending(ctx) : null,

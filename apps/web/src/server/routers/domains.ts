@@ -82,7 +82,7 @@ import { catchAllAllowed, inboxDeps, userActor } from "../inboxes";
 import { enqueueDomainAge } from "../queue";
 import { tooManyRequests } from "../retry-after";
 import { assertTeamNotSuspended } from "../suspension-lock";
-import { adminProcedure, router, teamProcedure } from "../trpc";
+import { adminProcedure, receivingProcedure, router, teamProcedure } from "../trpc";
 import { signalViews, warmupTodayWindow } from "../warmup-view";
 import { effectiveSetting } from "./system";
 
@@ -571,6 +571,24 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         ],
       };
     }),
+
+    /**
+     * Where the domain's mail goes today, read live whether receiving is on
+     * or off: the inbox dialog offers to turn receiving on only when no other
+     * mail server takes the domain's mail.
+     */
+    receivingMx: receivingProcedure
+      .input(z.object({ id: z.uuid() }))
+      .query(async ({ ctx, input }) => {
+        const host = receivingMxHost();
+        if (!host) throw new TRPCError({ code: "NOT_FOUND" });
+        const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
+        const record = receivingDnsRecord(domain.name, host);
+        return {
+          record,
+          ...(await checkReceivingMx(domain.name, host, deps.dns ?? nodeDnsResolver)),
+        };
+      }),
 
     verify: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);

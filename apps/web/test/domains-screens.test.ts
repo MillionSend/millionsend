@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   list: [] as unknown[],
   search: "",
+  /** Other queries' answers by procedure path; any other reads as still loading. */
+  byPath: {} as Record<string, unknown>,
 }));
 
 // The real English catalogs, so the test reads what a customer reads.
@@ -38,9 +40,9 @@ vi.mock("@/lib/trpc", () => {
 });
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ path }: { path: string }) =>
-    path === "domains.list"
+    path === "domains.list" || path in h.byPath
       ? {
-          data: h.list,
+          data: path === "domains.list" ? h.list : h.byPath[path],
           isPending: false,
           isError: false,
           isSuccess: true,
@@ -56,6 +58,8 @@ vi.mock("@/components/api-sheet", () => ({ ResourceApiButton: () => null }));
 const { DomainsView } = await import("@/app/(dashboard)/domains/domains-table");
 const { formatStepTime } = await import("@/lib/format");
 const { WarmupStatus, WarmupTab } = await import("@/app/(dashboard)/domains/[id]/warmup-tab");
+const { DomainDetail } = await import("@/app/(dashboard)/domains/[id]/domain-detail");
+const { ServerTeamRole } = await import("@/lib/use-team-role");
 
 const own = (name: string, status: string) => ({
   id: name,
@@ -416,5 +420,87 @@ describe("the domain Warm-up tab", () => {
       (tag) => !tag.includes("disabled") && !tag.includes("ms-tooltip-trigger"),
     );
     expect(enabled).toEqual([]);
+  });
+});
+
+describe("the domain page's receiving group", () => {
+  const MX = "mx.receiving.test";
+  /** A verified domain receiving here while its MX still points at another server. */
+  function page(role: "owner" | "member") {
+    h.byPath = {
+      "system.features": { receiving: true, trackingSubdomainsSupported: true },
+      "domains.get": {
+        id: "d1",
+        name: "example.com",
+        region: "us-east-1",
+        status: "verified",
+        createdAt: new Date(),
+        sentCount: 0,
+        warmupStatus: "off",
+        limit: null,
+        limitRequest: null,
+        mailFromSubdomain: "send",
+        openTracking: false,
+        clickTracking: false,
+        trackingSubdomain: null,
+        trackingPending: false,
+        tlsMode: "OPTIONAL",
+        receivingEnabled: true,
+        receivingCatchAll: false,
+        catchAllAllowed: true,
+        inboxCount: 1,
+      },
+      "domains.records": {
+        provider: null,
+        records: [
+          {
+            group: "receiving",
+            type: "MX",
+            name: "example.com",
+            value: MX,
+            priority: 10,
+            status: null,
+            live: "mismatch",
+            found: `1 smtp.mail.example\n10 ${MX}`,
+          },
+        ],
+      },
+    };
+    try {
+      return renderToStaticMarkup(
+        createElement(
+          ServerTeamRole.Provider,
+          { value: role },
+          createElement(DomainDetail, { id: "d1" }),
+        ),
+      );
+    } finally {
+      h.byPath = {};
+    }
+  }
+  /** A switch with whatever wraps it right before. */
+  const control = (html: string, label: string) =>
+    html.match(new RegExp(`<span[^>]*>\\s*<button[^>]*aria-label="${label}"[^>]*>`))?.[0] ??
+    html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))?.[0] ??
+    "";
+
+  it("says the mail still goes elsewhere instead of leaving only the Mismatch badge", () => {
+    const html = page("owner").replaceAll("&#x27;", "'");
+    expect(html).toContain(
+      "Mail for example.com still goes to smtp.mail.example, where its MX record points, so inboxes here get nothing yet.",
+    );
+    expect(html).toContain("such as inbound.example.com");
+  });
+
+  it("keeps the receiving switches to owners and admins, saying so to members", () => {
+    for (const label of ["Enable receiving", "Catch-all"]) {
+      const owner = control(page("owner"), label);
+      expect(owner).toContain(`aria-label="${label}"`);
+      expect(owner).not.toContain("disabled");
+      expect(owner).not.toContain("ms-tooltip-trigger");
+      const member = control(page("member"), label);
+      expect(member).toContain("disabled");
+      expect(member).toContain("ms-tooltip-trigger");
+    }
   });
 });

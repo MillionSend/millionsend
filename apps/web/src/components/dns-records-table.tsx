@@ -16,6 +16,7 @@ import { abbreviateDkim } from "@/lib/format";
 import { zoneRelativeName } from "@/lib/zone";
 
 const GROUPS = ["verification", "sending", "dmarc", "tracking", "receiving"] as const;
+export type DnsGroup = (typeof GROUPS)[number];
 
 /**
  * Rows per group as dnsRecordsForDomain emits them (packages/ses). Tracking and
@@ -59,7 +60,13 @@ const RECORD_STATUS_TONE: Record<RecordStatus, string> = {
  * The single source-of-truth Status badge: our live DNS lookup gated by AWS's
  * verification. Sized to its label (inline-block) — never stretched to the cell.
  */
-function RecordStatusBadge({ status, note }: { status: RecordStatus; note?: React.ReactNode }) {
+export function RecordStatusBadge({
+  status,
+  note,
+}: {
+  status: RecordStatus;
+  note?: React.ReactNode;
+}) {
   const t = useTranslations("domains");
   return (
     <span
