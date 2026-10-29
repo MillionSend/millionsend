@@ -355,6 +355,53 @@ it("parks a new team's mail to a loopback address instead of holding the team, a
   expect(await sendEmail(db, sendDeps, { emailId: again })).toBe("parked");
 });
 
+it("parks a new team's reset test signed with its framework's name, every link local, instead of holding the team", async () => {
+  const t = await team("framework-default", "new", "example");
+  const id = await email(
+    t,
+    "http://localhost:5173/reset-password?token=x",
+    undefined,
+    "<p>Regards, Framework</p>",
+  );
+  await sendEmail(db, sendDeps, { emailId: id });
+  await judge((await sampleOf(id))?.id ?? "", verdict(90));
+  expect(await sampleOf(id)).toMatchObject({ destinations: ["localhost"], sparedHold: "score" });
+  expect(await suspension(t.teamId)).toBeNull();
+  expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("parked");
+  // The same claim beside a name a stranger can serve keeps the hold.
+  const mixed = await team("framework-default-mixed", "new", "example");
+  const lure = await email(
+    mixed,
+    "http://localhost:5173/reset-password?token=x",
+    undefined,
+    '<a href="https://abcdefghijklmnop.supabase.co/auth/v1/verify?token=y">verify</a>',
+  );
+  await sendEmail(db, sendDeps, { emailId: lure });
+  await judge((await sampleOf(lure))?.id ?? "", verdict(90));
+  expect(await sampleOf(lure)).toMatchObject({ sparedHold: null });
+  expect(await suspension(mixed.teamId)).toBe("review");
+});
+
+it("still holds a new team whose brand lure hides a local link beside its own page, a call or a reply", async () => {
+  const decoy = '<a href="http://localhost:3000/u">.</a>';
+  const cases: [string, string, string, string[] | null][] = [
+    ["decoy-own", "https://decoy-own.example/keep", decoy, null],
+    ["decoy-call", "http://localhost:3000/keep", '<a href="tel:+5511900000000">ligue</a>', null],
+    ["decoy-reply", "http://localhost:3000/keep", "", ["suporte@decoy-reply.example"]],
+  ];
+  for (const [slug, href, extra, replyTo] of cases) {
+    const t = await team(slug, "new", "example");
+    const id = await email(t, href, undefined, extra);
+    if (replyTo) {
+      await db.update(schema.emails).set({ replyTo }).where(eq(schema.emails.id, id));
+    }
+    await sendEmail(db, sendDeps, { emailId: id });
+    await judge((await sampleOf(id))?.id ?? "", verdict(97));
+    expect(await sampleOf(id), slug).toMatchObject({ sparedHold: null });
+    expect(await suspension(t.teamId), slug).toBe("review");
+  }
+});
+
 it("never screens a link to a loopback address as a new destination", async () => {
   const t = await team("local-settled", "established", "example");
   const id = await email(t, "http://localhost:3000/reset?token=x");
@@ -866,4 +913,116 @@ it("counts a vouched client's notices toward no repeat hold", async () => {
   await sendEmail(db, sendDeps, { emailId: lure });
   await judge((await sampleOf(lure))?.id ?? "", verdict(85));
   expect(await suspension(t.teamId)).toBeNull();
+});
+
+const TRACKER = "parcel-tracker.example";
+const tracking = (site = TRACKER) => `<p><a href="https://${site}/r/AB123">Rastrear</a></p>`;
+
+it("parks a client's notice that also links a carrier, and its release vouches for both names", async () => {
+  const t = await team("store-tracking", "new", "example");
+  const first = await clientNotice(t, { extra: tracking() });
+  await sendEmail(db, sendDeps, { emailId: first });
+  await judge((await sampleOf(first))?.id ?? "", clientBrand(93));
+  expect(await sampleOf(first)).toMatchObject({
+    destinations: [CLIENT_SITE, TRACKER],
+    sparedHold: "score",
+  });
+  expect(await suspension(t.teamId)).toBeNull();
+  expect(await sendEmail(db, sendDeps, { emailId: first })).toBe("parked");
+  await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [first], holdLine: 80 });
+  expect((await cleared(t.teamId)).sort()).toEqual([CLIENT_SITE, TRACKER]);
+  const next = await clientNotice(t, { extra: tracking() });
+  await sendEmail(db, sendDeps, { emailId: next });
+  await judge((await sampleOf(next))?.id ?? "", clientBrand(93));
+  expect(await sampleOf(next)).toMatchObject({ sparedHold: "vouched" });
+  expect(await sendEmail(db, sendDeps, { emailId: next })).toBe("sent");
+  // A listed brand's name beside the site is no carrier the shape takes: the hold stands.
+  const listed = await clientNotice(t, { extra: tracking("correios.example") });
+  await sendEmail(db, sendDeps, { emailId: listed });
+  await judge((await sampleOf(listed))?.id ?? "", clientBrand(93));
+  expect(await sampleOf(listed)).toMatchObject({ sparedHold: null });
+  expect(await suspension(t.teamId)).toBe("review");
+});
+
+it("keeps a released client site's clearance when its notice links a new carrier, and takes it back on a lure", async () => {
+  for (const [answer, kept] of [
+    [clientBrand(85), true],
+    [verdict(85), false],
+  ] as const) {
+    const t = await team(`store-carrier-${kept}`, "new", "example");
+    const first = await clientNotice(t);
+    await sendEmail(db, sendDeps, { emailId: first });
+    await judge((await sampleOf(first))?.id ?? "", clientBrand(93));
+    await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [first], holdLine: 80 });
+    const shipped = await clientNotice(t, { extra: tracking() });
+    await sendEmail(db, sendDeps, { emailId: shipped });
+    await judge((await sampleOf(shipped))?.id ?? "", answer);
+    expect(await sampleOf(shipped), `${kept}`).toMatchObject({ sparedHold: null });
+    const [site] = await db
+      .select()
+      .from(schema.teamDestinations)
+      .where(
+        and(
+          eq(schema.teamDestinations.teamId, t.teamId),
+          eq(schema.teamDestinations.domain, CLIENT_SITE),
+        ),
+      );
+    expect(site?.revokedAt === null, `${kept}`).toBe(kept);
+    expect(await suspension(t.teamId), `${kept}`).toBeNull();
+  }
+});
+
+it("takes back a released carrier beside the client's site when a new one joins it, and keeps the site", async () => {
+  const t = await team("store-two-carriers", "new", "example");
+  const first = await clientNotice(t, { extra: tracking() });
+  await sendEmail(db, sendDeps, { emailId: first });
+  await judge((await sampleOf(first))?.id ?? "", clientBrand(93));
+  await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [first], holdLine: 80 });
+  const next = await clientNotice(t, {
+    extra: `${tracking()}${tracking("second-carrier.example")}`,
+  });
+  await sendEmail(db, sendDeps, { emailId: next });
+  await judge((await sampleOf(next))?.id ?? "", clientBrand(85));
+  const rows = await db
+    .select({
+      domain: schema.teamDestinations.domain,
+      revokedAt: schema.teamDestinations.revokedAt,
+    })
+    .from(schema.teamDestinations)
+    .where(eq(schema.teamDestinations.teamId, t.teamId));
+  expect(rows.find((r) => r.domain === CLIENT_SITE)?.revokedAt).toBeNull();
+  expect(rows.find((r) => r.domain === TRACKER)?.revokedAt).not.toBeNull();
+});
+
+it("counts released spares again on the verdict that takes their site's release back", async () => {
+  const t = await team("store-spares-revoked", "new", "example");
+  const ids: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const id = await clientNotice(t);
+    await sendEmail(db, sendDeps, { emailId: id });
+    await judge((await sampleOf(id))?.id ?? "", clientBrand(93));
+    expect(await sampleOf(id)).toMatchObject({ sparedHold: "score" });
+    ids.push(id);
+  }
+  await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: ids, holdLine: 80 });
+  const lure = await email(t, `https://${CLIENT_SITE}/login`);
+  await sendEmail(db, sendDeps, { emailId: lure });
+  await judge((await sampleOf(lure))?.id ?? "", verdict(85));
+  expect(await suspension(t.teamId)).toBe("review");
+  expect(await sendEmail(db, sendDeps, { emailId: lure })).toBe("parked");
+});
+
+it("spares a new team the repeat hold its client's notices with a carrier link meet, and parks them", async () => {
+  const t = await team("store-carrier-repeat", "new", "example");
+  const ids: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    const id = await clientNotice(t, { extra: tracking() });
+    await sendEmail(db, sendDeps, { emailId: id });
+    await judge((await sampleOf(id))?.id ?? "", clientBrand(85));
+    ids.push(id);
+  }
+  expect(await sampleOf(ids[4] ?? "")).toMatchObject({ sparedHold: "repeat" });
+  expect(await suspension(t.teamId)).toBeNull();
+  for (const id of ids) expect(await sendEmail(db, sendDeps, { emailId: id })).toBe("parked");
+  expect(sesCalls).toEqual([]);
 });

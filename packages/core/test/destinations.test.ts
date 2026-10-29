@@ -5,12 +5,12 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyJudgedSample, recordMonitorSample } from "../src/abuse-monitor.js";
 import type { DomainAge, DomainAgeResolver } from "../src/domain-age.js";
+import { isShortener } from "../src/email-insights.js";
 import { MONITOR_SETTING_DEFAULTS } from "../src/monitor-settings.js";
 import {
   anyYoungLinkDomain,
   clearDestinations,
   destinationVerdictParks,
-  isShortener,
   linkDomainsAged,
   messageDestinations,
   teamNovelDestinations,

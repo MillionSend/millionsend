@@ -1190,7 +1190,9 @@ parked (`park_reason = 'review'`), queued mail and broadcasts park, a new
 broadcast is refused with `403 sending_paused`, and with `SES_TENANTS` on its
 SES tenant is disabled. A run of lower verdicts holds the team too: by
 default the fifth such verdict from 80 within any seven days while the team
-is New. A link to
+is New; a verdict that spared the team (below) and whose mail an operator
+released counts toward it no more, while every name it rested on keeps that
+release. A link to
 another domain counts toward neither rule on its own: legitimate mail often
 links elsewhere. The operator is emailed at once, with the rule that held the
 team; the owner is not. The dashboard shows a neutral "Sending is paused
@@ -1260,8 +1262,10 @@ one-time-code or billing link to a product's own name on an app platform
 (`ref.supabase.co`, `app.up.railway.app`, `x.workers.dev`: the parents are
 `PLATFORM_HOST_PARENTS` in `packages/core`) or to a loopback address, on a
 message judged before SES that is not a broadcast, poses as no other brand
-and carries no payment instrument (a Pix code, changed bank details, a
-callback), spares a New-tier team the hold it would have met: the message
+(it may when every link in it, one read from its images included, goes to a
+loopback address and it has no Reply-To: a framework's default template signs
+with the framework's name) and carries no payment instrument
+(a Pix code, changed bank details, a callback), spares a New-tier team the hold it would have met: the message
 parks for the review list instead, with the same operator mail, and the
 team's other mail waiting on a phishing-type verdict from 80, queued or
 parked for quota, parks with it, as the hold would have parked it. Mail to a
@@ -1280,18 +1284,23 @@ counts in the risk at every tier. A platform's notice for one client
 business is spared and vouched for the same way: a verdict that names
 nothing but brand impersonation, on a message that is not a broadcast,
 carries no Pix code or file and does not ride in images or a QR code drawn
-with characters, from a sending domain at least 7 days old, whose one
-destination is a registered domain that its Reply-To and at least one web
-link lead to and whose name the From display name spells (`"Acme Tiles"
-<orders@platform.example>` replying to and linking `acme-tiles.example`),
-with no other kind of link and no brand the monitor knows in the name, the
-domain or the subject. Until an operator releases mail to that domain, the
-spare takes a message judged before SES and a domain known to be registered
-7 days ago or more (looked up as a new link domain is, even once a clean
-verdict cleared it; no date keeps the hold). After the release, later mail
-of that shape to the domain is neither held, parked nor delayed for it, and
-its verdicts take no clearance back and count toward no repeat hold; the
-same message under another name still does all of that. These samples count against no daily cap; a team has 200 of
+with characters, from a sending domain at least 7 days old, whose
+destinations are all registered domains (no file share, form, site builder
+or chat link host whose users all share one name), one of which its Reply-To and at
+least one web link lead to and whose name the From display name spells
+(`"Acme Tiles" <orders@platform.example>` replying to and linking
+`acme-tiles.example`, a carrier's tracking page beside it or not), with no
+other kind of link and no brand the monitor knows in the name, a domain or
+the subject. Until an operator releases mail to those domains, the spare
+takes a message judged before SES and domains known to be registered 7 days
+ago or more (looked up as a new link domain is, even once a clean verdict
+cleared it; no date keeps the hold). After the release, later mail of that
+shape to the same domains is neither held, parked nor delayed for it, and its
+verdicts take no clearance back and count toward no repeat hold; the same
+message under another name still does all of that. A notice that adds a
+domain beside its released site keeps the site's clearance while the new one
+is screened; any other released name in it, a carrier's page included, is
+taken back as before. These samples count against no daily cap; a team has 200 of
 them a day, past which its mail with a new destination waits for the next
 UTC day.
 
