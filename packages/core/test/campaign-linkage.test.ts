@@ -3,7 +3,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordSignup } from "../src/account-signups.js";
 import {
   forgetAbuseRecords,
@@ -31,7 +31,10 @@ beforeEach(async () => {
   ({ db, close } = await createTestDb());
   phisher = await phishingTeam();
 });
-afterEach(() => close());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  return close();
+});
 
 async function person(teamId: string, email: string, ip: string | null) {
   const id = randomUUID();
@@ -426,6 +429,58 @@ describe("linkTeam", () => {
     await person(team, "facture.vexto@googlemail.com", null);
     expect((await linkTeam(db, { teamId: team, trigger: "send" }))?.held).toBe(false);
     expect(await standing(team)).toEqual({ reason: null, flag: { reason: "linked", detail: {} } });
+  });
+});
+
+describe("the instance's own domains", () => {
+  it("tie no team to another: a shared inbox address, the onboarding email, a print kept before", async () => {
+    // The onboarding sender and the shared inbox domain share a name under different suffixes.
+    vi.stubEnv("SHARED_INBOX_DOMAIN", "platform.test");
+    vi.stubEnv("ONBOARDING_EMAIL_FROM", "Platform <hello@mail.platform.example>");
+    vi.stubEnv("APP_BASE_URL", "https://app.dashboard.example");
+    await storedEmail(
+      phisher,
+      "Platform <hello@mail.platform.example>",
+      "It works.",
+      '<p>Your first email just landed in this inbox. The next ones go out from your own domain.</p><p><a href="https://app.dashboard.example/home">Open the dashboard</a></p>',
+    );
+    await storedEmail(
+      phisher,
+      "Vexto <vexto@vexto.platform.test>",
+      "Sua fatura Vexto chegou hoje",
+      "<p>Oi</p>",
+    );
+    await suspendForPhishing(phisher);
+    const by = await printsOf(phisher);
+    expect(by("sending_domain")).toEqual(["vexto-cadeaux.example"]);
+    expect(by("link_domain")).toEqual(["vextos-cadeaux.example"]);
+    expect(by("subject")).toEqual([
+      "Sua fatura Vexto chegou hoje",
+      "Votre facture Vexto du 02/10 est disponible",
+    ]);
+    // A print kept on the instance's domain before, and the phisher's look-alike of it.
+    await db.insert(schema.campaignFingerprints).values(
+      ["mail.platform.example", "platform.invalid"].map((value) => ({
+        teamId: phisher,
+        teamName: "facture-vexto",
+        kind: "sending_domain" as const,
+        value,
+      })),
+    );
+    const send = async (slug: string, from: string) => {
+      const team = await createTeam(db, slug);
+      await person(team, `${slug}@outlook.fr`, null);
+      return linkTeam(db, { teamId: team, trigger: "send", message: sendOf(from, "Olá") });
+    };
+    expect(await send("shared-address", "Equipe <hi@showrunner.platform.test>")).toBeNull();
+    // The look-alike itself still ties a team that sends from it.
+    expect((await send("look-alike", "Equipe <hi@login.platform.invalid>"))?.links).toMatchObject([
+      {
+        matches: [
+          { kind: "sending_domain", value: "login.platform.invalid", matched: "platform.invalid" },
+        ],
+      },
+    ]);
   });
 });
 

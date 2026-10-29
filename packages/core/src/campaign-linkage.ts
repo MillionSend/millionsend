@@ -1,4 +1,4 @@
-import { env } from "@millionsend/config";
+import { env, sharedInboxDomain, unsubscribeBaseUrl } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { CampaignFingerprintKind, LinkMatch, LinkTrigger } from "@millionsend/db/schema";
@@ -23,6 +23,9 @@ import type { Keyring } from "./crypto/keyring.js";
 import { errorSummary } from "./error-summary.js";
 import { sharedEgressIps } from "./ip-geo.js";
 import { getMonitorSettingsRow, resolveMonitorSettings } from "./monitor-settings.js";
+import { isOnboardingSender } from "./onboarding-sender.js";
+import { registrableDomain } from "./org-domain.js";
+import { parseSingleSender } from "./sender-address.js";
 import { mailboxIdentity } from "./suppressions.js";
 import { type SuspensionReason, suspendTeam } from "./team-standing.js";
 import { DAY_MS } from "./utc-day.js";
@@ -43,6 +46,33 @@ export const IP_FINGERPRINT_RETENTION_DAYS = 90;
  * card. Anything else holds only beside a second kind.
  */
 const STRONG_KINDS: ReadonlySet<CampaignFingerprintKind> = new Set(["address", "card"]);
+
+/**
+ * The registrable domains this instance's own mail and addresses sit under:
+ * every team's shared inbox address, the onboarding, account and
+ * notification senders, and the app itself. Teams that share them share
+ * nothing of their own.
+ */
+function instanceDomains(): ReadonlySet<string> {
+  const hosts = [
+    sharedInboxDomain(),
+    ...[env.ONBOARDING_EMAIL_FROM, env.AUTH_EMAIL_FROM, env.NOTIFICATIONS_EMAIL_FROM].map((from) =>
+      from ? parseSingleSender(from)?.domain : undefined,
+    ),
+    ...[env.APP_BASE_URL, unsubscribeBaseUrl()].map((url) =>
+      url && URL.canParse(url) ? new URL(url).hostname : undefined,
+    ),
+  ];
+  return new Set(hosts.flatMap((host) => (host ? [registrableDomain(host.toLowerCase())] : [])));
+}
+
+/** A sending or link domain under the instance's own (instanceDomains): evidence of no one. */
+function instancePrint(print: Fingerprint, own: ReadonlySet<string>): boolean {
+  return (
+    (print.kind === "sending_domain" || print.kind === "link_domain") &&
+    own.has(registrableDomain(print.value))
+  );
+}
 
 const cf = schema.campaignFingerprints;
 const links = schema.teamLinks;
@@ -151,6 +181,7 @@ async function mailFingerprints(
       wrappedDek: e.bodyWrappedDek,
       keyVersion: e.bodyKeyVersion,
       purgedAt: e.bodyPurgedAt,
+      domainId: e.domainId,
     })
     .from(e)
     .where(eq(e.teamId, teamId))
@@ -158,9 +189,11 @@ async function mailFingerprints(
     .limit(CAPTURE_SCAN);
   // Each sender and subject is read from its newest email that still has a
   // body, else its newest: a newer one whose body is gone, or was never
-  // stored, would hide the campaign's links, phones and text.
+  // stored, would hide the campaign's links, phones and text. The fixed
+  // onboarding email is the instance's own, sent to every team alike.
   const byKey = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {
+    if (row.domainId === null && isOnboardingSender(row.from, env.ONBOARDING_EMAIL_FROM)) continue;
     const key = `${row.from}\n${row.subject}`;
     const kept = byKey.get(key);
     if (kept ? !hasBody(kept) && hasBody(row) : byKey.size < CAPTURE_EMAILS) byKey.set(key, row);
@@ -230,7 +263,10 @@ export async function recordPhishingFingerprints(
   if (input.reason !== "phishing") return 0;
   let team: { name: string; customerId: string | null } | undefined;
   const prints = new Map<string, Fingerprint>();
-  const keep = (print: Fingerprint) => prints.set(`${print.kind}\n${print.value}`, print);
+  const own = instanceDomains();
+  const keep = (print: Fingerprint) => {
+    if (!instancePrint(print, own)) prints.set(`${print.kind}\n${print.value}`, print);
+  };
   try {
     [team] = await db
       .select({ name: schema.teams.name, customerId: schema.teams.stripeCustomerId })
@@ -426,8 +462,13 @@ async function link(
   },
 ): Promise<TeamLinkResult | null> {
   const ipSince = daysBefore(input.now, IP_FINGERPRINT_RETENTION_DAYS);
+  // A domain of the instance's own, kept before it was left out, ties no one.
+  const own = instanceDomains();
   const stored = (await phishingPrints(db)).filter(
-    (print) => print.teamId !== input.teamId && (print.kind !== "ip" || print.since > ipSince),
+    (print) =>
+      print.teamId !== input.teamId &&
+      (print.kind !== "ip" || print.since > ipSince) &&
+      !instancePrint(print, own),
   );
   if (stored.length === 0) return null;
   const known = await db
@@ -454,7 +495,7 @@ async function link(
     ...(await domainFingerprints(db, input.teamId, { verifiedOnly: false })),
     ...(input.cards ?? []).map((card) => fingerprint("card", card)),
     ...(input.message ? messageFingerprints(input.message) : []),
-  ];
+  ].filter((print) => !instancePrint(print, own));
 
   const found = new Map(
     known.map((row) => [
