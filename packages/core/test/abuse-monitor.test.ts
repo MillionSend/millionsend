@@ -11,6 +11,7 @@ import {
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
+  isLocalOnlyMail,
   isPlatformLinkVerdict,
   isPlatformTenantName,
   MONITOR_PRIOR_NEW,
@@ -776,27 +777,45 @@ describe("the review hold", () => {
       categories: ["phishing_credentials"],
       reasons: ["off_domain_lure", "harvests_secrets"],
     };
-    const at = (v: typeof RESET, destinations: string[]) =>
-      isPlatformLinkVerdict({ ...v, score: 90 }, destinations);
+    const at = (v: typeof RESET, destinations: string[], localMail = false) =>
+      isPlatformLinkVerdict({ ...v, score: 90 }, destinations, { localMail });
     expect(at(RESET, ["app.localhost"])).toBe(true);
     expect(at(RESET, ["127.0.0.1", "ref.supabase.co"])).toBe(true);
-    // A framework's default template signing its own name under the product's: only local links.
-    expect(at(PHISHING, ["localhost"])).toBe(true);
-    expect(at({ ...RESET, reasons: ["impersonation", "off_domain_lure"] }, ["localhost"])).toBe(
-      true,
-    );
+    // A framework's default template signing its own name under the product's, on mail that
+    // leads nowhere else; with any other link or a Reply-To, a named brand keeps every rule.
+    expect(at(PHISHING, ["localhost"], true)).toBe(true);
+    expect(
+      at({ ...RESET, reasons: ["impersonation", "off_domain_lure"] }, ["localhost"], true),
+    ).toBe(true);
+    expect(at(PHISHING, ["localhost"])).toBe(false);
     // A name a stranger can serve beside it, an address only dressed as local: not this.
     expect(at(RESET, ["localhost", "lure.example"])).toBe(false);
     expect(at(RESET, ["[::ffff:808:808]"])).toBe(false);
     expect(at(RESET, ["169.254.169.254"])).toBe(false);
     // A brand beside a platform name, a lure without a link, a class past a brand's: not this.
-    expect(at(PHISHING, ["localhost", "ref.supabase.co"])).toBe(false);
-    expect(at({ ...PHISHING, reasons: ["impersonation", "no_link_lure"] }, ["localhost"])).toBe(
-      false,
-    );
-    expect(at({ ...PHISHING, categories: ["brand_impersonation", "scam"] }, ["localhost"])).toBe(
-      false,
-    );
+    expect(at(PHISHING, ["localhost", "ref.supabase.co"], true)).toBe(false);
+    expect(
+      at({ ...PHISHING, reasons: ["impersonation", "no_link_lure"] }, ["localhost"], true),
+    ).toBe(false);
+    expect(
+      at({ ...PHISHING, categories: ["brand_impersonation", "scam"] }, ["localhost"], true),
+    ).toBe(false);
+  });
+
+  it("reads mail that leads nowhere but the reader's own machine", () => {
+    const local = (html: string, replyTo: string[] | null = null, images: string[] = []) =>
+      isLocalOnlyMail({ html, text: null, replyTo }, images);
+    const reset =
+      '<p>Hello!</p><a href="http://localhost:5173/reset-password?token=x">Reset Password</a><p>http://localhost:5173/reset-password?token=x</p>';
+    expect(local(reset)).toBe(true);
+    expect(local(`${reset}<a href="http://127.0.0.1:8000/u">sair</a>`)).toBe(true);
+    // The team's own domain, a channel, a Reply-To, a link read from an image, or no link at all.
+    expect(local(`${reset}<a href="https://acct-alerts.example/keep">Keep</a>`)).toBe(false);
+    expect(local(`${reset}<a href="tel:+5511900000000">ligue</a>`)).toBe(false);
+    expect(local(`${reset}<a href="mailto:x@lure.example">fale conosco</a>`)).toBe(false);
+    expect(local(reset, ["suporte@acct-alerts.example"])).toBe(false);
+    expect(local(reset, null, ["https://lure.example/qr"])).toBe(false);
+    expect(local("<p>Hello!</p>")).toBe(false);
   });
 
   it("reads a platform's notice for one client business, whose name it spells, as that client's own", () => {
@@ -888,6 +907,15 @@ describe("the review hold", () => {
     expect(at(tracked, BRAND, [SITE, "correios.example"])).toBeNull();
     expect(at(tracked, BRAND, [SITE, "acmetiles.example"])).toBeNull();
     expect(at(mail({ replyTo: [`contato@${TRACK}`] }), BRAND, [SITE, TRACK])).toBeNull();
+    expect(
+      at(mail({ html: `<p><a href="https://${TRACK}/r/AB123">Rastrear</a></p>` }), BRAND, [
+        SITE,
+        TRACK,
+      ]),
+    ).toBeNull();
+    // A host whose every user shares one name: a release of it would cover every page there.
+    expect(at(tracked, BRAND, [SITE, "sharepoint.com"])).toBeNull();
+    expect(at(tracked, BRAND, [SITE, "wa.me"])).toBeNull();
   });
 
   it("suspends a new team for review on one confident phishing verdict, once, and leaves a released team to the operator", async () => {
@@ -1185,7 +1213,7 @@ describe("the review hold", () => {
       o: {
         released?: boolean;
         site?: { operator: boolean; revoked?: boolean } | null;
-        sparedHold?: string;
+        sparedHold?: string | null;
         destinations?: string[];
       } = {},
     ) => {
@@ -1209,7 +1237,7 @@ describe("the review hold", () => {
           status: "judged",
           score: 85,
           ...PHISHING,
-          sparedHold: o.sparedHold ?? "score",
+          sparedHold: "sparedHold" in o ? o.sparedHold : "score",
           destinations: o.destinations ?? [SITE],
           createdAt: minute(i),
           judgedAt: minute(i),
@@ -1236,6 +1264,8 @@ describe("the review hold", () => {
       await fifth("released-spares-revoked", { site: { operator: true, revoked: true } }),
     ).toEqual(held);
     expect(await fifth("released-spares-none", { site: null })).toEqual(held);
+    // A verdict that spared nothing, released from its short wait, still counts.
+    expect(await fifth("released-spares-unspared", { sparedHold: null })).toEqual(held);
     // A burst row's own names were never looked at; a loopback address never clears.
     expect(await fifth("released-spares-burst", { sparedHold: "burst" })).toEqual(held);
     expect(await fifth("released-spares-local", { destinations: [SITE, "localhost"] })).toEqual(

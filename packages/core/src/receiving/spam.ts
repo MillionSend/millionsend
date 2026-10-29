@@ -1,5 +1,5 @@
 import type { ReceivedAuthentication, ReceivedHiddenText } from "@millionsend/db/schema";
-import { SHORTENER_HOSTS } from "../email-insights.js";
+import { isShortener } from "../email-insights.js";
 import type { SenderTrust, SpamVerdict } from "../inboxes/types.js";
 import type { BodyLink } from "../links.js";
 import { registrableDomain } from "../org-domain.js";
@@ -106,7 +106,7 @@ export function spamVerdict(i: SpamInput): {
   let anchorMismatch = false;
   for (const link of i.links) {
     const host = hostOf(link.href);
-    if (host && [...SHORTENER_HOSTS].some((s) => host === s || host.endsWith(`.${s}`))) {
+    if (host && isShortener(host)) {
       shortener = true;
     }
     if (host && IP_HOST.test(host)) ipLink = true;

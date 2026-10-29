@@ -88,7 +88,7 @@ export const SHORTENER_HOSTS = new Set([
   "s.id",
 ]);
 
-/** A shortener's domain: it hides where a link leads, so it is never cleared. */
+/** A link shortener's domain, or a name under one: it hides where a link leads. */
 export function isShortener(domain: string): boolean {
   return [...SHORTENER_HOSTS].some((s) => domain === s || domain.endsWith(`.${s}`));
 }

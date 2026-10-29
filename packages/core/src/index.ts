@@ -66,6 +66,7 @@ export {
   type HoldRule,
   inFirstWindow,
   isHoldVerdict,
+  isLocalOnlyMail,
   isPlatformLinkVerdict,
   isPlatformTenantName,
   loadMonitorState,

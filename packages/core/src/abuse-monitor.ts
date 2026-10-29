@@ -688,10 +688,10 @@ const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
   "payment_redirect",
 ]);
 /**
- * Mail whose every link leads back to the reader's own machine may also read
- * as another brand's: a framework's default template signs with the
- * framework's name under the product's. Such a link opens no page anyone
- * serves.
+ * Mail that leads its reader nowhere but their own machine (isLocalOnlyMail)
+ * may also read as another brand's: a framework's default template signs
+ * with the framework's name under the product's. Such a link opens no page
+ * anyone serves.
  */
 const LOOPBACK_LINK_REASONS: ReadonlySet<string> = new Set([
   ...PLATFORM_LINK_REASONS,
@@ -709,9 +709,9 @@ const LOOPBACK_LINK_CATEGORIES: ReadonlySet<string> = new Set([
  * that poses as no other brand: phishing_credentials or payment_redirect
  * at most for a category (PLATFORM_LINK_CATEGORIES), reasons saying only
  * that the link is off the verified domains and asks for a secret, and
- * every destination such a name. When every destination is a loopback
- * address, the mail may pose as a brand too (LOOPBACK_LINK_CATEGORIES,
- * LOOPBACK_LINK_REASONS). The judge cannot tell such a
+ * every destination such a name. Mail that leads nowhere but the reader's own
+ * machine (`localMail`, isLocalOnlyMail) may pose as a brand too
+ * (LOOPBACK_LINK_CATEGORIES, LOOPBACK_LINK_REASONS). The judge cannot tell such a
  * page from a lure, so the hold policy spares the team the hold such a
  * verdict meets (applyJudgedSample's `platformLink`): the mail waits for the
  * review list instead, with the team's other mail waiting on a
@@ -719,15 +719,16 @@ const LOOPBACK_LINK_CATEGORIES: ReadonlySet<string> = new Set([
  * which also keeps a verdict of this shape from taking the clearance back. A
  * loopback address never clears (clearDestinations), so a verdict resting
  * on one always waits for a person: a decoy loopback link can sit beside a
- * lure the link table never shows. A lure that names a brand beside a link
- * a stranger can serve, moves a payment or carries no link keeps every
+ * lure the link table never shows. A lure that names a brand beside any
+ * other link or a Reply-To, moves a payment or carries no link keeps every
  * rule, and the callers never spare a broadcast's sample.
  */
 export function isPlatformLinkVerdict(
   v: HoldVerdictFields,
   destinations: readonly string[],
+  opts: { localMail?: boolean } = {},
 ): boolean {
-  const local = destinations.every((d) => isLoopbackHost(d));
+  const local = opts.localMail === true && destinations.every((d) => isLoopbackHost(d));
   const categories = local ? LOOPBACK_LINK_CATEGORIES : PLATFORM_LINK_CATEGORIES;
   const reasons = local ? LOOPBACK_LINK_REASONS : PLATFORM_LINK_REASONS;
   return (
@@ -740,6 +741,56 @@ export function isPlatformLinkVerdict(
 }
 
 /**
+ * Mail that leads its reader nowhere but their own machine: every link in
+ * it, and every one read from its images, a web link to a loopback address,
+ * and no Reply-To. A link to the team's own domains, a mailto: or tel: link
+ * and a Reply-To are no destinations, so the destinations alone cannot tell.
+ */
+export function isLocalOnlyMail(
+  mail: Pick<JudgeBlockInput, "html" | "text" | "replyTo">,
+  imageLinks: readonly string[] = [],
+): boolean {
+  const local = (url: string | null) =>
+    url !== null && URL.canParse(url) && isLoopbackHost(new URL(url).hostname);
+  const links = extractLinks(mail.html, mail.text);
+  return (
+    (mail.replyTo ?? []).length === 0 &&
+    links.length > 0 &&
+    links.every((link) => local(link.url)) &&
+    imageLinks.every(local)
+  );
+}
+
+/**
+ * Hosts whose every user's pages sit under one registered name the suffix
+ * list does not split: file shares, forms, site builders, link pages and
+ * chat links. A name clears by its owner domain, so one release of such a
+ * host would cover every page on it.
+ */
+const SHARED_CONTENT_HOSTS: ReadonlySet<string> = new Set([
+  "sharepoint.com",
+  "live.com",
+  "1drv.ms",
+  "office.com",
+  "wetransfer.com",
+  "we.tl",
+  "forms.gle",
+  "jotform.com",
+  "typeform.com",
+  "wordpress.com",
+  "weebly.com",
+  "godaddysites.com",
+  "hs-sites.com",
+  "notion.site",
+  "notion.so",
+  "github.com",
+  "telegra.ph",
+  "linktr.ee",
+  "wa.me",
+  "t.me",
+]);
+
+/**
  * A platform's notice for one client business, sent under the platform's own
  * verified domain ("Acme Tiles" <orders@platform.example>, replying to and
  * linking acme-tiles.example), that the judge reads as that business's
@@ -750,15 +801,16 @@ export function isPlatformLinkVerdict(
  * name never matches a typosquat of it), and every Reply-To address and at
  * least one web link sit under it. Every destination, the site or another
  * beside it (a carrier's tracking page), is a registered name: no free host's
- * tenant, no IDN, no shortener, no loopback address; the caller dates them
- * all and vouches only once an operator released every one. No brand
+ * tenant, no IDN, no shortener, no loopback address, no name every user of a
+ * host shares (SHARED_CONTENT_HOSTS); the caller dates them all and vouches
+ * only once an operator released every one. No brand
  * IMITATED_BRANDS lists in the name, the subject or a destination, no
  * invisible character in the name, no link that opens anything but a web
  * page, no file and no opaque body. The judge cannot tell such a notice from a
  * brand lure on a lookalike domain, so the caller spares the team the hold and
  * parks the mail for a person, as isPlatformLinkVerdict's are, until an
- * operator's release of mail to that site vouches for the name spelling it.
- * The site, or null.
+ * operator's release of mail to every one of its names vouches for the name
+ * spelling the site. The site, or null.
  */
 export function clientIdentitySite(
   v: HoldVerdictFields,
@@ -770,6 +822,7 @@ export function clientIdentitySite(
     !d.includes("xn--") &&
     !isShortener(d) &&
     !isLoopbackHost(d) &&
+    !SHARED_CONTENT_HOSTS.has(d) &&
     registeredName(d) !== null;
   if (
     v.verdict !== "abuse" ||

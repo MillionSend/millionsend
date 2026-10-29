@@ -11,6 +11,7 @@ import {
   destinationVerdictParks,
   type EmailAttachment,
   isHoldVerdict,
+  isLocalOnlyMail,
   isPlatformLinkVerdict,
   isSharedInboxSender,
   type JudgeBlockInput,
@@ -242,7 +243,14 @@ async function judgePending(
   // its images and files, is a payment instrument, which no such page needs.
   const paysByPix = (media?.findings.pix.length ?? 0) > 0 || mailCarriesPix(loaded.input);
   const platformShape =
-    sample.broadcastId === null && !paysByPix && isPlatformLinkVerdict(verdict, standing.all);
+    sample.broadcastId === null &&
+    !paysByPix &&
+    isPlatformLinkVerdict(verdict, standing.all, {
+      localMail: isLocalOnlyMail(
+        loaded.input,
+        media?.findings.links.map((link) => link.url),
+      ),
+    });
   // A platform's notice for one client business, read as that business's impersonation, from a
   // sending domain past young: spared and vouched as above. The vouch rests on the From name
   // spelling the released site, so another brand's name on that site is held as before.
@@ -252,9 +260,10 @@ async function judgePending(
       : null;
   const clientShape = clientSite !== null;
   const vouched = (platformShape || clientShape) && standing.all.every((d) => vouchedNames.has(d));
-  // Unvouched, the spare takes a client site known to be registered 7 days or more ago, even one a
-  // clean verdict made no longer new to the team: no date, or one not known yet, keeps the hold.
-  // The site is dated only when a hold rule could be met.
+  // Unvouched, the spare takes a notice whose every name, the site and any carrier beside it, is
+  // known to be registered 7 days or more ago, even one a clean verdict made no longer new to the
+  // team: no date, or one not known yet, keeps the hold. They are dated only when a hold rule could
+  // be met.
   const clientSpared =
     clientShape &&
     sample.screening &&
@@ -265,6 +274,21 @@ async function judgePending(
     (destinations.length === 0 || linkYoung === false) &&
     (await deps.linkDomainAged?.(standing.all, now)) === true;
   const platformLink = vouched || (platformShape && sample.screening) || clientSpared;
+  // Mail to a destination that cleared within its probation, read as
+  // phishing: the clearance goes, and the operator hears of it, unless an
+  // operator's release vouched for this shape on it. A client business's
+  // notice keeps its released site's clearance while a link new beside it
+  // is screened.
+  const platformProbation =
+    sample.broadcastId === null &&
+    !paysByPix &&
+    isPlatformLinkVerdict(verdict, standing.probation) &&
+    standing.probation.every((d) => vouchedNames.has(d));
+  const probation = standing.probation.filter((d) => d !== clientSite || !vouchedNames.has(d));
+  const revoking =
+    !platformProbation && !vouched && isHoldVerdict(verdict, settings.holdRepeatScore)
+      ? probation
+      : [];
   // The verdict and its fold commit together: a crash between them would
   // leave a judged row the retry skips and a risk that never saw it.
   const outcome = await db.transaction(async (tx) => {
@@ -290,6 +314,9 @@ async function judgePending(
       .returning({ id: ms.id });
     // A concurrent run already wrote this sample: its verdict stands, the risk moved once.
     if (!judged) return null;
+    // Taken back before the verdict counts: a released spare resting on a
+    // name this verdict revokes counts toward the repeat hold again.
+    const revoked = await revokeDestinations(t, sample.teamId, revoking, now);
     const applied = await applyJudgedSample(t, settings, {
       teamId: sample.teamId,
       score: verdict.score,
@@ -314,41 +341,22 @@ async function judgePending(
         holdRepeatScore: settings.holdRepeatScore,
       });
     }
-    return applied;
+    return { ...applied, revoked };
   });
   if (!outcome) return "skipped";
   if (verdictClearsDestinations(verdict, destinations.length)) {
     await clearDestinations(db, sample.teamId, destinations, now);
   }
-  // Mail to a destination that cleared within its probation, read as
-  // phishing: the clearance goes, and the operator hears of it, unless an
-  // operator's release vouched for this shape on it. A client business's
-  // notice keeps its released site's clearance while a link new beside it
-  // is screened.
-  const platformProbation =
-    sample.broadcastId === null &&
-    !paysByPix &&
-    isPlatformLinkVerdict(verdict, standing.probation) &&
-    standing.probation.every((d) => vouchedNames.has(d));
-  const probation = standing.probation.filter((d) => d !== clientSite || !vouchedNames.has(d));
-  if (
-    probation.length > 0 &&
-    !platformProbation &&
-    !vouched &&
-    isHoldVerdict(verdict, settings.holdRepeatScore)
-  ) {
-    const revoked = await revokeDestinations(db, sample.teamId, probation, now);
-    if (revoked.length > 0) {
-      await notifyDestination(
-        db,
-        deps,
-        "monitor.destination_revoked",
-        sample.teamId,
-        verdict,
-        revoked,
-        now,
-      );
-    }
+  if (outcome.revoked.length > 0) {
+    await notifyDestination(
+      db,
+      deps,
+      "monitor.destination_revoked",
+      sample.teamId,
+      verdict,
+      outcome.revoked,
+      now,
+    );
   }
   const spareParks = sample.screening && outcome.spared !== null && !vouched;
   const destinationParks =

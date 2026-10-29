@@ -1260,8 +1260,9 @@ one-time-code or billing link to a product's own name on an app platform
 (`ref.supabase.co`, `app.up.railway.app`, `x.workers.dev`: the parents are
 `PLATFORM_HOST_PARENTS` in `packages/core`) or to a loopback address, on a
 message judged before SES that is not a broadcast, poses as no other brand
-(with every link on a loopback address it may: a framework's default
-template signs with the framework's name) and carries no payment instrument
+(it may when every link in it, one read from its images included, goes to a
+loopback address and it has no Reply-To: a framework's default template signs
+with the framework's name) and carries no payment instrument
 (a Pix code, changed bank details, a callback), spares a New-tier team the hold it would have met: the message
 parks for the review list instead, with the same operator mail, and the
 team's other mail waiting on a phishing-type verdict from 80, queued or
@@ -1282,7 +1283,8 @@ business is spared and vouched for the same way: a verdict that names
 nothing but brand impersonation, on a message that is not a broadcast,
 carries no Pix code or file and does not ride in images or a QR code drawn
 with characters, from a sending domain at least 7 days old, whose
-destinations are all registered domains, one of which its Reply-To and at
+destinations are all registered domains (no file share, form, site builder
+or chat link host whose users all share one name), one of which its Reply-To and at
 least one web link lead to and whose name the From display name spells
 (`"Acme Tiles" <orders@platform.example>` replying to and linking
 `acme-tiles.example`, a carrier's tracking page beside it or not), with no
@@ -1294,8 +1296,9 @@ cleared it; no date keeps the hold). After the release, later mail of that
 shape to the same domains is neither held, parked nor delayed for it, and its
 verdicts take no clearance back and count toward no repeat hold; the same
 message under another name still does all of that. A notice that adds a
-domain beside a released one keeps that one's clearance while the new one is
-screened. These samples count against no daily cap; a team has 200 of
+domain beside its released site keeps the site's clearance while the new one
+is screened; any other released name in it, a carrier's page included, is
+taken back as before. These samples count against no daily cap; a team has 200 of
 them a day, past which its mail with a new destination waits for the next
 UTC day.
 
