@@ -221,6 +221,10 @@ mostra um traço.
   para essa pausa a partir de 100 desses envios. No plano Free, elas contam
   desde o primeiro e-mail e são julgadas juntas em todas as equipes Free que
   você criou, inclusive as excluídas, e uma pausa vale para todas elas.
+- Depois de uma análise, um operador pode retirar uma pausa por bounces antes
+  da hora (no MillionSend Cloud, peça ao suporte). Os bounces depois da
+  retirada contam normalmente, e uma pausa por reclamações nunca é retirada
+  antes da hora.
 - Se a taxa agregada de bounce da plataforma na região SES do seu remetente
   se aproxima do limite em que o SES age sobre a conta, envios de transmissão
   nessa região são recusados com `403 broadcasts_paused` até a taxa se
@@ -236,6 +240,10 @@ transmissões.
 
 ## Mudanças recentes
 
+- Agora, depois de uma análise, um operador pode retirar uma pausa por bounces
+  antes da hora (no MillionSend Cloud, peça ao suporte). Os bounces depois da
+  retirada contam normalmente, e uma pausa por reclamações nunca é retirada
+  antes da hora.
 - As reclamações contam no dia em que o e-mail foi enviado, a mesma data que
   o SES usa na própria taxa, e não no dia em que chegam: na proteção de
   envio, na nota da conta e na taxa de reclamação da página de Métricas.
