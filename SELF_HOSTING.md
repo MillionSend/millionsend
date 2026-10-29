@@ -1118,7 +1118,9 @@ content insights (never email bodies), and an instance-wide audit log.
   IPs, its verified domains and card, and from its latest stored mail the sender
   names, subjects, link domains, phone numbers and a visible-text hash). IPs of
   shared egress networks (Cloudflare WARP, iCloud Private Relay, Vivo, Claro,
-  TIM) are left out. A new team is compared with them when it is created, adds a
+  TIM) are left out, and so is what the instance itself sends: the onboarding
+  email, and any domain under the shared inbox domain, the onboarding, account
+  and notification senders' domains or the app's, which every team shares. A new team is compared with them when it is created, adds a
   domain, first pays and sends; a match opens a `linked` flag and mails the
   operator the kinds of evidence, and the team's dialog and review page show the
   values. Only a send holds the team for review, its mail parked silently, and

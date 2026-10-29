@@ -1350,7 +1350,10 @@ the cloud, and from its latest stored mail the sender names, subjects (cut
 to 256 characters), link domains, phone numbers and a hash of the visible
 text. An IP of a shared egress network, where one address stands for
 crowds (Cloudflare WARP, iCloud Private Relay, Vivo, Claro and TIM), is
-left out, by the ASN database `IP_GEOLOCATION` keeps. A new team is
+left out, by the ASN database `IP_GEOLOCATION` keeps. So is what the
+instance itself sends: the onboarding email, and any domain under the shared
+inbox domain, the onboarding, account and notification senders' domains or
+the app's, which every team shares. A new team is
 compared with them when it is created, adds a domain, first pays and
 sends. A match opens a `linked` flag on the trust & safety list and mails
 the operator which kinds of evidence matched; the team's dialog and review

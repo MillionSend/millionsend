@@ -1398,7 +1398,11 @@ guardados, os nomes de remetente, assuntos (cortados em 256 caracteres),
 domínios dos links, telefones e um hash do texto visível. Um IP de uma rede
 de saída compartilhada, em que um endereço representa muita gente
 (Cloudflare WARP, Retransmissão Privada do iCloud, Vivo, Claro e TIM), fica de
-fora, pela base de ASN que o `IP_GEOLOCATION` mantém. Uma equipe nova é
+fora, pela base de ASN que o `IP_GEOLOCATION` mantém. O que a própria
+instância envia também fica de fora: o e-mail do onboarding e qualquer domínio
+sob o domínio compartilhado das caixas, sob os domínios dos remetentes de
+onboarding, de conta e de notificações ou sob o do app, que todas as equipes
+compartilham. Uma equipe nova é
 comparada com elas quando é criada, adiciona um domínio, faz o primeiro
 pagamento e envia. Uma coincidência abre uma sinalização `linked` na lista de
 confiança e segurança e avisa o operador por e-mail sobre os tipos de
