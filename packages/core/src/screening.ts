@@ -141,9 +141,10 @@ const td = schema.teamDestinations;
 
 type Sample = typeof schema.monitorSamples.$inferSelect;
 
-// What a link can resolve to: a DNS name (URL hands IDNs over in punycode),
-// or an address. A merge field still in a template is neither.
-const LINK_HOST = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])$/;
+// What a link can resolve to: a DNS name (URL hands IDNs over in punycode,
+// and keeps the underscore a browser resolves), or an address. A merge field
+// still in a template is neither.
+const LINK_HOST = /^(?:[a-z0-9._-]+|\[[0-9a-f:.]+\])$/;
 
 /**
  * Where a message sends its reader: the owner domain (ownerDomain, so a free

@@ -247,6 +247,12 @@ describe("messageDestinations", () => {
     ]);
   });
 
+  it("sees a host whose name carries an underscore", () => {
+    expect(destinations('<a href="https://login_secure.lure.example/x">entrar</a>')).toEqual([
+      "lure.example",
+    ]);
+  });
+
   it("follows nested wrappers to where they lead", () => {
     const wrap = (url: string) => `https://www.google.com/url?q=${encodeURIComponent(url)}`;
     expect(destinations(`<a href="${wrap(wrap("https://evil.example/login"))}">x</a>`)).toEqual([
