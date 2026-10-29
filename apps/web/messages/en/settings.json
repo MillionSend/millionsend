@@ -463,6 +463,7 @@
       "team_broadcasts_resumed": "Resumed broadcasts",
       "team_suspended": "Suspended team",
       "team_reinstated": "Reinstated team",
+      "team_sending_pause_lifted": "Lifted sending pause",
       "team_held_for_review": "Sending paused pending review",
       "team_ses_tenant_updated": "Updated SES tenant status",
       "team_ses_tenant_update_failed": "SES tenant status update failed",

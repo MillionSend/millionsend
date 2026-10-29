@@ -31,15 +31,16 @@ export function formatDay(date: Date | string | number, locale: string): string 
 }
 
 /**
- * Short day label for a UTC day key ("2026-08-13" → "Aug 13"), pinned to UTC —
- * local-zone formatting would shift the day in negative-offset timezones.
+ * Short day label for a UTC day key ("2026-08-13" → "Aug 13") or an instant's
+ * UTC day, pinned to UTC — local-zone formatting would shift the day in
+ * negative-offset timezones.
  */
-export function formatDayUtc(day: string, locale: string): string {
+export function formatDayUtc(day: string | Date, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
     timeZone: "UTC",
-  }).format(new Date(`${day}T00:00:00Z`));
+  }).format(typeof day === "string" ? new Date(`${day}T00:00:00Z`) : day);
 }
 
 /** Calendar date with its year ("Nov 14, 2026" / "14 de nov. de 2026"). */

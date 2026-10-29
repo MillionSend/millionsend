@@ -13,7 +13,10 @@
   "bounce": {
     "title": "Taxa de bounce permanente",
     "bounced": "Bounces permanentes",
-    "noSends": "{count, plural, =0 {Nenhum envio} one {# bounce permanente · nenhum envio} other {# bounces permanentes · nenhum envio}}"
+    "noSends": "{count, plural, =0 {Nenhum envio} one {# bounce permanente · nenhum envio} other {# bounces permanentes · nenhum envio}}",
+    "lifted": "Deixados de fora após análise",
+    "notCounted": "fora da taxa",
+    "liftedHint": "Analisamos esses bounces permanentes com você, e eles saíram da sua taxa junto com os envios dos mesmos dias até a análise. Eles continuam no gráfico e nos logs de e-mail. Todo bounce depois disso conta normalmente."
   },
   "complaint": {
     "title": "Taxa de reclamação",

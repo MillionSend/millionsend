@@ -75,6 +75,7 @@ function load(
     days: DAYS.map((day) => ({ ...ZERO, day, sent: 5_000, delivered: 5_000, complained: 1 })),
     totals: { ...ZERO, sent: 15_000, delivered: 15_000, complained: 3 },
     allTimeDelivered: 15_000,
+    liftedHardBounced: 0,
     today: DAYS[2],
     complaints: {
       days: complaintDays,
@@ -221,6 +222,19 @@ describe("the complaint card's tip", () => {
       "0.02% · 1 of 5,000 to inboxes that report spam",
     ]);
     expect(await hover(0)).toEqual(["Oct 12", "0.05% · 1 of 2,000 to inboxes that report spam"]);
+  });
+});
+
+describe("the hard-bounce card", () => {
+  it("shows what a pause lift left out of the rate, only once there is something", () => {
+    const quiet = card(render({ complaintRate: 0, complaintSent: 0 }), "Hard-bounce rate");
+    expect(quiet).not.toContain("Left out after review");
+    load({ complaintRate: 0, complaintSent: 0 });
+    data.window = { ...(data.window as object), liftedHardBounced: 30 };
+    const lifted = card(renderToStaticMarkup(createElement(MetricsPage)), "Hard-bounce rate");
+    expect(lifted).toMatch(/title="We reviewed these hard bounces with you[^"]*"/);
+    // Over the same 15,000 sends the Hard bounced row divides by.
+    expect(lifted).toMatch(/>Left out after review<.*?>not counted<.*?>30<.*?>0\.2%</s);
   });
 });
 

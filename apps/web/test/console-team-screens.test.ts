@@ -1,15 +1,21 @@
+// @vitest-environment jsdom
+
+import { DAY_MS, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { createElement } from "react";
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { formatDayUtc } from "@/lib/format";
 import { createCaller } from "@/server/routers";
 
 const h = vi.hoisted(() => ({
   review: undefined as unknown,
   monitor: undefined as unknown,
   guard: vi.fn(),
+  mutated: [] as unknown[],
 }));
 
 // The real English catalogs, so the test reads what the operator reads.
@@ -61,7 +67,7 @@ vi.mock("@tanstack/react-query", () => ({
         }
       : { data: undefined, isPending: true, isError: false, isSuccess: false, error: null },
   useMutation: () => ({
-    mutate: () => {},
+    mutate: (variables: unknown) => h.mutated.push(variables),
     reset: () => {},
     isPending: false,
     isSuccess: false,
@@ -244,6 +250,106 @@ describe("the Teams list's row menu", () => {
     ]);
     items[1]?.onSelect();
     expect(visited).toEqual([`/console/safety/${teamId}`]);
+  });
+});
+
+describe("the review page's Lift sending pause", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+    h.mutated = [];
+  });
+
+  /** A new team's review page, its counters reading `today`, and its lift button if any. */
+  async function open(
+    slug: string,
+    today?: { sent: number; hardBounced?: number; complained?: number },
+  ) {
+    const id = await createTeam(db, slug);
+    if (today)
+      await db.insert(schema.usageCounters).values({ teamId: id, day: utcDay(), ...today });
+    h.review = await createCaller({
+      db,
+      session: {
+        user: { id: operatorId, email: "op@example.com", name: "Operator" },
+        session: { id: crypto.randomUUID(), createdAt: new Date() },
+      },
+      teamId: null,
+      role: null,
+    }).console.safety.review({ teamId: id });
+    await act(async () => root.render(createElement(ReviewView, { teamId: id })));
+    const button = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Lift sending pause",
+    );
+    return { id, button };
+  }
+  const type = (field: HTMLInputElement | HTMLTextAreaElement | null | undefined, value: string) =>
+    act(async () => {
+      if (!field) throw new Error("no field");
+      const proto = Object.getPrototypeOf(field) as HTMLInputElement | HTMLTextAreaElement;
+      Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(field, value);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+  it("is offered while a bounce pause holds, and not at all otherwise", async () => {
+    expect((await open("lift-quiet")).button).toBeUndefined();
+    expect((await open("lift-paused", { sent: 200, hardBounced: 20 })).button?.disabled).toBe(
+      false,
+    );
+  });
+
+  it("is disabled under a refusal, the reason one focus away", async () => {
+    const { button } = await open("lift-complaints", { sent: 200, complained: 4 });
+    expect(button?.disabled).toBe(true);
+    // The wrapper takes the focus the disabled button cannot.
+    const trigger = button?.parentElement;
+    expect(trigger?.className).toBe("ms-tooltip-trigger inline");
+    expect(trigger?.tabIndex).toBe(0);
+    await act(async () => trigger?.focus());
+    expect(document.querySelector(".ms-tooltip")?.textContent).toBe(
+      "Paused on complaints, which a lift never covers. The pause lifts on its own once those send days leave the 2-day window.",
+    );
+  });
+
+  it("confirms only once the reference and the note both hold more than spaces", async () => {
+    const { id, button } = await open("lift-confirm", { sent: 200, hardBounced: 20 });
+    await act(async () => button?.click());
+    const dialog = container.querySelector('[data-title="Lift sending pause · lift-confirm"]');
+    const since = formatDayUtc(utcDay(Date.now() - DAY_MS), "en");
+    expect(dialog?.textContent).toContain("Paused onHard-bounce rate 10.00% over the last 2 days");
+    expect(dialog?.textContent).toContain(
+      `Leaves out20 hard bounces in 200 sends since ${since} UTC`,
+    );
+    expect(dialog?.textContent).toContain("Waiting to go outNothing");
+    expect(dialog?.textContent).toContain("Last liftNever");
+    const confirm = () => dialog?.querySelector<HTMLButtonElement>('button[type="submit"]');
+    expect(confirm()?.disabled).toBe(true);
+    await type(dialog?.querySelector("input"), "  Ticket 1042 ");
+    expect(confirm()?.disabled).toBe(true);
+    await type(dialog?.querySelector("textarea"), "   ");
+    expect(confirm()?.disabled).toBe(true);
+    await type(dialog?.querySelector("textarea"), "Fake sign-ups. The form checks addresses now.");
+    expect(confirm()?.disabled).toBe(false);
+    await act(async () => confirm()?.click());
+    expect(h.mutated).toEqual([
+      {
+        id,
+        reference: "Ticket 1042",
+        note: "Fake sign-ups. The form checks addresses now.",
+        notify: true,
+      },
+    ]);
   });
 });
 

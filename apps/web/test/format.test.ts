@@ -23,6 +23,8 @@ describe("formatDayUtc", () => {
     // Whatever the runner's zone, the label must be the key's own day.
     expect(formatDayUtc("2026-08-13", "en")).toBe("Aug 13");
     expect(formatDayUtc("2026-01-01", "en")).toBe("Jan 1");
+    // An instant reads its UTC day, whatever day it already is east of UTC.
+    expect(formatDayUtc(new Date("2026-08-13T23:30:00Z"), "en")).toBe("Aug 13");
   });
 });
 
