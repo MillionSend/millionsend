@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1156.0",
-    "@better-auth/oauth-provider": "^1.7.12",
+    "@better-auth/oauth-provider": "^1.7.14",
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@maily-to/core": "^0.3.7",
     "@maily-to/render": "^0.2.3",
@@ -29,7 +29,7 @@
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@trpc/tanstack-react-query": "^11.19.0",
-    "better-auth": "^1.7.12",
+    "better-auth": "^1.7.14",
     "drizzle-orm": "^0.45.4",
     "highlight.js": "11.12.0",
     "lowlight": "3.3.0",
